@@ -11,14 +11,14 @@ requirements:
 
 This design covers how `dynamicTaskDownstream.Launch` turns a synchronous
 `LaunchPreparedSession` error into the error the dynamic conductor routes on.
-It does not change the classifier rules, the asynchronous startup failure path,
-or ceiling admission.
+It also covers a typed, pre-prompt model-unavailable rejection during an
+asynchronous initial start. It does not change ceiling admission.
 
 ## Requirement mapping
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-AGENTS-DYNAMIC-LAUNCH-FAILURE-001` | [Launch error classification](#launch-error-classification) |
+| `REQ-AGENTS-DYNAMIC-LAUNCH-FAILURE-001` | [Launch error classification](#launch-error-classification), [asynchronous strict model rejection](#asynchronous-strict-model-rejection) |
 
 ## Components and responsibilities
 
@@ -48,3 +48,19 @@ errors such as `dial tcp 127.0.0.1:<port>: connect: connection refused`. That
 suspended the candidate and advanced the route without contacting the
 provider. The asynchronous path (`handleDynamicAgentStartupFailure`) already
 required startup provenance; both paths now share that boundary.
+
+## Asynchronous strict model rejection
+
+When the current startup attempt reports `model_unavailable` with
+`requested_not_advertised` and explicit `prompt_not_sent=true`, the task's
+logical dynamic profile applies its existing candidate failure policy. The
+startup attempt, execution, route generation, and concrete profile must still
+own the session. The selected candidate is rejected before any prompt reaches
+the agent's default model. Existing attempt output and effect observations are
+merged into the decision; ambiguous identity or a retired attempt fails closed.
+Without an attempt record or retired fence, typed pre-prompt evidence remains
+usable. The admitted execution is bound before the process starts, without
+rebinding a later attempt. The configured candidate policy determines whether
+to retry, wait, stop, or advance. Fixed profiles and resume failures retain
+their existing manual recovery. No candidate order, tier, retry threshold, or
+ceiling changes.

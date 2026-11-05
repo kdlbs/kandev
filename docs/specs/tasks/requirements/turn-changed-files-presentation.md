@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-10-07
 owners:
@@ -20,8 +20,8 @@ are defined in [turn changed files](turn-changed-files.md).
 
 #### Acceptance criteria
 
-- **AC-TASKS-TURN-CHANGES-005.1:** One card shall appear beneath the final assistant reply with the matching durable turn identity, outside tool groups.
-  Without a final reply, a stable terminal-turn row shall expose captured changes.
+- **AC-TASKS-TURN-CHANGES-005.1:** For an eligible summary, one card shall appear beneath the final assistant reply with the matching durable turn identity, outside tool groups.
+  Without a final reply, a stable terminal-turn row shall expose eligible captured changes.
 - **AC-TASKS-TURN-CHANGES-005.2:** A ready card shall show a pluralized file count, green plus additions, red minus deletions, and a labeled Open diff action.
   Unknown textual counts shall not appear as zero. Status labels or icons shall supplement color.
 - **AC-TASKS-TURN-CHANGES-005.3:** The tree shall show root entries and initially collapsed folders with aggregate counts.
@@ -38,7 +38,9 @@ are defined in [turn changed files](turn-changed-files.md).
   Settled summaries with zero recorded file entries shall have no card, including failed/unavailable captures.
   Retained failure status shall remain distinct from a successful zero-change capture and available through explicit history selection.
   Partial totals shall say "available changes" and identify affected repository states.
-  An unavailable history comparison is an exception: it shall use the existing unavailable state even without recorded file entries.
+  Unavailable or failed summaries shall have no transcript card, including unavailable history comparisons and summaries with retained file entries.
+  Desktop and phone shall omit the entire card, its actions, repository footer, and reserved spacing.
+  This rule shall apply after terminal updates, reconnect, and reload.
 - **AC-TASKS-TURN-CHANGES-005.8:** Expired content shall preserve counts and explain why Open diff is unavailable.
   Known shared-checkout overlap shall have a visible attribution note.
 - **AC-TASKS-TURN-CHANGES-005.9:** Streaming, pagination, reconnect, and checkpoint updates shall preserve card placement and the reader's scroll position.
@@ -52,7 +54,7 @@ are defined in [turn changed files](turn-changed-files.md).
 - **AC-TASKS-TURN-CHANGES-005.13:** History correction shall preserve the existing card layout, controls, and styling.
   Normal cards shall add no history-adjustment or export-progress explanations.
   Legacy counts shall use repository wording in the existing count position.
-  Unavailable, loading, and partial results shall reuse existing status areas; detailed reasons belong in the selected historical diff.
+  Loading and partial results shall reuse existing status areas. Unavailable comparison details belong in the selected historical diff.
 
 ### REQ-TASKS-TURN-CHANGES-006: Existing desktop and mobile diff surfaces
 
@@ -116,6 +118,7 @@ Backfill from current HEAD or workspace content and an off-by-default release to
 - [Unified compaction contract](../../system-page/requirements/tool-payload-retention.md)
 - [Preservation retry plan](../../../plans/turn-change-preservation-retry/plan.md)
 - [History integrity fix plan](../../../plans/turn-change-history-integrity/plan.md)
+- [Unavailable-card visibility plan](../../../plans/hide-unavailable-turn-changes/plan.md)
 - [Content requirements](turn-changed-files.md)
 - [Actor attribution](human-assignee.md)
 

@@ -49,6 +49,20 @@ describe("ModelConfigSelector", () => {
     expect(screen.getByRole("option", { name: "Sonnet" })).toBeTruthy();
   });
 
+  it("exposes one trigger identity and its expanded state", () => {
+    render(
+      <ModelConfigSelector
+        modelOptions={[{ id: "sonnet", name: "Sonnet" }]}
+        currentModel="sonnet"
+        onModelChange={() => {}}
+      />,
+    );
+    const trigger = screen.getByTestId("model-config-trigger");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("passes custom trigger classes to the button", () => {
     render(
       <ModelConfigSelector

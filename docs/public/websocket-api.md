@@ -390,6 +390,16 @@ query validation.
 }
 ```
 
+When **Limit automatic sessions** is enabled and the instance has no turn
+capacity, Kandev still accepts an ordinary message. It persists the visible
+message and a durable queue receipt in one transaction before responding, then
+dispatches one new turn after capacity is released. The success response keeps
+the existing message shape; clients observe the pending input through
+`message.queue.get` and `message.queue.status_changed`. Auto-run OFF leaves the
+entry pending. Explicit `message.queue.send_now` keeps its override. A failed
+queue or transcript write returns the existing error instead of a false
+success.
+
 `entity_references` is the structured companion to work-item Markdown links inserted by the `#` composer. Each version-1 entry carries `ref`, `provider`, `kind`, immutable `id`, optional display `key`, title snapshot, canonical `url`, and provider-connection `scope`. The backend derives the workspace from the persisted session, validates canonical identity and destination through the registered provider, deduplicates by `ref`, and rejects the request when a supplied reference is invalid or unauthorized. CLI-passthrough sessions do not accept structured references.
 
 `message.queue.add` accepts the same optional array. `message.queue.update` also accepts it and treats the array as a replacement: send `[]` after removing every generated reference link so stale metadata is cleared. Queue status and message responses return validated entries under `metadata.entity_references`.

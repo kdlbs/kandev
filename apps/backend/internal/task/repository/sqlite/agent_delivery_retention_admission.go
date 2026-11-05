@@ -18,17 +18,8 @@ func (r *Repository) ensureAgentDeliveryIdentityAvailable(
 	sessionID string,
 ) error {
 	var retained bool
-	err := exec.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT EXISTS (
-			SELECT 1 FROM agent_delivery_cleanup_jobs WHERE session_id = ?
-			UNION ALL SELECT 1 FROM agent_delivery_submissions WHERE session_id = ?
-			UNION ALL SELECT 1 FROM agent_delivery_inbox WHERE session_id = ?
-			UNION ALL SELECT 1 FROM agent_delivery_cursors WHERE session_id = ?
-			UNION ALL
-			SELECT 1 FROM agent_delivery_effects e
-			LEFT JOIN agent_delivery_cursors c ON c.stream_id = e.stream_id
-			WHERE e.session_id = ? OR c.session_id = ?
-		)`), sessionID, sessionID, sessionID, sessionID, sessionID, sessionID).Scan(&retained)
+	query, args := agentDeliveryIdentityRetainedQuery(sessionID)
+	err := exec.QueryRowxContext(ctx, r.db.Rebind(query), args...).Scan(&retained)
 	if err != nil {
 		return err
 	}
@@ -36,6 +27,23 @@ func (r *Repository) ensureAgentDeliveryIdentityAvailable(
 		return repoerrors.ErrAgentDeliveryIdentityRetiring
 	}
 	return nil
+}
+
+// agentDeliveryIdentityRetainedQuery runs inside the session-creation writer
+// transaction, so every branch must be an index search on the requested
+// session. An effect bound only through its stream is already covered by the
+// cursor branch. The effect branch repeats the non-empty session_id predicate
+// of idx_agent_delivery_effects_owned_retirement; SQLite cannot use that
+// partial index with a bound parameter otherwise.
+func agentDeliveryIdentityRetainedQuery(sessionID string) (string, []any) {
+	return `
+		SELECT EXISTS (
+			SELECT 1 FROM agent_delivery_cleanup_jobs WHERE session_id = ?
+			UNION ALL SELECT 1 FROM agent_delivery_submissions WHERE session_id = ?
+			UNION ALL SELECT 1 FROM agent_delivery_inbox WHERE session_id = ?
+			UNION ALL SELECT 1 FROM agent_delivery_cursors WHERE session_id = ?
+			UNION ALL SELECT 1 FROM agent_delivery_effects WHERE session_id = ? AND session_id <> ''
+		)`, []any{sessionID, sessionID, sessionID, sessionID, sessionID}
 }
 
 func (r *Repository) ensureAgentDeliverySessionNotRetired(

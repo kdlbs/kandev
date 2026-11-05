@@ -37,7 +37,7 @@ import {
 } from "@/components/github/pr-task-icon";
 import { PRStatusGlyph } from "@/components/github/pr-status-glyph";
 import { prIdentitySlug, prTaskKey } from "@/components/github/pr-utils";
-import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
+import { PR_CI_DESKTOP_POPOVER_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import { useAppStore } from "@/components/state-provider";
 import {
@@ -278,10 +278,12 @@ function PRSingleButton({
           data-testid="pr-topbar-popover"
           align="end"
           sideOffset={4}
-          className={`w-80 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
+          className={`w-80 ${PR_CI_DESKTOP_POPOVER_CLASS}`}
           onMouseEnter={onContentEnter}
           onMouseMove={onContentEnter}
           onMouseLeave={onContentLeave}
+          onFocus={onContentEnter}
+          onBlur={onContentLeave}
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
           <PRCIPopover pr={pr} enabled={open} refreshTaskPR={refreshTaskPR} />
@@ -387,10 +389,12 @@ function PRMultiDesktopSurface({
           data-testid="pr-topbar-popover"
           align="end"
           sideOffset={4}
-          className={`w-96 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
+          className={`w-96 ${PR_CI_DESKTOP_POPOVER_CLASS}`}
           onMouseEnter={interactions.onContentEnter}
           onMouseMove={interactions.onContentEnter}
           onMouseLeave={interactions.onContentLeave}
+          onFocus={interactions.onContentEnter}
+          onBlur={interactions.onContentLeave}
           onOpenAutoFocus={(event) => event.preventDefault()}
         >
           <MultiPRCIPopover

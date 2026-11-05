@@ -33,9 +33,33 @@ blockquotes, or code panels. Tables are supported only in pending shared context
 File references remain labels rather than opening workspace files.
 
 Long context starts at its content height, up to an initial limit. Select
-**Expand to available space** or drag the panel's top edge to use more of the
-visible host. Select **Reset panel size** to return to content sizing. The
-panel keeps space for the chat input and, in Threads, a minimum transcript area.
+**Expand** to fill the available space. Select **Restore** to return to the
+previous height, including a height you set by dragging the panel's top edge.
+Drag the panel's top edge to resize it, or double-click the drag handle to
+return to content sizing. The panel keeps space for the chat input and, in
+Threads, a minimum transcript area.
+
+### Attach files to an answer
+
+Use the paperclip beside the custom answer, or in the question header when
+custom text is disabled, to add screenshots or other evidence. You can also
+paste an image directly into the custom answer. A bundle accepts up to 10 files
+and 100 MiB in total. Each file is limited to 100 MiB.
+
+Selecting an option records a draft. For one question, select **Send** to submit
+the answer. For several questions, select **Submit answers** after answering
+each question. An image-only paste keeps the selected option, typed text, and
+focus. Ordinary text paste behaves as before.
+
+The paperclip badge shows the file count, upload progress, or failure. Open the
+paperclip to view, retry, or remove files without losing the answer. A submission
+waits while a file is uploading or has failed. If delivery fails, Kandev keeps
+the answer and its files for a retry.
+
+Kandev delivers each file as a readable path in the agent's execution. It does
+not add a native image block to the tool result, so the agent inspects images
+with its file-reading tools. If an upload or the runtime cannot deliver a file,
+the answer fails visibly instead of reaching the agent with a missing file.
 
 ## Start a parallel session
 
@@ -202,6 +226,13 @@ before it accepts new work. This delivery recovery is automatic and separate
 from the executor setting that controls whether the agent process survives.
 If the delivery evidence is missing or inconsistent, Kandev keeps the session
 blocked and preserves Stop and the available recovery action.
+
+After a restart, confirmed evidence that the exact Remote Docker or Sprites
+instance is absent ends attachment so the existing recovery actions can check
+the saved state. An unreachable host or control endpoint does not prove that
+the instance stopped, so Kandev keeps that owner protected. Missing native
+conversation or delivery evidence can still block Resume. Kandev does not resend
+an instruction whose outcome is uncertain.
 
 If delivery is interrupted and the prompt outcome is uncertain, the recovery
 card shows **Retry connection** and **Stop**. Retry connection reconnects the
@@ -621,6 +652,10 @@ and leaves the session's auto-scroll preference unchanged. Scroll up to read
 history without being pulled back by incoming content. Rich-output chart
 animations have their own Appearance setting.
 
+The device preference also makes Kandev's grid, rotating, and pulsing status
+indicators static. Their labels and status updates remain visible. Changes to
+the preference apply while the page is open; no reload is needed.
+
 Select **Jump to latest** above the composer to return to the newest message,
 including agent replies. The action appears only when newer content is below
 the transcript. It does not change the session's auto-scroll preference.
@@ -693,6 +728,8 @@ Review compares each submodule with the gitlink commit recorded by its parent an
 When a task has multiple linked pull requests, use the PR selector in the Changes diff header or Review toolbar to inspect one PR revision at a time. The selection is scoped to that task for the current app session. Switching PRs replaces only the remote PR contribution; uncommitted and committed sources keep their normal precedence. Selecting a file from a specific PR row opens that exact PR revision, even when a sibling PR changes the same path.
 
 When several pull requests are linked to a task, hover the PR control in the desktop top bar or tap the PR status chip on mobile to open the tabbed CI surface. Right-click the top-bar PR control on desktop to open **Edit** and remove a selected association. Each PR tab also has a **Remove from task** button. Removing a tab only detaches that Kandev task association; it does not close or modify the GitHub pull request, its branch or commits, the task repositories, or sibling PR associations. Explicitly linking that PR again restores the association.
+
+For GitHub pull requests, select **Open PR** in the status header to open the selected pull request on GitHub. The header stays visible while check results load or refresh. Scroll the details below it to reach reviews, automation, and merge controls. The phone status drawer keeps the same action visible above its scrolling details.
 
 Task rows and Kanban cards also let you remove an association. Open the menu, select **Edit**, then select `Remove owner/repo #number from task`. On a phone, open row actions or the card dots, then make the same selections. This action removes only that association. It does not change the GitHub pull request, its branch, or commits.
 

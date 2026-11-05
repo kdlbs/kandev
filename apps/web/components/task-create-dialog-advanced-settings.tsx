@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { IconChevronDown, IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
@@ -38,6 +38,7 @@ type TaskCreateAdvancedSettingsProps = TaskCreateParentWorkspaceSettingProps & {
   onWorkflowAgentOverrideChange?: (sourceProfileId: string, replacementProfileId: string) => void;
   onResetWorkflowAgentOverrides?: () => void;
   onRetryWorkflowAgentOverrides?: () => void;
+  builtinPackages?: ReactNode;
   mcpDefinitions?: MCPServerDefinition[];
   mcpDefinitionsLoading?: boolean;
   mcpSelectionIds?: string[];
@@ -316,6 +317,7 @@ function normalizeAdvancedSettingsProps(
       props.onRetryWorkflowAgentOverrides,
       () => undefined,
     ),
+    builtinPackages: props.builtinPackages ?? null,
     mcpDefinitions: valueOrDefault(props.mcpDefinitions, []),
     mcpDefinitionsLoading: valueOrDefault(props.mcpDefinitionsLoading, false),
     mcpSelectionIds: valueOrDefault(props.mcpSelectionIds, []),
@@ -343,6 +345,7 @@ function TaskCreateAdvancedSettingsContent({
   onWorkflowAgentOverrideChange,
   onResetWorkflowAgentOverrides,
   onRetryWorkflowAgentOverrides,
+  builtinPackages,
   mcpDefinitions,
   mcpDefinitionsLoading,
   mcpSelectionIds,
@@ -371,6 +374,7 @@ function TaskCreateAdvancedSettingsContent({
           <TaskCreatePrioritySelect value={priority} onChange={onPriorityChange} />
         </div>
         <TaskCreateMCPSettingRow
+          builtinPackages={builtinPackages}
           definitions={mcpDefinitions}
           loading={mcpDefinitionsLoading}
           selectedIds={mcpSelectionIds}
@@ -417,6 +421,7 @@ export function TaskCreateAdvancedSettings(props: TaskCreateAdvancedSettingsProp
     onWorkflowAgentOverrideChange,
     onResetWorkflowAgentOverrides,
     onRetryWorkflowAgentOverrides,
+    builtinPackages,
     mcpDefinitions,
     mcpDefinitionsLoading,
     mcpSelectionIds,
@@ -467,6 +472,7 @@ export function TaskCreateAdvancedSettings(props: TaskCreateAdvancedSettingsProp
           onWorkflowAgentOverrideChange={onWorkflowAgentOverrideChange}
           onResetWorkflowAgentOverrides={onResetWorkflowAgentOverrides}
           onRetryWorkflowAgentOverrides={onRetryWorkflowAgentOverrides}
+          builtinPackages={builtinPackages}
           mcpDefinitions={mcpDefinitions}
           mcpDefinitionsLoading={mcpDefinitionsLoading}
           mcpSelectionIds={mcpSelectionIds}

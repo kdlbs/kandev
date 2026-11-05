@@ -78,6 +78,11 @@ jobs:
       - name: Test frontend timing helper
         run: node --test .github/scripts/frontend-timings.test.mjs
 
+      - name: Test native web toolchain evidence
+        run: |
+          python3 .github/scripts/web-toolchain-evidence_test.py
+          python3 .github/scripts/upgrade-regression-workflow-contract_test.py
+
       - name: Test CI efficiency and required gates
         run: |
           python3 .github/scripts/ci-efficiency_test.py

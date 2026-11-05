@@ -10,7 +10,7 @@
  * has to say why no event exists to wait on instead.
  *
  * ~126 raw sleeps predate this check, and `pnpm lint` is
- * `eslint --max-warnings 0`, so registering the rule repo-wide at any severity
+ * a zero-warning native lint command, so registering the rule repo-wide at any severity
  * would break every unrelated PR until the conversion finishes — the mistake the
  * first i18n migration attempt made. Hence judging the CHANGE, not the FILE:
  *

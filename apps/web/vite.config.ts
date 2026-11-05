@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
 import { shouldBundlePseudoLocale } from "./lib/i18n/bundling";
+import { serviceWorkerPlugin } from "./vite-plugins/service-worker";
 
 const LOCALES_DIR = path.resolve(__dirname, "src/locales");
 
@@ -36,7 +37,7 @@ function escapeRegExp(value: string): string {
 
 export default defineConfig({
   base: process.env.VITE_KANDEV_BASE_PATH || "/",
-  plugins: [react(), pseudoLocaleBundling()],
+  plugins: [react(), pseudoLocaleBundling(), serviceWorkerPlugin()],
   server: {
     port: readPort(process.env.PORT),
     strictPort: Boolean(process.env.PORT),

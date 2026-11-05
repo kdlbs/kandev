@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: tasks
 created: 2026-10-07
 requirements:
@@ -291,7 +291,7 @@ Partial pagination cannot nominate an earlier assistant message as final.
 Add a separate terminal changes render item to `use-processed-messages` or an equivalent shared projection.
 Its output sits immediately after the final assistant row and outside any `turn_group` tool disclosure.
 Keep its stable key and measurement in native/virtualized transcript handling.
-Eligible pending/failure rows use the same anchor. Chat uses `isTurnChangeCardVisible`; history retains `projectTurnChangeSummary`. No-final-reply cancellation gets a terminal row with its outcome.
+Eligible pending rows use the same anchor. Chat uses `isTurnChangeCardVisible`; history retains `projectTurnChangeSummary`. No-final-reply cancellation gets a terminal row with its outcome.
 Existing unread, bottom-follow, and reader-position claims remain authoritative.
 Capture updates invalidate only the affected row and preserve the reader's viewport anchor.
 
@@ -312,10 +312,26 @@ Availability projection:
 | Complete ready with zero entries | Hidden card, retained successful zero record |
 | Disabled viewer, uncaptured turn, no eligible Git checkout | Hidden |
 | Settled zero-entry summary | Hidden chat card; retain status and history selection |
-| Failed/unavailable interval with recorded files | Existing incomplete-state card |
+| Failed/unavailable interval, with or without recorded files | Hidden chat card; retain explicit historical selection |
 | Partial summary/content | Available changes totals, repository reasons, usable retained-file navigation |
 | Expired nonzero summary | Counts, History expired explanation, disabled Open diff |
 | Known overlap | Shared checkout note with interval detail |
+
+`isTurnChangeCardVisible` in `lib/turn-changes/projection.ts` rejects summary
+availability `unavailable` and `failed`, independently of counts or reasons.
+Remove its unavailable-history exception. Keep `isUnavailableHistoryComparison`
+and `projectTurnChangeSummary` for historical selection and viewer diagnostics.
+Do not change repository-level availability or hide usable partial summaries.
+
+`message-list-native.tsx` uses this predicate for reply anchors, fallback rows,
+and visible summaries. Filter before mounting `TurnChangedFilesCard` so the
+border, disabled actions, repository footer, and padding all disappear.
+Desktop and phone share this rule and the existing transcript scroll owner.
+Revision updates, reconnect, and reload reevaluate the same predicate.
+Retain existing pending, expired, zero-file, and capture-preference behavior.
+
+The [visibility plan](../../../plans/hide-unavailable-turn-changes/plan.md)
+owns this completed presentation change and its desktop/phone regression evidence.
 
 The transcript ResizeObserver handles late summaries and asynchronous file rows without new observers or layout polling. Native scroll cannot revoke bottom-follow ownership without reader intent. Explicit navigation releases reconcile viewport geometry. Resize events blocked by history loading retry on the next render under existing follow guards.
 

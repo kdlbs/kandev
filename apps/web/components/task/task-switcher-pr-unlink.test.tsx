@@ -80,6 +80,9 @@ function renderTaskMenu(
             }}
             activeTaskId={null}
             selectedTaskId={null}
+            unreadMessagesEnabled={false}
+            unreadDotHideDelayMs={0}
+            displayedSessionId={null}
             onSelectTask={vi.fn()}
             onEditTask={options.rowActions ? vi.fn() : undefined}
             onRenameTask={options.rowActions ? vi.fn() : undefined}
