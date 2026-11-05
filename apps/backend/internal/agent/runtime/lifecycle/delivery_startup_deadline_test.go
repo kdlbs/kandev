@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -280,6 +281,100 @@ func TestDeliveryStartupAuthorityQueryIsBounded(t *testing.T) {
 				t.Fatal("expired attempt probe admitted delivery evidence")
 			}
 		})
+	})
+}
+
+var errDeliveryStartupAuthorityRead = errors.New("authority read failed")
+
+type transientAuthorityRepository struct {
+	retentionBootstrapRepository
+	err error
+}
+
+func (r *transientAuthorityRepository) GetCurrentHarnessSessionGeneration(
+	context.Context, string, string,
+) (*models.HarnessSessionGeneration, error) {
+	return nil, r.err
+}
+
+func TestDeliveryStartupAuthorityReadFailureKeepsBootstrap(t *testing.T) {
+	execution, attempt := deliveryStartupTestExecution(t)
+	execution.DeliveryMode = DurableDeliveryV1
+	attempt.finishNegotiation(nil)
+	attempt.finishNative(nil)
+	manager := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
+	failure := &transientAuthorityRepository{
+		retentionBootstrapRepository: retentionBootstrapRepository{firstRead: make(chan struct{})},
+		err:                          errDeliveryStartupAuthorityRead,
+	}
+	result := deliveryStartupTestPrepare(t, manager, context.Background(), execution, failure)
+	if err := <-result; !errors.Is(err, errDeliveryStartupAuthorityRead) {
+		t.Fatalf("transient authority read = %v", err)
+	}
+	if !execution.deliveryBootstrap.Load() {
+		t.Fatal("transient authority read cleared bootstrap admission")
+	}
+	recovered := &retentionBootstrapRepository{firstRead: make(chan struct{})}
+	recovered.generation.Store(retentionBootstrapGeneration())
+	result = deliveryStartupTestPrepare(t, manager, context.Background(), execution, recovered)
+	if err := <-result; err != nil {
+		t.Fatalf("retry after transient authority read = %v", err)
+	}
+	if execution.deliveryBootstrap.Load() {
+		t.Fatal("successful retry left bootstrap admission open")
+	}
+	if recovered.receipts.Load() != 1 {
+		t.Fatalf("successful retry admitted %d events", recovered.receipts.Load())
+	}
+}
+
+type finalCommitAuthorityRepository struct {
+	retentionBootstrapRepository
+	calls atomic.Int32
+}
+
+func (r *finalCommitAuthorityRepository) GetCurrentHarnessSessionGeneration(
+	ctx context.Context, _, _ string,
+) (*models.HarnessSessionGeneration, error) {
+	if r.calls.Add(1) == 1 {
+		return nil, models.ErrTaskSessionNotFound
+	}
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) > deliveryStartupAuthorityProbe+time.Second {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return retentionBootstrapGeneration(), nil
+}
+
+func TestDeliveryStartupFinalAuthorityReadCatchesDeadlineCommit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		execution, _ := retentionBootstrapOwner()
+		repository := &finalCommitAuthorityRepository{
+			retentionBootstrapRepository: retentionBootstrapRepository{firstRead: make(chan struct{})},
+		}
+		type outcome struct {
+			generation *models.HarnessSessionGeneration
+			err        error
+		}
+		result := make(chan outcome, 1)
+		go func() {
+			generation, err := awaitBootstrapGeneration(
+				context.Background(), execution, nil, repository,
+				execution.SessionID, execution.DeliveryIncarnationID, time.Now(),
+			)
+			result <- outcome{generation: generation, err: err}
+		}()
+		time.Sleep(deliveryStartupAuthorityBudget + deliveryStartupPollInterval)
+		got := <-result
+		if got.err != nil {
+			t.Fatalf("deadline commit was missed: %v", got.err)
+		}
+		if got.generation == nil || got.generation.Generation != 1 {
+			t.Fatalf("final authority read returned %+v", got.generation)
+		}
+		if execution.deliveryBootstrap.Load() {
+			t.Fatal("successful final authority read left bootstrap admission open")
+		}
 	})
 }
 

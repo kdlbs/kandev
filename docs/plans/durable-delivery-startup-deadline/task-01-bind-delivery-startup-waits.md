@@ -243,8 +243,9 @@ Completed on 5 November 2026.
 - `delivery_startup_deadline_test.go` covers the 35-second virtual-time
   negotiation and native budgets, missing authority, cancellation, replacement,
   startup cleanup, an authority commit after the budget, bounded initial and
-  expired-attempt authority reads, and a deterministic successor overlap during
-  the bootstrap reset.
+  expired-attempt authority reads, retry after a transient read failure, a final
+  authority commit at the budget boundary, and a deterministic successor overlap
+  during the bootstrap reset.
 - `delivery_startup_stream_test.go` drives the production lifecycle over a real
   WebSocket and SQLite repository. It holds the native response and generation
   commit at separate barriers, asserts zero delivery evidence before authority,
@@ -252,7 +253,9 @@ Completed on 5 November 2026.
 - The initial authority read now shares the native-anchored deadline; an
   already-expired attempt uses a separate short probe instead of the stream
   lifetime. Releasing a successful attempt retains its anchor, so a late event
-  cannot restart the budget.
+  cannot restart the budget. A transient authority-read failure keeps bootstrap
+  admission set, and an expiring budget gets one final bounded authority read so
+  a commit in the last poll interval is observed.
 - The stream fixture rejects prompt dispatch and asserts that only the real
   setup frame reaches the callback.
 - `clearDeliveryBootstrapForAttempt` now runs its ownership check and flag

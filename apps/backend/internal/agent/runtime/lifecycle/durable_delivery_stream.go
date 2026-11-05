@@ -559,9 +559,14 @@ func awaitBootstrapGeneration(
 	readCtx, cancelRead := bootstrapAuthorityContext(ctx, deadline)
 	current, err := reader.GetCurrentHarnessSessionGeneration(readCtx, sessionID, incarnationID)
 	cancelRead()
-	if !errors.Is(err, models.ErrTaskSessionNotFound) {
+	if err == nil {
 		execution.clearDeliveryBootstrapForAttempt(attempt)
-		return current, err
+		return current, nil
+	}
+	if !errors.Is(err, models.ErrTaskSessionNotFound) {
+		// A transient read failure does not prove that authority is absent.
+		// Keep bootstrap admission so a reattached stream can retry the wait.
+		return nil, err
 	}
 	waitCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
@@ -570,18 +575,45 @@ func awaitBootstrapGeneration(
 		select {
 		case <-waitCtx.Done():
 			timer.Stop()
-			return nil, waitCtx.Err()
+			return finalBootstrapAuthorityRead(ctx, execution, attempt, reader, sessionID, incarnationID, waitCtx.Err())
 		case <-timer.C:
 		}
 		if waitCtx.Err() != nil {
-			return nil, waitCtx.Err()
+			return finalBootstrapAuthorityRead(ctx, execution, attempt, reader, sessionID, incarnationID, waitCtx.Err())
 		}
 		current, err = reader.GetCurrentHarnessSessionGeneration(waitCtx, sessionID, incarnationID)
-		if !errors.Is(err, models.ErrTaskSessionNotFound) {
+		if err == nil {
 			execution.clearDeliveryBootstrapForAttempt(attempt)
-			return current, err
+			return current, nil
+		}
+		if !errors.Is(err, models.ErrTaskSessionNotFound) {
+			if waitCtx.Err() != nil {
+				return finalBootstrapAuthorityRead(ctx, execution, attempt, reader, sessionID, incarnationID, waitCtx.Err())
+			}
+			return nil, err
 		}
 	}
+}
+
+// finalBootstrapAuthorityRead gives a commit that landed in the last poll
+// interval one bounded chance before the expired wait is reported. The
+// connected stream still owns the read; stream cancellation ends it promptly.
+func finalBootstrapAuthorityRead(
+	ctx context.Context,
+	execution *AgentExecution,
+	attempt *deliveryStartupAttempt,
+	reader harnessGenerationReader,
+	sessionID, incarnationID string,
+	waitErr error,
+) (*models.HarnessSessionGeneration, error) {
+	readCtx, cancel := context.WithTimeout(ctx, deliveryStartupAuthorityProbe)
+	defer cancel()
+	current, err := reader.GetCurrentHarnessSessionGeneration(readCtx, sessionID, incarnationID)
+	if err != nil {
+		return nil, waitErr
+	}
+	execution.clearDeliveryBootstrapForAttempt(attempt)
+	return current, nil
 }
 
 func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *models.AgentDeliveryEvent {

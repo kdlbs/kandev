@@ -288,6 +288,9 @@ Implementation and permanent regression results passed on 5 November 2026:
   carries the native-anchored deadline, that a released successful attempt
   keeps that anchor for late events, and that an already-expired attempt gets a
   separately bounded authority probe.
+- Transient authority-read failures retain bootstrap admission for a reattached
+  stream, and a commit landing at the budget boundary is observed by one final
+  bounded authority read.
 - The bootstrap reset runs under the execution's startup ownership lease.
   `TestDeliveryStartupCancellationAndReplacement` advances a successor during
   the old reset's ownership interval and proves the replacement keeps its own
