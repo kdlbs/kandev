@@ -31,6 +31,10 @@ const GLM_GROUP = "GLM-5.2";
 const GLM_STANDARD = "glm-standard";
 const GLM_TURBO = "glm-turbo";
 const TRAILING_CHOICE = "trailing-choice";
+const NESTED_ONE = "nested-one";
+const NESTED_TWO = "nested-two";
+const NESTED_ONE_LABEL = "Nested one";
+const NESTED_TWO_LABEL = "Nested two";
 const FUSION_COMPOSITION_ROW = "model-catalog-composition-row-fusion";
 const PROVIDER_MODEL_ID = "loose-model";
 const PROVIDER_MODEL_NAME = "Loose model";
@@ -445,5 +449,40 @@ describe("ModelConfigSelector catalog filtering and headings", () => {
     const headingGroup = screen.getByRole("group", { name: "Model" });
     expect(within(headingGroup).getByRole("option", { name: "Trailing choice" })).toBeTruthy();
     expect(within(headingGroup).queryByRole("option", { name: "Standard" })).toBeNull();
+  });
+});
+
+describe("ModelConfigSelector nested group filtering", () => {
+  it("keeps a nested-group-only parent visible while searching a nested choice", () => {
+    const catalog: SelectConfigOption = {
+      type: "select",
+      id: "model",
+      name: "Model",
+      currentValue: NESTED_ONE,
+      category: "model",
+      options: [
+        { value: NESTED_ONE, name: NESTED_ONE_LABEL },
+        { value: NESTED_TWO, name: NESTED_TWO_LABEL },
+      ],
+      catalog: {
+        version: 1,
+        nodes: [
+          group("family", "Family A", [
+            group("tier", "Tier 1", [
+              choice(NESTED_ONE, NESTED_ONE_LABEL),
+              choice(NESTED_TWO, NESTED_TWO_LABEL),
+            ]),
+          ]),
+        ],
+      },
+    };
+    renderCatalogOption(catalog, NESTED_ONE);
+    openPicker();
+    fireEvent.change(screen.getByPlaceholderText(FILTER_MODELS), {
+      target: { value: NESTED_TWO_LABEL },
+    });
+    expect(screen.getByRole("option", { name: NESTED_TWO_LABEL })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Family A" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Tier 1" })).toBeTruthy();
   });
 });

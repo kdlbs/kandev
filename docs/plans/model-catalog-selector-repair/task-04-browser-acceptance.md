@@ -170,7 +170,11 @@ const path = require('node:path').posix;
 const { execFileSync } = require('node:child_process');
 const docs = require('./.github/scripts/pr-docs.cjs');
 const names = (args) => execFileSync('git', args, { encoding: 'utf8' }).split('\0').filter(Boolean);
-const changed = [...new Set([...names(['diff', '--name-only', '-z', 'HEAD']), ...names(['ls-files', '--others', '--exclude-standard', '-z'])])];
+// Compare committed work-order changes against the PR base like CI does, and keep
+// untracked files. Comparing with HEAD would omit committed work orders.
+const baseRef = process.env.KANDEV_DOCS_BASE_REF || 'origin/main';
+const base = execFileSync('git', ['merge-base', baseRef, 'HEAD'], { encoding: 'utf8' }).trim();
+const changed = [...new Set([...names(['diff', '--name-only', '-z', base]), ...names(['ls-files', '--others', '--exclude-standard', '-z'])])];
 const contents = {};
 const ids = new Set();
 for (const file of docs.selectChangedWorkOrders(changed)) {

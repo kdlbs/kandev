@@ -312,8 +312,14 @@ function ProjectedGroupNode({
   context: RenderContext;
   depth: number;
 }) {
+  // cmdk registers an item under its nearest group only. A group whose children
+  // are all nested groups has no direct item, so it would be hidden during a
+  // search that matches a nested choice and take that nested heading with it.
+  const nestedOnly =
+    entry.children.length > 0 && entry.children.every((child) => child.kind === "group");
   return (
     <CommandGroup
+      forceMount={nestedOnly}
       heading={<span className={depth > 0 ? "pl-3" : undefined}>{entry.group.label}</span>}
     >
       {entry.children.map((child) => renderChild(child, context, depth + 1))}

@@ -305,7 +305,8 @@ Review fixes on 2026-11-04:
 - The catalog `Command` root scores only declared keywords, so command-identity prefixes and counted suffixes never participate in fuzzy search; a focused regression types `row` and `composition` and expects no results.
 - A top-level loose choice that follows a group keeps the `Model` heading, because the heading attaches to the first top-level row run regardless of preceding groups; a regression covers the trailing-row case.
 - `EnrichDevinCatalog` validates injected native evidence before indexing it and leaves repeated advertised values unbound, so a duplicate identifier or duplicated leaf can never produce a first-match binding; both have Go regressions.
-- Re-verified: `(cd apps/web && pnpm exec vitest run <selector and ownership suites>)`: 11 files, 101 tests passed; `(cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/acpcompat ./internal/common/modelcatalog -count=1)`: passed; oxlint and Prettier clean.
+- A group whose children are all nested groups force-mounts its cmdk wrapper, so a search that matches a nested choice no longer hides the parent heading and its content; a nested-group regression covers it.
+- Re-verified: `(cd apps/web && pnpm exec vitest run <selector and ownership suites>)`: 11 files, 102 tests passed; `(cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/acpcompat ./internal/common/modelcatalog -count=1)`: passed; oxlint and Prettier clean.
 
 Remaining blocker on 2026-11-04:
 

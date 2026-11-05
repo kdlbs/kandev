@@ -153,5 +153,6 @@ Review fixes (2026-11-04):
 - Review follow-up: the catalog `Command` root scores only the declared keywords, so the opaque `row:`/`composition:` identity and its counted suffix never match unrelated models; a regression types `row` and `composition` and expects no results.
 - Review follow-up: a top-level loose choice that follows a group keeps its `Model` heading, because the heading now attaches to the first top-level row run regardless of preceding groups; a regression renders a group followed by a loose choice and finds that row inside the named heading group.
 - Review follow-up: the acpcompat normalizer validates injected native evidence before indexing it and leaves repeated advertised values unbound so no duplicate row is hidden; both have focused Go regressions.
+- Review follow-up: a group whose children are all nested groups force-mounts its cmdk wrapper, so searching a nested choice keeps the parent heading and the matching nested group visible; a regression searches a nested choice and asserts both headings.
 
 Those fixes change no catalog data, no selection callback value, and no Task 02 qualification status.

@@ -131,7 +131,8 @@ Task 03 requires this work order's actual qualification and pure normalizer.
 Pure normalization implemented 2026-11-04. The captured-fixture gate is still open.
 
 - `apps/backend/internal/agentctl/acpcompat/devin_catalog.go` adds the bounded `families[]`/`variants[]` decoder, the exact identifier and label join, first-occurrence dimension ordering from the ACP group, ambiguity rejection, tuple-collision fallback, and non-mutating enrichment that validates a copy before publication.
-  An unqualified, malformed, colliding, or existing composition keeps the original catalog and its flat projection.
+  Unqualified, malformed, or colliding candidates produce no composition for that group, and a group that already carries a composition is skipped while other qualifying groups can still receive one.
+  The original catalog and its flat projection are returned only when no composition is added or the final validated copy is rejected.
 - `apps/backend/internal/agentctl/acpcompat/devin_catalog_test.go` covers parsing bounds and duplicates, exact bindings, current-catalog intersection, mixed unknown leaves, tuple collisions, ambiguous pairs, unexplained labels, repeated leaves, and original-catalog preservation.
 - `(cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/acpcompat ./internal/common/modelcatalog -count=1)`: passed.
 - `bash scripts/lint-go-changed apps/backend/internal/agentctl/acpcompat/devin_catalog.go apps/backend/internal/agentctl/acpcompat/devin_catalog_test.go`: 0 issues.
