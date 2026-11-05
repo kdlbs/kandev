@@ -70,7 +70,7 @@ test("phone: generic prompt error shows one inline error with a usable composer"
     const dismiss = row.getByTestId("turn-error-dismiss-button");
     await expect(dismiss).toBeVisible();
     const box = await dismiss.boundingBox();
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(43.5);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
     await dismiss.tap();
     await expect(dismiss).toHaveCount(0);
     await expect(row).toContainText(GENERIC_PROMPT_ERROR);
@@ -92,6 +92,7 @@ test("phone: Dismiss and continue stacks above dismissal with a reachable target
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
     await waitForPromptError(apiClient, fixture.sessionId);
+    await session.waitForDirectInput();
 
     const row = await expectPromptErrorRow(session, { continue: true });
     const continueButton = row.getByTestId("turn-error-continue-button");
@@ -101,8 +102,8 @@ test("phone: Dismiss and continue stacks above dismissal with a reachable target
 
     const continueBox = await continueButton.boundingBox();
     const dismissBox = await dismissButton.boundingBox();
-    expect(continueBox?.height ?? 0).toBeGreaterThanOrEqual(43.5);
-    expect(dismissBox?.height ?? 0).toBeGreaterThanOrEqual(43.5);
+    expect(continueBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(dismissBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     expect(continueBox?.y ?? 0).toBeLessThan(dismissBox?.y ?? 0);
     await assertNoDocumentHorizontalOverflow(testPage);
 
@@ -139,14 +140,14 @@ test("phone: visible per-row task actions expose Dismiss turn error", async ({
     const trigger = row.locator("button.mobile-task-actions-button");
     await expect(trigger).toBeVisible();
     const triggerBox = await trigger.boundingBox();
-    expect(triggerBox?.width ?? 0).toBeGreaterThanOrEqual(43.5);
+    expect(triggerBox?.width ?? 0).toBeGreaterThanOrEqual(44);
     await trigger.tap();
     const dismiss = testPage.getByTestId("task-context-dismiss-turn-error");
     await expect(dismiss).toBeVisible();
     const menu = testPage.locator('[data-slot="context-menu-content"]').filter({ has: dismiss });
     await waitForFiniteAnimations(menu);
     const box = await dismiss.boundingBox();
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(43.5);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
     await dismiss.tap();
 
     await expect(visibleTaskRow(testPage, fixture.taskTitle)).toBeVisible();

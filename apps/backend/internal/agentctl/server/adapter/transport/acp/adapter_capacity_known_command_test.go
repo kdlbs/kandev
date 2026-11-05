@@ -17,6 +17,7 @@ func TestCodexCapacityKnownCommandFailure(t *testing.T) {
 		safe      bool
 		known     uint16
 		completed uint16
+		pending   bool
 	}{
 		{
 			name: "failed status with matching terminal exit",
@@ -103,6 +104,51 @@ func TestCodexCapacityKnownCommandFailure(t *testing.T) {
 			safe: true, known: 1,
 		},
 		{
+			name: "malformed raw exit before terminal blocks",
+			frames: []string{
+				`{"sessionUpdate":"tool_call","toolCallId":"exec-13","title":"Run","kind":"execute","status":"in_progress"}`,
+				`{"sessionUpdate":"tool_call_update","toolCallId":"exec-13","status":"completed","rawOutput":{"exit_code":1.5}}`,
+				`{"sessionUpdate":"tool_call_update","toolCallId":"exec-13","status":"completed","_meta":{"terminal_exit":{"exit_code":1,"signal":null,"terminal_id":"exec-13"}}}`,
+			},
+		},
+		{
+			name: "malformed raw exit in same frame blocks",
+			frames: []string{
+				`{"sessionUpdate":"tool_call","toolCallId":"exec-14","title":"Run","kind":"execute","status":"in_progress"}`,
+				`{"sessionUpdate":"tool_call_update","toolCallId":"exec-14","status":"completed","rawOutput":{"exit_code":"not-a-number"},"_meta":{"terminal_exit":{"exit_code":1,"signal":null,"terminal_id":"exec-14"}}}`,
+			},
+		},
+		{
+			name: "malformed formatted return code blocks",
+			frames: []string{
+				`{"sessionUpdate":"tool_call","toolCallId":"exec-15","title":"Run","kind":"execute","status":"in_progress"}`,
+				`{"sessionUpdate":"tool_call_update","toolCallId":"exec-15","status":"completed","rawOutput":{"formatted_output":"<return-code>nope</return-code>"},"_meta":{"terminal_exit":{"exit_code":1,"signal":null,"terminal_id":"exec-15"}}}`,
+			},
+		},
+		{
+			name: "string cancellation marker blocks",
+			frames: []string{
+				`{"sessionUpdate":"tool_call","toolCallId":"exec-16","title":"Run","kind":"execute","status":"in_progress"}`,
+				`{"sessionUpdate":"tool_call_update","toolCallId":"exec-16","status":"failed","_meta":{"terminal_exit":{"exit_code":1,"signal":null,"cancelled":"true","terminal_id":"exec-16"}}}`,
+			},
+		},
+		{
+			name: "conflicting terminal exit aliases block",
+			frames: []string{
+				`{"sessionUpdate":"tool_call","toolCallId":"exec-17","title":"Run","kind":"execute","status":"in_progress"}`,
+				`{"sessionUpdate":"tool_call_update","toolCallId":"exec-17","status":"failed","_meta":{"terminal_exit":{"exit_code":1,"code":2,"signal":null,"terminal_id":"exec-17"}}}`,
+			},
+		},
+		{
+			name: "qualifying command with pending non-command tool still blocks",
+			frames: []string{
+				`{"sessionUpdate":"tool_call","toolCallId":"exec-18","title":"Run","kind":"execute","status":"in_progress"}`,
+				`{"sessionUpdate":"tool_call_update","toolCallId":"exec-18","status":"failed","_meta":{"terminal_exit":{"exit_code":1,"signal":null,"terminal_id":"exec-18"}}}`,
+				`{"sessionUpdate":"tool_call","toolCallId":"pending-read","title":"Read","kind":"read","status":"in_progress"}`,
+			},
+			known: 1, pending: true,
+		},
+		{
 			name: "conflicting terminal exits block",
 			frames: []string{
 				`{"sessionUpdate":"tool_call","toolCallId":"exec-8","title":"Run","kind":"execute","status":"in_progress"}`,
@@ -139,6 +185,7 @@ func TestCodexCapacityKnownCommandFailure(t *testing.T) {
 			require.Equal(t, tc.safe, snapshot.SafeFor(7))
 			require.Equal(t, tc.known, snapshot.KnownFailedShellTools)
 			require.Equal(t, tc.completed, snapshot.CompletedTools)
+			require.Equal(t, tc.pending, snapshot.PendingTools)
 			if !tc.safe && tc.known == 0 {
 				require.True(t, snapshot.FailedTools || snapshot.UnknownOutcomes,
 					"blocked command evidence must keep the recovery fence")

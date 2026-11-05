@@ -127,7 +127,7 @@ export function useContinueTurnError({
     messageId,
     session,
     queuedCount,
-    accepted,
+    accepted: accepted || outcome === "accepted",
     retrying,
   });
   const ready = available && !pending;

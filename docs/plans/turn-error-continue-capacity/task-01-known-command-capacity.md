@@ -124,7 +124,7 @@ Record all actual commands and results, including the final changed-file list an
 
 ## Dependencies
 
-None. All production and permanent test changes await an explicit implementation request.
+None.
 
 ## Risks
 
@@ -158,4 +158,4 @@ Done. Codex and mock now emit `codex_live_session_v2` / `mock_live_session_v2` w
 - `(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/session/mobile-transient-turn-runtime-continuity.spec.ts)`: 5 passed.
 - `node --test scripts/validate-public-docs.test.mjs`, `node scripts/validate-public-docs.mjs`, `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`: passed.
 
-New evidence covers `TestCapacityContinuationV2KnownFailedShellTools`, `TestCodexCapacityKnownCommandFailure`, `TestCapacityContinuationKnownCommandFailure`, and the mock `/capacity-known-failed-command` scenario. The adapter table pins raw-before-terminal, terminal-before-raw, same-frame, and repeated-terminal conflict refusal, plus an agreeing split-frame positive; parsed raw exit evidence is retained per tool and compared in both arrival orders. The scenario emits matching terminal identity, integer nonzero exit, and null signal, and the continuation does not repeat the command. The desktop and phone suites assert the existing retry notice, actual attempt, deadline, Cancel action, same runtime identity, and preserved failed tool rows against UI-04.
+New evidence covers `TestCapacityContinuationV2KnownFailedShellTools`, `TestCodexCapacityKnownCommandFailure`, `TestCapacityContinuationKnownCommandFailure`, and the mock `/capacity-known-failed-command` scenario. The adapter table pins raw-before-terminal, terminal-before-raw, same-frame, malformed raw, formatted return-code, string cancellation, alias conflict, and mixed pending-tool refusal, plus an agreeing split-frame positive; parsed raw exit evidence is retained per tool and compared in both arrival orders. The scenario emits matching terminal identity, integer nonzero exit, and null signal, and the continuation does not repeat the command. The desktop and phone suites assert the existing retry notice, actual attempt, deadline, Cancel action, same runtime identity, and preserved failed tool rows against UI-04.

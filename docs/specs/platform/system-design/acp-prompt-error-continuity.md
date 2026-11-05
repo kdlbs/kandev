@@ -289,7 +289,7 @@ A stale stamp cannot clear a newer error. A rejected send leaves the badge and c
 An accepted send whose acknowledgement fails leaves the badge, but never resends that continuation to repair attention.
 Once the stable message is accepted, show Dismiss only while any acknowledgement failure remains.
 Reconcile by that message ID after reload or an uncertain response rather than creating another continuation identity.
-Backend capacity queuing remains normal admission. If acceptance queues the input, report that result without claiming the agent resumed.
+Backend capacity queuing remains normal admission. A capacity-queued continuation appears through the existing queued-message UI; this action reports one accepted continuation and never claims the agent resumed.
 No new endpoint, metadata reason, schema, timer, or restoration action is required.
 
 Desktop controls form a compact row with Dismiss and continue first, then Dismiss turn error.

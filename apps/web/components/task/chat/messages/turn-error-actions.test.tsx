@@ -12,6 +12,7 @@ import { TurnErrorActions } from "./turn-error-actions";
 
 const sendMessageRequestMock = vi.hoisted(() => vi.fn());
 const acknowledgementFailureMock = vi.hoisted(() => vi.fn());
+const dismissTurnErrorMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/message-request", () => ({
   sendMessageRequest: sendMessageRequestMock,
@@ -20,7 +21,7 @@ vi.mock("@/lib/task-turn-error-feedback", () => ({
   notifyTurnErrorAcknowledgementFailure: acknowledgementFailureMock,
 }));
 vi.mock("@/lib/api/domains/task-turn-error-api", () => ({
-  dismissTaskTurnError: vi.fn().mockResolvedValue({ dismissed: true }),
+  dismissTaskTurnError: dismissTurnErrorMock,
 }));
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn() }),
@@ -74,6 +75,7 @@ function renderActions(options: Parameters<typeof wrapper>[0] = {}) {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  dismissTurnErrorMock.mockResolvedValue({ dismissed: true });
 });
 
 describe("TurnErrorActions", () => {
@@ -117,6 +119,24 @@ describe("TurnErrorActions", () => {
     );
     expect((screen.getByTestId(CONTINUE_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByTestId(DISMISS_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("disables continuation while dismissal is in flight", async () => {
+    let resolveDismiss: (value: unknown) => void = () => {};
+    dismissTurnErrorMock.mockImplementation(
+      () => new Promise((resolve) => (resolveDismiss = resolve)),
+    );
+    renderActions();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId(DISMISS_TEST_ID));
+    });
+    await waitFor(() =>
+      expect((screen.getByTestId(CONTINUE_TEST_ID) as HTMLButtonElement).disabled).toBe(true),
+    );
+    expect((screen.getByTestId(DISMISS_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => {
+      resolveDismiss({ dismissed: true });
+    });
   });
 
   it("does not offer continuation during automatic retry waiting", () => {

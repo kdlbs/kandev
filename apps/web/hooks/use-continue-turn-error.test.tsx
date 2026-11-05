@@ -215,6 +215,41 @@ describe("useContinueTurnError applied configuration", () => {
     expect(sendMessageRequestMock.mock.calls[0][0].planMode).toBe(true);
   });
 
+  it("ignores an unapplied composer plan-mode toggle", async () => {
+    sendMessageRequestMock.mockResolvedValue(
+      message({
+        id: continueTurnErrorMessageID(SESSION_ID, STAMP),
+        author_type: "user",
+        content: "continue",
+      }),
+    );
+    const { result } = renderHook(
+      () => ({
+        hook: useContinueTurnError({
+          taskId: TASK_ID,
+          sessionId: SESSION_ID,
+          stamp: STAMP,
+        }),
+        store: useAppStoreApi(),
+      }),
+      {
+        wrapper: wrapper({
+          initialState: {
+            chatInput: {
+              planModeBySessionId: { [SESSION_ID]: true },
+              cancellingBySessionId: {},
+            },
+          },
+        }),
+      },
+    );
+    await act(async () => {
+      await result.current.hook.continueTurn();
+    });
+    expect(sendMessageRequestMock.mock.calls[0][0].planMode).toBe(false);
+    expect(result.current.store.getState().chatInput.planModeBySessionId[SESSION_ID]).toBe(true);
+  });
+
   it("keeps the captured plan mode immutable across retries for the same error", async () => {
     sendMessageRequestMock.mockRejectedValueOnce(new Error("network"));
     sendMessageRequestMock.mockResolvedValueOnce(
@@ -263,6 +298,17 @@ describe("useContinueTurnError applied configuration", () => {
 });
 
 describe("useContinueTurnError retry identity", () => {
+  it("does not reopen continuation when acceptance returns no message", async () => {
+    sendMessageRequestMock.mockResolvedValue(undefined);
+    const { result } = renderContinue();
+    await act(async () => {
+      await result.current.continueTurn();
+    });
+    expect(result.current.outcome).toBe("accepted");
+    expect(result.current.available).toBe(false);
+    expect(result.current.ready).toBe(false);
+  });
+
   it("keeps one logical continuation for rapid activation", async () => {
     let resolveSend: (message: Message | undefined) => void = () => {};
     sendMessageRequestMock.mockImplementation(

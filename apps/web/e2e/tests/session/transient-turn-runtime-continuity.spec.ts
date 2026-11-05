@@ -8,6 +8,7 @@ import {
   createRetainedCapacityFixture,
   expectCompletedCapacityProgress,
   expectKnownFailedCommandVisible,
+  waitForKnownFailedCommandMessage,
   expectRetainedTurnReady,
   readMockACPTrace,
   waitForRetainedTurnFailure,
@@ -294,6 +295,7 @@ test("desktop: confirmed failed command keeps capacity continuation on the same 
     const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
 
     await expectKnownFailedCommandVisible(session);
+    await waitForKnownFailedCommandMessage(apiClient, fixture.sessionId);
     const notice = await waitForCapacityRetry(apiClient, fixture.sessionId, 1);
     expect(notice.metadata?.retry_in_seconds).toBeGreaterThan(0);
     await advanceCapacityRetries(backend, Number(notice.metadata?.retry_in_seconds));

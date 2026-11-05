@@ -1,6 +1,8 @@
 package acp
 
 import (
+	"strings"
+
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
@@ -264,8 +266,10 @@ func (t *promptTurnState) observeCapacityTerminalEvidence(
 			t.observeCapacityTerminalExit(&tool.terminal, toolID, exit)
 		}
 	}
-	if code, ok := capacityRawExitCode(update.RawOutput); ok {
+	if code, present, valid := capacityRawExitEvidence(update.RawOutput); present {
 		switch {
+		case !valid:
+			tool.terminal.invalid = true
 		case tool.terminal.rawSeen && tool.terminal.rawExitCode != code:
 			tool.terminal.invalid = true
 		case !tool.terminal.rawSeen:
@@ -347,7 +351,11 @@ func capacityTerminalSignal(fields map[string]any) bool {
 
 func capacityTerminalCancelled(fields map[string]any) bool {
 	for _, key := range []string{"cancelled", "canceled"} {
-		if cancelled, ok := fields[key].(bool); ok && cancelled {
+		value, present := fields[key]
+		if !present || value == nil {
+			continue
+		}
+		if cancelled, ok := value.(bool); !ok || cancelled {
 			return true
 		}
 	}
@@ -355,14 +363,20 @@ func capacityTerminalCancelled(fields map[string]any) bool {
 }
 
 func capacityTerminalExitCode(fields map[string]any) (int, bool) {
+	code := 0
+	found := false
 	for _, key := range []string{"exit_code", "code"} {
 		value, present := fields[key]
 		if !present {
 			continue
 		}
-		return authoritativeTerminalExitCode(value)
+		parsed, ok := authoritativeTerminalExitCode(value)
+		if !ok || (found && parsed != code) {
+			return 0, false
+		}
+		code, found = parsed, true
 	}
-	return 0, false
+	return code, found
 }
 
 // authoritativeTerminalExitCode rejects string-shaped exit values: V2 requires
@@ -374,12 +388,57 @@ func authoritativeTerminalExitCode(value any) (int, bool) {
 	return parseExitCode(value)
 }
 
-func capacityRawExitCode(rawOutput any) (int, bool) {
-	result := normalizeFinalShellResult(rawOutput)
-	if result.exitCode == nil {
-		return 0, false
+// capacityRawExitEvidence reports a raw exit value separately from whether the
+// field was present and whether it parsed. A present malformed value must block
+// the tool instead of being treated as absent evidence.
+func capacityRawExitEvidence(rawOutput any) (int, bool, bool) {
+	value := unwrapShellRawOutput(rawOutput)
+	switch result := value.(type) {
+	case map[string]any:
+		return capacityRawMapExitEvidence(result)
+	case string:
+		return capacityRawTextExitEvidence(result)
+	default:
+		return 0, false, true
 	}
-	return *result.exitCode, true
+}
+
+func capacityRawMapExitEvidence(result map[string]any) (int, bool, bool) {
+	if raw, present := result["exit_code"]; present {
+		code, ok := parseExitCode(raw)
+		return code, true, ok
+	}
+	if metadata, ok := result["metadata"].(map[string]any); ok {
+		if raw, present := metadata["exit"]; present {
+			code, ok := parseExitCode(raw)
+			return code, true, ok
+		}
+	}
+	if _, explicit := result["stdout"]; explicit {
+		return 0, false, true
+	}
+	if _, explicit := result["stderr"]; explicit {
+		return 0, false, true
+	}
+	if formatted, ok := result["formatted_output"].(string); ok {
+		return capacityRawTextExitEvidence(formatted)
+	}
+	if output, ok := result["output"].(string); ok {
+		return capacityRawTextExitEvidence(output)
+	}
+	return 0, false, true
+}
+
+func capacityRawTextExitEvidence(text string) (int, bool, bool) {
+	if !strings.Contains(text, "<return-code>") {
+		return 0, false, true
+	}
+	codeText, present := embeddedShellField(text, "return-code")
+	if !present {
+		return 0, false, true
+	}
+	code, ok := parseExitCode(codeText)
+	return code, true, ok
 }
 
 func (t *promptTurnState) applyCapacityToolKind(tool *capacityToolEvidence, kind *acpsdk.ToolKind) {

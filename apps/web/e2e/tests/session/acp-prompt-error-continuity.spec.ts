@@ -112,6 +112,7 @@ test("desktop: Dismiss and continue sends one manual continue and preserves the 
     await waitForPromptError(apiClient, fixture.sessionId);
     const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
 
+    await session.waitForDirectInput();
     const row = await expectPromptErrorRow(session, { continue: true });
     await expectTurnErrorBadge(session, fixture.taskTitle);
     const editor = await session.fillMessage("keep this unsent draft");
@@ -154,6 +155,55 @@ test("desktop: Dismiss and continue sends one manual continue and preserves the 
       ),
     ).toHaveLength(1);
   } finally {
+    await fixture.dispose();
+  }
+});
+
+test("desktop: two viewers submitting at once create one continuation", async ({
+  testPage,
+  apiClient,
+  backend,
+  seedData,
+}) => {
+  const fixture = await createPromptErrorFixture(backend, apiClient, seedData);
+  const viewer = await testPage.context().newPage();
+  try {
+    const session = new SessionPage(testPage);
+    await testPage.goto(`/t/${fixture.taskId}`);
+    await session.waitForLoad();
+    await waitForPromptError(apiClient, fixture.sessionId);
+    await session.waitForDirectInput();
+    const firstRow = await expectPromptErrorRow(session, { continue: true });
+
+    await viewer.goto(`/t/${fixture.taskId}`);
+    const otherViewer = new SessionPage(viewer);
+    await otherViewer.waitForLoad();
+    await otherViewer.waitForDirectInput();
+    const secondRow = await expectPromptErrorRow(otherViewer, { continue: true });
+
+    await Promise.allSettled([
+      firstRow.getByTestId("turn-error-continue-button").evaluate((element) => {
+        (element as HTMLButtonElement).click();
+      }),
+      secondRow.getByTestId("turn-error-continue-button").evaluate((element) => {
+        (element as HTMLButtonElement).click();
+      }),
+    ]);
+    const continued = await waitForUserContinueMessages(apiClient, fixture.sessionId);
+    expect(continued).toHaveLength(1);
+    await expect.poll(() => promptEventCount(fixture.tracePath), { timeout: 60_000 }).toBe(2);
+    await expect
+      .poll(async () => {
+        const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+        return messages.filter(
+          (message) => message.author_type === "user" && message.content === "continue",
+        );
+      })
+      .toHaveLength(1);
+    await expect(firstRow.getByTestId("turn-error-continue-button")).toHaveCount(0);
+    await expect(secondRow.getByTestId("turn-error-continue-button")).toHaveCount(0);
+  } finally {
+    await viewer.close();
     await fixture.dispose();
   }
 });
@@ -382,8 +432,8 @@ test.describe("narrow fine-pointer error controls", () => {
 
       const continueBox = await continueButton.boundingBox();
       const dismissBox = await dismissButton.boundingBox();
-      expect(continueBox?.height ?? 0).toBeGreaterThanOrEqual(43.5);
-      expect(dismissBox?.height ?? 0).toBeGreaterThanOrEqual(43.5);
+      expect(continueBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect(dismissBox?.height ?? 0).toBeGreaterThanOrEqual(44);
       expect(continueBox?.y ?? 0).toBeLessThan(dismissBox?.y ?? 0);
       expect(continueBox?.width ?? 0).toBeLessThanOrEqual(600);
       await assertNoDocumentHorizontalOverflow(testPage);

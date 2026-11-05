@@ -183,7 +183,7 @@ Implementation verification passed:
 
 - Backend protocol, lifecycle, watcher, orchestrator, mock-agent, and message-handler selections passed under `-race`.
 - `bash scripts/lint-go-changed` reported 0 issues.
-- The focused web hook/component selection passed 120 tests; `pnpm run typecheck` and Oxlint passed.
+- The focused web hook/component selection passed 123 tests; `pnpm run typecheck` and Oxlint passed.
 - The Traditional Chinese generator, pseudo generator, `i18n:check`, and `i18n:ratchet` passed.
 - Desktop and phone capacity suites passed, including the new known-failed-command scenario and the unchanged eleven-attempt notice.
 - Desktop and phone prompt-error suites passed, including preview Chat, task-backed Quick Chat, reload, a second viewer, and the narrow fine-pointer pseudo-locale layout.

@@ -7,6 +7,7 @@ import {
   createRetainedCapacityFixture,
   readMockACPTrace,
 } from "./transient-turn-runtime-continuity";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import { pollUntil } from "./poll-until";
 import type { SessionPage } from "../pages/session-page";
 
@@ -77,7 +78,7 @@ export async function expectPromptErrorRow(
   if (options.continue === false) {
     await expect(row.getByTestId("turn-error-continue-button")).toHaveCount(0);
   } else if (options.continue === true) {
-    await expect(row.getByTestId("turn-error-continue-button")).toBeVisible({ timeout: 30_000 });
+    await expect(row.getByTestId("turn-error-continue-button")).toBeVisible();
   }
   return row;
 }
@@ -101,15 +102,20 @@ export async function waitForAgentResponseAfter(
   sessionId: string,
   after: string,
 ) {
+  const afterTimestamp = parseStrictRfc3339Timestamp(after);
   return pollUntil(
     async () => {
       const { messages } = await apiClient.listSessionMessages(sessionId);
-      return messages.find(
-        (message) =>
+      return messages.find((message) => {
+        const createdAt = parseStrictRfc3339Timestamp(message.created_at);
+        return (
           message.author_type === "agent" &&
-          Date.parse(message.created_at) > Date.parse(after) &&
-          (message.content ?? "").trim().length > 0,
-      );
+          afterTimestamp !== null &&
+          createdAt !== null &&
+          createdAt > afterTimestamp &&
+          (message.content ?? "").trim().length > 0
+        );
+      });
     },
     (message): message is NonNullable<typeof message> => message !== undefined,
     60_000,

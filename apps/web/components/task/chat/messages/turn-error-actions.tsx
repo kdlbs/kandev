@@ -4,6 +4,7 @@ import { Button } from "@kandev/ui/button";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { useTranslation } from "react-i18next";
 import { useContinueTurnError } from "@/hooks/use-continue-turn-error";
+import { useTaskTurnError } from "@/hooks/use-task-turn-error";
 import { TaskTurnErrorDismissButton } from "./turn-error-dismiss-button";
 
 /**
@@ -26,6 +27,9 @@ export function TurnErrorActions({
     sessionId,
     stamp,
   });
+  const { dismiss, pendingStamp } = useTaskTurnError();
+  const dismissing = pendingStamp === stamp;
+  const busy = pending || dismissing;
   return (
     <div
       data-testid="turn-error-actions"
@@ -35,15 +39,15 @@ export function TurnErrorActions({
         <Button
           variant="default"
           size="default"
-          className={`w-full whitespace-normal break-words md:w-auto ${controlSizingClassName("standard", "max-md:min-h-11 [@media(pointer:coarse)]:min-h-11")}`}
-          disabled={pending}
+          className={`w-full whitespace-normal break-words md:w-auto ${controlSizingClassName("standard", "max-md:min-h-12 [@media(pointer:coarse)]:min-h-12")}`}
+          disabled={busy}
           onClick={() => void continueTurn()}
           data-testid="turn-error-continue-button"
         >
           {t("task:dismissAndContinue")}
         </Button>
       )}
-      <TaskTurnErrorDismissButton taskId={taskId} stamp={stamp} disabled={pending} />
+      <TaskTurnErrorDismissButton disabled={busy} onClick={() => void dismiss(taskId, stamp)} />
       {outcome === "pending" && (
         <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
           {t("task:continuingTurnError")}

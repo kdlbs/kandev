@@ -73,7 +73,8 @@ Implementation status belongs to that package. Completed earlier packages retain
   The action shall clear that observed task attention without deleting the error history or stopping ACP.
   Historical errors shall remain readable after dismissal.
 - **AC-PLATFORM-TURN-CONTINUITY-005.3:** A newly accepted manual prompt shall acknowledge only its client-observed task error from the same session.
-  The request shall carry that error stamp. Missing or mismatched evidence shall leave attention unchanged.
+  When supplied, the request shall carry that client-observed error stamp; a prompt without an observation remains valid and leaves attention unchanged.
+  Missing or mismatched evidence shall leave attention unchanged.
   Accepted queued input can acknowledge that stamp. A later queue drain cannot acknowledge an error created after acceptance.
   Drafts, rejected or duplicate sends, queue edits, and automatic or agent-origin prompts shall not acknowledge errors.
 - **AC-PLATFORM-TURN-CONTINUITY-005.4:** A normal task with turn-error attention shall expose Dismiss error in its task actions.

@@ -10,6 +10,7 @@ import {
   createRetainedCapacityFixture,
   expectCompletedCapacityProgress,
   expectKnownFailedCommandVisible,
+  waitForKnownFailedCommandMessage,
   expectRetainedTurnReady,
   readMockACPTrace,
   waitForRetainedTurnFailure,
@@ -233,9 +234,11 @@ test("phone: confirmed failed command shows the retry notice and continues once"
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
     await expectKnownFailedCommandVisible(session);
+    await waitForKnownFailedCommandMessage(apiClient, fixture.sessionId);
     const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
 
-    await waitForCapacityRetry(apiClient, fixture.sessionId, 1);
+    const notice = await waitForCapacityRetry(apiClient, fixture.sessionId, 1);
+    expect(notice.metadata?.retry_in_seconds).toBeGreaterThan(0);
     await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
     await assertNoDocumentHorizontalOverflow(testPage);
     await driveCapacityRetries(backend, apiClient, fixture.sessionId, 1);

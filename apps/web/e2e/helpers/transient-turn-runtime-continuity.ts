@@ -133,15 +133,34 @@ export function assertKnownFailedCommandCapacityACPTrace(tracePath: string) {
 }
 
 export async function expectKnownFailedCommandVisible(session: SessionPage) {
-  // The failed command and the successful read are grouped into one collapsed
-  // tool-call summary. The command's exit evidence is asserted through the
-  // trace; this checks the real result rows survived in the transcript.
-  await expect(
-    session
-      .activeChat()
-      .getByRole("button", { name: /2 tool calls/ })
-      .first(),
-  ).toBeVisible({ timeout: 30_000 });
+  const group = session
+    .activeChat()
+    .getByRole("button", { name: /2 tool calls/ })
+    .first();
+  await expect(group).toBeVisible({ timeout: 30_000 });
+  const command = session.activeChat().getByText("go test ./focused", { exact: true }).first();
+  if (!(await command.isVisible())) {
+    await group.click();
+  }
+  await expect(command).toBeVisible();
+}
+
+export async function waitForKnownFailedCommandMessage(apiClient: ApiClient, sessionId: string) {
+  return pollUntil(
+    async () => {
+      const { messages } = await apiClient.listSessionMessages(sessionId);
+      return messages.find((message) => {
+        if (!message.type?.startsWith("tool_")) return false;
+        const status = message.metadata?.status;
+        if (status !== "error" && status !== "failed") return false;
+        const title = String(message.metadata?.title ?? message.content ?? "");
+        return /Run focused fixture command|go test \.\/focused/.test(title);
+      });
+    },
+    (message): message is SessionMessage => message !== undefined,
+    60_000,
+    "waiting for the failed command tool result",
+  );
 }
 
 export function assertCompletedCapacityACPTrace(tracePath: string, originalCommand: string) {

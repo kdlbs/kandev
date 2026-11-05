@@ -188,7 +188,7 @@ func TestRetainedCapacityKnownFailedCommandEmitsTerminalProofOnce(t *testing.T) 
 		t.Fatalf("continuation handled=%v error=%v, want successful continuation", handled, continuationErr)
 	}
 	for _, update := range updater.getUpdates()[initialCount:] {
-		if update.notification.Update.ToolCallUpdate != nil {
+		if update.notification.Update.ToolCall != nil || update.notification.Update.ToolCallUpdate != nil {
 			t.Fatal("continuation must not repeat the failed command or read")
 		}
 	}
