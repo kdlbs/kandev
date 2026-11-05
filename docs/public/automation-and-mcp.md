@@ -1076,9 +1076,11 @@ Neither tool accepts a task or workspace override from the caller. Recovery
 snapshots are redacted after the destination queue is dispositioned or the task
 is archived; retain the returned readback if it is needed for an audit.
 
-The tools have no task, session, workspace, body, force, sender-filter, or
-clear-all argument. The local MCP server binds them to the calling task and
-session, and the backend verifies that binding against the task workspace. If
+The tools have no caller-controlled task, session, or workspace scope override.
+Recovery and cleanup require `target_session_id` to select a helper; census and
+disposition use the local MCP server's bound session scope. None accepts a body,
+force, sender-filter, or clear-all argument. The backend verifies the caller's
+task and session binding against the task workspace. If
 the tools are unavailable, preserve the queue and wait for normal FIFO delivery
 or use the authenticated queue UI. Do not use database edits as a fallback.
 

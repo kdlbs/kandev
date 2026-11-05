@@ -230,54 +230,54 @@ func TestDeleteTaskSessionRejectsQueuedMessages(t *testing.T) {
 }
 
 func TestDeleteTaskSessionPreservesDurableQueueClaimsInTransaction(t *testing.T) {
-	repo := newRepoForArchiveTests(t, "task-session-recovery-purge")
-	ctx := context.Background()
-	const sessionID = "session-recovery-purge"
-	seedLiveSessionForQueue(t, repo, sessionID, "task-session-recovery-purge")
+	for _, claimType := range []string{"dispatch", "send_now"} {
+		t.Run(claimType, func(t *testing.T) {
+			repo := newRepoForArchiveTests(t, "task-session-recovery-purge")
+			ctx := context.Background()
+			const sessionID = "session-recovery-purge"
+			seedLiveSessionForQueue(t, repo, sessionID, "task-session-recovery-purge")
 
-	mqRepo, err := messagequeue.NewSQLiteRepository(repo.db, repo.db)
-	if err != nil {
-		t.Fatalf("NewSQLiteRepository: %v", err)
-	}
-	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
-	if err != nil {
-		t.Fatalf("logger: %v", err)
-	}
-	queue := messagequeue.NewService(mqRepo, messagequeue.DefaultMaxPerSession, log)
-	dispatchEntry, err := queue.QueueMessage(ctx, sessionID, "task-session-recovery-purge", "dispatch", "", "user", false, nil)
-	if err != nil {
-		t.Fatalf("queue dispatch entry: %v", err)
-	}
-	if reserved, ok := queue.ReserveQueued(ctx, sessionID); !ok || reserved.ID != dispatchEntry.ID {
-		t.Fatalf("reserved dispatch entry = %#v, ok=%t", reserved, ok)
-	}
-	sendNowEntry, err := queue.QueueMessage(ctx, sessionID, "task-session-recovery-purge", "send now", "", "user", false, nil)
-	if err != nil {
-		t.Fatalf("queue Send Now entry: %v", err)
-	}
-	if _, err := mqRepo.ClaimSendNow(ctx, sessionID, []messagequeue.QueuedMessage{*sendNowEntry}); err != nil {
-		t.Fatalf("claim Send Now entry: %v", err)
-	}
+			mqRepo, err := messagequeue.NewSQLiteRepository(repo.db, repo.db)
+			if err != nil {
+				t.Fatalf("NewSQLiteRepository: %v", err)
+			}
+			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+			if err != nil {
+				t.Fatalf("logger: %v", err)
+			}
+			queue := messagequeue.NewService(mqRepo, messagequeue.DefaultMaxPerSession, log)
+			entry, err := queue.QueueMessage(ctx, sessionID, "task-session-recovery-purge", claimType, "", "user", false, nil)
+			if err != nil {
+				t.Fatalf("queue entry: %v", err)
+			}
+			if claimType == "dispatch" {
+				if reserved, ok := queue.ReserveQueued(ctx, sessionID); !ok || reserved.ID != entry.ID {
+					t.Fatalf("reserved dispatch entry = %#v, ok=%t", reserved, ok)
+				}
+			} else if _, err := mqRepo.ClaimSendNow(ctx, sessionID, []messagequeue.QueuedMessage{*entry}); err != nil {
+				t.Fatalf("claim Send Now entry: %v", err)
+			}
 
-	if err := deleteTaskSessionByID(ctx, repo, sessionID); err == nil {
-		t.Fatal("DeleteTaskSession removed a session with undispositioned queue claims")
-	}
-	dispatches, err := mqRepo.(interface {
-		ListPendingQueueDispatches(context.Context) ([]messagequeue.PendingQueueDispatch, error)
-	}).ListPendingQueueDispatches(ctx)
-	if err != nil {
-		t.Fatalf("list dispatch claims: %v", err)
-	}
-	sendNowClaims, err := mqRepo.(interface {
-		ListPendingSendNowClaims(context.Context) ([]messagequeue.PendingSendNowClaim, error)
-	}).ListPendingSendNowClaims(ctx)
-	if err != nil {
-		t.Fatalf("list Send Now claims: %v", err)
-	}
-	if len(dispatches) != 1 || dispatches[0].Message.ID != dispatchEntry.ID ||
-		len(sendNowClaims) != 1 || len(sendNowClaims[0].Claim.Sources) != 1 ||
-		sendNowClaims[0].Claim.Sources[0].ID != sendNowEntry.ID {
-		t.Fatalf("durable claims after rejected session delete: dispatches=%#v send_now=%#v", dispatches, sendNowClaims)
+			if err := deleteTaskSessionByID(ctx, repo, sessionID); err == nil {
+				t.Fatal("DeleteTaskSession removed a session with undispositioned queue claims")
+			}
+			dispatches, err := mqRepo.(interface {
+				ListPendingQueueDispatches(context.Context) ([]messagequeue.PendingQueueDispatch, error)
+			}).ListPendingQueueDispatches(ctx)
+			if err != nil {
+				t.Fatalf("list dispatch claims: %v", err)
+			}
+			sendNowClaims, err := mqRepo.(interface {
+				ListPendingSendNowClaims(context.Context) ([]messagequeue.PendingSendNowClaim, error)
+			}).ListPendingSendNowClaims(ctx)
+			if err != nil {
+				t.Fatalf("list Send Now claims: %v", err)
+			}
+			if claimType == "dispatch" && (len(dispatches) != 1 || dispatches[0].Message.ID != entry.ID || len(sendNowClaims) != 0) ||
+				claimType == "send_now" && (len(dispatches) != 0 || len(sendNowClaims) != 1 || len(sendNowClaims[0].Claim.Sources) != 1 || sendNowClaims[0].Claim.Sources[0].ID != entry.ID) {
+				t.Fatalf("durable claims after rejected session delete: dispatches=%#v send_now=%#v", dispatches, sendNowClaims)
+			}
+		})
 	}
 }
 

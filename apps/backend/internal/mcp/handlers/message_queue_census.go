@@ -66,7 +66,7 @@ func (h *Handlers) handleDisposeMessageQueueEntries(ctx context.Context, msg *ws
 	result, err := h.queueManager.DisposeExact(ctx, req.SessionID, req.Entries)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrInvalidQueueDisposition) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid message queue disposition", nil)
 		}
 		h.logger.Error("exact message queue disposition failed", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to dispose message queue entries", nil)

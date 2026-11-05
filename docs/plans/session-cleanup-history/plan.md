@@ -1,7 +1,7 @@
 ---
 created: 2026-10-25
 updated: 2026-10-25
-status: done
+status: in_progress
 requirements:
   - REQ-TASKS-GUARDED-MESSAGE-QUEUE-001
   - REQ-TASKS-GUARDED-MESSAGE-QUEUE-002
@@ -34,7 +34,7 @@ state, and deleting task-owned workspace resources.
 
 ## Work orders
 
-- [x] [Task 01: Preserve and recover session queue work](task-01-preserve-session-queue-work.md)
+- [ ] [Task 01: Preserve and recover session queue work](task-01-preserve-session-queue-work.md)
 - [x] [Task 02: Archive and reopen helper history](task-02-archive-helper-history.md)
 
 ## UI preview

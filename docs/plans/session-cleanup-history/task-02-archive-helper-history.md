@@ -84,5 +84,7 @@ also skips automatic inspection and manual resume for archived rows. Focused
 backend and hook regression checks cover those paths. This local successor's
 component test also verifies that the stopped-session banner keeps only the
 task-scoped New Agent action for archived history. Browser evidence for the
-banner correction remains pending revalidation; earlier history captures are
-listed above and are not claimed as a browser run for this source successor.
+banner correction was revalidated in isolated desktop history browser journeys
+on `d78445136e15ea0a1c4a8b399aa2c753ffead644`; the archived history capture
+was inspected at that revision. Earlier history captures retain their original
+execution revisions and are not relabelled as new runs.

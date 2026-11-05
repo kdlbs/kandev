@@ -30,7 +30,7 @@ import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { repositorySlug } from "@/lib/repository-slug";
 import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import type { ForegroundActivity, TaskSessionState } from "@/lib/types/http";
-import { buildSessionRows, type SessionRow } from "./mobile-session-rows";
+import { buildSessionRows, visibleMobileSessionRows, type SessionRow } from "./mobile-session-rows";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { MobileSessionDeleteConfirmation } from "./mobile-session-delete-confirmation";
@@ -444,7 +444,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
     taskId ? (state.sessionHistoryVisibleByTaskId[taskId] ?? false) : false,
   );
   const visibleRows = useMemo(
-    () => rows.filter((row) => showHistory || !row.isHistory || row.id === activeSessionId),
+    () => visibleMobileSessionRows(rows, showHistory, activeSessionId),
     [activeSessionId, rows, showHistory],
   );
 
@@ -474,7 +474,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
     <div className="flex flex-col gap-2 px-1">
       <div className="flex items-center justify-between px-1">
         <span className="text-xs font-medium text-muted-foreground">
-          {t("task:sessionCount", { count: rows.length })}
+          {t("task:sessionCount", { count: visibleRows.length })}
         </span>
         <Button
           size="sm"
@@ -504,7 +504,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
             row={row}
             taskId={taskId}
             isActive={row.id === activeSessionId}
-            totalSessions={rows.length}
+            totalSessions={visibleRows.length}
             isConfirming={row.id === confirmDeleteSessionId}
             onAskDelete={() => setConfirmDeleteSessionId(row.id)}
             onCancelDelete={() => setConfirmDeleteSessionId(null)}
@@ -534,8 +534,15 @@ function useActiveSessionPillLabel(
   const storedActiveSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const { rows } = useSessionRows(taskId);
   const effectiveSessionId = sessionId === undefined ? storedActiveSessionId : sessionId;
-  const activeRow = rows.find((r) => r.id === effectiveSessionId);
-  const total = rows.length;
+  const showHistory = useDockviewStore((state) =>
+    taskId ? (state.sessionHistoryVisibleByTaskId[taskId] ?? false) : false,
+  );
+  const visibleRows = useMemo(
+    () => visibleMobileSessionRows(rows, showHistory, effectiveSessionId ?? null),
+    [rows, showHistory, effectiveSessionId],
+  );
+  const activeRow = visibleRows.find((r) => r.id === effectiveSessionId);
+  const total = visibleRows.length;
   const idx = activeRow?.index;
   let count: string | undefined;
   if (total > 1 && idx) count = `${idx}/${total}`;

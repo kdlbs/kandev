@@ -33,7 +33,8 @@ rows remain outside the disposable set.
 Scheduled automation messages may coalesce only when a trusted automation
 principal, stable automation and trigger identity, target session, and complete
 expanded payload are identical. The retained row keeps its entry ID and FIFO
-position. Every other message remains distinct.
+position. Other scheduled wakes remain distinct; existing non-routine queue
+coalescing and merge policies remain unchanged.
 
 ## Consequences
 

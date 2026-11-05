@@ -36,7 +36,7 @@ func parseScopedTerminalSessionRequest(
 
 func terminalSessionScopeError(msg *ws.Message, parseErr error, workspaceID, action string) (*ws.Message, error) {
 	if parseErr != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+parseErr.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload", nil)
 	}
 	if workspaceID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, action+" requires the calling task's current primary session", nil)

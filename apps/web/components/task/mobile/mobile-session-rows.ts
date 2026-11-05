@@ -22,7 +22,15 @@ export type SessionRow = {
 
 function sessionAgentLabel(session: TaskSession, profile: AgentProfileOption | undefined): string {
   const labelParts = profile?.label.split(" • ") ?? [];
-  return session.name || labelParts[1] || labelParts[0] || profile?.label || t("task:agent");
+  const snapshotLabel = session.agent_profile_snapshot?.label;
+  return (
+    session.name ||
+    labelParts[1] ||
+    labelParts[0] ||
+    profile?.label ||
+    (typeof snapshotLabel === "string" ? snapshotLabel : null) ||
+    t("task:agent")
+  );
 }
 
 export function buildSessionRows(
@@ -34,9 +42,13 @@ export function buildSessionRows(
   const sorted = [...sessions].sort(
     (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
   );
+  const knownPrimarySessionId =
+    primarySessionId && sessions.some((session) => session.id === primarySessionId)
+      ? primarySessionId
+      : null;
   return sorted.map((s, idx) => {
     const profile = agentProfiles.find((p) => p.id === s.agent_profile_id);
-    const isPrimary = primarySessionId ? s.id === primarySessionId : !!s.is_primary;
+    const isPrimary = knownPrimarySessionId ? s.id === knownPrimarySessionId : !!s.is_primary;
     return {
       id: s.id,
       agentName: profile?.agent_name ?? null,
@@ -55,4 +67,14 @@ export function buildSessionRows(
       startedAt: s.started_at,
     };
   });
+}
+
+export function visibleMobileSessionRows(
+  rows: SessionRow[],
+  showHistory: boolean,
+  activeSessionId: string | null,
+): SessionRow[] {
+  return rows
+    .filter((row) => showHistory || row.isPrimary || !row.isHistory || row.id === activeSessionId)
+    .map((row, index) => ({ ...row, index: index + 1 }));
 }

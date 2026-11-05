@@ -106,6 +106,8 @@ test.describe("desktop: session history", () => {
       })
       .toBeTruthy();
     await expect(helperTab).toHaveCount(0);
+    const originalCloseBehavior = (await apiClient.getUserSettings()).settings
+      .agent_tab_close_behavior;
     await apiClient.saveUserSettings({ agent_tab_close_behavior: "hide_panel" });
     try {
       await testPage.reload();
@@ -139,7 +141,7 @@ test.describe("desktop: session history", () => {
       await session.chat.getByTestId("archived-session-new-agent-button").click();
       await expect(session.newSessionDialog()).toBeVisible();
     } finally {
-      await apiClient.saveUserSettings({ agent_tab_close_behavior: "delete_session" });
+      await apiClient.saveUserSettings({ agent_tab_close_behavior: originalCloseBehavior });
     }
   });
 });

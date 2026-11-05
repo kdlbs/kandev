@@ -114,6 +114,25 @@ func TestHandleDisposeMessageQueueEntriesReturnsPerEntryOutcomes(t *testing.T) {
 	}
 }
 
+func TestHandleDisposeMessageQueueEntriesSanitizesInvalidClaim(t *testing.T) {
+	h, _ := queueCensusHandler(t)
+	secretID := "client-controlled-secret-id"
+	response, err := h.handleDisposeMessageQueueEntries(
+		queuePrincipal("workspace-1", "task-1", "session-1"),
+		makeWSMessage(t, ws.ActionMCPDisposeMessageQueueEntries, map[string]interface{}{
+			"task_id": "task-1", "session_id": "session-1",
+			"entries": []map[string]interface{}{{"id": secretID, "claim": "claim"}, {"id": secretID, "claim": "claim"}},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("dispose: %v", err)
+	}
+	assertWSError(t, response, ws.ErrorCodeValidation)
+	if strings.Contains(string(response.Payload), secretID) {
+		t.Fatalf("validation response leaked claim id: %s", response.Payload)
+	}
+}
+
 func containsJSONBody(data []byte, body string) bool {
 	return body != "" && json.Valid(data) && strings.Contains(string(data), body)
 }

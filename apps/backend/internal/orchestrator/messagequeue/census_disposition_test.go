@@ -52,6 +52,29 @@ func TestQueueCensusIsFIFOAndOmitsMessageBodies(t *testing.T) {
 	}
 }
 
+func TestMemoryExactDispositionPreservesSessionPositionHighWater(t *testing.T) {
+	svc := censusTestService(t, NewMemoryRepository())
+	ctx := context.Background()
+	first, err := svc.QueueMessage(ctx, "session-1", "task-1", "first", "", QueuedByUser, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	census, err := svc.Census(ctx, "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.DisposeExact(ctx, "session-1", []QueueEntryClaim{{ID: first.ID, Claim: census.Entries[0].Claim}}); err != nil {
+		t.Fatal(err)
+	}
+	next, err := svc.QueueMessage(ctx, "session-1", "task-1", "next", "", QueuedByUser, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Position <= first.Position {
+		t.Fatalf("position reset after last-row disposition: first=%d next=%d", first.Position, next.Position)
+	}
+}
+
 func TestExactDispositionIsIdempotentAndPreservesChangedAndNewRows(t *testing.T) {
 	tests := []struct {
 		name string

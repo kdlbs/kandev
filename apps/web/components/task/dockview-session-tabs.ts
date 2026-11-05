@@ -388,6 +388,7 @@ function resolveCurrentSessionIds(
 ): {
   tid: string | null;
   currentSessionIds: string[];
+  allSessionIds: string[];
   sessionListLoaded: boolean;
 } {
   const state = appStore.getState();
@@ -401,6 +402,7 @@ function resolveCurrentSessionIds(
   return {
     tid: tid ?? null,
     currentSessionIds: visibleSessions.map((session) => session.id),
+    allSessionIds: currentSessions.map((session) => session.id),
     sessionListLoaded: tid ? (state.taskSessionsByTask.loadedByTaskId[tid] ?? false) : false,
   };
 }
@@ -517,7 +519,7 @@ function updateAutoSessionTabRefs(
 function reconcileLoadedSessionPanels(
   api: DockviewApi,
   refs: AutoSessionTabRefs,
-  currentSessionIds: string[],
+  sessionIds: { visible: string[]; all: string[] },
   effectiveSessionId: string | null,
   sessionListLoaded: boolean,
 ): void {
@@ -525,10 +527,10 @@ function reconcileLoadedSessionPanels(
   reconcileRemovedSessionPanels(
     api,
     refs.sessionTabCreatedRef.current,
-    currentSessionIds,
+    sessionIds.visible,
     effectiveSessionId ?? "",
   );
-  useDockviewStore.getState().reconcileMaximizeSessionList(effectiveSessionId, currentSessionIds);
+  useDockviewStore.getState().reconcileMaximizeSessionList(effectiveSessionId, sessionIds.all);
 }
 
 function workflowFocusRequestIdForSession(
@@ -553,7 +555,7 @@ export function runAutoSessionTabEffect(
   const api = useDockviewStore.getState().api;
   if (!api) return;
 
-  const { tid, currentSessionIds, sessionListLoaded } = resolveCurrentSessionIds(
+  const { tid, currentSessionIds, allSessionIds, sessionListLoaded } = resolveCurrentSessionIds(
     appStore,
     showHistory,
     effectiveSessionId,
@@ -568,7 +570,13 @@ export function runAutoSessionTabEffect(
     return;
   }
 
-  reconcileLoadedSessionPanels(api, refs, currentSessionIds, effectiveSessionId, sessionListLoaded);
+  reconcileLoadedSessionPanels(
+    api,
+    refs,
+    { visible: currentSessionIds, all: allSessionIds },
+    effectiveSessionId,
+    sessionListLoaded,
+  );
   pruneHiddenSessionIds(api, appStore.getState);
 
   if (!effectiveSessionId) {

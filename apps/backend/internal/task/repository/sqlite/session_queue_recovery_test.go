@@ -62,6 +62,34 @@ func TestRecoverTaskSessionQueueCommitsReceiptAndReplaysExactSnapshot(t *testing
 	}
 }
 
+func TestRecoverTaskSessionQueuePreventsMergeUntilRecoveredWorkIsDispositioned(t *testing.T) {
+	repo, queueRepo := newSessionQueueRecoveryFixture(t)
+	ctx := context.Background()
+	above := &messagequeue.QueuedMessage{SessionID: "destination", TaskID: "task-recovery", Content: "unrelated", QueuedBy: messagequeue.QueuedByUser}
+	if err := queueRepo.Insert(ctx, above, 10); err != nil {
+		t.Fatalf("insert destination head: %v", err)
+	}
+	recovered := insertSessionQueueRecoveryMessage(t, queueRepo, "recovered body")
+	result, err := repo.RecoverTaskSessionQueue(ctx, sessionQueueRecoveryScope())
+	if err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if _, err := queueRepo.MergeIntoAbove(ctx, "destination", recovered.ID, messagequeue.QueuedByUser); !errors.Is(err, messagequeue.ErrNoMergeTarget) {
+		t.Fatalf("merge recovered source error = %v, want ErrNoMergeTarget", err)
+	}
+	below := &messagequeue.QueuedMessage{SessionID: "destination", TaskID: "task-recovery", Content: "later body", QueuedBy: messagequeue.QueuedByUser}
+	if err := queueRepo.Insert(ctx, below, 10); err != nil {
+		t.Fatalf("insert later entry: %v", err)
+	}
+	if _, err := queueRepo.MergeIntoAbove(ctx, "destination", below.ID, messagequeue.QueuedByUser); !errors.Is(err, messagequeue.ErrNoMergeTarget) {
+		t.Fatalf("merge into recovered target error = %v, want ErrNoMergeTarget", err)
+	}
+	retry, err := repo.RecoverTaskSessionQueue(ctx, sessionQueueRecoveryScope())
+	if err != nil || retry.Receipt.ID != result.Receipt.ID || len(retry.Entries) != 1 || retry.Entries[0].Content != "recovered body" {
+		t.Fatalf("receipt replay = %#v, %v", retry, err)
+	}
+}
+
 func TestRecoverTaskSessionQueueRejectsStalePrimaryWithoutMutation(t *testing.T) {
 	repo, queueRepo := newSessionQueueRecoveryFixture(t)
 	ctx := context.Background()

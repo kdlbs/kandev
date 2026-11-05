@@ -1862,7 +1862,7 @@ func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) 
 func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+`
-		 WHERE ts.task_id = ? AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+		 WHERE ts.task_id = ? AND ts.archived_at IS NULL AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		 ORDER BY ts.started_at DESC LIMIT 1`,
 	), taskID)
 	return r.scanTaskSession(ctx, row, fmt.Sprintf("no active agent session for task: %s", taskID))

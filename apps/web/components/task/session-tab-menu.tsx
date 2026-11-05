@@ -215,6 +215,12 @@ export function SessionContextMenuItems({
 }) {
   const { t } = useTranslation();
   const renameAfterCloseRef = useRef(false);
+  const hasLifecycleAction = sessionHasLifecycleAction(
+    sessionState,
+    isPrimary,
+    isArchived,
+    actions.isRestarting,
+  );
   return (
     <ContextMenuContent
       onCloseAutoFocus={(event) => {
@@ -239,7 +245,7 @@ export function SessionContextMenuItems({
       >
         {t("task:setAsPrimary")}
       </ContextMenuItem>
-      <ContextMenuSeparator />
+      {hasLifecycleAction && <ContextMenuSeparator />}
       <SessionLifecycleMenuItems
         sessionState={sessionState}
         isPrimary={isPrimary}
@@ -270,6 +276,20 @@ export function SessionContextMenuItems({
         </>
       )}
     </ContextMenuContent>
+  );
+}
+
+function sessionHasLifecycleAction(
+  state: TaskSessionState | null,
+  isPrimary: boolean,
+  isArchived: boolean,
+  isRestarting: boolean | undefined,
+): boolean {
+  return (
+    !isArchived &&
+    (isRestarting === true ||
+      (state !== null &&
+        (isStoppable(state) || isResumable(state) || (!isPrimary && isDeletable(state)))))
   );
 }
 

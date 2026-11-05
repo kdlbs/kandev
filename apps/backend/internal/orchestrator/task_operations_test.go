@@ -3134,6 +3134,34 @@ func TestQueueAndInterruptForPeerMessage_CancelFailureLeavesMessageQueuedWhenSti
 	}
 }
 
+func TestQueueAndInterruptForPeerMessage_CoalescesIdenticalRoutineWakeOnCancelFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true, repoForExecutionLookup: repo,
+		cancelAgentErr: errors.New("agent manager unreachable"),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+	metadata := map[string]interface{}{
+		messagequeue.MetadataRoutineWake: true,
+		messagequeue.MetadataCoalesceKey: "routine-key",
+	}
+	first, dispatched, err := queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "wake", metadata)
+	if first == nil || dispatched || err == nil {
+		t.Fatalf("first interrupt = %+v, %t, %v", first, dispatched, err)
+	}
+	second, dispatched, err := queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "wake", metadata)
+	if second == nil || dispatched || err == nil {
+		t.Fatalf("second interrupt = %+v, %t, %v", second, dispatched, err)
+	}
+	if second.ID != first.ID || svc.messageQueue.GetStatus(ctx, "session1").Count != 1 {
+		t.Fatalf("identical routine wakes accumulated: first=%s second=%s", first.ID, second.ID)
+	}
+}
+
 // TestQueueAndInterruptForPeerMessage_DoesNotCancelUnrelatedSuccessorTurn
 // drives the active-turn revalidation race through the *public* interrupt
 // API (QueueAndInterruptForPeerMessage), with a real TurnService, rather
@@ -6034,7 +6062,7 @@ func TestResumeTaskSession_ArchivedSessionCannotResume(t *testing.T) {
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
-	_, err = svc.loadResumeSessionCandidate(ctx, "task1", "session1", executor.ResumeOptions{}, nil)
+	_, err = svc.ResumeTaskSession(ctx, "task1", "session1")
 	require.ErrorIs(t, err, ErrSessionNotPromptable)
 	require.False(t, launchCalled, "archived history must not launch an agent")
 }

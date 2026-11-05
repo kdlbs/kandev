@@ -63,7 +63,7 @@ describe("filterSessionHistory", () => {
       makeSession({ id: "primary", state: "COMPLETED", is_primary: true }),
       makeSession({ id: "live", state: "WAITING_FOR_INPUT" }),
       makeSession({ id: "finished", state: "COMPLETED" }),
-      makeSession({ id: "archived", state: "FAILED", archived_at: EPOCH }),
+      makeSession({ id: "archived", state: "IDLE", archived_at: EPOCH }),
     ];
     expect(filterSessionHistory(sessions, false).map((session) => session.id)).toEqual([
       "primary",

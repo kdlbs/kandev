@@ -790,9 +790,8 @@ func (h *Handlers) wsDeleteSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		code := sessionDeleteErrorCode(err)
 		if code == ws.ErrorCodeInternalError {
 			h.logger.Error("failed to delete session", zap.String("session_id", req.SessionID), zap.Error(err))
-			return ws.NewError(msg.ID, msg.Action, code, "Failed to delete session: "+err.Error(), nil)
 		}
-		return ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, code, sessionDeleteErrorMessage(err), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }
@@ -802,6 +801,13 @@ func sessionDeleteErrorCode(err error) string {
 		return ws.ErrorCodeValidation
 	}
 	return ws.ErrorCodeInternalError
+}
+
+func sessionDeleteErrorMessage(err error) string {
+	if errors.Is(err, messagequeue.ErrSessionQueueNotEmpty) {
+		return "Session has pending queued work; resolve it before deleting."
+	}
+	return "Failed to delete session."
 }
 
 // wsSetPrimarySession marks a session as the task's primary session.

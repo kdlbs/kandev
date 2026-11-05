@@ -12059,9 +12059,19 @@ func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, identity 
 	guard := s.lockCancelInFlightGuard(sessionID)
 	defer guard.release()
 
-	queued, err := s.messageQueue.QueueMessageWithMetadataForSession(
-		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata,
-	)
+	var queued *messagequeue.QueuedMessage
+	var err error
+	routineWake, _ := metadata[messagequeue.MetadataRoutineWake].(bool)
+	coalesceKey, _ := metadata[messagequeue.MetadataCoalesceKey].(string)
+	if routineWake && coalesceKey != "" {
+		queued, _, err = s.messageQueue.QueueMessageWithCoalesceKeyForSession(
+			ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata, coalesceKey, true,
+		)
+	} else {
+		queued, err = s.messageQueue.QueueMessageWithMetadataForSession(
+			ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata,
+		)
+	}
 	if err != nil {
 		return nil, false, err
 	}

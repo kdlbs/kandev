@@ -957,7 +957,6 @@ func (r *memoryRepository) DisposeExact(_ context.Context, sessionID string, cla
 		}
 		if len(kept) == 0 {
 			delete(r.entries, sessionID)
-			delete(r.nextPosition, sessionID)
 		} else {
 			r.entries[sessionID] = kept
 		}

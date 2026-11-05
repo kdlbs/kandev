@@ -44,7 +44,7 @@ function SessionHistoryToggle({ taskId }: { taskId: string }) {
     <Button
       size="sm"
       variant={visible ? "secondary" : "ghost"}
-      className={HEADER_ACTION_BUTTON_CLASS}
+      className={`${HEADER_ACTION_BUTTON_CLASS} [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11`}
       data-testid="dockview-session-history-toggle"
       aria-label={label}
       title={label}

@@ -26,7 +26,7 @@ owners to clean up disposable sessions.
 #### Acceptance criteria
 
 - **AC-TASKS-TERMINAL-SESSION-HISTORY-001.1:** When a cleanup request targets a session, the system shall authorize it against the caller's current primary session, task, workspace, and target identity.
-- **AC-TASKS-TERMINAL-SESSION-HISTORY-001.2:** The system shall allow cleanup only for a terminal, non-primary target; it shall preserve active sessions, primary sessions, and sessions that are the sole retained evidence for the task.
+- **AC-TASKS-TERMINAL-SESSION-HISTORY-001.2:** The system shall allow cleanup only for a terminal, non-primary target with no pending queue work; it shall preserve active sessions, primary sessions, and sessions that are the sole retained evidence for the task. Queued work must be recovered or explicitly disposed before cleanup.
 - **AC-TASKS-TERMINAL-SESSION-HISTORY-001.3:** When a terminal helper has retained conversation evidence, cleanup shall archive its session and preserve that evidence with an explicit archive time and a durable cleanup receipt.
 - **AC-TASKS-TERMINAL-SESSION-HISTORY-001.4:** When a terminal helper has no retained conversation evidence, cleanup may hard-delete its disposable session state and shall record the cleanup outcome.
 - **AC-TASKS-TERMINAL-SESSION-HISTORY-001.5:** When a cleanup operation is retried after commit, the system shall return the original task-scoped receipt without repeating destructive effects.

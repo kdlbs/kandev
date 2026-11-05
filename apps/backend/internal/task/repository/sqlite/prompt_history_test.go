@@ -201,11 +201,11 @@ func TestDeleteTaskSessionRemovesPromptHistoryClaim(t *testing.T) {
 		t.Fatalf("delete session: %v", err)
 	}
 
-	seedForMsgTest(t, repo, "task-session-reuse", "session-session-reuse", "turn-session-reuse-new")
-	if _, err := repo.db.Exec(repo.db.Rebind(`
-		UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?
-	`), "replacement-session-incarnation", "session-session-reuse"); err != nil {
-		t.Fatalf("set replacement session incarnation: %v", err)
+	purgeDeliveryRetirementJobs(t, repo)
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-session-reuse", TaskID: "task-session-reuse",
+	}); err != nil {
+		t.Fatalf("create replacement session: %v", err)
 	}
 	newSession, err := repo.GetTaskSession(ctx, "session-session-reuse")
 	if err != nil {

@@ -1,7 +1,7 @@
 ---
 id: "01-preserve-session-queue-work"
 title: "Preserve and recover session queue work"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -75,3 +75,11 @@ focused repository, service, orchestrator, and MCP tests for these contracts.
 Independent Review and QA passed that exact candidate. This work order records
 its delivered scope; the documentation-only coverage correction does not
 change or extend those test results.
+
+Closure gate: PostgreSQL lock-order validation requires an isolated task-owned
+PostgreSQL DSN and a reproducible concurrent recovery/deletion run. A reviewed
+shared-environment scenario was unavailable, so validation against that class
+of fixture is also outstanding. Record command, exit status, database identity,
+and queue/receipt before-and-after assertions before marking this work order
+done. Repository-owned SQLite and browser fixtures remain the verified local
+coverage; this gate does not authorize access to shared or production data.

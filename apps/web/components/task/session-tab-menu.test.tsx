@@ -103,14 +103,17 @@ function SessionRenameMenuHarness({ onCommit }: { onCommit: () => void }) {
   );
 }
 
-it("keeps the primary session and archived history out of cleanup actions", () => {
+it.each([
+  { name: "primary session", isPrimary: true, isArchived: false },
+  { name: "archived helper", isPrimary: false, isArchived: true },
+])("keeps $name out of cleanup actions", ({ isPrimary, isArchived }) => {
   render(
     <ContextMenu>
       <ContextMenuTrigger data-testid="protected-tab">Agent</ContextMenuTrigger>
       <SessionContextMenuItems
         sessionState="COMPLETED"
-        isPrimary
-        isArchived
+        isPrimary={isPrimary}
+        isArchived={isArchived}
         canShare={false}
         taskId={null}
         sessionId="s1"
@@ -129,7 +132,10 @@ it("keeps the primary session and archived history out of cleanup actions", () =
   );
   fireEvent.contextMenu(screen.getByTestId("protected-tab"));
   expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
-  expect(screen.queryByRole("menuitem", { name: "Resume" })).toBeNull();
+  if (isArchived) {
+    expect(screen.queryByRole("menuitem", { name: "Resume" })).toBeNull();
+    expect(screen.queryAllByRole("separator")).toHaveLength(0);
+  }
 });
 
 describe("SessionContextMenuItems", () => {

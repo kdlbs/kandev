@@ -2,9 +2,13 @@ package handlers
 
 import (
 	"context"
+	"errors"
 
+	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"go.uber.org/zap"
 )
 
 type closeTaskSessionRequest = scopedTerminalSessionRequest
@@ -28,9 +32,8 @@ func (h *Handlers) handleCloseTaskSession(ctx context.Context, msg *ws.Message) 
 func (h *Handlers) closeAuthorizedTaskSession(
 	ctx context.Context, msg *ws.Message, req closeTaskSessionRequest, workspaceID string,
 ) (*ws.Message, error) {
-	caller, err := h.sessionRepo.GetTaskSession(ctx, req.CallerSessionID)
-	if err != nil || caller.TaskID != req.TaskID || !caller.IsPrimary || caller.ArchivedAt != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "session cleanup requires the current primary session", nil)
+	if response, err := h.validateCleanupCaller(ctx, msg, req); response != nil || err != nil {
+		return response, err
 	}
 	reader, ok := h.sessionRepo.(taskSessionCleanupReceiptReader)
 	if !ok {
@@ -40,22 +43,45 @@ func (h *Handlers) closeAuthorizedTaskSession(
 	if response != nil || err != nil {
 		return response, err
 	}
-	if target.State != models.TaskSessionStateCompleted && target.State != models.TaskSessionStateFailed &&
-		target.State != models.TaskSessionStateCancelled {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "target session must be terminal", nil)
-	}
 	closer, ok := h.sessionLauncher.(taskSessionCloser)
 	if !ok {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "session cleanup is unavailable", nil)
 	}
-	if err := closer.DeleteSession(ctx, req.TargetSessionID); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	if err := closer.DeleteSession(ctx, target.ID); err != nil {
+		return h.cleanupExecutionError(msg, err)
 	}
 	receipt, err := reader.GetTaskSessionCleanupReceipt(ctx, req.TaskID, req.TargetSessionID)
-	if err != nil || receipt.WorkspaceID != workspaceID {
+	if err != nil || receipt == nil || receipt.WorkspaceID != workspaceID {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "session cleanup committed without a readable receipt", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"receipt": receipt})
+}
+
+func (h *Handlers) validateCleanupCaller(ctx context.Context, msg *ws.Message, req closeTaskSessionRequest) (*ws.Message, error) {
+	caller, err := h.sessionRepo.GetTaskSession(ctx, req.CallerSessionID)
+	if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
+		if h.logger != nil {
+			h.logger.Error("session cleanup caller lookup failed", zap.Error(err))
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "session cleanup is unavailable", nil)
+	}
+	if err != nil || caller == nil || caller.TaskID != req.TaskID || !caller.IsPrimary || caller.ArchivedAt != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "session cleanup requires the current primary session", nil)
+	}
+	return nil, nil
+}
+
+func (h *Handlers) cleanupExecutionError(msg *ws.Message, err error) (*ws.Message, error) {
+	if errors.Is(err, messagequeue.ErrSessionQueueNotEmpty) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "target session has pending queued work", nil)
+	}
+	if errors.Is(err, orchestrator.ErrSessionResetInProgress) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "target session is busy", nil)
+	}
+	if h.logger != nil {
+		h.logger.Error("session cleanup failed", zap.Error(err))
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "session cleanup failed", nil)
 }
 
 func (h *Handlers) resolveCleanupTarget(
@@ -63,15 +89,26 @@ func (h *Handlers) resolveCleanupTarget(
 	reader taskSessionCleanupReceiptReader,
 ) (*models.TaskSession, *ws.Message, error) {
 	target, err := h.sessionRepo.GetTaskSession(ctx, req.TargetSessionID)
+	if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
+		if h.logger != nil {
+			h.logger.Error("session cleanup target lookup failed", zap.Error(err))
+		}
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "session cleanup is unavailable", nil)
+		return nil, response, responseErr
+	}
 	if err == nil && (target.TaskID != req.TaskID || target.IsPrimary) {
 		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "target session is outside the calling task", nil)
 		return nil, response, responseErr
 	}
 	if err == nil && target.ArchivedAt == nil {
+		if !isTerminalCleanupState(target.State) {
+			response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "target session is not terminal", nil)
+			return nil, response, responseErr
+		}
 		return target, nil, nil
 	}
 	receipt, receiptErr := reader.GetTaskSessionCleanupReceipt(ctx, req.TaskID, req.TargetSessionID)
-	if receiptErr == nil && receipt.WorkspaceID == workspaceID {
+	if receiptErr == nil && receipt != nil && receipt.WorkspaceID == workspaceID {
 		response, responseErr := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"receipt": receipt})
 		return nil, response, responseErr
 	}
@@ -81,4 +118,9 @@ func (h *Handlers) resolveCleanupTarget(
 	}
 	response, responseErr := ws.NewError(msg.ID, msg.Action, code, message, nil)
 	return nil, response, responseErr
+}
+
+func isTerminalCleanupState(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateCompleted || state == models.TaskSessionStateFailed ||
+		state == models.TaskSessionStateCancelled
 }

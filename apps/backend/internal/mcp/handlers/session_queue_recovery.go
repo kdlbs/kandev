@@ -27,16 +27,15 @@ func (h *Handlers) handleRecoverSessionQueue(ctx context.Context, msg *ws.Messag
 func (h *Handlers) recoverAuthorizedSessionQueue(
 	ctx context.Context, msg *ws.Message, req recoverSessionQueueRequest, workspaceID string,
 ) (*ws.Message, error) {
-	caller, err := h.sessionRepo.GetTaskSession(ctx, req.CallerSessionID)
-	if err != nil || caller.TaskID != req.TaskID || !caller.IsPrimary {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "queue recovery requires the calling task's current primary session", nil)
+	_, response, err := h.loadRecoverySession(ctx, msg, req.CallerSessionID, req.TaskID, true)
+	if response != nil || err != nil {
+		return response, err
 	}
-	target, err := h.sessionRepo.GetTaskSession(ctx, req.TargetSessionID)
-	if err != nil || target.TaskID != req.TaskID || target.IsPrimary {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "queue recovery target is outside the calling task", nil)
+	target, response, err := h.loadRecoverySession(ctx, msg, req.TargetSessionID, req.TaskID, false)
+	if response != nil || err != nil {
+		return response, err
 	}
-	if target.State != models.TaskSessionStateCompleted && target.State != models.TaskSessionStateFailed &&
-		target.State != models.TaskSessionStateCancelled {
+	if !isTerminalCleanupState(target.State) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "queue recovery target must be terminal", nil)
 	}
 	coordinator, ok := h.sessionRepo.(sessionQueueRecoveryCoordinator)
@@ -66,6 +65,32 @@ func (h *Handlers) recoverAuthorizedSessionQueue(
 	})
 }
 
+func (h *Handlers) loadRecoverySession(
+	ctx context.Context, msg *ws.Message, sessionID, taskID string, requirePrimary bool,
+) (*models.TaskSession, *ws.Message, error) {
+	session, err := h.sessionRepo.GetTaskSession(ctx, sessionID)
+	if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
+		response, responseErr := h.queueRecoveryLookupError(msg, err)
+		return nil, response, responseErr
+	}
+	if err != nil || session == nil || session.TaskID != taskID || session.IsPrimary != requirePrimary {
+		message := "queue recovery target is outside the calling task"
+		if requirePrimary {
+			message = "queue recovery requires the calling task's current primary session"
+		}
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, message, nil)
+		return nil, response, responseErr
+	}
+	return session, nil, nil
+}
+
+func (h *Handlers) queueRecoveryLookupError(msg *ws.Message, err error) (*ws.Message, error) {
+	if h.logger != nil {
+		h.logger.Error("session queue recovery lookup failed", zap.Error(err))
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "message queue recovery is unavailable", nil)
+}
+
 func (h *Handlers) queueRecoveryError(msg *ws.Message, targetSessionID string, err error) (*ws.Message, error) {
 	if errors.Is(err, messagequeue.ErrQueueRecoveryUnauthorized) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "queue recovery authorization changed", nil)
@@ -73,7 +98,7 @@ func (h *Handlers) queueRecoveryError(msg *ws.Message, targetSessionID string, e
 	if errors.Is(err, messagequeue.ErrQueueRecoveryConflict) ||
 		errors.Is(err, messagequeue.ErrQueueRecoveryTargetNotTerminal) ||
 		errors.Is(err, messagequeue.ErrQueueRecoverySnapshotExpired) {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "queue recovery cannot proceed; refresh the source queue and retry", nil)
 	}
 	if h.logger != nil {
 		h.logger.Error("session queue recovery failed", zap.String("target_session_id", targetSessionID), zap.Error(err))
