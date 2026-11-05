@@ -362,10 +362,15 @@ describe("markdownComponents", () => {
 describe("shared Markdown image rendering", () => {
   afterEach(resetMarkdownComponentTestState);
 
-  it("keeps browser-rendered images when there is no session context", () => {
-    render(<Markdown>{"![Preview](/assets/chart.svg)"}</Markdown>);
+  it("keeps browser-rendered relative and same-origin images without a session", () => {
+    render(
+      <Markdown>{"![Relative](images/chart.svg) ![Same origin](/assets/chart.svg)"}</Markdown>,
+    );
 
-    expect(screen.getByRole("img", { name: "Preview" }).getAttribute("src")).toBe(
+    expect(screen.getByRole("img", { name: "Relative" }).getAttribute("src")).toBe(
+      "images/chart.svg",
+    );
+    expect(screen.getByRole("img", { name: "Same origin" }).getAttribute("src")).toBe(
       "/assets/chart.svg",
     );
   });
