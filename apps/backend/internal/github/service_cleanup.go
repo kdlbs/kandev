@@ -109,7 +109,7 @@ func (s *Service) CleanupMergedReviewTasks(ctx context.Context, watch *ReviewWat
 		return 0, fmt.Errorf("list review PR tasks: %w", err)
 	}
 	policy := NormalizeCleanupPolicy(watch.CleanupPolicy)
-	return s.cleanupReviewPRTaskBatch(ctx, resolved.Client, resolved.RateTracker, prTasks,
+	return s.cleanupReviewPRTaskBatch(withGitHubOperationFence(ctx, s, resolved.Principal.WorkspaceID, resolved), resolved.Client, resolved.RateTracker, prTasks,
 		func(_ *ReviewPRTask) string { return policy })
 }
 
@@ -139,7 +139,7 @@ func (s *Service) cleanupScheduledMergedReviewTasks(
 		}}}, nil
 	}
 	policy := NormalizeCleanupPolicy(watch.CleanupPolicy)
-	result := s.cleanupScheduledReviewPRTaskBatch(ctx, resolved.Client, resolved.RateTracker,
+	result := s.cleanupScheduledReviewPRTaskBatch(withGitHubOperationFence(ctx, s, resolved.Principal.WorkspaceID, resolved), resolved.Client, resolved.RateTracker,
 		prTasks, watch.WorkspaceID, func(_ *ReviewPRTask) string { return policy }, admission)
 	return result, nil
 }
@@ -203,7 +203,7 @@ func (s *Service) CleanupReviewTasksForWorkspace(ctx context.Context, workspaceI
 			candidates = append(candidates, rpt)
 		}
 	}
-	return s.cleanupReviewPRTaskBatch(ctx, resolved.Client, resolved.RateTracker, candidates, func(rpt *ReviewPRTask) string {
+	return s.cleanupReviewPRTaskBatch(withGitHubOperationFence(ctx, s, resolved.Principal.WorkspaceID, resolved), resolved.Client, resolved.RateTracker, candidates, func(rpt *ReviewPRTask) string {
 		return watchPolicies[rpt.ReviewWatchID]
 	})
 }
@@ -298,6 +298,7 @@ func (s *Service) cleanupReviewTasksForWorkspace(
 		}
 		return scheduledReviewCleanupResult{}, nil
 	}
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
 	if scheduled {
 		return s.cleanupScheduledReviewPRTaskBatch(
 			ctx, resolved.Client, resolved.RateTracker, candidates, workspaceID, resolvePolicy, admission,
@@ -354,6 +355,9 @@ func (s *Service) buildReviewWatchCaches(
 // the task.deleted event when the wired deleter supports it (see
 // TaskDeleterWithReason). Falls back to plain DeleteTask otherwise.
 func (s *Service) deleteTaskWithReason(ctx context.Context, taskID, reason string) error {
+	if err := requireGitHubOperationCurrent(ctx); err != nil {
+		return err
+	}
 	if d, ok := s.taskDeleter.(TaskDeleterWithReason); ok {
 		return d.DeleteTaskWithReason(ctx, taskID, reason)
 	}
@@ -521,6 +525,9 @@ func (s *Service) shouldDeleteReviewTask(ctx context.Context, rpt *ReviewPRTask,
 func (s *Service) shouldDeleteReviewTaskWithClient(
 	ctx context.Context, client Client, rpt *ReviewPRTask, policy string,
 ) (bool, string, error) {
+	if err := requireCleanupResourceHost(ctx, rpt.GitHubHost, rpt.ID); err != nil {
+		return false, "", err
+	}
 	if policy == CleanupPolicyNever {
 		return false, "", nil
 	}
@@ -528,6 +535,9 @@ func (s *Service) shouldDeleteReviewTaskWithClient(
 	pr, err := client.GetPR(ctx, rpt.RepoOwner, rpt.RepoName, rpt.PRNumber)
 	if err != nil {
 		s.trackCleanupFailure(failureKey, "review", rpt.RepoOwner+"/"+rpt.RepoName, rpt.PRNumber, err)
+		return false, "", err
+	}
+	if err := requireGitHubOperationCurrent(ctx); err != nil {
 		return false, "", err
 	}
 	s.resetCleanupFailure(failureKey)
@@ -671,7 +681,7 @@ func (s *Service) CleanupClosedIssueTasks(ctx context.Context, watch *IssueWatch
 		return 0, fmt.Errorf("list issue watch tasks: %w", err)
 	}
 	policy := NormalizeCleanupPolicy(watch.CleanupPolicy)
-	return s.cleanupIssueTaskBatch(ctx, resolved.Client, resolved.RateTracker, issueTasks,
+	return s.cleanupIssueTaskBatch(withGitHubOperationFence(ctx, s, resolved.Principal.WorkspaceID, resolved), resolved.Client, resolved.RateTracker, issueTasks,
 		func(_ *IssueWatchTask) string { return policy })
 }
 
@@ -720,7 +730,7 @@ func (s *Service) CleanupIssueTasksForWorkspace(ctx context.Context, workspaceID
 			candidates = append(candidates, it)
 		}
 	}
-	return s.cleanupIssueTaskBatch(ctx, resolved.Client, resolved.RateTracker, candidates, func(it *IssueWatchTask) string {
+	return s.cleanupIssueTaskBatch(withGitHubOperationFence(ctx, s, resolved.Principal.WorkspaceID, resolved), resolved.Client, resolved.RateTracker, candidates, func(it *IssueWatchTask) string {
 		return watchPolicies[it.IssueWatchID]
 	})
 }
@@ -760,7 +770,7 @@ func (s *Service) cleanupAllIssueTasks(ctx context.Context, orphansOnly bool) (i
 				zap.String("workspace_id", workspaceID), zap.Error(resolveErr))
 			continue
 		}
-		batchDeleted, batchErr := s.cleanupIssueTaskBatch(ctx, resolved.Client, resolved.RateTracker, candidates, func(it *IssueWatchTask) string {
+		batchDeleted, batchErr := s.cleanupIssueTaskBatch(withGitHubOperationFence(ctx, s, resolved.Principal.WorkspaceID, resolved), resolved.Client, resolved.RateTracker, candidates, func(it *IssueWatchTask) string {
 			return policyCache[it.IssueWatchID]
 		})
 		deleted += batchDeleted
@@ -881,6 +891,9 @@ func (s *Service) shouldDeleteIssueTask(ctx context.Context, it *IssueWatchTask,
 func (s *Service) shouldDeleteIssueTaskWithClient(
 	ctx context.Context, client Client, it *IssueWatchTask, policy string,
 ) (bool, string, error) {
+	if err := requireCleanupResourceHost(ctx, it.GitHubHost, it.ID); err != nil {
+		return false, "", err
+	}
 	if policy == CleanupPolicyNever {
 		return false, "", nil
 	}
@@ -888,6 +901,9 @@ func (s *Service) shouldDeleteIssueTaskWithClient(
 	state, err := client.GetIssueState(ctx, it.RepoOwner, it.RepoName, it.IssueNumber)
 	if err != nil {
 		s.trackCleanupFailure(failureKey, "issue", it.RepoOwner+"/"+it.RepoName, it.IssueNumber, err)
+		return false, "", err
+	}
+	if err := requireGitHubOperationCurrent(ctx); err != nil {
 		return false, "", err
 	}
 	s.resetCleanupFailure(failureKey)

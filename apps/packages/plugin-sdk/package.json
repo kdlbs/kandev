@@ -1,15 +1,19 @@
 {
-  "name": "@kandev/plugin-sdk",
+  "name": "@kdlbs/plugin-sdk",
   "version": "0.1.0",
   "description": "Versioned frontend contracts for Kandev runtime plugins",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./sdk-release.json": "./sdk-release.json"
   },
   "files": [
-    "src"
+    "src",
+    "sdk-release.json",
+    "README.md",
+    "LICENSE"
   ],
   "publishConfig": {
     "access": "public"
@@ -20,5 +24,11 @@
   },
   "devDependencies": {
     "typescript": "^5.7.2"
+  },
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kdlbs/kandev.git",
+    "directory": "apps/packages/plugin-sdk"
   }
 }

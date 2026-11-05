@@ -171,6 +171,7 @@ export type MockCheckRun = {
 export type MockGitHubConnectionStatus = "active" | "invalid" | "suspended" | "revoked";
 
 export type MockGitHubWorkspaceConnection = {
+  github_host?: string;
   source: "pat" | "gh_cli" | "github_app_installation" | "legacy_shared";
   status: MockGitHubConnectionStatus;
   login?: string;
@@ -205,6 +206,7 @@ export type MockGitHubCLIAccount = {
 };
 
 export type MockGitHubAppRegistration = {
+  github_host?: string;
   id: string;
   display_name: string;
   app_id: number;
@@ -934,6 +936,7 @@ export class ApiClient {
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
       command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
+      copilot_selected_plugins?: string[];
     },
   ): Promise<AgentProfile> {
     const response = await this.request<unknown>("POST", `/api/v1/agents/${agentId}/profiles`, {
@@ -949,6 +952,7 @@ export class ApiClient {
       cli_flags: opts.cli_flags,
       command_prefix: opts.command_prefix,
       env_vars: opts.env_vars,
+      copilot_selected_plugins: opts.copilot_selected_plugins,
     });
     return normalizeAgentProfile(response);
   }
@@ -1022,6 +1026,7 @@ export class ApiClient {
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
       command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
+      copilot_selected_plugins?: string[];
     },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/agent-profiles/${profileId}`, patch);
@@ -1520,6 +1525,8 @@ export class ApiClient {
     prevent_auto_start_agent_on_open?: boolean;
     auto_focus_new_tasks?: boolean;
     unread_divider?: boolean;
+    unread_task_dot?: boolean;
+    unread_task_dot_hide_delay_seconds?: number;
     agent_generated_task_titles?: boolean;
     message_time_display?: "relative" | "absolute_short" | "absolute_long";
     agent_tab_close_behavior?: "delete_session" | "hide_panel";
@@ -1639,7 +1646,7 @@ export class ApiClient {
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
       complete_task_on_enter?: boolean;
-      stage_type?: "work" | "review" | "approval" | "custom";
+      stage_type?: "work" | "review" | "approval" | "custom" | "hold";
       profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
       profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
       session_target?: WorkflowSessionTarget | null;
@@ -1883,6 +1890,32 @@ export class ApiClient {
       `/api/v1/_test/background-probe/${sessionId}/calls`,
     );
     return calls;
+  }
+
+  /**
+   * Seeds one shared background-workload projection row and publishes it on
+   * the live WebSocket subject. Lets browser suites cover provider states the
+   * deterministic ACP producer cannot reach, such as a terminal job whose
+   * history must outlive the active count. Only mounted when the backend was
+   * started with KANDEV_E2E_MOCK=true.
+   */
+  async recordBackgroundWorkload(
+    sessionId: string,
+    workload: {
+      work_id: string;
+      run_id?: string;
+      kind: string;
+      title: string;
+      state: string;
+      exit_code?: number;
+      output?: string;
+      revision?: number;
+    },
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/_test/background-work", {
+      session_id: sessionId,
+      ...workload,
+    });
   }
 
   /**
@@ -2152,7 +2185,11 @@ export class ApiClient {
     return this.request<Record<string, unknown>>(
       "PUT",
       `/api/v1/github/mock/app-registrations/${encodeURIComponent(registration.id)}`,
-      { display_name: registration.display_name, app_id: registration.app_id },
+      {
+        display_name: registration.display_name,
+        app_id: registration.app_id,
+        ...(registration.github_host ? { github_host: registration.github_host } : {}),
+      },
     );
   }
 
@@ -2899,6 +2936,22 @@ export class ApiClient {
 
   // --- Session ---
 
+  /** Reads the authoritative background-work projection for a session. */
+  async listBackgroundWorkloads(sessionId: string): Promise<{
+    workloads: Array<{ work_id: string; title: string; state: string }>;
+  }> {
+    const response = await this.rawRequest(
+      "GET",
+      `/api/v1/task-sessions/${encodeURIComponent(sessionId)}/background-work`,
+    );
+    if (!response.ok) {
+      throw new Error(
+        `listBackgroundWorkloads failed (${response.status}): ${await response.text()}`,
+      );
+    }
+    return response.json();
+  }
+
   async listSessionMessages(sessionId: string): Promise<{
     messages: Array<{
       id: string;
@@ -3299,6 +3352,7 @@ export class ApiClient {
     workflowStepId: string,
     agentProfileId: string,
     opts?: {
+      executor_profile_id?: string;
       repos?: Array<{ owner: string; name: string }>;
       prompt?: string;
       review_scope?: string;
@@ -3311,6 +3365,7 @@ export class ApiClient {
       workflow_id: workflowId,
       workflow_step_id: workflowStepId,
       agent_profile_id: agentProfileId,
+      ...(opts?.executor_profile_id ? { executor_profile_id: opts.executor_profile_id } : {}),
       repos: opts?.repos ?? [],
       prompt: opts?.prompt ?? "",
       review_scope: opts?.review_scope ?? "user_and_teams",
@@ -3506,21 +3561,6 @@ export class ApiClient {
       defaultTeamKey: "",
       ...config,
       authMethod: "api_key",
-    });
-  }
-
-  async createSentryInstance(payload: {
-    name: string;
-    secret: string;
-    url?: string;
-    workspaceId?: string;
-  }): Promise<{ id: string }> {
-    const { workspaceId, ...config } = payload;
-    const path = await this.withActiveWorkspace("/api/v1/sentry/instances", workspaceId);
-    return this.request("POST", path, {
-      authMethod: "auth_token",
-      url: "https://sentry.io",
-      ...config,
     });
   }
 

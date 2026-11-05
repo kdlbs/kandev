@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/acpprovider"
@@ -72,6 +73,7 @@ type CreateInstanceRequest struct {
 	SessionID              string              `json:"session_id,omitempty"`           // Task session ID for MCP tool calls
 	TaskID                 string              `json:"task_id,omitempty"`              // Task ID for MCP plan tool calls (server-side injection)
 	DisableAskQuestion     bool                `json:"disable_ask_question,omitempty"` // Disable ask_user_question MCP tool (TUI agents)
+	PromptSuggestions      bool                `json:"prompt_suggestions,omitempty"`   // Ask native-suggestion agents to emit next-prompt suggestions
 	AssumeMcpSse           bool                `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
 	AssumeMcpHttp          bool                `json:"assume_mcp_http,omitempty"`      // Assume agent supports HTTP MCP servers
 	McpMode                string              `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
@@ -93,6 +95,10 @@ type CreateInstanceRequest struct {
 	// after initialize. Resolved by the backend from the launching agent
 	// profile's OpenAI-compatible provider fields.
 	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
+
+	// AuthPolicy selects a provider-specific authentication method after
+	// initialize. It is an internal child-process contract.
+	AuthPolicy *acpcompat.AuthPolicy `json:"acp_auth_policy,omitempty"`
 
 	// NamespacesMCPToolsByServer tells the per-instance MCP server to adapt
 	// built-in tool names for an agent that appends the server name itself.
@@ -123,6 +129,10 @@ type CreateInstanceRequest struct {
 	DeliveryIncarnationID string `json:"delivery_incarnation_id,omitempty"`
 	// DeliveryHarnessGeneration fences events to one native harness conversation.
 	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+
+	// OpenCodePluginRuntime is the resolved OpenCode family/source/version for
+	// this launch. Nil keeps the integration off for non-OpenCode launches.
+	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime `json:"opencode_plugin_runtime,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.
@@ -316,6 +326,9 @@ func (c *ControlClient) SubprocessAdmission(ctx context.Context) (subproc.Snapsh
 
 // CreateInstance creates a new agent instance.
 func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceRequest) (*CreateInstanceResponse, error) {
+	if err := c.requireBuiltinPackages(ctx, req); err != nil {
+		return nil, err
+	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -428,8 +441,9 @@ func (c *ControlClient) GetInstance(ctx context.Context, instanceID string) (*In
 // IdentityInfo is the response from GET /identity: installation identity and
 // the capability set this control server advertises.
 type IdentityInfo struct {
-	ServerIdentity string   `json:"server_identity"`
-	Capabilities   []string `json:"capabilities"`
+	BuiltinMCPCatalogVersion int      `json:"builtin_mcp_catalog_version"`
+	ServerIdentity           string   `json:"server_identity"`
+	Capabilities             []string `json:"capabilities"`
 	// UnownedPeriodMS is the reporting server's own resolved unowned period
 	// in milliseconds (AC-EXECUTORS-CONTROL-OWNERSHIP-003.2/.7) -- the value
 	// that server itself enforces, which an adopting backend's local config

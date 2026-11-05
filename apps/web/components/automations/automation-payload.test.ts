@@ -9,6 +9,7 @@ vi.mock("@/app/actions/workspaces", () => ({
 import {
   buildCreatePayload,
   buildUpdatePayload,
+  canonicalPluginTools,
   normalizeRetryPolicyForTaskMode,
   resolveNormalizedRepositoryIds,
   resolveRepositoryIdsForMode,
@@ -40,6 +41,7 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
       backoff: "fixed",
       history_mode: "attempts",
     },
+    pluginTools: [],
     ...overrides,
   };
 }
@@ -205,6 +207,39 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
       task_mode: "normal_task",
       repository_mode: "selected",
     });
+  });
+
+  it("omits plugin tools on unrelated updates and sends explicit selections", () => {
+    const form = baseForm();
+    expect(buildUpdatePayload(form, [])).not.toHaveProperty("plugin_tools");
+    expect(buildCreatePayload("ws-1", form, [], [])).toHaveProperty("plugin_tools", []);
+
+    const selection = [
+      {
+        plugin_id: "kandev-security",
+        installation_id: "installation-1",
+        policy_version: "policy-1",
+        tool_names: ["list_findings"],
+      },
+    ];
+    expect(buildUpdatePayload(form, [], selection)).toMatchObject({ plugin_tools: selection });
+    expect(buildUpdatePayload(form, [], [])).toMatchObject({ plugin_tools: [] });
+    expect(buildUpdatePayload(baseForm({ taskMode: "normal_task" }), [], selection)).toMatchObject({
+      plugin_tools: [],
+    });
+  });
+
+  it("compares plugin tool approvals without depending on tool order", () => {
+    const left = [
+      {
+        plugin_id: "kandev-security",
+        installation_id: "installation-1",
+        policy_version: "policy-1",
+        tool_names: ["list_findings", "complete_report"],
+      },
+    ];
+    const right = [{ ...left[0], tool_names: ["complete_report", "list_findings"] }];
+    expect(canonicalPluginTools(left)).toEqual(canonicalPluginTools(right));
   });
 });
 

@@ -306,6 +306,16 @@ cannot set provenance itself.
 placement defaults when the plugin omits them (single workspace; that
 workspace's first workflow — ambiguous → `InvalidArgument`), accepts an optional
 `start_agent` that best-effort auto-launches an agent, and requires a title.
+Launch profiles (`launch.agent_profile_id` / `launch.executor_profile_id`) are
+validated before a new task is created and stored in the task's
+`agent_profile_id` / `executor_profile_id` metadata, the keys native issue
+watchers use. An exact create retry resolves an existing task by external ID
+before it checks profile availability, so removal of a profile after task
+creation does not block recovery of the committed task. On a later workflow
+start, a matching task-specific fixed-step agent profile, the step's agent
+profile, or the workflow default takes precedence over the saved agent profile.
+Kandev uses the saved agent profile when workflow policy selects no profile.
+The saved executor profile remains available to the workflow start path.
 `UpdateTask` accepts a conservative field mask — `title` / `description` /
 `state` / `priority`, each optional (a nil field is left unchanged);
 a present `workflow_step_id` is rejected and workflow transitions use

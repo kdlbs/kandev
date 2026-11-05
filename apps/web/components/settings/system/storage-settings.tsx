@@ -7,6 +7,7 @@ import {
   SettingsTabsPanel,
   type SettingsTabOption,
 } from "@/components/settings/settings-tabs";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useSettingsTab } from "@/hooks/domains/settings/use-settings-tab";
 import { SYSTEM_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/system";
 import { RetentionSettingsCard } from "./retention-settings-card";
@@ -20,19 +21,22 @@ const STORAGE_TARGET_TO_TAB = {
   [SYSTEM_SETTINGS_TARGETS.storageGoCache]: "host",
   [SYSTEM_SETTINGS_TARGETS.storageDocker]: "host",
   [SYSTEM_SETTINGS_TARGETS.storageQuarantine]: "host",
+} as const;
+
+const OFFICE_STORAGE_TARGET_TO_TAB = {
+  ...STORAGE_TARGET_TO_TAB,
   [SYSTEM_SETTINGS_TARGETS.retention]: "office-retention",
 } as const;
 
 export function StorageSettings() {
   const { t } = useTranslation();
-  const tabs: SettingsTabOption[] = [
-    { id: "host", label: t("system:storageHostTab") },
-    { id: "office-retention", label: t("system:officeRetentionTab") },
-  ];
+  const officeEnabled = useFeature("office");
+  const tabs: SettingsTabOption[] = [{ id: "host", label: t("system:storageHostTab") }];
+  if (officeEnabled) tabs.push({ id: "office-retention", label: t("system:officeRetentionTab") });
   const { value, selectTab } = useSettingsTab({
     tabs: tabs.map((tab) => tab.id),
     defaultTab: "host",
-    targetToTab: STORAGE_TARGET_TO_TAB,
+    targetToTab: officeEnabled ? OFFICE_STORAGE_TARGET_TO_TAB : STORAGE_TARGET_TO_TAB,
   });
 
   return (
@@ -45,9 +49,11 @@ export function StorageSettings() {
         <SettingsTabsPanel value="host" testId="settings-storage-host">
           <StorageMaintenanceSettings active={value === "host"} />
         </SettingsTabsPanel>
-        <SettingsTabsPanel value="office-retention" testId="settings-storage-office-retention">
-          <RetentionSettingsCard />
-        </SettingsTabsPanel>
+        {officeEnabled && (
+          <SettingsTabsPanel value="office-retention" testId="settings-storage-office-retention">
+            <RetentionSettingsCard />
+          </SettingsTabsPanel>
+        )}
       </SystemRouteShell>
     </SettingsTabs>
   );

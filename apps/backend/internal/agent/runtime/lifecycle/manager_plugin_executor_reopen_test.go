@@ -15,7 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 type pluginExecutorManagerInventoryStore struct {
@@ -124,7 +124,7 @@ func TestManagerReopensStoppedPluginExecutorByAttachingRetainedEnvironment(t *te
 	runtime.SetRecoveryDependencies(&pluginExecutorRecoveryProfileLoaderFake{profile: models.ExecutorProviderLaunchProfile{
 		Provider: testPluginExecutorLaunchProvider(), ProfileID: profileID,
 	}}, store)
-	runtime.newRecoveredAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
+	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 		if executionID != runtimeIdentity || token != "agentctl-secret" {
 			return nil, fmt.Errorf("runtime identity=%q token=%q", executionID, token)
 		}

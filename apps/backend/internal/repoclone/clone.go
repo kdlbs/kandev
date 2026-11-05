@@ -554,6 +554,8 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithBasicAuth(
 	}, 0)
 }
 
+// refreshWorkspaceRepository updates origin and the Kandev-owned PR snapshot refs
+// without changing the checkout HEAD.
 func (c *Cloner) refreshWorkspaceRepository(
 	ctx context.Context, targetPath, cloneURL string, auth *cloneAuth, prNumber int,
 ) error {
@@ -583,7 +585,7 @@ func (c *Cloner) refreshWorkspaceRepository(
 		return err
 	}
 	if prNumber > 0 {
-		prRefspec := fmt.Sprintf("pull/%d/head:refs/kandev/pull/%d/head", prNumber, prNumber)
+		prRefspec := fmt.Sprintf("refs/pull/%d/head:refs/kandev/pull/%d/head", prNumber, prNumber)
 		if err := runFetch(prRefspec); err != nil {
 			return fmt.Errorf("refresh scoped workspace pull request: %w", err)
 		}
@@ -964,7 +966,7 @@ func validateCloneAuth(auth *cloneAuth) error {
 
 func cleanGitEnvironment() []string {
 	env := withoutEnv(os.Environ(),
-		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", gitHubCredentialEnv, gitHubCredentialUserEnv,
+		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", gitHubCredentialEnv, gitHubCredentialUserEnv,
 		gitCredentialUsernameFileEnv, gitCredentialPasswordFileEnv,
 		"GIT_ASKPASS", "SSH_ASKPASS", "GIT_SSH", "GIT_SSH_COMMAND",
 		"GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM",

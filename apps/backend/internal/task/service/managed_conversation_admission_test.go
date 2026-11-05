@@ -13,7 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -245,7 +245,7 @@ func TestManagedConversationAdmissionRollback(t *testing.T) {
 				before, err = repos[1].GetTaskSession(ctx, first.SessionID)
 				require.NoError(t, err)
 				if mode == "repair" {
-					require.NoError(t, repos[1].DeleteTaskSession(ctx, before))
+					retireLegacyConversationPrimaryForTest(t, ctx, repos[1], before)
 				}
 				spec.ExpectedRevision = first.Revision
 				spec.AgentProfileID, spec.BasePrompt = "replacement-profile", "replacement instructions"

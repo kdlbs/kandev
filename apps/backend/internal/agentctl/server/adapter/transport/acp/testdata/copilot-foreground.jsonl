@@ -1,0 +1,3 @@
+{"sessionId":"copilot-session","update":{"sessionUpdate":"tool_call","toolCallId":"parent-foreground","title":"Read a.txt contents","kind":"other","status":"pending","rawInput":{"agent_type":"explore","name":"reader","description":"Read a.txt contents","prompt":"Read a.txt and report its contents.","mode":"sync"}}}
+{"sessionId":"copilot-session","update":{"sessionUpdate":"tool_call","toolCallId":"child-foreground","title":"View a.txt","kind":"read","status":"pending","_meta":{"github.com/copilot":{"agentId":"ecd77f64-439d-4899-bead-9936a8cde372"}},"rawInput":{"path":"a.txt"}}}
+{"sessionId":"copilot-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"parent-foreground","status":"completed","rawOutput":{"content":"apple"}}}

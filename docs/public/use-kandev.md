@@ -158,6 +158,11 @@ choice while a feature is unavailable and restores it when the feature is enable
 setting belongs to your account and workspace, so it follows you across clients without changing
 another user's layout.
 
+In regular workspaces, integration plugins, such as YouTrack, appear inside **Integrations** on desktop and phone.
+Their visibility controls remain individual, and their move controls reorder them within that section.
+Hiding Integrations hides its original plugin links without changing each link's visibility choice.
+Explicit shortcuts in custom sections remain independent.
+
 Create named shortcut sections for destinations, canvases, automations, and plugin links. Fold a
 section to keep its header icons visible, or open the labelled list to use a shortcut. Automation
 icons show running, idle, or paused activity. Tasks stays in its fixed navigation area, and hiding a shortcut does not disable the underlying feature.
@@ -305,6 +310,13 @@ The dialog also supports multiple repositories, remote GitHub rows, and a single
 4. Run the repository's required checks. Agent completion does not prove that tests passed.
 5. Inspect commits and branch state. Create or associate a pull request only after provider credentials and the target base branch are correct.
 6. Move the task through the workflow's human review gate. Archive it only after deciding what should happen to its branch, worktree, and external issue or pull request.
+
+When a clarification includes an image, select **Inspect image** to enlarge it.
+Choices can also have images. Select a choice label to answer. Select its image
+or **Inspect image** to examine it without selecting the choice.
+Close inspection, answer each question, then submit the bundle. Image errors do
+not prevent an answer. See [image questions](agent-communication.md#show-an-image-with-an-operator-question)
+for supported files and reload behavior.
 
 Large user messages keep their complete source for storage, agent input, copying, editing, and delivery. Kandev shortens the rendered transcript, raw text, workflow instructions, pinned prompt, and queued-message previews when they exceed the display limit. Select **Download full text** below a shortened preview to save the complete message.
 

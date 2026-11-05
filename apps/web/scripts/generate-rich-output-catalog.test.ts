@@ -33,7 +33,9 @@ it("generates checked guidance beside the schema, including column and source sh
     expect(guidance).toContain("columns:{key,label}[]");
     expect(guidance).toContain("rows:string[][] or csv:{path,repo?}");
     expect(guidance).toContain("leaves children:[]");
-    expect(guidance).toContain("items:{label,status,detail?}[]");
+    expect(guidance).toContain(
+      "items:{label,status:passed|failed|running|pending|skipped,detail?}[]",
+    );
     expect(Array.from(guidance.trim()).length).toBeLessThanOrEqual(650);
     writeFileSync(guidanceTarget, "stale");
     expect(() => generateCatalog(target, true)).toThrow("drifted");

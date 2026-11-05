@@ -147,6 +147,27 @@ func TestMergeEntryMetadataPreservesQueueAdmissionIDs(t *testing.T) {
 	}
 }
 
+func TestBuiltinIntentSurvivesQueueMerge(t *testing.T) {
+	for _, sourceIntent := range []string{"walkthrough", "invalid"} {
+		merged, err := mergeEntryMetadata(map[string]any{"keep": "target"}, map[string]any{"builtin_intent": sourceIntent})
+		if sourceIntent == "invalid" {
+			if err == nil {
+				t.Fatal("malformed intent must not be silently removed by merge")
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if merged["builtin_intent"] != sourceIntent {
+			t.Fatal("merge lost the typed request's capability requirement")
+		}
+		if merged["keep"] != "target" {
+			t.Fatal("merge lost unrelated metadata")
+		}
+	}
+}
+
 func TestRepository_AutoMergeIntoAbove_AgentSameSender(t *testing.T) {
 	for _, tt := range autoMergeRepositoryFactories() {
 		t.Run(tt.name, func(t *testing.T) {
@@ -588,5 +609,24 @@ func testAutoMergeWriteRollback(t *testing.T, repo Repository, createTrigger str
 	entries, _ := repo.ListBySession(context.Background(), "rollback")
 	if len(entries) != 2 || entries[0].ID != target.ID || entries[1].ID != source.ID {
 		t.Fatalf("rollback entries = %+v", entries)
+	}
+}
+
+func TestBuiltinIntentSurvivesSendAll(t *testing.T) {
+	for _, value := range []any{"walkthrough", "invalid", 42} {
+		envelope, err := BuildSendNowEnvelope([]QueuedMessage{
+			{ID: "first", TaskID: "task", SessionID: "session", Content: "ordinary"},
+			{ID: "second", TaskID: "task", SessionID: "session", Content: "request", Metadata: map[string]any{"builtin_intent": value}},
+		})
+		if value == "walkthrough" {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Metadata["builtin_intent"] != value {
+				t.Fatal("Send All lost the typed capability requirement")
+			}
+		} else if err == nil {
+			t.Fatal("Send All accepted malformed intent")
+		}
 	}
 }

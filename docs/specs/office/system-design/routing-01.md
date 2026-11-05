@@ -216,9 +216,39 @@ runs (routing additions)
   routing_blocked_status     string waiting_for_provider_capacity | blocked_provider_action_required
   earliest_retry_at          timestamp nullable; minimum auto-retry deadline across degraded routes
   scheduled_retry_at         timestamp next same-route retry or parked-run wake
-```
+  ```
 
-### `office_run_route_attempts` (per run, per attempt)
+  ### Deferred session-ceiling launches
+
+  An Office run whose launch the orchestrator session ceiling refuses is parked
+  as `blocked_provider_action_required` with no retry deadline. Recovery is
+  owned by the orchestrator's ceiling retry sweep, which replays the durable
+  task deferral every 20 seconds and immediately after capacity is released.
+  The Office scheduler must not retry that run itself: a second dispatch would
+  race the ceiling replay into a duplicate launch. This design deliberately
+  does not add a session-capacity park status or a timed Office lift; changing
+  that retry ownership is a separate contract decision.
+
+  The deferral payload carries the Office run identity as `causing_run_id`.
+  When the ceiling replay admits the launch, the run is bound to the replayed
+  session and its routing block is cleared, so the ordinary lifecycle events
+  finish it. If that settlement write fails, the replayed launch's ready event
+  carries the same `causing_run_id` and retries the settlement. Lifecycle keeps
+  a separate `terminal_causing_run_id` after it consumes `causing_run_id` on
+  the first ready event. A new prompt clears that terminal identity. This lets
+  delayed terminal events identify only the launch that created them. If the
+  launch's completion arrives before ready recovery, the completion path
+  finishes that exact parked row atomically. If a failure arrives first, the
+  service settles that exact parked row and applies the normal Office failure
+  policy. Error cleanup cannot mark the run successful. A terminal drop fails
+  the parked run with the drop reason. The orchestrator keeps the durable
+  deferral until the caller accepts a drop settlement; a failed write can be
+  retried by the ceiling sweep. If settlement still fails after replay, the run
+  stays parked and visible. An operator must not clear its routing block by
+  hand because a manual clear can start a second launch. An explicit discard
+  action for the pending task deferral is a separate operator contract.
+
+  ### `office_run_route_attempts` (per run, per attempt)
 
 One row per provider attempt inside a run. `(run_id, seq)` is the primary key. Each fallback (resolver candidate tried) appends a new row keyed by the next `current_route_attempt_seq`. Persisted by the dispatcher in `internal/office/scheduler/dispatch_routing.go`.
 

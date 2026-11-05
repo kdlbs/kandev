@@ -12,15 +12,22 @@ func (a *Adapter) beginContinuationPermission(sessionID, toolCallID string, opti
 		return nil
 	}
 	turn.evidenceMu.Lock()
-	if support != streams.ContinuationNativeSavedHistoryV2 || toolCallID == "" ||
+	if (support != streams.ContinuationNativeSavedHistoryV2 && support != streams.ContinuationAgentManagedToolsV3) || toolCallID == "" ||
 		turn.continuationPermissions >= continuationToolLimit || len(turn.continuationPermissionTools) >= continuationToolLimit {
 		turn.continuationUnsafe = true
+		turn.continuationPermissionUnsafe = true
 		turn.evidenceMu.Unlock()
 		return nil
 	}
 	turn.continuationPermissions++
 	if turn.continuationPermissionTools == nil {
 		turn.continuationPermissionTools = make(map[string]struct{})
+	}
+	if _, exists := turn.continuationPermissionTools[toolCallID]; exists {
+		turn.continuationUnsafe = true
+		turn.continuationPermissionUnsafe = true
+		turn.evidenceMu.Unlock()
+		return nil
 	}
 	turn.continuationPermissionTools[toolCallID] = struct{}{}
 	turn.evidenceMu.Unlock()
@@ -32,6 +39,7 @@ func (a *Adapter) beginContinuationPermission(sessionID, toolCallID string, opti
 		turn.continuationPermissions--
 		if err != nil || !continuationPermissionAllowed(offered, response) {
 			turn.continuationUnsafe = true
+			turn.continuationPermissionUnsafe = true
 		}
 	}
 }

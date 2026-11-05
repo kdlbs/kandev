@@ -1,4 +1,5 @@
 import { expectMCPChoiceDetails } from "../../helpers/mcp-picker-consistency";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { checkMCPOriginSections } from "../../helpers/mcp-origin-sections";
 import { openMCPComposerCustomization } from "../../helpers/mcp-composer";
 import { checkMCPSessionClarity } from "../../helpers/mcp-session-clarity";
@@ -244,8 +245,10 @@ test.describe("Task MCP selection", () => {
       expect(trigger!.height).toBeGreaterThanOrEqual(44);
       const drawer = testPage.locator('[data-slot="drawer-content"][data-state="open"]');
       await expect(drawer).toHaveCount(1);
+      await waitForFiniteAnimations(drawer);
       const box = await drawer.boundingBox();
-      expect(box!.height).toBeLessThanOrEqual(800);
+      // Browser transforms can produce fractional-pixel rounding at the 80vh limit.
+      expect(box!.height).toBeLessThanOrEqual(testPage.viewportSize()!.height * 0.8 + 1);
       const close = await drawer.getByTestId("mcp-explorer-close").boundingBox();
       expect(close!.width).toBeGreaterThanOrEqual(44);
       expect(close!.height).toBeGreaterThanOrEqual(44);

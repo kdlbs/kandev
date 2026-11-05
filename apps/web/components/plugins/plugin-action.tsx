@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import type { PluginActionGroupProps, PluginActionProps } from "@kandev/plugin-sdk";
+import type { PluginActionGroupProps, PluginActionProps } from "@kdlbs/plugin-sdk";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { SurfaceAction } from "@/components/actions/surface-action";
 import { surfaceActionGroupClassName } from "@/components/actions/surface-action-styles";

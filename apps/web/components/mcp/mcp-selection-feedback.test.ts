@@ -32,3 +32,9 @@ describe("MCP selection feedback", () => {
     expect(mcpSelectionErrorKey(undefined)).toBeNull();
   });
 });
+
+it("offers conflict-specific feedback for stale choices", () => {
+  expect(
+    mcpSelectionErrorKey(new ApiError("changed", 409, { code: "mcp_selection_conflict" })),
+  ).toBe("settings:mcpSelectionConflict");
+});

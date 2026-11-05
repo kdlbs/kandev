@@ -47,6 +47,15 @@ async function openPassthrough(page: Page, api: ApiClient, seed: SeedData, title
   await session.waitForPassthroughLoad();
   await session.waitForPassthroughLoaded();
   await session.expectPassthroughHasText("Processed:");
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await api.listTaskSessions(task.id);
+        return sessions.find((item) => item.id === task.session_id)?.state;
+      },
+      { timeout: 30_000, message: "Waiting for the initial passthrough turn to finish" },
+    )
+    .toBe("WAITING_FOR_INPUT");
   return { task, session, keybar: new MobileTerminalKeybarPage(page) };
 }
 

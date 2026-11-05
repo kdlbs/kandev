@@ -12,11 +12,14 @@ import { useInlineTaskSearchEffect } from "./use-command-panel-task-results";
 import type { Task } from "@/lib/types/http";
 import { taskId, workflowId, workspaceId } from "@/lib/types/ids";
 
+const WORKSPACE_ID = "workspace-1";
+const WORKFLOW_ID = "workflow-1";
+
 function task(id: string, title: string, overrides: Partial<Task> = {}): Task {
   return {
     id: taskId(id),
-    workspace_id: workspaceId("workspace-1"),
-    workflow_id: workflowId("workflow-1"),
+    workspace_id: workspaceId(WORKSPACE_ID),
+    workflow_id: workflowId(WORKFLOW_ID),
     workflow_step_id: "step-1",
     position: 0,
     title,
@@ -44,7 +47,7 @@ function harness(
   search = "",
 ) {
   return renderHook(
-    ({ mode, search = "", open = true, workspace = "workspace-1" }: HarnessProps) =>
+    ({ mode, search = "", open = true, workspace = WORKSPACE_ID }: HarnessProps) =>
       useInlineTaskSearchEffect({
         mode,
         search,
@@ -63,6 +66,101 @@ function harness(
 afterEach(() => {
   listTasksByWorkspace.mockReset();
   searchTaskConversations.mockReset().mockResolvedValue({ tasks: [], state: "ready" });
+});
+
+// @covers AC-TASKS-WORKSPACE-SEARCH-002.2
+it("requests the eligible window before ordering and falls back when steps are absent", async () => {
+  const later = task("later", "Later", { workflow_step_id: "step-later" });
+  const earlier = task("earlier", "Earlier", { workflow_step_id: "step-earlier" });
+  listTasksByWorkspace.mockResolvedValue({ tasks: [later, earlier], total: 2 });
+  const setTaskResults = vi.fn();
+  const setIsSearching = vi.fn();
+  const visibleSteps = [
+    { id: "step-earlier", position: 0, show_in_command_panel: true },
+    { id: "step-later", position: 1, show_in_command_panel: true },
+  ];
+  const { rerender } = renderHook(
+    ({ steps }) =>
+      useInlineTaskSearchEffect({
+        mode: "search-tasks",
+        search: "",
+        open: true,
+        workspaceId: WORKSPACE_ID,
+        workflowId: WORKFLOW_ID,
+        steps,
+        setTaskResults,
+        setIsSearching,
+      }),
+    { initialProps: { steps: visibleSteps } },
+  );
+  await waitFor(() => expect(setTaskResults).toHaveBeenCalledWith([earlier, later]));
+  expect(listTasksByWorkspace.mock.calls[0][1]).toEqual({
+    page: 1,
+    pageSize: 20,
+    workflowId: WORKFLOW_ID,
+    commandPanelVisible: true,
+  });
+  listTasksByWorkspace.mockClear();
+  rerender({ steps: [] });
+  await waitFor(() => expect(listTasksByWorkspace).toHaveBeenCalled());
+  expect(listTasksByWorkspace.mock.calls[0][1]).toEqual({ page: 1, pageSize: 20 });
+});
+
+it("aborts an obsolete idle request", async () => {
+  let finish!: (value: unknown) => void;
+  let signal!: AbortSignal;
+  listTasksByWorkspace.mockImplementationOnce(
+    (_workspace, _params, options) =>
+      new Promise((resolve) => {
+        signal = options.init.signal;
+        finish = resolve;
+      }),
+  );
+  const setTaskResults = vi.fn();
+  const setIsSearching = vi.fn();
+  const hiddenSteps = [{ id: "hidden", position: 0, show_in_command_panel: false }];
+  const { rerender } = renderHook(
+    ({ open }) =>
+      useInlineTaskSearchEffect({
+        mode: "commands",
+        search: "",
+        open,
+        workspaceId: WORKSPACE_ID,
+        workflowId: WORKFLOW_ID,
+        steps: hiddenSteps,
+        setTaskResults,
+        setIsSearching,
+      }),
+    { initialProps: { open: true } },
+  );
+  await waitFor(() => expect(listTasksByWorkspace).toHaveBeenCalledOnce());
+  expect(listTasksByWorkspace.mock.calls[0][1].commandPanelVisible).toBe(true);
+  rerender({ open: false });
+  expect(signal.aborted).toBe(true);
+  finish({ tasks: [task("late", "Late", { workflow_step_id: "hidden" })], total: 1 });
+  await waitFor(() => expect(setTaskResults).toHaveBeenLastCalledWith([]));
+  expect(setIsSearching).toHaveBeenLastCalledWith(false);
+});
+
+it("settles an all-hidden workflow with no task results", async () => {
+  listTasksByWorkspace.mockResolvedValue({ tasks: [], total: 0 });
+  const setTaskResults = vi.fn();
+  const setIsSearching = vi.fn();
+  renderHook(() =>
+    useInlineTaskSearchEffect({
+      mode: "commands",
+      search: "",
+      open: true,
+      workspaceId: WORKSPACE_ID,
+      workflowId: WORKFLOW_ID,
+      steps: [{ id: "hidden", position: 0, show_in_command_panel: false }],
+      setTaskResults,
+      setIsSearching,
+    }),
+  );
+  await waitFor(() => expect(setIsSearching).toHaveBeenLastCalledWith(false));
+  expect(setTaskResults).toHaveBeenLastCalledWith([]);
+  expect(listTasksByWorkspace.mock.calls[0][1].commandPanelVisible).toBe(true);
 });
 
 describe("useInlineTaskSearchEffect", () => {

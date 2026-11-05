@@ -44,6 +44,7 @@
   "undo": "撤銷",
   "update": "更新",
   "walkthrough": "導覽",
+  "walkthroughGeneratedAt": "產生於 {{date}}",
   "walkthroughNoteAdded": "已新增導覽備註",
   "walkthroughNoteQueued": "導覽備註已排隊",
   "walkthroughNoteSent": "導覽備註已傳送",

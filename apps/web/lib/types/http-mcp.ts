@@ -100,6 +100,7 @@ export type MCPSetupComparison = {
   applied_revision: number;
   attachment_attempt_id?: string;
   selection_ids?: string[];
+  excluded_definition_ids?: string[];
   changes?: MCPSetupChange[];
 };
 
@@ -114,10 +115,13 @@ export type MCPSessionSelectionState = {
 };
 
 export type MCPSelectionResponse = {
+  legacy_import_status?: "complete" | "pending" | "unknown";
   workspace_id: string;
   scope: MCPSelectionScope;
   owner_id: string;
   definition_ids: string[];
+  selection_revision?: number;
+  excluded_definition_ids?: string[];
   mcp_state?: MCPSessionSelectionState;
 };
 
@@ -202,4 +206,47 @@ export type MCPResolutionSummary = {
   definition_id?: string;
   runtime_name?: string;
   origins?: MCPSelectionOrigin[];
+};
+
+export type MCPOwnerUsageDestination = {
+  kind: MCPSelectionScope;
+  workspace_id: string;
+  owner_id: string;
+  agent_id?: string;
+  task_id?: string;
+};
+
+export type MCPOwnerUsage = {
+  scope: MCPSelectionScope;
+  owner_id: string;
+  workspace_id: string;
+  display_name?: string;
+  agent_id?: string;
+  task_id?: string;
+  owner_state: "available" | "disabled" | "archived";
+  destination: MCPOwnerUsageDestination | null;
+};
+
+export type MCPCatalogUsagePage = {
+  workspace_id: string;
+  definition_id: string;
+  items: MCPOwnerUsage[];
+  next_cursor?: string;
+};
+
+/** Safe settings-profile identity for workspace MCP navigation and discovery. */
+export type MCPProfileOwner = {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  name: string;
+  workspace_id: string;
+  kind: "concrete" | "dynamic";
+  enabled: boolean;
+  supports_mcp: boolean;
+};
+export type MCPProfileOwnerPage = {
+  workspace_id: string;
+  items: MCPProfileOwner[];
+  next_cursor?: string;
 };

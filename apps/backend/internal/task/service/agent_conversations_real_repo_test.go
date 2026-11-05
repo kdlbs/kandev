@@ -8,7 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // The uninstall cleanup path is otherwise only proven against hand-written
@@ -73,9 +73,7 @@ func TestEnsureWaitsForDeliveryRetirementBeforePrimaryRepairOverRealRepository(t
 	if err != nil {
 		t.Fatalf("load conversation session: %v", err)
 	}
-	if err := repo.DeleteTaskSession(ctx, session); err != nil {
-		t.Fatalf("delete conversation session: %v", err)
-	}
+	retireLegacyConversationPrimaryForTest(t, ctx, repo, session)
 
 	_, _, err = svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{
 		WorkspaceID: "ws-one", ConversationKey: "coordinator",

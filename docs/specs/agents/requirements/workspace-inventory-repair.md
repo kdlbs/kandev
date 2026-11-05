@@ -41,6 +41,8 @@ The branch-continuity extension is tracked in the
 [attested branch continuity package](../../../plans/attested-worktree-branch-continuity/plan.md).
 Its work order records implementation and validation status.
 
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.13:** When a worktree launch requests a checkout branch that has no exact canonical slot, but exactly one active canonical row of the same repository holds a preserved worktree on that exact branch and no other requested slot owns that row, reuse shall bind the launch to that row's slot and reuse its worktree instead of failing closed; a different branch, an ambiguous, deleted, or failed holder, or a row owned by another requested slot shall still fail closed.
+
 ## Migrated source detail
 
 This requirement was split out of

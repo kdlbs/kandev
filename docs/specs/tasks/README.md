@@ -11,18 +11,17 @@ owners:
 
 ## Purpose
 
-Owns durable tasks, execution, workflows, queued launches and process contracts.
+Owns tasks, execution, workflows, queued launches, and process contracts.
 
 ## Ownership
 
-Owns task identity and metadata; [workspace discovery](requirements/workspace-search.md);
-documents and attachments; parent and dependency relationships; creation and
-launch; runtime state publication; workflow definitions, transitions, and
-completion signals; and scheduling.
+Owns task identity, metadata, [workspace discovery](requirements/workspace-search.md),
+documents, attachments, parent/dependency links, creation, launch,
+runtime state, workflows, completion, and scheduling.
 
-Turn change sets bind immutable repository intervals to capture policy,
-historical content availability, and transcript anchors. Workspaces supply
-checkout identity; runtime supplies ordered executor access.
+Turn change sets bind immutable repository intervals, capture policy, history,
+and transcript anchors. Workspaces own checkout identity; runtime orders
+executor access.
 
 ## Exclusions
 
@@ -67,6 +66,7 @@ checkout identity; runtime supplies ordered executor access.
 - [Link Existing Task to External References](requirements/link-existing-task-github-issue.md)
 - [MCP-Created Task Agent Profile Default](requirements/mcp-task-agent-profile-default.md)
 - [MCP Tool Name Stability](requirements/mcp-tool-name-stability.md)
+- [MCP task priority](requirements/mcp-task-priority.md)
 - [MCP workspace modes](requirements/mcp-workspace-mode.md)
 - [Missing task route recovery](requirements/missing-task-route-recovery.md)
 - [Task model unification](requirements/model-unification.md)
@@ -214,6 +214,7 @@ checkout identity; runtime supplies ordered executor access.
 - [Audited cross-workspace task transfers](system-design/cross-workspace-task-transfer.md)
 - [Task Create Launch Preview](system-design/task-create-launch-preview.md)
 - [Task priority visibility](system-design/task-priority-visibility.md)
+- [MCP task priority](system-design/mcp-task-priority.md)
 - [Board priority sort and filter](system-design/board-priority-sort-filter.md)
 - [Threads task actions](system-design/threads-task-actions.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)

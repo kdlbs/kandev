@@ -16,6 +16,59 @@ type importProfileCatalogFixture struct {
 	profiles []ImportProfileCandidate
 }
 
+// @covers AC-TASKS-PORTABLE-PROFILE-001.5
+func TestImportProfileBindingComparesOptions(t *testing.T) {
+	low := map[string]string{"reasoning_effort": "low"}
+	high := map[string]string{"reasoning_effort": "high"}
+	empty := map[string]string{}
+	a := &models.AgentProfilePortable{AgentName: "Codex", Model: "luna", ConfigOptions: &low}
+	b := &models.AgentProfilePortable{AgentName: "Codex", Model: "luna", ConfigOptions: &high}
+	assert.False(t, samePortableProfile(a, b))
+	b.ConfigOptions = &low
+	assert.True(t, samePortableProfile(a, b))
+	a.ConfigOptions = nil
+	b.ConfigOptions = &empty
+	assert.False(t, samePortableProfile(a, b))
+}
+
+// @covers AC-TASKS-PORTABLE-PROFILE-001.5
+func TestRawImportPassesProfileOptionsToLookup(t *testing.T) {
+	svc, _, _ := setupTestServiceWithProvider(t)
+	options := map[string]string{"reasoning_effort": "low"}
+	svc.SetAgentProfileLookup(func(profile *models.AgentProfilePortable, _ string) models.ProfileMatch {
+		require.NotNil(t, profile.ConfigOptions)
+		require.Equal(t, "low", (*profile.ConfigOptions)["reasoning_effort"])
+		return models.ProfileMatch{ID: "low-profile"}
+	})
+	export := &models.WorkflowExport{Version: models.ProfileOptionsExportVersion, Type: models.ExportType,
+		Workflows: []models.WorkflowPortable{{Name: "Flow", Steps: []models.StepPortable{{Name: "Work", Position: 0, AgentProfile: &models.AgentProfilePortable{AgentName: "Codex", ConfigOptions: &options}}}}}}
+	result, err := svc.ImportWorkflows(context.Background(), "ws-1", export)
+	require.NoError(t, err)
+	require.Equal(t, []string{"Flow"}, result.Created)
+	steps, err := svc.repo.ListStepsByWorkflow(context.Background(), "imported-Flow")
+	require.NoError(t, err)
+	require.Equal(t, "low-profile", steps[0].AgentProfileID)
+}
+
+func TestImportReviewUsesOnlyOptionAwareLookup(t *testing.T) {
+	svc, _, _ := setupTestServiceWithProvider(t)
+	svc.SetAgentProfileFuncs(nil, func(string, string, string, string) string {
+		t.Fatal("review import must not use the legacy matcher when the option-aware lookup is available")
+		return ""
+	})
+	svc.SetAgentProfileLookup(func(profile *models.AgentProfilePortable, _ string) models.ProfileMatch {
+		require.NotNil(t, profile.ConfigOptions)
+		require.Equal(t, "low", (*profile.ConfigOptions)["reasoning_effort"])
+		return models.ProfileMatch{ID: "review-profile"}
+	})
+	step := models.StepPortable{Name: "Review", Position: 0, Events: models.StepEvents{OnEnter: []models.OnEnterAction{{
+		Type:   models.OnEnterRunCodeReview,
+		Config: map[string]interface{}{models.ReviewAgentProfilePortableKey: map[string]interface{}{"agent_name": "Codex", "config_options": map[string]interface{}{"reasoning_effort": "low"}}},
+	}}}}
+	converted := svc.stepFromPortable("workflow", step, map[int]string{0: "step"}, "")
+	require.Equal(t, "review-profile", converted.Events.OnEnter[0].Config[models.ReviewAgentProfileConfigKey])
+}
+
 func (f *importProfileCatalogFixture) ListEligibleProfiles(context.Context) ([]ImportProfileCandidate, error) {
 	return append([]ImportProfileCandidate(nil), f.profiles...), nil
 }

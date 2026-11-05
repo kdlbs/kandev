@@ -38,6 +38,7 @@ test.describe("Mock agent clarification slash commands", () => {
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
     await session.clarificationOption("PostgreSQL").click();
+    await session.submitClarification();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
@@ -75,8 +76,8 @@ test.describe("Clarification overlay resizable layout", () => {
     apiClient,
     seedData,
   }) => {
-    // Tall viewport so the content-sized overlay has plenty of room to grow
-    // without bumping into the 35vh safety cap on the first drag.
+    // Tall viewport so the content-sized overlay has room to grow without
+    // reaching the initial 50vh cap on the first drag.
     await testPage.setViewportSize({ width: 1280, height: 3000 });
 
     const session = await seedTaskAndWaitForIdle(
@@ -92,9 +93,9 @@ test.describe("Clarification overlay resizable layout", () => {
     const container = testPage.getByTestId("clarification-overlay-container");
     await expect(container).toBeVisible();
 
-    // The container now also carries the persistent header row (collapse
-    // toggle + waiting count), so it no longer scrolls itself — the nested
-    // scroll region below the header does.
+    // The container also carries the persistent header row (size toggle,
+    // collapse toggle + waiting count), so it does not scroll itself — the
+    // nested scroll region below the header does.
     const scrollRegion = container.getByTestId("clarification-scroll-region");
     const initial = await container.evaluate((el) => {
       return {
@@ -107,9 +108,34 @@ test.describe("Clarification overlay resizable layout", () => {
     // Default state: no inline height → container sizes to its content.
     expect(initial.inlineHeight).toBe("");
     // Sanity check: content-sized overlay is at least tall enough for the
-    // question card but well under the 35vh safety cap.
+    // question card but well under the 50vh safety cap.
     expect(initial.height).toBeGreaterThan(200);
-    expect(initial.height).toBeLessThan(3000 * 0.35);
+    expect(initial.height).toBeLessThan(3000 * 0.5);
+
+    const toggle = testPage.getByTestId("clarification-panel-size-toggle");
+    await expect(toggle).toHaveCount(1);
+    await expect(toggle).toHaveAttribute("aria-label", "Expand");
+    await expect(toggle).toBeEnabled();
+
+    // The tooltip explains the same action as the accessible name.
+    await testPage.mouse.move(0, 0);
+    await toggle.hover();
+    await expect(testPage.getByRole("tooltip").first()).toContainText("Expand");
+    await testPage.mouse.move(0, 0);
+
+    // Keyboard activation expands to the measured host and keeps focus on the
+    // same control while its next action becomes Restore.
+    await toggle.focus();
+    await testPage.keyboard.press("Enter");
+    const hostMax = Number(await container.getAttribute("data-host-max-height"));
+    await expect(container).toHaveCSS("height", `${hostMax}px`);
+    await expect(toggle).toHaveAttribute("aria-label", "Restore");
+    await expect(toggle).toBeFocused();
+
+    await toggle.focus();
+    await testPage.keyboard.press("Space");
+    await expect.poll(() => container.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
+    await expect(toggle).toHaveAttribute("aria-label", "Expand");
 
     const handle = container.locator("xpath=..").locator("button[aria-label='Resize']");
     await expect(handle).toBeVisible();
@@ -134,6 +160,19 @@ test.describe("Clarification overlay resizable layout", () => {
     // Allow ±10px tolerance for rounding / mouse event coalescing.
     expect(afterDrag.height).toBeGreaterThan(initial.height + dragDistance - 10);
 
+    expect(hostMax).toBeGreaterThan(afterDrag.height);
+    await expect(toggle).toBeEnabled();
+    await toggle.click();
+    await expect(container).toHaveCSS("height", `${hostMax}px`);
+    await expect(toggle).toHaveAttribute("aria-label", "Restore");
+
+    // Restore returns to the manual height the user selected, not the cap.
+    await toggle.click();
+    await expect
+      .poll(() => container.evaluate((el) => (el as HTMLElement).style.height))
+      .toBe(afterDrag.inlineHeight);
+    await expect(toggle).toHaveAttribute("aria-label", "Expand");
+
     // Double-click the handle → back to auto-sized.
     await handle.dblclick();
     const afterReset = await container.evaluate((el) => ({
@@ -144,47 +183,135 @@ test.describe("Clarification overlay resizable layout", () => {
     expect(Math.abs(afterReset.height - initial.height)).toBeLessThanOrEqual(2);
   });
 
-  // Regression coverage for the task-chat-panel cap: the rendered CSS
-  // max-height and the resize hook's drag clamp must agree on 50vh here.
-  // Before the fix, ClarificationPanelSection rendered a flat 35vh cap
-  // (inherited from Quick Chat) while the hook still clamped drags to 50vh,
-  // so the handle silently stopped growing the box ~30% short of its own
-  // documented ceiling with zero feedback.
-  test("dragging well past the old 35vh mark keeps growing the task panel up to its 50vh cap, with no dead zone", async ({
+  test("follows host contraction while expanded and keeps Restore usable", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    // 2000px viewport → 35vh = 700px, 50vh = 1000px. Round numbers make the
-    // two caps unambiguous to distinguish in assertions.
-    await testPage.setViewportSize({ width: 1280, height: 2000 });
+    await testPage.setViewportSize({ width: 1280, height: 1100 });
 
     const session = await seedTaskAndWaitForIdle(
       testPage,
       apiClient,
       seedData,
-      "Clarification Resize Cap",
+      "Clarification Resize Host Changes",
     );
 
-    await session.sendMessage("/ask-multiple");
+    await session.sendMessage("/e2e:clarification-markdown");
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    const container = session.clarificationBar();
+    const toggle = container.getByTestId("clarification-panel-size-toggle");
+    await expect(toggle).toHaveAttribute("aria-label", "Expand");
+    await expect(toggle).toBeEnabled();
+    await toggle.click();
+    const hostBefore = Number(await container.getAttribute("data-host-max-height"));
+    await expect(container).toHaveCSS("height", `${hostBefore}px`);
+
+    await testPage.setViewportSize({ width: 1280, height: 700 });
+    await expect
+      .poll(async () => Number(await container.getAttribute("data-host-max-height")))
+      .toBeLessThan(hostBefore);
+    await expect
+      .poll(() =>
+        container.evaluate((element) => {
+          const host = Number((element as HTMLElement).dataset.hostMaxHeight);
+          return Math.abs(element.getBoundingClientRect().height - host) <= 1;
+        }),
+      )
+      .toBe(true);
+    await expect(toggle).toHaveAttribute("aria-label", "Restore");
+    await expect(toggle).toBeEnabled();
+
+    await toggle.focus();
+    await testPage.keyboard.press("Enter");
+    await expect.poll(() => container.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
+    await expect(toggle).toHaveAttribute("aria-label", "Expand");
+    await expect(toggle).toBeFocused();
+  });
+
+  test("keeps Expand visible but disabled when the host has no spare space", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 1280, height: 420 });
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Resize No Headroom",
+    );
+
+    await session.sendMessage("/e2e:clarification-markdown");
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    const container = session.clarificationBar();
+    const toggle = container.getByTestId("clarification-panel-size-toggle");
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-label", "Expand");
+    await expect(toggle).toBeDisabled();
+
+    const geometry = await container.evaluate((element) => ({
+      hostMax: Number((element as HTMLElement).dataset.hostMaxHeight),
+      height: element.getBoundingClientRect().height,
+      inlineHeight: (element as HTMLElement).style.height,
+    }));
+    expect(geometry.inlineHeight).toBe("");
+    expect(geometry.hostMax).toBeGreaterThan(0);
+    expect(geometry.height).toBeGreaterThanOrEqual(geometry.hostMax - 1);
+  });
+
+  // The initial 50vh cap remains the default. Manual resizing can use only
+  // the measured task-chat host budget, which may be smaller than the viewport.
+  test("dragging past the initial cap grows the task panel to its measured host bound", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Resize Host Bound",
+    );
+
+    await session.sendMessage("/e2e:clarification-markdown");
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
     const container = session.clarificationBar();
     await expect(container).toBeVisible();
-    await expect(container).toHaveCSS("max-height", "1000px");
+    const geometry = await container.evaluate((el) => ({
+      hostMax: Number((el as HTMLElement).dataset.hostMaxHeight),
+      initialMax: Number.parseFloat((el as HTMLElement).style.maxHeight),
+      viewportHeight: window.innerHeight,
+      contentHeight: (
+        el.querySelector('[data-testid="clarification-scroll-region"]') as HTMLElement
+      ).scrollHeight,
+      contentClientHeight: (
+        el.querySelector('[data-testid="clarification-scroll-region"]') as HTMLElement
+      ).clientHeight,
+    }));
+    const initialCap = Math.round(geometry.viewportHeight * 0.5);
+    expect(geometry.hostMax).toBeGreaterThan(initialCap);
+    expect(geometry.initialMax).toBe(initialCap);
+    expect(geometry.contentHeight).toBeGreaterThan(geometry.contentClientHeight);
 
     const handle = container.locator("xpath=..").locator("button[aria-label='Resize']");
     await expect(handle).toBeVisible();
 
-    // Drag far enough (900px) that a working cap must clamp it — well past
-    // the old, wrong 700px (35vh) ceiling.
+    // A large real mouse gesture crosses the 50vh initial cap and exercises
+    // the independently measured host ceiling.
     const handleBox = await handle.boundingBox();
     expect(handleBox).not.toBeNull();
     const startX = handleBox!.x + handleBox!.width / 2;
     const startY = handleBox!.y + handleBox!.height / 2;
     await testPage.mouse.move(startX, startY);
     await testPage.mouse.down();
-    await testPage.mouse.move(startX, startY - 900, { steps: 15 });
+    await testPage.mouse.move(startX, startY - 1800, { steps: 20 });
     await testPage.mouse.up();
 
     const afterDrag = await container.evaluate((el) => ({
@@ -192,12 +319,9 @@ test.describe("Clarification overlay resizable layout", () => {
       inlineHeight: (el as HTMLElement).style.height,
     }));
 
-    // The drag target overshoots 50vh, so the hook's own clamp pins the
-    // inline height at exactly 1000px...
-    expect(afterDrag.inlineHeight).toBe("1000px");
-    // ...and because the CSS cap now agrees, the box actually renders there
-    // instead of stopping dead at the old 700px ceiling.
-    expect(afterDrag.height).toBeGreaterThan(700);
-    expect(afterDrag.height).toBeCloseTo(1000, 0);
+    const hostMaxAfterDrag = Number(await container.getAttribute("data-host-max-height"));
+    expect(afterDrag.inlineHeight).toBe(`${hostMaxAfterDrag}px`);
+    await expect(container).toHaveCSS("max-height", `${hostMaxAfterDrag}px`);
+    expect(afterDrag.height).toBeCloseTo(hostMaxAfterDrag, 0);
   });
 });

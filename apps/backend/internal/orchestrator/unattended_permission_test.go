@@ -25,12 +25,19 @@ type unattendedFixture struct {
 
 func newUnattendedFixture(t *testing.T, options []streams.PermissionChoice) *unattendedFixture {
 	t.Helper()
+	return newUnattendedFixtureWithPermission(t, streams.PendingAgentPermission{
+		RequestID: "request-live", PendingID: "pending-1", Options: options,
+	})
+}
+
+func newUnattendedFixtureWithPermission(t *testing.T, permission streams.PendingAgentPermission) *unattendedFixture {
+	t.Helper()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-1", "session-1", "")
 	f := &unattendedFixture{repo: repo}
 	manager := &mockAgentManager{
 		listPermissionsFunc: func(context.Context, string) ([]streams.PendingAgentPermission, error) {
-			return []streams.PendingAgentPermission{{RequestID: "request-live", PendingID: "pending-1", Options: options}}, nil
+			return []streams.PendingAgentPermission{permission}, nil
 		},
 		resolvePermissionFunc: func(_ context.Context, _, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
 			f.delivered = append(f.delivered, requestID+"/"+pendingID+"/"+optionID)
@@ -113,6 +120,27 @@ func TestResolveUnattendedPermissionWithoutRejectOptionCancelsAndRestoresRunning
 	}
 }
 
+// A native human question is never answered on the user's behalf. An
+// unattended turn must leave it pending, with no claim, delivery, or cancel.
+func TestResolveUnattendedPermissionLeavesHumanInputPending(t *testing.T) {
+	f := newUnattendedFixtureWithPermission(t, streams.PendingAgentPermission{
+		RequestID: "request-live", PendingID: "pending-1",
+		HumanInput: true, Options: rejectAndAllow,
+	})
+	f.svc.setSessionWaitingForInput(context.Background(), "task-1", "session-1")
+
+	if err := f.svc.ResolveUnattendedPermission(context.Background(), "task-1", "session-1", "pending-1", "turn-row-1"); err != nil {
+		t.Fatalf("ResolveUnattendedPermission: %v", err)
+	}
+	if len(f.delivered) != 0 || len(f.cancelled) != 0 || len(f.audits) != 0 || len(f.finalized) != 0 {
+		t.Fatalf("human question was answered: delivered=%v cancelled=%v audits=%v finalized=%v",
+			f.delivered, f.cancelled, f.audits, f.finalized)
+	}
+	if state := f.sessionState(t); state != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %s, want WAITING_FOR_INPUT", state)
+	}
+}
+
 func TestResolveUnattendedPermissionMissingEntryIsSuccess(t *testing.T) {
 	f := newUnattendedFixture(t, rejectAndAllow)
 	if err := f.svc.ResolveUnattendedPermission(context.Background(), "task-1", "session-1", "pending-gone", "turn-row-1"); err != nil {
@@ -175,7 +203,7 @@ func TestHandlePermissionRequestCallsUnattendedHandlerOnlyAfterMessageStored(t *
 	if got := run(t, &mockMessageCreator{}, base); len(got) != 1 || got[0] != (call{"task-1", "session-1", "pending-1", "turn-9"}) {
 		t.Fatalf("stored request: calls = %+v", got)
 	}
-	failing := &mockMessageCreator{permissionMessageCreateFn: func(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}, *models.PermissionDecision) (string, error) {
+	failing := &mockMessageCreator{permissionMessageCreateFn: func(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}, models.PermissionRequestMessageOptions) (string, error) {
 		return "", errors.New("db down")
 	}}
 	if got := run(t, failing, base); len(got) != 0 {

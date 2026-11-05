@@ -80,10 +80,10 @@ after descriptors as needed. An unavailable comparison contains a stable reason
 such as missing baseline or inconsistent snapshot, with no definitive actions.
 
 Build desired descriptors from the complete saved profile/repository/task/
-session union without revealing secrets, materializing packages, or probing
-endpoints. Return a comparison only when its selection revision and descriptors
-were read consistently. An obsolete comparison cannot decorate newer checkbox
-state. Failed projection reads do not fail an otherwise successful saved write;
+session union, minus [saved session exclusions](session-mcp-exclusions.md), without
+revealing secrets, materializing packages, or probing endpoints. Return a comparison only when its selection revision and descriptors
+were read consistently. Compare against committed positive and excluded IDs, not an unsaved addition
+draft. An obsolete comparison cannot decorate newer saved state. Failed projection reads do not fail an otherwise successful saved write;
 they yield unavailable comparison and retain existing application authority.
 
 Diff by definition ID: desired-only is add; accepted-only is remove; same ID

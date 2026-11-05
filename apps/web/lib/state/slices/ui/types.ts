@@ -63,7 +63,14 @@ export type MobileKanbanState = {
 /** Core, host-defined mobile panels. Kept as a named union (rather than
  *  inlined into MobileSessionPanel) so existing `=== "chat"`-style narrowing
  *  still works unchanged after MobileSessionPanel grew a plugin variant. */
-export type MobileSessionCorePanel = "chat" | "plan" | "changes" | "files" | "terminal" | "review";
+export type MobileSessionCorePanel =
+  | "chat"
+  | "plan"
+  | "changes"
+  | "files"
+  | "terminal"
+  | "review"
+  | "background-work";
 
 /** A plugin task panel id on mobile, `plugin:<pluginId>:<panelKey>` — see
  *  lib/state/layout-manager/plugin-panels.ts's pluginPanelId. */
@@ -163,6 +170,10 @@ export type QuickChatSession = {
   taskId?: string;
   name?: string;
   agentProfileId?: string;
+  /** Idempotency key for browser-owned Quick Chat creation. */
+  creationId?: string;
+  /** The accepted startup still owns a CREATED/STARTING session. */
+  startupPending?: boolean;
   initialPrompt?: QuickChatInitialPrompt;
 };
 

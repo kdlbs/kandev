@@ -3,6 +3,7 @@ import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type { ForegroundActivity } from "./activity";
 import type {
+  RuntimeStorageHealth,
   TaskPendingAction,
   TaskPendingActionRevision,
   WorkspaceRecoveryProjection,
@@ -10,6 +11,7 @@ import type {
 import type {
   AgentCapabilitiesPayload,
   SessionInfoPayload,
+  SessionPromptSuggestionPayload,
   SessionModelsPayload,
   SessionModelSelectionWarningPayload,
   SessionMCPStatusPayload,
@@ -276,6 +278,11 @@ export type AvailableCommandPayload = {
   };
 };
 
+export type SessionRuntimeStorageChangedPayload = RuntimeStorageHealth & {
+  task_id: string;
+  session_id: string;
+};
+
 export type SessionBackendMessageMap = {
   "session.message.added": BackendMessage<"session.message.added", MessageAddedPayload>;
   "session.message.updated": BackendMessage<"session.message.updated", MessageAddedPayload>;
@@ -299,10 +306,19 @@ export type SessionBackendMessageMap = {
     "session.workspace_recovery.changed",
     SessionWorkspaceRecoveryChangedPayload
   >;
+  "task_session.runtime_storage_changed": BackendMessage<
+    "task_session.runtime_storage_changed",
+    SessionRuntimeStorageChangedPayload
+  >;
   "session.clarification_requested": BackendMessage<
     "session.clarification_requested",
     TaskSessionNotificationPayload
   >;
+  "session.permission_requested": BackendMessage<
+    "session.permission_requested",
+    TaskSessionNotificationPayload
+  >;
+  "session.failed": BackendMessage<"session.failed", TaskSessionNotificationPayload>;
   "session.agentctl_starting": BackendMessage<
     "session.agentctl_starting",
     TaskSessionAgentctlPayload
@@ -361,6 +377,10 @@ export type SessionBackendMessageMap = {
     SessionMCPStatusPayload
   >;
   "session.info_updated": BackendMessage<"session.info_updated", SessionInfoPayload>;
+  "session.prompt_suggestion": BackendMessage<
+    "session.prompt_suggestion",
+    SessionPromptSuggestionPayload
+  >;
   "session.todos_updated": BackendMessage<"session.todos_updated", SessionTodosPayload>;
   "session.prompt_usage": BackendMessage<"session.prompt_usage", SessionPromptUsagePayload>;
   "session.usage_updated": BackendMessage<"session.usage_updated", SessionUsageUpdatedPayload>;
