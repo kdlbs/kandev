@@ -22,7 +22,7 @@ export async function verifyLocalMarkdownLinks(page: Page, api: ApiClient, seed:
   );
   fs.writeFileSync(path.join(dir, "broken.png"), fs.readFileSync(image).subarray(0, 16));
   try {
-    const content = `[Open local report](${report})\n\n[![Local chart](${encodeURI(image)})](${report})\n\n![Missing chart](${dir}/missing.png)\n\n![Broken chart](${dir}/broken.png)`;
+    const content = `[Open local report](${report})\n\n[![Local chart](${encodeURI(image)} "Chart source")](${report})\n\n![Missing chart](${dir}/missing.png)\n\n![Broken chart](${dir}/broken.png)`;
     const script = `e2e:message(${JSON.stringify(content)})`;
     const task = await api.createTaskWithAgent(
       seed.workspaceId,
@@ -48,6 +48,7 @@ export async function verifyLocalMarkdownLinks(page: Page, api: ApiClient, seed:
     const imageButton = response.getByRole("button", { name: "Open Local chart", exact: true });
     const thumbnail = imageButton.locator("img");
     await expect(thumbnail).toBeVisible();
+    await expect(thumbnail).toHaveAttribute("title", "Chart source");
     await expect
       .poll(() => thumbnail.evaluate((node) => (node as HTMLImageElement).naturalWidth))
       .toBeGreaterThan(0);

@@ -5,12 +5,18 @@ import { Button } from "@kandev/ui/button";
 import { IconX } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
-import { useRef, useState } from "react";
+import { useRef, useState, type ImgHTMLAttributes } from "react";
+
+type ImageThumbnailProps = Omit<
+  ImgHTMLAttributes<HTMLImageElement>,
+  "src" | "alt" | "className" | "draggable"
+>;
 
 type ImagePreviewDialogProps = {
   src: string;
   alt: string;
   thumbnailClassName?: string;
+  thumbnailProps?: ImageThumbnailProps;
   interactive?: boolean;
 };
 
@@ -110,11 +116,20 @@ export function ImagePreviewDialog({
   src,
   alt,
   thumbnailClassName,
+  thumbnailProps,
   interactive = true,
 }: ImagePreviewDialogProps) {
   const { t } = useTranslation();
   if (!interactive) {
-    return <img src={src} alt={alt} draggable={false} className={thumbnailClassName} />;
+    return (
+      <img
+        {...thumbnailProps}
+        src={src}
+        alt={alt}
+        draggable={false}
+        className={thumbnailClassName}
+      />
+    );
   }
 
   return (
@@ -126,6 +141,7 @@ export function ImagePreviewDialog({
           className="inline-flex max-w-full cursor-pointer items-center justify-center rounded-md focus:outline-none focus:ring-2 focus:ring-primary max-md:min-h-12 max-md:min-w-12 [@media(pointer:coarse)]:min-h-12 [@media(pointer:coarse)]:min-w-12"
         >
           <img
+            {...thumbnailProps}
             src={src}
             alt=""
             draggable={false}
