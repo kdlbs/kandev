@@ -79,16 +79,47 @@ class ManagedRuntimePinWorkflowContractTest(unittest.TestCase):
                 f"{workflow_name} must accept explicit validation dispatches",
             )
 
+    def test_workflow_exports_pr_number_for_trusted_docs_dispatch(self) -> None:
+        pr_start = self.workflow.index("- name: Create or refresh the single grouped PR")
+        dispatch_start = self.workflow.index(
+            "- name: Dispatch required checks for generated PR"
+        )
+        pr_step = self.workflow[pr_start:dispatch_start]
+        dispatch_step = self.workflow[dispatch_start:]
+        self.assertIn("id: pr", pr_step)
+        self.assertIn('echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"', pr_step)
+        self.assertIn('created_url="$(gh pr create', pr_step)
+        self.assertIn('pr_number="${created_url##*/}"', pr_step)
+        self.assertIn('pr_number="$open_pr_number"', pr_step)
+        self.assertLess(
+            pr_step.index('gh pr edit "$open_pr_number"'),
+            pr_step.index('pr_number="$open_pr_number"'),
+        )
+        self.assertIn('=~ ^[0-9]+$', pr_step)
+        self.assertIn("gh workflow run pr-docs.yml", dispatch_step)
+        self.assertIn("--ref main", dispatch_step)
+        self.assertIn('PR_NUMBER: ${{ steps.pr.outputs.pr_number }}', dispatch_step)
+        self.assertIn('-f pr_number="$PR_NUMBER"', dispatch_step)
+        self.assertIn("pr-docs.yml", dispatch_step)
+
     def test_workflow_validates_before_any_commit_or_push(self) -> None:
+        baseline_pos = self.workflow.index('cp "$CATALOGUE"')
         update_pos = self.workflow.index("node scripts/update-agent-runtime-pins.mjs")
         validation_pos = self.workflow.index("go test ./internal/agent/agents")
+        record_pos = self.workflow.index(
+            "node .github/scripts/record-agent-runtime-pin-refresh.mjs"
+        )
         commit_pos = self.workflow.index("git commit")
         push_pos = self.workflow.index("git push")
+        self.assertLess(baseline_pos, update_pos)
         self.assertLess(update_pos, validation_pos)
-        self.assertLess(validation_pos, commit_pos)
+        self.assertLess(validation_pos, record_pos)
+        self.assertLess(record_pos, commit_pos)
         self.assertLess(commit_pos, push_pos)
         self.assertIn("node --test scripts/update-agent-runtime-pins.test.mjs", self.workflow)
         self.assertIn("--github-output", self.workflow)
+        self.assertIn("--validation-passed", self.workflow)
+        self.assertIn('--before "$RUNNER_TEMP/managed-runtime-pins.before.json"', self.workflow)
         self.assertIn("working-directory: apps/backend", self.workflow)
         self.assertIn(
             "go test ./internal/agent/agents ./internal/agent/managedruntime "
@@ -97,6 +128,28 @@ class ManagedRuntimePinWorkflowContractTest(unittest.TestCase):
             self.workflow,
         )
         self.assertIn("if: steps.update.outputs.changed == 'true'", self.workflow)
+
+    def test_workflow_stages_the_catalogue_and_generated_delivery_record(self) -> None:
+        commit_start = self.workflow.index("- name: Commit and push one grouped change")
+        commit_step = self.workflow[commit_start:]
+        self.assertIn(
+            "git add apps/backend/internal/agent/agents/managed_npm_runtime_versions.json",
+            commit_step,
+        )
+        self.assertIn(
+            "git add docs/plans/managed-runtime-pin-automation/plan.md",
+            commit_step,
+        )
+        self.assertIn(
+            "git add docs/plans/managed-runtime-pin-automation/task-01-refresh-pins.md",
+            commit_step,
+        )
+        self.assertIn(
+            "docs/plans/managed-runtime-pin-automation/task-01-refresh-pins.md",
+            self.workflow,
+        )
+        self.assertIn("## Validation", self.workflow)
+        self.assertIn("## Checklist", self.workflow)
 
     def test_all_actions_are_commit_pinned(self) -> None:
         for line in self.workflow.splitlines():
@@ -108,6 +161,10 @@ class ManagedRuntimePinWorkflowContractTest(unittest.TestCase):
         lint_workflow = LINT_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
             "python3 .github/scripts/update-agent-runtime-pins-workflow-contract_test.py",
+            lint_workflow,
+        )
+        self.assertIn(
+            "node --test .github/scripts/record-agent-runtime-pin-refresh.test.mjs",
             lint_workflow,
         )
 

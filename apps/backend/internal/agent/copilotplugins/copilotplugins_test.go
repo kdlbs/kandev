@@ -509,7 +509,7 @@ func TestConfigDirPrecedence(t *testing.T) {
 }
 
 func TestRuntimeSupportedVersions(t *testing.T) {
-	for _, version := range []string{"1.0.88", "1.0.104"} {
+	for _, version := range []string{"1.0.88", "1.0.104", "1.0.105"} {
 		if !RuntimeSupported(version) {
 			t.Fatalf("%s should be qualified", version)
 		}
@@ -565,7 +565,7 @@ func TestSelectionTimeoutUsesRequestDeadline(t *testing.T) {
 }
 
 func TestCopilotPluginNativeAuthorityAdmission(t *testing.T) {
-	for _, version := range []string{"1.0.88", "1.0.104"} {
+	for _, version := range []string{"1.0.88", "1.0.104", "1.0.105"} {
 		t.Run(version, func(t *testing.T) {
 			root := t.TempDir()
 			writePlugin(t, root, "plugin.json", "spark", "1.0.0")

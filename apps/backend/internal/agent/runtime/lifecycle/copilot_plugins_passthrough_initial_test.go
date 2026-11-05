@@ -69,6 +69,7 @@ func newCopilotPassthroughInitialManager(t *testing.T) (*Manager, *AgentExecutio
 	mgr.profileResolver = &mockPassthroughProfileResolver{
 		agentName: agents.CopilotACPAgentID, cliPassthrough: true, profile: profile,
 	}
+	mgr.managedRuntimeSelections = &copilotSelectionReader{version: "1.0.104"}
 	mgr.SetCopilotPluginRunner(pluginRunner)
 	pty := &recordingPassthroughRunner{}
 	mgr.passthroughRunnerOverride = pty

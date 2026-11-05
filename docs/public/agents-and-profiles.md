@@ -1062,13 +1062,13 @@ selection asks Copilot to load the whole plugin for this profile; it does not
 enable the plugin globally.
 
 Kandev supports inventory and plugin-metadata adapters for managed Copilot CLI
-versions **1.0.88** and **1.0.104**. For a supported version and valid local or
-worktree context, Kandev can prepare a native `--plugin-dir` mount without an
-enterprise-policy qualification gate. `mount_permitted` describes that
-preparation eligibility; it is not policy approval, authentication, or a
-guarantee that a plugin component will load. Kandev uses the runtime selected
-for this profile and does not fall back to an unrelated global CLI or change a
-runtime pin.
+versions **1.0.88**, **1.0.104**, and **1.0.105**. For a supported version and
+valid local or worktree context, Kandev can prepare a native `--plugin-dir`
+mount without an enterprise-policy qualification gate. `mount_permitted`
+describes that preparation eligibility; it is not policy approval,
+authentication, or a guarantee that a plugin component will load. Kandev uses
+the runtime selected for this profile and does not fall back to an unrelated
+global CLI or change a runtime pin.
 
 A selection asks Copilot to load the whole plugin through its native support. A plugin
 can run MCP servers, skills, agents, commands, hooks, and other executable
@@ -1116,8 +1116,10 @@ observed real calls and successful results from a plugin, a sibling plugin,
 native-config MCP, and an ACP-injected MCP. In the disable observation, the
 target received no traffic while an allowed sibling succeeded, but no
 authoritative denial was captured. Copilot 1.0.88 reached the endpoints, but
-its paired disable case was not reached. Managed policy was not tested. These
-observations are not evidence of enterprise-policy enforcement or
+its paired disable case was not reached. Managed policy was not tested. Copilot
+1.0.105 passed isolated inventory, installation-metadata, manifest, and repeated
+mount checks, but it was not part of the authenticated native diagnostics.
+These observations are not evidence of enterprise-policy enforcement or
 certification.
 
 <details>

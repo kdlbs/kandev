@@ -19,6 +19,7 @@ const windowsOS = "windows"
 var inventoryQualifiedVersions = map[string]struct{}{
 	"1.0.88":  {},
 	"1.0.104": {},
+	"1.0.105": {},
 }
 
 // RuntimeSupported reports whether safe inventory discovery is qualified for

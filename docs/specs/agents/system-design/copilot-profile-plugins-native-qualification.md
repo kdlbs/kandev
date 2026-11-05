@@ -37,10 +37,15 @@ Numbers use prefix `REQ-AGENTS-COPILOT-PLUGINS-`.
 
 ## Evidence baseline
 
-The inventory adapter supports `1.0.88` and `1.0.104`. WO-04 removed the empty
-`policyVerifiedVersions` gate and `RequireMountPolicy`. Mount preparation now
-uses the same supported-version predicate as discovery, not privileged
-qualification results.
+The inventory adapter supports `1.0.88`, `1.0.104`, and `1.0.105`. WO-04
+removed the empty `policyVerifiedVersions` gate and `RequireMountPolicy`. Mount
+preparation now uses the same supported-version predicate as discovery, not
+privileged qualification results.
+
+The `1.0.105` admission rests on a bounded native inventory, installation
+metadata, manifest, and repeated-mount observation. That observation did not
+exercise authenticated ACP traffic or managed policy, so it does not widen the
+authenticated or enterprise-policy claims below.
 
 The [sole evidence ledger](../../../plans/copilot-profile-plugins/compatibility-evidence.md)
 preserves historical Linux observations and macOS arm64 native attempts.
