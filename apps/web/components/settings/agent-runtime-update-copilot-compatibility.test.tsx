@@ -122,7 +122,7 @@ describe("Copilot runtime plugin compatibility preview", () => {
     );
     expect(notice.textContent).toContain("Qualified versions: 1.0.88, 1.0.104, 1.0.105");
     expect(notice.textContent).toContain(
-      "Select a qualified runtime before updating, or uncheck plugins in the affected profiles and Save.",
+      "Select a qualified runtime, or uncheck plugins and Save.",
     );
     const confirm = screen.getByTestId(`agent-update-confirm-${AGENT_NAME}`);
     expect(confirm.hasAttribute("disabled")).toBe(false);

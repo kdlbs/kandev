@@ -235,6 +235,9 @@ func TestCopilotPluginRuntimeSnapshotNotReread(t *testing.T) {
 }
 
 func TestCopilotPluginRuntime105Preparation(t *testing.T) {
+	if !copilotplugins.RuntimeSupported("1.0.105") {
+		t.Skip("1.0.105 adapter qualification is scoped to linux/amd64")
+	}
 	root, configDir, runner := copilotPluginFixture(t)
 	selection := &copilotSelectionReader{version: "1.0.105"}
 	mgr := newCopilotLifecycleManager(t, copilotLaunchProfile(), selection)

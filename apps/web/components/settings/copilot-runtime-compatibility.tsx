@@ -52,7 +52,7 @@ export function CopilotRuntimeCompatibilityNotice({
       ) : (
         <>
           <p className="font-medium">
-            {t("agents:copilotRuntimePluginUnavailable", {
+            {t("agents:copilotPluginsRuntimeUnavailableTitle", {
               version: compatibility.runtime_version,
             })}
           </p>
@@ -62,12 +62,12 @@ export function CopilotRuntimeCompatibilityNotice({
           <p data-testid={`${testId}-profiles`}>
             {affectedProfilesText(t, compatibility.selected_profile_count)}
           </p>
-          <p>{t("agents:copilotRuntimeQualifiedVersions", { versions })}</p>
-          <p className="text-muted-foreground">{t("agents:copilotRuntimeRecovery")}</p>
+          <p>{t("agents:copilotPluginsRuntimeQualified", { versions })}</p>
+          <p className="text-muted-foreground">{t("agents:copilotPluginsRuntimeRecovery")}</p>
         </>
       )}
       {compatibility.supported ? (
-        <p>{t("agents:copilotRuntimeQualifiedVersions", { versions })}</p>
+        <p>{t("agents:copilotPluginsRuntimeQualified", { versions })}</p>
       ) : null}
     </div>
   );

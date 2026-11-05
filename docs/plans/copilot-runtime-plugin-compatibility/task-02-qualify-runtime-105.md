@@ -84,11 +84,11 @@ From the repository root:
 
 ```bash
 npm view @github/copilot@1.0.105 version dist.tarball optionalDependencies --json
-(cd apps/backend && go test -trimpath -tags copilot_native ./internal/agent/copilotplugins -run '^TestNative' -count=1)
-(cd apps/backend && KANDEV_COPILOT_NATIVE_VERSION=1.0.105 go test -trimpath -tags copilot_native ./internal/agent/copilotplugins -run '^TestCopilotPluginNativeAdapterAcceptance$' -count=1 -timeout=5m -v)
-(cd apps/backend && go test -trimpath ./internal/agent/copilotplugins -run '^(TestCopilotPluginRuntime105Admission|TestCopilotPluginRuntimeUnsupportedAdmission|TestRuntimeSupportedVersions|TestCopilotPluginNativeAuthorityAdmission)$' -count=1 -v)
-(cd apps/backend && go test -trimpath ./internal/agent/copilotplugins ./internal/agent/settings/controller -count=1)
-(cd apps/backend && go test -trimpath ./internal/agent/runtime/lifecycle ./internal/agent/hostutility -run '^TestCopilotPlugin' -count=1)
+(cd apps/backend && go test -trimpath -tags 'copilot_native fts5' ./internal/agent/copilotplugins -run '^TestNative' -count=1)
+(cd apps/backend && KANDEV_COPILOT_NATIVE_VERSION=1.0.105 go test -trimpath -tags 'copilot_native fts5' ./internal/agent/copilotplugins -run '^TestCopilotPluginNativeAdapterAcceptance$' -count=1 -timeout=8m -v)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/copilotplugins -run '^(TestCopilotPluginRuntime105Admission|TestCopilotPluginRuntimeUnsupportedAdmission|TestRuntimeSupportedVersions|TestCopilotPluginNativeAuthorityAdmission)$' -count=1 -v)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/copilotplugins ./internal/agent/settings/controller -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/runtime/lifecycle ./internal/agent/hostutility -run '^TestCopilotPlugin' -count=1)
 bash scripts/lint-go-changed apps/backend/internal/agent/copilotplugins/context.go apps/backend/internal/agent/copilotplugins/copilotplugins_test.go apps/backend/internal/agent/copilotplugins/runtime_compatibility_test.go apps/backend/internal/agent/copilotplugins/native_adapter_acceptance_test.go apps/backend/internal/agent/copilotplugins/native_adapter_acceptance_contract_test.go apps/backend/internal/agent/runtime/lifecycle/copilot_plugins_launch_test.go apps/backend/internal/agent/hostutility/copilot_plugins_test.go
 git diff --check
 ```
@@ -155,15 +155,18 @@ Command:
 
 ```bash
 (cd apps/backend && KANDEV_COPILOT_NATIVE_VERSION=1.0.105 \
-  go test -trimpath -tags copilot_native ./internal/agent/copilotplugins \
+  go test -trimpath -tags 'copilot_native fts5' ./internal/agent/copilotplugins \
   -run '^TestCopilotPluginNativeAdapterAcceptance$' -count=1 -timeout=8m -v)
 ```
 
 All five cases passed, including production installed-plugin admission and the
 live control. Offline `TestCopilotPluginRuntime105AdapterContract` covers the
-exact managed package identity and shared discovery/mount predicate.
-`1.0.105` was then added to the single qualified-version map. `TestCopilotPluginRuntime105Admission`, the extended support table, the
-lifecycle 1.0.105 preparation test, and the hostutility 1.0.105 inventory test
-pass. The existing full macOS diagnostic remains separate and was not rerun on
-Linux. No authentication, enterprise-policy enforcement, model behavior, or
-other runtime version is claimed. The sole ledger records the sanitized result.
+exact managed package identity and platform-scoped discovery/mount predicate.
+`1.0.105` was then added to the qualified-version map with linux/amd64
+platform scope. `TestCopilotPluginRuntime105Admission`, the extended support
+table, the lifecycle 1.0.105 preparation test, and the hostutility 1.0.105
+inventory test pass on qualified hosts. Other platforms remain unsupported
+until separately qualified. The existing full macOS diagnostic remains
+separate and was not rerun on Linux. No authentication, enterprise-policy
+enforcement, model behavior, or other runtime version is claimed. The sole
+ledger records the sanitized result.

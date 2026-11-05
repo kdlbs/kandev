@@ -24,19 +24,44 @@ var inventoryQualifiedVersions = map[string]struct{}{
 	"1.0.105": {},
 }
 
+// platformQualifiedVersions scopes versions whose adapter evidence covers only
+// specific host platforms. An unlisted platform remains unsupported even when
+// the exact package version is present in the inventory-qualified set.
+var platformQualifiedVersions = map[string]map[string]struct{}{
+	"1.0.105": {"linux/amd64": {}},
+}
+
 // RuntimeSupported reports whether safe inventory discovery is qualified for
-// the selected managed runtime version.
+// the selected managed runtime version on this host platform.
 func RuntimeSupported(version string) bool {
-	_, ok := inventoryQualifiedVersions[strings.TrimSpace(version)]
+	return RuntimeSupportedOn(version, runtime.GOOS, runtime.GOARCH)
+}
+
+// RuntimeSupportedOn reports whether safe inventory discovery is qualified for
+// the exact version and host platform. A version without platform-scoped
+// evidence remains available on every platform.
+func RuntimeSupportedOn(version, goos, goarch string) bool {
+	version = strings.TrimSpace(version)
+	if _, ok := inventoryQualifiedVersions[version]; !ok {
+		return false
+	}
+	platforms, scoped := platformQualifiedVersions[version]
+	if !scoped {
+		return true
+	}
+	_, ok := platforms[goos+"/"+goarch]
 	return ok
 }
 
-// SupportedRuntimeVersions returns the qualified versions in ascending order.
-// The slice is independent of the internal inventory set so callers cannot
-// mutate the admission predicate.
+// SupportedRuntimeVersions returns the qualified versions for this host in
+// ascending order. The slice is independent of the internal inventory set so
+// callers cannot mutate the admission predicate.
 func SupportedRuntimeVersions() []string {
 	versions := make([]string, 0, len(inventoryQualifiedVersions))
 	for version := range inventoryQualifiedVersions {
+		if !RuntimeSupported(version) {
+			continue
+		}
 		versions = append(versions, version)
 	}
 	sort.Slice(versions, func(left, right int) bool {

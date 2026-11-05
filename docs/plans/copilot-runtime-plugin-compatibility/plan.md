@@ -99,7 +99,8 @@ work order 02, not an unanswered product choice.
 Follow the native-authority design's
 [runtime amendment](../../specs/agents/system-design/copilot-profile-plugins-native-qualification.md#runtime-compatibility-amendment).
 Add `SupportedRuntimeVersions` to `copilotplugins/context.go`, derived from the
-existing map. Do not broaden `RuntimeSupported` during work order 01.
+existing map and filtered to the current host platform. Do not broaden
+`RuntimeSupported` during work order 01.
 
 Add a response-only `copilot_plugin_compatibility` object to
 `AgentUpdatePreviewDTO` and `AgentUpdatePreview`. It names the resolved target,
@@ -142,7 +143,7 @@ use null. Preserve selection intent and unrelated drafts through refresh/errors.
 | Provider/context | Identity and transport | Result | Evidence/fallback |
 | --- | --- | --- | --- |
 | Copilot 1.0.88/1.0.104, valid host context | Exact managed package; native inventory and ACP | Keep current explicit mounts | Existing ledger and caller tests |
-| Copilot 1.0.105, nonempty selection | Exact managed package; host local/worktree | Admitted after focused adapter qualification | Linux x64 ledger evidence; typed rejection for failures |
+| Copilot 1.0.105, nonempty selection | Exact managed package; linux/amd64 host local/worktree | Admitted after focused adapter qualification | Linux x64 ledger evidence; other platforms stay unsupported |
 | Any unqualified Copilot version | Exact selected package | Preview impact and block nonempty preparation | No alternate runtime or identity |
 | Empty Copilot selection | Any existing executor | Preserve current launch behavior | No added inventory/root reads |
 | Isolated/wrapped Copilot selection | Existing executor/wrapper identity | Preserve typed rejection | No host resource transfer |
@@ -193,7 +194,6 @@ Native status: disabled        Select a qualified runtime, or
                                uncheck plugins and Save.
                                [x] example
                                Native status: unknown
-                               Availability not checked
              [Reset] [Save]                [Reset] [Save]
 ```
 
@@ -261,15 +261,16 @@ focused Linux x64 adapter test passed exact package identity, fresh production
 inventory, a native-written remote marketplace install with `source=installed`
 cached metadata, a matching installed root, a `source=live` directory
 marketplace control, production discovery/admission for both shapes, and two
-repeated special-character mounts. Production admission was added only after
+repeated special-character mounts. Admission is platform-scoped to
+`linux/amd64`; other platforms remain unsupported. Production admission was added only after
 that run.
 See the [evidence ledger](../copilot-profile-plugins/compatibility-evidence.md#native-adapter-qualification-for-copilot-10105-2026-11-05).
 
 Implementation evidence:
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/agent/copilotplugins ./internal/agent/settings/controller ./internal/agent/settings/handlers -count=1)
-(cd apps/backend && go test -trimpath ./internal/agent/runtime/lifecycle ./internal/agent/hostutility -run '^TestCopilotPlugin' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/copilotplugins ./internal/agent/settings/controller ./internal/agent/settings/handlers -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/runtime/lifecycle ./internal/agent/hostutility -run '^TestCopilotPlugin' -count=1)
 (cd apps/web && pnpm exec vitest run components/settings/copilot-plugin-selection.test.ts components/settings/copilot-plugin-profile-selection.test.tsx components/settings/agent-runtime-update-copilot-compatibility.test.tsx components/settings/use-agent-update-dialog-state.test.ts hooks/domains/settings/use-copilot-plugin-discovery.test.tsx components/settings/agent-runtime-update-control.test.tsx)
 (cd apps/web && pnpm run typecheck && pnpm run i18n:check && pnpm run i18n:ratchet)
 (cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/settings/agent-runtime-update-copilot.spec.ts tests/settings/copilot-profile-plugins.spec.ts)
@@ -282,7 +283,6 @@ The focused Go suites passed. Six frontend Vitest files passed 64 tests. The
 chromium run passed 10 tests across both Copilot runtime and profile specs. The
 mobile-chrome run passed 6 tests. Typecheck, i18n check/ratchet, changed-Go lint,
 public-doc validation, specification validation, and all-spec lint passed.
-Changes remain uncommitted; no push or PR was created.
 
 Design-package checks passed:
 
@@ -291,22 +291,24 @@ python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.test.py
 python3 scripts/lint-spec-files.py --all
 git diff --check -- docs/specs/agents docs/plans/copilot-profile-plugins docs/plans/copilot-runtime-plugin-compatibility
-git status --short -- docs/plans/copilot-runtime-plugin-compatibility
 ```
 
 The catalog accepted 431 decisions and 1920 specifications. All 36 linter
-regression tests and all-spec lint passed. The repository PR-documentation
-preflight used the actual eight changed paths and returned `exempt`, with zero
-errors, because this change contains documentation only. An independent
-traceability audit accepted three work orders and 36 criterion references,
-including design declarations, plan coverage, and dependency IDs. Nine relative
-links in the four new package files, untracked-file whitespace, and conflict
-markers passed. All eight changed files remain unstaged and uncommitted.
+regression tests and all-spec lint passed. The design-package preflight checked
+only the eight documentation paths that existed when the package was created
+and returned `exempt`, with zero errors. That result does not cover the later
+Go, web, locale, or E2E implementation paths. An independent traceability audit
+accepted three work orders and 36 criterion references, including design
+declarations, plan coverage, and dependency IDs. Nine relative links in the
+four new package files, untracked-file whitespace, and conflict markers
+passed.
 
 ## Risks
 
 - Exact npm artifacts must be available before native adapter qualification.
-  A GitHub release or ACP handshake alone cannot replace that evidence.
+  A GitHub release or ACP handshake alone cannot replace that evidence. The
+  current 1.0.105 evidence covers linux/amd64 only; other platforms remain
+  unsupported until separately qualified.
 - A changed installation schema can require a bounded design amendment.
   Do not admit 1.0.105 while that contract remains unknown.
 - Runtime-impact counts are read-only snapshots, not activation-time locks.

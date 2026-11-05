@@ -348,11 +348,6 @@ function PluginMetadata({ row }: { row: CopilotPluginSelectionRow }) {
           status: nativeStatusLabel(t, row.nativeEnabled),
         })}
       </span>
-      {row.nativeEnabled === null && row.availabilityUnchecked ? (
-        <span className="block text-xs text-muted-foreground">
-          {t("agents:copilotPluginsNativeUnknownHint")}
-        </span>
-      ) : null}
     </>
   );
 }

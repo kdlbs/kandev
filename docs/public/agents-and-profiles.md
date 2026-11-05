@@ -1062,9 +1062,11 @@ selection asks Copilot to load the whole plugin for this profile; it does not
 enable the plugin globally.
 
 Kandev supports inventory and plugin-metadata adapters for managed Copilot CLI
-versions **1.0.88**, **1.0.104**, and **1.0.105**. For a supported version and
-valid local or worktree context, Kandev can prepare a native `--plugin-dir`
-mount without an enterprise-policy qualification gate. `mount_permitted`
+versions **1.0.88** and **1.0.104** on every supported host, and **1.0.105** on
+Linux x64. The 1.0.105 adapter was qualified on Linux x64 only; other platforms
+remain unsupported for plugin preparation until separately validated. For a
+supported version and valid local or worktree context, Kandev can prepare a
+native `--plugin-dir` mount without an enterprise-policy qualification gate. `mount_permitted`
 describes that preparation eligibility; it is not policy approval,
 authentication, or a guarantee that a plugin component will load. Kandev uses
 the runtime selected for this profile and does not fall back to an unrelated

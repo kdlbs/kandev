@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 )
 
@@ -35,7 +36,7 @@ func TestCopilotRuntimeCompatibilityPreviewHandlerContract(t *testing.T) {
 	if compatibility.Reason != "runtime_unsupported" {
 		t.Fatalf("reason = %q, want runtime_unsupported", compatibility.Reason)
 	}
-	if !reflect.DeepEqual(compatibility.SupportedVersions, []string{"1.0.88", "1.0.104", "1.0.105"}) {
+	if !reflect.DeepEqual(compatibility.SupportedVersions, copilotplugins.SupportedRuntimeVersions()) {
 		t.Fatalf("supported versions = %v", compatibility.SupportedVersions)
 	}
 	if compatibility.SelectedProfileCount != nil {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
 )
@@ -44,6 +45,9 @@ func newCopilotCompatibilityController(t *testing.T) (*Controller, *fakeStore) {
 func ptrTime(value time.Time) *time.Time { return &value }
 
 func TestCopilotRuntimeCompatibilityPreview(t *testing.T) {
+	if !copilotplugins.RuntimeSupported("1.0.105") {
+		t.Skip("1.0.105 adapter qualification is scoped to linux/amd64")
+	}
 	ctrl, st := newCopilotCompatibilityController(t)
 
 	preview, err := ctrl.PreviewAgentUpdate(context.Background(), agents.CopilotACPAgentID, "1.0.105")
@@ -64,7 +68,7 @@ func TestCopilotRuntimeCompatibilityPreview(t *testing.T) {
 	if compatibility.Reason != "" {
 		t.Fatalf("supported target reason = %q, want empty", compatibility.Reason)
 	}
-	wantVersions := []string{"1.0.88", "1.0.104", "1.0.105"}
+	wantVersions := copilotplugins.SupportedRuntimeVersions()
 	if !reflect.DeepEqual(compatibility.SupportedVersions, wantVersions) {
 		t.Fatalf("supported versions = %v, want %v", compatibility.SupportedVersions, wantVersions)
 	}

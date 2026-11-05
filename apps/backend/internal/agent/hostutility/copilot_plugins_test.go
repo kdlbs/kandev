@@ -103,6 +103,9 @@ func TestCopilotPluginProfileUtility(t *testing.T) {
 }
 
 func TestCopilotPluginProfileUtilityRuntime105(t *testing.T) {
+	if !copilotplugins.RuntimeSupported("1.0.105") {
+		t.Skip("1.0.105 adapter qualification is scoped to linux/amd64")
+	}
 	configDir, runner := copilotUtilityFixture(t)
 	mgr := &Manager{}
 	mgr.SetCopilotPluginRunner(runner)

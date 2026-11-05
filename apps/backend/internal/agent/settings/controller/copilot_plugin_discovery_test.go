@@ -109,7 +109,8 @@ func TestCopilotPluginDiscoveryMountPermission(t *testing.T) {
 	if got.RuntimeVersion != "1.0.88" || !copilotplugins.RuntimeSupported(got.RuntimeVersion) {
 		t.Fatalf("discovery runtime = %q, want the supported default", got.RuntimeVersion)
 	}
-	if len(got.SupportedRuntimeVersions) != 3 || got.SupportedRuntimeVersions[0] != "1.0.88" {
+	if len(got.SupportedRuntimeVersions) != len(copilotplugins.SupportedRuntimeVersions()) ||
+		got.SupportedRuntimeVersions[0] != "1.0.88" {
 		t.Fatalf("supported runtime versions = %v", got.SupportedRuntimeVersions)
 	}
 	if len(runner.calls) != 1 {
@@ -140,7 +141,8 @@ func TestCopilotPluginDiscoveryReportsSupportedVersionsForUnsupportedRuntime(t *
 	if got.RuntimeVersion != "9.9.9" || got.MountPermitted {
 		t.Fatalf("runtime = %q mount permitted = %t", got.RuntimeVersion, got.MountPermitted)
 	}
-	if len(got.SupportedRuntimeVersions) != 3 || !copilotplugins.RuntimeSupported(got.SupportedRuntimeVersions[0]) {
+	if len(got.SupportedRuntimeVersions) != len(copilotplugins.SupportedRuntimeVersions()) ||
+		!copilotplugins.RuntimeSupported(got.SupportedRuntimeVersions[0]) {
 		t.Fatalf("supported runtime versions = %v", got.SupportedRuntimeVersions)
 	}
 	if len(runner.calls) != 0 {

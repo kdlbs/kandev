@@ -84,7 +84,6 @@ Qualified: <server list>
 Select a qualified runtime, or uncheck plugins and Save.
 [x] example
     Native status: unknown
-    Availability not checked
                                   [Reset] [Save]
 ```
 
@@ -97,7 +96,7 @@ Fresh observed disabled rows still say disabled. Copy is illustrative.
 From the repository root, with the task 01 workspace bootstrap complete:
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/agent/settings/controller ./internal/agent/settings/handlers -run '^TestCopilotPlugin' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/settings/controller ./internal/agent/settings/handlers -run '^TestCopilotPlugin' -count=1)
 (cd apps/web && pnpm exec vitest run components/settings/copilot-plugin-selection.test.ts components/settings/copilot-plugin-profile-selection.test.tsx hooks/domains/settings/use-copilot-plugin-discovery.test.tsx)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm exec oxlint -c oxlint.config.mjs --deny-warnings components/settings/copilot-plugin-selection.ts components/settings/copilot-plugin-profile-selection.tsx hooks/domains/settings/use-copilot-plugin-discovery.ts lib/types/copilot-plugin-discovery.ts)
@@ -168,8 +167,8 @@ lists `1.0.105` and explains the runtime warning and recovery.
 
 Evidence:
 
-- Controller discovery tests cover the shared supported list and an unsupported
-  runtime without native commands.
+- Controller discovery tests cover the platform-scoped shared supported list and
+  an unsupported runtime without native commands.
 - Selector/profile tests cover fresh unavailable roots, stale observations,
   missing identities, unknown native status, current-version recovery,
   missing metadata, wrapped launch context, legacy policy, and unknown-reason

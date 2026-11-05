@@ -258,7 +258,8 @@ decision; absence of a privileged test is not such a demonstration.
 ## Inventory-qualified subset
 
 This table preserves the original Linux results, not the later macOS
-observations or the revised target admission contract.
+observations, the 1.0.105 qualification above, or the revised target admission
+contract.
 
 | Capability | 1.0.88 | 1.0.103 | 1.0.104 |
 | --- | --- | --- | --- |
@@ -271,18 +272,20 @@ observations or the revised target admission contract.
 | Authenticated plugin/MCP use | Not observed | Supplied only | Not observed |
 | Native policy veto | Not observed | Not observed | Not observed |
 
-Inventory qualification: `1.0.88` and `1.0.104`. `1.0.103` remains unqualified
-because only supplied observations exist. Other versions return
-`runtime_unsupported`; Kandev does not fall back to a global CLI.
+Inventory qualification: `1.0.88` and `1.0.104` are unscoped. `1.0.105` is
+qualified on `linux/amd64` as recorded above. `1.0.103` and other versions
+remain unqualified and return `runtime_unsupported`; Kandev does not fall back
+to a global CLI.
 
 At the original baseline, mount permission was empty: `policyVerifiedVersions`
 rejected nonempty starts with `policy_unverified` before inventory/start.
 That AC-AGENTS-COPILOT-PLUGINS-007.2 gate is superseded by 007.6 and 005.8.
 Completion WO-04 removed it under native authority. Current preparation admits
-valid local/worktree selections for `1.0.88` and `1.0.104`, while retaining
-root, identity, executor, wrapper, and argument-conflict validation. Unknown
-versions remain unsupported. Preparation eligibility is not native policy
-approval or enterprise certification.
+valid local/worktree selections for `1.0.88` and `1.0.104` on every supported
+host and `1.0.105` on `linux/amd64`, while retaining root, identity, executor,
+wrapper, and argument-conflict validation. Other platforms and unknown versions
+remain unsupported. Preparation eligibility is not native policy approval or
+enterprise certification.
 
 ## Not exercised
 

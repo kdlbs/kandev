@@ -230,7 +230,6 @@ test("phone users can remove a saved selection when the runtime is unsupported",
       "Select a qualified runtime, or uncheck plugins and Save.",
     );
     await expect(selector.getByText("Native status: unknown")).toBeVisible();
-    await expect(selector.getByText("Availability not checked.", { exact: true })).toBeVisible();
     await expect(selector.getByTestId("copilot-plugins-start-blocked")).toBeVisible();
     await expect(spark).toHaveCount(1);
     await expect(spark).toBeChecked();

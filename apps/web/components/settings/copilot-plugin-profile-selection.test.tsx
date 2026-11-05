@@ -115,7 +115,6 @@ describe("CopilotPluginProfileSelection", () => {
     const { onSelectedPluginsChange } = renderSelection([sparkPluginId]);
     expect(screen.getByText(/Saved selection, availability not checked/)).toBeTruthy();
     expect(screen.getByText("Native status: unknown")).toBeTruthy();
-    expect(screen.getByText("Availability not checked.")).toBeTruthy();
     const checkbox = screen.getByRole("checkbox", { name: sparkCheckboxName });
     expect(checkbox.hasAttribute("disabled")).toBe(false);
     fireEvent.click(checkbox);

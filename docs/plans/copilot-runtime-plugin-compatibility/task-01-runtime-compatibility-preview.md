@@ -33,7 +33,8 @@ provider boundary, with an accurate count or unknown profile impact.
 ## In scope
 
 - Add `SupportedRuntimeVersions`, an independent ordered projection of the
-  exact map. Keep current admission unchanged in this work order.
+  exact map for the current host platform. Keep current admission unchanged in
+  this work order.
 - Add the response-only preview object and matching browser API type from the
   design's runtime amendment. Use the resolved target for explicit/default choices.
 - Count non-deleted concrete Copilot profiles with at least one selection,
@@ -85,13 +86,13 @@ From the repository root, after one workspace bootstrap if dependencies are abse
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/backend && go test -trimpath ./internal/agent/copilotplugins ./internal/agent/settings/controller ./internal/agent/settings/handlers -count=1)
-(cd apps/web && pnpm exec vitest run components/settings/agent-runtime-update-control.test.tsx components/settings/use-agent-update-dialog-state.test.ts hooks/domains/settings/use-agent-runtime-updates.test.tsx)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/copilotplugins ./internal/agent/settings/controller ./internal/agent/settings/handlers -count=1)
+(cd apps/web && pnpm exec vitest run components/settings/copilot-plugin-selection.test.ts components/settings/copilot-plugin-profile-selection.test.tsx components/settings/agent-runtime-update-copilot-compatibility.test.tsx components/settings/use-agent-update-dialog-state.test.ts hooks/domains/settings/use-copilot-plugin-discovery.test.tsx components/settings/agent-runtime-update-control.test.tsx)
 (cd apps/web && pnpm run typecheck)
-(cd apps/web && pnpm exec oxlint -c oxlint.config.mjs --deny-warnings components/settings/agent-runtime-update-control.tsx components/settings/runtime-version-summary.tsx components/settings/use-agent-update-dialog-state.ts hooks/domains/settings/use-agent-runtime-updates.ts lib/api/domains/agent-update-api.ts)
+(cd apps/web && pnpm exec oxlint -c oxlint.config.mjs --deny-warnings components/settings/agent-runtime-update-control.tsx components/settings/copilot-runtime-compatibility.tsx components/settings/agent-runtime-update-copilot-compatibility.test.tsx lib/api/domains/agent-update-api.ts)
 (cd apps/web && pnpm run i18n:zh-hant && pnpm run i18n:pseudo && pnpm run i18n:check && pnpm run i18n:ratchet)
-(cd apps/web && pnpm e2e:run --project chromium tests/settings/agent-runtime-update.spec.ts)
-(cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-agent-runtime-update.spec.ts)
+(cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/settings/agent-runtime-update-copilot.spec.ts tests/settings/copilot-profile-plugins.spec.ts)
+(cd apps/web && pnpm e2e:run --host --shards 1 --project mobile-chrome tests/settings/mobile-agent-runtime-update-copilot.spec.ts tests/settings/mobile-copilot-profile-plugins.spec.ts)
 bash scripts/lint-go-changed apps/backend/internal/agent/copilotplugins/context.go apps/backend/internal/agent/copilotplugins/runtime_compatibility_test.go apps/backend/internal/agent/settings/dto/dto.go apps/backend/internal/agent/settings/controller/agent_update.go apps/backend/internal/agent/settings/controller/runtime_copilot_compatibility.go apps/backend/internal/agent/settings/controller/runtime_copilot_compatibility_test.go apps/backend/internal/agent/settings/handlers/runtime_copilot_compatibility_test.go
 git diff --check
 ```
@@ -108,10 +109,10 @@ Managed E2E commands run sequentially and rebuild the assets they test.
 - `apps/backend/internal/agent/settings/controller/agent_update.go` and new `runtime_copilot_compatibility.go` / `runtime_copilot_compatibility_test.go`.
 - New `apps/backend/internal/agent/settings/handlers/runtime_copilot_compatibility_test.go`.
 - `apps/web/lib/api/domains/agent-update-api.ts`.
-- `apps/web/components/settings/agent-runtime-update-control.tsx`, its test, and `runtime-version-summary.tsx` if needed.
+- `apps/web/components/settings/agent-runtime-update-control.tsx`, `copilot-runtime-compatibility.tsx`, and their tests.
 - `apps/web/components/settings/use-agent-update-dialog-state.test.ts` and its hook only if target fencing needs a correction.
 - `apps/web/hooks/domains/settings/use-agent-runtime-updates.test.tsx` and its API hook if response handling needs a correction.
-- `apps/web/e2e/tests/settings/agent-runtime-update-helpers.ts`, `agent-runtime-update.spec.ts`, and `mobile-agent-runtime-update.spec.ts`.
+- `apps/web/e2e/tests/settings/agent-runtime-update-helpers.ts`, `agent-runtime-update-copilot.spec.ts`, and `mobile-agent-runtime-update-copilot.spec.ts`.
 - `apps/web/src/locales/{en,pt-pt,zh-cn,zh-hk,zh-tw,ja,ko,pseudo}/agents.json`.
 
 New test paths are proposed outputs; all other paths exist at the planning baseline.

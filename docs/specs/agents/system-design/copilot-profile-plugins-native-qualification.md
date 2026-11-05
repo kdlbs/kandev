@@ -46,15 +46,17 @@ recovery, and exact `1.0.105` admission described here.
 
 `copilotplugins.RuntimeSupported` remains the admission predicate.
 Add `SupportedRuntimeVersions() []string` beside it, derived from the same
-exact-version inventory set. Return an independent, deterministically ordered
-slice. Discovery, runtime previews, and recovery must not maintain another list.
+exact-version inventory set and filtered to the current host platform. Return
+an independent, deterministically ordered slice. Discovery, runtime previews,
+and recovery must not maintain another list.
 
 `1.0.105` was added only after the exact managed npm package passed adapter
-checks with disposable native fixtures. Those checks cover inventory containers,
-native installation metadata, matching manifests, and repeated `--plugin-dir`
-arguments, including a special-character path. Native-written installation
-evidence agrees with Kandev resolution; a hand-written compatible JSON fixture
-alone does not qualify the adapter.
+checks with disposable native fixtures on `linux/amd64`. Those checks cover
+inventory containers, native installation metadata, matching manifests, and
+repeated `--plugin-dir` arguments, including a special-character path.
+Native-written installation evidence agrees with Kandev resolution; a
+hand-written compatible JSON fixture alone does not qualify the adapter. Other
+platforms remain unsupported until separately qualified.
 
 Use the existing evidence ledger. A focused `copilot_native` adapter test can
 exercise this contract without model prompts or enterprise-policy fixtures.
@@ -150,9 +152,10 @@ Chinese/pseudo catalogs. The plan and UI work orders contain structural views.
 
 ## Evidence baseline
 
-The inventory adapter supports `1.0.88`, `1.0.104`, and `1.0.105`. WO-04
-removed the empty `policyVerifiedVersions` gate and `RequireMountPolicy`. Mount
-preparation uses the same supported-version predicate as discovery, not
+The inventory adapter supports `1.0.88` and `1.0.104` on every supported host,
+and `1.0.105` on `linux/amd64`. WO-04 removed the empty
+`policyVerifiedVersions` gate and `RequireMountPolicy`. Mount preparation uses
+the same platform-scoped supported-version predicate as discovery, not
 privileged qualification results. The focused Linux x64 adapter test recorded
 exact package identity, a successful fresh inventory, a native-written remote
 marketplace install with `config.json` installed metadata and a

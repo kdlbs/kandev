@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
+	"github.com/tailscale/hujson"
 )
 
 const nativeAdapterVersion = "1.0.105"
@@ -65,6 +67,9 @@ func TestCopilotPluginNativeAdapterAcceptance(t *testing.T) {
 	}
 	if version != nativeAdapterVersion {
 		t.Fatalf("%s must select exactly %s for this adapter acceptance test", nativeVersionEnv, nativeAdapterVersion)
+	}
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("1.0.105 adapter qualification is scoped to linux/amd64")
 	}
 	artifactRoot := strings.TrimSpace(os.Getenv(nativeArtifactsEnv))
 	if artifactRoot == "" {
@@ -248,9 +253,14 @@ func TestCopilotPluginNativeAdapterAcceptance(t *testing.T) {
 	if !filepath.IsAbs(installedRoot) {
 		t.Fatalf("installed root = %q, want an absolute native cache path", installedRoot)
 	}
+	installedVersion, err := nativeAdapterInstalledVersion(configDir, "copilot-plugins", "build-perf-cpp")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if name, version, err := nativeAdapterManifest(installedRoot); err != nil ||
-		name != "build-perf-cpp" || version != "1.0.0" {
-		t.Fatalf("installed manifest = %s %s err=%v root=%s", name, version, err, installedRoot)
+		name != "build-perf-cpp" || version != installedVersion {
+		t.Fatalf("installed manifest = %s %s err=%v root=%s, want version %s",
+			name, version, err, installedRoot, installedVersion)
 	}
 	livePrepared, err := copilotplugins.ResolveLaunchSelection(
 		context.Background(), productionRunner, launch, []string{"live:fixture-market/harness"},
@@ -357,6 +367,33 @@ func createNativeAdapterMarketplace(runtimeRoot string) (string, string, error) 
 		return "", "", err
 	}
 	return marketplaceRoot, pluginRoot, nil
+}
+
+func nativeAdapterInstalledVersion(configDir, marketplace, name string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(configDir, "config.json"))
+	if err != nil {
+		return "", err
+	}
+	standardized, err := hujson.Standardize(data)
+	if err != nil {
+		return "", err
+	}
+	var config struct {
+		InstalledPlugins []struct {
+			Name        string `json:"name"`
+			Marketplace string `json:"marketplace"`
+			Version     string `json:"version"`
+		} `json:"installedPlugins"`
+	}
+	if err := json.Unmarshal(standardized, &config); err != nil {
+		return "", err
+	}
+	for _, entry := range config.InstalledPlugins {
+		if entry.Name == name && entry.Marketplace == marketplace && entry.Version != "" {
+			return entry.Version, nil
+		}
+	}
+	return "", fmt.Errorf("native installation metadata did not name %s@%s", name, marketplace)
 }
 
 func nativeAdapterManifest(pluginRoot string) (string, string, error) {

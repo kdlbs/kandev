@@ -274,7 +274,6 @@ test("shows current runtime recovery and unknown native status without losing th
       "Select a qualified runtime, or uncheck plugins and Save.",
     );
     await expect(selector.getByText("Native status: unknown")).toBeVisible();
-    await expect(selector.getByText("Availability not checked.", { exact: true })).toBeVisible();
     const spark = selector.getByRole("checkbox", { name: "Select spark" });
     await expect(spark).toBeChecked();
     await expect(spark).not.toHaveAttribute("disabled", "");
