@@ -509,7 +509,8 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	if data.TaskID == "" {
 		return s.handleTasklessAgentCompleted(ctx, data)
 	}
-	if lifecycleEventRunID(*data) == "" && s.hasPendingAgentFailure(data.SessionID) {
+	eventRunID := lifecycleEventRunID(*data)
+	if eventRunID == "" && s.hasPendingAgentFailure(data.SessionID) {
 		// A completion without an event run identity would resolve through
 		// the task-and-agent fallback, which cannot prove it belongs to the
 		// run that currently owns the reused session. While a failure is
@@ -544,7 +545,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 			// A stale/duplicate completion still consumes only the parked
 			// failure that belongs to the completing run; another run's
 			// failure on the same reused session must survive.
-			s.dropPendingAgentFailure(data.SessionID, data.RunID)
+			s.dropPendingAgentFailure(data.SessionID, eventRunID)
 			if exactRunSessionEvent(data) {
 				return nil
 			}
@@ -562,14 +563,14 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	}
 	// A delayed legacy stop must not resolve through a successor's claim on
 	// the same persistent task/agent session.
-	if data.RunID == "" && run.ClaimedAt != nil && !event.Timestamp.IsZero() &&
+	if eventRunID == "" && run.ClaimedAt != nil && !event.Timestamp.IsZero() &&
 		event.Timestamp.Before(*run.ClaimedAt) {
 		return nil
 	}
 	// Only the event's own run identity may consume the parked failure. The
 	// task-and-agent fallback used for legacy events does not prove which run
 	// completed, so it leaves another run's parked failure in place.
-	s.dropPendingAgentFailure(data.SessionID, data.RunID)
+	s.dropPendingAgentFailure(data.SessionID, eventRunID)
 	return s.completeClaimedTaskRun(ctx, run, *data)
 }
 
