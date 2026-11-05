@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-08-07
-updated: 2026-11-03
+updated: 2026-11-04
 owners:
   - kandev
 ---
@@ -29,13 +29,7 @@ Agents owns that meaning. The shared UI renders the normalized data.
 
 ### REQ-AGENTS-DYNAMIC-PROVIDER-OPTIONS-001: Dynamic Provider Model Options
 
-**Intent:** Provider capabilities are not always properties of an agent family alone. Some ACP
-providers change the available configuration options when a model is selected. OpenCode currently
-demonstrates this split: the task chat selector receives model-dependent options such as reasoning
-effort from the live session, while the workflow session override editor and the OpenCode agent
-profile editor only have the agent-level capability snapshot. The settings surfaces therefore show
-the model but omit valid dependent options. Kandev needs one provider-neutral contract that works
-for OpenCode and future providers without maintaining a list of provider-specific option names.
+**Intent:** Settings users can discover the selected model's provider options through one shared contract.
 
 #### Acceptance criteria
 
@@ -61,6 +55,9 @@ for OpenCode and future providers without maintaining a list of provider-specifi
   Settings discovery shall retain its existing transient cache lifetime.
 - **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-002.4:** The shared catalog shall accept only bounded presentation data.
   Invalid richer metadata shall retain the ordinary exact-model selection path without executable metadata or inferred billing information.
+- **AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-002.5:** An ordinary group containing one model shall show one model row without a redundant heading.
+  Descriptions, order, distinct occurrences, and useful path context shall remain available.
+  Multi-choice groups and verified compositions shall retain their presentation, including during search.
 
 ### REQ-AGENTS-DYNAMIC-PROVIDER-OPTIONS-003: Exact composed-model selection
 
@@ -376,4 +373,5 @@ task session, change an agent profile, or mutate provider configuration.
 
 - [Grouped/composed model design](../system-design/grouped-model-catalog.md)
 - [Combined Devin delivery plan for issues #5023 and #5026](../../../plans/first-draft-profile-discovery/plan.md)
+- [Selector repair for issue #5053](../../../plans/model-catalog-selector-repair/plan.md)
 - [Configuration summary and attribution contract](../../ui/requirements/acp-model-configuration-summary.md)
