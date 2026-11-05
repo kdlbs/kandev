@@ -147,13 +147,12 @@ func TestCopilotPluginNativeAdapterAcceptance(t *testing.T) {
 
 	productionRunner := &nativeAdapterRunner{baseEnv: env, captureDir: paths.captureRoot}
 	launch := copilotplugins.LaunchContext{
-		AgentType:        copilotplugins.ProviderID,
-		ExecutorType:     "local",
-		Env:              map[string]string{"HOME": homeDir, "USERPROFILE": homeDir, "COPILOT_HOME": configDir, "PATH": os.Getenv("PATH")},
-		WorkDir:          paths.workspace,
-		RuntimeVersion:   version,
-		RuntimeCommand:   runtimeCommand,
-		InventoryTimeout: 2 * time.Minute,
+		AgentType:      copilotplugins.ProviderID,
+		ExecutorType:   "local",
+		Env:            map[string]string{"HOME": homeDir, "USERPROFILE": homeDir, "COPILOT_HOME": configDir, "PATH": os.Getenv("PATH")},
+		WorkDir:        paths.workspace,
+		RuntimeVersion: version,
+		RuntimeCommand: runtimeCommand,
 	}
 	discover := func(target copilotplugins.LaunchContext) copilotplugins.Snapshot {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

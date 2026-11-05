@@ -1,53 +1,27 @@
 package copilotplugins
 
-import (
-	"reflect"
-	"runtime"
-	"testing"
-)
+import "testing"
 
-func TestSupportedRuntimeVersions(t *testing.T) {
-	want := []string{"1.0.88", "1.0.104"}
-	if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
-		want = append(want, "1.0.105")
+func TestHelpAdvertisesPluginDirOption(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{name: "separate argument", text: "Options:\n  --plugin-dir <path>  Load plugin directories\n", want: true},
+		{name: "equals argument", text: "Options:\n  --plugin-dir=<path>  Load plugin directories\n", want: true},
+		{name: "prose token", text: "Use --plugin-dir to load one or more directories.", want: false},
+		{name: "option after prose", text: "Options include --plugin-dir <path>.", want: false},
+		{name: "partial token", text: "  --plugin-directory <path>  Load plugin directories\n", want: false},
+		{name: "missing argument", text: "  --plugin-dir  Load plugin directories\n", want: false},
+		{name: "incomplete equals token", text: "  --plugin-dir=\n", want: false},
+		{name: "invalid utf8", text: string([]byte{'-', '-', 'p', 'l', 'u', 'g', 'i', 'n', '-', 'd', 'i', 'r', 0xff}), want: false},
 	}
-	if got := SupportedRuntimeVersions(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("SupportedRuntimeVersions() = %v, want %v", got, want)
-	}
-	for _, version := range want {
-		if !RuntimeSupported(version) {
-			t.Fatalf("RuntimeSupported(%q) = false, want true", version)
-		}
-	}
-	if RuntimeSupported("") || RuntimeSupported("9.9.9") {
-		t.Fatal("unsupported versions must not be admitted")
-	}
-}
-
-func TestRuntimeSupportedOnScopesPlatformEvidence(t *testing.T) {
-	if !RuntimeSupportedOn("1.0.105", "linux", "amd64") {
-		t.Fatal("1.0.105 must be qualified on linux/amd64")
-	}
-	for _, platform := range [][2]string{{"darwin", "arm64"}, {"windows", "amd64"}, {"linux", "arm64"}} {
-		if RuntimeSupportedOn("1.0.105", platform[0], platform[1]) {
-			t.Fatalf("1.0.105 must not be admitted on %s/%s", platform[0], platform[1])
-		}
-	}
-	if !RuntimeSupportedOn("1.0.104", "darwin", "arm64") {
-		t.Fatal("unscoped qualified versions must remain available on every platform")
-	}
-}
-
-func TestSupportedRuntimeVersionsReturnsIndependentSlice(t *testing.T) {
-	versions := SupportedRuntimeVersions()
-	if len(versions) == 0 {
-		t.Fatal("SupportedRuntimeVersions() is empty")
-	}
-	versions[0] = "9.9.9"
-	if RuntimeSupported("9.9.9") {
-		t.Fatal("mutating the returned slice changed runtime admission")
-	}
-	if !RuntimeSupported("1.0.88") {
-		t.Fatal("mutating the returned slice removed a qualified runtime")
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := helpAdvertisesPluginDir([]byte(test.text)); got != test.want {
+				t.Fatalf("helpAdvertisesPluginDir(%q) = %v, want %v", test.text, got, test.want)
+			}
+		})
 	}
 }

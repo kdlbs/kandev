@@ -32,9 +32,7 @@ function targetedPreview(targetVersion: string, selectedProfileCount: number): A
     target_version: targetVersion,
     copilot_plugin_compatibility: {
       runtime_version: targetVersion,
-      supported: false,
-      supported_versions: ["0.62.0"],
-      reason: "runtime_unsupported",
+      state: "not_checked",
       selected_profile_count: selectedProfileCount,
     },
   };

@@ -4,10 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
+	"strings"
 	"testing"
 
-	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 )
 
@@ -30,14 +29,14 @@ func TestCopilotRuntimeCompatibilityPreviewHandlerContract(t *testing.T) {
 	if compatibility == nil {
 		t.Fatal("Copilot preview omitted plugin compatibility")
 	}
-	if compatibility.RuntimeVersion != "1.1.0" || compatibility.Supported {
+	if compatibility.RuntimeVersion != "1.1.0" || compatibility.State != "not_checked" {
 		t.Fatalf("compatibility = %#v", compatibility)
 	}
-	if compatibility.Reason != "runtime_unsupported" {
-		t.Fatalf("reason = %q, want runtime_unsupported", compatibility.Reason)
+	if compatibility.Reason != "" {
+		t.Fatalf("reason = %q, want none without a concrete check", compatibility.Reason)
 	}
-	if !reflect.DeepEqual(compatibility.SupportedVersions, copilotplugins.SupportedRuntimeVersions()) {
-		t.Fatalf("supported versions = %v", compatibility.SupportedVersions)
+	if strings.Contains(response.Body.String(), "supported_versions") {
+		t.Fatalf("preview projected a runtime qualification list: %s", response.Body.String())
 	}
 	if compatibility.SelectedProfileCount != nil {
 		t.Fatalf("selected profile count = %d, want null without a repository", *compatibility.SelectedProfileCount)

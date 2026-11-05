@@ -88,7 +88,7 @@ func TestCopilotPluginInitialPassthroughStartsSupportedSelection(t *testing.T) {
 	))
 	version, ok := copilotplugins.RuntimeVersionFromCommand(pty.startReq.Command)
 	require.True(t, ok, "passthrough command must carry the selected managed runtime")
-	require.True(t, copilotplugins.RuntimeSupported(version), "selected runtime %q must be supported", version)
+	require.Equal(t, "1.0.88", version, "passthrough command must retain the selected runtime")
 }
 
 func TestCopilotPluginInitialPassthroughEmptySelectionStarts(t *testing.T) {

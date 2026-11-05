@@ -36,18 +36,29 @@ func (r *copilotSelectionReader) Get(context.Context, string, string) (managedru
 }
 
 type copilotPluginRunner struct {
-	stdout  []byte
-	err     error
-	calls   [][]string
-	envs    []map[string]string
-	dirs    []string
-	started chan struct{}
-	release chan struct{}
-	onRun   func()
-	once    sync.Once
+	stdout        []byte
+	err           error
+	calls         [][]string
+	helpCalls     [][]string
+	helpOutput    []byte
+	helpOutputSet bool
+	envs          []map[string]string
+	dirs          []string
+	started       chan struct{}
+	release       chan struct{}
+	onRun         func()
+	once          sync.Once
 }
 
 func (r *copilotPluginRunner) Run(_ context.Context, argv []string, env map[string]string, workDir string) (copilotplugins.CommandResult, error) {
+	if containsSequence(argv, "--help") {
+		r.helpCalls = append(r.helpCalls, append([]string{}, argv...))
+		output := []byte("Options:\n  --plugin-dir <path>  Load plugin directories\n")
+		if r.helpOutputSet {
+			output = r.helpOutput
+		}
+		return copilotplugins.CommandResult{Stdout: output}, nil
+	}
 	r.calls = append(r.calls, append([]string{}, argv...))
 	r.envs = append(r.envs, cloneStringMap(env))
 	r.dirs = append(r.dirs, workDir)
@@ -235,9 +246,6 @@ func TestCopilotPluginRuntimeSnapshotNotReread(t *testing.T) {
 }
 
 func TestCopilotPluginRuntime105Preparation(t *testing.T) {
-	if !copilotplugins.RuntimeSupported("1.0.105") {
-		t.Skip("1.0.105 adapter qualification is scoped to linux/amd64")
-	}
 	root, configDir, runner := copilotPluginFixture(t)
 	selection := &copilotSelectionReader{version: "1.0.105"}
 	mgr := newCopilotLifecycleManager(t, copilotLaunchProfile(), selection)

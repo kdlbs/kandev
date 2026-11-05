@@ -27,48 +27,35 @@ export function CopilotRuntimeCompatibilityNotice({
   const { t } = useTranslation();
   if (agentName !== COPILOT_AGENT_NAME) return null;
   const testId = `agent-update-copilot-compatibility-${agentName}`;
-  if (!compatibility) {
-    return (
-      <p className="break-words text-xs text-muted-foreground" role="status" data-testid={testId}>
-        {t("agents:copilotRuntimeCompatibilityUnavailable")}
-      </p>
-    );
-  }
-  const versions =
-    compatibility.supported_versions.length > 0
-      ? compatibility.supported_versions.join(", ")
-      : t("common:unknown");
+  const state = compatibility?.state ?? "not_checked";
+  const version = compatibility?.runtime_version ?? t("common:unknown");
+  const profileCount = compatibility?.selected_profile_count ?? null;
   return (
     <div
       className="space-y-1 rounded-md border bg-muted/30 p-2 text-xs"
       role="status"
       data-testid={testId}
-      data-supported={compatibility.supported}
+      data-state={state}
     >
-      {compatibility.supported ? (
-        <p>
-          {t("agents:copilotRuntimePluginSupported", { version: compatibility.runtime_version })}
-        </p>
-      ) : (
-        <>
-          <p className="font-medium">
-            {t("agents:copilotPluginsRuntimeUnavailableTitle", {
-              version: compatibility.runtime_version,
-            })}
-          </p>
-          <p className="text-muted-foreground">
-            {t("agents:copilotRuntimePluginUnavailableReason")}
-          </p>
-          <p data-testid={`${testId}-profiles`}>
-            {affectedProfilesText(t, compatibility.selected_profile_count)}
-          </p>
-          <p>{t("agents:copilotPluginsRuntimeQualified", { versions })}</p>
-          <p className="text-muted-foreground">{t("agents:copilotPluginsRuntimeRecovery")}</p>
-        </>
-      )}
-      {compatibility.supported ? (
-        <p>{t("agents:copilotPluginsRuntimeQualified", { versions })}</p>
-      ) : null}
+      <p className={state === "not_checked" ? "font-medium" : undefined}>
+        {compatibilityMessage(t, state, version)}
+      </p>
+      <p data-testid={`${testId}-profiles`}>{affectedProfilesText(t, profileCount)}</p>
     </div>
   );
+}
+
+function compatibilityMessage(
+  t: ReturnType<typeof useTranslation>["t"],
+  state: NonNullable<CopilotPluginCompatibility["state"]>,
+  version: string,
+): string {
+  switch (state) {
+    case "compatible":
+      return t("agents:copilotRuntimePluginAdvertised", { version });
+    case "incompatible":
+      return t("agents:copilotRuntimePluginNotAdvertised", { version });
+    case "not_checked":
+      return t("agents:copilotRuntimeCompatibilityNotChecked", { version });
+  }
 }

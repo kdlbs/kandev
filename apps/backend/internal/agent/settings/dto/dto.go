@@ -539,15 +539,14 @@ type AgentUpdatePreviewDTO struct {
 	CopilotPluginCompatibility *CopilotPluginCompatibilityDTO `json:"copilot_plugin_compatibility,omitempty"`
 }
 
-// CopilotPluginCompatibilityDTO is the read-only runtime plugin preparation
-// projection for the built-in Copilot managed package. It reports preparation
-// eligibility, not native policy, authentication, or root availability.
+// CopilotPluginCompatibilityDTO is the read-only plugin compatibility
+// projection for the built-in Copilot managed package. Agent-wide preview has
+// no concrete profile context and therefore normally remains unchecked.
 type CopilotPluginCompatibilityDTO struct {
-	RuntimeVersion       string   `json:"runtime_version"`
-	Supported            bool     `json:"supported"`
-	SupportedVersions    []string `json:"supported_versions"`
-	Reason               string   `json:"reason,omitempty"`
-	SelectedProfileCount *int     `json:"selected_profile_count"`
+	RuntimeVersion       string `json:"runtime_version"`
+	State                string `json:"state"`
+	Reason               string `json:"reason,omitempty"`
+	SelectedProfileCount *int   `json:"selected_profile_count"`
 }
 
 // AgentUpdateVersionDTO is one stable, selectable package version.

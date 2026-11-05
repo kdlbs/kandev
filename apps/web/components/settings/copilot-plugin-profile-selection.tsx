@@ -32,9 +32,9 @@ function selectionBlocksStart(
   response: CopilotPluginDiscoveryResponse | undefined,
   selectedCount: number,
 ): boolean {
-  if (selectedCount === 0 || stale || !response) return false;
-  if (status !== "ready" && status !== "unsupported") return false;
-  return response.mount_permitted === false;
+  if (selectedCount === 0 || stale || !response || status !== response.status) return false;
+  if (status === "ready") return response.mount_permitted === false;
+  return true;
 }
 
 export function CopilotPluginProfileSelection({
@@ -194,13 +194,6 @@ function DiscoveryStatus({
       </p>
     );
   }
-  if (status === "unavailable") {
-    return (
-      <p className="text-xs text-destructive" role="status" data-testid="copilot-plugins-failed">
-        {t("agents:copilotPluginsFailed")}
-      </p>
-    );
-  }
   if (stale) {
     return (
       <p
@@ -212,8 +205,24 @@ function DiscoveryStatus({
       </p>
     );
   }
+  if (status === "unavailable") {
+    return (
+      <div className="space-y-1 text-xs" role="status" data-testid="copilot-plugins-failed">
+        <SelectedRuntimeLabel
+          response={response}
+          currentObservation={status === response?.status}
+        />
+        <p className="text-destructive">{unavailableReasonText(t, response)}</p>
+      </div>
+    );
+  }
   if (status === "unsupported") {
-    return <UnsupportedRuntimeStatus response={response} />;
+    return (
+      <UnsupportedRuntimeStatus
+        response={response}
+        currentObservation={status === response?.status}
+      />
+    );
   }
   if (isEmpty) {
     return (
@@ -229,35 +238,33 @@ function DiscoveryStatus({
   return null;
 }
 
-function UnsupportedRuntimeStatus({ response }: { response?: CopilotPluginDiscoveryResponse }) {
+function UnsupportedRuntimeStatus({
+  response,
+  currentObservation,
+}: {
+  response?: CopilotPluginDiscoveryResponse;
+  currentObservation: boolean;
+}) {
   const { t } = useTranslation();
-  const version = response?.runtime_version?.trim() ?? "";
-  const qualified = response?.supported_runtime_versions ?? [];
-  if (response?.reason === "runtime_unsupported" && version) {
-    return (
-      <div className="space-y-1 text-xs" role="status" data-testid="copilot-plugins-unsupported">
-        <p className="font-medium text-destructive">
-          {t("agents:copilotPluginsRuntimeUnavailableTitle", { version })}
-        </p>
-        <p className="text-muted-foreground">
-          {t("agents:copilotPluginsRuntimeUnavailableReason")}
-        </p>
-        {qualified.length > 0 ? (
-          <p>{t("agents:copilotPluginsRuntimeQualified", { versions: qualified.join(", ") })}</p>
-        ) : null}
-        <p>{t("agents:copilotPluginsRuntimeRecovery")}</p>
-      </div>
-    );
-  }
   return (
-    <p
-      className="text-xs text-muted-foreground"
-      role="status"
-      data-testid="copilot-plugins-unsupported"
-    >
-      {unsupportedReasonText(t, response)}
-    </p>
+    <div className="space-y-1 text-xs" role="status" data-testid="copilot-plugins-unsupported">
+      <SelectedRuntimeLabel response={response} currentObservation={currentObservation} />
+      <p className="text-muted-foreground">{unsupportedReasonText(t, response)}</p>
+    </div>
   );
+}
+
+function SelectedRuntimeLabel({
+  response,
+  currentObservation,
+}: {
+  response?: CopilotPluginDiscoveryResponse;
+  currentObservation: boolean;
+}) {
+  const { t } = useTranslation();
+  const version = response?.runtime_version?.trim();
+  if (!currentObservation || !version) return null;
+  return <p className="font-medium">{t("agents:copilotPluginsSelectedRuntime", { version })}</p>;
 }
 
 function unsupportedReasonText(
@@ -265,8 +272,10 @@ function unsupportedReasonText(
   response?: CopilotPluginDiscoveryResponse,
 ): string {
   switch (response?.reason) {
+    case "plugin_loading_unsupported":
+      return t("agents:copilotPluginsLoadingUnsupported");
     case "runtime_unsupported":
-      return t("agents:copilotPluginsRuntimeFallback");
+      return t("agents:copilotPluginsLegacyRuntimeUnsupported");
     case "unsupported_launch_context":
       return t("agents:copilotPluginsLaunchContextReason");
     case "policy_unverified":
@@ -275,6 +284,21 @@ function unsupportedReasonText(
       return t("agents:copilotPluginsUnsupported");
     default:
       return t("agents:copilotPluginsUnknownReason");
+  }
+}
+
+function unavailableReasonText(
+  t: ReturnType<typeof useTranslation>["t"],
+  response?: CopilotPluginDiscoveryResponse,
+): string {
+  switch (response?.reason) {
+    case "invalid_inventory":
+    case "legacy_errors":
+      return t("agents:copilotPluginsInventoryInvalid");
+    case "output_limit":
+      return t("agents:copilotPluginsInventoryLimit");
+    default:
+      return t("agents:copilotPluginsFailed");
   }
 }
 

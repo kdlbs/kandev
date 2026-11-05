@@ -1,6 +1,6 @@
 ---
 created: 2026-11-05
-status: implemented
+status: done
 requirements:
   - REQ-AGENTS-COPILOT-PLUGINS-001
   - REQ-AGENTS-COPILOT-PLUGINS-002
@@ -12,6 +12,7 @@ requirements:
 system_design:
   - ../../specs/agents/system-design/copilot-profile-plugins.md
   - ../../specs/agents/system-design/copilot-profile-plugins-native-qualification.md
+  - ../../specs/agents/system-design/copilot-plugin-contract-compatibility.md
 legacy_specs: []
 ---
 
@@ -21,11 +22,64 @@ legacy_specs: []
 
 Repair [issue #5064](https://github.com/kdlbs/kandev/issues/5064): an operator can
 activate Copilot `1.0.105`, but saved plugin selections then block new processes.
-Expose compatibility before runtime approval, qualify the exact new adapter,
-and show accurate profile recovery on desktop and phone.
+Admit compatible selected runtimes through actual capability and format checks.
+Show unchecked update compatibility honestly, preserve every saved selection,
+and retain safe plugin startup causes after reload on desktop and phone.
 
-All three work orders are implemented. Production and permanent test changes
-were applied after the package's design handoff.
+Original work orders 01 through 03 are implemented. The user authorized
+implementation of work orders 04 and 05 with a 6 Luna Max worker and this
+session as coordinator. Work orders 04 and 05 are done, executed sequentially.
+
+## Confirmed direction change, 2026-11-05
+
+The user confirmed the [new issue comment](https://github.com/kdlbs/kandev/issues/5064#issuecomment-6660108800):
+plugin admission follows observed capability, inventory, and installation
+contracts. New compatible versions must work without another version constant.
+The [accepted ADR](../../decisions/2026-11-05-copilot-plugin-contract-admission.md)
+and [new design](../../specs/agents/system-design/copilot-plugin-contract-compatibility.md)
+supersede exact-version/platform certification in the original package.
+
+The intermediate PR #5078 at `a36f65b281a438ff6b377f42ae59268a2eaa953a`
+adds 1.0.105 qualification only for Linux x64. Its platform map still rejects
+Mac arm64 before observing native compatibility. It does not complete the revised issue criteria.
+
+New scope:
+
+- Task 04 removes version/platform admission maps, adds bounded actual-runtime
+  capability checks, retains strict production adapters, and makes preview honestly unchecked.
+- Task 05 preserves safe plugin preparation reasons through bootstrap wrapping
+  into durable task/session feedback, including ordinary and MCP-created starts.
+- Keep exact managed runtimes, defaults, identity/root/manifest checks,
+  executor restrictions, selection intent, and native policy authority.
+
+Order: 04 then 05, sequentially. The user authorized a native 6 Luna Max worker
+on 2026-11-05. The coordinator owns artifact status and integration judgment.
+Earlier delivery evidence remains historical.
+
+UI-03: runtime preview shows the target, unchecked plugin compatibility, and
+saved-profile count before Update. Desktop keeps its dialog; phone keeps its
+bottom drawer. Profile failures identify actual capability/schema/root reasons.
+UI-04: the existing task recovery card shows the safe plugin cause, runtime,
+and recovery after reload. Both views wrap inline and retain current scroll owners and safe-area actions.
+Work orders contain the corresponding structural previews and exact commands.
+
+Tests map new 005.11/005.12/005.13 and 006.11 to task 04; task 05 owns 006.12.
+Positive cases use an unfamiliar compatible version through host-native launch
+contexts and prove admission has no platform-certification predicate. Darwin
+native execution remains not run without a matching host; no simulation switch is added.
+Negative cases cover absent native loading capability, incompatible schemas,
+mixed selected sets, stale observations, cancellation, and private-data exclusion.
+
+The earlier design turn ran only catalog/specification lint and reference/
+whitespace checks. The later explicit authorization now includes the work
+orders' TDD, native, and desktop/phone validation.
+
+Design validation passed: 432 decisions and 1921 specifications, all-spec
+lint, 23 added relative links, and whitespace. The two new work orders have
+25 valid acceptance references, complete design/plan coverage, and valid dependencies.
+The actual nine-path PR-documentation preflight is documentation-only and exempt.
+No production code, permanent tests, commits, or PR content changed in that
+design-only extension. Current implementation results are recorded below.
 
 ## Confirmed root cause and evidence
 
@@ -48,7 +102,7 @@ not prove upstream incompatibility or qualify `1.0.105`.
 identities without inventory. `PluginMetadata` then labels those rows disabled.
 The profile warning ignores the response's version and bounded failure reason.
 
-## Requirement conformance and assumptions
+## Original requirement conformance and assumptions
 
 Agents owns this repair because it owns profile plugin preparation and managed
 runtime identity. Adjacent Platform settings parity and UI control sizing are
@@ -71,6 +125,9 @@ native-status claims. Native compatibility is an evidence prerequisite for
 work order 02, not an unanswered product choice.
 
 ## Scope
+
+The following records original work orders 01 through 03. The confirmed
+direction change above defines the additional current scope.
 
 ### In scope
 
@@ -240,10 +297,13 @@ projects sequentially through the managed runner with fresh builds.
 - [x] [Task 01: Expose Copilot runtime plugin impact](task-01-runtime-compatibility-preview.md)
 - [x] [Task 02: Qualify and admit Copilot 1.0.105](task-02-qualify-runtime-105.md)
 - [x] [Task 03: Correct profile compatibility recovery](task-03-profile-recovery.md)
+- [x] [Task 04: Admit through observed contracts](task-04-contract-admission.md)
+- [x] [Task 05: Preserve actionable startup failures](task-05-durable-plugin-failures.md)
 
-Default order: 01, 02, 03. Task 02 and task 03 each required 01. Native
+Original order: 01, 02, 03. Task 02 and task 03 each required 01. Native
 artifacts became available, so task 02 completed rather than remaining blocked.
-No delegation or parallel execution was used.
+Those original work orders used no delegation or parallel execution. The
+authorized native worker now executes 04 then 05 sequentially.
 
 ## Companion records
 
@@ -254,6 +314,32 @@ The parent design links this package, and the native-authority design owns the
 technical amendment. Public support guidance changes with task 03.
 
 ## Verification results
+
+Task 04 is done. Its Results record causal provider/UI Red, final targeted Go
+Green, 55 Vitest tests across five files, fresh desktop 10/10 and phone 6/6
+E2E, Linux/amd64 native 1.0.105 acceptance, typecheck/i18n, complete changed-Go
+and TS lint, and public-doc checks. Darwin native execution is not run.
+Task 05 is done. Its Results record causal bootstrap Red, final provider,
+lifecycle, model, and orchestrator Green, 50 frontend tests, typecheck/i18n,
+and fresh final-source desktop 1/1 plus phone 1/1. The shared production path
+tests include ordinary starts, both actual MCP request sequences, durable
+reload, status summary, transcript privacy, and stale-attempt fencing.
+They do not invoke the MCP handler itself. Complete lint covered 34 Go and
+23 TypeScript source/test/E2E paths. Public-doc tests passed 63/63 and content
+validation accepted 55 pages.
+
+Coordinator gates passed: catalog (432 decisions and 1921 specifications),
+all-spec lint, full local PR-documentation coverage (94 paths, five work orders,
+61 acceptance references, ten referenced documents, and valid dependencies),
+81 relative file targets in 14 Markdown files, and tracked/untracked whitespace.
+The preflight uses PR merge base `360b05ccd378cbe8c08bfcdc86a9c9a9d3465fd7`
+and includes both earlier commits and the local amendment. All five work orders
+are complete. At the implementation handoff, the amendment was uncommitted
+and PR #5078 remained at `92ce0f8ffd4b8c8f85b669be3e01696a6504d678`.
+The user subsequently authorized commit, push, a 15-minute hold, and PR fixup.
+
+Earlier results below cover only tasks 01 through 03 and do not establish the
+revised admission or startup-feedback contract.
 
 Planning diagnostic: two focused Go tests passed through a temporary overlay.
 The configured npm lookup later returned `@github/copilot@1.0.105`, and the
@@ -305,12 +391,12 @@ passed.
 
 ## Risks
 
-- Exact npm artifacts must be available before native adapter qualification.
+- Actual capability and installation formats must pass bounded validation.
   A GitHub release or ACP handshake alone cannot replace that evidence. The
-  current 1.0.105 evidence covers linux/amd64 only; other platforms remain
-  unsupported until separately qualified.
-- A changed installation schema can require a bounded design amendment.
-  Do not admit 1.0.105 while that contract remains unknown.
+  real 1.0.105 native run covers Linux/amd64 only. Other platforms are not
+  native-tested here; the absence of such evidence is not an admission block.
+- A changed installation schema can require a bounded adapter amendment.
+  Reject incompatible observed formats without guessing paths or dropping selections.
 - Runtime-impact counts are read-only snapshots, not activation-time locks.
 - Existing full native diagnostics require macOS arm64 and authorized native
   context. Their missing controls remain explicit and do not certify policy.

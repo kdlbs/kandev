@@ -45,12 +45,14 @@ func (m *Manager) prepareCopilotPluginArgsForSelection(
 	if len(selection) == 0 {
 		return baseArgs, nil
 	}
-	if !copilotPluginHostExecutor(execution) {
-		return nil, &copilotplugins.Error{Reason: copilotplugins.ReasonUnsupportedLaunch}
-	}
 	version, ok := copilotplugins.RuntimeVersionFromCommand(baseArgs)
 	if !ok {
 		return nil, &copilotplugins.Error{Reason: copilotplugins.ReasonUnsupportedLaunch}
+	}
+	if !copilotPluginHostExecutor(execution) {
+		return nil, preserveCopilotPluginRuntimeVersion(
+			&copilotplugins.Error{Reason: copilotplugins.ReasonUnsupportedLaunch}, version,
+		)
 	}
 	spec := agents.NewCopilotACP().ManagedNPMRuntime()
 	launch := copilotplugins.LaunchContext{
@@ -65,11 +67,11 @@ func (m *Manager) prepareCopilotPluginArgsForSelection(
 	}
 	prepared, err := copilotplugins.ResolveLaunchSelection(ctx, m.copilotPluginRunner(), launch, selection)
 	if err != nil {
-		return nil, err
+		return nil, preserveCopilotPluginRuntimeVersion(err, version)
 	}
 	args, err := copilotplugins.ApplyToArgsInDir(baseArgs, prepared.Plugins, execution.WorkspacePath)
 	if err != nil {
-		return nil, err
+		return nil, preserveCopilotPluginRuntimeVersion(err, version)
 	}
 	m.logger.Info("prepared copilot profile plugins",
 		zap.String("execution_id", execution.ID),
@@ -233,12 +235,14 @@ func (m *Manager) applyPassthroughCopilotPluginsForSelection(
 	if len(selection) == 0 {
 		return nil
 	}
-	if !copilotPluginHostExecutor(execution) {
-		return &copilotplugins.Error{Reason: copilotplugins.ReasonUnsupportedLaunch}
-	}
 	version, ok := copilotplugins.RuntimeVersionFromCommand(cmd.Args())
 	if !ok {
 		return &copilotplugins.Error{Reason: copilotplugins.ReasonUnsupportedLaunch}
+	}
+	if !copilotPluginHostExecutor(execution) {
+		return preserveCopilotPluginRuntimeVersion(
+			&copilotplugins.Error{Reason: copilotplugins.ReasonUnsupportedLaunch}, version,
+		)
 	}
 	spec := agents.NewCopilotACP().ManagedNPMRuntime()
 	launch := copilotplugins.LaunchContext{
@@ -253,11 +257,11 @@ func (m *Manager) applyPassthroughCopilotPluginsForSelection(
 	}
 	prepared, err := copilotplugins.ResolveLaunchSelection(ctx, m.copilotPluginRunner(), launch, selection)
 	if err != nil {
-		return err
+		return preserveCopilotPluginRuntimeVersion(err, version)
 	}
 	args, err := copilotplugins.ApplyToArgsInDir(cmd.Args(), prepared.Plugins, execution.WorkspacePath)
 	if err != nil {
-		return err
+		return preserveCopilotPluginRuntimeVersion(err, version)
 	}
 	cmd.Command = agents.NewCommand(args...)
 	return nil

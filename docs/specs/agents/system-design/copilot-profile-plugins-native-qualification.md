@@ -37,122 +37,26 @@ Numbers use prefix `REQ-AGENTS-COPILOT-PLUGINS-`.
 
 ## Runtime compatibility amendment
 
-The [issue #5064 package](../../../plans/copilot-runtime-plugin-compatibility/plan.md)
-extends adapter qualification and exposes its effect in runtime and profile
-settings. Implementation now delivers the runtime-impact preview, profile
-recovery, and exact `1.0.105` admission described here.
+Work orders 01 through 03 delivered the exact-version preview and profile
+recovery recorded in the [package](../../../plans/copilot-runtime-plugin-compatibility/plan.md).
+The user subsequently confirmed contract-based admission, superseding the
+version/platform policy in that intermediate implementation.
 
-### One adapter-version source
+The [contract admission design](copilot-plugin-contract-compatibility.md) is
+now authoritative for capability checks, current preview states, preparation,
+and durable/UI plugin failure projection. Work orders 04 and 05 record its implementation evidence.
+The original settings layout, draft preservation, native unknown-status
+projection, authorization, and response-generation fences remain required.
 
-`copilotplugins.RuntimeSupported` remains the admission predicate.
-Add `SupportedRuntimeVersions() []string` beside it, derived from the same
-exact-version inventory set and filtered to the current host platform. Return
-an independent, deterministically ordered slice. Discovery, runtime previews,
-and recovery must not maintain another list.
-
-`1.0.105` was added only after the exact managed npm package passed adapter
-checks with disposable native fixtures on `linux/amd64`. Those checks cover
-inventory containers, native installation metadata, matching manifests, and
-repeated `--plugin-dir` arguments, including a special-character path.
-Native-written installation evidence agrees with Kandev resolution; a
-hand-written compatible JSON fixture alone does not qualify the adapter. Other
-platforms remain unsupported until separately qualified.
-
-Use the existing evidence ledger. A focused `copilot_native` adapter test can
-exercise this contract without model prompts or enterprise-policy fixtures.
-Keep the full authenticated diagnostic separate and preserve its failures.
-No authenticated tool behavior or enterprise enforcement follows from adapter
-qualification. A demonstrated incompatible schema requires a bounded adapter
-design before admission; do not widen support to a version range.
-
-### Runtime preview projection
-
-Extend `settings/dto.AgentUpdatePreviewDTO` with optional
-`copilot_plugin_compatibility`, populated only for the built-in `copilot-acp`
-managed package. The response-only object contains:
-
-- `runtime_version`: the exact resolved preview target, including use-default.
-- `supported`: the result of `RuntimeSupported(runtime_version)`.
-- `supported_versions`: the shared qualified-version list.
-- `reason`: `runtime_unsupported` for an unqualified target; absent otherwise.
-- `selected_profile_count`: a nullable integer. Null means impact is unknown.
-
-An absent object means that an older server supplied no compatibility evidence.
-It does not mean supported. The object reports preparation eligibility, not
-native policy, authentication, root availability, or general ACP compatibility.
-
-Build the projection in `Controller.previewAgentUpdate` after target resolution.
-Use `GetAgentByName(ctx, agents.CopilotACPAgentID)` and `ListAgentProfiles`
-through the existing settings repository. Count each non-deleted concrete
-Copilot profile once if `len(CopilotSelectedPlugins) > 0`, including disabled
-profiles. Empty selections, foreign providers, and deleted profiles do not
-contribute. Mixed-state tests must contain all these controls.
-
-A repository error produces a null count, without raw error text or a false
-zero. Cancellation still follows the preview request context. This read-only
-snapshot does not fence later profile edits or promise an atomic impact count
-at activation. A reopen or target change obtains a new preview.
-
-Do not run native inventory, inspect plugin roots, read profile secrets, or
-enumerate authentication stores for the preview. Return no profile names,
-identities, plugin IDs, roots, or native output in this object.
-
-Render compatibility beside the target summary before the existing approval
-action in `RuntimeUpdatePreviewDetails`. An unqualified target shows the impact
-count, or explicit unknown impact, and qualified alternatives. Zero affected
-profiles still leaves the target's plugin limitation visible. A qualified
-target must not promise that every selected plugin can load.
-
-Reuse `useAgentUpdateDialogState` request ownership and target fencing. A delayed
-preview for another target must not replace the current compatibility notice.
-The notice adds no approval, persistence, fallback, or activation gate. The
-[runtime selection contract](runtime-updates-01.md) still governs staging and
-ACP validation.
-
-### Profile recovery and unknown status
-
-Add optional `supported_runtime_versions` to the safe Copilot discovery DTO and
-browser type. Populate it from the shared list for concrete Copilot responses,
-including an unsupported runtime result. Preserve existing authorization,
-runtime/context revisions, cache invalidation, and superseded-response handling.
-
-`CopilotPluginProfileSelection` uses the current response's `reason`,
-`runtime_version`, and supported list for localized guidance. A
-`runtime_unsupported` response explains the actual version and qualified
-alternatives. Keep explicit uncheck/Save recovery. Legacy `policy_unverified`,
-unsupported launch contexts, absent metadata, and unknown reason codes retain
-their own safe fallback; do not label every failure as a version rejection.
-Stale data cannot identify a previously observed version as the current one.
-
-Change the browser row's `nativeEnabled` to `boolean | null`. Only a fresh,
-successful inventory row supplies a boolean. Missing identities and stale or
-failed observations supply null. Root unavailability on a fresh discovered row
-does not erase its native activation observation. Render null as localized
-unknown status; never convert it to disabled. This is a browser projection
-change, not a nullable native inventory parser or stored profile migration.
-
-Preserve selection arrays, unrelated drafts, model choices, Save/Reset, missing
-row removal, and deferred command preview. Refresh does not qualify versions.
-An older response without a version list cannot justify a hardcoded list in
-the browser.
-
-### Desktop and phone composition
-
-Reuse the shipped `AgentRuntimeUpdateSurface`: desktop dialog, phone bottom
-drawer, one existing body scroller, fixed actions, and safe-area clearance.
-Compatibility is inline content before approval, never tooltip-only feedback.
-Keep phone targets at least 44px and ordinary desktop actions at 28px.
-
-Profile recovery stays on the direct Settings > Agents > Copilot > Profile
-route. Reuse `CopilotPluginProfileSelection`, wrapping row metadata, the
-settings page scroller, and `SettingsFloatingSave`. No additional overlay or
-nested plugin scroller is necessary for these short status messages.
-All new text uses the seven shipped catalogs and generated Traditional
-Chinese/pseudo catalogs. The plan and UI work orders contain structural views.
+The [new ADR](../../../decisions/2026-11-05-copilot-plugin-contract-admission.md)
+amends only the version restriction in the accepted native-policy decision.
+This document retains native authority, historic observations, and diagnostic methods.
 
 ## Evidence baseline
 
-The inventory adapter supports `1.0.88` and `1.0.104` on every supported host,
+The following records the intermediate patch, not the new admission policy.
+
+The intermediate inventory adapter admits `1.0.88` and `1.0.104` on every supported host,
 and `1.0.105` on `linux/amd64`. WO-04 removed the empty
 `policyVerifiedVersions` gate and `RequireMountPolicy`. Mount preparation uses
 the same platform-scoped supported-version predicate as discovery, not
@@ -192,39 +96,16 @@ context alone is not demonstrated incompatibility.
 
 ## Qualification and admission
 
-Keep `RuntimeSupported` and its inventory/metadata version boundary. Unknown
-versions still return `runtime_unsupported`; never fall back to a global CLI or
-change the managed pin.
+The [current contract](copilot-plugin-contract-compatibility.md#shared-discovery-and-admission)
+replaces exact-version and platform certification maps. Preserve exact managed
+runtime identity, final profile environment, strict metadata/root checks,
+executor restrictions, all-or-nothing selected sets, and preflight before replacement.
+Unknown version strings alone no longer reject discovery or launch.
+Capability and format incompatibilities remain specific failures.
+Empty selection and retained-process behavior remain unchanged.
 
-Remove `policyVerifiedVersions` and `RequireMountPolicy` as launch prerequisites.
-`MountsPermitted(version)` may remain as a compatibility projection of supported
-native preparation, using the same version predicate as launch. It must not be
-a second policy allowlist or a platform-certification lookup.
-
-`ResolveLaunchSelection` retains this order:
-
-1. Empty selection is a no-op without inventory, filesystem, or policy reads.
-2. Validate Copilot provider, local/worktree executor, wrapper, and identity.
-3. Require the selected inventory/metadata adapter version.
-4. Resolve all selected roots and validate matching readable manifests.
-5. Preserve manual argument order, deduplicate equal mounts, reject conflicts.
-6. Pass separate `--plugin-dir` pairs to the selected native process.
-
-No browser input grants admission. Environment and profile options do not
-override version, root, or executor validation. Native policy remains a
-subsequent native decision, not a Kandev preflight authorization result.
-
-| Context | Intended preparation |
-| --- | --- |
-| Supported adapter version, valid local/worktree identity and roots | Attempt native mounts; native CLI decides policy and consent |
-| Unknown adapter version | `runtime_unsupported`, no global fallback |
-| Empty selection on any executor | Existing behavior, no added native work |
-| Nonempty isolated executor, changing wrapper, or invalid roots | Existing typed rejection before native launch/resource handoff |
-| Missing enterprise fixture or untested platform policy | No additional policy-only rejection |
-| Retained process or in-process reset | Preserve original mounts; no new preparation |
-
-This is preparation eligibility, not certification that an enterprise
-configuration, authentication method, or every plugin component was tested.
+Native policy and authentication are subsequent native decisions.
+No browser input, missing enterprise fixture, or diagnostic certification grants a policy exception.
 
 ## Evidence contract
 
@@ -288,8 +169,8 @@ successful preparation at actual configure/start or inference boundaries:
 
 Assert selected version, final environment/cwd, separate argv, manual-mount
 deduplication/conflict handling, and intact ACP MCP attachments. Keep
-empty-selection, unknown-version, isolated/wrapped, agent-wide, and retained
-negative controls.
+empty-selection, incompatible-shape, isolated/wrapped, agent-wide, and retained
+negative controls. Compatible unknown versions are positive admission controls.
 
 Use one authorized profile snapshot for selection, command, and environment.
 A channel/barrier test proves a concurrent edit cannot mix revisions and that
@@ -340,19 +221,14 @@ remain owned by [probe failure diagnostics](probe-failure-diagnostics.md).
 
 ## Discovery projection and settings
 
-`DiscoverCopilotPlugins` returns `mount_permitted` from the same supported-version
-preparation predicate as launch. It is not a native policy/consent assertion.
-Retain runtime/context cache identity and refresh fencing.
-
-The existing inline Copilot editor hides the artificial policy warning for
-eligible preparation. Unsupported states and unavailable entries remain
-visible/removable with accurate recovery. Preserve native-enabled metadata,
-deferred preview, localization, dirty state, keyboard behavior, 44px phone
-targets, desktop density, the existing scroll owner, and safe-area Save/Reset.
-
-Browser mocks prove UI behavior, not native enforcement. Public docs distinguish
-supported adapter versions from platform-specific observations and explicitly
-state that Copilot governs component availability and authentication.
+The [current compatibility design](copilot-plugin-contract-compatibility.md#truthful-runtime-preview-and-profile-recovery)
+owns observed eligibility, unchecked preview, and safe cause projection.
+`mount_permitted` derives from the actual discovery observation, not a version map.
+Keep runtime/context cache identity and refresh fencing.
+Preserve native-enabled metadata, deferred preview, localization, drafts,
+keyboard behavior, phone targets, desktop density, and existing scroll ownership.
+Browser fixtures prove presentation; native fixtures prove the observed protocol contract.
+Public guidance must distinguish diagnostic observations from an admission restriction.
 
 ## Delivery records
 

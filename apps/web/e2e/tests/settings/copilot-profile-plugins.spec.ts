@@ -252,9 +252,8 @@ test("shows current runtime recovery and unknown native status without losing th
         body: JSON.stringify(
           copilotPluginDiscovery(fixture.agentId, fixture.profileId, {
             status: "unsupported",
-            reason: "runtime_unsupported",
+            reason: "plugin_loading_unsupported",
             runtime_version: "9.9.9",
-            supported_runtime_versions: ["1.0.88", "1.0.104", "1.0.105"],
             mount_permitted: false,
             plugins: [],
           }),
@@ -265,13 +264,10 @@ test("shows current runtime recovery and unknown native status without losing th
     const selector = testPage.getByTestId("copilot-plugins-selection");
     await expect(selector).toBeVisible({ timeout: 15_000 });
     await expect(selector.getByTestId("copilot-plugins-unsupported")).toContainText(
-      "Copilot 9.9.9: plugin adapter unavailable.",
+      "Selected runtime: Copilot 9.9.9",
     );
     await expect(selector.getByTestId("copilot-plugins-unsupported")).toContainText(
-      "Qualified versions: 1.0.88, 1.0.104, 1.0.105",
-    );
-    await expect(selector.getByTestId("copilot-plugins-unsupported")).toContainText(
-      "Select a qualified runtime, or uncheck plugins and Save.",
+      "This selected Copilot runtime does not advertise profile plugin loading.",
     );
     await expect(selector.getByText("Native status: unknown")).toBeVisible();
     const spark = selector.getByRole("checkbox", { name: "Select spark" });
@@ -391,7 +387,7 @@ test("recovers a policy-blocked profile capability probe without changing saved 
     );
 
     await spark.click();
-    await expect(spark).not.toBeChecked();
+    await expect(pluginSection.getByRole("checkbox", { name: "Select spark" })).toHaveCount(0);
     const actions = copilotProfileSaveActions(testPage);
     await expect(actions.save).toHaveCount(1);
     await actions.save.click();
@@ -405,7 +401,7 @@ test("recovers a policy-blocked profile capability probe without changing saved 
     recovery.allowRecovery();
     await testPage.reload();
     await expect(pluginSection).toBeVisible({ timeout: 15_000 });
-    await expect(spark).not.toBeChecked();
+    await expect(pluginSection.getByRole("checkbox", { name: "Select spark" })).toHaveCount(0);
     await expect(capabilityStatus).toHaveAttribute("data-status", "ready", { timeout: 20_000 });
     await expect(capabilityStatus).not.toContainText(
       "Model discovery is blocked by this plugin selection.",

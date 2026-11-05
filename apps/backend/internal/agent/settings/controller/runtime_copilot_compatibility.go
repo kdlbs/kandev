@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/agents"
-	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 )
 
@@ -20,14 +19,9 @@ func (c *Controller) copilotPluginCompatibilityPreview(
 	if agentName != agents.CopilotACPAgentID {
 		return nil, nil
 	}
-	target := strings.TrimSpace(targetVersion)
 	compatibility := &dto.CopilotPluginCompatibilityDTO{
-		RuntimeVersion:    target,
-		Supported:         copilotplugins.RuntimeSupported(target),
-		SupportedVersions: copilotplugins.SupportedRuntimeVersions(),
-	}
-	if !compatibility.Supported {
-		compatibility.Reason = string(copilotplugins.ReasonRuntimeUnsupported)
+		RuntimeVersion: strings.TrimSpace(targetVersion),
+		State:          "not_checked",
 	}
 	selectedProfileCount, err := c.copilotPluginSelectedProfileCount(ctx)
 	if err != nil {

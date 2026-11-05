@@ -387,3 +387,38 @@ Copilot regression or an initial process-start denial. Do not describe the
 extended race command as passing. Unrelated process-group cleanup was not
 changed. The disposable baseline archive was removed and raw results remain
 private.
+
+## Contract admission implementation evidence, 2026-11-05 (WO-04)
+
+The historical qualification and diagnostic sections above are retained as
+records of earlier observations. Current admission no longer consults their
+version or platform subsets.
+
+The causal Red was established before production changes:
+
+```bash
+(cd apps/backend && go test -trimpath ./internal/agent/copilotplugins -run '^TestCopilotPluginCompatibleUnknownRuntime$' -count=1)
+```
+
+It failed as expected: runtime `9.9.9` returned `unsupported` with
+`runtime_unsupported` before native capability evidence was observed. After the
+change, the final provider package run passed the same production-shaped test on
+the host's Linux/amd64 platform. The test used the exact selected runtime for
+help, inventory, root validation, and launch admission. No platform override
+was used.
+
+The final focused contract checks passed:
+
+```bash
+(cd apps/backend && go test -trimpath ./internal/agent/copilotplugins ./internal/agent/settings/controller ./internal/agent/settings/handlers -count=1)
+(cd apps/backend && go test -trimpath ./internal/agent/runtime/lifecycle ./internal/agent/hostutility -run '^TestCopilotPlugin' -count=1)
+(cd apps/backend && KANDEV_COPILOT_NATIVE_VERSION=1.0.105 go test -trimpath -tags copilot_native ./internal/agent/copilotplugins -run '^TestCopilotPluginNativeAdapterAcceptance$' -count=1 -timeout=8m)
+```
+
+The provider tests cover absent `--plugin-dir` evidence, malformed inventory,
+invalid installation metadata, a mixed valid/invalid selected set, an invalid
+unselected control, cancellation, the shared bounded help/inventory deadline,
+and isolated managed-NPM prefix preparation. The real native adapter acceptance
+command passed for `@github/copilot@1.0.105` on Linux/amd64. It is host-native
+adapter evidence only. A native Darwin run was not performed; this does not
+imply that Darwin is incompatible. Native Copilot policy remains authoritative.

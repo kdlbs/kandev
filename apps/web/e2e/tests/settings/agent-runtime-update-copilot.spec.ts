@@ -24,9 +24,7 @@ function copilotPreview(selectedProfileCount: number | null) {
     command_string: "npm exec",
     copilot_plugin_compatibility: {
       runtime_version: "9.9.9",
-      supported: false,
-      supported_versions: ["1.0.88", "1.0.104", "1.0.105"],
-      reason: "runtime_unsupported",
+      state: "not_checked",
       selected_profile_count: selectedProfileCount,
     },
   };
@@ -48,32 +46,29 @@ function installCopilotRuntimeFixture(
 }
 
 test.describe("Copilot runtime plugin compatibility", () => {
-  test("shows plugin impact before approval and fences target changes", async ({ testPage }) => {
+  test("keeps preview compatibility unchecked before approval across target changes", async ({
+    testPage,
+  }) => {
     const runtime = await installCopilotRuntimeFixture(testPage, 2);
     await testPage.goto("/settings/agents");
     await testPage.getByTestId(`agent-update-trigger-${AGENT_NAME}`).click();
 
     const dialog = testPage.getByTestId(`agent-update-dialog-${AGENT_NAME}`);
     const notice = dialog.getByTestId(`agent-update-copilot-compatibility-${AGENT_NAME}`);
-    await expect(notice).toHaveAttribute("data-supported", "false");
-    await expect(notice).toContainText("Copilot 9.9.9: plugin adapter unavailable.");
-    await expect(notice).toContainText(
-      "2 saved profiles have plugin selections that will block a new process.",
-    );
-    await expect(notice).toContainText("Qualified versions: 1.0.88, 1.0.104, 1.0.105");
+    await expect(notice).toHaveAttribute("data-state", "not_checked");
+    await expect(notice).toContainText("Plugin compatibility for Copilot 9.9.9: unchecked.");
+    await expect(notice).toContainText("2 saved profiles select plugins.");
+    await expect(notice).not.toContainText(/qualified versions|will block/i);
     await expect(testPage.getByTestId(`agent-update-confirm-${AGENT_NAME}`)).toBeEnabled();
     expect(runtime.postCount()).toBe(0);
 
     await dialog.getByTestId(`agent-update-quick-default-${AGENT_NAME}`).click();
-    await expect(notice).toHaveAttribute("data-supported", "true");
-    await expect(notice).toContainText("Copilot 1.0.88 supports profile plugin preparation.");
-    await expect(notice).not.toContainText("Saved profile plugin selections cannot be prepared");
+    await expect(notice).toHaveAttribute("data-state", "not_checked");
+    await expect(notice).toContainText("Plugin compatibility for Copilot 1.0.88: unchecked.");
 
     await dialog.getByTestId(`agent-update-quick-latest-${AGENT_NAME}`).click();
-    await expect(notice).toHaveAttribute("data-supported", "false");
-    await expect(notice).toContainText(
-      "2 saved profiles have plugin selections that will block a new process.",
-    );
+    await expect(notice).toHaveAttribute("data-state", "not_checked");
+    await expect(notice).toContainText("2 saved profiles select plugins.");
     await testPage.getByTestId(`agent-update-confirm-${AGENT_NAME}`).click();
     await expect.poll(() => runtime.postCount()).toBe(1);
     expect(runtime.postTargets()).toEqual(["9.9.9"]);
@@ -86,9 +81,7 @@ test.describe("Copilot runtime plugin compatibility", () => {
 
     const notice = testPage.getByTestId(`agent-update-copilot-compatibility-${AGENT_NAME}`);
     await expect(notice).toBeVisible();
-    await expect(notice).toContainText(
-      "Saved profile impact is unknown because profiles could not be read.",
-    );
+    await expect(notice).toContainText("Saved profile selections could not be counted.");
     await expect(notice).not.toContainText("No saved profiles select plugins.");
   });
 });

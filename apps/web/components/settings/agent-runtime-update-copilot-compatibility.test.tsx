@@ -42,6 +42,9 @@ vi.mock("@kandev/ui/drawer", () => ({
 
 const AGENT_NAME = "copilot-acp";
 const PACKAGE_NAME = "@github/copilot";
+const UNCHECKED_PREVIEW_STATE = "not_checked" as const;
+const UNKNOWN_RUNTIME_VERSION = "9.9.9";
+const COMPATIBILITY_STATE_ATTRIBUTE = "data-state";
 
 function preview(overrides: Partial<AgentUpdatePreview> = {}): AgentUpdatePreview {
   return {
@@ -52,10 +55,10 @@ function preview(overrides: Partial<AgentUpdatePreview> = {}): AgentUpdatePrevie
     default_version: "1.0.88",
     effective_version: "1.0.104",
     active_version: "1.0.104",
-    target_version: "9.9.9",
+    target_version: UNKNOWN_RUNTIME_VERSION,
     operation: "update",
     available_versions: [
-      { version: "9.9.9", latest: true },
+      { version: UNKNOWN_RUNTIME_VERSION, latest: true },
       { version: "1.0.104", latest: false },
       { version: "1.0.88", latest: false },
     ],
@@ -65,13 +68,11 @@ function preview(overrides: Partial<AgentUpdatePreview> = {}): AgentUpdatePrevie
   };
 }
 
-function unsupportedPreview(overrides: Partial<AgentUpdatePreview> = {}): AgentUpdatePreview {
+function uncheckedPreview(overrides: Partial<AgentUpdatePreview> = {}): AgentUpdatePreview {
   return preview({
     copilot_plugin_compatibility: {
-      runtime_version: "9.9.9",
-      supported: false,
-      supported_versions: ["1.0.88", "1.0.104", "1.0.105"],
-      reason: "runtime_unsupported",
+      runtime_version: UNKNOWN_RUNTIME_VERSION,
+      state: UNCHECKED_PREVIEW_STATE,
       selected_profile_count: 2,
     },
     ...overrides,
@@ -110,35 +111,31 @@ afterEach(() => {
 });
 
 describe("Copilot runtime plugin compatibility preview", () => {
-  it("shows an unqualified target with mixed-profile impact before approval", async () => {
-    const onUpdate = renderControl(() => Promise.resolve(unsupportedPreview()));
+  it("leaves unknown targets unchecked and reports profile selections before approval", async () => {
+    const onUpdate = renderControl(() => Promise.resolve(uncheckedPreview()));
     fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
 
     const notice = await screen.findByTestId(`agent-update-copilot-compatibility-${AGENT_NAME}`);
-    expect(notice.getAttribute("data-supported")).toBe("false");
-    expect(notice.textContent).toContain("Copilot 9.9.9: plugin adapter unavailable.");
+    expect(notice.getAttribute(COMPATIBILITY_STATE_ATTRIBUTE)).toBe(UNCHECKED_PREVIEW_STATE);
+    expect(notice.textContent).toContain(`Copilot ${UNKNOWN_RUNTIME_VERSION}`);
     expect(notice.textContent).toContain(
-      "2 saved profiles have plugin selections that will block a new process.",
+      `Plugin compatibility for Copilot ${UNKNOWN_RUNTIME_VERSION}: unchecked.`,
     );
-    expect(notice.textContent).toContain("Qualified versions: 1.0.88, 1.0.104, 1.0.105");
-    expect(notice.textContent).toContain(
-      "Select a qualified runtime, or uncheck plugins and Save.",
-    );
+    expect(notice.textContent).toContain("2 saved profiles select plugins.");
+    expect(notice.textContent).not.toMatch(/qualified versions|will block/i);
     const confirm = screen.getByTestId(`agent-update-confirm-${AGENT_NAME}`);
     expect(confirm.hasAttribute("disabled")).toBe(false);
     fireEvent.click(confirm);
-    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(AGENT_NAME, "9.9.9"));
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(AGENT_NAME, UNKNOWN_RUNTIME_VERSION));
   });
 
   it("shows unknown impact instead of zero when the profile read failed", async () => {
     renderControl(() =>
       Promise.resolve(
-        unsupportedPreview({
+        uncheckedPreview({
           copilot_plugin_compatibility: {
-            runtime_version: "9.9.9",
-            supported: false,
-            supported_versions: ["1.0.88", "1.0.104", "1.0.105"],
-            reason: "runtime_unsupported",
+            runtime_version: UNKNOWN_RUNTIME_VERSION,
+            state: UNCHECKED_PREVIEW_STATE,
             selected_profile_count: null,
           },
         }),
@@ -146,21 +143,17 @@ describe("Copilot runtime plugin compatibility preview", () => {
     );
     fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
     const notice = await screen.findByTestId(`agent-update-copilot-compatibility-${AGENT_NAME}`);
-    expect(notice.textContent).toContain(
-      "Saved profile impact is unknown because profiles could not be read.",
-    );
+    expect(notice.textContent).toContain("Saved profile selections could not be counted.");
     expect(notice.textContent).not.toContain("No saved profiles select plugins.");
   });
 
-  it("keeps the target limitation visible when no saved profile selects plugins", async () => {
+  it("shows zero profile selections without deriving a target limitation", async () => {
     renderControl(() =>
       Promise.resolve(
-        unsupportedPreview({
+        uncheckedPreview({
           copilot_plugin_compatibility: {
-            runtime_version: "9.9.9",
-            supported: false,
-            supported_versions: ["1.0.88", "1.0.104", "1.0.105"],
-            reason: "runtime_unsupported",
+            runtime_version: UNKNOWN_RUNTIME_VERSION,
+            state: UNCHECKED_PREVIEW_STATE,
             selected_profile_count: 0,
           },
         }),
@@ -168,20 +161,19 @@ describe("Copilot runtime plugin compatibility preview", () => {
     );
     fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
     const notice = await screen.findByTestId(`agent-update-copilot-compatibility-${AGENT_NAME}`);
-    expect(notice.textContent).toContain("Copilot 9.9.9: plugin adapter unavailable.");
+    expect(notice.textContent).toContain("No saved profiles select plugins.");
     expect(notice.textContent).toContain(
-      "No saved profiles select plugins. The runtime's plugin limitation still applies.",
+      `Plugin compatibility for Copilot ${UNKNOWN_RUNTIME_VERSION}: unchecked.`,
     );
   });
 
-  it("reports qualification without promising every selected plugin can load", async () => {
+  it("renders a positive capability observation without promising every selected plugin can load", async () => {
     renderControl(() =>
       Promise.resolve(
         preview({
           copilot_plugin_compatibility: {
             runtime_version: "1.0.104",
-            supported: true,
-            supported_versions: ["1.0.88", "1.0.104", "1.0.105"],
+            state: "compatible",
             selected_profile_count: 2,
           },
         }),
@@ -189,19 +181,42 @@ describe("Copilot runtime plugin compatibility preview", () => {
     );
     fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
     const notice = await screen.findByTestId(`agent-update-copilot-compatibility-${AGENT_NAME}`);
-    expect(notice.getAttribute("data-supported")).toBe("true");
+    expect(notice.getAttribute(COMPATIBILITY_STATE_ATTRIBUTE)).toBe("compatible");
     expect(notice.textContent).toContain(
-      "Copilot 1.0.104 supports profile plugin preparation. Selected plugins still depend on their own installation and native policy.",
+      "Copilot 1.0.104 advertises profile plugin loading. Selected plugins still depend on their own installation and native policy.",
     );
-    expect(notice.textContent).toContain("Qualified versions: 1.0.88, 1.0.104, 1.0.105");
+    expect(notice.textContent).not.toMatch(/qualified versions/i);
   });
 
-  it("uses an unavailable-compatibility fallback for an older Copilot server", async () => {
+  it("treats an omitted compatibility state as unchecked for an older Copilot server", async () => {
     renderControl(() => Promise.resolve(preview()));
     fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
     const notice = await screen.findByTestId(`agent-update-copilot-compatibility-${AGENT_NAME}`);
     expect(notice.textContent).toContain(
-      "Plugin compatibility information is unavailable from this server. Check this runtime's plugin support before updating.",
+      "Plugin compatibility for Copilot Unknown: unchecked. It is checked when a profile is used.",
     );
+    expect(notice.getAttribute(COMPATIBILITY_STATE_ATTRIBUTE)).toBe(UNCHECKED_PREVIEW_STATE);
   });
+});
+
+it("labels a negative capability observation without claiming selected roots were evaluated", async () => {
+  renderControl(() =>
+    Promise.resolve(
+      preview({
+        copilot_plugin_compatibility: {
+          runtime_version: UNKNOWN_RUNTIME_VERSION,
+          state: "incompatible",
+          selected_profile_count: 2,
+        },
+      }),
+    ),
+  );
+  fireEvent.click(screen.getByTestId(`agent-update-trigger-${AGENT_NAME}`));
+  const notice = await screen.findByTestId(`agent-update-copilot-compatibility-${AGENT_NAME}`);
+  expect(notice.getAttribute(COMPATIBILITY_STATE_ATTRIBUTE)).toBe("incompatible");
+  expect(notice.textContent).toContain(
+    `Copilot ${UNKNOWN_RUNTIME_VERSION} does not advertise profile plugin loading.`,
+  );
+  expect(notice.textContent).toContain("This preview does not evaluate selected roots");
+  expect(notice.textContent).not.toMatch(/will block/i);
 });

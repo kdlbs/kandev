@@ -5,107 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
-	"strconv"
 	"strings"
 )
 
 var errUnsupportedLaunchContext = errors.New("unsupported copilot plugin launch context")
 
 const windowsOS = "windows"
-
-// inventoryQualifiedVersions lists the managed Copilot packages whose inventory
-// format, installation metadata, and repeated mount syntax were reproduced.
-// An unlisted version returns a typed unsupported result instead of falling
-// back to a globally installed CLI.
-var inventoryQualifiedVersions = map[string]struct{}{
-	"1.0.88":  {},
-	"1.0.104": {},
-	"1.0.105": {},
-}
-
-// platformQualifiedVersions scopes versions whose adapter evidence covers only
-// specific host platforms. An unlisted platform remains unsupported even when
-// the exact package version is present in the inventory-qualified set.
-var platformQualifiedVersions = map[string]map[string]struct{}{
-	"1.0.105": {"linux/amd64": {}},
-}
-
-// RuntimeSupported reports whether safe inventory discovery is qualified for
-// the selected managed runtime version on this host platform.
-func RuntimeSupported(version string) bool {
-	return RuntimeSupportedOn(version, runtime.GOOS, runtime.GOARCH)
-}
-
-// RuntimeSupportedOn reports whether safe inventory discovery is qualified for
-// the exact version and host platform. A version without platform-scoped
-// evidence remains available on every platform.
-func RuntimeSupportedOn(version, goos, goarch string) bool {
-	version = strings.TrimSpace(version)
-	if _, ok := inventoryQualifiedVersions[version]; !ok {
-		return false
-	}
-	platforms, scoped := platformQualifiedVersions[version]
-	if !scoped {
-		return true
-	}
-	_, ok := platforms[goos+"/"+goarch]
-	return ok
-}
-
-// SupportedRuntimeVersions returns the qualified versions for this host in
-// ascending order. The slice is independent of the internal inventory set so
-// callers cannot mutate the admission predicate.
-func SupportedRuntimeVersions() []string {
-	versions := make([]string, 0, len(inventoryQualifiedVersions))
-	for version := range inventoryQualifiedVersions {
-		if !RuntimeSupported(version) {
-			continue
-		}
-		versions = append(versions, version)
-	}
-	sort.Slice(versions, func(left, right int) bool {
-		return compareRuntimeVersions(versions[left], versions[right]) < 0
-	})
-	return versions
-}
-
-func compareRuntimeVersions(left, right string) int {
-	leftParts := strings.Split(left, ".")
-	rightParts := strings.Split(right, ".")
-	for index := 0; index < len(leftParts) || index < len(rightParts); index++ {
-		leftPart, rightPart := "0", "0"
-		if index < len(leftParts) {
-			leftPart = leftParts[index]
-		}
-		if index < len(rightParts) {
-			rightPart = rightParts[index]
-		}
-		leftNumber, leftErr := strconv.Atoi(leftPart)
-		rightNumber, rightErr := strconv.Atoi(rightPart)
-		switch {
-		case leftErr == nil && rightErr == nil:
-			if leftNumber != rightNumber {
-				if leftNumber < rightNumber {
-					return -1
-				}
-				return 1
-			}
-		case leftPart != rightPart:
-			if leftPart < rightPart {
-				return -1
-			}
-			return 1
-		}
-	}
-	return 0
-}
-
-// MountsPermitted reports whether the selected runtime has a supported native
-// inventory and metadata adapter for explicit plugin preparation.
-func MountsPermitted(version string) bool {
-	return RuntimeSupported(version)
-}
 
 // RuntimeVersionFromCommand extracts the exact @github/copilot package version
 // from an already-prepared argv. Binding discovery to this command prevents a

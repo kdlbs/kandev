@@ -68,9 +68,8 @@ function unsupportedRuntime(
   return {
     ...discovery,
     status: "unsupported",
-    reason: "runtime_unsupported",
+    reason: "plugin_loading_unsupported",
     runtime_version: "9.9.9",
-    supported_runtime_versions: ["1.0.88", "1.0.104", "1.0.105"],
     mount_permitted: false,
     plugins: [],
     ...overrides,
@@ -119,6 +118,25 @@ describe("CopilotPluginProfileSelection", () => {
     expect(checkbox.hasAttribute("disabled")).toBe(false);
     fireEvent.click(checkbox);
     expect(onSelectedPluginsChange).toHaveBeenCalledWith([]);
+  });
+
+  it("reports a malformed inventory while preserving saved selections", () => {
+    mocks.discovery = {
+      status: "unavailable",
+      response: { ...discovery, status: "unavailable", reason: "invalid_inventory", plugins: [] },
+      stale: false,
+    };
+    renderSelection([sparkPluginId]);
+    expect(
+      screen.getByText(
+        "The selected Copilot CLI returned an inventory format Kandev cannot read. Saved choices are unchanged. Refresh or repair the CLI.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Selected runtime: Copilot 1.0.88")).toBeTruthy();
+    expect(screen.getByTestId(startBlockedTestId)).toBeTruthy();
+    const spark = screen.getByRole("checkbox", { name: sparkCheckboxName });
+    expect(spark.getAttribute("aria-checked")).toBe("true");
+    expect(spark.hasAttribute("disabled")).toBe(false);
   });
 
   it("marks retained successful rows unchecked after a failed refresh", () => {
@@ -208,12 +226,13 @@ it("keeps a saved plugin removable when the runtime is unsupported", () => {
   };
   const { onSelectedPluginsChange } = renderSelection([sparkPluginId]);
   expect(screen.getByTestId(unsupportedTestId)).toBeTruthy();
-  expect(screen.getByText("Copilot 9.9.9: plugin adapter unavailable.")).toBeTruthy();
+  expect(screen.getByText("Selected runtime: Copilot 9.9.9")).toBeTruthy();
   expect(
-    screen.getByText("This runtime version is not qualified for profile plugin loading."),
+    screen.getByText(
+      "This selected Copilot runtime does not advertise profile plugin loading. Saved selections are preserved; remove them before starting a new process.",
+    ),
   ).toBeTruthy();
-  expect(screen.getByText("Qualified versions: 1.0.88, 1.0.104, 1.0.105")).toBeTruthy();
-  expect(screen.getByText("Select a qualified runtime, or uncheck plugins and Save.")).toBeTruthy();
+  expect(screen.queryByText(/qualified versions/i)).toBeNull();
   expect(screen.getByTestId(startBlockedTestId)).toBeTruthy();
   const spark = screen.getByRole("checkbox", { name: sparkCheckboxName });
   expect(spark.hasAttribute("disabled")).toBe(false);
@@ -227,7 +246,7 @@ it("prioritizes stale launch-context guidance over a retained runtime rejection"
   const { onSelectedPluginsChange } = renderSelection([sparkPluginId]);
   expect(screen.getByTestId("copilot-plugins-stale")).toBeTruthy();
   expect(screen.queryByTestId(unsupportedTestId)).toBeNull();
-  expect(screen.queryByText("Copilot 9.9.9: plugin adapter unavailable.")).toBeNull();
+  expect(screen.queryByText(/does not advertise profile plugin loading/)).toBeNull();
   expect(screen.queryByTestId(startBlockedTestId)).toBeNull();
   const spark = screen.getByRole("checkbox", { name: sparkCheckboxName });
   expect(spark.hasAttribute("disabled")).toBe(false);
@@ -241,7 +260,7 @@ it("does not present a retained rejection while a new context is loading", () =>
   renderSelection([sparkPluginId]);
   expect(screen.getByTestId("copilot-plugins-loading")).toBeTruthy();
   expect(screen.queryByTestId(unsupportedTestId)).toBeNull();
-  expect(screen.queryByText("Copilot 9.9.9: plugin adapter unavailable.")).toBeNull();
+  expect(screen.queryByText(/does not advertise profile plugin loading/)).toBeNull();
   expect(screen.queryByTestId(startBlockedTestId)).toBeNull();
 });
 
@@ -254,6 +273,7 @@ it("does not present a definite start block after a failed observation", () => {
   };
   renderSelection([sparkPluginId]);
   expect(screen.getByTestId("copilot-plugins-failed")).toBeTruthy();
+  expect(screen.queryByText("Selected runtime: Copilot 9.9.9")).toBeNull();
   expect(screen.queryByTestId(startBlockedTestId)).toBeNull();
   expect(screen.queryByTestId(unsupportedTestId)).toBeNull();
 });
@@ -282,14 +302,13 @@ it("uses safe fallback guidance when runtime metadata is missing", () => {
     status: "unsupported",
     response: unsupportedRuntime({
       runtime_version: undefined,
-      supported_runtime_versions: undefined,
     }),
     stale: false,
   };
   renderSelection([sparkPluginId]);
   expect(
     screen.getByText(
-      "This Copilot runtime is not qualified for profile plugin loading. Select a qualified runtime, or uncheck plugins and Save.",
+      "This selected Copilot runtime does not advertise profile plugin loading. Saved selections are preserved; remove them before starting a new process.",
     ),
   ).toBeTruthy();
   expect(screen.queryByText(/Copilot .*plugin adapter unavailable/)).toBeNull();
@@ -307,6 +326,20 @@ it("does not label a legacy policy response as a runtime version rejection", () 
     "This Kandev version cannot verify plugin policy for this runtime.",
   );
   expect(screen.queryByText(/plugin adapter unavailable/)).toBeNull();
+});
+
+it("keeps legacy runtime rejection guidance without showing a version allowlist", () => {
+  mocks.discovery = {
+    status: "unsupported",
+    response: unsupportedRuntime({ reason: "runtime_unsupported", runtime_version: "9.9.9" }),
+    stale: false,
+  };
+  renderSelection([sparkPluginId]);
+  expect(screen.getByText("Selected runtime: Copilot 9.9.9")).toBeTruthy();
+  expect(screen.getByTestId(unsupportedTestId).textContent).toContain(
+    "This Copilot runtime was marked unsupported by an older compatibility check.",
+  );
+  expect(screen.queryByText(/qualified versions/i)).toBeNull();
 });
 
 // @covers AC-AGENTS-COPILOT-PLUGINS-006.9

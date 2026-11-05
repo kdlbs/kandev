@@ -73,11 +73,12 @@ export type AgentUpdatePreview = {
   copilot_plugin_compatibility?: CopilotPluginCompatibility;
 };
 
+export type CopilotPluginCompatibilityState = "not_checked" | "compatible" | "incompatible";
+
 export type CopilotPluginCompatibility = {
   runtime_version: string;
-  supported: boolean;
-  supported_versions: string[];
-  reason?: string;
+  /** Missing state is treated as unchecked for older servers. */
+  state?: CopilotPluginCompatibilityState;
   /** Null means the saved-profile impact could not be read. */
   selected_profile_count: number | null;
 };

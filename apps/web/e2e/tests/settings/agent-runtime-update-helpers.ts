@@ -58,9 +58,7 @@ type UpdatePreview = {
   command_string: string;
   copilot_plugin_compatibility?: {
     runtime_version: string;
-    supported: boolean;
-    supported_versions: string[];
-    reason?: string;
+    state?: "not_checked" | "compatible" | "incompatible";
     selected_profile_count: number | null;
   };
 };
@@ -221,10 +219,6 @@ function withTarget(
           copilot_plugin_compatibility: {
             ...compatibility,
             runtime_version: targetVersion,
-            supported: compatibility.supported_versions.includes(targetVersion),
-            ...(compatibility.supported_versions.includes(targetVersion)
-              ? { reason: undefined }
-              : { reason: "runtime_unsupported" }),
           },
         }
       : {}),

@@ -111,17 +111,12 @@ func TestCopilotPluginDiscoveryOldCompletionBeforeNewerPublicationIsRejected(t *
 	}
 }
 
-func TestCopilotPluginResponseCloneCopiesSupportedVersions(t *testing.T) {
+func TestCopilotPluginResponseCloneCopiesPlugins(t *testing.T) {
 	original := &dto.CopilotPluginDiscoveryResponse{
-		SupportedRuntimeVersions: []string{"1.0.88", "1.0.104", "1.0.105"},
-		Plugins:                  []dto.CopilotPluginDiscoveryPlugin{{ID: "installed:m/p"}},
+		Plugins: []dto.CopilotPluginDiscoveryPlugin{{ID: "installed:m/p"}},
 	}
 	clone := cloneCopilotPluginResponse(original)
-	clone.SupportedRuntimeVersions[0] = "9.9.9"
 	clone.Plugins[0].ID = "installed:m/other"
-	if original.SupportedRuntimeVersions[0] != "1.0.88" {
-		t.Fatalf("clone mutated supported versions: %v", original.SupportedRuntimeVersions)
-	}
 	if original.Plugins[0].ID != "installed:m/p" {
 		t.Fatalf("clone mutated plugins: %v", original.Plugins)
 	}

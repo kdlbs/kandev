@@ -205,9 +205,8 @@ test("phone users can remove a saved selection when the runtime is unsupported",
         body: JSON.stringify(
           copilotPluginDiscovery(fixture.agentId, fixture.profileId, {
             status: "unsupported",
-            reason: "runtime_unsupported",
+            reason: "plugin_loading_unsupported",
             runtime_version: "9.9.9",
-            supported_runtime_versions: ["1.0.88", "1.0.104", "1.0.105"],
             mount_permitted: false,
             plugins: [],
           }),
@@ -221,13 +220,10 @@ test("phone users can remove a saved selection when the runtime is unsupported",
     await expect(selector).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByTestId("copilot-plugins-unsupported")).toBeVisible();
     await expect(testPage.getByTestId("copilot-plugins-unsupported")).toContainText(
-      "Copilot 9.9.9: plugin adapter unavailable.",
+      "Selected runtime: Copilot 9.9.9",
     );
     await expect(testPage.getByTestId("copilot-plugins-unsupported")).toContainText(
-      "Qualified versions: 1.0.88, 1.0.104, 1.0.105",
-    );
-    await expect(testPage.getByTestId("copilot-plugins-unsupported")).toContainText(
-      "Select a qualified runtime, or uncheck plugins and Save.",
+      "This selected Copilot runtime does not advertise profile plugin loading.",
     );
     await expect(selector.getByText("Native status: unknown")).toBeVisible();
     await expect(selector.getByTestId("copilot-plugins-start-blocked")).toBeVisible();
@@ -315,7 +311,7 @@ test("phone users can recover a policy-blocked profile capability probe", async 
     ).toBe(true);
 
     await spark.tap();
-    await expect(spark).not.toBeChecked();
+    await expect(pluginSection.getByRole("checkbox", { name: "Select spark" })).toHaveCount(0);
     const actions = copilotProfileSaveActions(testPage);
     await expect(actions.surface).toHaveCount(1);
     await expect(actions.save).toHaveCount(1);
@@ -330,7 +326,7 @@ test("phone users can recover a policy-blocked profile capability probe", async 
     recovery.allowRecovery();
     await testPage.reload();
     await expect(pluginSection).toBeVisible({ timeout: 15_000 });
-    await expect(spark).not.toBeChecked();
+    await expect(pluginSection.getByRole("checkbox", { name: "Select spark" })).toHaveCount(0);
     await expect(capabilityStatus).toHaveAttribute("data-status", "ready", { timeout: 20_000 });
     await expect(modelPicker).toContainText(COPILOT_RECOVERY_MODEL_ID);
     await expect(modelPicker).not.toHaveClass(/text-destructive/);

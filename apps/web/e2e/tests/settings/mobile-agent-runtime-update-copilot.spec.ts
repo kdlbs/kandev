@@ -31,9 +31,7 @@ function installCopilotRuntimeFixture(testPage: Parameters<typeof installRuntime
       command_string: "npm exec",
       copilot_plugin_compatibility: {
         runtime_version: "9.9.9",
-        supported: false,
-        supported_versions: ["1.0.88", "1.0.104", "1.0.105"],
-        reason: "runtime_unsupported",
+        state: "not_checked",
         selected_profile_count: null,
       },
     },
@@ -52,12 +50,10 @@ test.describe("Copilot runtime plugin compatibility on mobile", () => {
     const drawer = testPage.getByTestId(`agent-update-drawer-${AGENT_NAME}`);
     await expect(drawer).toBeVisible();
     const notice = drawer.getByTestId(`agent-update-copilot-compatibility-${AGENT_NAME}`);
-    await expect(notice).toHaveAttribute("data-supported", "false");
-    await expect(notice).toContainText("Copilot 9.9.9: plugin adapter unavailable.");
-    await expect(notice).toContainText(
-      "Saved profile impact is unknown because profiles could not be read.",
-    );
-    await expect(notice).toContainText("Qualified versions: 1.0.88, 1.0.104, 1.0.105");
+    await expect(notice).toHaveAttribute("data-state", "not_checked");
+    await expect(notice).toContainText("Plugin compatibility for Copilot 9.9.9: unchecked.");
+    await expect(notice).toContainText("Saved profile selections could not be counted.");
+    await expect(notice).not.toContainText(/qualified versions|will block/i);
     const noticeBox = await settledBoundingBox(notice);
     const viewport = testPage.viewportSize();
     expect(viewport).not.toBeNull();

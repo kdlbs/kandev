@@ -33,18 +33,29 @@ func (s *copilotUtilitySelection) Get(context.Context, string, string) (managedr
 }
 
 type copilotUtilityRunner struct {
-	stdout   []byte
-	root     string
-	calls    int
-	argv     []string
-	env      map[string]string
-	workDir  string
-	argvs    [][]string
-	envs     []map[string]string
-	workDirs []string
+	stdout       []byte
+	root         string
+	calls        int
+	helpCalls    int
+	argv         []string
+	env          map[string]string
+	workDir      string
+	argvs        [][]string
+	helpArgvs    [][]string
+	envs         []map[string]string
+	helpEnvs     []map[string]string
+	workDirs     []string
+	helpWorkDirs []string
 }
 
 func (r *copilotUtilityRunner) Run(_ context.Context, argv []string, env map[string]string, workDir string) (copilotplugins.CommandResult, error) {
+	if containsSequence(argv, "--help") {
+		r.helpCalls++
+		r.helpArgvs = append(r.helpArgvs, append([]string(nil), argv...))
+		r.helpEnvs = append(r.helpEnvs, cloneStringMap(env))
+		r.helpWorkDirs = append(r.helpWorkDirs, workDir)
+		return copilotplugins.CommandResult{Stdout: []byte("Options:\n  --plugin-dir <path>  Load plugin directories\n")}, nil
+	}
 	r.calls++
 	r.argv = append([]string(nil), argv...)
 	r.env = cloneStringMap(env)
@@ -103,9 +114,6 @@ func TestCopilotPluginProfileUtility(t *testing.T) {
 }
 
 func TestCopilotPluginProfileUtilityRuntime105(t *testing.T) {
-	if !copilotplugins.RuntimeSupported("1.0.105") {
-		t.Skip("1.0.105 adapter qualification is scoped to linux/amd64")
-	}
 	configDir, runner := copilotUtilityFixture(t)
 	mgr := &Manager{}
 	mgr.SetCopilotPluginRunner(runner)
@@ -218,6 +226,16 @@ func assertCopilotUtilityInventory(t *testing.T, runner *copilotUtilityRunner, i
 	}
 	if runner.envs[index]["COPILOT_HOME"] != configDir {
 		t.Errorf("inventory %d COPILOT_HOME = %q, want %q", index, runner.envs[index]["COPILOT_HOME"], configDir)
+	}
+	if index >= len(runner.helpArgvs) || index >= len(runner.helpEnvs) || index >= len(runner.helpWorkDirs) {
+		t.Fatalf("capability probe index %d missing from %d help calls", index, runner.helpCalls)
+	}
+	if !containsSequence(runner.helpArgvs[index], "@github/copilot@"+version, "--help") ||
+		containsSequence(runner.helpArgvs[index], "--acp") {
+		t.Errorf("capability %d argv = %#v, want selected interactive runtime help", index, runner.helpArgvs[index])
+	}
+	if runner.helpWorkDirs[index] != workDir || runner.helpEnvs[index]["COPILOT_HOME"] != configDir {
+		t.Errorf("capability %d context = workdir:%q home:%q, want final profile context", index, runner.helpWorkDirs[index], runner.helpEnvs[index]["COPILOT_HOME"])
 	}
 }
 

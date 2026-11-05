@@ -17,13 +17,4 @@ func TestCopilotPluginRuntime105AdapterContract(t *testing.T) {
 	}); !ok || version != "1.0.105" {
 		t.Fatalf("runtime version from command = %q, ok=%t", version, ok)
 	}
-	if !copilotplugins.RuntimeSupportedOn("1.0.105", "linux", "amd64") {
-		t.Fatal("1.0.105 must be qualified on linux/amd64")
-	}
-	if copilotplugins.RuntimeSupportedOn("1.0.105", "darwin", "arm64") {
-		t.Fatal("1.0.105 must not be admitted without darwin/arm64 adapter evidence")
-	}
-	if !copilotplugins.RuntimeSupportedOn("1.0.104", "darwin", "arm64") {
-		t.Fatal("unscoped qualified versions must remain available on every platform")
-	}
 }

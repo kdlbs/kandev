@@ -16,15 +16,29 @@ import (
 )
 
 type recordingCopilotRunner struct {
-	stdout []byte
-	calls  [][]string
-	envs   []map[string]string
+	stdout    []byte
+	calls     [][]string
+	helpCalls [][]string
+	envs      []map[string]string
 }
 
 func (r *recordingCopilotRunner) Run(_ context.Context, argv []string, env map[string]string, _ string) (copilotplugins.CommandResult, error) {
+	if isCopilotPluginHelpCommand(argv) {
+		r.helpCalls = append(r.helpCalls, append([]string{}, argv...))
+		return copilotplugins.CommandResult{Stdout: []byte("Options:\n  --plugin-dir <path>  Load plugin directories\n")}, nil
+	}
 	r.calls = append(r.calls, append([]string{}, argv...))
 	r.envs = append(r.envs, env)
 	return copilotplugins.CommandResult{Stdout: r.stdout}, nil
+}
+
+func isCopilotPluginHelpCommand(argv []string) bool {
+	for _, arg := range argv {
+		if arg == "--help" {
+			return true
+		}
+	}
+	return false
 }
 
 func newCopilotDiscoveryController(t *testing.T) (*Controller, *fakeStore, string) {
@@ -106,19 +120,15 @@ func TestCopilotPluginDiscoveryMountPermission(t *testing.T) {
 	if got.Status != "ready" || !got.MountPermitted {
 		t.Fatalf("supported inventory must permit native mounts: %#v", got)
 	}
-	if got.RuntimeVersion != "1.0.88" || !copilotplugins.RuntimeSupported(got.RuntimeVersion) {
-		t.Fatalf("discovery runtime = %q, want the supported default", got.RuntimeVersion)
+	if got.RuntimeVersion != "1.0.88" {
+		t.Fatalf("discovery runtime = %q, want the selected default", got.RuntimeVersion)
 	}
-	if len(got.SupportedRuntimeVersions) != len(copilotplugins.SupportedRuntimeVersions()) ||
-		got.SupportedRuntimeVersions[0] != "1.0.88" {
-		t.Fatalf("supported runtime versions = %v", got.SupportedRuntimeVersions)
-	}
-	if len(runner.calls) != 1 {
-		t.Fatalf("discovery ran %d inventory commands, want one", len(runner.calls))
+	if len(runner.calls) != 1 || len(runner.helpCalls) != 1 {
+		t.Fatalf("discovery ran %d inventory and %d help commands, want one each", len(runner.calls), len(runner.helpCalls))
 	}
 }
 
-func TestCopilotPluginDiscoveryReportsSupportedVersionsForUnsupportedRuntime(t *testing.T) {
+func TestCopilotPluginDiscoveryUsesObservedCapabilityForUnknownRuntime(t *testing.T) {
 	ctrl, _, profileID := newCopilotDiscoveryController(t)
 	runner := &recordingCopilotRunner{stdout: []byte(`[]`)}
 	ctrl.copilotPluginRunnerImpl = runner
@@ -135,18 +145,14 @@ func TestCopilotPluginDiscoveryReportsSupportedVersionsForUnsupportedRuntime(t *
 	if err != nil {
 		t.Fatalf("DiscoverCopilotPlugins: %v", err)
 	}
-	if got.Status != "unsupported" || got.Reason != "runtime_unsupported" {
+	if got.Status != "ready" || got.Reason != "" {
 		t.Fatalf("response = %#v", got)
 	}
-	if got.RuntimeVersion != "9.9.9" || got.MountPermitted {
+	if got.RuntimeVersion != "9.9.9" || !got.MountPermitted {
 		t.Fatalf("runtime = %q mount permitted = %t", got.RuntimeVersion, got.MountPermitted)
 	}
-	if len(got.SupportedRuntimeVersions) != len(copilotplugins.SupportedRuntimeVersions()) ||
-		!copilotplugins.RuntimeSupported(got.SupportedRuntimeVersions[0]) {
-		t.Fatalf("supported runtime versions = %v", got.SupportedRuntimeVersions)
-	}
-	if len(runner.calls) != 0 {
-		t.Fatalf("unsupported runtime ran %d native commands", len(runner.calls))
+	if len(runner.calls) != 1 || len(runner.helpCalls) != 1 {
+		t.Fatalf("unknown runtime ran %d inventory and %d help commands, want one each", len(runner.calls), len(runner.helpCalls))
 	}
 }
 
