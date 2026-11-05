@@ -13,9 +13,11 @@ const viewport = (window as unknown as HappyDOMWindow).happyDOM;
 const CHAT_INPUT_GLOW_TEST_ID = "chat-input-glow";
 
 vi.mock("./tiptap-input", () => ({
-  TipTapInput: (props: unknown) => {
+  TipTapInput: (props: {
+    onEscape?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  }) => {
     tipTapPropsMock(props);
-    return <div data-testid={MOCK_TIPTAP_INPUT_TEST_ID} />;
+    return <textarea data-testid={MOCK_TIPTAP_INPUT_TEST_ID} onKeyDownCapture={props.onEscape} />;
   },
 }));
 
@@ -111,6 +113,78 @@ function props(overrides: Partial<ChatInputBodyProps> = {}): ChatInputBodyProps 
     ...overrides,
   };
 }
+
+describe("ChatInputBody Escape cancellation", () => {
+  it("cancels a running turn on Escape from the composer", () => {
+    const onCancel = vi.fn();
+    render(
+      <TooltipProvider>
+        <ChatInputBody
+          {...props({
+            isAgentBusy: true,
+            editorAreaProps: { ...props().editorAreaProps, isAgentBusy: true, onCancel },
+          })}
+        />
+      </TooltipProvider>,
+    );
+
+    const editor = screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID);
+    editor.focus();
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    editor.dispatchEvent(event);
+
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("prevents default only when cancelling a running turn", () => {
+    const onCancel = vi.fn();
+    render(
+      <TooltipProvider>
+        <ChatInputBody
+          {...props({
+            isAgentBusy: false,
+            editorAreaProps: { ...props().editorAreaProps, isAgentBusy: false, onCancel },
+          })}
+        />
+      </TooltipProvider>,
+    );
+
+    const editor = screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID);
+    editor.focus();
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    editor.dispatchEvent(event);
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("does not cancel on composing or repeated Escape keydowns", () => {
+    const onCancel = vi.fn();
+    render(
+      <TooltipProvider>
+        <ChatInputBody
+          {...props({
+            isAgentBusy: true,
+            editorAreaProps: { ...props().editorAreaProps, isAgentBusy: true, onCancel },
+          })}
+        />
+      </TooltipProvider>,
+    );
+
+    const editor = screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID);
+    editor.focus();
+    const composingEvent = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperty(composingEvent, "keyCode", { value: 229 });
+    editor.dispatchEvent(composingEvent);
+    expect(onCancel).not.toHaveBeenCalled();
+    fireEvent.keyDown(editor, { key: "Escape", repeat: true });
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+});
 
 describe("ChatInputBody", () => {
   it("renders the running glow as a pointer-inert HTML pulse target", () => {

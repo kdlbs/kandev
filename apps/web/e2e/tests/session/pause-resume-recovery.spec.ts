@@ -4,6 +4,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 // ---------------------------------------------------------------------------
@@ -55,6 +56,33 @@ async function seedTaskAndWaitForIdle(
 
 test.describe("Pause → resume recovery", () => {
   // Cancel/resume timing can be sensitive under CI load.
+
+  test("Escape cancels only while the chat composer is focused", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Escape cancels focused chat turn",
+    );
+
+    await session.sendMessage("/slow 8s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+
+    await session.cancelAgentButton().focus();
+    await testPage.keyboard.press("Escape");
+    await dwell(testPage, 300, "negative-assertion", "Escape outside the composer must not cancel");
+    await expect(session.agentStatus()).toBeVisible();
+
+    const editor = session.activeChat().locator(".tiptap.ProseMirror:visible").first();
+    await editor.focus();
+    await editor.press("Escape");
+    await expect(session.agentStatus()).not.toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  });
 
   test("pausing a running turn lets a newly typed message resume the same session", async ({
     testPage,

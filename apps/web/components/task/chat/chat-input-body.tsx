@@ -62,6 +62,7 @@ export type ChatInputEditorAreaProps = {
   hideAgentControls?: boolean;
   hidePlanMode?: boolean;
   isAgentBusy: boolean;
+  onEscape?: (event: React.KeyboardEvent<HTMLElement>) => void;
   canCancelAgent?: boolean;
   onPlanModeChange: (enabled: boolean) => void;
   taskTitle?: string;
@@ -240,6 +241,7 @@ function ChatInputEditorField({
         onPlanModeChange={p.onPlanModeChange}
         promptSuggestion={promptSuggestion ?? null}
         onPromptSuggestionDismiss={p.onPromptSuggestionDismiss}
+        onEscape={p.onEscape}
       />
       {promptSuggestion && !value.trim() && !isDisabled && (
         <ComposerPromptSuggestionHint
@@ -276,6 +278,23 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         else handleSubmitWithReset();
       }
     : wrappedSubmit;
+  const handleEscape = useCallback(
+    (event: React.KeyboardEvent<HTMLElement>) => {
+      if (
+        event.key !== "Escape" ||
+        !p.isAgentBusy ||
+        event.nativeEvent.isComposing ||
+        event.nativeEvent.keyCode === 229 ||
+        event.repeat ||
+        event.defaultPrevented
+      ) {
+        return;
+      }
+      event.preventDefault();
+      p.onCancel();
+    },
+    [p.isAgentBusy, p.onCancel],
+  );
 
   const composerCapability = useChatPluginComposer(composerPluginOptions(p, hasContent));
   const submitDisabledReason = p.hasPendingAttachmentUploads
@@ -285,7 +304,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-      <ChatInputEditorField p={p} onSubmit={wrappedSubmit} />
+      <ChatInputEditorField p={{ ...p, onEscape: handleEscape }} onSubmit={wrappedSubmit} />
       <FileInput fileInputRef={fileInputRef} addFiles={addFiles} />
       <ChatInputToolbar
         planModeEnabled={planModeEnabled}

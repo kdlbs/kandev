@@ -23,6 +23,14 @@ scoped `AGENTS.md`/`CLAUDE.md` files and read the referenced instructions.
 If an imported file is unavailable, note the missing guidance and continue with
 the best available local instructions.
 
+When asked to run or inspect a service in the user's environment, search the
+known local infrastructure repositories and runbooks before concluding the
+host is unreachable or that deployment is unsupported. Use the exact hostname
+the user gave, then confirm aliases and deployment paths from those sources.
+Check whether the requested change is actually present in the target runtime
+before claiming it can exercise the current checkout. Keep this read-only until
+the user explicitly authorizes a deployment or other state change.
+
 Before changing code:
 - Read the scoped `AGENTS.md` for the subtree you will touch, e.g. `apps/backend/AGENTS.md`, `apps/web/AGENTS.md`, or integration-specific guidance.
 - Use `rg` to find existing patterns before inventing one.
