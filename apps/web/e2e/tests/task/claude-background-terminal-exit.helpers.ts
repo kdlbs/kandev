@@ -1,11 +1,23 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import fs from "node:fs";
 import type { ApiClient } from "../../helpers/api-client";
 import { firstSessionId } from "../../helpers/session";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
-const FIRST_JOB = "toolu_e2e_claude_terminal_first";
-const SECOND_JOB = "toolu_e2e_claude_terminal_second";
+const FIRST_JOB_TITLE = "Run the full test suite";
+const SECOND_JOB_TITLE = "Watch pull request checks";
+
+type TerminalJobs = { first: string; second: string };
+
+async function resolveTerminalJobs(apiClient: ApiClient, sessionId: string): Promise<TerminalJobs> {
+  const { workloads } = await apiClient.listBackgroundWorkloads(sessionId);
+  const first = workloads.find((workload) => workload.title === FIRST_JOB_TITLE)?.work_id ?? "";
+  const second = workloads.find((workload) => workload.title === SECOND_JOB_TITLE)?.work_id ?? "";
+  expect(first).not.toBe("");
+  expect(second).not.toBe("");
+  return { first, second };
+}
 
 async function createClaudeACpProfile(apiClient: ApiClient): Promise<string> {
   let agentId = "";
@@ -79,11 +91,14 @@ async function expectRunningCount(
  * A qualified Claude 0.97.0 terminal frame ends only its matching detached
  * shell with a null outcome. Desktop and phone share this flow through their
  * own specs (REQ-AGENTS-BACKGROUND-WORK-005 and -010, AC .5 and .6).
+ * `signalFile` is the test-owned gate that releases the fixture's terminal
+ * frames only after both running jobs have been observed.
  */
 export async function expectClaudeBackgroundTerminalExit(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
+  signalFile: string,
 ): Promise<void> {
   const agentProfileId = await createClaudeACpProfile(apiClient);
   const task = await apiClient.createTaskWithAgent(
@@ -104,39 +119,41 @@ export async function expectClaudeBackgroundTerminalExit(
   const sessionId = task.session_id ?? (await firstSessionId(apiClient, task.id));
 
   // Start the fixture only after the page is ready so both launch frames are
-  // observable before the first terminal frame arrives.
+  // observable before the test releases the terminal frames.
   await session.sendMessageViaButton("/claude-background-terminal 15s 8s");
   await session.expectChatResponseVisible("Two background commands are running.");
 
   await expectRunningCount(apiClient, sessionId, 2);
+  const jobs = await resolveTerminalJobs(apiClient, sessionId);
   const { workloads: running } = await apiClient.listBackgroundWorkloads(sessionId);
   const launchOrigin =
-    running.find((workload) => workload.work_id === FIRST_JOB)?.origin_turn_id ?? "";
+    running.find((workload) => workload.work_id === jobs.first)?.origin_turn_id ?? "";
   expect(launchOrigin).not.toBe("");
   const chip = testPage.getByTestId("background-work-chip");
   await expect(chip).toBeVisible();
   await expect(chip).toContainText("2 Background Jobs");
 
   const editor: Locator = await session.fillMessage("draft survives Claude terminal exits");
+  fs.writeFileSync(signalFile, "release-terminal-frames");
 
-  await expectJobState(apiClient, sessionId, FIRST_JOB, "ended");
+  await expectJobState(apiClient, sessionId, jobs.first, "ended");
   await expectRunningCount(apiClient, sessionId, 1);
   await expect(chip).toContainText("1 Background Job");
   await expect(chip).not.toContainText("2 Background Jobs");
 
   const { workloads: afterFirst } = await apiClient.listBackgroundWorkloads(sessionId);
-  const first = afterFirst.find((workload) => workload.work_id === FIRST_JOB);
+  const first = afterFirst.find((workload) => workload.work_id === jobs.first);
   expect(first?.exit_code).toBeUndefined();
-  expect(first?.source_call_id).toBe(FIRST_JOB);
+  expect(first?.source_call_id).toBe(jobs.first);
   expect(first?.origin_turn_id).toBe(launchOrigin);
 
-  await expectJobState(apiClient, sessionId, SECOND_JOB, "ended");
+  await expectJobState(apiClient, sessionId, jobs.second, "ended");
   await expectRunningCount(apiClient, sessionId, 0);
   await expect(chip).toHaveCount(0);
   await expect(editor).toHaveText("draft survives Claude terminal exits");
 
   await openBackgroundWorkHistory(testPage);
-  for (const workId of [FIRST_JOB, SECOND_JOB]) {
+  for (const workId of [jobs.first, jobs.second]) {
     await expect(testPage.getByTestId(`background-workload-card-${workId}`)).toBeVisible();
     await expect(testPage.getByTestId(`background-work-state-${workId}`)).toHaveText("Ended");
   }
@@ -154,7 +171,7 @@ export async function expectClaudeBackgroundTerminalExit(
     });
   }
   await openBackgroundWorkHistory(testPage);
-  for (const workId of [FIRST_JOB, SECOND_JOB]) {
+  for (const workId of [jobs.first, jobs.second]) {
     await expect(testPage.getByTestId(`background-workload-card-${workId}`)).toBeVisible();
   }
 }

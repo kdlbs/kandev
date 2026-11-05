@@ -135,6 +135,7 @@ AC-AGENTS-BACKGROUND-WORK-010.5 and .6. There is no UI markup change.
 - `go test -trimpath -tags fts5 ./internal/agentctl/server/adapter/transport/acp -count=1`: passed.
 - `go test -trimpath -tags fts5 ./internal/orchestrator -count=1`: passed.
 - Adapter and orchestrator review regressions: verified/legacy cleanup scope, exact terminal accounting retirement, live sibling retention, duplicate delivery, and stale execution isolation passed.
+- Signal-terminated null-code frames settle as unavailable outcomes. Mock fixture tool-call IDs are unique per invocation, and a test-owned signal file releases terminal frames only after both running jobs are observed.
 - `go test -trimpath -tags fts5 ./internal/task/service -run 'Test.*BackgroundWork' -count=1`: passed.
 - `go test -trimpath -tags fts5 ./cmd/mock-agent -count=1`: passed.
 - Desktop and mobile Playwright scenarios: passed (`1 passed` each, about 36 s and 33 s).

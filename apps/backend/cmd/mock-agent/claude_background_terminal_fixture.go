@@ -14,6 +14,11 @@ import (
 // only by the scenario that replays those captured frames.
 const mockClaudeBridgeVersionEnv = "E2E_MOCK_AGENT_CLAUDE_BRIDGE_VERSION"
 
+// mockClaudeTerminalSignalEnv gates the captured terminal frames on a file the
+// browser test creates after it has observed both running jobs. Unset, the
+// fixture falls back to its delay for manual use.
+const mockClaudeTerminalSignalEnv = "E2E_MOCK_AGENT_CLAUDE_TERMINAL_SIGNAL_FILE"
+
 const (
 	mockClaudeBridgeName    = "@agentclientprotocol/claude-agent-acp"
 	mockClaudeBridgeVersion = "0.97.0"
@@ -51,12 +56,12 @@ func emitClaudeBackgroundTerminalFixture(e *emitter, cmd string) {
 
 	jobs := []claudeBackgroundTerminalJob{
 		{
-			toolCallID: "toolu_e2e_claude_terminal_first",
+			toolCallID: string(nextToolID()),
 			command:    "go test ./...",
 			title:      "Run the full test suite",
 		},
 		{
-			toolCallID: "toolu_e2e_claude_terminal_second",
+			toolCallID: string(nextToolID()),
 			command:    "gh pr checks --watch",
 			title:      "Watch pull request checks",
 		},
@@ -72,11 +77,16 @@ func emitClaudeBackgroundTerminalFixture(e *emitter, cmd string) {
 	if e.registerDetachedWork != nil {
 		release = e.registerDetachedWork(e.sid, cancel)
 	}
+	signalFile := strings.TrimSpace(os.Getenv(mockClaudeTerminalSignalEnv))
 	backgroundEmitter := &emitter{ctx: context.Background(), conn: e.conn, sid: e.sid}
 	go func() {
 		defer release()
 		defer cancel()
-		if !waitClaudeTerminalFixture(backgroundCtx, firstDelay) {
+		if signalFile != "" {
+			if !waitClaudeTerminalSignal(backgroundCtx, signalFile) {
+				return
+			}
+		} else if !waitClaudeTerminalFixture(backgroundCtx, firstDelay) {
 			return
 		}
 		backgroundEmitter.emitClaudeBackgroundTerminalExit(jobs[0].toolCallID)
@@ -85,6 +95,21 @@ func emitClaudeBackgroundTerminalFixture(e *emitter, cmd string) {
 		}
 		backgroundEmitter.emitClaudeBackgroundTerminalExit(jobs[1].toolCallID)
 	}()
+}
+
+func waitClaudeTerminalSignal(ctx context.Context, path string) bool {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return false
+		}
+	}
 }
 
 func waitClaudeTerminalFixture(ctx context.Context, delay time.Duration) bool {
@@ -109,7 +134,7 @@ func withClaudeUpdateMeta(meta map[string]any) acp.ToolCallUpdateOpt {
 func (e *emitter) startClaudeBackgroundShell(job claudeBackgroundTerminalJob) {
 	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
 		SessionId: e.sid,
-		Update: acp.StartToolCall(acp.ToolCallId(job.toolCallID), "Terminal",
+		Update: acp.StartToolCall(acp.ToolCallId(job.toolCallID), job.title,
 			acp.WithStartKind(acp.ToolKindExecute),
 			acp.WithStartStatus(acp.ToolCallStatusPending),
 			acp.WithStartRawInput(map[string]any{
@@ -133,6 +158,7 @@ func (e *emitter) completeClaudeBackgroundShell(job claudeBackgroundTerminalJob)
 		SessionId: e.sid,
 		Update: acp.UpdateToolCall(acp.ToolCallId(job.toolCallID),
 			acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
+			acp.WithUpdateTitle(job.title),
 			acp.WithUpdateRawOutput(map[string]any{"output": banner}),
 			withClaudeUpdateMeta(map[string]any{
 				"terminal_output": map[string]any{

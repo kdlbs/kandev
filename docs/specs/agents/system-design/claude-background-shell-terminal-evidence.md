@@ -28,7 +28,9 @@ after a Bash command detaches. Its `withRunningTerminal` helper suppresses the
 launch result's terminal exit. Its `endBackgroundTerminal` sends a separate
 `tool_call_update` when the command's task ends. This update names the original
 `toolCallId` and repeats that ID as `_meta.terminal_exit.terminal_id`.
-Both `exit_code` and `signal` can be null. Null proves no outcome.
+Both `exit_code` and `signal` can be null. Null proves no outcome. A non-null
+signal proves the command was terminated by that signal and still carries no
+exit code.
 
 The inspected 0.81.2 bridge emits terminal-exit metadata with the launch result
 and has no equivalent retained-terminal path. The same metadata name therefore
@@ -53,8 +55,9 @@ For null-code termination, require all of these conditions:
 3. The payload belongs to an already recognized detached shell in this session.
 4. The terminal envelope is an object with a nonempty `terminal_id` equal to the
    current `toolCallId`. The bridge uses this same ID for its display terminal.
-5. The envelope has the verified nullable exit fields. Invalid non-null field
-   types do not qualify as unknown-outcome evidence.
+5. The envelope has a null `exit_code` and a valid `signal` field: null or a
+   nonempty string. Invalid non-null exit-code types or malformed signal values
+   do not qualify as unknown-outcome evidence.
 
 The verified version also handles a fast command whose terminal exit accompanies
 the launch result: that bridge suppresses the exit while the command remains live.

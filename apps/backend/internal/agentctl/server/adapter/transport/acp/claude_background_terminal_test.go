@@ -246,6 +246,21 @@ func TestClaudeBackgroundTerminalExit(t *testing.T) {
 		require.Nil(t, event.BackgroundWork.ExitCode)
 	})
 
+	t.Run("signal termination settles with an unavailable exit code", func(t *testing.T) {
+		a := claudeTerminalAdapter(t)
+		launch := claudeBackgroundLaunch{
+			toolCallID: "toolu_signaled", command: "sleep 300", title: "Long sleep",
+		}
+		startClaudeBackgroundLaunch(t, a, "session-claude", launch)
+
+		event := a.convertToolCallResultUpdate("session-claude", claudeTerminalExitUpdate(launch.toolCallID, nil, "SIGTERM"))
+		require.NotNil(t, event)
+		require.False(t, event.ToolStatusMissing)
+		require.NotNil(t, event.BackgroundWork)
+		require.Equal(t, streams.RunStateEnded, event.BackgroundWork.State)
+		require.Nil(t, event.BackgroundWork.ExitCode, "a signal carries no exit code")
+	})
+
 	for _, tc := range []struct {
 		name         string
 		agentID      string
@@ -308,9 +323,9 @@ func TestClaudeBackgroundTerminalExit(t *testing.T) {
 			},
 		},
 		{
-			name: "non-null signal",
+			name: "malformed signal type",
 			build: func(toolCallID string) *acp.SessionToolCallUpdate {
-				return claudeTerminalExitUpdate(toolCallID, nil, float64(9))
+				return claudeTerminalExitUpdate(toolCallID, nil, true)
 			},
 		},
 		{

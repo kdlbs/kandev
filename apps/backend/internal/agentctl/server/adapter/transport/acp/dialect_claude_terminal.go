@@ -28,10 +28,10 @@ func (a *Adapter) connectedAgentIdentity() (string, string) {
 }
 
 // claudeBackgroundTerminalExit reports whether update is the verified terminal
-// frame for the tracked detached shell identified by toolCallID. Null exit
-// fields prove the command ended without a reportable outcome; a numeric code
-// keeps the existing terminal-code path, and malformed evidence establishes
-// nothing.
+// frame for the tracked detached shell identified by toolCallID. A null exit
+// code proves the command ended without a reportable outcome, whether it exited
+// normally (null signal) or was terminated by a signal. A numeric code keeps the
+// existing terminal-code path, and malformed evidence establishes nothing.
 func claudeBackgroundTerminalExit(
 	agentID, agentName, agentVersion string,
 	meta map[string]any,
@@ -79,8 +79,20 @@ func claudeTerminalExitEnvelope(meta map[string]any, toolCallID string) (map[str
 
 func claudeTerminalOutcomeUnavailable(terminal map[string]any) bool {
 	exitCode, hasExitCode := terminal["exit_code"]
+	if !hasExitCode || exitCode != nil {
+		return false
+	}
 	signal, hasSignal := terminal["signal"]
-	return hasExitCode && hasSignal && exitCode == nil && signal == nil
+	if !hasSignal {
+		return false
+	}
+	if signal == nil {
+		return true
+	}
+	// A signal-terminated process has no exit code but still proves the
+	// command ended. Only a non-empty signal string is valid evidence.
+	signalName, ok := signal.(string)
+	return ok && strings.TrimSpace(signalName) != ""
 }
 
 // preservesVerifiedClaudeBackgroundShell reports whether this adapter can
