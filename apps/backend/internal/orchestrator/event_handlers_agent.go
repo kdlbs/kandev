@@ -4475,6 +4475,7 @@ func (s *Service) handleDynamicAgentStartupFailure(
 	dispatch *func(context.Context),
 ) bool {
 	classified := unavailableDynamicStartupModel(err, *failureData)
+	strictModelFailure := classified != nil
 	var startupFailure *routingerr.AgentStartupFailure
 	if classified == nil && (!errors.As(err, &startupFailure) || startupFailure == nil) {
 		return false
@@ -4497,17 +4498,18 @@ func (s *Service) handleDynamicAgentStartupFailure(
 		session, sessionErr = s.repo.GetTaskSession(ctx, sessionID)
 	}
 	if sessionErr != nil || !startupAttemptOwnsSession(session, agentExecutionID, attempt) ||
-		(classified.Code != routingerr.CodeAgentRuntime && classified.Code != routingerr.CodeModelUnavailable) {
+		(classified.Code != routingerr.CodeAgentRuntime && !strictModelFailure) {
 		return false
 	}
 	evidence := s.unclassifiedStartupEvidence(ctx, *failureData, session, attempt, startupFailure)
-	if classified.Code == routingerr.CodeModelUnavailable {
+	if strictModelFailure {
 		*failureData = s.withStartupAttemptObservations(*failureData)
 		evidence = s.unclassifiedFailureEvidence(
 			ctx, *failureData, session, attempt.SessionID == sessionID,
 			dynamicruntime.UnclassifiedOriginAgentStartup, routingerr.PhaseSessionInit,
 			attempt.ID, "", "", false, failureData.EvidenceKnown, failureData.OutputObserved, failureData.EffectObserved,
 		)
+		evidence.StrictStartupModelRejection = true
 	}
 	if !evidence.TaskScope || !evidence.CurrentAttempt {
 		return false
@@ -4529,7 +4531,7 @@ func (s *Service) handleDynamicAgentStartupFailure(
 }
 
 func startupAttemptOwnsSession(session *models.TaskSession, executionID string, attempt dynamicStartupAttempt) bool {
-	return session != nil && session.AgentExecutionID == executionID && session.RouteGeneration == attempt.Generation &&
+	return executionID != "" && session != nil && session.AgentExecutionID == executionID && session.RouteGeneration == attempt.Generation &&
 		session.AgentProfileID == attempt.LogicalProfileID && session.ExecutionProfileID == attempt.ExecutionProfileID
 }
 

@@ -46,6 +46,10 @@ a launch error is classified.
   evidence with the current execution, generation, session and profile.
 - `apps/backend/internal/orchestrator/dynamic_launch.go` preserves the proven
   pre-prompt evidence for the existing dynamic candidate policy.
+- `apps/backend/internal/orchestrator/dynamic_evidence.go` binds the admitted
+  execution before process start and merges the matching observed effects.
+- `apps/backend/internal/agent/runtime/dynamic/types.go` carries explicit typed
+  rejection evidence rather than treating generic model errors as equivalent.
 
 ## Verification
 
@@ -58,3 +62,7 @@ a launch error is classified.
 - A follow-up temporary overlay reproduced and rejected unsafe fallthrough when
   startup evidence has output, effects, or unknown status. It also checked the
   same-execution observation merge, absent record, and ambiguous identities.
+- A second targeted overlay reproduced early admission before dynamic evidence
+  binding, generic model classification without typed rejection, and retired
+  state without a record. It verifies exact-attempt pre-start binding, caller
+  callback preservation, stale-callback fencing, and the typed/retired guards.

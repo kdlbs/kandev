@@ -43,7 +43,9 @@ func classifiedStartupModelFailureSafe(
 ) bool {
 	return classified != nil && classified.Code == routingerr.CodeModelUnavailable &&
 		classified.Phase == routingerr.PhaseSessionInit && classified.FallbackAllowed &&
-		evidence != nil && evidence.Origin == dynamicruntime.UnclassifiedOriginAgentStartup &&
+		classified.ClassifierRule == "startup.requested_model_unavailable" &&
+		evidence != nil && evidence.StrictStartupModelRejection &&
+		evidence.Origin == dynamicruntime.UnclassifiedOriginAgentStartup &&
 		evidence.TaskScope && evidence.CurrentAttempt && evidence.EvidenceKnown &&
 		!evidence.OutputObserved && !evidence.EffectObserved
 }

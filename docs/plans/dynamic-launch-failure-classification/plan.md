@@ -26,12 +26,14 @@ provenance. See [task 01](task-01-classify-startup-launch-failures.md).
 ### In scope
 
 - `classifyDynamicLaunchFailure` in `apps/backend/internal/orchestrator`.
+- The asynchronous initial-start path for a current typed, pre-prompt
+  requested-model rejection and its existing candidate policy.
 - Tests through `dynamicTaskDownstream.Launch` with a mocked agent manager.
 
 ### Out of scope
 
 - Classifier rules.
-- The asynchronous `agent.failed` startup path.
+- Other asynchronous `agent.failed` startup outcomes.
 - Ceiling admission and route persistence.
 
 ## Verification
@@ -40,3 +42,7 @@ provenance. See [task 01](task-01-classify-startup-launch-failures.md).
 - `go test ./internal/orchestrator/` compared with the base revision.
 - `golangci-lint run ./internal/orchestrator/...`
 - `make -C apps/backend build`
+
+The typed-rejection follow-up uses temporary targeted checks of startup
+identity, recorded effects and the pre-process admission callback; it does not
+claim a live-provider or full-backend run.
