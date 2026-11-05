@@ -5,8 +5,10 @@ package utility
 
 import (
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/modelcatalog"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -201,6 +203,7 @@ type ProbeConfigOption struct {
 	CurrentValue string                    `json:"current_value"`
 	Category     string                    `json:"category,omitempty"`
 	Options      []ProbeConfigOptionChoice `json:"options,omitempty"`
+	Catalog      *modelcatalog.Catalog     `json:"catalog,omitempty"`
 }
 
 type ProbeConfigOptionChoice struct {
@@ -247,6 +250,9 @@ type InferenceConfigDTO struct {
 	// (base URL + bearer key) right after the ACP initialize handshake, the
 	// same mechanism the live session adapter uses.
 	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
+	// AuthPolicy selects a provider-specific authentication method after
+	// initialize. It is an internal child-process contract.
+	AuthPolicy *acpcompat.AuthPolicy `json:"acp_auth_policy,omitempty"`
 	// OperatorDefined marks a command that came from a custom agent the
 	// install operator registered in Settings rather than from an agent
 	// definition compiled into the binary. Such a command cannot appear in

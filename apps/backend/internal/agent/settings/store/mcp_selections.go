@@ -182,6 +182,9 @@ func (r *sqliteRepository) DeleteMCPTaskData(ctx context.Context, taskID string,
 			continue
 		}
 		seen[sessionID] = struct{}{}
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM task_session_mcp_exclusions WHERE task_session_id = ?`), sessionID); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM task_session_mcp_selections WHERE task_session_id = ?`), sessionID); err != nil {
 			return err
 		}
@@ -205,6 +208,9 @@ func (r *sqliteRepository) DeleteMCPWorkspaceData(ctx context.Context, workspace
 	}
 	defer func() { _ = tx.Rollback() }()
 	queries := []string{
+		`DELETE FROM mcp_task_session_apply_state WHERE task_session_id IN (SELECT task_session_id FROM task_session_mcp_exclusions WHERE workspace_id = ?)`,
+		`DELETE FROM task_session_mcp_exclusions WHERE workspace_id = ?`,
+		`DELETE FROM workspace_builtin_mcp_policies WHERE workspace_id = ?`,
 		`DELETE FROM workspace_agent_profile_mcp_selections WHERE workspace_id = ? OR mcp_server_id IN (SELECT id FROM mcp_server_definitions WHERE workspace_id = ?)`,
 		`DELETE FROM repository_mcp_selections WHERE mcp_server_id IN (SELECT id FROM mcp_server_definitions WHERE workspace_id = ?)`,
 		`DELETE FROM task_mcp_selections WHERE mcp_server_id IN (SELECT id FROM mcp_server_definitions WHERE workspace_id = ?)`,
@@ -232,6 +238,15 @@ func replaceMCPSelectionsTx(
 	workspaceID, ownerID string,
 	definitionIDs []string,
 ) error {
+	origin := mcpconfig.SelectionOrigin{Scope: scope, WorkspaceID: workspaceID, OwnerID: ownerID}
+	if err := lockMCPSelectionOwner(ctx, tx, origin); err != nil {
+		return err
+	}
+	for _, id := range normalizedMCPSelectionIDs(definitionIDs) {
+		if err := lockMCPDefinition(ctx, tx, workspaceID, id); err != nil {
+			return err
+		}
+	}
 	table, err := selectionTable(scope)
 	if err != nil {
 		return err
@@ -353,6 +368,7 @@ func deleteMCPSelectionRows(ctx context.Context, tx *sqlx.Tx, definitionID strin
 		"repository_mcp_selections",
 		"task_mcp_selections",
 		"task_session_mcp_selections",
+		"task_session_mcp_exclusions",
 	} {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM `+table+` WHERE mcp_server_id = ?`), definitionID); err != nil {
 			return err
@@ -369,6 +385,9 @@ func (r *sqliteRepository) DeleteMCPServerDefinitionWithSelections(ctx context.C
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockMCPDefinition(ctx, tx, workspaceID, id); err != nil {
+		return err
+	}
 	if err := deleteMCPSelectionRows(ctx, tx, id); err != nil {
 		return err
 	}
@@ -402,6 +421,9 @@ func (r *sqliteRepository) ImportLegacyMCPProfileWorkspace(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockMCPSelectionOwner(ctx, tx, mcpconfig.SelectionOrigin{Scope: mcpconfig.SelectionScopeProfile, WorkspaceID: workspaceID, OwnerID: profileID}); err != nil {
+		return err
+	}
 	for _, definition := range definitions {
 		if err := prepareMCPServerDefinition(definition); err != nil {
 			return err
@@ -426,25 +448,8 @@ func (r *sqliteRepository) ImportLegacyMCPProfileWorkspace(
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, tx.Rebind(`
-		DELETE FROM workspace_agent_profile_mcp_selections
-		WHERE workspace_id = ? AND profile_id = ?
-	`), workspaceID, profileID); err != nil {
+	if err := replaceMCPSelectionsTx(ctx, tx, mcpconfig.SelectionScopeProfile, workspaceID, profileID, definitionIDs); err != nil {
 		return err
-	}
-	seen := make(map[string]struct{}, len(definitionIDs))
-	for _, definitionID := range definitionIDs {
-		if _, ok := seen[definitionID]; ok || strings.TrimSpace(definitionID) == "" {
-			continue
-		}
-		seen[definitionID] = struct{}{}
-		if _, err := tx.ExecContext(ctx, tx.Rebind(`
-			INSERT INTO workspace_agent_profile_mcp_selections
-			(workspace_id, profile_id, mcp_server_id) VALUES (?, ?, ?)
-			ON CONFLICT DO NOTHING
-		`), workspaceID, profileID, definitionID); err != nil {
-			return err
-		}
 	}
 	if state.UpdatedAt.IsZero() {
 		state.UpdatedAt = time.Now().UTC()

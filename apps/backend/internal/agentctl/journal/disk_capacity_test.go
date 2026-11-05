@@ -487,7 +487,7 @@ func TestAcknowledgedPagesAllowWriteWhileOSReserveRemainsIntact(t *testing.T) {
 	var available atomic.Uint64
 	available.Store(1 << 40)
 	j, err := Open(Config{
-		Path: path, DiskCapacityCacheTTL: time.Nanosecond,
+		Path: path, MaxEventBytes: DefaultMaxSubmissionBytes, DiskCapacityCacheTTL: time.Nanosecond,
 		DiskCapacityReader: func(context.Context, string) (systemmetrics.DiskCapacity, error) {
 			free := available.Load()
 			return systemmetrics.DiskCapacity{TotalBytes: 1 << 40, AvailableBytes: free}, nil
@@ -499,7 +499,7 @@ func TestAcknowledgedPagesAllowWriteWhileOSReserveRemainsIntact(t *testing.T) {
 	t.Cleanup(func() { _ = j.Close() })
 	ctx := context.Background()
 	var last Event
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 100; i++ {
 		last, err = j.Append(ctx, Event{
 			SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1,
 			StreamID: "stream", Type: "message", Payload: make([]byte, 512<<10),
@@ -533,7 +533,7 @@ func TestAcknowledgedPagesAllowWriteWhileOSReserveRemainsIntact(t *testing.T) {
 		t.Fatal(err)
 	}
 	reusableBytes := int64(db.Stats().FreePageN) * int64(db.Info().PageSize)
-	maxReuseCredit := maxReusableWriteBytes(DefaultMaxEventBytes)
+	maxReuseCredit := maxReusableWriteBytes(DefaultMaxSubmissionBytes)
 	if reusableBytes < maxReuseCredit {
 		t.Fatalf("reusable bbolt pages = %d bytes, want at least %d", reusableBytes, maxReuseCredit)
 	}

@@ -29,9 +29,11 @@ func (s *Service) CreateIssueWatchForWorkspace(
 	if err := s.authorizeWorkspaceAccess(ctx, req.WorkspaceID); err != nil {
 		return nil, err
 	}
-	if _, err := s.resolveAutomationClient(ctx, req.WorkspaceID, "", ""); err != nil {
+	resolved, err := s.resolveAutomationClient(ctx, req.WorkspaceID, "", "")
+	if err != nil {
 		return nil, err
 	}
+	ctx = withGitHubOperationFence(ctx, s, req.WorkspaceID, resolved)
 	return s.createIssueWatch(ctx, req)
 }
 
@@ -42,6 +44,11 @@ func (s *Service) createIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if err := s.authorizeWorkspaceAccess(ctx, req.WorkspaceID); err != nil {
 		return nil, err
 	}
+	ctx, host, unlock, err := s.prepareWatchCreation(ctx, req.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	if req.PollIntervalSeconds <= 0 {
 		req.PollIntervalSeconds = defaultWatchPollIntervalSec
 	}
@@ -60,6 +67,7 @@ func (s *Service) createIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		return nil, fmt.Errorf("invalid cleanup_policy: %q", req.CleanupPolicy)
 	}
 	iw := &IssueWatch{
+		GitHubHost:          host,
 		WorkspaceID:         req.WorkspaceID,
 		WorkflowID:          req.WorkflowID,
 		WorkflowStepID:      req.WorkflowStepID,
@@ -252,11 +260,19 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 		return nil, admissionErr
 	}
 
+	if err := s.validateIssueWatchHost(ctx, watch); err != nil {
+		return nil, err
+	}
+	ctx = withExpectedGitHubHost(ctx, defaultAuthFlowHost(watch.GitHubHost))
 	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, "", "")
 	if err != nil {
 		return nil, err
 	}
 
+	if resolved.host().String() != defaultAuthFlowHost(watch.GitHubHost) {
+		return nil, ErrGitHubHostMismatch
+	}
+	ctx = withGitHubOperationFence(ctx, s, watch.WorkspaceID, resolved)
 	s.logger.Debug("checking issue watch for new issues",
 		zap.String("watch_id", watch.ID),
 		zap.Int("repo_filters", len(watch.Repos)),
@@ -278,6 +294,9 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 	if err != nil {
 		return nil, err
 	}
+	if err := s.requireCurrentHost(ctx, watch.WorkspaceID, resolved); err != nil {
+		return nil, err
+	}
 	issues = filterIssuesByWorkspaceScope(issues, settings)
 
 	var newIssues []*Issue
@@ -288,13 +307,20 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 			continue
 		}
 		if !exists {
-			newIssues = append(newIssues, issue)
+			snapshot := *issue
+			snapshot.operationFence = &githubOperationFence{service: s, workspaceID: watch.WorkspaceID, resolved: resolved}
+			newIssues = append(newIssues, &snapshot)
 		}
 	}
 
 	if !complete {
 		return newIssues, nil
 	}
+	ctx, unlock, err := s.lockResourceMutation(ctx, watch.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	now := time.Now().UTC()
 	watch.LastPolledAt = &now
 	_ = s.store.UpdateIssueWatchLastPolledAt(ctx, watch.ID, now)
@@ -392,6 +418,19 @@ func (s *Service) fetchIssuesWithRepoFilter(ctx context.Context, client Client, 
 
 // ReserveIssueWatchTask atomically claims a dedup slot.
 func (s *Service) ReserveIssueWatchTask(ctx context.Context, watchID, repoOwner, repoName string, issueNumber int, issueURL string) (bool, error) {
+	watch, err := s.store.GetIssueWatch(ctx, watchID)
+	if err != nil {
+		return false, err
+	}
+	if watch == nil {
+		return false, ErrGitHubHostMismatch
+	}
+	lock := s.workspaceConnectionMutationLock(watch.WorkspaceID)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := s.validateWatchReservation(ctx, watch.WorkspaceID, watch.GitHubHost); err != nil {
+		return false, err
+	}
 	return s.store.ReserveIssueWatchTask(ctx, watchID, repoOwner, repoName, issueNumber, issueURL)
 }
 
@@ -463,7 +502,12 @@ func (s *Service) publishNewIssueEvent(ctx context.Context, watch *IssueWatch, i
 	if s.eventBus == nil {
 		return
 	}
+	host, generation, err := s.watchEventIdentity(ctx, watch.WorkspaceID, watch.GitHubHost, issue.operationFence)
+	if err != nil {
+		return
+	}
 	event := bus.NewEvent(events.GitHubNewIssue, "github", &NewIssueEvent{
+		GitHubHost: host, CredentialGeneration: generation,
 		CreatedByUserID:   watch.CreatedByUserID,
 		IssueWatchID:      watch.ID,
 		WorkspaceID:       watch.WorkspaceID,

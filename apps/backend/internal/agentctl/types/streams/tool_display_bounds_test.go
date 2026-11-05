@@ -7,6 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,7 +60,7 @@ func TestBoundedToolEventIsImmutableAndIdempotent(t *testing.T) {
 	second, err := json.Marshal(BoundGenericToolEvent(bounded))
 	require.NoError(t, err)
 	require.Equal(t, first, second)
-	require.Less(t, len(first), 1<<20)
+	require.Less(t, len(first), int(deliverylimits.DisplayBytes))
 	require.True(t, bounded.NormalizedPayload.IsMCPTool())
 	require.Equal(t, "monitor", bounded.NormalizedPayload.Monitor().TaskID)
 	require.Equal(t, "error", bounded.ToolStatus)
@@ -97,7 +98,7 @@ func TestBoundedToolPreviewRemainsStable(t *testing.T) {
 
 func TestBoundedToolContentOnlyPreview(t *testing.T) {
 	event := AgentEvent{Type: EventTypeToolUpdate, NormalizedPayload: NewGeneric("tool", nil),
-		ToolCallContents: []ToolCallContentItem{{Type: "content", Content: &ContentBlock{Type: "text", Text: strings.Repeat("result世", 10000)}}}}
+		ToolCallContents: []ToolCallContentItem{{Type: "content", Content: &ContentBlock{Type: "text", Text: strings.Repeat("result世", 500000)}}}}
 	bounded := BoundGenericToolEvent(event)
 	output := bounded.NormalizedPayload.Generic().Output.(map[string]any)
 	require.Equal(t, true, output["truncated"])

@@ -13,11 +13,65 @@ import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { makePRCheckRun, makePRWorkflowRun } from "../../helpers/pr-checks";
+import type { Locator, Page } from "@playwright/test";
 
 const OWNER = "acme";
 const REPO = "demo";
 const PR_NUMBER = 99;
 const PR_URL = `https://github.com/${OWNER}/${REPO}/pull/${PR_NUMBER}`;
+
+async function expectCompactAction(page: Page, drawer: Locator) {
+  const client = await page.context().newCDPSession(page);
+  const zeroInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+  const cases = [
+    ...[240, 321, 400, 480, 481].map((height) => ({ height, insets: zeroInsets })),
+    { height: 400, insets: { top: 20, right: 32, bottom: 20, left: 24 } },
+  ];
+  try {
+    for (const { height, insets } of cases) {
+      await client.send("Emulation.setSafeAreaInsetsOverride", { insets });
+      await page.setViewportSize({ width: 320, height });
+      await waitForFiniteAnimations(drawer);
+      const close = drawer.getByTestId("pr-status-chip-drawer-close");
+      const closeBounds = await close.boundingBox();
+      expect(closeBounds!.y).toBeGreaterThanOrEqual(insets.top);
+      expect(closeBounds!.x + closeBounds!.width).toBeLessThanOrEqual(320 - insets.right);
+      await close.click({ trial: true });
+      const link = drawer.getByTestId("pr-popover-pr-link");
+      const bounds = await link.boundingBox();
+      const wrapper = await drawer.locator("[data-vaul-no-drag]").boundingBox();
+      expect(bounds!.x).toBeGreaterThanOrEqual(wrapper!.x);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(wrapper!.x + wrapper!.width);
+      expect(bounds!.y).toBeGreaterThanOrEqual(wrapper!.y);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(wrapper!.y + wrapper!.height);
+      expect(bounds!.x).toBeGreaterThanOrEqual(insets.left);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320 - insets.right);
+      expect(bounds!.y).toBeGreaterThanOrEqual(insets.top);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(height - insets.bottom);
+      const footer = await drawer.getByTestId("pr-popover-footer").boundingBox();
+      expect(footer!.y + footer!.height).toBeLessThanOrEqual(wrapper!.y + wrapper!.height);
+      expect(footer!.y + footer!.height).toBeLessThanOrEqual(height - insets.bottom);
+      expect(
+        await drawer
+          .getByTestId("pr-popover-scroll-body")
+          .evaluate((element) => element.clientHeight),
+      ).toBeGreaterThanOrEqual(44);
+      expect(
+        await link.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return (
+            document
+              .elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+              ?.closest("a") === element
+          );
+        }),
+      ).toBe(true);
+    }
+  } finally {
+    await client.send("Emulation.setSafeAreaInsetsOverride", { insets: zeroInsets });
+    await client.detach();
+  }
+}
 
 type SeedTaskArgs = {
   apiClient: ApiClient;
@@ -82,15 +136,15 @@ async function seedTaskWithPRAndTodos(args: SeedTaskArgs): Promise<string> {
   });
 }
 
-async function seedTaskWithTwoPRs(args: SeedTaskArgs): Promise<string> {
+async function seedTaskWithTwoPRs(args: SeedTaskArgs, secondRepo = "api"): Promise<string> {
   const taskId = await seedTaskWithPR(args);
   await args.apiClient.mockGitHubAssociateTaskPR({
     workspace_id: args.seedData.workspaceId,
     task_id: taskId,
     owner: OWNER,
-    repo: "api",
+    repo: secondRepo,
     pr_number: 100,
-    pr_url: `https://github.com/${OWNER}/api/pull/100`,
+    pr_url: `https://github.com/${OWNER}/${secondRepo}/pull/100`,
     pr_title: "PR events mobile PR",
     head_branch: "feat/mobile-pr-events",
     base_branch: "main",
@@ -113,6 +167,111 @@ async function openTask(testPage: import("@playwright/test").Page, taskId: strin
 }
 
 test.describe("mobile PR CI chip drawer", () => {
+  // @covers AC-INTEGRATIONS-GITHUB-PR-DISCLOSURE-001.2/.3/.4/.6
+  test("keeps the mobile PR action fixed through loading and scrolling", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    await testPage.setViewportSize({ width: 320, height: 844 });
+    await testPage
+      .context()
+      .addCookies([{ name: "kandev_locale", value: "pt-pt", url: backend.baseUrl }]);
+    const taskId = await seedTaskWithPR({ apiClient, seedData, title: "Stable mobile PR action" });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: Array.from({ length: 24 }, (_, index) => ({
+        name: `Workflow ${index + 1} / test`,
+        status: "in_progress",
+        html_url: "",
+      })),
+    });
+    const gate = Promise.withResolvers<void>();
+    await testPage.route(
+      (url) => url.pathname === `/api/v1/github/prs/${OWNER}/${REPO}/${PR_NUMBER}`,
+      async (route) => {
+        await gate.promise;
+        await route.continue();
+      },
+    );
+    try {
+      const session = await openTask(testPage, taskId);
+      await session.tapPRStatusChip();
+      const drawer = session.prStatusChipDrawer();
+      await waitForFiniteAnimations(drawer);
+      await expect(testPage.locator("html")).toHaveAttribute("lang", "pt-pt");
+      const footer = drawer.getByTestId("pr-popover-footer");
+      const footerFits = () =>
+        footer.evaluate((element) => {
+          const slot = element.parentElement!.getBoundingClientRect();
+          const text = element.querySelector("span")!.getBoundingClientRect();
+          return text.left >= slot.left && text.right <= slot.right && text.bottom <= slot.bottom;
+        });
+      await expect(drawer.getByTestId("pr-popover-updating")).toHaveText("A atualizar…");
+      expect(await footerFits()).toBe(true);
+      const link = drawer.getByTestId("pr-popover-pr-link");
+      await expect(link).toBeVisible();
+      const before = await link.boundingBox();
+      const frameBefore = await drawer.boundingBox();
+      expect(before!.height).toBeGreaterThanOrEqual(44);
+      expect(before!.width).toBeGreaterThanOrEqual(44);
+      const response = testPage.waitForResponse(
+        (res) => new URL(res.url()).pathname === `/api/v1/github/prs/${OWNER}/${REPO}/${PR_NUMBER}`,
+      );
+      gate.resolve();
+      await response;
+      await expect(drawer.getByTestId("pr-workflow-row")).toHaveCount(24);
+      await expect(drawer.getByTestId("pr-popover-updated-at")).toContainText("atualizado");
+      expect(await footerFits()).toBe(true);
+      const after = await link.boundingBox();
+      expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs((await drawer.boundingBox())!.height - frameBefore!.height),
+      ).toBeLessThanOrEqual(1);
+      const body = drawer.getByTestId("pr-popover-scroll-body");
+      expect(await body.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
+      await body.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await expect(drawer.getByTestId("pr-workflow-row").last()).toBeInViewport();
+      expect(Math.abs((await link.boundingBox())!.y - before!.y)).toBeLessThanOrEqual(1);
+      expect(
+        await drawer.evaluate(
+          (element) =>
+            Array.from(element.querySelectorAll("*")).filter(
+              (child) =>
+                getComputedStyle(child).overflowY === "auto" &&
+                child.scrollHeight > child.clientHeight,
+            ).length,
+        ),
+      ).toBe(1);
+      expect(
+        await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      ).toBe(true);
+      expect((await drawer.boundingBox())!.y).toBeGreaterThanOrEqual(0);
+      await body.evaluate((element) => {
+        element.scrollTop = 0;
+      });
+      await testPage.screenshot({ path: test.info().outputPath("stable-phone-drawer.png") });
+      await testPage.context().route(PR_URL, (route) => route.fulfill({ body: "PR destination" }));
+      const opened = testPage.waitForEvent("popup");
+      await testPage.touchscreen.tap(before!.x + before!.width / 2, before!.y + before!.height / 2);
+      const popup = await opened;
+      await expect(popup).toHaveURL(PR_URL);
+      await popup.close();
+      await expectCompactAction(testPage, drawer);
+      await session.prStatusChipDrawerClose().tap();
+      await expect(drawer).toBeHidden();
+    } finally {
+      gate.resolve();
+      await testPage.unrouteAll({ behavior: "wait" });
+    }
+  });
+
   test("keeps grouped PR event automations usable without tray overflow", async ({
     testPage,
     apiClient,
@@ -392,16 +551,20 @@ test.describe("mobile PR CI chip drawer", () => {
     prCapture,
   }) => {
     test.setTimeout(120_000);
-    const taskId = await seedTaskWithTwoPRs({
-      apiClient,
-      seedData,
-      title: "Mobile multi PR unlink",
-      prOverrides: {
-        checks_state: "success",
-        checks_total: 2,
-        checks_passing: 2,
+    await testPage.setViewportSize({ width: 320, height: 844 });
+    const taskId = await seedTaskWithTwoPRs(
+      {
+        apiClient,
+        seedData,
+        title: "Mobile multi PR unlink",
+        prOverrides: {
+          checks_state: "success",
+          checks_total: 2,
+          checks_passing: 2,
+        },
       },
-    });
+      "repository-name-long-enough-to-exercise-truncation",
+    );
     const session = await openTask(testPage, taskId);
 
     await expect(session.prStatusChip()).toHaveAttribute("data-pr-count", "2", {
@@ -411,6 +574,23 @@ test.describe("mobile PR CI chip drawer", () => {
     const removeFirst = session.prMultiPopoverRemove(OWNER, REPO, PR_NUMBER);
     await expect(removeFirst).toBeVisible();
     await waitForFiniteAnimations(session.prStatusChipDrawer());
+    const tabs = session.prStatusChipDrawer().getByTestId("pr-multi-popover-tabs");
+    expect(await tabs.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
+    const longTab = tabs.getByRole("tab").filter({ hasText: "#100" });
+    const number = longTab.getByText("#100", { exact: true });
+    expect(
+      await number.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          document
+            .elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+            ?.closest('[role="tab"]') === element.closest('[role="tab"]')
+        );
+      }),
+    ).toBe(true);
+    await longTab.tap();
+    await expect(longTab).toHaveAttribute("aria-selected", "true");
+    await tabs.getByRole("tab").filter({ hasText: "#99" }).tap();
     await prCapture.screenshot("mobile-pr-unlink-drawer", {
       caption: "Mobile multi-PR drawer with visible unlink controls inside the tabs",
     });
@@ -624,5 +804,79 @@ test.describe("mobile PR CI chip drawer", () => {
     await expect(drawer.locator("[data-testid='pr-check-group']")).toHaveCount(0);
     await session.prStatusChipDrawerClose().tap();
     await expect(session.prStatusChipDrawer()).toHaveCount(0);
+  });
+  test("many PR tabs keep the action reachable on a short phone", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await testPage.setViewportSize({ width: 320, height: 480 });
+    const taskId = await seedTaskWithPR({
+      apiClient,
+      seedData,
+      title: "Short phone with many PRs",
+    });
+    const associate = async (number: number) => {
+      await apiClient.mockGitHubAssociateTaskPR({
+        workspace_id: seedData.workspaceId,
+        task_id: taskId,
+        owner: OWNER,
+        repo: REPO,
+        pr_number: number,
+        pr_url: `https://github.com/${OWNER}/${REPO}/pull/${number}`,
+        pr_title: `Additional PR ${number}`,
+        head_branch: `feature/${number}`,
+        base_branch: "main",
+        author_login: "test-user",
+        state: "open",
+        checks_state: "success",
+        checks_total: 1,
+        checks_passing: 1,
+      });
+    };
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: 110,
+      checks: [{ name: "Build", status: "completed", conclusion: "success", html_url: "" }],
+    });
+    await associate(100);
+    const session = await openTask(testPage, taskId);
+    await session.tapPRStatusChip();
+    const drawer = session.prStatusChipDrawer();
+    await waitForFiniteAnimations(drawer);
+    const link = drawer.getByTestId("pr-popover-pr-link");
+    await expect(link).toBeInViewport();
+    const before = await link.boundingBox();
+    for (let number = 101; number <= 110; number++) await associate(number);
+    const tabs = drawer.getByTestId("pr-multi-popover-tabs");
+    await expect(tabs.getByRole("tab")).toHaveCount(12);
+    const after = await link.boundingBox();
+    expect(Math.abs(after!.x - before!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
+    const body = drawer.getByTestId("pr-popover-scroll-body");
+    expect(await body.evaluate((element) => element.clientHeight)).toBeGreaterThanOrEqual(44);
+    expect(await tabs.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
+    expect(await tabs.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+      true,
+    );
+    const last = tabs.getByRole("tab").last();
+    await last.scrollIntoViewIfNeeded();
+    await last.tap();
+    await expect(last).toHaveAttribute("aria-selected", "true");
+    await expect(link).toHaveAttribute("href", `https://github.com/${OWNER}/${REPO}/pull/110`);
+    expect(
+      await link.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          document
+            .elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+            ?.closest("a") === element
+        );
+      }),
+    ).toBe(true);
+    await expectCompactAction(testPage, drawer);
+    await session.prStatusChipDrawerClose().tap();
   });
 });

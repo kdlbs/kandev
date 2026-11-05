@@ -6,6 +6,8 @@ import { expectWebkitDialogMotion } from "../../helpers/dialog-webkit-metrics";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { waitForRepositoryPickerClose } from "../../helpers/task-create-picker";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 test.use({ trace: "retain-on-failure" });
 
@@ -167,6 +169,8 @@ test.describe("Branch selector behavior with executor types", () => {
       const pasteInput = testPage.getByTestId("remote-repo-input");
       await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
       await pasteInput.press("Enter");
+      await expect(testPage.getByTestId("remote-repo-popover-content")).toHaveCount(0);
+      await expect(testPage.getByTestId("remote-repo-chip-trigger")).toBeFocused();
 
       // Select local executor profile
       const executorSelector = testPage.getByTestId("executor-profile-selector");
@@ -302,6 +306,9 @@ test.describe("Fresh-branch flow", () => {
       .getByRole("option", { name: new RegExp(`^${escapeRe(repoName)}\\b`, "i") })
       .first()
       .click();
+    await waitForRepositoryPickerClose(testPage);
+    await expect(testPage.getByTestId("repo-chip-trigger").first()).toContainText(repoName);
+    await expect(testPage.getByTestId("repo-chip-trigger").first()).toBeFocused();
     await testPage.getByTestId("executor-profile-selector").click();
     await testPage
       .getByRole("option", { name: new RegExp(`^${escapeRe(profileName)}\\b`, "i") })
@@ -512,6 +519,8 @@ test.describe("Fresh-branch flow", () => {
       const pasteInput = testPage.getByTestId("remote-repo-input");
       await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
       await pasteInput.press("Enter");
+      // Finish the repository popover's focus restoration before opening the executor picker.
+      await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toBeFocused();
       await testPage.getByTestId("executor-profile-selector").click();
       await testPage.getByRole("option", { name: /E2E Fresh Branch GH/i }).click();
 
@@ -588,6 +597,8 @@ test.describe("Fresh-branch flow", () => {
         .getByRole("option", { name: new RegExp(`^${setup.repoName}\\b`, "i") })
         .first()
         .click();
+      await waitForRepositoryPickerClose(testPage);
+      await expect(testPage.getByTestId("repo-chip-trigger").first()).toBeFocused();
 
       const executorSelector = testPage.getByTestId("executor-profile-selector");
       await executorSelector.click();
@@ -596,6 +607,7 @@ test.describe("Fresh-branch flow", () => {
         .filter({ hasText: /worktree/i })
         .first()
         .click();
+      await expect(executorSelector).toBeFocused();
       const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
       await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
       await branchSelector.click();
@@ -604,6 +616,8 @@ test.describe("Fresh-branch flow", () => {
         .first()
         .click();
       await expect(branchSelector).toContainText("develop");
+      // Finish the branch popover's focus restoration before opening the executor picker.
+      await expect(branchSelector).toBeFocused();
 
       await executorSelector.click();
       await testPage
@@ -645,13 +659,19 @@ test.describe("Branch refresh + filter", () => {
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
     await testPage.getByTestId("task-title-input").fill("Refresh button test");
     await testPage.getByTestId("task-description-input").fill("triggers git fetch");
-    await testPage.getByTestId("repo-chip-trigger").first().click();
+    const repoSelector = testPage.getByTestId("repo-chip-trigger").first();
+    await repoSelector.click();
     // Repository names are not unique after earlier specs register additional
     // worktrees. cmdk's stable data-value is the repository ID.
     await testPage.locator(`[cmdk-item][data-value="${seedData.repositoryId}"]`).click();
+    await waitForRepositoryPickerClose(testPage);
+    await expect(repoSelector).toBeFocused();
     // Worktree executor → branch selector enabled and refresh button visible.
     await testPage.getByTestId("executor-profile-selector").click();
-    await testPage.getByRole("option", { name: worktreeProfileName }).click();
+    const worktreeOption = testPage.getByRole("option", { name: worktreeProfileName });
+    await expect(worktreeOption).toBeVisible();
+    await waitForFiniteAnimations(worktreeOption);
+    await worktreeOption.click();
     await expect(testPage.getByTestId("executor-profile-selector")).toBeFocused();
 
     const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
@@ -734,11 +754,14 @@ test.describe("Branch refresh + filter", () => {
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
     await testPage.getByTestId("task-title-input").fill("Filter ranking test");
     await testPage.getByTestId("task-description-input").fill("exact match wins");
-    await testPage.getByTestId("repo-chip-trigger").first().click();
+    const repoSelector = testPage.getByTestId("repo-chip-trigger").first();
+    await repoSelector.click();
     await testPage
       .getByRole("option", { name: new RegExp(`^${repoName}\\b`, "i") })
       .first()
       .click();
+    await waitForRepositoryPickerClose(testPage);
+    await expect(repoSelector).toBeFocused();
     await testPage.getByTestId("executor-profile-selector").click();
     await testPage.getByRole("option", { name: worktreeProfileName }).click();
     // Finish the executor popover's focus restoration before opening the next picker.

@@ -156,7 +156,7 @@ func TestOpenCodeRuntimeCommandAdmissionOrdersUtilityAndMigration(t *testing.T) 
 
 	t.Run("utility admitted first", func(t *testing.T) {
 		manager, inst, store := newFixture()
-		first, releaseUtility, err := manager.acquireInferenceCommand(context.Background(), inst, openCode, agents.Command{})
+		first, _, releaseUtility, err := manager.acquireInferenceCommand(context.Background(), inst, openCode, agents.Command{})
 		require.NoError(t, err)
 		require.Equal(t, v1Spec.ACPCommand("1.18.5").Args(), first.Args())
 		migrationStarted := make(chan struct{})
@@ -177,7 +177,7 @@ func TestOpenCodeRuntimeCommandAdmissionOrdersUtilityAndMigration(t *testing.T) 
 		store.replace(v2Selection)
 		migrationRelease()
 
-		second, releaseUtility, err := manager.acquireInferenceCommand(context.Background(), inst, openCode, agents.Command{})
+		second, _, releaseUtility, err := manager.acquireInferenceCommand(context.Background(), inst, openCode, agents.Command{})
 		require.NoError(t, err)
 		defer releaseUtility()
 		require.Equal(t, v2Spec.ACPCommand("2.0.18").Args(), second.Args())
@@ -192,7 +192,7 @@ func TestOpenCodeRuntimeCommandAdmissionOrdersUtilityAndMigration(t *testing.T) 
 		resolved := make(chan agents.Command, 1)
 		go func() {
 			close(started)
-			command, release, commandErr := manager.acquireInferenceCommand(context.Background(), inst, openCode, agents.Command{})
+			command, _, release, commandErr := manager.acquireInferenceCommand(context.Background(), inst, openCode, agents.Command{})
 			if commandErr == nil {
 				release()
 			}

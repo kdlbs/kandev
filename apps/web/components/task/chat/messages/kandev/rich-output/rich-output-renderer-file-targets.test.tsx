@@ -122,6 +122,11 @@ it.each([1, 2])(
     await act(async () => fireEvent.click(trigger));
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
     expect(within(dialog).getByRole("img").getAttribute("src")).toBe(image.getAttribute("src"));
+    await act(async () =>
+      fireEvent.click(within(dialog).getByRole("button", { name: "Actual size" })),
+    );
+    expect(within(dialog).getByRole("img").getAttribute("src")).toBe(image.getAttribute("src"));
+    expect(transport.read).toHaveBeenCalledOnce();
     await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Close" })));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(toggle().getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");

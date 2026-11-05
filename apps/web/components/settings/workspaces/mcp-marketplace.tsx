@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
@@ -326,6 +326,7 @@ export function MCPMarketplace({
   const [selected, setSelected] = useState<MCPMarketplaceEntry | null>(null);
   const [choice, setChoice] = useState<MCPMarketplaceChoice | null>(null);
   const [runtimeName, setRuntimeName] = useState("");
+  const installingRef = useRef(false);
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
@@ -342,11 +343,13 @@ export function MCPMarketplace({
 
   const install = async () => {
     if (
+      installingRef.current ||
       !selected ||
       !choice?.selectable ||
       !marketplaceInputsComplete(choice, inputValues, bindings)
     )
       return;
+    installingRef.current = true;
     setInstalling(true);
     setInstallError(null);
     try {
@@ -363,6 +366,7 @@ export function MCPMarketplace({
     } catch (cause) {
       setInstallError(cause instanceof Error ? cause.message : t("settings:mcpInstallFailed"));
     } finally {
+      installingRef.current = false;
       setInstalling(false);
     }
   };

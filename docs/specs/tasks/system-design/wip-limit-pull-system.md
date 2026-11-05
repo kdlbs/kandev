@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-WIP-LIMIT-PULL-SYSTEM-001
 created: 2026-07-27
-updated: 2026-08-12
+updated: 2026-10-25
 owners:
   - kandev
 ---
@@ -96,9 +96,12 @@ GitHub-specific retry logic.
   tasks automatically from another step. Direct moves and automatic workflow
   transitions still queue in the destination when it is full.
 - The workflow step settings page explains that `Pull from` controls automatic
-  feeder intake through an info tooltip. Its help text also explains
-  destination-queue priority and is available by tap or focus on touch
-  devices.
+  feeder intake. Fine-pointer desktop uses an info tooltip. Phone and coarse
+  pointers use the existing `HelpTip` drawer with a 44-pixel target. The drawer
+  retains the guidance after a tap, supports Escape and normal drawer dismissal,
+  and restores focus to its trigger. Both surfaces share the same localized
+  guidance and preserve the feeder selection and unsaved draft. Block content
+  uses a div-backed drawer description so its paragraphs remain valid markup.
 - A queued move processes the source step's `on_exit` behavior immediately.
   The destination step's `on_enter` behavior runs only after admission.
 - Ephemeral tasks remain outside workflow WIP and queue behavior.
@@ -443,6 +446,20 @@ reason from normal task/summary events. Saving one limit does not release work
 still blocked by the other. The phone banner/link uses the dedicated task
 layout and existing workflow Settings page with no hover requirement or extra
 modal. The follow-up plan contains desktop/mobile previews and tests.
+
+## Deferred entry observability
+
+For AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.11, the session-lifecycle transition
+logs the task, session, source and destination step IDs, WIP limit, and reason
+when the committed destination remains queued. Queue promotion still owns the
+later entry; the log does not change admission, promotion, or session state.
+Guarded decisions use a separate entry path and do not emit this session log.
+
+The transition commit returns its admission decision and the WIP limit used for
+that decision to the orchestrator. The lifecycle uses this result before it
+runs destination entry. If a compatibility commit does not return admission
+state and its task reread fails, the orchestrator logs the failure and stops
+before destination entry.
 
 ## Implementation plan
 

@@ -37,6 +37,8 @@ type QuickChatContentProps = {
   placeholderOverride?: string;
   initialPrompt?: QuickChatInitialPrompt;
   onInitialPromptAttempted?: () => void;
+  /** The accepted Quick Chat launch owns input until its initial startup settles. */
+  startupPending?: boolean;
   /** Inserted once through `chatInputRef.insertText`, not sent. See
    *  {@link useQuickChatInitialDraft}. */
   initialDraft?: string;
@@ -118,11 +120,103 @@ function useQuickChatState(
   };
 }
 
+function QuickChatInputArea({
+  state,
+  clarificationKey,
+  onClarificationResolved,
+  minimalToolbar,
+  placeholderOverride,
+}: {
+  state: ReturnType<typeof useQuickChatState>;
+  clarificationKey: number;
+  onClarificationResolved: () => void;
+  minimalToolbar?: boolean;
+  placeholderOverride?: string;
+}) {
+  return (
+    <ChatInputArea
+      chatInputRef={state.chatInputRef}
+      clarificationKey={clarificationKey}
+      onClarificationResolved={onClarificationResolved}
+      handleSubmit={state.handleSubmit}
+      handleCancelTurn={state.handleCancelTurn}
+      showRequestChangesTooltip={false}
+      onRequestChangesTooltipDismiss={undefined}
+      panelState={state.panelState}
+      isSending={state.isSending}
+      hideSessionsDropdown={true}
+      minimalToolbar={minimalToolbar}
+      hidePlanMode={true}
+      placeholderOverride={placeholderOverride}
+      surfaceClassName="bg-popover"
+    />
+  );
+}
+
 function useFocusComposerOnMount(chatInputRef: React.RefObject<ChatInputContainerHandle | null>) {
   useEffect(() => {
     const timer = setTimeout(() => chatInputRef.current?.focusInput(), 50);
     return () => clearTimeout(timer);
   }, [chatInputRef]);
+}
+
+function useQuickChatClarificationHost() {
+  const shortcutScopeRef = useRef<HTMLDivElement>(null);
+  const cancelCommandsRef = useRef<HTMLDivElement>(null);
+  const activityStatusRef = useRef<HTMLDivElement>(null);
+  const chatInputAreaRef = useRef<HTMLDivElement>(null);
+  const clarificationReservations = [cancelCommandsRef, activityStatusRef, chatInputAreaRef];
+  const handleShortcutScopeMouseDown = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(event, shortcutScopeRef),
+    [],
+  );
+  return {
+    shortcutScopeRef,
+    cancelCommandsRef,
+    activityStatusRef,
+    chatInputAreaRef,
+    clarificationReservations,
+    handleShortcutScopeMouseDown,
+  };
+}
+
+type QuickChatMessageSurfaceProps = {
+  items: ReturnType<typeof useVisibleItems>;
+  panelState: ReturnType<typeof useChatPanelState>;
+  taskId: string | null;
+};
+
+function QuickChatMessageSurface({ items, panelState, taskId }: QuickChatMessageSurfaceProps) {
+  return (
+    <div className="flex-1 min-h-0 overflow-hidden bg-popover" data-testid="quick-chat-messages">
+      <MessageList
+        items={items}
+        messages={panelState.allMessages}
+        footerActionMessages={panelState.footerActionMessages}
+        permissionsByToolCallId={panelState.permissionsByToolCallId}
+        childrenByParentToolCallId={panelState.childrenByParentToolCallId}
+        taskId={taskId ?? undefined}
+        sessionId={panelState.resolvedSessionId}
+        messagesLoading={panelState.messagesLoading}
+        isWorking={panelState.isWorking}
+        sessionState={panelState.session?.state}
+        worktreePath={getSessionWorkspacePath(panelState.session)}
+      />
+    </div>
+  );
+}
+
+function isQuickChatComposerBlocked(
+  startupPending: boolean | undefined,
+  panelState: ReturnType<typeof useChatPanelState>,
+): boolean {
+  return (
+    startupPending ||
+    !panelState.session ||
+    panelState.inputMode === "unavailable" ||
+    (panelState.inputMode === "queue" && (!panelState.isQueueReady || panelState.isLoading)) ||
+    (panelState.planCommentMigration?.isBlocking ?? false)
+  );
 }
 
 export const QuickChatContent = memo(function QuickChatContent({
@@ -131,6 +225,7 @@ export const QuickChatContent = memo(function QuickChatContent({
   placeholderOverride,
   initialPrompt,
   onInitialPromptAttempted,
+  startupPending,
   initialDraft,
   transformOutgoing,
   hideStartupRows,
@@ -138,14 +233,20 @@ export const QuickChatContent = memo(function QuickChatContent({
   loadSettings,
 }: QuickChatContentProps) {
   const [clarificationKey, setClarificationKey] = useState(0);
-  const shortcutScopeRef = useRef<HTMLDivElement>(null);
+  const {
+    shortcutScopeRef,
+    cancelCommandsRef,
+    activityStatusRef,
+    chatInputAreaRef,
+    clarificationReservations,
+    handleShortcutScopeMouseDown,
+  } = useQuickChatClarificationHost();
   const state = useQuickChatState(sessionId, transformOutgoing, loadSettings);
-  const { chatInputRef, panelState, isSending, handleSubmit, handleCancelTurn } = state;
+  const { chatInputRef, panelState, handleSubmit, handleCancelTurn } = state;
   const { taskId, pendingClarification, pendingClarificationGroup } = panelState;
   const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
   const activity = useCopilotActivity(activityDisplay, panelState);
   const items = useVisibleItems(activity.items, hideStartupRows);
-
   useFocusComposerOnMount(chatInputRef);
 
   useQuickChatComposerPriming({
@@ -153,21 +254,13 @@ export const QuickChatContent = memo(function QuickChatContent({
     taskId,
     initialPrompt,
     initialDraft,
-    blocked:
-      !panelState.session ||
-      panelState.inputMode === "unavailable" ||
-      (panelState.inputMode === "queue" && (!panelState.isQueueReady || panelState.isLoading)) ||
-      (panelState.planCommentMigration?.isBlocking ?? false),
+    blocked: isQuickChatComposerBlocked(startupPending, panelState),
     handleSubmit,
     onInitialPromptAttempted,
     chatInputRef,
   });
 
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
-  const handleShortcutScopeMouseDown = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(event, shortcutScopeRef),
-    [],
-  );
   return (
     <div
       ref={shortcutScopeRef}
@@ -177,26 +270,15 @@ export const QuickChatContent = memo(function QuickChatContent({
       onClick={(event) => routePanelClick(event, shortcutScopeRef)}
       className="flex flex-col flex-1 min-h-0 outline-none"
     >
-      <QuickChatCancelCommands
-        sessionId={sessionId}
-        isWorking={panelState.isWorking}
-        pendingClarification={pendingClarification}
-        onCancel={handleCancelTurn}
-      />
-      <div className="flex-1 min-h-0 overflow-hidden bg-popover" data-testid="quick-chat-messages">
-        <MessageList
-          items={items}
-          messages={panelState.allMessages}
-          permissionsByToolCallId={panelState.permissionsByToolCallId}
-          childrenByParentToolCallId={panelState.childrenByParentToolCallId}
-          taskId={taskId ?? undefined}
-          sessionId={panelState.resolvedSessionId}
-          messagesLoading={panelState.messagesLoading}
+      <div ref={cancelCommandsRef} className="shrink-0">
+        <QuickChatCancelCommands
+          sessionId={sessionId}
           isWorking={panelState.isWorking}
-          sessionState={panelState.session?.state}
-          worktreePath={getSessionWorkspacePath(panelState.session)}
+          pendingClarification={pendingClarification}
+          onCancel={handleCancelTurn}
         />
       </div>
+      <QuickChatMessageSurface items={items} panelState={panelState} taskId={taskId} />
       <ClarificationPanelSection
         key={sessionId}
         pending={Boolean(pendingClarification)}
@@ -206,25 +288,24 @@ export const QuickChatContent = memo(function QuickChatContent({
         onLateAnswer={lateAnswer.send}
         lateAnswerState={lateAnswer.state}
         shortcutScopeRef={shortcutScopeRef}
-        maxHeightVh={35}
+        initialMaxHeightVh={35}
+        allocationRef={shortcutScopeRef}
+        anchorRef={shortcutScopeRef}
+        reservedSiblingRefs={clarificationReservations}
+        reservedHeightPx={80}
       />
-      <ActivityStatusSlot line={activity.statusLine} />
-      <ChatInputArea
-        chatInputRef={chatInputRef}
-        clarificationKey={clarificationKey}
-        onClarificationResolved={handleClarificationResolved}
-        handleSubmit={handleSubmit}
-        handleCancelTurn={handleCancelTurn}
-        showRequestChangesTooltip={false}
-        onRequestChangesTooltipDismiss={undefined}
-        panelState={panelState}
-        isSending={isSending}
-        hideSessionsDropdown={true}
-        minimalToolbar={minimalToolbar}
-        hidePlanMode={true}
-        placeholderOverride={placeholderOverride}
-        surfaceClassName="bg-popover"
-      />
+      <div ref={activityStatusRef} className="shrink-0">
+        <ActivityStatusSlot line={activity.statusLine} />
+      </div>
+      <div ref={chatInputAreaRef} className="shrink-0">
+        <QuickChatInputArea
+          state={state}
+          clarificationKey={clarificationKey}
+          onClarificationResolved={handleClarificationResolved}
+          minimalToolbar={minimalToolbar}
+          placeholderOverride={placeholderOverride}
+        />
+      </div>
     </div>
   );
 });

@@ -48,6 +48,9 @@ func TestTurnCheckpointCapturesExactIntervalWithoutMutatingUserGitState(t *testi
 	if start.HashAlgorithm != "sha1" || start.CommitOID == "" || start.TreeOID == "" || start.ReachabilityRef == "" {
 		t.Fatalf("start checkpoint = %+v", start)
 	}
+	if start.CommonGitDir == "" {
+		t.Fatal("start checkpoint did not report its common Git directory")
+	}
 	retried, err := operator.CaptureTurnCheckpoint(context.Background(), turnchanges.CheckpointRequest{
 		ChangeSetID: changeSetID, CheckoutID: checkoutID, Boundary: turnchanges.CheckpointStart,
 	})

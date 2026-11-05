@@ -180,3 +180,18 @@ passed.
 
 Review remediation: every responsive install-dialog dismissal now cancels the
 staged review, including drawer and dialog outside-click or Escape handling.
+
+## Phone geometry precision (2026-10-27)
+
+CI result 51191ad5d102d6a55c99391dc66afc57 reports the Cancel target as
+43.99993896484375 pixels against a 44-pixel requirement. The install and
+Cancel checks now reuse expectTouchControl, already used for this fixture's
+toolbar. Its existing 0.01-pixel precision allowance accommodates fractional
+geometry while rejecting a genuinely 43-pixel target. Both measurements
+follow the respective detail/dialog owner's finite animations. Production
+styles and the 44-pixel requirement remain unchanged. Focused repetitions,
+typecheck and lint verify the checks; current-head CI remains the delivery gate.
+
+Focused post-correction validation passed three repetitions with retries
+disabled, plus full web typecheck, zero-warning scoped lint, catalog validation
+and specification lint. Normal hooks and fresh integrated CI remain required.

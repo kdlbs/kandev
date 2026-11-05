@@ -111,3 +111,9 @@ describe("PR feedback resource", () => {
     expect(scope.getSnapshot(key).loading).toBe(false);
   });
 });
+
+it("keeps feedback cache entries on different hosts distinct after replacement", () => {
+  const { scope } = setupScope();
+  const ref = { workspaceId: "ws-1", owner: "acme", repo: "app", prNumber: 7 };
+  expect(scope.key({ ...ref, host: "git.company.example" })).not.toBe(scope.key(ref));
+});

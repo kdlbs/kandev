@@ -27,6 +27,23 @@ function history(servers: MCPAttachmentServer[]): MCPAttachmentHistory {
 }
 
 describe("MCP explorer view model", () => {
+  it("recognizes optional native packages only with canonical host provenance", () => {
+    const native = server({
+      name: "kandev-walkthroughs",
+      source: "kandev",
+      builtin_package: "walkthroughs",
+      tools_listed_at: "2026-10-25T12:00:00Z",
+      tools: [],
+    });
+    expect(isKandevMcpServer(native)).toBe(true);
+    expect(getMcpCatalogState(native)).toBe("loaded");
+    expect(isKandevMcpServer({ ...native, source: "profile" })).toBe(false);
+    expect(isKandevMcpServer({ ...native, name: "kandev-walkthroughs-sse" })).toBe(false);
+  });
+  it("keeps an unobserved tool count unknown", () => {
+    expect(getMcpToolCounts(server({ status: "unknown" })).total).toBeUndefined();
+    expect(getMcpToolCounts(server({ tools: [] })).total).toBe(0);
+  });
   it("keeps configured servers visible when observations are partial", () => {
     const configured = buildMcpExplorerServers(["kandev", "filesystem"]);
     expect(configured.map((item) => item.name)).toEqual(["kandev", "filesystem"]);
@@ -46,7 +63,7 @@ describe("MCP explorer view model", () => {
     expect(partial.map((item) => item.name)).toEqual(["kandev", "filesystem"]);
     expect(partial[1]).toMatchObject({
       source: "profile",
-      status: "delivered",
+      status: "unknown",
     });
   });
 
@@ -76,7 +93,9 @@ describe("MCP explorer view model", () => {
       getMcpCatalogState(server({ name: "filesystem", source: "profile", status: "delivered" })),
     ).toBe("unavailable");
   });
+});
 
+describe("MCP server identity and tools", () => {
   it("identifies only the backend-owned Kandev server", () => {
     expect(isKandevMcpServer(server({ name: "kandev", source: "kandev" }))).toBe(true);
     expect(isKandevMcpServer(server({ name: "kandev", source: "profile" }))).toBe(false);
@@ -134,6 +153,7 @@ it.each([
   ["definition_disabled", "DefinitionDisabled"],
   ["definition_missing", "DefinitionMissing"],
   ["secret_resolution_failed", "SecretResolution"],
+  ["session_excluded", "SessionExcluded"],
 ])("explains the recorded %s exclusion safely", (reason_code, suffix) => {
   expect(mcpStatusPresentation(server({ status: "filtered", reason_code })).explanationKey).toBe(
     `task:mcpReason${suffix}`,
@@ -153,4 +173,20 @@ it("does not reuse a stale filtered reason for stronger evidence or expose arbit
     mcpStatusPresentation(server({ status: "filtered", reason_code: "sensitive unknown" }))
       .explanationKey,
   ).toBe("task:mcpExplanationFiltered");
+});
+
+// @covers AC-AGENTS-MCP-MANAGEMENT-003.1
+it("uses only current server evidence and never promotes previous attempts", () => {
+  const prior = history([server({ status: "active", tool_count: 12 })]).current;
+  const current = history([]);
+  current.previous = [prior];
+  expect(buildMcpExplorerServers(["kandev"], current)).toEqual([
+    { name: "kandev", status: "unknown" },
+  ]);
+  const failed = server({ status: "failed", summary: "Connection failed" });
+  current.current.servers = [failed];
+  expect(buildMcpExplorerServers(["kandev", "filesystem"], current)).toEqual([
+    failed,
+    { name: "filesystem", source: "profile", status: "unknown" },
+  ]);
 });

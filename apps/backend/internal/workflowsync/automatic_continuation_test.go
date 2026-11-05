@@ -20,6 +20,7 @@ import (
 )
 
 type pacedWorkflowGitHub struct {
+	fakeGitHubClients
 	mu                 sync.Mutex
 	deferred           chan struct{}
 	trackerChanged     chan struct{}

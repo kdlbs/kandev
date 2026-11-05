@@ -623,8 +623,8 @@ func TestListStuckParents_ReadmitsAfterChildReopenedAndRecompleted(t *testing.T)
 	seedWakeAgentProfile(t, repo, ctx, parentID+"-agent", "idle")
 	seedRunner(t, repo, ctx, parentID)
 
-	if err := repo.UpdateTaskState(ctx, childID, "COMPLETED"); err != nil {
-		t.Fatalf("complete child: %v", err)
+	if _, err := repo.ExecRaw(ctx, `UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, "COMPLETED", childID); err != nil {
+		t.Fatalf("complete child fixture: %v", err)
 	}
 
 	preDelivery, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
@@ -668,15 +668,14 @@ func TestListStuckParents_ReadmitsAfterChildReopenedAndRecompleted(t *testing.T)
 		t.Fatalf("after delivery: candidates = %#v, want none (receipt already covers this child set)", afterDelivery)
 	}
 
-	// The child is reopened and re-completed through the same production
-	// writer used above, immediately after delivery — landing in the same
-	// wall-clock second as delivered_at. The resulting child_set_key is
-	// byte-identical to before (same "id:state").
-	if err := repo.UpdateTaskState(ctx, childID, "IN_PROGRESS"); err != nil {
-		t.Fatalf("reopen child: %v", err)
+	// The child is reopened and re-completed immediately after delivery,
+	// landing in the same wall-clock second as delivered_at. The resulting
+	// child_set_key is byte-identical to before (same "id:state").
+	if _, err := repo.ExecRaw(ctx, `UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, "IN_PROGRESS", childID); err != nil {
+		t.Fatalf("reopen child fixture: %v", err)
 	}
-	if err := repo.UpdateTaskState(ctx, childID, "COMPLETED"); err != nil {
-		t.Fatalf("recomplete child: %v", err)
+	if _, err := repo.ExecRaw(ctx, `UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, "COMPLETED", childID); err != nil {
+		t.Fatalf("recomplete child fixture: %v", err)
 	}
 
 	after, err := repo.ListStuckParents(ctx, "task_children_completed", 5)

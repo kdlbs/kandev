@@ -31,6 +31,6 @@ func TestReorderStepsInvalidOrdersAreBadRequests(t *testing.T) {
 
 func seedReorderWorkflow(t *testing.T, h *workflowHarness) {
 	t.Helper()
-	_, err := h.db.Exec(`INSERT INTO workflows (id, name, created_at, updated_at) VALUES ('workflow-1', 'Test', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	_, err := h.db.Exec(`INSERT OR IGNORE INTO workflows (id, name, created_at, updated_at) VALUES ('workflow-1', 'Test', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 	require.NoError(t, err)
 }

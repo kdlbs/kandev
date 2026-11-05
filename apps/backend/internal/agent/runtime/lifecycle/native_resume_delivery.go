@@ -56,7 +56,7 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 		return err
 	}
 	for _, id := range ids {
-		if err := client.RetireDeliverySubmission(ctx, id); err != nil {
+		if err := m.deliveryJournalReleaser().retire(ctx, client, id); err != nil {
 			return fmt.Errorf("acknowledge native resume delivery: %w", err)
 		}
 	}
