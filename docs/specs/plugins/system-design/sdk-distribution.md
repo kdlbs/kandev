@@ -19,6 +19,8 @@ runtime behavior, Host authority, or UI composition changes.
 
 The version policy is recorded in the
 [SDK ADR](../../../decisions/2026-10-09-published-plugin-sdk.md).
+SDK evidence retention follows the
+[immutable release recovery decision](../../../decisions/2026-11-05-sdk-release-evidence.md).
 
 ## Requirement mapping
 
@@ -237,9 +239,12 @@ release. Never pack a later host checkout under an existing SDK version.
 
 For a new SDK, build one candidate from the verified signed host commit with
 the exact packaging versions in `pack-config.json`. Test that archive. Retain
-`plugin-sdk-<S>.tgz` and `plugin-sdk-<S>.receipt.json` as assets on the originating
-host's GitHub Release before creating the SDK tag or uploading to npm. CI
-artifacts alone are insufficient because their retention can expire.
+`plugin-sdk-<S>.tgz`, `plugin-sdk-<S>.receipt.json`, and its detached signature
+on a draft GitHub Release named by `pluginsdk/v<S>`. Retain and verify all three
+assets before creating the signed SDK tag. Then publish that SDK release before
+npm publication. Set `make_latest=false` when creating and publishing it.
+The originating host release remains unchanged, including when it is immutable.
+CI artifacts alone are insufficient because their retention can expire.
 
 The receipt records schema version, SDK version/tag, full source commit,
 originating host tag, canonical record digest, archive SHA-512 integrity, file
@@ -248,8 +253,9 @@ with the approved release signing identity and retain its detached signature.
 Consumers of the receipt verify that signature, its source, and the archive
 hash before reuse. A receipt records candidate identity, not publication success.
 
-Reuse downloads the original archive and receipt from their originating host
-release. It verifies the SDK tag, canonical record, and npm `dist.integrity`
+Reuse downloads the original archive and receipt from their SDK release.
+Existing complete evidence retained on an originating host release remains a
+supported read-only source. It verifies the SDK tag, canonical record, and npm `dist.integrity`
 against that identity. A README or tooling change in a later host tree may
 remain unpublished while the original SDK is reused. To publish changed package
 bytes, declare a new shared SDK version, even for a packaging-only fix.
@@ -260,6 +266,52 @@ only when its integrity equals the authenticated receipt. Missing or conflicting
 receipt evidence after any SDK publication stops recovery. Before any SDK
 publication, an interrupted first candidate creation may restart from the
 verified host source. Never overwrite a conflicting retained asset.
+
+### SDK release lifecycle and storage selection
+
+`ReleaseAssets` owns release discovery, asset retention, and SDK release
+finalization. `CandidateStore` resolves evidence using the complete original
+source identity, rather than assuming `source.hostTag` is its storage location.
+The signed receipt stays at schema version 1. Its `host_tag` continues to name
+the signed source authority; a storage change does not restamp the record or
+change package bytes.
+
+For new evidence, create a draft for the exact `source.sdkTag`, with
+`target_commitish=source.commit`, `prerelease=false`, and `make_latest=false`.
+Draft creation must not create an unsigned SDK ref. Before publication, create
+or verify the signed SDK tag using `SourceRepository`, then require its peeled
+commit and approved fingerprint to match. Publish the draft only after all
+three assets match the authenticated candidate. Re-read both release metadata
+and assets after uncertain create, upload, or publish responses. Never retry a
+write merely because its response was lost.
+
+Discover drafts through an authenticated release listing that supports drafts
+and complete pagination. Bind subsequent operations to one validated release
+ID. Reject duplicate matches, unexpected tag/target identities, malformed
+metadata, and authentication or transport errors. Only a confirmed absence may
+start draft creation. A published SDK release is read-only, whether or not the
+repository currently reports it as immutable. Never delete an SDK release,
+replace an asset, or make a published release a draft again.
+
+Prefer a complete, verified SDK-release evidence set. If the originating host
+contains legacy SDK evidence, inspect it before creating replacements. Reuse a
+complete valid legacy set without copying or rewriting its host assets. When
+both locations contain evidence, verify their identities and reject differing
+receipts or archive bytes. Do not assemble a candidate from unrelated partial
+sets. Existing missing-receipt and exact-rebuild rules still apply. A partial
+legacy set that cannot satisfy those rules fails with an explicit recovery
+error; it does not authorize fresh evidence after SDK publication.
+
+`preparePublication` retains the candidate, verifies or creates the signed tag,
+and finalizes the SDK release before returning `prepared`. The signing job owns
+these GitHub writes. The OIDC job keeps read-only GitHub access and refuses to
+publish from an unfinalized draft. Bootstrap summaries and public verification
+use the resolved evidence location, including a legacy host location when it
+was reused. They never construct an SDK download link from `hostTag` alone.
+Report validated `browser_download_url` values from that release's asset
+metadata, preserving the encoding of SDK tag names that contain a slash.
+Draft downloads use authenticated asset IDs. Temporary draft URLs are not
+reported as public links; finalization resolves and validates the published URLs.
 
 ## Stable release integration
 
@@ -278,9 +330,11 @@ SDK preparation and publication operations.
    preparation does not persist a credential helper. Signing and OIDC
    publication retain separate protected jobs.
 3. For a new SDK, `prepare-plugin-sdk` tests and retains the candidate and signed
-   receipt. It checks all existing SDK identities before any SDK mutation.
+   receipt on its SDK draft. It checks all existing SDK identities before mutation.
    Then it creates the missing signed `pluginsdk/v<S>` at the verified host
-   commit, or verifies and reuses a matching signed tag. Reused SDKs instead
+   commit, or verifies and reuses a matching signed tag, and publishes the
+   completed SDK release without changing the application's latest release.
+   Reused SDKs instead
    resolve their original host/tag/receipt and never retarget to the current host.
 4. `publish-plugin-sdk` requires successful SDK preparation. It verifies the
    retained receipt and publishes that exact archive with public access and
@@ -417,3 +471,4 @@ clean-consumer acceptance evidence independently of that follow-up.
 - [Plugin boundary](plugins-01.md).
 - [Managed coordination compatibility](managed-coordination.md#independent-consumers-and-compatibility).
 - [SDK publishing plan](../../../plans/plugin-sdk-publishing/plan.md).
+- [Immutable release recovery](../../../plans/immutable-release-sdk-recovery/plan.md).

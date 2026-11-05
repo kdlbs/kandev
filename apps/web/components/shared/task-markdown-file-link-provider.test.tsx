@@ -1,3 +1,4 @@
+/* eslint-disable max-lines-per-function, sonarjs/no-duplicate-string -- Fixture paths repeat across hydration-order cases. */
 import { useContext, type ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +13,7 @@ const storeState = vi.hoisted(() => ({
         repository_id: "repo-1",
         workspace_path: "/root/.kandev/tasks/example" as string | undefined,
         worktree_path: "/root/.kandev/tasks/example/kandev",
+        agent_workspace_path: undefined as string | undefined,
       },
     },
   },
@@ -70,7 +72,11 @@ import { TaskMarkdownFileLinkProvider } from "./task-markdown-file-link-provider
 function ContextProbe() {
   const context = useContext(MarkdownFileLinkContext);
   return (
-    <output data-testid="context" data-has-action={context.onOpenFile ? "true" : "false"}>
+    <output
+      data-testid="context"
+      data-has-action={context.onOpenFile ? "true" : "false"}
+      data-relative-base={context.relativeBasePath ?? ""}
+    >
       {JSON.stringify(context.fileRootAliases)}
     </output>
   );
@@ -89,6 +95,7 @@ describe("TaskMarkdownFileLinkProvider", () => {
     cleanup();
     storeState.workspaces.activeId = WORKSPACE_ID;
     storeState.taskSessions.items["session-1"].workspace_path = "/root/.kandev/tasks/example";
+    delete storeState.taskSessions.items["session-1"].agent_workspace_path;
     taskState.workspaceId = WORKSPACE_ID;
     taskState.repositoryIds = ["repo-1", "repo-2"];
     sessionWorktreeState.items = [
@@ -96,6 +103,40 @@ describe("TaskMarkdownFileLinkProvider", () => {
       { repositoryId: "repo-2", path: "/root/.kandev/tasks/example/plugin" },
     ];
     vi.clearAllMocks();
+  });
+
+  it("exposes the session's confirmed native workspace as the relative base", () => {
+    storeState.taskSessions.items["session-1"].agent_workspace_path =
+      "/root/.kandev/tasks/example/kandev";
+
+    render(
+      <Wrapper>
+        <ContextProbe />
+      </Wrapper>,
+    );
+
+    expect(screen.getByTestId("context").getAttribute("data-relative-base")).toBe(
+      "/root/.kandev/tasks/example/kandev",
+    );
+  });
+
+  it("lets an explicit relative base override the session projection", () => {
+    storeState.taskSessions.items["session-1"].agent_workspace_path =
+      "/root/.kandev/tasks/example/kandev";
+
+    render(
+      <TaskMarkdownFileLinkProvider
+        taskId="task-1"
+        sessionId="session-1"
+        relativeBasePath="/root/.kandev/tasks/example/plugin"
+      >
+        <ContextProbe />
+      </TaskMarkdownFileLinkProvider>,
+    );
+
+    expect(screen.getByTestId("context").getAttribute("data-relative-base")).toBe(
+      "/root/.kandev/tasks/example/plugin",
+    );
   });
 
   it("provides repository aliases scoped to the rendered task and session", () => {

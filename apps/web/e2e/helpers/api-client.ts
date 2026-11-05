@@ -2938,7 +2938,16 @@ export class ApiClient {
 
   /** Reads the authoritative background-work projection for a session. */
   async listBackgroundWorkloads(sessionId: string): Promise<{
-    workloads: Array<{ work_id: string; title: string; state: string }>;
+    workloads: Array<{
+      work_id: string;
+      title: string;
+      kind?: string;
+      state: string;
+      exit_code?: number | null;
+      source_call_id?: string;
+      origin_turn_id?: string;
+      revision?: number;
+    }>;
   }> {
     const response = await this.rawRequest(
       "GET",

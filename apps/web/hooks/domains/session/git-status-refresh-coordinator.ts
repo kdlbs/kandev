@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- one foreground refresh owner keeps ordering, recovery, and inventory state together. */
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
@@ -15,6 +16,8 @@ import {
 } from "./git-status-refresh-recovery-utils";
 import type { GitStatusUpdateEvent } from "@/lib/types/git-events";
 import { applyGitStatusUpdateWithOutcome } from "@/lib/ws/handlers/git-status";
+import { gitStatusInventoryGeneration } from "@/lib/state/slices/session-runtime/git-status-inventory";
+import { reconcileInventoryFromSnapshot } from "./git-status-refresh-inventory";
 import type {
   SessionGitRefreshMode,
   SessionGitRefreshResponse,
@@ -32,12 +35,14 @@ type SnapshotOutcome = {
   received: number;
   count: number;
   complete: number;
+  scopes: string[];
   incompleteRepositories: Map<string, GitStatusUpdateEvent>;
   pendingDetails: Map<string, GitStatusUpdateEvent>;
 };
 type GitRefreshContext = GitRefreshScopeContext & {
   attemptKey: string;
   requestId: string;
+  inventoryGeneration: number;
 };
 type RefreshSnapshot = {
   response: SessionGitRefreshResponse | null;
@@ -77,8 +82,13 @@ function clientScopeKey(client: WebSocketClient, environmentId: string): string 
   return `${currentClientScope(client).id}\u0000${environmentId}`;
 }
 
-function activeAttemptKey(scopeKey: string, generation: number, mode: SessionGitRefreshMode) {
-  return `${scopeKey}\u0000${generation}\u0000${mode}`;
+function activeAttemptKey(
+  scopeKey: string,
+  generation: number,
+  inventoryGeneration: number,
+  mode: SessionGitRefreshMode,
+) {
+  return `${scopeKey}\u0000${generation}\u0000${inventoryGeneration}\u0000${mode}`;
 }
 
 function completeMembership(status: GitStatusEntry | undefined): boolean {
@@ -118,7 +128,14 @@ function scheduleRecovery(context: GitRefreshScopeContext) {
     ) {
       return;
     }
-    if (hasActiveAttemptForScope(attempts, scopeKey, current.generation)) {
+    if (
+      hasActiveAttemptForScope(
+        attempts,
+        scopeKey,
+        current.generation,
+        gitStatusInventoryGeneration(current.store.getState(), current.environmentId),
+      )
+    ) {
       reconcileRecovery(current);
       return;
     }
@@ -141,7 +158,14 @@ function reconcileRecovery(context: GitRefreshScopeContext) {
     clearRecoveryState(context.scopeKey);
     return;
   }
-  if (hasActiveAttemptForScope(attempts, context.scopeKey, current.generation)) {
+  if (
+    hasActiveAttemptForScope(
+      attempts,
+      context.scopeKey,
+      current.generation,
+      gitStatusInventoryGeneration(current.store.getState(), current.environmentId),
+    )
+  ) {
     clearRecoveryTimer(context.scopeKey);
     return;
   }
@@ -203,11 +227,21 @@ function isCurrentRequest(
   context: GitRefreshContext,
   response?: SessionGitRefreshResponse,
 ): boolean {
-  const { client, store, scopeKey, generation, sessionId, environmentId, attemptKey, requestId } =
-    context;
+  const {
+    client,
+    store,
+    scopeKey,
+    generation,
+    sessionId,
+    environmentId,
+    attemptKey,
+    requestId,
+    inventoryGeneration,
+  } = context;
   const scope = currentClientScope(client);
   const attempt = attempts.get(attemptKey);
-  const currentEnvironment = store.getState().environmentIdBySessionId[sessionId] ?? sessionId;
+  const state = store.getState();
+  const currentEnvironment = state.environmentIdBySessionId[sessionId] ?? sessionId;
   return (
     attempt?.requestId === requestId &&
     !attempt.controller.signal.aborted &&
@@ -215,6 +249,7 @@ function isCurrentRequest(
     scope.generation === generation &&
     client.getStatus() === "connected" &&
     currentEnvironment === environmentId &&
+    gitStatusInventoryGeneration(state, environmentId) === inventoryGeneration &&
     (!response ||
       (response.session_id === sessionId &&
         (!response.task_environment_id || response.task_environment_id === environmentId)))
@@ -231,6 +266,7 @@ function applyRefreshSnapshots(
     received: 0,
     count: 0,
     complete: 0,
+    scopes: [],
     incompleteRepositories: new Map(),
     pendingDetails: new Map(),
   };
@@ -246,6 +282,7 @@ function applyRefreshSnapshots(
     const applied = applyGitStatusUpdateWithOutcome(store, event);
     if (!applied.accepted) continue;
     outcome.count += 1;
+    outcome.scopes.push(repositoryName);
     const complete =
       event.status.status_state !== "unavailable" &&
       event.status.status_state !== "loading" &&
@@ -330,12 +367,13 @@ function setPendingDetailsUnavailable(
 async function runReplay(context: GitRefreshScopeContext) {
   const { client, store, sessionId, environmentId, scopeKey, generation } = context;
   if (!ownsScope(scopeKey) || hasPendingDetails(store, environmentId) === false) return;
-  const attemptKey = activeAttemptKey(scopeKey, generation, "replay");
+  const inventoryGeneration = gitStatusInventoryGeneration(store.getState(), environmentId);
+  const attemptKey = activeAttemptKey(scopeKey, generation, inventoryGeneration, "replay");
   const existing = attempts.get(attemptKey);
   if (existing && !existing.controller.signal.aborted) return existing.promise;
   const controller = new AbortController();
   const requestId = createRefreshRequestId();
-  const attemptContext = { ...context, attemptKey, requestId };
+  const attemptContext = { ...context, attemptKey, requestId, inventoryGeneration };
   const attempt: ActiveAttempt = {
     controller,
     requestId,
@@ -357,6 +395,7 @@ async function runReplay(context: GitRefreshScopeContext) {
           setPendingDetailsUnavailable(store, environmentId, sessionId);
         }
       }
+      reconcileInventoryFromSnapshot(store, environmentId, inventoryGeneration, response, outcome);
     } catch {
       if (!controller.signal.aborted && isCurrentRequest(attemptContext)) {
         setPendingDetailsUnavailable(store, environmentId, sessionId);
@@ -499,6 +538,13 @@ async function performForegroundRefresh(context: GitRefreshContext, controller: 
 
   setRefreshForAttempt(store, environmentId, requestId, null);
   setIncompleteRepositoriesUnavailable(store, outcome.incompleteRepositories.values());
+  reconcileInventoryFromSnapshot(
+    store,
+    environmentId,
+    context.inventoryGeneration,
+    finalSnapshot.response,
+    finalSnapshot.outcome,
+  );
   if (hasPendingDetails(store, environmentId)) {
     scheduleDetailsReplay(context);
   }
@@ -512,7 +558,8 @@ export function requestGitStatusRefresh(
 ): Promise<void> {
   const scope = currentClientScope(client);
   const scopeKey = clientScopeKey(client, environmentId);
-  const attemptKey = activeAttemptKey(scopeKey, scope.generation, "fresh");
+  const inventoryGeneration = gitStatusInventoryGeneration(store.getState(), environmentId);
+  const attemptKey = activeAttemptKey(scopeKey, scope.generation, inventoryGeneration, "fresh");
   const existing = attempts.get(attemptKey);
   if (existing && !existing.controller.signal.aborted) return existing.promise;
   if (existing) attempts.delete(attemptKey);
@@ -537,6 +584,7 @@ export function requestGitStatusRefresh(
     environmentId,
     scopeKey,
     generation: scope.generation,
+    inventoryGeneration,
     attemptKey,
     requestId,
   };
@@ -556,6 +604,56 @@ export function requestGitStatusRefresh(
   return attempt.promise;
 }
 
+function scopedGitStatusChanged(
+  state: AppState,
+  previousState: AppState,
+  environmentId: string,
+  inventoryChanged: boolean,
+): boolean {
+  const current = state.gitStatus;
+  const previous = previousState.gitStatus;
+  return (
+    current.byEnvironmentId[environmentId] !== previous.byEnvironmentId[environmentId] ||
+    current.byEnvironmentRepo[environmentId] !== previous.byEnvironmentRepo[environmentId] ||
+    current.refreshByEnvironmentId?.[environmentId] !==
+      previous.refreshByEnvironmentId?.[environmentId] ||
+    current.refreshByEnvironmentRepo?.[environmentId] !==
+      previous.refreshByEnvironmentRepo?.[environmentId] ||
+    inventoryChanged
+  );
+}
+
+function requestReplacementInventory(
+  client: WebSocketClient,
+  store: StoreApi<AppState>,
+  sessionId: string,
+  environmentId: string,
+  scopeKey: string,
+): void {
+  const inventory = store.getState().gitStatus.inventoryByEnvironment?.[environmentId];
+  if (inventory?.scopes !== null || !ownsScope(scopeKey) || client.getStatus() !== "connected") {
+    return;
+  }
+  // An attachment promoted the Files root. Keep healthy named snapshots
+  // visible while the authoritative replacement inventory is requested,
+  // without waiting for a Changes remount.
+  void requestGitStatusRefresh(client, store, sessionId, environmentId).catch(() => undefined);
+}
+
+function clearSettledReplayTimer(
+  gitStatus: AppState["gitStatus"],
+  environmentId: string,
+  scopeKey: string,
+): void {
+  const statuses = [
+    ...Object.values(gitStatus.byEnvironmentRepo[environmentId] ?? {}),
+    gitStatus.byEnvironmentId[environmentId],
+  ].filter((status): status is GitStatusEntry => Boolean(status));
+  if (statuses.length > 0 && statuses.every((status) => status.detail_state !== "pending")) {
+    clearReplayTimer(scopeKey);
+  }
+}
+
 export function monitorGitStatusDetails(
   client: WebSocketClient,
   store: StoreApi<AppState>,
@@ -564,37 +662,30 @@ export function monitorGitStatusDetails(
 ): () => void {
   const scopeKey = clientScopeKey(client, environmentId);
   return store.subscribe((state, previousState) => {
-    const currentGitStatus = state.gitStatus;
-    const previousGitStatus = previousState.gitStatus;
     const bindingChanged =
       (state.environmentIdBySessionId[sessionId] ?? sessionId) !==
       (previousState.environmentIdBySessionId[sessionId] ?? sessionId);
-    const scopedGitStatusChanged =
-      currentGitStatus.byEnvironmentId[environmentId] !==
-        previousGitStatus.byEnvironmentId[environmentId] ||
-      currentGitStatus.byEnvironmentRepo[environmentId] !==
-        previousGitStatus.byEnvironmentRepo[environmentId] ||
-      currentGitStatus.refreshByEnvironmentId?.[environmentId] !==
-        previousGitStatus.refreshByEnvironmentId?.[environmentId] ||
-      currentGitStatus.refreshByEnvironmentRepo?.[environmentId] !==
-        previousGitStatus.refreshByEnvironmentRepo?.[environmentId];
-    if (!bindingChanged && !scopedGitStatusChanged) return;
-
-    const statuses = [
-      ...Object.values(currentGitStatus.byEnvironmentRepo[environmentId] ?? {}),
-      currentGitStatus.byEnvironmentId[environmentId],
-    ].filter((status): status is GitStatusEntry => Boolean(status));
-    if (statuses.length > 0 && statuses.every((status) => status.detail_state !== "pending")) {
-      clearReplayTimer(scopeKey);
+    const inventoryChanged =
+      state.gitStatus.inventoryByEnvironment?.[environmentId] !==
+      previousState.gitStatus.inventoryByEnvironment?.[environmentId];
+    if (
+      !bindingChanged &&
+      !scopedGitStatusChanged(state, previousState, environmentId, inventoryChanged)
+    ) {
+      return;
     }
-    const scope = currentClientScope(client);
+
+    clearSettledReplayTimer(state.gitStatus, environmentId, scopeKey);
+    if (inventoryChanged) {
+      requestReplacementInventory(client, store, sessionId, environmentId, scopeKey);
+    }
     reconcileRecovery({
       client,
       store,
       sessionId,
       environmentId,
       scopeKey,
-      generation: scope.generation,
+      generation: currentClientScope(client).generation,
     });
   });
 }

@@ -767,6 +767,12 @@ export type TaskSession = ActiveSubagentCountFields & {
   worktree_branch?: string;
   /** Effective task root containing every attached workspace source. */
   workspace_path?: string;
+  /**
+   * Confirmed native-session working directory used as the base for
+   * repository-relative chat links. Omitted means no update; null means the
+   * backend has no authoritative value.
+   */
+  agent_workspace_path?: string | null;
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
   /** Latest path-free managed workspace recovery operation for this environment. */

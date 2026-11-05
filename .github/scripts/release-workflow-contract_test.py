@@ -1653,6 +1653,26 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("xdg-utils", install)
         self.assertIn("command -v xdg-open", install)
 
+    def test_immutable_host_release_is_verified_without_publication_writes(self) -> None:
+        inspect = job_step_block("publish-release", "Inspect published release")
+        self.assertIn("id: existing_release", inspect)
+        self.assertIn("existing-release.mjs inspect", inspect)
+        verify = job_step_block("publish-release", "Verify immutable release assets")
+        self.assertIn("if: steps.existing_release.outputs.reuse == 'true'", verify)
+        self.assertIn("existing-release.mjs verify", verify)
+        self.assertNotIn("continue-on-error", verify)
+        for name in (
+            "Generate release notes",
+            "Add unsigned desktop warning to release notes",
+            "Generate and verify updater manifest",
+            "Publish release",
+        ):
+            block = job_step_block("publish-release", name)
+            self.assertIn("if: steps.existing_release.outputs.reuse != 'true'", block)
+        load = job_step_block("publish-release", "Load publication helpers")
+        self.assertIn('git checkout "$GITHUB_WORKFLOW_SHA" -- scripts/release', load)
+        self.assertIn("needs.publish-release.result == 'success'", job_block("prepare-plugin-sdk"))
+
     def test_updater_verifier_uses_installed_supported_toolchain(self) -> None:
         install = step_block("Install updater signature verifier toolchain")
         generate = step_block("Generate and verify updater manifest")

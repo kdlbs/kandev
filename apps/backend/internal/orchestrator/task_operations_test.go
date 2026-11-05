@@ -2715,6 +2715,8 @@ func TestQueueAndInterruptForPeerMessageRejectsReplacementIncarnationWhileWaitin
 	}()
 	coordinatorStopWaitForGuardRefs(t, svc, original.ID, 2)
 
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, original.ID, models.TaskSessionStateCompleted, ""))
+	original.State = models.TaskSessionStateCompleted
 	require.NoError(t, repo.DeleteTaskSession(ctx, original))
 	_, err = repo.DB().ExecContext(ctx, `
 		DELETE FROM agent_delivery_cleanup_jobs
