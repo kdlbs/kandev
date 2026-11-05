@@ -157,14 +157,15 @@ type TaskMovedEventData struct {
 
 // ContextWindowData contains data from context window events
 type ContextWindowData struct {
-	TaskID                 string  `json:"task_id"`
-	TaskSessionID          string  `json:"session_id"`
-	AgentID                string  `json:"agent_id"`
-	ContextWindowSize      int64   `json:"context_window_size"`
-	ContextWindowUsed      int64   `json:"context_window_used"`
-	ContextWindowRemaining int64   `json:"context_window_remaining"`
-	ContextEfficiency      float64 `json:"context_efficiency"`
-	Timestamp              string  `json:"timestamp"`
+	TaskID                      string  `json:"task_id"`
+	TaskSessionID               string  `json:"session_id"`
+	AgentID                     string  `json:"agent_id"`
+	ContextWindowSize           int64   `json:"context_window_size"`
+	ContextWindowUsed           int64   `json:"context_window_used"`
+	ContextWindowRemaining      int64   `json:"context_window_remaining"`
+	ContextEfficiency           float64 `json:"context_efficiency"`
+	CompactionInferenceDisabled bool    `json:"compaction_inference_disabled,omitempty"`
+	Timestamp                   string  `json:"timestamp"`
 }
 
 // EventHandlers contains callbacks for different event types
