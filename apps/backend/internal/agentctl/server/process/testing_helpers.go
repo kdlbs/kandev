@@ -19,6 +19,13 @@ func (m *Manager) SetStatusForTest(status Status) {
 	m.status.Store(status)
 }
 
+// GitStatusEvidenceChangedErrorForTest returns the evidence-change sentinel so
+// API tests can exercise the classified warning branch without racing a real
+// repository change.
+func GitStatusEvidenceChangedErrorForTest() error {
+	return errGitStatusEvidenceChanged
+}
+
 // SetVscodeForTest injects a VscodeManager with the given status and port.
 // Intended for use in tests where starting a real code-server is not feasible.
 func (m *Manager) SetVscodeForTest(status VscodeStatus, port int) {

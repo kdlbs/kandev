@@ -68,6 +68,8 @@ function fixture({
       return state.candidate;
     },
     retainCandidate: async () => events.push(["retain"]),
+    finalizeCandidate: async () => events.push(["finalize"]),
+    verifyFinalizedCandidate: async () => events.push(["verify-finalized"]),
     createTag: async () => {
       events.push(["tag"]);
       state.tag = tag();
@@ -93,6 +95,34 @@ function fixture({
   };
 }
 // @covers AC-PLUGINS-SDK-DISTRIBUTION-003.2
+test("SDK evidence is finalized after signed tagging and before npm publication", async () => {
+  const f = fixture();
+  await preparePublication(f.io, f.context);
+  await publishPublication(f.io, f.context);
+  const position = (name) => {
+    const index = f.events.findIndex(([event]) => event === name);
+    assert.notEqual(index, -1, `${name} event is missing`);
+    return index;
+  };
+  assert.ok(position("retain") < position("tag"));
+  assert.ok(position("tag") < position("finalize"));
+  assert.ok(position("finalize") < position("verify-finalized"));
+  assert.ok(position("verify-finalized") < position("publish"));
+});
+test("unfinalized evidence blocks npm publication and bootstrap", async () => {
+  for (const packageExists of [false, true]) {
+    const f = fixture({ tagged: true, packageExists });
+    f.context.firstPublishOIDCReady = false;
+    f.io.verifyFinalizedCandidate = async () => {
+      throw new Error("SDK evidence is not finalized");
+    };
+    await assert.rejects(publishPublication(f.io, f.context), /not finalized/);
+    assert.equal(
+      f.events.some(([event]) => event === "publish" || event === "consumers"),
+      false,
+    );
+  }
+});
 for (const tagged of [false, true])
   for (const published of [false, true]) {
     test(`recovers immutable state: tag=${tagged}, npm=${published}`, async () => {

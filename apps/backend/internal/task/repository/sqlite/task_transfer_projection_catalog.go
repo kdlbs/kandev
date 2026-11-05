@@ -9,6 +9,7 @@ type transferWorkspaceProjection struct {
 }
 
 var transferWorkspaceProjections = []transferWorkspaceProjection{
+	{table: "task_builtin_mcp_preferences", taskColumn: "task_id"},
 	{table: "task_status_summaries", taskColumn: "task_id"},
 	{table: "task_message_attachments", taskColumn: "task_id"},
 	{table: "github_pr_watches", taskColumn: "task_id"},

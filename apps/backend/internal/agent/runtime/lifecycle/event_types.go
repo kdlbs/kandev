@@ -134,6 +134,7 @@ type AgentctlEventPayload struct {
 	DeliveryHarnessGeneration uint64                   `json:"delivery_harness_generation,omitempty"`
 	PromptGeneration          uint64                   `json:"prompt_generation,omitempty"`
 	WorktreeID                string                   `json:"worktree_id,omitempty"`
+	WorktreeRepositoryID      string                   `json:"worktree_repository_id,omitempty"`
 	WorktreePath              string                   `json:"worktree_path,omitempty"`
 	WorktreeBranch            string                   `json:"worktree_branch,omitempty"`
 	// TaskWorkspacePath is the task root that contains every per-repo
@@ -142,6 +143,11 @@ type AgentctlEventPayload struct {
 	// than the initial session ready. The frontend uses this to repoint the
 	// file browser at the task root once the task becomes multi-branch.
 	TaskWorkspacePath string `json:"task_workspace_path,omitempty"`
+	// AgentWorkspacePath is the launched execution's confirmed working
+	// directory. It stays stable when attachment promotes the task workspace
+	// root, so the frontend can keep resolving repository-relative chat links
+	// against the checkout the agent still runs in.
+	AgentWorkspacePath string `json:"agent_workspace_path,omitempty"`
 }
 
 // ACPSessionCreatedPayload is the payload when an ACP session is created.
@@ -571,7 +577,10 @@ type PermissionRequestEventPayload struct {
 	ToolCallID       string             `json:"tool_call_id"`
 	Title            string             `json:"title"`
 	Options          []PermissionOption `json:"options"`
-	ActionType       string             `json:"action_type"`
+	// HumanInput marks a provider-native question only a person can answer.
+	// Automatic consumers must leave it pending.
+	HumanInput bool   `json:"human_input,omitempty"`
+	ActionType string `json:"action_type"`
 	// AutoApprovedOptionID names the option agentctl already selected. A
 	// nonempty value makes this payload an audit record of an answered
 	// request rather than a prompt awaiting a person.

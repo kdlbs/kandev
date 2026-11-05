@@ -462,7 +462,13 @@ select **Validate**; this explicit check is independent of discovery roots.
 `KANDEV_DEBUG_DEV_MODE=true` selects the `dev` profile. `make dev` sets that
 selector and defaults the browser title to `Dev Kandev`. `make start-debug`
 enables pprof and debug logging without selecting the `dev` profile, and
-defaults the browser title to `Debug Kandev`. Debug mode is high risk. It
+defaults the browser title to `Debug Kandev`. Source startup compiles the
+frontend as production React regardless of an inherited `NODE_ENV` value.
+Runtime diagnostics do not depend on that build mode, so `make start-debug`
+keeps debug logging and pprof while React development warnings and default
+performance-track instrumentation stay out of the bundle. Use `make dev` for
+development React when `NODE_ENV` is unset or set to `development`. Debug mode
+is high risk. It
 enables local diagnostic surfaces and implies
 `KANDEV_DEBUG_AGENT_MESSAGES=true` and `KANDEV_DEBUG_PPROF_ENABLED=true` when
 not explicitly locked by the environment. ACP JSONL frames include complete
@@ -683,7 +689,7 @@ The source checkout's `make dev` activates the embedded development profile, whi
 
 ## Credentials and product settings
 
-The **Unread Messages** preference in **Settings > Preferences > Task Behavior > Conversation** controls the Slack-style **New** divider in session transcripts. It defaults off for each user, persists with user settings, and takes effect immediately. Enabling it also allows that user's active transcript view to advance the session read cursor.
+The **Show New divider in transcripts** preference in **Settings > Preferences > Task Behavior > Conversation** controls the Slack-style **New** divider in session transcripts. The **Show unread dot on tasks** preference directly below it controls the unread dot on task rows in the desktop task sidebar and the mobile task switcher. Both default off for each user, persist with user settings, and take effect immediately. While either is on, that user's active transcript view advances the session read cursor. A task row shows the dot when one of its sessions has an agent message you have not seen, including sessions you have never opened; your own messages never count. Reading a session to its end clears its contribution, including messages the transcript hides. The task you have open keeps its dot while another of its sessions is unread. When you open a task that shows the dot, the dot stays for the **Unread dot hide delay**, then clears. The delay appears only while the dot is on, defaults to 2 seconds, accepts 0 to 60 seconds (0 clears it immediately), and changes only how long the dot stays visible: messages are marked read as soon as you view them. Setup output, subagent messages, session start and resume notices, recovery cards, action notices, and permission or clarification requests do not set the dot. Read cursors are shared by every user of a session, so reading a task in one window clears its dot in the others.
 
 Most integrations, executor profiles, agent profiles, MCP servers, repository settings, and UI preferences are persistent database records edited under **Settings**. They are not fields in `config.yaml`. Secret values use an encrypted secret store backed by `<home>/data/master.key`; filesystem permissions, database backups, and key backup are part of the security boundary.
 

@@ -60,6 +60,9 @@ func (a *usageProviderAdapter) ensureRegistered(profileID, agentName string) {
 	if err != nil {
 		return
 	}
+	// Antigravity's supported personal path is a subscription, but its native
+	// server owns the account allowance report and exposes no client-side quota
+	// API. Keep it out of this switch: /usage renders the native report instead.
 	switch agentName {
 	case claudeACPAgentID:
 		credPath := filepath.Join(home, ".claude", ".credentials.json")

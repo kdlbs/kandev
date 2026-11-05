@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	acpAssistantRole                    = "assistant"
 	acpUserRole                         = "user"
 	availableCommandKindSkill           = "skill"
 	codexPlanCommandName                = "plan"
@@ -178,6 +179,7 @@ func (a *Adapter) handleACPUpdate(
 		// the last one as authoritative (last-write-wins).
 		if u.AgentMessageChunk != nil || u.UserMessageChunk != nil || u.AgentThoughtChunk != nil ||
 			u.ToolCall != nil || u.ToolCallUpdate != nil ||
+			u.CompactionUpdate != nil || u.CompactionSummaryChunk != nil ||
 			u.Plan != nil || u.CurrentModeUpdate != nil || u.ConfigOptionUpdate != nil {
 			return
 		}
@@ -197,8 +199,10 @@ func (a *Adapter) handleACPUpdate(
 	suppressed := a.dialect.suppresses(n)
 	handled := suppressed
 	var event, leadingEvent *AgentEvent
+	var claudeResumeUpdate *AgentEvent
 	if !suppressed {
-		event = a.convertNotification(n)
+		event = a.convertNotificationForGeneration(n, promptGeneration)
+		claudeResumeUpdate = a.claudeSubagentResumeEvent(n, promptGeneration)
 		if a.observesResponseAttemptReset(promptGeneration, event) {
 			leadingEvent = &AgentEvent{
 				Type:             streams.EventTypeResponseAttemptReset,
@@ -258,6 +262,18 @@ func (a *Adapter) handleACPUpdate(
 	a.stampUpdateTurnIdentity(leadingEvent, promptGeneration)
 	a.stampUpdateTurnIdentity(event, promptGeneration)
 	a.stampSessionSettingsReports(sessionID, leadingEvent, event)
+	if n.Update.ToolCallUpdate != nil {
+		for _, controlUpdate := range a.codexControlCardUpdates(sessionID, n.Update.ToolCallUpdate) {
+			a.stampUpdateTurnIdentity(&controlUpdate, promptGeneration)
+			shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, &controlUpdate)
+			a.sendUpdate(controlUpdate)
+		}
+	}
+	if claudeResumeUpdate != nil {
+		a.stampUpdateTurnIdentity(claudeResumeUpdate, promptGeneration)
+		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, claudeResumeUpdate)
+		a.sendUpdate(*claudeResumeUpdate)
+	}
 	if leadingEvent != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, leadingEvent)
 		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
@@ -450,6 +466,21 @@ func (a *Adapter) emitDialectContextWindow(sessionID string, meta map[string]any
 
 // convertNotification converts an ACP SessionNotification to an AgentEvent.
 func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
+	return a.convertNotificationForGeneration(n, a.currentPromptGeneration())
+}
+
+func (a *Adapter) convertNotificationForGeneration(n acp.SessionNotification, promptGeneration uint64) *AgentEvent {
+	if event, handled := a.convertACPContentNotification(n, promptGeneration); handled {
+		return event
+	}
+	event, _ := a.convertACPSessionNotification(n)
+	return event
+}
+
+func (a *Adapter) convertACPContentNotification(
+	n acp.SessionNotification,
+	promptGeneration uint64,
+) (*AgentEvent, bool) {
 	u := n.Update
 	sessionID := string(n.SessionId)
 
@@ -458,9 +489,9 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		return a.convertMessageChunkWithProtocolID(
 			sessionID,
 			u.AgentMessageChunk.Content,
-			"assistant",
+			acpAssistantRole,
 			derefStr(u.AgentMessageChunk.MessageId),
-		)
+		), true
 
 	case u.UserMessageChunk != nil:
 		return a.convertMessageChunkWithProtocolID(
@@ -468,7 +499,7 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 			u.UserMessageChunk.Content,
 			acpUserRole,
 			derefStr(u.UserMessageChunk.MessageId),
-		)
+		), true
 
 	case u.AgentThoughtChunk != nil:
 		if u.AgentThoughtChunk.Content.Text != nil {
@@ -477,15 +508,30 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 				SessionID:         sessionID,
 				ProtocolMessageID: derefStr(u.AgentThoughtChunk.MessageId),
 				ReasoningText:     u.AgentThoughtChunk.Content.Text.Text,
-			}
+			}, true
 		}
+		return nil, true
 
 	case u.ToolCall != nil:
-		return a.convertToolCallUpdate(sessionID, u.ToolCall)
+		return a.convertToolCallUpdateForGeneration(sessionID, u.ToolCall, promptGeneration), true
 
 	case u.ToolCallUpdate != nil:
-		return a.convertToolCallResultUpdate(sessionID, u.ToolCallUpdate)
+		return a.convertToolCallResultUpdateForGeneration(sessionID, u.ToolCallUpdate, promptGeneration), true
 
+	case u.CompactionUpdate != nil:
+		return a.convertCompactionUpdate(sessionID, u.CompactionUpdate), true
+
+	case u.CompactionSummaryChunk != nil:
+		return a.convertCompactionSummaryChunk(sessionID, u.CompactionSummaryChunk), true
+	}
+	return nil, false
+}
+
+func (a *Adapter) convertACPSessionNotification(n acp.SessionNotification) (*AgentEvent, bool) {
+	u := n.Update
+	sessionID := string(n.SessionId)
+
+	switch {
 	case u.Plan != nil:
 		entries := make([]PlanEntry, len(u.Plan.Entries))
 		for i, e := range u.Plan.Entries {
@@ -499,20 +545,20 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 			Type:        streams.EventTypePlan,
 			SessionID:   sessionID,
 			PlanEntries: entries,
-		}
+		}, true
 
 	case u.AvailableCommandsUpdate != nil:
-		return a.convertAvailableCommands(sessionID, u.AvailableCommandsUpdate)
+		return a.convertAvailableCommands(sessionID, u.AvailableCommandsUpdate), true
 
 	case u.CurrentModeUpdate != nil:
 		if !a.noteCurrentMode(sessionID, string(u.CurrentModeUpdate.CurrentModeId)) {
-			return nil
+			return nil, true
 		}
 		return &AgentEvent{
 			Type:          streams.EventTypeSessionMode,
 			SessionID:     sessionID,
 			CurrentModeID: string(u.CurrentModeUpdate.CurrentModeId),
-		}
+		}, true
 
 	case u.ConfigOptionUpdate != nil:
 		configOptions := convertACPConfigOptions(u.ConfigOptionUpdate.ConfigOptions)
@@ -524,7 +570,7 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 			a.mu.Lock()
 			if a.sessionID != sessionID || a.closed {
 				a.mu.Unlock()
-				return nil
+				return nil, true
 			}
 			cachedModels := a.availableModels
 			a.availableConfigOptions = configOptions
@@ -542,8 +588,9 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 				SessionModels:  convertSessionModels(cachedModels),
 				ConfigOptions:  configOptions,
 				Data:           map[string]any{"config_options_source": "provider_update"},
-			}
+			}, true
 		}
+		return nil, true
 
 	case u.SessionInfoUpdate != nil:
 		return &AgentEvent{
@@ -552,13 +599,13 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 			SessionTitle:     derefStr(u.SessionInfoUpdate.Title),
 			SessionUpdatedAt: derefStr(u.SessionInfoUpdate.UpdatedAt),
 			SessionMeta:      u.SessionInfoUpdate.Meta,
-		}
+		}, true
 
 	case u.UsageUpdate != nil:
-		return a.convertUsageUpdate(sessionID, u.UsageUpdate)
+		return a.convertUsageUpdate(sessionID, u.UsageUpdate), true
 	}
 
-	return nil
+	return nil, false
 }
 
 // usageTracker carries the latest cumulative ACP usage sample and the sample
@@ -757,7 +804,7 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 		// own assistant text. Parse those out into proper Monitor events and
 		// strip them from the chat text. Assistant role only — genuine user
 		// messages don't carry these.
-		if role == "assistant" {
+		if role == acpAssistantRole {
 			cleaned := a.routeMonitorEvents(sessionID, text)
 			monitorTextRemoved := cleaned != text
 			text = cleaned
@@ -774,7 +821,7 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 		// downstream clearing rule only reads an unmarked assistant/thought
 		// chunk, so a marked user chunk would never be cleared by the ordinary-
 		// output path.
-		event.ProviderDiagnosticCandidate = role == "assistant" &&
+		event.ProviderDiagnosticCandidate = role == acpAssistantRole &&
 			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
 		return event
 	}

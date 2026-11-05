@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { closeModelConfigSheetIfOpen } from "../../helpers/model-config-sheet";
 import path from "node:path";
 import { expect, type Locator, type Page, type TestInfo } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
@@ -222,11 +223,12 @@ export async function exerciseMiniMaxSetup({
     });
     try {
       await page.goto(`/settings/agents/minimax-acp/profiles/${profile.id}`);
-      const selector = page.getByRole("button", { name: "Profile start model settings" });
+      const selector = page.getByTestId("model-config-trigger");
       await expect(selector).toContainText("MiniMax-M3", { timeout: 15_000 });
       await activate(selector);
       await activate(page.getByRole("option", { name: "MiniMax-M2.7-highspeed", exact: true }));
       await expect(selector).toContainText("MiniMax-M2.7-highspeed");
+      await closeModelConfigSheetIfOpen(page);
       await activate(page.getByText("Profile name", { exact: true }));
       await expect(
         page.getByRole("option", { name: "MiniMax-M2.7-highspeed", exact: true }),

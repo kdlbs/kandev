@@ -193,7 +193,8 @@ Accepted historical comparisons are never recalculated to repair this defect.
 
 Desktop and phone use the existing projection: a ready zero-file result has no card.
 A renamed turn with edits uses the existing card and historical diff surface.
-Unproven history retains its unavailable state, including the zero-entry exception.
+Unproven history retains its unavailable state for explicit historical selection.
+Its transcript card stays hidden under AC-TASKS-TURN-CHANGES-005.7.
 
 ### Direct comparison
 
@@ -482,9 +483,8 @@ When any root is legacy, use repository wording for aggregate counts too.
 The basis remains in retained metadata; no per-root basis badge or explanatory
 paragraph is required on an otherwise usable card or diff.
 
-When every comparison is unavailable, omit numeric totals and use one existing
-unavailable message in the current card status area, even without file entries.
-Do not duplicate it in the header and body or introduce another warning surface.
+When summary availability is `unavailable` or `failed`, omit the transcript card.
+Counts and history reasons do not override this rule. Retain historical diagnostics.
 For mixed results, reuse the existing Partial indicator and repository status
 positions. Keep healthy roots and available counts usable.
 A selected unavailable historical diff can explain the cause in its existing
@@ -583,3 +583,4 @@ lost acknowledgements, stale claims, mixed active/completed turns, and cleanup r
 - [Original delivery plan](../../../plans/turn-changed-files/plan.md)
 - [Fix plan](../../../plans/turn-change-history-integrity/plan.md)
 - [Generated-branch continuity fix plan](../../../plans/turn-change-title-branch-continuity/plan.md)
+- [Unavailable-card visibility plan](../../../plans/hide-unavailable-turn-changes/plan.md)

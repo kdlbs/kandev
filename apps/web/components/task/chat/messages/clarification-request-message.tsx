@@ -14,6 +14,7 @@ import { QuestionImages } from "../question-images";
 import { ClarificationChoiceImages } from "../clarification-choice-images";
 import { ClarificationMarkdown } from "../clarification-markdown";
 import { ClarificationInputOverlay } from "../clarification-input-overlay";
+import { ClarificationAttachmentSummary } from "../clarification-answer-attachments";
 import type {
   LateClarificationSnapshot,
   LateClarificationState,
@@ -155,7 +156,12 @@ export function ClarificationRequestMessage({
           {isAnswered && (
             <div className="mt-1 ml-3 flex items-start gap-1.5 text-xs text-foreground/80">
               {getStatusIndicator()}
-              <AnswerSummary question={question} response={metadata.response} />
+              <span className="min-w-0">
+                <AnswerSummary question={question} response={metadata.response} />
+                <ClarificationAttachmentSummary
+                  attachments={metadata.response?.attachments ?? []}
+                />
+              </span>
               {metadata.agent_disconnected && (
                 <span className="text-muted-foreground">{t("task:sentAsNewMessage")}</span>
               )}

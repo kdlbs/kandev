@@ -31,10 +31,36 @@ func newCodexACPDialect() acpDialect {
 	return acpDialect{
 		capacityContinuationSupport: streams.CapacityContinuationCodexLiveSessionV1,
 		subagentFrame:               parseCodexSubagentFrame,
+		subagentControl:             codexSubagentControl,
 		normalizePromptUsage:        normalizeCodexPromptUsage,
 		mcpToolCall:                 parseCodexMCPToolCall,
 		mcpToolResult:               normalizeCodexMCPToolResult,
 		responseAttemptReset:        codexResponseAttemptResetMeta,
+	}
+}
+
+func codexSubagentControl(toolName string, _ map[string]any, rawInput any) streams.SubagentControl {
+	input, ok := rawInput.(map[string]any)
+	if !ok {
+		return ""
+	}
+	sender, _ := input["senderThreadId"].(string)
+	_, statesOK := input["agentsStates"].(map[string]any)
+	receivers, receiversPresent := input["receiverThreadIds"]
+	if strings.TrimSpace(sender) == "" || !statesOK || !receiversPresent || !validCodexReceiverThreadIDs(receivers) {
+		return ""
+	}
+	switch toolName {
+	case "wait":
+		return streams.SubagentControlWait
+	case "closeAgent":
+		return streams.SubagentControlClose
+	case "sendInput", "followupTask":
+		return streams.SubagentControlMessage
+	case "resumeAgent":
+		return streams.SubagentControlResume
+	default:
+		return ""
 	}
 }
 

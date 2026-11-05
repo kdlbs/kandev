@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -165,9 +166,11 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.mu.Lock()
 	a.pendingWakeups = make(map[string]*pendingWakeup)
 	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearClaudeSubagentsLocked("")
 	a.clearCursorTaskMetaLocked("")
 	a.clearPromptHandoffToolTrackingLocked()
 	clear(a.usageBySession)
+	clear(a.contextCompactions)
 	a.wakeup.cancel()
 	a.mu.Unlock()
 	a.cancelAllAsyncTurnCompletes()
@@ -177,6 +180,9 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
+	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers); err != nil {
+		return "", err
+	}
 	for _, decision := range decisions {
 		kind := streams.MCPAttachmentEvidenceDelivered
 		if !decision.Included {
@@ -462,21 +468,22 @@ func (a *Adapter) emitMCPAttachmentEvidence(
 		target = streams.SanitizeMCPNetworkTarget(server.URL)
 	}
 	source := streams.MCPServerSourceProfile
-	if server.Name == kandevMCPServerName {
+	if server.Name == kandevMCPServerName || server.IsInjectedBuiltin() {
 		source = streams.MCPServerSourceKandev
 	}
 	a.sendUpdate(AgentEvent{
 		Type: streams.EventTypeMCPAttachment,
 		MCPAttachment: &streams.MCPAttachmentEvidence{
-			AttemptID:  attachmentContext.Attempt.AttemptID,
-			ServerName: server.Name,
-			Kind:       kind,
-			OccurredAt: time.Now().UTC(),
-			Source:     source,
-			Transport:  server.Type,
-			Target:     target,
-			ReasonCode: reasonCode,
-			Summary:    streams.SanitizeMCPErrorSummary(summary),
+			BuiltinPackage: server.BuiltinPackage,
+			AttemptID:      attachmentContext.Attempt.AttemptID,
+			ServerName:     server.Name,
+			Kind:           kind,
+			OccurredAt:     time.Now().UTC(),
+			Source:         source,
+			Transport:      server.Type,
+			Target:         target,
+			ReasonCode:     reasonCode,
+			Summary:        streams.SanitizeMCPErrorSummary(summary),
 		},
 	})
 }
@@ -597,8 +604,12 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.mu.Lock()
 	a.pendingWakeups = make(map[string]*pendingWakeup)
 	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearClaudeSubagentsLocked("")
 	a.clearCursorTaskMetaLocked("")
 	a.clearPromptHandoffToolTrackingLocked()
+	if priorSessionID != sessionID {
+		clear(a.contextCompactions)
+	}
 	a.wakeup.cancel()
 	a.mu.Unlock()
 	a.cancelAllAsyncTurnCompletes()
@@ -609,6 +620,9 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	// Filter MCP servers by agent capabilities (same logic as NewSession).
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
+	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers); err != nil {
+		return err
+	}
 	for _, decision := range decisions {
 		kind := streams.MCPAttachmentEvidenceDelivered
 		if !decision.Included {
@@ -763,6 +777,9 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	}
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
+	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers); err != nil {
+		return err
+	}
 	for _, decision := range decisions {
 		kind := streams.MCPAttachmentEvidenceDelivered
 		if !decision.Included {
@@ -1896,12 +1913,22 @@ func isModelConfigID(configID string, cachedConfig []streams.ConfigOption) bool 
 
 // Authenticate triggers ACP session/authenticate for a given auth method.
 func (a *Adapter) Authenticate(ctx context.Context, methodID string) error {
+	var policy *acpcompat.AuthPolicy
+	if a.cfg != nil {
+		policy = a.cfg.AuthPolicy
+	}
+	if policy != nil && acpcompat.IsAntigravity(a.agentID) && methodID != policy.MethodID {
+		return fmt.Errorf("antigravity authentication method %q is not supported", methodID)
+	}
 	a.mu.RLock()
 	conn := a.acpConn
 	a.mu.RUnlock()
 
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
+	}
+	if policy != nil && acpcompat.IsAntigravity(a.agentID) {
+		return a.authenticateAntigravity(ctx, policy)
 	}
 
 	_, err := conn.Authenticate(ctx, acp.AuthenticateRequest{

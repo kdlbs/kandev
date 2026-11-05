@@ -37,6 +37,12 @@ func TestLoadSuppression_MessageEventsAreSuppressed(t *testing.T) {
 		makeNotification("s1", acp.SessionUpdate{
 			ToolCallUpdate: &acp.SessionToolCallUpdate{},
 		}),
+		makeNotification("s1", acp.SessionUpdate{
+			CompactionUpdate: &acp.SessionCompactionUpdate{CompactionId: "replayed", Status: "completed"},
+		}),
+		makeNotification("s1", acp.SessionUpdate{
+			CompactionSummaryChunk: &acp.SessionUpdateCompactionSummaryChunk{CompactionId: "replayed", Content: acp.TextBlock("replayed")},
+		}),
 	}
 
 	for _, n := range notifications {
@@ -46,6 +52,12 @@ func TestLoadSuppression_MessageEventsAreSuppressed(t *testing.T) {
 	events := drainEvents(a)
 	if len(events) != 0 {
 		t.Errorf("expected 0 events during load, got %d: %+v", len(events), events)
+	}
+	a.mu.RLock()
+	compactions := len(a.contextCompactions)
+	a.mu.RUnlock()
+	if compactions != 0 {
+		t.Fatalf("replayed compaction changed adapter state: %d entries", compactions)
 	}
 }
 

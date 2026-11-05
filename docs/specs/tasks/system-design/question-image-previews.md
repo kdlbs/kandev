@@ -342,16 +342,17 @@ status region per image group. Use a stable accessible name on Retry and Inspect
 
 ### Drafts across responsive layouts
 
-The task page keeps a bounded, memory-only draft context above its responsive
-layout. Image-bearing active bundles use a key composed of source session, pending
-ID, and form mode. The context restores the text, keyed choices, and current
-question when the desktop/phone layout remounts. It holds at most eight bundles
-and removes locally settled bundles. A task change replaces only the draft cache;
-the provider preserves the mounted task layout and its pending panel-focus state.
-A page reload discards the context.
-It contains no image bytes and does not persist unsent answers. Image-free forms
-and late-answer forms keep their existing local state behavior. The answer hook
-and server claim remain authoritative; restoring a draft never submits it.
+The [clarification reliability design](clarification-response-reliability.md#unsubmitted-drafts-across-navigation)
+owns answer retention for active forms with or without images. Its browser-memory
+cache survives task navigation and responsive remounts. Exact task, source-session,
+pending-bundle, and form-mode identity prevents answer reuse by another form.
+The cache contains no image bytes. Reload and auth changes discard it.
+
+The task page retains a local context for panel sizes across responsive remounts.
+A task change replaces that resize cache without remounting the task layout or
+resetting pending panel-focus state. Historical late-answer forms keep their
+existing admission behavior. The answer hook and server claim remain
+authoritative. Restoring a draft never submits it.
 
 ## Loading and memory
 

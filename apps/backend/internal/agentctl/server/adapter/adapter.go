@@ -13,6 +13,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -24,15 +25,16 @@ import (
 // This allows users of the adapter package to access these types without
 // importing the types package directly.
 type (
-	PermissionRequest  = types.PermissionRequest
-	PermissionResponse = types.PermissionResponse
-	PermissionOption   = streams.PermissionOption
-	PermissionHandler  = types.PermissionHandler
-	UserInputOption    = types.UserInputOption
-	UserInputQuestion  = types.UserInputQuestion
-	UserInputRequest   = types.UserInputRequest
-	UserInputAnswer    = types.UserInputAnswer
-	UserInputResponse  = types.UserInputResponse
+	PermissionRequest   = types.PermissionRequest
+	PermissionResponse  = types.PermissionResponse
+	PermissionOption    = streams.PermissionOption
+	PermissionHandler   = types.PermissionHandler
+	UserInputOption     = types.UserInputOption
+	UserInputQuestion   = types.UserInputQuestion
+	UserInputRequest    = types.UserInputRequest
+	UserInputAnswer     = types.UserInputAnswer
+	UserInputAttachment = types.UserInputAttachment
+	UserInputResponse   = types.UserInputResponse
 )
 
 // UserInputRequestHandler creates a clarification request and waits for its
@@ -161,6 +163,12 @@ type SessionModelStateProvider interface {
 // support ACP authentication (session/authenticate).
 type AuthenticatableAdapter interface {
 	Authenticate(ctx context.Context, methodID string) error
+}
+
+// AuthStatusProvider exposes a transient provider authentication snapshot for
+// the dedicated operator sign-in instance.
+type AuthStatusProvider interface {
+	AuthStatus() streams.AuthStatus
 }
 
 // ProviderErrorContextProvider exposes the adapter state a generic ACP
@@ -380,6 +388,10 @@ type Config struct {
 	// OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
 
+	// AuthPolicy selects a provider-specific authentication method after
+	// initialize. It is an internal child-process contract.
+	AuthPolicy *acpcompat.AuthPolicy
+
 	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
 	PromptSuggestions bool
 }
@@ -418,6 +430,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		AgentBackgroundWorkEnabled: c.AgentBackgroundWorkEnabled,
 		PromptCancelJoinTimeout:    c.PromptCancelJoinTimeout,
 		ProviderGatewayAuth:        c.ProviderGatewayAuth,
+		AuthPolicy:                 c.AuthPolicy,
 		PromptSuggestions:          c.PromptSuggestions,
 	}
 }

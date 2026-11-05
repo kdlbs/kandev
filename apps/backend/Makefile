@@ -246,6 +246,11 @@ build-e2e-delivery-fixture:
 	@$(call MKDIR,$(BUILD_DIR))
 	$(CGO_LOCALE) $(GO) test -c -trimpath -tags fts5 -o $(BUILD_DIR)/e2e-delivery-fixture$(EXE) ./internal/agent/runtime/lifecycle
 
+.PHONY: build-e2e-send-now-fixture
+build-e2e-send-now-fixture:
+	@$(call MKDIR,$(BUILD_DIR))
+	$(CGO_LOCALE) $(GO) test -c -trimpath -tags fts5 -o $(BUILD_DIR)/e2e-send-now-fixture$(EXE) ./internal/orchestrator
+
 ## Build the lean development binary set. Unlike `build`, this does not build
 ## every cross-platform remote helper; dev needs the host helper and, for a
 ## host other than Linux/amd64, one linux/amd64 helper.
