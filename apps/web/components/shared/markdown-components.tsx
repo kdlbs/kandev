@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { Options as MarkdownOptions } from "react-markdown";
+import { MarkdownImage } from "./markdown-image";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkGemoji from "remark-gemoji";
@@ -81,6 +82,7 @@ type MarkdownCodeProps = {
 };
 
 export type MarkdownFileLinkContextValue = {
+  sessionId?: string | null;
   worktreePath?: string | null;
   /** Confirmed native workspace used as the base for relative links. */
   relativeBasePath?: string | null;
@@ -266,5 +268,6 @@ function MarkdownCode({ className, children }: MarkdownCodeProps) {
 export const markdownComponents = {
   code: MarkdownCode,
   a: MarkdownLink,
+  img: MarkdownImage,
   table: ResizableMarkdownTable,
 };

@@ -142,6 +142,7 @@ export function TaskMarkdownFileLinkProvider({
   );
   const contextValue = useMemo<MarkdownFileLinkContextValue>(
     () => ({
+      sessionId: sessionId ?? inheritedContext.sessionId,
       worktreePath: effectiveWorkspacePath ?? inheritedContext.worktreePath,
       relativeBasePath: effectiveRelativeBasePath ?? inheritedContext.relativeBasePath,
       sourcePrefixes,
@@ -151,6 +152,8 @@ export function TaskMarkdownFileLinkProvider({
     [
       effectiveRelativeBasePath,
       effectiveWorkspacePath,
+      sessionId,
+      inheritedContext.sessionId,
       fileRootAliases,
       inheritedContext.onOpenFile,
       inheritedContext.relativeBasePath,

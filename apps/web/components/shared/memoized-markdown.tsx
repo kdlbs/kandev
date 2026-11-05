@@ -59,7 +59,7 @@ function renderStaticMarkdown(content: string): ReturnType<typeof ReactMarkdown>
  * string and standard static element tree have bounded LRU caches,
  * so remounting a visited transcript does not repeat Markdown parsing.
  */
-type MemoizedMarkdownProps = MarkdownFileLinkContextValue & {
+type MemoizedMarkdownProps = Omit<MarkdownFileLinkContextValue, "sessionId"> & {
   content: string;
   components?: Components;
   taskId?: string | null;
@@ -80,6 +80,7 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
   const inheritedContext = useContext(MarkdownFileLinkContext);
   const fileLinkContext = useMemo(
     () => ({
+      sessionId: inheritedContext.sessionId,
       worktreePath: worktreePath ?? inheritedContext.worktreePath,
       relativeBasePath: relativeBasePath ?? inheritedContext.relativeBasePath,
       sourcePrefixes: sourcePrefixes ?? inheritedContext.sourcePrefixes,
@@ -88,6 +89,7 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
     }),
     [
       fileRootAliases,
+      inheritedContext.sessionId,
       inheritedContext.fileRootAliases,
       inheritedContext.onOpenFile,
       inheritedContext.relativeBasePath,
