@@ -144,6 +144,7 @@ func (a *mockAgent) Initialize(_ context.Context, req acp.InitializeRequest) (ac
 	}
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
+		AgentInfo:       mockClaudeBridgeAgentInfo(),
 		AgentCapabilities: acp.AgentCapabilities{
 			LoadSession: true,
 			PromptCapabilities: acp.PromptCapabilities{

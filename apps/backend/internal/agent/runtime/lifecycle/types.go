@@ -107,7 +107,7 @@ type AgentExecution struct {
 	DeliveryHarnessGeneration uint64   // Native harness generation owning the stream
 	// Fresh native startup buffers delivery until its initial SQL generation exists.
 	deliveryBootstrap          atomic.Bool
-	deliveryNegotiation        atomic.Pointer[deliveryNegotiationGate]
+	deliveryStartup            atomic.Pointer[deliveryStartupAttempt]
 	deliveryStreamConnectError atomic.Pointer[deliveryStreamFailure]
 	// DeliveryMode records the recovery protocol selected for this execution.
 	// It is set before an adopted execution is published so admission and stream
