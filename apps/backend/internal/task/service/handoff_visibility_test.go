@@ -44,6 +44,18 @@ func (r *visibilityReceiptRepo) GetTaskVisibilitySnapshot(ctx context.Context, w
 	return task, receipt, err
 }
 
+func (r *visibilityReceiptRepo) GetAuthorizedTaskVisibilitySnapshot(ctx context.Context, callerTaskID, workspaceID, taskID string) (*models.Task, *models.TaskLifecycleReceipt, bool, error) {
+	caller, err := r.GetTask(ctx, callerTaskID)
+	if errors.Is(err, repository.ErrTaskNotFound) || (err == nil && (caller == nil || caller.WorkspaceID != workspaceID)) {
+		return nil, nil, false, nil
+	}
+	if err != nil {
+		return nil, nil, false, err
+	}
+	task, receipt, err := r.GetTaskVisibilitySnapshot(ctx, workspaceID, taskID)
+	return task, receipt, true, err
+}
+
 func TestGetTaskVisibilityUsesLiveProjectionAndDoesNotMutateReads(t *testing.T) {
 	ctx := context.Background()
 	tasks := newFakeTaskRepo()
@@ -152,8 +164,8 @@ func TestGetTaskVisibilityPropagatesCallerLookupFailure(t *testing.T) {
 	require.ErrorIs(t, err, lookupErr)
 }
 
-func (r *failingVisibilitySnapshotRepo) GetTaskVisibilitySnapshot(context.Context, string, string) (*models.Task, *models.TaskLifecycleReceipt, error) {
-	return nil, nil, r.err
+func (r *failingVisibilitySnapshotRepo) GetAuthorizedTaskVisibilitySnapshot(context.Context, string, string, string) (*models.Task, *models.TaskLifecycleReceipt, bool, error) {
+	return nil, nil, false, r.err
 }
 
 func TestGetTaskVisibilityFailsClosedWithoutSnapshotOrOnSnapshotError(t *testing.T) {
@@ -196,6 +208,19 @@ func (r *deleteAfterVisibilitySnapshotRepo) GetTaskVisibilitySnapshot(ctx contex
 	return task, receipt, nil
 }
 
+func (r *deleteAfterVisibilitySnapshotRepo) GetAuthorizedTaskVisibilitySnapshot(ctx context.Context, callerTaskID, workspaceID, taskID string) (*models.Task, *models.TaskLifecycleReceipt, bool, error) {
+	task, receipt, valid, err := r.Repository.GetAuthorizedTaskVisibilitySnapshot(ctx, callerTaskID, workspaceID, taskID)
+	if err != nil || !valid || taskID != r.deleteTargetID {
+		return task, receipt, valid, err
+	}
+	deleted := make(chan error, 1)
+	go func() { deleted <- r.DeleteTask(ctx, taskID) }()
+	if err := <-deleted; err != nil {
+		return nil, nil, false, err
+	}
+	return task, receipt, valid, nil
+}
+
 func TestGetTaskVisibilitySQLiteSnapshotDoesNotMutateWhenDeleteFollowsRead(t *testing.T) {
 	ctx := context.Background()
 	repo, writer := newVisibilitySQLiteRepo(t)
@@ -227,6 +252,44 @@ func TestGetTaskVisibilitySQLiteSnapshotDoesNotMutateWhenDeleteFollowsRead(t *te
 	require.Equal(t, "deleted", afterDelete.Visibility.Disposition)
 	require.Equal(t, "delete", afterDelete.Visibility.Provenance)
 	require.EqualValues(t, 2, afterDelete.Visibility.Revision)
+}
+
+type moveCallerBeforeVisibilitySnapshotRepo struct {
+	*sqlite.Repository
+	writer   *sqlx.DB
+	callerID string
+}
+
+func (r *moveCallerBeforeVisibilitySnapshotRepo) GetTask(ctx context.Context, taskID string) (*models.Task, error) {
+	task, err := r.Repository.GetTask(ctx, taskID)
+	if err != nil || task == nil || taskID != r.callerID {
+		return task, err
+	}
+	_, err = r.writer.ExecContext(ctx, `UPDATE tasks SET workspace_id = ? WHERE id = ?`, "workspace-b", taskID)
+	if err == nil {
+		err = r.CreateTask(ctx, &models.Task{ID: "target", WorkspaceID: "workspace-a", Title: "Created after transfer"})
+	}
+	return task, err
+}
+
+func TestGetTaskVisibilityDeniesCallerMovedBeforeTargetSnapshot(t *testing.T) {
+	ctx := context.Background()
+	repo, writer := newVisibilitySQLiteRepo(t)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace-a", Name: "A"}))
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace-b", Name: "B"}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "caller", WorkspaceID: "workspace-a", Origin: models.TaskOriginManual}))
+	svc := NewHandoffService(&moveCallerBeforeVisibilitySnapshotRepo{Repository: repo, writer: writer, callerID: "caller"}, nil, nil, nil, nil, nil)
+	visibility, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{
+		CallerTaskID: "caller", CallerWorkspaceID: "workspace-a", TargetTaskID: "target", Scope: RelatedReadScopeTaskVisibility,
+	})
+	require.Nil(t, visibility)
+	require.ErrorIs(t, err, ErrAccessDenied)
+	var actualWorkspace string
+	require.NoError(t, writer.GetContext(ctx, &actualWorkspace, `SELECT workspace_id FROM tasks WHERE id = 'caller'`))
+	require.Equal(t, "workspace-b", actualWorkspace)
+	_, _, valid, err := repo.GetAuthorizedTaskVisibilitySnapshot(ctx, "", "workspace-a", "target")
+	require.NoError(t, err)
+	require.False(t, valid)
 }
 
 func newVisibilitySQLiteRepo(t *testing.T) (*sqlite.Repository, *sqlx.DB) {

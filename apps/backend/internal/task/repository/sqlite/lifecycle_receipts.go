@@ -104,15 +104,40 @@ func (r *Repository) GetTaskLifecycleReceipt(ctx context.Context, workspaceID, t
 // uses the pair together, so a lifecycle write cannot combine one version of
 // the task with another version of its receipt.
 func (r *Repository) GetTaskVisibilitySnapshot(ctx context.Context, workspaceID, taskID string) (*models.Task, *models.TaskLifecycleReceipt, error) {
+	task, receipt, _, err := r.taskVisibilitySnapshot(ctx, "", workspaceID, taskID)
+	return task, receipt, err
+}
+
+// GetAuthorizedTaskVisibilitySnapshot reads the caller's current workspace and
+// the target evidence from one snapshot. A transfer cannot separate the
+// authorization workspace from the returned projection.
+func (r *Repository) GetAuthorizedTaskVisibilitySnapshot(ctx context.Context, callerTaskID, workspaceID, taskID string) (*models.Task, *models.TaskLifecycleReceipt, bool, error) {
+	if callerTaskID == "" || workspaceID == "" {
+		return nil, nil, false, nil
+	}
+	return r.taskVisibilitySnapshot(ctx, callerTaskID, workspaceID, taskID)
+}
+
+func (r *Repository) taskVisibilitySnapshot(ctx context.Context, callerTaskID, workspaceID, taskID string) (*models.Task, *models.TaskLifecycleReceipt, bool, error) {
 	tx, err := r.ro.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if callerTaskID != "" {
+		var callerWorkspaceID string
+		err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT workspace_id FROM tasks WHERE id = ?`), callerTaskID).Scan(&callerWorkspaceID)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && callerWorkspaceID != workspaceID) {
+			return nil, nil, false, nil
+		}
+		if err != nil {
+			return nil, nil, false, err
+		}
+	}
 
 	task, err := r.taskLifecycleSnapshotInTx(ctx, tx, taskID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	if r.visibilitySnapshotAfterTaskRead != nil {
 		r.visibilitySnapshotAfterTaskRead()
@@ -128,13 +153,13 @@ func (r *Repository) GetTaskVisibilitySnapshot(ctx context.Context, workspaceID,
 	if errors.Is(err, sql.ErrNoRows) {
 		receipt = models.TaskLifecycleReceipt{}
 	} else if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	if receipt.TaskID == "" {
-		return task, nil, nil
+		return task, nil, true, nil
 	}
-	return task, &receipt, nil
+	return task, &receipt, true, nil
 }

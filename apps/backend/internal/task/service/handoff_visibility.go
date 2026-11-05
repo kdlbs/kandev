@@ -28,7 +28,7 @@ type TaskVisibility struct {
 }
 
 type taskVisibilitySnapshotReader interface {
-	GetTaskVisibilitySnapshot(context.Context, string, string) (*models.Task, *models.TaskLifecycleReceipt, error)
+	GetAuthorizedTaskVisibilitySnapshot(context.Context, string, string, string) (*models.Task, *models.TaskLifecycleReceipt, bool, error)
 }
 
 type TaskVisibilityIdentity struct {
@@ -64,9 +64,12 @@ func (s *HandoffService) GetTaskVisibilityForRequest(ctx context.Context, req Re
 	if !ok {
 		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "target lifecycle snapshot unavailable")
 	}
-	task, receipt, err := snapshots.GetTaskVisibilitySnapshot(ctx, caller.WorkspaceID, req.TargetTaskID)
+	task, receipt, callerValid, err := snapshots.GetAuthorizedTaskVisibilitySnapshot(ctx, req.CallerTaskID, caller.WorkspaceID, req.TargetTaskID)
 	if err != nil {
 		return nil, err
+	}
+	if !callerValid {
+		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller workspace changed")
 	}
 	if task != nil && task.WorkspaceID != caller.WorkspaceID {
 		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "target unavailable after authorization")
