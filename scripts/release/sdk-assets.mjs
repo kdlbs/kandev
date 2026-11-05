@@ -152,7 +152,9 @@ export class ReleaseAssets {
   }
   retention(location) {
     const urls = [];
-    for (const asset of location.entries.values()) {
+    for (const asset of location.release?.draft
+      ? []
+      : location.entries.values()) {
       const url = new URL(asset.browser_download_url);
       if (
         url.origin !== "https://github.com" ||
@@ -298,6 +300,7 @@ export class ReleaseAssets {
   }
   async finalize(candidate, source) {
     let location = await this.locations(source);
+    this.verifyReleaseIdentity(candidate, location);
     await this.verifyBytes(candidate, source, location, true);
     if (location.kind === "sdk" && location.release.draft) {
       const id = location.release.id;
@@ -332,9 +335,17 @@ export class ReleaseAssets {
   }
   async verifyFinalized(candidate, source) {
     const location = await this.locations(source);
+    this.verifyReleaseIdentity(candidate, location);
     if (!location.release || location.release.draft)
       throw new Error("SDK candidate evidence is not finalized");
     await this.verifyBytes(candidate, source, location, true);
     candidate.retention = this.retention(location);
+  }
+  verifyReleaseIdentity(candidate, location) {
+    if (
+      !candidate.retention?.releaseId ||
+      candidate.retention.releaseId !== location.release?.id
+    )
+      throw new Error("SDK release identity changed during recovery");
   }
 }

@@ -75,6 +75,7 @@ returning HTTP 422. It must fail on the old storage behavior.
 ```bash
 node --test scripts/release/sdk-assets.test.mjs scripts/release/sdk-candidate-store.test.mjs scripts/release/sdk-release-io.test.mjs scripts/release/publish-plugin-sdk.test.mjs scripts/release/sdk-artifact.test.mjs
 node --test scripts/pluginsdk/consumer-smoke.test.mjs scripts/pluginsdk/pack-candidate.test.mjs
+node --test scripts/release/sdk-source.test.mjs scripts/release/sdk-registry.test.mjs scripts/release/sdk-runtime.test.mjs
 python3 .github/scripts/release-workflow-contract_test.py
 python3 .github/scripts/lint-action-pinning_test.py
 bash -n scripts/release/publish-plugin-sdk.sh
@@ -140,7 +141,7 @@ the read-only npm job requires finalized evidence. Bootstrap links use validated
 GitHub asset URLs, including encoded SDK tags.
 
 - Focused SDK publication, storage, candidate, adapter, and receipt suite:
-  31 tests passed with Node 24.19.0 and npm 11.21.0.
+  34 tests passed with Node 24.19.0 and npm 11.21.0.
 - Packaging and consumer suite: 12 tests passed, including real isolated Go and
   frontend installations. Signed-source, registry, and runtime suite: 7 passed.
 - Workflow contracts: 74 passed. Action-pinning tests: 9 passed. Shell syntax: passed.
@@ -152,3 +153,10 @@ GitHub asset URLs, including encoded SDK tags.
 - Whitespace checks passed. No live SDK draft, tag, npm upload, or release dispatch
   was created during implementation. Public availability remains unverified until
   the maintainer completes the documented recovery and bootstrap.
+
+PR review added cross-phase release-ID binding and temporary draft URL handling.
+Matching bytes cannot authorize a replacement release between retention and
+finalization or read-only publication. Draft assets download through their IDs;
+only finalized, validated URLs appear in bootstrap instructions. Ordering tests
+require every event, and the unfinalized-evidence test covers first-package
+bootstrap with OIDC readiness disabled.

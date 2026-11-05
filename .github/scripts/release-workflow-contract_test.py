@@ -1660,6 +1660,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         verify = job_step_block("publish-release", "Verify immutable release assets")
         self.assertIn("if: steps.existing_release.outputs.reuse == 'true'", verify)
         self.assertIn("existing-release.mjs verify", verify)
+        self.assertNotIn("continue-on-error", verify)
         for name in (
             "Generate release notes",
             "Add unsigned desktop warning to release notes",

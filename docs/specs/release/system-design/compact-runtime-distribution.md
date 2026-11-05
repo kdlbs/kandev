@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: release
 requirements:
   - REQ-RELEASE-COMPACT-RUNTIME-001

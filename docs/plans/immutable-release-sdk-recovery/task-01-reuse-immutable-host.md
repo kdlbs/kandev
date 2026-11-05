@@ -77,6 +77,7 @@ findings separately. Introduce no finding in the changed recovery path.
 - `scripts/release/remote-helper-assets.mjs` and `.test.mjs` when sharing validation.
 - `scripts/release/verify-desktop-assets.sh` only if reusable validation needs adjustment.
 - `.github/workflows/release.yml` and `.github/scripts/release-workflow-contract_test.py`.
+- `Makefile` and `.github/workflows/lint-action-pinning.yml` for regression execution.
 - `docs/public/release-process.md`.
 
 ## Dependencies
@@ -103,7 +104,7 @@ as absence, or compare nondeterministic rebuilt installers as replacement author
 
 Implemented with an initial failing workflow-guard regression. Verification:
 
-- Host asset and canonical helper suites: 18 tests passed. A real archive,
+- Host asset and canonical helper suites: 24 tests passed. A real archive,
   helper manifest, checksum, desktop, and unsigned updater fixture passed.
 - Release workflow contracts: 74 tests passed. Action pinning: 9 tests passed.
 - Public docs validator suite: 63 tests passed. All 55 public pages validated.
@@ -113,3 +114,11 @@ Implemented with an initial failing workflow-guard regression. Verification:
 - Formatting and `git diff --check` passed.
 - A read-only invocation against actual `v0.99.0` verified its signed source
   and selected reuse for GitHub release ID `435377048`. No asset was changed.
+
+PR review regressions reproduced JSON rejection, incomplete and unsafe ZIPs,
+incorrect size rows, and leftover partial downloads before their fixes. Both
+compact archive variants and legacy Windows ZIPs now pass real extraction and
+bundle validation. Size reports are checked against published bytes. The suite
+runs in the regular local and CI Node test commands; all three Make platform
+expansions include it. The combined release-helper suite passed 62 tests,
+including the final size-rounding regression.

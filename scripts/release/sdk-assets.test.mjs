@@ -44,13 +44,14 @@ async function fixture(t) {
   let pageError = null;
   let changeRead = (value) => value;
   let created = async () => {};
+  let temporaryURLs = false;
   async function put(release, name, bytes) {
     const asset = {
       id: id++,
       name,
       size: bytes.length,
       digest: digest(bytes),
-      browser_download_url: `https://github.com/kdlbs/kandev/releases/download/${encodeURIComponent(release.tag_name)}/${name}`,
+      browser_download_url: `https://github.com/kdlbs/kandev/releases/download/${temporaryURLs && release.draft ? "untagged-draft" : encodeURIComponent(release.tag_name)}/${name}`,
     };
     release.assets.push(asset);
     payloads.set(asset.id, Buffer.from(bytes));
@@ -133,6 +134,8 @@ async function fixture(t) {
       events.push("finalize");
       release.draft = false;
       release.immutable = true;
+      for (const asset of release.assets)
+        asset.browser_download_url = `https://github.com/kdlbs/kandev/releases/download/${encodeURIComponent(release.tag_name)}/${asset.name}`;
       if (lost) throw new Error("publish response lost");
     }
     return { stdout: JSON.stringify(changeRead(release)) };
@@ -166,6 +169,9 @@ async function fixture(t) {
     },
     onCreate: (effect) => {
       created = effect;
+    },
+    temporaryURLs: () => {
+      temporaryURLs = true;
     },
     addSDK: (overrides = {}) => {
       const value = {
@@ -332,4 +338,72 @@ test("conflicting assets discovered after draft creation stop further writes", a
   );
   await assert.rejects(f.assets.retain(f.candidate, source), /conflict/);
   assert.equal(f.events.includes("upload"), false);
+});
+test("finalization and read-only verification reject a replacement release with matching bytes", async (t) => {
+  for (const method of ["finalize", "verifyFinalized"]) {
+    const f = await fixture(t);
+    await f.assets.retain(f.candidate, source);
+    if (method === "verifyFinalized")
+      await f.assets.finalize(f.candidate, source);
+    const previous = f.sdk();
+    const retained = structuredClone(f.candidate.retention);
+    f.releases.delete(previous.id);
+    const replacement = f.addSDK({
+      draft: previous.draft,
+      immutable: previous.immutable,
+    });
+    for (const asset of previous.assets)
+      await f.put(replacement, asset.name, f.payloads.get(asset.id));
+    const writes = f.events.filter((event) =>
+      ["create", "upload", "finalize"].includes(event),
+    );
+    await assert.rejects(
+      f.assets[method](f.candidate, source),
+      /identity|release ID/,
+    );
+    assert.deepEqual(f.candidate.retention, retained);
+    assert.deepEqual(
+      f.events.filter((event) =>
+        ["create", "upload", "finalize"].includes(event),
+      ),
+      writes,
+    );
+  }
+});
+test("temporary draft URLs are not reported as finalized download links", async (t) => {
+  const f = await fixture(t);
+  f.temporaryURLs();
+  await f.assets.retain(f.candidate, source);
+  assert.deepEqual(f.candidate.retention.urls, []);
+  const downloaded = await f.assets.download(source, assetNames("0.1.0"));
+  assert.equal(downloaded.retention.releaseId, f.sdk().id);
+  await f.assets.finalize(f.candidate, source);
+  assert.equal(f.candidate.retention.urls.length, 3);
+  assert.ok(
+    f.candidate.retention.urls.every((url) =>
+      url.includes("pluginsdk%2Fv0.1.0"),
+    ),
+  );
+});
+test("retained asset metadata must match the downloaded payload before writes", async (t) => {
+  for (const field of ["size", "digest"]) {
+    const f = await fixture(t);
+    const asset = await f.put(
+      f.addSDK(),
+      "plugin-sdk-0.1.0.tgz",
+      Buffer.from("archive"),
+    );
+    if (field === "size") asset.size++;
+    else asset.digest = digest(Buffer.from("other"));
+    await assert.rejects(
+      f.assets.retain(f.candidate, source),
+      /integrity conflict/,
+    );
+    assert.equal(
+      f.events.some((event) =>
+        ["create", "upload", "finalize"].includes(event),
+      ),
+      false,
+    );
+  }
 });

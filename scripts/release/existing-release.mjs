@@ -125,9 +125,11 @@ export async function downloadReleaseAsset(
   )
     throw new Error("unsafe asset download redirect");
   if (
-    /text\/html|application\/(?:[^;]+\+)?json/i.test(
+    /text\/html/i.test(response.headers.get("content-type") ?? "") ||
+    (/application\/(?:[^;]+\+)?json/i.test(
       response.headers.get("content-type") ?? "",
-    )
+    ) &&
+      !/\.json$/i.test(asset.name))
   )
     throw new Error("invalid asset download response type");
   const digest = createHash("sha256");
@@ -141,13 +143,22 @@ export async function downloadReleaseAsset(
       callback(null, chunk);
     },
   });
-  await pipeline(
-    Readable.fromWeb(response.body),
-    meter,
-    createWriteStream(destination, { flags: "wx" }),
-  );
-  if (size !== asset.size || `sha256:${digest.digest("hex")}` !== asset.digest)
-    throw new Error(`asset digest or size mismatch: ${asset.name}`);
+  const output = createWriteStream(destination, { flags: "wx" });
+  let created = false;
+  output.once("open", () => {
+    created = true;
+  });
+  try {
+    await pipeline(Readable.fromWeb(response.body), meter, output);
+    if (
+      size !== asset.size ||
+      `sha256:${digest.digest("hex")}` !== asset.digest
+    )
+      throw new Error(`asset digest or size mismatch: ${asset.name}`);
+  } catch (error) {
+    if (created) await rm(destination, { force: true });
+    throw error;
+  }
 }
 function assetIndex(release) {
   const assets = new Map();
@@ -187,6 +198,55 @@ async function verifyChecksums(directory, assets) {
       throw new Error(`invalid asset checksum: ${name}`);
   }
 }
+async function verifySizeReport(directory, assets, compact) {
+  const required = new Map(
+    [...assets].filter(
+      ([name]) =>
+        /^kandev-(?:linux|macos|windows)-(?:x64|arm64)(?:-full)?\.(?:tar\.gz|zip)$/.test(
+          name,
+        ) || /^agentctl-(?:linux|darwin)-(?:amd64|arm64)\.gz$/.test(name),
+    ),
+  );
+  const report = await readFile(
+    join(directory, "runtime-size-report.md"),
+    "utf8",
+  );
+  const seen = new Set();
+  for (const line of report.split(/\r?\n/)) {
+    const row =
+      /^\|\s*(standard|full|helper)\s*\|\s*([^|]+)\|\s*(\d+)\s*\|\s*(\d+\.\d{2})\s*\|$/.exec(
+        line,
+      );
+    if (!row) continue;
+    const name = /`([^`]+)`/.exec(row[2])?.[1];
+    const asset = required.get(name);
+    if (!asset || seen.has(name))
+      throw new Error("unexpected or duplicate runtime size report row");
+    const helper = name.startsWith("agentctl-");
+    const variant = helper
+      ? "helper"
+      : compact && !name.includes("-full.")
+        ? "standard"
+        : "full";
+    const platform = /^kandev-(.+?)(?:-full)?\.(?:tar\.gz|zip)$/.exec(
+      name,
+    )?.[1];
+    const label = helper ? `\`${name}\`` : `${platform} (\`${name}\`)`;
+    const mib = asset.size / 1048576;
+    if (
+      row[1] !== variant ||
+      row[2].trim() !== label ||
+      Number(row[3]) !== asset.size ||
+      Math.abs(Number(row[4]) - mib) > 0.005 + Number.EPSILON * Math.max(1, mib)
+    )
+      throw new Error(
+        `runtime size report differs from published asset: ${name}`,
+      );
+    seen.add(name);
+  }
+  if (seen.size !== required.size)
+    throw new Error("runtime size report is missing required rows");
+}
 async function verifyRuntimeManifest(manifest, name, directory, tag, commit) {
   const records = parseManifest(
     manifest,
@@ -223,58 +283,74 @@ async function verifyRuntimeArchives({
       continue;
     const archive = join(directory, name);
     const options = { cwd: root, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 };
-    if (name.endsWith(".zip")) {
-      if (compact) {
-        const manifest = JSON.parse(
-          (
-            await run(
-              "unzip",
-              ["-p", archive, "kandev/remote-helpers.json"],
-              options,
-            )
-          ).stdout,
-        );
-        await verifyRuntimeManifest(manifest, name, directory, tag, commit);
-      }
-      continue;
-    }
-    const list = (await run("tar", ["-tzf", archive], options)).stdout
-      .trim()
-      .split("\n");
-    if (
-      list.some(
-        (entry) =>
-          !entry.startsWith("kandev/") || entry.split("/").includes(".."),
+    const zip = name.endsWith(".zip");
+    if (!zip) {
+      const list = (await run("tar", ["-tzf", archive], options)).stdout
+        .trim()
+        .split("\n");
+      if (
+        list.some(
+          (entry) =>
+            !entry.startsWith("kandev/") || entry.split("/").includes(".."),
+        )
       )
-    )
-      throw new Error(`invalid runtime archive paths: ${name}`);
-    const detail = (await run("tar", ["-tvzf", archive], options)).stdout;
-    if (
-      detail
-        .split("\n")
-        .filter(Boolean)
-        .some((line) => !/^[d-]/.test(line))
-    )
-      throw new Error(`unsupported runtime archive entry: ${name}`);
+        throw new Error(`invalid runtime archive paths: ${name}`);
+      const detail = (await run("tar", ["-tvzf", archive], options)).stdout;
+      if (
+        detail
+          .split("\n")
+          .filter(Boolean)
+          .some((line) => !/^[d-]/.test(line))
+      )
+        throw new Error(`unsupported runtime archive entry: ${name}`);
+    }
     const temporary = await mkdtemp(join(tmpdir(), "verify-runtime-"));
     try {
-      await run(
-        "tar",
-        [
-          "-xzf",
-          archive,
-          "-C",
-          temporary,
-          "--no-same-owner",
-          "--no-same-permissions",
-        ],
-        options,
-      );
+      if (zip)
+        await run(
+          "python3",
+          [
+            "-c",
+            String.raw`
+import stat, sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    seen = set()
+    for entry in archive.infolist():
+        name = entry.filename
+        parts = name.rstrip('/').split('/')
+        mode = stat.S_IFMT(entry.external_attr >> 16)
+        if (not name.startswith('kandev/') or '\\' in name or
+            any(part in ('', '.', '..') for part in parts) or
+            '/'.join(parts) in seen or mode not in (0, stat.S_IFDIR, stat.S_IFREG)):
+            raise ValueError('unsafe ZIP archive path or entry: ' + name)
+        seen.add('/'.join(parts))
+    archive.extractall(sys.argv[2])
+`,
+            archive,
+            temporary,
+          ],
+          options,
+        );
+      else
+        await run(
+          "tar",
+          [
+            "-xzf",
+            archive,
+            "-C",
+            temporary,
+            "--no-same-owner",
+            "--no-same-permissions",
+          ],
+          options,
+        );
       const bundleDir = join(temporary, "kandev");
       verifyRemoteHelperBundle({
         bundleDir,
         variant:
-          compact && !name.endsWith("-full.tar.gz") ? "standard" : "full",
+          compact && !/-full\.(?:tar\.gz|zip)$/.test(name)
+            ? "standard"
+            : "full",
       });
       if (compact) {
         const manifest = JSON.parse(
@@ -316,6 +392,7 @@ export async function verifyPublishedAssets({
   for (const asset of assets.values())
     await downloadReleaseAsset(asset, join(outputDir, asset.name), fetcher);
   await verifyChecksums(outputDir, assets);
+  await verifySizeReport(outputDir, assets, compact);
   await verifyRuntimeArchives({
     directory: outputDir,
     assets,

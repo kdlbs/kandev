@@ -154,13 +154,20 @@ This credential does not supply npm authentication or repair SDK retention.
 
 ## Verification results
 
-Both work orders are complete. Validation passed with 18 host/helper tests,
-31 SDK recovery tests, 12 packaging/consumer tests, 7 signing/registry/runtime
+Both work orders are complete. Validation passed with 24 host/helper tests,
+34 SDK recovery tests, 12 packaging/consumer tests, 7 signing/registry/runtime
 tests, 74 workflow contracts, 9 action-pinning tests, and 63 documentation tests.
 Real packaging used the original Node 24.19.0 and npm 11.21.0 pins. The 55
 published documentation pages passed validation. All 205 harness files passed
 lint, and its 19 validator tests passed. The unchanged 10-finding zizmor baseline
 has no new or changed findings; its nonzero scan exit remains explicit.
+
+PR review added JSON download, safe ZIP extraction, size-report, partial-file
+cleanup, and cross-phase SDK release-ID regressions. The host suite now runs in
+the regular Make and CI commands. Exact byte counts remain authoritative; MiB
+display checks allow the publisher's rounding at exact half steps. The linked
+compact-runtime requirements and design are now active/current, consistent with
+their four completed work orders from 2026-09-25 and this recovery amendment.
 
 Design validation on 2026-11-05:
 

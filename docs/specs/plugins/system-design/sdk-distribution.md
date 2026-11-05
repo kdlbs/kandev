@@ -310,6 +310,8 @@ use the resolved evidence location, including a legacy host location when it
 was reused. They never construct an SDK download link from `hostTag` alone.
 Report validated `browser_download_url` values from that release's asset
 metadata, preserving the encoding of SDK tag names that contain a slash.
+Draft downloads use authenticated asset IDs. Temporary draft URLs are not
+reported as public links; finalization resolves and validates the published URLs.
 
 ## Stable release integration
 
