@@ -55,6 +55,14 @@ a separate slice; this task does not import it.
   `consumeQueuedTaskCapacityLocked`.
 - `office/scheduler.SchedulerService.deferRunSessionAdmission` and
   `providerAttemptCount` (Office capacity waits are not provider attempts).
+- `backendapp.officeCapacityAttempt.prepareCandidate` and
+  `office/repository/sqlite.RequeueUnboundRunSession`: a transient candidate
+  binding error may defer only when one transaction closes the exact still
+  unbound, uncancelled preparing session and requeues its still-claimed run.
+  A changed owner, cancellation, other active session or failed transaction
+  does not authorize that retry; ordinary errors remain errors. Binding errors
+  or a lost candidate CAS can have an unknown owner, so the losing launcher
+  does not finalize that session without proof.
 
 ## Adaptation and limits
 

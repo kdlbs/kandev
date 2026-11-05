@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -35,6 +36,37 @@ func (r *Repository) BindRunSessionCandidate(ctx context.Context, id, executionI
 	}
 	n, err := result.RowsAffected()
 	return n == 1, err
+}
+
+// RequeueUnboundRunSession closes only an unallocated attempt and requeues its
+// original claimed run atomically. A changed owner or cancellation wins.
+func (r *Repository) RequeueUnboundRunSession(ctx context.Context, sessionID, runID, message string) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE office_run_sessions SET state=?,finished_at=?,error_message=?,version=version+1 WHERE id=? AND run_id=? AND state=? AND execution_id='' AND cancel_requested_at IS NULL`), models.RunSessionStateFailed, time.Now().UTC(), message, sessionID, runID, models.RunSessionStatePreparing)
+	if err != nil {
+		return false, err
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		return false, err
+	}
+	result, err = tx.ExecContext(ctx, r.db.Rebind(`UPDATE runs SET status='queued',claimed_at=NULL WHERE id=? AND status='claimed' AND NOT EXISTS(SELECT 1 FROM office_run_sessions WHERE run_id=runs.id AND state IN (?,?))`), runID, models.RunSessionStatePreparing, models.RunSessionStateRunning)
+	if err != nil {
+		return false, err
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	if r.runSessionCapacityReleased != nil {
+		r.runSessionCapacityReleased()
+	}
+	return true, nil
 }
 
 // RequeueUnstartedRunForCapacity retains the original queue record and retry

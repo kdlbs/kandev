@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/db"
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -99,9 +100,20 @@ func (a *officeCapacityAttempt) prepareCandidate(ctx context.Context, request *r
 	candidate := uuid.NewString()
 	wrote, err := a.launcher.repo.BindRunSessionCandidate(ctx, a.session.ID, candidate)
 	if err != nil {
+		// The write outcome may be unknown. Do not finalize a row that might
+		// already belong to a different or newly bound execution.
+		a.persisted = false
+		if db.IsTransientError(err) {
+			requeued, requeueErr := a.launcher.repo.RequeueUnboundRunSession(context.WithoutCancel(ctx), a.session.ID, a.session.RunID, err.Error())
+			if requeued {
+				return fmt.Errorf("%w: candidate binding: %w", officeservice.ErrRunSessionAdmissionDeferred, err)
+			}
+			return errors.Join(err, requeueErr)
+		}
 		return err
 	}
 	if !wrote {
+		a.persisted = false
 		return errors.New("run candidate owner no longer preparing")
 	}
 	a.session.ExecutionID = candidate
