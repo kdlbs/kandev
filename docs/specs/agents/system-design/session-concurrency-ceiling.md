@@ -515,6 +515,8 @@ a replacement start.
 
 ## Persistence
 
+### [Inference](inference-attempt-ownership.md)
+
 `deferred_launch` is updated with a read-compare-write retry loop. The ceiling
 keys share the task record with other launch intents and are removed as a group
 after replay or a terminal drop. A prompt edit preserves unrelated keys and

@@ -48,6 +48,12 @@ func decodeSettings(raw []byte, found bool) (*Settings, error) {
 	if !found {
 		return nil, nil
 	}
+	if _, err := decodeInferenceBindings(raw, true); err != nil {
+		return nil, err
+	}
+	if inferenceOnlySettings(raw) {
+		return nil, nil
+	}
 	var settings Settings
 	if err := json.Unmarshal(raw, &settings); err != nil {
 		return nil, fmt.Errorf("%w: decode JSON: %v", ErrInvalidPersisted, err)
@@ -70,7 +76,19 @@ func decodeSettings(raw []byte, found bool) (*Settings, error) {
 }
 
 func (s *Store) Save(ctx context.Context, settings Settings) error {
+	if cas, ok := s.raw.(rawCompareAndSwapStore); ok {
+		_, err := s.updateWithCompareAndSwap(ctx, cas, func(*Settings) (Settings, error) { return settings, nil })
+		return err
+	}
 	raw, err := encodeSettings(settings)
+	if err != nil {
+		return err
+	}
+	previous, _, err := s.raw.Get(ctx, SettingsKey)
+	if err != nil {
+		return fmt.Errorf("load session capacity settings: %w", err)
+	}
+	raw, err = preserveInferenceBindings(previous, raw)
 	if err != nil {
 		return err
 	}
@@ -147,6 +165,10 @@ func (s *Store) updateWithCompareAndSwap(
 			return Settings{}, err
 		}
 		next, err := encodeSettings(updated)
+		if err != nil {
+			return Settings{}, err
+		}
+		next, err = preserveInferenceBindings(raw, next)
 		if err != nil {
 			return Settings{}, err
 		}
