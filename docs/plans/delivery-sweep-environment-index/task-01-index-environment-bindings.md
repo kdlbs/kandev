@@ -90,19 +90,21 @@ Run from the repository root. The named new tests are implementation deliverable
 First run the regression commands before changing production code and record RED.
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/delivery -run '^TestDeliveryGitSnapshotObservationUsesEnvironmentTaskIndex$' -count=1 -v)
-(cd apps/backend && go test -trimpath ./internal/task/repository/sqlite -run '^TestTaskSessionEnvironmentTaskIndexFreshUpgradeReplay$' -count=1 -v)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/delivery -run '^TestDeliveryGitSnapshotObservationUsesEnvironmentTaskIndex$' -count=1 -v)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^TestTaskSessionEnvironmentTaskIndexFreshUpgradeReplay$' -count=1 -v)
 ```
 
 After implementation, run these commands with `KANDEV_TEST_POSTGRES_DSN` set
 to a disposable PostgreSQL server. The isolated-schema helper owns test cleanup.
 
 ```bash
-(cd apps/backend && go test -trimpath -race ./internal/delivery -count=1)
-(cd apps/backend && go test -trimpath -race ./internal/task/repository/sqlite -run '^(TestTaskSessionEnvironmentTaskIndexFreshUpgradeReplay|TestPostgresTaskSessionEnvironmentTaskIndexFreshUpgradeReplay|TestSQLiteSchemaReinitializes|TestGitSnapshotEnvironmentMigration.*)$' -count=1 -v)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/delivery -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run '^(TestTaskSessionEnvironmentTaskIndexFreshUpgradeReplay|TestPostgresTaskSessionEnvironmentTaskIndexFreshUpgradeReplay|TestSQLiteSchemaReinitializes|TestGitSnapshotEnvironmentMigration.*)$' -count=1 -v)
 (cd apps/backend && go run ./cmd/sqlguard ./internal)
-(cd apps/backend && go test -trimpath -race ./internal/persistence/storeconformance -count=1)
-bash scripts/lint-go-changed apps/backend/internal/task/repository/sqlite/base_migrations.go apps/backend/internal/task/repository/sqlite/task_session_environment_index_test.go apps/backend/internal/task/repository/sqlite/task_session_environment_index_postgres_test.go apps/backend/internal/delivery/sweep_query_plan_test.go
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/persistence/storeconformance -count=1)
+bash scripts/lint-go-changed apps/backend/internal/task/repository/sqlite/base_migrations.go apps/backend/internal/task/repository/sqlite/task_session_environment_index_test.go apps/backend/internal/task/repository/sqlite/task_session_environment_index_postgres_test.go apps/backend/internal/delivery/sweep_query_plan_test.go apps/backend/internal/worktree/store.go apps/backend/internal/worktree/manager_cleanup_shared_reference_test.go
+(cd apps/backend && go test -trimpath -race ./internal/worktree -run '^TestCleanupWorktrees_PreservesParentWorkspaceWhenInheritedSubtaskDeleted$' -count=1 -v)
+(cd apps/backend && go test -trimpath -race ./internal/task/inventoryrepair -run '^TestLegacyAliasLifecycle$' -count=1 -v)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.test.py
 python3 scripts/lint-spec-files.py --all
@@ -120,7 +122,17 @@ const { validateCoverage } = require('./.github/scripts/pr-docs.cjs');
 const changed = execFileSync('git', ['diff', 'HEAD', '--name-only', '-z'], {encoding: 'utf8'}).split('\0').filter(Boolean);
 const added = execFileSync('git', ['ls-files', '--others', '--exclude-standard', '-z'], {encoding: 'utf8'}).split('\0').filter(Boolean);
 const paths = [...new Set([...changed, ...added])];
-const fileContents = Object.fromEntries(paths.filter(p => p.endsWith('.md')).map(p => [p, fs.readFileSync(p, 'utf8')]));
+const referenced = [
+  'docs/plans/delivery-sweep-environment-index/plan.md',
+  'docs/plans/delivery-sweep-environment-index/task-01-index-environment-bindings.md',
+  'docs/plans/delivery-sweep-environment-index/evidence.md',
+  'docs/specs/platform/requirements/interactive-read-availability.md',
+  'docs/specs/platform/system-design/interactive-read-availability.md',
+];
+const fileContents = {};
+for (const p of [...new Set([...paths, ...referenced])]) {
+  if (p.endsWith('.md') && fs.existsSync(p)) fileContents[p] = fs.readFileSync(p, 'utf8');
+}
 const changedFiles = paths.map(filename => ({filename, status: added.includes(filename) ? 'added' : 'modified'}));
 const result = validateCoverage({changedFiles, fileContents});
 console.log(JSON.stringify({status: result.status, errors: result.errors}, null, 2));
@@ -139,6 +151,8 @@ validated access path. Do not turn its observed latency into a CI timer.
 - `apps/backend/internal/task/repository/sqlite/task_session_environment_index_test.go` (new)
 - `apps/backend/internal/task/repository/sqlite/task_session_environment_index_postgres_test.go` (new)
 - `apps/backend/internal/delivery/sweep_query_plan_test.go` (new)
+- `apps/backend/internal/worktree/store.go`
+- `apps/backend/internal/worktree/manager_cleanup_shared_reference_test.go`
 - `docs/plans/delivery-sweep-environment-index/plan.md`
 - `docs/plans/delivery-sweep-environment-index/task-01-index-environment-bindings.md`
 
@@ -189,12 +203,18 @@ Completed on 2026-11-05.
   replay, missing-index upgrade, an identical operator-created index, and a
   pre-column database. The mixed-binding eligibility fixture also passed on
   PostgreSQL.
-- `go test -trimpath -race ./internal/delivery -count=1` passed with
+- `go test -trimpath -tags fts5 -race ./internal/delivery -count=1` passed with
   `KANDEV_TEST_POSTGRES_DSN` set, so no PostgreSQL subtest skipped.
 - The targeted SQLite race command passed with the same DSN.
-- `go test -trimpath ./internal/task/repository/sqlite -count=1`, `go build ./...`,
+- `go test -trimpath -tags fts5 ./internal/task/repository/sqlite -count=1`,
+  `go build -tags fts5 ./...`,
   `go run ./cmd/sqlguard ./internal`,
-  `go test -trimpath -race ./internal/persistence/storeconformance -count=1`,
-  and `bash scripts/lint-go-changed` (0 issues) passed.
+  `go test -trimpath -tags fts5 -race ./internal/persistence/storeconformance -count=1`,
+  `go test -trimpath -race ./internal/worktree -count=1`,
+  `go test -trimpath -race ./internal/task/inventoryrepair -count=1`, and the
+  file-scoped `bash scripts/lint-go-changed` (0 issues) passed.
+- The fixup corrected task-scoped worktree inventory so a shared environment's
+  borrower session cannot make owner cleanup skip its worktree. The focused
+  worktree and inventory-repair regressions passed.
 - Catalog validation, all specification lint, and `git diff --check` passed.
   The disposable PostgreSQL server was removed after verification.

@@ -137,17 +137,23 @@ Implementation checks passed on 2026-11-05:
   creation, replay, missing-index upgrade, an identical operator-created index,
   and a pre-column database. The mixed-binding eligibility fixture also passes
   on PostgreSQL.
-- `go test -trimpath -race ./internal/delivery -count=1` passed with
+- `go test -trimpath -tags fts5 -race ./internal/delivery -count=1` passed with
   `KANDEV_TEST_POSTGRES_DSN` configured, including the PostgreSQL eligibility
   subtest.
-- `go test -trimpath -race ./internal/task/repository/sqlite -run
+- `go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run
   '^(TestTaskSessionEnvironmentTaskIndexFreshUpgradeReplay|TestPostgresTaskSessionEnvironmentTaskIndexFreshUpgradeReplay|TestSQLiteSchemaReinitializes|TestGitSnapshotEnvironmentMigration.*)$'
   -count=1 -v` passed with the same DSN.
-- `go test -trimpath ./internal/task/repository/sqlite -count=1` passed.
-- `go build ./...`, `go run ./cmd/sqlguard ./internal`, and
-  `go test -trimpath -race ./internal/persistence/storeconformance -count=1`
+- `go test -trimpath -tags fts5 ./internal/task/repository/sqlite -count=1` passed.
+- `go build -tags fts5 ./...`, `go run ./cmd/sqlguard ./internal`, and
+  `go test -trimpath -tags fts5 -race ./internal/persistence/storeconformance -count=1`
   passed.
-- `bash scripts/lint-go-changed` reported `0 issues`.
+- `bash scripts/lint-go-changed apps/backend/internal/task/repository/sqlite/base_migrations.go apps/backend/internal/task/repository/sqlite/task_session_environment_index_test.go apps/backend/internal/task/repository/sqlite/task_session_environment_index_postgres_test.go apps/backend/internal/delivery/sweep_query_plan_test.go apps/backend/internal/worktree/store.go apps/backend/internal/worktree/manager_cleanup_shared_reference_test.go`
+  reported `0 issues`.
+- The fixup also corrected task-scoped worktree inventory: the query now joins
+  only sessions belonging to the environment owner task. Without that, a shared
+  environment borrower session could make owner cleanup skip its worktree.
+  `go test -trimpath -race ./internal/worktree -count=1` and
+  `go test -trimpath -race ./internal/task/inventoryrepair -count=1` passed.
 - Catalog validation, all specification lint, and `git diff --check` passed.
 
 No millisecond CI timer was added. The disposable PostgreSQL server was removed
