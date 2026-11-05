@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -242,6 +243,12 @@ func TestOpenCodeInstallPreparesSelectedManagedRuntime(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("install fixture uses a POSIX shell")
 	}
+	mkdirPath, mkdirErr := exec.LookPath("mkdir")
+	if mkdirErr != nil {
+		t.Fatal(mkdirErr)
+	}
+	t.Setenv("INSTALL_FIXTURE_MKDIR", mkdirPath)
+
 	for _, tc := range []struct {
 		family managedruntime.OpenCodeFamily
 		source managedruntime.OpenCodeSource
@@ -305,7 +312,7 @@ func TestOpenCodeInstallPreparesSelectedManagedRuntime(t *testing.T) {
 				"printf '%%s\\n' \"$@\" >> \"$NPM_ARGS_FILE\"\n" +
 				"if [ \"$1\" = \"--prefix\" ] && [ \"$3\" = exec ] && [ ! -d \"$2\" ]; then echo \"npm prefix does not exist: $2\" >&2; exit 17; fi\n" +
 				"if [ \"$1\" = config ]; then printf '%%s\\n' \"$NPM_CACHE_ROOT\"; exit 0; fi\n" +
-				"for arg do if [ \"$arg\" = \"--package=$EXPECTED_PACKAGE_SPEC\" ]; then /bin/mkdir -p \"$NPM_CACHE_ROOT/_npx/$EXPECTED_CACHE_KEY\"; exit 0; fi; done\n" +
+				"for arg do if [ \"$arg\" = \"--package=$EXPECTED_PACKAGE_SPEC\" ]; then \"$INSTALL_FIXTURE_MKDIR\" -p \"$NPM_CACHE_ROOT/_npx/$EXPECTED_CACHE_KEY\"; exit 0; fi; done\n" +
 				"exit 0\n")
 			if err := os.WriteFile(filepath.Join(binDir, "npm"), []byte(fakeNPM), 0o755); err != nil {
 				t.Fatalf("write npm fixture: %v", err)

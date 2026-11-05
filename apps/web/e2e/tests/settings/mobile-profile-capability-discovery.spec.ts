@@ -291,7 +291,7 @@ test.describe("Mobile profile capability discovery", () => {
       ).toBeEnabled();
 
       await testPage.getByTestId("cli-flag-flag-0").fill("--profile-catalog=mobile-draft-cli");
-      await testPage.getByTestId("profile-advanced-options-trigger").tap();
+      await expect(testPage.getByTestId("profile-execution-section")).toBeVisible();
       await testPage.getByTestId("command-prefix-input").fill(commandPrefix);
       await refresh.tap();
       await expect(testPage.getByTestId("profile-capability-status")).toHaveAttribute(

@@ -16,11 +16,13 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/sandbox"
 	"go.uber.org/zap"
 )
 
 // InteractiveStartRequest contains parameters for starting an interactive passthrough process.
 type InteractiveStartRequest struct {
+	Sandbox              *sandbox.Launch    `json:"sandbox,omitempty"`
 	LaunchWrapper        launchwrapper.Spec `json:"launch_wrapper,omitzero"`
 	InitialPromptChunks  int                `json:"-"`
 	ProcessID            string             `json:"-"`
@@ -51,7 +53,7 @@ type InteractiveStartRequest struct {
 // commandForLog returns the command to log: the redacted LogCommand when the
 // caller supplied one, otherwise the raw Command.
 func (r InteractiveStartRequest) commandForLog() []string {
-	if !r.LaunchWrapper.IsZero() {
+	if !r.LaunchWrapper.IsZero() || r.Sandbox != nil {
 		return []string{"[wrapped agent]"}
 	}
 	if len(r.LogCommand) > 0 {
@@ -125,8 +127,9 @@ type InteractiveRunner struct {
 	statusCallback       StatusCallback
 	stateCallback        AgentStateCallback
 
-	mu        sync.RWMutex
-	processes map[string]*interactiveProcess
+	mu              sync.RWMutex
+	processes       map[string]*interactiveProcess
+	sandboxAttempts map[string]*sandboxStartRecord
 
 	// Session-level WebSocket tracking - survives process restarts
 	sessionWsMu sync.RWMutex

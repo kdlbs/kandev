@@ -14,12 +14,17 @@ import (
 )
 
 func TestProcStatDisappearanceAfterOpen(t *testing.T) {
-	cmd := exec.Command("/bin/sleep", "60")
+	cmd := exec.Command("sleep", "60")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	})
 	identity, err := Capture(cmd.Process.Pid)
 	if err != nil {
 		t.Fatal(err)

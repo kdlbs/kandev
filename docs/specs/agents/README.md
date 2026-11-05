@@ -28,6 +28,9 @@ configuration, declared behaviors, and observations extend the provider contract
 These implementation assets are separate from marketplace plugins for the
 Kandev host, which retain their own plugin-system ownership.
 
+The optional [sandbox policy contract](requirements/sandbox-policies.md) keeps effective policy and operator authority here.
+The [plugin system](../plugins/README.md) owns sandbox extension negotiation.
+
 ## Exclusions
 
 - Durable work items and workflow transitions belong to the [task and workflow

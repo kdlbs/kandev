@@ -1,3 +1,4 @@
+import { buildExecutionConnectionActions } from "./execution-connection";
 import { invalidateExecutorCatalogue } from "@/lib/api/executor-catalogue";
 import { createStore } from "zustand/vanilla";
 import { immer } from "zustand/middleware/immer";
@@ -71,6 +72,7 @@ export function createAppStore(initialState?: HydrationState) {
             draft.agentRuntime = newerAgentRuntimeSnapshot(draft.agentRuntime, snapshot);
           }),
         ...createUISlice(set, get),
+        ...buildExecutionConnectionActions(set),
         ...createAutomationsSlice(set, get),
         ...createCoordinatorsSlice(set),
         ...createPluginsSlice(set, get),

@@ -42,6 +42,8 @@ export type DiffState = {
 
 export type ConnectionState = {
   status: ConnectionStatus;
+  /** Changes at transport boundaries so stale reads cannot authorize actions after reconnect. */
+  epoch?: number;
   error: string | null;
   issueSeverity: ConnectionIssueSeverity;
 };

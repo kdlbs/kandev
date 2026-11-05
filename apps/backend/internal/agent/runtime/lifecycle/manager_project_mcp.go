@@ -59,6 +59,9 @@ func (m *Manager) materializeRuntimeProjectMCPWithPreparation(
 	if err != nil {
 		return fmt.Errorf("build project MCP config: %w", err)
 	}
+	if err := validateSandboxMCPArtifacts(execution, len(servers), artifacts); err != nil {
+		return err
+	}
 	return m.writePassthroughMCPFiles(ctx, execution, artifacts.Files)
 }
 

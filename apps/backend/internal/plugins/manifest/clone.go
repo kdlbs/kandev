@@ -9,6 +9,7 @@ func (m Manifest) Clone() Manifest {
 	clone.Actions = cloneActions(m.Actions)
 	clone.RepositoryProviders = cloneStrings(m.RepositoryProviders)
 	clone.ExecutorProviders = cloneExecutorProviders(m.ExecutorProviders)
+	clone.SandboxProviders = append([]SandboxProvider(nil), m.SandboxProviders...)
 	clone.ReferenceSources = cloneReferenceSources(m.ReferenceSources)
 	clone.AuthProviders = cloneAuthProviders(m.AuthProviders)
 	clone.ConfigSchema = cloneMap(m.ConfigSchema)

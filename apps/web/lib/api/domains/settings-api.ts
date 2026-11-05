@@ -152,12 +152,14 @@ export async function getAgentProfileMcpConfig(
 }
 
 export type CommandPreviewRequest = {
+  safe_only?: boolean;
   model: string;
   permission_settings: Record<string, boolean>;
   cli_passthrough: boolean;
 };
 
 export type CommandPreviewResponse = {
+  composition?: import("@/lib/types/execution").CommandComposition;
   supported: boolean;
   command: string[];
   command_string: string;
@@ -177,6 +179,16 @@ export async function previewAgentCommand(
     ...options,
     init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
+}
+
+export async function previewSavedProfileCommand(
+  profileId: string,
+  options?: ApiRequestOptions,
+): Promise<CommandPreviewResponse> {
+  return fetchJson<CommandPreviewResponse>(
+    `/api/v1/agent-profiles/${encodeURIComponent(profileId)}/command-preview`,
+    { ...options, cache: "no-store" },
+  );
 }
 
 export type InstallJobStatus = "queued" | "running" | "succeeded" | "failed";

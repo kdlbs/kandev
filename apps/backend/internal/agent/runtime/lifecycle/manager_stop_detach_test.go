@@ -8,7 +8,9 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	policy "github.com/kandev/kandev/internal/agent/sandbox"
 	"github.com/kandev/kandev/internal/agentruntime"
+	contract "github.com/kandev/kandev/internal/common/sandbox"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
@@ -211,4 +213,17 @@ func TestPluginExecutorDetachesOnBackendShutdown(t *testing.T) {
 	for _, event := range eventBus.PublishedEvents {
 		require.NotEqual(t, events.AgentStopped, event.Type, "shutdown detach must preserve the live task session")
 	}
+}
+
+func TestSandboxShutdownStopsBeforeReleasingRuntime(t *testing.T) {
+	mgr, backend := newDetachTestManager(t, true)
+	execution := newDetachTestExecution("sandbox-shutdown", "sandbox-session")
+	execution.SandboxSelection = &policy.SelectionContext{ExecutorID: "local"}
+	attempt := &startSandboxFixture{launch: &contract.Launch{AttemptID: "owned"}}
+	execution.sandboxAttempt = attempt
+	require.NoError(t, mgr.executionStore.Add(execution))
+	require.NoError(t, mgr.StopAgentWithReason(t.Context(), execution.ID, StopReasonBackendShutdown, false))
+	require.Len(t, backend.stopInstanceCalls, 1, "sandbox callbacks belong to this backend and cannot survive detachment")
+	require.True(t, attempt.closed)
+	require.Equal(t, "owned", execution.sandboxPreviousAttempt)
 }

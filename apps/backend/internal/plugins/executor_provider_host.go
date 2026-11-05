@@ -97,14 +97,14 @@ func (h *executorProviderHost) authorize(ctx context.Context, request *pluginsdk
 		return nil, errors.New("plugins: executor callback lease is expired")
 	}
 	key := executorProviderOperationKey(h.pluginID, request.GetOperationId(), request.GetDispatchGeneration())
-	h.service.executorProviderOpMu.Lock()
+	h.service.providerOpMu.Lock()
 	active, ok := h.service.executorProviderOps[key]
 	if !ok || !proto.Equal(active.context, request) {
-		h.service.executorProviderOpMu.Unlock()
+		h.service.providerOpMu.Unlock()
 		return nil, errors.New("plugins: executor callback lease is stale")
 	}
 	active.callbacks.RLock()
-	h.service.executorProviderOpMu.Unlock()
+	h.service.providerOpMu.Unlock()
 	return active.callbacks.RUnlock, nil
 }
 
@@ -126,20 +126,20 @@ func (s *Service) beginExecutorProviderOperation(request *pluginsdk.ExecutorProv
 	if trusted.GetOperationId() == "" {
 		return trusted, func() {}
 	}
-	s.executorProviderOpMu.Lock()
-	s.executorProviderDispatchID++
-	trusted.DispatchGeneration = s.executorProviderDispatchID
+	s.providerOpMu.Lock()
+	s.providerDispatchID++
+	trusted.DispatchGeneration = s.providerDispatchID
 	key := executorProviderOperationKey(trusted.GetPluginId(), trusted.GetOperationId(), trusted.GetDispatchGeneration())
 	active := &activeExecutorProviderOperation{context: proto.Clone(trusted).(*pluginsdk.ExecutorProviderRequestContext)}
 	s.executorProviderOps[key] = active
-	s.executorProviderOpMu.Unlock()
+	s.providerOpMu.Unlock()
 	return trusted, func() {
-		s.executorProviderOpMu.Lock()
+		s.providerOpMu.Lock()
 		if current, exists := s.executorProviderOps[key]; exists && current == active {
 			current.callbacks.Lock()
 			delete(s.executorProviderOps, key)
 			current.callbacks.Unlock()
 		}
-		s.executorProviderOpMu.Unlock()
+		s.providerOpMu.Unlock()
 	}
 }

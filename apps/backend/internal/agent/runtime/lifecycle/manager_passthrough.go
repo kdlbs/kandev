@@ -384,8 +384,8 @@ func redactPassthroughArgs(args []string) []string {
 }
 
 func passthroughCommandForLog(execution *AgentExecution, args []string) []string {
-	if isSSHPassthrough(execution) {
-		return []string{"remote CLI", "<arguments omitted>"}
+	if isSSHPassthrough(execution) || (execution != nil && execution.SandboxSelection != nil) {
+		return []string{"agent CLI", "<arguments omitted>"}
 	}
 	return redactPassthroughArgs(args)
 }
@@ -501,6 +501,9 @@ func (m *Manager) applyPassthroughMCPWithPreparation(
 	if err != nil {
 		return preparedPassthroughMCP{}, fmt.Errorf("build passthrough MCP config: %w", err)
 	}
+	if err := validateSandboxMCPArtifacts(execution, len(servers), artifacts); err != nil {
+		return preparedPassthroughMCP{}, err
+	}
 	if err := m.writePassthroughMCPFiles(ctx, execution, artifacts.Files); err != nil {
 		return preparedPassthroughMCP{}, err
 	}
@@ -535,6 +538,9 @@ func (m *Manager) passthroughMCPServers(
 			return nil, err
 		}
 	}
+	if err := m.prepareSandboxMCP(ctx, execution); err != nil {
+		return nil, err
+	}
 	return builtinPassthroughMCPServers(execution, m.agentMCPURL(execution, port, builtinCoreMCPPath), operation.servers)
 }
 
@@ -542,6 +548,9 @@ func (m *Manager) passthroughMCPServers(
 // kandev-owned temp config path (for file+flag / file+env strategies) and the
 // workspace dir (for project-local file strategies like Cursor).
 func (m *Manager) passthroughMCPPaths(execution *AgentExecution) mcpconfig.PassthroughPaths {
+	if execution.SandboxSelection != nil {
+		return sandboxMCPPaths(execution)
+	}
 	root := m.dataDir
 	if root == "" {
 		root = filepath.Join(os.TempDir(), "kandev")
@@ -612,6 +621,9 @@ func (m *Manager) materializePassthroughFile(ctx context.Context, execution *Age
 }
 
 func (m *Manager) materializePassthroughFileLocked(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
+	if execution.SandboxSelection != nil {
+		return m.materializeSandboxMCPFileLocked(execution, f)
+	}
 	if escapes, err := workspacePathEscapes(execution.WorkspacePath, f.Path); err != nil {
 		return false, fmt.Errorf("validate passthrough MCP config path: %w", err)
 	} else if escapes {

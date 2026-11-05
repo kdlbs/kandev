@@ -113,10 +113,10 @@ func TestPluginExecutorUninstallRace(t *testing.T) {
 	// callback. Uninstall must wait until that admitted operation has checkpointed.
 	dispatchLock := service.dispatchLocks.lockFor(installed.ID)
 	dispatchLock.RLock()
-	callCtx, releaseDispatch, err := service.beginExecutorProviderDispatch(context.Background(), installed.ID)
+	callCtx, releaseDispatch, err := service.beginProviderDispatch(context.Background(), installed.ID)
 	if err != nil {
 		dispatchLock.RUnlock()
-		t.Fatalf("beginExecutorProviderDispatch() error = %v", err)
+		t.Fatalf("beginProviderDispatch() error = %v", err)
 	}
 	uninstallDone := make(chan error, 1)
 	go func() { uninstallDone <- service.Uninstall(context.Background(), installed.ID) }()

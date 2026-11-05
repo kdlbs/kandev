@@ -31,7 +31,7 @@ Env kandev injects into the subprocess:
 
 - `KANDEV_PLUGIN_DATA_DIR` — per-plugin writable dir (`~/.kandev/plugins/<id>/data`).
 
-## 3. Proto (`apps/backend/proto/kandev/plugin/v1/plugin.proto`)
+## 3. Proto (`pluginsdk/proto/kandev/plugin/v1/plugin.proto`)
 
 ```proto
 syntax = "proto3";
@@ -283,7 +283,7 @@ kandev database file directly. Full message definitions (`Page`, `PageInfo`,
 `Task`, `TaskFilter`, `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`,
 `Repository`, `Session`, `SessionFilter`, `SessionCodeStats`, and the write
 `CreateTaskRequest`/`UpdateTaskRequest`/`SendMessageRequest`/`SendMessageResponse`) live in
-the real proto — `apps/backend/proto/kandev/plugin/v1/plugin.proto` — and are not
+the real proto — `pluginsdk/proto/kandev/plugin/v1/plugin.proto` — and are not
 duplicated here; this section covers the RPC list (added to `service Host` above),
 capability gating, and cross-cutting conventions. See ADR 0043
 (`docs/decisions/0043-plugin-host-data-api.md`) for the design rationale.
@@ -486,7 +486,7 @@ derived from.
 - **Ephemeral tasks** (quick-chat) are excluded from `ListTasks` unless the
   request sets `TaskFilter.include_ephemeral`.
 
-## 4. SDK (`apps/backend/pkg/pluginsdk`)
+## 4. SDK (`pluginsdk`)
 
 Public Go module surface (authors import only this):
 
@@ -566,6 +566,45 @@ generation checked before and after redemption; missing or changed bindings fail
 Disabling, failing, or uninstalling a plugin immediately revokes leases for all
 manifest-declared provider IDs. Repository host and path matching are exact and
 case-sensitive. The broker does not add, remove, or equate a trailing `.git`.
+
+### Sandbox providers
+
+`SandboxProviderPlugin` is an optional, complete six-method extension. The SDK
+exports the generated typed messages from `plugin/v1` and the interface in
+`pluginsdk/sandbox_provider.go`. An older plugin remains
+compatible and returns `Unimplemented` for this extension.
+
+Each request binds its declared protocol major (1 or 2), installation, provider key, operation, attempt, execution, generation, and deadline. Responses must use that same major as their schema version, the request operation ID, and an optional error code. The host rejects unknown protobuf fields, messages over 1 MiB,
+stale installation bindings, and malformed results. RPC budgets are 5 seconds
+for describe/status/report, 10 seconds for compile/propose, and 2 seconds for
+approval normalization, bounded by the caller deadline.
+
+The runtime description identifies a packaged executable by relative path and SHA-256. The host verifies its checksum-manifest entry and exact bytes. The installation record stores the checksum-manifest digest, so an attempt can retain its runtime identity across upgrades.
+
+Artifact `bindings` contain an object-key `path` and a `runtime_reference`. Each destination must already be an empty JSON string. Core inserts values after compilation with JSON escaping. Private callback references are excluded from RPC inputs and command arguments. A description can supply `approval_wire` JSON bodies for allow-once, deny, and timeout. These static bodies do not authorize a decision. Approval normalization also returns `provider_session_id` and `child_pid` for core ownership checks.
+
+Canonical grants include exact `environment_keys`, never environment values or wildcard names. The provider must preserve these grants and reject its own configuration overrides.
+
+Compilation returns typed prefix references, bounded UTF-8 artifacts, override
+constraints, and canonical effective grants. Effective grants must match the
+request. The host admits the original child separately. Normalized approval
+and status responses are evidence, not authorization or authoritative active
+state. Report and proposal results do not persist policy.
+
+Manifest API v2, a managed binary, `capabilities.sandbox_provider`, and a valid
+`sandbox_providers` declaration are required. The restart-required
+`features.sandboxPolicies` gate is off in every shipped profile. Lifecycle
+revocation cancels in-flight calls on disable, restart, crash, upgrade, and
+uninstall. Core owns process termination and retained policy artifacts.
+
+See the [public recipe](../../public/plugins-authoring.md#contribute-a-sandbox-provider)
+and [fixture](../../../apps/backend/cmd/plugin-fixture/sandbox_provider.go).
+
+Major 2 extends these same six RPCs with the [typed schema](../../../pluginsdk/proto/kandev/plugin/v1/sandbox_v2.proto). Existing field numbers remain stable; new parent fields start at 100. Major 1 validation rejects those fields even though the current generated decoder recognizes them. Unknown fields remain rejected for both majors. Captured provider bindings retain their major; pre-version bindings mean major 1 only.
+
+Typed policy grants and approval envelopes are separate. Operations and actors use distinct oneof alternatives. A runtime-service actor must exactly match the host-authenticated callback binding supplied to normalization. It does not relax child-process identity checks. Runtime observations cannot supply an active boolean. Reports distinguish per-class coverage, integrity, finalization, and signature trust. Chunk and verification replies bind to the requested operation/artifact identity and expected trust key. No major 2 field silently changes policy authority, PTY ownership, process lifecycle, or persistence ownership.
+
+Major 2 typed reports declare `capabilities_v2.report_schemas` separately from audit-signature support. `SandboxAuditChunkV2` binds source schema/path/session and ordered source index/count. The chunk sequence spans the artifact set, while `final` ends one source. Empty existing files are valid final chunks. `audit_final` sources are collected only after confirmed stop. The current host freezes at most 32 files/32 MiB and dispatches at most 256 KiB per chunk. Event reasons are closed codes. Partial identities are inspection-only and cannot enter approval or learning validators. See the owning [major 2 design](../../specs/plugins/system-design/sandbox-provider-v2.md) for artifact-set hashing and persistent source checks.
 
 ### Remote executor providers
 
@@ -1221,7 +1260,7 @@ if err != nil {
 _ = result.Status // APPLIED, ALREADY_APPLIED, or a typed non-success result
 ```
 
-### Host data API accessors (`apps/backend/pkg/pluginsdk/host.go`, `data_types.go`)
+### Host data API accessors (`pluginsdk/host.go`, `data_types.go`)
 
 Each `Host.<Resource>()` call above returns a small reader interface. All
 methods take `context.Context`; list methods take a Go-native `Page{Limit
@@ -1384,3 +1423,9 @@ multipart field `package` → verify checksums.txt covers all files & hashes mat
 ```
 
 ```
+
+Sandbox provider descriptions can declare bounded private state sources through `SandboxRuntimeSource`. Core owns file reads and enforces directory, suffix, depth, count, and byte limits. `NormalizeSandboxStatusResponse` returns either confinement evidence or `SandboxRuntimeIdentity`. Identity-only replies never prove an active policy; core must check process birth and ancestry before binding approval authority.
+
+Sandbox providers that need host enforcement of exact TCP destinations declare the required `egress_proxy` capability. Core supplies `sandbox.egress.endpoint` only through a protected JSON artifact binding, using an existing empty string destination. This reserved reference cannot enter provider request values, supervisor arguments, or public projections. The relay belongs to one captured attempt and closes its tunnels on cancellation.
+
+Core-owned child state uses the existing `SandboxRuntimeReference` contract. The four keys are `sandbox.child.home`, `sandbox.child.config`, `sandbox.child.state`, and `sandbox.child.tmp`. Core sends them only for an explicit agent-state grant. Providers validate grant coverage and use artifact bindings for child environment settings. These references do not replace private supervisor directories or transfer allocation ownership.

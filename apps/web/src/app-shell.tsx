@@ -13,6 +13,7 @@ import { LogBufferBridge } from "@/components/log-buffer-bridge";
 import { PluginModalHost } from "@/components/plugins/plugin-modal-host";
 import { QuickChatProvider } from "@/components/quick-chat/quick-chat-provider";
 import { RecentTaskSwitcher } from "@/components/task/recent-task-switcher";
+import { SandboxRestartReviewHost } from "@/components/task/sandbox-restart-review-host";
 import { SessionFailureToastBridge } from "@/components/session-failure-toast-bridge";
 import { TaskDeletedToastBridge } from "@/components/task-deleted-toast-bridge";
 import { UpdateAvailableToastBridge } from "@/components/update-available-toast-bridge";
@@ -76,6 +77,7 @@ export function AppShell({ children }: AppShellProps) {
             <ToastProvider>
               <AppToaster />
               <PluginModalHost />
+              <SandboxRestartReviewHost />
               <SessionFailureToastBridge />
               <TaskDeletedToastBridge />
               <UpdateAvailableToastBridge />

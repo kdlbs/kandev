@@ -4,11 +4,13 @@
 package utility
 
 import (
+	"context"
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/modelcatalog"
+	"github.com/kandev/kandev/internal/common/sandbox"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -103,6 +105,7 @@ type ProbeRequest struct {
 
 // ProbeResponse is the response from probing an agent.
 type ProbeResponse struct {
+	SandboxReceipt *sandbox.StartReceipt `json:"sandbox_receipt,omitempty"`
 	// Success indicates if the probe completed successfully.
 	Success bool `json:"success"`
 
@@ -228,7 +231,12 @@ type ProbePromptCapabilities struct {
 
 // InferenceConfigDTO is the inference configuration passed from backend to agentctl.
 type InferenceConfigDTO struct {
-	LaunchWrapper launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	SandboxStarting    func() error                                       `json:"-"`
+	SandboxStartFailed func()                                             `json:"-"`
+	SandboxReceipt     func() *sandbox.StartReceipt                       `json:"-"`
+	SandboxStarted     func(context.Context, *sandbox.ProcessOwner) error `json:"-"`
+	Sandbox            *sandbox.Launch                                    `json:"sandbox,omitempty"`
+	LaunchWrapper      launchwrapper.Spec                                 `json:"launch_wrapper,omitzero"`
 	// Protocol selects the one-shot inference transport. Empty means ACP.
 	Protocol agent.Protocol `json:"protocol,omitempty"`
 	// Command is the protocol command for one-shot inference.
@@ -263,6 +271,7 @@ type InferenceConfigDTO struct {
 
 // PromptResponse is the response from executing a utility prompt.
 type PromptResponse struct {
+	SandboxReceipt *sandbox.StartReceipt `json:"sandbox_receipt,omitempty"`
 	// Success indicates if the prompt completed successfully.
 	Success bool `json:"success"`
 

@@ -24,6 +24,10 @@ func (c *Client) requireLaunchWrapper(ctx context.Context, spec launchwrapper.Sp
 }
 
 func (c *Client) checkLaunchWrapperCapability(ctx context.Context) error {
+	return c.checkLaunchCapability(ctx, launchwrapper.Capability, ErrLaunchWrapperUnsupported)
+}
+
+func (c *Client) checkLaunchCapability(ctx context.Context, capability string, unsupported error) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/identity", nil)
 	if err != nil {
 		return launchwrapper.ErrContext
@@ -34,7 +38,7 @@ func (c *Client) checkLaunchWrapperCapability(ctx context.Context) error {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
-		return ErrLaunchWrapperUnsupported
+		return unsupported
 	}
 	if resp.StatusCode != http.StatusOK {
 		return launchwrapper.ErrContext
@@ -49,8 +53,8 @@ func (c *Client) checkLaunchWrapperCapability(ctx context.Context) error {
 	if json.Unmarshal(body, &identity) != nil {
 		return launchwrapper.ErrContext
 	}
-	if !slices.Contains(identity.Capabilities, launchwrapper.Capability) {
-		return ErrLaunchWrapperUnsupported
+	if !slices.Contains(identity.Capabilities, capability) {
+		return unsupported
 	}
 	return nil
 }

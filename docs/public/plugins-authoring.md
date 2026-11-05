@@ -1060,6 +1060,89 @@ The generic `PluginRegistry.registerComponent` signature lets the contribution
 declare `slotProps?: PluginComposerSlotProps` directly, without narrowing an
 `unknown` slot prop.
 
+## Contribute a sandbox provider
+
+The optional `pluginsdk.SandboxProviderPlugin` interface translates policy and
+runtime evidence. Implement all six methods from the
+[SDK contract](../../pluginsdk/sandbox_provider.go): describe,
+compile, normalize approval, normalize status, read report, and propose revision.
+Use the maintained [fixture provider](../../apps/backend/cmd/plugin-fixture/sandbox_provider.go)
+and its [tests](../../apps/backend/cmd/plugin-fixture/sandbox_provider_test.go)
+as a contract example. The fixture does not enforce confinement.
+
+Add this declaration to a managed API v2 manifest:
+
+```yaml
+capabilities:
+  sandbox_provider: true
+sandbox_providers:
+  - key: policy
+    display_name: Example sandbox
+    protocol_major: 1
+```
+
+The experimental `features.sandboxPolicies` setting gates host dispatch and is
+off in all shipped profiles. Its environment alias is
+`KANDEV_FEATURES_SANDBOX_POLICIES`; changing it requires a restart. The optional
+contract does not change basic agent command wrapping. A plugin without this
+interface remains compatible and returns `Unimplemented` for these RPCs.
+
+Set the response schema version to the request's admitted protocol major and copy the request operation ID into the response context. Major 1 preserves the original field shapes. Major 2 uses the [typed SDK messages](../../pluginsdk/sandbox_v2.go) and [wire definitions](../../pluginsdk/proto/kandev/plugin/v1/sandbox_v2.proto). Declare `protocol_major: 2` to opt in. The host never sends these new fields to a major 1 provider and never downgrades a major 2 call.
+
+Declare supported policy versions separately in `capabilities_v2.policy_schemas`. Protocol major 2 does not imply support for policy schema 2. Schema 2 compilation receives `policy_v2` with separate `static_grants` and `approval_envelope` groups, without legacy `grants`. Return the same typed policy in `effective_policy_v2`. An empty envelope permits no operator-approved expansion. An unsupported selected policy blocks availability and launch.
+
+Major 2 separates static grants from approval eligibility and distinguishes filesystem, TCP, command, and HTTP-endpoint operations. Child-process actors and attempt-owned runtime-service actors have different identity checks. The host authenticates runtime-service callbacks before normalization and compares the returned channel/route binding; a PID of zero is not a child identity. Neither actor type grants operator authority.
+
+The experimental compiled `approval_services_v2` field declares private runtime callbacks. Each declaration supplies a `service_key`, `route_id`, `operation_kind`, and `endpoint_reference`. Use lowercase letters, digits, and hyphens for each key (1-64 characters, starting with a letter).
+
+The reference must be `sandbox.approval.service.<service_key>.<route_id>.endpoint` and must bind an empty JSON string in a private artifact. Include `service_approval_channels.v2` in `required_capabilities`. Core creates channel IDs and callback secrets, which must not enter compile inputs or supervisor arguments.
+
+The current validator accepts only network declarations under policy schema 2 and rejects combination with `egress_proxy` or its private artifact binding. Runtime dispatch for these declarations is not enabled yet; declaring one refuses launch. This SDK shape does not establish native TCP approval support in the host or a provider.
+
+Runtime observations do not establish active confinement. Reports carry separate coverage, integrity, finalization, and signature-verification results. Chunk replies must retain the core-generated operation handle, artifact-set digest, and sequence. Trusted signature results require the expected public key, trust revision, and matching artifact identity. Private keys and callback secrets never enter these RPC payloads. See the maintained [major 2 fixture test](../../apps/backend/cmd/plugin-fixture/sandbox_provider_v2_test.go) for a complete-interface example.
+
+Negotiate typed reports separately with `capabilities_v2.report_schemas: ["kandev.sandbox.report.v2"]`. Each chunk binds its source schema, relative path, captured session, and position in the artifact set. A final marker ends that source. Preserve the operation's chunk sequence across source transitions. Empty existing sources remain distinct from missing files. The current host snapshot limit is 32 files and 32 MiB, with at most 256 KiB per chunk. Major 1 keeps its existing limits.
+
+Audit verification uses the explicit `verify_audit_v2` request field. Keep verification separate from ordinary report collection. A request can omit `trust_v2` to inspect unsigned or untrusted artifacts. When trust is present, bind the same expected public key, fingerprint, and trust revision to every chunk. Return verification only after the last source. Keep the observed `signer_key_fingerprint` separate from the expected key fingerprint. An artifact's embedded key does not establish operator trust. Never accept or return private signing keys.
+
+Core owns verification jobs and retained input files. It checks the captured
+provider package and runtime before dispatch. It admits at most four jobs,
+with a 30-second deadline per job. Handle RPC cancellation and remove temporary
+verification files when the call ends. A repeated operator request returns its
+stored job. Backend restart interrupts abandoned jobs without executing them
+again. Verification history remains independent of current signer trust.
+
+Use major 2 source kind `audit_final` for finalization metadata. Core collects it after confirmed stop. Audit event logs remain append-only. Rewrites, truncation, replacement, aliases, or missing prior files invalidate a refresh. Current persistent birth-identity checks require Linux statx support. Keep previous evidence visible when a new collection is unavailable.
+
+Partial or redacted events can be reported with `exact_target: false`. They cannot authorize access or supply revision additions. Partial command events must omit raw argv and executable/resource details. Return closed `reason_code` values instead of private error text: `permission_denied`, `approval_denied`, `approval_timeout`, `approval_granted`, `authentication_failed`, `upstream_unavailable`, `unsupported_protocol`, `command_failed`, or `other`. The empty code preserves compatibility.
+
+The versioned wire surface does not by itself enable a runtime capability. A provider must pass real host/transport/runtime acceptance before advertising an operation. Core admission can refuse a major 2 policy whose execution path is not yet supported.
+
+ Return typed prefix tokens, UTF-8 configuration artifacts, and the exact
+canonical effective grants. Do not return replacement agent commands, executable
+artifacts, arbitrary file paths, or a claim that confinement is active.
+Kandev rejects unknown fields, invalid references, expanded grants, oversized
+messages, stale installations, and expired deadlines.
+
+The runtime description identifies a packaged executable by relative path and SHA-256. The host verifies its checksum-manifest entry and exact bytes. The installation record stores the checksum-manifest digest, so an attempt can retain its runtime identity across upgrades.
+
+Artifact `bindings` contain an object-key `path` and a `runtime_reference`. Each destination must already be an empty JSON string. Core inserts values after compilation with JSON escaping. Private callback references are excluded from RPC inputs and command arguments. A description can supply `approval_wire` JSON bodies for allow-once, deny, and timeout. These static bodies do not authorize a decision. Approval normalization also returns `provider_session_id` and `child_pid` for core ownership checks.
+
+Canonical grants include exact `environment_keys`, never environment values or wildcard names. The provider must preserve these grants and reject its own configuration overrides.
+
+When an operator grants agent state, core supplies `sandbox.child.home`, `sandbox.child.config`, `sandbox.child.state`, and `sandbox.child.tmp` runtime references. Bind them into the child environment through private JSON artifacts. The paths share a granted child home and remain separate from supervisor state. They contain no credentials. Preserve these paths for the captured attempt. Do not infer or grant the operator's real home. Without these references, do not inject a child home. Core owns allocation, persistence, and cleanup.
+
+Compilation is limited to 32 artifacts and 1 MiB in total. Artifact names must
+be relative and cannot traverse directories. Core owns process creation,
+cancellation, approval decisions, and policy persistence. Provider reports and
+proposals cannot grant access or save policy. Keep production providers in
+separate repositories; package runtime helpers through the normal reviewed
+plugin artifact workflow.
+
+The contract and fixture establish API compatibility. Full runtime support also
+requires an implementation that passes real discovery, chat, terminal, recovery,
+cancellation, cleanup, and negative filesystem/network checks.
+
 ## Backend contract
 
 ### Plugin lifecycle surface
@@ -1068,6 +1151,7 @@ declare `slotProps?: PluginComposerSlotProps` directly, without narrowing an
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
 | Plugin.OnEvent       | OnEvent(ctx, \*pluginsdk.Event) error; event has EventID, EventType, OccurredAt, WorkspaceID, Payload                             | Matching capabilities.events subject/pattern                          | Delivery is sequential per plugin with bounded queue and retries; make handlers idempotent by EventID and reconcile critical state | if event.EventType == "task.created" { ... }       |
 | Plugin.HandleWebhook | HandleWebhook(ctx, *pluginsdk.WebhookRequest) (*WebhookResponse, error); request includes key, method, path, query, headers, body | webhooks[].key; auth additionally required for login assertion header | Undeclared keys are 404; GET/POST are relayed; validate method/signature and bound side effects                                    | if req.WebhookKey == "inbound" { ... }             |
+| SandboxProviderPlugin | Six versioned policy, typed operation/evidence, report, and proposal RPCs | `capabilities.sandbox_provider`, `sandbox_providers`, managed API v2 | Host bounds messages and deadlines; disable, restart, crash, upgrade, and uninstall cancel calls | [Sandbox provider recipe](#contribute-a-sandbox-provider) |
 | Host.EmitEvent       | EmitEvent(ctx, name, payload) publishes plugin.<id>.<name>                                                                        | None; intentionally ungated                                           | Subscribers must declare the emitted subject; use versioned names/payloads                                                         | host.EmitEvent(ctx, "sync.completed", payload-map) |
 
 Event delivery is best-effort: Kandev makes the initial attempt plus retries
@@ -3942,7 +4026,8 @@ instance:
 make -C apps/backend e2e-plugin-package
 cd apps/backend
 go test ./cmd/plugin-pack ./cmd/plugin-fixture ./internal/plugins/manifest \
-  ./internal/plugins/pkgtar ./pkg/pluginsdk
+  ./internal/plugins/pkgtar
+(cd ../../pluginsdk && go test -trimpath ./...)
 ```
 
 The fixture build proves the current SDK/package shape and produces a
@@ -4015,3 +4100,10 @@ repackaging.
 
 Related: [Plugins](plugins.md), [Plugin manifest reference](plugins-manifest.md),
 [Plugin marketplace](plugins-marketplace.md), and [Extending Kandev](extending-kandev.md).
+
+Sandbox providers can declare bounded runtime records below the private state directory. Use identity records to associate a supervisor, child, and provider session. Keep identity separate from confinement evidence: a process registry without a policy digest must not certify active protection. Core verifies ownership and reads the declared files.
+
+A sandbox provider can require the optional `egress_proxy` host capability when its runtime cannot enforce exact TCP ports. Core supplies an attempt-owned CONNECT relay at the reserved `sandbox.egress.endpoint` artifact reference. Bind the reference to an existing empty JSON string in a private artifact. The relay accepts only the attempt's captured host/port pairs. Basic command wrappers do not require this capability.
+
+
+Logical Kandev MCP access uses a host-owned dynamic endpoint. Core captures selected package paths and preserves their separate registries behind that relay. Providers do not receive a backend control credential. Do not replace this endpoint with a fixed host path or broad loopback permission. Selected package routes require the execution helper capability `sandbox-mcp-routes.v1`; core checks compatibility before dispatch.

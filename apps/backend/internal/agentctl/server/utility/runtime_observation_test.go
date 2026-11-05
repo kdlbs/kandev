@@ -414,7 +414,7 @@ func TestRuntimeObservationRejectsOversizedVersionOutput(t *testing.T) {
 		t.Skip("uses a Unix executable fixture")
 	}
 	binary := filepath.Join(t.TempDir(), "large codex")
-	writeRuntimeObservationExecutable(t, binary, "#!/bin/sh\nprintf 'codex-cli 0.177.3\\n'; head -c 8192 /dev/zero | tr '\\000' x; printf 'credential=secret\\n' >&2\n")
+	writeRuntimeObservationExecutable(t, binary, "#!/bin/sh\nprintf 'codex-cli 0.177.3\\n'; printf '%s' '"+strings.Repeat("x", 8192)+"'; printf 'credential=secret\\n' >&2\n")
 	info := NewACPInferenceExecutor(zap.NewNop()).collectRuntimeObservation(
 		context.Background(), codexRuntimeDescriptor(), codexManagedCommand(), nil,
 		codexManagedCommand(), []string{"CODEX_PATH=" + binary}, "", t.TempDir(), "1.2.3",
@@ -434,7 +434,7 @@ func TestRuntimeObservationCommandRejectsOversizedOutput(t *testing.T) {
 		t.Skip("uses a Unix executable fixture")
 	}
 	binary := filepath.Join(t.TempDir(), "large output")
-	writeRuntimeObservationExecutable(t, binary, "#!/bin/sh\nhead -c 8192 /dev/zero | tr '\\000' x\n")
+	writeRuntimeObservationExecutable(t, binary, "#!/bin/sh\nprintf '%s' '"+strings.Repeat("x", 8192)+"'\n")
 	output, err := runRuntimeObservationCommand(context.Background(), binary, nil, os.Environ(), t.TempDir(), zap.NewNop())
 	if err == nil {
 		t.Fatalf("oversized output was accepted with %d captured bytes", len(output))

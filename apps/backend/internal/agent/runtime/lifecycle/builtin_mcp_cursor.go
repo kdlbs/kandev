@@ -11,7 +11,7 @@ import (
 )
 
 func composeEffectiveMCPServers(execution *AgentExecution, profile []types.McpServer, user map[string]json.RawMessage, imported map[string]types.McpServer, host string) (map[string]any, map[string]string, error) {
-	if _, bound := execution.metadataValue(p.BuiltinBindingMetadataKey); !bound {
+	if _, bound := execution.metadataValue(p.BuiltinBindingMetadataKey); !bound && execution.SandboxSelection == nil {
 		servers, ownership := composeLegacyMCPServers(execution, profile, user, imported, host)
 		return servers, ownership, nil
 	}
@@ -24,6 +24,7 @@ func composeEffectiveMCPServers(execution *AgentExecution, profile []types.McpSe
 		return nil, nil, err
 	}
 	servers, ownership := composeLegacyMCPServers(execution, profile, user, imported, host)
+	delete(servers, kandevMCPServerName)
 	for _, server := range native {
 		entry := map[string]any{"url": server.URL}
 		servers[server.Name] = entry

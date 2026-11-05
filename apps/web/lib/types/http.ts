@@ -20,6 +20,7 @@ import type { OnEnterActionType, StepEvents } from "./workflow-actions";
 import type { EntityReference } from "./entity-reference";
 import type { TaskStatusSummary } from "./task-status-summary";
 import type { AgentGoalReconciliation } from "@/lib/agent-goal";
+import type { ExecutionSnapshot } from "./execution";
 
 export type { TaskStatusSummary } from "./task-status-summary";
 export type * from "./http-mcp";
@@ -730,6 +731,8 @@ export type RuntimeStorageHealth = {
 export type TaskSession = ActiveSubagentCountFields & {
   id: SessionId;
   task_id: TaskId;
+  execution_snapshot?: ExecutionSnapshot | null;
+  execution_observation?: import("./execution").ExecutionObservation | null;
   /** Immutable queue ownership identity; changes when a textual session ID is recreated. */
   queue_incarnation_id?: string;
   /** Frontend-only owner for an in-flight optimistic resume projection. */

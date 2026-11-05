@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	contract "github.com/kandev/kandev/internal/common/sandbox"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1026,6 +1027,7 @@ const (
 )
 
 type ResumeOptions struct {
+	SandboxRestartReview         *contract.RestartPolicyReview
 	RequiredNativeConversationID string
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
@@ -2120,6 +2122,7 @@ func newResumeLaunchRequest(
 		executionProfileID = session.AgentProfileID
 	}
 	req := &LaunchAgentRequest{
+		SandboxRestartReview:         options.SandboxRestartReview,
 		WorkspaceLayout:              task.InitialWorkspaceLayout,
 		ResumePassthrough:            startAgent && session.IsPassthrough && !options.ForceContextContinuation,
 		TaskID:                       task.ID,
@@ -2508,7 +2511,7 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 			isRecoverableCancelledResumeSession(session) ||
 			session.State == models.TaskSessionStateCompleted ||
 			(session.State == models.TaskSessionStateFailed &&
-				req.SessionSettingsPolicy == ResumeSettingsPolicyProviderRestored)
+				(req.SessionSettingsPolicy == ResumeSettingsPolicyProviderRestored || isExplicitBootstrapResume(req, session)))
 		if startAgent && noAutoPromptState {
 			if req.ForceContextContinuation {
 				return nil
@@ -2570,6 +2573,15 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 	}
 
 	return running
+}
+
+func isExplicitBootstrapResume(req *LaunchAgentRequest, session *models.TaskSession) bool {
+	const recoveryActionResume = "resume"
+	if req.RecoveryAction != recoveryActionResume {
+		return false
+	}
+	failure, found := models.LoadLastAgentError(session.Metadata)
+	return found && failure.Phase == models.LaunchErrorPhaseBootstrap
 }
 
 // persistedSessionResumeToken returns the provider conversation identity that

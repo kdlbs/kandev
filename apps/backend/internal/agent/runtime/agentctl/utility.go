@@ -14,7 +14,7 @@ import (
 // HTTP client and decodes a JSON response body into out. It is used by the
 // utility endpoints (inference prompt, probe) where the underlying LLM call
 // or agent cold-start can take minutes.
-func (c *Client) doLongRunningJSON(ctx context.Context, path, label string, in, out any) error {
+func (c *Client) doLongRunningJSON(ctx context.Context, path, label string, in, out any, private bool) error {
 	body, err := json.Marshal(in)
 	if err != nil {
 		return fmt.Errorf("failed to marshal request: %w", err)
@@ -36,9 +36,15 @@ func (c *Client) doLongRunningJSON(ctx context.Context, path, label string, in, 
 		return fmt.Errorf("failed to read response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if private {
+			return fmt.Errorf("%s failed with status %d", label, resp.StatusCode)
+		}
 		return fmt.Errorf("%s failed with status %d: %s", label, resp.StatusCode, truncateBody(respBody))
 	}
 	if err := json.Unmarshal(respBody, out); err != nil {
+		if private {
+			return fmt.Errorf("invalid %s response (status %d)", label, resp.StatusCode)
+		}
 		return fmt.Errorf("failed to parse %s response (status %d, body: %s): %w", label, resp.StatusCode, truncateBody(respBody), err)
 	}
 	return nil
@@ -48,12 +54,15 @@ func (c *Client) doLongRunningJSON(ctx context.Context, path, label string, in, 
 // Uses the long-running HTTP client since LLM inference can take several minutes.
 func (c *Client) InferencePrompt(ctx context.Context, req *utility.PromptRequest) (*utility.PromptResponse, error) {
 	if req.InferenceConfig != nil {
+		if err := c.requireSandbox(ctx, req.InferenceConfig.Sandbox); err != nil {
+			return nil, err
+		}
 		if err := c.requireLaunchWrapper(ctx, req.InferenceConfig.LaunchWrapper); err != nil {
 			return nil, err
 		}
 	}
 	var result utility.PromptResponse
-	if err := c.doLongRunningJSON(ctx, "/api/v1/inference/prompt", "utility prompt", req, &result); err != nil {
+	if err := c.doLongRunningJSON(ctx, "/api/v1/inference/prompt", "utility prompt", req, &result, req.InferenceConfig != nil && req.InferenceConfig.Sandbox != nil); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -63,12 +72,15 @@ func (c *Client) InferencePrompt(ctx context.Context, req *utility.PromptRequest
 // to discover its capabilities, auth methods, models, and modes.
 func (c *Client) Probe(ctx context.Context, req *utility.ProbeRequest) (*utility.ProbeResponse, error) {
 	if req.InferenceConfig != nil {
+		if err := c.requireSandbox(ctx, req.InferenceConfig.Sandbox); err != nil {
+			return nil, err
+		}
 		if err := c.requireLaunchWrapper(ctx, req.InferenceConfig.LaunchWrapper); err != nil {
 			return nil, err
 		}
 	}
 	var result utility.ProbeResponse
-	if err := c.doLongRunningJSON(ctx, "/api/v1/inference/probe", "probe", req, &result); err != nil {
+	if err := c.doLongRunningJSON(ctx, "/api/v1/inference/probe", "probe", req, &result, req.InferenceConfig != nil && req.InferenceConfig.Sandbox != nil); err != nil {
 		return nil, err
 	}
 	return &result, nil

@@ -41,66 +41,6 @@ func (s *Service) SetExecutorProviderInventoryReader(reader ExecutorProviderInve
 	s.executorProviderInventoryReader = reader
 }
 
-func (s *Service) beginExecutorProviderDispatch(ctx context.Context, pluginID string) (context.Context, func(), error) {
-	s.executorProviderOpMu.Lock()
-	if s.executorProviderAdmissionClosed[pluginID] {
-		s.executorProviderOpMu.Unlock()
-		return nil, nil, ErrExecutorProviderUnavailable
-	}
-	if s.executorProviderDispatches == nil {
-		s.executorProviderDispatches = make(map[string]map[uint64]context.CancelFunc)
-	}
-	s.executorProviderDispatchID++
-	dispatchID := s.executorProviderDispatchID
-	callCtx, cancel := context.WithCancel(ctx)
-	if s.executorProviderDispatches[pluginID] == nil {
-		s.executorProviderDispatches[pluginID] = make(map[uint64]context.CancelFunc)
-	}
-	s.executorProviderDispatches[pluginID][dispatchID] = cancel
-	s.executorProviderOpMu.Unlock()
-	return callCtx, func() {
-		s.executorProviderOpMu.Lock()
-		delete(s.executorProviderDispatches[pluginID], dispatchID)
-		if len(s.executorProviderDispatches[pluginID]) == 0 {
-			delete(s.executorProviderDispatches, pluginID)
-		}
-		s.executorProviderOpMu.Unlock()
-		cancel()
-	}, nil
-}
-
-// closeExecutorProviderAdmission rejects calls that have not yet acquired a
-// dispatch lease and cancels the contexts of calls already admitted. The
-// lifecycle caller then takes the exclusive dispatch lock to drain them.
-func (s *Service) closeExecutorProviderAdmission(pluginID string) {
-	s.executorProviderOpMu.Lock()
-	if s.executorProviderAdmissionClosed == nil {
-		s.executorProviderAdmissionClosed = make(map[string]bool)
-	}
-	s.executorProviderAdmissionClosed[pluginID] = true
-	cancels := make([]context.CancelFunc, 0, len(s.executorProviderDispatches[pluginID]))
-	for _, cancel := range s.executorProviderDispatches[pluginID] {
-		cancels = append(cancels, cancel)
-	}
-	s.executorProviderOpMu.Unlock()
-	for _, cancel := range cancels {
-		cancel()
-	}
-}
-
-func (s *Service) openExecutorProviderAdmission(pluginID string) {
-	s.executorProviderOpMu.Lock()
-	delete(s.executorProviderAdmissionClosed, pluginID)
-	s.executorProviderOpMu.Unlock()
-}
-
-func (s *Service) reopenExecutorProviderAdmissionIfActive(pluginID string) {
-	record, err := s.Get(pluginID)
-	if err == nil && record != nil && record.Status == StatusActive {
-		s.openExecutorProviderAdmission(pluginID)
-	}
-}
-
 func (s *Service) retainedExecutorProviderInventory(ctx context.Context, pluginID string) ([]retainedExecutorProviderInventory, error) {
 	s.mu.Lock()
 	reader := s.executorProviderInventoryReader

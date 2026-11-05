@@ -25,7 +25,7 @@ func (m *Manager) builtinPermissionAllowed(name, tool string) bool {
 	if catalog == nil || !slices.Contains(catalog()[id], tool) {
 		return false
 	}
-	expected, err := config.BuiltinMCPServers(m.cfg.McpProfile.BuiltinPackages, m.cfg.MCPHost, m.cfg.Port)
+	expected, err := config.BuiltinMCPServersForLaunch(m.cfg.McpProfile.BuiltinPackages, m.cfg.MCPHost, m.cfg.Port, m.cfg.Sandbox)
 	if err != nil {
 		return false
 	}

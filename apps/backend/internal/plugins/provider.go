@@ -103,6 +103,7 @@ func ProvideWithStoreErrors(cfg *config.Config, dbPool *db.Pool, secrets SecretV
 	}
 
 	svc := NewService(pluginStore, registry, eventBus, log)
+	svc.SetSandboxProvidersEnabled(cfg.Features.SandboxPolicies)
 	if cfg.Features.Canvases {
 		svc.subscribeWebAppEvents()
 	}

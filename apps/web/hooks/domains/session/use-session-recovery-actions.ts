@@ -324,6 +324,7 @@ export function useSessionRecoveryActions({
         taskId,
         sessionId,
         action,
+        ...(errorStamp ? { errorStamp } : {}),
         failureMessage: t(FAILED_TO_RESUME_MESSAGE_KEY),
       };
       if (action === "relocate_and_resume") {
