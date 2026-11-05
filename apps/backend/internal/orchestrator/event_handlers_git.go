@@ -707,11 +707,12 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 	}
 
 	contextWindowData := map[string]interface{}{
-		"size":       size,
-		"used":       data.ContextWindowUsed,
-		"remaining":  remaining,
-		"efficiency": efficiency,
-		"source":     source,
+		"size":                          size,
+		"used":                          data.ContextWindowUsed,
+		"remaining":                     remaining,
+		"efficiency":                    efficiency,
+		"source":                        source,
+		"compaction_inference_disabled": data.CompactionInferenceDisabled,
 	}
 
 	// Persist synchronously using json_set to atomically set one key without
