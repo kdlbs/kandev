@@ -36,11 +36,12 @@ export async function expectProcessEndClearsBackgroundWork(
     return workloads.filter((w) => w.state === "running").length;
   };
   // The composer chip is running-only, so wait for the authoritative running
-  // projection before asserting its rendered shadow.
+  // projection before asserting its rendered shadow. CI runs several subshards
+  // concurrently, so registration can exceed a single-process local budget.
   await expect
     .poll(runningWorkloadCount, {
       message: "the detached launch should register a running background workload",
-      timeout: 30_000,
+      timeout: 60_000,
     })
     .toBeGreaterThan(0);
 
