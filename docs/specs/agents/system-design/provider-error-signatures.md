@@ -22,7 +22,7 @@ the established higher-priority signals and sanitized excerpt contract.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose) |
+| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose), [OpenCode period reset](#opencode-period-reset) |
 
 ## Components and responsibilities
 
@@ -113,6 +113,16 @@ Do not fabricate recorded protocol provenance or expose raw error Data.
 Interactive policy belongs to Platform. Office and dynamic routing consume the
 new classification through their existing policies, without a new retry policy.
 [Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).
+
+## OpenCode period reset
+
+When `Classify` selects the existing OpenCode period usage-limit rule, a
+relative duration on its sole matching line can supply a missing reset time.
+The diagnostic observation time must be known; the duration is added to it.
+An explicit structured or dated reset keeps precedence. Unrelated lines,
+multiple matching period lines, incomplete or unsupported units, and overflow
+leave the hint unknown without changing the error classification. The result
+does not change candidate order or authorize prompt replay.
 
 ## OpenCode admission refusal
 
