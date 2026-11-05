@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -111,6 +114,91 @@ func TestWorkflowTransition_AdmittedDestinationDoesNotLogWIPDeferral(t *testing.
 	require.Equal(t, true, storedSession.Metadata["plan_mode"])
 }
 
+func TestWorkflowTransition_WIPDeferralLogUsesAdmissionLimit(t *testing.T) {
+	ctx := context.Background()
+	svc, logs, _ := newWIPDeferralTestService(t, true)
+	steps := svc.workflowStepGetter.(*mockStepGetter)
+	stepReads := 0
+	steps.getStepFunc = func(_ context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+		step := steps.steps[stepID]
+		if step == nil {
+			return nil, nil
+		}
+		copy := *step
+		if stepID == "step2" {
+			stepReads++
+			if stepReads == 3 {
+				copy.WIPLimit = 1
+			} else {
+				copy.WIPLimit = 2
+			}
+		}
+		return &copy, nil
+	}
+	session, err := svc.repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+
+	require.True(t, svc.applyEngineTransitionWithMode(ctx, "t1", session, engine.HandleResult{
+		Transitioned: true, FromStepID: "step1", ToStepID: "step2",
+	}, engine.TriggerOnTurnComplete, "Test", transitionLifecycleWithOnEnter))
+
+	require.Equal(t, 3, stepReads)
+	entries := logs.FilterMessage(wipDeferralLogMessage).All()
+	require.Len(t, entries, 1)
+	require.Equal(t, int64(1), entries[0].ContextMap()["wip_limit"])
+	task, err := svc.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	require.Equal(t, "step2", task.QueuedForStepID)
+	require.False(t, task.WIPAdmitted)
+}
+
+func TestWorkflowTransition_PostCommitTaskReloadFailureWarnsAndDefersEntry(t *testing.T) {
+	ctx := context.Background()
+	svc, logs, onEnterDone := newWIPDeferralTestService(t, true)
+	repo := svc.repo.(*sqliterepo.Repository)
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+
+	readErr := errors.New("task reread failed")
+	wrappedRepo := &postCommitTaskReadFailureRepo{Repository: repo, readErr: readErr}
+	svc.repo = wrappedRepo
+	svc.workflowStore = newWorkflowStore(
+		wrappedRepo, svc.workflowStepGetter, svc.agentManager, noopPublisher, svc.logger, &operationLedger{},
+	)
+
+	require.True(t, svc.applyEngineTransitionWithCommitMode(ctx, "t1", session, engine.HandleResult{
+		Transitioned: true, FromStepID: "step1", ToStepID: "step2",
+	}, engine.TriggerOnTurnComplete, "Test", transitionLifecycleWithOnEnter,
+		func(commitCtx context.Context) (bool, error) {
+			result, commitErr := svc.workflowStore.applyTransitionReportingApplied(
+				commitCtx, "t1", "s1", "step1", "step2", engine.TriggerOnTurnComplete,
+			)
+			return result.Applied, commitErr
+		}))
+
+	warnings := logs.FilterMessage("failed to reload task after committed workflow transition").All()
+	require.Len(t, warnings, 1)
+	require.Equal(t, "t1", warnings[0].ContextMap()["task_id"])
+	require.Equal(t, "s1", warnings[0].ContextMap()["session_id"])
+	require.Equal(t, "step1", warnings[0].ContextMap()["from_step_id"])
+	require.Equal(t, "step2", warnings[0].ContextMap()["to_step_id"])
+	require.Equal(t, readErr.Error(), warnings[0].ContextMap()["error"])
+	require.Zero(t, logs.FilterMessage(wipDeferralLogMessage).Len())
+
+	task, err := repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	require.Equal(t, "step2", task.QueuedForStepID)
+	require.False(t, task.WIPAdmitted)
+	storedSession, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, storedSession.State)
+	select {
+	case <-onEnterDone:
+		t.Fatal("destination entry ran after task reload failed")
+	case <-time.After(250 * time.Millisecond):
+	}
+}
+
 func newWIPDeferralTestService(t *testing.T, full bool) (*Service, *observer.ObservedLogs, <-chan struct{}) {
 	t.Helper()
 	ctx := context.Background()
@@ -144,4 +232,29 @@ func newWIPDeferralTestService(t *testing.T, full bool) (*Service, *observer.Obs
 	onEnterDone := make(chan struct{}, 1)
 	svc.onProcessOnEnterComplete = func() { onEnterDone <- struct{}{} }
 	return svc, logs, onEnterDone
+}
+
+type postCommitTaskReadFailureRepo struct {
+	*sqliterepo.Repository
+	failNextGetTask atomic.Bool
+	readErr         error
+}
+
+func (r *postCommitTaskReadFailureRepo) UpdateTaskWithWorkflowStepAdmissionReportingApplied(
+	ctx context.Context, task *models.Task, sourceStepID, targetStepID string, limit int,
+) (admitted, applied bool, err error) {
+	admitted, applied, err = r.Repository.UpdateTaskWithWorkflowStepAdmissionReportingApplied(
+		ctx, task, sourceStepID, targetStepID, limit,
+	)
+	if err == nil && applied {
+		r.failNextGetTask.Store(true)
+	}
+	return admitted, applied, err
+}
+
+func (r *postCommitTaskReadFailureRepo) GetTask(ctx context.Context, taskID string) (*models.Task, error) {
+	if r.failNextGetTask.CompareAndSwap(true, false) {
+		return nil, r.readErr
+	}
+	return r.Repository.GetTask(ctx, taskID)
 }

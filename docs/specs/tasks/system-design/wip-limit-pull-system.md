@@ -455,6 +455,12 @@ when the committed destination remains queued. Queue promotion still owns the
 later entry; the log does not change admission, promotion, or session state.
 Guarded decisions use a separate entry path and do not emit this session log.
 
+The transition commit returns its admission decision and the WIP limit used for
+that decision to the orchestrator. The lifecycle uses this result before it
+runs destination entry. If a compatibility commit does not return admission
+state and its task reread fails, the orchestrator logs the failure and stops
+before destination entry.
+
 ## Implementation plan
 
 See

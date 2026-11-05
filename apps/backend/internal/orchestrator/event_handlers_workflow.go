@@ -8241,7 +8241,7 @@ func (s *Service) applyGuardedTransitionLifecycle(
 	casAttempted := false
 	casApplied := false
 	var commitErr error
-	lifecycleApplied := s.applyEngineTransitionWithCommitMode(
+	lifecycleApplied := s.applyEngineTransitionWithCommitResultMode(
 		ctx,
 		taskID,
 		session,
@@ -8249,28 +8249,33 @@ func (s *Service) applyGuardedTransitionLifecycle(
 		trigger,
 		task.Description,
 		transitionLifecycleGuardedDecision,
-		func(commitCtx context.Context) (bool, error) {
+		func(commitCtx context.Context) (workflowTransitionCommitResult, error) {
 			casAttempted = true
 			transitionCtx := commitCtx
 			if !steptelemetry.HasTrigger(transitionCtx) {
 				transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
 			}
-			committedTask, oldWorkflowID, applied, err := s.workflowStore.applyTransitionIfAtStepRaw(
+			committedTask, oldWorkflowID, applied, wipLimit, err := s.workflowStore.applyTransitionIfAtStepRaw(
 				transitionCtx, taskID, fromStepID, toStepID,
 			)
 			if err != nil {
 				commitErr = err
-				return false, err
+				return workflowTransitionCommitResult{}, err
 			}
 			if !applied {
-				return false, nil
+				return workflowTransitionCommitResult{}, nil
 			}
 			casApplied = true
 			// The raw CAS commit intentionally has no side effects. The shared
 			// lifecycle helper performs the remaining task-level work below.
 			s.publishTaskUpdated(ctx, committedTask, oldWorkflowID)
 			s.workflowStore.pullNextTaskOnVacate(ctx, fromStepID, taskID)
-			return true, nil
+			return workflowTransitionCommitResult{
+				Applied:        true,
+				AdmissionKnown: true,
+				WIPAdmitted:    committedTask.QueuedForStepID != toStepID || committedTask.WIPAdmitted,
+				WIPLimit:       wipLimit,
+			}, nil
 		},
 	)
 	if commitErr != nil {
@@ -8324,11 +8329,9 @@ func (s *Service) applyEngineTransitionWithMode(
 	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
 	mode transitionLifecycleMode,
 ) bool {
-	return s.applyEngineTransitionWithCommitMode(ctx, taskID, session, result, trigger, taskDescription, mode,
-		func(commitCtx context.Context) (bool, error) {
-			return s.workflowStore.applyTransitionReportingApplied(
-				commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger,
-			)
+	return s.applyEngineTransitionWithCommitResultMode(ctx, taskID, session, result, trigger, taskDescription, mode,
+		func(commitCtx context.Context) (workflowTransitionCommitResult, error) {
+			return s.workflowStore.applyTransitionReportingApplied(commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger)
 		})
 }
 
@@ -8379,16 +8382,28 @@ func (s *Service) recoverCompletedTurnAfterWorkflowPreflightFailure(
 	s.setSessionWaitingForInput(ctx, taskID, currentSession.ID, currentSession)
 }
 
-// applyEngineTransitionWithCommitMode applies the shared lifecycle around a
-// transition commit. The default path commits through ApplyTransition. The
-// quorum decision path supplies a CAS commit so lifecycle hooks cannot be
-// bypassed by the engine's guarded-transition re-evaluation.
-//
-//nolint:cyclop,gocognit,funlen // this coordinates independent transition lifecycle stages.
+// applyEngineTransitionWithCommitMode adapts bool-only commit callbacks to the
+// shared transition lifecycle.
 func (s *Service) applyEngineTransitionWithCommitMode(
 	ctx context.Context, taskID string, session *models.TaskSession,
 	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
 	mode transitionLifecycleMode, commit func(context.Context) (bool, error),
+) bool {
+	return s.applyEngineTransitionWithCommitResultMode(ctx, taskID, session, result, trigger, taskDescription, mode,
+		func(commitCtx context.Context) (workflowTransitionCommitResult, error) {
+			applied, err := commit(commitCtx)
+			return workflowTransitionCommitResult{Applied: applied}, err
+		})
+}
+
+// applyEngineTransitionWithCommitResultMode gates destination lifecycle work
+// with the admission decision returned by the committed transition.
+//
+//nolint:cyclop,gocognit,funlen // this coordinates independent transition lifecycle stages.
+func (s *Service) applyEngineTransitionWithCommitResultMode(
+	ctx context.Context, taskID string, session *models.TaskSession,
+	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
+	mode transitionLifecycleMode, commit func(context.Context) (workflowTransitionCommitResult, error),
 ) bool {
 	ctx = withWorkflowMetaCache(ctx)
 	sessionLifecycle := mode != transitionLifecycleGuardedDecision
@@ -8464,7 +8479,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 			consumedSignal = signal
 		}
 	}
-	applied, err := commit(applyCtx)
+	commitResult, err := commit(applyCtx)
 	if err != nil {
 		recordWorkflowTransitionError(ctx, err)
 		s.logger.Error("failed to apply engine transition",
@@ -8474,7 +8489,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		settleFailedTransitionSession()
 		return false
 	}
-	if !applied {
+	if !commitResult.Applied {
 		recordWorkflowTransitionError(ctx, errors.New("workflow transition commit was not applied"))
 		return false
 	}
@@ -8514,28 +8529,15 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		}
 	}
 
-	queuedTask, queuedErr := s.repo.GetTask(ctx, taskID)
-	if queuedErr == nil && queuedTask != nil && queuedTask.QueuedForStepID == result.ToStepID && !queuedTask.WIPAdmitted {
-		// The source transition is committed, but destination state and
-		// on_enter behavior wait for the queue promotion event.
-		if sessionLifecycle {
-			s.logger.Info("workflow on_enter deferred until destination step admits the task",
-				zap.String("task_id", taskID),
-				zap.String("session_id", session.ID),
-				zap.String("from_step_id", result.FromStepID),
-				zap.String("to_step_id", result.ToStepID),
-				zap.Int("wip_limit", targetStep.WIPLimit),
-				zap.String("reason", "wip_limit_reached"))
-			if mode == transitionLifecycleOnTurnStart {
-				if err := s.prepareWorkflowTurnStartSessionState(ctx, taskID, session.ID); err != nil {
-					s.reportWorkflowTurnStartPreparationError(ctx, taskID, session.ID, err)
-					return false
-				}
-			} else {
-				s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
-			}
-		}
+	commitResult, admissionKnown := s.workflowTransitionAdmissionResult(
+		ctx, taskID, session.ID, result, targetStep, commitResult,
+	)
+	if !admissionKnown {
+		settleFailedTransitionSession()
 		return true
+	}
+	if !commitResult.WIPAdmitted {
+		return s.deferWorkflowTransitionEntry(ctx, taskID, session, result, mode, sessionLifecycle, commitResult.WIPLimit)
 	}
 
 	if terminalTarget {
@@ -8608,6 +8610,72 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// asynchronously after that guard is released. Clear the synchronous
 	// ownership marker so profile-switch parking acquires its own guard.
 	s.launchProcessOnEnter(withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep, taskDescription, transitionID, fromStep)
+	return true
+}
+
+func (s *Service) workflowTransitionAdmissionResult(
+	ctx context.Context,
+	taskID, sessionID string,
+	result engine.HandleResult,
+	targetStep *wfmodels.WorkflowStep,
+	commitResult workflowTransitionCommitResult,
+) (workflowTransitionCommitResult, bool) {
+	if commitResult.AdmissionKnown {
+		return commitResult, true
+	}
+	queuedTask, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to reload task after committed workflow transition",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("from_step_id", result.FromStepID),
+			zap.String("to_step_id", result.ToStepID),
+			zap.Error(err))
+		return workflowTransitionCommitResult{}, false
+	}
+	if queuedTask == nil {
+		s.logger.Warn("task reload returned no task after committed workflow transition",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("from_step_id", result.FromStepID),
+			zap.String("to_step_id", result.ToStepID))
+		return workflowTransitionCommitResult{}, false
+	}
+	commitResult.AdmissionKnown = true
+	commitResult.WIPAdmitted = queuedTask.QueuedForStepID != result.ToStepID || queuedTask.WIPAdmitted
+	if targetStep != nil {
+		commitResult.WIPLimit = targetStep.WIPLimit
+	}
+	return commitResult, true
+}
+
+func (s *Service) deferWorkflowTransitionEntry(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	result engine.HandleResult,
+	mode transitionLifecycleMode,
+	sessionLifecycle bool,
+	wipLimit int,
+) bool {
+	if !sessionLifecycle {
+		return true
+	}
+	s.logger.Info("workflow on_enter deferred until destination step admits the task",
+		zap.String("task_id", taskID),
+		zap.String("session_id", session.ID),
+		zap.String("from_step_id", result.FromStepID),
+		zap.String("to_step_id", result.ToStepID),
+		zap.Int("wip_limit", wipLimit),
+		zap.String("reason", "wip_limit_reached"))
+	if mode != transitionLifecycleOnTurnStart {
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return true
+	}
+	if err := s.prepareWorkflowTurnStartSessionState(ctx, taskID, session.ID); err != nil {
+		s.reportWorkflowTurnStartPreparationError(ctx, taskID, session.ID, err)
+		return false
+	}
 	return true
 }
 
