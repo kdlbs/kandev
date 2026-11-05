@@ -2961,7 +2961,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-          RUSTUP_TOOLCHAIN: 1.88.0
+          RUSTUP_TOOLCHAIN: 1.90.0
         run: |
           set -euo pipefail
           pub_date="$(git show -s --format=%cI "${RELEASE_TAG}^{commit}")"
