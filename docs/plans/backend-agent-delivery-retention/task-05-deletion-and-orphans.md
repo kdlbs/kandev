@@ -119,3 +119,11 @@ The new SQLite repository scenarios were first run while the retirement methods 
 | `gofmt -l $(git diff --name-only -- '*.go'; git ls-files --others --exclude-standard '*.go')` and `git diff --check` | Passed after formatting two existing changed test files. |
 
 The PostgreSQL run executed the environment-gated subtests; none were skipped. No feature flag, staging or commit was added.
+
+## Bounded diagnostic follow-up
+
+On 2026-10-24, an offline maintenance run reached the unbound-workflow count and exhausted the existing batch context. SQLite could choose the terminal-lookup index and a temporary ORDER BY tree despite LIMIT. The count now uses the existing sparse index with its matching literal predicate on SQLite only. PostgreSQL retains the original parameterized query. Schema, candidate limits, shared deadlines and retained-row policy are unchanged.
+
+SQLite 3.50.4 EXPLAIN on the offline input selected the terminal-lookup index plus temporary sort for the original query, and the sparse unbound-workflow index without that sort for the candidate. One read-only candidate count capped at 200 returned 2 in 5.6694 ms. This measures that query, not the complete 250 ms batch or a successful maintenance run.
+
+The existing `TestDeliveryRetentionOrphans/SQLite` and a temporary method-level overlay passed together with race detection (package 1.371s). The overlay checked capped counts, both missing-identity cases, unrelated/bound-row exclusion, cancellation, required SQLite index selection, and unchanged PostgreSQL rebinding/arguments on SQLite-compatible positional parameters. The existing PostgreSQL subtest skipped because its DSN was unset; the overlay is not a PostgreSQL engine result. No permanent test was added, and the earlier verification records remain unchanged.

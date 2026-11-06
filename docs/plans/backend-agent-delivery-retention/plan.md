@@ -127,6 +127,7 @@ Measure the same workload at the pre-retention baseline, with new fencing/cleanu
 - SQLite native BEGIN may remain busy after cancellation until its existing 5-second busy timeout plus scheduling overhead. Measure that separately from admitted SQL work; no predicates or mutations may follow cancelled admission. Join failed entry/rollback before pool reuse or shutdown. A pass starts no new batch after its deadline, but an in-flight native wait can overrun it. Unexpected overruns beyond these distinct budgets keep acceptance unresolved.
 - At 20 events/second and 1 KiB, cleanup must drain steady-state eligible backlog with oldest eligible age at most two normal intervals beyond grace on the controlled fixture.
 - Explain plans must use the intended candidate/purge indexes. Fixed batch query/scan work must not increase linearly with 1,000,000 retained historical rows.
+- SQLite's bounded unbound-workflow count selects the existing sparse index with its matching literal predicate. The [Task 05 follow-up](task-05-deletion-and-orphans.md#bounded-diagnostic-follow-up) records the focused check; no worker budget changes.
 - Record logical payload bytes, index/page overhead, WAL/dead tuples, reusable pages and separately requested post-compaction size. Confirm deleted payload bytes can remain in backups.
 
 The design formula estimates about 71.5 MiB raw grace plus 2.44 MiB compact receipt content for a continuously active healthy baseline stream.
