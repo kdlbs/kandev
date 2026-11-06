@@ -103,9 +103,16 @@ type ProviderError struct {
 	// DiagnosticIdentityComplete is set only when the adapter extracted the
 	// complete raw diagnostic and sanitization made no change to it.
 	DiagnosticIdentityComplete bool `json:"diagnostic_identity_complete,omitempty"`
+	// DiagnosticSingleLine is set only when an adapter can establish that the
+	// original diagnostic has no line separators before whitespace sanitization.
+	DiagnosticSingleLine bool `json:"diagnostic_single_line,omitempty"`
 	// RPCCode is the JSON-RPC error code from a terminal ACP prompt error,
 	// carried verbatim. JSON-RPC forbids code 0, so 0 means absent.
 	RPCCode int `json:"rpc_code,omitempty"`
+	// HTTPStatus is a provider HTTP error status supplied as structured metadata.
+	HTTPStatus int `json:"http_status,omitempty"`
+	// ProviderCode is an opaque, bounded provider error code, not a routing code.
+	ProviderCode string `json:"provider_code,omitempty"`
 	// ErrorKind is the adapter-declared error kind from a terminal ACP prompt
 	// error's structured Data, allowlisted and validated before it crosses the
 	// boundary.
