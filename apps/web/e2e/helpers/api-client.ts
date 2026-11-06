@@ -2938,7 +2938,16 @@ export class ApiClient {
 
   /** Reads the authoritative background-work projection for a session. */
   async listBackgroundWorkloads(sessionId: string): Promise<{
-    workloads: Array<{ work_id: string; title: string; state: string }>;
+    workloads: Array<{
+      work_id: string;
+      title: string;
+      kind?: string;
+      state: string;
+      exit_code?: number | null;
+      source_call_id?: string;
+      origin_turn_id?: string;
+      revision?: number;
+    }>;
   }> {
     const response = await this.rawRequest(
       "GET",
@@ -3560,21 +3569,6 @@ export class ApiClient {
       defaultTeamKey: "",
       ...config,
       authMethod: "api_key",
-    });
-  }
-
-  async createSentryInstance(payload: {
-    name: string;
-    secret: string;
-    url?: string;
-    workspaceId?: string;
-  }): Promise<{ id: string }> {
-    const { workspaceId, ...config } = payload;
-    const path = await this.withActiveWorkspace("/api/v1/sentry/instances", workspaceId);
-    return this.request("POST", path, {
-      authMethod: "auth_token",
-      url: "https://sentry.io",
-      ...config,
     });
   }
 

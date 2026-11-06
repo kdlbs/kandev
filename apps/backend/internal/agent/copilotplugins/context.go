@@ -12,28 +12,6 @@ var errUnsupportedLaunchContext = errors.New("unsupported copilot plugin launch 
 
 const windowsOS = "windows"
 
-// inventoryQualifiedVersions lists the managed Copilot packages whose inventory
-// format, installation metadata, and repeated mount syntax were reproduced.
-// An unlisted version returns a typed unsupported result instead of falling
-// back to a globally installed CLI.
-var inventoryQualifiedVersions = map[string]struct{}{
-	"1.0.88":  {},
-	"1.0.104": {},
-}
-
-// RuntimeSupported reports whether safe inventory discovery is qualified for
-// the selected managed runtime version.
-func RuntimeSupported(version string) bool {
-	_, ok := inventoryQualifiedVersions[strings.TrimSpace(version)]
-	return ok
-}
-
-// MountsPermitted reports whether the selected runtime has a supported native
-// inventory and metadata adapter for explicit plugin preparation.
-func MountsPermitted(version string) bool {
-	return RuntimeSupported(version)
-}
-
 // RuntimeVersionFromCommand extracts the exact @github/copilot package version
 // from an already-prepared argv. Binding discovery to this command prevents a
 // runtime activation between command construction and plugin resolution.

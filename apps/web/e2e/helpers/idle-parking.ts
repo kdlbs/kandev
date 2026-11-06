@@ -1,4 +1,60 @@
+import type { Page } from "@playwright/test";
 import { DatabaseSync } from "./node-sqlite";
+
+export type SessionFocusLaunchTracker = {
+  /** IDs of `session.launch` requests whose activation source is `session_focus`. */
+  requestIds: Set<string>;
+  /** Responses correlated to those `session_focus` requests. */
+  responses: Array<{ id: string; payload: unknown }>;
+};
+
+/**
+ * Observe `session.launch` requests with `activation_source=session_focus` for
+ * one session. Arm it before the navigation that could send the focus resume.
+ */
+export function watchSessionFocusLaunches(
+  page: Page,
+  sessionId: string,
+): SessionFocusLaunchTracker {
+  const requestIds = new Set<string>();
+  const responses: Array<{ id: string; payload: unknown }> = [];
+  page.on("websocket", (socket) => {
+    socket.on("framesent", (frame) => {
+      try {
+        const message = JSON.parse(String(frame.payload)) as {
+          id?: string;
+          action?: string;
+          payload?: { session_id?: string; activation_source?: string };
+        };
+        if (
+          message.action === "session.launch" &&
+          message.payload?.session_id === sessionId &&
+          message.payload.activation_source === "session_focus" &&
+          message.id
+        ) {
+          requestIds.add(message.id);
+        }
+      } catch {
+        // Ignore unrelated websocket frames.
+      }
+    });
+    socket.on("framereceived", (frame) => {
+      try {
+        const message = JSON.parse(String(frame.payload)) as {
+          id?: string;
+          type?: string;
+          payload?: unknown;
+        };
+        if (message.type === "response" && message.id && requestIds.has(message.id)) {
+          responses.push({ id: message.id, payload: message.payload });
+        }
+      } catch {
+        // Ignore unrelated websocket frames.
+      }
+    });
+  });
+  return { requestIds, responses };
+}
 
 export function readIdleSuspensionState(databasePath: string, sessionId: string): string | null {
   const database = new DatabaseSync(databasePath);

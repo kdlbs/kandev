@@ -359,5 +359,19 @@
   "runStatusRetrySchedulingFailed": "Não foi possível agendar a nova tentativa",
   "retryAttempt": "Tentativa {{attempt}}",
   "retryDue": "Prevista {{when}}",
-  "stopRetry": "Parar repetições"
+  "stopRetry": "Parar repetições",
+  "pluginToolsTitle": "Ferramentas de plugins (opcional)",
+  "pluginToolsDescription": "Selecione as ferramentas que esta automação pode usar.",
+  "pluginToolsLoading": "A carregar ferramentas de plugins...",
+  "pluginToolsLoadError": "Não foi possível carregar as ferramentas de plugins. A seleção guardada não foi alterada.",
+  "pluginToolsRetry": "Tentar novamente",
+  "pluginToolsEmpty": "Nenhum plugin instalado oferece atualmente ferramentas para automações privadas.",
+  "pluginToolsReviewRequired": "Revisão necessária: a configuração do plugin foi alterada.",
+  "pluginToolsPreviouslySelected": "Selecionado anteriormente: {{names}}",
+  "pluginToolsReselect": "Selecione as ferramentas novamente e guarde para restaurar o acesso.",
+  "pluginToolsClear": "Limpar",
+  "pluginToolsRead": "Leitura",
+  "pluginToolsWrite": "Escrita",
+  "pluginToolsClearedHint": "Guarde para remover o acesso às ferramentas de plugins.",
+  "pluginToolsUnavailable": "Plugin indisponível"
 }

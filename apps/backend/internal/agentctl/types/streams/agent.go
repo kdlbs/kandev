@@ -1,6 +1,10 @@
 package streams
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/common/modelcatalog"
+)
 
 // AgentEvent type constants define the types of events streamed from the agent.
 const (
@@ -305,9 +309,10 @@ type AgentEvent struct {
 
 	// ToolStatus indicates the current status: "started", "running", "completed", "error".
 	ToolStatus string `json:"tool_status,omitempty"`
-	// ToolStatusMissing retains ACP wire provenance for the local turn finalizer.
-	// It is not serialized because only the adapter consumes this evidence.
-	ToolStatusMissing bool `json:"-"`
+	// ToolStatusMissing retains ACP wire provenance. It crosses the agentctl
+	// stream so the backend lifecycle boundary can use the same evidence as the
+	// local turn finalizer when deciding whether an update starts a turn.
+	ToolStatusMissing bool `json:"tool_status_missing,omitempty"`
 
 	// ToolOutputBytes preserves legacy v1 receipt serialization, including explicit zero.
 	// New producers leave this read-compatibility field unset.
@@ -757,6 +762,10 @@ type ConfigOption struct {
 
 	// Options lists the selectable values.
 	Options []ConfigOptionValue `json:"options,omitempty"`
+
+	// Catalog carries the provider's bounded group structure and verified
+	// composition bindings. Options stays the flat compatibility projection.
+	Catalog *modelcatalog.Catalog `json:"catalog,omitempty"`
 }
 
 // ConfigOptionValue represents a selectable value for a ConfigOption.

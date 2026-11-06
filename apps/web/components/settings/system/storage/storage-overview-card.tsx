@@ -134,6 +134,7 @@ function GoCacheResourceActions({
         <div className="mt-3 border-t pt-3">
           <StorageGoCacheResult
             result={latestRun.result}
+            message={latestRun.message}
             busyPolicyEnabled={
               latestRun.settings_snapshot.go_cache?.allow_cleanup_while_busy === true
             }

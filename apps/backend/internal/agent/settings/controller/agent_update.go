@@ -132,25 +132,30 @@ func (c *Controller) previewAgentUpdate(
 		// always previews an exact package@version command.
 		command = spec.UpdateCommand().Args()
 	}
+	compatibility, err := c.copilotPluginCompatibilityPreview(ctx, name, target)
+	if err != nil {
+		return nil, err
+	}
 	return &dto.AgentUpdatePreviewDTO{
-		UpdateMode:         dto.AgentUpdateModePinned,
-		ManagedFallback:    fallback,
-		AgentName:          name,
-		Package:            spec.Package,
-		CurrentVersion:     current,
-		DefaultVersion:     defaultVersion,
-		ActiveVersion:      active,
-		EffectiveVersion:   effective,
-		TargetVersion:      target,
-		Family:             string(family),
-		Source:             string(source),
-		TargetFamily:       string(family),
-		RuntimeRevision:    revision,
-		MigrationAvailable: migrationAvailable,
-		Operation:          string(operation),
-		AvailableVersions:  runtimeVersionDTOs(catalogue),
-		Command:            command,
-		CommandString:      buildCommandString(command),
+		UpdateMode:                 dto.AgentUpdateModePinned,
+		ManagedFallback:            fallback,
+		AgentName:                  name,
+		Package:                    spec.Package,
+		CurrentVersion:             current,
+		DefaultVersion:             defaultVersion,
+		ActiveVersion:              active,
+		EffectiveVersion:           effective,
+		TargetVersion:              target,
+		Family:                     string(family),
+		Source:                     string(source),
+		TargetFamily:               string(family),
+		RuntimeRevision:            revision,
+		MigrationAvailable:         migrationAvailable,
+		Operation:                  string(operation),
+		AvailableVersions:          runtimeVersionDTOs(catalogue),
+		Command:                    command,
+		CommandString:              buildCommandString(command),
+		CopilotPluginCompatibility: compatibility,
 	}, nil
 }
 

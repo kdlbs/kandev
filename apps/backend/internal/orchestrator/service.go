@@ -131,6 +131,13 @@ type MessageCreator interface {
 	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
 	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
 	CreateUserMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
+	// SetUserMessageDeliveryStatus sets the delivery status on an exact
+	// session-owned user message. It reports whether the message exists.
+	SetUserMessageDeliveryStatus(ctx context.Context, messageID, agentSessionID, status string) (bool, error)
+	// CreateCompletedUserMessageIdempotent records a user message in an
+	// already-completed lifecycle-only turn. It never starts or adopts an
+	// active conversation turn.
+	CreateCompletedUserMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID string, metadata map[string]interface{}) error
 	// CreateToolCallMessage creates a message for a tool call.
 	// normalized contains the typed tool payload data.
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
@@ -188,12 +195,15 @@ type StreamingMessageRetractionService interface {
 // stale provider event from creating a new retry while terminal cleanup is in
 // flight, then allows the session entry to be reclaimed.
 type transientRetryNoticeState struct {
-	mu           sync.Mutex
-	retired      atomic.Bool
-	owned        atomic.Bool
-	retiredUntil atomic.Int64
-	refs         int
-	fenceTimer   *time.Timer
+	mu sync.Mutex
+	// retirementGeneration is protected by mu and distinguishes a fence
+	// already present when an attempt began from a later cancellation.
+	retirementGeneration uint64
+	retired              atomic.Bool
+	owned                atomic.Bool
+	retiredUntil         atomic.Int64
+	refs                 int
+	fenceTimer           *time.Timer
 }
 
 // SessionAttachmentCleaner removes file-backed prompt attachments after a
@@ -2006,6 +2016,9 @@ func NewService(
 	})
 	exec.SetOnLaunchFailed(s.handleLaunchFailed)
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
+	exec.SetOnStaleExecutionCleanup(func(ctx context.Context, sessionID string) {
+		s.settleBackgroundWorkLocked(ctx, sessionID, "")
+	})
 	exec.SetOnCancelledResumeExecutionCleanup(s.cleanupCancelledResumeExecution)
 	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
 	exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
@@ -4443,6 +4456,9 @@ func (s *Service) QueueUserPrompt(
 	queueMetadata := make(map[string]interface{}, len(metadata)+1)
 	for key, value := range metadata {
 		queueMetadata[key] = value
+	}
+	if err := retainBuiltinIntent(ctx, taskID, sessionID, queueMetadata); err != nil {
+		return err
 	}
 	if userMessageRecorded {
 		queueMetadata[metaKeyUserMessageRecorded] = true

@@ -54,7 +54,7 @@ After a completed turn, use **Fork conversation** to create another session thro
 
 ### Inspect agent background work
 
-Agents that report background shell commands, subagents, or monitors feed the shared background-work chip above the message box. The chip is enabled by default in the shipped profiles; the operator toggle is **Agent background work** in **Settings > System > Feature Toggles**. The same experience, counts, and detail views apply on desktop and phone, and the chip never changes how a prompt is admitted. See [Tasks and workflows](tasks-and-workflows.md#inspect-background-work).
+Agents that report background shell commands, subagents, or monitors feed the shared background-work view. A composer chip appears only while at least one job is running; it counts and summarizes that running subset. The overview separates **Active** (running and waiting) from **History** (completed, failed, interrupted, ended, and unknown). Open it from **View all work**, the desktop **+** panel menu, or the phone **Panels** menu in a managed session, even when no chip is visible; passthrough terminal sessions do not expose the phone entry. Unknown activity keeps its status and never implies completion. The chip is enabled by default in the shipped profiles; the operator toggle is **Agent background work** in **Settings > System > Feature Toggles**. The same experience, counts, and detail views apply on desktop and phone, and the chip never changes how a prompt is admitted. See [Tasks and workflows](tasks-and-workflows.md#inspect-background-work).
 
 Provider support differs, and Kandev shows only what the connected runtime verifies:
 
@@ -424,6 +424,40 @@ After you edit launch settings, choose **Refresh models** to check the current d
 The provider returns the model catalog. Discovery success does not confirm
 catalog completeness or account access to every model.
 
+### Create the first profile for a newly installed agent
+
+If you install an agent CLI after Kandev started, **Settings > Agents** can list it
+as available before any profile row exists. Open its card and create the profile
+as usual. Model discovery and dependent option resolution use the complete draft,
+so the model list, modes, and dependent options work before the first Save.
+Saving creates the agent and then its first profile. Invalid profile input is
+rejected before the agent row is created; a later storage failure reports an
+error instead of claiming a partial success. Discovery alone does not create a
+profile, change an existing one, or start a task session.
+
+### Model groups and composed selections
+
+Some providers advertise models under native groups instead of one flat list.
+The picker keeps the supplied group names, order, and descriptions. Search matches
+model labels, exact values, group paths, and, for a composed family, its
+dimension labels and values.
+
+A composed family opens a focused view with one row per supplied dimension. When
+the exact model resolves, the view also shows that model's real provider options,
+such as Thinking or Speed, so the whole configuration can be reviewed before the
+single **Use configuration** action. Only a complete combination that resolves to
+exactly one currently advertised model can be applied. Selecting a dimension keeps
+the rest of your draft visible; values that can no longer complete a pairing are
+marked and must be replaced before applying. Thinking, Speed, Effort, and other
+provider options remain separate controls and keep the selected model's
+authoritative option snapshot. Kandev does not guess pairings from model names:
+a family renders as composed only when the provider supplies verified
+relationships, so an unqualified family stays an ordinary group.
+
+On a phone the picker opens as one sheet with internal Back navigation, one
+vertical scroll region, and a fixed Apply action. Closing the sheet without
+applying leaves your saved configuration unchanged.
+
 ### Runtime notifications and automatic updates
 
 Kandev checks enabled, available agent runtimes in the background, including
@@ -668,7 +702,9 @@ full, it stays parked without a manual-override notice. A queued focus resume,
 including a completed conversation, retries when capacity is available and
 only while the same conversation remains idle-suspended. Explicit **Resume**
 and **Send Now** keep manual admission. Ordinary message delivery waits for
-capacity through the same ceiling.
+capacity through the same ceiling. When **Prevent auto-start on open** is
+enabled in the web app, focus does not send that resume; the composer shows the
+start hint and a message to the parked conversation resumes it instead.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn
@@ -920,6 +956,32 @@ which option before delivery and rejects concurrent or replayed answers. It does
 environment values, headers, raw MCP arguments, or option metadata. See
 [Resolve a live agent permission request](automation-and-mcp.md#resolve-a-live-agent-permission-request).
 
+### Devin permissions and sandbox
+
+New Devin profiles start in **Smart** mode with **Devin sandbox** set to
+**Disabled**, which stores an explicit `DEVIN_SANDBOX=false` entry. Existing
+profiles keep their saved values, including an inherited setting that has no
+entry. Smart availability varies by account and rollout; when the current
+capability snapshot does not advertise it, the editor shows Smart as unavailable
+and asks for an advertised mode instead of substituting Code, Ask, or Plan.
+
+The sandbox control has three values:
+
+- **Use CLI settings**: no profile entry. Devin applies its own policy and the
+  profile keeps its explicit mode.
+- **Disabled**: explicit `DEVIN_SANDBOX=false`.
+- **Enabled**: explicit `DEVIN_SANDBOX=true` and **Autonomous** mode. Kandev
+  validates the pair and refuses a contradictory Smart or Bypass mode before the
+  provider starts.
+
+Install or update Devin with the official command
+`curl -fsSL https://cli.devin.ai/install.sh | bash`. Sandbox execution needs the
+provider's own prerequisites on the host; a missing prerequisite fails visibly
+and Kandev does not retry without the sandbox. The ACP Start mode controls
+structured sessions only. With terminal passthrough enabled, the native terminal
+keeps Devin's own permission behavior. Kandev **Auto-approve all permissions**
+remains independent and only answers approval requests the provider still sends.
+
 Auto approval can authorize shell commands, file changes, network calls, or any other capability exposed by that agent. Agent-specific flags that suppress permission prompts can be broader still. Use either only with a constrained executor, repository, environment, and credential set.
 
 Workspace automation selectors do not offer passthrough agent profiles. Local executor profiles are available for the repository-free target; Worktree requires a repository. Hidden automation sessions receive a fixed workspace-scoped coordinator MCP surface. Visible normal-task automations use the ordinary task profile and MCP surface. The trusted automation principal is resolved before hidden-run dispatch, and a hidden automation task and its sessions cannot be used as mutation, messaging, stopping, spawning, or blocker targets. Cross-task spawning uses the target task's normal profile. Native provider continuation and compaction remain authoritative for a healthy reusable session. When native continuation is unavailable, Kandev uses an explicit recovery action and bounded saved history. It does not restore private harness state or repeat an uncertain prompt. See [Automation and MCP](automation-and-mcp.md).
@@ -999,14 +1061,31 @@ A disabled installed plugin can still be selected for this profile. This
 selection asks Copilot to load the whole plugin for this profile; it does not
 enable the plugin globally.
 
-Kandev supports inventory and plugin-metadata adapters for managed Copilot CLI
-versions **1.0.88** and **1.0.104**. For a supported version and valid local or
-worktree context, Kandev can prepare a native `--plugin-dir` mount without an
-enterprise-policy qualification gate. `mount_permitted` describes that
-preparation eligibility; it is not policy approval, authentication, or a
-guarantee that a plugin component will load. Kandev uses the runtime selected
-for this profile and does not fall back to an unrelated global CLI or change a
-runtime pin.
+When you refresh, Kandev checks the selected interactive CLI's native help for
+the `--plugin-dir` option, then reads and validates its plugin inventory and
+installation metadata. These checks use the exact runtime and launch context
+selected for the profile. Kandev does not use a version or platform list to
+decide whether plugin preparation is available, and it does not fall back to
+an unrelated global CLI or change a runtime pin. A successful check confirms
+the interface and the selected plugin roots; Copilot's own policy remains the
+authority for whether a plugin component loads. The `mount_permitted` field
+reports only observed option support. It does not mean policy approval,
+authentication, or guaranteed plugin execution.
+
+Before a Copilot runtime change, the update preview shows plugin compatibility
+as unchecked because it does not run help or inventory for each saved profile's
+concrete launch context. It also reports how many saved profiles select plugins
+when that count is available. The notice is advisory. It does not block the
+update, change selections, or stop a running process. Successful ACP validation
+does not by itself verify profile plugin loading.
+
+If the selected runtime does not advertise `--plugin-dir`, or its inventory
+cannot be read, the profile keeps its saved selections and shows that plugin
+preparation cannot be completed for the current observation. Remove the
+selection before starting a new process, or repair the runtime and refresh.
+Native enabled status is unknown for a saved plugin that the current successful
+inventory did not observe; Kandev does not report that unknown state as
+disabled.
 
 A selection asks Copilot to load the whole plugin through its native support. A plugin
 can run MCP servers, skills, agents, commands, hooks, and other executable
@@ -1028,6 +1107,14 @@ its selected plugins cannot be prepared; Kandev does not silently omit them.
 If inventory refresh fails, saved choices remain and availability is marked
 unchecked. The profile's normal **Save**, **Reset**, and external-change
 recovery flow applies.
+
+If startup cannot prepare the selected plugins, the task conversation keeps a
+recovery card after reload. It shows the safe failure reason and the exact
+selected runtime version when available. It does not show plugin identities,
+host paths, or native command output. The saved selection stays in place; repair
+the plugin state or review the profile selection, then use the existing
+recovery controls to try again. The same recovery information is available on
+desktop and phone.
 
 Older Kandev backends may return the legacy `policy_unverified` reason for a
 profile capability or model-option probe. This is older-backend recovery, not
@@ -1064,6 +1151,8 @@ certification.
 ## Add MCP servers to a workspace
 
 Open **Settings > Workspaces > _workspace_ > MCP servers**. The **Configured** view stores reusable MCP definitions for that workspace. The existing **External MCP** page is different: it exposes Kandev's own MCP endpoint to outside clients.
+
+The **Built-in** section manages Kandev's native tool packages separately from these definitions. See [Choose built-in MCP packages](builtin-mcp-packages.md) for task opt-in, workspace limits, defaults, and next-start timing.
 
 Choose **Add MCP server** for one of these setup modes:
 
@@ -1121,7 +1210,8 @@ After a definition is configured, select it where it should apply:
   additions under **Additional servers**. Inherited entries retain all contributing
   origins. Choose **Exclude for this session** to leave out one inherited server,
   or **Restore inheritance** to use its current inherited selections again.
-  Check **Connections** for evidence of delivery or loaded tools.
+  Exclusion help appears only when there are inherited servers or saved
+  exclusions. Check **Connections** for evidence of delivery or loaded tools.
 
 Selections combine every repository attached to the task, its profile, task,
 and session additions. An existing session can exclude a definition from this

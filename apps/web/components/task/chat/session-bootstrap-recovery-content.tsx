@@ -189,6 +189,13 @@ function preferredBootstrapRecoveryAction(
   return undefined;
 }
 
+function recoveryCauseDetails(error: TaskStatusSummaryActiveError, model: RecoveryCardModel) {
+  if (model.hasTypedSelectionCause || model.hasTypedPluginCause || model.hasTypedCleanupCause) {
+    return "";
+  }
+  return error.details ?? "";
+}
+
 export function RecoveryCardContent({
   model,
   error,
@@ -240,8 +247,7 @@ export function RecoveryCardContent({
   const summary = needsManagedCloneRelocation
     ? t("task:managedCloneRelocationBody")
     : model.summary;
-  const details =
-    model.hasTypedSelectionCause || model.hasTypedCleanupCause ? "" : (error.details ?? "");
+  const details = recoveryCauseDetails(error, model);
   return (
     <div className="min-w-0 flex-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">

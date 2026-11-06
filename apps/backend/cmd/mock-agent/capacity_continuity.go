@@ -16,7 +16,7 @@ import (
 
 const retainedCapacityMessage = "Selected model is at capacity. Please try a different model."
 
-var retainedCapacityCmdRe = regexp.MustCompile(`(?i)^/(?:e2e:)?capacity-(after-tools|completed-tools|retry|cancel|exhaust)(?::(\d+))?$`)
+var retainedCapacityCmdRe = regexp.MustCompile(`(?i)^/(?:e2e:)?capacity-(after-tools|completed-tools|known-failed-command|retry|cancel|exhaust)(?::(\d+))?$`)
 
 const retainedCapacityContinuationMarker = "previous turn stopped because the selected model was at capacity"
 
@@ -40,9 +40,7 @@ func parseRetainedCapacityCmd(prompt string) (retainedCapacityScenario, bool) {
 	}
 	scenario := retainedCapacityScenario{name: strings.ToLower(match[1]), failTimes: 1}
 	switch scenario.name {
-	case "after-tools":
-		scenario.withTools = true
-	case "completed-tools":
+	case "after-tools", "completed-tools", "known-failed-command":
 		scenario.withTools = true
 	case "cancel", "exhaust":
 		scenario.failTimes = 9
@@ -139,6 +137,9 @@ func (a *mockAgent) handleRetainedCapacity(ctx context.Context, sid acp.SessionI
 			e.completeTool("capacity-edit", "fixture.txt updated.")
 			traceACP("completed_side_effect", string(sid), map[string]string{"scenario": scenario.name, "effect": "fixture.txt"})
 		}
+		if scenario.withTools && attempt == 1 && scenario.name == "known-failed-command" {
+			emitKnownFailedCommandCapacityFrames(e, sid)
+		}
 		return acp.PromptResponse{}, &acp.RequestError{
 			Code:    -32603,
 			Message: retainedCapacityMessage,
@@ -155,4 +156,31 @@ func (a *mockAgent) handleRetainedCapacity(ctx context.Context, sid acp.SessionI
 		e.text(fmt.Sprintf("Mock provider recovered after %d retained capacity error(s).", scenario.failTimes))
 	}
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil, true
+}
+
+// emitKnownFailedCommandCapacityFrames models the measured Codex shape: one
+// successful read and one command that ended with a matching terminal identity,
+// integer nonzero exit, and no signal. The command stays failed in history.
+func emitKnownFailedCommandCapacityFrames(e *emitter, sid acp.SessionId) {
+	const commandID acp.ToolCallId = "capacity-known-command"
+	const readID acp.ToolCallId = "capacity-known-read"
+	e.text("Ran the focused fixture read and command before the provider reported capacity.\n")
+	e.startTool(readID, "Read fixture.txt", acp.ToolKindRead, map[string]any{"path": "fixture.txt"})
+	e.completeTool(readID, "Fixture contents read.")
+	e.startTool(commandID, "Run focused fixture command", acp.ToolKindExecute, map[string]any{"command": "go test ./focused"})
+	e.completeToolWithMeta(commandID, acp.ToolCallStatusFailed,
+		map[string]any{
+			"exit_code": 1, "stdout": "FAIL focused package\n",
+			"stderr": "", "formatted_output": "FAIL focused package\n",
+		},
+		map[string]any{
+			"terminal_output": map[string]any{"data": "FAIL focused package\n", "terminal_id": string(commandID)},
+			"terminal_exit": map[string]any{
+				"exit_code": 1, "signal": nil, "terminal_id": string(commandID),
+			},
+		},
+	)
+	traceACP("known_command_failure", string(sid), map[string]string{
+		"scenario": "known-failed-command", "exit_code": "1",
+	})
 }

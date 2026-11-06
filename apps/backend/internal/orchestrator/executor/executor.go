@@ -1129,6 +1129,7 @@ type CoordinatorLookup interface {
 
 // Executor manages agent execution for tasks
 type Executor struct {
+	builtinPolicyReader           BuiltinPolicyReader
 	autonomousExecutorContext     func(context.Context, string, string) (context.Context, error)
 	executorAdmission             func(context.Context, string, string, string) (context.Context, error)
 	agentManager                  AgentManagerClient
@@ -1202,6 +1203,7 @@ type Executor struct {
 	// orchestrator so coordinator graceful stop and launch cleanup cannot both
 	// tear down the same execution.
 	onExecutionCleanupClaim ExecutionCleanupClaimFunc
+	onStaleExecutionCleanup func(context.Context, string)
 	// Callback for cancelled resume startup cleanup, which must share the
 	// orchestrator's retryable exact-execution teardown claim.
 	onCancelledResumeExecutionCleanup CancelledResumeExecutionCleanupFunc

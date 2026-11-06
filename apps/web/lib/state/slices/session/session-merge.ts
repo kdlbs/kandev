@@ -297,6 +297,14 @@ function mergeParkedProjection(
   };
 }
 
+function mergeAgentWorkspacePath(
+  existing: TaskSession,
+  incoming: TaskSession,
+): TaskSession["agent_workspace_path"] {
+  if (incoming.agent_workspace_path === undefined) return existing.agent_workspace_path;
+  return incoming.agent_workspace_path;
+}
+
 /** Merge an incoming session update with an existing session, preserving nullable fields. */
 export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSession {
   const cancellation = mergeCancellationProjection(existing, incoming);
@@ -356,6 +364,8 @@ export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): 
     worktree_path: incoming.worktree_path ?? existing.worktree_path,
     worktree_branch: incoming.worktree_branch ?? existing.worktree_branch,
     workspace_path: incoming.workspace_path ?? existing.workspace_path,
+    // Omission means "no update"; an authoritative null clears the base.
+    agent_workspace_path: mergeAgentWorkspacePath(existing, incoming),
     repository_id: incoming.repository_id ?? existing.repository_id,
     base_branch: incoming.base_branch ?? existing.base_branch,
     task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,

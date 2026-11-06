@@ -52,6 +52,7 @@ test.describe("Needs-you Inbox answer flow on mobile", () => {
     await expect(overlay).toBeVisible({ timeout: 15_000 });
 
     await overlay.getByTestId("clarification-option").filter({ hasText: "PostgreSQL" }).click();
+    await overlay.getByTestId("clarification-custom-submit").click();
 
     await expect(row).toHaveCount(0, { timeout: 15_000 });
     await waitForAgentMessage(apiClient, task.session_id, "You answered:", 30_000);

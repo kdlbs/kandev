@@ -86,7 +86,7 @@ func classifyUserOwnedProjectServers(
 	return userOwned
 }
 
-func composeEffectiveMCPServers(
+func composeLegacyMCPServers(
 	execution *AgentExecution,
 	allowedProfileServers []agentctltypes.McpServer,
 	userOwnedProjectServers map[string]json.RawMessage,

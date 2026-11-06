@@ -357,6 +357,7 @@ const (
 // are NOT copied on resume.
 var persistentMetadataKeys = map[string]bool{
 	MetadataKeyResourceCircuitIdentity:   true,
+	"kandev.builtin_mcp_binding":         true,
 	idleActivityMetadataKey:              true,
 	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
@@ -474,6 +475,7 @@ var persistentMetadataPrefixes = []string{
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
 	MetadataKeyResourceCircuitIdentity:   true,
+	"kandev.builtin_mcp_binding":         true,
 	idleActivityMetadataKey:              true,
 	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
