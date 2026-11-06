@@ -235,6 +235,22 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.usageHistory",
+			EnvVar:          "KANDEV_FEATURES_USAGE_HISTORY",
+			Kind:            KindFeature,
+			Label:           "Usage history",
+			Description:     "Retains token and cost history for statistics, plugin imports, and session cost details.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "Retained usage keeps bounded token and cost facts beyond task and session lifetime. Erasure and deletion completion remain active while this toggle is off.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.UsageHistory },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.UsageHistory = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             "features.agentBackgroundWork",
 			EnvVar:          "KANDEV_FEATURES_AGENT_BACKGROUND_WORK",
 			Kind:            KindFeature,

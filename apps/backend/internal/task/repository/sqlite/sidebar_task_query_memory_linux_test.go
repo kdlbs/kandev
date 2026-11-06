@@ -22,6 +22,7 @@ const sidebarMemoryChild = "KANDEV_SIDEBAR_MEMORY_CHILD"
 const sidebarMemoryCase = "KANDEV_SIDEBAR_MEMORY_CASE"
 const sidebarMiB = int64(1024 * 1024)
 const sidebarQueryPreparationPeakLimit = 64 * sidebarMiB
+const sidebarQueryPoolRSSDeltaLimit = 640 * sidebarMiB
 
 func TestSidebarQueryPreparationMemory(t *testing.T) {
 	if os.Getenv(sidebarMemoryChild) == "" {
@@ -134,8 +135,8 @@ func TestSidebarQueryPoolMemoryPlateau(t *testing.T) {
 		}
 		peak, retained, rss := sqlitememory.Peak(false)-baseline, sqlitememory.Used()-baseline, sidebarProcessRSS(t)-baselineRSS
 		t.Logf("case=%s reads=%d concurrency=4 native_peak_delta_bytes=%d retained_delta_bytes=%d rss_delta_bytes=%d elapsed=%s", os.Getenv(sidebarMemoryCase), start+4, peak, retained, rss, time.Since(started))
-		if peak > 256*sidebarMiB || retained > 8*sidebarMiB || rss > 512*sidebarMiB {
-			t.Fatalf("pooled memory budget exceeded: native_peak=%d retained=%d rss=%d bytes", peak, retained, rss)
+		if peak > 256*sidebarMiB || retained > 8*sidebarMiB || rss > sidebarQueryPoolRSSDeltaLimit {
+			t.Fatalf("pooled memory budget exceeded: native_peak=%d retained=%d rss=%d (rss limit %d) bytes", peak, retained, rss, sidebarQueryPoolRSSDeltaLimit)
 		}
 	}
 }

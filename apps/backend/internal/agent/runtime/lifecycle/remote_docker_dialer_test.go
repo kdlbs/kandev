@@ -215,6 +215,10 @@ func TestSSHDockerDialerRejectsClosedConnection(t *testing.T) {
 	server := newFakeSSHServer(t, nil)
 	sshClient := server.dial(t)
 	_ = sshClient.Close()
+	// Close is asynchronous with respect to the SSH client's channel mux. Wait
+	// for the transport to observe shutdown before asking it to open a channel;
+	// otherwise NewSession can race shutdown and wait forever for a reply.
+	_ = sshClient.Wait()
 	server.Close()
 
 	transport := NewSSHDockerDialer(sshClient, dialerTestLogger(t))

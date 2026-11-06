@@ -75,7 +75,9 @@ test("keeps every Plan action reachable at the narrow desktop panel width", asyn
     expect(isReachable).toBe(true);
     if (control === menu) {
       await testPage.keyboard.press("Enter");
-      await expect(testPage.getByTestId("plan-toolbar-implement-fresh-menu-item")).toBeVisible();
+      const freshMenuItem = testPage.getByTestId("plan-toolbar-implement-fresh-menu-item");
+      await expect(freshMenuItem).toBeVisible();
+      await expect(freshMenuItem).toBeFocused();
       await testPage.keyboard.press("Escape");
       await expect(menu).toBeFocused();
     }

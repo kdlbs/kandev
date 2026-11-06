@@ -105,7 +105,7 @@ export default defineConfig({
     },
     {
       name: "mobile-chrome",
-      testMatch: /mobile-.*\.spec\.ts/,
+      testMatch: [/mobile-.*\.spec\.ts/, /layout\/usage-history-toggle\.spec\.ts/],
       testIgnore: [/ssh\/.*\.spec\.ts/, /upgrade\/.*\.spec\.ts/],
       use: { ...devices["Pixel 5"] },
     },

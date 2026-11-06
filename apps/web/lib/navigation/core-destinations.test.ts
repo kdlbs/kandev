@@ -154,22 +154,32 @@ describe("navigation coverage guardrails", () => {
       `mobileMenu destinations must live in one of: ${MOBILE_MENU_SECTIONS.join(", ")}`,
     ).toEqual([]);
   });
+});
 
+describe("top-level route coverage", () => {
   it("covers every first-class top-level route with a destination", () => {
     // Pre-auth routes: the SPA shell bounces them, so they are never navigation
     // targets. `/` (the kanban catch-all) and the nested `/settings` and
     // `/office` trees are not part of this switch; Office is still owned by the
     // sidebar footer's mode toggle rather than a manifest destination.
     const NOT_NAVIGABLE = ["/login", "/setup", "/invite"];
+    // These routes are first-class SPA routes but are reached through the
+    // navigation for their parent surface rather than a standalone catalog
+    // entry. Keep the parent in the manifest so this remains an explicit
+    // coverage check.
+    const PARENT_NAVIGATION: Record<string, string> = {
+      "/stats/token-usage": "/stats",
+    };
 
-    // Source-scanned rather than imported: the route table is a `switch` over
-    // string literals, so there is no route list to read at runtime. Typed route
-    // ids shared by routing and navigation would replace this — see the
-    // open-decisions note in `surface-policy.ts`. Until then the length floor
-    // below turns a restructured switch into a failure rather than a silent pass.
+    // Source-scanned rather than imported: the route table is kept with the
+    // resolver, so this still catches a route added without a matching
+    // navigation entry. Keep the length floor because a restructured route
+    // module must update this guardrail rather than pass vacuously.
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const source = readFileSync(path.join(here, "../../src/spa-routes.tsx"), "utf8");
-    const topLevelRoutes = [...source.matchAll(/case "(\/[a-z0-9-]*)":/g)].map((match) => match[1]);
+    const source = readFileSync(path.join(here, "../../src/spa-top-level-routes.ts"), "utf8");
+    const topLevelRoutes = [...source.matchAll(/["'](\/[a-z0-9/-]+)["']/g)].map(
+      (match) => match[1],
+    );
 
     expect(
       topLevelRoutes.length,
@@ -193,7 +203,10 @@ describe("navigation coverage guardrails", () => {
     );
 
     const uncovered = topLevelRoutes.filter(
-      (route) => !NOT_NAVIGABLE.includes(route) && !covered.has(route),
+      (route) =>
+        !NOT_NAVIGABLE.includes(route) &&
+        !covered.has(route) &&
+        !(PARENT_NAVIGATION[route] && covered.has(PARENT_NAVIGATION[route])),
     );
 
     expect(

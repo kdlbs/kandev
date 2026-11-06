@@ -58,11 +58,17 @@ type orgWorkspaceLifecycle interface {
 	DeleteOrganizationWorkspaces(ctx context.Context, orgID string) error
 }
 
+type orgUsageEraser interface {
+	BeginOrganizationUsageErasure(ctx context.Context, orgID string) error
+	EraseOrganizationUsage(ctx context.Context, orgID string) error
+}
+
 // orgDataAdapter keeps migration SQL in the repository while routing
 // destructive workspace removal through the task service's full lifecycle.
 type orgDataAdapter struct {
 	migrations orgMigrationData
 	workspaces orgWorkspaceLifecycle
+	usage      orgUsageEraser
 }
 
 func (a orgDataAdapter) AssignWorkspacesWithoutOrg(ctx context.Context, orgID string) (int64, error) {
@@ -77,7 +83,16 @@ func (a orgDataAdapter) DeleteOrgData(ctx context.Context, orgID string) error {
 	if a.workspaces == nil {
 		return errors.New("workspace deletion lifecycle is unavailable")
 	}
-	return a.workspaces.DeleteOrganizationWorkspaces(ctx, orgID)
+	if a.usage == nil {
+		return errors.New("organization usage erasure is unavailable")
+	}
+	if err := a.usage.BeginOrganizationUsageErasure(ctx, orgID); err != nil {
+		return err
+	}
+	if err := a.workspaces.DeleteOrganizationWorkspaces(ctx, orgID); err != nil {
+		return err
+	}
+	return a.usage.EraseOrganizationUsage(ctx, orgID)
 }
 
 var _ org.DataMigrator = orgDataAdapter{}
@@ -96,10 +111,11 @@ func buildOrgService(
 	if err != nil {
 		return nil, err
 	}
+	usage, _ := repos.Analytics.(orgUsageEraser)
 	return org.NewService(
 		store,
 		orgAccountAdapter{accounts: repos.UserAccounts},
-		orgDataAdapter{migrations: repos.Task, workspaces: workspaces},
+		orgDataAdapter{migrations: repos.Task, workspaces: workspaces, usage: usage},
 		cfg.Features.MultiTenancy,
 		log,
 	), nil

@@ -103,9 +103,19 @@ it("updates an unfinished scroll when its content grows before the row enters vi
   const revealed = revealSidebarTask(TEST_TASK_ID, (callback) => frames.push(callback));
   frames.shift()!();
   expect(row.scrollIntoView).toHaveBeenCalledOnce();
+  expect(row.scrollIntoView).toHaveBeenLastCalledWith({
+    behavior: "smooth",
+    block: "nearest",
+    inline: "nearest",
+  });
   Object.defineProperty(viewport, "scrollHeight", { value: 250 });
   frames.shift()!();
   expect(row.scrollIntoView).toHaveBeenCalledTimes(2);
+  expect(row.scrollIntoView).toHaveBeenLastCalledWith({
+    behavior: "instant",
+    block: "nearest",
+    inline: "nearest",
+  });
   setRect(row, { x: 0, y: 60, width: 320, height: 24 });
   while (frames.length) frames.shift()!();
   await expect(revealed).resolves.toBe(true);

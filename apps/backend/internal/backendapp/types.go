@@ -59,11 +59,13 @@ import (
 )
 
 type Repositories struct {
-	RequiredStores *requiredstores.Tracker
-	Task           *sqliterepo.Repository
-	Analytics      analyticsrepository.Repository
-	AgentSettings  settingsstore.Repository
-	User           userstore.Repository
+	RequiredStores      *requiredstores.Tracker
+	Task                *sqliterepo.Repository
+	Analytics           analyticsrepository.Repository
+	UsageHistoryStop    func() error
+	usageHistoryControl *usageHistoryProjectionControl
+	AgentSettings       settingsstore.Repository
+	User                userstore.Repository
 	// UserAccounts is the account-management view of the same user store
 	// (list/create/role/status), consumed by the auth service.
 	UserAccounts  userstore.AccountRepository

@@ -3798,6 +3798,19 @@ func (r *Repository) DeleteTaskWithVacatedStep(ctx context.Context, id string) (
 }
 
 func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, claim *managed.DeleteClaim) (string, error) {
+	usagePreserved := false
+	usageDeleted := false
+	if r.usageHistoryLifecycle != nil && r.usageHistoryIsEnabled() {
+		if err := r.usageHistoryLifecycle.PreserveTaskUsage(ctx, id); err != nil {
+			return "", fmt.Errorf("preserve task usage before deletion: %w", err)
+		}
+		usagePreserved = true
+		defer func() {
+			if usagePreserved && !usageDeleted {
+				_ = r.usageHistoryLifecycle.ReleaseTaskUsage(context.Background(), id)
+			}
+		}()
+	}
 	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return "", err
@@ -3844,6 +3857,11 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 	if err := r.StageTurnHistoryCleanupForTask(ctx, tx, id); err != nil {
 		return "", err
 	}
+	if r.usageHistoryLifecycle != nil {
+		if err := r.usageHistoryLifecycle.CompleteTaskUsageTx(ctx, tx, id); err != nil {
+			return "", fmt.Errorf("detach retained task usage before deletion: %w", err)
+		}
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
 	if err != nil {
 		return "", err
@@ -3862,6 +3880,7 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 	if err := tx.Commit(); err != nil {
 		return "", err
 	}
+	usageDeleted = true
 	r.notifyTaskQueuePurged(ctx, id)
 	return vacatedStepID, nil
 }
@@ -5350,15 +5369,23 @@ func (r *Repository) purgeQueueSessionPoliciesInTx(
 	tx *sqlx.Tx,
 	sessionIDs []string,
 ) error {
+	// Queue policy storage is optional when task storage is used without the
+	// queue repository. Probe before DELETE: PostgreSQL marks the transaction
+	// failed after a missing-table statement even if the caller treats that
+	// error as an optional no-op.
+	present, err := internaldb.TableExists(tx, "queue_session_state")
+	if err != nil {
+		return fmt.Errorf("check queue session policy table: %w", err)
+	}
+	if !present {
+		return nil
+	}
 	for _, sessionID := range sessionIDs {
 		if _, err := tx.ExecContext(
 			ctx,
 			r.db.Rebind(`DELETE FROM queue_session_state WHERE session_id = ?`),
 			sessionID,
 		); err != nil {
-			if internaldb.IsMissingTableError(err) {
-				return nil
-			}
 			return fmt.Errorf("purge queue session policy for %s: %w", sessionID, err)
 		}
 	}

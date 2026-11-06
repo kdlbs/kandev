@@ -370,9 +370,11 @@ test.describe("Markdown text wrapping", () => {
 
     await expect(table).toBeVisible({ timeout: 30_000 });
     await expect(firstCell).toContainText(marker);
-    expect(
-      await firstCell.evaluate((cell) => cell.getBoundingClientRect().width),
-    ).toBeGreaterThanOrEqual(96);
+    await expect
+      .poll(() => firstCell.evaluate((cell) => cell.getBoundingClientRect().width), {
+        timeout: 10_000,
+      })
+      .toBeGreaterThanOrEqual(96);
     expect(
       await firstCell.evaluate((cell) => {
         const range = document.createRange();

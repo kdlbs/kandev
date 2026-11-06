@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { expect, test } from "../../fixtures/test-base";
+import { openCreateTaskDialog } from "../../helpers/create-task-dialog";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { useRegularMode } from "../../helpers/regular-mode";
@@ -26,6 +27,19 @@ test.describe("Create task repository tooltip", () => {
     }
   });
 
+  // Opening must work even when another scenario saved collapsed navigation.
+  test.beforeEach(async ({ apiClient, seedData }) => {
+    const { settings } = await apiClient.getUserSettings();
+    const layout = settings.sidebar_layouts_by_workspace![seedData.workspaceId];
+    await apiClient.saveUserSettings({
+      sidebar_layout_state: {
+        workspace_id: seedData.workspaceId,
+        expected_revision: layout.revision,
+        layout: { ...layout, navigation_height: 0, navigation_expanded: false },
+      },
+    });
+  });
+
   test("contains a long path and waits for a deliberate re-hover after picker selection", async ({
     testPage,
     apiClient,
@@ -44,7 +58,7 @@ test.describe("Create task repository tooltip", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    await openCreateTaskDialog(testPage);
 
     const dialog = testPage.getByTestId("create-task-dialog");
     const trigger = dialog.getByTestId("repo-chip-trigger").first();
@@ -111,7 +125,7 @@ test.describe("Create task repository tooltip", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    await openCreateTaskDialog(testPage);
 
     const dialog = testPage.getByTestId("create-task-dialog");
     const trigger = dialog.getByTestId("repo-chip-trigger").first();

@@ -5,6 +5,7 @@ import type { DockviewApi } from "dockview-react";
 import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getOpenFileTabs, setOpenFileTabs } from "@/lib/local-storage";
+import * as fileDiff from "@/lib/utils/file-diff";
 import type { TaskSession } from "@/lib/types/http";
 import { useFileEditors } from "./use-file-editors";
 import { useFileOperations } from "./use-file-operations";
@@ -121,6 +122,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useDockviewStore.setState({ api: null });
+  vi.restoreAllMocks();
 });
 
 it("uses the active session workspace to distinguish an external editor during rename", async () => {
@@ -172,6 +174,13 @@ it.each(["current", "host replaced", "visit retired"])(
   "persists renamed tabs after restoration only for the current owner (%s)",
   async (owner) => {
     const session = `restore-rename-${owner}`;
+    const calculateHash = fileDiff.calculateHash;
+    let finishHash!: () => void;
+    const hashPending = new Promise<void>((resolve) => (finishHash = resolve));
+    vi.spyOn(fileDiff, "calculateHash").mockImplementation(async (content) => {
+      if (content === "first") await hashPending;
+      return calculateHash(content);
+    });
     setOpenFileTabs(session, [
       { path: "old.txt", name: "old.txt", pinned: false },
       { path: "other.txt", name: "other.txt", pinned: true },
@@ -201,6 +210,11 @@ it.each(["current", "host replaced", "visit retired"])(
       })),
     );
     await waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(2));
+    expect(useDockviewStore.getState().openFiles.get("old.txt")?.originalHash).toBeFalsy();
+    await act(async () => finishHash());
+    await waitFor(() =>
+      expect(useDockviewStore.getState().openFiles.get("old.txt")?.originalHash).toBeTruthy(),
+    );
     await act(async () => expect(await h.result.current.rename("old.txt", "new.txt")).toBe(true));
     expect(useDockviewStore.getState().openFiles.has("new.txt")).toBe(true);
     if (owner === "host replaced") act(() => useDockviewStore.setState({ api: null }));

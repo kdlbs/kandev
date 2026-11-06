@@ -45,7 +45,7 @@ func BenchmarkStatsHTTPReference(b *testing.B) {
 		b.Fatalf("logger: %v", err)
 	}
 	router := gin.New()
-	RegisterStatsRoutes(router, fixture.repo, statsReferenceAuthorizer{}, log)
+	RegisterStatsRoutes(router, fixture.repo, statsReferenceAuthorizer{}, log, true)
 
 	for _, rangeKey := range []string{"month", "all"} {
 		rangeKey := rangeKey

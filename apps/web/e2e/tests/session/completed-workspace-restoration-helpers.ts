@@ -17,6 +17,7 @@ type GatewayFrame = {
 type SocketMessage = string | Buffer;
 type DeferredRecoveryState = {
   retryRequestId: string | undefined;
+  retryObserved: boolean;
   deferredReadiness: string[];
   workspaceRestored: boolean;
 };
@@ -97,11 +98,16 @@ export async function failWorkspaceRestoresUntilReleased(
   taskId: string,
   sessionId: string,
   failureMessage = "workspace restore failed for e2e",
-): Promise<{ wasConsumed: () => boolean; allowNextRestores: () => void }> {
+): Promise<{
+  wasConsumed: () => boolean;
+  retryWasRequested: () => boolean;
+  allowNextRestores: () => void;
+}> {
   let failRestores = true;
   let wasConsumed = false;
   const recoveryState: DeferredRecoveryState = {
     retryRequestId: undefined,
+    retryObserved: false,
     deferredReadiness: [],
     workspaceRestored: false,
   };
@@ -124,6 +130,7 @@ export async function failWorkspaceRestoresUntilReleased(
         }
         if (!failRestores && isTargetWorkspaceRestore(frame, taskId, sessionId)) {
           recoveryState.retryRequestId = frame.id;
+          recoveryState.retryObserved = true;
         }
         if (part.trim()) forwarded.push(part);
       }
@@ -148,6 +155,7 @@ export async function failWorkspaceRestoresUntilReleased(
 
   return {
     wasConsumed: () => wasConsumed,
+    retryWasRequested: () => recoveryState.retryObserved,
     allowNextRestores: () => {
       failRestores = false;
     },

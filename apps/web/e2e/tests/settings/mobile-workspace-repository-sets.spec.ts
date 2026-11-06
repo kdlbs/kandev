@@ -157,6 +157,8 @@ test.describe("Mobile workspace repository sets", () => {
     await addRepository.tap();
     await testPage.getByRole("option", { name: /E2E Repo/ }).tap();
     await expect(testPage.getByRole("option", { name: /E2E Repo/ })).toHaveCount(0);
+    // Finish closing the add picker before opening the branch picker; its
+    // deferred focus restoration must not dismiss the next popover.
     await expect(testPage.getByTestId("repository-set-add-repository-dropdown")).toHaveCount(0);
     await expect(addRepository).toBeFocused();
     await expect(
@@ -196,14 +198,15 @@ test.describe("Mobile workspace repository sets", () => {
     await expect(remoteMainOption.getByText("origin", { exact: true })).toBeVisible();
 
     const refreshButton = dropdown.getByTestId("branch-refresh-button");
+    await waitForFiniteAnimations(dropdown);
     await expect(refreshButton).toBeVisible();
     await expect(refreshButton).toBeEnabled();
+    await expect(refreshButton).toBeInViewport();
     const refreshButtonBox = await refreshButton.boundingBox();
     expect(refreshButtonBox).not.toBeNull();
     expect(refreshButtonBox!.height).toBeGreaterThanOrEqual(44);
     expect(refreshButtonBox!.width).toBeGreaterThanOrEqual(44);
     await waitForFiniteAnimations(dropdown);
-    await refreshButton.scrollIntoViewIfNeeded();
     const refreshReceivesCenterTap = await refreshButton.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       const target = document.elementFromPoint(

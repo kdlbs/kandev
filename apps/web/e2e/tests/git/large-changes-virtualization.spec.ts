@@ -1,3 +1,4 @@
+import { routeCommitSpacingSource } from "./commit-spacing-source";
 import { test, expect } from "../../fixtures/test-base";
 import {
   GitHelper,
@@ -57,12 +58,13 @@ test.describe("Large Changes virtualization", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    const history = await routeCommitSpacingSource(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle();
     await session.clickTab("Changes");
-    await seedCommitSpacingHistory(testPage);
+    await seedCommitSpacingHistory(testPage, history);
     await refreshSpacingAndExpectAnchor(testPage);
     await prCapture.screenshot("changelist-spacing-desktop", {
       caption: "Commit history retains compact, contiguous rows after measurement refresh",

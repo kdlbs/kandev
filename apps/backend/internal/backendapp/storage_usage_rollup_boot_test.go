@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/task/models"
@@ -51,6 +52,9 @@ func TestProvideRepositoriesPreservesUsageRollupAcrossReboot(t *testing.T) {
 	}
 	t.Cleanup(closeFirst)
 
+	if err := firstRepos.Task.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Usage rollup reboot test"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
 	if err := firstRepos.Task.CreateTask(ctx, &models.Task{
 		ID:          "task-reboot-rollup",
 		WorkspaceID: "ws-1",
@@ -70,6 +74,7 @@ func TestProvideRepositoriesPreservesUsageRollupAcrossReboot(t *testing.T) {
 	tokensCachedRead := int64(20)
 	tokensCachedWrite := int64(5)
 	tokensOut := int64(30)
+	occurredAt := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
 	if err := firstRepos.Task.CreateTaskUsageEvent(ctx, &models.TaskUsageEvent{
 		UsageEventID:      "evt-reboot-rollup",
 		TaskID:            "task-reboot-rollup",
@@ -85,6 +90,8 @@ func TestProvideRepositoriesPreservesUsageRollupAcrossReboot(t *testing.T) {
 		CostSubcents:      42,
 		CostSource:        "actual",
 		ContractVersion:   1,
+		OccurredAt:        occurredAt,
+		CreatedAt:         occurredAt,
 	}); err != nil {
 		t.Fatalf("CreateTaskUsageEvent: %v", err)
 	}

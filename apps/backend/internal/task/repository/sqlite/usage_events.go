@@ -163,6 +163,27 @@ func (r *Repository) insertUsageEventAndRollup(ctx context.Context, event *model
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if r.usageHistoryLifecycle != nil && r.usageHistoryIsEnabled() {
+		admissionSessionID := ""
+		if event.SessionID != "" {
+			var ownerTaskID string
+			lookupErr := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT task_id FROM task_sessions WHERE id = ?`), event.SessionID).Scan(&ownerTaskID)
+			switch {
+			case lookupErr == nil && ownerTaskID == event.TaskID:
+				admissionSessionID = event.SessionID
+			case lookupErr == nil:
+				event.SessionID = ""
+			case errors.Is(lookupErr, sql.ErrNoRows):
+				// Let the append's existing foreign-key retry clear a missing
+				// session reference after task-level admission succeeds.
+			case lookupErr != nil:
+				return fmt.Errorf("verify retained usage session admission: %w", lookupErr)
+			}
+		}
+		if err := r.usageHistoryLifecycle.AdmitUsageWriteTx(ctx, tx, event.TaskID, "", admissionSessionID); err != nil {
+			return err
+		}
+	}
 
 	if err := r.insertUsageEventRowTx(ctx, tx, event); err != nil {
 		return err
@@ -184,6 +205,11 @@ func (r *Repository) insertUsageEventAndRollup(ctx context.Context, event *model
 			return err
 		}
 	}
+	if r.usageHistoryRetainer != nil && r.usageHistoryIsEnabled() {
+		if err := r.usageHistoryRetainer.RetainNativeUsageTx(ctx, tx, nativeUsageFromTaskEvent(event)); err != nil {
+			return fmt.Errorf("retain native task usage event: %w", err)
+		}
+	}
 
 	return tx.Commit()
 }
@@ -201,7 +227,7 @@ func coalesceInt64(v *int64) int64 {
 func (r *Repository) insertUsageEventRowTx(ctx context.Context, tx *sqlx.Tx, event *models.TaskUsageEvent) error {
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_usage_events (
-			usage_event_id, task_id, session_id, turn_id,
+			usage_event_id, task_id, session_id, turn_id, usage_binding_id,
 			agent_profile_id, agent_type, model, provider,
 			provider_thread_id, provider_turn_id, provider_response_id,
 			native_scope, measurement_source, usage_completeness, usage_schema_version,
@@ -211,8 +237,9 @@ func (r *Repository) insertUsageEventRowTx(ctx context.Context, tx *sqlx.Tx, eve
 			rate_input_per_million, rate_cached_read_per_million,
 			rate_cached_write_per_million, rate_output_per_million,
 			pricing_catalog_version, contract_version, occurred_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), event.UsageEventID, event.TaskID, nullableString(event.SessionID), nullableString(event.TurnID),
+		event.UsageBindingID,
 		event.AgentProfileID, event.AgentType, event.Model, event.Provider,
 		event.ProviderThreadID, event.ProviderTurnID, event.ProviderResponseID,
 		event.NativeScope, event.MeasurementSource, event.UsageCompleteness, event.UsageSchemaVersion,
@@ -232,7 +259,7 @@ func (r *Repository) insertUsageEventRowTx(ctx context.Context, tx *sqlx.Tx, eve
 // rows both return an empty, non-nil slice and a nil error.
 func (r *Repository) ListTaskUsageEvents(ctx context.Context, taskID string, limit int) ([]*models.TaskUsageEvent, error) {
 	query := `
-		SELECT id, usage_event_id, task_id, session_id, turn_id,
+		SELECT id, usage_event_id, task_id, session_id, turn_id, usage_binding_id,
 		       agent_profile_id, agent_type, model, provider,
 		       provider_thread_id, provider_turn_id, provider_response_id,
 		       native_scope, measurement_source, usage_completeness, usage_schema_version,
@@ -306,7 +333,7 @@ func (r *Repository) ListSessionUsageTurnCursors(ctx context.Context, sessionID 
 
 func (r *Repository) ListSessionUsageEventsByTurn(ctx context.Context, sessionID, turnID string) ([]*models.TaskUsageEvent, error) {
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
-		SELECT id, usage_event_id, task_id, session_id, turn_id,
+		SELECT id, usage_event_id, task_id, session_id, turn_id, usage_binding_id,
 		       agent_profile_id, agent_type, model, provider,
 		       provider_thread_id, provider_turn_id, provider_response_id,
 		       native_scope, measurement_source, usage_completeness, usage_schema_version,
@@ -342,13 +369,13 @@ func (r *Repository) ListSessionUsageEventsByTurn(ctx context.Context, sessionID
 func scanTaskUsageEventRow(row *sqlx.Rows) (*models.TaskUsageEvent, error) {
 	var (
 		event                                                                models.TaskUsageEvent
-		sessionID, turnID, pricingCatalogVersion                             sql.NullString
+		sessionID, turnID, usageBindingID, pricingCatalogVersion             sql.NullString
 		tokensCachedRead, tokensCachedWrite, tokensOut, tokensThought        sql.NullInt64
 		reasoningOutputTokens, reportedCacheWriteTokens, reportedTotalTokens sql.NullInt64
 		rateInput, rateCachedRead, rateCachedWrite, rateOutput               sql.NullInt64
 	)
 	if err := row.Scan(
-		&event.ID, &event.UsageEventID, &event.TaskID, &sessionID, &turnID,
+		&event.ID, &event.UsageEventID, &event.TaskID, &sessionID, &turnID, &usageBindingID,
 		&event.AgentProfileID, &event.AgentType, &event.Model, &event.Provider,
 		&event.ProviderThreadID, &event.ProviderTurnID, &event.ProviderResponseID,
 		&event.NativeScope, &event.MeasurementSource, &event.UsageCompleteness, &event.UsageSchemaVersion,
@@ -363,6 +390,7 @@ func scanTaskUsageEventRow(row *sqlx.Rows) (*models.TaskUsageEvent, error) {
 
 	event.SessionID = sessionID.String
 	event.TurnID = turnID.String
+	event.UsageBindingID = usageBindingID.String
 	event.PricingCatalogVersion = pricingCatalogVersion.String
 	event.TokensCachedRead = nullInt64ToPtr(tokensCachedRead)
 	event.TokensCachedWrite = nullInt64ToPtr(tokensCachedWrite)

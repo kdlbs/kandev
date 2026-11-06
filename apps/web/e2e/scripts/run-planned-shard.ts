@@ -103,11 +103,7 @@ async function run(): Promise<void> {
     manifest.cohort,
   );
   console.log(`planned shard ${shard.index}: ${count} processes, one worker each`);
-  if (count === 1) {
-    process.exitCode = executeShard(manifest, shard, spawnSync, undefined, extraArgs);
-  } else {
-    process.exitCode = await executeSubshards(manifest, shard, count, { extraArgs });
-  }
+  process.exitCode = await executeSubshards(manifest, shard, count, { extraArgs });
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

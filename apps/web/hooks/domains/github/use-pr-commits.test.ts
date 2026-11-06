@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StateProvider } from "@/components/state-provider";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import type { PRCommitInfo } from "@/lib/types/github";
 import { createPRCommitsResource, type PRCommitsRequest } from "./pr-commits-resource";
@@ -13,8 +13,11 @@ const SHARED_COMMIT_SHA = "shared-sha";
 const RETRY_COMMIT_SHA = "retry-sha";
 const REFRESHED_COMMIT_SHA = "refreshed-sha";
 const STABLE_COMMIT_SHA = "stable-sha";
+const FIRST_PROVIDER_FAILURE = "first provider failure";
+const FINAL_PROVIDER_FAILURE = "final provider failure";
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => websocketClient,
+  useWebSocketClient: () => websocketClient,
 }));
 
 function deferred<T>() {
@@ -37,6 +40,7 @@ afterEach(() => {
 function wrapper({ children }: { children: ReactNode }) {
   const initialState = {
     workspaces: { activeId: "workspace-1" },
+    connection: { status: "connected" },
   } as unknown as Partial<AppState>;
   return createElement(StateProvider, { initialState, children });
 }
@@ -107,8 +111,8 @@ describe("usePRCommits request ownership", () => {
     try {
       const requester = vi
         .fn()
-        .mockRejectedValueOnce(new Error("first provider failure"))
-        .mockRejectedValueOnce(new Error("final provider failure"))
+        .mockRejectedValueOnce(new Error(FIRST_PROVIDER_FAILURE))
+        .mockRejectedValueOnce(new Error(FINAL_PROVIDER_FAILURE))
         .mockResolvedValueOnce({
           commits: [commit("recovered-sha")],
           head_sha: "recovered-sha",
@@ -291,6 +295,82 @@ describe("usePRCommits retained evidence", () => {
 });
 
 describe("usePRCommits unavailable client", () => {
+  it("preserves the provider retry budget while the initial socket is unavailable", async () => {
+    vi.useFakeTimers();
+    websocketClient = null;
+    requestMock
+      .mockRejectedValueOnce(new Error("temporary provider failure"))
+      .mockResolvedValueOnce({
+        commits: [commit(RETRY_COMMIT_SHA)],
+        head_sha: RETRY_COMMIT_SHA,
+        complete: true,
+      });
+    const hook = renderHook(
+      () => ({
+        store: useAppStoreApi(),
+        commits: usePRCommits("acme", "app", 1, "startup-connection"),
+      }),
+      { wrapper },
+    );
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(requestMock).not.toHaveBeenCalled();
+      expect(hook.result.current.commits.error).toBeNull();
+      websocketClient = { request: requestMock };
+      hook.rerender();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(requestMock).toHaveBeenCalledTimes(2);
+      expect(hook.result.current.commits.providerHead).toBe(RETRY_COMMIT_SHA);
+      expect(hook.result.current.commits.error).toBeNull();
+    } finally {
+      hook.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits for connection readiness and reloads unresolved history after reconnection", async () => {
+    requestMock
+      .mockRejectedValueOnce(new Error(FIRST_PROVIDER_FAILURE))
+      .mockRejectedValueOnce(new Error(FINAL_PROVIDER_FAILURE))
+      .mockResolvedValueOnce({
+        commits: [commit(STABLE_COMMIT_SHA)],
+        head_sha: STABLE_COMMIT_SHA,
+        complete: true,
+      });
+    const hook = renderHook(
+      () => ({
+        store: useAppStoreApi(),
+        commits: usePRCommits("acme", "app", 1, "reconnect-history"),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(hook.result.current.commits.error).not.toBeNull());
+    act(() =>
+      hook.result.current.store.setState({
+        connection: {
+          ...hook.result.current.store.getState().connection,
+          status: "disconnected",
+        },
+      }),
+    );
+    expect(await hook.result.current.commits.refresh()).toBeNull();
+    expect(requestMock).toHaveBeenCalledTimes(2);
+    act(() =>
+      hook.result.current.store.setState({
+        connection: {
+          ...hook.result.current.store.getState().connection,
+          status: "connected",
+        },
+      }),
+    );
+    await waitFor(() => expect(hook.result.current.commits.providerHead).toBe(STABLE_COMMIT_SHA));
+    expect(requestMock).toHaveBeenCalledTimes(3);
+  });
+
   it("retains resolved display commits when the WebSocket client is unavailable", async () => {
     requestMock.mockResolvedValueOnce({
       commits: [commit(STABLE_COMMIT_SHA)],

@@ -1956,9 +1956,17 @@ func TestPublishNativeUsageObservationUsesStableProviderIdentity(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-native-usage", "session-native-usage", "")
+	turn := &models.Turn{
+		ID: "turn-kandev-1", TaskID: "task-native-usage", TaskSessionID: "session-native-usage",
+		StartedAt: time.Now().UTC(), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	require.NoError(t, repo.CreateTurn(ctx, turn))
+	_, err := repo.DB().ExecContext(ctx, `UPDATE task_session_turns SET usage_binding_id = ? WHERE id = ?`, "binding-native-1", turn.ID)
+	require.NoError(t, err)
 	eb := &recordingEventBus{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.eventBus = eb
+	svc.turnService = &repoTurnService{repo: repo}
 	cacheWrite := int64(7)
 	observation := &streams.NativeUsageObservation{
 		SchemaVersion: 1, Source: "response", ProviderThreadID: "native-root",
@@ -1969,7 +1977,7 @@ func TestPublishNativeUsageObservationUsesStableProviderIdentity(t *testing.T) {
 	frame := &lifecycle.AgentStreamEventPayload{
 		TaskID: "task-native-usage", SessionID: "session-native-usage", ExecutionID: "execution-1",
 		Data: &lifecycle.AgentStreamEventData{
-			Type: streams.EventTypeUsageObservation, TurnID: "turn-kandev-1",
+			Type: streams.EventTypeUsageObservation, TurnID: turn.ID,
 			Usage: &streams.PromptUsage{InputTokens: 10, OutputTokens: 5}, UsageObservation: observation,
 		},
 	}
@@ -1983,7 +1991,10 @@ func TestPublishNativeUsageObservationUsesStableProviderIdentity(t *testing.T) {
 	if first.UsageEventID == "" || first.UsageEventID != second.UsageEventID {
 		t.Fatalf("usage event IDs = %q and %q, want stable non-empty ID", first.UsageEventID, second.UsageEventID)
 	}
-	if first.TurnID != "turn-kandev-1" || first.Model != "gpt-5-codex" || first.UsageObservation != observation || !first.Usage.PriceSuppressed {
+	if first.UsageBindingID != "binding-native-1" || second.UsageBindingID != first.UsageBindingID {
+		t.Fatalf("native usage binding IDs = %q and %q, want the same admitted turn binding", first.UsageBindingID, second.UsageBindingID)
+	}
+	if first.TurnID != turn.ID || first.UsageBindingID != "binding-native-1" || first.Model != "gpt-5-codex" || first.UsageObservation != observation || !first.Usage.PriceSuppressed {
 		t.Fatalf("published native usage payload = %#v", first)
 	}
 	if eb.events[0].subject != events.BuildSessionPromptUsageSubject("session-native-usage") {
@@ -2002,7 +2013,7 @@ func TestPublishNativeUsageObservationUsesStableProviderIdentity(t *testing.T) {
 	childFrame.Data = &childData
 	svc.publishNativeUsageObservation(ctx, &childFrame)
 	third := eb.events[2].event.Data.(lifecycle.SessionPromptUsageEventPayload)
-	if third.Model != "" || third.UsageEventID == first.UsageEventID {
+	if third.Model != "" || third.UsageEventID == first.UsageEventID || third.UsageBindingID != first.UsageBindingID {
 		t.Fatalf("child usage attribution model/id = %q/%q, want no inferred parent model and distinct identity", third.Model, third.UsageEventID)
 	}
 }
@@ -2032,6 +2043,10 @@ func TestPublishPromptUsage_RepublishedCompletionReusesUsageEventID(t *testing.T
 
 	_, err := svc.turnService.StartTurn(ctx, "s1")
 	require.NoError(t, err)
+	var turnID string
+	require.NoError(t, repo.DB().QueryRowContext(ctx, `SELECT id FROM task_session_turns WHERE task_session_id = ?`, "s1").Scan(&turnID))
+	_, err = repo.DB().ExecContext(ctx, `UPDATE task_session_turns SET usage_binding_id = ? WHERE id = ?`, "binding-prompt-1", turnID)
+	require.NoError(t, err)
 	svc.markExecutionCompleted("s1", "exec-1")
 	svc.completeTurnForSession(ctx, "s1")
 
@@ -2058,6 +2073,10 @@ func TestPublishPromptUsage_RepublishedCompletionReusesUsageEventID(t *testing.T
 	require.NotEmpty(t, published[0].UsageEventID)
 	require.Equal(t, published[0].UsageEventID, published[1].UsageEventID,
 		"republishing the same completion must reuse the same usage_event_id so the DB unique index catches the duplicate")
+	require.Equal(t, "binding-prompt-1", published[0].UsageBindingID,
+		"prompt usage must resolve the immutable binding persisted with its turn")
+	require.Equal(t, published[0].UsageBindingID, published[1].UsageBindingID,
+		"republished prompt usage must preserve its turn binding")
 }
 
 // TestPublishPromptUsage_RepublishedCompletionWithoutPromptGenerationMintsDistinctUsageEventIDs

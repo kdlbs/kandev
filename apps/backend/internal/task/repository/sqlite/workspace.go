@@ -180,6 +180,11 @@ func (r *Repository) updateWorkspace(ctx context.Context, workspace *models.Work
 
 // DeleteWorkspace deletes a workspace by ID
 func (r *Repository) DeleteWorkspace(ctx context.Context, id string) error {
+	if r.usageHistoryLifecycle != nil {
+		if err := r.eraseDeletedWorkspaceUsage(ctx, id); err != nil {
+			return err
+		}
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM workspaces WHERE id = ?`), id)
 	if err != nil {
 		return err
@@ -188,6 +193,28 @@ func (r *Repository) DeleteWorkspace(ctx context.Context, id string) error {
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return workspaceNotFoundError(id)
+	}
+	return nil
+}
+
+func (r *Repository) eraseDeletedWorkspaceUsage(ctx context.Context, id string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var workspaceExists bool
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT EXISTS(SELECT 1 FROM workspaces WHERE id = ?)`), id).Scan(&workspaceExists); err != nil {
+		return err
+	}
+	if !workspaceExists {
+		return workspaceNotFoundError(id)
+	}
+	if err := r.usageHistoryLifecycle.EraseWorkspaceUsageTx(ctx, tx, id); err != nil {
+		return fmt.Errorf("erase retained workspace usage: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -252,6 +279,11 @@ func (r *Repository) deleteWorkspaceCascade(
 	// queued messages orphaned after the task rows are deleted.
 	if err := r.lockWorkspaceRowInTx(ctx, tx, id); err != nil {
 		return nil, nil, err
+	}
+	if r.usageHistoryLifecycle != nil {
+		if err := r.usageHistoryLifecycle.EraseWorkspaceUsageTx(ctx, tx, id); err != nil {
+			return nil, nil, fmt.Errorf("erase retained workspace usage: %w", err)
+		}
 	}
 	if expectedName != nil {
 		if err := r.confirmWorkspaceNameForCascadeDelete(ctx, tx, id, *expectedName); err != nil {

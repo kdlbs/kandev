@@ -7,6 +7,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/analytics/repository"
@@ -31,4 +32,31 @@ func (s *Service) ListSessionCodeStats(
 	filter models.SessionCodeStatsFilter,
 ) ([]*models.SessionCodeStats, error) {
 	return s.repo.ListSessionCodeStats(ctx, filter)
+}
+
+func (s *Service) usageRepository() (repository.UsageRepository, error) {
+	usageRepo, ok := s.repo.(repository.UsageRepository)
+	if !ok || usageRepo == nil {
+		return nil, fmt.Errorf("analytics usage repository is not configured")
+	}
+	return usageRepo, nil
+}
+
+func (s *Service) ListSessionUsage(ctx context.Context, filter models.SessionUsageFilter) (*models.TokenUsageReport, error) {
+	usageRepo, err := s.usageRepository()
+	if err != nil {
+		return nil, err
+	}
+	return usageRepo.ListSessionUsage(ctx, filter)
+}
+
+// ListCanonicalSessionUsageMeasurements returns the host-authorized canonical
+// view for a session. Unlike the plugin observation read, it may include the
+// native ledger and another collector's accepted value.
+func (s *Service) ListCanonicalSessionUsageMeasurements(ctx context.Context, filter models.SessionUsageFilter) ([]models.SessionUsageMeasurement, error) {
+	usageRepo, err := s.usageRepository()
+	if err != nil {
+		return nil, err
+	}
+	return usageRepo.ListCanonicalSessionUsageMeasurements(ctx, filter)
 }

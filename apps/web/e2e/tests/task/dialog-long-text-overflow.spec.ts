@@ -4,6 +4,7 @@ import {
   assertLocatorWithinViewportX,
   assertNoDescendantOverflowsRight,
 } from "../../helpers/layout-assertions";
+import { openCreateTaskDialog } from "../../helpers/create-task-dialog";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -50,7 +51,7 @@ test.describe("Dialog long text layout", () => {
     await expand.click();
     await expect(expand).toHaveAttribute("aria-expanded", "true");
 
-    await kanban.createTaskButton.first().click();
+    await openCreateTaskDialog(testPage);
     const createDialog = testPage.getByTestId("create-task-dialog");
     await expect(createDialog).toBeVisible();
     await testPage.getByTestId("task-title-input").fill(LONG_UNBROKEN_TEXT);

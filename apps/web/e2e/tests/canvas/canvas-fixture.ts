@@ -596,6 +596,8 @@ export async function seedTaskCanvas(
   await session.waitForChatIdle({ timeout: 45_000 });
 
   const canvas = await waitForTaskCanvas(apiClient, task.id, title);
+  // Canvas creation can be visible before its provider turn has settled.
+  // Finish that turn before writing and publishing the package in a new one.
   await waitForSessionDone(
     apiClient,
     task.id,

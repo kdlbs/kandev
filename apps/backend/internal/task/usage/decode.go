@@ -28,6 +28,7 @@ type usageEventPayload struct {
 	Usage            *promptUsagePayload            `json:"usage"`
 	Timestamp        string                         `json:"timestamp"`
 	TurnID           string                         `json:"turn_id,omitempty"`
+	UsageBindingID   string                         `json:"usage_binding_id,omitempty"`
 	UsageEventID     string                         `json:"usage_event_id,omitempty"`
 	UsageObservation *nativeUsageObservationPayload `json:"usage_observation,omitempty"`
 }

@@ -5,8 +5,11 @@ import (
 	"fmt"
 )
 
-// ErrAnalyticsBusy marks a bounded analytics operation that could not finish
-// within its admission-plus-query budget.
+var ErrUsageAmountOverflow = errors.New("usage amount exceeds int64")
+
+var ErrUsageProjectionChanged = errors.New("usage publication changed")
+
+// ErrAnalyticsBusy marks an operation that exhausted its queue-plus-query budget.
 var ErrAnalyticsBusy = errors.New("analytics busy")
 
 type analyticsBusyError struct {
