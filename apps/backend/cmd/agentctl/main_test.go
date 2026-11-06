@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"testing"
 	"time"
@@ -71,4 +73,90 @@ func TestMonitorParentLiveness_PipeBreak(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("channel not closed after pipe break")
 	}
+}
+
+func reservePprofAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve pprof address: %v", err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("release reserved pprof address: %v", err)
+	}
+	return addr
+}
+
+func waitForPprofListener(t *testing.T, addr string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		resp, err := http.Get("http://" + addr + "/debug/pprof/")
+		if err == nil {
+			_ = resp.Body.Close()
+			return
+		}
+		lastErr = err
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("pprof listener at %s was not reachable: %v", addr, lastErr)
+}
+
+func TestPprofListenerShutdownReleasesListener(t *testing.T) {
+	addr := reservePprofAddr(t)
+	t.Setenv(pprofAddrEnv, addr)
+
+	stop := startPprofListenerIfEnabled(newTestLogger(t))
+	waitForPprofListener(t, addr)
+
+	stop()
+	stop()
+
+	if resp, err := http.Get("http://" + addr + "/debug/pprof/"); err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("pprof listener still serving after stop")
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("pprof address %s was not released after stop: %v", addr, err)
+	}
+	_ = ln.Close()
+}
+
+func TestPprofListenerDisabledOrNonLoopbackStartsNoListener(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		addr string
+	}{
+		{name: "unset", addr: ""},
+		{name: "non-loopback", addr: "0.0.0.0:0"},
+		{name: "malformed", addr: "not-an-address"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(pprofAddrEnv, tc.addr)
+			stop := startPprofListenerIfEnabled(newTestLogger(t))
+			stop()
+			stop()
+		})
+	}
+}
+
+func TestPprofListenerBindFailureLeavesExistingListenerAlone(t *testing.T) {
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("occupy pprof address: %v", err)
+	}
+	defer func() { _ = occupied.Close() }()
+	t.Setenv(pprofAddrEnv, occupied.Addr().String())
+
+	stop := startPprofListenerIfEnabled(newTestLogger(t))
+	stop()
+
+	conn, err := net.DialTimeout("tcp", occupied.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatalf("existing listener was disturbed after bind failure: %v", err)
+	}
+	_ = conn.Close()
 }
