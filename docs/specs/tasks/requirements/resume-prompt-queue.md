@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-09
-updated: 2026-10-04
+updated: 2026-10-29
 owners:
   - kandev
 ---
@@ -92,6 +92,36 @@ stays safe until a user returns to the task.
 - **AC-TASKS-RESUME-PROMPT-QUEUE-003.3:** When a user opens the task and the
   session resumes and becomes ready, Auto-run ON shall deliver eligible queued
   work under existing queue policy, and each message shall be delivered once.
+
+### REQ-TASKS-RESUME-PROMPT-QUEUE-004: A cancelled resume keeps queued work
+
+**Intent:** Stopping or restarting Kandev while a queued prompt waits for its
+session to resume never drops the prompt. The entry returns to its session
+queue as soon as the cancelled resume is observed, or, when shutdown wins the
+race, is retained and returned to the queue when explicit session recovery
+completes.
+
+#### Acceptance criteria
+
+- **AC-TASKS-RESUME-PROMPT-QUEUE-004.1:** When dispatch of a reserved queued
+  entry fails because the resume attempt it waited on was cancelled, and no
+  part of the prompt reached the agent, Kandev shall return the entry to its
+  session queue with its identity, payload, and order unchanged and settle its
+  dispatch claim. A reservation for an exact session incarnation shall restore
+  onto that incarnation. While the backend is shutting down, if Stop reaches
+  the reserved-prompt callback teardown before the restore runs, the restore is
+  refused and the dispatch claim is retained; the existing startup
+  reconciliation then parks the session for explicit recovery and returns the
+  same entry to its queue when that recovery completes. The entry is not lost.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-004.2:** The returned entry shall wait for the
+  next delivery trigger under the existing queue policy. The idle-session queue
+  drain of REQ-TASKS-IDLE-QUEUE-DRAIN-001 is one such trigger: a restored entry
+  is offered like any other queued entry when its session is promptable and
+  Auto-run is on. Kandev shall not add a timer, retry loop, or resume attempt
+  specific to a cancelled resume, and a cancelled resume after a delivery
+  attempt shall keep its current disposition.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-004.3:** A dispatch failure that matches no
+  retained or retryable case shall be logged as dropped, not as lost.
 
 ## Compatibility and exclusions
 
