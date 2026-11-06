@@ -133,8 +133,8 @@ type Error struct {
 	ClassifierRule   string
 	ExitCode         *int
 	ResetHint        *time.Time
-	// ResetHintInferred marks a ResetHint derived from a clock-only notice
-	// rather than an explicit, dated provider reset time.
+	// ResetHintInferred marks a ResetHint derived without an explicit, dated
+	// provider reset time, such as from a clock-only notice or relative duration.
 	ResetHintInferred bool
 	RawExcerpt        string
 	RemediationPath   string // path to clean before retry; only set for codes that have a known remediation
@@ -202,6 +202,10 @@ func Classify(in Input) *Error {
 		hint := parseResetHintAt(text, observedAt)
 		if hint == nil && e.ClassifierRule == "claude.stderr.session_limit.v1" {
 			hint = parseResetClockHintAt(text, observedAt)
+			e.ResetHintInferred = hint != nil
+		}
+		if hint == nil && e.ClassifierRule == openCodePeriodUsageRule {
+			hint = openCodePeriodResetAt(text, in.OccurredAt)
 			e.ResetHintInferred = hint != nil
 		}
 		if hint != nil {
