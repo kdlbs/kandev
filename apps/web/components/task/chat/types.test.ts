@@ -28,6 +28,34 @@ function toolCall(rawName: string, field: "tool_name" | "title" | "content" = "t
 }
 
 describe("kandevToolStemOf", () => {
+  // @covers AC-AGENTS-AGENT-RICH-OUTPUT-002.9
+  it("uses the persisted built-in package identity", () => {
+    const message = toolCall("mcp.kandev-rich-output.show_rich_output_kandev");
+    const metadata = message.metadata as ToolCallMetadata;
+    metadata.normalized!.generic!.name = "kandev-rich-output/show_rich_output_kandev";
+    expect(kandevToolStemOf(message)).toBe("show_rich_output");
+    expect(isRichOutputMessage(message)).toBe(true);
+  });
+
+  it.each(["kandev-rich-output", "kandev-rich-output-extra", "foreign", null])(
+    "checks the explicit historical provider %s before package-title fallback",
+    (providerIdentifier) => {
+      const message = toolCall("kandev-rich-output: show_rich_output_kandev");
+      const metadata = message.metadata as ToolCallMetadata;
+      metadata.normalized!.generic!.input = { raw_input: { providerIdentifier, args: {} } };
+      expect(kandevToolStemOf(message)).toBe(
+        providerIdentifier === "kandev-rich-output" ? "show_rich_output" : null,
+      );
+    },
+  );
+
+  it("does not let a package title override a normalized foreign identity", () => {
+    const message = toolCall("mcp.kandev-rich-output.show_rich_output_kandev");
+    (message.metadata as ToolCallMetadata).normalized!.generic!.name =
+      "foreign/show_rich_output_kandev";
+    expect(kandevToolStemOf(message)).toBeNull();
+  });
+
   it.each(["tool_name", "title", "content"] as const)("reads the %s field", (field) => {
     expect(kandevToolStemOf(toolCall("mcp__kandev__show_rich_output_kandev", field))).toBe(
       "show_rich_output",

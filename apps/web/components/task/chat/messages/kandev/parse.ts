@@ -15,14 +15,27 @@
 // JSON-encoded string; we parse that inner JSON so the renderers see plain JS.
 
 const NAMESPACE_SEP = /\/|__|\./;
-const KANDEV_NAMESPACES = [
-  "mcp__kandev__",
-  "mcp.kandev.",
-  "kandev/",
-  "kandev: ",
-  "kandev-",
+// Exact runtime names from internal/mcp/profile/builtin_descriptors.go.
+// Package prefixes precede the shorter historic `kandev-` prefix.
+const KANDEV_SERVER_NAMES = [
+  "kandev-configuration",
+  "kandev-rich-output",
+  "kandev-walkthroughs",
+  "kandev-diagnostics",
+  "kandev",
 ] as const;
+const KANDEV_NAMESPACES = KANDEV_SERVER_NAMES.flatMap((server) => [
+  `mcp__${server}__`,
+  `mcp.${server}.`,
+  `${server}/`,
+  `${server}: `,
+  `${server}-`,
+]);
 const KANDEV_SUFFIX = "_kandev";
+
+export function isKandevServerName(value: string): boolean {
+  return KANDEV_SERVER_NAMES.some((server) => server === value.trim());
+}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
