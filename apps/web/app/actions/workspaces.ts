@@ -199,6 +199,7 @@ export async function updateWorkflowAction(
     description?: string;
     prompt?: string;
     agent_profile_id?: string;
+    hidden?: boolean;
   },
 ) {
   return fetchJson<Workflow>(`${apiBaseUrl}/api/v1/workflows/${id}`, {

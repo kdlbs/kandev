@@ -165,6 +165,8 @@ Delivery: [preserve disjoint workflow edits](../../../plans/disjoint-workflow-ed
   immutable branch-policy snapshots.
 - [Human assignee](human-assignee.md), [generated titles](agent-generated-titles.md), and
   [task completion](task-completion.md) retain their existing policy.
+- [Workflow visibility patch](workflow-visibility-patch.md) adds the optional workflow
+  `hidden` field with the same omission rules.
 
 ## Out of scope
 

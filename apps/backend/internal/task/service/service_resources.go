@@ -804,6 +804,10 @@ func (s *Service) GetWorkflow(ctx context.Context, id string) (*models.Workflow,
 	return s.workflows.GetWorkflow(ctx, id)
 }
 
+// ErrSystemWorkflowVisibility rejects a visibility change on a built-in
+// workflow, whose hidden flag is reconciled from its embedded template.
+var ErrSystemWorkflowVisibility = errors.New("built-in workflow visibility cannot be changed")
+
 // UpdateWorkflow updates an existing workflow
 func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWorkflowRequest) (*models.Workflow, error) {
 	if err := s.authorizeWorkflowAction(ctx, id, models.CollaborationControl); err != nil {
@@ -819,6 +823,9 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	if req.ExpectedUpdatedAt != nil && !workflow.UpdatedAt.Equal(*req.ExpectedUpdatedAt) {
 		return nil, repoerrors.ErrTaskVersionConflict
 	}
+	if req.Hidden != nil && *req.Hidden != workflow.Hidden && workflow.IsSystem {
+		return nil, ErrSystemWorkflowVisibility
+	}
 
 	if req.Name != nil {
 		workflow.Name = *req.Name
@@ -832,6 +839,9 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	if req.AgentProfileID != nil {
 		workflow.AgentProfileID = strings.TrimSpace(*req.AgentProfileID)
 	}
+	if req.Hidden != nil {
+		workflow.Hidden = *req.Hidden
+	}
 	workflow.UpdatedAt = time.Now().UTC()
 
 	var updateErr error
@@ -844,6 +854,7 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	} else {
 		workflow, updateErr = s.workflows.UpdateWorkflowFields(ctx, id, models.WorkflowFieldUpdate{
 			Name: req.Name, Description: req.Description, Prompt: req.Prompt, AgentProfileID: normalizedWorkflowProfile(req.AgentProfileID),
+			Hidden: req.Hidden,
 		})
 	}
 	if updateErr != nil {
@@ -866,7 +877,8 @@ func normalizedWorkflowProfile(value *string) *string {
 
 // SetWorkflowHidden flips the hidden flag on a workflow. Used by system
 // flows (e.g. improve-kandev) to heal records created before Hidden was
-// honored on insert.
+// honored on insert. User requests go through UpdateWorkflow, which writes
+// the same field and event and rejects built-in workflows.
 func (s *Service) SetWorkflowHidden(ctx context.Context, id string, hidden bool) error {
 	workflow, err := s.workflows.GetWorkflow(ctx, id)
 	if err != nil {
