@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
 // MetaKeyLastLaunchError stores the task-owned launch failure. Unlike the
@@ -78,6 +80,7 @@ const (
 	AgentErrorCauseCodePermissionModeUnconfirmed = "permission_mode_unconfirmed"
 	AgentErrorCauseCodePermissionModeMismatch    = "permission_mode_mismatch"
 	AgentErrorCauseCodeDeliveryStorage           = "delivery_storage"
+	AgentErrorCauseCodePluginPreparationFailed   = "plugin_preparation_failed"
 
 	AgentErrorCauseReasonRequestedNotAdvertised = "requested_not_advertised"
 	AgentErrorCauseReasonCatalogEmpty           = "catalog_empty"
@@ -88,6 +91,8 @@ const (
 	AgentErrorCauseReasonConfirmationMissing    = "confirmation_missing"
 	AgentErrorCauseReasonEffectiveMismatch      = "effective_mismatch"
 )
+
+const AgentErrorCausePluginPreparationDetail = "The selected Copilot plugins could not be prepared."
 
 // AgentErrorCause keeps the bounded, operation-specific explanation for one
 // recovery attempt. It is intentionally smaller than LastAgentError so a
@@ -104,6 +109,7 @@ type AgentErrorCause struct {
 	AttemptedModel string             `json:"attempted_model,omitempty"`
 	RequestedMode  string             `json:"requested_mode,omitempty"`
 	EffectiveMode  string             `json:"effective_mode,omitempty"`
+	RuntimeVersion string             `json:"runtime_version,omitempty"`
 	PromptNotSent  *bool              `json:"prompt_not_sent,omitempty"`
 }
 
@@ -149,7 +155,7 @@ func NormalizeAgentErrorCauses(causes []AgentErrorCause) []AgentErrorCause {
 		identity := cause.Operation + "\x00" + cause.Code + "\x00" + cause.Detail +
 			"\x00" + cause.Reason + "\x00" + cause.RequestedModel + "\x00" + cause.EffectiveModel +
 			"\x00" + cause.AttemptedModel + "\x00" + cause.RequestedMode + "\x00" + cause.EffectiveMode +
-			"\x00" + agentErrorStorageIdentity(cause.Storage)
+			"\x00" + cause.RuntimeVersion + "\x00" + agentErrorStorageIdentity(cause.Storage)
 		switch {
 		case cause.PromptNotSent == nil:
 			identity += "\x00unknown"
@@ -182,7 +188,7 @@ func AgentErrorCausesEqual(left, right []AgentErrorCause) bool {
 			a.Reason != b.Reason || a.RequestedModel != b.RequestedModel ||
 			a.EffectiveModel != b.EffectiveModel || a.AttemptedModel != b.AttemptedModel ||
 			a.RequestedMode != b.RequestedMode ||
-			a.EffectiveMode != b.EffectiveMode {
+			a.EffectiveMode != b.EffectiveMode || a.RuntimeVersion != b.RuntimeVersion {
 			return false
 		}
 		if (a.PromptNotSent == nil) != (b.PromptNotSent == nil) {
@@ -237,6 +243,7 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 		cause.AttemptedModel = safeAgentErrorSelector(cause.AttemptedModel)
 		cause.RequestedMode = ""
 		cause.EffectiveMode = ""
+		cause.RuntimeVersion = ""
 	case AgentErrorCauseCodePermissionModeFailed,
 		AgentErrorCauseCodePermissionModeUnconfirmed,
 		AgentErrorCauseCodePermissionModeMismatch:
@@ -249,10 +256,26 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 		cause.RequestedModel = ""
 		cause.EffectiveModel = ""
 		cause.AttemptedModel = ""
+		cause.RuntimeVersion = ""
 	case AgentErrorCauseCodeRuntimeCleanupFailed:
 		promptNotSent := cause.PromptNotSent
 		clearAgentErrorCauseEvidence(cause)
 		cause.PromptNotSent = promptNotSent
+	case AgentErrorCauseCodePluginPreparationFailed:
+		cause.Storage = nil
+		cause.RequestedModel = ""
+		cause.EffectiveModel = ""
+		cause.AttemptedModel = ""
+		cause.RequestedMode = ""
+		cause.EffectiveMode = ""
+		cause.PromptNotSent = nil
+		cause.Detail = AgentErrorCausePluginPreparationDetail
+		if !isKnownAgentErrorCauseReason(cause.Code, cause.Reason) {
+			cause.Reason = ""
+			cause.RuntimeVersion = ""
+			return
+		}
+		cause.RuntimeVersion = safeAgentErrorRuntimeVersion(cause.RuntimeVersion)
 	case AgentErrorCauseCodeDeliveryStorage:
 		storage := normalizeAgentErrorStorage(cause.Storage)
 		clearAgentErrorCauseEvidence(cause)
@@ -277,7 +300,18 @@ func clearAgentErrorCauseEvidence(cause *AgentErrorCause) {
 	cause.AttemptedModel = ""
 	cause.RequestedMode = ""
 	cause.EffectiveMode = ""
+	cause.RuntimeVersion = ""
 	cause.PromptNotSent = nil
+}
+
+func safeAgentErrorRuntimeVersion(value string) string {
+	if len(value) == 0 || len(value) > 256 || !utf8.ValidString(value) {
+		return ""
+	}
+	if _, err := managedruntime.ParseStableVersion(value); err != nil {
+		return ""
+	}
+	return value
 }
 
 func isKnownAgentErrorCauseReason(code, reason string) bool {
@@ -296,6 +330,16 @@ func isKnownAgentErrorCauseReason(code, reason string) bool {
 		return reason == AgentErrorCauseReasonConfirmationMissing
 	case AgentErrorCauseCodePermissionModeMismatch:
 		return reason == AgentErrorCauseReasonEffectiveMismatch
+	case AgentErrorCauseCodePluginPreparationFailed:
+		switch reason {
+		case "cli_unavailable", "timeout", "cancelled", "output_limit", "invalid_inventory", "legacy_errors",
+			"runtime_unsupported", "plugin_loading_unsupported", "unsupported_launch_context", "metadata_unavailable",
+			"ambiguous_identity", "missing_root", "manifest_mismatch", "unsafe_root", "builtin_not_mountable",
+			"external_not_mountable", "unsupported_source", "manual_mount_conflict", "policy_unverified":
+			return true
+		default:
+			return false
+		}
 	default:
 		return false
 	}
@@ -385,7 +429,7 @@ func NormalizeAgentErrorDetails(details string, causes []AgentErrorCause) string
 func agentErrorCauseEvidenceBytes(cause AgentErrorCause) int {
 	total := len(cause.Operation) + len(cause.Code) + len(cause.Detail) + len(cause.Reason) +
 		len(cause.RequestedModel) + len(cause.EffectiveModel) + len(cause.AttemptedModel) +
-		len(cause.RequestedMode) + len(cause.EffectiveMode)
+		len(cause.RequestedMode) + len(cause.EffectiveMode) + len(cause.RuntimeVersion)
 	if cause.PromptNotSent != nil {
 		total++
 	}
@@ -415,6 +459,7 @@ func isKnownAgentErrorCauseCode(code string) bool {
 		AgentErrorCauseCodePermissionModeUnconfirmed,
 		AgentErrorCauseCodePermissionModeMismatch,
 		AgentErrorCauseCodeDeliveryStorage,
+		AgentErrorCauseCodePluginPreparationFailed,
 		LaunchErrorCategoryBaseBranchMissing,
 		LaunchErrorCategoryDefaultBranchUnresolved,
 		LaunchErrorCategoryWorkspaceCheckoutFailed,

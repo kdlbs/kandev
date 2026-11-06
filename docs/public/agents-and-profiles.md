@@ -1061,14 +1061,31 @@ A disabled installed plugin can still be selected for this profile. This
 selection asks Copilot to load the whole plugin for this profile; it does not
 enable the plugin globally.
 
-Kandev supports inventory and plugin-metadata adapters for managed Copilot CLI
-versions **1.0.88**, **1.0.104**, and **1.0.105**. For a supported version and
-valid local or worktree context, Kandev can prepare a native `--plugin-dir`
-mount without an enterprise-policy qualification gate. `mount_permitted`
-describes that preparation eligibility; it is not policy approval,
-authentication, or a guarantee that a plugin component will load. Kandev uses
-the runtime selected for this profile and does not fall back to an unrelated
-global CLI or change a runtime pin.
+When you refresh, Kandev checks the selected interactive CLI's native help for
+the `--plugin-dir` option, then reads and validates its plugin inventory and
+installation metadata. These checks use the exact runtime and launch context
+selected for the profile. Kandev does not use a version or platform list to
+decide whether plugin preparation is available, and it does not fall back to
+an unrelated global CLI or change a runtime pin. A successful check confirms
+the interface and the selected plugin roots; Copilot's own policy remains the
+authority for whether a plugin component loads. The `mount_permitted` field
+reports only observed option support. It does not mean policy approval,
+authentication, or guaranteed plugin execution.
+
+Before a Copilot runtime change, the update preview shows plugin compatibility
+as unchecked because it does not run help or inventory for each saved profile's
+concrete launch context. It also reports how many saved profiles select plugins
+when that count is available. The notice is advisory. It does not block the
+update, change selections, or stop a running process. Successful ACP validation
+does not by itself verify profile plugin loading.
+
+If the selected runtime does not advertise `--plugin-dir`, or its inventory
+cannot be read, the profile keeps its saved selections and shows that plugin
+preparation cannot be completed for the current observation. Remove the
+selection before starting a new process, or repair the runtime and refresh.
+Native enabled status is unknown for a saved plugin that the current successful
+inventory did not observe; Kandev does not report that unknown state as
+disabled.
 
 A selection asks Copilot to load the whole plugin through its native support. A plugin
 can run MCP servers, skills, agents, commands, hooks, and other executable
@@ -1090,6 +1107,14 @@ its selected plugins cannot be prepared; Kandev does not silently omit them.
 If inventory refresh fails, saved choices remain and availability is marked
 unchecked. The profile's normal **Save**, **Reset**, and external-change
 recovery flow applies.
+
+If startup cannot prepare the selected plugins, the task conversation keeps a
+recovery card after reload. It shows the safe failure reason and the exact
+selected runtime version when available. It does not show plugin identities,
+host paths, or native command output. The saved selection stays in place; repair
+the plugin state or review the profile selection, then use the existing
+recovery controls to try again. The same recovery information is available on
+desktop and phone.
 
 Older Kandev backends may return the legacy `policy_unverified` reason for a
 profile capability or model-option probe. This is older-backend recovery, not

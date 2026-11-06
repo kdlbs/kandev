@@ -46,8 +46,8 @@ actual scope of the evidence.
   Include a path with spaces. Observe inventory and repeated-mount behavior.
 - Use `/acp-debug` for any native ACP investigation. Keep captures private and
   record only sanitized evidence in the existing compatibility ledger.
-- Add the exact Copilot version to `inventoryQualifiedVersions` only after
-  positive adapter evidence. Preserve unknown-version rejection.
+- Record adapter evidence for the exact Copilot version. Preserve the current
+  capability and inventory checks instead of adding a version allowlist.
 - Run the existing pin updater. Reconcile the supported-adapter documentation
   and generated delivery records with the actual diff and validation results.
 
@@ -60,8 +60,8 @@ changes, feature flags, weakening adapter admission, or changing native authorit
 
 1. The catalogue matches stable metadata for every proposed update and retains
    OpenCode's supported package majors. Unchanged entries remain unchanged.
-2. Any new Copilot adapter has exact native inventory, installation-metadata,
-   manifest, and repeated-mount evidence. Unknown versions still fail visibly.
+2. The Copilot candidate has exact native inventory, installation-metadata,
+   manifest, and repeated-mount evidence. Incompatible contracts fail visibly.
 3. The six-package suite and generated-record coverage pass with the refreshed
    catalogue. Public adapter documentation describes only observed support.
 
@@ -87,8 +87,8 @@ git diff --check
 If the registry candidate changes, update the exact test version and Results
 before the native run. Record actual commands and sanitized observations.
 Run `bash scripts/lint-go-changed` with the exact changed Go paths.
-Native incompatibility or unavailable evidence keeps adapter admission pending.
-Do not replace an error with a support claim to finish the pin refresh.
+Record native incompatibility or unavailable evidence accurately. Do not replace
+an error with a support claim to finish the pin refresh.
 
 ## Files likely touched
 
@@ -147,10 +147,10 @@ Completed on 2026-11-05.
   returns promptly and reaps a descendant that retains an output descriptor.
 - The isolated native test passed for `1.0.105` on Linux x64 in 6.1 seconds.
   It did not authenticate or exercise managed policy.
-- Added `1.0.105` to the inventory-qualified adapter set only after that run.
-  Unknown-version rejection and the existing native-authority admission tests
-  remain. The compatibility ledger and public adapter reference describe the
-  observed scope without claiming authenticated or enterprise certification.
+- The branch originally added `1.0.105` to the adapter set after that run. Main
+  subsequently replaced version-based admission with capability checks. The
+  compatibility ledger describes the observation without claiming authenticated
+  or enterprise certification.
 - Inspected the `@agentclientprotocol/claude-agent-acp@0.100.0` package contract
   and added it to the exact verified prompt-suggestion fallback versions without
   broadening the range.

@@ -33,18 +33,29 @@ func (s *copilotUtilitySelection) Get(context.Context, string, string) (managedr
 }
 
 type copilotUtilityRunner struct {
-	stdout   []byte
-	root     string
-	calls    int
-	argv     []string
-	env      map[string]string
-	workDir  string
-	argvs    [][]string
-	envs     []map[string]string
-	workDirs []string
+	stdout       []byte
+	root         string
+	calls        int
+	helpCalls    int
+	argv         []string
+	env          map[string]string
+	workDir      string
+	argvs        [][]string
+	helpArgvs    [][]string
+	envs         []map[string]string
+	helpEnvs     []map[string]string
+	workDirs     []string
+	helpWorkDirs []string
 }
 
 func (r *copilotUtilityRunner) Run(_ context.Context, argv []string, env map[string]string, workDir string) (copilotplugins.CommandResult, error) {
+	if containsSequence(argv, "--help") {
+		r.helpCalls++
+		r.helpArgvs = append(r.helpArgvs, append([]string(nil), argv...))
+		r.helpEnvs = append(r.helpEnvs, cloneStringMap(env))
+		r.helpWorkDirs = append(r.helpWorkDirs, workDir)
+		return copilotplugins.CommandResult{Stdout: []byte("Options:\n  --plugin-dir <path>  Load plugin directories\n")}, nil
+	}
 	r.calls++
 	r.argv = append([]string(nil), argv...)
 	r.env = cloneStringMap(env)
@@ -100,6 +111,24 @@ func TestCopilotPluginProfileUtility(t *testing.T) {
 		t.Fatalf("utility flags = %#v, want selected plugin mount", flags)
 	}
 	assertCopilotUtilityInventory(t, runner, 0, "1.0.104", workDir, configDir)
+}
+
+func TestCopilotPluginProfileUtilityRuntime105(t *testing.T) {
+	configDir, runner := copilotUtilityFixture(t)
+	mgr := &Manager{}
+	mgr.SetCopilotPluginRunner(runner)
+	workDir := t.TempDir()
+	flags, err := mgr.profileCopilotPluginFlags(context.Background(), agents.CopilotACPAgentID, ProfileProbeContext{
+		Env:                    map[string]string{"COPILOT_HOME": configDir, "PATH": os.Getenv("PATH")},
+		CopilotSelectedPlugins: []string{"installed:m/spark"},
+	}, workDir, utilityInferenceCommand("1.0.105"))
+	if err != nil {
+		t.Fatalf("profileCopilotPluginFlags: %v", err)
+	}
+	if !containsSequence(flags, "--plugin-dir", canonicalCopilotPluginRootForTest(t, runner.root)) {
+		t.Fatalf("utility flags = %#v, want selected plugin mount", flags)
+	}
+	assertCopilotUtilityInventory(t, runner, 0, "1.0.105", workDir, configDir)
 }
 
 func TestCopilotPluginExecuteProfilePromptUsesSelectedInventory(t *testing.T) {
@@ -197,6 +226,16 @@ func assertCopilotUtilityInventory(t *testing.T, runner *copilotUtilityRunner, i
 	}
 	if runner.envs[index]["COPILOT_HOME"] != configDir {
 		t.Errorf("inventory %d COPILOT_HOME = %q, want %q", index, runner.envs[index]["COPILOT_HOME"], configDir)
+	}
+	if index >= len(runner.helpArgvs) || index >= len(runner.helpEnvs) || index >= len(runner.helpWorkDirs) {
+		t.Fatalf("capability probe index %d missing from %d help calls", index, runner.helpCalls)
+	}
+	if !containsSequence(runner.helpArgvs[index], "@github/copilot@"+version, "--help") ||
+		containsSequence(runner.helpArgvs[index], "--acp") {
+		t.Errorf("capability %d argv = %#v, want selected interactive runtime help", index, runner.helpArgvs[index])
+	}
+	if runner.helpWorkDirs[index] != workDir || runner.helpEnvs[index]["COPILOT_HOME"] != configDir {
+		t.Errorf("capability %d context = workdir:%q home:%q, want final profile context", index, runner.helpWorkDirs[index], runner.helpEnvs[index]["COPILOT_HOME"])
 	}
 }
 

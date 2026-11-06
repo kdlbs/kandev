@@ -289,7 +289,7 @@ func TestStreamProcessorBatchUsesOneWriterCommit(t *testing.T) {
 
 	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
 	defer sm.Wait()
-	processor := newStreamEventProcessor(sm, context.Background(), execution, client, repository, 0)
+	processor := newStreamEventProcessor(sm, context.Background(), execution, client, repository, 0, nil)
 	for _, event := range events {
 		if !processor.enqueue(event) {
 			t.Fatal("processor rejected an event")
@@ -343,7 +343,7 @@ func TestCombinedBatchDuplicateDoesNotNotify(t *testing.T) {
 	sm := NewStreamManager(newTestLogger(), StreamCallbacks{
 		OnAgentEvent: func(*AgentExecution, agentctl.AgentEvent) { notifications++ },
 	}, nil, nil)
-	if err := sm.commitPreparedAgentEvents(context.Background(), execution, prepared, repository, nil, 0); err != nil {
+	if err := sm.commitPreparedAgentEvents(context.Background(), execution, prepared, repository, nil, 0, nil); err != nil {
 		t.Fatalf("commit duplicate combined batch: %v", err)
 	}
 	if repository.combinedCalls != 1 {
@@ -385,7 +385,7 @@ func TestCombinedBatchAdmissionFailureFallsBack(t *testing.T) {
 					receiptDeferred: true,
 				}
 			}
-			err := sm.commitPreparedAgentEvents(context.Background(), execution, prepared, repository, client, 0)
+			err := sm.commitPreparedAgentEvents(context.Background(), execution, prepared, repository, client, 0, nil)
 			if tc.err == repoerrors.ErrAgentDeliveryReplayExpired {
 				if !errors.Is(err, errDeliveryReplayReconciled) {
 					t.Fatalf("error = %v, want the existing reconciliation outcome", err)
@@ -464,7 +464,7 @@ func TestStreamProcessorCombinedBatchWithSQLiteRepository(t *testing.T) {
 	}
 	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
 	defer sm.Wait()
-	processor := newStreamEventProcessor(sm, ctx, execution, nil, repository, 0)
+	processor := newStreamEventProcessor(sm, ctx, execution, nil, repository, 0, nil)
 	for _, event := range events {
 		if !processor.enqueue(event) {
 			t.Fatal("processor rejected an event")

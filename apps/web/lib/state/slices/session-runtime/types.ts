@@ -137,12 +137,27 @@ export type GitStatusEntry = {
   is_submodule?: boolean;
 };
 
+/**
+ * Runtime-only repository inventory for one environment. `scopes` is null
+ * until an authoritative aggregate read validates the current Git scopes.
+ * `generation` advances on every invalidation and fences refresh responses;
+ * streaming events are filtered by `scopes` and `retiredScopes`.
+ */
+export type GitStatusInventoryState = {
+  generation: number;
+  scopes: string[] | null;
+  /** Scopes removed by a validated inventory; late frames from them are rejected. */
+  retiredScopes?: string[];
+};
+
 export type GitStatusState = {
   /** Git status keyed by delivered environment ID (shared across sessions in the same environment).
    *  For multi-repo workspaces this holds the most recently received status
    *  (whichever repo emitted last); per-repo state lives in byEnvironmentRepo.
    */
   byEnvironmentId: Record<string, GitStatusEntry>;
+  /** Validated repository scopes and their invalidation generation per environment. */
+  inventoryByEnvironment?: Record<string, GitStatusInventoryState>;
   /**
    * Per-repository git status for multi-repo task workspaces, keyed by
    * environment ID then repository name. Empty for single-repo workspaces.
@@ -250,12 +265,20 @@ export type GitCheckoutGenerationState = {
   byEnvironmentId: Record<string, Record<string, number>>;
 };
 
+export type ContextCompactionReporting = {
+  source: "usage_drop" | "copilot_native";
+  availability: "available" | "unavailable";
+  coverage: "observed" | "partial";
+  revision: number;
+};
+
 export type ContextWindowEntry = {
   size: number;
   used: number;
   remaining: number;
   efficiency: number;
   compactionCount: number;
+  compactionReporting?: ContextCompactionReporting;
   source?: "acp" | "api";
   timestamp?: string;
 };
@@ -563,6 +586,8 @@ export type BackgroundWorkState = {
   nextOutputWindowGeneration: number;
   activeWorkIdBySessionId: Record<string, string>;
   loadingBySessionId: Record<string, boolean>;
+  readGenerationBySessionId: Record<string, number>;
+  nextReadGeneration: number;
 };
 
 export type BackgroundOutputWindow = {
@@ -628,6 +653,14 @@ export type SessionRuntimeSliceActions = {
    *  freshly-multi-branch session doesn't surface a stale snapshot from the
    *  workspace tracker that was replaced on the backend during rescan. */
   clearLegacyGitStatusEntry: (sessionId: string) => void;
+  /** Advances the environment's inventory generation once and marks scopes unknown. */
+  invalidateGitStatusInventory: (sessionId: string) => void;
+  /** Applies one validated aggregate scope set and retires obsolete refresh state. */
+  reconcileGitStatusInventory: (
+    environmentId: string,
+    generation: number,
+    scopes: readonly string[],
+  ) => boolean;
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
   setContextWindow: (sessionId: string, contextWindow: ContextWindowEntry) => void;
   clearContextWindow: (sessionId: string) => void;
@@ -714,6 +747,7 @@ export type SessionRuntimeSliceActions = {
   clearWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
   setLaunchWarning: (sessionId: string, entry: LaunchWarningEntry) => void;
   clearLaunchWarning: (sessionId: string) => void;
+  beginBackgroundWorkRead: (sessionId: string) => number;
   setBackgroundWorkloads: (sessionId: string, workloads: WorkloadRunObservation[]) => void;
   updateBackgroundWorkload: (sessionId: string, workload: WorkloadRunObservation) => void;
   appendBackgroundWorkloadOutput: (sessionId: string, chunk: WorkloadOutputChunk) => void;

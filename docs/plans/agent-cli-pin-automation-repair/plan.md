@@ -47,8 +47,8 @@ and [native Copilot policy](../../decisions/2026-10-28-copilot-native-policy-aut
 - Local targeted Codex/OpenCode tests pass with the tracked catalogue. A Go
   overlay containing npm's current stable versions reproduces failures across
   agents, settings controller, settings handlers, and lifecycle.
-- Copilot plugin adapters currently support exactly `1.0.88` and `1.0.104`.
-  The candidate `1.0.105` requires compatibility evidence before admission.
+- At the original baseline, Copilot plugin adapters used an exact-version gate.
+  Main later replaced that gate with observed capability and inventory checks.
 - The repository allows Actions PR creation. The configured setting reports
   `can_approve_pull_request_reviews: true`. Credentials are not the observed
   blocker.
@@ -84,7 +84,8 @@ and [native Copilot policy](../../decisions/2026-10-28-copilot-native-policy-aut
 Use `DefaultManagedNPMRuntimeVersion` or its existing must-getter for assertions
 about shipped defaults. Keep fixture versions for explicit operator selections
 and migration tests. Copilot success fixtures install a fake selection store
-that returns a supported version. Unknown selected versions still reject.
+that returns an explicit version. Native capability and format checks determine
+plugin admission, including for previously unobserved versions.
 
 ### Weekly PR record
 
@@ -119,14 +120,16 @@ during implementation because release metadata can change.
 
 Implementation resolved the same stable versions again on 2026-11-05 before
 running the updater. The refreshed catalogue contains those exact values.
+The later main-branch merge changed the prior Copilot default to `1.0.103`.
+The generated delivery record compares the proposed pins with that new base.
 
 ### Copilot compatibility
 
 | Context | Verification | Result required |
 | --- | --- | --- |
 | Current supported selected version | Hermetic discovery and process tests | Plugin fixtures work regardless of shipped default |
-| Candidate exact managed package | Isolated native inventory, metadata, manifest, and repeated-mount fixtures | Evidence precedes adapter admission |
-| Unknown selected version | Existing negative controls | Typed rejection, no global fallback |
+| Candidate exact managed package | Isolated native inventory, metadata, manifest, and repeated-mount fixtures | Record native compatibility evidence |
+| Unobserved selected version | Capability and inventory controls | Admit compatible shapes without global fallback |
 | Missing enterprise-policy fixture | Existing native-authority contract | Report untested policy without a new admission gate |
 
 ## Tests
@@ -134,7 +137,7 @@ running the updater. The refreshed catalogue contains those exact values.
 - `AC-AGENTS-RUNTIME-UPDATES-001.5`, `.7`, `.9`: complete command and metadata
   assertions pass against both tracked and modified catalogue values.
 - `AC-AGENTS-COPILOT-PLUGINS-001.1`, `004.3`, `005.4`, `005.8`: plugin success
-  fixtures select a supported runtime, while unknown versions remain rejected.
+  fixtures select an explicit runtime. Capability and format failures remain rejected.
 - `AC-CI-PR-DOCS-001.3`, `.4`: generated records pass the existing validator.
   Catalogue-only and broken-reference fixtures still fail.
 - `AC-CI-PR-DOCS-003.3`: workflow contracts require the documentation dispatch
@@ -184,11 +187,20 @@ Implemented and verified on 2026-11-05:
 - The generated record paths contain the actual previous and proposed versions
   for the eight changed packages and the validation that preceded generation.
 
+Merge-conflict reconciliation on 2026-11-06 preserved the newer capability-based
+Copilot contract and the runtime pin refresh. The selected-runtime passthrough
+fixture now asserts its explicit selection. The nine affected Go packages passed
+with `go test -trimpath -tags fts5`, including lifecycle and Copilot plugins.
+The updater and generator tests passed 18/18. The workflow contracts passed
+13/13 and the documentation workflow contracts passed 7/7. Public documentation
+tests passed 63/63, all 55 public pages validated, and web typecheck passed.
+The generated delivery record compares the pins with the merged main baseline.
+
 ## Risks
 
 - A stable npm tag does not prove native protocol or plugin compatibility.
-- An unsupported candidate cannot enter the Copilot adapter list solely to
-  make tests pass. A demonstrated incompatibility needs a reported decision.
+- A demonstrated Copilot capability or format incompatibility needs a reported
+  decision and must not be hidden by a version-based fallback.
 - Future automated PRs propose runtime changes for review. Passing unit tests
   does not automatically qualify every future Copilot adapter release.
 - Generated records must change with the proposed versions and describe only

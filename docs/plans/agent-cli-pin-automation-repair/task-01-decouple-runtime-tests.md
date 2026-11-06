@@ -50,8 +50,8 @@ Runtime pins, adapter admission, production runtime logic, and workflow changes.
 1. The six-package suite passes with both the tracked and synthetic catalogues.
 2. Command tests still reject wrong packages, missing exact versions, and wrong
    arguments. Override and migration fixtures retain their intended versions.
-3. Plugin success fixtures select a qualified version. Unknown selected
-   versions still return `runtime_unsupported` without another runtime attempt.
+3. Plugin success fixtures select an explicit version. Capability and inventory
+   failures remain visible without another runtime attempt.
 
 ## Verification
 
@@ -137,7 +137,8 @@ Completed on 2026-11-05.
   remain independent assertions.
 - Copilot controller, route, preview, cache, initial passthrough, and review
   success fixtures select `1.0.104` through the existing selection seam.
-  Unknown selected versions remain a typed `runtime_unsupported` rejection.
+  Current admission checks runtime capabilities and inventory instead of
+  rejecting an unfamiliar version alone.
 - The six-package suite passed with the tracked catalogue and with the temporary
   overlay that changed every pin, both with the `fts5` build tag. The pre-repair
   overlay reproduced the reported fixed-default and unsupported-plugin failures.

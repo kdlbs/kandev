@@ -1403,15 +1403,30 @@ func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]st
 // drove the picker-save.
 func (m *Manager) refreshTrackersDetached(root *WorkspaceTracker, trackers []*WorkspaceTracker, bySubpath map[string]*WorkspaceTracker) {
 	ctx := context.Background()
-	if root != nil {
+	// A plain task-root tracker owns Files events but is not a Git scope.
+	// Refreshing it would publish an unavailable snapshot under the empty
+	// repository name and manufacture a refresh failure the Changes panel
+	// cannot clear.
+	if gitEligibleTracker(root) {
 		root.RefreshGitStatus(ctx)
 	}
 	for _, t := range trackers {
-		t.RefreshGitStatus(ctx)
+		if gitEligibleTracker(t) {
+			t.RefreshGitStatus(ctx)
+		}
 	}
 	for _, t := range bySubpath {
-		t.RefreshGitStatus(ctx)
+		if gitEligibleTracker(t) {
+			t.RefreshGitStatus(ctx)
+		}
 	}
+}
+
+// gitEligibleTracker reports whether a tracker owns a real Git repository.
+// Only those trackers may publish Git status; the empty repository scope is
+// valid exactly when the root tracker passes this check.
+func gitEligibleTracker(tracker *WorkspaceTracker) bool {
+	return tracker != nil && tracker.gitIndexPath != ""
 }
 
 // StartProcess runs a script/process with isolated stdout/stderr.
@@ -1607,11 +1622,13 @@ func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
 	// Refresh in background — RefreshGitStatus blocks on git commands which
 	// can take seconds on large repos; the HTTP caller shouldn't wait.
 	go func() {
-		if root != nil {
+		if gitEligibleTracker(root) {
 			root.RefreshGitStatus(ctx)
 		}
 		for _, t := range trackers {
-			t.RefreshGitStatus(ctx)
+			if gitEligibleTracker(t) {
+				t.RefreshGitStatus(ctx)
+			}
 		}
 	}()
 }
@@ -2053,6 +2070,7 @@ func (m *Manager) buildAdapterConfig() error {
 		ProviderGatewayAuth:        m.cfg.ProviderGatewayAuth,
 		AuthPolicy:                 m.cfg.AuthPolicy,
 		PromptSuggestions:          m.cfg.PromptSuggestions,
+		CopilotNativeSessionEvents: m.cfg.CopilotNativeSessionEvents,
 	}
 	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {
 		harness := acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
@@ -2936,6 +2954,19 @@ func (m *Manager) GetSessionID() string {
 		return a.GetSessionID()
 	}
 	return ""
+}
+
+// CopilotNativeSessionEventsActive reports the live adapter's actual vendor
+// subscription state. An older adapter omits the optional method.
+func (m *Manager) CopilotNativeSessionEventsActive() bool {
+	m.mu.RLock()
+	a := m.adapter
+	m.mu.RUnlock()
+	if a == nil {
+		return false
+	}
+	reporter, ok := a.(interface{ CopilotNativeSessionEventsActive() bool })
+	return ok && reporter.CopilotNativeSessionEventsActive()
 }
 
 // Stop stops the agent process

@@ -532,13 +532,11 @@ catalogue. They still assert trusted package identities, exact version
 selection, and complete argument order. Explicit override and historical
 migration fixtures retain fixed versions.
 
-Copilot plugin success fixtures select an explicitly supported adapter version.
-They do not assume that the mutable shipped default has a supported plugin
-adapter. Unknown-version rejection remains covered separately. Adding an
-adapter version requires native inventory, installation-metadata, manifest,
-and repeated-mount evidence under the
-[Copilot compatibility boundary](copilot-profile-plugins-native-qualification.md).
-An npm release number alone does not supply that evidence.
+Copilot plugin success fixtures can select an explicit runtime version without
+depending on the mutable shipped default. The current
+[Copilot compatibility contract](copilot-plugin-contract-compatibility.md)
+checks native capability and inventory shape instead of an exact-version list.
+An npm release number alone does not prove compatibility.
 
 The generated PR includes a delivery record under
 `docs/plans/managed-runtime-pin-automation/`: `plan.md` and
@@ -560,11 +558,10 @@ The [repair package](../../../plans/agent-cli-pin-automation-repair/plan.md)
 records implementation and verification. It does not change runtime activation
 or authorize a native compatibility claim before evidence exists.
 
-Closure gate: Copilot `1.0.105` admission is limited to inventory and
-installation-metadata compatibility. Authenticated ACP behavior, physical-device
-coverage, and enterprise-policy enforcement remain unavailable and untested;
-they are not reported as passed and do not block this inventory-only admission
-under the native-authority boundary.
+Copilot `1.0.105` has recorded inventory and installation-metadata evidence.
+Authenticated ACP behavior, physical-device coverage, and enterprise-policy
+enforcement remain untested by that fixture. The current compatibility contract
+governs runtime admission independently of those diagnostic observations.
 
 ## Out of scope
 

@@ -184,9 +184,10 @@ also includes open runs under terminal parents, so older partial settlements
 remain repairable. Delayed non-terminal observations cannot reopen terminal
 parents or runs, including runs first observed after their parent ended. Late
 terminal provider observations may still supply the actual outcome and exit code.
-A provider that does not report completion, such as Claude's detached shells
-without lifecycle support, therefore cannot leave rows running past verified
-process termination. Browser
+A provider without attributed completion evidence cannot leave rows running past
+verified process termination. Claude's separate, tool-scoped terminal evidence
+follows the [shell termination design](claude-background-shell-terminal-evidence.md),
+without enabling the rejected async-task capability. Browser
 disconnection alone does not imply provider disconnection. Session reset/deletion fences its
 incarnation before clearing client state; late events cannot recreate it.
 
@@ -218,6 +219,13 @@ are paginated; per-work revisions and request-start epochs prevent delayed HTTP
 snapshots overwriting newer events or dropping rows introduced during a fetch.
 Use the existing session activity-epoch approach as a pattern. Keep completed
 history pageable; do not clear the list when active count becomes zero.
+
+The shared client captures the session list before starting each HTTP read.
+If its snapshot omits a row added or updated during that read, preserve the
+accepted live row. Unchanged omitted rows follow the complete snapshot.
+A store-owned read generation admits only the latest read per session across
+consumers. Clearing or purging a session invalidates its outstanding reads;
+their responses cannot recreate rows or settle a replacement read's loading state.
 
 ## Control routing
 

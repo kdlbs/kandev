@@ -68,6 +68,7 @@ func (m *Manager) buildWorkspaceTrackerGraph(
 
 	if !rootIsGit && (len(directRepos) >= 2 || forceBareRoot) {
 		root := NewWorkspaceTrackerForRepo(workDir, "", m.logger)
+		root.suppressGitPublication = true
 		m.configureTracker(root, "", roots)
 
 		trackers := make([]*WorkspaceTracker, 0, len(directRepos))
@@ -141,8 +142,10 @@ func (m *Manager) reconcileWorkspaceTrackerGraph(
 
 	root := desiredRoot
 	rootReused := false
-	if oldRoot != nil && repositoryTrackerIdentity(oldRoot.RepositoryName(), oldRoot.workDir) ==
-		repositoryTrackerIdentity(desiredRoot.RepositoryName(), desiredRoot.workDir) {
+	if oldRoot != nil &&
+		repositoryTrackerIdentity(oldRoot.RepositoryName(), oldRoot.workDir) ==
+			repositoryTrackerIdentity(desiredRoot.RepositoryName(), desiredRoot.workDir) &&
+		oldRoot.suppressGitPublication == desiredRoot.suppressGitPublication {
 		root = oldRoot
 		rootReused = true
 		syncTrackerConfiguration(root, desiredRoot, roots)
