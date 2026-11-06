@@ -144,7 +144,7 @@ func (e *Executor) repairClaimedWorkspaceInventory(
 	if err := e.rejectCompetingWorkspaceWriters(ctx, task.ID, session.ID); err != nil {
 		return nil, err
 	}
-	if err := validateWorkspaceInventoryRepairCandidate(env, info, candidate); err != nil {
+	if err := validateScopedInventoryCandidate(ctx, env, info, candidate); err != nil {
 		return nil, err
 	}
 	evidence, err := inspectWorkspaceInventoryCandidate(ctx, info, candidate)
@@ -157,6 +157,7 @@ func (e *Executor) repairClaimedWorkspaceInventory(
 	}
 	running = workspaceInventoryEvidenceRuntime(running, sourceRuntime)
 	preservation := workspaceInventoryPreservation(spec, session, evidence, running)
+	preservation.Fence = inventoryMetadataFence(ctx)
 	repair := &models.WorkspaceInventoryRepair{
 		TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
 		TaskEnvironmentID: env.ID, TaskRepositoryID: info.TaskRepositoryID,
@@ -226,7 +227,7 @@ func (e *Executor) existingWorkspaceInventoryRepairReceipt(
 	if existing == nil {
 		return nil, nil
 	}
-	retryHash, spec, info, candidate, ok := workspaceInventoryRetryIdentity(existing, task, session, req, env, repositories)
+	retryHash, spec, info, candidate, ok := workspaceInventoryRetryIdentity(ctx, existing, task, session, req, env, repositories)
 	if !ok || retryHash != existing.RequestHash {
 		return nil, models.ErrWorkspaceInventoryRecoveryIdempotencyConflict
 	}
@@ -464,6 +465,7 @@ func preservationEvidenceFromModel(p models.WorkspaceInventoryPreservation) *wor
 }
 
 func workspaceInventoryRetryIdentity(
+	ctx context.Context,
 	existing *models.WorkspaceInventoryRecoveryReceipt,
 	task *v1.Task,
 	session *models.TaskSession,
@@ -471,6 +473,9 @@ func workspaceInventoryRetryIdentity(
 	env *models.TaskEnvironment,
 	repositories []*repoInfo,
 ) (string, RepoSpec, *repoInfo, *models.TaskEnvironmentRepo, bool) {
+	if existing == nil || !inventoryMetadataFence(ctx).Equal(existing.Preservation.Fence) {
+		return "", RepoSpec{}, nil, nil, false
+	}
 	if !workspaceInventoryRetryReceiptMatches(existing, task, session, env) ||
 		!workspaceInventoryRetryRequestMatches(req, task) {
 		return "", RepoSpec{}, nil, nil, false
@@ -479,7 +484,7 @@ func workspaceInventoryRetryIdentity(
 	if !ok {
 		return "", RepoSpec{}, nil, nil, false
 	}
-	info, candidate, ok := workspaceInventoryRetryCandidate(env, repositories, existing, spec)
+	info, candidate, ok := workspaceInventoryRetryCandidate(ctx, env, repositories, existing, spec)
 	if !ok {
 		return "", RepoSpec{}, nil, nil, false
 	}
@@ -536,6 +541,7 @@ func workspaceInventoryRetrySpec(
 }
 
 func workspaceInventoryRetryCandidate(
+	ctx context.Context,
 	env *models.TaskEnvironment,
 	repositories []*repoInfo,
 	existing *models.WorkspaceInventoryRecoveryReceipt,
@@ -549,7 +555,7 @@ func workspaceInventoryRetryCandidate(
 		return nil, nil, false
 	}
 	candidate, ok := workspaceInventoryRetryRow(env.Repos, existing, spec, info.Position)
-	if !ok || validateWorkspaceInventoryRepairCandidate(env, info, candidate) != nil {
+	if !ok || validateScopedInventoryCandidate(ctx, env, info, candidate) != nil {
 		return nil, nil, false
 	}
 	return info, candidate, true

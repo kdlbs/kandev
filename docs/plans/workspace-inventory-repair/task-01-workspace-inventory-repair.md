@@ -136,3 +136,38 @@ final production edit. PostgreSQL inventory-repair regressions passed with
 against a disposable PostgreSQL 17 database. SQL guard, documentation catalog,
 specification lint, and public-doc validators passed. Final broad checks and
 exact-head GitHub CI/review verification are recorded in the Kandev task.
+
+
+### Explicit local metadata-only recovery follow-up
+
+The optional workspace-only request reuses existing authorization, durable
+environment claims, reciprocal Git preservation proof, and atomic inventory
+repair. It permits one server-derived local repository/worktree only in this
+explicit metadata-only path. A server-read task/session/dynamic-route fence is
+checked in the existing transaction and retained in receipt JSON. Agent launch,
+primary-session changes and route rewriting are excluded; ordinary retry is
+separate. Automatic local-source rejection and external filter guards remain.
+
+Windows reciprocal registration comparison now canonicalizes Git's forward-slash
+worktree path before comparing the existing server-canonical path. The change
+does not relax branch, HEAD or common-repository identity checks.
+
+Disposable overlay checks use real SQLite, Git and dirty staged/untracked
+checkouts. Initial failures were isolated to Windows registration syntax and
+host-global external-filter configuration. Only the registration comparison
+needed production repair; synthetic tests isolate global/system Git config and
+separately prove that configured external filters remain rejected. No permanent
+test files, operating repair, installation or runtime retry were added.
+
+Final disposable race checks: executor 83.706s, orchestrator metadata-only API
+5.654s, SQLite repair regressions 7.177s, and Git preservation 22.647s passed.
+Task-entry/route-generation races, same-key replay after generation change,
+ordinary attestation after repair, active writer, foreign repository/task,
+changed branch, and configured external filter denial were exercised. SQL guard,
+384 decisions/1616 specifications, specification lint, and public-doc validation
+(63 validator tests and 48 pages) passed. PostgreSQL was not run: no dedicated
+authorized test DSN is available. These results do not claim operating recovery.
+
+The first normal commit hook rejected cyclomatic complexity 16 (limit 15).
+Task/session lookup and validation were extracted without changing the contract;
+the applicable focused checks and ordinary hook are rerun after this refactor.

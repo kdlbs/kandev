@@ -22,21 +22,22 @@ var (
 // authoritative executor/runtime record (models.ExecutorRunning) in effect
 // for the session at the time evidence was captured, when one exists.
 type WorkspaceInventoryPreservation struct {
-	ExpectedBranchSlug string `json:"expected_branch_slug"`
-	ObservedBranch     string `json:"observed_branch"`
-	RefName            string `json:"ref_name"`
-	HeadOID            string `json:"head_oid"`
-	WorktreeID         string `json:"worktree_id"`
-	PathHash           string `json:"path_hash"`
-	StatusHash         string `json:"status_hash"`
-	ContentHash        string `json:"content_hash"`
-	IndexHash          string `json:"index_hash"`
-	DirtyCount         int    `json:"dirty_count"`
-	UntrackedCount     int    `json:"untracked_count"`
-	RuntimeState       string `json:"runtime_state"`
-	ExecutorID         string `json:"executor_id,omitempty"`
-	ExecutorStatus     string `json:"executor_status,omitempty"`
-	AgentExecutionID   string `json:"agent_execution_id,omitempty"`
+	Fence              *WorkspaceInventoryRepairFence `json:"fence,omitempty"`
+	ExpectedBranchSlug string                         `json:"expected_branch_slug"`
+	ObservedBranch     string                         `json:"observed_branch"`
+	RefName            string                         `json:"ref_name"`
+	HeadOID            string                         `json:"head_oid"`
+	WorktreeID         string                         `json:"worktree_id"`
+	PathHash           string                         `json:"path_hash"`
+	StatusHash         string                         `json:"status_hash"`
+	ContentHash        string                         `json:"content_hash"`
+	IndexHash          string                         `json:"index_hash"`
+	DirtyCount         int                            `json:"dirty_count"`
+	UntrackedCount     int                            `json:"untracked_count"`
+	RuntimeState       string                         `json:"runtime_state"`
+	ExecutorID         string                         `json:"executor_id,omitempty"`
+	ExecutorStatus     string                         `json:"executor_status,omitempty"`
+	AgentExecutionID   string                         `json:"agent_execution_id,omitempty"`
 }
 
 // WorkspaceInventoryRepair is derived only from server-owned task lifecycle
