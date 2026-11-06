@@ -62,8 +62,9 @@ file authorization, or visual components. Do not broaden third-party trust.
 ## Technical approach
 
 Update `messages/kandev/parse.ts`. Keep the historical provider fallback guard
-in chat `types.ts` unchanged: legacy imported external definitions can retain
-new reserved names. Current calls use normalized qualified identities. The
+in chat `types.ts` on its original `kandev`-only rule and apply it to both
+explicit server fields: legacy imported external definitions can retain new
+reserved names. Current calls use normalized qualified identities. The
 canonical server inventory is `apps/backend/internal/mcp/profile/builtin_descriptors.go`.
 Do not reuse the MCP explorer's broader reserved-name policy: reserving a name
 does not establish a native renderer identity.
@@ -148,7 +149,8 @@ reports can render after loading the patched frontend. The running user instance
 was not restarted or modified.
 
 The initial four focused unit suites passed (83 tests). Review remediation
-adds four provider-collision cases; see the work-order results. Desktop Chromium and mobile
+adds eight provider-collision and Codex fallback cases (91 tests total); see
+the work-order results. Desktop Chromium and mobile
 Chrome each passed the live-and-reload scenario with two loaded image previews,
 a table, neighboring activity groups, and a foreign-name control. Type checking,
 focused lint, specification checks, and documentation coverage passed. See the

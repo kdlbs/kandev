@@ -213,9 +213,11 @@ function hasForeignKandevProvider(input: unknown): boolean {
   const rawInput = (input as Record<string, unknown>).raw_input;
   if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) return false;
   const rawInputRecord = rawInput as Record<string, unknown>;
-  if (!Object.hasOwn(rawInputRecord, "providerIdentifier")) return false;
-  const provider = rawInputRecord.providerIdentifier;
-  return typeof provider !== "string" || provider.trim() !== "kandev";
+  return ["providerIdentifier", "server"].some((field) => {
+    if (!Object.hasOwn(rawInputRecord, field)) return false;
+    const provider = rawInputRecord[field];
+    return typeof provider !== "string" || provider.trim() !== "kandev";
+  });
 }
 
 function legacyKandevToolCandidates(

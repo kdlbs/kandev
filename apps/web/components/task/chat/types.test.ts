@@ -27,16 +27,7 @@ function toolCall(rawName: string, field: "tool_name" | "title" | "content" = "t
   };
 }
 
-describe("kandevToolStemOf", () => {
-  // @covers AC-AGENTS-AGENT-RICH-OUTPUT-002.9
-  it("uses the persisted built-in package identity", () => {
-    const message = toolCall("mcp.kandev-rich-output.show_rich_output_kandev");
-    const metadata = message.metadata as ToolCallMetadata;
-    metadata.normalized!.generic!.name = "kandev-rich-output/show_rich_output_kandev";
-    expect(kandevToolStemOf(message)).toBe("show_rich_output");
-    expect(isRichOutputMessage(message)).toBe(true);
-  });
-
+describe("historical Kandev provider fallback", () => {
   it.each([
     "kandev",
     "kandev-configuration",
@@ -57,6 +48,29 @@ describe("kandevToolStemOf", () => {
       );
     },
   );
+
+  it.each(["kandev", "kandev-rich-output", "foreign", null])(
+    "checks the explicit historical Codex server %s before package-title fallback",
+    (server) => {
+      const message = toolCall("mcp.kandev-rich-output.show_rich_output_kandev");
+      const metadata = message.metadata as ToolCallMetadata;
+      metadata.normalized!.generic!.input = {
+        raw_input: { server, tool: "show_rich_output_kandev", arguments: {} },
+      };
+      expect(kandevToolStemOf(message)).toBe(server === "kandev" ? "show_rich_output" : null);
+    },
+  );
+});
+
+describe("kandevToolStemOf", () => {
+  // @covers AC-AGENTS-AGENT-RICH-OUTPUT-002.9
+  it("uses the persisted built-in package identity", () => {
+    const message = toolCall("mcp.kandev-rich-output.show_rich_output_kandev");
+    const metadata = message.metadata as ToolCallMetadata;
+    metadata.normalized!.generic!.name = "kandev-rich-output/show_rich_output_kandev";
+    expect(kandevToolStemOf(message)).toBe("show_rich_output");
+    expect(isRichOutputMessage(message)).toBe(true);
+  });
 
   it("does not let a package title override a normalized foreign identity", () => {
     const message = toolCall("mcp.kandev-rich-output.show_rich_output_kandev");

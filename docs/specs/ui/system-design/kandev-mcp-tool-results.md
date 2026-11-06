@@ -102,8 +102,9 @@ Qualified namespaces use the exact server inventory. The legacy
 selects native rendering only if it has a registered renderer. This parser is a
 presentation selector, not proof of built-in authorization or execution origin.
 
-Preserve the historical `raw_input.providerIdentifier` fallback guard: only
-`kandev` permits title fallback. A legacy imported external definition can retain
+Preserve the historical provider fallback guard for both
+`raw_input.providerIdentifier` and Codex `raw_input.server`: only `kandev`
+permits title fallback. A legacy imported external definition can retain
 one of the new reserved package names, so that name alone must not relax this
 guard. Current package calls use the normalized qualified identity. An explicit
 foreign normalized identity still prevents fallback to a trusted-looking title.

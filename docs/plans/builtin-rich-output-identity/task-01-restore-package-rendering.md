@@ -206,3 +206,9 @@ Validation after remediation: all four focused unit suites passed (87 tests),
 and `pnpm run typecheck` passed. The existing desktop/phone evidence remains
 applicable to the unchanged qualified report path; only ambiguous historical
 provider fallback is narrowed. No visual component or layout changed.
+
+CodeRabbit identified the equivalent historical Codex `raw_input.server` case.
+The fallback guard now checks both explicit server fields. Three new Codex cases
+failed before this correction; monolithic `kandev` remains a passing control.
+The final four focused suites pass all 91 tests, and type checking passes.
+The design and implementation plan now describe both historical server fields.
