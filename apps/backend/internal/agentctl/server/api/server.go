@@ -269,6 +269,7 @@ func (s *Server) setupRoutes() {
 
 	// Utility agent routes
 	auxHandler := utility.NewHandler(s.cfg.WorkDir, s.logger.Zap())
+	auxHandler.SetInstanceID(s.cfg.InstanceID)
 	auxHandler.SetControlAuthorization(func(c *gin.Context) bool { return c.GetBool(authenticatedControlContextKey) })
 	auxHandler.RegisterRoutes(api)
 
@@ -568,7 +569,8 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		configureErr = s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.LaunchWrapper)
 	}
 	if configureErr != nil {
-		s.logger.Error("failed to configure agent", zap.Error(configureErr))
+		s.logger.Error("failed to configure agent",
+			append(s.agentConfigureFailureFields(configureErr), zap.Error(configureErr))...)
 		c.JSON(http.StatusInternalServerError, AgentConfigureResponse{
 			Success: false,
 			Error:   configureErr.Error(),

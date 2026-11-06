@@ -773,6 +773,11 @@ func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
 			preserved[tcID] = payload
 		case monitorToolCallIDs[tcID]:
 			preserved[tcID] = payload
+		case preserveHandoff && a.preservesVerifiedClaudeBackgroundShell(payload):
+			// Prompt-end cleanup keeps the verified bridge's shell binding so a
+			// later tool-scoped frame can settle the exact job. Explicit
+			// cancellation still terminates the card.
+			preserved[tcID] = payload
 		case payload != nil && payload.Kind() == streams.ToolKindSubagentTask:
 			preserved[tcID] = payload
 		default:

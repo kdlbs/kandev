@@ -74,8 +74,7 @@ the conversation, so that I can explain a change in the agent's retained context
 - **AC-AGENTS-ACP-SESSION-EVENTS-002.7:** When a page is refreshed or the backend
   restarts, a persisted entry shall retain its last reported state. An entry still in
   progress after its turn ends shall not appear active.
-- **AC-AGENTS-ACP-SESSION-EVENTS-002.8:** The existing compaction count and its
-  usage-drop derivation shall not change.
+- **AC-AGENTS-ACP-SESSION-EVENTS-002.8:** Standard ACP timeline events alone shall not mutate the compaction count. Provider-specific counting shall require its own validated evidence contract.
 - **AC-AGENTS-ACP-SESSION-EVENTS-002.9:** Agents that report compaction as ordinary
   text or tool output shall keep their existing presentation.
 - **AC-AGENTS-ACP-SESSION-EVENTS-002.10:** The entry shall be readable and its summary
@@ -137,3 +136,8 @@ temporary wire proxy.
   list badges.
 - Parsing provider text to synthesize compaction or notice entries.
 - Starting a compaction from the Kandev UI.
+
+## Provider-specific evidence
+
+[Copilot native compaction](copilot-native-compaction.md) defines the separate vendor subscription, counter evidence, and root usage.
+Its normalized timeline entries reuse this presentation without giving generic ACP entries counting authority.

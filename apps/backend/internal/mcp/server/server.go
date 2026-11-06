@@ -147,9 +147,9 @@ type Server struct {
 	pluginToolsMu              sync.Mutex
 	pluginTools                plugintools.Snapshot
 	pluginToolsReady           bool
-	automationPluginToolsMu    sync.Mutex
-	automationPluginTools      plugintools.Snapshot
-	automationPluginToolsReady bool
+	filteredPluginToolsMu      sync.Mutex
+	filteredPluginTools        plugintools.Snapshot
+	filteredPluginToolsReady   bool
 	pluginToolsEpoch           atomic.Uint64
 }
 
@@ -325,7 +325,7 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		s.observeMCPToolsListForRequest(ctx, result.Tools)
 	})
 	hooks.AddBeforeListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest) {
-		s.syncPluginTools(ctx)
+		_ = s.syncPluginTools(ctx)
 	})
 	hooks.AddAfterCallTool(func(ctx context.Context, _ any, _ *mcp.CallToolRequest, _ any) {
 		s.observeMCPRequest(ctx, streams.MCPAttachmentEvidenceToolCallObserved, 0, "")
@@ -919,14 +919,16 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 	if sameProfile(s.profile, profileContext) {
 		return
 	}
-	if profileContext.Surface == mcpprofile.SurfaceAutomation {
-		if s.profile.Surface != mcpprofile.SurfaceAutomation {
+	if profileContext.Surface == mcpprofile.SurfaceAutomation ||
+		profileContext.Surface == mcpprofile.SurfaceCoordinator ||
+		profileContext.Surface == mcpprofile.SurfaceExternal {
+		if s.profile.Surface != profileContext.Surface {
 			s.legacyModeCapabilities = slices.Clone(s.profile.Capabilities)
 		}
-		s.automationPluginToolsMu.Lock()
-		s.automationPluginTools = plugintools.Snapshot{}
-		s.automationPluginToolsReady = false
-		s.automationPluginToolsMu.Unlock()
+		s.filteredPluginToolsMu.Lock()
+		s.filteredPluginTools = plugintools.Snapshot{}
+		s.filteredPluginToolsReady = false
+		s.filteredPluginToolsMu.Unlock()
 		s.pluginToolsEpoch.Add(1)
 	} else {
 		s.legacyModeCapabilities = slices.Clone(profileContext.Capabilities)
@@ -1004,15 +1006,22 @@ func (s *Server) setPluginToolsLocked(snapshot plugintools.Snapshot) error {
 		return err
 	}
 	s.mu.RLock()
-	automationSurface := s.profile.Surface == mcpprofile.SurfaceAutomation
+	filteredSurface := sessionFilteredPluginSurface(s.profile.Surface)
 	s.mu.RUnlock()
-	if automationSurface {
-		// A global push is only an invalidation notice for an automation
-		// session. Its candidate tools are never installed here; the next
-		// list request fetches the session-filtered catalog from the backend.
+	if filteredSurface {
+		if s.profile.Surface == mcpprofile.SurfaceCoordinator {
+			// A coordinator execution can filter the full catalog by its bound
+			// references locally, so install the coordinator projection instead
+			// of dropping live tools until the next list.
+			s.pluginToolsEpoch.Add(1)
+			return s.setFilteredPluginToolsLocked(plugintools.ProjectCoordinatorOnly(snapshot))
+		}
+		// A global push is only an invalidation notice for automation. Its
+		// candidate tools depend on a backend-owned exact approval, so they are
+		// never installed here; the next list fetches the filtered catalog.
 		// Bumping the epoch also discards any filtered fetch already in flight.
 		s.pluginToolsEpoch.Add(1)
-		s.clearAutomationPluginToolsLocked()
+		s.clearFilteredPluginToolsLocked()
 		return nil
 	}
 	normalized := plugintools.Normalize(snapshot)
@@ -1041,69 +1050,91 @@ func equivalentPluginToolCatalog(left, right plugintools.Snapshot) bool {
 	return plugintools.Equal(left, right)
 }
 
-func (s *Server) clearAutomationPluginToolsLocked() {
-	s.automationPluginToolsMu.Lock()
-	s.automationPluginTools = plugintools.Snapshot{}
-	s.automationPluginToolsReady = false
-	s.automationPluginToolsMu.Unlock()
+func (s *Server) clearFilteredPluginToolsLocked() {
+	s.filteredPluginToolsMu.Lock()
+	wasReady := s.filteredPluginToolsReady
+	s.filteredPluginTools = plugintools.Snapshot{}
+	s.filteredPluginToolsReady = false
+	s.filteredPluginToolsMu.Unlock()
+	if !wasReady {
+		return
+	}
 	s.mu.Lock()
 	s.rebuildTools()
 	s.mu.Unlock()
 }
 
-// SetAutomationPluginTools replaces the backend-filtered automation snapshot.
-// Selection changes can alter membership at the same global catalog revision,
-// so this setter compares definitions rather than revision ordering.
-func (s *Server) SetAutomationPluginTools(snapshot plugintools.Snapshot) error {
+// SetFilteredPluginTools replaces the backend-filtered snapshot for a
+// session-filtered context (automation, coordinator, or external). Selection
+// and binding changes can alter membership at the same global catalog
+// revision, so this setter compares definitions rather than revision ordering.
+func (s *Server) SetFilteredPluginTools(snapshot plugintools.Snapshot) error {
 	s.pluginToolsUpdateMu.Lock()
 	defer s.pluginToolsUpdateMu.Unlock()
 	// A direct replacement invalidates any older fetch that has not applied.
 	s.pluginToolsEpoch.Add(1)
-	return s.setAutomationPluginToolsLocked(snapshot)
+	return s.setFilteredPluginToolsLocked(snapshot)
 }
 
-func (s *Server) setAutomationPluginToolsLocked(snapshot plugintools.Snapshot) error {
+// SetAutomationPluginTools is the automation-specific spelling retained for
+// callers that predate the shared filtered snapshot.
+func (s *Server) SetAutomationPluginTools(snapshot plugintools.Snapshot) error {
+	return s.SetFilteredPluginTools(snapshot)
+}
+
+func (s *Server) setFilteredPluginToolsLocked(snapshot plugintools.Snapshot) error {
 	if err := validatePluginToolSnapshot(snapshot); err != nil {
 		return err
 	}
 	normalized := plugintools.Normalize(snapshot)
-	s.automationPluginToolsMu.Lock()
-	if s.automationPluginToolsReady && equivalentPluginToolCatalog(s.automationPluginTools, normalized) {
-		s.automationPluginTools = normalized
-		s.automationPluginToolsMu.Unlock()
+	s.filteredPluginToolsMu.Lock()
+	if s.filteredPluginToolsReady && equivalentPluginToolCatalog(s.filteredPluginTools, normalized) {
+		s.filteredPluginTools = normalized
+		s.filteredPluginToolsMu.Unlock()
 		return nil
 	}
-	s.automationPluginTools = normalized
-	s.automationPluginToolsReady = true
-	s.automationPluginToolsMu.Unlock()
+	s.filteredPluginTools = normalized
+	s.filteredPluginToolsReady = true
+	s.filteredPluginToolsMu.Unlock()
 	s.mu.Lock()
 	s.rebuildTools()
 	s.mu.Unlock()
 	return nil
 }
 
-// applyAutomationPluginTools applies a filtered fetch only while it is still
-// the newest request. A later list fetch or invalidation bumps the epoch and
-// makes an older delayed response a no-op.
-func (s *Server) applyAutomationPluginTools(epoch uint64, snapshot plugintools.Snapshot) error {
+// applyFilteredPluginTools applies a filtered fetch only while it is still the
+// newest request. A later list fetch or invalidation bumps the epoch and makes
+// an older delayed response a no-op.
+func (s *Server) applyFilteredPluginTools(epoch uint64, snapshot plugintools.Snapshot) error {
 	s.pluginToolsUpdateMu.Lock()
 	defer s.pluginToolsUpdateMu.Unlock()
 	if epoch != s.pluginToolsEpoch.Load() {
 		return nil
 	}
-	return s.setAutomationPluginToolsLocked(snapshot)
+	return s.setFilteredPluginToolsLocked(snapshot)
 }
 
-// discardAutomationPluginTools clears discovery after a failed fetch unless a
+// discardFilteredPluginTools clears discovery after a failed fetch unless a
 // newer request has already superseded this one.
-func (s *Server) discardAutomationPluginTools(epoch uint64) {
+func (s *Server) discardFilteredPluginTools(epoch uint64) {
 	s.pluginToolsUpdateMu.Lock()
 	defer s.pluginToolsUpdateMu.Unlock()
 	if epoch != s.pluginToolsEpoch.Load() {
 		return
 	}
 	s.pluginToolsEpoch.Add(1)
-	s.clearAutomationPluginToolsLocked()
+	s.clearFilteredPluginToolsLocked()
+}
+
+// sessionFilteredPluginSurface reports whether a surface receives its catalog
+// from the backend-filtered path rather than the shared live snapshot.
+func sessionFilteredPluginSurface(surface mcpprofile.Surface) bool {
+	switch surface {
+	case mcpprofile.SurfaceAutomation, mcpprofile.SurfaceCoordinator, mcpprofile.SurfaceExternal:
+		return true
+	default:
+		return false
+	}
 }
 
 func validatePluginToolSnapshot(snapshot plugintools.Snapshot) error {
@@ -1126,6 +1157,13 @@ func validatePluginToolSnapshot(snapshot plugintools.Snapshot) error {
 		if err := validatePluginToolSurfaces(name, definition.Surfaces); err != nil {
 			return err
 		}
+		if definition.InvocationScope != "" && definition.InvocationScope != plugintools.InvocationScopeTask &&
+			definition.InvocationScope != plugintools.InvocationScopeInstance {
+			return fmt.Errorf("%s has unsupported invocation scope %q", name, definition.InvocationScope)
+		}
+		if declaresInstanceOnlySurface(definition.Surfaces) && !definition.IsInstanceRead() {
+			return fmt.Errorf("%s requires instance scope and a true read-only hint", name)
+		}
 		if err := validatePluginToolSchema(definition.ExposedName+"/input", definition.InputSchema); err != nil {
 			return fmt.Errorf("%s input schema: %w", name, err)
 		}
@@ -1145,7 +1183,8 @@ func validatePluginToolSurfaces(name string, surfaces []string) error {
 	seen := make(map[string]struct{}, len(surfaces))
 	for _, surface := range surfaces {
 		if surface != plugintools.SurfaceKanban && surface != plugintools.SurfaceOffice &&
-			surface != plugintools.SurfaceManaged && surface != plugintools.SurfaceAutomation {
+			surface != plugintools.SurfaceManaged && surface != plugintools.SurfaceAutomation &&
+			surface != plugintools.SurfaceCoordinator && surface != plugintools.SurfaceExternal {
 			return fmt.Errorf("%s has unsupported surface %q", name, surface)
 		}
 		if _, ok := seen[surface]; ok {
@@ -1167,48 +1206,68 @@ func validatePluginToolSchema(name string, raw json.RawMessage) error {
 	return nil
 }
 
-func (s *Server) syncPluginTools(ctx context.Context) {
+func declaresInstanceOnlySurface(surfaces []string) bool {
+	for _, surface := range surfaces {
+		if surface == plugintools.SurfaceCoordinator || surface == plugintools.SurfaceExternal {
+			return true
+		}
+	}
+	return false
+}
+
+// RefreshPluginTools pulls the backend-filtered catalog for this server's
+// surface. Backend lifecycle wiring calls it so a live filtered client receives
+// an atomic replacement and tools/list_changed without waiting for a new list.
+func (s *Server) RefreshPluginTools(ctx context.Context) error {
+	return s.syncPluginTools(ctx)
+}
+
+func (s *Server) syncPluginTools(ctx context.Context) error {
 	if s.backend == nil {
-		return
+		return nil
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	s.mu.RLock()
 	surface := string(s.profile.Surface)
 	s.mu.RUnlock()
-	automationSurface := surface == string(mcpprofile.SurfaceAutomation)
+	filteredSurface := sessionFilteredPluginSurface(mcpprofile.Surface(surface))
 	epoch := uint64(0)
-	if automationSurface {
+	if filteredSurface {
 		epoch = s.pluginToolsEpoch.Add(1)
 	}
 	var snapshot plugintools.Snapshot
 	if err := s.backend.RequestPayload(requestCtx, ws.ActionMCPListPluginTools, map[string]string{"surface": surface}, &snapshot); err != nil {
-		if automationSurface {
-			s.discardAutomationPluginTools(epoch)
+		if filteredSurface {
+			s.discardFilteredPluginTools(epoch)
 		}
-		return
+		return err
 	}
-	if automationSurface {
-		if err := s.applyAutomationPluginTools(epoch, snapshot); err != nil {
-			s.logger.Warn("ignoring invalid automation plugin tool catalog", zap.Error(err))
-			s.discardAutomationPluginTools(epoch)
+	if filteredSurface {
+		if err := s.applyFilteredPluginTools(epoch, snapshot); err != nil {
+			s.logger.Warn("ignoring invalid filtered plugin tool catalog",
+				zap.String("surface", surface), zap.Error(err))
+			s.discardFilteredPluginTools(epoch)
+			return err
 		}
-		return
+		return nil
 	}
 	if err := s.SetPluginTools(snapshot); err != nil {
 		s.logger.Warn("ignoring invalid plugin tool catalog", zap.Error(err))
+		return err
 	}
+	return nil
 }
 
 func (s *Server) registerPluginTools() {
 	surface := s.profile.Surface
 	var snapshot plugintools.Snapshot
 	ready := false
-	if surface == mcpprofile.SurfaceAutomation {
-		s.automationPluginToolsMu.Lock()
-		ready = s.automationPluginToolsReady
-		snapshot = plugintools.Normalize(s.automationPluginTools)
-		s.automationPluginToolsMu.Unlock()
+	if sessionFilteredPluginSurface(surface) {
+		s.filteredPluginToolsMu.Lock()
+		ready = s.filteredPluginToolsReady
+		snapshot = plugintools.Normalize(s.filteredPluginTools)
+		s.filteredPluginToolsMu.Unlock()
 	} else {
 		s.pluginToolsMu.Lock()
 		ready = s.pluginToolsReady
@@ -1224,6 +1283,14 @@ func (s *Server) registerPluginTools() {
 		}
 		if surface == mcpprofile.SurfaceManagedConversation &&
 			(s.profile.ManagedToolPolicy == nil || !s.profile.ManagedToolPolicy.Allows(definition.PluginID, definition.LocalName)) {
+			continue
+		}
+		if surface == mcpprofile.SurfaceCoordinator &&
+			(s.profile.CoordinatorToolPolicy == nil ||
+				!s.profile.CoordinatorToolPolicy.AllowsPlugin(definition.PluginID, definition.LocalName, definition.InstallationID, definition.PolicyVersion)) {
+			continue
+		}
+		if (surface == mcpprofile.SurfaceCoordinator || surface == mcpprofile.SurfaceExternal) && !definition.IsInstanceRead() {
 			continue
 		}
 		tool := mcp.NewToolWithRawSchema(definition.ExposedName, definition.Description, definition.InputSchema)
@@ -1353,9 +1420,7 @@ func (s *Server) registerAgentPermissionTools() {
 // registerTools assembles the selected packages before publishing their views.
 func (s *Server) registerTools() {
 	s.registerContextTools()
-	if s.profile.Surface != mcpprofile.SurfaceCoordinator {
-		s.registerPluginTools()
-	}
+	s.registerPluginTools()
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),
 		zap.Int("count", len(s.mcpServer.ListTools())),

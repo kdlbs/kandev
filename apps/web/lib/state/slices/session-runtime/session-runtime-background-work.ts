@@ -30,6 +30,15 @@ function mergeWorkloadCapabilities(
 
 function buildBackgroundWorkLoadActions(set: ImmerSet) {
   return {
+    beginBackgroundWorkRead: (sessionId: string) => {
+      let generation = 0;
+      set((draft) => {
+        generation = draft.backgroundWork.nextReadGeneration++;
+        draft.backgroundWork.readGenerationBySessionId[sessionId] = generation;
+        draft.backgroundWork.loadingBySessionId[sessionId] = true;
+      });
+      return generation;
+    },
     setBackgroundWorkloads: (
       sessionId: string,
       workloads: Parameters<SessionRuntimeSlice["setBackgroundWorkloads"]>[1],

@@ -40,6 +40,36 @@ describe("extractKandevArgs", () => {
 });
 
 describe("extractKandevStem", () => {
+  // @covers AC-AGENTS-AGENT-RICH-OUTPUT-002.9
+  it.each([
+    "kandev",
+    "kandev-configuration",
+    "kandev-rich-output",
+    "kandev-walkthroughs",
+    "kandev-diagnostics",
+  ])("recognizes the exact %s server in supported serialized formats", (server) => {
+    for (const name of [
+      `${server}/show_rich_output_kandev`,
+      `mcp.${server}.show_rich_output_kandev`,
+      `mcp__${server}__show_rich_output_kandev`,
+      `${server}: show_rich_output_kandev`,
+      `${server}-show_rich_output_kandev`,
+    ]) {
+      expect(extractKandevStem(` ${name} `), name).toBe("show_rich_output");
+    }
+  });
+
+  it.each([
+    "kandev-rich-output-extra/show_rich_output_kandev",
+    "mcp.kandev.example.show_rich_output_kandev",
+    "mcp__kandev-rich-output-extra__show_rich_output_kandev",
+    "kandev-rich-output/mcp__other__show_rich_output_kandev",
+    "kandev-rich-output/_kandev",
+    "kandev-rich-output/show_rich_output",
+  ])("rejects lookalike or malformed package identity %s", (name) => {
+    expect(extractKandevStem(name)).toBeNull();
+  });
+
   it("strips the mcp__kandev__ namespace and the _kandev suffix", () => {
     expect(extractKandevStem("mcp__kandev__list_tasks_kandev")).toBe("list_tasks");
   });

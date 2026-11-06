@@ -392,6 +392,7 @@ func buildRecoveredKubernetesInstance(
 		Metadata:        metadata, Env: cloneStringMap(info.Env),
 		WorkspaceSourceRoots: append([]string(nil), info.WorkspaceSourceRoots...),
 		ProviderSessionID:    info.ProviderSessionID, AuthToken: token, BootstrapNonce: req.BootstrapNonce,
+		CopilotNativeSessionEvents: info.CopilotNativeSessionEvents,
 	}
 }
 

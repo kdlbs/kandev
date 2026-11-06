@@ -2,6 +2,7 @@
 status: draft
 system: agents
 created: 2026-11-03
+updated: 2026-11-04
 requirements:
   - REQ-AGENTS-DYNAMIC-PROVIDER-OPTIONS-001
   - REQ-AGENTS-DYNAMIC-PROVIDER-OPTIONS-002
@@ -28,22 +29,18 @@ The [first-draft correction](profile-capability-discovery.md#identity-before-the
 | REQ-AGENTS-DYNAMIC-PROVIDER-OPTIONS-003 | Composition qualification; Exact combination resolution |
 | REQ-AGENTS-DYNAMIC-PROVIDER-OPTIONS-004 | Shared selector; Resolution and application; Mobile and summaries |
 
-## Evidence and current loss
+## Implementation baseline
 
-At commit `8cd31a0896abc50e6d9683369cee92252c5d2e44`, live `convertACPConfigOptions` copies each group's choices into one flat array.
-Utility `probeConfigOptions` uses `selectOptionsUngrouped`, which also discards the groups.
-The stream, probe, host utility, and settings types cannot represent the lost structure.
-Frontend `configOptionToModelOptions` and selector types consume flat choices.
+The original delivery preserved native ACP groups through `acpcompat.CatalogFromSelectOptions` and `CatalogFromRawOptions`.
+Both the live converter and utility probe use that shared boundary.
+The optional composition shape and generic editor also exist.
 
-Two temporary no-inference tests passed and reproduced the loss in both converters.
-Each input contained two native groups and two choices with repeated display labels.
-Both exact values and choice descriptions survived. Both group IDs and labels disappeared.
-The tests were removed after diagnosis.
+[Issue #5053](https://github.com/kdlbs/kandev/issues/5053) identifies two remaining gaps.
+`CatalogCommandGroups` renders ordinary singleton headings, and no Devin source populates compositions.
+The [repair plan](../../../plans/model-catalog-selector-repair/plan.md) records the current reproduction and remaining delivery work.
 
-The issue reports grouped Devin options after advertising `_meta["cognition.ai/groupedSessionConfigOptions"]=true`.
-The installed SDK represents native groups through `group`, `name`, and a flat choice list.
-ACP does not define arbitrary nesting or composed-model bindings in that type.
-The issue's example pairing and catalog counts are observations, not production constants or a decoder grammar.
+ACP's native `group`, `name`, and choice list do not establish composition relationships.
+The [qualification record](../../../plans/first-draft-profile-discovery/fusion-qualification.md) separates reported native evidence from captured fixtures.
 
 ## Catalog shape
 
@@ -95,16 +92,100 @@ Prefer explicit provider relationship metadata or a documented model catalogue.
 Use backend compatibility normalization for any necessary Devin interpretation.
 The renderer must not parse model IDs, names, `fusion`, `lead`, or `sidekick`.
 
-Task 04 is a mandatory qualification gate before implementing Devin composition bindings.
-Record the actual source, mapping rules, ambiguity handling, and supported observed shape.
-An illustrative ID from the issue is not a verified decoder contract.
-A narrow decoder needs sanitized real fixtures and exact current-catalog validation.
-Unknown, changed, or ambiguous entries remain ordinary selectable leaves.
+Devin's observed `models list --format json` command supplies `families[]` with `family_uid`, `family_label`, and `variants[]`.
+Each variant supplies an exact `model_uid` and `label`.
+The [Fusion documentation](https://docs.devin.ai/cli/fusion) explains the controls but does not define the pairing wire contract.
 
-The [Fusion documentation](https://docs.devin.ai/cli/fusion) explains the controls but does not publish a machine-readable relationship schema.
-If qualification cannot establish the bindings, report the missing evidence and retain the gate.
-Do not mark #5026 complete because grouping or synthetic compositions work.
-Its Fusion criterion requires verified bindings.
+Qualify the native schema and Fusion family identity with a sanitized capture before enabling its adapter.
+Use actual non-Fusion variant records as candidate leads and sidekicks.
+Accept a candidate only when both relationships match exactly:
+
+```text
+fusion.model_uid == "fusion-" + lead.model_uid + "-sidekick-" + sidekick.model_uid
+fusion.label == "Fusion (" + lead.label + " + " + sidekick.label + ")"
+```
+
+The native Fusion record must also match an existing ACP leaf's exact value and label.
+The native catalog supplies relationships, never additional model availability.
+Do not split a name or identifier into guessed dimension values.
+Use bounded indexed matching, retaining every candidate until ambiguity checks finish.
+
+Use the lead's native family identity and family label for the Lead dimension.
+Use the sidekick's exact variant identity and label for Sidekick.
+Preserve first occurrence order from the ACP group when deriving dimension choices and bindings.
+Do not remove effort suffixes from labels with string heuristics.
+
+Accept each advertised value only if exactly one native record and one candidate pair explain it.
+Then require each `(lead family, sidekick variant)` tuple to identify exactly one advertised value.
+If a tuple collides, leave every colliding member unbound.
+Never choose the first match or silently add an effort dimension.
+
+Scope each composition to its existing ACP group ID.
+Keep unbound choices beside its configuration entry, in source order.
+A mixed group can therefore offer verified composition and ordinary unknown choices together.
+If no bindings survive, retain the ordinary group.
+Validate the enriched copy with `modelcatalog.Validate` before publication.
+If validation fails, preserve the original catalog and flat projection.
+
+Thinking and Speed remain separate ACP options even when a variant identifier contains an effort-like suffix.
+Unsupported fast variants and changed relationships remain ordinary leaves.
+A newer CLI version qualifies only through the supported shape and exact checks, never its version number alone.
+Do not claim universal decoding or mark #5026 complete from ordinary fallback or synthetic fixtures.
+
+## Native catalog acquisition
+
+Acquire evidence inside the owning agentctl, using the resolved launch snapshot for that ACP process or probe.
+The snapshot includes the executable, authorized wrapper or prefix, working directory, environment, authentication, proxy configuration, and executor.
+Preserve the existing credential and configuration environment.
+Do not create an empty configuration home, copy credentials, or retry under a global account.
+
+Construct the native command from the admitted Devin command before wrapper expansion.
+Replace only the qualified ACP subcommand with `models list --format json`.
+Retain configuration flags only when the captured CLI contract supports them for that subcommand.
+An unknown command shape or flag translation retains ordinary selection.
+Use `prepareSessionArgs` for the live wrapper and `prepareACPLaunch` for the probe wrapper.
+Never remove an authorized wrapper to make discovery succeed.
+
+Keep acquisition separate from pure compatibility normalization in `acpcompat`.
+A small `internal/agentctl/devincatalog` source holds one immutable evidence snapshot and accepts an owner-provided command runner.
+The source exposes a preparation operation and a pure catalog enrichment operation.
+The optional internal adapter configuration carries this source through `adapter.Config.ToSharedConfig`.
+It is not a browser DTO, provider registry, or second selection store.
+
+For a live generation, `process.Manager` supplies the final admitted command context and owns the listing process.
+`Adapter.Initialize` prepares the source once after successful initialization and authentication, outside configuration locks.
+Every later model catalog uses pure enrichment before adapter caching and publication.
+This includes typed/untyped initial state, new/load/resume/reset, notifications, model confirmations, and option confirmations.
+Recheck the current catalog on every projection, so removed models cannot survive through old bindings.
+
+For settings, `ACPInferenceExecutor.Probe` acquires at most one native snapshot after a successful ACP probe.
+The listing shares the probe's deadline, sanitized environment, command preparation, and process-group cleanup.
+The existing hostutility caches and flights retain authorization scope, context revisions, expiry, and refresh authority.
+Do not add a host-global native cache or pass a settings result into live state.
+Each uncached probe can perform one listing. Cache hits, browser renders, and ACP notifications perform none.
+
+Give a listing a 10-second maximum within its parent's remaining deadline.
+Retain at most 2 MiB of stdout and 64 KiB of stderr, with an explicit overflow result.
+Parse stdout separately from stderr and reject truncated JSON, trailing data, malformed required fields, and excessive catalog structures.
+Cancel and reap the whole owned process tree on timeout, overflow, parent cancellation, and shutdown.
+Use the existing managed process and ACP cleanup paths instead of a bare `exec.Command` without ownership.
+The host CLI runner's 64 KiB combined-output buffer is unsuitable for this source.
+
+Source state belongs to one live launch generation or one admitted probe operation.
+Stop, replacement, reconfiguration, or a new initialization discards the old source.
+No old-generation result can update a replacement adapter.
+The first initialization owns live preparation. Settings cancellation retains the existing hostutility flight policy for other waiters.
+There is no independently detached source job or periodic poller.
+
+Listing failure is optional enrichment failure, not ACP discovery failure.
+Return the ordinary catalog without changing the selected model, profile, modes, or provider options.
+An explicit settings refresh or a new live initialization can retry.
+Log only a bounded outcome such as unavailable, unsupported context, timeout, overflow, or invalid data.
+Raw native output, pricing, credentials, account identifiers, and filesystem paths do not enter generic logs or browser metadata.
+
+This is distinct from [host CLI model suggestions](host-cli-model-discovery.md).
+That contract can merge suggestions from a host account. Fusion enrichment only describes exact choices from the current ACP account.
+The [existing catalog decision](../../../decisions/2026-11-03-provider-neutral-model-catalog.md) remains authoritative.
 
 ## Projection and cache ownership
 
@@ -170,7 +251,19 @@ Extend `ModelConfigSelector` and its content with optional normalized catalog da
 Share pure tree navigation, search, combination filtering, and draft state.
 Do not add a Devin component or another provider selection store.
 Desktop uses the existing popover with Back navigation and an in-place composition view.
-Singleton ordinary groups can collapse while retaining visible context.
+Project ordinary singleton groups into one model row at render time.
+Keep the canonical nodes and `buildCatalogTree` lossless.
+Determine singleton eligibility from the full catalog before search filtering.
+Collapse a chain only when its entire subtree contains one ordinary choice and no composition entry.
+Run composition detection first, including a composition with only one binding.
+Retain multi-choice groups when search happens to leave one visible result.
+
+Render one ordered traversal of the source entries. Do not hoist loose leaves or merge repeated labels or values.
+Carry the leaf occurrence key separately from its executable model value into the command item identity.
+Selection callbacks still receive the exact provider value.
+Show useful removed path context as secondary row detail and accessible description, alongside any provider description.
+Avoid repeating path labels that only duplicate the model label.
+Paths remain searchable even when a provider description exists.
 Search returns exact matching leaves with paths and includes dimension labels/values.
 Keep the selected/current entry discoverable outside the open group.
 
@@ -190,6 +283,7 @@ Preserve full accessible details, provider descriptions, and historical labels.
 ## Delivery
 
 - [Combined implementation plan](../../../plans/first-draft-profile-discovery/plan.md)
+- [Selector repair package](../../../plans/model-catalog-selector-repair/plan.md), including source qualification and desktop/phone acceptance.
 - [Architecture decision](../../../decisions/2026-11-03-provider-neutral-model-catalog.md)
 - [Requirements](../requirements/dynamic-provider-options.md)
 - [Devin permission controls](devin-profile-permissions.md), a separate mode/sandbox concern.

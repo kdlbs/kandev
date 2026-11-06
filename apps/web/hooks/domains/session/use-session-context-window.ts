@@ -2,7 +2,12 @@ import { useEffect, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { ContextWindowEntry } from "@/lib/state/store";
-import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
+import {
+  mergeCompactionCountValue,
+  mergeCompactionReportingValue,
+  reconcileContextWindowMetadata,
+  sameContextWindowEntry,
+} from "@/lib/state/slices/session-runtime/context-window";
 
 export function useSessionContextWindow(
   sessionId: string | null,
@@ -24,6 +29,9 @@ export function useSessionContextWindow(
   const compactionCount = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.compactionCount : undefined,
   );
+  const compactionReporting = useAppStore((state) =>
+    sessionId ? state.contextWindow.bySessionId[sessionId]?.compactionReporting : undefined,
+  );
   const source = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.source : undefined,
   );
@@ -40,10 +48,11 @@ export function useSessionContextWindow(
       remaining: remaining ?? 0,
       efficiency: efficiency ?? 0,
       compactionCount: compactionCount ?? 0,
+      compactionReporting,
       source,
       timestamp,
     };
-  }, [size, used, remaining, efficiency, compactionCount, source, timestamp]);
+  }, [size, used, remaining, efficiency, compactionCount, compactionReporting, source, timestamp]);
 
   const session = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId] : undefined,
@@ -51,23 +60,37 @@ export function useSessionContextWindow(
   const setContextWindow = useAppStore((state) => state.setContextWindow);
   const connectionStatus = useAppStore((state) => state.connection.status);
 
-  // Populate context window from session metadata if not already in store
+  // Reconcile the retained session metadata with the live cache. This is the
+  // shared freshness boundary for hydration, deferred HTTP snapshots, and a
+  // missed count-only notification.
   useEffect(() => {
-    if (!sessionId || contextWindow) return;
-
-    // Try to extract context_window from session metadata
+    if (!sessionId) return;
     const metadata = session?.metadata;
     if (!metadata || typeof metadata !== "object") return;
-
-    const storedContextWindow = (metadata as Record<string, unknown>).context_window;
-    const entry = parseContextWindowEntry(
-      storedContextWindow,
-      undefined,
-      (metadata as Record<string, unknown>).context_compaction_count,
+    const record = metadata as Record<string, unknown>;
+    const hasGauge = Object.prototype.hasOwnProperty.call(record, "context_window");
+    const count = mergeCompactionCountValue(
+      record.context_compaction_count,
+      contextWindow?.compactionCount,
     );
-    if (!entry) return;
+    const reporting = mergeCompactionReportingValue(
+      record.context_compaction_reporting,
+      contextWindow?.compactionReporting,
+    );
 
-    setContextWindow(sessionId, entry);
+    // Hydration never clears a live gauge from a stale null snapshot; live WS
+    // events own explicit invalidation.
+    const next = reconcileContextWindowMetadata({
+      current: contextWindow,
+      gauge: record.context_window,
+      hasGauge,
+      count,
+      reporting,
+      timestamp: undefined,
+      allowExplicitClear: false,
+    });
+    if (next === undefined || next === null || sameContextWindowEntry(next, contextWindow)) return;
+    setContextWindow(sessionId, next);
   }, [sessionId, contextWindow, session?.metadata, setContextWindow]);
 
   // Subscribe to session updates via WebSocket

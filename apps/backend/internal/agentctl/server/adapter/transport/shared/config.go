@@ -83,6 +83,10 @@ type Config struct {
 	// PromptSuggestions asks an agent with native next-prompt suggestions to
 	// emit them. Only dialects that support native suggestions act on it.
 	PromptSuggestions bool
+
+	// CopilotNativeSessionEvents enables Copilot's opt-in native compaction and
+	// attributed usage notifications for this launch.
+	CopilotNativeSessionEvents bool
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

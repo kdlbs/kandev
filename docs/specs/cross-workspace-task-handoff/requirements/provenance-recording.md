@@ -84,8 +84,7 @@ distinct, non-idempotent activity-log entry per call — including on a replay
 
 ## Out of scope
 
-A UI surface rendering either provenance record or either activity verb. The
-reverse direction — writing back to the source task when the delivery task
-finishes — is also excluded; the reverse-link record only makes the source
-findable, and nothing in this system closes that loop or imposes a deadline
-on an open handoff.
+A UI surface rendering either provenance record or either activity verb. A
+deadline on an open handoff is also excluded. The completion report and
+source-task wake are defined separately in
+[Completion report and source-task wake](completion-notification.md).

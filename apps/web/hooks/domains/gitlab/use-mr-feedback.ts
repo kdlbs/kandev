@@ -69,6 +69,34 @@ function reducer(state: State, action: Action): State {
   }
 }
 
+export type ReloadResult =
+  | { outcome: "ok"; mr: GitLabMRFeedback["mr"] }
+  | { outcome: "failed" }
+  | { outcome: "superseded" };
+
+type MRIdentity = { workspaceId: string; project: string; iid: number; host?: string };
+
+async function fetchMRBundle(identity: MRIdentity) {
+  const [feedback, files, commits] = await Promise.allSettled([
+    getMRFeedback(identity),
+    getMRFiles(identity),
+    getMRCommits(identity),
+  ]);
+  const errors = [feedback, files, commits]
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) =>
+      result.reason instanceof Error ? result.reason.message : t("gitlab:gitlabRejectedTheRequest"),
+    );
+  const loaded: Action = {
+    type: "loaded",
+    feedback: feedback.status === "fulfilled" ? feedback.value : undefined,
+    files: files.status === "fulfilled" ? (files.value.files ?? []) : undefined,
+    commits: commits.status === "fulfilled" ? (commits.value.commits ?? []) : undefined,
+    error: errors.length > 0 ? errors.join("; ") : null,
+  };
+  return { loaded, feedback };
+}
+
 export function useMRFeedback(
   workspaceId: string | null,
   project: string | null,
@@ -78,6 +106,31 @@ export function useMRFeedback(
   const [state, dispatch] = useReducer(reducer, initialState);
   const requestGeneration = useRef(0);
   const refresh = useCallback(() => dispatch({ type: "refresh" }), []);
+
+  useEffect(
+    () => () => {
+      requestGeneration.current += 1;
+    },
+    [],
+  );
+
+  // Reloads the live MR under the same generation as the effect load, so an
+  // unmount, identity change, refresh() or newer reload supersedes it.
+  const reload = useCallback(async (): Promise<ReloadResult> => {
+    if (!workspaceId || !project || !iid) return { outcome: "superseded" };
+    const generation = ++requestGeneration.current;
+    const { loaded, feedback } = await fetchMRBundle({
+      workspaceId,
+      project,
+      iid,
+      host: host ?? undefined,
+    });
+    if (requestGeneration.current !== generation) return { outcome: "superseded" };
+    dispatch(loaded);
+    return feedback.status === "fulfilled"
+      ? { outcome: "ok", mr: feedback.value.mr }
+      : { outcome: "failed" };
+  }, [workspaceId, project, iid, host]);
 
   useEffect(() => {
     if (!workspaceId || !project || !iid) {
@@ -89,24 +142,9 @@ export function useMRFeedback(
     const identity = { workspaceId, project, iid, host: host ?? undefined };
     const identityKey = `${workspaceId}\0${host ?? ""}\0${project}\0${iid}`;
     dispatch({ type: "loading", identityKey });
-    Promise.allSettled([getMRFeedback(identity), getMRFiles(identity), getMRCommits(identity)])
-      .then(([feedback, files, commits]) => {
-        if (requestGeneration.current === generation) {
-          const errors = [feedback, files, commits]
-            .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-            .map((result) =>
-              result.reason instanceof Error
-                ? result.reason.message
-                : t("gitlab:gitlabRejectedTheRequest"),
-            );
-          dispatch({
-            type: "loaded",
-            feedback: feedback.status === "fulfilled" ? feedback.value : undefined,
-            files: files.status === "fulfilled" ? (files.value.files ?? []) : undefined,
-            commits: commits.status === "fulfilled" ? (commits.value.commits ?? []) : undefined,
-            error: errors.length > 0 ? errors.join("; ") : null,
-          });
-        }
+    fetchMRBundle(identity)
+      .then(({ loaded }) => {
+        if (requestGeneration.current === generation) dispatch(loaded);
       })
       .catch((error: unknown) => {
         if (requestGeneration.current === generation) {
@@ -121,7 +159,7 @@ export function useMRFeedback(
     };
   }, [workspaceId, project, iid, host, state.revision]);
 
-  return { ...state, refresh };
+  return { ...state, refresh, reload };
 }
 
 export function useAddMRFeedbackAsContext(sessionId: string, projectPath: string, mrIid: number) {

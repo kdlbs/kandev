@@ -6,9 +6,14 @@ import {
   expectPromptErrorRow,
   expectTurnErrorBadge,
   GENERIC_PROMPT_ERROR,
+  originalPromptOccurrences,
   promptEventCount,
   waitForPromptError,
+  waitForAgentResponseAfter,
+  waitForUserContinueMessages,
 } from "../../helpers/acp-prompt-error-continuity";
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { openQuickChatSetup, selectAgentIfNeeded } from "../chat/quick-chat-helpers";
 import { completeQuickChatOpening } from "../chat/quick-chat-opening-composer-helpers";
@@ -89,6 +94,116 @@ test("generic prompt error keeps the runtime and accepts a follow-up prompt", as
     await expectNoTurnErrorBadge(session, fixture.taskTitle);
     await expectPromptErrorRow(session, { dismiss: false });
   } finally {
+    await fixture.dispose();
+  }
+});
+
+test("desktop: Dismiss and continue sends one manual continue and preserves the draft", async ({
+  testPage,
+  apiClient,
+  backend,
+  seedData,
+}) => {
+  const fixture = await createPromptErrorFixture(backend, apiClient, seedData);
+  try {
+    const session = new SessionPage(testPage);
+    await testPage.goto(`/t/${fixture.taskId}`);
+    await session.waitForLoad();
+    await waitForPromptError(apiClient, fixture.sessionId);
+    const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
+
+    await session.waitForDirectInput();
+    const row = await expectPromptErrorRow(session, { continue: true });
+    await expectTurnErrorBadge(session, fixture.taskTitle);
+    const editor = await session.fillMessage("keep this unsent draft");
+    await row.getByTestId("turn-error-continue-button").click();
+
+    await expect.poll(() => promptEventCount(fixture.tracePath), { timeout: 60_000 }).toBe(2);
+    const continueMessages = await waitForUserContinueMessages(apiClient, fixture.sessionId);
+    expect(continueMessages).toHaveLength(1);
+    await waitForAgentResponseAfter(apiClient, fixture.sessionId, continueMessages[0].created_at);
+    expect(originalPromptOccurrences(fixture.tracePath, "/prompt-error:1")).toBe(1);
+    expect(await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId)).toBe(
+      executionId,
+    );
+    await expectNoTurnErrorBadge(session, fixture.taskTitle);
+    await expect(row.getByTestId("turn-error-continue-button")).toHaveCount(0);
+    await expect(row.getByTestId("turn-error-dismiss-button")).toHaveCount(0);
+    await expect(editor).toHaveText("keep this unsent draft");
+    assertPromptErrorACPTrace(fixture.tracePath, 2);
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await expectPromptErrorRow(session, { dismiss: false, continue: false });
+    await expectNoTurnErrorBadge(session, fixture.taskTitle);
+    const viewer = await testPage.context().newPage();
+    try {
+      await viewer.goto(`/t/${fixture.taskId}`);
+      const otherViewer = new SessionPage(viewer);
+      await otherViewer.waitForLoad();
+      await expectPromptErrorRow(otherViewer, { dismiss: false, continue: false });
+      await expect(
+        otherViewer.activeChat().getByText("continue", { exact: true }).first(),
+      ).toBeVisible();
+    } finally {
+      await viewer.close();
+    }
+    const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+    expect(
+      messages.filter(
+        (message) => message.author_type === "user" && message.content === "continue",
+      ),
+    ).toHaveLength(1);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test("desktop: two viewers submitting at once create one continuation", async ({
+  testPage,
+  apiClient,
+  backend,
+  seedData,
+}) => {
+  const fixture = await createPromptErrorFixture(backend, apiClient, seedData);
+  const viewer = await testPage.context().newPage();
+  try {
+    const session = new SessionPage(testPage);
+    await testPage.goto(`/t/${fixture.taskId}`);
+    await session.waitForLoad();
+    await waitForPromptError(apiClient, fixture.sessionId);
+    await session.waitForDirectInput();
+    const firstRow = await expectPromptErrorRow(session, { continue: true });
+
+    await viewer.goto(`/t/${fixture.taskId}`);
+    const otherViewer = new SessionPage(viewer);
+    await otherViewer.waitForLoad();
+    await otherViewer.waitForDirectInput();
+    const secondRow = await expectPromptErrorRow(otherViewer, { continue: true });
+
+    await Promise.allSettled([
+      firstRow.getByTestId("turn-error-continue-button").evaluate((element) => {
+        (element as HTMLButtonElement).click();
+      }),
+      secondRow.getByTestId("turn-error-continue-button").evaluate((element) => {
+        (element as HTMLButtonElement).click();
+      }),
+    ]);
+    const continued = await waitForUserContinueMessages(apiClient, fixture.sessionId);
+    expect(continued).toHaveLength(1);
+    await expect.poll(() => promptEventCount(fixture.tracePath), { timeout: 60_000 }).toBe(2);
+    await expect
+      .poll(async () => {
+        const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+        return messages.filter(
+          (message) => message.author_type === "user" && message.content === "continue",
+        );
+      })
+      .toHaveLength(1);
+    await expect(firstRow.getByTestId("turn-error-continue-button")).toHaveCount(0);
+    await expect(secondRow.getByTestId("turn-error-continue-button")).toHaveCount(0);
+  } finally {
+    await viewer.close();
     await fixture.dispose();
   }
 });
@@ -229,4 +344,102 @@ test("task-backed Quick Chat keeps retained attention without board rows", async
   const reloadedRow = dialog.getByTestId("session-recovery-action-message");
   await expect(reloadedRow).toBeVisible({ timeout: 30_000 });
   await expect(reloadedRow.getByTestId("turn-error-dismiss-button")).toHaveCount(0);
+});
+
+test("task-backed Quick Chat sends Dismiss and continue from the retained alert", async ({
+  testPage,
+  apiClient,
+}) => {
+  const dialog = await openQuickChatSetup(testPage);
+  await selectAgentIfNeeded(dialog, testPage);
+  const started = await completeQuickChatOpening(testPage, dialog, apiClient, "/prompt-error:1", {
+    submit: (button) => button.click(),
+    expectExactPrompt: true,
+  });
+  await waitForPromptError(apiClient, started.session_id);
+
+  const row = dialog.getByTestId("session-recovery-action-message");
+  const continueButton = row.getByTestId("turn-error-continue-button");
+  await expect(continueButton).toBeVisible({ timeout: 30_000 });
+  await continueButton.click();
+
+  const continued = await waitForUserContinueMessages(apiClient, started.session_id);
+  expect(continued).toHaveLength(1);
+  await waitForAgentResponseAfter(apiClient, started.session_id, continued[0].created_at);
+  await expect(continueButton).toHaveCount(0);
+  await expect(row.getByTestId("turn-error-dismiss-button")).toHaveCount(0);
+  await expect(row).toBeVisible();
+});
+
+test("preview Chat continues the current error", async ({
+  testPage,
+  apiClient,
+  backend,
+  seedData,
+}) => {
+  const fixture = await createPromptErrorFixture(backend, apiClient, seedData);
+  try {
+    await waitForPromptError(apiClient, fixture.sessionId);
+    await apiClient.saveUserSettings({ enable_preview_on_click: true });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const card = kanban.taskCardByTitle(fixture.taskTitle);
+    await expect(card.getByRole("button", { name: "Open full page" })).toBeVisible({
+      timeout: 15_000,
+    });
+    await card.click();
+    await expect(testPage).toHaveURL(/taskId=/, { timeout: 15_000 });
+
+    const preview = testPage.getByTestId("task-preview-panel");
+    const continueButton = preview.getByTestId("turn-error-continue-button");
+    await expect(continueButton).toBeVisible({ timeout: 30_000 });
+    await continueButton.click();
+    const continued = await waitForUserContinueMessages(apiClient, fixture.sessionId);
+    expect(continued).toHaveLength(1);
+    await waitForAgentResponseAfter(apiClient, fixture.sessionId, continued[0].created_at);
+    await expect(continueButton).toHaveCount(0);
+    await expect(preview.getByTestId("turn-error-dismiss-button")).toHaveCount(0);
+  } finally {
+    await apiClient.saveUserSettings({ enable_preview_on_click: false });
+    await fixture.dispose();
+  }
+});
+
+test.describe("narrow fine-pointer error controls", () => {
+  test.use({ viewport: { width: 600, height: 900 } });
+
+  test("stacks Dismiss and continue with pseudo-localized labels and no overflow", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    const fixture = await createPromptErrorFixture(backend, apiClient, seedData);
+    try {
+      await testPage
+        .context()
+        .addCookies([{ name: "kandev_locale", value: "pseudo", url: backend.baseUrl }]);
+      const session = new SessionPage(testPage);
+      await testPage.goto(`/t/${fixture.taskId}`);
+      await session.waitForLoad();
+      await waitForPromptError(apiClient, fixture.sessionId);
+
+      const row = session.activeChat().getByTestId("session-recovery-action-message");
+      const continueButton = row.getByTestId("turn-error-continue-button");
+      const dismissButton = row.getByTestId("turn-error-dismiss-button");
+      await expect(continueButton).toBeVisible({ timeout: 30_000 });
+      await expect(testPage.locator("html")).toHaveAttribute("lang", "pseudo");
+
+      const continueBox = await continueButton.boundingBox();
+      const dismissBox = await dismissButton.boundingBox();
+      expect(continueBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect(dismissBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect(continueBox?.y ?? 0).toBeLessThan(dismissBox?.y ?? 0);
+      expect(continueBox?.width ?? 0).toBeLessThanOrEqual(600);
+      await assertNoDocumentHorizontalOverflow(testPage);
+      expect((await continueButton.textContent())?.trim().length ?? 0).toBeGreaterThan(0);
+    } finally {
+      await fixture.dispose();
+    }
+  });
 });

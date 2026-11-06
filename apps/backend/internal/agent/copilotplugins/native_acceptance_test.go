@@ -432,10 +432,10 @@ func nativeGlobalArgs(version string, paths nativeRunPaths) []string {
 		"--no-custom-instructions",
 		"--log-dir", paths.logRoot,
 	}
-	if version == "1.0.104" {
-		args = append(args, "--disable-client-telemetry", "--sync-session=off")
-	} else {
+	if version == "1.0.88" {
 		args = append(args, "--no-remote", "--no-remote-export")
+	} else {
+		args = append(args, "--disable-client-telemetry", "--sync-session=off")
 	}
 	return args
 }
