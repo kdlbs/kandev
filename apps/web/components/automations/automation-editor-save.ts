@@ -125,6 +125,8 @@ export function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
         });
         const persistedForm = withSavedMCPSelection(formWithPromotedSelections, saved);
         setForm((prev) => reconcileSavedMCPSelection(prev, form, saved));
+        // Automation settings are saved independently of trigger drafts.
+        onSaved(persistedForm, triggerActions.baselineTriggers);
 
         const persistedTriggers = await triggerActions.persistDrafts();
         promoteSelections();

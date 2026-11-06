@@ -89,12 +89,13 @@ test("selects and saves every optional package on a phone with reachable control
 });
 
 test.describe("Narrow fine pointer", () => {
-  test.use({ viewport: { width: 393, height: 851 }, isMobile: false, hasTouch: false });
   test("keeps phone-sized package controls and keyboard access", async ({
-    testPage,
+    desktopTestPage: testPage,
     apiClient,
     seedData,
   }) => {
+    await testPage.setViewportSize({ width: 393, height: 851 });
+    expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
     const automation = await apiClient.seedAutomation({
       workspaceId: seedData.workspaceId,
       name: "Fine pointer MCP choices",

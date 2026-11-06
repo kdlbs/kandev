@@ -179,3 +179,10 @@ The final review batch passed 144 focused web cases and ten desktop plus five ph
 - Preserve explicit automation On/Off grants, required Core, normal-task workspace blocks, and shared Save/Reset ownership.
 - Verify touch selection, keyboard navigation, registered tools, reload, conflict recovery, blocked-choice removal, and responsive draft retention in the existing desktop/phone suites.
 - Validation: the keyboard detail test failed before implementation. After implementation, 18 desktop and 15 phone E2E cases passed with retries disabled. These include the existing task/workspace package picker suites. The 17 focused unit cases, web typecheck, changed-file lint, translation integrity/ratchet, public-doc checks, and specification checks passed.
+
+### Follow-up review and CI checks
+
+- The saved automation baseline now advances after its update succeeds, even if a later trigger write fails. A hook integration regression covers Reset, pending-trigger preservation, and a subsequent MCP edit with the accepted revision.
+- The narrow fine-pointer scenario uses the desktop page fixture at phone width and verifies the actual pointer media query. The previous fixture forced Pixel 5 touch options.
+- The SSH keepalive stop check is shared at the loss-notification boundary. Deterministic stopped/running cases for probe errors and deadlines replace a scheduler-dependent coincidence test that failed in CI. Focused SSH transport tests passed with the race detector.
+- Validation: 39 focused hook/payload tests, eight desktop automation cases, five phone cases, and SSH keepalive/transport tests with the race detector passed. Both partial-save and pointer regressions failed before their fixes. The stopped-watchdog boundary cases failed before centralizing the guard. Changed-Go lint, changed-web lint, typecheck, and specification checks passed.
