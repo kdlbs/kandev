@@ -39,6 +39,9 @@ type Repository struct {
 	// clockNow is a test-only clock seam. Set it before any concurrent
 	// repository call; it carries no synchronization.
 	clockNow func() time.Time
+	// visibilitySnapshotAfterTaskRead is a test-only seam used to prove that
+	// the compact task projection and lifecycle receipt share one read snapshot.
+	visibilitySnapshotAfterTaskRead func()
 	// sidebarQueryStage injects failures at resource boundaries in repository tests.
 	sidebarQueryStage func(string, *sqlx.Tx) error
 	// failCutoverAfter is a test-only failpoint for the worktree ownership
