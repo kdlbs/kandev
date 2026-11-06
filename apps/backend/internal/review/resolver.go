@@ -126,6 +126,13 @@ func (r *Resolver) Resolve(ctx context.Context, agentProfileID string) (Reviewer
 var errDeferToDefaults = errors.New("defer to default utility settings")
 
 func (r *Resolver) resolveFromProfile(ctx context.Context, profileID string) (ReviewerIdentity, error) {
+	// With durable native owners the durable run row must exist before any
+	// selection or concrete model validation. This pre-run read therefore does
+	// not borrow a default model; bindRunReviewer validates the concrete model
+	// after the run is created.
+	if lookup, ok := r.Profiles.(runProfileLookup); ok && lookup.NativeRouteOwnersEnabled() {
+		return r.resolveProfile(ctx, profileID, false)
+	}
 	return r.resolveProfile(ctx, profileID, true)
 }
 
@@ -135,7 +142,7 @@ func (r *Resolver) resolveProfile(ctx context.Context, profileID string, require
 	}
 	profile, found, err := r.Profiles.ReviewerProfile(ctx, profileID)
 	if err != nil {
-		return ReviewerIdentity{}, fmt.Errorf("%w: load agent profile %s: %v", ErrAgentUnavailable, profileID, err)
+		return ReviewerIdentity{}, fmt.Errorf("%w: load agent profile %s: %w", ErrAgentUnavailable, profileID, err)
 	}
 	if !found {
 		return ReviewerIdentity{}, fmt.Errorf("%w: agent profile %s no longer exists", ErrAgentUnavailable, profileID)

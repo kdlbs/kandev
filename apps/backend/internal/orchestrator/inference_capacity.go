@@ -80,6 +80,7 @@ func (s *Service) ReserveInferenceCapacity(ctx context.Context, binding sessionc
 		if !sameInferenceOwner(held, binding) {
 			return false, ceilingReasonUnknownPopulation, fmt.Errorf("inference ownership changed")
 		}
+		c.retirePersistedNativeAliasLocked(held, binding)
 		return true, "", nil
 	}
 	if retainedNativeChild(binding, active) {
