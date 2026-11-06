@@ -49,6 +49,10 @@ func (r *Repository) ListRelationsForTasks(ctx context.Context, taskIDs []string
 		Low  string `db:"task_id_low"`
 		High string `db:"task_id_high"`
 	}
+	// A relation pair whose two ends land in different 500-id chunks matches
+	// both chunks' queries, so dedupe by pair before building adjacency —
+	// otherwise that pair is appended to each side's list twice.
+	seen := make(map[row]struct{})
 	for _, chunk := range chunkTaskIDs(taskIDs) {
 		query, args, err := sqlx.In(`SELECT task_id_low, task_id_high FROM task_relations
 			WHERE task_id_low IN (?) OR task_id_high IN (?)
@@ -61,6 +65,10 @@ func (r *Repository) ListRelationsForTasks(ctx context.Context, taskIDs []string
 			return nil, err
 		}
 		for _, rel := range rows {
+			if _, ok := seen[rel]; ok {
+				continue
+			}
+			seen[rel] = struct{}{}
 			result[rel.Low] = append(result[rel.Low], rel.High)
 			result[rel.High] = append(result[rel.High], rel.Low)
 		}
