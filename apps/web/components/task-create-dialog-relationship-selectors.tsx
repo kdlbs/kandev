@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
 type BoardTask = KanbanState["tasks"][number];
 const PICKER_CONTENT_CLASS =
   "w-[var(--radix-popover-trigger-width)] min-w-[min(420px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] p-0";
-const PICKER_OPTION_CLASS = "min-h-12 cursor-pointer gap-2 md:min-h-11";
+const PICKER_OPTION_CLASS = "cursor-pointer gap-2 max-md:min-h-11 pointer-coarse:min-h-11";
 const PICKER_CHECK_CLASS = "h-4 w-4 shrink-0";
 const CHECKED_CLASS = "opacity-100";
 const UNCHECKED_CLASS = "opacity-0";
@@ -56,7 +56,15 @@ export function filterCreateParentCandidates(
       }
     }
   }
-  return tasks.filter((task) => !task.isArchived && !excluded.has(task.id));
+  return tasks.filter(
+    (task) =>
+      !task.isArchived &&
+      !excluded.has(task.id) &&
+      // Mirrors the backend's ValidateCreationParent: a task that is already a
+      // subtask cannot become a parent, except an Office task's own subtasks,
+      // which intentionally allow arbitrary nesting depth.
+      (!task.parentTaskId || task.isFromOffice),
+  );
 }
 
 export function filterCreateRelatedCandidates(
@@ -72,6 +80,47 @@ export function filterCreateRelatedCandidates(
 
 export function toggleRelatedTaskSelection(selected: string[], taskId: string): string[] {
   return selected.includes(taskId) ? selected.filter((id) => id !== taskId) : [...selected, taskId];
+}
+
+// Drops any related-task selection that a later parent/blocked-by choice has
+// made mutually exclusive, so the three pickers never hold a task in two
+// conflicting relationships at once.
+export function reconcileRelatedTaskIds(
+  relatedTaskIds: string[],
+  conflictingIds: string[],
+): string[] {
+  if (conflictingIds.length === 0) return relatedTaskIds;
+  const conflicts = new Set(conflictingIds);
+  return relatedTaskIds.filter((id) => !conflicts.has(id));
+}
+
+export function useRelationshipConflictHandlers({
+  onBlockedByChange,
+  onSelectedParentTaskIdChange,
+  relatedTaskIds,
+  onRelatedTaskIdsChange,
+}: {
+  onBlockedByChange: (next: string[]) => void;
+  onSelectedParentTaskIdChange?: (next: string | undefined) => void;
+  relatedTaskIds: string[];
+  onRelatedTaskIdsChange?: (next: string[]) => void;
+}): {
+  handleBlockedByChange: (next: string[]) => void;
+  handleSelectedParentTaskIdChange: (next: string | undefined) => void;
+} {
+  const handleBlockedByChange = (next: string[]) => {
+    onBlockedByChange(next);
+    if (!onRelatedTaskIdsChange) return;
+    const reconciled = reconcileRelatedTaskIds(relatedTaskIds, next);
+    if (reconciled.length !== relatedTaskIds.length) onRelatedTaskIdsChange(reconciled);
+  };
+  const handleSelectedParentTaskIdChange = (next: string | undefined) => {
+    onSelectedParentTaskIdChange?.(next);
+    if (!next || !onRelatedTaskIdsChange) return;
+    const reconciled = reconcileRelatedTaskIds(relatedTaskIds, [next]);
+    if (reconciled.length !== relatedTaskIds.length) onRelatedTaskIdsChange(reconciled);
+  };
+  return { handleBlockedByChange, handleSelectedParentTaskIdChange };
 }
 
 export function filterCreateDialogCandidates(
@@ -229,7 +278,7 @@ export function TaskCreateParentSelector({
           aria-label={t("task:parent")}
           aria-expanded={open}
           className={cn(
-            "h-12 min-h-12 w-full min-w-0 justify-between md:h-7 md:min-h-7",
+            "h-7 min-h-7 w-full min-w-0 justify-between max-md:h-11 max-md:min-h-11 pointer-coarse:h-11 pointer-coarse:min-h-11",
             !disabled && "cursor-pointer",
           )}
           disabled={disabled}
@@ -328,7 +377,7 @@ export function TaskCreateRelatedSelector({
           aria-label={t("task:relatedTo")}
           aria-expanded={open}
           className={cn(
-            "h-12 min-h-12 w-full min-w-0 justify-between md:h-7 md:min-h-7",
+            "h-7 min-h-7 w-full min-w-0 justify-between max-md:h-11 max-md:min-h-11 pointer-coarse:h-11 pointer-coarse:min-h-11",
             !disabled && "cursor-pointer",
           )}
           disabled={disabled}

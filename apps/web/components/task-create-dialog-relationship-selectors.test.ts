@@ -4,6 +4,7 @@ import {
   filterCreateDialogCandidates,
   filterCreateParentCandidates,
   filterCreateRelatedCandidates,
+  reconcileRelatedTaskIds,
   toggleRelatedTaskSelection,
 } from "./task-create-dialog-relationship-selectors";
 
@@ -52,5 +53,24 @@ describe("relationship selector candidates", () => {
   it("toggles multi-selection without duplicates", () => {
     expect(toggleRelatedTaskSelection(["a"], "b")).toEqual(["a", "b"]);
     expect(toggleRelatedTaskSelection(["a", "b"], "a")).toEqual(["b"]);
+  });
+
+  it("excludes ordinary subtasks from parent candidates but keeps Office subtasks", () => {
+    const tasks = [
+      task("current"),
+      task("ordinary-subtask", { parentTaskId: "some-parent" }),
+      task("office-subtask", { parentTaskId: "some-parent", isFromOffice: true }),
+      task("top-level"),
+    ];
+    expect(filterCreateParentCandidates(tasks, "current").map(({ id }) => id)).toEqual([
+      "office-subtask",
+      "top-level",
+    ]);
+  });
+
+  it("drops related selections made mutually exclusive by a new conflict", () => {
+    expect(reconcileRelatedTaskIds(["a", "b", "c"], ["b"])).toEqual(["a", "c"]);
+    expect(reconcileRelatedTaskIds(["a", "b"], [])).toEqual(["a", "b"]);
+    expect(reconcileRelatedTaskIds(["a", "b"], ["c"])).toEqual(["a", "b"]);
   });
 });

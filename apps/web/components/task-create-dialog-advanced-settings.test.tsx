@@ -62,6 +62,16 @@ vi.mock("@/components/task-create-dialog-dependencies", () => ({
 vi.mock("@/components/task-create-dialog-relationship-selectors", () => ({
   TaskCreateParentSelector: () => <button data-testid="task-create-parent-trigger" />,
   TaskCreateRelatedSelector: () => <button data-testid="task-create-related-trigger" />,
+  useRelationshipConflictHandlers: ({
+    onBlockedByChange,
+    onSelectedParentTaskIdChange,
+  }: {
+    onBlockedByChange: (next: string[]) => void;
+    onSelectedParentTaskIdChange?: (next: string | undefined) => void;
+  }) => ({
+    handleBlockedByChange: onBlockedByChange,
+    handleSelectedParentTaskIdChange: onSelectedParentTaskIdChange,
+  }),
 }));
 
 function renderAdvancedSettings(
