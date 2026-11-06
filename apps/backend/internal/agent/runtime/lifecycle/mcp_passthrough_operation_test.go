@@ -9,8 +9,57 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	p "github.com/kandev/kandev/internal/mcp/profile"
+	"github.com/stretchr/testify/require"
 )
+
+func TestBuiltinPassthroughAcceptedEvidenceUsesSealedBinding(t *testing.T) {
+	for _, outcome := range []string{"accepted", "failed", "superseded"} {
+		t.Run(outcome, func(t *testing.T) {
+			manager, eventBus := createTestManagerWithTracking()
+			execution := createTestExecution("execution", "task-a", "session")
+			execution.WorkspaceID = "workspace"
+			profile := builtinDispatchProfile(p.PackageCore, p.PackageConfiguration)
+			encoded, err := p.MarshalBuiltinBinding(profile)
+			require.NoError(t, err)
+			execution.setMetadataValue(p.BuiltinBindingMetadataKey, encoded)
+			require.NoError(t, manager.executionStore.Add(execution))
+			operation := &preparedMCPOperation{servers: []types.McpServer{
+				{Name: "kandev", Type: "http", URL: "http://127.0.0.1:1234/mcp", BuiltinPackage: p.PackageCore},
+				{Name: "kandev-configuration", Type: "http", URL: "http://127.0.0.1:1234/mcp/packages/configuration", BuiltinPackage: p.PackageConfiguration},
+			}}
+			runner := &mcpOperationRunner{start: func() (*process.InteractiveProcessInfo, error) {
+				if outcome == "failed" {
+					return nil, errors.New("start failed")
+				}
+				if outcome == "superseded" {
+					execution.beginStartupAttempt()
+				}
+				return &process.InteractiveProcessInfo{ID: "process", SessionID: "session"}, nil
+			}}
+			_, err = manager.startPassthroughWithMCP(context.Background(), execution, runner, process.InteractiveStartRequest{}, operation)
+			if outcome != "accepted" {
+				require.Empty(t, eventBus.getStreamEvents())
+				require.Equal(t, outcome == "failed", err != nil)
+				return
+			}
+			require.NoError(t, err)
+			events := eventBus.getStreamEvents()
+			require.Len(t, events, 1)
+			var history streams.MCPAttachmentHistory
+			history.StartAttempt(*events[0].Data.MCPAttachmentAttempt)
+			require.NotNil(t, history.BuiltinBinding)
+			expected, parseErr := p.ParseBuiltinBindingMetadata(encoded)
+			require.NoError(t, parseErr)
+			require.Equal(t, expected.BuiltinPackages, history.BuiltinBinding.Manifest)
+			for _, server := range history.Current.Servers {
+				require.Nil(t, server.ConnectedAt)
+			}
+		})
+	}
+}
 
 type mcpOperationRunner struct {
 	executionPassthroughRunner

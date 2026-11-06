@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"encoding/json"
 
+	builtinintent "github.com/kandev/kandev/internal/mcp/intent"
+
 	"github.com/kandev/kandev/internal/sysprompt"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -10,6 +12,7 @@ import (
 // UserMessageMeta holds metadata fields for a user message.
 // Use NewUserMessageMeta to construct and ToMap to serialize.
 type UserMessageMeta struct {
+	BuiltinIntent     builtinintent.Intent
 	PlanMode          bool
 	HasReviewComments bool
 	AutoStart         bool
@@ -29,6 +32,11 @@ type UserMessageMeta struct {
 // NewUserMessageMeta creates a UserMessageMeta builder.
 func NewUserMessageMeta() *UserMessageMeta {
 	return &UserMessageMeta{}
+}
+
+func (m *UserMessageMeta) WithBuiltinIntent(intent builtinintent.Intent) *UserMessageMeta {
+	m.BuiltinIntent = intent
+	return m
 }
 
 // WithPlanMode marks the message as having plan mode enabled.
@@ -102,10 +110,13 @@ func (m *UserMessageMeta) WithWorkflowStep(stepID, stepName, stepColor string) *
 // Returns nil if no metadata fields are set.
 func (m *UserMessageMeta) ToMap() map[string]interface{} {
 	if !m.PlanMode && !m.HasReviewComments && !m.AutoStart && len(m.Attachments) == 0 &&
-		len(m.ContextFiles) == 0 && len(m.EntityReferences) == 0 && m.SenderTaskID == "" && !m.WorkflowMessage {
+		len(m.ContextFiles) == 0 && len(m.EntityReferences) == 0 && m.SenderTaskID == "" && !m.WorkflowMessage && m.BuiltinIntent == "" {
 		return nil
 	}
 	meta := make(map[string]interface{})
+	if m.BuiltinIntent != "" {
+		meta[builtinintent.MetadataKey] = string(m.BuiltinIntent)
+	}
 	if m.PlanMode {
 		meta["plan_mode"] = true
 	}

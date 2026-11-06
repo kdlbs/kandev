@@ -25,7 +25,7 @@ func TestDurableRetentionNegotiationBuffersRetainedFrame(t *testing.T) {
 	ctx := &observedNegotiationContext{Context: parent, waiting: make(chan struct{})}
 	execution, event := retentionBootstrapOwner()
 	execution.DeliveryMode = ""
-	gate := execution.beginDeliveryNegotiation()
+	gate := execution.beginDeliveryStartupAttempt(context.Background())
 	repo := &retentionBootstrapRepository{firstRead: make(chan struct{})}
 	repo.generation.Store(retentionBootstrapGeneration())
 	manager := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
@@ -45,7 +45,8 @@ func TestDurableRetentionNegotiationBuffersRetainedFrame(t *testing.T) {
 		t.Fatal("receipt before negotiation")
 	}
 	execution.DeliveryMode = DurableDeliveryV1
-	gate.finish(nil)
+	gate.finishNegotiation(nil)
+	gate.finishNative(nil)
 	if err := <-result; err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +58,7 @@ func TestDurableRetentionNegotiationBuffersRetainedFrame(t *testing.T) {
 func TestDurableRetentionNegotiationCancellationFailsClosed(t *testing.T) {
 	execution, event := retentionBootstrapOwner()
 	execution.DeliveryMode = ""
-	execution.beginDeliveryNegotiation()
+	execution.beginDeliveryStartupAttempt(context.Background())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	repo := &retentionBootstrapRepository{firstRead: make(chan struct{})}

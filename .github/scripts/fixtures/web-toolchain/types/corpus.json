@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "projects": {
+    "valid": {
+      "expected": "clean",
+      "description": "Positive generic, conditional, mapped, recursive and inference shapes."
+    },
+    "invalid": {
+      "expected": "errors",
+      "minimum_count": 8,
+      "required_codes": [
+        "TS2322",
+        "TS2339",
+        "TS2345",
+        "TS2554",
+        "TS2741",
+        "TS2353"
+      ],
+      "description": "The eight injected migration errors plus their positive counterparts.",
+      "exact_count": 8
+    },
+    "instantiation": {
+      "expected": "errors",
+      "minimum_count": 1,
+      "required_codes": [
+        "TS2589"
+      ],
+      "description": "Unbounded instantiation rejected; bounded counterpart accepted."
+    }
+  }
+}

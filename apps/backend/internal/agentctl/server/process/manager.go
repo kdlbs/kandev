@@ -20,7 +20,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/antigravityruntime"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -33,9 +35,11 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
@@ -76,6 +80,10 @@ type PendingPermission struct {
 	CreatedAt         time.Time
 	State             string
 	AutoApproveOption *adapter.PermissionOption
+	// HumanInput marks a provider-native question only a person can answer.
+	// It bypasses every automatic policy branch and never carries an
+	// AutoApproveOption.
+	HumanInput bool
 }
 
 // PermissionOperationError carries a stable code across the agentctl stream.
@@ -121,6 +129,8 @@ type Manager struct {
 	questionImageOnce        sync.Once
 	questionImageSlots       chan struct{}
 	cfg                      *config.InstanceConfig
+	builtinCatalogMu         sync.RWMutex
+	builtinCatalog           func() map[mcpprofile.PackageID][]string
 	logger                   *logger.Logger
 	managedGitTools          installedManagedGitTools
 	materializeGitHelperPath string
@@ -369,10 +379,19 @@ type Manager struct {
 	killGroupFn      func(int) error
 	waitGroupExitFn  func(context.Context, int) bool
 	managerWaitFn    func(context.Context, <-chan struct{}, time.Duration) bool
+
+	// agentProcessIdentity is the running agent child's process-group identity,
+	// reported in the delivery descriptor for per-session termination proof.
+	agentProcessIdentity atomic.Pointer[processidentity.Identity]
 }
 
 // ErrManagerStopping indicates that process admission is closed for teardown.
 var ErrManagerStopping = errors.New("process manager is stopping")
+
+// ErrConfigureWhileRunning reports a configuration attempt that arrived while
+// the agent process was already starting or running. Callers classify this
+// sentinel instead of matching error text.
+var ErrConfigureWhileRunning = errors.New("cannot configure while agent is running")
 
 func (m *Manager) admitStart() (func(), error) {
 	m.admissionMu.Lock()
@@ -622,6 +641,7 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 				IncarnationID:     m.DeliveryIncarnationID(),
 				HarnessGeneration: m.DeliveryHarnessGeneration(),
 				StreamID:          currentStreamID,
+				AgentProcess:      m.AgentProcessIdentity(),
 			}, nil
 		}
 		return journal.RecoveryDescriptor{}, journal.ErrJournalCorrupt
@@ -642,6 +662,7 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 	}
 	descriptor.StorageCapability = capability
 	descriptor.ProcessManagerID = m.ProcessManagerID()
+	descriptor.AgentProcess = m.AgentProcessIdentity()
 	return descriptor, nil
 }
 
@@ -1388,15 +1409,30 @@ func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]st
 // drove the picker-save.
 func (m *Manager) refreshTrackersDetached(root *WorkspaceTracker, trackers []*WorkspaceTracker, bySubpath map[string]*WorkspaceTracker) {
 	ctx := context.Background()
-	if root != nil {
+	// A plain task-root tracker owns Files events but is not a Git scope.
+	// Refreshing it would publish an unavailable snapshot under the empty
+	// repository name and manufacture a refresh failure the Changes panel
+	// cannot clear.
+	if gitEligibleTracker(root) {
 		root.RefreshGitStatus(ctx)
 	}
 	for _, t := range trackers {
-		t.RefreshGitStatus(ctx)
+		if gitEligibleTracker(t) {
+			t.RefreshGitStatus(ctx)
+		}
 	}
 	for _, t := range bySubpath {
-		t.RefreshGitStatus(ctx)
+		if gitEligibleTracker(t) {
+			t.RefreshGitStatus(ctx)
+		}
 	}
+}
+
+// gitEligibleTracker reports whether a tracker owns a real Git repository.
+// Only those trackers may publish Git status; the empty repository scope is
+// valid exactly when the root tracker passes this check.
+func gitEligibleTracker(tracker *WorkspaceTracker) bool {
+	return tracker != nil && tracker.gitIndexPath != ""
 }
 
 // StartProcess runs a script/process with isolated stdout/stderr.
@@ -1592,11 +1628,13 @@ func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
 	// Refresh in background — RefreshGitStatus blocks on git commands which
 	// can take seconds on large repos; the HTTP caller shouldn't wait.
 	go func() {
-		if root != nil {
+		if gitEligibleTracker(root) {
 			root.RefreshGitStatus(ctx)
 		}
 		for _, t := range trackers {
-			t.RefreshGitStatus(ctx)
+			if gitEligibleTracker(t) {
+				t.RefreshGitStatus(ctx)
+			}
 		}
 	}()
 }
@@ -1951,6 +1989,8 @@ func (m *Manager) startManagedProcess() (uint64, error) {
 		return 0, errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
 
+	m.recordAgentProcessIdentity(m.cmd.Process.Pid)
+
 	// Start stderr reader and exit waiter. Keep the completion channel local to
 	// this process generation so a delayed reader cannot signal a replacement.
 	stderrDone := make(chan stderrReadResult, 1)
@@ -2034,7 +2074,24 @@ func (m *Manager) buildAdapterConfig() error {
 		AgentBackgroundWorkEnabled: m.cfg.AgentBackgroundWorkEnabled,
 		PromptCancelJoinTimeout:    m.cfg.PromptCancelJoinTimeout,
 		ProviderGatewayAuth:        m.cfg.ProviderGatewayAuth,
+		AuthPolicy:                 m.cfg.AuthPolicy,
 		PromptSuggestions:          m.cfg.PromptSuggestions,
+		CopilotNativeSessionEvents: m.cfg.CopilotNativeSessionEvents,
+	}
+	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {
+		harness := acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
+		if harness == "" {
+			bundle, err := antigravityruntime.Resolve(context.Background(), antigravityruntime.ResolveOptions{})
+			if err != nil {
+				return fmt.Errorf("resolve Antigravity harness: %w", err)
+			}
+			harness = bundle.HarnessPath
+		}
+		env, err := acpcompat.PrepareLocalAntigravityEnv(m.cfg.AgentEnv, harness)
+		if err != nil {
+			return fmt.Errorf("prepare Antigravity child environment: %w", err)
+		}
+		m.cfg.AgentEnv = env
 	}
 
 	// Configure one-shot mode when a continue command is provided.
@@ -2364,7 +2421,7 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	defer m.startMu.Unlock()
 
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
-		return fmt.Errorf("cannot configure while agent is running")
+		return ErrConfigureWhileRunning
 	}
 
 	spec, err := configuredLaunchWrapper(wrapper, agentArgsPresent)
@@ -2397,6 +2454,7 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	}
 
 	m.cfg.AgentCommand = command
+	m.cfg.AgentCommandConfigured = true
 	m.cfg.AgentArgs = args
 	m.cfg.LaunchWrapper = launchwrapper.Profile(spec.Argv)
 	m.cfg.LaunchWrapperRequired = !spec.IsZero()
@@ -2902,6 +2960,19 @@ func (m *Manager) GetSessionID() string {
 		return a.GetSessionID()
 	}
 	return ""
+}
+
+// CopilotNativeSessionEventsActive reports the live adapter's actual vendor
+// subscription state. An older adapter omits the optional method.
+func (m *Manager) CopilotNativeSessionEventsActive() bool {
+	m.mu.RLock()
+	a := m.adapter
+	m.mu.RUnlock()
+	if a == nil {
+		return false
+	}
+	reporter, ok := a.(interface{ CopilotNativeSessionEventsActive() bool })
+	return ok && reporter.CopilotNativeSessionEventsActive()
 }
 
 // Stop stops the agent process
@@ -3589,6 +3660,7 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 	// The manager owns stderr's read/write pipe, so Wait can reap the process
 	// without closing the reader. The reader drains the pipe concurrently.
 	err := m.cmd.Wait()
+	m.clearAgentProcessIdentity(pid)
 	// Wait has observed process exit; now bound the reader drain in case a child
 	// process inherited the stderr writer and kept the pipe open.
 	stderrComplete, stderrPresent := m.waitForStderrDrain(stderrDone)
@@ -3698,18 +3770,25 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		pendingID = fmt.Sprintf("%s-%s-%d", req.SessionID, req.ToolCallID, time.Now().UnixNano())
 	}
 
+	req.HumanInput = m.classifyHumanInputPermission(req)
 	m.logger.Info("handling permission request",
 		zap.String("pending_id", pendingID),
 		zap.String("session_id", req.SessionID),
 		zap.String("tool_call_id", req.ToolCallID),
+		zap.Bool("human_input", req.HumanInput),
 		zap.Bool("auto_approve", m.cfg.AutoApprovePermissions))
 
-	// A coordinator session's agentctl instance does not consult its own
-	// blanket AutoApprovePermissions flag or the generic "any kandev tool"
-	// injected-MCP approval; only the exact seven-tool coordinator allowlist
-	// decides (docs/specs/coordinator/system-design/copilot.md#permission-policy).
+	// A native human question is classified before every automatic policy
+	// branch. Coordinator, managed-MCP, and blanket auto-approval would
+	// otherwise select an offered allow option, which is the user's answer.
 	switch {
+	case req.HumanInput:
+		// Wait for the person. Nothing below may answer this request.
 	case m.cfg.McpMode == mcpmode.Coordinator:
+		// A coordinator session's agentctl instance does not consult its own
+		// blanket AutoApprovePermissions flag or the generic "any kandev tool"
+		// injected-MCP approval; only the exact seven-tool coordinator allowlist
+		// decides (docs/specs/coordinator/system-design/copilot.md#permission-policy).
 		if response, approved := m.autoApproveCoordinatorPermission(req); approved {
 			return response, nil
 		}
@@ -3729,8 +3808,9 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 
 	// A coordinator session never takes the blanket or injected-tool approval:
 	// only its allowlist above decides, and anything else waits for a person.
+	// A human question never takes any automatic approval at all.
 	var autoApproveOption *adapter.PermissionOption
-	if m.cfg.McpMode != mcpmode.Coordinator {
+	if !req.HumanInput && m.cfg.McpMode != mcpmode.Coordinator {
 		var response *adapter.PermissionResponse
 		if autoApproveOption, response = m.nonCoordinatorAutoApproval(req); response != nil {
 			return response, nil
@@ -3747,6 +3827,7 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		CreatedAt:         createdAt,
 		State:             streams.PermissionStatusPending,
 		AutoApproveOption: autoApproveOption,
+		HumanInput:        req.HumanInput,
 	}
 	pending.Snapshot = m.permissionSnapshot(pending)
 
@@ -3885,15 +3966,16 @@ func (m *Manager) permissionRequestEvent(pending *PendingPermission) adapter.Age
 		}
 	}
 	event := adapter.AgentEvent{
-		Type:              adapter.EventTypePermissionRequest,
-		SessionID:         m.permissionSessionID(pending),
-		ToolCallID:        pending.Request.ToolCallID,
-		RequestID:         pending.RequestID,
-		PendingID:         pending.ID,
-		PermissionTitle:   pending.Snapshot.Title,
-		PermissionOptions: options,
-		ActionType:        pending.Snapshot.Action.Type,
-		ActionDetails:     permissionActionDetailsForEvent(pending.Snapshot.Action),
+		Type:                 adapter.EventTypePermissionRequest,
+		SessionID:            m.permissionSessionID(pending),
+		ToolCallID:           pending.Request.ToolCallID,
+		RequestID:            pending.RequestID,
+		PendingID:            pending.ID,
+		PermissionTitle:      pending.Snapshot.Title,
+		PermissionOptions:    options,
+		PermissionHumanInput: pending.HumanInput,
+		ActionType:           pending.Snapshot.Action.Type,
+		ActionDetails:        permissionActionDetailsForEvent(pending.Snapshot.Action),
 	}
 	if pending.AutoApproveOption != nil {
 		event.AutoApprovedOptionID = pending.AutoApproveOption.OptionID
@@ -3921,7 +4003,7 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 		event = persisted
 	}
 
-	if !m.IsAttached() {
+	if !m.IsAttached() || pending.HumanInput {
 		m.sendUpdateBlocking(event)
 		return
 	}
@@ -4018,9 +4100,10 @@ func (m *Manager) permissionSnapshot(pending *PendingPermission) streams.Pending
 			Tool:        action.Tool,
 			Redacted:    action.Redacted,
 		},
-		Options:   options,
-		CreatedAt: pending.CreatedAt,
-		Status:    streams.PermissionStatusPending,
+		Options:    options,
+		HumanInput: pending.HumanInput,
+		CreatedAt:  pending.CreatedAt,
+		Status:     streams.PermissionStatusPending,
 	}
 }
 

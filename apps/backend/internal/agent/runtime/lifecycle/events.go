@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -259,7 +260,13 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 	if p.eventBus == nil {
 		return
 	}
-	p.publishAgentctlEventPayload(ctx, eventType, p.agentctlEventPayload(ctx, execution, errMsg))
+	payload := p.agentctlEventPayload(ctx, execution, errMsg)
+	// Only a ready event confirms the launched execution workspace. A starting
+	// event can carry a prepared path that has not been validated yet.
+	if eventType == events.AgentctlReady {
+		payload.AgentWorkspacePath = execution.WorkspacePath
+	}
+	p.publishAgentctlEventPayload(ctx, eventType, payload)
 }
 
 // PublishAgentctlDeliveryRecovery publishes an immutable reconciliation state
@@ -514,6 +521,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		PlanContent:                      event.PlanContent,
 		MCPAttachment:                    event.MCPAttachment,
 		MCPAttachmentAttempt:             event.MCPAttachmentAttempt,
+		ContextCompaction:                event.ContextCompaction,
 		BackgroundWork:                   event.BackgroundWork,
 		BackgroundWorkOutput:             event.BackgroundWorkOutput,
 	}
@@ -730,6 +738,7 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		ToolCallID:    event.ToolCallID,
 		Title:         event.PermissionTitle,
 		Options:       options,
+		HumanInput:    event.PermissionHumanInput,
 		ActionType:    event.ActionType,
 		ActionDetails: event.ActionDetails,
 
@@ -918,14 +927,16 @@ func (p *EventPublisher) PublishContextWindow(execution *AgentExecution, size, u
 	sessionID := execution.SessionID
 
 	payload := ContextWindowEventPayload{
-		TaskID:                 execution.TaskID,
-		SessionID:              sessionID,
-		AgentID:                execution.ID,
-		ContextWindowSize:      size,
-		ContextWindowUsed:      used,
-		ContextWindowRemaining: remaining,
-		ContextEfficiency:      efficiency,
-		Timestamp:              time.Now().UTC().Format(time.RFC3339Nano),
+		TaskID:                      execution.TaskID,
+		SessionID:                   sessionID,
+		AgentID:                     execution.ID,
+		ContextWindowSize:           size,
+		ContextWindowUsed:           used,
+		ContextWindowRemaining:      remaining,
+		ContextEfficiency:           efficiency,
+		CompactionInferenceDisabled: compactionInferenceDisabledForProvider(execution.AgentID),
+		CopilotNativeSessionEvents:  execution.CopilotNativeSessionEvents,
+		Timestamp:                   time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
 	event := bus.NewEvent(events.ContextWindowUpdated, "agent-manager", payload)
@@ -938,6 +949,13 @@ func (p *EventPublisher) PublishContextWindow(execution *AgentExecution, size, u
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+}
+
+// compactionInferenceDisabledForProvider reports whether usage drops from this
+// provider cannot distinguish a compaction from a switch between mixed agent
+// contexts.
+func compactionInferenceDisabledForProvider(agentID string) bool {
+	return agentID == agents.CopilotACPAgentID
 }
 
 // PublishAvailableCommands publishes an available commands update event to the event bus.

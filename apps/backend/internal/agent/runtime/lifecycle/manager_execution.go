@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/events"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -923,6 +924,13 @@ func (m *Manager) createExecutionWithMode(
 	if err != nil {
 		return nil, err
 	}
+	copilotAgentType := ""
+	if inputs.preparation.request.AgentConfig != nil {
+		copilotAgentType = inputs.preparation.request.AgentConfig.ID()
+	}
+	inputs.preparation.request.CopilotNativeSessionEvents = m.copilotNativeLaunchAllowed(
+		inputs.runtime, copilotAgentType, inputs.preparation.request.DeliveryStreamID,
+	)
 	activityLease, err := m.acquireActivity(operationCtx, activity.KindExecutionStarting)
 	if err != nil {
 		return nil, err
@@ -1118,6 +1126,8 @@ func (m *Manager) prepareExecutionCreateRequest(
 	}
 	captureResourceCircuitIdentity(metadata, executionID, profileInfo)
 	delete(metadata, managedGoCacheMetadataKey)
+	// A new workspace helper receives its binding at the next process launch.
+	delete(metadata, mcpprofile.BuiltinBindingMetadataKey)
 	m.seedExecutionBaseBranches(ctx, taskID, executionID, metadata)
 	if envPreparation.managedGoCachePath != "" {
 		metadata[managedGoCacheMetadataKey] = envPreparation.managedGoCachePath
@@ -1292,6 +1302,7 @@ func (m *Manager) initializeCreatedExecution(
 ) *AgentExecution {
 	execution := runtimeInstance.ToAgentExecution(preparation.request)
 	execution.RuntimeName = rt.Name()
+	m.applyCopilotNativeLaunchCapability(execution, rt, preparation.request.DeliveryStreamID)
 	// Set before executionStore.Add: once the execution is registered, a
 	// concurrent EnsurePassthroughExecution can reach it, and it must never
 	// observe a half-initialised resume intent.

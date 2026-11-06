@@ -89,8 +89,13 @@ test("desktop preserves the episode when the OpenCode continuation fails without
     await session.waitForLoad();
     await expectOpenCodeCapacityNotice(session);
 
-    await driveOpenCodeCapacityRetries(backend, apiClient, fixture.sessionId, 1, 10);
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      const notice = await waitForCapacityRetry(apiClient, fixture.sessionId, attempt);
+      await expect(session.transientRetryCard()).toContainText(`Attempt ${attempt} of 11`);
+      await advanceCapacityRetries(backend, Number(notice!.metadata!.retry_in_seconds) + 1);
+    }
     const finalRetryNotice = await waitForCapacityRetry(apiClient, fixture.sessionId, 11);
+    await expect(session.transientRetryCard()).toContainText("Attempt 11 of 11");
     const retryNoticeRemoved = ws.waitForEvent("session.conversation.changed", {
       where: (payload) =>
         payload.session_id === fixture.sessionId &&
@@ -105,8 +110,10 @@ test("desktop preserves the episode when the OpenCode continuation fails without
           );
         }),
     });
-    await advanceCapacityRetries(backend, Number(finalRetryNotice!.metadata?.retry_in_seconds) + 1);
-    await retryNoticeRemoved;
+    await Promise.all([
+      retryNoticeRemoved,
+      advanceCapacityRetries(backend, Number(finalRetryNotice!.metadata!.retry_in_seconds) + 1),
+    ]);
     const failure = await expectOpenCodeRetainedRefusal(apiClient, fixture.sessionId, "exhausted");
     expect(failure.metadata?.attempts_started).toBe(11);
     await pollUntil(

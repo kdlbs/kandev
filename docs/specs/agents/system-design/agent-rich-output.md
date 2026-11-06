@@ -10,9 +10,8 @@ requirements:
 
 ## Purpose and boundaries
 
-The replacement baseline and structured evidence extension are implemented.
-The 2026-10-10 evidence package adds Table, StatusList and Callout while
-preserving existing component and historical contracts.
+The implemented evidence extension adds Table, StatusList and Callout and
+preserves existing component and historical contracts.
 
 Replace the fixed rich-output composition engine with json-render and expose
 catalog composition to agents through `show_rich_output_kandev`. Agents owns
@@ -512,6 +511,8 @@ an assertive live-alert role. Agent strings render as text; color is additional
 information. These components have no controls, external links, callbacks,
 animations, polling, or agent-selected styles. Local interactions in existing
 components retain their authorization and identity semantics.
+
+Guidance requires the [Rich Output binding](builtin-mcp-management.md).
 
 Schema examples in `lib/rich-output/examples.ts` cover inline and CSV Table,
 StatusList and Callout, including a composed report. Descriptions tell agents:

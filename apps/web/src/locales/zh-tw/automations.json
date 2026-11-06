@@ -359,5 +359,19 @@
   "runStatusRetrySchedulingFailed": "無法安排重試",
   "retryAttempt": "第 {{attempt}} 次嘗試",
   "retryDue": "計劃於 {{when}}",
-  "stopRetry": "停止重試"
+  "stopRetry": "停止重試",
+  "pluginToolsTitle": "外掛工具（可選）",
+  "pluginToolsDescription": "選擇此自動化可以使用的工具。",
+  "pluginToolsLoading": "正在載入外掛工具...",
+  "pluginToolsLoadError": "無法載入外掛工具。已儲存的選擇未更改。",
+  "pluginToolsRetry": "重試",
+  "pluginToolsEmpty": "目前沒有已安裝的外掛為私有自動化提供工具。",
+  "pluginToolsReviewRequired": "需要稽核：外掛設定已更改。",
+  "pluginToolsPreviouslySelected": "之前選擇：{{names}}",
+  "pluginToolsReselect": "請重新選擇工具並儲存以恢復存取。",
+  "pluginToolsClear": "清除",
+  "pluginToolsRead": "讀取",
+  "pluginToolsWrite": "寫入",
+  "pluginToolsClearedHint": "儲存以移除外掛工具存取權限。",
+  "pluginToolsUnavailable": "外掛不可用"
 }

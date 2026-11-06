@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-09-12
-updated: 2026-10-29
+updated: 2026-11-05
 owners:
   - kandev
 ---
@@ -109,6 +109,18 @@ The [journey loading design](../system-design/journey-data-loading.md) owns this
 - **AC-PLATFORM-INTERACTIVE-READS-007.7:** Desktop and phone shall share recovery semantics. Phone task pickers and app navigation shall retain touch recovery, contained scrolling, safe areas, and focus return. Each visible surface shall announce progress once per cycle, without announcements for every failed attempt.
 - **AC-PLATFORM-INTERACTIVE-READS-007.8:** Without eligible retained content, automatic recovery shall show ordinary loading progress rather than a refresh warning or a successful empty result. Exhausted recovery shall show the applicable unavailable state and recovery actions.
 
+### REQ-PLATFORM-INTERACTIVE-READS-008: Delivery history lookup cost
+
+**Intent:** Background delivery checks remain practical as task history accumulates.
+Platform owns the shared read-capacity guarantee. Tasks retains authority over
+environment membership and delivery results.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-INTERACTIVE-READS-008.1:** For a fixed task/repository pair, delivery refresh work shall not grow as snapshot history multiplied by unrelated session history.
+- **AC-PLATFORM-INTERACTIVE-READS-008.2:** SQLite and PostgreSQL shall preserve delivery freshness and classification results, including shared environments, deleted capture sessions, and repository exclusions.
+- **AC-PLATFORM-INTERACTIVE-READS-008.3:** Fresh installations, supported upgrades, and repeated startups shall receive the efficient lookup automatically without losing existing task, session, or snapshot data.
+
 ## Related contracts
 
 - [Required-store health](postgres-domain-store-parity.md), REQ-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.
@@ -125,3 +137,4 @@ The [journey loading design](../system-design/journey-data-loading.md) owns this
 ## Implementation plans
 
 - [Quiet task refresh recovery](../../../plans/quiet-task-refresh-recovery/plan.md) covers the shared warning policy and bounded sidebar recovery.
+- [Delivery environment lookup index](../../../plans/delivery-sweep-environment-index/plan.md) covers REQ-PLATFORM-INTERACTIVE-READS-008.

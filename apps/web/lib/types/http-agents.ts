@@ -16,15 +16,16 @@ export type {
   ProviderUsage,
 } from "./agent-profile";
 
-import type {
-  UsageAccountingMetadata,
-  UsageExactAmounts,
-  UsageReportProjection,
-  UsageRetainedRow,
+export type {
+  TokenUsageMetricValue,
+  TokenUsageMetrics,
+  TokenUsageRow,
+  TokenUsageResponse,
 } from "./http-usage-history";
 import type { AgentProfile } from "./agent-profile";
 import type { CLIFlag } from "./agent-profile";
 import type { BackendMessage } from "./backend-message";
+import type { ModelCatalog } from "@kandev/types/model-catalog";
 
 /**
  * How kandev drives a custom agent's command. Absent means terminal
@@ -119,6 +120,7 @@ export type AgentProfileMcpConfig = {
 export type AgentDiscovery = {
   name: string;
   supports_mcp: boolean;
+  supports_local_install?: boolean;
   mcp_config_path?: string | null;
   installation_paths: string[];
   available: boolean;
@@ -175,6 +177,8 @@ export type ConfigOptionEntry = {
   current_value: string;
   category?: string;
   options?: { value: string; name: string; description?: string }[];
+  /** Bounded provider group structure and verified composition bindings. */
+  catalog?: ModelCatalog;
 };
 
 // CapabilityStatus mirrors the host utility probe status. "probing" is the
@@ -193,6 +197,8 @@ export type ProfileLaunchSettingsRequest = {
   env_vars: { key: string; value?: string; secret_id?: string }[];
   cli_flags: CLIFlag[];
   command_prefix: string;
+  /** Draft ACP mode. Omission keeps the saved value for an older client. */
+  mode?: string;
   /** Draft selection for a capability or model probe. Omit to use the saved value. */
   copilot_selected_plugins?: string[];
 };
@@ -341,6 +347,7 @@ export type AvailableAgent = {
   display_name: string;
   description?: string;
   install_script?: string;
+  supports_local_install?: boolean;
   supports_mcp: boolean;
   mcp_config_path?: string | null;
   installation_paths: string[];
@@ -396,6 +403,15 @@ export type ClarificationQuestion = {
   allow_custom_text?: boolean;
 };
 
+export type ClarificationAnswerAttachment = {
+  attachment_id: string;
+  type: "image" | "audio" | "resource";
+  name: string;
+  mime_type: string;
+  size_bytes: number;
+  delivery_mode: "prompt" | "path";
+};
+
 // Each per-question chat message carries its own metadata. For multi-question
 // bundles, every message in the group shares the same pending_id and includes
 // question_index/question_total so the renderer can show "Question 2 of 3"
@@ -411,6 +427,8 @@ export type ClarificationRequestMetadata = {
   context?: string;
   status?: "pending" | "answered" | "rejected" | "expired" | "cancelled";
   response?: ClarificationAnswer;
+  /** Server-retained answer files, present after a retryable delivery failure. */
+  attachments?: ClarificationAnswerAttachment[];
   agent_disconnected?: boolean;
 };
 
@@ -418,6 +436,7 @@ export type ClarificationAnswer = {
   question_id: string;
   selected_options?: string[];
   custom_text?: string;
+  attachments?: ClarificationAnswerAttachment[];
 };
 
 export type ClarificationResponse = {
@@ -694,52 +713,4 @@ export type StatsResponse = {
   model_usage: ModelUsageDTO[];
   repository_stats: RepositoryStatsDTO[];
   git_stats: GitStatsDTO;
-};
-
-export type TokenUsageMetricValue = number | null;
-
-export type TokenUsageMetrics = UsageExactAmounts &
-  UsageAccountingMetadata & {
-    input_tokens: TokenUsageMetricValue;
-    output_tokens: TokenUsageMetricValue;
-    cache_read_tokens: TokenUsageMetricValue;
-    cache_write_tokens: TokenUsageMetricValue;
-    reasoning_tokens: TokenUsageMetricValue;
-    total_tokens: TokenUsageMetricValue;
-    turns: TokenUsageMetricValue;
-    cost_subcents: TokenUsageMetricValue;
-    currency: string;
-    cost_basis: string;
-    cost_coverage: string;
-    effective_cost_per_million: TokenUsageMetricValue;
-  };
-
-export type TokenUsageRow = TokenUsageMetrics &
-  UsageRetainedRow & {
-    key: string;
-    period: string;
-    model: string;
-    provider: string;
-    task_id: string;
-    session_id: string;
-    source: string;
-    coverage: string;
-    estimated: boolean;
-    stale: boolean;
-    undated: boolean;
-  };
-
-export type TokenUsageResponse = UsageReportProjection & {
-  summary: TokenUsageMetrics;
-  rows: TokenUsageRow[];
-  totals: TokenUsageMetrics;
-  total_rows: number;
-  has_more: boolean;
-  has_history: boolean;
-  has_range_data: boolean;
-  has_native_history: boolean;
-  dated_coverage: boolean;
-  undated_coverage: boolean;
-  providers: string[];
-  last_updated?: string | null;
 };

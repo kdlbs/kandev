@@ -3,6 +3,7 @@ package shared
 import (
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 )
@@ -75,9 +76,17 @@ type Config struct {
 	// agent against an OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
 
+	// AuthPolicy selects a provider-specific authentication method after
+	// initialize.
+	AuthPolicy *acpcompat.AuthPolicy
+
 	// PromptSuggestions asks an agent with native next-prompt suggestions to
 	// emit them. Only dialects that support native suggestions act on it.
 	PromptSuggestions bool
+
+	// CopilotNativeSessionEvents enables Copilot's opt-in native compaction and
+	// attributed usage notifications for this launch.
+	CopilotNativeSessionEvents bool
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

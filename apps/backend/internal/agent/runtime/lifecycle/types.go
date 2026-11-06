@@ -14,8 +14,10 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/ctxmutex"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -31,6 +33,8 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
+	builtinMCPMu                 sync.Mutex
+	builtinDispatch              *builtinDispatchState
 	RequiredNativeConversationID string
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
@@ -91,19 +95,23 @@ type AgentExecution struct {
 	ExecutionProfileID string
 	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
 	// launches, where AgentProfileID owns both identity and execution config.
-	OfficeAgentProfileID      string
-	AgentID                   string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
-	ContainerID               string
-	ContainerIP               string   // IP address of the container for agentctl communication
-	WorkspacePath             string   // Path to the workspace (worktree or repository path)
-	WorkspaceSourceRoots      []string // Canonical durable source roots permitted by agentctl file operations
-	ACPSessionID              string   // ACP session ID to resume, if available
-	DeliveryStreamID          string   // Generation-scoped durable agentctl stream
-	DeliveryIncarnationID     string   // Kandev session incarnation owning the stream
-	DeliveryHarnessGeneration uint64   // Native harness generation owning the stream
+	OfficeAgentProfileID string
+	AgentID              string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
+	// CopilotNativeSessionEvents reports whether this launch requested the
+	// Copilot native event stream from a capable agentctl peer.
+	CopilotNativeSessionEvents bool
+	AuthPolicy                 *acpcompat.AuthPolicy
+	ContainerID                string
+	ContainerIP                string   // IP address of the container for agentctl communication
+	WorkspacePath              string   // Path to the workspace (worktree or repository path)
+	WorkspaceSourceRoots       []string // Canonical durable source roots permitted by agentctl file operations
+	ACPSessionID               string   // ACP session ID to resume, if available
+	DeliveryStreamID           string   // Generation-scoped durable agentctl stream
+	DeliveryIncarnationID      string   // Kandev session incarnation owning the stream
+	DeliveryHarnessGeneration  uint64   // Native harness generation owning the stream
 	// Fresh native startup buffers delivery until its initial SQL generation exists.
 	deliveryBootstrap          atomic.Bool
-	deliveryNegotiation        atomic.Pointer[deliveryNegotiationGate]
+	deliveryStartup            atomic.Pointer[deliveryStartupAttempt]
 	deliveryStreamConnectError atomic.Pointer[deliveryStreamFailure]
 	// DeliveryMode records the recovery protocol selected for this execution.
 	// It is set before an adopted execution is published so admission and stream
@@ -186,7 +194,7 @@ type AgentExecution struct {
 	// completion's attribution while its stream frame is in flight.
 	promptTurnID      string
 	promptTurnIDs     map[uint64]string
-	promptLifecycleMu sync.Mutex
+	promptLifecycleMu ctxmutex.Mutex
 	// cancelEscalatedPromptGeneration identifies a prompt whose cancellation
 	// released the execution locally before the agentctl stream closed. The
 	// resulting disconnect is expected teardown and must not replace the
@@ -238,7 +246,7 @@ type AgentExecution struct {
 	agentctlURLFallback       atomic.Pointer[string]
 	agentctlLifecycleMu       sync.RWMutex
 	agentctlSourceMu          sync.RWMutex
-	remoteInstanceLifecycleMu sync.Mutex
+	remoteInstanceLifecycleMu ctxmutex.Mutex
 	// contextResetMu owns the reset attempt boundary. While a session reset is
 	// in flight, fresh-session setup events are retained until the lifecycle
 	// manager has committed the new ACP session. A timed-out attempt discards
@@ -1736,7 +1744,12 @@ type LaunchRequest struct {
 	TaskDescription           string              // Task description to send via ACP prompt
 	Attachments               []MessageAttachment // Attachments (images/files) for the initial prompt
 	Env                       map[string]string   // Additional env vars
-	WorkspaceLayout           string
+	// AuthPolicy is the internal child-process authentication contract for
+	// eligible host-local providers. Nil preserves existing behavior.
+	AuthPolicy *acpcompat.AuthPolicy
+	// LocalRuntimeEnv pins a validated host-local helper after environment merge.
+	LocalRuntimeEnv map[string]string
+	WorkspaceLayout string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string

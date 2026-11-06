@@ -116,14 +116,17 @@ type PermissionRequestData struct {
 	AgentID       string `json:"agent_id"`
 	// OwnerKind is "run" for a run-owned Office execution, which Office
 	// answers; the task permission path ignores it.
-	OwnerKind     string                   `json:"owner_kind,omitempty"`
-	RequestID     string                   `json:"request_id"`
-	PendingID     string                   `json:"pending_id"`
-	ToolCallID    string                   `json:"tool_call_id"`
-	Title         string                   `json:"title"`
-	Options       []map[string]interface{} `json:"options"`
-	ActionType    string                   `json:"action_type"`
-	ActionDetails map[string]interface{}   `json:"action_details"`
+	OwnerKind  string                   `json:"owner_kind,omitempty"`
+	RequestID  string                   `json:"request_id"`
+	PendingID  string                   `json:"pending_id"`
+	ToolCallID string                   `json:"tool_call_id"`
+	Title      string                   `json:"title"`
+	Options    []map[string]interface{} `json:"options"`
+	// HumanInput marks a provider-native question only a person can answer.
+	// Automatic consumers must leave it pending.
+	HumanInput    bool                   `json:"human_input,omitempty"`
+	ActionType    string                 `json:"action_type"`
+	ActionDetails map[string]interface{} `json:"action_details"`
 	// AutoApprovedOptionID names the option agentctl already selected on the
 	// user's behalf. Nonempty means the request is recorded, not pending.
 	AutoApprovedOptionID   string `json:"auto_approved_option_id,omitempty"`
@@ -154,14 +157,16 @@ type TaskMovedEventData struct {
 
 // ContextWindowData contains data from context window events
 type ContextWindowData struct {
-	TaskID                 string  `json:"task_id"`
-	TaskSessionID          string  `json:"session_id"`
-	AgentID                string  `json:"agent_id"`
-	ContextWindowSize      int64   `json:"context_window_size"`
-	ContextWindowUsed      int64   `json:"context_window_used"`
-	ContextWindowRemaining int64   `json:"context_window_remaining"`
-	ContextEfficiency      float64 `json:"context_efficiency"`
-	Timestamp              string  `json:"timestamp"`
+	TaskID                      string  `json:"task_id"`
+	TaskSessionID               string  `json:"session_id"`
+	AgentID                     string  `json:"agent_id"`
+	ContextWindowSize           int64   `json:"context_window_size"`
+	ContextWindowUsed           int64   `json:"context_window_used"`
+	ContextWindowRemaining      int64   `json:"context_window_remaining"`
+	ContextEfficiency           float64 `json:"context_efficiency"`
+	CompactionInferenceDisabled bool    `json:"compaction_inference_disabled,omitempty"`
+	CopilotNativeSessionEvents  bool    `json:"copilot_native_session_events,omitempty"`
+	Timestamp                   string  `json:"timestamp"`
 }
 
 // EventHandlers contains callbacks for different event types

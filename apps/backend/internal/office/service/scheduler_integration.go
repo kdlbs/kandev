@@ -1335,6 +1335,13 @@ func (si *SchedulerIntegration) buildPromptContext(
 		}
 	}
 
+	if reason == RunReasonHandoffCompleted {
+		pc.HandoffDeliveryTaskID = parsed["delivery_task_id"]
+		pc.HandoffDeliveryTitle = parsed["delivery_title"]
+		pc.HandoffDeliveryState = parsed["delivery_state"]
+		si.enrichCommentContext(ctx, pc, parsed["comment_id"])
+	}
+
 	if reason == RunReasonAgentError {
 		pc.FailedAgentID = parsed["failed_agent_id"]
 		pc.FailedSessionID = parsed["failed_session_id"]

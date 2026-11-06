@@ -154,6 +154,25 @@ diagnostics. A later successful probe restores readiness and stateful traffic
 without a process restart. `/health` remains a pure liveness check and stays
 HTTP 200 while the process is alive.
 
+The probe warning identifies the stage that failed. A connection the probe
+cannot acquire reports `writer_acquire` or `reader_acquire`. A ping that fails
+on an acquired connection reports `writer_ping` or `reader_ping`, and
+`elapsed_ms` measures only that failing stage.
+
+Connection acquisition can include opening a connection and applying its
+initialization work, so it is not a measurement of SQLite lock time alone. The
+warning also reports writer and reader pool counters. These counters are
+correlation evidence and do not identify the transaction that holds the writer.
+
+On SQLite, journal release also logs one warning when a shared durability run
+fails or takes at least one second. The warning reports the operation, the
+outcome, the current stage, and numeric timings for connection acquisition,
+connection ownership, transaction entry, generation write, and commit. A stage
+the run never reached has no timing field.
+
+The warning does not change write durability, probe timing, readiness policy, or
+retry behavior. It also does not identify another writer that held the database.
+
 Stats requests have a separate temporary pressure response. When the shared
 analytics limit is full for too long, a Stats endpoint returns HTTP 503 with
 `error_code: "analytics_busy"` and `Retry-After: 2`. This means the analytics
@@ -330,6 +349,16 @@ before permanent deletion. Each entry shows its `delete_after` retention deadlin
 time, not an exact promise. The first scheduled or full manual maintenance run that reaches the
 quarantine provider after the deadline performs the purge. That provider still must pass the idle
 gate and avoid preemption. A run that cleans only the Go cache does not purge quarantine entries.
+
+**Maintenance history** lists each run with a localized status and trigger. **Incomplete** means the
+run reached its bounded entry limit and can continue on a later run. **Partial** means some cleanup
+succeeded before a genuine error. **Failed** means no successful cleanup was recorded. The expanded
+Go-cache result shows removed and remaining bytes, or an unknown remaining size, with one
+explanation per distinct issue. Other providers show their own result facts when available. Skipped
+resources are reported separately and do not turn bounded progress into a failure.
+
+**Technical details** opens the original diagnostic message and raw result JSON. It is collapsed by
+default. Long diagnostics scroll inside that disclosure instead of widening the page.
 
 Go-cache cleanup uses a separate policy. When managed-cache use is enabled, new host-local
 executions share the selected Go build-cache path. The displayed physical size includes Go's `fuzz`
