@@ -6,6 +6,7 @@ import {
   getChildrenCompletedTransitionType,
   HelpTip,
   PROMPT_TEMPLATES,
+  stageTypeOnHoldToggle,
   STEP_COLORS,
 } from "./workflow-pipeline-editor-helpers";
 
@@ -128,5 +129,23 @@ describe("workflow pipeline editor helpers", () => {
 
   it("defaults all child tasks complete to none when no transition is configured", () => {
     expect(getChildrenCompletedTransitionType({ events: {} } as WorkflowStep)).toBe("none");
+  });
+});
+
+describe("stageTypeOnHoldToggle", () => {
+  it("ticking the hold box always sets hold", () => {
+    expect(stageTypeOnHoldToggle(true, "review")).toBe("hold");
+    expect(stageTypeOnHoldToggle(true, undefined)).toBe("hold");
+  });
+
+  it("unticking restores the saved non-hold nature", () => {
+    expect(stageTypeOnHoldToggle(false, "review")).toBe("review");
+    expect(stageTypeOnHoldToggle(false, "approval")).toBe("approval");
+    expect(stageTypeOnHoldToggle(false, "work")).toBe("work");
+  });
+
+  it("unticking a step that was not already a hold falls back to custom", () => {
+    expect(stageTypeOnHoldToggle(false, "hold")).toBe("custom");
+    expect(stageTypeOnHoldToggle(false, undefined)).toBe("custom");
   });
 });

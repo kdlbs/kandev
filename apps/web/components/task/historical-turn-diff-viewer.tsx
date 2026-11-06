@@ -6,6 +6,7 @@ import { PanelBody, PanelRoot } from "./panel-primitives";
 import {
   FileSelectionControls,
   HistoricalScopeSelect,
+  HistoricalDiffLoadMoreButton,
   HistoricalViewerHeader,
 } from "./historical-turn-diff-viewer-controls";
 import { FileDiffViewer } from "@/components/diff/file-diff-viewer";
@@ -19,7 +20,28 @@ import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
 import type { TurnChangeSetSummary, TurnFileChange } from "@/lib/types/turn-changes";
 import { readTurnChangeViewState, updateTurnChangeViewState } from "@/lib/turn-changes/view-state";
 import { resolveTurnChangeScope } from "@/lib/turn-changes/history-scope";
+import { contentUnavailableText, isSelectedContentPending } from "@/lib/turn-changes/content-copy";
+import { isUnavailableHistoryComparison } from "@/lib/turn-changes/projection";
+import { emptyHistoricalSummary } from "@/lib/turn-changes/empty-summary";
+import { useReadyContentRetry } from "@/hooks/domains/session/use-ready-content-retry";
 import { useTranslation } from "react-i18next";
+
+function useHistoricalChangeSet(target: HistoricalTurnDiffTarget) {
+  const [activeChangeSetId, setActiveChangeSetId] = useState(target.changeSetId);
+  const [scopeValue, setScopeValue] = useState(target.changeSetId);
+  useEffect(() => {
+    setActiveChangeSetId(target.changeSetId);
+    setScopeValue(target.changeSetId);
+  }, [target.changeSetId]);
+  const activeTarget = useMemo<HistoricalTurnDiffTarget>(
+    () =>
+      activeChangeSetId === target.changeSetId
+        ? target
+        : { sessionId: target.sessionId, changeSetId: activeChangeSetId },
+    [activeChangeSetId, target],
+  );
+  return { activeChangeSetId, setActiveChangeSetId, scopeValue, setScopeValue, activeTarget };
+}
 
 function statusFromKind(kind: string): string {
   switch (kind) {
@@ -112,7 +134,8 @@ function targetFile(
     checkout_id: firstDefined(target.checkoutId, saved?.selectedCheckoutId, ""),
     path,
     kind: firstDefined(target.fileKind, saved?.selectedFileKind, "modified"),
-    content_availability: "ready",
+    content_availability: "pending",
+    synthetic: true,
   };
   if (oldPath) file.old_path = oldPath;
   return file;
@@ -130,10 +153,19 @@ function oldPathForTarget(
   return saved?.selectedFileOldPath ?? undefined;
 }
 
+function repositoryForFile(summary: TurnChangeSetSummary | undefined, file: TurnFileChange | null) {
+  return summary?.repositories.find((repository) => repository.id === file?.repository_change_id);
+}
+
 function loadingLabel(t: (key: string) => string): string {
   return t("task:turnChangesLoading");
 }
-
+function buildSelectionOptions(selectedFile: TurnFileChange | null, available: TurnFileChange[]) {
+  if (selectedFile && !available.some((file) => file.id === selectedFile.id)) {
+    return [selectedFile, ...available];
+  }
+  return available;
+}
 function persistSelectedFile(target: HistoricalTurnDiffTarget, file: TurnFileChange) {
   updateTurnChangeViewState(target.sessionId, target.changeSetId, {
     selectedFileId: file.id,
@@ -167,24 +199,16 @@ export const HistoricalTurnDiffViewer = memo(function HistoricalTurnDiffViewer({
     hasMore: hasMoreHistory,
     loadMore,
   } = useSessionTurnChanges(target.sessionId, { detailActive });
-  const [activeChangeSetId, setActiveChangeSetId] = useState(target.changeSetId);
-  const [scopeValue, setScopeValue] = useState(target.changeSetId);
-  useEffect(() => {
-    setActiveChangeSetId(target.changeSetId);
-    setScopeValue(target.changeSetId);
-  }, [target.changeSetId]);
-  const activeTarget = useMemo<HistoricalTurnDiffTarget>(
-    () =>
-      activeChangeSetId === target.changeSetId
-        ? target
-        : { sessionId: target.sessionId, changeSetId: activeChangeSetId },
-    [activeChangeSetId, target],
-  );
+  const { activeChangeSetId, setActiveChangeSetId, scopeValue, setScopeValue, activeTarget } =
+    useHistoricalChangeSet(target);
   const summary = summaries.find((item) => item.id === activeChangeSetId);
   useEffect(() => {
     if (!summary) void loadChangeSet(activeChangeSetId);
   }, [activeChangeSetId, loadChangeSet, summary]);
-  const files = useTurnChangeFiles(activeTarget.sessionId, summary ?? emptySummary(activeTarget));
+  const files = useTurnChangeFiles(
+    activeTarget.sessionId,
+    summary ?? emptyHistoricalSummary(activeTarget),
+  );
   const availableFiles = useMemo(
     () => (summary ? flattenFiles(summary, files.filesByRepository, activeTarget) : []),
     [activeTarget, files.filesByRepository, summary],
@@ -200,15 +224,21 @@ export const HistoricalTurnDiffViewer = memo(function HistoricalTurnDiffViewer({
     whitespace,
     retryKey,
   );
-  const selectionOptions = useMemo(
-    () =>
-      selectedFile && !availableFiles.some((file) => file.id === selectedFile.id)
-        ? [selectedFile, ...availableFiles]
-        : availableFiles,
-    [availableFiles, selectedFile],
-  );
+  const selectionOptions = buildSelectionOptions(selectedFile, availableFiles);
   const expired = isExpiredError(content.error) || summary?.availability === "expired";
-  const unavailable = Boolean(content.error && !expired);
+  const pendingContent =
+    !expired &&
+    isSelectedContentPending(selectedFile, summary, content.patch !== null, content.error);
+  const unavailable = Boolean(content.error && !expired && !pendingContent);
+  const selectedRepository = repositoryForFile(summary, selectedFile);
+  useReadyContentRetry({
+    selectedFile,
+    contentError: content.error,
+    contentLoading: content.loading,
+    whitespace,
+    repositorySettled: selectedRepository?.export_state === "complete",
+    retry: () => setRetryKey((key) => key + 1),
+  });
   const handleScopeSelect = (value: string) => {
     const selection = resolveTurnChangeScope(value, summaries);
     if (!selection) return;
@@ -245,6 +275,7 @@ export const HistoricalTurnDiffViewer = memo(function HistoricalTurnDiffViewer({
       reload={reload}
       expired={expired}
       unavailable={unavailable}
+      pendingContent={pendingContent}
       onRetryContent={() => setRetryKey((key) => key + 1)}
     />
   );
@@ -271,6 +302,7 @@ function HistoricalViewerLayout({
   reload,
   expired,
   unavailable,
+  pendingContent,
   onRetryContent,
 }: {
   changeSetId: string;
@@ -293,6 +325,7 @@ function HistoricalViewerLayout({
   reload: () => Promise<void>;
   expired: boolean;
   unavailable: boolean;
+  pendingContent: boolean;
   onRetryContent: () => void;
 }) {
   return (
@@ -328,6 +361,7 @@ function HistoricalViewerLayout({
         reload={reload}
         expired={expired}
         unavailable={unavailable}
+        pendingContent={pendingContent}
         onRetryContent={onRetryContent}
       />
     </PanelRoot>
@@ -351,6 +385,7 @@ function HistoricalViewerBody({
   reload,
   expired,
   unavailable,
+  pendingContent,
   onRetryContent,
 }: {
   summary?: TurnChangeSetSummary;
@@ -362,6 +397,7 @@ function HistoricalViewerBody({
   reload: () => Promise<void>;
   expired: boolean;
   unavailable: boolean;
+  pendingContent: boolean;
   onRetryContent: () => void;
 }) {
   const { t } = useTranslation();
@@ -376,6 +412,7 @@ function HistoricalViewerBody({
       filesError: files.error,
       expired,
       unavailable,
+      pendingContent,
     },
     t,
   );
@@ -407,7 +444,10 @@ function HistoricalViewerBody({
       ))}
       {diff}
       {files.hasMore && (
-        <LoadMoreButton loading={files.loading} onClick={() => void files.loadMore()} />
+        <HistoricalDiffLoadMoreButton
+          loading={files.loading}
+          onClick={() => void files.loadMore()}
+        />
       )}
     </PanelBody>
   );
@@ -424,6 +464,7 @@ function viewerNotices(
     filesError: unknown;
     expired: boolean;
     unavailable: boolean;
+    pendingContent: boolean;
   },
   t: (key: string) => string,
 ): ViewerNotices {
@@ -457,6 +498,10 @@ function historyNotices(
   if (state.expired) {
     notices.push({ key: "expired", text: t("task:turnChangesExpiredDetail"), role: "status" });
   }
+  if (state.summary && !state.expired && isUnavailableHistoryComparison(state.summary)) {
+    notices.push({ key: "unavailable", text: t("task:turnChangesUnavailable"), role: "status" });
+    return notices;
+  }
   if (!state.expired && !state.summary && !state.historyLoading && !state.historyError) {
     notices.push({ key: "unavailable", text: t("task:turnChangesUnavailable"), role: "status" });
   }
@@ -467,32 +512,64 @@ function contentNotices(
   state: Parameters<typeof viewerNotices>[0],
   t: (key: string) => string,
 ): ViewerNotices {
+  const pending = pendingContentNotice(state, t);
+  if (pending) return [pending];
   const notices: ViewerNotices = [];
-  if (state.summary && !state.expired && !state.content.patch && state.content.loading) {
-    notices.push({ key: "content-loading", text: loadingLabel(t), role: "status" });
+  const loading = contentLoadingNotice(state, t);
+  if (loading) notices.push(loading);
+  if (state.summary && isUnavailableHistoryComparison(state.summary)) {
+    return notices;
   }
   if (state.summary && state.unavailable) {
     notices.push({
       key: "content-error",
-      text: t("task:turnChangesContentUnavailable"),
+      text: contentUnavailableText(state.selectedFile, t),
       role: "alert",
       retry: "content",
     });
   }
-  if (
-    state.summary &&
-    !state.expired &&
-    !state.content.loading &&
-    !state.content.error &&
-    !state.filesError &&
-    !state.selectedFile
-  ) {
-    notices.push({
-      key: "files-empty",
-      text: state.filesLoading ? loadingLabel(t) : t("task:turnChangesNoFiles"),
-    });
-  }
+  const empty = emptyFilesNotice(state, t);
+  if (empty) notices.push(empty);
   return notices;
+}
+
+function pendingContentNotice(
+  state: { summary?: TurnChangeSetSummary; expired: boolean; pendingContent: boolean },
+  t: (key: string) => string,
+): ViewerNotices[number] | null {
+  if (!state.summary || state.expired || !state.pendingContent) return null;
+  return { key: "content-pending", text: loadingLabel(t), role: "status" };
+}
+
+function contentLoadingNotice(
+  state: {
+    summary?: TurnChangeSetSummary;
+    expired: boolean;
+    content: ReturnType<typeof useTurnChangeContent>;
+  },
+  t: (key: string) => string,
+): ViewerNotices[number] | null {
+  if (!state.summary || state.expired || state.content.patch || !state.content.loading) return null;
+  return { key: "content-loading", text: loadingLabel(t), role: "status" };
+}
+
+function emptyFilesNotice(
+  state: {
+    summary?: TurnChangeSetSummary;
+    expired: boolean;
+    content: ReturnType<typeof useTurnChangeContent>;
+    filesLoading: boolean;
+    filesError: unknown;
+    selectedFile: TurnFileChange | null;
+  },
+  t: (key: string) => string,
+): ViewerNotices[number] | null {
+  if (!state.summary || state.expired || state.content.loading || state.content.error) return null;
+  if (state.filesError || state.selectedFile) return null;
+  return {
+    key: "files-empty",
+    text: state.filesLoading ? loadingLabel(t) : t("task:turnChangesNoFiles"),
+  };
 }
 
 function ViewerNotice({
@@ -525,42 +602,4 @@ function ViewerNotice({
       )}
     </div>
   );
-}
-
-function LoadMoreButton({ loading, onClick }: { loading: boolean; onClick: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <div className="p-3 text-center">
-      <Button
-        size="sm"
-        variant="ghost"
-        className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-        onClick={onClick}
-        disabled={loading}
-      >
-        {loading ? loadingLabel(t) : t("task:turnChangesLoadMore")}
-      </Button>
-    </div>
-  );
-}
-
-function emptySummary(target: HistoricalTurnDiffTarget): TurnChangeSetSummary {
-  return {
-    id: target.changeSetId,
-    task_id: "",
-    session_id: target.sessionId,
-    turn_id: "",
-    revision: 0,
-    availability: "pending",
-    complete: false,
-    summary_complete: false,
-    content_complete: false,
-    turn_ordinal: 0,
-    fallback_anchor: "",
-    file_count: 0,
-    binary_file_count: 0,
-    unknown_count_file_count: 0,
-    repository_count: 0,
-    repositories: [],
-  };
 }

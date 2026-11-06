@@ -459,7 +459,10 @@ func TestSidebarQueryPoolMemoryPlateau(t *testing.T) {
 
     def test_ordinary_linux_shards_keep_the_ten_minute_package_budget(self) -> None:
         test_step = step_block(self.workflow, "Run tests")
-        self.assertIn("-timeout=10m", test_step)
+        # The process package can approach the old 10m ceiling under race and
+        # coverage after additional delivery-storage tests land.
+        self.assertIn("-timeout=15m", test_step)
+        self.assertNotIn("-timeout=20m", test_step)
         self.assertNotIn("-timeout=120m", test_step)
 
     def test_base_image_mirrors_postgres_18_at_the_same_digest(self) -> None:

@@ -30,6 +30,58 @@ func checkoutStoredVersion(t *testing.T, r *Repository, id string, version time.
 	return row
 }
 
+func TestNextRepositoryUpdatedAtAdvances(t *testing.T) {
+	for _, previous := range []time.Time{
+		time.Now().UTC(),
+		time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC),
+	} {
+		next := nextRepositoryUpdatedAt(previous)
+		require.True(t, next.After(previous), "next=%s previous=%s", next.Format(time.RFC3339Nano), previous.Format(time.RFC3339Nano))
+	}
+}
+
+func TestRepositoryCheckoutDefaultsAdvanceFromStoredVersion(t *testing.T) {
+	r, row := checkoutStoreFixture(t)
+	future := time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC)
+	stale := checkoutStoredVersion(t, r, row.ID, future)
+	overlap := *stale
+
+	stale.Name = "first"
+	require.NoError(t, r.UpdateRepositoryWithCheckoutIntent(t.Context(), stale, models.RepositoryCheckoutIntent{}))
+	first := stale.UpdatedAt
+	require.True(t, first.After(future))
+
+	overlap.Name = "second"
+	require.NoError(t, r.UpdateRepositoryWithCheckoutIntent(t.Context(), &overlap, models.RepositoryCheckoutIntent{}))
+	require.True(t, overlap.UpdatedAt.After(first), "overlapping stale save must advance past the stored version")
+	stored, err := r.GetRepository(t.Context(), row.ID)
+	require.NoError(t, err)
+	require.Equal(t, overlap.UpdatedAt, stored.UpdatedAt)
+	require.Equal(t, "second", stored.Name)
+}
+
+func TestRepositoryUpdateAdvancesFromStoredVersion(t *testing.T) {
+	future := time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC)
+	t.Run("exact", func(t *testing.T) {
+		r, row := checkoutStoreFixture(t)
+		current := checkoutStoredVersion(t, r, row.ID, future)
+		update := *current
+		update.Name = "exact"
+		require.NoError(t, r.UpdateRepositoryIfUnchanged(t.Context(), &update, future))
+		require.True(t, update.UpdatedAt.After(future))
+		stale := *current
+		stale.Name = "stale"
+		require.ErrorIs(t, r.UpdateRepositoryIfUnchanged(t.Context(), &stale, future), repoerrors.ErrTaskVersionConflict)
+	})
+	t.Run("legacy", func(t *testing.T) {
+		r, row := checkoutStoreFixture(t)
+		stale := checkoutStoredVersion(t, r, row.ID, future)
+		stale.Name = "legacy"
+		require.NoError(t, r.UpdateRepository(t.Context(), stale))
+		require.True(t, stale.UpdatedAt.After(future), "complete write must not rewind a future stored version")
+	})
+}
+
 // @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.20, AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.21
 func TestRepositoryCheckoutDefaultsStorage(t *testing.T) {
 	r, stale := checkoutStoreFixture(t)

@@ -23,6 +23,7 @@ import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import { PluginPanelPicker } from "./plugin-panel-picker";
 import { registrationIsVisible } from "../plugin-task-panel";
 import { useOptionalPortForwardingVisibility } from "../port-forwarding-visibility-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 
 type SessionMobileBottomNavProps = {
   activePanel: MobileSessionPanel;
@@ -77,6 +78,7 @@ function buildMobileNavItems({
   onOpenPluginPicker,
   hasTaskCanvases,
   hasPortForwarding,
+  hasBackgroundWork,
   mobilePluginPanelsAvailable,
   connectionIssueSeverity,
   t,
@@ -90,6 +92,7 @@ function buildMobileNavItems({
   onOpenPluginPicker: () => void;
   hasTaskCanvases: boolean;
   hasPortForwarding: boolean;
+  hasBackgroundWork: boolean;
   connectionIssueSeverity: ConnectionIssueSeverity;
   t: (key: string) => string;
   mobilePluginPanelsAvailable: boolean;
@@ -141,13 +144,14 @@ function buildMobileNavItems({
       label: t("task:terminal"),
       icon: <IconTerminal2 className="h-5 w-5" />,
     },
-    ...(hasTaskCanvases || mobilePluginPanelsAvailable || hasPortForwarding
+    ...(hasTaskCanvases || mobilePluginPanelsAvailable || hasPortForwarding || hasBackgroundWork
       ? [
           {
             label: t("common:panels"),
             testId: "mobile-session-nav-panels",
             icon: <IconLayoutGrid className="h-5 w-5" />,
-            active: parsePluginPanelId(activePanel) !== undefined,
+            active:
+              parsePluginPanelId(activePanel) !== undefined || activePanel === "background-work",
             onClick: onOpenPluginPicker,
           },
         ]
@@ -183,6 +187,10 @@ export function SessionMobileBottomNav({
   const { t } = useTranslation();
   const portForwarding = useOptionalPortForwardingVisibility();
   const hasPortForwarding = Boolean(taskId && portForwarding);
+  const backgroundWorkEnabled = useFeature("agentBackgroundWork");
+  const hasBackgroundWork = Boolean(
+    taskId && sessionId && sessionKind === "managed" && backgroundWorkEnabled,
+  );
   usePluginRegistry();
   const registryVersion = pluginRegistry.getVersion();
   const [pluginPickerOpen, setPluginPickerOpen] = useState(false);
@@ -199,6 +207,7 @@ export function SessionMobileBottomNav({
         onOpenPluginPicker: () => setPluginPickerOpen(true),
         hasTaskCanvases: taskCanvases.length > 0,
         hasPortForwarding,
+        hasBackgroundWork,
         mobilePluginPanelsAvailable,
         connectionIssueSeverity,
         t,
@@ -215,6 +224,7 @@ export function SessionMobileBottomNav({
       taskCanvases.length,
       mobilePluginPanelsAvailable,
       hasPortForwarding,
+      hasBackgroundWork,
       t,
     ],
   );
@@ -242,6 +252,7 @@ export function SessionMobileBottomNav({
         taskId={taskId}
         sessionId={sessionId}
         sessionKind={sessionKind}
+        backgroundWorkAvailable={hasBackgroundWork}
       />
     </nav>
   );

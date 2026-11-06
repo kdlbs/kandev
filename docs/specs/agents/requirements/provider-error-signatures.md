@@ -2,6 +2,7 @@
 status: active
 system: agents
 created: 2026-10-08
+updated: 2026-10-28
 owners:
   - kandev
 ---
@@ -81,11 +82,25 @@ errors does not take its own healthy account out of rotation.
   `Rate limit exceeded. Please try again later` line, optionally wrapped by
   its provider error label, shall classify as rate limited without inferring a
   daily reset period.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.11:** For `opencode-acp`, an opening
+  `Upstream request failed: [ttft_admission_refused] the cell is at capacity`
+  diagnostic shall classify as high-confidence, retryable `model_capacity`.
+  Established error labels can precede the diagnostic.
+  Bare capacity prose, quoted examples, other refusal tokens, and unrelated
+  providers shall not match this signature.
+  Existing structured classification and earlier account-limit rules retain precedence.
+  A valid `(after N s)` suffix shall provide a reset hint from the diagnostic's observation time.
+  Only integer delays from 1 through 60 seconds qualify.
+  Missing, malformed, zero, negative, and larger delays shall provide no hint.
+  Classification shall not establish runtime health or authorize another prompt.
+
+Criterion 001.11 was added by the October 28
+[OpenCode capacity package](../../../plans/opencode-capacity-retry/plan.md).
 
 ## Out of scope
 
 - Changing rule order, confidence levels, or classification flags beyond the
-  narrow additions in criteria 001.6, 001.8, 001.9 and 001.10.
+  narrow additions in criteria 001.6, 001.8, 001.9, 001.10, and 001.11.
 - Changing unrelated provider-neutral rules or any runtime-environment rules.
 - Changing how classified failures suspend candidates or select a successor.
 

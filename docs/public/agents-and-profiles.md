@@ -54,15 +54,44 @@ After a completed turn, use **Fork conversation** to create another session thro
 
 ### Inspect agent background work
 
-Agents that report background shell commands, subagents, or monitors feed the shared background-work chip above the message box. The chip is enabled by default in the shipped profiles; the operator toggle is **Agent background work** in **Settings > System > Feature Toggles**. The same experience, counts, and detail views apply on desktop and phone, and the chip never changes how a prompt is admitted. See [Tasks and workflows](tasks-and-workflows.md#inspect-background-work).
+Agents that report background shell commands, subagents, or monitors feed the shared background-work view. A composer chip appears only while at least one job is running; it counts and summarizes that running subset. The overview separates **Active** (running and waiting) from **History** (completed, failed, interrupted, ended, and unknown). Open it from **View all work**, the desktop **+** panel menu, or the phone **Panels** menu in a managed session, even when no chip is visible; passthrough terminal sessions do not expose the phone entry. Unknown activity keeps its status and never implies completion. The chip is enabled by default in the shipped profiles; the operator toggle is **Agent background work** in **Settings > System > Feature Toggles**. The same experience, counts, and detail views apply on desktop and phone, and the chip never changes how a prompt is admitted. See [Tasks and workflows](tasks-and-workflows.md#inspect-background-work).
 
 Provider support differs, and Kandev shows only what the connected runtime verifies:
 
 - **Claude ACP and native Codex** report job lifecycle and, for native Codex, supported job actions. Explicit controls appear only for an advertised capability.
-- **OpenCode ACP** reports a detached shell launch with its native shell identity. The supported OpenCode versions end their ACP subscription with the foreground prompt, so Kandev keeps the launch inspectable but marks its later activity unknown instead of promising completion, live output, or controls. The original launch banner stays in the tool message.
+- **OpenCode ACP** reports a detached shell launch with its native shell identity. With the optional integration plugin enabled on a supported OpenCode v2 2.2.0 runtime, Kandev can settle that job when the native shell exits. Without the plugin, or on any other runtime, the job stays inspectable and its later activity remains unknown. Neither path provides live output or process controls, and the original launch banner stays in the tool message.
 - **Other ACP agents** keep their existing behavior when they do not report background lifecycle.
 
 A bounded probe or reconnect can also leave a job unknown. Unknown activity is neither a successful completion nor a verified running job, and retained history stays reachable after the active count reaches zero.
+
+#### OpenCode terminal outcomes
+
+Kandev can supply a small integration plugin to supported OpenCode v2 task
+launches. The plugin observes native shell terminal events through a private
+loopback callback, so an owned job can move from unknown to completed, failed,
+or interrupted after the foreground prompt ends.
+
+This integration is opt-in. Enable **OpenCode integration plugin** in
+**Settings > System > Feature Toggles**, or set
+`KANDEV_FEATURES_OPENCODE_PLUGIN=true`, and restart Kandev. An environment value
+wins over a stored toggle. The integration is off in every shipped profile.
+
+Requirements and behavior:
+
+- The runtime must be OpenCode v2 2.2.0. Other versions and OpenCode v1 keep the
+  existing ACP behavior and the unknown-job fallback.
+- Kandev supplies the plugin automatically. Do not install an npm package or
+  add a project plugin.
+- Existing `opencode.json`, inline configuration, user plugins, credentials,
+  and MCP settings keep their meaning. A malformed or conflicting inline
+  configuration disables only this integration for that launch.
+- The shared **Agent background work** feature must also be on. Turning it off
+  prevents shell claims and workload observations.
+- A terminal result can arrive after the foreground prompt. Intermediate
+  activity can still show unknown. Output streaming, process controls, and
+  automatic assistant follow-ups remain unavailable.
+- A job with no terminal evidence stays unknown. The plugin does not replay
+  events lost while OpenCode or the executor was stopped.
 
 Codex questions sent through Kandev's `ask_user_question_kandev` MCP tool or through the native app-server `item/tool/requestUserInput` method use the normal clarification UI. Native options and permitted free-text answers map back to Codex's answer format. Secret questions fail closed because Kandev's clarification flow stores answers in the conversation. If Codex resolves a pending request, Kandev closes the corresponding clarification.
 
@@ -395,6 +424,40 @@ After you edit launch settings, choose **Refresh models** to check the current d
 The provider returns the model catalog. Discovery success does not confirm
 catalog completeness or account access to every model.
 
+### Create the first profile for a newly installed agent
+
+If you install an agent CLI after Kandev started, **Settings > Agents** can list it
+as available before any profile row exists. Open its card and create the profile
+as usual. Model discovery and dependent option resolution use the complete draft,
+so the model list, modes, and dependent options work before the first Save.
+Saving creates the agent and then its first profile. Invalid profile input is
+rejected before the agent row is created; a later storage failure reports an
+error instead of claiming a partial success. Discovery alone does not create a
+profile, change an existing one, or start a task session.
+
+### Model groups and composed selections
+
+Some providers advertise models under native groups instead of one flat list.
+The picker keeps the supplied group names, order, and descriptions. Search matches
+model labels, exact values, group paths, and, for a composed family, its
+dimension labels and values.
+
+A composed family opens a focused view with one row per supplied dimension. When
+the exact model resolves, the view also shows that model's real provider options,
+such as Thinking or Speed, so the whole configuration can be reviewed before the
+single **Use configuration** action. Only a complete combination that resolves to
+exactly one currently advertised model can be applied. Selecting a dimension keeps
+the rest of your draft visible; values that can no longer complete a pairing are
+marked and must be replaced before applying. Thinking, Speed, Effort, and other
+provider options remain separate controls and keep the selected model's
+authoritative option snapshot. Kandev does not guess pairings from model names:
+a family renders as composed only when the provider supplies verified
+relationships, so an unqualified family stays an ordinary group.
+
+On a phone the picker opens as one sheet with internal Back navigation, one
+vertical scroll region, and a fixed Apply action. Closing the sheet without
+applying leaves your saved configuration unchanged.
+
 ### Runtime notifications and automatic updates
 
 Kandev checks enabled, available agent runtimes in the background, including
@@ -482,7 +545,7 @@ This order applies only to Settings. Task creation, in-task agents, handoff, and
 | Provider                               | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                                                                                                                                                                                                   |
 | CLI passthrough                        | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                                                                                                                                                                                                                 |
 | Enabled                                | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                                                                                                                                                                                                           |
-| Auto-approve all permissions           | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default.                                                                                                                                                                                   |
+| Auto-approve all permissions           | Answers automatically with an offered `allow_once` or `allow_always` option. Requests without an allow option stay pending for a person to answer. Every automatic decision keeps its option and source in permission history. It is off by default.                                                                                                                                          |
 | MCP servers                            | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                                                                                                                                                                                                            |
 | Share local Cursor MCP credentials     | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. It applies only to local executions that share the backend home directory.                                                                                                                                                                                                |
 | Import local Cursor plugin MCP servers | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. Imports supported local plugin and user MCP definitions into task worktrees. On supported macOS installations, enabled marketplace plugins are discovered from Cursor’s account service and matched to their exact cached revision.                                       |
@@ -496,6 +559,13 @@ return environment values or MCP credentials; use references or the existing
 interactive credential flow when a secret is required.
 
 Model and mode choices are probed from the locally installed CLI. Opening a saved concrete profile probes its saved environment, CLI flags, and command prefix. If you edit any of these launch settings, select **Refresh models** before you choose a model. Kandev probes the current draft without saving it or sending a prompt. A secret reference is resolved on the Kandev host and its value is not sent back to the browser. Probe status can report **auth required**, **not installed**, **not configured**, **unsupported**, or **failed**; a saved model name does not prove that the current provider account can use it.
+
+For a mode defined in a repository, open **Start mode**, type its exact ID,
+select the custom entry, and save the profile. The host probe runs outside the
+task repository, so it may omit that mode and show options for the host default.
+At task startup, the selected executor must confirm the requested mode before
+the first prompt. If it cannot, startup fails. Leaving the mode unset uses the
+agent's default.
 
 ### Use an OpenAI-compatible provider
 
@@ -605,25 +675,36 @@ Any workflow step can veto this policy with
 workflow-step API and is included in workflow import/export. The veto applies
 to the step's task session even when the candidate policy is enabled.
 
-After a provider switch, the failed provider is paused for the route health
-backoff, or until its trusted reset time when one is available. Kandev runs an
-exclusive health probe before it becomes eligible again. This shared error
-classification is used by task/Kanban and Office routing, while the per-
-candidate policies are configured on dynamic profiles.
+After a provider switch, the failed resource enters the shared circuit backoff:
+1, 5, 15, and 30 minutes, then 1, 2, and 4 hours. Failures in one open window
+count as one incident. A failed probe advances the ladder, while a successful
+probe keeps its count. A clean completed turn resets the count. A trusted
+provider reset time can extend the wait; inferred reset times are capped at
+24 hours. Kandev runs an exclusive health probe before a dynamic candidate
+becomes eligible again.
+
+When `features.dynamicAgentRouting` is enabled, fixed profiles use the same
+shared circuits. A fixed profile waits for its resource circuit to expire and
+does not switch to another provider. This flag remains off by default. This
+shared error classification is used by task/Kanban and Office routing, while
+per-candidate policies are configured on dynamic profiles.
 
 When a task launch waits for session capacity, Kandev keeps the selected
 destination and retries it automatically. Inspecting another session does not
 change the workflow's selected step or primary session. You can open another
 session and use its normal controls. Kandev resumes it when the session can run;
 the automatic session ceiling still applies unless you explicitly start,
-resume, or message the session.
+resume, or use Send Now on the session.
 
 Opening or refocusing a conversation parked by the ACP idle policy also uses
 automatic admission. With **Limit automatic sessions** enabled and capacity
 full, it stays parked without a manual-override notice. A queued focus resume,
 including a completed conversation, retries when capacity is available and
 only while the same conversation remains idle-suspended. Explicit **Resume**
-and message delivery keep manual admission.
+and **Send Now** keep manual admission. Ordinary message delivery waits for
+capacity through the same ceiling. When **Prevent auto-start on open** is
+enabled in the web app, focus does not send that resume; the composer shows the
+start hint and a message to the parked conversation resumes it instead.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn
@@ -862,7 +943,9 @@ Literal values remain in profile configuration. A secret reference avoids copyin
 
 ## Permissions and unattended work
 
-In a structured ACP session, the agent can present a permission request and its available responses. With **Auto-approve all permissions** disabled, a person chooses a response in the session. With it enabled, the runtime selects the first allow-once or allow-always response without waiting. If the agent supplies no allow response, Kandev selects its first response even when that response is not approval; with no responses, it cancels.
+In a structured ACP session, the agent can present a permission request and its available responses. With **Auto-approve all permissions** disabled, a person chooses a response in the session. With it enabled, Kandev selects an offered `allow_once` response, or `allow_always` when allow-once is not offered, without waiting. If the agent supplies no allow response, the request stays pending for a person. Automatic approval never supplies a denial or cancellation. It shows the ordinary tool progress instead of an approval prompt, and permission history keeps the selected option and automatic source.
+
+If an automatic decision fails before dispatch while the request is still answerable, Kandev exposes the request for a person. After a decision is dispatched, a failed or uncertain outcome shows non-actionable feedback instead of a second answer.
 
 Claude ACP also has a narrower built-in rule. When the agent uses the host-injected `kandev` MCP server, Kandev automatically selects an offered allow-once response, or allow-always when allow-once is not offered, even when **Auto-approve all permissions** is disabled. This covers every tool on that server, including task creation, task deletion, and plan changes. It is not a saved approval decision and is recreated for each task or Quick Chat session. Kandev still enforces MCP authentication, task and session authorization, user-question barriers, and workflow gates. Shell commands, file operations, third-party tools, and ambiguous requests keep the normal permission flow.
 
@@ -872,6 +955,32 @@ from targeting a replacement prompt that reused a provider pending ID. Kandev re
 which option before delivery and rejects concurrent or replayed answers. It does not expose hidden
 environment values, headers, raw MCP arguments, or option metadata. See
 [Resolve a live agent permission request](automation-and-mcp.md#resolve-a-live-agent-permission-request).
+
+### Devin permissions and sandbox
+
+New Devin profiles start in **Smart** mode with **Devin sandbox** set to
+**Disabled**, which stores an explicit `DEVIN_SANDBOX=false` entry. Existing
+profiles keep their saved values, including an inherited setting that has no
+entry. Smart availability varies by account and rollout; when the current
+capability snapshot does not advertise it, the editor shows Smart as unavailable
+and asks for an advertised mode instead of substituting Code, Ask, or Plan.
+
+The sandbox control has three values:
+
+- **Use CLI settings**: no profile entry. Devin applies its own policy and the
+  profile keeps its explicit mode.
+- **Disabled**: explicit `DEVIN_SANDBOX=false`.
+- **Enabled**: explicit `DEVIN_SANDBOX=true` and **Autonomous** mode. Kandev
+  validates the pair and refuses a contradictory Smart or Bypass mode before the
+  provider starts.
+
+Install or update Devin with the official command
+`curl -fsSL https://cli.devin.ai/install.sh | bash`. Sandbox execution needs the
+provider's own prerequisites on the host; a missing prerequisite fails visibly
+and Kandev does not retry without the sandbox. The ACP Start mode controls
+structured sessions only. With terminal passthrough enabled, the native terminal
+keeps Devin's own permission behavior. Kandev **Auto-approve all permissions**
+remains independent and only answers approval requests the provider still sends.
 
 Auto approval can authorize shell commands, file changes, network calls, or any other capability exposed by that agent. Agent-specific flags that suppress permission prompts can be broader still. Use either only with a constrained executor, repository, environment, and credential set.
 
@@ -945,53 +1054,96 @@ To stop sharing, clear the option and launch that profile again. That launch rem
 ### Load Copilot plugins for a profile
 
 On a saved Copilot profile, open **Plugins** and choose **Refresh plugins**.
-Kandev runs the profile's selected Copilot CLI with its effective home, path,
-and resolved secret references. The list shows installed plugins, their
-marketplace and version, and the CLI's own enabled status. A plugin that the CLI
-has disabled is still selectable here: this checkbox means "load this plugin
-for this Kandev profile", not "enable it globally".
+Kandev uses the profile's selected managed interactive Copilot CLI with its
+effective home, path, and resolved secret references. The list shows installed
+plugins, their marketplace and version, and the CLI's native enabled status.
+A disabled installed plugin can still be selected for this profile. This
+selection asks Copilot to load the whole plugin for this profile; it does not
+enable the plugin globally.
 
-Kandev can discover installed plugins and save a selection on a profile. Native
-plugin mounting is currently fail-closed: a new local or worktree process with
-a nonempty saved selection returns `policy_unverified`. Kandev has not yet
-established with authenticated native fixtures that an explicit
-`--plugin-dir` mount preserves Copilot's MCP disables and managed prohibitions.
-Discovery, save, Reset, and removal remain available while that qualification
-is outstanding.
+When you refresh, Kandev checks the selected interactive CLI's native help for
+the `--plugin-dir` option, then reads and validates its plugin inventory and
+installation metadata. These checks use the exact runtime and launch context
+selected for the profile. Kandev does not use a version or platform list to
+decide whether plugin preparation is available, and it does not fall back to
+an unrelated global CLI or change a runtime pin. A successful check confirms
+the interface and the selected plugin roots; Copilot's own policy remains the
+authority for whether a plugin component loads. The `mount_permitted` field
+reports only observed option support. It does not mean policy approval,
+authentication, or guaranteed plugin execution.
 
-When native mounting is enabled, a selection will load the whole plugin through
-Copilot's native `--plugin-dir` support. A plugin can run MCP servers, skills,
-agents, commands, hooks, and other executable components. Loading is additive.
-Copilot can still load other plugins that its own configuration enables, so
-this is not an exclusive whitelist. Review a plugin's publisher and contents
-before selecting it.
+Before a Copilot runtime change, the update preview shows plugin compatibility
+as unchecked because it does not run help or inventory for each saved profile's
+concrete launch context. It also reports how many saved profiles select plugins
+when that count is available. The notice is advisory. It does not block the
+update, change selections, or stop a running process. Successful ACP validation
+does not by itself verify profile plugin loading.
+
+If the selected runtime does not advertise `--plugin-dir`, or its inventory
+cannot be read, the profile keeps its saved selections and shows that plugin
+preparation cannot be completed for the current observation. Remove the
+selection before starting a new process, or repair the runtime and refresh.
+Native enabled status is unknown for a saved plugin that the current successful
+inventory did not observe; Kandev does not report that unknown state as
+disabled.
+
+A selection asks Copilot to load the whole plugin through its native support. A plugin
+can run MCP servers, skills, agents, commands, hooks, and other executable
+components. Loading is additive, not an exclusive whitelist. Copilot can still
+load other plugins its own configuration enables, so review a plugin's
+publisher and contents before selecting it.
 
 Selections are stored on the profile and apply when the next Copilot process
-starts. Saving a profile does not reload or stop a running process; that
-process keeps the plugins it started with. Missing plugins stay visible and can
-be unchecked. A new process does not start while a saved selection is missing,
-unresolvable, or policy-unqualified.
+starts. Saving a profile does not reload or stop a running process; it keeps
+the plugins it started with. Plugin loading is limited to local and worktree
+executions. A nonempty selection cannot start on Docker, SSH, Kubernetes,
+Sprites, or another isolated executor. Clear the selection and Save to continue
+without plugin mounts, or use a local or worktree executor. Empty selections
+keep their existing behavior on every executor.
 
-Profile plugin loading is limited to local and worktree executions. Profiles
-with a nonempty selection cannot start on Docker, SSH, Kubernetes, Sprites, or
-another isolated executor; clear the selection or use a local executor.
-Profiles with no selected plugins keep their existing behavior on every
-executor.
+Unsupported runtimes and execution contexts, missing plugins, and unresolved
+plugin roots remain visible and removable. A new process does not start while
+its selected plugins cannot be prepared; Kandev does not silently omit them.
+If inventory refresh fails, saved choices remain and availability is marked
+unchecked. The profile's normal **Save**, **Reset**, and external-change
+recovery flow applies.
 
-Copilot's native authentication, MCP disables, tool permissions, and managed
-policy remain authoritative. Kandev does not copy credentials, start a login,
-install, enable, disable, or update plugins, or reuse plugin MCP definitions as
-Kandev-managed servers. Use Copilot's own commands for plugin management.
+If startup cannot prepare the selected plugins, the task conversation keeps a
+recovery card after reload. It shows the safe failure reason and the exact
+selected runtime version when available. It does not show plugin identities,
+host paths, or native command output. The saved selection stays in place; repair
+the plugin state or review the profile selection, then use the existing
+recovery controls to try again. The same recovery information is available on
+desktop and phone.
 
-Kandev currently qualifies inventory discovery for managed Copilot 1.0.88 and
-1.0.104. Another selected runtime shows an unsupported message instead of
-falling back to an unrelated global CLI. The command preview shows the base
-command and marks it incomplete when plugin mounts are deferred to process
-start; it never shows resolved host directories.
+Older Kandev backends may return the legacy `policy_unverified` reason for a
+profile capability or model-option probe. This is older-backend recovery, not
+the supported-runtime default. To restore model discovery without the
+selection, uncheck the plugins, Save the profile, then refresh models or retry
+model options. This does not enable plugin mounting or change Copilot's native
+policy.
 
-If refresh fails, Kandev keeps your saved choices and says availability was not
-checked. You can still remove a choice. The profile's normal **Save**, **Reset**,
-and external-change recovery flow applies to plugin changes.
+Copilot remains responsible for native MCP disables, managed prohibitions,
+component availability, authentication, and tool consent. Kandev does not edit
+native activation or configuration, copy credentials, start a login, install,
+enable, disable, or update plugins, reconstruct plugin MCP definitions, add
+permission-bypass flags, or retry a native rejection under another runtime,
+home, transport, or identity. Use Copilot's own commands for plugin management.
+
+The command preview is deferred because plugin roots are resolved at process
+start. It shows the base command and selected plugin identities, marks that
+preview incomplete for the selected plugin launch, and never exposes resolved
+host directories or a runnable `--plugin-dir` command.
+
+Native diagnostics are limited and do not certify enterprise policy. Eight
+full native acceptance attempts exited nonzero. A corrected 1.0.104 diagnostic
+observed real calls and successful results from a plugin, a sibling plugin,
+native-config MCP, and an ACP-injected MCP. In the disable observation, the
+target received no traffic while an allowed sibling succeeded, but no
+authoritative denial was captured. Copilot 1.0.88 reached the endpoints, but
+its paired disable case was not reached. Managed policy was not tested. These
+observations are not evidence of enterprise-policy enforcement or
+certification.
 
 <details>
 <summary>Configure workspace MCP servers</summary>
@@ -999,6 +1151,8 @@ and external-change recovery flow applies to plugin changes.
 ## Add MCP servers to a workspace
 
 Open **Settings > Workspaces > _workspace_ > MCP servers**. The **Configured** view stores reusable MCP definitions for that workspace. The existing **External MCP** page is different: it exposes Kandev's own MCP endpoint to outside clients.
+
+The **Built-in** section manages Kandev's native tool packages separately from these definitions. See [Choose built-in MCP packages](builtin-mcp-packages.md) for task opt-in, workspace limits, defaults, and next-start timing.
 
 Choose **Add MCP server** for one of these setup modes:
 
@@ -1053,14 +1207,25 @@ After a definition is configured, select it where it should apply:
   **Customize**. Desktop opens a dialog; phones open one sheet. **Connections**
   keeps server status and tool inspection available. Inherited entries show
   their profile, repository, task, or session name when available. Choose
-  additions under **Additional servers**. The **From task setup** group shows
-  inherited entries, which are read-only. Each entry separates its description
-  and setup/transport badges from a **Where it comes from** section with named
-  origin badges. A server selected by
-  several scopes shows each contributing source. These describe configuration;
-  check **Connections** for evidence of delivery or loaded tools.
+  additions under **Additional servers**. Inherited entries retain all contributing
+  origins. Choose **Exclude for this session** to leave out one inherited server,
+  or **Restore inheritance** to use its current inherited selections again.
+  Exclusion help appears only when there are inherited servers or saved
+  exclusions. Check **Connections** for evidence of delivery or loaded tools.
 
-Selections are additive. The effective set combines every selected repository, profile, task, and session definition, includes every repository attached to the task, and reports duplicate origins once. A lower scope cannot remove an inherited server. Changing a definition or selection does not alter an active turn.
+Selections combine every repository attached to the task, its profile, task,
+and session additions. An existing session can exclude a definition from this
+combined set without changing repository, profile, task, or sibling-session
+choices. Changing a definition or selection does not alter an active turn.
+
+Exclusions survive closing the editor, reload, and restart of the same session.
+They last until restored or the session or definition is deleted. A new session
+starts without exclusions. **Saved exclusions** keeps a restore action when a
+server is no longer inherited. Restore does not add that server or enable a
+workspace-disabled definition. Disabling a server in workspace settings affects
+other sessions' future setups; session exclusion affects only this session.
+Required Kandev tools remain managed separately. Independently configured
+provider servers are outside this catalog control.
 
 The plug shows a clock while saved changes wait for idle, a next-start marker
 when reconnection is unsupported, and a failure marker when application fails.
@@ -1087,17 +1252,20 @@ For an existing task session, MCP changes save immediately. A compatible ACP
 provider applies them by reconnecting the same session after the current turn
 is idle. Providers without safe reconnection apply saved changes when the agent
 starts again. The state notice tells you which timing applies. If reconnect
-fails, the previous applied selection remains active and the UI offers retry.
+fails, the last accepted setup remains available for comparison and the UI
+offers retry. A failed operation can leave provider state uncertain.
 
 If another editor changes the saved choices, Kandev rejects your stale save.
-Choose **Reload choices**, review your retained draft against the latest saved
-choices, then save again. A save whose response is lost also requires a reload
-before another attempt.
+Choose **Reload choices**, review your retained addition draft against the latest
+saved choices, then repeat the intended action. Exclude and restore show saved
+state only after a successful response. A save whose response is lost also
+requires a reload before another attempt.
 
 Repository and profile editors use **Save changes**. Session Customize saves
 after an explicit selection change.
 
-Application retry remains available for a saved session setup that failed to apply.
+Application retry uses the saved session setup and keeps your checkbox draft.
+After a rejected save, choose **Reload choices** before retrying application.
 The pending-change list continues to describe the saved choices while a rejected
 checkbox draft remains visible.
 

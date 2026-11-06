@@ -74,6 +74,7 @@ Task agents can call `spawn_session_kandev` with a prompt and optional `name`, `
 - A target task must be in the same workspace as the spawning task.
 - Profile selection prefers an explicit profile, then the spawner's profile for the same task, then the target task's primary-session profile.
 - The spawned session receives hidden attribution context identifying the sender and reply route.
+- Spawning does not change the conversation that the current workflow step records for later explicit targets. A step that already has a stored recipient keeps it, and a step with none still uses its fresh-session fallback.
 - A failure to apply the optional name does not fail an otherwise successful launch.
 
 Use the returned task ID, session ID, and state for subsequent targeted messages.
@@ -204,7 +205,7 @@ Additional messaging boundaries:
 - Sender metadata and content become part of the target conversation. Do not send secrets.
 - Use bounded requests with the repository, branch, expected result, and reply target instead of treating messages as shared memory.
 
-Use `get_task_conversation_kandev` to read a primary or explicit session conversation. It supports limits, before/after cursors, ascending or descending order, and message-type filters. When a task has more than one session, use `list_task_sessions_kandev` to list them (newest first, flagging the primary and your own) and pass the `session_id` you want. Use `list_related_tasks_kandev` for the current or another same-workspace task to list its parent, direct children, siblings, stored blocker relationships, and associated GitHub pull requests.
+Use `get_task_conversation_kandev` to read a primary or explicit session conversation. It supports limits, before/after cursors, ascending or descending order, and message-type filters. When a task has more than one session, use `list_task_sessions_kandev` to list them (newest first, flagging the primary and your own) and pass the `session_id` you want. Use `list_related_tasks_kandev` to list a task's parent, direct children, siblings, stored blocker relationships, and associated GitHub pull requests. `task_id` defaults to the current task; another target is allowed only when it is an ancestor, a descendant, a sibling with a shared non-empty parent, or a blocker of the caller in the same workspace. Unrelated tasks are denied, including in the same workspace. Compact output is a presentation option, not a separate metadata permission: `verbose` adds descriptions and never widens access.
 
 Replies close the loop: the receiving agent calls `message_task_kandev` back with the originating task's ID, turning a one-way notification into a genuine bidirectional conversation. This enables multi-turn negotiations between agents, for example, agreeing on an API contract before both sides implement. See [Agent Communication](agent-communication.md) for delivery semantics, discovery patterns, and a worked negotiation example.
 

@@ -35,7 +35,7 @@ install-wide with that profile.
 MCP definitions are workspace-owned reusable resources. Repository, profile,
 task, and task-session selections reference stable definition identifiers.
 
-The runtime effective set is the additive union of:
+The positive selection set is the additive union of:
 
 1. selections from every repository attached to the task.
 2. the effective agent profile's selection in the task workspace.
@@ -44,7 +44,12 @@ The runtime effective set is the additive union of:
 
 The resolver collapses duplicate definition identifiers and retains every
 origin for diagnostics. Different definitions cannot share one runtime name in
-the same workspace. Provider and executor transport policy runs after union.
+the same workspace. The 2026-10-23 [session exclusion extension](../specs/agents/system-design/session-mcp-exclusions.md)
+subtracts saved definition IDs for one existing session after union and before
+secrets or preparation. It leaves selecting owners unchanged. Exclusions persist
+until restored or deleted with the session/definition; this reversible scope
+exception does not introduce precedence among selecting owners. Provider and
+executor transport policy runs after that composition.
 Kandev's internal MCP endpoint remains separately injected under a reserved
 name.
 

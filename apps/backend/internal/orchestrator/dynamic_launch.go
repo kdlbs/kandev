@@ -116,7 +116,16 @@ func (d *dynamicTaskDownstream) Launch(
 		}
 	}
 	d.service.flushPendingDynamicStreakReset(ctx, d.sessionID, nil)
-	d.service.beginDynamicAttempt(d.sessionID)
+	startupEvidence := d.service.beginDynamicAttempt(d.sessionID)
+	previousAdmission := options.OnExecutionAdmitted
+	options.OnExecutionAdmitted = func(executionID string) {
+		if startupEvidence != nil {
+			d.service.bindDynamicAttemptExecution(d.sessionID, executionID, startupEvidence)
+		}
+		if previousAdmission != nil {
+			previousAdmission(executionID)
+		}
+	}
 	taskID := ""
 	if d.task != nil {
 		taskID = d.task.ID
@@ -132,8 +141,11 @@ func (d *dynamicTaskDownstream) Launch(
 	if err != nil {
 		return dynamicruntime.DownstreamExecution{}, classifyDynamicLaunchFailure(err, launch.ExecutionProfileID)
 	}
-	d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID)
-	d.service.bindPromptAttemptToExecution(dispatchCtx, d.sessionID, execution.AgentExecutionID)
+	if startupEvidence != nil {
+		d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID, startupEvidence)
+		generation := d.service.promptGenerationForSession(dispatchCtx, d.sessionID)
+		d.service.bindPromptAttemptIfCurrent(d.sessionID, execution.AgentExecutionID, generation, startupEvidence)
+	}
 	d.execution = execution
 	acpSessionID := ""
 	if session, sessionErr := d.service.repo.GetTaskSession(ctx, d.sessionID); sessionErr == nil && session != nil {
@@ -536,6 +548,11 @@ func (s *Service) launchConcretePreparedSession(
 	sessionID string,
 	options executor.LaunchOptions,
 ) (*executor.TaskExecution, error) {
+	// A fixed profile whose resource circuit is open must not be launched,
+	// even though it is not routed through dynamic selection.
+	if err := s.admitFixedProfileDispatch(ctx, sessionID, s.fixedLaunchProfileID(ctx, sessionID, options.AgentProfileID)); err != nil {
+		return nil, err
+	}
 	if task != nil {
 		if err := s.admitCeilingDispatch(ctx, task.ID); err != nil {
 			return nil, err
@@ -839,6 +856,9 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 			return dynamicFailureRouteResult{}
 		}
 	}
+	// A fixed profile has no route to advance, but its classified failure
+	// still records the resource circuit that gates its next dispatch.
+	s.recordFixedProfileFailure(ctx, data, classified)
 	session, ok := s.dynamicFailureSession(ctx, data)
 	if !ok {
 		return dynamicFailureRouteResult{}
@@ -872,6 +892,7 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	}
 	evidence, eligible := s.prepareDynamicFailureEvidence(ctx, data, session, classified, startupEvidence, unclassified)
 	if !eligible {
+		s.recordIneligibleFailureCircuit(ctx, session, classified)
 		return dynamicFailureRouteResult{}
 	}
 	conductor := s.profileExecutionResolver.NewConductor(nil)
@@ -976,6 +997,10 @@ func (s *Service) prepareDynamicFailureEvidence(
 ) (dynamicruntime.UnclassifiedFailureEvidence, bool) {
 	if unclassified {
 		return s.prepareUnclassifiedFailureEvidence(ctx, data, session, classified, startupEvidence)
+	}
+	if classified != nil && classified.Code == routingerr.CodeModelUnavailable &&
+		classified.Phase == routingerr.PhaseSessionInit && startupEvidence != nil {
+		return *startupEvidence, classifiedStartupModelFailureSafe(classified, startupEvidence)
 	}
 	if !s.clearStreakAfterCurrentClassifiedFailure(ctx, data, session) {
 		return dynamicruntime.UnclassifiedFailureEvidence{}, false
@@ -1785,7 +1810,10 @@ func (s *Service) launchPreparedDynamicRelaunch(
 			prompt.attachments,
 			true,
 			origin,
-			promptTaskOptions{allowRouteActionPrompt: true},
+			promptTaskOptions{
+				capacityIntent:         turnCapacityOverride,
+				allowRouteActionPrompt: true,
+			},
 		)
 		if err != nil {
 			return dynamicRelaunchFailed, err

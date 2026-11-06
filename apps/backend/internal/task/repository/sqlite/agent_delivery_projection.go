@@ -103,11 +103,9 @@ func (r *Repository) projectCanonicalDeliveryAttempt(ctx context.Context, stream
 
 	var projectedSequence int64
 	var boundary sql.NullInt64
-	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT projected_sequence, message_segment_boundary_sequence
-		FROM agent_delivery_cursors WHERE stream_id = ?`),
-		streamID).Scan(&projectedSequence, &boundary); err != nil {
-		return nil, fmt.Errorf("load canonical delivery cursor: %w", err)
+	projectedSequence, boundary, err = loadCanonicalDeliveryCursorTx(ctx, tx, r.db.Rebind, streamID)
+	if err != nil {
+		return nil, err
 	}
 	results := make([]models.CanonicalAgentDeliveryProjectionResult, len(events))
 	if err := r.projectCanonicalDeliveryBatchTx(
@@ -168,6 +166,7 @@ func (r *Repository) projectCanonicalDeliveryBatchTx(
 			if err := flushGroup(); err != nil {
 				return err
 			}
+			results[i].AlreadyProjected = true
 			results[i].CanonicalMessageID = stored.CanonicalMessageID
 			if results[i].CanonicalMessageID == "" && stored.PayloadPrunedAt == nil && len(stored.Payload) > 0 {
 				var projectedEvent streams.AgentEvent
@@ -270,6 +269,12 @@ func (r *Repository) projectCanonicalDeliveryBatchGroupTx(
 		}
 	}
 	if group[0].agentEvent.Type == streams.EventTypeToolCall {
+		return r.markCanonicalDeliveryBatchProjectedTx(ctx, tx, group)
+	}
+	if group[0].agentEvent.Type == streams.EventTypeContextCompactionObservation {
+		if err := r.projectContextCompactionGroupTx(ctx, tx, group, results); err != nil {
+			return err
+		}
 		return r.markCanonicalDeliveryBatchProjectedTx(ctx, tx, group)
 	}
 	firstContent, content := canonicalDeliveryBatchContent(group)

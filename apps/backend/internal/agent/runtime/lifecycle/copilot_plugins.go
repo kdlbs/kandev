@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
 // prepareCopilotPluginArgs resolves the profile's stable plugin identities
@@ -27,15 +28,31 @@ func (m *Manager) prepareCopilotPluginArgs(
 	if err != nil {
 		return nil, err
 	}
-	if len(selection) == 0 {
+	return m.prepareCopilotPluginArgsForSelection(ctx, execution, env, baseArgs, execution.LaunchWrapper, selection)
+}
+
+func (m *Manager) prepareCopilotPluginArgsForSelection(
+	ctx context.Context,
+	execution *AgentExecution,
+	env map[string]string,
+	baseArgs []string,
+	wrapper launchwrapper.Spec,
+	selection []string,
+) ([]string, error) {
+	if execution == nil || execution.AgentID != agents.CopilotACPAgentID {
 		return baseArgs, nil
 	}
-	if !copilotPluginHostExecutor(execution) {
-		return nil, &copilotplugins.Error{Reason: copilotplugins.ReasonUnsupportedLaunch}
+	if len(selection) == 0 {
+		return baseArgs, nil
 	}
 	version, ok := copilotplugins.RuntimeVersionFromCommand(baseArgs)
 	if !ok {
 		return nil, &copilotplugins.Error{Reason: copilotplugins.ReasonUnsupportedLaunch}
+	}
+	if !copilotPluginHostExecutor(execution) {
+		return nil, preserveCopilotPluginRuntimeVersion(
+			&copilotplugins.Error{Reason: copilotplugins.ReasonUnsupportedLaunch}, version,
+		)
 	}
 	spec := agents.NewCopilotACP().ManagedNPMRuntime()
 	launch := copilotplugins.LaunchContext{
@@ -44,17 +61,17 @@ func (m *Manager) prepareCopilotPluginArgs(
 		Env:            env,
 		WorkDir:        execution.WorkspacePath,
 		CLIFlags:       baseArgs,
-		CommandPrefix:  execution.LaunchWrapper.Argv,
+		CommandPrefix:  wrapper.Argv,
 		RuntimeVersion: version,
 		RuntimeCommand: spec.InteractiveCommand(version).Args(),
 	}
 	prepared, err := copilotplugins.ResolveLaunchSelection(ctx, m.copilotPluginRunner(), launch, selection)
 	if err != nil {
-		return nil, err
+		return nil, preserveCopilotPluginRuntimeVersion(err, version)
 	}
 	args, err := copilotplugins.ApplyToArgsInDir(baseArgs, prepared.Plugins, execution.WorkspacePath)
 	if err != nil {
-		return nil, err
+		return nil, preserveCopilotPluginRuntimeVersion(err, version)
 	}
 	m.logger.Info("prepared copilot profile plugins",
 		zap.String("execution_id", execution.ID),
@@ -63,7 +80,49 @@ func (m *Manager) prepareCopilotPluginArgs(
 	return args, nil
 }
 
+func (m *Manager) copilotPluginPreflightEnvironment(
+	ctx context.Context,
+	execution *AgentExecution,
+	profileInfo *AgentProfileInfo,
+) (map[string]string, error) {
+	metadataEnv := runtimeEnvFromMetadata(execution.MetadataSnapshot())
+	snapshot := execution.RuntimeEnvironment()
+	var env map[string]string
+	switch {
+	case snapshot == nil:
+		env = cloneStringMap(metadataEnv)
+		if env == nil {
+			env = make(map[string]string)
+		}
+		var err error
+		if profileInfo != nil {
+			err = m.mergeAgentProfileEnvFromInfoWithPartial(ctx, profileInfo, env, false)
+		} else {
+			err = m.mergeAgentProfileEnvForExecution(ctx, execution, env)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("resolve agent profile environment: %w", err)
+		}
+	case !hasRuntimeEnvOverlay(execution.MetadataSnapshot()):
+		env = snapshot
+	default:
+		var err error
+		env, err = composeExecutionRuntimeEnvironment(snapshot, metadataEnv)
+		if err != nil {
+			return nil, fmt.Errorf("compose agent env: %w", err)
+		}
+	}
+	normalizeManagedGitHelperEnvironment(execution.RuntimeName, env)
+	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
+		return nil, fmt.Errorf("failed to prepare agent env: %w", err)
+	}
+	return env, nil
+}
+
 func (m *Manager) copilotPluginSelection(ctx context.Context, execution *AgentExecution) ([]string, error) {
+	if execution.CopilotSelectedPlugins != nil {
+		return append([]string(nil), execution.CopilotSelectedPlugins...), nil
+	}
 	profileID := execution.ExecutionProfileID
 	if profileID == "" {
 		// Legacy sessions may not carry the concrete profile identity. Agent
@@ -76,9 +135,9 @@ func (m *Manager) copilotPluginSelection(ctx context.Context, execution *AgentEx
 	if m.profileResolver == nil {
 		return nil, &copilotplugins.Error{Reason: copilotplugins.ReasonMetadataUnavailable}
 	}
-	// Resolve the profile on every new process. A resume or relaunch after a
-	// profile edit must use the saved selection rather than an execution
-	// snapshot from an earlier launch.
+	// Older executions may not have captured a selection. Resolve those once
+	// and retain the result so command, environment, and mounts share a profile
+	// revision on subsequent process boundaries.
 	profile, err := m.profileResolver.ResolveProfile(ctx, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve copilot plugin profile: %w", err)
@@ -156,19 +215,34 @@ func (m *Manager) applyPassthroughCopilotPlugins(
 	if execution == nil || cmd == nil || execution.AgentID != agents.CopilotACPAgentID {
 		return nil
 	}
-	selection := execution.CopilotSelectedPlugins
+	var selection []string
 	if profile != nil {
 		selection = profile.CopilotSelectedPlugins
+	}
+	return m.applyPassthroughCopilotPluginsForSelection(ctx, execution, cmd, env, selection)
+}
+
+func (m *Manager) applyPassthroughCopilotPluginsForSelection(
+	ctx context.Context,
+	execution *AgentExecution,
+	cmd *passthroughCommand,
+	env map[string]string,
+	selection []string,
+) error {
+	if execution == nil || cmd == nil || execution.AgentID != agents.CopilotACPAgentID {
+		return nil
 	}
 	if len(selection) == 0 {
 		return nil
 	}
-	if !copilotPluginHostExecutor(execution) {
-		return &copilotplugins.Error{Reason: copilotplugins.ReasonUnsupportedLaunch}
-	}
 	version, ok := copilotplugins.RuntimeVersionFromCommand(cmd.Args())
 	if !ok {
 		return &copilotplugins.Error{Reason: copilotplugins.ReasonUnsupportedLaunch}
+	}
+	if !copilotPluginHostExecutor(execution) {
+		return preserveCopilotPluginRuntimeVersion(
+			&copilotplugins.Error{Reason: copilotplugins.ReasonUnsupportedLaunch}, version,
+		)
 	}
 	spec := agents.NewCopilotACP().ManagedNPMRuntime()
 	launch := copilotplugins.LaunchContext{
@@ -177,18 +251,26 @@ func (m *Manager) applyPassthroughCopilotPlugins(
 		Env:            env,
 		WorkDir:        execution.WorkspacePath,
 		CLIFlags:       cmd.Args(),
-		CommandPrefix:  execution.LaunchWrapper.Argv,
+		CommandPrefix:  cmd.wrapper.Argv,
 		RuntimeVersion: version,
 		RuntimeCommand: spec.InteractiveCommand(version).Args(),
 	}
 	prepared, err := copilotplugins.ResolveLaunchSelection(ctx, m.copilotPluginRunner(), launch, selection)
 	if err != nil {
-		return err
+		return preserveCopilotPluginRuntimeVersion(err, version)
 	}
 	args, err := copilotplugins.ApplyToArgsInDir(cmd.Args(), prepared.Plugins, execution.WorkspacePath)
 	if err != nil {
-		return err
+		return preserveCopilotPluginRuntimeVersion(err, version)
 	}
 	cmd.Command = agents.NewCommand(args...)
 	return nil
+}
+
+func capturePassthroughCopilotProfile(execution *AgentExecution, profile *AgentProfileInfo) {
+	if execution.AgentID != agents.CopilotACPAgentID || profile == nil {
+		return
+	}
+	execution.ExecutionProfileID = profile.ProfileID
+	execution.CopilotSelectedPlugins = append([]string{}, profile.CopilotSelectedPlugins...)
 }

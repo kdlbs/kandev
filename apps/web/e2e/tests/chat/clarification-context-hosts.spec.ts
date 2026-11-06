@@ -27,34 +27,37 @@ test("Quick Chat expands formatted context to its measured allocation and restor
   expect(initial.maxHeight).toBe(Math.round(initial.viewportHeight * 0.35));
   await expect(dialog.getByTestId("chat-input-editor")).toBeVisible();
 
-  const expand = dialog.getByTestId("clarification-panel-expand");
-  await expect(expand).toBeEnabled();
-  await expand.click();
+  const toggle = dialog.getByTestId("clarification-panel-size-toggle");
+  await expect(toggle).toHaveCount(1);
+  await expect(toggle).toHaveAttribute("aria-label", "Expand");
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
   await expect(container).toHaveCSS("height", `${initial.hostMax}px`);
   await expect(container).toHaveCSS("max-height", `${initial.hostMax}px`);
+  await expect(toggle).toHaveAttribute("aria-label", "Restore");
   await expect(dialog.getByTestId("chat-input-editor")).toBeVisible();
   await testInfo.attach("quick-chat-clarification-expanded.png", {
     body: await testPage.screenshot(),
     contentType: "image/png",
   });
 
-  await dialog.getByTestId("clarification-panel-reset").click();
+  await toggle.click();
   await expect
     .poll(() => container.evaluate((element) => (element as HTMLElement).style.height))
     .toBe("");
   await expect(container).toHaveCSS("max-height", `${initial.maxHeight}px`);
+  await expect(toggle).toHaveAttribute("aria-label", "Expand");
 
   await testPage.setViewportSize({ width: 767, height: 1200 });
-  for (const control of [
-    dialog.getByTestId("clarification-panel-expand"),
-    dialog.getByTestId("clarification-panel-reset"),
-  ]) {
-    expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-  }
+  const phoneBox = await toggle.boundingBox();
+  expect(phoneBox).not.toBeNull();
+  expect(phoneBox!.height).toBeGreaterThanOrEqual(44);
+  expect(phoneBox!.width).toBeGreaterThanOrEqual(44);
   await testPage.setViewportSize({ width: 768, height: 1200 });
-  expect(
-    (await dialog.getByTestId("clarification-panel-expand").boundingBox())!.height,
-  ).toBeLessThan(44);
+  const desktopBox = await toggle.boundingBox();
+  expect(desktopBox).not.toBeNull();
+  expect(desktopBox!.height).toBeLessThan(44);
+  expect(desktopBox!.width).toBeLessThan(44);
 });
 
 test("keeps Quick Chat's rendered panel within a host below 120px", async ({ testPage }) => {
@@ -118,10 +121,14 @@ test("Needs You bounds a long clarification to the inbox viewport and keeps its 
   expect(initial.maxHeight).toBe(
     Math.min(Math.round(initial.viewportHeight * 0.5), initial.hostMax),
   );
-  await expect(row.getByTestId("clarification-panel-expand")).toBeEnabled();
-  await row.getByTestId("clarification-panel-expand").click();
+  const toggle = row.getByTestId("clarification-panel-size-toggle");
+  await expect(toggle).toHaveCount(1);
+  await expect(toggle).toHaveAttribute("aria-label", "Expand");
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
   await expect(container).toHaveCSS("height", `${initial.hostMax}px`);
   await expect(container).toHaveCSS("max-height", `${initial.hostMax}px`);
+  await expect(toggle).toHaveAttribute("aria-label", "Restore");
 
   const scrollRegion = row.getByTestId("clarification-scroll-region");
   const answer = row.getByTestId("clarification-option").first();
@@ -158,5 +165,6 @@ test("Needs You bounds a long clarification to the inbox viewport and keeps its 
     contentType: "image/png",
   });
   await answer.click();
+  await row.getByTestId("clarification-custom-submit").click();
   await expect(row).toHaveCount(0, { timeout: 15_000 });
 });

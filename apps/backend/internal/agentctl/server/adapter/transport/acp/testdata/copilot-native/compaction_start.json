@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "method": "github.com/copilot/sessionEvent",
+  "params": {
+    "sessionId": "258e12a9-9e5a-4820-9f20-ee43e895e958",
+    "timestamp": "2026-11-05T23:25:10.452Z",
+    "type": "session.compaction_start",
+    "data": {
+      "compactionAttemptId": "f6474858-c254-41f3-b429-db1f0e7de472",
+      "trigger": "manual",
+      "model": "gpt-6-luna",
+      "currentTokens": 12171,
+      "conversationTokens": 8335,
+      "systemTokens": 3833,
+      "toolDefinitionsTokens": 0,
+      "tokenLimit": 272000
+    }
+  }
+}

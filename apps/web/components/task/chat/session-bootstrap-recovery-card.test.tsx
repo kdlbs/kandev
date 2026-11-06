@@ -31,7 +31,10 @@ const recoveryActionState = vi.hoisted(() => ({
 }));
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, options?: { reason?: string; runtime?: string }) =>
+      options?.runtime ? `${key}:${options.reason ?? ""}:${options.runtime}` : key,
+  }),
 }));
 
 vi.mock("@/components/task/new-session-dialog", () => ({
@@ -89,6 +92,45 @@ afterEach(() => {
 
 // eslint-disable-next-line max-lines-per-function -- recovery outcomes share one focused card harness.
 describe("SessionBootstrapRecoveryCard", () => {
+  it("shows localized plugin repair guidance and the validated runtime without native details", () => {
+    render(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={{
+          ...error,
+          details: "private command output /Users/alice/.config/copilot/plugins",
+          causes: [
+            {
+              operation: "start",
+              code: "plugin_preparation_failed",
+              detail: "private plugin output /Users/alice/.config/copilot/plugins",
+              reason: "invalid_inventory",
+              runtime_version: "1.2.3+build.4",
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("task:sessionBootstrapPluginFailureTitle")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "task:sessionBootstrapPluginFailureSummaryWithRuntime:task:sessionBootstrapPluginReasonInventory:1.2.3+build.4",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByTestId("session-bootstrap-recovery-card").textContent).not.toContain(
+      "private",
+    );
+    expect(screen.getByTestId("session-bootstrap-recovery-card").textContent).not.toContain(
+      "invalid_inventory",
+    );
+    expect(screen.getByTestId("session-bootstrap-recovery-card").textContent).not.toContain(
+      "plugin_preparation_failed",
+    );
+    expect(screen.getByTestId(RESUME_BUTTON_TEST_ID)).toBeTruthy();
+  });
+
   it("explains skipped overrides before an eligible explicit Resume", () => {
     recoveryActionState.providerRestoredResumeEligible = true;
     render(<SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />);

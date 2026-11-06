@@ -50,11 +50,20 @@ type userStateCleanupStore interface {
 //     (e.g. proxies checking a plugin's manifest/capabilities without
 //     going through Service's error-wrapping Get).
 type Service struct {
+	hostCallContextEnabled                bool
+	hostCallContextValidator              func(context.Context, bool) error
 	automationRevoker                     func(string) error
 	capabilityApprovalWorkspaceAuthorizer func(context.Context, string) error
 	humanInteractionResponseAuthorizer    func(context.Context, string) error
 	mu                                    sync.Mutex
 	approvalEffectMu                      sync.Mutex
+	// agentToolPolicyMu serializes automation selection validation/write
+	// against plugin installation and configuration policy rotation.
+	agentToolPolicyMu sync.RWMutex
+	// recordPersistMu serializes whole-record registry snapshot writes so a
+	// policy rotation cannot revert a status, restart count, or auto-update
+	// change (and vice versa).
+	recordPersistMu sync.Mutex
 	// ownershipMu makes cross-plugin provider/reference ownership checks and
 	// transitions into active one atomic reservation. Per-plugin lifecycle
 	// locks cannot protect two different IDs claiming the same identity.
@@ -78,7 +87,7 @@ type Service struct {
 	// dispatchLocks keep lifecycle replacement/disable boundaries from racing
 	// authenticated actions and reference RPCs. Dispatch holds a read lease for
 	// the full RPC; lifecycle mutation holds the write side.
-	dispatchLocks *keyedRWMutex
+	dispatchLocks *keyedContextRWMutex
 
 	// agentToolInstallMu makes exposed-name collision validation and registry
 	// insertion one atomic catalog mutation across different plugin IDs.
@@ -113,6 +122,7 @@ type Service struct {
 	agentConvs                 AgentConversationService
 	managedConvs               ManagedAgentConversationService
 	managedAutomationSchedules ManagedConversationScheduleService
+	automationHistoryData      AutomationHistoryDataSource
 	eventBus                   bus.EventBus
 	conversationTokens         *conversationTokenManager
 	conversationEpoch          string
@@ -228,7 +238,7 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 		log:                             log,
 		httpClient:                      &http.Client{},
 		lifecycleLocks:                  newKeyedMutex(),
-		dispatchLocks:                   newKeyedRWMutex(),
+		dispatchLocks:                   newKeyedContextRWMutex(),
 		agentToolGeneration:             uuid.NewString(),
 		eventHub:                        webapp.NewEventHub(),
 		conversationTokens:              newConversationTokenManager(),
@@ -325,26 +335,6 @@ type keyedMutex struct {
 	locks map[string]*sync.Mutex
 }
 
-type keyedRWMutex struct {
-	mu    sync.Mutex
-	locks map[string]*sync.RWMutex
-}
-
-func newKeyedRWMutex() *keyedRWMutex {
-	return &keyedRWMutex{locks: make(map[string]*sync.RWMutex)}
-}
-
-func (k *keyedRWMutex) lockFor(key string) *sync.RWMutex {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	lock, ok := k.locks[key]
-	if !ok {
-		lock = &sync.RWMutex{}
-		k.locks[key] = lock
-	}
-	return lock
-}
-
 func newKeyedMutex() *keyedMutex {
 	return &keyedMutex{locks: make(map[string]*sync.Mutex)}
 }
@@ -376,6 +366,12 @@ func (s *Service) SetAgentToolCatalogListener(listener AgentToolCatalogListener)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.agentToolCatalogListener = listener
+}
+
+// NotifyAgentToolCatalogChanged forwards an external invalidation (an
+// automation selection change) through the existing catalog listener path.
+func (s *Service) NotifyAgentToolCatalogChanged() {
+	s.notifyAgentToolCatalogChanged()
 }
 
 func (s *Service) notifyAgentToolCatalogChanged() {
@@ -690,6 +686,21 @@ func (s *Service) managedConversationScheduleDeps() ManagedConversationScheduleS
 	return s.managedAutomationSchedules
 }
 
+// SetAutomationHistoryDataSource wires the automation-owned history reader.
+// It is read live by every Host instance so late wiring reaches hosts created
+// before the automation service existed.
+func (s *Service) SetAutomationHistoryDataSource(source AutomationHistoryDataSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.automationHistoryData = source
+}
+
+func (s *Service) automationHistoryDataDependency() AutomationHistoryDataSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.automationHistoryData
+}
+
 // writeDependencies returns the currently-wired task messenger and task
 // starter. Read live (not snapshotted at hostForPlugin time) so a plugin
 // spawned before SetWriteDeps still resolves them once it is called. Guarded by
@@ -915,6 +926,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		agentConversations:         s.agentConversationDeps,
 		managedConversations:       s.managedAgentConversationDeps,
 		managedAutomationSchedules: s.managedConversationScheduleDeps,
+		automationHistoryDataDep:   s.automationHistoryDataDependency,
 		log:                        s.log,
 	}
 }

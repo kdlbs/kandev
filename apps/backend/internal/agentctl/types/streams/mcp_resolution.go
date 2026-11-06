@@ -51,7 +51,7 @@ func NormalizeMCPResolution(entries []MCPResolutionEntry) []MCPResolutionEntry {
 			continue
 		}
 		switch entry.ReasonCode {
-		case "", "definition_missing", "definition_disabled", "secret_resolution_failed", "transport_policy", "server_policy", "invalid_transport", "filtered":
+		case "", "definition_missing", "definition_disabled", "session_excluded", "secret_resolution_failed", "transport_policy", "server_policy", "invalid_transport", "filtered":
 		default:
 			continue
 		}

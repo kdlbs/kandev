@@ -44,6 +44,7 @@
   "undo": "Anular",
   "update": "Atualizar",
   "walkthrough": "Passo a passo",
+  "walkthroughGeneratedAt": "Gerado em {{date}}",
   "walkthroughNoteAdded": "Nota do passo a passo adicionada",
   "walkthroughNoteQueued": "Nota do passo a passo em fila",
   "walkthroughNoteSent": "Nota do passo a passo enviada",

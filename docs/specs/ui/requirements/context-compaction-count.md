@@ -2,88 +2,78 @@
 status: active
 system: ui
 created: 2026-08-02
+updated: 2026-11-05
 owners:
   - kandev
 ---
+
 # Context Compaction Count Requirements
 
 ## Overview
 
-Users can see how much of an agent session's context window is currently occupied, but they cannot tell how often the conversation has already been compacted. That history helps them understand when an old session has repeatedly shed context and when starting a fresh session may be preferable.
+The context-window surface shows a session's retained compaction history and explains how new increments are derived.
+This count helps users assess how often a conversation loses older context.
+Usage changes can describe different agent contexts, so every decrease is not evidence of compaction.
+
+This revision corrects the existing capability for mixed parent and subagent usage.
+The existing requirement ID and presentation contract remain canonical.
+The [system design](../system-design/context-compaction-count.md) defines persistence and provider compatibility.
+
+## Terminology
+
+- **Eligible sample:** A usable observation from a stream that Kandev does not know to mix unidentified agent contexts.
+- **Excluded sample:** A usable observation from a stream known to mix parent and subagent contexts without sufficient attribution.
+- **Lifetime count:** The retained compaction count for one task session, including its previous executions and historical estimates.
 
 ## Requirements
 
-### REQ-UI-CONTEXT-COMPACTION-COUNT-001: Context Compaction Count
+### REQ-UI-CONTEXT-COMPACTION-COUNT-001: Context compaction count
 
-**Intent:** Users can see how much of an agent session's context window is currently occupied, but they cannot tell how often the conversation has already been compacted. That history helps them understand when an old session has repeatedly shed context and when starting a fresh session may be preferable.
+**Intent:** Users can inspect an approximate session history without treating switches between agent contexts as compactions.
 
 #### Acceptance criteria
 
-- **AC-UI-CONTEXT-COMPACTION-COUNT-001.1:** The context-window hover shows a non-negative compaction count for the active agent session.
-- **AC-UI-CONTEXT-COMPACTION-COUNT-001.2:** Kandev infers an automatic compaction when a valid context-window sample reports fewer used tokens than the previous persisted sample for the same session.
-- **AC-UI-CONTEXT-COMPACTION-COUNT-001.3:** The first valid sample establishes a comparison baseline and does not increment the count.
-- **AC-UI-CONTEXT-COMPACTION-COUNT-001.4:** Equal or increasing usage does not increment the count.
-- **AC-UI-CONTEXT-COMPACTION-COUNT-001.5:** A successful explicit context reset or model change clears the usage comparison baseline without incrementing or erasing the session's lifetime count.
-- **AC-UI-CONTEXT-COMPACTION-COUNT-001.6:** The hover includes an info control explaining that Kandev derives the count from observed usage drops rather than an ACP compaction event, so missing samples and provider-side resets can make it approximate.
-- **AC-UI-CONTEXT-COMPACTION-COUNT-001.7:** The count and its explanatory control are available through the existing desktop hover and mobile tap-pinned context-window surface.
-- **AC-UI-CONTEXT-COMPACTION-COUNT-001.8:** **GIVEN** a session has no persisted context-window sample, **WHEN** its first valid sample arrives, **THEN** Kandev stores the sample and shows `0` compactions without incrementing the count.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.1:** The context-window surface shall show a non-negative compaction count for the active agent session.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.2:** For usage-inference providers, adjacent eligible samples with a strict decrease in used tokens shall increment that session's count once.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.3:** The first eligible usage sample shall establish a baseline without incrementing or erasing the retained count.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.4:** Equal or increasing eligible usage shall leave the count unchanged.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.5:** A successful explicit context reset or model change shall clear the comparison baseline and preserve the lifetime count.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.6:** The info control shall explain the current counting source and coverage limits. Historical inferred values shall not be described as wholly confirmed.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.7:** Desktop pointer and keyboard access, and mobile tap access, shall expose the count and its explanation.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.8:** When the first usable gauge sample arrives, Kandev shall show the retained count, defaulting to zero only when no prior count exists.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.9:** Excluded usage samples shall never infer an increment. Copilot usage-drop inference shall remain disabled even when a separate native-event counter is available.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.10:** Excluding a sample from compaction inference shall preserve normal context-window updates, token accounting, and cost accounting.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.11:** An eligible sample immediately after an excluded sample shall establish a new baseline without incrementing the count.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.12:** Refresh, backend restart, and execution recovery shall retain the stored count and exclusion state. Duplicate deliveries shall not create additional increments.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.13:** The correction shall preserve existing lifetime counts. It shall not subtract historical false positives without attributable evidence.
 
-## Migrated source detail
+## Compatibility and accuracy
 
-## Why
+Copilot ACP currently interleaves parent and child usage without identifying the context owner.
+Its usage drops cannot reliably distinguish compaction from a context switch.
+Supported native Copilot observations can add explicit increments under the [provider contract](../../agents/requirements/copilot-native-compaction.md).
+That provider contract owns native acceptance, durable identity, and observed/partial/unavailable outcomes.
+The ordinary usage stream remains excluded from inference.
 
-Users can see how much of an agent session's context window is currently occupied, but they cannot tell how often the conversation has already been compacted. That history helps them understand when an old session has repeatedly shed context and when starting a fresh session may be preferable.
+Other provider streams retain their existing inference behavior unless evidence establishes the same ambiguity.
+Missing observations and provider resets can still cause undercounts or overcounts in eligible streams.
+The lifetime aggregate can include older inferred values and missed events. It does not represent a complete provider-confirmed history.
 
-## What
-
-- The context-window hover shows a non-negative compaction count for the active agent session.
-- Kandev infers an automatic compaction when a valid context-window sample reports fewer used tokens than the previous persisted sample for the same session.
-- The first valid sample establishes a comparison baseline and does not increment the count.
-- Equal or increasing usage does not increment the count.
-- A successful explicit context reset or model change clears the usage comparison baseline without incrementing or erasing the session's lifetime count.
-- The hover includes an info control explaining that Kandev derives the count from observed usage drops rather than an ACP compaction event, so missing samples and provider-side resets can make it approximate.
-- The count and its explanatory control are available through the existing desktop hover and mobile tap-pinned context-window surface.
-
-## Data model
-
-`task_sessions.metadata` owns both the current sample and the lifetime count:
-
-- `context_window`: existing nullable object containing `size`, `used`, `remaining`, `efficiency`, and `source`; its `used` value is the comparison baseline.
-- `context_compaction_count`: non-negative integer. Absence is equivalent to `0` for sessions created before this feature.
-
-The count belongs to one `task_sessions` row. It is not shared across sessions for the same task and is not reset when `context_window` is cleared.
-
-## API surface
-
-No new HTTP route or ACP extension is introduced. Existing session metadata and `session.state_changed` payloads expose `context_compaction_count` alongside `context_window`. Context-window frontend state represents the count as `compactionCount` for the active session hover.
-
-## Failure modes
-
-- If a context-window update cannot be persisted, neither its baseline nor a derived increment becomes visible; Kandev logs the failure and a later valid sample compares against the last successfully persisted sample.
-- ACP does not identify compaction events. A provider-side usage reset that appears as a decrease can be counted as a compaction, and compactions between missing usage samples can be missed. The UI disclosure states that the value is approximate.
-- Invalid or unusable context-window reports remain hidden under the existing reliability rules and do not create user-visible count-only UI.
-
-## Persistence guarantees
-
-- `context_compaction_count` survives backend restarts, agent execution recovery, page refreshes, and explicit context resets for as long as the owning task session exists.
-- Restart recovery uses the persisted `context_window.used` value as the next comparison baseline when it is present.
-- Legacy sessions without `context_compaction_count` begin at zero without a schema backfill.
-- Deleting the owning task session deletes its count with the session metadata.
-
-## Scenarios
-
-- **GIVEN** a session has no persisted context-window sample, **WHEN** its first valid sample arrives, **THEN** Kandev stores the sample and shows `0` compactions without incrementing the count.
-- **GIVEN** a session's persisted usage is 120,000 tokens with zero compactions, **WHEN** a valid sample reports 80,000 used tokens, **THEN** Kandev persists and shows a count of `1`.
-- **GIVEN** a session already has a compaction count, **WHEN** equal or increasing usage samples arrive, **THEN** the count remains unchanged.
-- **GIVEN** a session has a persisted baseline and count, **WHEN** the backend restarts and the next valid sample reports lower usage, **THEN** the persisted count increments exactly once.
-- **GIVEN** the same decreased-usage update is delivered more than once, **WHEN** Kandev persists each delivery, **THEN** the count increments only for the first delivery because subsequent deliveries equal the persisted baseline.
-- **GIVEN** a session has a non-zero count, **WHEN** the user successfully resets context or changes models, **THEN** the current context-window sample is cleared and the lifetime count remains unchanged.
-- **GIVEN** a counted session has a reliable current context-window sample, **WHEN** the user opens its context hover with a pointer or touch, **THEN** the hover shows the count and an accessible explanation that Kandev infers it from usage drops and that it may be approximate.
+A fresh session starts at zero.
+An existing session can retain a non-zero historical count after the correction.
+Invalid context-window reports retain the existing visibility rules.
+A persistence failure shall expose neither a new baseline nor a derived increment.
 
 ## Out of scope
 
-- Adding a compaction event to ACP or agent adapters.
-- Distinguishing an automatic compaction from every provider-side reset when both produce the same observed usage decrease.
-- Counting explicit user context resets or model changes as compactions.
-- Aggregating compactions across sessions, tasks, agents, or workspaces.
-- Showing a count outside the existing context-window hover.
+- Interpreting native provider events or defining their counting identity; the owning provider contract defines those rules.
+- Inferring context identity from token thresholds, timing, tool names, or open subagent cards.
+- Repairing historical counts or aggregating counts across sessions.
+- Changing the context ring's layout, touch interaction, or placement.
+- Changing provider accounting or suppressing usage observations.
+
+## Implementation plans
+
+- [Original implementation](../../../plans/context-compaction-count/plan.md).
+- [Copilot inference correction](../../../plans/copilot-compaction-inference/plan.md).
+- [Native Copilot evidence](../../../plans/copilot-native-compaction-count/plan.md).

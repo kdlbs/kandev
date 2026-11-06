@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,12 +13,29 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
 const submoduleDiscoveryTimeout = 10 * time.Second
 const maxSubmoduleDiscoveryDepth = 32
+
+// submoduleDiagnosticFields supplies the closed operation and error class for
+// submodule discovery failures. An exit code is added only when a typed
+// process result supplies one.
+func submoduleDiagnosticFields(err error) []zap.Field {
+	fields := []zap.Field{zap.String("operation", "submodule_discovery")}
+	if err == nil {
+		return fields
+	}
+	fields = append(fields, zap.String("error_class", fsdiagnostics.ErrorClass(err)))
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		fields = append(fields, zap.Int("exit_code", exitErr.ExitCode()))
+	}
+	return fields
+}
 
 func (m *Manager) hasBareMultiRepoTrackerGraph() bool {
 	root, trackers := m.snapshotTrackers()
@@ -50,6 +68,7 @@ func (m *Manager) buildWorkspaceTrackerGraph(
 
 	if !rootIsGit && (len(directRepos) >= 2 || forceBareRoot) {
 		root := NewWorkspaceTrackerForRepo(workDir, "", m.logger)
+		root.suppressGitPublication = true
 		m.configureTracker(root, "", roots)
 
 		trackers := make([]*WorkspaceTracker, 0, len(directRepos))
@@ -123,8 +142,10 @@ func (m *Manager) reconcileWorkspaceTrackerGraph(
 
 	root := desiredRoot
 	rootReused := false
-	if oldRoot != nil && repositoryTrackerIdentity(oldRoot.RepositoryName(), oldRoot.workDir) ==
-		repositoryTrackerIdentity(desiredRoot.RepositoryName(), desiredRoot.workDir) {
+	if oldRoot != nil &&
+		repositoryTrackerIdentity(oldRoot.RepositoryName(), oldRoot.workDir) ==
+			repositoryTrackerIdentity(desiredRoot.RepositoryName(), desiredRoot.workDir) &&
+		oldRoot.suppressGitPublication == desiredRoot.suppressGitPublication {
 		root = oldRoot
 		rootReused = true
 		syncTrackerConfiguration(root, desiredRoot, roots)
@@ -259,17 +280,21 @@ func (m *Manager) discoverSubmoduleTrackers(
 ) []*WorkspaceTracker {
 	if depth >= maxSubmoduleDiscoveryDepth {
 		m.logger.Warn("submodule discovery depth limit reached",
-			zap.String("repository_name", parent.RepositoryName()),
-			zap.Int("depth", depth),
-			zap.Int("max_depth", maxSubmoduleDiscoveryDepth))
+			append([]zap.Field{
+				zap.String("repository_name", parent.RepositoryName()),
+				zap.Int("depth", depth),
+				zap.Int("max_depth", maxSubmoduleDiscoveryDepth),
+			}, submoduleDiagnosticFields(nil)...)...)
 		return nil
 	}
 	paths, err := listGitlinkPaths(ctx, parent.workDir, "HEAD")
 	if err != nil {
 		m.logger.Warn("could not discover submodules",
-			zap.String("repository_name", parent.RepositoryName()),
-			zap.String("path", parent.workDir),
-			zap.Error(err))
+			append([]zap.Field{
+				zap.String("repository_name", parent.RepositoryName()),
+				zap.String("path", parent.workDir),
+				zap.Error(err),
+			}, submoduleDiagnosticFields(err)...)...)
 		return nil
 	}
 	parentAnchor, _ := parent.ResolveBaseAnchor(ctx)
@@ -288,9 +313,11 @@ func (m *Manager) discoverSubmoduleTrackers(
 			anchor, err = gitlinkCommitAt(ctx, parent.workDir, parentAnchor, relativePath)
 			if err != nil {
 				m.logger.Warn("could not resolve submodule comparison anchor",
-					zap.String("repository_name", name),
-					zap.String("parent_anchor", parentAnchor),
-					zap.Error(err))
+					append([]zap.Field{
+						zap.String("repository_name", name),
+						zap.String("parent_anchor", parentAnchor),
+						zap.Error(err),
+					}, submoduleDiagnosticFields(err)...)...)
 			}
 		}
 		child.SetComparisonAnchor(anchor)
@@ -307,13 +334,14 @@ func (m *Manager) discoverSubmoduleTrackers(
 // authenticated workspace root.
 func (m *Manager) initializedSubmodulePath(workspaceRoot, parentPath, relativePath string) (string, bool) {
 	if !safeGitRelativePath(relativePath) {
-		m.logger.Warn("submodule discovery rejected unsafe path", zap.String("path", relativePath))
+		m.logger.Warn("submodule discovery rejected unsafe path",
+			append([]zap.Field{zap.String("path", relativePath)}, submoduleDiagnosticFields(nil)...)...)
 		return "", false
 	}
 	parentRoot, err := os.OpenRoot(parentPath)
 	if err != nil {
 		m.logger.Warn("submodule discovery could not open parent worktree",
-			zap.String("path", parentPath), zap.Error(err))
+			append([]zap.Field{zap.String("path", parentPath), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return "", false
 	}
 	defer func() { _ = parentRoot.Close() }()
@@ -323,7 +351,7 @@ func (m *Manager) initializedSubmodulePath(workspaceRoot, parentPath, relativePa
 	childPath := filepath.Clean(filepath.Join(parentPath, filepath.FromSlash(relativePath)))
 	if err != nil || !childInfo.IsDir() || childInfo.Mode()&os.ModeSymlink != 0 {
 		m.logger.Warn("submodule discovery rejected child worktree",
-			zap.String("path", childPath), zap.Error(err))
+			append([]zap.Field{zap.String("path", childPath), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return "", false
 	}
 	childRoot, ok := m.openVerifiedSubmoduleRoot(parentRoot, childInfo, childPath, relativePath)
@@ -334,31 +362,35 @@ func (m *Manager) initializedSubmodulePath(workspaceRoot, parentPath, relativePa
 	resolvedRoot, err := filepath.EvalSymlinks(workspaceRoot)
 	if err != nil {
 		m.logger.Warn("submodule discovery could not resolve workspace root",
-			zap.String("path", workspaceRoot), zap.Error(err))
+			append([]zap.Field{zap.String("path", workspaceRoot), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return "", false
 	}
 	resolvedChild, err := filepath.EvalSymlinks(childPath)
 	if err != nil {
 		m.logger.Warn("submodule discovery could not resolve child worktree",
-			zap.String("path", childPath), zap.Error(err))
+			append([]zap.Field{zap.String("path", childPath), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return "", false
 	}
 	relativeToRoot, err := filepath.Rel(resolvedRoot, resolvedChild)
 	if err != nil || pathEscapesRoot(relativeToRoot) {
 		m.logger.Warn("submodule discovery rejected child outside workspace root",
-			zap.String("path", childPath), zap.String("workspace_root", workspaceRoot), zap.Error(err))
+			append([]zap.Field{
+				zap.String("path", childPath),
+				zap.String("workspace_root", workspaceRoot),
+				zap.Error(err),
+			}, submoduleDiagnosticFields(err)...)...)
 		return "", false
 	}
 	if resolveGitIndexPath(childPath) == "" {
 		m.logger.Warn("submodule discovery rejected uninitialized child",
-			zap.String("path", childPath))
+			append([]zap.Field{zap.String("path", childPath)}, submoduleDiagnosticFields(nil)...)...)
 		return "", false
 	}
 	currentChildInfo, err := parentRoot.Lstat(filepath.FromSlash(relativePath))
 	if err != nil || currentChildInfo.Mode()&os.ModeSymlink != 0 ||
 		!os.SameFile(childInfo, currentChildInfo) {
 		m.logger.Warn("submodule discovery rejected changed child worktree",
-			zap.String("path", childPath), zap.Error(err))
+			append([]zap.Field{zap.String("path", childPath), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return "", false
 	}
 	return childPath, true
@@ -373,20 +405,20 @@ func (m *Manager) openVerifiedSubmoduleRoot(
 	childRoot, err := parentRoot.OpenRoot(filepath.FromSlash(relativePath))
 	if err != nil {
 		m.logger.Warn("submodule discovery could not open child worktree",
-			zap.String("path", childPath), zap.Error(err))
+			append([]zap.Field{zap.String("path", childPath), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return nil, false
 	}
 	openedChildInfo, err := childRoot.Stat(".")
 	if err != nil || !os.SameFile(childInfo, openedChildInfo) {
 		_ = childRoot.Close()
 		m.logger.Warn("submodule discovery rejected replaced child worktree",
-			zap.String("path", childPath), zap.Error(err))
+			append([]zap.Field{zap.String("path", childPath), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return nil, false
 	}
 	if _, err := childRoot.Lstat(".git"); err != nil {
 		_ = childRoot.Close()
 		m.logger.Warn("submodule discovery rejected child without git entry",
-			zap.String("path", childPath), zap.Error(err))
+			append([]zap.Field{zap.String("path", childPath), zap.Error(err)}, submoduleDiagnosticFields(err)...)...)
 		return nil, false
 	}
 	return childRoot, true

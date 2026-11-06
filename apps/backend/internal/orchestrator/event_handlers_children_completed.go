@@ -150,7 +150,7 @@ func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, ta
 			zap.Error(err))
 		return
 	}
-	if models.IsTerminalTaskState(task.State) {
+	if models.IsTerminalTaskState(task.State) || task.State == v1.TaskStateBlocked {
 		unlock()
 		return
 	}
@@ -164,11 +164,13 @@ func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, ta
 		TaskID:                 task.ID,
 		NewStatus:              "done",
 		SuppressStatusActivity: true,
+		ExpectedCurrentState:   string(oldState),
+		ExpectedWorkflowStepID: task.WorkflowStepID,
 	})
 	var pending *dashboard.ApprovalsPendingError
 	if err != nil {
 		unlock()
-		if !errors.As(err, &pending) {
+		if !errors.As(err, &pending) && !errors.Is(err, dashboard.ErrAutomaticCompletionStale) {
 			s.logger.Warn("terminal step completion: office status update failed",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
