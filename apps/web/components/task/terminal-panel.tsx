@@ -18,32 +18,61 @@ type TerminalPanelProps = {
 };
 
 type ShellStateSlice = {
-  userShells: { byScope: Record<string, Array<{ terminalId: string }>> };
+  userShells: {
+    byScope: Record<string, Array<{ terminalId: string; state?: string }>>;
+    byEnvironmentId: Record<string, Array<{ terminalId: string; kind?: string; state?: string }>>;
+  };
 };
 
-function hasTerminalStampConflict(
+function isManagedTerminalId(terminalId: unknown): terminalId is string {
+  return typeof terminalId === "string" && terminalId.startsWith("shell-");
+}
+
+function panelStampConflicts(
   activeTaskID: string | null,
   activeEnvironmentID: string | null,
   stampedTaskID: string | undefined,
   stampedEnvironmentID: string | undefined,
+) {
+  return {
+    taskConflict: !!stampedTaskID && stampedTaskID !== activeTaskID,
+    environmentConflict: !!stampedEnvironmentID && stampedEnvironmentID !== activeEnvironmentID,
+  };
+}
+
+function shouldBlockOrdinaryPanel(
+  isOrdinaryTerminal: boolean,
+  isDevServer: boolean,
+  ownsTerminal: boolean,
 ): boolean {
-  if (stampedTaskID && stampedTaskID !== activeTaskID) return true;
-  return !!stampedEnvironmentID && stampedEnvironmentID !== activeEnvironmentID;
+  return isOrdinaryTerminal && !isDevServer && !ownsTerminal;
 }
 
 function isTerminalOwned(
   state: ShellStateSlice,
   args: {
     isOrdinaryTerminal: boolean;
+    activeEnvironmentId: string | null;
     scopeKey: string;
-    stampConflicts: boolean;
+    taskConflict: boolean;
+    environmentConflict: boolean;
     terminalId: string;
   },
 ): boolean {
   if (!args.isOrdinaryTerminal) return true;
-  if (!args.scopeKey || args.stampConflicts) return false;
+  if (args.environmentConflict) return false;
+  // Legacy backends returned `shell-` ids without ordinary metadata; those
+  // descriptors live in the environment namespace and remain attachable.
+  const environmentRows = args.activeEnvironmentId
+    ? (state.userShells.byEnvironmentId[args.activeEnvironmentId] ?? [])
+    : [];
+  const legacy = environmentRows.some(
+    (shell) => shell.terminalId === args.terminalId && shell.kind !== "ordinary",
+  );
+  if (legacy) return true;
+  if (!args.scopeKey || args.taskConflict) return false;
   return (state.userShells.byScope[args.scopeKey] ?? []).some(
-    (shell) => shell.terminalId === args.terminalId,
+    (shell) => shell.terminalId === args.terminalId && shell.state !== "parked",
   );
 }
 
@@ -58,14 +87,14 @@ export const TerminalPanel = memo(function TerminalPanel({ params }: TerminalPan
   const activeTaskID = useAppStore((state) => state.tasks.activeTaskId ?? null);
   const stampedTaskID = params.taskID as string | undefined;
   const stampedEnvironmentID = params.environmentId as string | undefined;
-  const isOrdinaryTerminal = typeof terminalId === "string" && terminalId.startsWith("shell-");
+  const isOrdinaryTerminal = isManagedTerminalId(terminalId);
   // Ordinary terminals belong to the active task/environment. A panel's own
   // stamps may not be trusted on their own: a retained panel from task B can
   // still name B's terminal while task A is active, and B's cache may contain
   // that row. Both stamps must agree with the visible scope.
   const scope = makeUserShellScope(hookEnvironmentId, activeTaskID);
   const scopeKey = scope ? userShellScopeKey(scope) : "";
-  const stampConflicts = hasTerminalStampConflict(
+  const { taskConflict, environmentConflict } = panelStampConflicts(
     activeTaskID,
     hookEnvironmentId,
     stampedTaskID,
@@ -78,8 +107,10 @@ export const TerminalPanel = memo(function TerminalPanel({ params }: TerminalPan
   const ownsTerminal = useAppStore((state) =>
     isTerminalOwned(state, {
       isOrdinaryTerminal,
+      activeEnvironmentId: hookEnvironmentId,
       scopeKey,
-      stampConflicts,
+      taskConflict,
+      environmentConflict,
       terminalId,
     }),
   );
@@ -106,7 +137,7 @@ export const TerminalPanel = memo(function TerminalPanel({ params }: TerminalPan
   if (isArchived)
     return <ArchivedPanelPlaceholder message={t("task:terminalNotAvailableThisTaskIs")} />;
 
-  if (isOrdinaryTerminal && !isDevServer && !ownsTerminal) {
+  if (shouldBlockOrdinaryPanel(isOrdinaryTerminal, isDevServer, ownsTerminal)) {
     // An owned panel becomes attachable as soon as its scope lists the row.
     // A foreign or stale ID never reaches the transport; layout
     // reconciliation removes the panel rather than reconnecting it.

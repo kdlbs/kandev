@@ -227,6 +227,33 @@ describe("shell-list authority", () => {
     expect(result.current.value.hasSuccessfulList).toBe(true);
   });
 
+  it("retries a failed list after settling without granting authority", async () => {
+    vi.useFakeTimers();
+    try {
+      const request = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("temporary failure"))
+        .mockResolvedValue({ shells: [{ id: "shell-1", kind: "ordinary" }] });
+      setWebSocketClient({ request } as unknown as WebSocketClient);
+      const { result } = renderSessionRead(() => useUserShells("environment", "task"), undefined);
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(result.current.value.hasSuccessfulList).toBe(false);
+      expect(request).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(result.current.value.hasSuccessfulList).toBe(true);
+      expect(result.current.value.shells.map((shell) => shell.terminalId)).toEqual(["shell-1"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("never grants authority for a failed first read", async () => {
     const request = vi.fn(() => Promise.reject(new Error("temporary failure")));
     setWebSocketClient({ request } as unknown as WebSocketClient);

@@ -28,6 +28,7 @@ interface UseUserShellsReturn {
 }
 
 const EMPTY_SHELLS: UserShellInfo[] = [];
+const SHELL_LIST_RETRY_MS = 5_000;
 
 /**
  * Per-store request generation for the environment-shared rows. Each list
@@ -160,6 +161,14 @@ export function useUserShells(
   const hasSuccessfulList =
     !!scopeKey && isListed && !isLoading && snapshot.data !== undefined && !snapshot.loading;
   useEffect(() => read?.ensure(undefined, !isLoaded), [read, scopeKey, isLoaded]);
+
+  // A failed list keeps display continuity but no authority. Retry while the
+  // consumer remains mounted so a transient WS/API failure can recover.
+  useEffect(() => {
+    if (!read || !isLoaded || isLoading || hasSuccessfulList) return;
+    const timer = setTimeout(() => read.invalidate(), SHELL_LIST_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [read, isLoaded, isLoading, hasSuccessfulList]);
 
   const addShell = (shell: UserShellInfo) => {
     if (scope) store.getState().addUserShell(scope, shell);

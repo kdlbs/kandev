@@ -146,5 +146,5 @@ rg -n 'userShells|setUserShells|addUserShell|removeUserShell|updateUserShell' ap
 git diff --check
 ```
 
-The focused suites passed (100 tests at the Task 02 boundary), typecheck and
+The focused suites passed (105 tests at the Task 02 boundary), typecheck and
 lint passed, and the `rg` inventory contains no ordinary-environment access.

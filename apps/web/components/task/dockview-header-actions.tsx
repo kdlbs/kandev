@@ -139,13 +139,23 @@ function useHeaderTerminalHandlers({ environmentId, taskID, groupId }: TerminalH
       try {
         const result = await createUserShell(environmentId, { scriptId });
         const title = result.label ?? t("common:script");
+        addUserShell(
+          { environmentId, taskId: null },
+          {
+            ...result,
+            kind: "script",
+            label: title,
+            closable: result.closable ?? true,
+            running: result.ptyStatus === "running",
+          },
+        );
         if (!isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
         addTerminalPanel(result.terminalId, groupId, environmentId, undefined, title);
       } catch (error) {
         console.error("Failed to run script:", error);
       }
     },
-    [environmentId, taskID, addTerminalPanel, groupId, storeApi],
+    [environmentId, taskID, addTerminalPanel, addUserShell, groupId, storeApi],
   );
 
   const handleRunDevScript = useCallback(async () => {
@@ -158,12 +168,22 @@ function useHeaderTerminalHandlers({ environmentId, taskID, groupId }: TerminalH
         command: devScript,
         label: t("task:devServer"),
       });
+      addUserShell(
+        { environmentId, taskId: null },
+        {
+          ...result,
+          kind: "script",
+          label: t("task:devServer"),
+          closable: result.closable ?? true,
+          running: result.ptyStatus === "running",
+        },
+      );
       if (!isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
       addTerminalPanel(result.terminalId, groupId, environmentId, undefined, t("task:devServer"));
     } catch (error) {
       console.error("Failed to start dev script:", error);
     }
-  }, [environmentId, taskID, devScript, addTerminalPanel, groupId, storeApi]);
+  }, [environmentId, taskID, devScript, addTerminalPanel, addUserShell, groupId, storeApi]);
 
   return { handleAddTerminal, handleRunScript, handleRunDevScript };
 }
@@ -436,6 +456,7 @@ function TerminalScriptsDropdown({
 }: TerminalScriptsDropdownProps) {
   const { t } = useTranslation();
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
+  const addUserShell = useAppStore((s) => s.addUserShell);
   const storeApi = useAppStoreApi();
 
   const handleRunScript = useCallback(
@@ -446,19 +467,30 @@ function TerminalScriptsDropdown({
       const owner = captureUserShellPublicationOwner(storeApi.getState(), scope);
       try {
         const result = await createUserShell(environmentId, { scriptId });
+        const title = result.label ?? t("common:script");
+        addUserShell(
+          { environmentId, taskId: null },
+          {
+            ...result,
+            kind: "script",
+            label: title,
+            closable: result.closable ?? true,
+            running: result.ptyStatus === "running",
+          },
+        );
         if (!isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
         addTerminalPanel(
           result.terminalId,
           rightBottomGroupId ?? undefined,
           owner.scope.environmentId,
           undefined,
-          result.label ?? t("common:script"),
+          title,
         );
       } catch (error) {
         console.error("Failed to run script:", error);
       }
     },
-    [environmentId, addTerminalPanel, rightBottomGroupId, storeApi],
+    [environmentId, addTerminalPanel, addUserShell, rightBottomGroupId, storeApi],
   );
 
   if (scripts.length === 0) return null;

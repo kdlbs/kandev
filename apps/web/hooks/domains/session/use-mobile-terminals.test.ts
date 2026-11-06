@@ -7,7 +7,12 @@ const SESSION_ID = "sess-1";
 
 const addTerminalMock = vi.fn();
 let mockEnvironmentId: string | null = null;
-let mockShells: Array<{ terminalId: string; label: string; closable: boolean }> = [];
+let mockShells: Array<{
+  terminalId: string;
+  label: string;
+  closable: boolean;
+  state?: string;
+}> = [];
 let mockShellsLoaded = false;
 
 let mockTaskID: string | null = "task-1";
@@ -110,6 +115,16 @@ describe("useMobileTerminals auto-create", () => {
     renderHook(() => useMobileTerminals(SESSION_ID));
     await new Promise((r) => setTimeout(r, 0));
     expect(addTerminalMock).not.toHaveBeenCalled();
+  });
+
+  it("creates a shell when the environment cache only has bottom-panel or parked rows", async () => {
+    addTerminalMock.mockResolvedValue(undefined);
+    mockShells = [
+      { terminalId: "bottom-panel", label: "Terminal", closable: true },
+      { terminalId: "shell-parked", label: "Parked", closable: true, state: "parked" },
+    ];
+    renderHook(() => useMobileTerminals(SESSION_ID));
+    await waitFor(() => expect(addTerminalMock).toHaveBeenCalledTimes(1));
   });
 
   it("multiple instances for the same env trigger only one creation (module-level guard)", async () => {

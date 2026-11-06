@@ -27,6 +27,7 @@ import {
   makeUserShellScope,
   type UserShellScope,
 } from "@/lib/state/user-shell-scope";
+import { createOrdinaryShellOnce } from "@/lib/state/user-shell-creation";
 import type { RepositoryScript } from "@/lib/types/http";
 import type { Dispatch, SetStateAction, MouseEvent } from "react";
 import type { PreviewStage } from "@/lib/state/slices";
@@ -156,6 +157,20 @@ function useTerminalStore(sessionId: string | null, devProcessId: string | undef
   };
 }
 
+function shellFromCreatedTerminal(
+  result: Awaited<ReturnType<typeof createUserShell>>,
+): UserShellInfo {
+  return {
+    ...result,
+    terminalId: result.terminalId,
+    kind: result.kind,
+    state: result.state ?? "open",
+    label: result.displayName ?? result.label ?? t("common:terminal"),
+    closable: result.closable ?? true,
+    running: result.ptyStatus === "running",
+  };
+}
+
 type AddTerminalOpts = {
   environmentId: string | null;
   taskID: string | null;
@@ -179,7 +194,11 @@ function useAddTerminal({
     if (!scope) return;
     const owner = captureUserShellPublicationOwner(storeApi.getState(), scope);
     try {
-      const result = await createUserShell(environmentId, { taskId: taskID ?? undefined });
+      const shell = taskID
+        ? await createOrdinaryShellOnce(storeApi, { environmentId, taskId: taskID }, async () =>
+            shellFromCreatedTerminal(await createUserShell(environmentId, { taskId: taskID })),
+          )
+        : shellFromCreatedTerminal(await createUserShell(environmentId, { taskId: undefined }));
       // During rollout an older backend returns the legacy payload
       // (terminal_id, label, closable) without `kind` or `seq`. Defaulting
       // to "ordinary" in that case marks the tab as managed and routes
@@ -187,30 +206,23 @@ function useAddTerminal({
       // `seq` is the only field a backend that supports the DB-backed
       // path always populates, so gate on its presence alone — a
       // bare-bones `kind: "ordinary"` without `seq` is treated as legacy.
-      const ordinary = result.seq !== undefined;
+      const ordinary = shell.seq !== undefined;
       const newTerm: Terminal = {
-        id: result.terminalId,
+        id: shell.terminalId,
         type: "shell",
-        label: result.displayName ?? result.label ?? t("common:terminal"),
+        label: shell.displayName ?? shell.label ?? t("common:terminal"),
         closable: true,
-        kind: ordinary ? "ordinary" : result.kind,
-        seq: result.seq,
-        state: ordinary ? (result.state ?? "open") : result.state,
-        ptyStatus: result.ptyStatus ?? "stopped",
+        kind: ordinary ? "ordinary" : shell.kind,
+        seq: shell.seq,
+        state: ordinary ? (shell.state ?? "open") : shell.state,
+        ptyStatus: shell.ptyStatus ?? "stopped",
       };
-      addUserShell(scope, {
-        ...result,
-        kind: newTerm.kind,
-        state: newTerm.state,
-        label: newTerm.label,
-        closable: newTerm.closable,
-        running: result.ptyStatus === "running",
-      });
+      if (!taskID) addUserShell(scope, shell);
       // The captured cache always receives the row; local state and panel
       // selection are only for the task the user is still looking at.
       if (!isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
       setTerminals((prev) => appendTerminalIfMissing(prev, newTerm));
-      if (sessionId) setRightPanelActiveTab(sessionId, result.terminalId);
+      if (sessionId) setRightPanelActiveTab(sessionId, shell.terminalId);
     } catch (error) {
       console.error("Failed to create user shell:", error);
     }

@@ -16,6 +16,7 @@ const CONFIRM_CLOSE_BUTTON_NAME = "Close terminal";
 const storeState = {
   tasks: { activeTaskId: "task-1" },
   userShells: {
+    byEnvironmentId: {} as Record<string, Array<Record<string, unknown>>>,
     byScope: {
       [userShellScopeKey({ environmentId: "env-1", taskId: "task-1" })]: [
         {
@@ -149,6 +150,19 @@ describe("TerminalTab", () => {
     await waitFor(() => {
       expect(mockSetTitle).toHaveBeenCalledWith(i18n.t("task:panelTerminal"));
     });
+  });
+
+  it("reads closability and label for environment-scoped script tabs", async () => {
+    storeState.userShells.byEnvironmentId["env-1"] = [
+      { terminalId: "script-1", kind: "script", closable: false, label: "Build watcher" },
+    ];
+    const props = makeProps();
+    props.params = { terminalId: "script-1", taskID: "task-1", environmentId: "env-1" } as never;
+
+    render(<TerminalTab {...props} />);
+
+    await waitFor(() => expect(mockSetTitle).toHaveBeenCalledWith("Build watcher"));
+    expect(screen.queryByRole("button", { name: CLOSE_TERMINAL_BUTTON_NAME })).toBeNull();
   });
 
   it("asks for localized confirmation before closing an idle terminal", async () => {

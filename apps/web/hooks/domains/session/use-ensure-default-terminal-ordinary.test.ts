@@ -6,8 +6,9 @@ import type { AppState } from "@/lib/state/store";
 import type { UserShellInfo } from "@/lib/state/slices/session-runtime/types";
 import { deferred, renderSessionRead } from "./session-read-test-helpers";
 
-const { createUserShell, dockviewApi } = vi.hoisted(() => ({
+const { createUserShell, dockviewApi, dockviewState } = vi.hoisted(() => ({
   createUserShell: vi.fn(),
+  dockviewState: { isRestoringLayout: false },
   dockviewApi: {
     getPanel: vi.fn(),
     panels: [] as Array<{
@@ -20,8 +21,14 @@ const { createUserShell, dockviewApi } = vi.hoisted(() => ({
 
 vi.mock("@/lib/state/dockview-store", () => ({
   useDockviewStore: Object.assign(
-    (selector: (state: { api: typeof dockviewApi }) => unknown) => selector({ api: dockviewApi }),
-    { getState: () => ({ isRestoringLayout: false }) },
+    (selector: (state: { api: typeof dockviewApi; isRestoringLayout: boolean }) => unknown) =>
+      selector({ api: dockviewApi, isRestoringLayout: dockviewState.isRestoringLayout }),
+    {
+      getState: () => ({
+        api: dockviewApi,
+        isRestoringLayout: dockviewState.isRestoringLayout,
+      }),
+    },
   ),
 }));
 
@@ -46,6 +53,7 @@ type SeedOptions = {
   panelTerminalId?: string;
   panelTaskId?: string;
   panelEnvironmentId?: string;
+  omitPanelStamps?: boolean;
   activeTaskId?: string | null;
 };
 
@@ -89,11 +97,13 @@ function seed(store: StoreApi<AppState>, options: SeedOptions): PanelMock | null
     return null;
   }
   const panel: PanelMock = {
-    params: {
-      terminalId: options.panelTerminalId,
-      environmentId: options.panelEnvironmentId ?? ENV_ID,
-      taskID: options.panelTaskId ?? TASK_ID,
-    },
+    params: options.omitPanelStamps
+      ? { terminalId: options.panelTerminalId }
+      : {
+          terminalId: options.panelTerminalId,
+          environmentId: options.panelEnvironmentId ?? ENV_ID,
+          taskID: options.panelTaskId ?? TASK_ID,
+        },
     api: { updateParameters: vi.fn() },
   };
   dockviewApi.getPanel.mockReturnValue({ id: PANEL_ID, ...panel });
@@ -166,6 +176,20 @@ describe("useEnsureDefaultTerminalOrdinary selection", () => {
     );
   });
 
+  it("restores missing stamps on an eligible terminal id", () => {
+    const { panel } = renderWithSeed({
+      panelTerminalId: SHELL_OPEN,
+      omitPanelStamps: true,
+      shells: [ordinary(SHELL_OPEN)],
+    });
+
+    expect(panel?.api.updateParameters).toHaveBeenCalledWith({
+      terminalId: SHELL_OPEN,
+      environmentId: ENV_ID,
+      taskID: TASK_ID,
+    });
+  });
+
   it("repairs conflicting stamps even when the terminal id is eligible", () => {
     const { panel } = renderWithSeed({
       panelTerminalId: SHELL_OPEN,
@@ -233,6 +257,23 @@ describe("useEnsureDefaultTerminalOrdinary creation ownership", () => {
     });
 
     expect(createUserShell).not.toHaveBeenCalled();
+  });
+
+  it("reconciles again when layout restoration completes", () => {
+    dockviewState.isRestoringLayout = true;
+    const { panel, rerender } = renderWithSeed({
+      panelTerminalId: SHELL_FOREIGN,
+      shells: [ordinary(SHELL_OPEN)],
+    });
+
+    expect(panel?.api.updateParameters).not.toHaveBeenCalled();
+    dockviewState.isRestoringLayout = false;
+    rerender();
+    expect(panel?.api.updateParameters).toHaveBeenCalledWith({
+      terminalId: SHELL_OPEN,
+      environmentId: ENV_ID,
+      taskID: TASK_ID,
+    });
   });
 
   it("creates once for concurrent consumers of the same scope", async () => {

@@ -16,7 +16,17 @@ const FOREIGN_TERMINAL_ID = "shell-b";
 const appState = vi.hoisted(() => ({
   tasks: { activeSessionId: "session-1" as string | null, activeTaskId: "task-1" as string | null },
   userShells: {
-    byScope: {} as Record<string, Array<{ terminalId: string; kind: string }>>,
+    byScope: {} as Record<string, Array<{ terminalId: string; kind: string; state?: string }>>,
+    byEnvironmentId: {} as Record<
+      string,
+      Array<{
+        terminalId: string;
+        kind?: string;
+        state?: string;
+        label?: string;
+        closable?: boolean;
+      }>
+    >,
     listed: {} as Record<string, boolean>,
   },
   processes: {
@@ -59,22 +69,23 @@ vi.mock("./passthrough-terminal", () => ({
   ),
 }));
 
+beforeEach(() => {
+  appState.tasks.activeSessionId = SESSION_ID;
+  appState.tasks.activeTaskId = "task-1";
+  appState.userShells.byScope = {
+    [SCOPE_KEY]: [{ terminalId: "shell-1", kind: "ordinary" }],
+    [OTHER_TASK_SCOPE_KEY]: [{ terminalId: FOREIGN_TERMINAL_ID, kind: "ordinary" }],
+  };
+  appState.userShells.byEnvironmentId = {};
+  appState.userShells.listed = { [SCOPE_KEY]: true };
+  appState.processes.devProcessBySessionId = {};
+  appState.processes.processesById = {};
+  appState.processes.outputsByProcessId = {};
+});
+
+afterEach(cleanup);
+
 describe("TerminalPanel", () => {
-  beforeEach(() => {
-    appState.tasks.activeSessionId = SESSION_ID;
-    appState.tasks.activeTaskId = "task-1";
-    appState.userShells.byScope = {
-      [SCOPE_KEY]: [{ terminalId: "shell-1", kind: "ordinary" }],
-      [OTHER_TASK_SCOPE_KEY]: [{ terminalId: FOREIGN_TERMINAL_ID, kind: "ordinary" }],
-    };
-    appState.userShells.listed = { [SCOPE_KEY]: true };
-    appState.processes.devProcessBySessionId = {};
-    appState.processes.processesById = {};
-    appState.processes.outputsByProcessId = {};
-  });
-
-  afterEach(cleanup);
-
   it("renders the live dev-process output, resolving the id from the store", () => {
     appState.processes.devProcessBySessionId = { [SESSION_ID]: DEV_PROCESS_ID };
     appState.processes.outputsByProcessId = { [DEV_PROCESS_ID]: "vite ready on :5173" };
@@ -145,7 +156,9 @@ describe("TerminalPanel", () => {
 
     expect(screen.queryByTestId(PASSTHROUGH_TEST_ID)).toBeNull();
   });
+});
 
+describe("TerminalPanel ownership guards", () => {
   it("rejects a retained task-B panel while task A is active and both caches are populated", () => {
     render(
       <TerminalPanel
@@ -159,6 +172,28 @@ describe("TerminalPanel", () => {
     );
 
     expect(screen.queryByTestId(PASSTHROUGH_TEST_ID)).toBeNull();
+  });
+
+  it("does not attach a restored panel that references a parked terminal", () => {
+    appState.userShells.byScope[SCOPE_KEY] = [
+      { terminalId: "shell-parked", kind: "ordinary", state: "parked" },
+    ];
+
+    render(<TerminalPanel panelId="shell-parked" params={{ terminalId: "shell-parked" }} />);
+
+    expect(screen.queryByTestId(PASSTHROUGH_TEST_ID)).toBeNull();
+  });
+
+  it("still attaches a legacy shell descriptor stored by environment", () => {
+    appState.userShells.byEnvironmentId["env-1"] = [
+      { terminalId: "shell-legacy", label: "Legacy", closable: false },
+    ];
+
+    render(<TerminalPanel panelId="shell-legacy" params={{ terminalId: "shell-legacy" }} />);
+
+    expect(screen.getByTestId(PASSTHROUGH_TEST_ID).getAttribute("data-terminal-id")).toBe(
+      "shell-legacy",
+    );
   });
 
   it("rejects a panel stamped for another environment", () => {

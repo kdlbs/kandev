@@ -8,6 +8,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { TERMINAL_DEFAULT_ID } from "@/lib/state/layout-manager";
 import { removeInvalidOrdinaryTerminalPanels } from "@/components/task/dockview-layout-setup";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
+import { createOrdinaryShellOnce } from "@/lib/state/user-shell-creation";
 import type { AppState } from "@/lib/state/store";
 import type { UserShellInfo } from "@/lib/state/slices/session-runtime/types";
 import {
@@ -17,23 +18,6 @@ import {
   userShellScopeKey,
   type UserShellScope,
 } from "@/lib/state/user-shell-scope";
-
-/**
- * Creation ownership for the default panel, per app store and scope. Several
- * consumers render the terminal pane at once (dockview header, mobile pane,
- * picker), so a module-level promise is the only way they join the same
- * create instead of minting several terminals.
- */
-const pendingCreations = new WeakMap<StoreApi<AppState>, Map<string, Promise<string>>>();
-
-function creationGuard(store: StoreApi<AppState>): Map<string, Promise<string>> {
-  let guard = pendingCreations.get(store);
-  if (!guard) {
-    guard = new Map();
-    pendingCreations.set(store, guard);
-  }
-  return guard;
-}
 
 function eligibleOrdinaryShells(shells: UserShellInfo[] | null): UserShellInfo[] {
   return (shells ?? [])
@@ -52,11 +36,7 @@ function panelTerminalId(panel: unknown): string | undefined {
 /** The restored default panel must carry the active task/environment stamps. */
 function panelStampsMatch(panel: unknown, scope: UserShellScope): boolean {
   const params = panelParamsOf(panel);
-  const stampedTask = params.taskID as string | undefined;
-  const stampedEnvironment = params.environmentId as string | undefined;
-  if (stampedTask && stampedTask !== scope.taskId) return false;
-  if (stampedEnvironment && stampedEnvironment !== scope.environmentId) return false;
-  return true;
+  return params.taskID === scope.taskId && params.environmentId === scope.environmentId;
 }
 
 /**
@@ -103,28 +83,77 @@ function shellFromCreateResult(result: Awaited<ReturnType<typeof createUserShell
   };
 }
 
-function createOnce(
+type ReconcileGate = {
+  store: StoreApi<AppState>;
+  scope: UserShellScope | null;
+  scopeKey: string;
+  dockviewApi: DockviewApi | null;
+  hasSuccessfulList: boolean;
+  isLoading: boolean;
+  isRestoringLayout: boolean;
+};
+
+function shouldReconcileDefaultTerminal(gate: ReconcileGate): boolean {
+  return (
+    !!gate.scope?.taskId &&
+    !!gate.scopeKey &&
+    !!gate.dockviewApi &&
+    !gate.isRestoringLayout &&
+    gate.hasSuccessfulList &&
+    !gate.isLoading &&
+    canCreateForScope(gate.store, gate.scopeKey)
+  );
+}
+
+function reconcileDefaultPanel(
   store: StoreApi<AppState>,
-  scope: UserShellScope,
-  scopeKey: string,
-  authorized: () => boolean,
-): Promise<string> | null {
-  if (!authorized()) return null;
-  const guard = creationGuard(store);
-  const existing = guard.get(scopeKey);
-  if (existing) return existing;
-  const creation = createUserShell(scope.environmentId, { taskId: scope.taskId ?? undefined })
-    .then((result) => {
-      // The admitted create publishes to the cache it was admitted for, even
-      // if the user has navigated away by now.
-      store.getState().addUserShell(scope, shellFromCreateResult(result));
-      return result.terminalId;
+  api: DockviewApi,
+  scope: UserShellScope & { taskId: string },
+  shells: UserShellInfo[] | null,
+): void {
+  // Extra ordinary panels restored from a layout may point at another task's
+  // terminal. They must stop connecting before the default panel is repaired.
+  removeInvalidOrdinaryTerminalPanels(api, store, scope);
+  const panel = api.getPanel(TERMINAL_DEFAULT_ID);
+  // Layouts that omit the default panel must stay free of an automatic
+  // desktop terminal.
+  if (!panel) return;
+  const owner = captureUserShellPublicationOwner(store.getState(), scope);
+  const currentTerminalId = panelTerminalId(panel);
+  const eligible = eligibleOrdinaryShells(shells);
+  if (currentTerminalId && eligible.some((shell) => shell.terminalId === currentTerminalId)) {
+    // The terminal is owned but the restored panel may still carry another
+    // task's or environment's stamp. Repair the stamps in place.
+    if (!panelStampsMatch(panel, scope)) {
+      selectDefaultPanel(api, panel, currentTerminalId, currentTerminalId, scope);
+    }
+    return;
+  }
+  if (eligible.length > 0) {
+    selectDefaultPanel(api, panel, eligible[0].terminalId, currentTerminalId, scope);
+    return;
+  }
+  if (
+    !isActiveUserShellPublicationOwner(store.getState(), owner) ||
+    !canCreateForScope(store, userShellScopeKey(scope))
+  ) {
+    return;
+  }
+  createOrdinaryShellOnce(
+    store,
+    { environmentId: scope.environmentId, taskId: scope.taskId },
+    async () =>
+      shellFromCreateResult(await createUserShell(scope.environmentId, { taskId: scope.taskId })),
+  )
+    .then((shell) => {
+      // Recheck after the asynchronous create: the user may have navigated
+      // or the panel may have been reused for another terminal.
+      if (!isActiveUserShellPublicationOwner(store.getState(), owner)) return;
+      selectDefaultPanel(api, panel, shell.terminalId, currentTerminalId, scope);
     })
-    .finally(() => {
-      guard.delete(scopeKey);
+    .catch((error: unknown) => {
+      console.error("default-terminal migration:", error);
     });
-  guard.set(scopeKey, creation);
-  return creation;
 }
 
 /**
@@ -161,59 +190,28 @@ export function useEnsureDefaultTerminalOrdinary(): void {
     return s.userShells.byScope[scopeKey] ?? null;
   });
   const dockviewApi = useDockviewStore((s) => s.api);
+  const isRestoringLayout = useDockviewStore((s) => s.isRestoringLayout);
 
   useEffect(() => {
-    // Ordinary terminals require a real task. A taskless scope can never
-    // prove ownership or authorize creation.
-    if (!scope?.taskId || !scopeKey || !dockviewApi) return;
-    // Re-read authority at the boundary: a read may have started after this
-    // effect was scheduled, which withdraws the older successful evidence.
-    if (!hasSuccessfulList || isLoading || !canCreateForScope(store, scopeKey)) return;
-    // Extra ordinary panels restored from a layout may point at another
-    // task's terminal. They must stop connecting before the panel below is
-    // reconciled.
-    const owner = captureUserShellPublicationOwner(store.getState(), scope);
-    removeInvalidOrdinaryTerminalPanels(dockviewApi, store, scope);
-    const panel = dockviewApi.getPanel(TERMINAL_DEFAULT_ID);
-    // Layouts that omit the default panel must stay free of an automatic
-    // desktop terminal.
-    if (!panel) return;
-
-    const currentTerminalId = panelTerminalId(panel);
-    const eligible = eligibleOrdinaryShells(shells);
-    // A restored panel may carry no terminal id at all (its params were
-    // stripped during layout normalization). That panel needs a selection just
-    // like a foreign or parked id does.
-    if (currentTerminalId && eligible.some((shell) => shell.terminalId === currentTerminalId)) {
-      // The terminal is owned but the restored panel may still carry another
-      // task's or environment's stamp. Repair the stamps in place.
-      if (!panelStampsMatch(panel, scope))
-        selectDefaultPanel(dockviewApi, panel, currentTerminalId, currentTerminalId, scope);
-      return;
-    }
-
-    if (eligible.length > 0) {
-      selectDefaultPanel(dockviewApi, panel, eligible[0].terminalId, currentTerminalId, scope);
-      return;
-    }
-
-    const creation = createOnce(
+    const gate = {
       store,
       scope,
       scopeKey,
-      () =>
-        isActiveUserShellPublicationOwner(store.getState(), owner) &&
-        canCreateForScope(store, scopeKey),
-    );
-    creation
-      ?.then((terminalId) => {
-        // Recheck after the asynchronous create: the user may have navigated
-        // or the panel may have been reused for another terminal.
-        if (!isActiveUserShellPublicationOwner(store.getState(), owner)) return;
-        selectDefaultPanel(dockviewApi, panel, terminalId, currentTerminalId, scope);
-      })
-      .catch((error: unknown) => {
-        console.error("default-terminal migration:", error);
-      });
-  }, [store, scope, scopeKey, hasSuccessfulList, isLoading, shells, dockviewApi]);
+      dockviewApi,
+      hasSuccessfulList,
+      isLoading,
+      isRestoringLayout,
+    };
+    if (!shouldReconcileDefaultTerminal(gate) || !scope?.taskId || !dockviewApi) return;
+    reconcileDefaultPanel(store, dockviewApi, { ...scope, taskId: scope.taskId }, shells);
+  }, [
+    store,
+    scope,
+    scopeKey,
+    hasSuccessfulList,
+    isLoading,
+    shells,
+    dockviewApi,
+    isRestoringLayout,
+  ]);
 }

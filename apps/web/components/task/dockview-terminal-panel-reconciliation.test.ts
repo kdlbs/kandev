@@ -69,17 +69,22 @@ function makePanel(id: string, params: Record<string, unknown>): FakePanel {
 }
 
 function makeAppStore(): StoreApi<AppState> {
-  return {
-    getState: () =>
-      ({
-        tasks: { activeSessionId: "session-1", activeTaskId: "task-1" },
-        environmentIdBySessionId: { "session-1": "env-1" },
-        userShells: {
-          byScope: { [userShellScopeKey(SCOPE)]: [{ terminalId: OWNED_ID, kind: "ordinary" }] },
-          byEnvironmentId: {},
-        },
-      }) as unknown as AppState,
-  } as StoreApi<AppState>;
+  const state = {
+    tasks: { activeSessionId: "session-1", activeTaskId: "task-1" },
+    environmentIdBySessionId: { "session-1": "env-1" },
+    userShells: {
+      byScope: {
+        [userShellScopeKey(SCOPE)]: [
+          { terminalId: OWNED_ID, kind: "ordinary", state: "open" },
+        ] as Array<{ terminalId: string; kind?: string; state?: string }>,
+      },
+      byEnvironmentId: {} as Record<
+        string,
+        Array<{ terminalId: string; kind?: string; state?: string }>
+      >,
+    },
+  };
+  return { getState: () => state as unknown as AppState } as StoreApi<AppState>;
 }
 
 beforeEach(() => {
@@ -154,6 +159,40 @@ describe("removeInvalidOrdinaryTerminalPanels", () => {
     expect(foreign.api.close).toHaveBeenCalledTimes(1);
     expect(mockPark).not.toHaveBeenCalled();
     expect(mockStop).not.toHaveBeenCalled();
+  });
+
+  it("removes extra panels that reference parked terminals", () => {
+    const parked = makePanel(FOREIGN_ID, {
+      terminalId: FOREIGN_ID,
+      environmentId: "env-1",
+      taskID: "task-1",
+    });
+    const api = makeApi([parked]);
+    const store = makeAppStore();
+    store.getState().userShells.byScope[userShellScopeKey(SCOPE)] = [
+      { terminalId: FOREIGN_ID, kind: "ordinary", state: "parked" },
+    ];
+
+    removeInvalidOrdinaryTerminalPanels(api as never, store, SCOPE);
+
+    expect(parked.api.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps legacy environment-scoped terminal panels", () => {
+    const legacy = makePanel(FOREIGN_ID, {
+      terminalId: FOREIGN_ID,
+      environmentId: "env-1",
+      taskID: "task-2",
+    });
+    const api = makeApi([legacy]);
+    const store = makeAppStore();
+    store.getState().userShells.byEnvironmentId["env-1"] = [
+      { terminalId: FOREIGN_ID, label: "Legacy" },
+    ];
+
+    removeInvalidOrdinaryTerminalPanels(api as never, store, SCOPE);
+
+    expect(legacy.api.close).not.toHaveBeenCalled();
   });
 
   it("does nothing while a layout is being restored", () => {

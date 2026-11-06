@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useTerminals } from "./use-terminals";
+import { BOTTOM_PANEL_TERMINAL_ID } from "./use-terminals-build";
 import { useUserShells } from "./use-user-shells";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { userShellScopeKey } from "@/lib/state/user-shell-scope";
@@ -72,6 +73,11 @@ export function useMobileTerminals(sessionId: string | null) {
     hasSuccessfulList,
     shells,
   } = useUserShells(environmentId, taskID);
+  // The phone pane renders visible tabs only; bottom-panel and parked rows do
+  // not satisfy the "one usable terminal" invariant.
+  const hasVisibleShell = shells.some(
+    (shell) => shell.state !== "parked" && shell.terminalId !== BOTTOM_PANEL_TERMINAL_ID,
+  );
   const addTerminalRef = useRef(result.addTerminal);
   useEffect(() => {
     addTerminalRef.current = result.addTerminal;
@@ -88,7 +94,7 @@ export function useMobileTerminals(sessionId: string | null) {
     // future task-scoped mounts on a stale legacy entry.
     if (!scope) return;
     if (autoCreatedScopes.has(scope)) return;
-    if (shells.length > 0) {
+    if (hasVisibleShell) {
       autoCreatedScopes.add(scope);
       return;
     }
@@ -107,7 +113,7 @@ export function useMobileTerminals(sessionId: string | null) {
         autoCreatedScopes.delete(scope);
       });
     }
-  }, [environmentId, taskID, store, shellsLoaded, isLoading, hasSuccessfulList, shells.length]);
+  }, [environmentId, taskID, store, shellsLoaded, isLoading, hasSuccessfulList, hasVisibleShell]);
 
   return { ...result, environmentId };
 }

@@ -557,7 +557,14 @@ export function removeInvalidOrdinaryTerminalPanels(
   if (useDockviewStore.getState().isRestoringLayout) return;
   const state = appStore.getState();
   const owned = new Set(
-    (state.userShells.byScope[userShellScopeKey(scope)] ?? []).map((shell) => shell.terminalId),
+    (state.userShells.byScope[userShellScopeKey(scope)] ?? [])
+      .filter((shell) => shell.state !== "parked")
+      .map((shell) => shell.terminalId),
+  );
+  const legacyOwned = new Set(
+    (state.userShells.byEnvironmentId[scope.environmentId] ?? [])
+      .filter((shell) => shell.kind !== "ordinary")
+      .map((shell) => shell.terminalId),
   );
   for (const panel of [...api.panels]) {
     if (panel.id === TERMINAL_DEFAULT_ID) continue;
@@ -566,13 +573,19 @@ export function removeInvalidOrdinaryTerminalPanels(
     if (!terminalId || !terminalId.startsWith("shell-")) continue;
     const stampedTask = params.taskID as string | undefined;
     const stampedEnv = params.environmentId as string | undefined;
-    const stampConflicts =
-      (!!stampedTask && stampedTask !== scope.taskId) ||
-      (!!stampedEnv && stampedEnv !== scope.environmentId);
-    // A panel retained from another task or environment must not stay in this
-    // workbench even when its stamped cache contains the row. The close is
-    // marked as terminate-only so it never parks or stops that terminal.
-    if (!stampConflicts && owned.has(terminalId)) continue;
+    if (!!stampedEnv && stampedEnv !== scope.environmentId) {
+      markTerminalPanelTerminateClose(panel.api.id);
+      panel.api.close();
+      continue;
+    }
+    // Legacy descriptors have no task identity and stay environment-scoped.
+    if (legacyOwned.has(terminalId)) continue;
+    const taskConflict = !!stampedTask && stampedTask !== scope.taskId;
+    // A panel retained from another task must not stay in this workbench even
+    // when its stamped cache contains the row. Parked ordinary terminals are
+    // not attachable from an extra panel either. The close is marked as
+    // terminate-only so it never parks or stops that terminal.
+    if (!taskConflict && owned.has(terminalId)) continue;
     markTerminalPanelTerminateClose(panel.api.id);
     panel.api.close();
   }

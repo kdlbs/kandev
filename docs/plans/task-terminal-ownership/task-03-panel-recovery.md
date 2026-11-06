@@ -175,7 +175,7 @@ python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
 
-Focused unit suites passed (310 tests across 37 files, including both Task 02 and Task 03 verification lists).
+Focused unit suites passed (324 tests across 38 files, including both Task 02 and Task 03 verification lists).
 Chromium passed 12 tests and mobile-chrome passed 3 tests, including the two
 new ownership specs and a client-side task switch that holds a late create
 request open across the navigation. Mobile ownership navigation now uses the

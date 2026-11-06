@@ -78,8 +78,16 @@ function handleTerminalToggle(
 
   createUserShell(environmentId, { taskId: taskID ?? undefined })
     .then((result) => {
-      if (!isActiveUserShellPublicationOwner(appStore.getState(), owner)) return;
       const title = result.displayName ?? result.label ?? t("common:terminal");
+      appStore.getState().addUserShell(scope, {
+        ...result,
+        kind: result.kind,
+        state: result.state ?? "open",
+        label: title,
+        closable: result.closable ?? true,
+        running: result.ptyStatus === "running",
+      });
+      if (!isActiveUserShellPublicationOwner(appStore.getState(), owner)) return;
       useDockviewStore
         .getState()
         .addTerminalPanel(result.terminalId, undefined, environmentId, taskID ?? undefined, title);

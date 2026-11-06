@@ -69,15 +69,25 @@ function pickDisplayName(
 
 function useTerminalTabState(
   scope: UserShellScope | null,
+  environmentId: string | null | undefined,
   terminalId: string,
   apiTitle: string,
   ordinaryLabel: string,
 ) {
   const scopeKey = scope ? userShellScopeKey(scope) : "";
   const shell = useAppStore((s) => {
-    if (!scopeKey) return null;
-    const list = s.userShells.byScope[scopeKey] ?? [];
-    return list.find((it) => it.terminalId === terminalId) ?? null;
+    const scoped = scopeKey
+      ? (s.userShells.byScope[scopeKey] ?? []).find((it) => it.terminalId === terminalId)
+      : undefined;
+    if (scoped) return scoped;
+    // Fixed, script, and legacy rows carry environment-scoped metadata
+    // (closability, label) outside byScope.
+    if (!environmentId) return null;
+    return (
+      (s.userShells.byEnvironmentId[environmentId] ?? []).find(
+        (it) => it.terminalId === terminalId,
+      ) ?? null
+    );
   });
   const ordinaryCount = useAppStore((s) => {
     if (!scopeKey) return 0;
@@ -154,6 +164,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
   const scope = makeUserShellScope(stampedEnv, taskID);
   const { shell, isOrdinary, seq, showBadge, displayName, closable } = useTerminalTabState(
     scope,
+    stampedEnv,
     terminalId,
     props.api.title ?? t("common:terminal"),
     t("task:panelTerminal"),

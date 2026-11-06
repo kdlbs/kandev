@@ -24,7 +24,6 @@ import {
   captureUserShellPublicationOwner,
   isActiveUserShellPublicationOwner,
   makeUserShellScope,
-  resolveActiveUserShellScope,
 } from "@/lib/state/user-shell-scope";
 import type { PrepareStepInfo, UserShellInfo } from "@/lib/state/slices/session-runtime/types";
 
@@ -262,10 +261,12 @@ function useAgentMcpAuthenticate({
   const addTerminalPanel = useDockviewStore((state) => state.addTerminalPanel);
   return async () => {
     if (!serverId || pending) return;
-    const activeScope = resolveActiveUserShellScope(store.getState());
-    const owner = activeScope
-      ? captureUserShellPublicationOwner(store.getState(), activeScope)
-      : null;
+    const stateAtStart = store.getState();
+    const ownerScope = makeUserShellScope(
+      stateAtStart.environmentIdBySessionId[sessionId] ?? null,
+      taskId,
+    );
+    const owner = ownerScope ? captureUserShellPublicationOwner(stateAtStart, ownerScope) : null;
     setPending("authenticate");
     setFeedback("");
     try {
@@ -277,7 +278,13 @@ function useAgentMcpAuthenticate({
       // the UI waits until the user is still in that task/environment and the
       // surrounding workspace context has not been replaced.
       if (!owner || !isActiveUserShellPublicationOwner(store.getState(), owner)) return;
-      if (!scope || scope.environmentId !== owner.scope.environmentId) return;
+      if (
+        !scope ||
+        scope.environmentId !== owner.scope.environmentId ||
+        scope.taskId !== owner.scope.taskId
+      ) {
+        return;
+      }
       if (usesDesktopWorkbench) {
         addTerminalPanel(
           result.terminal_id,

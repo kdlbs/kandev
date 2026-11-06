@@ -163,19 +163,24 @@ function useWatermarkHandlers(
       const owner = captureUserShellPublicationOwner(storeApi.getState(), scope);
       try {
         const result = await createUserShell(environmentId, { scriptId });
-        if (!isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
-        addTerminalPanel(
-          result.terminalId,
-          groupId,
-          environmentId,
-          undefined,
-          result.label ?? t("common:script"),
+        const title = result.label ?? t("common:script");
+        addUserShell(
+          { environmentId, taskId: null },
+          {
+            ...result,
+            kind: "script",
+            label: title,
+            closable: result.closable ?? true,
+            running: result.ptyStatus === "running",
+          },
         );
+        if (!isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
+        addTerminalPanel(result.terminalId, groupId, environmentId, undefined, title);
       } catch (error) {
         console.error("Failed to run script:", error);
       }
     },
-    [environmentId, taskID, groupId, addTerminalPanel, storeApi],
+    [environmentId, taskID, groupId, addTerminalPanel, addUserShell, storeApi],
   );
 
   const handleRunDevScript = useCallback(async () => {
@@ -188,12 +193,22 @@ function useWatermarkHandlers(
         command: devScript,
         label: t("task:devServer"),
       });
+      addUserShell(
+        { environmentId, taskId: null },
+        {
+          ...result,
+          kind: "script",
+          label: t("task:devServer"),
+          closable: result.closable ?? true,
+          running: result.ptyStatus === "running",
+        },
+      );
       if (!isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
       addTerminalPanel(result.terminalId, groupId, environmentId, undefined, t("task:devServer"));
     } catch (error) {
       console.error("Failed to start dev script:", error);
     }
-  }, [environmentId, taskID, devScript, groupId, addTerminalPanel, storeApi]);
+  }, [environmentId, taskID, devScript, groupId, addTerminalPanel, addUserShell, storeApi]);
 
   return { handleAddTerminal, handleRunScript, handleRunDevScript };
 }
