@@ -235,7 +235,7 @@ func (r *Repository) CloseUnansweredClarificationBundle(
 	if closeReq.Reason == models.ClarificationClosedAnsweredLate {
 		return r.closeUnansweredWithAdmission(ctx, pendingID, closeReq, patch)
 	}
-	return r.patchUnansweredBundle(ctx, pendingID, patch)
+	return r.patchUnansweredBundle(ctx, pendingID, patch, closeReq.SourceSessionID)
 }
 
 func unansweredClosePatch(closeReq models.CloseUnansweredClarification) ([]metadataPatchValue, error) {
@@ -361,10 +361,22 @@ func (r *Repository) patchUnansweredBundle(
 	ctx context.Context,
 	pendingID string,
 	patch []metadataPatchValue,
+	sourceSession ...string,
 ) ([]*models.Message, error) {
 	drv := r.db.DriverName()
-	query := unansweredPatchQuery(drv, patch, "b.pending_id = ?", true)
+	filter := "b.pending_id = ?"
 	args := append(metadataPatchArgs(patch), r.nowUTC(), pendingID)
+	if len(sourceSession) > 0 && sourceSession[0] != "" {
+		filter += " AND b.session_id = ?"
+		args = append(args, sourceSession[0])
+	}
+	query := unansweredPatchQuery(drv, patch, filter, false)
+	if len(sourceSession) > 0 && sourceSession[0] != "" {
+		query += " AND task_session_id = ?"
+		args = append(args, sourceSession[0])
+	}
+	query += ` RETURNING id, task_session_id, task_id, turn_id, author_type, author_id,
+		content, requests_input, type, metadata, created_at, updated_at`
 	rows, err := r.db.QueryContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("patch unanswered clarification %s: %w", pendingID, err)

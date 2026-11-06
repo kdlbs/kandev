@@ -80,6 +80,8 @@ type CloseUnansweredClarification struct {
 	// otherwise.
 	MessageID string
 	SessionID string
+	// SourceSessionID is the authorized session that asked the question.
+	SourceSessionID string
 }
 
 // ClarificationQuestionIdentity is the part of a question compared when a

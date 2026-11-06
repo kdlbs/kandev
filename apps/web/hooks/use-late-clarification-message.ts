@@ -29,6 +29,7 @@ export type LateClarificationState =
 
 type LateAdmissionRecord = {
   clientMessageId: string;
+  boundPendingId?: string | null;
   state: LateClarificationState;
   inFlight: Promise<MessageAdmissionOutcome> | null;
 };
@@ -91,6 +92,20 @@ function recordForKey(key: string): LateAdmissionRecord {
   };
   lateAdmissionRecords.set(key, created);
   return created;
+}
+
+function bindLateAdmission(record: LateAdmissionRecord, pendingId: string | null) {
+  if (
+    record.boundPendingId === pendingId &&
+    record.state.status !== "sent" &&
+    record.state.status !== "queued"
+  )
+    return;
+  const prefix = pendingId ? `late:${pendingId}:` : "";
+  const id = `${prefix}${generateUUID()}`;
+  // Long legacy identifiers can still be sent and closed manually.
+  record.clientMessageId = new TextEncoder().encode(id).length <= 128 ? id : generateUUID();
+  record.boundPendingId = pendingId;
 }
 
 function stateForKey(key: string | null): LateClarificationState {
@@ -281,9 +296,7 @@ export function useLateClarificationMessage(
       const admissionKey = lateAdmissionKey(taskId, sessionId, snapshot.messages);
       const record = recordForKey(admissionKey);
       if (record.inFlight) return record.inFlight;
-      if (record.state.status === "sent" || record.state.status === "queued") {
-        record.clientMessageId = generateUUID();
-      }
+      bindLateAdmission(record, pendingId);
       const admissionSnapshot: LateClarificationSnapshot = {
         messages: snapshot.messages.slice(),
         answers: snapshot.answers.slice(),

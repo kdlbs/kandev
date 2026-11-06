@@ -204,12 +204,12 @@ func isTerminalSessionState(state taskmodels.TaskSessionState) bool {
 // closes the question without sending an answer.
 func (h *Handlers) httpCloseInboxUnanswered(c *gin.Context) {
 	pendingID := c.Param("pendingID")
-	_, taskID, ok := h.authorizeUnansweredBundle(c, pendingID)
+	sessionID, taskID, ok := h.authorizeUnansweredBundle(c, pendingID)
 	if !ok || !h.authorizeUnansweredAction(c, taskID, "") {
 		return
 	}
 	h.closeInboxUnanswered(c, pendingID, taskmodels.CloseUnansweredClarification{
-		Reason: taskmodels.ClarificationClosedByUser, At: h.now(),
+		Reason: taskmodels.ClarificationClosedByUser, At: h.now(), SourceSessionID: sessionID,
 	})
 }
 
@@ -245,7 +245,7 @@ func (h *Handlers) httpLateAnswerInboxUnanswered(c *gin.Context) {
 	}
 	h.closeInboxUnanswered(c, pendingID, taskmodels.CloseUnansweredClarification{
 		Reason: taskmodels.ClarificationClosedAnsweredLate, At: h.now(),
-		MessageID: body.MessageID, SessionID: body.SessionID,
+		MessageID: body.MessageID, SessionID: body.SessionID, SourceSessionID: sessionID,
 	})
 }
 

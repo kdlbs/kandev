@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	internaldb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -30,8 +31,14 @@ func (r *Repository) closeUnansweredWithAdmission(
 	defer func() { _ = tx.Rollback() }()
 	drv := r.db.DriverName()
 	var taskID, sourceSessionID string
-	query := "SELECT b.task_id,b.session_id FROM " + unansweredBundlesExpr(drv) + " b WHERE b.pending_id = ? LIMIT 1"
-	if err := tx.QueryRowContext(ctx, tx.Rebind(query), pendingID).Scan(&taskID, &sourceSessionID); err != nil {
+	query := "SELECT b.task_id,b.session_id FROM " + unansweredBundlesExpr(drv) + " b WHERE b.pending_id = ?"
+	args := []any{pendingID}
+	if request.SourceSessionID != "" {
+		query += " AND b.session_id = ?"
+		args = append(args, request.SourceSessionID)
+	}
+	query += " LIMIT 1"
+	if err := tx.QueryRowContext(ctx, tx.Rebind(query), args...).Scan(&taskID, &sourceSessionID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -47,18 +54,14 @@ func (r *Repository) closeUnansweredWithAdmission(
 	if targetTaskID != taskID {
 		return nil, models.ErrUnansweredAdmissionUnknown
 	}
-	accepted, err := hasLateAnswerAdmission(ctx, tx, taskID, request.SessionID, request.MessageID)
-	if err != nil {
+	if err := validateLateAnswerReceipt(ctx, tx, pendingID, taskID, sourceSessionID, request); err != nil {
 		return nil, err
-	}
-	if !accepted {
-		return nil, models.ErrUnansweredAdmissionUnknown
 	}
 	query = unansweredPatchQuery(drv, patch, "b.pending_id = ? AND b.task_id = ? AND b.session_id = ?", false) + `
 		AND task_session_id = ?
 		RETURNING id, task_session_id, task_id, turn_id, author_type, author_id,
 		          content, requests_input, type, metadata, created_at, updated_at`
-	args := append(metadataPatchArgs(patch), r.nowUTC(), pendingID, taskID, sourceSessionID, sourceSessionID)
+	args = append(metadataPatchArgs(patch), r.nowUTC(), pendingID, taskID, sourceSessionID, sourceSessionID)
 	rows, err := tx.QueryContext(ctx, tx.Rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("close admitted unanswered clarification: %w", err)
@@ -78,6 +81,75 @@ func (r *Repository) closeUnansweredWithAdmission(
 		return nil, err
 	}
 	return messages, nil
+}
+
+func validateLateAnswerReceipt(ctx context.Context, tx *sqlx.Tx, pendingID, taskID, sourceSessionID string, request models.CloseUnansweredClarification) error {
+	// Older unbound receipts remain available for manual close.
+	prefix := "late:" + pendingID + ":"
+	if !strings.HasPrefix(request.MessageID, prefix) {
+		return models.ErrUnansweredAdmissionUnknown
+	}
+	if _, err := uuid.Parse(strings.TrimPrefix(request.MessageID, prefix)); err != nil {
+		return models.ErrUnansweredAdmissionUnknown
+	}
+	accepted, err := hasLateAnswerAdmission(ctx, tx, taskID, request.SessionID, request.MessageID)
+	if err != nil {
+		return err
+	}
+	if !accepted {
+		return models.ErrUnansweredAdmissionUnknown
+	}
+	accepted, err = lateAnswerAdmittedAfterQuestion(ctx, tx, pendingID, taskID, sourceSessionID, request.SessionID, request.MessageID)
+	if err != nil {
+		return err
+	}
+	if !accepted {
+		return models.ErrUnansweredAdmissionUnknown
+	}
+	return nil
+}
+
+// Identified queue admissions have their own durable time even when queue
+// merging keeps multiple IDs on one row with only the newest row timestamp.
+// Prefer that receipt over a later materialized transcript timestamp.
+func lateAnswerAdmittedAfterQuestion(ctx context.Context, tx *sqlx.Tx, pendingID, taskID, sourceSessionID, sessionID, id string) (bool, error) {
+	exists, err := internaldb.TableExistsContext(ctx, tx, "queue_admission_receipts")
+	if err != nil {
+		return false, err
+	}
+	bundles := unansweredBundlesExpr(tx.DriverName())
+	if exists {
+		var total, timely int
+		query := `SELECT COUNT(*), COALESCE(SUM(CASE WHEN q.admitted_at >= b.created_at THEN 1 ELSE 0 END), 0)
+			FROM queue_admission_receipts q JOIN ` + bundles + ` b ON b.pending_id = ? AND b.task_id = ? AND b.session_id = ?
+			WHERE q.task_id = ? AND q.session_id = ? AND q.client_queue_id = ?`
+		if err := tx.QueryRowContext(ctx, tx.Rebind(query), pendingID, taskID, sourceSessionID, taskID, sessionID, id).Scan(&total, &timely); err != nil {
+			return false, fmt.Errorf("read late answer admission time: %w", err)
+		}
+		if total > 0 {
+			return total == timely, nil
+		}
+	}
+	// Direct message admissions have an exact durable message ID and timestamp.
+	// Metadata aliases and legacy merged rows cannot establish their own time.
+	query := `SELECT COALESCE(m.metadata, '') FROM task_session_messages m JOIN ` + bundles + ` b ON b.pending_id = ? AND b.task_id = ? AND b.session_id = ?
+		WHERE m.task_id = ? AND m.task_session_id = ? AND m.id = ?
+		AND m.author_type = 'user' AND m.type = 'message' AND m.created_at >= b.created_at`
+	var raw string
+	if err := tx.QueryRowContext(ctx, tx.Rebind(query), pendingID, taskID, sourceSessionID, taskID, sessionID, id).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("read late answer message time: %w", err)
+	}
+	if raw == "" {
+		raw = "{}"
+	}
+	var metadata lateAnswerReceiptMetadata
+	if json.Unmarshal([]byte(raw), &metadata) != nil {
+		return false, nil
+	}
+	return metadata.ClientQueueID == "" && len(metadata.QueueAdmissionIDs) == 0 && len(metadata.SendNowSources) == 0, nil
 }
 
 type lateAnswerReceiptMetadata struct {
