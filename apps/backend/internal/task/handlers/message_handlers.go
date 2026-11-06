@@ -287,7 +287,7 @@ func (h *MessageHandlers) injectMessageContext(
 	return sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, content, sysprompt.KandevContextOptions{
 		BuiltinPackages:                req.builtinPackages,
 		RequiresCompletionSignal:       requiresSignal,
-		IncludeCoordinatorTaskControls: !configMode,
+		IncludeCoordinatorTaskControls: !configMode && task.Origin != models.TaskOriginAutomationRun,
 		IncludeTaskTitleTool:           !configMode && titleOwner,
 		IncludeCanvasGuidance:          includeCanvasGuidance,
 		Autopilot:                      task.Autopilot,

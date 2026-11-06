@@ -2,6 +2,14 @@ package models
 
 import "time"
 
+// ChildTaskOrderScope carries the current relation required for named children
+// when their complete step band is reordered.
+type ChildTaskOrderScope struct {
+	ParentTaskID string
+	WorkspaceID  string
+	TaskIDs      []string
+}
+
 // StepOrderLess reports whether left sorts before right under
 // REQ-TASKS-KANBAN-TASK-REORDERING-001.1: position ascending, then priority
 // rank (critical, high, medium, low, then any other or absent value), then
