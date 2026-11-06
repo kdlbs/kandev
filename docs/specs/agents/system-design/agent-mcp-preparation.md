@@ -138,11 +138,19 @@ Credential sharing and import enablement remain independently testable.
 
 ## Project-local file ownership and execution generations
 
+The [package delivery design](builtin-mcp-project-delivery.md) defines how
+successful materialization participates in session admission. File ownership
+and cleanup remain governed by this section.
+
 Pi retains the project-local contract from [ADR 0020](../../../decisions/0020-pi-project-mcp-config-injection.md):
 Kandev writes `<workspace>/.pi/mcp.json`, merges under `mcpServers`, emits the
 current execution's Kandev URL with `streamable-http`, and marks generated
 servers `eager`. The lifecycle manager owns the shared-file lifetime; the Pi
-adapter does not write `~/.pi/agent/mcp.json`.
+adapter does not write `~/.pi/agent/mcp.json`. Local/worktree targets use the
+backend writer. A runtime with a separate target filesystem resolves the
+helper-local workspace and loopback endpoint and materializes through the
+authenticated project-file operation, so backend-local paths are never used as
+remote delivery evidence.
 
 ### Shared resource model
 

@@ -140,11 +140,11 @@ export async function setContextWindowFixture(
   );
 }
 
-export async function expectCompactionCount(contextTooltip: Locator): Promise<void> {
+export async function expectCompactionCount(contextTooltip: Locator, count = 2): Promise<void> {
   const contextUsage = contextTooltip.getByTestId("context-window-usage").first();
   const row = contextUsage.getByTestId("context-window-compactions-row");
   await expect(row.getByText("Compactions", { exact: true })).toBeVisible();
-  await expect(row.getByText("2", { exact: true })).toBeVisible();
+  await expect(row.getByText(String(count), { exact: true })).toBeVisible();
 }
 
 export async function expectSourceRightOfTokenCount(contextTooltip: Locator): Promise<void> {

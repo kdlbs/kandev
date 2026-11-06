@@ -270,6 +270,67 @@ func TestStopSessionSynchronouslyWaitsForAgentTeardown(t *testing.T) {
 	}
 }
 
+func TestStopSessionSynchronouslyTreatsMissingRuntimeAsStopped(t *testing.T) {
+	runtimeFailure := errors.New("runtime teardown failed")
+	tests := []struct {
+		name           string
+		missingSession bool
+		stopErr        error
+		wantErr        error
+	}{
+		{
+			name:    "missing runtime is already stopped",
+			stopErr: lifecycle.ErrExecutionNotFound,
+		},
+		{
+			name:           "missing session and runtime are already stopped",
+			missingSession: true,
+		},
+		{
+			name:    "runtime teardown failure is preserved",
+			stopErr: runtimeFailure,
+			wantErr: runtimeFailure,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+			if tt.missingSession {
+				repo.getTaskSessionFunc = func(context.Context, string) (*models.TaskSession, error) {
+					return nil, fmt.Errorf("session deleted: %w", models.ErrTaskSessionNotFound)
+				}
+			} else {
+				repo.sessions["session-sync"] = &models.TaskSession{
+					ID: "session-sync", TaskID: "task-sync", State: models.TaskSessionStateRunning,
+				}
+			}
+			manager := &mockAgentManager{
+				getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+					if tt.missingSession {
+						return "", lifecycle.ErrNoExecutionForSession
+					}
+					return "execution-sync", nil
+				},
+				stopAgentWithReasonFunc: func(context.Context, string, string, bool) error {
+					return tt.stopErr
+				},
+			}
+			exec := newTestExecutor(t, manager, repo)
+
+			err := exec.StopSessionSynchronously(context.Background(), "session-sync", "cleanup", true)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("StopSessionSynchronously: %v, want success for absent runtime", err)
+				}
+				return
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("StopSessionSynchronously error = %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestStopSessionSynchronouslyStopsLateExecutionAfterSessionDeletion(t *testing.T) {
 	repo := newMockRepository()
 	repo.getTaskSessionFunc = func(context.Context, string) (*models.TaskSession, error) {

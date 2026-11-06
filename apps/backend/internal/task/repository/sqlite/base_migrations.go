@@ -699,6 +699,17 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		return err
 	}
 
+	// Delivery refresh resolves snapshots through their environment owner or a
+	// task/session binding. Both keys are needed by that correlated lookup, and
+	// the environment must lead because each outer snapshot supplies it. Create
+	// the index after both legacy session-table rebuilds above so neither
+	// rebuild can drop it.
+	if err := r.migrate.ApplyContext(ctx, "task_sessions.environment_task_index", `
+		CREATE INDEX IF NOT EXISTS idx_task_sessions_environment_task
+		ON task_sessions(task_environment_id, task_id)`); err != nil {
+		return fmt.Errorf("create task session environment index: %w", err)
+	}
+
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup
 	// instead of leaving a schema that allocateStepEntryIfPending can't write to.

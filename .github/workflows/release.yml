@@ -1079,11 +1079,11 @@ jobs:
             platform: linux-arm64
             goos: linux
             goarch: arm64
-          - os: macos-14
+          - os: macos-15-intel
             platform: macos-x64
             goos: darwin
             goarch: amd64
-          - os: macos-14
+          - os: macos-15
             platform: macos-arm64
             goos: darwin
             goarch: arm64
@@ -1097,6 +1097,8 @@ jobs:
       CGO_ENABLED: 1
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
+      # Keep the runtime deployment target independent of the runner image.
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.goos == 'darwin' && '14.0' || '' }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:

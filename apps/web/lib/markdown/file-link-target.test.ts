@@ -7,6 +7,10 @@ import {
 } from "./file-link-target";
 
 const workspaceRoot = "/root/.kandev/tasks/example";
+const PLUGIN_BUNDLE_PATH = "plugin/ui/bundle.js";
+const GUIDE_PATH = "docs/guide.md";
+const primaryWorktreeRoot = `${workspaceRoot}/kandev`;
+const siblingWorktreeRoot = `${workspaceRoot}/plugin`;
 const primaryRepositoryId = "repo-primary";
 const siblingRepositoryId = "repo-sibling";
 const primarySourceRoot = "/home/jcfs/projects/kandev";
@@ -37,8 +41,8 @@ describe("buildMarkdownFileRootAliases", () => {
           { id: siblingRepositoryId, localPath: siblingSourceRoot },
         ],
         sessionWorktrees: [
-          { repositoryId: primaryRepositoryId, path: `${workspaceRoot}/kandev` },
-          { repositoryId: siblingRepositoryId, path: `${workspaceRoot}/plugin` },
+          { repositoryId: primaryRepositoryId, path: primaryWorktreeRoot },
+          { repositoryId: siblingRepositoryId, path: siblingWorktreeRoot },
         ],
       }),
     ).toEqual([
@@ -82,8 +86,8 @@ describe("buildMarkdownFileRootAliases", () => {
           { id: siblingRepositoryId, localPath: siblingSourceRoot },
         ],
         sessionWorktrees: [
-          { repositoryId: primaryRepositoryId, path: `${workspaceRoot}/kandev` },
-          { repositoryId: siblingRepositoryId, path: `${workspaceRoot}/plugin` },
+          { repositoryId: primaryRepositoryId, path: primaryWorktreeRoot },
+          { repositoryId: siblingRepositoryId, path: siblingWorktreeRoot },
         ],
       }),
     ).toEqual([
@@ -100,7 +104,7 @@ describe("buildMarkdownFileRootAliases", () => {
       buildMarkdownFileRootAliases({
         workspaceRoot,
         repositories: [{ id: siblingRepositoryId, localPath: siblingSourceRoot }],
-        sessionWorktrees: [{ repositoryId: siblingRepositoryId, path: `${workspaceRoot}/plugin` }],
+        sessionWorktrees: [{ repositoryId: siblingRepositoryId, path: siblingWorktreeRoot }],
       }),
     ).toEqual([]);
   });
@@ -113,7 +117,7 @@ describe("buildMarkdownFileRootAliases fail-closed cases", () => {
         workspaceRoot,
         taskRepositoryIds: [singleRepositoryId],
         repositories: [{ id: singleRepositoryId, localPath: singleSourceRoot }],
-        sessionWorktrees: [{ repositoryId: "other-repo", path: `${workspaceRoot}/kandev` }],
+        sessionWorktrees: [{ repositoryId: "other-repo", path: primaryWorktreeRoot }],
       }),
     ).toEqual([]);
 
@@ -136,7 +140,7 @@ describe("buildMarkdownFileRootAliases fail-closed cases", () => {
           { id: singleRepositoryId, localPath: singleSourceRoot },
           { id: singleRepositoryId, localPath: "/home/jcfs/other-kandev" },
         ],
-        sessionWorktrees: [{ repositoryId: singleRepositoryId, path: `${workspaceRoot}/kandev` }],
+        sessionWorktrees: [{ repositoryId: singleRepositoryId, path: primaryWorktreeRoot }],
       }),
     ).toEqual([]);
 
@@ -146,7 +150,7 @@ describe("buildMarkdownFileRootAliases fail-closed cases", () => {
         taskRepositoryIds: [singleRepositoryId],
         repositories: [{ id: singleRepositoryId, localPath: singleSourceRoot }],
         sessionWorktrees: [
-          { repositoryId: singleRepositoryId, path: `${workspaceRoot}/kandev` },
+          { repositoryId: singleRepositoryId, path: primaryWorktreeRoot },
           { repositoryId: singleRepositoryId, path: `${workspaceRoot}/other` },
         ],
       }),
@@ -170,7 +174,7 @@ describe("resolveMarkdownFileTarget mapped paths", () => {
         workspaceRoot,
         fileRootAliases: aliases,
       }),
-    ).toEqual({ kind: "file", path: "plugin/ui/bundle.js" });
+    ).toEqual({ kind: "file", path: PLUGIN_BUNDLE_PATH });
   });
 
   it("maps Windows workspace and registered source paths case-insensitively", () => {
@@ -193,7 +197,7 @@ describe("resolveMarkdownFileTarget mapped paths", () => {
         workspaceRoot: windowsWorkspaceRoot,
         fileRootAliases: windowsAliases,
       }),
-    ).toEqual({ kind: "file", path: "plugin/ui/bundle.js" });
+    ).toEqual({ kind: "file", path: PLUGIN_BUNDLE_PATH });
     expect(
       resolveMarkdownFileTarget(String.raw`C:\Windows\System32\kernel32.dll`, {
         workspaceRoot: windowsWorkspaceRoot,
@@ -216,6 +220,143 @@ describe("resolveMarkdownFileTarget mapped paths", () => {
         fileRootAliases: aliases,
       }),
     ).toEqual({ kind: "blocked" });
+  });
+});
+
+describe("resolveMarkdownFileTarget native workspace base", () => {
+  it("keeps an unqualified link in the checkout that emitted it", () => {
+    expect(
+      resolveMarkdownFileTarget("implementation_plans/node26/task-00.md", {
+        workspaceRoot,
+        relativeBasePath: primaryWorktreeRoot,
+        fileRootAliases: aliases,
+      }),
+    ).toEqual({ kind: "file", path: "kandev/implementation_plans/node26/task-00.md" });
+  });
+
+  it("leaves links from a parent-root session unchanged", () => {
+    expect(
+      resolveMarkdownFileTarget(GUIDE_PATH, {
+        workspaceRoot,
+        relativeBasePath: workspaceRoot,
+        fileRootAliases: aliases,
+      }),
+    ).toEqual({ kind: "file", path: GUIDE_PATH });
+  });
+
+  it("does not double-prefix an explicit source qualifier", () => {
+    expect(
+      resolveMarkdownFileTarget(PLUGIN_BUNDLE_PATH, {
+        workspaceRoot,
+        relativeBasePath: primaryWorktreeRoot,
+        fileRootAliases: aliases,
+      }),
+    ).toEqual({ kind: "file", path: PLUGIN_BUNDLE_PATH });
+  });
+});
+
+describe("resolveMarkdownFileTarget native workspace boundaries", () => {
+  it("does not search a sibling repository for a duplicate filename", () => {
+    expect(
+      resolveMarkdownFileTarget("README.md", {
+        workspaceRoot,
+        relativeBasePath: siblingWorktreeRoot,
+        fileRootAliases: aliases,
+      }),
+    ).toEqual({ kind: "file", path: "plugin/README.md" });
+  });
+
+  it("keeps containment under the confirmed base", () => {
+    expect(
+      resolveMarkdownFileTarget("../../etc/passwd.md", {
+        workspaceRoot,
+        relativeBasePath: primaryWorktreeRoot,
+        fileRootAliases: aliases,
+      }),
+    ).toBeNull();
+    expect(
+      resolveMarkdownFileTarget("secret/key.md", {
+        workspaceRoot,
+        relativeBasePath: "/home/other-checkout",
+        fileRootAliases: aliases,
+      }),
+    ).toEqual({ kind: "blocked" });
+  });
+
+  it("preserves an explicit prefix from worktree placement without a source alias", () => {
+    expect(
+      resolveMarkdownFileTarget("secondary/README.md", {
+        workspaceRoot,
+        relativeBasePath: primaryWorktreeRoot,
+        sourcePrefixes: ["kandev", "secondary"],
+      }),
+    ).toEqual({ kind: "file", path: "secondary/README.md" });
+    expect(
+      resolveMarkdownFileTarget("kandev/README.md", {
+        workspaceRoot,
+        relativeBasePath: primaryWorktreeRoot,
+        sourcePrefixes: ["kandev", "secondary"],
+      }),
+    ).toEqual({ kind: "file", path: "kandev/README.md" });
+  });
+
+  it("fails closed for an ambiguous expanded workspace without a base", () => {
+    expect(
+      resolveMarkdownFileTarget(GUIDE_PATH, {
+        workspaceRoot,
+        fileRootAliases: aliases,
+      }),
+    ).toEqual({ kind: "blocked" });
+    expect(
+      resolveMarkdownFileTarget(GUIDE_PATH, {
+        workspaceRoot,
+        sourcePrefixes: ["kandev", "secondary"],
+      }),
+    ).toEqual({ kind: "blocked" });
+  });
+
+  it("retains root-relative behavior when the only checkout is the workspace root", () => {
+    expect(
+      resolveMarkdownFileTarget(GUIDE_PATH, {
+        workspaceRoot,
+        fileRootAliases: [
+          {
+            repositoryId: singleRepositoryId,
+            sourceRoot: singleSourceRoot,
+            workspaceRelativeRoot: "",
+          },
+        ],
+      }),
+    ).toEqual({ kind: "file", path: GUIDE_PATH });
+  });
+
+  it("matches a case-variant Windows source prefix", () => {
+    const windowsWorkspaceRoot = String.raw`C:\Users\Me\worktree`;
+    const windowsBase = String.raw`C:\Users\Me\worktree\master`;
+    expect(
+      resolveMarkdownFileTarget("MASTER/README.md", {
+        workspaceRoot: windowsWorkspaceRoot,
+        relativeBasePath: windowsBase,
+        sourcePrefixes: ["master"],
+      }),
+    ).toEqual({ kind: "file", path: "MASTER/README.md" });
+  });
+
+  it("maps a Windows native workspace case-insensitively", () => {
+    const windowsWorkspaceRoot = String.raw`C:\Users\Me\worktree`;
+    expect(
+      resolveMarkdownFileTarget(GUIDE_PATH, {
+        workspaceRoot: windowsWorkspaceRoot,
+        relativeBasePath: String.raw`c:\users\me\worktree\master`,
+        fileRootAliases: [
+          {
+            repositoryId: primaryRepositoryId,
+            sourceRoot: primarySourceRoot,
+            workspaceRelativeRoot: "master",
+          },
+        ],
+      }),
+    ).toEqual({ kind: "file", path: "master/docs/guide.md" });
   });
 });
 

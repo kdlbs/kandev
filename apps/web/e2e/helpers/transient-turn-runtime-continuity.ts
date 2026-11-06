@@ -122,6 +122,47 @@ export function assertRetainedACPTrace(tracePath: string, expectedPrompts: numbe
   expect(records.filter((record) => record.event === "prompt")).toHaveLength(expectedPrompts);
 }
 
+export function assertKnownFailedCommandCapacityACPTrace(tracePath: string) {
+  const records = readMockACPTrace(tracePath);
+  const prompts = records.filter((record) => record.event === "prompt");
+  assertRetainedACPTrace(tracePath, 2);
+  expect(
+    prompts.filter((record) => record.prompt?.includes("/capacity-known-failed-command")),
+  ).toHaveLength(1);
+  expect(records.filter((record) => record.event === "known_command_failure")).toHaveLength(1);
+}
+
+export async function expectKnownFailedCommandVisible(session: SessionPage) {
+  const group = session
+    .activeChat()
+    .getByRole("button", { name: /2 tool calls/ })
+    .first();
+  await expect(group).toBeVisible({ timeout: 30_000 });
+  const command = session.activeChat().getByText("go test ./focused", { exact: true }).first();
+  if (!(await command.isVisible())) {
+    await group.click();
+  }
+  await expect(command).toBeVisible();
+}
+
+export async function waitForKnownFailedCommandMessage(apiClient: ApiClient, sessionId: string) {
+  return pollUntil(
+    async () => {
+      const { messages } = await apiClient.listSessionMessages(sessionId);
+      return messages.find((message) => {
+        if (!message.type?.startsWith("tool_")) return false;
+        const status = message.metadata?.status;
+        if (status !== "error" && status !== "failed") return false;
+        const title = String(message.metadata?.title ?? message.content ?? "");
+        return /Run focused fixture command|go test \.\/focused/.test(title);
+      });
+    },
+    (message): message is SessionMessage => message !== undefined,
+    60_000,
+    "waiting for the failed command tool result",
+  );
+}
+
 export function assertCompletedCapacityACPTrace(tracePath: string, originalCommand: string) {
   const records = readMockACPTrace(tracePath);
   const prompts = records.filter((record) => record.event === "prompt");

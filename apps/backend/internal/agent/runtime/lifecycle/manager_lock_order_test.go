@@ -24,7 +24,7 @@ func goroutineParkedIn(frames ...string) bool {
 	buffer := make([]byte, 4<<20)
 	for _, stack := range strings.Split(string(buffer[:runtime.Stack(buffer, true)]), "\n\n") {
 		header, _, _ := strings.Cut(stack, "\n")
-		matches := strings.Contains(header, "[sync.")
+		matches := strings.Contains(header, "[sync.") || strings.Contains(header, "[select")
 		for _, frame := range frames {
 			matches = matches && strings.Contains(stack, frame)
 		}
