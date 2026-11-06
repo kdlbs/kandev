@@ -174,11 +174,37 @@ func (a *Adapter) emitCopilotCompactionTimeline(event decodedCopilotNativeEvent,
 		Status:        status,
 		SessionUpdate: "compaction",
 	}
-	if event.Type == copilotNativeTypeCompactionComplete && data.Trigger != "" {
-		update.Meta = acp.OptionalValue(map[string]any{"trigger": data.Trigger})
+	if event.Type == copilotNativeTypeCompactionComplete {
+		applyCopilotCompactionTimelineDetails(update, data)
 	}
 	if timeline := a.convertCompactionUpdate(event.SessionID, update); timeline != nil {
 		a.sendUpdate(*timeline)
+	}
+}
+
+func applyCopilotCompactionTimelineDetails(
+	update *acp.SessionCompactionUpdate,
+	data copilotNativeCompactionData,
+) {
+	contextMeta := map[string]any{}
+	if data.Trigger != "" {
+		contextMeta["trigger"] = data.Trigger
+	}
+	if data.PreCompactionTokens != nil {
+		contextMeta["preTokens"] = *data.PreCompactionTokens
+	}
+	if data.PostCompactionTokens != nil {
+		contextMeta["postTokens"] = *data.PostCompactionTokens
+	}
+	if len(contextMeta) > 0 {
+		update.Meta = acp.OptionalValue(map[string]any{"contextCompaction": contextMeta})
+	}
+	reason := data.FailureReason
+	if reason == "" {
+		reason = data.Error
+	}
+	if reason != "" {
+		update.Error = acp.OptionalValue(reason)
 	}
 }
 

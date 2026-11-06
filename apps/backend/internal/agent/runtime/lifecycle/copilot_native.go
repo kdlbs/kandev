@@ -19,17 +19,24 @@ func (m *Manager) applyCopilotNativeLaunchCapability(
 	rt ExecutorBackend,
 	deliveryStreamID string,
 ) {
-	if execution == nil || execution.AgentID != agents.CopilotACPAgentID || deliveryStreamID == "" {
-		return
-	}
-	if !m.canonicalDeliveryProjectorAvailable() {
-		return
-	}
-	capable, ok := rt.(interface{ SupportsCopilotNativeSessionEvents() bool })
-	if !ok || !capable.SupportsCopilotNativeSessionEvents() {
+	if execution == nil || !m.copilotNativeLaunchAllowed(rt, execution.AgentID, deliveryStreamID) {
 		return
 	}
 	execution.CopilotNativeSessionEvents = true
+}
+
+// copilotNativeLaunchAllowed is the single launch decision for the native
+// subscription. A qualified agentctl suppresses its mixed gauge, so the opt-in
+// must never be sent unless the backend can durably count the native events.
+func (m *Manager) copilotNativeLaunchAllowed(rt ExecutorBackend, agentType, deliveryStreamID string) bool {
+	if !copilotNativeSessionEventsForLaunch(agentType, deliveryStreamID) {
+		return false
+	}
+	if !m.canonicalDeliveryProjectorAvailable() {
+		return false
+	}
+	capable, ok := rt.(interface{ SupportsCopilotNativeSessionEvents() bool })
+	return ok && capable.SupportsCopilotNativeSessionEvents()
 }
 
 // canonicalDeliveryProjectorAvailable reports whether the backend repository

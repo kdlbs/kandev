@@ -4,6 +4,7 @@ import {
   expectNativeCompactionCount,
   openContextTooltip,
   seedCopilotNativeTask,
+  sendCopilotLiveCompaction,
 } from "./copilot-native-compaction-helpers";
 
 test.describe("Copilot native compaction", () => {
@@ -44,11 +45,19 @@ test.describe("Copilot native compaction", () => {
       await expect(gauge.tooltip.getByTestId("context-window-usage").first()).toContainText(
         "9.7K of 272.0K",
       );
+
+      // A distinct completion after page load proves live publication, not
+      // only the hydrated snapshot from seedCopilotNativeTask.
+      await sendCopilotLiveCompaction(testPage);
+      const live = await openContextTooltip(testPage);
+      await expectNativeCompactionCount(live.tooltip, 2);
+      await expect(testPage.getByRole("button", { name: "Context window: 3% used" })).toBeVisible();
+
       await backend.restart();
       await testPage.reload();
       const afterRestart = await openContextTooltip(testPage);
-      await expectNativeCompactionCount(afterRestart.tooltip, 1);
-      await expect(testPage.getByRole("button", { name: "Context window: 4% used" })).toBeVisible();
+      await expectNativeCompactionCount(afterRestart.tooltip, 2);
+      await expect(testPage.getByRole("button", { name: "Context window: 3% used" })).toBeVisible();
 
       await prCapture.screenshot("copilot-native-compaction", {
         caption: "Copilot native compaction count with retained root context gauge",

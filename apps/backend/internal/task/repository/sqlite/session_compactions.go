@@ -180,16 +180,24 @@ func (r *Repository) validateCompactionNativeIdentityTx(
 	if incarnationID == "" || nativeSessionID == "" {
 		return errCompactionNativeIdentity
 	}
-	var bound string
+	var bound, agentID string
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT native_session_id FROM harness_session_generations
-		WHERE session_id = ? AND incarnation_id = ? AND generation = ?`),
-		sessionID, incarnationID, generation).Scan(&bound)
+		SELECT hg.native_session_id,
+			COALESCE((SELECT a.name FROM agent_profiles ap
+				JOIN agents a ON a.id = ap.agent_id
+				WHERE ap.id = ts.agent_profile_id LIMIT 1), '')
+		FROM harness_session_generations hg
+		JOIN task_sessions ts ON ts.id = hg.session_id
+		WHERE hg.session_id = ? AND hg.incarnation_id = ? AND hg.generation = ?`),
+		sessionID, incarnationID, generation).Scan(&bound, &agentID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return errCompactionNativeIdentity
 	}
 	if err != nil {
 		return err
+	}
+	if agentID != copilotNativeCompactionProvider {
+		return errCompactionNativeIdentity
 	}
 	if bound == nativeSessionID {
 		return nil

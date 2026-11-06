@@ -699,10 +699,14 @@ type ExecutorCreateRequest struct {
 	DeliveryStreamID          string
 	DeliveryIncarnationID     string
 	DeliveryHarnessGeneration uint64
-	WorkspaceSourceRoots      []string
-	Protocol                  string
-	CodexAppServerEnabled     bool
-	Env                       map[string]string
+	// CopilotNativeSessionEvents is the manager-resolved opt-in after checking
+	// the provider, durable delivery, canonical projector, and authenticated
+	// peer capability. Executors only forward it; they never re-derive it.
+	CopilotNativeSessionEvents bool
+	WorkspaceSourceRoots       []string
+	Protocol                   string
+	CodexAppServerEnabled      bool
+	Env                        map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string

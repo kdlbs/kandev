@@ -7,6 +7,7 @@ import (
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
+	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -554,5 +555,67 @@ func TestCopilotNativeBindingBarrierDrainsBeforeNewerWork(t *testing.T) {
 	second := nextUpdate(t, a)
 	if first.ContextWindowUsed != 100 || second.ContextWindowUsed != 200 {
 		t.Fatalf("drain order = (%d, %d), want buffered 100 before newer 200", first.ContextWindowUsed, second.ContextWindowUsed)
+	}
+}
+
+func TestCopilotNativeUnknownOutcomeIsPartial(t *testing.T) {
+	data := map[string]any{"compactionAttemptId": "attempt-future", "success": true, "outcome": "future_outcome"}
+	event := decodeTestCopilotEvent(t, copilotCompactionParams(t, nil, copilotNativeTypeCompactionComplete, data))
+	observation, partial := copilotCompactionCompletion(event)
+	if observation != nil || !partial {
+		t.Fatalf("unknown outcome = %+v partial=%v, want partial evidence only", observation, partial)
+	}
+
+	failed := map[string]any{"compactionAttemptId": "attempt-failed", "success": true, "outcome": "failed"}
+	event = decodeTestCopilotEvent(t, copilotCompactionParams(t, nil, copilotNativeTypeCompactionComplete, failed))
+	if observation, partial = copilotCompactionCompletion(event); observation != nil || partial {
+		t.Fatalf("known non-applied outcome = %+v partial=%v, want complete non-counting evidence", observation, partial)
+	}
+}
+
+func TestCopilotNativeTimelineCarriesTokenAndErrorDetails(t *testing.T) {
+	a := newCopilotNativeTestAdapter(t)
+	complete := decodeTestCopilotEvent(t, copilotCompactionParams(t, nil, copilotNativeTypeCompactionComplete, map[string]any{
+		"compactionAttemptId": "attempt-timeline", "trigger": "manual", "success": true, "outcome": "applied",
+		"preCompactionTokens": 1200, "postCompactionTokens": 400,
+	}))
+	a.emitCopilotCompactionTimeline(complete, acp.CompactionStatusCompleted)
+	event := nextUpdate(t, a)
+	if event.NormalizedPayload == nil {
+		t.Fatal("timeline event has no normalized payload")
+	}
+	compaction := event.NormalizedPayload.ContextCompaction()
+	if compaction == nil || compaction.Trigger != "manual" || compaction.PreTokens == nil || *compaction.PreTokens != 1200 ||
+		compaction.PostTokens == nil || *compaction.PostTokens != 400 {
+		t.Fatalf("timeline compaction = %+v, want trigger and token details", compaction)
+	}
+
+	failed := decodeTestCopilotEvent(t, copilotCompactionParams(t, nil, copilotNativeTypeCompactionComplete, map[string]any{
+		"compactionAttemptId": "attempt-failure-timeline", "success": false, "outcome": "failed",
+		"failureReason": "empty_model_response",
+	}))
+	a.emitCopilotCompactionTimeline(failed, acp.CompactionStatusFailed)
+	event = nextUpdate(t, a)
+	compaction = event.NormalizedPayload.ContextCompaction()
+	if compaction == nil || compaction.Error != "empty_model_response" {
+		t.Fatalf("failed timeline compaction = %+v, want the failure reason", compaction)
+	}
+}
+
+func TestCopilotNativeModelChangeResetsGaugeBaseline(t *testing.T) {
+	a := newCopilotNativeTestAdapter(t)
+	a.mu.Lock()
+	a.nativeGaugeMaxSize[testCopilotNativeSession] = 272000
+	a.contextSamples[testCopilotNativeSession] = contextWindowSample{used: 1000, size: 272000}
+	a.mu.Unlock()
+
+	a.finalizeSetModel(sessionmodel.MethodSetModel, testCopilotNativeSession, "model-b", nil, nil, configOptionIDModel, nil)
+
+	a.mu.RLock()
+	_, hasNative := a.nativeGaugeMaxSize[testCopilotNativeSession]
+	_, hasSample := a.contextSamples[testCopilotNativeSession]
+	a.mu.RUnlock()
+	if hasNative || hasSample {
+		t.Fatalf("model change retained native gauge=%v sample=%v; want both reset", hasNative, hasSample)
 	}
 }

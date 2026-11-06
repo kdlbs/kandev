@@ -51,7 +51,8 @@ func (a *mockAgent) handleCopilotNativeFixture(
 		return acp.PromptResponse{}, fmt.Errorf("copilot native fixture requires the initialize subscription"), true
 	}
 	partial := strings.Contains(prompt, "/e2e:copilot-native-partial")
-	frames := copilotNativeFixtureFrames(partial)
+	live := strings.Contains(prompt, "/e2e:copilot-native-live")
+	frames := copilotNativeFixtureFrames(partial, live)
 	for _, frame := range frames {
 		payload := map[string]any{
 			"sessionId": string(sid),
@@ -79,10 +80,29 @@ func (a *mockAgent) handleCopilotNativeFixture(
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil, true
 }
 
-func copilotNativeFixtureFrames(partial bool) []copilotNativeFixtureData {
+func copilotNativeFixtureFrames(partial, live bool) []copilotNativeFixtureData {
 	attemptID := "e2e-copilot-attempt-1"
 	childID := "e2e-copilot-child-1"
 	now := func() string { return time.Now().UTC().Format(time.RFC3339Nano) }
+	if live {
+		return []copilotNativeFixtureData{
+			{Type: "session.usage_info", Timestamp: now(), Data: map[string]any{
+				"currentTokens": 14500, "tokenLimit": 272000,
+			}},
+			{Type: "session.compaction_start", Timestamp: now(), Data: map[string]any{
+				"compactionAttemptId": "e2e-copilot-live-attempt", "trigger": "manual",
+				"currentTokens": 14500, "tokenLimit": 272000,
+			}},
+			{Type: "session.compaction_complete", Timestamp: now(), Data: map[string]any{
+				"compactionAttemptId": "e2e-copilot-live-attempt", "trigger": "manual",
+				"success": true, "outcome": "applied",
+				"preCompactionTokens": 14500, "postCompactionTokens": 8100,
+			}},
+			{Type: "session.usage_info", Timestamp: now(), Data: map[string]any{
+				"currentTokens": 8100, "tokenLimit": 272000,
+			}},
+		}
+	}
 	var frames []copilotNativeFixtureData
 	if partial {
 		frames = append(frames, copilotNativeFixtureData{

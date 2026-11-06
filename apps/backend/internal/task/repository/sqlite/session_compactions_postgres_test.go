@@ -26,8 +26,27 @@ func seedPostgresCompactionSession(t *testing.T, repo *Repository) {
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID: "session-native-compactions-pg", TaskID: "task-native-compactions-pg",
+		AgentProfileID:     "profile-copilot-pg",
 		QueueIncarnationID: "incarnation-native-compactions-pg", State: models.TaskSessionStateWaitingForInput,
 	}))
+	_, err = repo.db.Exec(`CREATE TABLE IF NOT EXISTS agents (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL
+	)`)
+	require.NoError(t, err)
+	_, err = repo.db.Exec(`CREATE TABLE IF NOT EXISTS agent_profiles (
+		id TEXT PRIMARY KEY,
+		agent_id TEXT NOT NULL
+	)`)
+	require.NoError(t, err)
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO agents (id, name) VALUES ('agent-copilot-pg', 'copilot-acp')
+		ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`))
+	require.NoError(t, err)
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO agent_profiles (id, agent_id) VALUES ('profile-copilot-pg', 'agent-copilot-pg')
+		ON CONFLICT (id) DO UPDATE SET agent_id = EXCLUDED.agent_id`))
+	require.NoError(t, err)
 	_, err = repo.db.Exec(repo.db.Rebind(`
 		INSERT INTO harness_session_generations
 			(session_id, incarnation_id, generation, predecessor_generation, native_session_id,

@@ -94,3 +94,10 @@ export async function expectNativeCompactionCount(
   await expect(row.getByText("Compactions", { exact: true }).first()).toBeVisible();
   await expect(row.getByText(String(count), { exact: true }).first()).toBeVisible();
 }
+
+export async function sendCopilotLiveCompaction(testPage: Page): Promise<void> {
+  const session = new SessionPage(testPage);
+  await session.sendMessage("/e2e:copilot-native-live");
+  await expect(session.chat).toContainText("/e2e:copilot-native-live");
+  await session.waitForChatIdle({ timeout: 30_000 });
+}

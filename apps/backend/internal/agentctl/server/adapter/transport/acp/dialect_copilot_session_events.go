@@ -139,10 +139,14 @@ func isJSONNull(raw json.RawMessage) bool {
 }
 
 type copilotNativeCompactionData struct {
-	CompactionAttemptID string `json:"compactionAttemptId"`
-	Success             *bool  `json:"success"`
-	Outcome             string `json:"outcome"`
-	Trigger             string `json:"trigger"`
+	CompactionAttemptID  string `json:"compactionAttemptId"`
+	Success              *bool  `json:"success"`
+	Outcome              string `json:"outcome"`
+	Trigger              string `json:"trigger"`
+	PreCompactionTokens  *int64 `json:"preCompactionTokens"`
+	PostCompactionTokens *int64 `json:"postCompactionTokens"`
+	FailureReason        string `json:"failureReason"`
+	Error                string `json:"error"`
 }
 
 // copilotCompactionCompletion returns the countable observation and whether a
@@ -172,8 +176,11 @@ func copilotCompactionCompletion(event decodedCopilotNativeEvent) (*streams.Cont
 	if attemptID == "" || !successOK || !outcomeOK {
 		return nil, true
 	}
-	if !success || outcome != "applied" {
+	if !success {
 		return nil, false
+	}
+	if outcome != "applied" {
+		return nil, !copilotKnownNonAppliedOutcome(outcome)
 	}
 	trigger, _ := copilotRawStringValue(raw["trigger"])
 	return &streams.ContextCompactionObservation{
@@ -185,6 +192,17 @@ func copilotCompactionCompletion(event decodedCopilotNativeEvent) (*streams.Cont
 		Outcome:         outcome,
 		Trigger:         trigger,
 	}, false
+}
+
+// copilotKnownNonAppliedOutcome distinguishes an explicit non-application
+// from an unrecognized future outcome. Only the former is complete evidence.
+func copilotKnownNonAppliedOutcome(outcome string) bool {
+	switch outcome {
+	case "failed", toolStatusCancelled, "canceled", "skipped", "not_applied", "no_op", "empty":
+		return true
+	default:
+		return false
+	}
 }
 
 func copilotRawString(raw json.RawMessage) string {

@@ -837,6 +837,13 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
 	}
 	a.mu.Lock()
+	currentSessionID := a.sessionID
+	if currentSessionID != "" && currentSessionID != sessionID {
+		a.mu.Unlock()
+		return fmt.Errorf("session was replaced during resume")
+	}
+	clear(a.contextSamples)
+	clear(a.nativeGaugeMaxSize)
 	a.advanceNativeGenerationLocked()
 	a.configGeneration++
 	a.mu.Unlock()
@@ -1527,6 +1534,7 @@ func (a *Adapter) finalizeSetModel(
 	if method == sessionmodel.MethodNone {
 		return
 	}
+	a.resetContextWindowMaxSize(sessionID)
 	if len(responseConfig) > 0 {
 		a.emitAuthoritativeConfigOptions(sessionID, configID, responseConfig, available, false, expectedGeneration...)
 		return

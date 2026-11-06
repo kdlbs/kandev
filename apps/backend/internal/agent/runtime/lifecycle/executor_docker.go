@@ -716,7 +716,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		AssumeMcpHttp:              assumeMcpHttp,
 		McpMode:                    req.McpMode,
 		PromptSuggestions:          req.PromptSuggestions,
-		CopilotNativeSessionEvents: copilotNativeSessionEventsForLaunch(agentType, req.DeliveryStreamID),
+		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,

@@ -27,10 +27,28 @@ func seedCompactionSession(t *testing.T, repo *Repository) {
 	ctx := context.Background()
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: compactionTaskID, Title: "Compaction ledger"}))
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: compactionSessionID, TaskID: compactionTaskID,
+		ID: compactionSessionID, TaskID: compactionTaskID, AgentProfileID: "profile-copilot-1",
 		QueueIncarnationID: compactionIncarnation, State: models.TaskSessionStateWaitingForInput,
 	}))
 	_, err := repo.db.Exec(repo.db.Rebind(`
+		CREATE TABLE IF NOT EXISTS agents (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL
+		)`))
+	require.NoError(t, err)
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		CREATE TABLE IF NOT EXISTS agent_profiles (
+			id TEXT PRIMARY KEY,
+			agent_id TEXT NOT NULL
+		)`))
+	require.NoError(t, err)
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		INSERT OR REPLACE INTO agents (id, name) VALUES ('agent-copilot', 'copilot-acp')`))
+	require.NoError(t, err)
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		INSERT OR REPLACE INTO agent_profiles (id, agent_id) VALUES ('profile-copilot-1', 'agent-copilot')`))
+	require.NoError(t, err)
+	_, err = repo.db.Exec(repo.db.Rebind(`
 		INSERT OR REPLACE INTO harness_session_generations
 			(session_id, incarnation_id, generation, predecessor_generation, native_session_id,
 			 agent_type, adapter_version, original_workspace, current_workspace,
@@ -172,6 +190,40 @@ func TestSessionCompactionsRejectStaleNativeIdentity(t *testing.T) {
 	stale := compactionObservationEvent(t, 1, "attempt-stale")
 	stale.Payload = mustCompactionPayload(t, "unrelated-native-session", "attempt-stale")
 	results := projectCompactionEvents(t, repo, stale)
+	require.Nil(t, results[0].ContextCompactionCount)
+	count, _ := compactionMetadata(t, repo)
+	require.EqualValues(t, 0, count)
+}
+
+func TestSessionCompactionsResolveProfileAgentType(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedCompactionSession(t, repo)
+	_, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT OR REPLACE INTO agent_profiles (id, agent_id) VALUES ('profile-copilot-2', 'agent-copilot')`))
+	require.NoError(t, err)
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		UPDATE task_sessions SET agent_profile_id = 'profile-copilot-2' WHERE id = ?`), compactionSessionID)
+	require.NoError(t, err)
+
+	results := projectCompactionEvents(t, repo, compactionObservationEvent(t, 1, "attempt-profile"))
+	require.NotNil(t, results[0].ContextCompactionCount)
+	require.EqualValues(t, 1, *results[0].ContextCompactionCount)
+}
+
+func TestSessionCompactionsRejectNonCopilotSessionProfile(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedCompactionSession(t, repo)
+	_, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT OR REPLACE INTO agents (id, name) VALUES ('agent-claude', 'claude-acp')`))
+	require.NoError(t, err)
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		INSERT OR REPLACE INTO agent_profiles (id, agent_id) VALUES ('profile-claude-1', 'agent-claude')`))
+	require.NoError(t, err)
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		UPDATE task_sessions SET agent_profile_id = 'profile-claude-1' WHERE id = ?`), compactionSessionID)
+	require.NoError(t, err)
+
+	results := projectCompactionEvents(t, repo, compactionObservationEvent(t, 1, "attempt-wrong-provider"))
 	require.Nil(t, results[0].ContextCompactionCount)
 	count, _ := compactionMetadata(t, repo)
 	require.EqualValues(t, 0, count)

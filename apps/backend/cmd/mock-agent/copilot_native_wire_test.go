@@ -144,3 +144,22 @@ func TestCopilotNativeSubscriptionRequested(t *testing.T) {
 		t.Fatal("partial subscription must not enable the fixture")
 	}
 }
+
+func TestCopilotNativeLiveFramesAddOneDistinctCompletion(t *testing.T) {
+	frames := copilotNativeFixtureFrames(false, true)
+	if len(frames) != 4 {
+		t.Fatalf("frames = %d, want 4", len(frames))
+	}
+	completions := 0
+	for _, frame := range frames {
+		if frame.Type == copilotNativeTypeCompactionComplete {
+			completions++
+			if frame.Data["compactionAttemptId"] != "e2e-copilot-live-attempt" {
+				t.Fatalf("live attempt ID = %v", frame.Data["compactionAttemptId"])
+			}
+		}
+	}
+	if completions != 1 {
+		t.Fatalf("completions = %d, want 1", completions)
+	}
+}

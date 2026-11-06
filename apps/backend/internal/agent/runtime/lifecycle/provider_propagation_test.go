@@ -93,8 +93,12 @@ func TestManagerLaunchCarriesMCPProvidersToExecutor(t *testing.T) {
 
 func TestCopilotNativeOptInPropagatesThroughEveryAgentctlCreateRequest(t *testing.T) {
 	agent := &fakeRuntimeAgent{MockAgent: agents.NewMockAgent(), id: agents.CopilotACPAgentID}
-	req := &ExecutorCreateRequest{AgentConfig: agent, DeliveryStreamID: "stream-native"}
-	containerConfig := ContainerConfig{AgentConfig: agent, DeliveryStreamID: "stream-native"}
+	req := &ExecutorCreateRequest{
+		AgentConfig: agent, DeliveryStreamID: "stream-native", CopilotNativeSessionEvents: true,
+	}
+	containerConfig := ContainerConfig{
+		AgentConfig: agent, DeliveryStreamID: "stream-native", CopilotNativeSessionEvents: true,
+	}
 	sprites := agentctlInstanceRequest(req, spritesWorkspacePath)
 	ssh := buildSSHCreateInstanceRequest(req, "/workspace", "/remote/agentctl")
 	requests := map[string]*agentctl.CreateInstanceRequest{
@@ -108,6 +112,13 @@ func TestCopilotNativeOptInPropagatesThroughEveryAgentctlCreateRequest(t *testin
 		if !request.CopilotNativeSessionEvents {
 			t.Errorf("%s request lost CopilotNativeSessionEvents", name)
 		}
+	}
+	dockerConfig, err := buildDockerContainerConfig(req, "local_docker")
+	if err != nil {
+		t.Fatalf("buildDockerContainerConfig: %v", err)
+	}
+	if !dockerConfig.CopilotNativeSessionEvents {
+		t.Fatal("Docker container config lost CopilotNativeSessionEvents")
 	}
 
 	other := &fakeRuntimeAgent{MockAgent: agents.NewMockAgent(), id: "claude-acp"}
