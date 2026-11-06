@@ -5,10 +5,13 @@ import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summa
 import { extractKandevStem } from "./messages/kandev/parse";
 
 export type SubagentTaskPayload = {
+  name?: string;
+  provider?: "copilot";
   description?: string;
   prompt?: string;
   subagent_type?: string;
   status?: string; // result lifecycle, e.g. "complete" | "error" | "async_launched"
+  resume_count?: number; // Claude background subagent resumes
   agent_id?: string; // Claude
   model?: string; // OpenCode, e.g. "opencode/big-pickle"
   child_session_id?: string; // OpenCode child session
@@ -30,6 +33,18 @@ export type GenericPayload = {
   name?: string;
   input?: unknown;
   output?: unknown;
+  subagent_control?: "wait" | "close" | "message" | "read" | "list" | "resume";
+};
+
+export type ContextCompactionPayload = {
+  compaction_id?: string;
+  status?: "in_progress" | "completed" | "failed" | "cancelled" | string;
+  summary?: string;
+  error?: string;
+  trigger?: string;
+  pre_tokens?: number;
+  post_tokens?: number;
+  duration_ms?: number;
 };
 
 // MonitorView is the structured shape the kandev ACP adapter writes into the
@@ -168,6 +183,7 @@ export type NormalizedPayload = {
   modify_file?: ModifyFilePayload;
   shell_exec?: ShellExecPayload;
   http_request?: HttpRequestPayload;
+  context_compaction?: ContextCompactionPayload;
 };
 
 export type ToolCallMetadata = {
@@ -197,9 +213,11 @@ function hasForeignKandevProvider(input: unknown): boolean {
   const rawInput = (input as Record<string, unknown>).raw_input;
   if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) return false;
   const rawInputRecord = rawInput as Record<string, unknown>;
-  if (!Object.hasOwn(rawInputRecord, "providerIdentifier")) return false;
-  const provider = rawInputRecord.providerIdentifier;
-  return typeof provider !== "string" || provider.trim() !== "kandev";
+  return ["providerIdentifier", "server"].some((field) => {
+    if (!Object.hasOwn(rawInputRecord, field)) return false;
+    const provider = rawInputRecord[field];
+    return typeof provider !== "string" || provider.trim() !== "kandev";
+  });
 }
 
 function legacyKandevToolCandidates(
@@ -232,6 +250,11 @@ export function isRichOutputMessage(message: Message): boolean {
 export function isSubagentMessage(message: Message): boolean {
   const metadata = message.metadata as ToolCallMetadata | undefined;
   return metadata?.normalized?.kind === "subagent_task";
+}
+
+export function isContextCompactionMessage(message: Message): boolean {
+  const metadata = message.metadata as ToolCallMetadata | undefined;
+  return metadata?.normalized?.kind === "context_compaction";
 }
 
 export type TaskLaunchErrorIdentity = Pick<TaskStatusSummaryActiveError, "session_id" | "stamp">;

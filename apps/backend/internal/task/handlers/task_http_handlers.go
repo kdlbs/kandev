@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"io"
 	"net/http"
 	"strconv"
@@ -822,6 +823,37 @@ func (h *TaskHandlers) httpDismissLastAgentError(c *gin.Context) {
 	})
 }
 
+type dismissTaskTurnErrorRequest struct {
+	Stamp string `json:"stamp"`
+}
+
+// httpDismissTaskTurnError acknowledges exactly the observed task turn-error
+// attention. Inline Chat and task-menu dismissal share this operation.
+func (h *TaskHandlers) httpDismissTaskTurnError(c *gin.Context) {
+	var req dismissTaskTurnErrorRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if strings.TrimSpace(req.Stamp) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "stamp is required"})
+		return
+	}
+	err := h.service.DismissTaskTurnError(c.Request.Context(), c.Param("id"), req.Stamp)
+	switch {
+	case err == nil:
+		c.JSON(http.StatusOK, gin.H{"dismissed": true})
+	case errors.Is(err, service.ErrTurnErrorStale):
+		c.JSON(http.StatusConflict, gin.H{"error": "turn error stamp is stale"})
+	case errors.Is(err, service.ErrTurnErrorNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "turn error not found"})
+	case errors.Is(err, service.ErrTurnErrorStampRequired):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "stamp is required"})
+	default:
+		handleNotFound(c, h.logger, err, "task not found")
+	}
+}
+
 type markSessionReadRequest struct {
 	MessageID string `json:"message_id"`
 }
@@ -1025,23 +1057,24 @@ type httpTaskRepositoryInput struct {
 }
 
 type httpCreateTaskRequest struct {
-	WorkspaceID            string                    `json:"workspace_id"`
-	WorkflowID             string                    `json:"workflow_id"`
-	WorkflowStepID         string                    `json:"workflow_step_id"`
-	WorkflowAgentOverrides map[string]string         `json:"workflow_agent_overrides,omitempty"`
-	Title                  string                    `json:"title"`
-	Description            string                    `json:"description,omitempty"`
-	AutoTitle              bool                      `json:"auto_title,omitempty"`
-	Autopilot              bool                      `json:"autopilot,omitempty"`
-	Priority               string                    `json:"priority,omitempty"`
-	State                  *v1.TaskState             `json:"state,omitempty"`
-	Repositories           []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position               int                       `json:"position,omitempty"`
-	Metadata               map[string]interface{}    `json:"metadata,omitempty"`
-	MCPServerIDs           []string                  `json:"mcp_server_ids,omitempty"`
-	StartAgent             bool                      `json:"start_agent,omitempty"`
-	PrepareSession         bool                      `json:"prepare_session,omitempty"`
-	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
+	WorkspaceID            string                                `json:"workspace_id"`
+	WorkflowID             string                                `json:"workflow_id"`
+	WorkflowStepID         string                                `json:"workflow_step_id"`
+	WorkflowAgentOverrides map[string]string                     `json:"workflow_agent_overrides,omitempty"`
+	Title                  string                                `json:"title"`
+	Description            string                                `json:"description,omitempty"`
+	AutoTitle              bool                                  `json:"auto_title,omitempty"`
+	Autopilot              bool                                  `json:"autopilot,omitempty"`
+	Priority               string                                `json:"priority,omitempty"`
+	State                  *v1.TaskState                         `json:"state,omitempty"`
+	Repositories           []httpTaskRepositoryInput             `json:"repositories,omitempty"`
+	Position               int                                   `json:"position,omitempty"`
+	Metadata               map[string]interface{}                `json:"metadata,omitempty"`
+	MCPServerIDs           []string                              `json:"mcp_server_ids,omitempty"`
+	BuiltinMCPPreferences  *mcpconfig.BuiltinCreationPreferences `json:"builtin_mcp_preferences,omitempty"`
+	StartAgent             bool                                  `json:"start_agent,omitempty"`
+	PrepareSession         bool                                  `json:"prepare_session,omitempty"`
+	AgentProfileID         string                                `json:"agent_profile_id,omitempty"`
 	// AssigneeAgentProfileID names an Office agent instance to seat as the
 	// task's runner at create time. Optional, and always workspace-scoped;
 	// see service.ValidateAssigneeAgentProfile for eligibility rules.
@@ -1277,6 +1310,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Metadata:                              metadata,
 		MCPServerIDs:                          body.MCPServerIDs,
 		Attachments:                           body.Attachments,
+		BuiltinMCPPreferences:                 body.BuiltinMCPPreferences,
 		DeferredLaunch:                        deferredLaunch,
 		RecordAgentProfileRecentUse:           true,
 		PlanMode:                              body.PlanMode,

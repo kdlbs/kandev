@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 func (p *Projector) applySourceEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
 	activityChanged := applyTaskActivityEventLocked(state, eventType, data)
+	unreadChanged := applyUnreadEventLocked(state, eventType, data)
 	var sourceChanged bool
 	switch eventType {
 	case events.TaskCreated, events.TaskStateChanged:
@@ -67,7 +69,7 @@ func (p *Projector) applySourceEventLocked(state *projectionState, eventType str
 	case events.GitHubTaskPRUpdated:
 		sourceChanged = p.applyPREventLocked(state, data)
 	}
-	return activityChanged || sourceChanged
+	return activityChanged || unreadChanged || sourceChanged
 }
 
 func applyTaskActivityEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
@@ -313,6 +315,9 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restoreTaskLaunchError(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreTaskTurnError(ctx, taskID, state); err != nil {
+		return err
+	}
 	if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
 		return err
 	}
@@ -334,6 +339,7 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.launchQueueObserved = summary.LaunchQueue != nil
 	state.completionGate = cloneCompletionGate(summary.CompletionGate)
 	state.completionGateObserved = summary.CompletionGate != nil
+	state.unreadBaseline = slices.Clone(summary.UnreadSessionIDs)
 	state.taskPending = summary.PendingAction
 	state.lastActivityAt = maxTimePtr(state.lastActivityAt, summary.LastActivityAt)
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
@@ -347,6 +353,9 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 		copy := *summary.TaskError
 		copy.RecoveryActions = normalizeRecoveryActionsForCategory(copy.Category, copy.RecoveryActions)
 		state.taskError = &copy
+	}
+	if summary.TurnError != nil {
+		state.turnError = cloneTurnError(summary.TurnError)
 	}
 	if summary.ActiveError != nil {
 		copy := *summary.ActiveError
@@ -404,12 +413,15 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	state.errorsObserved = false
 	state.taskError = nil
 	state.taskErrorObserved = false
+	state.turnError = nil
+	state.turnErrorObserved = false
 	state.git = make(map[string]GitSummary)
 	state.gitBaseline = nil
 	state.gitObserved = false
 	state.prs = make(map[string]pullRequestObservation)
 	state.prBaseline = nil
 	state.prObserved = false
+	state.unreadObserved = false
 	applySummaryBaseline(state, current)
 	if err := p.restoreTaskActivity(ctx, taskID, state); err != nil {
 		return err
@@ -418,6 +430,9 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 		return err
 	}
 	if err := p.restoreTaskLaunchError(ctx, taskID, state); err != nil {
+		return err
+	}
+	if err := p.restoreTaskTurnError(ctx, taskID, state); err != nil {
 		return err
 	}
 	if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
@@ -511,6 +526,7 @@ func (p *Projector) restoreSessionObservations(
 			isPrimary:           input.IsPrimary,
 			foregroundActivity:  input.ForegroundActivity,
 			activeSubagentCount: maxInt(input.ActiveSubagentCount, 0),
+			unread:              unreadRanksFromState(input.Unread),
 		}
 		activeError := normalizeRebuildError(input.ActiveError, p.now().UTC())
 		if activeError == nil || state.clearedErrorStamps[sessionID] == activeError.Stamp {
@@ -522,6 +538,7 @@ func (p *Projector) restoreSessionObservations(
 	state.sessions = sessions
 	state.sessionsObserved = true
 	state.activityObserved = snapshot.ActivityObserved
+	state.unreadObserved = snapshot.UnreadObserved
 	if snapshot.ErrorsObserved {
 		state.errors = errorsBySession
 		state.errorsObserved = true
@@ -582,6 +599,50 @@ func (p *Projector) refreshTaskLaunchError(
 	}
 	state.taskErrorObserved = true
 	state.taskError = next
+	return true, nil
+}
+
+func (p *Projector) restoreTaskTurnError(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) error {
+	if p.loadTaskTurnError == nil {
+		return nil
+	}
+	observation, err := p.loadTaskTurnError(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load task turn error for status summary %q: %w", taskID, err)
+	}
+	if !observation.Observed {
+		return nil
+	}
+	state.turnErrorObserved = true
+	state.turnError = cloneTurnError(observation.Error)
+	return nil
+}
+
+func (p *Projector) refreshTaskTurnError(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) (bool, error) {
+	observation, err := p.loadTaskTurnError(ctx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("refresh task turn error for status summary %q: %w", taskID, err)
+	}
+	if !observation.Observed {
+		return false, nil
+	}
+	next := cloneTurnError(observation.Error)
+	if equalTurnError(state.turnError, next) && state.turnErrorObserved {
+		if state.current == nil && next != nil {
+			return true, nil
+		}
+		return false, nil
+	}
+	state.turnErrorObserved = true
+	state.turnError = next
 	return true, nil
 }
 

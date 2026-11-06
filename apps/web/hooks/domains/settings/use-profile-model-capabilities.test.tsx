@@ -105,6 +105,15 @@ function capabilityResponse(
   };
 }
 
+function policyBlockedCapabilityResponse(contextRevision: string): DynamicModelsResponse {
+  return {
+    ...capabilityResponse([], contextRevision),
+    status: "unsupported",
+    reason_code: "policy_unverified",
+    error: "profile launch settings are unsupported by this agent",
+  };
+}
+
 function optionResponse(model: string, contextRevision: string): AgentModelConfigResponse {
   return {
     agent_name: MOCK_AGENT_NAME,
@@ -117,6 +126,7 @@ function optionResponse(model: string, contextRevision: string): AgentModelConfi
 }
 
 const savedLaunchSettings = {
+  mode: "",
   env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: "saved" }],
   cli_flags: [],
   command_prefix: "",
@@ -225,6 +235,138 @@ describe("useProfileModelCapabilities", () => {
   });
 });
 
+describe("useProfileModelCapabilities policy feedback", () => {
+  it("keeps policy-blocked capability metadata without changing the saved model or options", async () => {
+    const selectedPluginIds = ["installed:m/spark"];
+    const profile = {
+      ...initialProfile,
+      config_options: { effort: "high", reasoning: "balanced" },
+      copilot_selected_plugins: selectedPluginIds,
+    };
+    const launchSettings = {
+      ...savedLaunchSettings,
+      copilot_selected_plugins: selectedPluginIds,
+    };
+    const onChange = vi.fn();
+    probeAgentProfileMock.mockResolvedValueOnce(policyBlockedCapabilityResponse(REVISION_A));
+
+    const { result } = renderHook(() =>
+      useProfileModelCapabilities(MOCK_AGENT_NAME, profile, modelConfig, onChange, {
+        profileId: PROFILE_ID_A,
+        savedLaunchSettings: launchSettings,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.discoveryState).toBe("failed"));
+    expect(result.current.capabilities.status).toBe("unsupported");
+    expect(result.current.capabilities.reasonCode).toBe("policy_unverified");
+    expect(result.current.capabilities.models).toEqual([]);
+    expect(profile.model).toBe(SAVED_MODEL_ID);
+    expect(profile.config_options).toEqual({ effort: "high", reasoning: "balanced" });
+    expect(resolveAgentModelConfigMock).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("retains a model-option policy reason without reconciling saved values", async () => {
+    const selectedPluginIds = ["installed:m/spark"];
+    const profile = {
+      ...initialProfile,
+      config_options: { effort: "high", reasoning: "balanced" },
+      copilot_selected_plugins: selectedPluginIds,
+    };
+    const launchSettings = {
+      ...savedLaunchSettings,
+      copilot_selected_plugins: selectedPluginIds,
+    };
+    const onChange = vi.fn();
+    probeAgentProfileMock.mockResolvedValueOnce(
+      capabilityResponse([{ id: SAVED_MODEL_ID, name: SAVED_MODEL_NAME }], REVISION_A),
+    );
+    resolveAgentModelConfigMock.mockResolvedValueOnce({
+      ...optionResponse(SAVED_MODEL_ID, REVISION_A),
+      status: "unsupported",
+      reason_code: "policy_unverified",
+      error: "model option resolution failed",
+    });
+
+    const { result } = renderHook(() =>
+      useProfileModelCapabilities(MOCK_AGENT_NAME, profile, modelConfig, onChange, {
+        profileId: PROFILE_ID_A,
+        savedLaunchSettings: launchSettings,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.configStatus).toBe("unsupported"));
+    expect(result.current.configReasonCode).toBe("policy_unverified");
+    expect(result.current.configError).toBe("model option resolution failed");
+    expect(profile.model).toBe(SAVED_MODEL_ID);
+    expect(profile.config_options).toEqual({ effort: "high", reasoning: "balanced" });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("useProfileModelCapabilities response ordering", () => {
+  it("rejects a delayed blocked-profile failure after an empty-selection recovery succeeds", async () => {
+    const selectedPluginIds = ["installed:m/spark"];
+    const selectedProfile = { ...initialProfile, copilot_selected_plugins: selectedPluginIds };
+    const selectedLaunchSettings = {
+      ...savedLaunchSettings,
+      copilot_selected_plugins: selectedPluginIds,
+    };
+    probeAgentProfileMock.mockResolvedValueOnce(policyBlockedCapabilityResponse(REVISION_A));
+    const onChange = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ profile }) =>
+        useProfileModelCapabilities(MOCK_AGENT_NAME, profile, modelConfig, onChange, {
+          profileId: PROFILE_ID_A,
+          savedLaunchSettings: selectedLaunchSettings,
+        }),
+      { initialProps: { profile: selectedProfile } },
+    );
+
+    await waitFor(() => expect(result.current.capabilities.reasonCode).toBe("policy_unverified"));
+    let rejectOldProbe: ((error: Error) => void) | undefined;
+    probeAgentProfileMock.mockImplementationOnce(
+      () =>
+        new Promise<DynamicModelsResponse>((_resolve, reject) => {
+          rejectOldProbe = reject;
+        }),
+    );
+    let oldRefresh: Promise<void> | undefined;
+    act(() => {
+      oldRefresh = result.current.refresh();
+    });
+    await waitFor(() => expect(probeAgentProfileMock).toHaveBeenCalledTimes(2));
+
+    const recoveredProfile = { ...selectedProfile, copilot_selected_plugins: [] };
+    rerender({ profile: recoveredProfile });
+    probeAgentProfileMock.mockResolvedValueOnce(
+      capabilityResponse([{ id: "recovered-model", name: "Recovered model" }], REVISION_B),
+    );
+    resolveAgentModelConfigMock.mockResolvedValueOnce(
+      optionResponse("recovered-model", REVISION_B),
+    );
+    await act(async () => {
+      await result.current.refresh();
+    });
+    await waitFor(() => expect(result.current.discoveryState).toBe("ready"));
+    await waitFor(() => expect(result.current.configStatus).toBe("ok"));
+
+    await act(async () => {
+      rejectOldProbe?.(new Error("late old profile failure"));
+      await oldRefresh;
+    });
+
+    expect(result.current.discoveryState).toBe("ready");
+    expect(result.current.capabilities.models).toEqual([
+      { id: "recovered-model", name: "Recovered model" },
+    ]);
+    expect(result.current.capabilities.reasonCode).toBeUndefined();
+    expect(result.current.capabilities.error).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
 describe("profile discovery after runtime activation", () => {
   it("refreshes the current draft once after a matching successful update", async () => {
     probeAgentProfileMock
@@ -264,6 +406,7 @@ describe("profile discovery after runtime activation", () => {
     expect(probeAgentProfileMock).toHaveBeenLastCalledWith(MOCK_AGENT_NAME, {
       profile_id: PROFILE_ID_A,
       launch_settings: {
+        mode: "",
         env_vars: [
           {
             key: "MOCK_AGENT_PROFILE_CATALOG",
@@ -391,47 +534,67 @@ describe("activation refresh failure", () => {
   });
 });
 
+function draftProfile(catalogValue: string) {
+  return {
+    ...initialProfile,
+    env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: catalogValue }],
+    cli_flags: [{ flag: "--catalog", enabled: true, description: CATALOG_SELECTOR_DESCRIPTION }],
+    command_prefix: "npx --",
+  };
+}
+
+function expectedDraftLaunchSettings(catalogValue: string): ProfileCapabilityRequest {
+  return {
+    launch_settings: {
+      mode: "",
+      env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: catalogValue, secret_id: undefined }],
+      cli_flags: [{ flag: "--catalog", enabled: true, description: CATALOG_SELECTOR_DESCRIPTION }],
+      command_prefix: "npx --",
+    },
+    refresh: true,
+  };
+}
+
+function renderDraftDiscovery() {
+  const onChange = vi.fn();
+  const draft = draftProfile(DRAFT_A);
+  const hook = renderHook(
+    ({ profile }) => useProfileModelCapabilities(MOCK_AGENT_NAME, profile, modelConfig, onChange),
+    { initialProps: { profile: draft } },
+  );
+  return { ...hook, draft, onChange };
+}
+
 describe("draft profile capability discovery", () => {
-  it("does not probe a draft until refresh and rejects the result after launch settings change", async () => {
+  it("does not probe a draft until refresh", async () => {
+    const { result } = renderDraftDiscovery();
+    expect(probeAgentProfileMock).not.toHaveBeenCalled();
+    expect(result.current.discoveryState).toBe("stale");
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(probeAgentProfileMock).toHaveBeenCalledTimes(1);
+    expect(probeAgentProfileMock).toHaveBeenLastCalledWith(
+      MOCK_AGENT_NAME,
+      expectedDraftLaunchSettings(DRAFT_A),
+    );
+  });
+
+  it("rejects a stale result and resolves the new draft options", async () => {
     let resolveOldProbe: ((response: DynamicModelsResponse) => void) | undefined;
     probeAgentProfileMock.mockImplementationOnce(
       () => new Promise<DynamicModelsResponse>((resolve) => (resolveOldProbe = resolve)),
     );
-
-    const onChange = vi.fn();
-    const draft = {
-      ...initialProfile,
-      env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: DRAFT_A }],
-      cli_flags: [{ flag: "--catalog", enabled: true, description: CATALOG_SELECTOR_DESCRIPTION }],
-      command_prefix: "npx --",
-    };
-    const { result, rerender } = renderHook(
-      ({ profile }) => useProfileModelCapabilities(MOCK_AGENT_NAME, profile, modelConfig, onChange),
-      { initialProps: { profile: draft } },
-    );
-
-    expect(probeAgentProfileMock).not.toHaveBeenCalled();
-    expect(result.current.discoveryState).toBe("stale");
+    const { result, rerender, draft, onChange } = renderDraftDiscovery();
 
     let oldRefresh: Promise<void> | undefined;
     act(() => {
       oldRefresh = result.current.refresh();
     });
     await waitFor(() => expect(probeAgentProfileMock).toHaveBeenCalledTimes(1));
-    expect(probeAgentProfileMock).toHaveBeenLastCalledWith(MOCK_AGENT_NAME, {
-      launch_settings: {
-        env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: DRAFT_A, secret_id: undefined }],
-        cli_flags: [
-          { flag: "--catalog", enabled: true, description: CATALOG_SELECTOR_DESCRIPTION },
-        ],
-        command_prefix: "npx --",
-      },
-      refresh: true,
-    } satisfies ProfileCapabilityRequest);
 
-    rerender({
-      profile: { ...draft, env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: DRAFT_B }] },
-    });
+    rerender({ profile: draftProfile(DRAFT_B) });
     expect(result.current.discoveryState).toBe("stale");
     await act(async () => {
       resolveOldProbe?.(capabilityResponse([{ id: "old-model", name: "Old model" }], "old"));
@@ -451,47 +614,25 @@ describe("draft profile capability discovery", () => {
     });
 
     await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(1));
-    expect(probeAgentProfileMock).toHaveBeenLastCalledWith(MOCK_AGENT_NAME, {
-      launch_settings: {
-        env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: DRAFT_B, secret_id: undefined }],
-        cli_flags: [
-          { flag: "--catalog", enabled: true, description: CATALOG_SELECTOR_DESCRIPTION },
-        ],
-        command_prefix: "npx --",
-      },
-      refresh: true,
-    });
+    expect(probeAgentProfileMock).toHaveBeenLastCalledWith(
+      MOCK_AGENT_NAME,
+      expectedDraftLaunchSettings(DRAFT_B),
+    );
     expect(resolveAgentModelConfigMock).toHaveBeenCalledWith(MOCK_AGENT_NAME, {
       model: SAVED_MODEL_ID,
-      launch_settings: {
-        env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: DRAFT_B, secret_id: undefined }],
-        cli_flags: [
-          { flag: "--catalog", enabled: true, description: CATALOG_SELECTOR_DESCRIPTION },
-        ],
-        command_prefix: "npx --",
-      },
+      launch_settings: expectedDraftLaunchSettings(DRAFT_B).launch_settings,
     });
     expect(result.current.capabilities.models).toEqual([
       { id: DRAFT_B_MODEL_ID, name: DRAFT_B_MODEL_NAME },
     ]);
 
     rerender({
-      profile: {
-        ...draft,
-        model: DRAFT_B_MODEL_ID,
-        env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: DRAFT_B }],
-      },
+      profile: { ...draft, model: DRAFT_B_MODEL_ID, env_vars: draftProfile(DRAFT_B).env_vars },
     });
     await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(2));
     expect(resolveAgentModelConfigMock).toHaveBeenLastCalledWith(MOCK_AGENT_NAME, {
       model: DRAFT_B_MODEL_ID,
-      launch_settings: {
-        env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: DRAFT_B, secret_id: undefined }],
-        cli_flags: [
-          { flag: "--catalog", enabled: true, description: CATALOG_SELECTOR_DESCRIPTION },
-        ],
-        command_prefix: "npx --",
-      },
+      launch_settings: expectedDraftLaunchSettings(DRAFT_B).launch_settings,
     });
     expect(onChange).not.toHaveBeenCalled();
   });

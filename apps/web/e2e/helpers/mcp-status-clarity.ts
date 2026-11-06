@@ -79,7 +79,7 @@ export async function checkMCPStatusClarity({
     const session = new SessionPage(page);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
-    await session.sendMessageViaButton("e2e:mcp:kandev:list_workspaces_kandev({})");
+    await session.sendMessageViaButton("e2e:mcp:kandev:list_agents_kandev({})");
     await session.waitForChatIdle({ timeout: 30_000 });
     const trigger = page.getByTestId("mcp-status-trigger");
     if (!mobile) {
@@ -273,7 +273,12 @@ async function checkSavedReports(
         apply_state === "failed" ? 2 : 1,
       );
       await expect(explorer).not.toContainText("Desired revision");
-      if (apply_state !== "applied") await expect(summary).toContainText("stays in use");
+      if (apply_state === "failed") {
+        await expect(summary).toContainText("The last accepted setup is kept for comparison.");
+        await expect(summary).not.toContainText("stays in use");
+      } else if (apply_state !== "applied") {
+        await expect(summary).toContainText("stays in use");
+      }
       if (mobile) {
         await expect(page.locator('[data-slot="drawer-content"][data-state="open"]')).toHaveCount(
           1,

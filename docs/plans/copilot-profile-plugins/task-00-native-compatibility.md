@@ -1,7 +1,7 @@
 ---
 id: "00-native-compatibility"
-title: "Qualify Copilot inventory and mount compatibility"
-status: pending
+title: "Record Copilot compatibility and native diagnostics"
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -17,17 +17,20 @@ acceptance_criteria:
   - AC-AGENTS-COPILOT-PLUGINS-003.3
   - AC-AGENTS-COPILOT-PLUGINS-004.1
   - AC-AGENTS-COPILOT-PLUGINS-005.4
-  - AC-AGENTS-COPILOT-PLUGINS-007.2
+  - AC-AGENTS-COPILOT-PLUGINS-007.6
 system_design:
   - ../../specs/agents/system-design/copilot-profile-plugins.md
 ---
 
-# Task 00: Qualify native compatibility
+# Task 00: Record native compatibility
 
 ## Summary
 
-Produce a reproducible compatibility matrix before production adapters depend on private metadata or native policy behavior.
-This is an evidence work order. It changes documentation and disposable fixtures only.
+Record a reproducible inventory/metadata compatibility matrix and actual native
+observations. Under the [native-authority decision](../../decisions/2026-10-28-copilot-native-policy-authority.md),
+this is diagnostic delivery, not privileged policy certification or a launch
+gate. The original slice owns evidence/disposable fixtures; completion WO-03
+owns the reusable tagged harness.
 
 ## In scope
 
@@ -49,13 +52,13 @@ Do not treat a successful handshake as proof of plugin loading or a successful t
 ## Acceptance
 
 1. Evidence identifies exact package, binary version, platform, inventory shape, root mapping, and manifest behavior for every proposed supported adapter.
-2. Repeated mounts and native veto behavior have explicit results. Missing evidence excludes that runtime/source rather than silently weakening the gate.
+2. Repeated mounts, native-disable observations, and untested managed policy have explicit results. Missing enterprise-policy evidence is not an adapter incompatibility or a launch gate; unknown inventory/metadata shapes remain unsupported.
 3. The matrix distinguishes reproduced results, supplied observations, unsupported cases, and authentication limitations without changing managed selection.
 
 ## Verification
 
 Run from the repository root after implementation is authorized.
-The following baseline probe uses no developer home or credentials.
+The following historical baseline probe uses no developer home or credentials.
 It does not qualify installation paths, plugin loading, or managed policy by itself.
 
 ```bash
@@ -83,7 +86,9 @@ Inspect captures, keep secrets out of repository files, and remove only the exac
 
 These adaptive qualification commands cannot be fixed before their native syntax is observed.
 They must be recorded exactly before marking this work order done.
-If no runtime meets the policy boundary, record the blocker and stop dependent production loading work.
+Record absent managed-policy coverage without claiming enforcement or bypass.
+No administrator or system/MDM/enterprise-policy changes are authorized.
+The absent control does not block the revised loading work order.
 
 ## Files likely touched
 
@@ -114,10 +119,26 @@ None. Production or permanent test work requires a later explicit implementation
 
 ## Results
 
-Pending 2026-10-28. Inventory/schema evidence is recorded in [compatibility-evidence.md](compatibility-evidence.md); native policy qualification is not.
+Follow-up execution is mapped to
+[completion task 03](../copilot-profile-plugin-completion/task-03-native-qualification.md).
+Completed under the amended diagnostic scope; no full policy-certification
+pass is claimed. Preserve the historical results below.
+
+Historical baseline, 2026-10-28: inventory/schema evidence was recorded in
+[compatibility-evidence.md](compatibility-evidence.md); native policy
+qualification was not. These results preceded the macOS follow-up and new ADR.
 
 - Reproduced package/binary identity, flat inventory, external rows, live rows with `installedFrom`, installed rows with `cache_path`, JSONC state, manifest precedence, `--config-dir` precedence, and repeated ACP mounts for 1.0.88.
 - Reproduced flat inventory, built-in rows, live rows, installed rows with `cache_path` (after registering the non-default marketplace), and repeated ACP mounts for 1.0.104.
 - 1.0.103 remains unqualified because only supplied observations exist.
-- Authenticated `session/new`, plugin tool calls, plugin MCP loading, native veto observation, Windows, and macOS remain unverified. Inventory discovery is qualified for 1.0.88 and 1.0.104; explicit mount permission is not. Nonempty starts return `policy_unverified`, and other versions return `runtime_unsupported`.
+- At the original checkpoint, authenticated `session/new`, plugin tool calls, plugin MCP loading, native veto observation, Windows, and macOS remained unverified. Inventory discovery was qualified for 1.0.88 and 1.0.104. Nonempty starts returned `policy_unverified`, and other versions returned `runtime_unsupported`.
 - `git diff --check -- docs/plans/copilot-profile-plugins docs/specs/agents` passed.
+
+Completion execution additionally reproduced exact package/root observations
+on macOS arm64 and attempted real ACP/MCP setup with its build-tagged harness.
+The [same evidence ledger](compatibility-evidence.md#completion-observations-macos-arm64)
+now records eight attempts, actual corrected 1.0.104 coexistence, target-disabled/
+sibling-called observations without authoritative denial, 1.0.88 endpoint calls,
+and the untested managed-policy control. Final offline/race/lint/cleanup checks
+and exact commands are recorded by completion WO-03. The diagnostic work is
+done. Completion WO-04 delivered supported native process preparation.

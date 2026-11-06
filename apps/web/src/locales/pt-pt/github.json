@@ -1,4 +1,5 @@
 {
+  "openPr": "Abrir PR",
   "views": "Vistas",
   "viewPicker": "Vistas: {{view}}",
   "loadingSavedQueries": "A carregar consultas guardadas...",

@@ -202,11 +202,10 @@ root. In a multi-source task this is the parent that contains every repository a
 workspace-source and sibling-materialization events update `workspace_path` without replacing the
 primary `worktree_path`, and a later session refresh returns the same effective root.
 
-Chat file links resolve against `workspace_path`, so an absolute path under any attached source is
-converted to its task-root-relative Files path before it is opened. Clients may fall back to
-`worktree_path` for legacy session payloads that do not yet include `workspace_path`. Absolute paths
-outside the effective workspace remain non-actionable and are never rewritten into a workspace
-file request.
+Chat file links use `workspace_path` as the Files containment boundary.
+The [chat file-link context design](chat-file-link-context.md) extends relative-base selection and absolute aliases.
+Legacy payloads retain `worktree_path` as the existing Files-root fallback.
+Unrelated host paths remain non-actionable.
 
 `add_workspace_sources_kandev` accepts the same source union and defaults `task_id` to the current
 task. The caller may target only itself or a same-workspace direct child. The task MCP server injects

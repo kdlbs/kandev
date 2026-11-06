@@ -67,6 +67,19 @@ func StrategyByKey(key string) (PassthroughMCPStrategy, bool) {
 	return strategy, ok
 }
 
+// ProjectDeliveryStrategyKey returns the stable identity of a project-file
+// strategy that may produce execution-bound delivery evidence. Only strategies
+// with explicit session-admission support qualify; declaring a project strategy
+// is not enough. A later producer must add its own validation and wire evidence.
+func ProjectDeliveryStrategyKey(strategy PassthroughMCPStrategy) (string, bool) {
+	switch strategy.(type) {
+	case PiStrategy, *PiStrategy:
+		return StrategyKeyPi, true
+	default:
+		return "", false
+	}
+}
+
 // StrategyOptions returns the selectable strategies in stable order, each with
 // the mechanism description the UI shows next to it.
 func StrategyOptions() []StrategyOption {

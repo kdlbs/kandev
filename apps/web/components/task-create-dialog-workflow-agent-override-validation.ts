@@ -1,5 +1,8 @@
 import type { AgentProfileOption } from "@/lib/state/slices";
-import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
+import type {
+  StepType,
+  TaskCreateWorkflowStepsResult,
+} from "@/components/task-create-dialog-types";
 import { t } from "@/lib/i18n";
 import {
   buildWorkflowAgentOverrideRows,
@@ -16,23 +19,14 @@ export type WorkflowAgentOverrideValidation = {
   blockedReason?: string;
 };
 
-function resolveSnapshotState(args: {
-  effectiveWorkflowId: string | null;
-  snapshots: Record<string, WorkflowSnapshotData>;
-  workspaceSnapshotRead?: { workspaceId?: string | null; error?: unknown };
-  workspaceId: string | null | undefined;
-}) {
-  const snapshot = args.effectiveWorkflowId ? args.snapshots[args.effectiveWorkflowId] : undefined;
-  const missingSnapshot = Boolean(args.effectiveWorkflowId && !snapshot);
-  const workspaceSnapshotRead = args.workspaceSnapshotRead ?? {};
-  const readBelongsToWorkspace =
-    !workspaceSnapshotRead.workspaceId || workspaceSnapshotRead.workspaceId === args.workspaceId;
-  const error = Boolean(missingSnapshot && workspaceSnapshotRead.error && readBelongsToWorkspace);
-  return {
-    snapshot,
-    error,
-    loading: Boolean(missingSnapshot && !error) || Boolean(snapshot?.isPlaceholder),
-  };
+function overrideSteps(steps: readonly StepType[]) {
+  return steps.map((step, index) => ({
+    id: step.id,
+    title: step.title,
+    position: step.position ?? index,
+    agent_profile_id: step.agent_profile_id,
+    session_target: step.session_target ?? null,
+  }));
 }
 
 function blockedReasonForValidation(args: {
@@ -50,27 +44,15 @@ function blockedReasonForValidation(args: {
 }
 
 export function buildWorkflowAgentOverrideValidation(args: {
-  effectiveWorkflowId: string | null | undefined;
-  snapshots: Record<string, WorkflowSnapshotData>;
-  workspaceSnapshotRead?: {
-    workspaceId?: string | null;
-    error?: unknown;
-  };
-  workspaceId: string | null | undefined;
+  selectedWorkflowSteps: TaskCreateWorkflowStepsResult;
   profiles: readonly AgentProfileOption[];
   replacementOptions: readonly WorkflowAgentOverrideOption[];
   overrides: Readonly<Record<string, string>>;
   isCreateMode: boolean;
 }): WorkflowAgentOverrideValidation {
-  const effectiveWorkflowId = args.effectiveWorkflowId ?? null;
-  const snapshotState = resolveSnapshotState({
-    effectiveWorkflowId,
-    snapshots: args.snapshots,
-    workspaceSnapshotRead: args.workspaceSnapshotRead,
-    workspaceId: args.workspaceId,
-  });
+  const { status, steps } = args.selectedWorkflowSteps;
   const rows = buildWorkflowAgentOverrideRows({
-    steps: snapshotState.snapshot?.steps ?? [],
+    steps: overrideSteps(steps),
     profiles: args.profiles,
     replacementOptions: args.replacementOptions,
     overrides: args.overrides,
@@ -78,18 +60,20 @@ export function buildWorkflowAgentOverrideValidation(args: {
   const hasSelectedOverride = Object.values(args.overrides ?? {}).some(
     (replacementProfileId) => replacementProfileId.trim() !== "",
   );
-  const invalid = !snapshotState.loading && rows.some((row) => !row.replacementAvailable);
+  const loading = status === "loading";
+  const error = status === "error";
+  const invalid = status === "success" && rows.some((row) => !row.replacementAvailable);
   return {
     rows,
     options: args.replacementOptions as WorkflowAgentOverrideOption[],
-    loading: snapshotState.loading,
-    error: snapshotState.error,
+    loading,
+    error,
     invalid,
     blockedReason: blockedReasonForValidation({
       isCreateMode: args.isCreateMode,
       hasSelectedOverride,
-      error: snapshotState.error,
-      loading: snapshotState.loading,
+      error,
+      loading,
       invalid,
     }),
   };

@@ -137,52 +137,6 @@ func (r *Repository) GetTaskProjectID(ctx context.Context, taskID string) (strin
 	return projectID, err
 }
 
-// UpdateTaskState updates the state column on a task (e.g. "IN_PROGRESS", "COMPLETED").
-func (r *Repository) UpdateTaskState(ctx context.Context, taskID, state string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-	`), state, taskID)
-	if err != nil {
-		return err
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("task not found: %s", taskID)
-	}
-	return nil
-}
-
-// UpdateTaskStateIfWorkflowStep updates a task only when its workflow step
-// still matches the value read by the caller. This closes the validation-to-
-// write window for status gates that depend on the current workflow step.
-func (r *Repository) UpdateTaskStateIfWorkflowStep(
-	ctx context.Context, taskID, expectedStepID, state string,
-) (bool, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks
-		SET state = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ? AND COALESCE(workflow_step_id, '') = ?
-	`), state, taskID, expectedStepID)
-	if err != nil {
-		return false, err
-	}
-	rows, _ := result.RowsAffected()
-	if rows > 0 {
-		return true, nil
-	}
-
-	var exists int
-	if err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT 1 FROM tasks WHERE id = ?
-	`), taskID).Scan(&exists); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, fmt.Errorf("task not found: %s", taskID)
-		}
-		return false, err
-	}
-	return false, nil
-}
-
 // UpdateTaskAssignee writes (or clears) the per-task runner participant
 // row for a task. ADR 0005 Wave F replaced the legacy
 // tasks.assignee_agent_profile_id column with a 'runner' row in

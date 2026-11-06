@@ -141,6 +141,7 @@ function userMessageMetadataFlags(
     hasContent,
     hasAttachments,
     deliveryBlocked: metadata?.delivery_status === "blocked",
+    deliveryNotDelivered: metadata?.delivery_status === "not_delivered",
   };
 }
 
@@ -170,6 +171,7 @@ function UserContextBadges({
   senderTask,
   workflowMessage,
   deliveryBlocked,
+  deliveryNotDelivered,
 }: {
   destinationTaskId: string;
   hasPlanMode: boolean;
@@ -178,6 +180,7 @@ function UserContextBadges({
   senderTask: SenderTaskInfo | null;
   workflowMessage: WorkflowStepMessageInfo | null;
   deliveryBlocked: boolean;
+  deliveryNotDelivered: boolean;
 }) {
   const { t } = useTranslation();
   if (
@@ -186,7 +189,8 @@ function UserContextBadges({
     contextFiles.length === 0 &&
     !senderTask &&
     !workflowMessage &&
-    !deliveryBlocked
+    !deliveryBlocked &&
+    !deliveryNotDelivered
   )
     return null;
   return (
@@ -199,6 +203,15 @@ function UserContextBadges({
           className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-700 dark:text-amber-300"
         >
           {t("task:deliveryMessageBlocked")}
+        </span>
+      )}
+      {deliveryNotDelivered && (
+        <span
+          role="status"
+          data-testid="user-message-delivery-not-delivered"
+          className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-700 dark:text-amber-300"
+        >
+          {t("task:deliveryMessageNotDelivered")}
         </span>
       )}
       {senderTask && <SenderTaskBadge sender={senderTask} destinationTaskId={destinationTaskId} />}
@@ -338,6 +351,7 @@ function UserMessageContent({
     workflowMessage,
     deliveryBlocked,
     childStallAlerts,
+    deliveryNotDelivered,
   } = parseUserMessageMetadata(comment);
 
   return (
@@ -351,6 +365,7 @@ function UserMessageContent({
           senderTask={senderTask}
           workflowMessage={workflowMessage}
           deliveryBlocked={deliveryBlocked}
+          deliveryNotDelivered={deliveryNotDelivered}
         />
         <ChildStallAlertSummary alerts={childStallAlerts} />
         <div

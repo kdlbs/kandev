@@ -160,17 +160,23 @@ type ApprovalResolvedData struct {
 // same identity, so taskless fallback resolution and summary writes use this
 // field, not AgentID.
 type AgentLifecycleData struct {
-	AgentExecutionID            string                 `json:"agent_execution_id"`
-	TaskID                      string                 `json:"task_id"`
-	RunID                       string                 `json:"run_id"`
-	RunSessionID                string                 `json:"run_session_id"`
-	RunAttempt                  int                    `json:"run_attempt"`
-	WorkspaceID                 string                 `json:"workspace_id"`
-	OwnerKind                   string                 `json:"owner_kind"`
-	AgentID                     string                 `json:"agent_id"`
-	AgentProfileID              string                 `json:"agent_profile_id"`
-	SessionID                   string                 `json:"session_id"`
-	TurnID                      string                 `json:"turn_id,omitempty"`
+	AgentExecutionID string `json:"agent_execution_id"`
+	TaskID           string `json:"task_id"`
+	RunID            string `json:"run_id"`
+	RunSessionID     string `json:"run_session_id"`
+	RunAttempt       int    `json:"run_attempt"`
+	WorkspaceID      string `json:"workspace_id"`
+	OwnerKind        string `json:"owner_kind"`
+	AgentID          string `json:"agent_id"`
+	AgentProfileID   string `json:"agent_profile_id"`
+	SessionID        string `json:"session_id"`
+	TurnID           string `json:"turn_id,omitempty"`
+	// CausingRunID is the Office run a task-owned launch serves. The lifecycle
+	// manager carries it on the launch's ready event, which gives Office a
+	// second, event-driven trigger to settle a ceiling-deferred run if the
+	// replay-success settlement write failed.
+	CausingRunID                string                 `json:"causing_run_id,omitempty"`
+	TerminalCausingRunID        string                 `json:"terminal_causing_run_id,omitempty"`
 	ErrorMessage                string                 `json:"error_message"`
 	ProviderError               *streams.ProviderError `json:"provider_error,omitempty"`
 	PromptGeneration            uint64                 `json:"prompt_generation,omitempty"`
@@ -315,10 +321,12 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		{events.TaskCreated, s.handleTaskCreated},
 		{events.TaskUpdated, s.handleTaskUpdated},
 		{events.TaskMoved, s.handleTaskMoved},
+		{events.TaskStateChanged, s.handleHandoffTaskStateChanged},
 		{events.OfficeApprovalResolved, s.handleApprovalResolved},
 		{events.OfficeCommentCreated, s.handleCommentCreated},
 		{events.AgentCompleted, maybeAsync(s.handleAgentCompleted)},
-		{events.AgentReady, maybeAsync(s.handleTasklessAgentReady)},
+		{events.AgentReady, maybeAsync(s.handleAgentReady)},
+		{events.BuildPermissionRequestWildcardSubject(), maybeAsync(s.handleTasklessPermissionRequest)},
 		// AgentStopped fires when StopAgent is called (e.g. office
 		// fire-and-forget turn-complete teardown). Same handler — both
 		// signal "the agent is no longer running on this task and the
@@ -456,6 +464,13 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	if err != nil {
 		return nil
 	}
+	if data.ErrorMessage != "" {
+		s.logger.Debug("ignoring completion event with an error message",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("error_message", data.ErrorMessage))
+		return nil
+	}
 	// Taskless completion: heartbeat or lightweight-routine fires that
 	// don't carry a task_id. Lightweight routines are already created
 	// today (wakeup/dispatcher.go's createFreshRun runs on every
@@ -468,7 +483,24 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	if data.TaskID == "" {
 		return s.handleTasklessAgentCompleted(ctx, data)
 	}
-	run, err := s.resolveLifecycleRun(ctx, *data)
+	run, err := s.resolveTerminalLifecycleRun(ctx, *data)
+	if errors.Is(err, sql.ErrNoRows) {
+		// A ceiling replay whose settlement write failed leaves the Office run
+		// parked until its ready event recovers it. Completion can run first:
+		// finish the exact parked row now so it does not become claimed after
+		// its execution has already stopped, with no later event to finish it.
+		finished, finishErr := s.finishCeilingDeferredRunOnCompletion(ctx, data)
+		if finishErr != nil {
+			return finishErr
+		}
+		if finished {
+			return nil
+		}
+		// The ready recovery may have claimed the run between the first
+		// lookup and this completion fallback; retry the claimed-run lookup
+		// once so that ordering also reaches the normal finish path.
+		run, err = s.resolveTerminalLifecycleRun(ctx, *data)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			if exactRunSessionEvent(data) {
@@ -479,9 +511,9 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 			// marked the run terminal before this event landed. There is no
 			// run left to reach stampRunFinished, but the agent may still
 			// be sitting at "working" from the launch that produced it.
-			// Scoped to data.RunID so a stale/duplicate event for this
-			// finished run can't clobber a successor run's live status.
-			s.clearAgentWorking(ctx, data.AgentProfileID, data.RunID)
+			// Scope this to the event's exact run identity so a stale event
+			// cannot clear a successor run's live status.
+			s.clearAgentWorking(ctx, data.AgentProfileID, lifecycleEventRunID(*data))
 			return nil
 		}
 		return err
@@ -845,7 +877,10 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	if data.TaskID == "" {
 		return s.handleTasklessAgentFailed(ctx, data)
 	}
-	run, err := s.resolveLifecycleRun(ctx, *data)
+	run, err := s.resolveTerminalLifecycleRun(ctx, *data)
+	if errors.Is(err, sql.ErrNoRows) && lifecycleCausingRunID(*data) != "" {
+		run, err = s.recoverCeilingDeferredRunOnFailure(ctx, *data)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			if exactRunSessionEvent(data) {
@@ -854,8 +889,8 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 			// Same reasoning as handleAgentCompleted's ErrNoRows exit: no
 			// claimed run resolves, so nothing reaches HandleAgentFailure's
 			// clear, but the agent may still be "working" from the launch.
-			// Scoped to data.RunID for the same reason.
-			s.clearAgentWorking(ctx, data.AgentProfileID, data.RunID)
+			// Scoped to the event's exact run identity for the same reason.
+			s.clearAgentWorking(ctx, data.AgentProfileID, lifecycleEventRunID(*data))
 			return nil
 		}
 		return err
@@ -1542,6 +1577,9 @@ func (s *Service) handleCommentCreated(ctx context.Context, event *bus.Event) er
 			zap.String("comment_id", data.CommentID), zap.Error(err))
 		return nil
 	}
+	if comment.Source == handoffCompletionCommentSource {
+		return nil
+	}
 	if err := s.relay.RelayComment(ctx, comment); err != nil {
 		s.logger.Error("relay comment failed",
 			zap.String("comment_id", data.CommentID), zap.Error(err))
@@ -1559,7 +1597,10 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 	}
 	// A session-bridged comment mirrors a turn that already ran; it must
 	// never itself queue a new run, whichever agent it's attributed to.
-	if data.Source == "session" {
+	// A handoff completion report carries its own handoff_completed wake,
+	// queued directly by handleHandoffTaskStateChanged, so the generic
+	// comment path must not wake the assignee a second time.
+	if data.Source == "session" || data.Source == handoffCompletionCommentSource {
 		return nil
 	}
 	// Self-comment short-circuit: if the agent that wrote the comment is

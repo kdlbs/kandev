@@ -14,6 +14,7 @@
  */
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { firstSessionId } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 const OPENCODE_FIXTURE_SCRIPT = "/opencode-background-fixture";
@@ -69,32 +70,46 @@ test.describe("OpenCode background inspection", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    const settledSessionId = await firstSessionId(apiClient, task.id);
+    await expect
+      .poll(
+        async () => {
+          const { workloads } = await apiClient.listBackgroundWorkloads(settledSessionId);
+          return {
+            count: workloads.length,
+            running: workloads.filter((workload) => workload.state === "running").length,
+          };
+        },
+        { message: "the three legacy launches should settle to unknown", timeout: 30_000 },
+      )
+      .toEqual({ count: SHELL_IDS.length, running: 0 });
 
     // AC-007.1: each confirmed launch keeps one shared workload identity, even
-    // after the launch tool finished and the foreground prompt settled.
-    const chip = testPage.getByTestId("background-work-chip");
-    await expect(chip).toBeVisible({ timeout: 30_000 });
-    await expect(chip).toContainText("3 Background Jobs");
-
-    await chip.click();
-    const summary = testPage.getByTestId("background-work-summary-list");
-    await expect(summary).toBeVisible();
+    // after the launch tool finished and the foreground prompt settled. Legacy
+    // delivery cannot establish liveness, so no composer chip is claimed; the
+    // independent entry keeps all three unknown records inspectable.
+    await testPage.getByTestId("dockview-add-panel-btn").first().click();
+    await testPage.getByTestId("add-panel-background-work").click();
+    const overview = testPage.getByTestId("background-work-overview");
+    await expect(overview).toBeVisible();
+    await expect(testPage.getByTestId("background-work-tab-history")).toHaveAttribute(
+      "data-state",
+      "active",
+    );
     for (const shellID of SHELL_IDS) {
-      await expect(summary.getByTestId(`background-work-summary-item-${shellID}`)).toBeVisible();
+      await expect(testPage.getByTestId(`background-workload-card-${shellID}`)).toBeVisible();
     }
+    await expect(testPage.getByTestId("background-work-chip")).toHaveCount(0);
 
-    // AC-007.4 / AC-008.5: legacy delivery cannot establish liveness, so the
-    // summary shows unknown activity instead of verified running counts.
-    await expect(summary).toContainText("0 running");
-    await expect(summary).toContainText("0 waiting");
-    await expect(summary).toContainText("3 unknown");
+    // AC-007.4 / AC-008.5: legacy delivery cannot establish liveness, so
+    // History keeps the honest unknown status instead of claiming completion.
     for (const shellID of SHELL_IDS) {
-      await expect(summary.getByTestId(`background-work-state-${shellID}`)).toHaveText("Unknown");
+      await expect(testPage.getByTestId(`background-work-state-${shellID}`)).toHaveText("Unknown");
     }
 
     // AC-009.4: a job opens its own central detail tab, with unavailable output
     // and no controls the runtime never advertised.
-    await summary.getByTestId(`background-work-open-button-${SHELL_IDS[2]}`).click();
+    await testPage.getByTestId(`open-workload-${SHELL_IDS[2]}`).click();
     const detail = testPage.getByTestId(`background-work-detail-${SHELL_IDS[2]}`);
     await expect(detail).toBeVisible();
     await expect(detail).toContainText("Output is not available for this job");
@@ -109,7 +124,7 @@ test.describe("OpenCode background inspection", () => {
     await session.waitForDirectInput(30_000);
     await session.sendMessage("Report the job status when you have it.");
     await expect(session.activeChat()).toContainText("Report the job status when you have it.");
-    await expect(chip).toContainText("3 Background Jobs");
+    await expect(testPage.getByTestId("background-work-chip")).toHaveCount(0);
   });
 
   test("history remains reachable after a terminal job and no active count", async ({
@@ -135,9 +150,6 @@ test.describe("OpenCode background inspection", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    const chip = testPage.getByTestId("background-work-chip");
-    await expect(chip).toBeVisible({ timeout: 30_000 });
-
     let sessionId = task.session_id ?? "";
     if (!sessionId) {
       await expect
@@ -151,10 +163,19 @@ test.describe("OpenCode background inspection", () => {
         )
         .not.toBe("");
     }
+    await expect
+      .poll(
+        async () => {
+          const { workloads } = await apiClient.listBackgroundWorkloads(sessionId);
+          return workloads.length;
+        },
+        { message: "the fixture should register three workloads", timeout: 30_000 },
+      )
+      .toBe(SHELL_IDS.length);
 
     // Resolve every job through the shared API with a terminal state. The
-    // viewer, not a provider branch, must keep the history entry reachable
-    // once the active count is zero (AC-009.5).
+    // viewer, not a provider branch, must keep history reachable once the
+    // running count is zero (AC-009.5).
     for (const shellID of SHELL_IDS) {
       await apiClient.recordBackgroundWorkload(sessionId, {
         work_id: shellID,
@@ -167,19 +188,20 @@ test.describe("OpenCode background inspection", () => {
       });
     }
 
-    const history = testPage.getByTestId("background-work-history-chip");
-    await expect(history).toBeVisible({ timeout: 30_000 });
     await expect(testPage.getByTestId("background-work-chip")).toHaveCount(0);
+    await expect(testPage.getByTestId("background-work-history-chip")).toHaveCount(0);
 
-    await history.click();
-    const summary = testPage.getByTestId("background-work-summary-list");
-    await expect(summary).toBeVisible();
-    await expect(summary).toContainText("Background history");
-    await expect(summary).toContainText("0 running");
-    await expect(summary).toContainText("0 waiting");
-    await expect(summary).toContainText("0 unknown");
+    await testPage.getByTestId("dockview-add-panel-btn").first().click();
+    await testPage.getByTestId("add-panel-background-work").click();
+    await expect(testPage.getByTestId("background-work-overview")).toBeVisible();
+    await expect(testPage.getByTestId("background-work-tab-history")).toHaveAttribute(
+      "data-state",
+      "active",
+    );
     for (const shellID of SHELL_IDS) {
-      await expect(summary.getByTestId(`background-work-state-${shellID}`)).toHaveText("Completed");
+      await expect(testPage.getByTestId(`background-work-state-${shellID}`)).toHaveText(
+        "Completed",
+      );
     }
   });
 });

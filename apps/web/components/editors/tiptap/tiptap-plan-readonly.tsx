@@ -44,7 +44,7 @@ export function PlanReadOnlyMarkdown({ content, className, testId }: Props) {
     immediatelyRender: false,
     editable: false,
     extensions: [
-      StarterKit.configure({ codeBlock: false }),
+      StarterKit.configure({ codeBlock: false, link: false, underline: false }),
       createCodeBlockWithMermaid(lowlight),
       Markdown.configure({ html: true, transformPastedText: false, transformCopiedText: false }),
       Link.configure({ openOnClick: false }),

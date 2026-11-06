@@ -1,6 +1,6 @@
 # Frontend (Vite/React SPA) — architecture and conventions
 
-Scoped guidance for `apps/web/`. Repo-wide rules (commit format, code-quality limits, etc.) live in the root `AGENTS.md`.
+Scoped guidance for `apps/web/`. Repo-wide rules (commit format, code-quality limits, etc.) live in the root `AGENTS.md`. Primary commands: `pnpm run lint` runs the Oxlint configuration; `pnpm run typecheck` runs `tsrs --noEmit --fast` after generation. Retained ESLint and classic TypeScript API roles, focused previews, and wiring evidence are in [`TOOLCHAIN.md`](TOOLCHAIN.md).
 
 ## Plugin authoring
 
@@ -258,7 +258,7 @@ README markup and for stripping executable HTML and unsafe URLs.
 
 ## Code-quality limits
 
-Enforced by `apps/web/eslint.config.mjs` (warnings, will become errors):
+Enforced by `apps/web/oxlint.config.mjs` (warnings become failures through `--deny-warnings`):
 
 - Files: ≤600 lines · Functions: ≤100 lines · Absolute-positioned virtualizer rows do not collapse CSS margins; do not layer row padding/gaps over an item's existing margin. Preserve the old rendered gap with a focused bounding-box regression.
 - Cyclomatic complexity: ≤15 · Cognitive complexity: ≤20
@@ -291,7 +291,7 @@ The public frontend contract is `apps/packages/plugin-sdk`; `docs/plans/plugins/
 
 ## Sidebar task views
 
-`taskOverview.byId` owns lightweight task records. Board/workflow `taskIds` and sidebar page memberships reference them; compatible `tasks` arrays expose the exact canonical objects. `withTaskOverviewNormalization` merges legacy board, optimistic, and Office writes before publication. Owners cover boards, active detail, displayed pages, and reusable pages; final release evicts the record. Read journals protect live changes/deletions within 1,000 IDs / 1 MiB. Task timestamps and summary revisions are independent. See [shared task state](../../docs/specs/ui/system-design/sidebar-shared-task-state.md) for coverage and reconciliation. Complete `sqlite_nocase_v1` scopes page locally, including sets above 100; other views fetch bounded pages. Covered views have no query or updating announcement. Do not mount sidebar-only all-workflow fetches. `sidebarViewsByWorkspace` stores personal views: use `selectSidebarViews`, retain workspace identity through saves/rollback, and reserve `sidebarViews` for legacy hydration. The backend owns migration/defaults; writes use scoped `sidebar_view_state`. `SidebarTaskPageCache` shares reads per store and retains at most five first pages, 2 MiB including entities, for five minutes from fetch. Later pages remain display-only. Context generations fence reuse. Soft invalidation clears reusable pages but can publish reconciled provisional rows while one trailing refresh recovers membership; provisional pages are never reusable. Summary changes invalidate affected pages. Access denial clears rows and outstanding reads for every consumer. Keep query status in `SidebarTaskQueryStatus`, without duplicate archive errors or layout-shifting banners.
+`taskOverview.byId` owns lightweight task records. Board/workflow `taskIds` and sidebar page memberships reference them; compatible `tasks` arrays expose the exact canonical objects. `withTaskOverviewNormalization` merges legacy board, optimistic, and Office writes before publication. Owners cover boards, active detail, displayed pages, and reusable pages; final release evicts the record. Read journals protect live changes/deletions within 1,000 IDs / 1 MiB. Task timestamps and summary revisions are independent. See [shared task state](../../docs/specs/ui/system-design/sidebar-shared-task-state.md) for coverage and reconciliation. Complete `sqlite_nocase_v1` scopes page locally, including sets above 100; other views fetch bounded pages. Covered views have no query or updating announcement. Do not mount sidebar-only all-workflow fetches. `sidebarViewsByWorkspace` stores personal views: use `selectSidebarViews`, retain workspace identity through saves/rollback, and reserve `sidebarViews` for legacy hydration. The backend owns migration/defaults; writes use scoped `sidebar_view_state`. `SidebarTaskPageCache` shares reads per store and retains at most five first pages, 2 MiB including entities, for five minutes from fetch. Later pages remain display-only. Context generations fence reuse. Soft invalidation clears reusable pages but can publish reconciled provisional rows while one trailing refresh recovers membership; provisional pages are never reusable. Summary changes invalidate affected pages. Access denial clears rows and outstanding reads for every consumer. Sidebar page reads share one bounded recovery owner in `lib/sidebar/sidebar-task-page-recovery.ts`: five attempts within thirty seconds of visible time, one terminal latch per query, and a new cycle only from manual Retry or a later foreground episode. Do not add per-consumer retry timers. Keep query status in `SidebarTaskQueryStatus`, without duplicate archive errors or layout-shifting banners.
 
 ## Testing notes
 

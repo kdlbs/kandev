@@ -2,7 +2,7 @@
 status: current
 system: tasks
 created: 2026-09-10
-updated: 2026-09-30
+updated: 2026-10-29
 requirements:
   - REQ-TASKS-REMOVAL-NAVIGATION-001
   - REQ-TASKS-REMOVAL-NAVIGATION-002
@@ -258,6 +258,75 @@ been acknowledged. Request settlement alone must not reopen stale content.
 
 Unselected targets get request bookkeeping and duplicate suppression without a
 departure record. Their completion never changes selection or focus.
+
+## Rapid independent sidebar archives
+
+This section implements AC-001.6 and AC-002.6. All short acceptance IDs use the
+`AC-TASKS-REMOVAL-NAVIGATION` prefix. The existing pending-row contract remains
+in force. Stable row positions let users act on several tasks without moving
+neighboring targets under the pointer.
+
+Keep the current ownership boundaries:
+
+- `taskRemoval` owns accepted operation membership and lifetime.
+- `coordinateTaskRemovalBatch` owns admission, mutation outcomes, departure,
+  and release. Single-task actions continue to pass one request.
+- Canonical task records describe accepted server data. Pending intent does
+  not change archive metadata or create a second task cache.
+- Desktop and phone adapters own confirmation targets, menu state, and focus.
+  Their per-task busy controls read the existing operation membership.
+- The backend retains all snapshot, cancellation, persistence, and cleanup work.
+
+Add small pure selectors beside the transitions in `lib/state/task-removal.ts`.
+Resolve membership through `pendingTokenByTaskId` and its matching operation.
+Require the captured workspace and task membership to match. Selectors can
+filter by action for archive controls. A stale token without a matching
+operation is not pending membership.
+
+`switchAfterRemoval` in `hooks/use-task-removal.ts` combines the operation's
+captured exclusions with current pending removals before candidate lookup.
+Recheck candidate eligibility after HTTP validation and after session loading,
+immediately before selection, layout, or URL writes. A cached successful
+liveness read cannot override a newer local removal intent. A selection attempt
+also keeps every removal it observes for its own lifetime, so a candidate
+removed while a reply was outstanding does not become eligible again when its
+operation releases. The attempt rechecks a candidate's ancestry against every
+cascade removal it observes, including immediately before the switch, so a
+descendant that appears only in the server-page fallback cannot become the
+destination.
+
+If a candidate becomes pending, exclude it for this selection attempt and
+continue through the existing candidate order and bounded server-page fallback.
+If navigation ownership expires, stop without another automatic selection.
+Do not wait for an event-free interval or retry the same rejected candidate.
+Preserve authoritative liveness and cascade-ancestry checks.
+
+The sidebar and `useSheetArchiveActions` must derive busy state for each
+captured target from these selectors. Remove their competing archive booleans
+where the store supplies the same fact. Row menus use per-row membership;
+finishing A must not enable B while B remains pending. Keep existing compatibility
+props only where another caller needs them. An existing invocation guard can
+retain promise bookkeeping, but it must not define shared pending state.
+
+Preserve the archive progress counter in `useTaskActions` and existing terminal
+notifications. No new timer, request queue, event bus, middleware, setting,
+offline storage, or transport contract is part of this correction.
+The existing sidebar refresh scheduler already coalesces membership reads.
+Do not add a second scheduler or redesign task-overview normalization here.
+
+Desktop retains the sidebar. Phone retains the existing Tasks drawer, visible
+overflow actions, dismissal, safe areas, and single list scroller. Both read the
+same pending membership. No copy, layout, touch-target, or animation changes
+are required.
+
+An isolated frontend trace covers repeated individual sidebar actions before
+and after the correction. Record synchronous handlers, React commits, layout
+switches, requests, and long tasks. The concurrency regression does not establish
+the dominant CPU consumer. Additional scheduling or backend work requires a
+separate measured cause before scope expands.
+
+The [rapid sidebar archive package](../../../plans/rapid-sidebar-archive/plan.md)
+records reproduction, exact checks, and the implementation work order.
 
 ## WebSocket reconciliation
 

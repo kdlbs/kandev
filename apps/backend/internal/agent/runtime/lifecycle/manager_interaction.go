@@ -1373,7 +1373,16 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
 	execution.cancelStartupRecovery()
-	execution.remoteInstanceLifecycleMu.Lock()
+	stopCtx := ctx
+	preserveRuntime := shouldPreserveRecoverableRuntime(execution, reason)
+	if force || preserveRuntime {
+		var cancelStop context.CancelFunc
+		stopCtx, cancelStop = kubernetesDurableContext(ctx)
+		defer cancelStop()
+	}
+	if err := execution.remoteInstanceLifecycleMu.LockContext(stopCtx); err != nil {
+		return err
+	}
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
@@ -1385,12 +1394,8 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		m.streamManager.cancelDeliveryReconciliation(executionID)
 	}
 	backendForce := force
-	stopCtx := ctx
-	if shouldPreserveRecoverableRuntime(execution, reason) {
+	if preserveRuntime {
 		backendForce = false
-		var cancelStop context.CancelFunc
-		stopCtx, cancelStop = kubernetesDurableContext(ctx)
-		defer cancelStop()
 	}
 	activityLease, err := m.acquireActivity(stopCtx, activity.KindExecutionStopping)
 	if err != nil {
@@ -1433,13 +1438,37 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// A retained runtime gets a bounded non-cancelled opportunity to
 	// stop the failed process before its environment is preserved for another retry.
 	if reason != StopReasonBackendShutdown {
-		m.preserveTurnChangesBeforeStop(stopCtx, execution, reason)
+		if err := m.preserveTurnChangesBeforeStop(stopCtx, execution, reason); err != nil {
+			if m.streamManager != nil {
+				m.streamManager.restoreDeliveryReconciliation(executionID)
+			}
+			return fmt.Errorf("preserve turn changes for execution %q: %w", executionID, err)
+		}
 	}
 	agentStopFailed := m.stopExecutionAgentctl(stopCtx, executionID, execution, backendForce)
+	// A preserved runtime must not fall through to the executor's
+	// AgentStopFailed cleanup, which stops the container and can turn a
+	// recoverable failure into loss of the workspace. Keep the execution and
+	// its cleanup ownership tracked so a later attempt can finish the stop.
+	if agentStopFailed && preserveRuntime {
+		return fmt.Errorf("stop agent process for execution %q: %w", executionID, errRecoverableStopUnconfirmed)
+	}
 	// Backend shutdown retains interrupted delivery outcomes. Its terminal
 	// checkpoint follows confirmed process termination, before runtime cleanup.
 	if reason == StopReasonBackendShutdown && !backendForce && !agentStopFailed {
-		m.preserveTurnChangesBeforeStop(stopCtx, execution, reason)
+		if err := m.preserveTurnChangesBeforeStop(stopCtx, execution, reason); err != nil {
+			return fmt.Errorf("preserve shutdown turn changes for execution %q: %w", executionID, err)
+		}
+	}
+
+	// Release remote project-file claims while the helper is still reachable.
+	// A failed release keeps the execution and client retryable rather than
+	// orphaning the files behind a torn-down runtime.
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	cleanupErr := m.cleanupProjectMCPFiles(ctx, execution, client)
+	releaseClient()
+	if cleanupErr != nil {
+		return fmt.Errorf("release project MCP files for execution %q: %w", executionID, cleanupErr)
 	}
 
 	// Stop the agent execution via the runtime that created it. A failed stop
@@ -1658,6 +1687,14 @@ func (m *Manager) restartAgentProcess(
 			return err
 		}
 	}
+	if preparation.profileInfo != nil {
+		_ = m.executionStore.WithLock(executionID, func(current *AgentExecution) {
+			if preparation.profileInfo.ProfileID != "" {
+				current.ExecutionProfileID = preparation.profileInfo.ProfileID
+			}
+			current.CopilotSelectedPlugins = append([]string{}, preparation.profileInfo.CopilotSelectedPlugins...)
+		})
+	}
 	execution.beginStartupAttemptPreservingIdentity()
 
 	// 1. Close WebSocket streams (updates + workspace). Use per-stream Close
@@ -1677,7 +1714,7 @@ func (m *Manager) restartAgentProcess(
 	m.stopAgentProcessForRestart(ctx, execution)
 
 	// 3. Reset execution state after the replacement command has been validated.
-	m.resetAgentRestartState(executionID, preparation.commands)
+	m.resetAgentRestartState(executionID, preparation)
 
 	// 4. Wait for agentctl to be ready (it should still be running)
 	client, releaseClient = execution.AcquireAgentCtlClient()
@@ -1697,9 +1734,15 @@ func (m *Manager) restartAgentProcess(
 	}
 
 	// 5. Reconfigure and start new agent subprocess
-	if _, err := m.configureAndStartAgentWithMCP(ctx, execution, preparation.agentConfig, operation); err != nil {
-		m.updateExecutionError(executionID, "failed to restart agent: "+err.Error())
-		return fmt.Errorf("failed to restart agent: %w", err)
+	var configureErr error
+	if preparation.copilotPluginArgsPrepared {
+		_, configureErr = m.configureAndStartAgentWithPreparedArgs(ctx, execution, preparation.copilotPluginArgs)
+	} else {
+		_, configureErr = m.configureAndStartAgentWithMCP(ctx, execution, preparation.agentConfig, operation)
+	}
+	if configureErr != nil {
+		m.updateExecutionError(executionID, "failed to restart agent: "+configureErr.Error())
+		return fmt.Errorf("failed to restart agent: %w", configureErr)
 	}
 
 	// 6. Wait for agent process to initialize
@@ -1759,10 +1802,13 @@ func (m *Manager) stopAgentProcessForRestart(ctx context.Context, execution *Age
 }
 
 type agentRestartPreparation struct {
-	agentConfig   agents.Agent
-	profileInfo   *AgentProfileInfo
-	commands      agentCommands
-	runtimeConfig models.SessionRuntimeConfig
+	agentConfig               agents.Agent
+	profileInfo               *AgentProfileInfo
+	commands                  agentCommands
+	runtimeConfig             models.SessionRuntimeConfig
+	copilotPluginArgs         []string
+	copilotPluginArgsPrepared bool
+	runtimeEnvironment        map[string]string
 }
 
 // prepareAgentRestart builds and validates the replacement before touching the current process.
@@ -1784,9 +1830,25 @@ func (m *Manager) prepareAgentRestart(
 	if err != nil {
 		return agentRestartPreparation{}, fmt.Errorf("failed to rebuild agent command for restart: %w", err)
 	}
-	if profileInfo != nil {
-		execution.ExecutionProfileID = profileInfo.ProfileID
-		execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
+	var copilotPluginArgs []string
+	var runtimeEnvironment map[string]string
+	copilotPluginArgsPrepared := agentConfig.ID() == agents.CopilotACPAgentID
+	if copilotPluginArgsPrepared {
+		runtimeEnvironment, err = m.copilotPluginPreflightEnvironment(ctx, execution, profileInfo)
+		if err != nil {
+			return agentRestartPreparation{}, fmt.Errorf("failed to prepare agent environment for reset: %w", err)
+		}
+		var selected []string
+		if profileInfo != nil {
+			selected = profileInfo.CopilotSelectedPlugins
+		}
+		copilotPluginArgs, err = m.prepareCopilotPluginArgsForSelection(
+			ctx, execution, runtimeEnvironment, commands.args, commands.wrapper, selected,
+		)
+		if err != nil {
+			return agentRestartPreparation{}, err
+		}
+		copilotPluginArgs = append([]string{}, copilotPluginArgs...)
 	}
 	var runtimeConfig models.SessionRuntimeConfig
 	if runtimeConfigOverride == nil {
@@ -1795,10 +1857,13 @@ func (m *Manager) prepareAgentRestart(
 		runtimeConfig = cloneSessionRuntimeConfig(*runtimeConfigOverride)
 	}
 	return agentRestartPreparation{
-		agentConfig:   agentConfig,
-		profileInfo:   profileInfo,
-		commands:      commands,
-		runtimeConfig: runtimeConfig,
+		agentConfig:               agentConfig,
+		profileInfo:               profileInfo,
+		commands:                  commands,
+		runtimeConfig:             runtimeConfig,
+		copilotPluginArgs:         copilotPluginArgs,
+		copilotPluginArgsPrepared: copilotPluginArgsPrepared,
+		runtimeEnvironment:        runtimeEnvironment,
 	}, nil
 }
 
@@ -1810,7 +1875,8 @@ func cloneSessionRuntimeConfig(config models.SessionRuntimeConfig) models.Sessio
 	}
 }
 
-func (m *Manager) resetAgentRestartState(executionID string, commands agentCommands) {
+func (m *Manager) resetAgentRestartState(executionID string, preparation agentRestartPreparation) {
+	commands := preparation.commands
 	if execution, exists := m.executionStore.Get(executionID); exists && execution.contextResetFencedState() {
 		// The old reset outcome is fenced until this explicit restart owns the
 		// replacement. Streams are closed before this state reset, so setup
@@ -1831,6 +1897,9 @@ func (m *Manager) resetAgentRestartState(executionID string, commands agentComma
 		exec.AgentArgs = commands.args
 		exec.ContinueArgs = commands.continueArgs
 		exec.LaunchWrapper = commands.wrapper
+		if preparation.copilotPluginArgsPrepared {
+			exec.setRuntimeEnvironment(preparation.runtimeEnvironment)
+		}
 		m.resetStreamingStateWithHistory(exec)
 		select {
 		case <-exec.promptDoneCh:
@@ -1961,6 +2030,66 @@ func (m *Manager) DurableDeliveryCapabilityForExecution(
 // Thread-safe: Can be called concurrently from multiple goroutines.
 func (m *Manager) GetExecutionBySessionID(sessionID string) (*AgentExecution, bool) {
 	return m.executionStore.GetBySessionID(sessionID)
+}
+
+// ErrNoActiveAnswerExecution means no live execution currently owns the
+// answering session. Callers treat it as a retryable materialization failure;
+// detached answers materialize through their resume prompt instead.
+var ErrNoActiveAnswerExecution = errors.New("no active execution for answer attachments")
+
+// MaterializeAnswerAttachments streams already-claimed answer files into the
+// session's current execution without starting or steering a prompt. It is
+// only valid for a live waiter whose execution still owns the session.
+func (m *Manager) MaterializeAnswerAttachments(
+	ctx context.Context,
+	sessionID string,
+	attachments []v1.MessageAttachment,
+) ([]v1.MessageAttachment, error) {
+	if len(attachments) == 0 {
+		return attachments, nil
+	}
+	execution, err := m.activeAnswerAttachmentExecution(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if m.sessionManager == nil {
+		return nil, errors.New("answer attachment runtime is unavailable")
+	}
+	executionID := execution.ID
+	taskID := execution.TaskID
+	materialized, err := m.sessionManager.materializeAttachments(ctx, execution, attachments)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.verifyAnswerAttachmentExecutionCurrent(executionID, taskID, sessionID); err != nil {
+		return nil, err
+	}
+	for _, attachment := range materialized {
+		if attachment.AttachmentID != "" && strings.TrimSpace(attachment.Path) == "" {
+			return nil, fmt.Errorf("attachment %q has no readable executor path", attachment.AttachmentID)
+		}
+	}
+	return materialized, nil
+}
+
+func (m *Manager) activeAnswerAttachmentExecution(sessionID string) (*AgentExecution, error) {
+	execution, ok := m.GetExecutionBySessionID(sessionID)
+	if !ok || execution == nil || execution.ID == "" ||
+		execution.SessionID != sessionID || execution.ACPSessionID == "" {
+		return nil, ErrNoActiveAnswerExecution
+	}
+	return execution, nil
+}
+
+func (m *Manager) verifyAnswerAttachmentExecutionCurrent(
+	executionID, taskID, sessionID string,
+) error {
+	current, stillCurrent := m.executionStore.GetBySessionID(sessionID)
+	if !stillCurrent || current == nil || current.ID != executionID ||
+		current.TaskID != taskID || current.SessionID != sessionID {
+		return fmt.Errorf("answer attachment execution changed during transfer")
+	}
+	return nil
 }
 
 // ResolveTaskEnvironmentID returns the task environment ID for a session.
@@ -2364,12 +2493,16 @@ func (m *Manager) OwnsPromptActivity(
 // active prompt for sessionID. Orchestrator cancellation uses this together
 // with the execution and turn IDs to reject stale terminal events while the
 // lifecycle manager waits for an acknowledged cancel to settle.
-func (m *Manager) GetPromptGenerationForSession(_ context.Context, sessionID string) (uint64, error) {
+func (m *Manager) GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error) {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		return 0, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
-	return execution.promptGenerationSnapshot(), nil
+	if err := execution.promptLifecycleMu.LockContext(ctx); err != nil {
+		return 0, err
+	}
+	defer execution.promptLifecycleMu.Unlock()
+	return execution.promptGeneration, nil
 }
 
 // AcknowledgeRetainedPromptFailure releases successor admission only after the

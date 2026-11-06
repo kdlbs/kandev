@@ -111,4 +111,3 @@ and `TestHandleAgentReady_PassthroughQueuedAttachmentUsesAttachmentAwarePrompt`
 `TestCompleteTurnsExceptReportsIterationExhaustion` (flaky; each passed on some
 runs of both the base and the change). No child-attention code runs in those
 tests.
-

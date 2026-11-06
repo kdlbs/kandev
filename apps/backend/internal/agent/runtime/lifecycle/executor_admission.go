@@ -5,6 +5,9 @@ import (
 )
 
 func (sm *SessionManager) admitExecutorPrompt(ctx context.Context, execution *AgentExecution) (context.Context, error) {
+	if err := execution.validateBuiltinIntent(ctx); err != nil {
+		return ctx, err
+	}
 	if sm.executorAdmission == nil {
 		return ctx, nil
 	}

@@ -13,6 +13,12 @@ legacy_specs: []
 
 # Implementation Plan: Versioned Plugin SDK Publishing
 
+The [immutable release recovery package](../immutable-release-sdk-recovery/plan.md)
+records the retention fix for SDK `0.1.0` from host release `v0.99.0`.
+Its design supersedes the original
+host-release storage location. Completed extraction and local validation results
+below remain historical evidence; they do not certify first public publication.
+
 Start with the [complete proposal walkthrough](proposal-walkthrough.md) for
 the five implementation steps and their relationship to issue #4358.
 The dated [plugin author inventory](author-notification-inventory.md) identifies

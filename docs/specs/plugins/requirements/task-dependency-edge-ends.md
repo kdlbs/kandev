@@ -110,8 +110,10 @@ The consumer must render them without being told a stale story about them.
 
 #### Acceptance criteria
 
-- **AC-PLUGINS-TASK-DEPS-006.1:** An archived predecessor shall appear in
-  `depends_on` with `status: pending`, and shall never report `resolved`.
+- **AC-PLUGINS-TASK-DEPS-006.1:** An archived predecessor shall remain in
+  `depends_on` with status derived from its persisted outcome: `COMPLETED`
+  reports `resolved`, `FAILED`/`CANCELLED` report `failed`, and unfinished work
+  reports `pending`. Archival alone shall not resolve unfinished work.
 - **AC-PLUGINS-TASK-DEPS-006.2:** An edge end shall appear in its list whether or
   not the same response contains that end as a task, so a default
   `include_archived=false` list still names its archived ends.

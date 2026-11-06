@@ -1,7 +1,7 @@
 ---
 id: "03-acp-process-loading"
 title: "Load profile plugins in local Copilot ACP processes"
-status: pending
+status: done
 wave: 4
 depends_on: ["01-inventory-discovery", "02-profile-state"]
 plan: "plan.md"
@@ -22,9 +22,10 @@ acceptance_criteria:
   - AC-AGENTS-COPILOT-PLUGINS-005.3
   - AC-AGENTS-COPILOT-PLUGINS-005.4
   - AC-AGENTS-COPILOT-PLUGINS-005.5
+  - AC-AGENTS-COPILOT-PLUGINS-005.8
   - AC-AGENTS-COPILOT-PLUGINS-007.1
-  - AC-AGENTS-COPILOT-PLUGINS-007.2
   - AC-AGENTS-COPILOT-PLUGINS-007.3
+  - AC-AGENTS-COPILOT-PLUGINS-007.6
 system_design:
   - ../../specs/agents/system-design/copilot-profile-plugins.md
 ---
@@ -56,7 +57,7 @@ Terminal/utility/probe/preview paths owned by WO-04, UI, remote mounts, plugin i
 
 1. Exact argv and final-child environment tests cover multiple plugins, spaces, config overrides, manual flags, and each new ACP process path.
 2. Missing/unsafe/unsupported selections fail atomically with safe repair errors. Empty selections retain every executor's current behavior without discovery.
-3. Existing MCP injection and retained sessions remain operational, and no preparation bypasses the WO-00 runtime/policy gate.
+3. Existing MCP injection and retained sessions remain operational. Supported-version/root/context checks remain effective, while native Copilot owns policy/consent without an additional enterprise-certification gate.
 
 ## Verification
 
@@ -88,7 +89,9 @@ Add platform-specific coverage through existing Windows CI guidance where native
 ## Dependencies
 
 WO-01 provides the qualified resolver and WO-02 provides the durable/runtime profile field.
-WO-00 qualification results remain a shipping gate for every supported runtime.
+WO-00 bounds supported inventory/metadata adapters. Its diagnostic policy
+limitations are not a production gate under the
+[native-authority decision](../../decisions/2026-10-28-copilot-native-policy-authority.md).
 
 ## Risks
 
@@ -108,7 +111,21 @@ An isolated executor can share a runtime label with a local path. Use trusted ex
 
 ## Results
 
-Pending 2026-10-28. The code paths are implemented but fail closed with `policy_unverified` until WO-00 supplies native policy evidence.
+Follow-up execution is mapped to
+[completion task 04](../copilot-profile-plugin-completion/task-04-qualified-process-loading.md),
+including removal of the policy-only blocker and positive process-boundary
+coverage for supported adapters.
+Completed by that work order: supported versions now reach real Configure/Start
+with coherent profile/runtime/environment, preserved MCP attachments, atomic
+preflight, and native-inventory rejection/no-alternate-identity coverage.
+Its Results retain exact commands/counts, the corrected macOS root assertions,
+the unavailable historical implementation Red details, and the demonstrated
+pristine-HEAD SSH teardown race exception. No privileged policy fixture or
+native-policy certification is claimed.
+
+### Historical pre-ADR results
+
+The baseline results below describe the earlier rejection-only implementation.
 
 - `go test -trimpath ./internal/agent/copilotplugins -run 'TestPluginArguments|TestPluginLaunchContext|TestPluginReadOnlyOperations|TestPolicyUnverified|TestWrapped|TestRuntimeVersion' -count=1`: passed.
 - `go test -trimpath ./internal/agent/runtime/lifecycle -run 'TestCopilotPlugin' -count=1`: passed, including `TestCopilotPluginPolicyUnverifiedLaunch`, `TestCopilotPluginWrapperRejected`, and `TestCopilotPluginRuntimeSnapshotNotReread`.

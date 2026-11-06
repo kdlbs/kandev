@@ -100,6 +100,7 @@ export type MCPSetupComparison = {
   applied_revision: number;
   attachment_attempt_id?: string;
   selection_ids?: string[];
+  excluded_definition_ids?: string[];
   changes?: MCPSetupChange[];
 };
 
@@ -120,6 +121,7 @@ export type MCPSelectionResponse = {
   owner_id: string;
   definition_ids: string[];
   selection_revision?: number;
+  excluded_definition_ids?: string[];
   mcp_state?: MCPSessionSelectionState;
 };
 

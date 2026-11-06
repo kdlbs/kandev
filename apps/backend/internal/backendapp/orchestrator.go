@@ -41,6 +41,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -71,6 +72,7 @@ func provideOrchestrator(
 	eventBus bus.EventBus,
 	taskRepo *sqliterepo.Repository,
 	taskSvc *taskservice.Service,
+	historyStore *taskchanges.GitHistoryStore,
 	authSvc *auth.Service,
 	userSvc *userservice.Service,
 	lifecycleMgr *lifecycle.Manager,
@@ -164,6 +166,7 @@ func provideOrchestrator(
 		return startupRecoveryOwnerContext(ctx, authSvc, ownerID, orgID)
 	})
 	orchestratorSvc.SetCanvasesEnabled(cfg != nil && cfg.Features.Canvases)
+	orchestratorSvc.SetWorkspaceCollaborationEnabled(cfg != nil && cfg.Features.WorkspaceCollaboration)
 	orchestratorSvc.SetAgentProfileRecentUseRecorder(userSvc)
 	if gitCredentialBroker != nil {
 		orchestratorSvc.SetGitHubCredentialBroker(gitCredentialBroker, githubCredentialBrokerEndpoint(cfg))
@@ -204,16 +207,53 @@ func provideOrchestrator(
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
+	orchestratorSvc.SetTaskTurnErrorRecorder(taskSvc)
 	orchestratorSvc.SetTransientRetryMessageService(taskSvc)
 	orchestratorSvc.SetStreamingMessageRetractionService(taskSvc)
 	orchestratorSvc.SetSubagentContextRecorder(&subagentContextAdapter{svc: taskSvc})
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
 	turnChangeContent := taskchanges.NewContentService(taskRepo, nil)
+	turnChangeContent.SetHistoryStore(historyStore)
+	taskSvc.SetTurnChangeContentService(turnChangeContent)
 	turnChangeCoordinator := taskchanges.NewCoordinator(taskRepo, taskSvc, userSvc, turnChangeContent, nil)
 	turnChangeCoordinator.SetLogger(log.Zap())
-	if err := turnChangeCoordinator.ReconcileUnfinished(context.Background()); err != nil {
-		log.Warn("failed to reconcile unfinished turn-change captures", zap.Error(err))
+	turnChangeCoordinator.SetTurnChangeOperationGuard(runtimeTurnChangeOperationGuard{reader: lifecycleMgr})
+	exportLimiter := taskchanges.NewExportLimiter()
+	turnChangeCoordinator.SetExportLimiter(exportLimiter)
+	turnChangeCoordinator.SetSummaryPublisher(taskSvc)
+	turnChangeExportProcessor := taskchanges.NewExportProcessor(taskRepo, turnChangeCoordinator)
+	turnChangeExportProcessor.SetClientProvider(runtimeTurnChangeExportProviderAdapter{manager: lifecycleMgr})
+	turnChangeExportProcessor.SetSummaryPublisher(taskSvc)
+	turnChangeExportProcessor.SetLogger(log.Zap())
+	preservationRetrier := taskchanges.NewPreservationRetrier(taskRepo, turnChangeContent,
+		func(_ context.Context, sessionID string) (taskchanges.ArchiveClient, func(), error) {
+			execution, ok := lifecycleMgr.GetExecutionBySessionID(sessionID)
+			if !ok || execution == nil {
+				return nil, func() {}, errors.New("turn-change preservation execution is unavailable")
+			}
+			client, release := execution.AcquireAgentCtlClient()
+			if client == nil {
+				release()
+				return nil, func() {}, errors.New("turn-change preservation client is unavailable")
+			}
+			return client, release, nil
+		},
+		func(ctx context.Context, taskID, sessionID, changeSetID string) {
+			if err := taskSvc.PublishTurnChangeSummary(ctx, taskID, sessionID, changeSetID); err != nil {
+				log.Warn("failed to publish recovered turn-change summary", zap.Error(err))
+			}
+		}, nil)
+	taskSvc.SetTurnChangePreservationRetrier(preservationRetrier)
+	taskSvc.SetTurnHistoryCleanup(taskchanges.NewHistoryService(taskRepo, historyStore, nil))
+	if ctx != nil {
+		context.AfterFunc(ctx, turnChangeExportProcessor.Stop)
+		startup.AfterReady(ctx, func() {
+			if err := turnChangeCoordinator.ReconcileUnfinished(context.Background()); err != nil {
+				log.Warn("failed to reconcile unfinished turn-change captures", zap.Error(err))
+			}
+			turnChangeExportProcessor.Start(ctx)
+		})
 	}
 	agentruntime.InstallTurnChangeCaptureHandler(
 		lifecycleMgr,
@@ -270,6 +310,11 @@ func provideOrchestrator(
 		}
 		return queues
 	})
+
+	// An explicit deferred-launch discard needs the orchestrator's automation
+	// settlement and ceiling-record ownership; the task service keeps the
+	// task-write authorization and never learns the record's shape.
+	taskSvc.SetDeferredLaunchDiscarder(orchestratorSvc)
 
 	// Per-user scoping for the session-keyed WS actions. The orchestrator
 	// resolves sessions through its own repo handle, so it does not inherit the

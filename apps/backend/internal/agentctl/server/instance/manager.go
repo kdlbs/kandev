@@ -292,7 +292,11 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 		zap.String("override_protocol", string(overrides.Protocol)))
 
 	// Create instance config using the unified method
-	instanceCfg := m.config.NewInstanceConfig(port, overrides)
+	instanceCfg, err := m.config.NewInstanceConfig(port, overrides)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	instanceCfg.AgentCommandConfigured = req.AgentCommand != ""
 
 	m.logger.Info("CreateInstance: instance config created",
 		zap.String("config_protocol", string(instanceCfg.Protocol)))
@@ -301,6 +305,14 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 	procMgr := process.NewManager(instanceCfg, m.logger)
 	procMgr.SetDiskCapacitySampler(m.diskSampler)
 	bundle.setProcessManager(procMgr)
+	// A configured but unusable journal is an admission error. Reject it
+	// before publishing the instance or starting workspace trackers, so no
+	// caller can observe an instance whose delivery storage cannot work.
+	if instanceCfg.DurableJournalPath != "" {
+		if _, journalErr := procMgr.DeliveryJournal(); journalErr != nil {
+			return nil, nil, nil, fmt.Errorf("instance %s delivery journal unavailable: %w", id, journalErr)
+		}
+	}
 	// Wire retained-outcome recording (AC-EXECUTORS-SURVIVAL-004) before
 	// anything that could reach Start(): this manager satisfies
 	// process.TurnOutcomeRecorder via RetainTurnOutcome, and nothing can start
@@ -380,6 +392,7 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 		TaskID:                     req.TaskID,
 		DisableAskQuestion:         req.DisableAskQuestion,
 		PromptSuggestions:          req.PromptSuggestions,
+		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
 		AssumeMcpSse:               req.AssumeMcpSse,
 		AssumeMcpHttp:              req.AssumeMcpHttp,
 		McpMode:                    req.McpMode,
@@ -389,6 +402,7 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 		RequiresProcessKill:        req.RequiresProcessKill,
 		StripEnv:                   req.StripEnv,
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,
+		AuthPolicy:                 req.AuthPolicy,
 		BaseBranches:               req.BaseBranches,
 		ComparisonTargets:          req.ComparisonTargets,
 		RemoteContributions:        req.RemoteContributions,
@@ -398,6 +412,7 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
+		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}
 }
 

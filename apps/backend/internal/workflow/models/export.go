@@ -150,6 +150,7 @@ type StepPortable struct {
 	CompleteTaskOnEnter          bool                                         `json:"complete_task_on_enter" yaml:"complete_task_on_enter"`
 	WIPLimit                     int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
 	PullFromStepPosition         *int                                         `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
+	StageType                    StageType                                    `json:"stage_type,omitempty" yaml:"stage_type,omitempty"`
 	completionTaskOnEnterDecoded bool                                         `json:"-" yaml:"-"`
 	completionTaskOnEnterPresent bool                                         `json:"-" yaml:"-"`
 	SessionTarget                *WorkflowSessionTargetPortable               `json:"session_target,omitempty" yaml:"session_target,omitempty"`
@@ -325,6 +326,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			CancelTriggersTurnComplete:  s.CancelTriggersTurnComplete,
 			CompleteTaskOnEnter:         s.CompleteTaskOnEnter,
 			WIPLimit:                    s.WIPLimit,
+			StageType:                   s.StageType,
 		}
 		if pos, ok := idToPos[s.PullFromStepID]; ok {
 			sp.PullFromStepPosition = &pos
@@ -388,6 +390,9 @@ func (e *WorkflowExport) Validate() error {
 		}
 		positions := make(map[int]bool, len(wf.Steps))
 		for j, step := range wf.Steps {
+			if step.StageType != "" && !step.StageType.IsValid() {
+				return fmt.Errorf("workflow %d step %d: unsupported stage type %q", i, j, step.StageType)
+			}
 			if err := validatePortableProfile(step.AgentProfile, e.Version); err != nil {
 				return fmt.Errorf("workflow %d step %d agent profile: %w", i, j, err)
 			}
