@@ -165,8 +165,9 @@ agent_tools:
       idempotent_hint: true
 ```
 
-A declaration that names `coordinator` or `external` must use
-`invocation_scope: instance` and set `annotations.read_only_hint: true`.
+A declaration that names `coordinator` must use `invocation_scope: instance`.
+A declaration that names `external` must use `invocation_scope: instance` or
+`workspace`. Both surfaces require `annotations.read_only_hint: true`.
 Configuration surfaces remain unsupported. External instance reads carry no
 task, session, or workspace identity. Coordinator calls require an exact
 version-2 conversation binding; a phase-1 or version-1 binding grants no

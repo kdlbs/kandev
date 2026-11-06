@@ -260,7 +260,23 @@ func addExternalWorkspaceArgument(raw json.RawMessage) (json.RawMessage, error) 
 		"type": "string", "minLength": 1, "description": externalWorkspaceArgumentDescription,
 	}
 	document["required"] = appendRequiredArgument(document["required"], manifest.AgentToolWorkspaceArgument)
+	adjustRootPropertyCount(document, "maxProperties", 1)
+	adjustRootPropertyCount(document, "minProperties", 1)
 	return json.Marshal(document)
+}
+
+// adjustRootPropertyCount widens an object-wide property bound by delta so the
+// injected host argument is accepted alongside the plugin-declared inputs.
+func adjustRootPropertyCount(document map[string]any, field string, delta float64) {
+	value, ok := document[field]
+	if !ok {
+		return
+	}
+	count, ok := value.(float64)
+	if !ok || count < 0 {
+		return
+	}
+	document[field] = count + delta
 }
 
 func appendRequiredArgument(value any, argument string) []string {

@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
+	hcplugin "github.com/hashicorp/go-plugin"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/auth/authn"
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
@@ -16,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"github.com/stretchr/testify/require"
 )
 
@@ -67,6 +70,75 @@ func workspaceReadHandler(t *testing.T) (*Handlers, *plugins.Registry, *sqlitere
 	h.SetPluginService(pluginService)
 	h.SetPluginToolAuthEnabled(func() bool { return false })
 	return h, registry, repo
+}
+
+// workspaceRecordingPlugin records the exact request the host sends over the
+// real plugin RPC boundary.
+type workspaceRecordingPlugin struct {
+	pluginsdk.UnimplementedPlugin
+
+	mu      sync.Mutex
+	request *pluginsdk.AgentToolRequest
+}
+
+func (p *workspaceRecordingPlugin) InvokeAgentTool(
+	_ context.Context, req *pluginsdk.AgentToolRequest,
+) (*pluginsdk.AgentToolResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.request = req
+	return &pluginsdk.AgentToolResult{Text: "workspace data"}, nil
+}
+
+func (p *workspaceRecordingPlugin) recorded() *pluginsdk.AgentToolRequest {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.request
+}
+
+type workspacePluginRuntime struct {
+	mu      sync.Mutex
+	remote  *pluginsdk.RemotePlugin
+	running bool
+}
+
+func (*workspacePluginRuntime) Start(context.Context, *store.Record, func(string) pluginsdk.Host) error {
+	return nil
+}
+func (*workspacePluginRuntime) Stop(string) {}
+func (r *workspacePluginRuntime) Get(string) (*pluginsdk.RemotePlugin, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.running {
+		return nil, false
+	}
+	return r.remote, true
+}
+func (*workspacePluginRuntime) Ping(string) error { return nil }
+func (r *workspacePluginRuntime) Running(string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.running
+}
+func (*workspacePluginRuntime) RestartCount(string) int { return 0 }
+func (*workspacePluginRuntime) StopAll()                {}
+
+func workspaceReadHandlerWithPlugin(t *testing.T) (*Handlers, *workspaceRecordingPlugin) {
+	t.Helper()
+	h, _, _ := workspaceReadHandler(t)
+	impl := &workspaceRecordingPlugin{}
+	client, _ := hcplugin.TestPluginGRPCConn(t, false, map[string]hcplugin.Plugin{
+		pluginsdk.PluginMapKey: &pluginsdk.GRPCPlugin{
+			Impl: impl, HostDialTimeout: 50 * time.Millisecond,
+		},
+	})
+	t.Cleanup(func() { _ = client.Close() })
+	raw, err := client.Dispense(pluginsdk.PluginMapKey)
+	require.NoError(t, err)
+	remote, ok := raw.(*pluginsdk.RemotePlugin)
+	require.True(t, ok, "Dispense returned %T", raw)
+	h.pluginSvc.SetRuntime(&workspacePluginRuntime{remote: remote, running: true})
+	return h, impl
 }
 
 func externalWorkspaceList(t *testing.T, h *Handlers, ctx context.Context) *ws.Message {
@@ -128,16 +200,48 @@ func TestExternalCatalogInjectsWorkspaceArgument(t *testing.T) {
 		"the plugin catalog schema must stay unchanged")
 }
 
+func TestWithExternalWorkspaceArgumentAdjustsPropertyCounts(t *testing.T) {
+	adjusted, err := addExternalWorkspaceArgument([]byte(
+		`{"type":"object","properties":{"key":{"type":"string"}},"required":["key"],"minProperties":1,"maxProperties":1}`))
+	require.NoError(t, err)
+	var schema map[string]any
+	require.NoError(t, json.Unmarshal(adjusted, &schema))
+	require.Equal(t, float64(2), schema["minProperties"])
+	require.Equal(t, float64(2), schema["maxProperties"])
+	require.Contains(t, schema["properties"], manifest.AgentToolWorkspaceArgument)
+	require.Contains(t, schema["required"], manifest.AgentToolWorkspaceArgument)
+
+	unbounded, err := addExternalWorkspaceArgument([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	var unboundedSchema map[string]any
+	require.NoError(t, json.Unmarshal(unbounded, &unboundedSchema))
+	require.NotContains(t, unboundedSchema, "minProperties")
+	require.NotContains(t, unboundedSchema, "maxProperties")
+}
+
 func TestExternalWorkspaceToolAuthorization(t *testing.T) {
-	t.Run("readable workspace reaches plugin dispatch", func(t *testing.T) {
-		h, _, _ := workspaceReadHandler(t)
+	t.Run("readable workspace reaches plugin dispatch with stripped arguments", func(t *testing.T) {
+		h, recording := workspaceReadHandlerWithPlugin(t)
 		ctx := mcporigin.WithTrustedExternalTransport(context.Background())
-		payload := pluginToolErrorPayload(t, externalWorkspaceCall(t, h, ctx, map[string]any{
+		resp := externalWorkspaceCall(t, h, ctx, map[string]any{
 			manifest.AgentToolWorkspaceArgument: "ws-readable",
-		}))
-		require.Equal(t, ws.ErrorCodeInternalError, payload.Code,
-			"authorization should pass; the fixture has no running plugin")
-		require.Contains(t, payload.Message, "plugin tool invocation failed")
+			"key":                               "value",
+		})
+		require.Equal(t, ws.MessageTypeResponse, resp.Type)
+		var result struct {
+			Text string `json:"text"`
+		}
+		require.NoError(t, json.Unmarshal(resp.Payload, &result))
+		require.Equal(t, "workspace data", result.Text)
+
+		request := recording.recorded()
+		require.NotNil(t, request)
+		require.Equal(t, "ws-readable", request.Context.WorkspaceID)
+		require.Equal(t, manifest.AgentToolSurfaceExternal, request.Context.Surface)
+		require.Empty(t, request.Context.TaskID)
+		require.Empty(t, request.Context.SessionID)
+		require.Empty(t, request.Context.ExecutionID)
+		require.Equal(t, map[string]any{"key": "value"}, request.Arguments)
 	})
 
 	for name, workspaceID := range map[string]string{
