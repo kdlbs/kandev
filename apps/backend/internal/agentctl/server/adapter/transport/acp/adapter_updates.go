@@ -32,6 +32,7 @@ const (
 // callback, releasing the waiter once everything queued ahead has completed.
 type notifWork struct {
 	notif            acp.SessionNotification
+	native           *decodedCopilotNativeEvent
 	sync             chan struct{}
 	afterBarrier     func()
 	promptGeneration uint64
@@ -132,6 +133,10 @@ func (a *Adapter) runUpdateWorker() {
 				close(item.sync)
 				continue
 			}
+			if item.native != nil {
+				a.handleCopilotNativeWork(*item.native)
+				continue
+			}
 			a.handleACPUpdate(item.notif, item.promptGeneration)
 		}
 	}
@@ -202,6 +207,14 @@ func (a *Adapter) handleACPUpdate(
 	var claudeResumeUpdate *AgentEvent
 	if !suppressed {
 		event = a.convertNotificationForGeneration(n, promptGeneration)
+		if a.copilotNativeActive.Load() && n.Update.UsageUpdate != nil &&
+			event != nil && event.Type == streams.EventTypeContextWindow {
+			// The native usage_info stream owns the Copilot gauge. The ordinary
+			// mixed stream already updated accounting above; it must not emit a
+			// competing parent/child context reading.
+			event = nil
+			handled = true
+		}
 		claudeResumeUpdate = a.claudeSubagentResumeEvent(n, promptGeneration)
 		if a.observesResponseAttemptReset(promptGeneration, event) {
 			leadingEvent = &AgentEvent{
@@ -694,6 +707,7 @@ func (a *Adapter) resetContextWindowMaxSize(sessionID string) {
 		tr.maxSize = 0
 	}
 	delete(a.contextSamples, sessionID)
+	delete(a.nativeGaugeMaxSize, sessionID)
 }
 
 // consumeUsageDelta returns nonnegative growth in context occupancy since the

@@ -18,7 +18,12 @@ type handlerCopilotRunner struct {
 	stdout []byte
 }
 
-func (r handlerCopilotRunner) Run(context.Context, []string, map[string]string, string) (copilotplugins.CommandResult, error) {
+func (r handlerCopilotRunner) Run(_ context.Context, argv []string, _ map[string]string, _ string) (copilotplugins.CommandResult, error) {
+	for _, arg := range argv {
+		if arg == "--help" {
+			return copilotplugins.CommandResult{Stdout: []byte("Options:\n  --plugin-dir <path>\n")}, nil
+		}
+	}
 	return copilotplugins.CommandResult{Stdout: r.stdout}, nil
 }
 

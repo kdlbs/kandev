@@ -10,6 +10,7 @@ import type {
 } from "./workspace-restoration";
 import type { NativeMCPDiagnostic } from "@/lib/prepare/native-mcp-diagnostic";
 import type { ModelCatalog } from "@kandev/types/model-catalog";
+import type { UserShellScope } from "@/lib/state/user-shell-scope";
 
 export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
@@ -265,12 +266,20 @@ export type GitCheckoutGenerationState = {
   byEnvironmentId: Record<string, Record<string, number>>;
 };
 
+export type ContextCompactionReporting = {
+  source: "usage_drop" | "copilot_native";
+  availability: "available" | "unavailable";
+  coverage: "observed" | "partial";
+  revision: number;
+};
+
 export type ContextWindowEntry = {
   size: number;
   used: number;
   remaining: number;
   efficiency: number;
   compactionCount: number;
+  compactionReporting?: ContextCompactionReporting;
   source?: "acp" | "api";
   timestamp?: string;
 };
@@ -488,14 +497,36 @@ export type UserShellInfo = {
 };
 
 export type UserShellsState = {
-  /** User shells keyed by environmentId (shared across sessions in the same environment). */
+  /**
+   * Ordinary (DB-backed, task-owned) rows keyed by `userShellScopeKey`.
+   * Different tasks sharing an environment never share this namespace.
+   */
+  byScope: Record<string, UserShellInfo[]>;
+  /**
+   * Unmanaged rows only - fixed (`bottom-panel`), script, and supported
+   * legacy passthrough shells keyed by environmentId. These stay shared
+   * across every task in the environment.
+   */
   byEnvironmentId: Record<string, UserShellInfo[]>;
-  /** Optimistically dismissed IDs hidden from stale list responses until this env is purged. */
+  /** Optimistically dismissed ordinary IDs, scoped by task/environment. */
+  dismissedByScope: Record<string, Record<string, true>>;
+  /** Optimistically dismissed unmanaged IDs, keyed by environmentId. */
   dismissedByEnvironmentId: Record<string, Record<string, true>>;
-  /** Keyed by environmentId (same key strategy as byEnvironmentId). */
+  /** Keyed by `userShellScopeKey`; true while a read for that scope is in flight. */
   loading: Record<string, boolean>;
-  /** Keyed by environmentId (same key strategy as byEnvironmentId). */
+  /** Keyed by `userShellScopeKey`; true once a read settled, successful or not. */
   loaded: Record<string, boolean>;
+  /**
+   * Keyed by `userShellScopeKey`; true only after a successful list. A settled
+   * failure is `loaded` but not `listed`, so it cannot authorize creation.
+   */
+  listed: Record<string, boolean>;
+  /**
+   * Newest shell-list request generation applied to the environment-shared
+   * rows. Task-scoped lists can finish out of order, so a delayed response
+   * may not overwrite newer fixed/script rows.
+   */
+  sharedGeneration: Record<string, number>;
 };
 
 export type PrepareStepInfo = {
@@ -578,6 +609,8 @@ export type BackgroundWorkState = {
   nextOutputWindowGeneration: number;
   activeWorkIdBySessionId: Record<string, string>;
   loadingBySessionId: Record<string, boolean>;
+  readGenerationBySessionId: Record<string, number>;
+  nextReadGeneration: number;
 };
 
 export type BackgroundOutputWindow = {
@@ -712,13 +745,20 @@ export type SessionRuntimeSliceActions = {
   bumpSessionUsageInvalidation: (sessionId: string) => void;
   // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
-  // User shells actions — env-scoped (sessions in the same task share one shell list)
-  setUserShells: (environmentId: string, shells: UserShellInfo[]) => void;
-  setUserShellsLoading: (environmentId: string, loading: boolean) => void;
-  addUserShell: (environmentId: string, shell: UserShellInfo) => void;
-  removeUserShell: (environmentId: string, terminalId: string) => void;
+  // User shells actions - ordinary rows are task/environment scoped; unmanaged
+  // rows (fixed/script) remain environment scoped.
+  setUserShells: (
+    scope: UserShellScope,
+    shells: UserShellInfo[],
+    sharedGeneration?: number,
+  ) => void;
+  setUserShellsLoading: (scope: UserShellScope, loading: boolean) => void;
+  /** Settles a failed read without granting creation authority. */
+  setUserShellsFailed: (scope: UserShellScope) => void;
+  addUserShell: (scope: UserShellScope, shell: UserShellInfo) => void;
+  removeUserShell: (scope: UserShellScope, terminalId: string) => void;
   updateUserShell: (
-    environmentId: string,
+    scope: UserShellScope,
     terminalId: string,
     // `terminalId` is the row key — patching it would silently break
     // future lookups while leaving the array index pointing at the old
@@ -737,6 +777,7 @@ export type SessionRuntimeSliceActions = {
   clearWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
   setLaunchWarning: (sessionId: string, entry: LaunchWarningEntry) => void;
   clearLaunchWarning: (sessionId: string) => void;
+  beginBackgroundWorkRead: (sessionId: string) => number;
   setBackgroundWorkloads: (sessionId: string, workloads: WorkloadRunObservation[]) => void;
   updateBackgroundWorkload: (sessionId: string, workload: WorkloadRunObservation) => void;
   appendBackgroundWorkloadOutput: (sessionId: string, chunk: WorkloadOutputChunk) => void;
