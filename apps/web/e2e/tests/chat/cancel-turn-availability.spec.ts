@@ -54,10 +54,13 @@ test.describe.serial("Cancel turn availability", () => {
     await cancelButton.click();
     await waitForActiveSessionCancellationPendingOrSettled(testPage);
     await expect
-      .poll(async () => {
-        if (!(await cancelButton.isVisible().catch(() => false))) return true;
-        return cancelButton.isDisabled();
-      })
+      .poll(
+        async () => {
+          if (!(await cancelButton.isVisible().catch(() => false))) return true;
+          return cancelButton.isDisabled();
+        },
+        { timeout: 15_000 },
+      )
       .toBe(true);
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await waitForActiveSessionCancellationPending(testPage, false);

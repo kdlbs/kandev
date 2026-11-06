@@ -1512,6 +1512,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		DeliveryStreamID:               reqWithWorktree.DeliveryStreamID,
 		DeliveryIncarnationID:          reqWithWorktree.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:      reqWithWorktree.DeliveryHarnessGeneration,
+		CopilotNativeSessionEvents:     m.copilotNativeLaunchAllowed(rt, agentConfig.ID(), reqWithWorktree.DeliveryStreamID),
 		DurableJournalHostRoot:         m.dataDir,
 		DurableJournalOwnerID:          journalOwnerID,
 		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
@@ -2518,6 +2519,7 @@ func (m *Manager) buildExecutionFromInstance(
 ) (*AgentExecution, error) {
 	execution := execInstance.ToAgentExecution(execReq)
 	execution.ExecutionProfileID = executionProfileID(req)
+	m.applyCopilotNativeLaunchCapability(execution, rt, execReq.DeliveryStreamID)
 	if profileInfo != nil {
 		execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
 	}
@@ -3056,13 +3058,26 @@ func (m *Manager) SetPluginToolsForAllExecutions(ctx context.Context, snapshot p
 		if client == nil {
 			continue
 		}
-		err := client.SetPluginTools(ctx, snapshot)
+		err := client.SetPluginTools(ctx, pluginToolSnapshotForExecution(execution, snapshot))
 		releaseClient()
 		if err != nil {
 			refreshErr = errors.Join(refreshErr, fmt.Errorf("refresh execution %s plugin tools: %w", execution.ID, err))
 		}
 	}
 	return refreshErr
+}
+
+// pluginToolSnapshotForExecution keeps legacy task agents on a surface-safe
+// catalog while a coordinator execution receives its coordinator-capable
+// projection, so a live refresh does not drop its plugin tools.
+func pluginToolSnapshotForExecution(execution *AgentExecution, snapshot plugintools.Snapshot) plugintools.Snapshot {
+	if execution == nil {
+		return plugintools.ProjectLegacySafe(snapshot)
+	}
+	if _, coordinator := execution.metadataValue(mcpprofile.CoordinatorToolPolicyMetadataKey); coordinator {
+		return plugintools.ProjectCoordinatorOnly(snapshot)
+	}
+	return plugintools.ProjectLegacySafe(snapshot)
 }
 
 // resolveAgentDisplayName resolves the agent display name from the execution's

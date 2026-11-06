@@ -35,6 +35,56 @@ system_design:
 
 # Task 03: Package selection and responsive management
 
+## New-task placement correction (2026-11-04)
+
+Completed the user's finding under AC-AGENTS-BUILTIN-MCP-001.1 and UI-02.
+The form previously rendered a package disclosure above Advanced settings. Its
+summary and the shared list both rendered the same title. Move the package
+content into the existing MCP server picker and remove the extra disclosure.
+The shared list owns the single heading. Preserve the package draft across
+picker/Advanced close and reopen, and clear it at the form's new-task/workspace
+reset boundary. Keep existing additional-server selection and package authority.
+
+Own `task-create-dialog.tsx`, `task-create-dialog-advanced-settings.tsx`,
+`task-create-dialog-mcp-select.tsx`, `task-create-builtin-packages.tsx`, and the
+form reset/state wiring, and shared package-row responsive height. Reuse package creation E2E helpers/specs on
+desktop and phone. Add reset regressions in the existing form lifecycle test.
+No sibling exclusions, runtime injection, or new policy work.
+
+Mobile design: New Task > Advanced settings > MCP servers is the entry point.
+Use the existing task-create MCP drawer, its header Close, one safe-area-aware
+scroll body, and the existing form submit footer after dismissal. The low-use
+advanced option stays beside other MCP choices. The desktop uses its existing
+popover with the same list/detail. One heading identifies Built-in packages.
+Back returns focus to the package row. Preserve package choices across closure.
+
+Acceptance: no standalone package section; list reachable through MCP even
+without catalog servers or while their request is pending; one title; explicit On survives picker and Advanced
+reopen and is saved by task creation; Back never submits; phone controls remain
+touch-sized and contained, including wrapped row labels; new task/workspace clears previous consent.
+
+PR review repair: only the additional-server content waits for catalog and
+selection data. Built-in packages retain their independent loading and editing
+path in the same picker. A deferred catalog response must not disable that
+entry. Desktop and minimum-width phone regressions choose Configuration On
+before releasing the real server response, then verify that consent survives.
+
+Focused commands (managed host environment/resource bounds from results):
+
+```sh
+pnpm --dir apps/web exec vitest run components/task-create-dialog-reset-effects.test.ts components/task-create-dialog-form-reset.test.ts components/task-create-dialog-advanced-settings.test.tsx components/task-create-dialog-composition.test.tsx
+pnpm --dir apps/web e2e:run --host --project chromium e2e/tests/settings/builtin-mcp-management.spec.ts -- --retries=0 -g 'at task creation|Back from package'
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/settings/mobile-builtin-mcp-management.spec.ts -- --retries=0 -g 'at task creation|Back from package'
+```
+
+Also run changed-file lint/format, web typecheck, and affected docs validators.
+Update the public package how-to's new-task entry instructions.
+
+Hosted follow-up CI also exposed sequencing defects in the existing navigation
+and workflow-model E2E cases. Delivery includes their test-only repair and
+focused phone/desktop checks recorded in the implementation results. This does
+not reopen product scope or change package policy, UI, or runtime behavior.
+
 ## Summary
 
 Expose built-in package policy and task choice through existing MCP management.

@@ -136,11 +136,14 @@ var childLogStates = stringSet(
 var childLogErrorClasses = stringSet(
 	"permission_denied", "not_found", "context_canceled", "deadline_exceeded",
 	"git_start_failed", "git_command_failed", "repository_context_unavailable",
-	"io_error", "unknown",
+	"io_error", "unknown", "agent_running", "managed_runtime_npm_resolution",
+	"managed_runtime_npm_policy", "unsupported_profile_context", "authentication_required",
+	"evidence_changed",
 )
 
 var childLogOperations = stringSet(
 	"read_directory", "read_file", "stat", "git_inspection", "submodule_discovery",
+	"agent_configure", "agent_probe",
 )
 
 var childLogTriggers = stringSet("manual_refresh", "user_select", "turn_complete", "startup_grace", "poll")

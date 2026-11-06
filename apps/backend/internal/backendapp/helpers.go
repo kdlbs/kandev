@@ -216,6 +216,11 @@ func refreshGitStatusFromSources(ctx context.Context, taskRepo *sqliterepo.Repos
 	rpcCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	live := false
+	// Every accepted aggregate response must describe one selected source's
+	// complete repository set. Concatenating a failed sibling-source attempt
+	// with a later successful source would mix inventories, so keep the first
+	// failed attempt only as the no-success fallback.
+	var failedSource *gateways.SessionGitRefreshResult
 	for _, sourceSessionID := range sources.sessionIDs {
 		if rpcCtx.Err() != nil {
 			break
@@ -225,10 +230,30 @@ func refreshGitStatusFromSources(ctx context.Context, taskRepo *sqliterepo.Repos
 		if multi == nil {
 			continue
 		}
-		appendGitStatusRefreshSnapshots(&result, sources, sessionID, multi)
-		if result.Success {
-			return result
+		attempt := gateways.SessionGitRefreshResult{
+			SessionID:         result.SessionID,
+			Mode:              result.Mode,
+			TaskEnvironmentID: result.TaskEnvironmentID,
+			StatusState:       "unavailable",
+			Snapshots:         []*ws.Message{},
 		}
+		appendGitStatusRefreshSnapshots(&attempt, sources, sessionID, multi)
+		if attempt.Success {
+			// A sibling execution can retain the pre-attachment tracker graph.
+			// Its aggregate then describes only that checkout, not the whole
+			// environment. Only a source covering every registered repository
+			// may define the complete inventory.
+			if len(multi.Repos) < sources.repositoryCount {
+				continue
+			}
+			return attempt
+		}
+		if failedSource == nil {
+			failedSource = &attempt
+		}
+	}
+	if failedSource != nil {
+		return *failedSource
 	}
 	if live && rpcCtx.Err() != nil {
 		result.ErrorCode = "status_timeout"
@@ -2798,8 +2823,13 @@ func registerExternalMCP(p routeParams) {
 	srv := mcpserver.NewExternal(backendClient, p.log, "")
 	mcpGroup := p.router.Group("", externalMCPAuthMiddleware(p.authSvc))
 	srv.RegisterBackendRoutes(mcpGroup)
+	unsubscribe := func() {}
+	if p.services != nil && p.services.PluginToolCatalog != nil {
+		unsubscribe = p.services.PluginToolCatalog.Subscribe(srv)
+	}
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {
+			unsubscribe()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			return srv.Close(ctx)

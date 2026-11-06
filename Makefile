@@ -330,7 +330,7 @@ start-windows:
 	@echo Installing web dependencies...
 	@cd $(APPS_DIR) && $(PNPM) install
 	@echo Building web app...
-	@cd $(APPS_DIR) && set "VITE_KANDEV_API_PORT=" && set "VITE_KANDEV_DEBUG=" && $(PNPM) --filter @kandev/web build
+	@cd $(APPS_DIR) && set "VITE_KANDEV_API_PORT=" && set "VITE_KANDEV_DEBUG=" && set "NODE_ENV=production" && $(PNPM) --filter @kandev/web build
 	@$(MAKE) -s sync-embedded-web-windows
 	@echo Building backend...
 	@$(MAKE) -s -C $(BACKEND_DIR) build
@@ -463,9 +463,11 @@ build-e2e-plugin-package:
 	@$(MAKE) -C $(BACKEND_DIR) e2e-plugin-package
 
 .PHONY: build-web
+# Vite bundles the development React runtime whenever NODE_ENV is inherited as
+# development, so source builds pin production at the command boundary.
 build-web:
 	@printf "$(CYAN)Building web app...$(RESET)\n"
-	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= $(PNPM) --filter @kandev/web build
+	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= NODE_ENV=production $(PNPM) --filter @kandev/web build
 
 ## Web build for the E2E harness. Identical to build-web except that it keeps the
 ## pseudo QA catalog, which a production build drops (see
@@ -475,12 +477,12 @@ build-web:
 .PHONY: build-web-e2e
 build-web-e2e:
 	@printf "$(CYAN)Building web app (with the pseudo QA locale)...$(RESET)\n"
-	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= $(PNPM) --filter @kandev/web build:e2e
+	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= NODE_ENV=production $(PNPM) --filter @kandev/web build:e2e
 
 .PHONY: build-web-quiet
 build-web-quiet:
 	@printf "  $(DIM)Web app$(RESET)\n"
-	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= $(PNPM) --filter @kandev/web build 2>&1 | grep -v "Warning:" | grep -v "parseLineType" | grep -v "^$$" || true
+	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= NODE_ENV=production $(PNPM) --filter @kandev/web build 2>&1 | grep -v "Warning:" | grep -v "parseLineType" | grep -v "^$$" || true
 
 .PHONY: sync-embedded-web
 sync-embedded-web:
@@ -599,7 +601,7 @@ test-scripts:
 	@bash scripts/release/signpath-signing-ready.test.sh
 	@node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs
 	@python3 .github/scripts/release-workflow-contract_test.py
-	@node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs
+	@node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs scripts/release/existing-release.test.mjs
 	@node --test scripts/validate-public-docs.test.mjs scripts/generic-plugin-host-boundary.test.mjs
 
 .PHONY: test-e2e

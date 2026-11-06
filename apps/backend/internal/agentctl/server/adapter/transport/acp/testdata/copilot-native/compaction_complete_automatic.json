@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "method": "github.com/copilot/sessionEvent",
+  "params": {
+    "sessionId": "258e12a9-9e5a-4820-9f20-ee43e895e958",
+    "timestamp": "2026-11-05T23:26:14.421Z",
+    "type": "session.compaction_complete",
+    "data": {
+      "compactionAttemptId": "195da2ad-4fb1-4eb4-a2b5-27f4f7fc76aa",
+      "trigger": "threshold",
+      "success": true,
+      "outcome": "applied",
+      "preCompactionTokens": 240000,
+      "postCompactionTokens": 31000,
+      "messagesRemoved": 42,
+      "tokensRemoved": 209000
+    }
+  }
+}

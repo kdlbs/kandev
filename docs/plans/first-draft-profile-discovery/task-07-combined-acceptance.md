@@ -1,7 +1,7 @@
 ---
 id: "07-combined-acceptance"
 title: "Prove both issues end to end"
-status: in-progress
+status: in_progress
 wave: 7
 depends_on:
   - "06-selector-integration"
@@ -160,8 +160,17 @@ Delivered and verified:
 
 Not verified or not delivered:
 
-- Task 04's Fusion qualification gate is unresolved. There is no machine-readable Lead/Sidekick source and no Devin CLI or credentials in this environment, so verified Fusion composition acceptance for #5026 is **not met**. See [fusion-qualification.md](fusion-qualification.md).
+- At the original handoff, Task 04 had no machine-readable Lead/Sidekick source or configured Devin executable. Verified Fusion acceptance for #5026 was **not met**. The updated [qualification record](fusion-qualification.md) now identifies reported native JSON evidence, with capture and implementation still pending.
 - No browser fixture supplies a catalog with compositions. Composed Apply and live partial application are covered by component/integration tests, not Playwright.
 - The mock ACP peer does not yet expose native grouped catalogs, so grouped browser navigation has no deterministic fixture.
 - The grouped-catalog E2E files named in this work order were not added; the first-profile and Devin permission specs are the new browser coverage.
 - The Devin capability scenarios (Smart present, Smart absent, sandbox initialization failure) are not exposed by the mock peer.
+
+## Follow-up execution for issue #5053
+
+The [selector repair browser work order](../model-catalog-selector-repair/task-04-browser-acceptance.md) owns the remaining grouped/Fusion browser matrix.
+It uses the four browser filenames above and adds explicit singleton, mixed fallback, and contextual native acquisition evidence.
+Its native fixture gate remains separate from deterministic browser results.
+Keep this work order `in_progress` until the complete remaining model-selection acceptance passes.
+The earlier command counts remain historical. Append new actual results after implementation.
+The permission capability scenarios remain a distinct companion-package gap and are not part of the selector repair.

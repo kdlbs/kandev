@@ -190,12 +190,15 @@ type StreamingMessageRetractionService interface {
 // stale provider event from creating a new retry while terminal cleanup is in
 // flight, then allows the session entry to be reclaimed.
 type transientRetryNoticeState struct {
-	mu           sync.Mutex
-	retired      atomic.Bool
-	owned        atomic.Bool
-	retiredUntil atomic.Int64
-	refs         int
-	fenceTimer   *time.Timer
+	mu sync.Mutex
+	// retirementGeneration is protected by mu and distinguishes a fence
+	// already present when an attempt began from a later cancellation.
+	retirementGeneration uint64
+	retired              atomic.Bool
+	owned                atomic.Bool
+	retiredUntil         atomic.Int64
+	refs                 int
+	fenceTimer           *time.Timer
 }
 
 // SessionAttachmentCleaner removes file-backed prompt attachments after a

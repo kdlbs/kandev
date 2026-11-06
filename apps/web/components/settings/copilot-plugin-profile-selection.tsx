@@ -15,7 +15,27 @@ import {
   useCopilotPluginDiscovery,
   type CopilotPluginLaunchSettings,
 } from "@/hooks/domains/settings/use-copilot-plugin-discovery";
+import type { CopilotPluginDiscoveryResponse } from "@/lib/types/copilot-plugin-discovery";
 import { areStringSetsEqual } from "@/lib/string-set-equality";
+
+function selectionIsDirtyCompared(
+  selectedPluginIds: string[],
+  savedSelectedPluginIds?: string[],
+): boolean {
+  if (savedSelectedPluginIds === undefined) return false;
+  return !areStringSetsEqual(selectedPluginIds, savedSelectedPluginIds);
+}
+
+function selectionBlocksStart(
+  status: "loading" | "ready" | "unavailable" | "unsupported",
+  stale: boolean,
+  response: CopilotPluginDiscoveryResponse | undefined,
+  selectedCount: number,
+): boolean {
+  if (selectedCount === 0 || stale || !response || status !== response.status) return false;
+  if (status === "ready") return response.mount_permitted === false;
+  return true;
+}
 
 export function CopilotPluginProfileSelection({
   agentId,
@@ -51,10 +71,8 @@ export function CopilotPluginProfileSelection({
     selectedPluginIds,
   );
   const searchable = status === "ready" && !stale;
-  const startBlocked = selectedPluginIds.length > 0 && response?.mount_permitted === false;
-  const selectionIsDirty =
-    savedSelectedPluginIds !== undefined &&
-    !areStringSetsEqual(selectedPluginIds, savedSelectedPluginIds);
+  const startBlocked = selectionBlocksStart(status, stale, response, selectedPluginIds.length);
+  const selectionIsDirty = selectionIsDirtyCompared(selectedPluginIds, savedSelectedPluginIds);
   const actionHeight = isFinePointer && usesDesktopWorkbench ? "min-h-7" : "min-h-11";
   const rowHeight = isFinePointer && usesDesktopWorkbench ? "min-h-8" : "min-h-11";
 
@@ -71,29 +89,18 @@ export function CopilotPluginProfileSelection({
       data-testid="copilot-plugins-selection"
       data-settings-dirty={selectionIsDirty}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <h3 className="text-sm font-semibold">{t("agents:copilotPluginsTitle")}</h3>
-          <SettingsFieldDescription>
-            {t("agents:copilotPluginsDescription")}
-          </SettingsFieldDescription>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className={`cursor-pointer ${actionHeight}`}
-          onClick={() => void refresh()}
-          disabled={status === "loading"}
-          aria-label={t("agents:refreshCopilotPlugins")}
-          data-testid="copilot-plugins-refresh"
-        >
-          <IconRefresh className={`mr-2 h-4 w-4 ${status === "loading" ? "animate-spin" : ""}`} />
-          {t("agents:refreshCopilotPlugins")}
-        </Button>
-      </div>
+      <PluginSelectionHeader
+        actionHeight={actionHeight}
+        loading={status === "loading"}
+        onRefresh={() => void refresh()}
+      />
 
-      <DiscoveryStatus status={status} stale={stale} isEmpty={rows.length === 0} />
+      <DiscoveryStatus
+        status={status}
+        stale={stale}
+        isEmpty={rows.length === 0}
+        response={response}
+      />
       {startBlocked ? (
         <p
           className="text-xs text-destructive"
@@ -123,6 +130,39 @@ export function CopilotPluginProfileSelection({
   );
 }
 
+function PluginSelectionHeader({
+  actionHeight,
+  loading,
+  onRefresh,
+}: {
+  actionHeight: string;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0 space-y-1">
+        <h3 className="text-sm font-semibold">{t("agents:copilotPluginsTitle")}</h3>
+        <SettingsFieldDescription>{t("agents:copilotPluginsDescription")}</SettingsFieldDescription>
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className={`cursor-pointer ${actionHeight}`}
+        onClick={onRefresh}
+        disabled={loading}
+        aria-label={t("agents:refreshCopilotPlugins")}
+        data-testid="copilot-plugins-refresh"
+      >
+        <IconRefresh className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        {t("agents:refreshCopilotPlugins")}
+      </Button>
+    </div>
+  );
+}
+
 function discoveryRowStatus(
   status: "loading" | "ready" | "unavailable" | "unsupported",
   hasResponse: boolean,
@@ -135,10 +175,12 @@ function DiscoveryStatus({
   status,
   stale,
   isEmpty,
+  response,
 }: {
   status: "loading" | "ready" | "unavailable" | "unsupported";
   stale: boolean;
   isEmpty: boolean;
+  response?: CopilotPluginDiscoveryResponse;
 }) {
   const { t } = useTranslation();
   if (status === "loading") {
@@ -149,24 +191,6 @@ function DiscoveryStatus({
         data-testid="copilot-plugins-loading"
       >
         {t("agents:copilotPluginsLoading")} {t("agents:copilotPluginsLoadingHint")}
-      </p>
-    );
-  }
-  if (status === "unsupported") {
-    return (
-      <p
-        className="text-xs text-muted-foreground"
-        role="status"
-        data-testid="copilot-plugins-unsupported"
-      >
-        {t("agents:copilotPluginsUnsupported")}
-      </p>
-    );
-  }
-  if (status === "unavailable") {
-    return (
-      <p className="text-xs text-destructive" role="status" data-testid="copilot-plugins-failed">
-        {t("agents:copilotPluginsFailed")}
       </p>
     );
   }
@@ -181,6 +205,25 @@ function DiscoveryStatus({
       </p>
     );
   }
+  if (status === "unavailable") {
+    return (
+      <div className="space-y-1 text-xs" role="status" data-testid="copilot-plugins-failed">
+        <SelectedRuntimeLabel
+          response={response}
+          currentObservation={status === response?.status}
+        />
+        <p className="text-destructive">{unavailableReasonText(t, response)}</p>
+      </div>
+    );
+  }
+  if (status === "unsupported") {
+    return (
+      <UnsupportedRuntimeStatus
+        response={response}
+        currentObservation={status === response?.status}
+      />
+    );
+  }
   if (isEmpty) {
     return (
       <p
@@ -193,6 +236,70 @@ function DiscoveryStatus({
     );
   }
   return null;
+}
+
+function UnsupportedRuntimeStatus({
+  response,
+  currentObservation,
+}: {
+  response?: CopilotPluginDiscoveryResponse;
+  currentObservation: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1 text-xs" role="status" data-testid="copilot-plugins-unsupported">
+      <SelectedRuntimeLabel response={response} currentObservation={currentObservation} />
+      <p className="text-muted-foreground">{unsupportedReasonText(t, response)}</p>
+    </div>
+  );
+}
+
+function SelectedRuntimeLabel({
+  response,
+  currentObservation,
+}: {
+  response?: CopilotPluginDiscoveryResponse;
+  currentObservation: boolean;
+}) {
+  const { t } = useTranslation();
+  const version = response?.runtime_version?.trim();
+  if (!currentObservation || !version) return null;
+  return <p className="font-medium">{t("agents:copilotPluginsSelectedRuntime", { version })}</p>;
+}
+
+function unsupportedReasonText(
+  t: ReturnType<typeof useTranslation>["t"],
+  response?: CopilotPluginDiscoveryResponse,
+): string {
+  switch (response?.reason) {
+    case "plugin_loading_unsupported":
+      return t("agents:copilotPluginsLoadingUnsupported");
+    case "runtime_unsupported":
+      return t("agents:copilotPluginsLegacyRuntimeUnsupported");
+    case "unsupported_launch_context":
+      return t("agents:copilotPluginsLaunchContextReason");
+    case "policy_unverified":
+      return t("agents:copilotPluginsLegacyPolicyReason");
+    case undefined:
+      return t("agents:copilotPluginsUnsupported");
+    default:
+      return t("agents:copilotPluginsUnknownReason");
+  }
+}
+
+function unavailableReasonText(
+  t: ReturnType<typeof useTranslation>["t"],
+  response?: CopilotPluginDiscoveryResponse,
+): string {
+  switch (response?.reason) {
+    case "invalid_inventory":
+    case "legacy_errors":
+      return t("agents:copilotPluginsInventoryInvalid");
+    case "output_limit":
+      return t("agents:copilotPluginsInventoryLimit");
+    default:
+      return t("agents:copilotPluginsFailed");
+  }
 }
 
 function PluginRow({
@@ -242,6 +349,16 @@ function PluginRow({
   );
 }
 
+function nativeStatusLabel(
+  t: ReturnType<typeof useTranslation>["t"],
+  nativeEnabled: boolean | null,
+): string {
+  if (nativeEnabled === null) return t("agents:copilotPluginsNativeUnknown");
+  return nativeEnabled
+    ? t("agents:copilotPluginsNativeEnabled")
+    : t("agents:copilotPluginsNativeDisabled");
+}
+
 function PluginMetadata({ row }: { row: CopilotPluginSelectionRow }) {
   const { t } = useTranslation();
   const metadata = [row.marketplace, row.version].filter(Boolean).join(" ");
@@ -252,9 +369,7 @@ function PluginMetadata({ row }: { row: CopilotPluginSelectionRow }) {
       ) : null}
       <span className="block text-xs text-muted-foreground">
         {t("agents:copilotPluginsNativeStatus", {
-          status: row.nativeEnabled
-            ? t("agents:copilotPluginsNativeEnabled")
-            : t("agents:copilotPluginsNativeDisabled"),
+          status: nativeStatusLabel(t, row.nativeEnabled),
         })}
       </span>
     </>

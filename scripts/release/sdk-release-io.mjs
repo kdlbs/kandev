@@ -52,6 +52,12 @@ export class ReleaseIO {
   retainCandidate(candidate, source) {
     return this.assets.retain(candidate, source);
   }
+  finalizeCandidate(candidate, source) {
+    return this.assets.finalize(candidate, source);
+  }
+  verifyFinalizedCandidate(candidate, source) {
+    return this.assets.verifyFinalized(candidate, source);
+  }
   createTag(source) {
     return this.repository.createSDKTag(source);
   }

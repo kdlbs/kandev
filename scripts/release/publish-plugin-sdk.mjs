@@ -12,7 +12,6 @@ import {
   publishPublication,
 } from "./sdk-publication-state.mjs";
 import { verifyTools } from "../pluginsdk/pack-candidate.mjs";
-import { assetNames } from "./sdk-artifact.mjs";
 const exec = promisify(execFile);
 export async function runRelease({
   mode,
@@ -80,6 +79,7 @@ export async function runRelease({
       const candidate = await io.obtainCandidate(source, {
         allowCreate: false,
       });
+      await io.verifyFinalizedCandidate(candidate, source);
       const registry = await io.readRegistry(source.record.sdk_version);
       if (
         !registry.version ||
@@ -100,12 +100,8 @@ export async function runRelease({
       origin: result.origin,
     };
     if (result.status === "bootstrap_required") {
-      const names = assetNames(source.record.sdk_version);
       summary.integrity = result.candidate.integrity;
-      summary.assets = Object.values(names).map(
-        (name) =>
-          `https://github.com/kdlbs/kandev/releases/download/${source.hostTag}/${name}`,
-      );
+      summary.assets = result.candidate.retention.urls;
       summary.instructions =
         "Verify the retained receipt signature and archive integrity. Publish that exact archive using the maintainer bootstrap instructions in docs/public/release-process.md, configure trusted publishing, then rerun the Stable backfill. No SDK completion has been recorded.";
     }

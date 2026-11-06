@@ -181,6 +181,7 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 		zap.Int("children", len(children)))
 
 	bareRoot := m.newTrackerForRepo(workDir, "")
+	bareRoot.suppressGitPublication = true
 	m.configureTracker(bareRoot, "", roots)
 	m.prepareTrackerComparisonTarget(bareRoot, false)
 	bareRoot.Start(ctx)

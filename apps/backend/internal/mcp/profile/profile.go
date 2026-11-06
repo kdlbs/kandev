@@ -188,6 +188,7 @@ func Normalize(c Context) Context {
 	if c.CoordinatorToolPolicy != nil && c.Surface == SurfaceCoordinator {
 		policy := *c.CoordinatorToolPolicy
 		policy.ToolNames = slices.Clone(c.CoordinatorToolPolicy.ToolNames)
+		policy.PluginTools = slices.Clone(c.CoordinatorToolPolicy.PluginTools)
 		normalized.CoordinatorToolPolicy = &policy
 	}
 	return normalized

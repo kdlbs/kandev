@@ -24,6 +24,10 @@ system_design:
 
 # Task 05: Build the shared hierarchical picker
 
+Issue #5053 adds an explicit rendered singleton outcome under AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-002.5.
+The [singleton repair work order](../model-catalog-selector-repair/task-01-singleton-presentation.md) owns that correction.
+This completed work order retains its original scope and historical results. Its pure-tree singleton coverage does not prove heading suppression.
+
 ## Summary
 
 Extend the existing selector with generic group navigation and exact composition drafts.

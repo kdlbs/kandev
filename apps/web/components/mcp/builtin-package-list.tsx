@@ -30,7 +30,7 @@ function PackageRow({
       data-settings-dirty={state.dirty}
       data-settings-dirty-level="container"
       onClick={() => onSelect(item.id)}
-      className="h-auto min-h-14 w-full cursor-pointer justify-start gap-3 whitespace-normal rounded-none border border-transparent p-3 text-left"
+      className="h-auto max-md:h-auto [@media(pointer:coarse)]:h-auto min-h-14 w-full cursor-pointer justify-start gap-3 whitespace-normal rounded-none border border-transparent p-3 text-left"
     >
       <span className="min-w-0 flex-1">
         <span className="block font-medium">{t(item.label_key)}</span>
