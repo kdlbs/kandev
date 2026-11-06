@@ -10,6 +10,13 @@ legacy_specs: []
 
 # Implementation Plan: Mobile Menu Backdrops
 
+## Nested drawer lifecycle repair
+
+[Task 02: Restore nested drawer menu pointer ownership](task-02-restore-nested-pointer-ownership.md)
+records the completed lifecycle correction for the existing nested-surface and
+dismissal contract (criteria 001.10 and 001.11). This follow-up preserves the
+backdrop presentation and action ownership described below.
+
 ## Overview
 
 Give every shared dropdown/context bottom sheet the background dimming and

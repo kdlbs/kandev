@@ -4,10 +4,22 @@ import * as React from "react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 
 import { cn } from "./lib/utils";
+import { ModalDrawerContentContext } from "./modal-drawer-context";
 import { IconCheck, IconChevronRight } from "@tabler/icons-react";
 
-function DropdownMenu({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
+function DropdownMenu({
+  modal,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
+  const insideModalDrawer = React.useContext(ModalDrawerContentContext);
+  // The drawer owns outside interaction blocking through nested menu exit and navigation.
+  return (
+    <DropdownMenuPrimitive.Root
+      data-slot="dropdown-menu"
+      modal={modal ?? !insideModalDrawer}
+      {...props}
+    />
+  );
 }
 
 function DropdownMenuPortal({

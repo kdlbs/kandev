@@ -33,8 +33,13 @@ that existing contract, including non-task consumers of the same primitives.
   scoped to the generated positioning wrapper immediately containing that
   marked root content.
 - `apps/packages/ui/src/drawer.tsx` is the visual reference for the backdrop:
-  `bg-black/80` and supported `backdrop-blur-xs`. Its implementation stays
-  unchanged.
+  `bg-black/80` and supported `backdrop-blur-xs`. Its root provides the modal
+  mode to content through React context. Content provides that mode to nested
+  shared dropdowns across portals, so an implicit dropdown inside modal Drawer
+  content defers outside-pointer ownership to the Drawer. An explicit dropdown
+  `modal` prop takes precedence; standalone dropdown defaults and dropdowns in
+  nonmodal Drawer content retain their existing behavior. `DrawerNested`
+  provides its own modal mode at the same boundary.
 - Existing Radix roots own open state, presence, accessibility, dismissal,
   focus, and outside interaction. Consumer components retain their handlers.
 
