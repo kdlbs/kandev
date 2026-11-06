@@ -14,6 +14,7 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
@@ -4258,13 +4259,10 @@ func (s *Service) persistRecoveryStatusMessage(
 	return nil
 }
 
-// applyProviderQuotaMetadata promotes only a validated OpenCode terminal
-// diagnostic to the specialized recovery surface. Generic prose and provider
-// diagnostics from other agents retain the existing error card.
+// applyProviderQuotaMetadata promotes validated quota diagnostics to the
+// specialized recovery surface. Generic prose keeps the ordinary error card.
 func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentEventData) bool {
-	if data.AgentID != "opencode-acp" || data.ProviderError == nil ||
-		data.ProviderError.Source != streams.ProviderErrorSourceOpenCodeStderr ||
-		!data.ProviderError.Valid() {
+	if data.ProviderError == nil || !data.ProviderError.Valid() {
 		return false
 	}
 	classified := routingerr.Classify(routingerr.Input{
@@ -4277,7 +4275,7 @@ func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentE
 	}
 
 	meta["failure_kind"] = "provider_quota_limited"
-	meta["provider_name"] = "OpenCode"
+	meta["provider_name"] = quotaProviderDisplayName(data.AgentID)
 	if modelID := routingerr.Sanitize(data.ProviderError.ModelID); modelID != "" {
 		meta["model_id"] = modelID
 	}
@@ -4288,6 +4286,27 @@ func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentE
 		meta["error_output"] = details
 	}
 	return true
+}
+
+func quotaProviderDisplayName(agentID string) string {
+	switch agentID {
+	case "opencode-acp":
+		return "OpenCode"
+	case "antigravity-acp":
+		return "Antigravity"
+	case "claude-acp":
+		return "Claude"
+	case "codex-acp":
+		return "Codex"
+	case acpcompat.CursorAgentID:
+		return "Cursor"
+	case "copilot-acp":
+		return "Copilot"
+	case "grok-acp":
+		return "Grok"
+	default:
+		return ""
+	}
 }
 
 // applyRecoverableFailureDetail populates the collapsed technical-details

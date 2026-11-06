@@ -4,6 +4,20 @@ package routingerr
 // than one adapter. Keep these rules independent from provider IDs so adding a
 // new ACP provider does not require copying the same transient fingerprints.
 var providerNeutralRules = []rule{
+	// A full provider notice can be the only signal when an ACP prompt never
+	// finishes. The complete opening wording is required for high confidence.
+	mustRule(
+		"provider.quota_notice.v1",
+		`(?is)^\s*(?:usage\s+limit\s+reached[.!]?\s*)?you have reached your current quota for this period\.\s*your limit will reset in\s+\d+\s*(?:days?|hours?|hrs?|minutes?|mins?|min)\b`,
+		CodeQuotaLimited,
+		ConfHigh,
+	),
+	mustRule(
+		"provider.quota_notice_prose.v1",
+		`(?i)\breached\s+your\s+current\s+quota\s+for\s+this\s+period\b`,
+		CodeQuotaLimited,
+		ConfMedium,
+	),
 	// A gateway that restricted an account rejects every request with 403 and
 	// an account-restriction code or message. The envelope must open the line,
 	// optionally inside a labeled JSON message, so an agent quoting the error
