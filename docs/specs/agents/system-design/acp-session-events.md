@@ -17,7 +17,8 @@ The ACP adapter translates schema 1.28 compaction and notice updates into existi
 normalized streams. Message persistence, durable delivery, and turn lifecycle keep
 their current owners. The usage-derived count in the
 [context compaction count](../../ui/requirements/context-compaction-count.md)
-contract does not change.
+contract does not change through standard timeline events.
+The [Copilot native design](copilot-native-compaction.md) defines a separate evidence-driven counter path.
 
 ## Requirement mapping
 
