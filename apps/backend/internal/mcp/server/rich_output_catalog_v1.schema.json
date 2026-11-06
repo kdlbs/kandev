@@ -560,13 +560,9 @@
                                   "maxItems": 100,
                                   "type": "array",
                                   "items": {
-                                    "anyOf": [
-                                      {
-                                        "type": "number"
-                                      },
-                                      {
-                                        "type": "null"
-                                      }
+                                    "type": [
+                                      "number",
+                                      "null"
                                     ]
                                   }
                                 }
