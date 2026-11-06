@@ -1,6 +1,7 @@
 package sessioncapacity
 
 import (
+	"maps"
 	"os"
 	"strconv"
 	"strings"
@@ -24,6 +25,13 @@ func Resolve(configured *Settings, environment Environment) (Resolution, error) 
 			return Resolution{}, err
 		}
 		settings = *configured
+		settings.GradeLimits = maps.Clone(configured.GradeLimits)
+		if settings.Policy == "" {
+			settings.Policy = PolicyAutomatic
+		}
+		if settings.GradeLimits == nil {
+			settings.GradeLimits = map[string]int{}
+		}
 		source = SourceSetting
 	}
 
@@ -46,15 +54,19 @@ func Resolve(configured *Settings, environment Environment) (Resolution, error) 
 		MaxSessions: int(value),
 		Source:      SourceEnvironment,
 		Locked:      true,
+		Policy:      PolicyAutomatic,
+		GradeLimits: map[string]int{},
 	}
 	return resolution, nil
 }
 
 func effectiveFor(settings Settings, source Source) Effective {
-	effective := Effective{Source: source}
+	effective := Effective{Source: source, Policy: PolicyAutomatic, GradeLimits: map[string]int{}}
 	if settings.Enabled {
 		effective.Enabled = true
+		effective.Policy = settings.Policy
 		effective.MaxSessions = settings.MaxSessions
+		effective.GradeLimits = maps.Clone(settings.GradeLimits)
 	}
 	return effective
 }

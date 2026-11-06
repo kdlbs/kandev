@@ -8,7 +8,7 @@ import (
 )
 
 func TestResolveSessionCapacity(t *testing.T) {
-	saved := &Settings{Enabled: true, MaxSessions: 9}
+	saved := &Settings{Enabled: true, MaxSessions: 9, Policy: PolicyAutomatic, GradeLimits: map[string]int{}}
 	tests := []struct {
 		name           string
 		configured     *Settings
@@ -19,41 +19,41 @@ func TestResolveSessionCapacity(t *testing.T) {
 	}{
 		{
 			name:          "absent saved state is disabled with remembered default",
-			wantSettings:  Settings{Enabled: false, MaxSessions: DefaultMaxSessions},
-			wantEffective: Effective{Enabled: false, MaxSessions: 0, Source: SourceDefault},
+			wantSettings:  Settings{Enabled: false, MaxSessions: DefaultMaxSessions, Policy: PolicyAutomatic, GradeLimits: map[string]int{}},
+			wantEffective: Effective{Enabled: false, MaxSessions: 0, Source: SourceDefault, Policy: PolicyAutomatic, GradeLimits: map[string]int{}},
 		},
 		{
 			name:          "saved disabled state remembers its maximum",
-			configured:    &Settings{Enabled: false, MaxSessions: 11},
-			wantSettings:  Settings{Enabled: false, MaxSessions: 11},
-			wantEffective: Effective{Enabled: false, MaxSessions: 0, Source: SourceSetting},
+			configured:    &Settings{Enabled: false, MaxSessions: 11, Policy: PolicyAutomatic, GradeLimits: map[string]int{}},
+			wantSettings:  Settings{Enabled: false, MaxSessions: 11, Policy: PolicyAutomatic, GradeLimits: map[string]int{}},
+			wantEffective: Effective{Enabled: false, MaxSessions: 0, Source: SourceSetting, Policy: PolicyAutomatic, GradeLimits: map[string]int{}},
 		},
 		{
 			name:          "saved enabled state supplies effective capacity",
 			configured:    saved,
 			wantSettings:  *saved,
-			wantEffective: Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting},
+			wantEffective: Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting, Policy: PolicyAutomatic, GradeLimits: map[string]int{}},
 		},
 		{
 			name:          "valid environment value wins and locks",
 			configured:    saved,
 			environment:   Environment{Value: " 7 ", Present: true},
 			wantSettings:  *saved,
-			wantEffective: Effective{Enabled: true, MaxSessions: 7, Source: SourceEnvironment, Locked: true},
+			wantEffective: Effective{Enabled: true, MaxSessions: 7, Source: SourceEnvironment, Locked: true, Policy: PolicyAutomatic, GradeLimits: map[string]int{}},
 		},
 		{
 			name:          "zero environment value disables and locks",
 			configured:    saved,
 			environment:   Environment{Value: "0", Present: true},
 			wantSettings:  *saved,
-			wantEffective: Effective{Enabled: false, MaxSessions: 0, Source: SourceEnvironment, Locked: true},
+			wantEffective: Effective{Enabled: false, MaxSessions: 0, Source: SourceEnvironment, Locked: true, Policy: PolicyAutomatic, GradeLimits: map[string]int{}},
 		},
 		{
 			name:           "blank environment falls back without warning",
 			configured:     saved,
 			environment:    Environment{Value: "  ", Present: true},
 			wantSettings:   *saved,
-			wantEffective:  Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting},
+			wantEffective:  Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting, Policy: PolicyAutomatic, GradeLimits: map[string]int{}},
 			wantInvalidEnv: false,
 		},
 		{
@@ -61,7 +61,7 @@ func TestResolveSessionCapacity(t *testing.T) {
 			configured:     saved,
 			environment:    Environment{Value: "not-a-number", Present: true},
 			wantSettings:   *saved,
-			wantEffective:  Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting},
+			wantEffective:  Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting, Policy: PolicyAutomatic, GradeLimits: map[string]int{}},
 			wantInvalidEnv: true,
 		},
 		{
@@ -69,7 +69,7 @@ func TestResolveSessionCapacity(t *testing.T) {
 			configured:     saved,
 			environment:    Environment{Value: "-1", Present: true},
 			wantSettings:   *saved,
-			wantEffective:  Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting},
+			wantEffective:  Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting, Policy: PolicyAutomatic, GradeLimits: map[string]int{}},
 			wantInvalidEnv: true,
 		},
 		{
@@ -77,14 +77,14 @@ func TestResolveSessionCapacity(t *testing.T) {
 			configured:     saved,
 			environment:    Environment{Value: "2147483648", Present: true},
 			wantSettings:   *saved,
-			wantEffective:  Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting},
+			wantEffective:  Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting, Policy: PolicyAutomatic, GradeLimits: map[string]int{}},
 			wantInvalidEnv: true,
 		},
 		{
 			name:          "maximum environment value is valid",
 			environment:   Environment{Value: "2147483647", Present: true},
-			wantSettings:  Settings{Enabled: false, MaxSessions: DefaultMaxSessions},
-			wantEffective: Effective{Enabled: true, MaxSessions: 2147483647, Source: SourceEnvironment, Locked: true},
+			wantSettings:  Settings{Enabled: false, MaxSessions: DefaultMaxSessions, Policy: PolicyAutomatic, GradeLimits: map[string]int{}},
+			wantEffective: Effective{Enabled: true, MaxSessions: 2147483647, Source: SourceEnvironment, Locked: true, Policy: PolicyAutomatic, GradeLimits: map[string]int{}},
 		},
 	}
 
@@ -113,11 +113,11 @@ func TestValidateSavedSettingsRequiresPortablePositiveMaximum(t *testing.T) {
 		settings Settings
 		wantErr  bool
 	}{
-		{name: "disabled zero", settings: Settings{MaxSessions: 0}, wantErr: true},
-		{name: "negative", settings: Settings{MaxSessions: -1}, wantErr: true},
-		{name: "overflow", settings: Settings{MaxSessions: 2147483648}, wantErr: true},
-		{name: "minimum", settings: Settings{MaxSessions: 1}},
-		{name: "maximum", settings: Settings{MaxSessions: 2147483647}},
+		{name: "disabled zero", settings: Settings{MaxSessions: 0, Policy: PolicyAutomatic, GradeLimits: map[string]int{}}, wantErr: true},
+		{name: "negative", settings: Settings{MaxSessions: -1, Policy: PolicyAutomatic, GradeLimits: map[string]int{}}, wantErr: true},
+		{name: "overflow", settings: Settings{MaxSessions: 2147483648, Policy: PolicyAutomatic, GradeLimits: map[string]int{}}, wantErr: true},
+		{name: "minimum", settings: Settings{MaxSessions: 1, Policy: PolicyAutomatic, GradeLimits: map[string]int{}}},
+		{name: "maximum", settings: Settings{MaxSessions: 2147483647, Policy: PolicyAutomatic, GradeLimits: map[string]int{}}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := Validate(tt.settings)
@@ -132,11 +132,11 @@ func TestValidateSavedSettingsRequiresPortablePositiveMaximum(t *testing.T) {
 }
 
 func TestSettingsAndPatchUseSnakeCaseAndPreserveOmittedFields(t *testing.T) {
-	settingsJSON, err := json.Marshal(Settings{Enabled: true, MaxSessions: 8})
+	settingsJSON, err := json.Marshal(Settings{Enabled: true, MaxSessions: 8, Policy: PolicyAutomatic, GradeLimits: map[string]int{}})
 	if err != nil {
 		t.Fatalf("marshal settings: %v", err)
 	}
-	if string(settingsJSON) != `{"enabled":true,"max_sessions":8}` {
+	if string(settingsJSON) != `{"enabled":true,"max_sessions":8,"policy":"automatic","grade_limits":{}}` {
 		t.Fatalf("settings JSON = %s", settingsJSON)
 	}
 
@@ -150,8 +150,8 @@ func TestSettingsAndPatchUseSnakeCaseAndPreserveOmittedFields(t *testing.T) {
 	if patch.MaxSessions != nil {
 		t.Fatalf("omitted max_sessions = %v, want nil", *patch.MaxSessions)
 	}
-	got := patch.Apply(Settings{Enabled: true, MaxSessions: 8})
-	if !reflect.DeepEqual(got, Settings{Enabled: false, MaxSessions: 8}) {
+	got := patch.Apply(Settings{Enabled: true, MaxSessions: 8, Policy: PolicyAutomatic, GradeLimits: map[string]int{}})
+	if !reflect.DeepEqual(got, Settings{Enabled: false, MaxSessions: 8, Policy: PolicyAutomatic, GradeLimits: map[string]int{}}) {
 		t.Fatalf("applied patch = %+v", got)
 	}
 }
