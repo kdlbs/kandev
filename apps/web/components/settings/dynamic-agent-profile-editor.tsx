@@ -13,6 +13,7 @@ import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
 import { ProfileNameField } from "@/components/settings/profile-form-fields";
 import { useDynamicAgentProfileEditorState } from "@/components/settings/dynamic-agent-profile-editor-state";
 import type { Agent, AgentProfile } from "@/lib/types/http";
+import { DynamicTierPreview } from "./dynamic-tier-preview";
 
 type DynamicAgentProfileEditorProps = {
   agent: Agent;
@@ -121,8 +122,15 @@ export function DynamicAgentProfileEditor({
         addCandidate={state.addCandidate}
         moveCandidate={state.moveCandidate}
         removeCandidate={state.removeCandidate}
+        toggleJoin={state.toggleJoin}
         updateCandidate={state.updateCandidate}
         updateCandidatePolicy={state.updateCandidatePolicy}
+      />
+      <DynamicTierPreview
+        profileId={isCreating ? undefined : profile.id}
+        version={state.dynamicVersion}
+        candidates={state.candidates}
+        profiles={state.concreteProfiles}
       />
     </>
   );

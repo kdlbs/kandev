@@ -146,7 +146,13 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.migrate.Apply("dynamic_resource_circuits.failure_count", `ALTER TABLE dynamic_resource_circuits ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := r.ensureRouteSelectionOrdinal(ctx); err != nil {
+		return err
+	}
 	if err := r.backfillLegacyActiveDynamicRoutes(); err != nil {
+		return err
+	}
+	if err := r.ensureNativeRouteOwners(ctx); err != nil {
 		return err
 	}
 	r.migrate.Apply("executors_running.execution_profile_id", `ALTER TABLE executors_running ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)

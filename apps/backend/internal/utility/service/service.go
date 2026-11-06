@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
@@ -369,6 +367,10 @@ type DefaultUtilitySettings struct {
 // When sessionless is true, missing template variables are substituted with
 // empty strings instead of being left as {{Var}}.
 func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tmplCtx *template.Context, defaults *DefaultUtilitySettings, sessionless bool) (*PromptRequest, error) {
+	return s.preparePromptRequest(ctx, utilityID, tmplCtx, defaults, sessionless, nil)
+}
+
+func (s *Service) preparePromptRequest(ctx context.Context, utilityID string, tmplCtx *template.Context, defaults *DefaultUtilitySettings, sessionless bool, callSessionID *string) (*PromptRequest, error) {
 	agent, err := s.repo.GetAgentByID(ctx, utilityID)
 	if err != nil {
 		return nil, ErrAgentNotFound
@@ -408,52 +410,7 @@ func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tm
 		if err != nil {
 			return nil, err
 		}
-		logicalProfileID := profile.ID
-		executionProfileID := logicalProfileID
-		routeSessionID := ""
-		routeGeneration := int64(0)
-		if s.executionResolver != nil {
-			var resolved *agentsettingsmodels.AgentProfile
-			var concreteID string
-			var resolveErr error
-			if detailsResolver, ok := s.executionResolver.(ExecutionDetailsResolver); ok {
-				routeSessionID = "utility:" + uuid.NewString()
-				details, detailsErr := detailsResolver.ResolveExecutionDetails(ctx, routeSessionID, profileID)
-				if detailsErr != nil {
-					return nil, detailsErr
-				}
-				resolved = details.Profile
-				concreteID = details.ExecutionProfileID
-				if details.RouteSessionID != "" {
-					routeSessionID = details.RouteSessionID
-				}
-				routeGeneration = details.Generation
-			} else if sessionResolver, ok := s.executionResolver.(SessionExecutionProfileResolver); ok {
-				routeSessionID = "utility:" + uuid.NewString()
-				resolved, concreteID, resolveErr = sessionResolver.ResolveExecutionForSession(ctx, routeSessionID, profileID)
-			} else {
-				resolved, concreteID, resolveErr = s.executionResolver.ResolveExecution(ctx, profileID)
-			}
-			if resolveErr != nil {
-				return nil, resolveErr
-			}
-			if resolved != nil {
-				profile = resolved
-			}
-			if concreteID != "" {
-				executionProfileID = concreteID
-			}
-		}
-		return &PromptRequest{
-			UtilityID:          utilityID,
-			ResolvedPrompt:     resolvedPrompt,
-			AgentCLI:           profile.AgentID,
-			Model:              profile.Model,
-			AgentProfileID:     logicalProfileID,
-			ExecutionProfileID: executionProfileID,
-			RouteSessionID:     routeSessionID,
-			RouteGeneration:    routeGeneration,
-		}, nil
+		return s.prepareProfilePrompt(ctx, utilityID, resolvedPrompt, profile, callSessionID)
 	}
 
 	// Use agent-specific values when fully configured. If the model is empty,
@@ -480,6 +437,7 @@ func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tm
 
 // PromptRequest contains the prepared request for executing a utility prompt.
 type PromptRequest struct {
+	CallID             string
 	UtilityID          string
 	ResolvedPrompt     string
 	AgentCLI           string // The inference agent ID (e.g., "claude-acp", "amp")
