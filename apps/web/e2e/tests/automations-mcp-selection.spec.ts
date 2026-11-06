@@ -1,3 +1,4 @@
+import { waitForFiniteAnimations } from "../helpers/pr-capture";
 import { watchWs } from "../helpers/causal-waits";
 import { test, expect } from "../fixtures/test-base";
 import {
@@ -66,6 +67,7 @@ test("saves all native packages and workspace servers, then invokes native tools
   const serverRow = section.getByTestId(`automation-mcp-server-${server.id}`);
   await serverRow.click();
   await section.evaluate((element) => element.scrollIntoView({ block: "start" }));
+  if (prCapture.capturing) await waitForFiniteAnimations(testPage.locator("body"));
   await prCapture.screenshot("automation-mcp-desktop", {
     caption: "Automation MCP selection on desktop",
   });
@@ -73,6 +75,7 @@ test("saves all native packages and workspace servers, then invokes native tools
   const detail = section.getByTestId("automation-mcp-package-detail");
   expect((await detail.getByRole("combobox").boundingBox())!.height).toBeCloseTo(28, 0);
   await detail.evaluate((element) => element.scrollIntoView({ block: "start" }));
+  if (prCapture.capturing) await waitForFiniteAnimations(testPage.locator("body"));
   await prCapture.screenshot("automation-mcp-package-detail-desktop", {
     caption: "Automation package detail uses the shared MCP package presentation",
   });

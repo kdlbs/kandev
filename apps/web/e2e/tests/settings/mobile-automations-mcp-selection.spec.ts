@@ -1,3 +1,4 @@
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { watchWs } from "../../helpers/causal-waits";
 import { test, expect } from "../../fixtures/test-base";
 import {
@@ -50,6 +51,7 @@ test("selects and saves every optional package on a phone with reachable control
     await chooseAutomationPackage(testPage, id, true, true);
   }
   await section.evaluate((element) => element.scrollIntoView({ block: "start" }));
+  if (prCapture.capturing) await waitForFiniteAnimations(testPage.locator("body"));
   await prCapture.screenshot("automation-mcp-phone", {
     caption: "Automation MCP selection on a phone",
   });
@@ -57,6 +59,7 @@ test("selects and saves every optional package on a phone with reachable control
   const detail = section.getByTestId("automation-mcp-package-detail");
   expect((await detail.getByRole("combobox").boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await detail.evaluate((element) => element.scrollIntoView({ block: "start" }));
+  if (prCapture.capturing) await waitForFiniteAnimations(testPage.locator("body"));
   await prCapture.screenshot("automation-mcp-package-detail-phone", {
     caption: "Automation package detail with touch-sized controls",
   });
