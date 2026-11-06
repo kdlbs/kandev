@@ -12,6 +12,10 @@ var (
 	ErrWorkspacePreparing        = errors.New("workspace is preparing")
 	ErrWorkspaceReuseUnsafe      = errors.New("workspace reuse is unsafe")
 	ErrWorkspaceReuseUnsupported = errors.New("workspace reuse is unsupported")
+	// ErrInheritedWorkspacePending marks an unsafe-reuse refusal that can still
+	// succeed: the parent is live and has not materialized any environment yet.
+	// It is always returned wrapped together with ErrWorkspaceReuseUnsafe.
+	ErrInheritedWorkspacePending = errors.New("inherited workspace is not materialized yet")
 	// ErrTaskEnvironmentResetRequired is the reuse refusal for a failed task
 	// environment that still holds workspace resources. A start cannot
 	// re-materialize it; resetting the task environment clears it.
@@ -53,4 +57,10 @@ func DescribeInheritedEnvironmentUnavailable(parentID string, parent *Task) stri
 		return fmt.Sprintf("inherited task environment is unavailable: parent task %s was archived and its workspace was removed", parentID)
 	}
 	return fmt.Sprintf("inherited task environment is unavailable: parent task %s workspace could not be resolved", parentID)
+}
+
+// DescribeInheritedEnvironmentPending builds the reason clause for an
+// inherit_parent task whose live parent has no environment yet.
+func DescribeInheritedEnvironmentPending(parentID string) string {
+	return fmt.Sprintf("inherited task environment is unavailable: parent task %s has not materialized a workspace yet", parentID)
 }

@@ -49,7 +49,7 @@ func (s *Service) admitInheritedEnvironment(ctx context.Context, task *v1.Task, 
 			return fmt.Errorf("%w: inherit_parent task has no parent", models.ErrWorkspaceReuseUnsafe)
 		}
 		var err error
-		envID, _, err = s.resolveInheritedEnvironmentChecked(ctx, task)
+		envID, _, _, err = s.resolveInheritedEnvironmentChecked(ctx, task)
 		if err != nil {
 			return err
 		}
@@ -131,12 +131,16 @@ func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Tas
 	if task.ParentID == "" {
 		return fmt.Errorf("%w: inherit_parent task has no parent", models.ErrWorkspaceReuseUnsafe)
 	}
-	envID, source, resolveErr := s.resolveInheritedEnvironmentChecked(ctx, task)
+	envID, source, pending, resolveErr := s.resolveInheritedEnvironmentChecked(ctx, task)
 	if resolveErr != nil {
 		return resolveErr
 	}
 	if envID == "" {
 		parent, _ := s.repo.GetTask(ctx, task.ParentID)
+		if pending {
+			return fmt.Errorf("%w: %w: %s", models.ErrWorkspaceReuseUnsafe, models.ErrInheritedWorkspacePending,
+				models.DescribeInheritedEnvironmentPending(task.ParentID))
+		}
 		return fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe,
 			models.DescribeInheritedEnvironmentUnavailable(task.ParentID, parent))
 	}
@@ -187,62 +191,183 @@ func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Tas
 // workspace group, and MarkOwnerSessionMaterialized records the parent as
 // that group's owner.
 func (s *Service) resolveInheritedEnvironment(ctx context.Context, task *v1.Task) (envID, source string) {
-	envID, source, _ = s.resolveInheritedEnvironmentChecked(ctx, task)
+	envID, source, _, _ = s.resolveInheritedEnvironmentChecked(ctx, task)
 	return envID, source
 }
 
-func (s *Service) resolveInheritedEnvironmentChecked(ctx context.Context, task *v1.Task) (envID, source string, err error) {
+// resolveInheritedEnvironmentChecked resolves the environment a child inherits
+// and reports whether an unresolved inheritance is still pending. The pending
+// verdict is derived from the same reads that resolve the environment, so a
+// parent that materializes its workspace concurrently cannot change the
+// classification after this pass (which would turn a retryable refusal into a
+// permanent one).
+func (s *Service) resolveInheritedEnvironmentChecked(ctx context.Context, task *v1.Task) (envID, source string, pending bool, err error) {
 	parent, err := s.repo.GetTask(ctx, task.ParentID)
 	if err != nil || parent == nil {
 		s.logger.Warn("inherit_parent: load parent task failed",
 			zap.String("task_id", task.ID),
 			zap.String("parent_task_id", task.ParentID),
 			zap.Error(err))
-		return "", "", fmt.Errorf("%w: parent task %s could not be verified", models.ErrWorkspaceReuseUnsafe, task.ParentID)
+		return "", "", false, fmt.Errorf("%w: parent task %s could not be verified", models.ErrWorkspaceReuseUnsafe, task.ParentID)
 	}
 	if parent.ArchivedAt != nil {
 		s.logger.Warn("inherit_parent: parent task is archived, environment inheritance unavailable",
 			zap.String("task_id", task.ID),
 			zap.String("parent_task_id", task.ParentID))
-		return "", "", fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe,
+		return "", "", false, fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe,
 			models.DescribeInheritedEnvironmentUnavailable(task.ParentID, parent))
 	}
+	pending, envID, source, err = s.resolveLiveParentEnvironment(ctx, task, parent)
+	return envID, source, pending, err
+}
+
+// resolveLiveParentEnvironment resolves a live parent's environment and
+// reports whether an unresolved inheritance is still pending. Every source is
+// read in this one pass: a parent that materializes its workspace concurrently
+// cannot change the pending classification afterwards, which would turn a
+// retryable refusal into a permanent one (or the reverse).
+func (s *Service) resolveLiveParentEnvironment(
+	ctx context.Context, task *v1.Task, parent *models.Task,
+) (pending bool, envID, source string, err error) {
+	// An unresolved inheritance is pending only for a live parent whose
+	// sessions, owned environment row, and workspace group all name no
+	// environment yet.
+	pending = !isTerminalTaskState(parent.State)
 	parentSessions, err := s.repo.ListTaskSessions(ctx, task.ParentID)
 	if err != nil {
 		s.logger.Warn("inherit_parent: list parent sessions failed",
 			zap.String("task_id", task.ID),
 			zap.String("parent_task_id", task.ParentID),
 			zap.Error(err))
-	} else if parent := findPrimarySession(parentSessions); parent != nil && parent.TaskEnvironmentID != "" {
-		available, validateErr := s.validateInheritedEnvironmentReference(ctx, task, parent.TaskEnvironmentID)
-		if validateErr != nil {
-			return "", "", validateErr
+		pending = false
+	} else {
+		if anyParentSessionEnvironment(parentSessions) {
+			pending = false
 		}
-		if available {
-			return parent.TaskEnvironmentID, "parent_session", nil
+		if candidate, candidateSource := parentSessionEnvironmentCandidate(parentSessions); candidate != "" {
+			envID, resolveErr := s.availableInheritedEnvironment(ctx, task, candidate, candidateSource)
+			if resolveErr != nil || envID != "" {
+				return false, envID, candidateSource, resolveErr
+			}
 		}
-		s.logger.Warn("inherit_parent: parent session environment no longer exists",
-			zap.String("task_id", task.ID),
-			zap.String("parent_task_id", task.ParentID),
-			zap.String("task_environment_id", parent.TaskEnvironmentID))
 	}
+	envID, parentEnvExists, envErr := s.parentOwnedEnvironment(ctx, task)
+	if parentEnvExists {
+		pending = false
+	}
+	if envErr != nil || envID != "" {
+		return false, envID, "parent_task_environment", envErr
+	}
+	groupEnvID, groupNamed, groupErr := s.workspaceGroupEnvironment(ctx, task)
+	if groupNamed {
+		pending = false
+	}
+	if groupErr != nil || groupEnvID != "" {
+		return false, groupEnvID, "workspace_group", groupErr
+	}
+	return pending, "", "", nil
+}
+
+// anyParentSessionEnvironment reports whether any parent session already names
+// an environment, even one that failed validation: such a reference makes the
+// refusal permanent rather than pending.
+func anyParentSessionEnvironment(sessions []*models.TaskSession) bool {
+	for _, session := range sessions {
+		if session != nil && session.TaskEnvironmentID != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// workspaceGroupEnvironment resolves the workspace group's materialized
+// environment and reports whether the group names one at all.
+func (s *Service) workspaceGroupEnvironment(ctx context.Context, task *v1.Task) (envID string, named bool, err error) {
 	if s.workspaceMaterializer == nil {
-		return "", "", nil
+		return "", false, nil
 	}
-	if envID := s.workspaceMaterializer.GetSharedGroupEnvironment(ctx, task.ID); envID != "" {
-		available, validateErr := s.validateInheritedEnvironmentReference(ctx, task, envID)
-		if validateErr != nil {
-			return "", "", validateErr
-		}
-		if available {
-			return envID, "workspace_group", nil
-		}
-		s.logger.Warn("inherit_parent: workspace group environment no longer exists",
-			zap.String("task_id", task.ID),
-			zap.String("parent_task_id", task.ParentID),
-			zap.String("task_environment_id", envID))
+	envID = s.workspaceMaterializer.GetSharedGroupEnvironment(ctx, task.ID)
+	if envID == "" {
+		return "", false, nil
 	}
-	return "", "", nil
+	available, validateErr := s.validateInheritedEnvironmentReference(ctx, task, envID)
+	if validateErr != nil {
+		return "", true, validateErr
+	}
+	if available {
+		return envID, true, nil
+	}
+	s.logger.Warn("inherit_parent: workspace group environment no longer exists",
+		zap.String("task_id", task.ID),
+		zap.String("parent_task_id", task.ParentID),
+		zap.String("task_environment_id", envID))
+	return "", true, nil
+}
+
+func isTerminalTaskState(state v1.TaskState) bool {
+	return state == v1.TaskStateCompleted || state == v1.TaskStateFailed || state == v1.TaskStateCancelled
+}
+
+// parentSessionEnvironmentCandidate picks the environment a parent's sessions
+// point at. The primary session wins. Office sessions are never primary, so a
+// parent without a primary session falls back to the environment its
+// sessions hold, but only when they all agree on one environment: sessions
+// bound to different environments leave the choice to the parent-owned
+// environment and the workspace group instead of guessing.
+func parentSessionEnvironmentCandidate(sessions []*models.TaskSession) (envID, source string) {
+	if primary := findPrimarySession(sessions); primary != nil {
+		if primary.TaskEnvironmentID == "" {
+			return "", ""
+		}
+		return primary.TaskEnvironmentID, "parent_session"
+	}
+	for _, session := range sessions {
+		if session == nil || session.TaskEnvironmentID == "" {
+			continue
+		}
+		if envID != "" && envID != session.TaskEnvironmentID {
+			return "", ""
+		}
+		envID = session.TaskEnvironmentID
+	}
+	if envID == "" {
+		return "", ""
+	}
+	return envID, "parent_environment_session"
+}
+
+// availableInheritedEnvironment returns envID when it still exists and its
+// owner is not archived. A missing environment returns "" so the caller can
+// try the next source; an unverifiable owner fails closed.
+func (s *Service) availableInheritedEnvironment(ctx context.Context, task *v1.Task, envID, source string) (string, error) {
+	available, err := s.validateInheritedEnvironmentReference(ctx, task, envID)
+	if err != nil {
+		return "", err
+	}
+	if available {
+		return envID, nil
+	}
+	s.logger.Warn("inherit_parent: parent environment no longer exists",
+		zap.String("task_id", task.ID),
+		zap.String("parent_task_id", task.ParentID),
+		zap.String("task_environment_id", envID),
+		zap.String("source", source))
+	return "", nil
+}
+
+// parentOwnedEnvironment resolves the environment row the parent task itself
+// owns. It reports whether the row exists so the pending classification uses
+// the same read: a dangling reference makes the refusal permanent.
+func (s *Service) parentOwnedEnvironment(ctx context.Context, task *v1.Task) (envID string, exists bool, err error) {
+	env, err := s.repo.GetTaskEnvironmentByTaskID(ctx, task.ParentID)
+	if err != nil {
+		return "", false, fmt.Errorf("%w: parent task %s environment could not be read", models.ErrWorkspaceReuseUnsafe, task.ParentID)
+	}
+	if env == nil || env.ID == "" {
+		return "", false, nil
+	}
+	envID, err = s.availableInheritedEnvironment(ctx, task, env.ID, "parent_task_environment")
+	return envID, true, err
 }
 
 // validateInheritedEnvironmentReference confirms that an inherited
