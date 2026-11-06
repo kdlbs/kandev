@@ -21,7 +21,10 @@ func reconcileLaunchWorkspace(ctx context.Context, rt ExecutorBackend, req *Laun
 		return err
 	}
 	if instance.RuntimeName == agentruntime.RuntimeRemoteDocker && instance.ReusedWorkspace {
-		return verifyRetainedLaunchWorkspace(ctx, req.SessionID, instance, projection)
+		if err := verifyRetainedLaunchWorkspace(ctx, req.SessionID, instance, projection); err != nil {
+			return err
+		}
+		return instance.Client.RescanWorkspace(ctx, "")
 	}
 	return materializeWorkspaceRepositories(ctx, instance.Client, projection)
 }

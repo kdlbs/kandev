@@ -13,7 +13,7 @@ system_design:
   - ../../specs/executors/system-design/remote-docker-executor.md
 ---
 
-# Task01: Verify Retained Repositories
+# Task 01: Verify Retained Repositories
 
 ## Summary
 
@@ -73,9 +73,11 @@ sequential
 
 ## Inputs
 
-Remote-Docker requirement001.12, paired retained-verification design section,
-existing pilot227ce6ea verification and b759c6bb process-result lifetime fix.
-Existing fake-Docker rollback and agentctl HTTP fixtures.
+Use requirement `REQ-EXECUTORS-REMOTE-DOCKER-001`, criterion
+`AC-EXECUTORS-REMOTE-DOCKER-001.12`, and the paired retained-verification
+design section. The retained-workspace and probe-lifetime regression tests are
+in `apps/backend/internal/agent/runtime/lifecycle/`. Existing fake-Docker
+rollback and agentctl HTTP fixtures also apply.
 
 ## Results
 

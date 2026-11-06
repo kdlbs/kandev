@@ -41,15 +41,29 @@ func retainedWorkspaceProbeCommand(root string, repositories []WorkspaceReposito
 		git := "git --no-optional-locks -C " + shellQuote(directory)
 		checks = append(checks,
 			"test -e "+shellQuote(path.Join(directory, ".git")),
-			git+" rev-parse --verify HEAD >/dev/null",
-			"origin=$("+git+" remote get-url origin)",
+			git+" rev-parse --verify "+shellQuote("HEAD^{commit}")+" >/dev/null",
+			"origin=$("+git+" config --local --get remote.origin.url)",
 			`[ "${origin%.git}" = `+shellQuote(strings.TrimSuffix(repository.RepositoryURL, ".git"))+" ]")
-		branch := repository.CheckoutBranch
-		if branch == "" {
-			branch = repository.BaseBranch
-		}
-		if branch != "" {
-			checks = append(checks, "branch=$("+git+" symbolic-ref --short HEAD)", `[ "$branch" = `+shellQuote(branch)+" ]")
+		if binding := repository.RemoteContribution; binding != nil {
+			remoteName := binding.ContributionRemoteName()
+			remoteURL := shellQuote(strings.TrimSuffix(binding.SourceRepository.RemoteURL, ".git"))
+			upstream := shellQuote(remoteName + "/" + binding.HeadBranch)
+			checks = append(checks,
+				"branch=$("+git+" symbolic-ref --short HEAD)",
+				`[ -n "$branch" ]`,
+				"contribution_origin=$("+git+" config --local --get "+shellQuote("remote."+remoteName+".url")+")",
+				`[ "${contribution_origin%.git}" = `+remoteURL+" ]",
+				"upstream=$("+git+" rev-parse --abbrev-ref --symbolic-full-name "+shellQuote("@{upstream}")+")",
+				`[ "$upstream" = `+upstream+" ]",
+				git+" merge-base --is-ancestor "+shellQuote(binding.HeadSHA)+" HEAD")
+		} else {
+			branch := repository.CheckoutBranch
+			if branch == "" {
+				branch = repository.BaseBranch
+			}
+			if branch != "" {
+				checks = append(checks, "branch=$("+git+" symbolic-ref --short HEAD)", `[ "$branch" = `+shellQuote(branch)+" ]")
+			}
 		}
 	}
 	return strings.Join(checks, "\n")

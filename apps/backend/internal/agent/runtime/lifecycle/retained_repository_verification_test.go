@@ -24,8 +24,10 @@ type retainedRepositoryHTTPFixture struct {
 	client           *agentctl.Client
 	runner           *process.ProcessRunner
 	materializations atomic.Int32
+	rescans          atomic.Int32
 	stops            atomic.Int32
 	cancelOnRead     context.CancelFunc
+	failRescan       bool
 }
 
 func newRetainedRepositoryHTTPFixture(t *testing.T, materializationOK bool) *retainedRepositoryHTTPFixture {
@@ -57,6 +59,13 @@ func newRetainedRepositoryHTTPFixture(t *testing.T, materializationOK bool) *ret
 			}
 			fixture.stops.Add(1)
 			_ = fixture.runner.Stop(r.Context(), req)
+			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		case r.URL.Path == "/api/v1/workspace/rescan":
+			fixture.rescans.Add(1)
+			if fixture.failRescan {
+				http.Error(w, "workspace rescan failed", http.StatusInternalServerError)
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 		case strings.HasPrefix(r.URL.Path, "/api/v1/processes/"):
 			if fixture.cancelOnRead != nil {
@@ -125,6 +134,23 @@ func TestLaunchRepositoryReconciliationPreservesUnpublishedCommit(t *testing.T) 
 	err := reconcileLaunchWorkspace(context.Background(), NewRemoteDockerExecutor(dialerTestLogger(t)), request, instance)
 	require.NoError(t, err, "a valid retained branch must accept its unpublished commit")
 	require.Zero(t, fixture.materializations.Load(), "retained source must not be rematerialized")
+	require.EqualValues(t, 1, fixture.rescans.Load(), "verified repositories must be added to workspace trackers")
+	require.Equal(t, before, runGitForPreparerTest(t, directory, "show-ref")+runGitForPreparerTest(t, directory, "status", "--porcelain"))
+	require.Eventually(t, func() bool { return len(fixture.runner.List(request.SessionID)) == 0 }, 3*time.Second, 10*time.Millisecond)
+}
+
+func TestLaunchRepositoryReconciliationPreservesWorkspaceWhenRescanFails(t *testing.T) {
+	request, root, directory := retainedRepositoryLaunch(t)
+	fixture := newRetainedRepositoryHTTPFixture(t, false)
+	fixture.failRescan = true
+	before := runGitForPreparerTest(t, directory, "show-ref") + runGitForPreparerTest(t, directory, "status", "--porcelain")
+	instance := &ExecutorInstance{RuntimeName: agentruntime.RuntimeRemoteDocker, ReusedWorkspace: true, Client: fixture.client, WorkspacePath: root}
+
+	err := reconcileLaunchWorkspace(context.Background(), NewRemoteDockerExecutor(dialerTestLogger(t)), request, instance)
+
+	require.Error(t, err, "launch must fail when workspace trackers cannot discover the retained repositories")
+	require.EqualValues(t, 1, fixture.rescans.Load())
+	require.Zero(t, fixture.materializations.Load())
 	require.Equal(t, before, runGitForPreparerTest(t, directory, "show-ref")+runGitForPreparerTest(t, directory, "status", "--porcelain"))
 	require.Eventually(t, func() bool { return len(fixture.runner.List(request.SessionID)) == 0 }, 3*time.Second, 10*time.Millisecond)
 }

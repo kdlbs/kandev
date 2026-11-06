@@ -24,7 +24,7 @@ changes, UI, new public APIs and other executor providers.
 
 ## Root cause and reproduction
 
-Stock0.99 launch materializes repositories even after attaching existing
+The current launch path materializes repositories even after attaching existing
 compute. Ordinary `matchingCheckoutCommit` requires HEAD to equal the remote
 tracking commit. A temporary real-Git experiment shows that the correct feature
 branch with one unpublished commit is refused without changing HEAD.
@@ -46,14 +46,15 @@ Keep `stopLaunchRuntimeOnRollback` and ordinary collision checks unchanged.
 
 ## Tests and end-to-end evidence
 
-AC001.12 maps to the actual-Git unpublished-commit regression, authenticated
-agentctl launch fixture, branch/origin/missing-source negatives, cancellation,
-probe-output lifetime and existing fake-Docker rollback preservation. No paid
-agent, browser change or live remote-daemon verification is claimed.
+Criterion `AC-EXECUTORS-REMOTE-DOCKER-001.12` covers the real Git regression
+for an unpublished commit and the authenticated agentctl launch fixture.
+Other tests cover branch and origin failures, missing sources, cancellation,
+probe-output lifetime, and fake-Docker rollback. No paid agent, browser change,
+or live remote-Docker test ran.
 
 ## Work orders
 
-- [x] [Task01: Verify retained repositories](task-01-verify-retained-repositories.md)
+- [x] [Task 01: Verify retained repositories](task-01-verify-retained-repositories.md)
 
 ## Verification results
 
