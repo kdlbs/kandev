@@ -1947,15 +1947,19 @@ type Workspace struct {
 	// UnitID places the workspace in the organization unit tree. Reach is
 	// resolved from this placement, so a workspace without one is reachable by
 	// nobody.
-	UnitID                      string    `json:"unit_id,omitempty"`
-	DefaultExecutorID           *string   `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
-	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
-	ACPIdleSuspensionEnabled    bool      `json:"acp_idle_suspension_enabled"`
-	ACPIdleTimeoutMinutes       int       `json:"acp_idle_timeout_minutes"`
-	CreatedAt                   time.Time `json:"created_at"`
-	UpdatedAt                   time.Time `json:"updated_at"`
+	UnitID                      string  `json:"unit_id,omitempty"`
+	DefaultExecutorID           *string `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled    bool    `json:"acp_idle_suspension_enabled"`
+	ACPIdleTimeoutMinutes       int     `json:"acp_idle_timeout_minutes"`
+	// DynamicMidTurnFailoverEnabled lets a dynamic task route try the next
+	// candidate once after a classified provider-capacity failure that happens
+	// after output or effects. Off by default; see dynamic_midturn_failover.go.
+	DynamicMidTurnFailoverEnabled bool      `json:"dynamic_midturn_failover_enabled"`
+	CreatedAt                     time.Time `json:"created_at"`
+	UpdatedAt                     time.Time `json:"updated_at"`
 
 	// Office extensions
 	TaskPrefix       string `json:"task_prefix,omitempty"`        // e.g. "KAN"

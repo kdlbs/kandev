@@ -893,6 +893,11 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	evidence, eligible := s.prepareDynamicFailureEvidence(ctx, data, session, classified, startupEvidence, unclassified)
 	if !eligible {
 		s.recordIneligibleFailureCircuit(ctx, session, classified)
+		if !unclassified {
+			// The decline stands; an opted-in workspace only queues one
+			// automatic Try next for after this turn settles.
+			s.scheduleMidTurnProviderFailover(ctx, data, session, classified)
+		}
 		return dynamicFailureRouteResult{}
 	}
 	conductor := s.profileExecutionResolver.NewConductor(nil)
@@ -1387,6 +1392,9 @@ func (s *Service) stopDynamicSuccessorWorkers() {
 // and final launch error surface so the UI never has to issue a second launch
 // request.
 func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string) error {
+	if automaticRouteActionFromContext(ctx) {
+		return s.launchDynamicRouteAction(ctx, sessionID, launchOriginAutomatic)
+	}
 	return s.launchDynamicRouteAction(ctx, sessionID, launchOriginManual)
 }
 

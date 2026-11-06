@@ -38,7 +38,18 @@ repair.
 
 - A provider replacement is allowed only when the failed attempt has explicit
   pre-result evidence. Any assistant output, thinking output, tool call, tool
-  effect, missing evidence, or evidence-read failure fails closed.
+  effect, missing evidence, or evidence-read failure fails closed. This default
+  is unchanged for every workspace that has not opted in.
+- The only exception is the per-workspace mid-turn provider failover setting,
+  which is off by default. When a workspace enables it, a current task attempt
+  with known output or effects that fails with a classified provider-capacity
+  code (`rate_limited`, `quota_limited`, `provider_unavailable`,
+  `provider_overloaded`, or `model_capacity`, with fallback allowed) performs
+  one automatic Try next per failed route generation. The successor receives
+  the bounded continuation package, never the failed prompt or replayed tools.
+  Missing or stale evidence, every other code, and a repeated same-code failure
+  on a candidate already tried in that chain still fail closed into manual
+  recovery. See `AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.17`.
 - Before a cross-provider launch, the conductor builds and persists a bounded
   continuation package. The downstream adapter delivers that package in the
   replacement prompt and never reuses the predecessor ACP identity.

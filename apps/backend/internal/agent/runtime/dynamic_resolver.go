@@ -441,6 +441,15 @@ func (r *ProfileExecutionResolver) ResolveWithPreference(
 	return r.resolve(ctx, sessionID, profileID, expectedGeneration, excludeProfileID, preferredProfileID)
 }
 
+const (
+	// RouteActionAutoTryNext is the unattended Try next the orchestrator
+	// submits after an opted-in mid-turn provider-capacity failure. It
+	// selects exactly like try_next and records its own route reason.
+	RouteActionAutoTryNext = "auto_try_next"
+	// RouteReasonAutoProviderFailover is the route reason of that selection.
+	RouteReasonAutoProviderFailover = "auto_provider_failover"
+)
+
 // ResolveRouteAction applies a manual route action to the durable route
 // state. Retry resumes the current generation, even when its policy deadline
 // has not elapsed; try-next claims a new generation and excludes the current
@@ -480,7 +489,11 @@ func (r *ProfileExecutionResolver) ResolveRouteAction(
 	case "retry":
 		return r.resolveRetryRouteAction(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration)
 	case "try_next", "skip":
-		return r.resolveSkipRouteAction(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration)
+		return r.resolveSkipRouteAction(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration, "manual_skip")
+	case RouteActionAutoTryNext:
+		return r.resolveSkipRouteAction(
+			ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration, RouteReasonAutoProviderFailover,
+		)
 	case "cancel_wait", "stop":
 		return r.resolveCancelRouteAction(ctx, sessionID, profileID, expectedGeneration, action)
 	default:
@@ -556,6 +569,7 @@ func (r *ProfileExecutionResolver) resolveSkipRouteAction(
 	ctx context.Context,
 	sessionID, profileID, currentExecutionProfileID string,
 	expectedGeneration int64,
+	reason string,
 ) (ProfileExecution, error) {
 	if state, exists, err := r.engine.LoadState(ctx, sessionID); err != nil {
 		return ProfileExecution{}, err
@@ -585,7 +599,7 @@ func (r *ProfileExecutionResolver) resolveSkipRouteAction(
 		}
 	}
 	decision, err := r.engine.SelectContextWithReason(
-		ctx, sessionID, profileConfig, expectedGeneration, currentExecutionProfileID, "manual_skip",
+		ctx, sessionID, profileConfig, expectedGeneration, currentExecutionProfileID, reason,
 	)
 	if err != nil {
 		return ProfileExecution{}, err

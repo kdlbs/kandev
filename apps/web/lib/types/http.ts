@@ -323,6 +323,8 @@ export type Workspace = {
   default_config_agent_profile_id?: AgentProfileId | null;
   acp_idle_suspension_enabled: boolean;
   acp_idle_timeout_minutes: number;
+  /** Opt-in automatic Try next after a mid-turn provider-capacity failure. */
+  dynamic_midturn_failover_enabled?: boolean;
   office_workflow_id?: WorkflowId;
   created_at: string;
   updated_at: string;

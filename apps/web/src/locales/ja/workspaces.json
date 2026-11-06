@@ -301,5 +301,9 @@
   "cloneSourceMissing": "コピー元のワークスペースは利用できなくなりました。",
   "cloneConfigurationUnsupported": "このワークスペースには、複製できない管理対象の設定、利用できない既定の構成、またはワークフローの参照があります。",
   "cloneFailed": "ワークスペースを複製できませんでした。もう一度お試しください。",
-  "workspaceActionsNamed": "{{name}}の操作"
+  "workspaceActionsNamed": "{{name}}の操作",
+  "dynamicRoutingPolicyTitle": "動的ルーティング",
+  "dynamicRoutingPolicyDescription": "ターンの途中でプロバイダーが失敗したときに、このワークスペースの動的エージェントプロファイルをどのように回復するかを選択します。この設定は既定でオフです。",
+  "midTurnFailoverEnabled": "プロバイダーの上限に達したら次の候補を試す",
+  "midTurnFailoverDescription": "すでに出力があったターンがレート制限、クォータ切れ、プロバイダーの過負荷で停止した場合、次の候補に一度だけ切り替え、保存されたタスクのコンテキストから続行します。失敗したリクエストは再送信しません。オフの場合、セッションはユーザーの操作を待ちます。"
 }

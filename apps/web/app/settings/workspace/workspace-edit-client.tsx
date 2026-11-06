@@ -41,6 +41,7 @@ import { WorkspacePlacementCard } from "@/components/settings/workspaces/workspa
 import { WorkspaceTeamAccessCard } from "@/components/settings/workspaces/workspace-team-access-card";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { WorkspaceIdlePolicyFormSection } from "./workspace-idle-policy-form-section";
+import { WorkspaceDynamicRoutingSection } from "@/components/settings/workspaces/workspace-dynamic-routing-card";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
@@ -375,7 +376,11 @@ function useWorkspaceEditForm(workspace: Workspace) {
     agentProfileId: workspace.default_agent_profile_id ?? "",
     idleSuspensionEnabled: workspace.acp_idle_suspension_enabled ?? false,
     idleTimeoutMinutes: workspace.acp_idle_timeout_minutes ?? 120,
+    midTurnFailoverEnabled: workspace.dynamic_midturn_failover_enabled ?? false,
   });
+  const [midTurnFailoverEnabled, setMidTurnFailoverEnabled] = useState(
+    workspace.dynamic_midturn_failover_enabled ?? false,
+  );
   const {
     enabled: idleSuspensionEnabled,
     setEnabled: setIdleSuspensionEnabled,
@@ -394,7 +399,8 @@ function useWorkspaceEditForm(workspace: Workspace) {
   const isDirty =
     workspaceNameDraft.trim() !== savedState.name ||
     defaultExecutorId !== savedState.executorId ||
-    defaultAgentProfileId !== savedState.agentProfileId;
+    defaultAgentProfileId !== savedState.agentProfileId ||
+    midTurnFailoverEnabled !== savedState.midTurnFailoverEnabled;
   const isWorkspaceDirty = isDirty || idlePolicyIsDirty;
 
   const handleSave = buildWorkspaceSaveHandler({
@@ -405,6 +411,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
       defaultAgentProfileId,
       idleSuspensionEnabled,
       idleTimeoutMinutes,
+      midTurnFailoverEnabled,
     },
     savedState,
     isDirty: isWorkspaceDirty,
@@ -422,6 +429,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     setDefaultAgentProfileId(savedState.agentProfileId);
     setIdleSuspensionEnabled(savedState.idleSuspensionEnabled);
     setIdleTimeoutMinutes(String(savedState.idleTimeoutMinutes));
+    setMidTurnFailoverEnabled(savedState.midTurnFailoverEnabled);
   };
 
   return {
@@ -436,6 +444,8 @@ function useWorkspaceEditForm(workspace: Workspace) {
     setIdleSuspensionEnabled,
     idleTimeoutMinutes,
     setIdleTimeoutMinutes,
+    midTurnFailoverEnabled,
+    setMidTurnFailoverEnabled,
     activeExecutors,
     executors,
     agentProfiles,
@@ -456,6 +466,7 @@ type WorkspaceFormSaveOptions = {
   defaultAgentProfileId: string;
   idleSuspensionEnabled: boolean;
   idleTimeoutMinutes: string;
+  midTurnFailoverEnabled: boolean;
   idleTimeoutValid: boolean;
   isDirty: boolean;
   save: () => Promise<void>;
@@ -474,6 +485,7 @@ function useWorkspaceFormSaveContributor(options: WorkspaceFormSaveOptions) {
       defaultAgentProfileId: options.defaultAgentProfileId,
       idleSuspensionEnabled: options.idleSuspensionEnabled,
       idleTimeoutMinutes: options.idleTimeoutMinutes,
+      midTurnFailoverEnabled: options.midTurnFailoverEnabled,
     }),
     isDirty: options.isDirty,
     canSave: hasWorkspaceName && options.idleTimeoutValid,
@@ -493,6 +505,25 @@ function workspaceDraftInvalidReason(
   return undefined;
 }
 
+// The form registers its own draft with the settings save bar.
+function useSavedWorkspaceEditForm(workspace: Workspace) {
+  const form = useWorkspaceEditForm(workspace);
+  useWorkspaceFormSaveContributor({
+    workspaceId: form.currentWorkspace.id,
+    workspaceNameDraft: form.workspaceNameDraft,
+    defaultExecutorId: form.defaultExecutorId,
+    defaultAgentProfileId: form.defaultAgentProfileId,
+    idleSuspensionEnabled: form.idleSuspensionEnabled,
+    idleTimeoutMinutes: form.idleTimeoutMinutes,
+    midTurnFailoverEnabled: form.midTurnFailoverEnabled,
+    idleTimeoutValid: form.idleTimeoutValid,
+    isDirty: form.isDirty,
+    save: form.handleSave,
+    discard: form.handleDiscard,
+  });
+  return form;
+}
+
 function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
   const {
     currentWorkspace,
@@ -506,6 +537,8 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     setIdleSuspensionEnabled,
     idleTimeoutMinutes,
     setIdleTimeoutMinutes,
+    midTurnFailoverEnabled,
+    setMidTurnFailoverEnabled,
     deleteDialogOpen,
     setDeleteDialogOpen,
     deleteConfirmText,
@@ -514,30 +547,14 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     executors,
     agentProfiles,
     savedState,
-    isDirty,
     idleTimeoutValid,
     idlePolicyIsDirty,
-    handleSave,
-    handleDiscard,
     handleDeleteWorkspace,
-  } = useWorkspaceEditForm(workspace);
+  } = useSavedWorkspaceEditForm(workspace);
   // Owner-only controls are gated on the server-issued scope, never on an
   // owner-id comparison, so the UI and the API agree on one answer.
   const canManage = hasScope(workspace.scopes, SCOPE.workspaceManage);
   const { t } = useTranslation();
-
-  useWorkspaceFormSaveContributor({
-    workspaceId: currentWorkspace.id,
-    workspaceNameDraft,
-    defaultExecutorId,
-    defaultAgentProfileId,
-    idleSuspensionEnabled,
-    idleTimeoutMinutes,
-    idleTimeoutValid,
-    isDirty,
-    save: handleSave,
-    discard: handleDiscard,
-  });
 
   return (
     <div className="space-y-8">
@@ -569,6 +586,12 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         timeoutIsDirty={idlePolicyIsDirty}
         onEnabledChange={setIdleSuspensionEnabled}
         onTimeoutChange={setIdleTimeoutMinutes}
+      />
+      <WorkspaceDynamicRoutingSection
+        canManage={canManage}
+        enabled={midTurnFailoverEnabled}
+        savedEnabled={savedState.midTurnFailoverEnabled}
+        onEnabledChange={setMidTurnFailoverEnabled}
       />
       {/*
         Reads the live store item rather than the form's captured snapshot:
