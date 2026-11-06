@@ -186,3 +186,11 @@ The final review batch passed 144 focused web cases and ten desktop plus five ph
 - The narrow fine-pointer scenario uses the desktop page fixture at phone width and verifies the actual pointer media query. The previous fixture forced Pixel 5 touch options.
 - The SSH keepalive stop check is shared at the loss-notification boundary. Deterministic stopped/running cases for probe errors and deadlines replace a scheduler-dependent coincidence test that failed in CI. Focused SSH transport tests passed with the race detector.
 - Validation: 39 focused hook/payload tests, eight desktop automation cases, five phone cases, and SSH keepalive/transport tests with the race detector passed. Both partial-save and pointer regressions failed before their fixes. The stopped-watchdog boundary cases failed before centralizing the guard. Changed-Go lint, changed-web lint, typecheck, and specification checks passed.
+
+### Repository retry follow-up
+
+- Accepted repository registrations now reach the current form before trigger writes. Matching rows retain branch edits, replacements, removals, and ordering changes made during the automation update.
+- Three regressions failed before the fix: reuse of a registered repository after a trigger failure, preservation of a new branch, and preservation of a replacement repository. All 42 focused save, trigger, and payload cases passed afterward.
+- A synchronized loop regression queues probe errors and pending stops before loop entry. It complements the direct notification-boundary cases and passes with the SSH transport tests under the race detector.
+- The loss-notification and deadline helpers now document their existing invariants.
+- Final local checks passed: 44 focused cases, eight desktop scenarios, five phone scenarios, typecheck, changed-web lint, changed-Go lint, and SSH transport tests with the race detector. Removal, addition, and row ordering are covered alongside branch edits and replacements.

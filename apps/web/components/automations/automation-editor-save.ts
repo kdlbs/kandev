@@ -24,6 +24,8 @@ import {
   withSavedMCPSelection,
 } from "./automation-payload";
 
+import type { RepositorySelection } from "./automation-repository-selection";
+
 export type SaveHandlerOpts = {
   isNew: boolean;
   workspaceId: string;
@@ -51,6 +53,34 @@ export type SaveHandlerOpts = {
   triggerActions: ReturnType<typeof useAutomationTriggerDrafts>;
   router: ReturnType<typeof useRouter>;
 };
+
+/** Promote accepted registrations without overwriting repository edits made during the request. */
+function reconcilePromotedRepositories(
+  current: FormState,
+  submitted: FormState,
+  promoted: RepositorySelection[],
+): FormState {
+  const unchangedContext =
+    current.repositoryMode === submitted.repositoryMode &&
+    current.executorProfileId === submitted.executorProfileId &&
+    current.taskMode === submitted.taskMode;
+  if (current.repositorySelections === submitted.repositorySelections && unchangedContext)
+    return { ...current, repositorySelections: promoted };
+  return {
+    ...current,
+    repositorySelections: current.repositorySelections.map((item) => {
+      if (item.kind !== "discovered") return item;
+      const index = submitted.repositorySelections.findIndex(
+        (source) =>
+          source.kind === "discovered" && source.path === item.path && source.key === item.key,
+      );
+      const source = submitted.repositorySelections[index];
+      const accepted = promoted[index];
+      if (!source || accepted?.kind !== "registered") return item;
+      return { ...accepted, branch: item.branch === source.branch ? accepted.branch : item.branch };
+    }),
+  };
+}
 
 /**
  * Save the automation and reconcile server revisions without overwriting edits made during the
@@ -84,7 +114,7 @@ export function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
         },
       );
       const promoteSelections = () => {
-        setForm((prev) => ({ ...prev, repositorySelections: promotedSelections }));
+        setForm((prev) => reconcilePromotedRepositories(prev, form, promotedSelections));
       };
       const formWithPromotedSelections = { ...form, repositorySelections: promotedSelections };
       if (isNew) {
@@ -124,12 +154,17 @@ export function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
           throw error;
         });
         const persistedForm = withSavedMCPSelection(formWithPromotedSelections, saved);
-        setForm((prev) => reconcileSavedMCPSelection(prev, form, saved));
+        setForm((prev) =>
+          reconcilePromotedRepositories(
+            reconcileSavedMCPSelection(prev, form, saved),
+            form,
+            promotedSelections,
+          ),
+        );
         // Automation settings are saved independently of trigger drafts.
         onSaved(persistedForm, triggerActions.baselineTriggers);
 
         const persistedTriggers = await triggerActions.persistDrafts();
-        promoteSelections();
         onSaved(persistedForm, persistedTriggers);
       }
     } catch (err) {

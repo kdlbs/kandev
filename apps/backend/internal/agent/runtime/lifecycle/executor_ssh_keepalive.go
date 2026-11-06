@@ -209,6 +209,7 @@ func (w *sshKeepaliveWatchdog) stopRequested() bool {
 	}
 }
 
+// handleReply records a completed probe and restarts the liveness deadline.
 func (w *sshKeepaliveWatchdog) handleReply(at time.Time, lastReply *time.Time, timer *time.Timer) {
 	*lastReply = at
 	if w.recordReply != nil {
@@ -223,6 +224,7 @@ func (w *sshKeepaliveWatchdog) handleReply(at time.Time, lastReply *time.Time, t
 	timer.Reset(w.deadline)
 }
 
+// handleDeadline reports loss only after silence exceeds the configured deadline.
 func (w *sshKeepaliveWatchdog) handleDeadline(lastReply time.Time, timer *time.Timer) bool {
 	silence := time.Since(lastReply)
 	if silence > w.deadline {
@@ -240,6 +242,7 @@ func (w *sshKeepaliveWatchdog) handleDeadline(lastReply time.Time, timer *time.T
 	return false
 }
 
+// declareLost gives a pending stop signal priority over loss notifications.
 func (w *sshKeepaliveWatchdog) declareLost(reason string, silence time.Duration) {
 	if w.stopRequested() {
 		return

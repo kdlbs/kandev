@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useSaveHandler, type SaveHandlerOpts } from "./automation-editor-save";
 import type { FormState } from "./automation-payload";
 import type { AutomationMCPSelection } from "@/lib/types/automation";
+const TRIGGER_WRITE_FAILED = "trigger write failed";
 const mocks = vi.hoisted(() => ({ resolve: vi.fn() }));
 vi.mock("./automation-payload", async (original) => ({
   ...(await original<typeof import("./automation-payload")>()),
@@ -126,38 +127,43 @@ describe("automation MCP save failures", () => {
   });
 });
 
+/** Exercise form and trigger baselines together at the native save boundary. */
+function renderEditorSave(opts: SaveHandlerOpts) {
+  return renderHook(() => {
+    const [form, setForm] = useState(opts.form);
+    const [savedForm, setSavedForm] = useState(opts.savedForm);
+    const triggerActions = useAutomationTriggerDrafts(opts.currentId);
+    const save = useSaveHandler({
+      ...opts,
+      form,
+      savedForm,
+      setForm,
+      triggerActions,
+      onSaved: (next) => setSavedForm(next),
+    });
+    return {
+      form,
+      savedForm,
+      setForm,
+      triggerActions,
+      save,
+      reset: () => {
+        setForm(savedForm);
+        triggerActions.discardDrafts();
+      },
+    };
+  });
+}
+
 describe("partial automation saves", () => {
   it("resets to persisted MCP grants and uses their revision after a trigger save fails", async () => {
     const opts = saveOptions();
-    vi.mocked(addTrigger).mockRejectedValue(new Error("trigger write failed"));
+    vi.mocked(addTrigger).mockRejectedValue(new Error(TRIGGER_WRITE_FAILED));
     vi.mocked(getAutomation).mockResolvedValue({ triggers: [] } as never);
-    const { result } = renderHook(() => {
-      const [form, setForm] = useState(opts.form);
-      const [savedForm, setSavedForm] = useState(opts.savedForm);
-      const triggerActions = useAutomationTriggerDrafts(opts.currentId);
-      const save = useSaveHandler({
-        ...opts,
-        form,
-        savedForm,
-        setForm,
-        triggerActions,
-        onSaved: (next) => setSavedForm(next),
-      });
-      return {
-        form,
-        savedForm,
-        setForm,
-        triggerActions,
-        save,
-        reset: () => {
-          setForm(savedForm);
-          triggerActions.discardDrafts();
-        },
-      };
-    });
+    const { result } = renderEditorSave(opts);
     await act(() => result.current.triggerActions.handleAdd("webhook", {}));
     await act(async () => {
-      await expect(result.current.save()).rejects.toThrow("trigger write failed");
+      await expect(result.current.save()).rejects.toThrow(TRIGGER_WRITE_FAILED);
     });
     expect(result.current.savedForm.mcpSelection).toEqual(opts.form.mcpSelection);
     expect(result.current.savedForm.mcpSelectionRevision).toBe(2);
@@ -190,5 +196,114 @@ describe("partial automation saves", () => {
     act(() => result.current.reset());
     expect(result.current.form.mcpSelection).toEqual(selection);
     expect(result.current.form.mcpSelectionRevision).toBe(3);
+  });
+});
+
+const discovered = {
+  kind: "discovered" as const,
+  path: "/repo",
+  name: "Repo",
+  defaultBranch: "main",
+  branch: "main",
+  key: "row-1",
+};
+const promoted = {
+  kind: "registered" as const,
+  id: "registered-1",
+  branch: "main",
+  key: "row-1",
+};
+
+describe("repository promotion during automation saves", () => {
+  it("retains registration after a trigger failure so retry does not register again", async () => {
+    const opts = saveOptions();
+    opts.form = { ...opts.form, repositoryMode: "selected", repositorySelections: [discovered] };
+    let registrations = 0;
+    mocks.resolve.mockImplementation(async (_workspace, selections) => {
+      const next = selections.map((item: typeof discovered | typeof promoted) => {
+        if (item.kind !== "discovered") return item;
+        registrations += 1;
+        return { ...promoted, id: `registered-${registrations}` };
+      });
+      return {
+        selections: next,
+        repositories: next.map((item: typeof promoted) => ({
+          repository_id: item.id,
+          base_branch: item.branch,
+        })),
+      };
+    });
+    const created = { id: "trigger-1", type: "webhook", config: {}, enabled: true };
+    vi.mocked(addTrigger)
+      .mockRejectedValueOnce(new Error(TRIGGER_WRITE_FAILED))
+      .mockResolvedValueOnce(created as never);
+    vi.mocked(getAutomation).mockResolvedValue({ triggers: [created] } as never);
+    const { result } = renderEditorSave(opts);
+    await act(() => result.current.triggerActions.handleAdd("webhook", {}));
+    await act(async () => {
+      await expect(result.current.save()).rejects.toThrow(TRIGGER_WRITE_FAILED);
+    });
+    expect(result.current.form.repositorySelections).toEqual([promoted]);
+    expect(result.current.triggerActions.pending).toHaveLength(1);
+    await act(() => result.current.save());
+    expect(registrations).toBe(1);
+    expect(mocks.resolve.mock.calls[1][1]).toEqual([promoted]);
+    expect(result.current.triggerActions.pending).toEqual([]);
+  });
+
+  const replacement = { ...discovered, path: "/other", name: "Other" };
+  const additional = { ...replacement, key: "row-2" };
+  it.each([
+    {
+      name: "branch",
+      changes: [{ ...discovered, branch: "feature/new" }],
+      expected: [{ ...promoted, branch: "feature/new" }],
+    },
+    { name: "replacement", changes: [replacement], expected: [replacement] },
+    { name: "removal", changes: [], expected: [] },
+    {
+      name: "addition and ordering",
+      changes: [additional, discovered],
+      expected: [additional, promoted],
+    },
+  ])("preserves $name changes made during update", async ({ changes, expected }) => {
+    const opts = saveOptions();
+    opts.form = { ...opts.form, repositoryMode: "selected", repositorySelections: [discovered] };
+    mocks.resolve.mockResolvedValue({
+      selections: [promoted],
+      repositories: [{ repository_id: promoted.id, base_branch: "main" }],
+    });
+    const response = {
+      id: "automation",
+      workspace_id: "workspace",
+      mcp_selection: opts.form.mcpSelection,
+      mcp_selection_revision: 2,
+    } as never;
+    let release!: () => void;
+    let started!: () => void;
+    const updating = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    vi.mocked(opts.update).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(response);
+          started();
+        }),
+    );
+    vi.mocked(getAutomation).mockResolvedValue({ triggers: [] } as never);
+    const { result } = renderEditorSave(opts);
+    let saving!: Promise<void>;
+    await act(async () => {
+      saving = result.current.save();
+      await updating;
+    });
+    act(() => result.current.setForm((prev) => ({ ...prev, repositorySelections: changes })));
+    await act(async () => {
+      release();
+      await saving;
+    });
+    expect(result.current.form.repositorySelections).toEqual(expected);
+    expect(result.current.savedForm.repositorySelections).toEqual([promoted]);
   });
 });
