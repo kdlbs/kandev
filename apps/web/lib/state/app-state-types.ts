@@ -27,6 +27,7 @@ import type * as SettingsSliceTypes from "./slices/settings/types";
 import type * as UISliceTypes from "./slices/ui/types";
 import type { AgentUpdateJob } from "@/lib/api";
 import type { InstallJob, NotificationProvidersUpdate } from "./slices/settings/types";
+import type { UserShellScope } from "./user-shell-scope";
 import {
   defaultWorkspaceState,
   defaultSettingsState,
@@ -670,12 +671,17 @@ export type AppState = KanbanSlice & {
   // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions
-  setUserShells: (sessionId: string, shells: UserShellInfo[]) => void;
-  setUserShellsLoading: (sessionId: string, loading: boolean) => void;
-  addUserShell: (sessionId: string, shell: UserShellInfo) => void;
-  removeUserShell: (sessionId: string, terminalId: string) => void;
+  setUserShells: (
+    scope: UserShellScope,
+    shells: UserShellInfo[],
+    sharedGeneration?: number,
+  ) => void;
+  setUserShellsLoading: (scope: UserShellScope, loading: boolean) => void;
+  setUserShellsFailed: (scope: UserShellScope) => void;
+  addUserShell: (scope: UserShellScope, shell: UserShellInfo) => void;
+  removeUserShell: (scope: UserShellScope, terminalId: string) => void;
   updateUserShell: (
-    environmentId: string,
+    scope: UserShellScope,
     terminalId: string,
     patch: Partial<Omit<UserShellInfo, "terminalId">>,
   ) => void;
