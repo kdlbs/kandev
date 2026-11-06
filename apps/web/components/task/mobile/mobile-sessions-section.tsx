@@ -33,6 +33,7 @@ import type { AgentProfileOption } from "@/lib/state/slices";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { MobileSessionDeleteConfirmation } from "./mobile-session-delete-confirmation";
+import { useSessionMenuOpeningGesture } from "./use-session-menu-opening-gesture";
 
 type SessionRow = {
   id: string;
@@ -143,6 +144,21 @@ function StateBadge({
   );
 }
 
+type SessionActionsMenuProps = {
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  taskId: string;
+  state: TaskSessionState | null;
+  isPrimary: boolean;
+  onSetPrimary: () => void;
+  onStop: () => void;
+  onResume: () => void;
+  onRestart: () => void;
+  isRestarting: boolean;
+  onAskDelete: () => void;
+  onHandoffProfile: (profileId: string) => void;
+};
+
+/** Exposes touch-accessible session actions and blocks conflicting lifecycle requests during restart. */
 function SessionActionsMenu({
   triggerRef,
   taskId,
@@ -151,35 +167,28 @@ function SessionActionsMenu({
   onSetPrimary,
   onStop,
   onResume,
+  onRestart,
+  isRestarting,
   onAskDelete,
   onHandoffProfile,
-}: {
-  triggerRef: RefObject<HTMLButtonElement | null>;
-  taskId: string;
-  state: TaskSessionState | null;
-  isPrimary: boolean;
-  onSetPrimary: () => void;
-  onStop: () => void;
-  onResume: () => void;
-  onAskDelete: () => void;
-  onHandoffProfile: (profileId: string) => void;
-}) {
+}: SessionActionsMenuProps) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const pendingDelete = useRef(false);
+  const { open, setOpen, triggerProps } = useSessionMenuOpeningGesture();
   const hasLifecycleAction =
     !!state &&
     (isSessionStoppable(state) || isSessionResumable(state) || isSessionDeletable(state));
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button
           ref={triggerRef}
           variant="ghost"
           size="icon-sm"
-          className="cursor-pointer h-11 w-11 md:h-7 md:w-7"
-          onClick={(e) => e.stopPropagation()}
+          className="cursor-pointer h-11 w-11 md:h-7 md:w-7 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+          {...triggerProps}
           aria-label={t("task:sessionActions")}
         >
           <IconDotsVertical className="h-4 w-4" />
@@ -204,18 +213,28 @@ function SessionActionsMenu({
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {state && isSessionStoppable(state) && (
-          <DropdownMenuItem className="cursor-pointer" onSelect={onStop}>
+          <DropdownMenuItem className="cursor-pointer" onSelect={onStop} disabled={isRestarting}>
             {t("task:stop")}
           </DropdownMenuItem>
         )}
+        {(isRestarting || (state && isSessionStoppable(state))) && (
+          <DropdownMenuItem
+            className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+            onSelect={onRestart}
+            disabled={isRestarting}
+          >
+            {t("task:restartSession")}
+          </DropdownMenuItem>
+        )}
         {state && isSessionResumable(state) && (
-          <DropdownMenuItem className="cursor-pointer" onSelect={onResume}>
+          <DropdownMenuItem className="cursor-pointer" onSelect={onResume} disabled={isRestarting}>
             {t("task:resume")}
           </DropdownMenuItem>
         )}
         {state && isSessionDeletable(state) && (
           <DropdownMenuItem
             className="cursor-pointer text-destructive focus:text-destructive"
+            disabled={isRestarting}
             onSelect={() => {
               if (isMobile) pendingDelete.current = true;
               else onAskDelete();
@@ -247,6 +266,7 @@ function SessionIdentity({ row }: { row: SessionRow }) {
   );
 }
 
+/** Connects one session's menu and delete confirmation to its shared lifecycle actions. */
 function SessionRowTrailingActions({
   row,
   taskId,
@@ -290,6 +310,8 @@ function SessionRowTrailingActions({
           onSetPrimary={() => void actions.setPrimary()}
           onStop={() => void actions.stop()}
           onResume={() => void actions.resume()}
+          onRestart={() => void actions.restart()}
+          isRestarting={actions.isRestarting}
           onAskDelete={onAskDelete}
           onHandoffProfile={onHandoffProfile}
         />

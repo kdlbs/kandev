@@ -29,6 +29,8 @@ func TestOfficeDefault_TriggersCompileThroughEngine(t *testing.T) {
 			engine.TriggerOnHeartbeat,
 			engine.TriggerOnBudgetAlert,
 			engine.TriggerOnAgentError,
+			engine.TriggerOnPRMerged,
+			engine.TriggerOnPRClosed,
 		} {
 			if _, ok := spec.Events[trig]; !ok {
 				t.Errorf("step %q: compiled spec missing trigger %q", def.Name, trig)

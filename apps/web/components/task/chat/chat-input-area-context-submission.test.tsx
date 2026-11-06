@@ -1,3 +1,5 @@
+import { useCommentsStore, type WalkthroughComment } from "@/lib/state/slices/comments";
+import { usePendingWalkthroughComments } from "@/hooks/domains/comments/use-pending-comments";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
@@ -20,7 +22,8 @@ const transport = vi.hoisted(() => ({
   getStatus: () => "connected",
   on: () => () => {},
   subscribeSession: () => () => {},
-  subscribeUser: () => () => {},
+  subscribeUser: () => {},
+  unsubscribeUser: () => {},
 }));
 
 const SESSION = "context-submission-session" as TaskSession["id"];
@@ -63,14 +66,17 @@ function SubmitHarness({ onSend }: { onSend?: () => ChatSubmitResult }) {
     planComments: [],
     previewFeedback: [],
     pendingPRFeedback: [],
-    walkthroughComments: [],
+    walkthroughComments: usePendingWalkthroughComments(SESSION),
     messageComments: [],
     pendingClarification: null,
     prompts: [],
     planModeEnabled: false,
-    markCommentsSent: () => {},
+    markCommentsSent: useCommentsStore.getState().markCommentsSent,
     handleClearPRFeedback: () => {},
-    handleClearWalkthroughComments: () => {},
+    handleClearWalkthroughComments: () => {
+      const state = useCommentsStore.getState();
+      for (const c of state.getPendingComments()) state.removeComment(c.id);
+    },
   } as unknown as ChatPanelState;
   submitter = useSubmitHandler(panelState, onSend);
   return (
@@ -163,6 +169,12 @@ function requestPayload(action = DIRECT_ACTION) {
 }
 
 beforeEach(() => {
+  useCommentsStore.setState({
+    byId: {},
+    bySession: {},
+    pendingForChat: [],
+    editingCommentId: null,
+  });
   viewport.setWindowSize({ width: 390 });
   window.sessionStorage.clear();
   localStorage.clear();
@@ -362,4 +374,38 @@ describe("pending submission selection edits and admission compatibility", () =>
       expect(transport.request.mock.calls.some(([name]) => name === DIRECT_ACTION)).toBe(false);
     },
   );
+});
+
+// @covers AC-UI-WALKTHROUGH-STEP-FEEDBACK-001.3
+it("retains submitted walkthrough feedback and leaves later feedback pending", async () => {
+  const note: WalkthroughComment = {
+    id: "submitted-note",
+    source: "walkthrough",
+    sessionId: SESSION,
+    taskId: TASK,
+    walkthroughId: "tour",
+    stepIndex: 0,
+    stepCount: 1,
+    filePath: "a.ts",
+    startLine: 1,
+    endLine: 1,
+    stepText: "Explain",
+    text: "First note",
+    createdAt: STARTED_AT,
+    status: "pending",
+  };
+  useCommentsStore.getState().addComment(note);
+  const admission = deferTransportAdmission();
+  mount();
+  const completion = startSubmission();
+  await waitForAdmission();
+  act(() =>
+    useCommentsStore.getState().addComment({ ...note, id: "next-note", text: "Next note" }),
+  );
+  await act(async () => {
+    admission.resolve(undefined);
+    expect(await completion).toBe(true);
+  });
+  expect(useCommentsStore.getState().byId["submitted-note"]?.status).toBe("sent");
+  expect(useCommentsStore.getState().pendingForChat).toEqual(["next-note"]);
 });

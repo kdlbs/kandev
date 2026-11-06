@@ -39,6 +39,9 @@ type nativeServiceMetadata struct {
 	Port            int    `json:"port,omitempty"`
 	SystemUser      string `json:"system_user,omitempty"`
 	NoBootStart     bool   `json:"no_boot_start,omitempty"`
+	Shell           string `json:"shell,omitempty"`
+	NodePath        string `json:"node_path,omitempty"`
+	CLIEntry        string `json:"cli_entry,omitempty"`
 	InstalledAt     string `json:"installed_at"`
 }
 
@@ -88,6 +91,7 @@ func buildNativeServiceMetadata(
 		Port:            input.Port,
 		SystemUser:      input.SystemUser,
 		NoBootStart:     input.NoBootStart,
+		Shell:           input.Shell,
 		InstalledAt:     time.Now().UTC().Format(time.RFC3339Nano),
 	}
 }

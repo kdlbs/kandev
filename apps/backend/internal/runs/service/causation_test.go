@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
@@ -15,9 +16,9 @@ import (
 // Tests in this file each use a distinct (agent, reason) pair, so this
 // stays unambiguous without threading the generated run id through
 // QueueRun's return value (which only reports QueueOutcome).
-func getRun(t *testing.T, repo *runssqlite.Repository, agentProfileID, reason string) *models.Run {
+func getRun(t *testing.T, repo *runssqlite.Repository, agentProfileID, reason string) *runsmodels.Run {
 	t.Helper()
-	var run models.Run
+	var run runsmodels.Run
 	err := repo.Reader().GetContext(context.Background(), &run,
 		`SELECT * FROM runs WHERE agent_profile_id = ? AND reason = ?`,
 		agentProfileID, reason)
@@ -37,7 +38,7 @@ func TestQueueRun_RootRunStampsOwnIDAsCausationID(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "root_reason",
-		ActorKind:      models.ActorKindSystem,
+		ActorKind:      runsmodels.ActorKindSystem,
 	}); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -65,7 +66,7 @@ func TestQueueRun_InheritsCausationFromCausingRun(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "parent_reason",
-		ActorKind:      models.ActorKindUser,
+		ActorKind:      runsmodels.ActorKindUser,
 		ActorID:        "user-1",
 	}); err != nil {
 		t.Fatalf("queue parent: %v", err)
@@ -78,7 +79,7 @@ func TestQueueRun_InheritsCausationFromCausingRun(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "child_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "some-other-agent",
 		CausingRunID:   parent.ID,
 	}); err != nil {
@@ -109,7 +110,7 @@ func TestQueueRun_HumanActorAlwaysRootsNewChain(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "agent_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 	}); err != nil {
 		t.Fatalf("queue causing run: %v", err)
@@ -119,7 +120,7 @@ func TestQueueRun_HumanActorAlwaysRootsNewChain(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "human_followup",
-		ActorKind:      models.ActorKindUser,
+		ActorKind:      runsmodels.ActorKindUser,
 		ActorID:        "user-1",
 		CausingRunID:   causing.ID,
 	}); err != nil {
@@ -190,7 +191,7 @@ func TestQueueRun_RefusesBeyondMaxCausationDepth(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "depth0",
-		ActorKind:      models.ActorKindSystem,
+		ActorKind:      runsmodels.ActorKindSystem,
 	}); err != nil {
 		t.Fatalf("queue depth0: %v", err)
 	}
@@ -199,7 +200,7 @@ func TestQueueRun_RefusesBeyondMaxCausationDepth(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "depth1",
-		ActorKind:      models.ActorKindSystem,
+		ActorKind:      runsmodels.ActorKindSystem,
 		CausingRunID:   depth0.ID,
 	}); err != nil {
 		t.Fatalf("queue depth1 (within limit): %v", err)
@@ -209,7 +210,7 @@ func TestQueueRun_RefusesBeyondMaxCausationDepth(t *testing.T) {
 	_, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "depth2",
-		ActorKind:      models.ActorKindSystem,
+		ActorKind:      runsmodels.ActorKindSystem,
 		CausingRunID:   depth1.ID,
 	})
 	var refusal *runsservice.RefusalError
@@ -238,7 +239,7 @@ func TestQueueRun_RefusesSelfTriggerBeyondAllowance(t *testing.T) {
 		if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 			AgentProfileID: "agent-primary",
 			Reason:         "self_trigger_reason",
-			ActorKind:      models.ActorKindAgent,
+			ActorKind:      runsmodels.ActorKindAgent,
 			ActorID:        "agent-primary",
 			IdempotencyKey: fmt.Sprintf("task_comment:self-trigger-%d", i),
 		}); err != nil {
@@ -249,7 +250,7 @@ func TestQueueRun_RefusesSelfTriggerBeyondAllowance(t *testing.T) {
 	_, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "self_trigger_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		IdempotencyKey: "task_comment:self-trigger-third",
 	})
@@ -276,8 +277,8 @@ func TestQueueRun_MissingActorNormalizesToSystem(t *testing.T) {
 		t.Fatalf("queue: %v", err)
 	}
 	run := getRun(t, repo, "agent-primary", "no_actor_declared")
-	if run.ActorKind != models.ActorKindSystem {
-		t.Fatalf("actor_kind = %q, want %q", run.ActorKind, models.ActorKindSystem)
+	if run.ActorKind != runsmodels.ActorKindSystem {
+		t.Fatalf("actor_kind = %q, want %q", run.ActorKind, runsmodels.ActorKindSystem)
 	}
 	if run.HumanRooted {
 		t.Fatalf("human_rooted = true, want false for a system-defaulted actor")

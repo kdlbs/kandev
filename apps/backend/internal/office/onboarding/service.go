@@ -38,10 +38,7 @@ type Repository interface {
 	// used by onboarding to write explicit routing.inherit markers on
 	// the freshly created CEO agent.
 	UpdateAgentSettings(ctx context.Context, agentID, settings string) error
-	// GetTaskWorkflowStepID resolves the workflow step currently bound to
-	// a task, used to gate the onboarding task's initial wake to steps
-	// that auto-start an agent.
-	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
+	shared.AssignmentTaskLookup
 }
 
 // WorkspaceCreator creates a DB workspace row for kanban compatibility.

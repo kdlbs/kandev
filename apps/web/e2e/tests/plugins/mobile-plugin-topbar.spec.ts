@@ -118,7 +118,12 @@ test.describe("Mobile plugin menu actions", () => {
       await assertNoDocumentHorizontalOverflow(testPage, `menu tools on ${route}`);
       await expect(menu.getByRole("textbox")).toHaveCount(0);
       await testPage.keyboard.press("Escape");
-      if (route !== "/threads") {
+      if (route === "/tasks") {
+        const search = testPage.getByTestId("tasks-list-search");
+        await search.tap();
+        await expect(search).toBeFocused();
+        await assertNoDocumentHorizontalOverflow(testPage, "phone list search");
+      } else if (route !== "/threads") {
         await testPage.getByTestId("mobile-topbar-page-context").tap();
         const options = testPage.getByRole("dialog", { name: "View options", exact: true });
         await options.getByTestId("mobile-search-toggle").tap();

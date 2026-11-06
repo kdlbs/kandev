@@ -23,9 +23,10 @@ const sqliteMaxHostParams = 500
 // worktree repo status values on task_environment_repos. Mirrors the worktree
 // package's StatusActive/StatusMerged/StatusDeleted lifecycle.
 const (
+	statusDeleted             = "deleted"
 	worktreeRepoStatusActive  = "active"
 	worktreeRepoStatusMerged  = "merged"
-	worktreeRepoStatusDeleted = "deleted"
+	worktreeRepoStatusDeleted = statusDeleted
 )
 
 // buildInPlaceholders returns a comma-separated "?,?,?" placeholder string and

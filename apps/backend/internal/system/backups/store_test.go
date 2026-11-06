@@ -376,10 +376,18 @@ func TestCreate_ManualSurvivesPruneBackups(t *testing.T) {
 func TestRestore_WrongConfirmReturnsError(t *testing.T) {
 	svc, _ := newTestService(t)
 
+	if err := updateRestoreTestValue(svc, "current-unbacked-work"); err != nil {
+		t.Fatal(err)
+	}
 	_, err := svc.Restore(context.Background(), "manual-1.db", "WRONG")
 	if err == nil {
 		t.Fatal("expected error for wrong confirm token")
 	}
+	assertRestoreTestValue(t, svc, "current-unbacked-work")
+	if err := updateRestoreTestValue(svc, "work-after-rejection"); err != nil {
+		t.Fatal(err)
+	}
+	assertRestoreTestValue(t, svc, "work-after-rejection")
 }
 
 func TestRestore_SuccessStagesFileAndFlagsRestartRequired(t *testing.T) {

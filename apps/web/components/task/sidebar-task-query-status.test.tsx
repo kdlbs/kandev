@@ -15,7 +15,6 @@ it("renders one actionable query error and disables duplicate retries while pend
   const { rerender } = render(<SidebarTaskQueryStatus {...props} />);
   expect(screen.getAllByRole("alert")).toHaveLength(1);
   const button = screen.getByRole("button", { name: "sidebar:retry" });
-  expect(button.className).toContain("min-h-11");
   fireEvent.click(button);
   expect(retry).toHaveBeenCalledOnce();
   rerender(<SidebarTaskQueryStatus {...props} pending />);

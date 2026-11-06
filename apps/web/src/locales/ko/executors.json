@@ -512,5 +512,12 @@
   "user": "사용자",
   "usesTheLocalDockerDaemonOn": "이 머신의 로컬 Docker 데몬을 사용합니다.",
   "value": "값",
-  "verifyingConnection": "연결 확인 중..."
+  "verifyingConnection": "연결 확인 중...",
+  "ownershipProfile": "프로필 접근 권한",
+  "ownershipExecutor": "실행기 접근 권한",
+  "ownershipShared": "공유",
+  "ownershipMe": "나만",
+  "ownershipDescription": "소유자와 관리자만 비공개 실행 환경을 보거나 사용할 수 있습니다. 공유 접근은 기존 권한을 유지합니다.",
+  "ownershipInherited": "실행기가 비공개입니다. 이 프로필을 공유해도 실행기 소유자와 관리자만 접근할 수 있습니다.",
+  "ownershipUnavailable": "이 실행기 프로필을 사용할 수 없습니다. 시작하기 전에 접근 가능한 프로필을 선택하세요."
 }

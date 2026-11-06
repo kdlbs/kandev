@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"net/url"
 	"strconv"
 	"strings"
@@ -80,6 +81,17 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 	}
 
 	metadata := execution.MetadataSnapshot()
+	activityAt, _, _ := execution.promptActivitySnapshot()
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	delete(metadata, idleActivityMetadataKey)
+	if !activityAt.IsZero() {
+		metadata[idleActivityMetadataKey] = map[string]interface{}{
+			"execution_id": execution.ID,
+			"activity_at":  activityAt.UTC().Format(time.RFC3339Nano),
+		}
+	}
 	if execution.OfficeAgentProfileID != "" {
 		if metadata == nil {
 			metadata = make(map[string]interface{})
@@ -143,9 +155,9 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 			running.Metadata = make(map[string]interface{})
 		}
 		for k, v := range prior.Metadata {
-			if k == metadataKeyPassthroughMCPClaims {
+			if k == metadataKeyPassthroughMCPClaims || k == idleActivityMetadataKey || k == mcpprofile.BuiltinBindingMetadataKey {
 				// Current execution metadata owns claim state. Copying an absent
-				// claim from a prior row would restore ownership after revocation.
+				// claim or clock from a prior row would undo its removal.
 				continue
 			}
 			if _, ok := running.Metadata[k]; !ok {
@@ -587,5 +599,24 @@ type executorRunningCASWriter interface {
 		ctx context.Context,
 		sessionID, expectedExecutionID string,
 		expectedUpdatedAt time.Time,
+	) error
+}
+
+type executorRunningOwnerCASWriter interface {
+	RepairExecutorRunningDeadIfOwnerCurrent(
+		ctx context.Context,
+		sessionID, expectedExecutionID string,
+		expectedUpdatedAt time.Time,
+		owner models.RemoteRecoveryOwnerLockIDs,
+		validateOwner func(context.Context) error,
+	) error
+}
+
+type executorRunningOwnerAbsentWriter interface {
+	ConfirmExecutorRunningAbsentIfOwnerCurrent(
+		ctx context.Context,
+		sessionID string,
+		owner models.RemoteRecoveryOwnerLockIDs,
+		validateOwner func(context.Context) error,
 	) error
 }

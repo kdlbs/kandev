@@ -195,6 +195,7 @@ func (h *ExecutorProfileHandlers) httpListProfiles(c *gin.Context) {
 }
 
 type httpCreateProfileRequest struct {
+	OwnerUserID   string                 `json:"owner_user_id,omitzero"`
 	Name          string                 `json:"name"`
 	McpPolicy     string                 `json:"mcp_policy"`
 	Config        map[string]string      `json:"config,omitempty"`
@@ -214,6 +215,7 @@ func (h *ExecutorProfileHandlers) httpCreateProfile(c *gin.Context) {
 		return
 	}
 	profile, err := h.service.CreateExecutorProfile(c.Request.Context(), &service.CreateExecutorProfileRequest{
+		OwnerUserID:   body.OwnerUserID,
 		ExecutorID:    c.Param("id"),
 		Name:          body.Name,
 		McpPolicy:     body.McpPolicy,
@@ -223,6 +225,9 @@ func (h *ExecutorProfileHandlers) httpCreateProfile(c *gin.Context) {
 		EnvVars:       body.EnvVars,
 	})
 	if err != nil {
+		if writeExecutorOwnershipError(c, err) {
+			return
+		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
@@ -260,6 +265,7 @@ func (h *ExecutorProfileHandlers) httpGetProfile(c *gin.Context) {
 }
 
 type httpUpdateProfileRequest struct {
+	OwnerUserID   models.OptionalOwner   `json:"owner_user_id,omitzero"`
 	Name          *string                `json:"name,omitempty"`
 	McpPolicy     *string                `json:"mcp_policy,omitempty"`
 	Config        map[string]string      `json:"config,omitempty"`
@@ -275,6 +281,7 @@ func (h *ExecutorProfileHandlers) httpUpdateProfile(c *gin.Context) {
 		return
 	}
 	profile, err := h.service.UpdateExecutorProfile(c.Request.Context(), c.Param("profileId"), &service.UpdateExecutorProfileRequest{
+		OwnerUserID:   body.OwnerUserID,
 		Name:          body.Name,
 		McpPolicy:     body.McpPolicy,
 		Config:        body.Config,
@@ -283,6 +290,9 @@ func (h *ExecutorProfileHandlers) httpUpdateProfile(c *gin.Context) {
 		EnvVars:       body.EnvVars,
 	})
 	if err != nil {
+		if writeExecutorOwnershipError(c, err) {
+			return
+		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
@@ -304,6 +314,9 @@ func (h *ExecutorProfileHandlers) httpUpdateProfile(c *gin.Context) {
 
 func (h *ExecutorProfileHandlers) httpDeleteProfile(c *gin.Context) {
 	if err := h.service.DeleteExecutorProfile(c.Request.Context(), c.Param("profileId")); err != nil {
+		if writeExecutorOwnershipError(c, err) {
+			return
+		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
@@ -375,6 +388,7 @@ func (h *ExecutorProfileHandlers) wsListAllProfiles(ctx context.Context, msg *ws
 }
 
 type wsCreateProfileRequest struct {
+	OwnerUserID   string                 `json:"owner_user_id,omitzero"`
 	ExecutorID    string                 `json:"executor_id"`
 	Name          string                 `json:"name"`
 	McpPolicy     string                 `json:"mcp_policy"`
@@ -393,6 +407,7 @@ func (h *ExecutorProfileHandlers) wsCreateProfile(ctx context.Context, msg *ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "executor_id and name are required", nil)
 	}
 	profile, err := h.service.CreateExecutorProfile(ctx, &service.CreateExecutorProfileRequest{
+		OwnerUserID:   req.OwnerUserID,
 		ExecutorID:    req.ExecutorID,
 		Name:          req.Name,
 		McpPolicy:     req.McpPolicy,
@@ -402,6 +417,9 @@ func (h *ExecutorProfileHandlers) wsCreateProfile(ctx context.Context, msg *ws.M
 		EnvVars:       req.EnvVars,
 	})
 	if err != nil {
+		if status, code, message := executorOwnershipError(err); status != 0 {
+			return ws.NewError(msg.ID, msg.Action, code, message, nil)
+		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
 		}
@@ -443,6 +461,7 @@ func (h *ExecutorProfileHandlers) wsGetProfile(ctx context.Context, msg *ws.Mess
 }
 
 type wsUpdateProfileRequest struct {
+	OwnerUserID   models.OptionalOwner   `json:"owner_user_id,omitzero"`
 	ID            string                 `json:"id"`
 	Name          *string                `json:"name,omitempty"`
 	McpPolicy     *string                `json:"mcp_policy,omitempty"`
@@ -461,6 +480,7 @@ func (h *ExecutorProfileHandlers) wsUpdateProfile(ctx context.Context, msg *ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 	profile, err := h.service.UpdateExecutorProfile(ctx, req.ID, &service.UpdateExecutorProfileRequest{
+		OwnerUserID:   req.OwnerUserID,
 		Name:          req.Name,
 		McpPolicy:     req.McpPolicy,
 		Config:        req.Config,
@@ -469,6 +489,9 @@ func (h *ExecutorProfileHandlers) wsUpdateProfile(ctx context.Context, msg *ws.M
 		EnvVars:       req.EnvVars,
 	})
 	if err != nil {
+		if status, code, message := executorOwnershipError(err); status != 0 {
+			return ws.NewError(msg.ID, msg.Action, code, message, nil)
+		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
 		}
@@ -490,6 +513,9 @@ func (h *ExecutorProfileHandlers) wsDeleteProfile(ctx context.Context, msg *ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 	if err := h.service.DeleteExecutorProfile(ctx, req.ID); err != nil {
+		if status, code, message := executorOwnershipError(err); status != 0 {
+			return ws.NewError(msg.ID, msg.Action, code, message, nil)
+		}
 		if errors.Is(err, service.ErrKubernetesAdminRequired) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
 		}

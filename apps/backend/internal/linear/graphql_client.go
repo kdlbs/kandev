@@ -311,6 +311,7 @@ const issueFragment = `
 	team { id key }
 	assignee { name email avatarUrl }
 	creator { name avatarUrl }
+	project { id name url description }
 `
 
 type issueNode struct {
@@ -342,6 +343,12 @@ type issueNode struct {
 		Name      string `json:"name"`
 		AvatarURL string `json:"avatarUrl"`
 	} `json:"creator"`
+	Project *struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		URL         string `json:"url"`
+		Description string `json:"description"`
+	} `json:"project"`
 }
 
 func issueNodeToIssue(n *issueNode) LinearIssue {
@@ -370,6 +377,12 @@ func issueNodeToIssue(n *issueNode) LinearIssue {
 	if n.Creator != nil {
 		out.CreatorName = n.Creator.Name
 		out.CreatorIcon = n.Creator.AvatarURL
+	}
+	if n.Project != nil {
+		out.ProjectID = n.Project.ID
+		out.ProjectName = n.Project.Name
+		out.ProjectURL = n.Project.URL
+		out.ProjectSummary = n.Project.Description
 	}
 	return out
 }
@@ -654,6 +667,9 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 				"id": map[string]interface{}{"in": f.LabelIDs},
 			},
 		}
+	}
+	if len(f.ProjectIDs) > 0 {
+		out["project"] = map[string]interface{}{"id": map[string]interface{}{"in": f.ProjectIDs}}
 	}
 	if f.CreatorID != "" {
 		out["creator"] = map[string]interface{}{"id": map[string]interface{}{"eq": f.CreatorID}}

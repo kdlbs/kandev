@@ -421,7 +421,7 @@ func TestExecuteQueuedMessage_DiscardsReservedLifecycleMessageForRecreatedSessio
 	if err != nil || !ok {
 		t.Fatalf("reserve lifecycle message: ok=%v err=%v", ok, err)
 	}
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, queued.ID, queued)
 
 	if _, err := repo.DB().ExecContext(
 		ctx,
@@ -473,7 +473,7 @@ func TestFinishQueuedMessageExecution_SuccessLeavesRecreatedSessionQueueEmpty(t 
 	if err != nil || !ok || queued == nil {
 		t.Fatalf("reserve lifecycle message: queued=%+v ok=%v err=%v", queued, ok, err)
 	}
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, queued.ID, queued)
 
 	if _, err := repo.DB().ExecContext(
 		ctx,
@@ -1136,7 +1136,7 @@ func TestExecuteQueuedMessage_LifecycleResetAfterClaimRestoresStateAndRetryDrain
 	}
 	lock, release := svc.acquireCancelInFlightGuard("s1")
 	lock.Lock()
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, nil)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, queued.ID, nil)
 	lock.Unlock()
 	release()
 	svc.executeQueuedMessageWithReservation("s1", queued, reservation)

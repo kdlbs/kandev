@@ -71,6 +71,30 @@ export function linearIssueWatchPlaceholders(t: TFunction): ScriptPlaceholder[] 
       example: "Tap submit, nothing happens.",
       executor_types: [],
     },
+    {
+      key: "issue.project.name",
+      description: t("linear:placeholderProjectName"),
+      example: "Mobile app",
+      executor_types: [],
+    },
+    {
+      key: "issue.project.url",
+      description: t("linear:placeholderProjectUrl"),
+      example: "https://linear.app/acme/project/mobile-app-1a2b3c4d5e6f",
+      executor_types: [],
+    },
+    {
+      key: "issue.project.summary",
+      description: t("linear:placeholderProjectSummary"),
+      example: "Native iOS and Android client",
+      executor_types: [],
+    },
+    {
+      key: "issue.project.description",
+      description: t("linear:placeholderProjectDescription"),
+      example: "Audience: field technicians. Scope: offline-first work orders.",
+      executor_types: [],
+    },
   ];
 }
 

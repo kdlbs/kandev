@@ -54,6 +54,12 @@ func (h *OfficeRecoveryHandler) Tick(ctx context.Context) error {
 		}
 		h.logger.Error("recovery sweep: replay deferred assignments failed", zap.Error(err))
 	}
+	if err := h.scheduler.svc.ReplayPendingHandoffCompletionOutbox(ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		h.logger.Error("recovery sweep: replay handoff completion outbox failed", zap.Error(err))
+	}
 	return nil
 }
 
@@ -95,7 +101,7 @@ func (si *SchedulerIntegration) recoverUnstartedTasks(ctx context.Context, log *
 			}
 			seen[t.ID] = struct{}{}
 			excluded = append(excluded, t.ID)
-			// The current step must accept an auto-started run before this
+			// The current step and blockers must permit assignment before this
 			// recovery wake is queued. See shared.IsAssignmentWakeEligible
 			// for the fail-open rationale.
 			if !shared.IsAssignmentWakeEligible(ctx, log, si.svc.repo, si.svc.workflowStepGetter, t.ID, "scheduler_recovery.recover_unstarted_tasks") {

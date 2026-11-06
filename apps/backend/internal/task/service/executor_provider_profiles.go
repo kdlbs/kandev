@@ -657,7 +657,7 @@ func (s *Service) createPluginExecutorProfile(ctx context.Context, executor *mod
 		return nil, fmt.Errorf("%w: provider profiles accept schema fields only", ErrInvalidExecutorConfig)
 	}
 	profile := &models.ExecutorProfile{
-		ID: newExecutorProfileID(), ExecutorID: executor.ID, Name: req.Name,
+		ID: newExecutorProfileID(), ExecutorID: executor.ID, Name: req.Name, OwnerUserID: req.OwnerUserID,
 		McpPolicy: req.McpPolicy, PrepareScript: "", CleanupScript: "",
 	}
 	config, created, err := s.normalizePluginExecutorProfileConfig(ctx, *provider, profile.ID, nil, req.Config)

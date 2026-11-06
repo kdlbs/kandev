@@ -848,11 +848,16 @@ export interface TaskListFacetValue {
   color?: string;
 }
 
+export interface TaskListFacetContext {
+  taskId: string;
+  workspaceId?: string;
+}
+
 /** A synchronous, page-local facet contribution for the host task list. */
 export interface TaskListFacetRegistration {
   id: string;
   label: string;
-  getValues(context: { taskId: string; workspaceId?: string }): readonly TaskListFacetValue[];
+  getValues(context: TaskListFacetContext): readonly TaskListFacetValue[];
   subscribe?(listener: () => void): () => void;
 }
 

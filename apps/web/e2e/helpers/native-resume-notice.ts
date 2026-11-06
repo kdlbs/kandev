@@ -11,14 +11,24 @@ import {
   withDatabase,
 } from "./interrupted-prompt-recovery";
 
+type NativeResumeScenario = boolean | "readiness" | "cancelled";
+type NativeResumeOptions = { legacy: NativeResumeScenario; afterResumeClick: () => Promise<void> };
+
+function resumeScenario(options: NativeResumeScenario | NativeResumeOptions) {
+  return typeof options === "object"
+    ? options
+    : { legacy: options, afterResumeClick: async () => {} };
+}
+
 // @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.4
 export async function verifyNativeResumeClearsRecoveryNotice(
   page: Page,
   api: ApiClient,
   seed: SeedData,
   tmpDir: string,
-  legacy: boolean | "readiness" | "cancelled" = false,
+  options: NativeResumeScenario | NativeResumeOptions = false,
 ) {
+  const { legacy, afterResumeClick } = resumeScenario(options);
   const task = await api.createTaskWithAgent(
     seed.workspaceId,
     "Native resume clears interrupted notice",
@@ -132,7 +142,7 @@ export async function verifyNativeResumeClearsRecoveryNotice(
     );
   }
   await expect(page.getByTestId("failed-session-banner")).toContainText(
-    "The prompt outcome is uncertain.",
+    "Kandev cannot confirm whether the agent processed your message.",
   );
   try {
     if (legacy) {
@@ -144,6 +154,7 @@ export async function verifyNativeResumeClearsRecoveryNotice(
       const resume = page.getByTestId("recovery-resume-button");
       if (test.info().project.name === "mobile-chrome") await resume.tap();
       else await resume.click();
+      await afterResumeClick();
       await expect
         .poll(() => readRecovery(tmpDir, recoveryBlockId, seeded.submissionId).block, {
           timeout: 60_000,

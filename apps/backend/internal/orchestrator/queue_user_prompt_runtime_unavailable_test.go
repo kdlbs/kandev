@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -371,5 +372,56 @@ func TestPromptTask_NonRetryableRecoveryGuardRemainsVisible(t *testing.T) {
 	}
 	if finalSession.State != models.TaskSessionStateFailed {
 		t.Fatalf("non-retryable recovery guard session state = %q, want visible failed state", finalSession.State)
+	}
+}
+
+func TestQueueUserPrompt_RecoveryWinsResumeRace(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-retained")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	var ready atomic.Bool
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		isAgentRunningFn:         func(context.Context, string) bool { return ready.Load() },
+		isAgentReadyFn:           func(context.Context, string) bool { return ready.Load() },
+		currentPromptExecutionID: "exec-retained",
+		promptDone:               make(chan struct{}),
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			// Remote recovery attaches the idle runtime after cold resume has claimed STARTING.
+			ready.Store(true)
+			return nil, lifecycle.ErrAgentAlreadyRunning
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor.SetOnResumeFailureRollback(svc.rollbackResumeFailureIfCurrentAttempt)
+	workerDone := make(chan struct{})
+	svc.onQueuedMessageExecutionComplete = func() { close(workerDone) }
+	if err := svc.QueueUserPrompt(ctx, "t1", "s1", "after restart", "", false, nil, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-workerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued prompt dispatch did not settle")
+	}
+	if len(agentMgr.capturedPrompts) != 1 || agentMgr.capturedPrompts[0] != "after restart" {
+		t.Fatalf("recovered prompt dispatches = %v, want original prompt exactly once", agentMgr.capturedPrompts)
+	}
+	entries, _, err := svc.messageQueue.SnapshotSession(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("queue after recovery = %+v, want empty", entries)
 	}
 }

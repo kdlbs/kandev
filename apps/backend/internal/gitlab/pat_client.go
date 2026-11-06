@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/unidiff"
 )
 
 const (
@@ -560,7 +562,7 @@ func (c *PATClient) ListMRFiles(ctx context.Context, projectPath string, iid int
 	}
 	files := make([]MRFile, len(raw.Changes))
 	for i, ch := range raw.Changes {
-		additions, deletions := countDiffLines(ch.Diff)
+		additions, deletions := unidiff.CountLines(ch.Diff)
 		files[i] = MRFile{
 			Filename:  ch.NewPath,
 			Status:    diffStatus(ch.NewFile, ch.DeletedFile, ch.RenamedFile),

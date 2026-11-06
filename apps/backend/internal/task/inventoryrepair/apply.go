@@ -45,6 +45,9 @@ func repairOwnership(p Plan) (*ownershiplock.Owner, error) {
 	if err := p.validate(); err != nil {
 		return nil, err
 	}
+	if p.Version == 2 && len(p.ExpectedConsumerPaths) == 0 {
+		return nil, errors.New("version 2 requires observed workspace consumer paths")
+	}
 	if len(p.ExpectedRows) == 0 || len(p.ExpectedGit) != len(p.Repairs) {
 		return nil, errors.New("application requires a reviewed preview with row and Git observations")
 	}
@@ -191,6 +194,12 @@ func (j *journal) reconcile(ctx context.Context, db *sql.DB, forward bool, audit
 	if err = j.publishDirection(ctx, tx, forward, before, after, audit); err != nil {
 		return err
 	}
+	if j.Plan.Version == 2 && forward {
+		if err = j.checkNewAliasForeignKeyViolations(ctx, tx); err != nil {
+			return err
+		}
+	}
+
 	if err = tx.Commit(); err != nil {
 		return err
 	}

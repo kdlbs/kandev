@@ -207,4 +207,5 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   resetters.setBlockedBy([]);
   resetters.setSelectedParentTaskId?.(undefined);
   resetters.setRelatedTaskIds?.([]);
+  resetters.setBuiltinMCPPreferences(undefined);
 }

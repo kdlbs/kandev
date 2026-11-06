@@ -1,4 +1,4 @@
-import type { GitHubStatus } from "@/lib/types/github";
+import type { GitHubAuthPrincipal, GitHubStatus } from "@/lib/types/github";
 import { t } from "@/lib/i18n";
 
 export function hasGitHubPersonalActor(status: GitHubStatus | null): boolean {
@@ -26,7 +26,10 @@ export function getGitHubPersonalIdentityState(status: GitHubStatus): GitHubPers
 
 export function getGitHubMutationActor(status: GitHubStatus | null) {
   if (!status?.authenticated) return null;
-  const effective = status?.effective_manual_mutation_actor;
+  return getGitHubActorLabel(status.effective_manual_mutation_actor);
+}
+
+export function getGitHubActorLabel(effective: GitHubAuthPrincipal | null | undefined) {
   if (!effective) return null;
   if (effective.kind === "app") {
     // i18n-exempt: GitHub's own product term for an app-authenticated actor.

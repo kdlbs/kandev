@@ -188,3 +188,9 @@ store-shape risk it would cover was reduced by typecheck, by the 88 targeted
 tests, and by the 64-test mocked-store sample; a 347-file sweep of tests that
 mock `useAppStore` should still run in CI, where a missing field degrades to the
 default `includeHidden: false` rather than failing.
+
+
+PR #3680 compatibility follow-up updates Task 03's attachment entry point
+after source attachment moved to Files +. The hidden-folder control and
+persistence contracts remain unchanged. Task 03 records the hosted failure
+evidence and focused desktop, narrow-screen and phone validation.

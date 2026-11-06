@@ -26,6 +26,11 @@ import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskMultiSelect } from "@/hooks/use-task-multi-select";
+import {
+  isBulkMoveTargetInWorkflow,
+  resolveBulkSelectionWorkflow,
+} from "@/lib/kanban/bulk-move-scope";
+import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { usePluginTaskFilters } from "@/hooks/use-plugin-task-filters";
 import { HomepageCommands } from "./homepage-commands";
 import { linkToTask } from "@/lib/links";
@@ -211,46 +216,37 @@ function useKanbanBoardHooks(
   };
 }
 
-type SnapEntry = {
-  tasks: { id: string }[];
-  steps: { id: string; title: string; color?: string | null }[];
-};
-
 export function useMultiSelectDerived(
   selectedIds: Set<string>,
-  snapshots: Record<string, SnapEntry>,
+  snapshots: Record<string, WorkflowSnapshotData>,
   activeSteps: { id: string; title: string; color?: string | null }[],
   hiddenWorkflowStepIds: Record<string, string[]>,
+  board: Pick<KanbanState, "workflowId" | "tasks" | "steps">,
 ) {
-  const isMixedWorkflowSelection = useMemo(() => {
-    if (selectedIds.size === 0) return false;
-    const taskToWorkflow = new Map<string, string>();
-    for (const [wfId, snap] of Object.entries(snapshots)) {
-      for (const task of snap.tasks) taskToWorkflow.set(task.id, wfId);
+  return useMemo(() => {
+    if (selectedIds.size === 0) {
+      return {
+        isMixedWorkflowSelection: false,
+        multiSelectSteps: activeSteps.map((s) => ({
+          id: s.id,
+          title: s.title,
+          color: s.color ?? "",
+        })),
+      };
     }
-    const wfIds = new Set<string>();
-    for (const id of selectedIds) {
-      const wfId = taskToWorkflow.get(id);
-      if (wfId) wfIds.add(wfId);
-    }
-    return wfIds.size > 1;
-  }, [selectedIds, snapshots]);
-
-  const multiSelectSteps = useMemo(() => {
-    if (selectedIds.size > 0) {
-      for (const [wfId, snap] of Object.entries(snapshots)) {
-        if (snap.tasks.some((t) => selectedIds.has(t.id))) {
-          const hidden = new Set(hiddenWorkflowStepIds[wfId] ?? []);
-          return snap.steps
-            .filter((s) => !hidden.has(s.id))
-            .map((s) => ({ id: s.id, title: s.title, color: s.color ?? "" }));
-        }
-      }
-    }
-    return activeSteps.map((s) => ({ id: s.id, title: s.title, color: s.color ?? "" }));
-  }, [selectedIds, snapshots, activeSteps, hiddenWorkflowStepIds]);
-
-  return { isMixedWorkflowSelection, multiSelectSteps };
+    const workflowId = resolveBulkSelectionWorkflow([...selectedIds], snapshots, board);
+    if (!workflowId) return { isMixedWorkflowSelection: true, multiSelectSteps: [] };
+    let steps = snapshots[workflowId]?.steps ?? [];
+    if (steps.length === 0 && board.workflowId === workflowId) steps = board.steps;
+    return {
+      isMixedWorkflowSelection: false,
+      multiSelectSteps: steps
+        .filter((step) =>
+          isBulkMoveTargetInWorkflow(step.id, workflowId, snapshots, board, hiddenWorkflowStepIds),
+        )
+        .map((step) => ({ id: step.id, title: step.title, color: step.color ?? "" })),
+    };
+  }, [selectedIds, snapshots, activeSteps, hiddenWorkflowStepIds, board]);
 }
 
 function useEffectiveWorkflowContext({
@@ -265,6 +261,7 @@ function useEffectiveWorkflowContext({
   activeSteps: ReturnType<typeof useKanbanBoardHooks>["activeSteps"];
 }) {
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const board = useAppStore((state) => state.kanban);
   const hiddenWorkflowStepIds = useAppStore((state) => state.userSettings.hiddenWorkflowStepIds);
   const mobileWorkflowFocusId = useAppStore((state) => state.mobileKanban.focusedWorkflowId);
   const effectiveWorkflowId = resolveBoardWorkflowId({
@@ -285,10 +282,11 @@ function useEffectiveWorkflowContext({
   );
   const multiSelect = useTaskMultiSelect(effectiveWorkflowId);
   const selection = useMultiSelectDerived(
-    multiSelect.selectedIds,
+    new Set(multiSelect.getEligibleSelectedIds([...multiSelect.selectedIds])),
     snapshots,
     effectiveSteps,
     hiddenWorkflowStepIds,
+    board,
   );
 
   return {

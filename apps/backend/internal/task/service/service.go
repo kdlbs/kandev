@@ -12,11 +12,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/changes"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -44,6 +47,12 @@ type CanvasCleanup interface {
 // for isolated task-service users.
 type WorkspaceSecretDeleter interface {
 	DeleteWorkspaceSecrets(ctx context.Context, workspaceID string) error
+}
+
+// MCPSelectionWriter persists task-scope MCP additions after the task row has
+// been created and validated by the task service.
+type MCPSelectionWriter interface {
+	Replace(context.Context, mcpconfig.SelectionScope, string, string, []string) error
 }
 
 type transactionalWorkspaceCascade interface {
@@ -108,7 +117,9 @@ type WorktreeBatchCleanerWithOptions interface {
 
 // DeleteTaskOptions controls destructive task deletion behavior.
 type DeleteTaskOptions struct {
-	DiscardWorktreeChanges bool
+	AllowUnverifiedWorkspaceChanges bool
+	WorkspaceCleanup                models.WorkspaceCleanupMode
+	DiscardWorktreeChanges          bool
 }
 
 // WorktreeArchiveBatchCleaner removes archived task worktrees without deleting
@@ -440,6 +451,7 @@ type Repos struct {
 	Messages                      repository.MessageRepository
 	Attachments                   repository.AttachmentRepository
 	Turns                         repository.TurnRepository
+	TurnChanges                   repository.TurnChangesRepository
 	Sessions                      repository.SessionRepository
 	GitSnapshots                  repository.GitSnapshotRepository
 	RepoEntities                  repository.RepositoryEntityRepository
@@ -464,6 +476,9 @@ type Repos struct {
 
 // Service provides task business logic
 type Service struct {
+	workspaceCollaboration          WorkspaceCollaborationBoundary
+	workspaceCollaborationStore     WorkspaceCollaborationStore
+	executorIdentityResolver        func(context.Context, string) (authn.Identity, bool)
 	workspaces                      repository.WorkspaceRepository
 	userDirectory                   UserDirectory
 	unitPlacer                      UnitPlacer
@@ -476,6 +491,10 @@ type Service struct {
 	messages                        repository.MessageRepository
 	attachments                     repository.AttachmentRepository
 	turns                           repository.TurnRepository
+	turnChanges                     repository.TurnChangesRepository
+	turnChangeContent               *changes.ContentService
+	turnChangePreservationRetrier   TurnChangePreservationRetrier
+	turnHistoryCleanup              TurnHistoryCleanup
 	sessions                        repository.SessionRepository
 	gitSnapshots                    repository.GitSnapshotRepository
 	repoEntities                    repository.RepositoryEntityRepository
@@ -528,6 +547,7 @@ type Service struct {
 	clarificationCanceller          TerminalClarificationCanceller
 	parkedProjectionCanceller       ParkedProjectionCanceller
 	sessionCeilingReleaser          SessionCeilingReleaser
+	deferredLaunchDiscard           DeferredLaunchDiscardSettler
 	rowLivenessProber               TaskRowLivenessProber
 	executionLivenessChecker        TaskExecutionLivenessChecker
 	pendingRemoteRecoveryChecker    func(sessionID, executionID string) bool
@@ -545,6 +565,7 @@ type Service struct {
 	workflowStepCreator             WorkflowStepCreator
 	executorSaveObserver            ExecutorSaveObserver
 	workspaceBootstrapper           WorkspaceBootstrapper
+	workspaceCloner                 WorkspaceClonePersistence
 	workflowStepGetter              WorkflowStepGetter
 	workflowMovePreflight           WorkflowMovePreflight
 	startStepResolver               StartStepResolver
@@ -578,6 +599,7 @@ type Service struct {
 	remoteBranchLister             RemoteBranchLister
 	repositorySelectionResolver    RepositorySelectionResolver
 	gitLabRepositoryOriginVerifier GitLabRepositoryOriginVerifier
+	gitHubRepositoryOriginVerifier GitHubRepositoryOriginVerifier
 	repoCloneLocation              RepoCloneLocation
 	blockers                       BlockerRepository
 	relations                      RelationRepository
@@ -589,6 +611,8 @@ type Service struct {
 	comparisonTargetPusher         AgentComparisonTargetPusher
 	backgroundWorkActionDispatcher BackgroundWorkActionDispatcher
 	runtimeOverridesMu             sync.Mutex
+	mcpSelectionWriter             MCPSelectionWriter
+	builtinCreationWriter          BuiltinCreationWriter
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
@@ -639,6 +663,9 @@ type Service struct {
 	cleanupWorkerMu                       sync.Mutex
 	archiveReclaimBackfillMu              sync.Mutex
 	archiveReclaimBackfillAfterWorktreeID string
+	archiveReclaimWakeCutoff              time.Time
+	archiveReclaimWakeAfterID             string
+	archiveReclaimWakeDone                bool
 	cleanupWorkerCancel                   context.CancelFunc
 	cleanupWorkerWG                       sync.WaitGroup
 	cleanupWorkerWake                     chan struct{}
@@ -799,6 +826,12 @@ func (s *Service) SetWorkflowTaskArchiveCoordinator(coordinator WorkflowTaskArch
 	s.workflowTaskArchiveCoordinator = coordinator
 }
 
+// SetMCPSelectionWriter wires task-scope MCP persistence. It is optional so
+// focused task-service users can keep the existing task contract.
+func (s *Service) SetMCPSelectionWriter(writer MCPSelectionWriter) {
+	s.mcpSelectionWriter = writer
+}
+
 // NewService creates a new task service
 func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
 	svc := &Service{
@@ -810,6 +843,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		messages:                      repos.Messages,
 		attachments:                   repos.Attachments,
 		turns:                         repos.Turns,
+		turnChanges:                   repos.TurnChanges,
 		sessions:                      repos.Sessions,
 		gitSnapshots:                  repos.GitSnapshots,
 		repoEntities:                  repos.RepoEntities,
@@ -1060,6 +1094,31 @@ func (s *Service) SetContributionDestinationPreparer(preparer ContributionDestin
 
 // SetPRTaskResolver wires the GitHub PR→task resolver for PR-number search.
 // Optional — when unset, search by PR number is a no-op.
+// SetTurnChangeContentService installs the source-aware historical reader so
+// Git-backed turns and legacy SQL rows share one read path.
+func (s *Service) SetTurnChangeContentService(content *changes.ContentService) {
+	s.turnChangeContent = content
+}
+
+// TurnChangePreservationRetrier owns bounded retries of pending terminal
+// preservation without extending the agent-running indicator.
+type TurnChangePreservationRetrier interface {
+	RetryPending(context.Context) (changes.PreservationRetryResult, error)
+}
+
+func (s *Service) SetTurnChangePreservationRetrier(retrier TurnChangePreservationRetrier) {
+	s.turnChangePreservationRetrier = retrier
+}
+
+// TurnHistoryCleanup drains task/session deletion ref receipts without policy.
+type TurnHistoryCleanup interface {
+	CleanupDeletionIntents(context.Context) (int64, error)
+}
+
+func (s *Service) SetTurnHistoryCleanup(cleanup TurnHistoryCleanup) {
+	s.turnHistoryCleanup = cleanup
+}
+
 func (s *Service) SetPRTaskResolver(resolver PRTaskResolver) {
 	s.prTaskResolver = resolver
 }

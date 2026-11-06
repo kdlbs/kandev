@@ -45,6 +45,7 @@ import {
   supportsCustomHighlights,
   useMessageCommentDecorations,
   useMessageCommentShortcut,
+  useMessageCommentMouseSelection,
 } from "./use-message-comment-dom";
 import {
   MessageCommentDecorationOverlay,
@@ -270,7 +271,7 @@ function MessageCommentDrawer({
         <DrawerHeader className="shrink-0 px-4 pb-3 text-left">
           <DrawerTitle>{isEditing ? t("task:editComment") : t("task:comment")}</DrawerTitle>
           <DrawerDescription className="line-clamp-2 text-pretty italic">
-            &ldquo;{target.selection.selectedText}&rdquo;
+            “{target.selection.selectedText}”
           </DrawerDescription>
         </DrawerHeader>
         <div className="min-h-0 overflow-y-auto px-4 pb-2">
@@ -358,6 +359,8 @@ function useCommentTargetState(
     const selection = getMessageSelection(rootRef.current, window.getSelection());
     if (selection) setNewSelection(selection, false);
   }, [isSelectable, rootRef, setNewSelection]);
+
+  useMessageCommentMouseSelection(rootRef, isSelectable && !composerOpen, captureSelection);
 
   const openFromShortcut = useCallback(
     (selection: MessageSelection) => setNewSelection(selection, true),
@@ -531,7 +534,6 @@ export function MessageCommentSurface({
         data-agent-message-body="true"
         data-message-id={message.id}
         data-agent-message-highlight-name={highlightName}
-        onMouseUp={captureSelection}
         onTouchEnd={captureSelection}
         onClick={handleDecorationClick}
       >

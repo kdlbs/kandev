@@ -42,6 +42,16 @@ func trackCanonicalResponseAttemptMessage(execution *AgentExecution, messageID s
 	execution.messageMu.Unlock()
 }
 
+func (e *AgentExecution) trackLastAssistantMessageLocked(messageID string, promptGeneration uint64) {
+	if messageID == "" || promptGeneration == 0 {
+		return
+	}
+	if e.lastAssistantMessageIDByGeneration == nil {
+		e.lastAssistantMessageIDByGeneration = make(map[uint64]string)
+	}
+	e.lastAssistantMessageIDByGeneration[promptGeneration] = messageID
+}
+
 func (e *AgentExecution) commitResponseAttemptLocked() {
 	e.responseAttemptMessageIDs = nil
 }
@@ -166,6 +176,7 @@ func (e *AgentExecution) resetStreamingStateLocked() {
 	e.assistantHistoryBuffer.Reset()
 	e.currentMessageID = ""
 	e.currentThinkingID = ""
+	e.lastAssistantMessageIDByGeneration = nil
 	e.clearProtocolMessageCorrelationLocked()
 	e.commitResponseAttemptLocked()
 }
@@ -194,6 +205,7 @@ func (m *Manager) publishProtocolMessage(
 	if !isAppend {
 		execution.trackResponseAttemptMessageLocked(messageID)
 	}
+	execution.trackLastAssistantMessageLocked(messageID, promptGeneration)
 	execution.messageMu.Unlock()
 
 	m.publishStreamingContent(execution, "message_streaming", messageID, content, isAppend, promptGeneration, attemptID)
@@ -475,6 +487,7 @@ func (m *Manager) publishStreamingMessage(execution *AgentExecution, content str
 		execution.currentMessageID = messageID
 		execution.trackResponseAttemptMessageLocked(messageID)
 	}
+	execution.trackLastAssistantMessageLocked(messageID, promptGeneration)
 	execution.messageMu.Unlock()
 
 	m.logger.Debug("publishing streaming message",

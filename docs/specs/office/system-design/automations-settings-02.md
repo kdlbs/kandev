@@ -17,7 +17,89 @@ This design preserves the technical source detail for `REQ-OFFICE-AUTOMATIONS-SE
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-OFFICE-AUTOMATIONS-SETTINGS-001` | [Migrated source detail](#migrated-source-detail), [Deletion confirmation](#deletion-confirmation), [Workspace list publication](#workspace-list-publication) |
+| `REQ-OFFICE-AUTOMATIONS-SETTINGS-001` | [Migrated source detail](#migrated-source-detail), [Deletion confirmation](#deletion-confirmation), [Workspace list publication](#workspace-list-publication), [GitHub PR event selection](#github-pr-event-selection) |
+
+## GitHub PR event selection
+
+AC-OFFICE-AUTOMATIONS-SETTINGS-001.19 belongs here because settings owns the
+automation's saved trigger choices and firing semantics. The adjacent
+`automation-runs.md` owns reading and watching admitted runs, not eligibility.
+This section extends the existing settings design without changing its legacy
+repository or lifecycle contracts.
+
+### Config semantics and eligibility
+
+`GitHubPRTriggerConfig.Events` in `internal/automation/models.go` decodes the
+saved JSON list. The registry in `trigger_registry.go` supplies
+`{"events":["opened"],"repos":[],"exclude_draft":false}` to the new-trigger
+picker. That is an explicit authoring default, not a runtime fallback.
+`CreateAutomation`, `AddTrigger`, and `UpdateTrigger` pass supplied config to
+the store; create/update store the JSON without merging registry defaults.
+Omitting the entire update config leaves the existing config unchanged.
+An omitted `events` member, `events: null`, `events: []`, or a whole JSON null
+config decodes without a selected event. Invalid JSON/type shapes retain the
+existing decode-error return. No migration or reset/default injection is needed.
+
+In `GitHubEvaluator.checkPRTrigger` in `internal/automation/evaluator.go`,
+immediately after successful decoding, require the existential predicate
+`there exists event in cfg.Events such that event == "opened"`. Return when
+false, before repository iteration, `ListAutomationPRs`, dedup/admission, or
+`Service.FireTrigger`. Membership is case-sensitive; neither the first element
+nor all elements must equal `opened`. Both `["opened"]` and
+`["closed", "opened"]` remain eligible. Unknown values alone never enable
+polling and do not introduce support for another PR event kind.
+
+The existing enabled-trigger/automation query, workspace ownership lookup,
+explicit repository requirement, workspace credential routing, branch/author
+filters, draft exclusion, payload, and PR dedup key remain authoritative for
+eligible selections. No provider client, auth policy, schema, cursor, scheduler,
+retry, concurrency, or lifecycle change is part of this correction. Existing
+All repos, labels, search-result hydration, and pagination limitations remain.
+
+### Editor, mobile, and public behavior
+
+The real `GitHubPRConfig` already displays missing/null `events` as `[]`, checks
+membership with `includes`, and emits the complete config with `events: []`
+when Opened is cleared. Selecting it emits `["opened"]`. The existing trigger
+draft/save path forwards that supplied config unchanged. Do not add a frontend
+fallback, translation, layout, control, navigation, or viewport-dependent rule.
+This is a backend eligibility correction with component-level data-contract
+evidence. Under the mobile-parity data/state exception, the existing shared
+desktop/phone checkbox composition needs no new mobile browser scenario or
+ASCII preview; component evidence exercises the same selection contract.
+
+When the behavior is fixed, replace only the known event-selection limitation
+in `docs/public/automation-and-mcp.md`'s GitHub PR paragraph with the supported
+selection rule. Preserve its explicit-repository/All repos limitation, initial
+open-PR sweep behavior, and once-per-PR dedup explanation.
+
+### Regression boundaries
+
+Independently author `evaluator_pr_events_test.go` using repository fixtures:
+real in-memory automation/GitHub stores, real workspace credential routing and
+provider adapter, real evaluator, real `Service.FireTrigger`, and an actual
+`AutomationTriggered` subscription. Replace only the external HTTP transport
+with deterministic synthetic responses; count search requests there. Do not
+launch an agent, use a real account, or claim physical provider/network proof.
+Run evaluation synchronously without starting the poller; clean up resources
+and subscriptions using existing test helpers.
+
+Cover cleared/missing/null/unsupported-only selections with matching configured
+repository/PR fixtures and assert zero search, events, runs (including skipped
+admissions), dedup binding, and last-triggered/evaluation changes. Pair these
+with explicit default and mixed-list positive controls, disabled trigger and
+automation controls, draft exclusion, no explicit repository, ownership/scope,
+branch and author mismatch controls. Repeated eligible evaluation retains the
+existing single firing/dedup outcome; clearing and later reselecting an unseen
+PR must not inherit a reservation from the cleared evaluation.
+
+A real translated `GitHubPRConfig` component test drives the checkbox and
+checks `onUpdate` plus rerendered checked state; backend service/store save and
+reload evidence connects the emitted config to evaluator behavior. Existing
+trigger-draft tests cover transport forwarding. Together these cover the
+authoring-to-firing contract without a browser or orchestration/agent fixture.
+
+Implementation and exact checks: [GitHub PR event selection plan](../../../plans/github-pr-event-selection/plan.md).
 
 ## Workspace list publication
 

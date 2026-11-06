@@ -131,6 +131,26 @@ function flushRaf(): Promise<void> {
 // switch restored the pre-preset layout from sessionStorage, losing the user's
 // intent. persistEnvLayoutNow runs after isRestoringLayout flips back to false
 // at the end of those rAF callbacks.
+describe("built-in preset sidebar projection", () => {
+  it("preserves sidebar visibility when a legacy panel remains in the applied layout", () => {
+    resetStoreForIntegration();
+    const api = makeStoreApi();
+    vi.mocked(api.getPanel).mockImplementation((id) =>
+      id === "sidebar" ? ({ id: "sidebar" } as ReturnType<DockviewApi["getPanel"]>) : undefined,
+    );
+    useDockviewStore.setState({ api, sidebarVisible: false });
+    useDockviewStore.getState().applyBuiltInPreset("default");
+    expect(useDockviewStore.getState().sidebarVisible).toBe(true);
+  });
+
+  it("does not reserve sidebar width when the applied preset has no sidebar", () => {
+    resetStoreForIntegration();
+    useDockviewStore.setState({ api: makeStoreApi(), sidebarVisible: true });
+    useDockviewStore.getState().applyBuiltInPreset("default");
+    expect(useDockviewStore.getState().sidebarVisible).toBe(false);
+  });
+});
+
 describe("persistEnvLayoutNow", () => {
   beforeEach(() => {
     vi.clearAllMocks();

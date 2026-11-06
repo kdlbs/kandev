@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { IconChevronDown, IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
@@ -11,6 +11,7 @@ import {
   TaskCreateParentSelector,
   TaskCreateRelatedSelector,
 } from "@/components/task-create-dialog-relationship-selectors";
+import { TaskCreateParentWorkspaceSetting } from "@/components/task-create-dialog-parent-workspace-setting";
 import { TaskCreatePrioritySelect } from "@/components/task-create-dialog-priority-select";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import { AgentLogo } from "@/components/agent-logo";
@@ -18,11 +19,15 @@ import type {
   WorkflowAgentOverrideOption,
   WorkflowAgentOverrideRow,
 } from "@/components/task-create-dialog-workflow-agent-overrides";
+import { TaskCreateMCPSettingRow } from "@/components/task-create-dialog-mcp-select";
+import type { MCPInheritedSelection, MCPServerDefinition } from "@/lib/types/http-mcp";
 import { cn } from "@/lib/utils";
 import type { TaskPriority } from "@/lib/types/http";
+import type { TaskCreateParentWorkspaceSettingProps } from "@/components/task-create-dialog-parent-workspace-setting";
 
-type TaskCreateAdvancedSettingsProps = {
+type TaskCreateAdvancedSettingsProps = TaskCreateParentWorkspaceSettingProps & {
   isCreateMode: boolean;
+  isEditMode?: boolean;
   isTaskStarted: boolean;
   blockedBy: string[];
   onBlockedByChange: (next: string[]) => void;
@@ -44,6 +49,12 @@ type TaskCreateAdvancedSettingsProps = {
   onWorkflowAgentOverrideChange?: (sourceProfileId: string, replacementProfileId: string) => void;
   onResetWorkflowAgentOverrides?: () => void;
   onRetryWorkflowAgentOverrides?: () => void;
+  builtinPackages?: ReactNode;
+  mcpDefinitions?: MCPServerDefinition[];
+  mcpDefinitionsLoading?: boolean;
+  mcpSelectionIds?: string[];
+  onMcpSelectionIdsChange?: (ids: string[]) => void;
+  mcpInheritedSelections?: MCPInheritedSelection[];
 };
 
 function replacementOptionsForRow(
@@ -238,9 +249,48 @@ function TaskCreateWorkflowAgentOverridesSection({
   );
 }
 
+type NormalizedAdvancedSettingsProps = Required<TaskCreateAdvancedSettingsProps>;
+
+function valueOrDefault<T>(value: T | undefined, fallback: T): T {
+  return value ?? fallback;
+}
+
+function normalizeAdvancedSettingsProps(
+  props: TaskCreateAdvancedSettingsProps,
+): NormalizedAdvancedSettingsProps {
+  return {
+    ...props,
+    isEditMode: valueOrDefault(props.isEditMode, false),
+    dependenciesDisabled: valueOrDefault(props.dependenciesDisabled, false),
+    workflowAgentOverrideRows: valueOrDefault(props.workflowAgentOverrideRows, []),
+    workflowAgentOverrideOptions: valueOrDefault(props.workflowAgentOverrideOptions, []),
+    workflowAgentOverridesLoading: valueOrDefault(props.workflowAgentOverridesLoading, false),
+    workflowAgentOverridesInvalid: valueOrDefault(props.workflowAgentOverridesInvalid, false),
+    workflowAgentOverridesError: valueOrDefault(props.workflowAgentOverridesError, false),
+    onWorkflowAgentOverrideChange: valueOrDefault(
+      props.onWorkflowAgentOverrideChange,
+      () => undefined,
+    ),
+    onResetWorkflowAgentOverrides: valueOrDefault(
+      props.onResetWorkflowAgentOverrides,
+      () => undefined,
+    ),
+    onRetryWorkflowAgentOverrides: valueOrDefault(
+      props.onRetryWorkflowAgentOverrides,
+      () => undefined,
+    ),
+    builtinPackages: props.builtinPackages ?? null,
+    mcpDefinitions: valueOrDefault(props.mcpDefinitions, []),
+    mcpDefinitionsLoading: valueOrDefault(props.mcpDefinitionsLoading, false),
+    mcpSelectionIds: valueOrDefault(props.mcpSelectionIds, []),
+    onMcpSelectionIdsChange: valueOrDefault(props.onMcpSelectionIdsChange, () => undefined),
+    mcpInheritedSelections: valueOrDefault(props.mcpInheritedSelections, []),
+  };
+}
+
 type AdvancedSettingsContentProps = Omit<
-  TaskCreateAdvancedSettingsProps,
-  "isCreateMode" | "isTaskStarted"
+  NormalizedAdvancedSettingsProps,
+  "isCreateMode" | "isEditMode" | "isTaskStarted" | keyof TaskCreateParentWorkspaceSettingProps
 >;
 
 type RelationshipSettingsProps = {
@@ -362,14 +412,20 @@ function TaskCreateAdvancedSettingsContent({
   priority,
   onPriorityChange,
   dependenciesDisabled,
-  workflowAgentOverrideRows = [],
-  workflowAgentOverrideOptions = [],
-  workflowAgentOverridesLoading = false,
-  workflowAgentOverridesInvalid = false,
-  workflowAgentOverridesError = false,
-  onWorkflowAgentOverrideChange = () => undefined,
-  onResetWorkflowAgentOverrides = () => undefined,
-  onRetryWorkflowAgentOverrides = () => undefined,
+  workflowAgentOverrideRows,
+  workflowAgentOverrideOptions,
+  workflowAgentOverridesLoading,
+  workflowAgentOverridesInvalid,
+  workflowAgentOverridesError,
+  onWorkflowAgentOverrideChange,
+  onResetWorkflowAgentOverrides,
+  onRetryWorkflowAgentOverrides,
+  builtinPackages,
+  mcpDefinitions,
+  mcpDefinitionsLoading,
+  mcpSelectionIds,
+  onMcpSelectionIdsChange,
+  mcpInheritedSelections,
 }: AdvancedSettingsContentProps) {
   const hasWorkflowAgentOverrides =
     workflowAgentOverridesLoading ||
@@ -399,6 +455,15 @@ function TaskCreateAdvancedSettingsContent({
         >
           <TaskCreatePrioritySelect value={priority} onChange={onPriorityChange} />
         </div>
+        <TaskCreateMCPSettingRow
+          builtinPackages={builtinPackages}
+          definitions={mcpDefinitions}
+          loading={mcpDefinitionsLoading}
+          selectedIds={mcpSelectionIds}
+          onSelectedIdsChange={onMcpSelectionIdsChange}
+          inherited={mcpInheritedSelections}
+          disabled={dependenciesDisabled}
+        />
       </div>
       {hasWorkflowAgentOverrides && (
         <TaskCreateWorkflowAgentOverridesSection
@@ -417,34 +482,45 @@ function TaskCreateAdvancedSettingsContent({
   );
 }
 
-export function TaskCreateAdvancedSettings({
-  isCreateMode,
-  isTaskStarted,
-  blockedBy,
-  onBlockedByChange,
-  parentTaskId,
-  selectedParentTaskId,
-  onSelectedParentTaskIdChange,
-  relatedTaskIds,
-  onRelatedTaskIdsChange,
-  contextStepId,
-  taskId,
-  priority,
-  onPriorityChange,
-  dependenciesDisabled,
-  workflowAgentOverrideRows = [],
-  workflowAgentOverrideOptions = [],
-  workflowAgentOverridesLoading = false,
-  workflowAgentOverridesInvalid = false,
-  workflowAgentOverridesError = false,
-  onWorkflowAgentOverrideChange = () => undefined,
-  onResetWorkflowAgentOverrides = () => undefined,
-  onRetryWorkflowAgentOverrides = () => undefined,
-}: TaskCreateAdvancedSettingsProps) {
+export function TaskCreateAdvancedSettings(props: TaskCreateAdvancedSettingsProps) {
+  const {
+    isCreateMode,
+    isEditMode,
+    isTaskStarted,
+    blockedBy,
+    onBlockedByChange,
+    parentTaskId,
+    selectedParentTaskId,
+    onSelectedParentTaskIdChange,
+    relatedTaskIds,
+    onRelatedTaskIdsChange,
+    contextStepId,
+    taskId,
+    priority,
+    onPriorityChange,
+    initialWorkspaceLayout,
+    onInitialWorkspaceLayoutChange,
+    initialWorkspaceLayoutMode,
+    dependenciesDisabled,
+    workflowAgentOverrideRows,
+    workflowAgentOverrideOptions,
+    workflowAgentOverridesLoading,
+    workflowAgentOverridesInvalid,
+    workflowAgentOverridesError,
+    onWorkflowAgentOverrideChange,
+    onResetWorkflowAgentOverrides,
+    onRetryWorkflowAgentOverrides,
+    builtinPackages,
+    mcpDefinitions,
+    mcpDefinitionsLoading,
+    mcpSelectionIds,
+    onMcpSelectionIdsChange,
+    mcpInheritedSelections,
+  } = normalizeAdvancedSettingsProps(props);
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
-  if (!isCreateMode || isTaskStarted) return null;
+  if ((!isCreateMode && !isEditMode) || isTaskStarted) return null;
 
   return (
     <Collapsible
@@ -492,6 +568,17 @@ export function TaskCreateAdvancedSettings({
           onWorkflowAgentOverrideChange={onWorkflowAgentOverrideChange}
           onResetWorkflowAgentOverrides={onResetWorkflowAgentOverrides}
           onRetryWorkflowAgentOverrides={onRetryWorkflowAgentOverrides}
+          builtinPackages={builtinPackages}
+          mcpDefinitions={mcpDefinitions}
+          mcpDefinitionsLoading={mcpDefinitionsLoading}
+          mcpSelectionIds={mcpSelectionIds}
+          onMcpSelectionIdsChange={onMcpSelectionIdsChange}
+          mcpInheritedSelections={mcpInheritedSelections}
+        />
+        <TaskCreateParentWorkspaceSetting
+          initialWorkspaceLayout={initialWorkspaceLayout}
+          onInitialWorkspaceLayoutChange={onInitialWorkspaceLayoutChange}
+          initialWorkspaceLayoutMode={initialWorkspaceLayoutMode}
         />
       </CollapsibleContent>
     </Collapsible>

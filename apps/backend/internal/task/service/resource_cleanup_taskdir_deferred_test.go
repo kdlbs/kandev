@@ -35,7 +35,7 @@ func TestArchiveTaskDirectoryDeferredReclaimSurvivesRestart(t *testing.T) {
 	if err := os.WriteFile(dirty, []byte("dirty"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	archiveDirectoryTestTask(t, svc, repo, wt.TaskID, false)
+	seedRetainedArchiveWorktree(t, svc, repo, wt.TaskID)
 	env, err := repo.GetTaskEnvironmentByTaskID(ctx, wt.TaskID)
 	if err != nil {
 		t.Fatal(err)
@@ -44,9 +44,6 @@ func TestArchiveTaskDirectoryDeferredReclaimSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc.SetWorktreeCleanup(&borrowingReclaimCleaner{Manager: manager, repo: repo, environmentID: env.ID})
-	if err := os.Remove(dirty); err != nil {
-		t.Fatal(err)
-	}
 	job := latestCleanupJob(t, repo, wt.TaskID, models.TaskResourceCleanupTriggerArchiveReclaim)
 	if err := svc.processTaskResourceCleanupJob(ctx, job.ID); err == nil {
 		t.Fatal("in-use directory obligation completed without retry")
@@ -93,11 +90,8 @@ func TestArchiveTaskDirectoryMissingReclaimRowKeepsRetry(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	archiveDirectoryTestTask(t, svc, repo, wt.TaskID, false)
+	seedRetainedArchiveWorktree(t, svc, repo, wt.TaskID)
 	svc.SetWorktreeCleanup(&failingTaskDirectoryCleaner{Manager: manager})
-	if err := os.Remove(dirty); err != nil {
-		t.Fatal(err)
-	}
 	job := latestCleanupJob(t, repo, wt.TaskID, models.TaskResourceCleanupTriggerArchiveReclaim)
 	if err := svc.processTaskResourceCleanupJob(ctx, job.ID); err == nil {
 		t.Fatal("expected removal failure")

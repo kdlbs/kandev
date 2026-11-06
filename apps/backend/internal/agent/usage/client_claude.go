@@ -137,7 +137,7 @@ func (c *ClaudeUsageClient) getUsage(ctx context.Context, token string) ([]byte,
 		return nil, fmt.Errorf("claude usage: read body: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("claude usage: unexpected status %d: %s", resp.StatusCode, body)
+		return nil, newStatusError("claude", resp.StatusCode, resp.Header, body)
 	}
 	return body, nil
 }

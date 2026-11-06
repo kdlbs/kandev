@@ -283,3 +283,44 @@ func TestRegisterRoutes_RegistersWSHandlers(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPListProjects_RequiresTeamKey(t *testing.T) {
+	_, router, _ := newTestController(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/projects", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// @covers AC-INTEGRATIONS-LINEAR-PROJECTS-001.3
+func TestHTTPListProjects_RoutesThroughService(t *testing.T) {
+	ctrl, router, client := newTestController(t)
+	ctx := context.Background()
+	if err := ctrl.service.store.UpsertConfig(ctx, &LinearConfig{
+		AuthMethod: AuthMethodAPIKey,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := ctrl.service.secrets.Set(ctx, SecretKeyForWorkspace("default"), "linear", "tok"); err != nil {
+		t.Fatalf("set secret: %v", err)
+	}
+	var seenTeam string
+	client.listProjectsFn = func(teamKey string) ([]LinearProject, error) {
+		seenTeam = teamKey
+		return []LinearProject{{ID: "p1", Name: "Checkout"}}, nil
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/projects?team_key=ENG", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if seenTeam != "ENG" {
+		t.Errorf("team key forwarded to client = %q, want ENG", seenTeam)
+	}
+	if !strings.Contains(w.Body.String(), `"projects":[{"id":"p1","name":"Checkout"}]`) {
+		t.Errorf("body = %s", w.Body.String())
+	}
+}

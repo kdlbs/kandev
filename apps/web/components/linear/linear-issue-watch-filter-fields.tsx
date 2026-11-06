@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import {
   LabelMultiSelect,
   PriorityMultiSelect,
+  ProjectMultiSelect,
   StateMultiSelect,
   useTeamsAndStates,
 } from "./linear-issue-watch-fields";
@@ -19,7 +20,7 @@ import {
   creatorPlaceholder,
   userOptionLabel,
 } from "./linear-issue-watch-form";
-import type { LinearTeam, LinearUser } from "@/lib/types/linear";
+import type { LinearProject, LinearTeam, LinearUser } from "@/lib/types/linear";
 
 // The filter half of the watcher dialog — the "which issues match?" block.
 // Split out of linear-issue-watch-dialog.tsx so that file stays under the
@@ -71,8 +72,17 @@ type FormSetter = React.Dispatch<React.SetStateAction<FormState>>;
 
 export function FilterFields({ form, setForm }: { form: FormState; setForm: FormSetter }) {
   const { t } = useTranslation();
-  const { teams, states, labels, users, loadingStates, loadingLabels, loadingUsers } =
-    useTeamsAndStates(form.workspaceId, form.teamKey);
+  const {
+    teams,
+    states,
+    labels,
+    users,
+    projects,
+    loadingStates,
+    loadingLabels,
+    loadingUsers,
+    loadingProjects,
+  } = useTeamsAndStates(form.workspaceId, form.teamKey);
   const toggleState = useCallback(
     (id: string) =>
       setForm((p) => ({
@@ -144,9 +154,54 @@ export function FilterFields({ form, setForm }: { form: FormState; setForm: Form
           disabled={!form.teamKey}
         />
       </div>
+      <ProjectRow
+        form={form}
+        setForm={setForm}
+        projects={projects}
+        loadingProjects={loadingProjects}
+      />
       <EstimateRow form={form} setForm={setForm} />
       <QueryField form={form} setForm={setForm} />
     </>
+  );
+}
+
+function ProjectRow({
+  form,
+  setForm,
+  projects,
+  loadingProjects,
+}: {
+  form: FormState;
+  setForm: FormSetter;
+  projects: LinearProject[];
+  loadingProjects: boolean;
+}) {
+  const { t } = useTranslation();
+  const toggleProject = useCallback(
+    (id: string) =>
+      setForm((p) => ({
+        ...p,
+        projectIds: p.projectIds.includes(id)
+          ? p.projectIds.filter((x) => x !== id)
+          : [...p.projectIds, id],
+      })),
+    [setForm],
+  );
+  return (
+    <div className="space-y-1.5">
+      <Label>{t("linear:projects")}</Label>
+      <p className="text-xs text-muted-foreground">
+        {form.teamKey ? t("linear:projectsHelp") : t("linear:projectsHelpNoTeam")}
+      </p>
+      <ProjectMultiSelect
+        projects={projects}
+        loading={loadingProjects}
+        selected={form.projectIds}
+        onToggle={toggleProject}
+        disabled={!form.teamKey && form.projectIds.length === 0}
+      />
+    </div>
   );
 }
 
@@ -166,7 +221,14 @@ function TeamRow({
       description={t("linear:teamHelp")}
       value={form.teamKey}
       onChange={(v) =>
-        setForm((p) => ({ ...p, teamKey: v, stateIds: [], labelIds: [], creatorId: "" }))
+        setForm((p) => ({
+          ...p,
+          teamKey: v,
+          stateIds: [],
+          labelIds: [],
+          projectIds: [],
+          creatorId: "",
+        }))
       }
       placeholder={t("linear:anyTeam")}
       // Team names and keys come from the Linear API — user data, never

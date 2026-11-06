@@ -85,13 +85,17 @@ func (h *Health) check(ctx context.Context) (*probeFailureDiagnostic, error) {
 	}
 	diagnostic, probeErr := h.pingObserved(ctx)
 	results := make([]error, len(h.tracker.catalog))
-	for index, descriptor := range h.tracker.catalog {
-		results[index] = probeErr
-		if probeErr == nil {
-			tableDiagnostic, tableErr := h.probeTablesObserved(ctx, descriptor)
-			results[index] = tableErr
-			if diagnostic == nil {
-				diagnostic = tableDiagnostic
+	if probeErr == nil && h.isSQLite() {
+		results, diagnostic = h.probeSQLiteCatalog(ctx)
+	} else {
+		for index, descriptor := range h.tracker.catalog {
+			results[index] = probeErr
+			if probeErr == nil {
+				tableDiagnostic, tableErr := h.probeTablesObserved(ctx, descriptor)
+				results[index] = tableErr
+				if diagnostic == nil {
+					diagnostic = tableDiagnostic
+				}
 			}
 		}
 	}
@@ -153,16 +157,64 @@ func (h *Health) isSQLite() bool {
 	return h.pool != nil && h.pool.Writer() != nil && h.pool.Writer().DriverName() == dialect.SQLite3
 }
 
+// pingObserved acquires and releases each pool connection explicitly so an
+// unavailable connection is reported as an acquisition stage. A ping that runs
+// on an acquired connection keeps its own stage.
 func (h *Health) pingObserved(ctx context.Context) (*probeFailureDiagnostic, error) {
-	started := time.Now()
-	if err := h.pool.Writer().PingContext(ctx); err != nil {
-		return h.failureDiagnostic("writer_ping", time.Since(started), err, ""), fmt.Errorf("writer ping failed: %w", err)
+	if diagnostic, err := h.pingPoolConnection(ctx, h.pool.Writer().DB, "writer_acquire", "writer_ping", "writer ping failed"); err != nil {
+		return diagnostic, err
 	}
-	started = time.Now()
-	if err := h.pool.Reader().PingContext(ctx); err != nil {
-		return h.failureDiagnostic("reader_ping", time.Since(started), err, ""), fmt.Errorf("reader ping failed: %w", err)
+	if diagnostic, err := h.pingPoolConnection(ctx, h.pool.Reader().DB, "reader_acquire", "reader_ping", "reader ping failed"); err != nil {
+		return diagnostic, err
 	}
 	return nil, nil
+}
+
+func (h *Health) pingPoolConnection(
+	ctx context.Context,
+	pool *sql.DB,
+	acquireStage, pingStage, message string,
+) (*probeFailureDiagnostic, error) {
+	acquireStarted := time.Now()
+	conn, err := pool.Conn(ctx)
+	if err != nil {
+		return h.failureDiagnostic(acquireStage, time.Since(acquireStarted), err, ""), fmt.Errorf("%s: %w", message, err)
+	}
+	defer func() { _ = conn.Close() }()
+	pingStarted := time.Now()
+	if err := conn.PingContext(ctx); err != nil {
+		return h.failureDiagnostic(pingStage, time.Since(pingStarted), err, ""), fmt.Errorf("%s: %w", message, err)
+	}
+	return nil, nil
+}
+
+func (h *Health) probeSQLiteCatalog(ctx context.Context) ([]error, *probeFailureDiagnostic) {
+	started := time.Now()
+	var tables []string
+	for _, descriptor := range h.tracker.catalog {
+		tables = append(tables, descriptor.RequiredTables...)
+	}
+	existing, err := db.ExistingSQLiteTablesContext(ctx, h.pool.Writer(), tables)
+	results := make([]error, len(h.tracker.catalog))
+	if err != nil {
+		for index := range results {
+			results[index] = fmt.Errorf("table probe failed: %w", err)
+		}
+		return results, h.failureDiagnostic("table_probe", time.Since(started), err, "")
+	}
+	var diagnostic *probeFailureDiagnostic
+	for index, descriptor := range h.tracker.catalog {
+		for _, table := range descriptor.RequiredTables {
+			if !existing[table] {
+				results[index] = fmt.Errorf("required table %q is missing", table)
+				if diagnostic == nil {
+					diagnostic = h.failureDiagnostic("table_probe", time.Since(started), results[index], descriptor.ID)
+				}
+				break
+			}
+		}
+	}
+	return results, diagnostic
 }
 
 func (h *Health) probeTables(ctx context.Context, descriptor Descriptor) error {

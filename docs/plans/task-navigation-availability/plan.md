@@ -11,6 +11,9 @@ legacy_specs: []
 
 # Implementation Plan: Task navigation availability
 
+The [task read resilience package](../task-read-resilience/plan.md) records the later recovery-policy revision.
+The completed results below retain their original retry counts and historical meaning.
+
 ## Overview
 
 Limit background inbox work, then make task navigation recover from temporary failures.

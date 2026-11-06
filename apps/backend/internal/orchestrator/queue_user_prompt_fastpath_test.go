@@ -165,7 +165,7 @@ func TestQueueUserPrompt_T2SkipsFastPathWhenInFlight(t *testing.T) {
 	// Simulate an in-flight dispatch: the gate is set by the dispatcher's
 	// own markQueuedDispatchInFlight. Set the same internal flag the
 	// fast-path checks.
-	svc.markQueuedDispatchInFlightWithSourceLocked("s1", "in-flight-source-id", nil)
+	svc.markQueuedDispatchInFlightWithSourceLocked(context.Background(), "s1", "in-flight-source-id", nil)
 
 	if err := svc.QueueUserPrompt(ctx, "t1", "s1", "during-in-flight", "", false, nil, map[string]interface{}{}, true); err != nil {
 		t.Fatalf("QueueUserPrompt: %v", err)

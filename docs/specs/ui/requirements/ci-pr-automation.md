@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-06-18
-updated: 2026-09-11
+updated: 2026-10-19
 owners:
   - tbd
 ---
@@ -64,6 +64,8 @@ Consequences section).
 - **AC-UI-CI-PR-AUTOMATION-001.14:** Every retry shall consume the existing per-PR 10-round budget. Kandev shall never create an 11th accepted round, and disabling then re-enabling auto-fix shall reset the retry state with the existing checkpoint and round state.
 - **AC-UI-CI-PR-AUTOMATION-001.15:** Existing installations whose built-in `ci-auto-fix` prompt still matches a shipped, untouched legacy revision shall receive the current default content on startup. Kandev shall preserve edited prompt rows, and the server-owned outcome instructions shall apply even when a task or global prompt is customized.
 
+- **AC-UI-CI-PR-AUTOMATION-001.18:** A current queued PR review-requested, merged, closed, or CI auto-fix prompt for an active promptable task shall reach initial agent delivery through its negotiated legacy or compatible durable transport. The queue shall retain the lifecycle event until prompt acceptance. A known unaccepted legacy handoff shall retain a retry under the existing lifecycle rules. A compatible durable-transport error without an authoritative backend terminal outcome shall conservatively retain the event and submission evidence behind the existing recovery block until authoritative reconciliation permits further admission; a queued event alone shall not authorize another send. Archive, deletion, reset, and session ownership retain their existing retry or discard rules. Accepted delivery shall clear that event from the queue so it no longer obstructs subsequent turn-completion processing; it shall not synthesize a completion signal or bypass workflow gates.
+
 ### Outcome scope clarification
 
 The following criteria clarify the existing turn-bound outcome contract.
@@ -76,6 +78,7 @@ The [scope repair plan](../../../plans/pr-auto-fix-outcome-scope/plan.md) record
 
 - [Outcome retries](../../../plans/pr-auto-fix-outcome-retries/plan.md): existing implementation.
 - [Outcome scope repair](../../../plans/pr-auto-fix-outcome-scope/plan.md): implementation record.
+- [Lifecycle queue dispatch](../../../plans/lifecycle-queue-dispatch/plan.md): delivery repair.
 
 ## System-design references
 

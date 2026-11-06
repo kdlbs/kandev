@@ -36,6 +36,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -61,6 +62,7 @@ const maxStartupTransferReconcileAttempts = 30
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
+	RetryClock RetryClock
 	Scheduler  scheduler.SchedulerConfig
 	QueueSize  int
 	QueueGroup string
@@ -112,10 +114,25 @@ func DefaultServiceConfig() ServiceConfig {
 }
 
 // MessageCreator is an interface for creating messages on tasks
+// SessionMessageTimestampReader returns the immutable creation time of a
+// persisted session message. A message creator that can resolve its own rows
+// implements it so durable attention ordering uses message time, not the time
+// settlement happened to record it.
+type SessionMessageTimestampReader interface {
+	SessionMessageCreatedAt(ctx context.Context, messageID string) (time.Time, bool)
+}
+
 type MessageCreator interface {
 	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
 	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
 	CreateUserMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
+	// SetUserMessageDeliveryStatus sets the delivery status on an exact
+	// session-owned user message. It reports whether the message exists.
+	SetUserMessageDeliveryStatus(ctx context.Context, messageID, agentSessionID, status string) (bool, error)
+	// CreateCompletedUserMessageIdempotent records a user message in an
+	// already-completed lifecycle-only turn. It never starts or adopts an
+	// active conversation turn.
+	CreateCompletedUserMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID string, metadata map[string]interface{}) error
 	// CreateToolCallMessage creates a message for a tool call.
 	// normalized contains the typed tool payload data.
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
@@ -132,8 +149,9 @@ type MessageCreator interface {
 	// already-completed lifecycle-only turn. The turn is never active, so a
 	// later prompt cannot adopt it.
 	CreateLifecycleSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}) error
-	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error)
+	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, messageOptions models.PermissionRequestMessageOptions) (string, error)
 	UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error
+	UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error)
 	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
 	FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
 	GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error)
@@ -172,12 +190,15 @@ type StreamingMessageRetractionService interface {
 // stale provider event from creating a new retry while terminal cleanup is in
 // flight, then allows the session entry to be reclaimed.
 type transientRetryNoticeState struct {
-	mu           sync.Mutex
-	retired      atomic.Bool
-	owned        atomic.Bool
-	retiredUntil atomic.Int64
-	refs         int
-	fenceTimer   *time.Timer
+	mu sync.Mutex
+	// retirementGeneration is protected by mu and distinguishes a fence
+	// already present when an attempt began from a later cancellation.
+	retirementGeneration uint64
+	retired              atomic.Bool
+	owned                atomic.Bool
+	retiredUntil         atomic.Int64
+	refs                 int
+	fenceTimer           *time.Timer
 }
 
 // SessionAttachmentCleaner removes file-backed prompt attachments after a
@@ -738,13 +759,14 @@ type passthroughDispatchToken struct {
 
 // Service is the main orchestrator service
 type Service struct {
-	config        ServiceConfig
-	logger        *logger.Logger
-	eventBus      bus.EventBus
-	taskRepo      scheduler.TaskRepository
-	repo          sessionExecutorStore
-	promptTargets taskPullRequestTargetStore
-	agentManager  executor.AgentManagerClient
+	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
+	config                    ServiceConfig
+	logger                    *logger.Logger
+	eventBus                  bus.EventBus
+	taskRepo                  scheduler.TaskRepository
+	repo                      sessionExecutorStore
+	promptTargets             taskPullRequestTargetStore
+	agentManager              executor.AgentManagerClient
 	// ACP mode and model reports mutate one selector snapshot per session.
 	sessionSettingsSnapshotLocks [64]sync.Mutex
 
@@ -788,6 +810,9 @@ type Service struct {
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
+	// turnErrorRecorder persists durable task attention for a manual retained
+	// failure. Nil leaves the historical settlement behavior unchanged.
+	turnErrorRecorder TaskTurnErrorRecorder
 
 	// transientRetryMessages owns durable cleanup of persisted retry notices.
 	// It is optional for focused tests and pre-composition callers.
@@ -823,9 +848,15 @@ type Service struct {
 
 	// Task event publisher for emitting task.updated events.
 	// Task service owns the rich payload; orchestrator delegates.
-	taskEvents             TaskEventPublisher
-	feederPulls            FeederPullReconciler
-	backgroundWorkObserver BackgroundWorkObserver
+	taskEvents                  TaskEventPublisher
+	feederPulls                 FeederPullReconciler
+	backgroundWorkObserver      BackgroundWorkObserver
+	backgroundWorkSettleMu      sync.Mutex
+	backgroundWorkSettleCtx     context.Context
+	backgroundWorkSettleCancel  context.CancelFunc
+	backgroundWorkSettleStopped bool
+	backgroundWorkSettleWorkers *sync.WaitGroup
+	backgroundWorkSettleDrain   chan struct{}
 
 	// launchAttachmentClaimer binds staged descriptors before any launch intent
 	// can dispatch them to the runtime. Inline attachments need no claim.
@@ -897,6 +928,7 @@ type Service struct {
 	silentRestoreWake         chan struct{}
 	silentRestoreWorkers      sync.WaitGroup
 	silentRestoreStopped      bool
+	silentRestoreQueue        *restartRestoreQueue
 	silentRestoreOwnerContext silentRestoreOwnerContextResolver
 
 	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, for
@@ -932,6 +964,11 @@ type Service struct {
 	// profileExecutionResolver is the shared logical-to-concrete profile
 	// boundary used by task and workflow launch paths.
 	profileExecutionResolver *agentruntime.ProfileExecutionResolver
+
+	// mcpSelectionWriter persists task-session MCP selections at the launch
+	// boundary. It is optional so focused orchestrator tests and older callers
+	// retain the legacy runtime path.
+	mcpSelectionWriter MCPSelectionWriter
 
 	// dynamicRecovery owns durable reset/retry deadlines. Only pending states
 	// are scheduled after restart; a retrying state means dispatch may have
@@ -1243,6 +1280,10 @@ type Service struct {
 	// session launches. Its initial effective capacity is resolved by the
 	// composition root and can be changed by the install Settings service.
 	sessionCeiling *sessionCeilingController
+	// messageCapacityWaits tracks process-local queue heads blocked only by
+	// the session ceiling. It starts empty after restart by design.
+	messageCapacityWaits     *messageCapacityWaitRegistry
+	messageCapacityWaitsOnce sync.Once
 
 	// ceilingSweeper is the single background goroutine that expires stale
 	// reservations (AC-7) and retries deferred launches (AC-15, AC-17a).
@@ -1255,6 +1296,12 @@ type Service struct {
 	// identity, so the token names the session the launch actually uses.
 	// Nil is the common case; see LaunchCredentialReminter.
 	launchCredentialReminter LaunchCredentialReminter
+
+	// ceilingDeferredLaunchSettler lets the component that queued a
+	// ceiling-deferred launch settle its own durable record once the ceiling
+	// replay admits or terminally drops that launch. Nil is the common case;
+	// see CeilingDeferredLaunchSettler.
+	ceilingDeferredLaunchSettler CeilingDeferredLaunchSettler
 
 	// lifecycleSweepCancel / lifecycleSweepWorkers own the one-shot
 	// background goroutine that runs reconcileTaskLifecycleTokens and
@@ -1329,6 +1376,10 @@ type Service struct {
 	// narrow interval after handleAgentReady releases its per-session guard
 	// and before it starts a deferred durable-lifecycle dispatch.
 	afterReadyLifecycleReservation func()
+	// afterBusyAutoStartSessionRead is a deterministic test seam for the
+	// interval after a workflow auto-start reads a mid-turn session and before
+	// it queues the step prompt.
+	afterBusyAutoStartSessionRead func()
 	// agentReadyReservationWaitTimeout is a deterministic test seam. Zero uses
 	// the production timeout derived from the prompt dispatch budgets.
 	agentReadyReservationWaitTimeout time.Duration
@@ -1571,6 +1622,8 @@ type Service struct {
 
 	// Service state
 	mu                      sync.RWMutex
+	startupPreparationMu    sync.Mutex
+	startupPrepared         bool
 	running                 bool
 	startedAt               time.Time
 	recoveryLifecycleCtx    context.Context
@@ -1590,11 +1643,13 @@ type Service struct {
 	// ciAutomationWorkers owns the asynchronous per-PR automation loops. The
 	// service-owned context lets Stop cancel in-flight evaluations and prevents
 	// workers from outliving the orchestrator across a restart.
-	ciAutomationMu      sync.Mutex
-	ciAutomationCtx     context.Context
-	ciAutomationCancel  context.CancelFunc
-	ciAutomationStopped bool
-	ciAutomationWorkers sync.WaitGroup
+	ciAutomationMu  sync.Mutex
+	ciAutomationCtx context.Context
+	// taskPRWorkflowRetryDelays overrides defaultTaskPRWorkflowRetryDelays in tests.
+	taskPRWorkflowRetryDelays []time.Duration
+	ciAutomationCancel        context.CancelFunc
+	ciAutomationStopped       bool
+	ciAutomationWorkers       sync.WaitGroup
 
 	// dynamicSuccessorWorkers owns detached dynamic launches and failure recovery. The
 	// launch has to leave the agent.failed dispatch to avoid the prompt
@@ -1824,6 +1879,7 @@ func NewService(
 	ciAutomationCtx, ciAutomationCancel := context.WithCancel(context.Background())
 	dynamicSuccessorCtx, dynamicSuccessorCancel := context.WithCancel(context.Background())
 	parkedLoopCtx, parkedLoopCancel := context.WithCancel(context.Background())
+	backgroundWorkSettleCtx, backgroundWorkSettleCancel := context.WithCancel(context.Background())
 	s := &Service{
 		config:                       cfg,
 		logger:                       svcLogger,
@@ -1852,12 +1908,16 @@ func NewService(
 		idleReaper:                   newIdleSessionReaper(),
 		ceilingSweeper:               newCeilingSweeper(),
 		sessionCeiling:               newSessionCeilingForRepo(repo, cfg.SessionCapacity, svcLogger.Zap()),
+		messageCapacityWaits:         newMessageCapacityWaitRegistry(),
 		backgroundProbeConfig:        LoadBackgroundProbeConfig(svcLogger),
 		parkedStates:                 make(map[string]*parkedSessionState),
 		taskParkedStates:             make(map[string]*taskParkedState),
 		parkedEpoch:                  uint64(time.Now().UnixNano()),
 		parkedLoopCtx:                parkedLoopCtx,
 		parkedLoopCancel:             parkedLoopCancel,
+		backgroundWorkSettleCtx:      backgroundWorkSettleCtx,
+		backgroundWorkSettleCancel:   backgroundWorkSettleCancel,
+		backgroundWorkSettleWorkers:  &sync.WaitGroup{},
 	}
 	if registrar, ok := repo.(interface {
 		SetTaskQueuePurgePreparer(func(context.Context, string))
@@ -1950,6 +2010,9 @@ func NewService(
 	})
 	exec.SetOnLaunchFailed(s.handleLaunchFailed)
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
+	exec.SetOnStaleExecutionCleanup(func(ctx context.Context, sessionID string) {
+		s.settleBackgroundWorkLocked(ctx, sessionID, "")
+	})
 	exec.SetOnCancelledResumeExecutionCleanup(s.cleanupCancelledResumeExecution)
 	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
 	exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
@@ -2051,6 +2114,11 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
+// SetTaskTurnErrorRecorder wires the task-owned failed-turn attention store.
+func (s *Service) SetTaskTurnErrorRecorder(recorder TaskTurnErrorRecorder) {
+	s.turnErrorRecorder = recorder
+}
+
 // SetTransientRetryMessageService wires the task service used to write and
 // retire persisted transient-retry status messages.
 func (s *Service) SetTransientRetryMessageService(service TransientRetryMessageService) {
@@ -2082,6 +2150,14 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 func (s *Service) SetCanvasesEnabled(enabled bool) {
 	if s.executor != nil {
 		s.executor.SetCanvasesEnabled(enabled)
+	}
+}
+
+// SetWorkspaceCollaborationEnabled applies the collaboration release gate to
+// task MCP profiles before agentctl receives them.
+func (s *Service) SetWorkspaceCollaborationEnabled(enabled bool) {
+	if s.executor != nil {
+		s.executor.SetWorkspaceCollaborationEnabled(enabled)
 	}
 }
 
@@ -3350,28 +3426,36 @@ func (s *Service) Start(ctx context.Context) (startErr error) {
 	}()
 
 	s.logger.Info("starting orchestrator service")
-	if err := s.reconcileStartupState(ctx); err != nil {
+	if err := s.PrepareStartup(ctx); err != nil {
 		s.setNotRunning()
 		return err
 	}
+	s.reconcileExecutorSessionsOnStartup(ctx)
+	s.settleOrphanedBackgroundWorkOnStartup(ctx)
+	s.reconcileCIAutoFixAttemptsOnStartup(ctx)
 	if err := s.startWatcherAndScheduler(ctx); err != nil {
 		s.setNotRunning()
 		return err
 	}
 	s.subscribeStartupEvents()
-	s.startBackgroundRecovery(ctx)
+	startup.AfterReady(ctx, func() { s.startBackgroundRecovery(ctx) })
 	s.logger.Info("orchestrator service started successfully")
 	return nil
 }
 
 func (s *Service) reconcileStartupState(ctx context.Context) error {
 	s.resetReservedPromptCallbacks()
+	if err := s.resetBackgroundWorkSettleWorkers(); err != nil {
+		return err
+	}
 	if err := s.resetSendNowWorkers(); err != nil {
 		return err
 	}
 	s.resetCIAutomationWorkers()
 	s.resetDynamicSuccessorWorkers()
-	if err := s.reconcileDurableQueueStateOnStartup(ctx); err != nil {
+	if err := s.housekeepingStep(ctx, startup.StepQueueReconciliation, func() error {
+		return s.reconcileDurableQueueStateOnStartup(ctx)
+	}); err != nil {
 		s.logger.Error("failed to reconcile durable queue state on startup", zap.Error(err))
 		return err
 	}
@@ -3384,12 +3468,12 @@ func (s *Service) reconcileStartupState(ctx context.Context) error {
 		s.logger.Error("failed to reconcile unpublished prompt turns on startup", zap.Error(err))
 		return err
 	}
-	if err := s.reconcileUnpublishedPromptTurnsOnStartup(ctx); err != nil {
+	if err := s.housekeepingStep(ctx, startup.StepTurnReconciliation, func() error {
+		return s.reconcileUnpublishedPromptTurnsOnStartup(ctx)
+	}); err != nil {
 		s.logger.Error("failed to reconcile unpublished prompt turns on startup", zap.Error(err))
 		return err
 	}
-	s.reconcileCIAutoFixAttemptsOnStartup(ctx)
-	s.releaseAbandonedAutomationStartOwnership(ctx)
 	// Recover routes orphaned at "starting" by a launch failure that never
 	// reached a terminal route status. Must run before
 	// reconcileExecutorSessionsOnStartup and scheduler.Start: the former
@@ -3398,17 +3482,22 @@ func (s *Service) reconcileStartupState(ctx context.Context) error {
 	// session and hide it from this sweep; the latter can begin dispatching
 	// new launches, which would let a genuinely in-flight claim race this
 	// snapshot of "starting" routes.
-	s.reconcileOrphanedDynamicStartingRoutes(ctx)
-	s.reconcileExecutorSessionsOnStartup(ctx)
-	s.settleOrphanedBackgroundWorkOnStartup(ctx)
-	// Executor reconciliation abandons turns left open by a pre-crash active
-	// session. Run the CI attempt sweep again after that transition so a
-	// running auto-fix reservation can become retryable on the same startup.
-	s.reconcileCIAutoFixAttemptsOnStartup(ctx)
-	if s.workflowStore != nil {
-		s.workflowStore.ReconcileQueuedTasks(ctx)
+	if err := s.housekeepingStep(ctx, startup.StepRouteReconciliation, func() error {
+		s.reconcileOrphanedDynamicStartingRoutes(ctx)
+		return ctx.Err()
+	}); err != nil {
+		return err
 	}
-	return nil
+	if err := s.housekeepingStep(ctx, startup.StepRuntimeInventory, func() error {
+		return s.classifyStartupRuntimeInventory(ctx)
+	}); err != nil {
+		return err
+	}
+	return s.housekeepingStep(ctx, startup.StepTaskReconciliation, func() error {
+		s.reconcileCIAutoFixAttemptsOnStartup(ctx)
+		s.releaseAbandonedAutomationStartOwnership(ctx)
+		return ctx.Err()
+	})
 }
 
 func (s *Service) startWatcherAndScheduler(ctx context.Context) error {
@@ -3417,36 +3506,40 @@ func (s *Service) startWatcherAndScheduler(ctx context.Context) error {
 		return err
 	}
 
-	// Start the scheduler processing loop
-	if err := s.scheduler.Start(ctx); err != nil {
-		if stopErr := s.watcher.Stop(); stopErr != nil {
-			s.logger.Warn("failed to stop watcher after scheduler start failure", zap.Error(stopErr))
+	return startup.AfterReadyError(ctx, func() error {
+		if err := s.scheduler.Start(ctx); err != nil {
+			if stopErr := s.watcher.Stop(); stopErr != nil {
+				s.logger.Warn("failed to stop watcher after scheduler start failure", zap.Error(stopErr))
+			}
+			return err
 		}
-		return err
-	}
-	s.reconcileDurablePlanCommentDeliveriesOnStartup(ctx)
+		if s.workflowStore != nil {
+			s.workflowStore.ReconcileQueuedTasks(ctx)
+		}
+		s.reconcileDurablePlanCommentDeliveriesOnStartup(ctx)
 
-	// Run the startup lifecycle sweep (reconcileSchedulingOrphansOnStartup,
-	// reconcileTaskLifecycleTokens, then
-	// reconcileDependencyLaunchesOnStartup — sequenced so an
-	// admitted-by-promotion task is already eligible for the dependency sweep
-	// when reconcileTaskLifecycleTokens returns normally) in the background,
-	// now that the watcher is subscribed. That sequencing only holds when
-	// reconcileTaskLifecycleTokens's own worker pool drains before it
-	// returns: on its deadline/cancel paths it returns with workers still
-	// in flight, so reconcileDependencyLaunchesOnStartup can run concurrently
-	// with lifecycle recovery for the tasks that had not finished yet.
-	// Recovery it drives (recoverManualMoveLifecycle -> ... ->
-	// waitForSessionReady) polls the DB for a session state that only
-	// handleAgentBootReady sets, and that handler is wired by
-	// watcher.Start. Running the sweep before the watcher meant its own
-	// completion event was dropped on the floor, so every recovered task
-	// burned its full interactive timeout regardless of whether the
-	// underlying agent was actually healthy — see
-	// docs/specs/startup-listener-before-recovery/spec.md. Service.Stop
-	// joins this goroutine (bounded) via stopLifecycleSweepAsync.
-	s.startLifecycleSweepAsync(ctx)
-	return nil
+		// Run the startup lifecycle sweep (reconcileSchedulingOrphansOnStartup,
+		// reconcileTaskLifecycleTokens, then
+		// reconcileDependencyLaunchesOnStartup — sequenced so an
+		// admitted-by-promotion task is already eligible for the dependency sweep
+		// when reconcileTaskLifecycleTokens returns normally) in the background,
+		// now that the watcher is subscribed. That sequencing only holds when
+		// reconcileTaskLifecycleTokens's own worker pool drains before it
+		// returns: on its deadline/cancel paths it returns with workers still
+		// in flight, so reconcileDependencyLaunchesOnStartup can run concurrently
+		// with lifecycle recovery for the tasks that had not finished yet.
+		// Recovery it drives (recoverManualMoveLifecycle -> ... ->
+		// waitForSessionReady) polls the DB for a session state that only
+		// handleAgentBootReady sets, and that handler is wired by
+		// watcher.Start. Running the sweep before the watcher meant its own
+		// completion event was dropped on the floor, so every recovered task
+		// burned its full interactive timeout regardless of whether the
+		// underlying agent was actually healthy — see
+		// docs/specs/startup-listener-before-recovery/spec.md. Service.Stop
+		// joins this goroutine (bounded) via stopLifecycleSweepAsync.
+		s.startLifecycleSweepAsync(ctx)
+		return nil
+	})
 }
 
 func (s *Service) subscribeStartupEvents() {
@@ -3536,6 +3629,11 @@ func (s *Service) StopEventWatcher() error {
 
 // Stop stops all orchestrator components
 func (s *Service) Stop() error {
+	defer func() {
+		s.startupPreparationMu.Lock()
+		s.startupPrepared = false
+		s.startupPreparationMu.Unlock()
+	}()
 	s.mu.Lock()
 	if !s.running {
 		s.mu.Unlock()
@@ -3564,6 +3662,7 @@ func (s *Service) Stop() error {
 	// workers can otherwise observe the shutdown only after those components
 	// have already stopped, and may launch or recover a session during teardown.
 	s.stopDynamicSuccessorWorkers()
+	s.stopBackgroundWorkSettleWorkers()
 	s.stopDynamicPolicyRecovery()
 	s.stopLifecycleSweepAsync()
 	s.stopOrphanReentryWorkers()
@@ -3771,7 +3870,7 @@ func (s *Service) reconcileDurablePlanCommentDeliveriesOnStartup(ctx context.Con
 
 func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 	s.retireInterruptedNoticesOnStartup(ctx)
-	runningExecutors, err := s.repo.ListExecutorsRunning(ctx)
+	runningExecutors, err := s.startupRuntimeInventory(ctx)
 	if err != nil {
 		s.logger.Warn("failed to list executors running on startup", zap.Error(err))
 		return
@@ -3788,26 +3887,13 @@ func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 	// (design 02 "Persistence": "it has two kinds of caller, and only one of
 	// them is a pass") -- taken once here rather than per-row.
 	scope := s.newStandaloneLivenessScope(ctx)
-	var remoteRecords []executor.RemoteStatusPollRequest
 	for _, running := range runningExecutors {
-		if models.IsRemoteExecutorType(models.ExecutorType(running.Runtime)) {
-			remoteRecords = append(remoteRecords, executor.RemoteStatusPollRequest{
-				TaskID:           running.TaskID,
-				SessionID:        running.SessionID,
-				Runtime:          running.Runtime,
-				AgentExecutionID: running.AgentExecutionID,
-				ContainerID:      running.ContainerID,
-				Metadata:         running.Metadata,
-			})
-		}
 		s.reconcileOneSessionOnStartup(ctx, running, report, scope)
 	}
 	report.flush(s.logger)
 
-	// Pre-poll remote executor status so task lists show accurate state
-	if len(remoteRecords) > 0 && s.agentManager != nil {
-		s.agentManager.PollRemoteStatusForRecords(ctx, remoteRecords)
-	}
+	// The lifecycle status worker attaches pending remote owners after readiness.
+	// Startup reconciliation must not synchronously probe remote availability.
 }
 
 // reconcileOneSessionOnStartup adjusts DB state for a single session without launching agents.
@@ -4285,7 +4371,7 @@ func (s *Service) withSessionPromptAdmission(
 	if s.messageQueue == nil {
 		return fn(ctx)
 	}
-	return s.messageQueue.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+	return s.messageQueue.WithPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		return fn(context.WithValue(admittedCtx, sessionPromptAdmissionContextKey{}, sessionID))
 	})
 }
@@ -4365,6 +4451,9 @@ func (s *Service) QueueUserPrompt(
 	for key, value := range metadata {
 		queueMetadata[key] = value
 	}
+	if err := retainBuiltinIntent(ctx, taskID, sessionID, queueMetadata); err != nil {
+		return err
+	}
 	if userMessageRecorded {
 		queueMetadata[metaKeyUserMessageRecorded] = true
 	}
@@ -4438,16 +4527,13 @@ func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID 
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err == nil && session != nil && session.State == models.TaskSessionStateCreated {
-		go func(profileID string) {
-			_, launchErr := s.startCreatedSessionWithComposedPrompt(
-				context.WithoutCancel(ctx), taskID, sessionID, profileID,
-				"", "", "", true, false, false, false, nil, nil, false,
-			)
-			if launchErr != nil && !errors.Is(launchErr, ErrAgentPromptInProgress) {
-				s.logger.Warn("failed to start session for durable queued prompt",
-					zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(launchErr))
-			}
-		}(session.AgentProfileID)
+		// Starting a CREATED session consumes a new slot. Register the accepted
+		// head for bounded startup instead of observing capacity and racing
+		// another start; the sweep acquires the actual ticket. The exported
+		// registration keeps a fallback wait when identity resolution is
+		// transiently unavailable.
+		s.RegisterMessageCapacityWait(ctx, taskID, sessionID, "")
+		s.signalCeilingSweep()
 		return
 	}
 	s.tryFastPathDrainAfterEnqueue(ctx, taskID, sessionID)

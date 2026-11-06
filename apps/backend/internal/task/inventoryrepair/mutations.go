@@ -6,19 +6,24 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 )
 
 type mutation struct {
-	Table  string `json:"table"`
-	ID     string `json:"id"`
-	Before row    `json:"before"`
-	After  row    `json:"after"`
+	RawTimestamps bool   `json:"raw_timestamps,omitempty"`
+	Table         string `json:"table"`
+	ID            string `json:"id"`
+	Before        row    `json:"before"`
+	After         row    `json:"after"`
 }
 
 func (in *inspection) mutations(ctx context.Context, at time.Time) ([]mutation, error) {
+	if in.report.Plan.Version == 2 {
+		return in.aliasMutations(ctx)
+	}
 	var result []mutation
 	for _, r := range in.report.Plan.Repairs {
 		before := in.slots[r.WorktreeID]
@@ -26,13 +31,13 @@ func (in *inspection) mutations(ctx context.Context, at time.Time) ([]mutation, 
 		after["repository_id"] = r.RepositoryID
 		after["worktree_branch"] = r.Branch
 		after["worktree_path"] = r.Path
-		result = append(result, mutation{"task_environment_repos", stringValue(before, "id"), before, after})
+		result = append(result, mutation{Table: aliasSlotTable, ID: stringValue(before, "id"), Before: before, After: after})
 	}
 	for _, w := range in.report.Plan.Workspaces {
 		before := in.envs[w.EnvironmentID]
 		after := maps.Clone(before)
 		after["workspace_path"] = w.Path
-		result = append(result, mutation{"task_environments", w.EnvironmentID, before, after})
+		result = append(result, mutation{Table: aliasEnvironmentTable, ID: w.EnvironmentID, Before: before, After: after})
 		sessions, err := queryRows(ctx, in.db, `SELECT * FROM task_sessions WHERE task_environment_id = ? ORDER BY id`, w.EnvironmentID)
 		if err != nil {
 			return nil, err
@@ -40,7 +45,7 @@ func (in *inspection) mutations(ctx context.Context, at time.Time) ([]mutation, 
 		for _, s := range sessions {
 			a := maps.Clone(s)
 			a["workspace_path"] = w.Path
-			result = append(result, mutation{"task_sessions", stringValue(s, "id"), s, a})
+			result = append(result, mutation{Table: aliasSessionTable, ID: stringValue(s, "id"), Before: s, After: a})
 		}
 	}
 	for _, id := range in.report.Plan.CleanupJobs {
@@ -55,7 +60,7 @@ func (in *inspection) mutations(ctx context.Context, at time.Time) ([]mutation, 
 
 func mutationTable(table string) (string, error) {
 	switch table {
-	case "task_environment_repos", "task_environments", "task_sessions", "task_resource_cleanup_jobs":
+	case aliasSlotTable, aliasEnvironmentTable, aliasSessionTable, cleanupJobTable, snapshotTable:
 		return table, nil
 	default:
 		return "", errors.New("unsupported repair table")
@@ -68,8 +73,14 @@ func mutationRow(ctx context.Context, db queryer, m mutation) (row, error) {
 		return nil, err
 	}
 	columns := "*"
-	if table == "task_resource_cleanup_jobs" {
+	if table == cleanupJobTable {
 		columns = cleanupJobProjection
+	}
+	if m.RawTimestamps {
+		columns, err = rawTimestampProjection(ctx, db, table)
+		if err != nil {
+			return nil, err
+		}
 	}
 	rows, err := queryRows(ctx, db, `SELECT `+columns+` FROM `+table+` WHERE id = ?`, m.ID)
 	if err != nil {
@@ -105,7 +116,12 @@ func publish(ctx context.Context, tx *sql.Tx, changes []mutation, forward bool) 
 	if err := rowsMatch(ctx, tx, changes, !forward); err != nil {
 		return err
 	}
-	for _, m := range changes {
+	ordered := changes
+	if !forward {
+		ordered = slices.Clone(changes)
+		slices.Reverse(ordered)
+	}
+	for _, m := range ordered {
 		if !forward {
 			m.Before, m.After = m.After, m.Before
 		}

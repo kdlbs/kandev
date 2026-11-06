@@ -11,11 +11,8 @@ owners:
 
 ## Purpose
 
-Paired design for
-[Kanban Task Reordering](../requirements/kanban-task-reordering.md). The
-requirement states what a user observes; this file states the mechanism behind
-it, the prior art the contract was drawn from, and the reasoning that would
-otherwise have to be rediscovered at build time.
+Design for [Kanban Task Reordering](../requirements/kanban-task-reordering.md),
+covering ordering, arrivals and client reconciliation.
 
 ## Requirement mapping
 
@@ -23,36 +20,17 @@ otherwise have to be rediscovered at build time.
 | --- | --- |
 | `REQ-TASKS-KANBAN-TASK-REORDERING-001` `.1`, `.36` | Ordering keys and the promotion comparators |
 | `.2`, `.38` | Surfaces |
-| `.12` | Surfaces, Position allocation |
+| `.9`, `.12` | Surfaces, Keyboard gesture availability, Position allocation |
 | `.8`, `.16`, `.17`, `.18`, `.19`, `.20`, `.25` | Reorder contract |
 | `.15`, `.28`, `.29`, `.30`, `.31` | Position allocation |
 | `.26`, `.27`, `.37` | Concurrency |
+| `.13` | Cross-step optimistic rollback |
 | `.32`, `.33`, `.34` | Band model, Position allocation |
 
 ## Prior art
 
-**Wiki (`OBSIDIAN_VAULT_PATH=/Users/henry/Documents/henry/wiki`, QMD collection
-`wiki`).** Queried twice: `lex: kanban board ordering drag drop reorder backlog
-priority queue position` / `vec: how tasks should be ordered in a kanban column
-and how drag-and-drop reordering with a persisted position field works`, then
-`lex: backlog prioritization WIP limit queue next in line pull` / `vec: how to
-decide what work gets picked up next, backlog ordering, work-in-progress limits
-and pull-based queues`. Direct page reads were unavailable (the vault path is
-not readable from the task sandbox, so `grep` and `obsidian-wiki graph-query`
-both failed); QMD's own index served the retrieval. **The wiki returned nothing
-useful on board ordering or drag-and-drop reordering.** The nearest hits are
-product-method pages, not interaction or persistence contracts:
-`concepts/shape-up.md` (0.39) records the Basecamp position that backlogs,
-sprints and points should be replaced by a betting table, and
-`concepts/roadmap-from-failure-signal.md` (0.78) records Block's inversion where
-customer signal generates the backlog rather than prioritising within it.
-Neither takes a position this specification departs from: both argue about where
-a backlog comes from, not how an existing queue is ordered. No prior position is
-overridden.
-
-**Cross-vendor (`saas-kb` / `search_fsm_docs`, `category: "ai_sdlc"`).**
-Unavailable: the tool is not exposed in this session and no tool-discovery
-mechanism is offered, so this leg did not run. Recorded rather than faked.
+External discovery supplied no board-ordering guidance. No external position
+is overridden.
 
 **In-repo prior art, which is the load-bearing one.** Kandev has already solved
 this problem once, for the session message queue:
@@ -69,13 +47,6 @@ would make the two drags on one card start differently. And the band
 discriminator, per AC-TASKS-KANBAN-TASK-REORDERING-001.17: a message queue has
 one list per session, so `{session_id, ordered_ids}` needs no band field, while
 a step has two bands and the request must say which one it names.
-
-That document also carries `## API Surface`, `## Data Model` and
-`## Failure Modes` sections. Those are migrated legacy detail, not the current
-house style for a requirement, which is why the paired requirement here does not
-imitate them. The equivalents live below: the wire contract in
-`## Reorder contract`, the storage rules in `## Position allocation`, and the
-failure and race behavior in `## Concurrency`.
 
 ## Reorder contract
 
@@ -376,6 +347,41 @@ authoritative order. Without that rule the two requirements pull in opposite
 directions: applying the event wholesale flickers the in-flight band back to the
 order the user just changed, and ignoring it wholesale strands the sibling band.
 
+## Cross-step optimistic rollback
+
+`useCrossStepMove` in `hooks/domains/kanban/use-swimlane-kanban-dnd.ts` owns the
+stage-only optimistic write used by `SwimlaneKanbanContent` desktop drag and
+phone card-menu movement. Read the original task from the captured workflow
+snapshot; absent tasks and same-step targets do not submit. Do not compute or
+send an arrival position.
+
+After each optimistic write, open the existing bounded task-overview journal.
+Accepted events and replacement snapshot rows assert stages, including equal
+values; identity-retained sibling rows and omitted WS fields do not. Existing
+freshness rules discard stale task fields but admit independently fresh status
+summaries. Successful HTTP read completion journals original admitted stages
+despite canonical identity reuse; stage fields superseded in flight confer no
+authority. Cached-row retention alone asserts nothing. Rollback requires a
+current-scope journal with no accepted stage or
+deletion, retained membership, and the captured workflow/workspace/target.
+
+Pending writes may link only when the predecessor still owns the current stage
+before the next optimism. Rejection skips failed linked intermediates and
+restores the preceding pending/successful stage or original baseline. After
+removing its own optimism, it may re-arm a pending predecessor's still-valid
+journal. Never re-arm missing, overflowed or out-of-scope evidence. Successful
+moves and external stages remain authoritative. A store-scoped weak map tracks
+pending requests. Release records, journals and subscriptions at settlement,
+including after unmount; add no revisions, ordering guarantee or move suppression.
+
+Change only the current row's stage; preserve positions and unrelated fields.
+Membership departure is sticky through reinsertion. Missing journals fail closed.
+Keep captured request/error task and session identity across rerenders.
+
+Phone composition is unchanged. Regression tests use real providers, HTTP/WS
+producers and deferred fetches, plus native desktop drag and phone taps against
+disposable managed browser fixtures.
+
 ## Ordering keys and the promotion comparators
 
 AC-TASKS-KANBAN-TASK-REORDERING-001.1 names the keys the WIP overflow queue
@@ -502,6 +508,38 @@ duration of a drag both satisfy the stated outcomes.
 The in-repo keyboard-sortable convention (a keyboard sensor with sortable
 coordinate resolution) already exists in the quick-chat tab strip and the task
 row settings list, and matches the key bindings the requirement names.
+
+## Keyboard gesture availability
+
+`SwimlaneKanbanContent` keeps `useKeyboardReorder(workflowId, displayTasks)`
+mounted across task-list changes. The hook owns the transient picked identity
+and band draft. For AC-TASKS-KANBAN-TASK-REORDERING-001.9/.12, reconcile stored
+pickup availability before it can block subsequent card keys: at least one task
+in the current hook input must have the picked ID. Otherwise retire the stored
+gesture, clear all exposed draft fields and never call `reorderBand`. Returning
+null alone must not leave a stored draft that revives when the ID reappears.
+An empty input cancels too.
+
+This input is `displayTasks`, after caller filtering and orphan remapping,
+before per-column virtualization. Global persisted inventory and mounted DOM
+rows do not determine availability. Virtual-row unmounting, equivalent list or
+object refreshes and changes to other tasks do not alone cancel a still-present
+picked ID. Do not compare whole-list equality. Still-present task step/band
+transitions, whole-band normalization and existing merge/conflict/pending rules
+are outside this correction. Preserve descendant-event rejection and normal
+pick/move/commit/Escape handling.
+
+`KanbanCardShell` routes phone Enter/Space to navigation before the reorder
+handler, per [mobile scrolling](mobile-kanban-scroll.md). Preserve that boundary,
+current desktop/tablet composition, insertion indicators and localized position
+announcements. Cancellation adds no focus transfer, layout, touch control or copy.
+
+Cover the input transition in hook tests and a real
+`SwimlaneKanbanContent`/`KanbanCard` composition regression. A focused desktop
+browser scenario removes the picked task through the existing API on the same
+mounted board, then verifies another card's reorder and persisted result.
+Existing phone real-card navigation and mobile scroll/no-mutation browser tests
+protect the phone exception.
 
 ## Related
 

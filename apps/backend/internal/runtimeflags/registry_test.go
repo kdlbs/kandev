@@ -18,6 +18,41 @@ type featureFieldBinding struct {
 	envVar     string
 }
 
+func TestIntegratedControlIsOptInAndRestartRequired(t *testing.T) {
+	const key = "features.integratedControl"
+	def, ok := DefinitionByKey(key)
+	if !ok || def.EnvVar != "KANDEV_FEATURES_INTEGRATED_CONTROL" {
+		t.Fatalf("Integrated control identity missing or changed: %+v", def)
+	}
+	if !def.RestartRequired || !def.Mutable || def.Stability != StabilityExperimental {
+		t.Fatalf("Integrated control must remain a restart-required experimental override: %+v", def)
+	}
+	for _, profile := range []struct{ name, dev, e2e string }{
+		{name: "prod", dev: "false", e2e: "false"},
+		{name: "dev", dev: "true", e2e: "false"},
+		{name: "e2e", dev: "false", e2e: "true"},
+	} {
+		t.Run(profile.name, func(t *testing.T) {
+			t.Setenv("KANDEV_DEBUG_DEV_MODE", profile.dev)
+			t.Setenv("KANDEV_E2E_MOCK", profile.e2e)
+			defaults, err := profiles.FeatureFlagDefaults()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if defaults["integrated_control"] != "false" {
+				t.Fatalf("Integrated control defaults to %q in %s", defaults["integrated_control"], profile.name)
+			}
+		})
+	}
+	cfg := &config.Config{}
+	for _, enabled := range []bool{true, false} {
+		ApplyStatesToConfig(cfg, []RuntimeFlagState{{Key: key, EffectiveValue: enabled}})
+		if cfg.Features.IntegratedControl != enabled || ValuesFromConfig(cfg)[key] != enabled {
+			t.Fatalf("Integrated control typed override did not round trip %v", enabled)
+		}
+	}
+}
+
 func TestDefinitionsIncludeOfficeExperimentalMetadata(t *testing.T) {
 	def, ok := DefinitionByKey("features.office")
 	if !ok {

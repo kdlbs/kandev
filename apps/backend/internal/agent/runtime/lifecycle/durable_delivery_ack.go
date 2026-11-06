@@ -269,13 +269,15 @@ func (sm *StreamManager) deliveryAckSender(execution *AgentExecution, streamID s
 		if sm.isExecutionCurrent != nil && !sm.isExecutionCurrent(execution) {
 			return context.Canceled
 		}
-		return client.AcknowledgeDelivery(ctx, streamID, sequence)
+		return sm.deliveryJournalReleaser().acknowledge(ctx, client, streamID, sequence)
 	}
 }
 
 func deliveryAckFailureReason(err error) string {
 	var response *agentctl.DeliveryHTTPError
 	switch {
+	case errors.Is(err, errDeliveryDurabilityBarrier):
+		return "durability_barrier"
 	case errors.Is(err, journal.ErrOwnerMismatch):
 		return "owner_mismatch"
 	case errors.Is(err, context.Canceled):
@@ -294,5 +296,5 @@ func validDeliveryAckTarget(execution *AgentExecution, client *agentctl.Client, 
 }
 
 func deliveryAckDescriptorMatches(status *agentctl.DeliveryStatus, execution *AgentExecution, streamID string) bool {
-	return status != nil && status.Durable && status.Version == journal.CurrentVersion && status.Stream != nil && status.SessionID == execution.SessionID && status.IncarnationID == execution.DeliveryIncarnationID && status.HarnessGeneration == execution.DeliveryHarnessGeneration && status.StreamID == streamID
+	return status != nil && status.Durable && journal.SupportsDeliveryVersion(status.Version) && status.Stream != nil && status.SessionID == execution.SessionID && status.IncarnationID == execution.DeliveryIncarnationID && status.HarnessGeneration == execution.DeliveryHarnessGeneration && status.StreamID == streamID
 }

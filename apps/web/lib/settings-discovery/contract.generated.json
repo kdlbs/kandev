@@ -450,6 +450,22 @@
           "settings_href": "/settings/agents"
         },
         {
+          "key": "agent_profile.copilot_selected_plugins",
+          "field_path": "copilot_selected_plugins",
+          "label": "copilot_selected_plugins",
+          "description": "Stable Copilot plugin identities loaded natively by new local/worktree processes. Omitted updates preserve the committed selection; an explicit empty list clears it.",
+          "json_type": "array",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "agent-settings",
+          "writable": true,
+          "validator": "agent-settings.profile",
+          "authority": "org.config.manage",
+          "replacement": true,
+          "change_timing": "future_sessions",
+          "settings_href": "/settings/agents"
+        },
+        {
           "key": "agent_profile.dynamic",
           "field_path": "dynamic",
           "label": "dynamic",
@@ -1565,6 +1581,21 @@
       },
       "fields": [
         {
+          "key": "executor.owner_user_id",
+          "field_path": "owner_user_id",
+          "label": "Owner",
+          "description": "Optional personal executor owner; null shares the resource.",
+          "json_type": "string",
+          "nullable": true,
+          "support": "supported",
+          "classification": "writable",
+          "owner": "execution",
+          "writable": true,
+          "validator": "execution.executor",
+          "authority": "execution.manage",
+          "settings_href": "/settings"
+        },
+        {
           "key": "executor.name",
           "field_path": "name",
           "label": "Name",
@@ -1657,6 +1688,21 @@
         "requires_resource_id": true
       },
       "fields": [
+        {
+          "key": "executor_profile.owner_user_id",
+          "field_path": "owner_user_id",
+          "label": "Owner",
+          "description": "Optional personal executor owner; null shares the resource.",
+          "json_type": "string",
+          "nullable": true,
+          "support": "supported",
+          "classification": "writable",
+          "owner": "execution",
+          "writable": true,
+          "validator": "execution.executor_profile",
+          "authority": "execution.manage",
+          "settings_href": "/settings"
+        },
         {
           "key": "executor_profile.name",
           "field_path": "name",
@@ -4672,9 +4718,60 @@
           "settings_href": "/settings/preferences"
         },
         {
+          "key": "user_settings.unread_task_dot",
+          "field_path": "unread_task_dot",
+          "label": "unread task dot",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "boolean",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
+        },
+        {
+          "key": "user_settings.unread_task_dot_hide_delay_seconds",
+          "field_path": "unread_task_dot_hide_delay_seconds",
+          "label": "unread task dot hide delay",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "integer",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "default_behavior": "2 seconds",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences",
+          "schema": {
+            "maximum": 60,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        {
           "key": "user_settings.agent_generated_task_titles",
           "field_path": "agent_generated_task_titles",
           "label": "generated titles",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "boolean",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
+        },
+        {
+          "key": "user_settings.prompt_suggestions",
+          "field_path": "prompt_suggestions",
+          "label": "prompt suggestions",
           "description": "Portable preference owned by the current user.",
           "json_type": "boolean",
           "support": "supported",
@@ -4795,6 +4892,21 @@
           "key": "user_settings.show_todo_list_panel_only_when_not_empty",
           "field_path": "show_todo_list_panel_only_when_not_empty",
           "label": "todo list empty state",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "boolean",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
+        },
+        {
+          "key": "user_settings.show_turn_changed_files",
+          "field_path": "show_turn_changed_files",
+          "label": "turn changed files",
           "description": "Portable preference owned by the current user.",
           "json_type": "boolean",
           "support": "supported",
@@ -6076,6 +6188,38 @@
                 },
                 "type": "array"
               },
+              "on_pr_closed": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "on_pr_merged": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "on_turn_complete": {
                 "items": {
                   "additionalProperties": false,
@@ -6406,6 +6550,7 @@
       "cli_passthrough",
       "command_prefix",
       "config_options",
+      "copilot_selected_plugins",
       "cursor_mcp_auth_enabled",
       "cursor_plugins_mcp_enabled",
       "dynamic",
@@ -6458,6 +6603,7 @@
       "message_time_display",
       "preferred_shell",
       "prevent_auto_start_agent_on_open",
+      "prompt_suggestions",
       "quick_chat_tab_order_by_workspace",
       "release_notes_last_seen_version",
       "repository_ids",
@@ -6471,6 +6617,7 @@
       "show_todo_list_panel",
       "show_todo_list_panel_only_when_not_empty",
       "show_transcript_auto_scroll_control",
+      "show_turn_changed_files",
       "sidebar_active_view_id",
       "sidebar_draft",
       "sidebar_fast_actions_enabled",
@@ -6496,6 +6643,8 @@
       "thread_view_draft",
       "thread_views",
       "unread_divider",
+      "unread_task_dot",
+      "unread_task_dot_hide_delay_seconds",
       "workflow_filter_id",
       "workflow_ids_with_auto_hide_empty_steps",
       "workspace_id"

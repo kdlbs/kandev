@@ -159,6 +159,10 @@ func (c *Controller) ResolveExecutionAfterFailure(
 	return c.svc.ResolveExecutionAfterFailure(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration, failure)
 }
 
+func (c *Controller) ResumePendingRoute(ctx context.Context, sessionID string, generation int64) (agentruntime.ProfileExecution, error) {
+	return c.svc.ResumePendingRoute(ctx, sessionID, generation)
+}
+
 // ListCalls returns the call history for a utility agent.
 func (c *Controller) ListCalls(ctx context.Context, utilityID string, limit int) (*dto.UtilityAgentCallsResponse, error) {
 	calls, err := c.svc.ListCalls(ctx, utilityID, limit)

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
@@ -110,7 +110,8 @@ describe("PR popover footer refresh indicator", () => {
     popoverState.lastUpdatedAt = Date.now();
     renderPopover();
 
-    expect(screen.getByRole("status").textContent).toContain(UPDATING_LABEL);
+    const footer = screen.getByTestId("pr-popover-footer");
+    expect(within(footer).getByRole("status").textContent).toContain(UPDATING_LABEL);
   });
 
   it("shows the elapsed label once the refresh settles", () => {

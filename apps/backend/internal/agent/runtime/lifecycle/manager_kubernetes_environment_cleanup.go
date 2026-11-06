@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/retention"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/executor"
@@ -18,6 +19,15 @@ func (m *Manager) DestroyKubernetesEnvironment(ctx context.Context, env *models.
 	if env == nil {
 		return nil
 	}
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return retentionErr
+	}
+	defer releaseRetention()
+	if err := m.checkRetainedWorkspaceResource(ctx, env.TaskID, env.ID); err != nil {
+		return err
+	}
+
 	if m.executorRegistry == nil {
 		return errors.New("kubernetes runtime registry is unavailable")
 	}

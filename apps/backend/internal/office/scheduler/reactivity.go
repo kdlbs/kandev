@@ -326,7 +326,7 @@ func (ss *SchedulerService) reactToAssigneeChange(
 		return
 	}
 
-	// The current step must accept an auto-started run before this wake is
+	// The current step and blockers must permit assignment before this wake is
 	// queued — the interrupt above already fired and is unaffected. See
 	// shared.IsAssignmentWakeEligible for the fail-open rationale.
 	if !shared.IsAssignmentWakeEligible(ctx, ss.logger, ss.repo, ss.workflowStepGetter, task.ID, "reactivity.assignee_change") {

@@ -63,7 +63,7 @@ These pages describe the current source tree and its development conventions:
 
 The regular Kanban workbench, task sessions, review surfaces, and task-scoped Kandev MCP are the supported product path. Some capabilities still depend on a particular agent, executor, provider, platform, credential, or install channel; those differences are called out on their topic pages.
 
-**Office is separate, disabled in the production runtime profile, feature-flagged, and still in progress.** Its source, tests, specifications, and internal plans do not make persistent teams, routines, budgets, or coordinator-led autonomy a supported production contract. See [Feature status](feature-status.md) for that boundary and [Office provider routing](office-provider-routing.md) for the feature-flagged routing surface.
+**Office is separate, disabled in the production runtime profile, feature-flagged, and still in progress.** Its source, tests, specifications, and internal plans do not make persistent teams, routines, budgets, or coordinator-led autonomy a supported production contract. See [Feature status](feature-status.md) for that boundary. The [Office guide](office.md) covers evaluating the current implementation, starting with [workspace setup](office-getting-started.md), then configuring a team, managing tasks and approvals, scheduling routines, and operating the workspace.
 
 <details>
 <summary>Version matching</summary>

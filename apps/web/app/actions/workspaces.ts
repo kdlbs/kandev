@@ -80,6 +80,16 @@ export async function getWorkspaceAction(id: string): Promise<Workspace> {
   return fetchJson<Workspace>(`${apiBaseUrl}/api/v1/workspaces/${id}`);
 }
 
+export async function cloneWorkspaceAction(
+  id: string,
+  payload: { name: string },
+): Promise<Workspace> {
+  return fetchJson<Workspace>(`${apiBaseUrl}/api/v1/workspaces/${encodeURIComponent(id)}/clone`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function createWorkspaceAction(payload: {
   name: string;
   description?: string;

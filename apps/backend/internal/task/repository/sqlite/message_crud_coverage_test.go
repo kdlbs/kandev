@@ -99,6 +99,7 @@ func TestMessageCRUDPaginationSearchAndMetadataLookups(t *testing.T) {
 		t.Fatalf("GetMessageByToolCallID = %+v, %v; permission row must be excluded", tool, err)
 	}
 
+	completionStarted := time.Now().UTC()
 	updated, err := repo.CompletePendingToolCallsForTurn(ctx, "turn-message-crud")
 	if err != nil || updated != 1 {
 		t.Fatalf("CompletePendingToolCallsForTurn = %d, %v; want 1", updated, err)
@@ -106,6 +107,9 @@ func TestMessageCRUDPaginationSearchAndMetadataLookups(t *testing.T) {
 	tool, err = repo.GetMessage(ctx, "message-b")
 	if err != nil || tool.Metadata["status"] != "complete" {
 		t.Fatalf("completed tool metadata = %v, %v", tool, err)
+	}
+	if tool.UpdatedAt.Before(completionStarted) {
+		t.Fatalf("completion timestamp %s predates mutation %s", tool.UpdatedAt, completionStarted)
 	}
 	permission, err := repo.GetMessage(ctx, "message-c")
 	if err != nil || permission.Metadata["status"] != "pending" {

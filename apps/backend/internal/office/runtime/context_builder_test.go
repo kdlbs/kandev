@@ -6,6 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -21,7 +23,7 @@ func TestContextBuilderBuildsAndPersistsRuntimeSnapshot(t *testing.T) {
 	}
 	store := &recordingRunSnapshotStore{}
 	builder := ContextBuilder{Agents: agents, Runs: store}
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID:             "run-1",
 		AgentProfileID: "agent-1",
 		Reason:         "task_assigned",
@@ -76,7 +78,7 @@ func (r *recordingAgentReader) ListAgentInstancesByIDs(
 type recordingRunSnapshotStore struct {
 	calls    []snapshotCall
 	casCalls []snapshotCall
-	runs     map[string]*models.Run
+	runs     map[string]*runsmodels.Run
 	casWins  bool
 	casErr   error
 	getErr   error
@@ -128,7 +130,7 @@ func buildTestRunContext(t *testing.T, seats DecisionSeatResolver) RunContext {
 		agent: &models.AgentInstance{ID: "agent-1", WorkspaceID: "ws-1", Role: models.AgentRoleWorker},
 	}
 	builder := ContextBuilder{Agents: agents, Runs: &recordingRunSnapshotStore{}, Seats: seats}
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID:             "run-1",
 		AgentProfileID: "agent-1",
 		Reason:         "task_assigned",
@@ -179,7 +181,7 @@ func TestContextBuilderReturnsResolverError(t *testing.T) {
 		},
 		Seats: seats,
 	}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{"task_id":"task-1"}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{"task_id":"task-1"}`}
 	if _, err := builder.Build(context.Background(), run); !errors.Is(err, errBoom) {
 		t.Fatalf("expected resolver error to abort context build, got %v", err)
 	}
@@ -194,7 +196,7 @@ func TestContextBuilderDeniesRecordStepDecisionForTasklessRun(t *testing.T) {
 		Runs:   &recordingRunSnapshotStore{},
 		Seats:  &stubSeatResolver{held: true},
 	}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Reason: "heartbeat", Payload: "{}"}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Reason: "heartbeat", Payload: "{}"}
 	runCtx, err := builder.Build(context.Background(), run)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -218,7 +220,7 @@ func TestContextBuilderPersistsSeatActionAsAdvisoryMetadata(t *testing.T) {
 		Runs:  store,
 		Seats: seats,
 	}
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID:             "run-1",
 		AgentProfileID: "agent-1",
 		Reason:         "task_review_requested",
@@ -285,7 +287,7 @@ func TestContextBuilderLostCASRaceAdoptsWinnerSnapshotVerbatim(t *testing.T) {
 
 	store := &recordingRunSnapshotStore{
 		casWins: false,
-		runs: map[string]*models.Run{
+		runs: map[string]*runsmodels.Run{
 			"run-1": {
 				ID:            "run-1",
 				Capabilities:  winnerCaps,
@@ -303,7 +305,7 @@ func TestContextBuilderLostCASRaceAdoptsWinnerSnapshotVerbatim(t *testing.T) {
 		},
 		Runs: store,
 	}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Reason: "heartbeat", Payload: "{}"}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Reason: "heartbeat", Payload: "{}"}
 
 	runCtx, err := builder.BuildAndPersist(context.Background(), run)
 	if err != nil {
@@ -352,12 +354,12 @@ func (s *recordingRunSnapshotStore) UpdateRunRuntimeSnapshotCAS(
 	return win, nil
 }
 
-func (s *recordingRunSnapshotStore) GetRunByID(_ context.Context, id string) (*models.Run, error) {
+func (s *recordingRunSnapshotStore) GetRunByID(_ context.Context, id string) (*runsmodels.Run, error) {
 	if s.getErr != nil {
 		return nil, s.getErr
 	}
 	if run, ok := s.runs[id]; ok {
 		return run, nil
 	}
-	return &models.Run{ID: id}, nil
+	return &runsmodels.Run{ID: id}, nil
 }

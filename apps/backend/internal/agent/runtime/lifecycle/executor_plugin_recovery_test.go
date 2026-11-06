@@ -16,7 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 type pluginExecutorRecoveryProfileLoaderFake struct {
@@ -187,7 +187,7 @@ func TestPluginExecutorRestartRecovery(t *testing.T) {
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
 	runtime.SetRecoveryDependencies(loader, store)
 	setPluginRecoveredInstanceInfoFixture(t, runtime)
-	runtime.newRecoveredAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
+	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 		if executionID != "execution-plugin-recovery" || token != "agentctl-secret" {
 			t.Fatalf("recovered client identity = %q token=%q", executionID, token)
 		}
@@ -211,6 +211,9 @@ func TestPluginExecutorRestartRecovery(t *testing.T) {
 		t.Fatalf("recovered instances = %#v", instances)
 	}
 	defer instances[0].Client.Close()
+	if !instances[0].CopilotNativeSessionEvents {
+		t.Fatal("recovered plugin instance lost the adopted native subscription state")
+	}
 	if instances[0].WorkspacePath != pluginExecutorWorkspacePath ||
 		!slices.Equal(instances[0].WorkspaceSourceRoots, []string{"/workspace", "/workspace/src"}) ||
 		instances[0].Env["KANDEV_RUN_ID"] != "run-plugin-recovery" {
@@ -245,7 +248,7 @@ func TestPluginExecutorRecoveredClientRequiresRecordedInstancePort(t *testing.T)
 	var clientFactoryCalled bool
 	operations := &pluginExecutorOperationsFake{}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
-	runtime.newRecoveredAgentctlClient = func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, error) {
+	runtime.newAgentctlClient = func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, error) {
 		clientFactoryCalled = true
 		return nil, errors.New("unexpected client creation")
 	}
@@ -415,7 +418,7 @@ func TestPluginExecutorPostHandshakeRecoveryAttachesEveryCheckpointPhase(t *test
 			runtime := NewPluginRemoteExecutor(operations, newTestLogger())
 			runtime.SetRecoveryDependencies(loader, store)
 			setPluginRecoveredInstanceInfoFixture(t, runtime)
-			runtime.newRecoveredAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
+			runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 				if executionID != "execution-plugin-recovery" || token != "agentctl-secret" {
 					t.Fatalf("recovered client execution=%q token=%q", executionID, token)
 				}
@@ -458,6 +461,7 @@ func setPluginRecoveredInstanceInfoFixture(t *testing.T, runtime *PluginRemoteEx
 			Port: testPluginExecutorInstancePort, WorkspacePath: pluginExecutorWorkspacePath,
 			Env:                  map[string]string{"KANDEV_RUN_ID": "run-plugin-recovery"},
 			WorkspaceSourceRoots: []string{"/workspace", "/workspace/src"}, ProviderSessionID: "native-plugin-session",
+			CopilotNativeSessionEvents: true,
 		}, nil
 	}
 }
@@ -490,6 +494,7 @@ func TestPluginRecoveredInstanceMetadataUsesAuthenticatedControlReader(t *testin
 			Port: testPluginExecutorInstancePort, WorkspacePath: pluginExecutorWorkspacePath,
 			Env:                  map[string]string{"KANDEV_RUN_ID": "run-plugin-recovery"},
 			WorkspaceSourceRoots: []string{"/workspace/src"}, ProviderSessionID: "native-plugin-session",
+			CopilotNativeSessionEvents: true,
 		}, nil
 	}
 	record := pluginExecutorRecoveryRecord(t, pluginExecutorPhaseReady, &pluginsdk.ExecutorResourceDescriptor{ResourceHandle: "resource-recovery"})

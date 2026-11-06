@@ -16,7 +16,10 @@ vi.mock("@/lib/api/domains/kanban-api", async (importOriginal) => {
 });
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({ useSettingsData: () => {} }));
 vi.mock("@/hooks/use-is-utility-configured", () => ({ useIsUtilityConfigured: () => false }));
-vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+  useOptionalToast: () => ({ toast: vi.fn() }),
+}));
 vi.mock("@/hooks/use-summarize-session", () => ({
   useSummarizeSession: () => ({ summarize: vi.fn(), isSummarizing: false }),
 }));

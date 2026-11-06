@@ -10,7 +10,11 @@
 // and analysis tools won't treat it as a real runtime cycle.
 import type { TaskCreateDialogProps } from "@/components/task-create-dialog";
 import type { useTaskCreateDialogSetup } from "@/components/task-create-dialog-setup";
-import type { DialogFormBodyProps, DialogFormState } from "@/components/task-create-dialog-types";
+import type {
+  DialogFormBodyProps,
+  DialogFormState,
+  TaskCreateWorkflowStepsResult,
+} from "@/components/task-create-dialog-types";
 import {
   resolveTaskCreateLaunchPreview,
   type TaskCreateLaunchPreview,
@@ -38,15 +42,14 @@ export function localRepositoryCreationEnabled(isCreateMode: boolean, repoLocked
 export function resolveDialogLaunchPreview(
   isCreateMode: boolean,
   effectiveWorkflowId: string | null,
-  fetchedSteps: DialogFormState["fetchedSteps"],
-  snapshots: DialogFormBodyProps["snapshots"],
+  selectedWorkflowSteps: TaskCreateWorkflowStepsResult,
   hasDescription: boolean,
 ): TaskCreateLaunchPreview | null {
   if (!isCreateMode) return null;
+  const steps = selectedWorkflowSteps.status === "success" ? selectedWorkflowSteps.steps : null;
   return resolveTaskCreateLaunchPreview({
     effectiveWorkflowId,
-    fetchedSteps,
-    snapshotSteps: effectiveWorkflowId ? snapshots[effectiveWorkflowId]?.steps : undefined,
+    fetchedSteps: steps,
     launchIntent: hasDescription ? "start-agent" : "plan-mode",
   });
 }
@@ -89,8 +92,7 @@ export function buildDialogFormBodyProps(
     launchPreview: resolveDialogLaunchPreview(
       setup.isCreateMode,
       effectiveWorkflowId,
-      fs.fetchedSteps,
-      setup.snapshots,
+      setup.selectedWorkflowSteps,
       fs.hasDescription,
     ),
     fs,
@@ -142,9 +144,14 @@ export function buildDialogFormBodyProps(
       fs.setWorkflowAgentOverrides(next);
     },
     onResetWorkflowAgentOverrides: () => fs.setWorkflowAgentOverrides({}),
-    onRetryWorkflowAgentOverrides: () => setup.refreshWorkspaceSnapshots(true),
+    onRetryWorkflowAgentOverrides: setup.selectedWorkflowSteps.retry,
     runnerEditable: computeRunnerEditable(setup.isEditMode, props.editingTask),
     runnerIneligibleReason: computeRunnerIneligibleReason(props.editingTask),
+    mcpDefinitions: setup.mcpDefinitions,
+    mcpDefinitionsLoading: setup.mcpDefinitionsLoading,
+    mcpInheritedSelections: setup.mcpInheritedSelections,
+    mcpSelectionRecovery: setup.mcpSelectionRecovery,
+    initialWorkspaceLayoutMode: setup.initialWorkspaceLayoutMode,
   };
 }
 
@@ -192,7 +199,8 @@ export function buildDialogFooterProps(
       props.submitBlockedReason ??
       pendingAttachmentUploadReason ??
       setup.savedBaseSubmitBlockedReason ??
-      workflowAgentOverridesBlockedReason,
+      workflowAgentOverridesBlockedReason ??
+      setup.executorOwnershipBlockedReason,
     editDependenciesReady: setup.isEditMode ? setup.editDependencies.ready : undefined,
   };
 }

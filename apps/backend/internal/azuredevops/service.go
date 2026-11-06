@@ -43,6 +43,7 @@ type SecretStore interface {
 // Service coordinates workspace configuration, encrypted PATs, and auth
 // probes.
 type Service struct {
+	executorContext          func(context.Context, string, string) (context.Context, error)
 	store                    *Store
 	secrets                  SecretStore
 	clientFn                 ClientFactory

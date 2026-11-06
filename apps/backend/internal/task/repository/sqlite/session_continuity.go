@@ -12,6 +12,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+const nativeReplacementCreationReason = "native_replaced"
+
 const sessionContinuitySchema = `
 		CREATE TABLE IF NOT EXISTS harness_session_generations (
 			session_id TEXT NOT NULL,
@@ -32,6 +34,20 @@ const sessionContinuitySchema = `
 		);
 		CREATE INDEX IF NOT EXISTS idx_harness_generations_current
 			ON harness_session_generations(session_id, incarnation_id, generation DESC);
+
+		CREATE TABLE IF NOT EXISTS harness_native_session_rebinds (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			incarnation_id TEXT NOT NULL,
+			generation BIGINT NOT NULL,
+			previous_native_session_id TEXT NOT NULL,
+			native_session_id TEXT NOT NULL,
+			execution_id TEXT NOT NULL,
+			rebound_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS idx_harness_native_rebinds_session
+			ON harness_native_session_rebinds(session_id, incarnation_id, generation);
 
 		CREATE TABLE IF NOT EXISTS session_restore_attempts (
 			id TEXT PRIMARY KEY,
@@ -163,6 +179,27 @@ func (r *Repository) GetCurrentHarnessSessionGeneration(ctx context.Context, ses
 }
 
 func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generation *models.HarnessSessionGeneration, expectedGeneration int64) (bool, error) {
+	return r.commitHarnessSessionGeneration(ctx, generation, expectedGeneration, "", "")
+}
+
+// CommitHarnessSessionGenerationForExecution commits only while the event's
+// task, incarnation, execution and native token still own the session. The
+// ownership check and predecessor CAS share the executor writer's SQL locks.
+func (r *Repository) CommitHarnessSessionGenerationForExecution(
+	ctx context.Context, generation *models.HarnessSessionGeneration, expectedGeneration int64,
+	taskID, executionID string,
+) (bool, error) {
+	if generation == nil || taskID == "" || executionID == "" ||
+		generation.Generation != expectedGeneration+1 || generation.PredecessorGeneration != expectedGeneration {
+		return false, fmt.Errorf("adjacent generation and execution identity are required")
+	}
+	return r.commitHarnessSessionGeneration(ctx, generation, expectedGeneration, taskID, executionID)
+}
+
+func (r *Repository) commitHarnessSessionGeneration(
+	ctx context.Context, generation *models.HarnessSessionGeneration, expectedGeneration int64,
+	taskID, executionID string,
+) (bool, error) {
 	if generation == nil {
 		return false, fmt.Errorf("harness generation is required")
 	}
@@ -176,6 +213,12 @@ func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generat
 	}
 	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{generation.SessionID}, nil); err != nil {
 		return false, err
+	}
+	if executionID != "" {
+		owns, err := r.harnessGenerationExecutionOwnsTx(ctx, tx, generation, taskID, executionID)
+		if err != nil || !owns {
+			return false, err
+		}
 	}
 	var current int64
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
@@ -193,11 +236,23 @@ func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generat
 	if err := insertGenerationTx(ctx, tx, r.db.Rebind, generation); err != nil {
 		return false, err
 	}
+	if err := r.moveOpenRecoveryBlocksWithGenerationTx(ctx, tx, generation, expectedGeneration); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Repository) moveOpenRecoveryBlocksWithGenerationTx(
+	ctx context.Context, tx *sql.Tx, generation *models.HarnessSessionGeneration, expectedGeneration int64,
+) error {
 	// A context continuation publishes a replacement generation while the
 	// operator's recovery block is still the admission fence. Move that fence
 	// with the generation in the same transaction so a successful commit cannot
 	// leave an open block stranded on the predecessor generation.
-	if generation.Generation == expectedGeneration+1 {
+	if generation.Generation == expectedGeneration+1 && generation.CreationReason != nativeReplacementCreationReason {
 		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE session_recovery_blocks
 			SET expected_generation = ?, updated_at = ?
@@ -206,13 +261,25 @@ func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generat
 			generation.Generation, generation.CommittedAt,
 			generation.SessionID, generation.IncarnationID,
 			expectedGeneration, models.RecoveryBlockOpen); err != nil {
-			return false, fmt.Errorf("move open recovery blocks with generation: %w", err)
+			return fmt.Errorf("move open recovery blocks with generation: %w", err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return true, nil
+	return nil
+}
+
+func (r *Repository) harnessGenerationExecutionOwnsTx(
+	ctx context.Context, tx *sql.Tx, generation *models.HarnessSessionGeneration, taskID, executionID string,
+) (bool, error) {
+	var owns bool
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+  SELECT EXISTS (
+   SELECT 1 FROM task_sessions ts
+   JOIN executors_running er ON er.session_id = ts.id AND er.task_id = ts.task_id
+   WHERE ts.id = ? AND ts.task_id = ?
+    AND COALESCE(NULLIF(ts.queue_incarnation_id, ''), ts.id) = ?
+    AND er.agent_execution_id = ? AND er.resume_token = ?
+  )`), generation.SessionID, taskID, generation.IncarnationID, executionID, generation.NativeSessionID).Scan(&owns)
+	return owns, err
 }
 
 func insertGenerationTx(ctx context.Context, tx *sql.Tx, rebind func(string) string, generation *models.HarnessSessionGeneration) error {

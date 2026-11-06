@@ -36,6 +36,10 @@ deployment are outside this code-change delivery.
 
 ## Work orders
 
+The [legacy duplicate extension](../legacy-worktree-alias-repair/plan.md)
+has separate work orders and validation records. It adds duplicate discovery and reconciliation
+without changing the completion record for this version-1 package.
+
 Execute sequentially; there is no delegation authorization.
 
 - [x] [01: Preview and validate exact inventory repairs](task-01-preview-repair.md)

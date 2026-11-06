@@ -237,6 +237,7 @@ func TestStartDoesNotBlockOnLifecycleSweep(t *testing.T) {
 	eventBus := eventbus.NewMemoryEventBus(log)
 	cfg := DefaultServiceConfig()
 	svc := NewService(cfg, eventBus, &mockAgentManager{}, newMockTaskRepo(), repo, nil, nil, nil, log)
+	svc.SetWorkflowStepGetter(newMockStepGetter())
 	svc.SetTurnService(&repoTurnService{repo: repo})
 
 	// Swap in the blocking wrapper only after construction: NewService's

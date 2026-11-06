@@ -19,7 +19,7 @@ import { clearBufferReader, exposeBufferReader } from "@/components/task/termina
 import { pendingPtyStarts, type PendingPtyStart } from "./pty-terminal-lifecycle";
 import { FONT } from "@/lib/theme/colors";
 import { MobileTerminalKeybar } from "@/components/task/mobile/mobile-terminal-keybar";
-import { sendPtyInput } from "./pty-terminal-input";
+import { sendPtyInput } from "@/lib/terminal/send-pty-input";
 import { useShellModifiersStore } from "@/lib/terminal/shell-modifiers";
 import {
   getFixedDarkTerminalTheme,

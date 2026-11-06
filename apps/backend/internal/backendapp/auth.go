@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -9,13 +10,16 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/authn"
 	authhttpapi "github.com/kandev/kandev/internal/auth/httpapi"
+	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/org"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -107,8 +111,9 @@ func gatewayAuthPolicy(
 	authSvc *auth.Service, taskSvc *taskservice.Service, taskRepo *sqliterepo.Repository, officeRepo *officesqlite.Repository,
 ) gateways.AuthPolicy {
 	return gateways.AuthPolicy{
-		Enforced:     func() bool { return authSvc.Mode() != auth.ModeDisabled },
-		ResolveToken: authSvc.ResolveBearer,
+		ExecutorConfiguration: taskSvc.AuthorizeExecutorConfiguration,
+		Enforced:              func() bool { return authSvc.Mode() != auth.ModeDisabled },
+		ResolveToken:          authSvc.ResolveBearer,
 		// A restored subtree-capability identity must pass the same live
 		// account gate as cookie/PAT auth: IdentityForUser fails when the
 		// account is missing or no longer active.
@@ -126,6 +131,26 @@ func gatewayAuthPolicy(
 		// The user-shell actions name a task environment and treat task_id as
 		// optional, so the dispatch backstop needs an environment-keyed check.
 		ActionEnvironment: taskSvc.AuthorizeEnvironmentAccess,
+	}
+}
+
+// organizationStatusChecker adapts the organization service to the auth gate.
+// A missing or suspended organization is a definitive rejection; any other
+// read error is unavailable and must not be reported as an invalid credential.
+// The interface keeps the mapping testable without constructing the full
+// organization service.
+func organizationStatusChecker(orgs interface {
+	Get(context.Context, string) (*org.Org, error)
+}) auth.OrgStatusChecker {
+	return func(ctx context.Context, orgID string) (bool, error) {
+		record, err := orgs.Get(ctx, orgID)
+		if errors.Is(err, org.ErrOrgNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return record.Active(), nil
 	}
 }
 
@@ -205,4 +230,16 @@ func warnIfExposedWithoutAuth(cfg *config.Config, svc *auth.Service, log *logger
 		"enable the Authentication feature toggle (Settings > System > Feature Toggles) "+
 		"or set KANDEV_FEATURES_AUTH=true",
 		zap.Strings("binds", binds))
+}
+
+func wireExecutorAdmission(authSvc *auth.Service, taskSvc *taskservice.Service, manager interface {
+	SetExecutorAdmission(func(context.Context, string, string, string) (context.Context, error))
+}) {
+	taskSvc.SetExecutorIdentityResolver(func(ctx context.Context, userID string) (authn.Identity, bool) {
+		if authSvc.Mode() == auth.ModeDisabled {
+			return authhttpmw.SyntheticIdentity(), true
+		}
+		return authSvc.IdentityForUser(ctx, userID)
+	})
+	manager.SetExecutorAdmission(taskSvc.PrepareExecutorAdmission)
 }

@@ -228,7 +228,7 @@ func (s *Service) reconcileStepCompletionSignalLocked(ctx context.Context, taskI
 			return
 		}
 		if existing, ok := models.LoadPendingStepSignal(latestSession.Metadata); ok && existing.StepID == stepID {
-			s.clearPendingStepSignal(ctx, latestSession)
+			s.clearConsumedStepSignal(ctx, latestSession)
 		}
 		return
 	}

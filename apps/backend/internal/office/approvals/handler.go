@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/office/agents"
 	"github.com/kandev/kandev/internal/office/models"
@@ -17,7 +19,7 @@ type ServiceIface interface {
 	DecideApproval(
 		ctx context.Context,
 		approvalID, status, decidedBy string,
-		actorKind models.ActorKind,
+		actorKind runsmodels.ActorKind,
 		note string,
 	) (*Approval, error)
 }
@@ -101,12 +103,12 @@ func (h *Handler) decideApproval(c *gin.Context) {
 // AC-OFFICE-RUN-CAUSATION-001.15.
 func resolveDecider(
 	c *gin.Context, caller *models.AgentInstance, approval *Approval, requestedDecidedBy string,
-) (string, models.ActorKind, error) {
+) (string, runsmodels.ActorKind, error) {
 	if caller == nil {
 		if requestedDecidedBy != "" {
-			return requestedDecidedBy, models.ActorKindSystem, nil
+			return requestedDecidedBy, runsmodels.ActorKindSystem, nil
 		}
-		return "ui", models.ActorKindSystem, nil
+		return "ui", runsmodels.ActorKindSystem, nil
 	}
 	if caller.WorkspaceID != approval.WorkspaceID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "cannot decide approvals from another workspace"})
@@ -123,5 +125,5 @@ func resolveDecider(
 		c.JSON(http.StatusForbidden, gin.H{"error": "cannot decide an approval you requested"})
 		return "", "", shared.ErrForbidden
 	}
-	return caller.ID, models.ActorKindAgent, nil
+	return caller.ID, runsmodels.ActorKindAgent, nil
 }

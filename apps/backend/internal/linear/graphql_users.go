@@ -16,10 +16,7 @@ query TeamMembers($filter: UserFilter!, $first: Int!, $after: String) {
 type usersData struct {
 	Users struct {
 		Nodes    []LinearUser `json:"nodes"`
-		PageInfo *struct {
-			HasNextPage *bool  `json:"hasNextPage"`
-			EndCursor   string `json:"endCursor"`
-		} `json:"pageInfo"`
+		PageInfo *pageInfo    `json:"pageInfo"`
 	} `json:"users"`
 }
 
@@ -38,33 +35,11 @@ func (c *GraphQLClient) ListUsers(ctx context.Context, teamKey string) ([]Linear
 		},
 		"first": linearMaxPageSize,
 	}
-	out := make([]LinearUser, 0)
-	cursors := make(map[string]struct{})
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
+	return collectPages(ctx, "users", vars, func(vars map[string]interface{}) ([]LinearUser, *pageInfo, error) {
 		var data usersData
 		if err := c.do(ctx, teamMembersQuery, vars, &data); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		page := data.Users.PageInfo
-		if page == nil || page.HasNextPage == nil {
-			return nil, fmt.Errorf("invalid Linear users pagination: missing completion metadata")
-		}
-		out = append(out, data.Users.Nodes...)
-		if !*page.HasNextPage {
-			break
-		}
-		cursor := page.EndCursor
-		if _, seen := cursors[cursor]; cursor == "" || seen {
-			return nil, fmt.Errorf("invalid Linear users pagination: empty or repeated continuation cursor")
-		}
-		cursors[cursor] = struct{}{}
-		vars["after"] = cursor
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+		return data.Users.Nodes, data.Users.PageInfo, nil
+	})
 }

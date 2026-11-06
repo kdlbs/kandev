@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import {
   approveRuntimeUpdateInOtherTab,
   createProfileWithCatalog,
+  expectWrapperRetry,
   installProfileRuntimeObservationFixture,
   observeProfileDiscoveryRequests,
   readProfileProbeEvidence,
@@ -40,6 +41,7 @@ test.describe("Profile capability discovery", () => {
       );
       await expect(testPage.getByTestId("profile-runtime-info")).toHaveCount(0);
 
+      await expect(selector).toHaveText("Mock Fast");
       const selectedBefore = await selector.textContent();
       await testPage.getByTestId("env-var-row-0").locator("input").nth(1).fill("runtime-draft");
       await expect(testPage.getByTestId("profile-capability-status")).toHaveAttribute(
@@ -113,6 +115,7 @@ test.describe("Profile capability discovery", () => {
         "ready",
         { timeout: 20_000 },
       );
+      await expect(selector).toHaveText("Mock Fast");
       const selectedBefore = await selector.textContent();
       await selector.click();
       await expect(
@@ -248,7 +251,7 @@ test.describe("Profile capability discovery", () => {
 
       await testPage.getByTestId("cli-flag-flag-0").fill("--profile-catalog=draft-cli");
       await testPage.getByTestId("profile-advanced-options-trigger").click();
-      await testPage.getByTestId("command-prefix-input").fill("mock-agent --profile-probe-wrapper");
+      await testPage.getByTestId("command-prefix-input").fill(alpha.commandPrefix);
       await testPage.getByTestId("profile-refresh-capabilities").click();
       await expect(testPage.getByTestId("profile-capability-status")).toHaveAttribute(
         "data-status",
@@ -303,6 +306,7 @@ test.describe("Profile capability discovery", () => {
       );
       expect(draftProbe?.body.profile_id).toBe(alpha.profile.id);
       expect(draftProbe?.body.launch_settings).toEqual({
+        mode: "",
         env_vars: [
           { key: "MOCK_AGENT_PROFILE_CATALOG", value: "draft-env" },
           { key: "MOCK_AGENT_PROFILE_EVIDENCE_FILE", value: alpha.evidencePath },
@@ -314,7 +318,8 @@ test.describe("Profile capability discovery", () => {
             enabled: true,
           },
         ],
-        command_prefix: "mock-agent --profile-probe-wrapper",
+        command_prefix: alpha.commandPrefix,
+        copilot_selected_plugins: [],
       });
       expect(
         requests.some(
@@ -333,6 +338,13 @@ test.describe("Profile capability discovery", () => {
             request.body.launch_settings !== undefined,
         ),
       ).toBe(true);
+
+      await expectWrapperRetry(
+        testPage,
+        alpha.commandPrefix,
+        { id: "profile-cli-draft-cli", label: "Profile CLI draft-cli" },
+        alpha.evidencePath,
+      );
 
       const stored = await apiClient.getAgentProfile(alpha.profile.id);
       expect(stored.model).toBe("profile-cli-draft-cli");

@@ -512,5 +512,12 @@
   "user": "Utilizador",
   "usesTheLocalDockerDaemonOn": "Usa o daemon local do Docker nesta máquina.",
   "value": "Valor",
-  "verifyingConnection": "A verificar a ligação..."
+  "verifyingConnection": "A verificar a ligação...",
+  "ownershipProfile": "Acesso ao perfil",
+  "ownershipExecutor": "Acesso ao executor",
+  "ownershipShared": "Partilhado",
+  "ownershipMe": "Só eu",
+  "ownershipDescription": "Apenas o proprietário e os administradores podem ver ou usar recursos privados. O acesso partilhado mantém as permissões existentes.",
+  "ownershipInherited": "O executor é privado. O proprietário e os administradores mantêm o acesso mesmo quando este perfil é partilhado.",
+  "ownershipUnavailable": "Este perfil de executor não está disponível. Escolha um perfil acessível antes de iniciar."
 }

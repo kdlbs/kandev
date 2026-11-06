@@ -4,6 +4,13 @@
 **Date:** 2026-09-24
 **Area:** backend, frontend
 
+## Policy replacement
+
+[Immediate archive removal](2026-10-17-immediate-archive-worktree-removal.md)
+replaces this decision's dirty-checkout retention policy. Lifecycle ownership,
+borrower protection, and filesystem identity boundaries remain applicable. The text below records the original
+choice and its rationale.
+
 ## Context
 
 Task archive now keeps a Git worktree when it contains tracked or untracked

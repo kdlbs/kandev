@@ -178,6 +178,16 @@ Every guarded action names a scope. These strings appear in the API and are what
 
 `GET /api/v1/authz/scopes` returns this list with descriptions.
 
+## Private compute on a shared board
+
+Workspace membership and executor access are separate. A collaborator can read
+a task's history without gaining permission to prompt its agent or open a shell
+on another user's private executor. Executor/profile owners and configuration
+administrators can use private compute, subject to the workspace permissions
+required by the action. A workspace owner alone has no private-compute bypass.
+See [Private executors and profiles](executors.md#private-executors-and-profiles)
+for ownership controls and inherited restrictions.
+
 ## Current limits
 
 - **"Organization" means one tenant.** With the Organizations feature off there is exactly one, implicitly, and its root unit covers everyone on the server. To run one server for several independent teams or customers, see [Organizations](organizations.md).

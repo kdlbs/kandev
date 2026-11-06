@@ -38,6 +38,7 @@ change Git commands that an agent runs after launch.
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.12` | [Pull-request base reconciliation](#pull-request-base-reconciliation) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13` | [Missing-base fallback](#missing-base-fallback) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.14` | [Safe refresh diagnostics](#safe-refresh-diagnostics) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.24` | [Required refresh verification cause](#required-refresh-verification-cause) |
 
 ## Components and responsibilities
 
@@ -539,6 +540,41 @@ Preserve context errors and current progress/error payloads. Correct the
 No new logging configuration, subprocess, retry, or persistence is required.
 
 Delivery: [Recovery diagnostic fixes](../../../plans/recovery-diagnostics/plan.md).
+
+#### Invalid local ref diagnostics
+
+Under AC .14, classify fatal `bad object refs/...` and `bad ref refs/...` lines
+as `invalid_local_ref`. Emit only: "Git reported an invalid local reference.
+Inspect repository references before retrying." Ignore incidental URL or branch
+text. Cancellation and timeout win. Missing blobs, arbitrary object IDs, and
+`did not send all necessary objects` alone remain unknown.
+
+Preserve refresh policy and error identities. Add no repair or Git command.
+Test required and best-effort refresh with an unrelated empty fixture ref,
+negative matches, secret exclusion, and context precedence.
+Delivery: [Invalid Git ref diagnostics](../../../plans/git-invalid-ref-diagnostics/plan.md).
+
+### Required refresh verification cause
+
+AC .24 extends the same diagnostics contract to the required checkout-branch
+refresh. `fetchBranchToLocalWithPolicy` retries a fetch that Git refused
+because the branch is already checked out, fetching the branch as a
+remote-tracking ref instead. When that retry still cannot verify the refreshed
+ref and the refresh is required, the manager returns a generic command-failure
+error. The `FetchBranchResult` already carries the user-facing `Warning` and the
+diagnostic `WarningDetail`, and the best-effort path returns them to the caller.
+
+The required path shall reuse those values instead of discarding them. Resolve
+the detail as `WarningDetail`, falling back to `Warning` when the detail is
+empty. Emit one structured warning that records the branch and the resolved
+detail, and carry the resolved detail in the returned error before
+`ErrGitCommandFailed`. The warning records no raw command output. The existing
+suppression of a result whose warning is empty, the non-required result, and
+every fallback decision remain unchanged. On this path the detail is the fixed
+probe string from `resolveRetryStartPoint`; it is not a raw credential or remote
+URL.
+
+Delivery: [Fail-closed worktree refresh](../../../plans/worktree-refresh-fail-closed/plan.md).
 
 ## Related decisions
 

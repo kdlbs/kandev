@@ -119,6 +119,14 @@ func (h *Handler) listReachability(ctx context.Context) ([]reachabilitypkg.Recor
 	interval := h.reachabilityIntervalSeconds()
 	dtos := make([]reachabilitypkg.RecordDTO, 0, len(sshExecutors))
 	for _, executor := range sshExecutors {
+		if executor.OwnerUserID != "" {
+			if h.executorFetcher == nil {
+				continue
+			}
+			if _, err := h.executorFetcher.GetExecutor(ctx, executor.ID); err != nil {
+				continue
+			}
+		}
 		dtos = append(dtos, buildReachabilityDTOFromRecord(executor, byExecutor[executor.ID], interval))
 	}
 	return dtos, http.StatusOK, nil

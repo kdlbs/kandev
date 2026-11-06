@@ -389,7 +389,7 @@ describe("TaskArchiveConfirmation cleanup copy", () => {
       screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).querySelectorAll('[role="listitem"]'),
     ).toHaveLength(2);
     expect(screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).textContent).toMatch(
-      /Git changes stays until it is clean/i,
+      /local changes are deleted on archive/i,
     );
     expect(screen.getByTestId(CLEANUP_NOTES_TEST_ID).textContent).toMatch(
       /Unpublished local branches remain available/i,
@@ -405,7 +405,7 @@ describe("TaskArchiveConfirmation cleanup copy", () => {
 
     const sheet = await screen.findByRole("dialog", { name: /Archive task/ });
     expect(within(sheet).getByTestId(CLEANUP_EFFECTS_TEST_ID).textContent).toMatch(
-      /Git changes stays until it is clean/i,
+      /local changes are deleted on archive/i,
     );
     expect(within(sheet).getByTestId(CLEANUP_NOTES_TEST_ID).textContent).toMatch(
       /Unpublished local branches remain available/i,

@@ -5,11 +5,85 @@ import {
   clickAgentMessageHighlight,
   expectAgentMessageHighlight,
   openSeededAgentReply,
+  openSeededWaitingAgentReply,
   openSeededQuickChatReply,
   selectAgentReplyText,
 } from "./agent-message-comments-helpers";
 
 test.describe("Agent message comments", () => {
+  for (const surface of ["Task Chat", "Quick Chat"] as const) {
+    // @covers AC-UI-AGENT-MESSAGE-COMMENTS-001.3
+    test(`shows the comment action after a drag ends in ${surface} message padding`, async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      const openReply =
+        surface === "Task Chat" ? openSeededWaitingAgentReply : openSeededQuickChatReply;
+      const { body } = await openReply(
+        testPage,
+        apiClient,
+        seedData,
+        `${surface} selection padding`,
+      );
+      await body.scrollIntoViewIfNeeded();
+      const selectedText = "The settled answer";
+      const points = await body.evaluate((element, quote) => {
+        const node = element.querySelector("p")!.firstChild!;
+        const range = document.createRange();
+        range.setStart(node, quote.length);
+        range.collapse(true);
+        const caret = range.getBoundingClientRect();
+        return {
+          startX: caret.x,
+          endX: element.getBoundingClientRect().left - 4,
+          y: caret.y + caret.height / 2,
+        };
+      }, selectedText);
+      await testPage.mouse.move(points.startX, points.y);
+      await testPage.mouse.down();
+      await testPage.mouse.move(points.endX, points.y, { steps: 12 });
+      await testPage.mouse.up();
+
+      expect(await testPage.evaluate(() => window.getSelection()?.toString())).toBe(selectedText);
+      const trigger = testPage.getByTestId("agent-message-comment-trigger");
+      await expect(trigger).toBeVisible();
+      await trigger.click();
+      const popover = testPage.getByTestId("agent-message-comment-popover");
+      await expect(popover).toBeVisible();
+      await expect(popover).toContainText(selectedText);
+    });
+  }
+
+  test("keeps the comment action dismissed after an unrelated selection-preserving click", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { body } = await openSeededWaitingAgentReply(
+      testPage,
+      apiClient,
+      seedData,
+      "Selection dismissal",
+    );
+    // Model a toolbar control that preserves the native selection on mousedown.
+    await body.evaluate((element) => {
+      const button = document.createElement("button");
+      button.textContent = "Unrelated selection-preserving control";
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      element.parentElement!.append(button);
+    });
+    await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
+    const trigger = testPage.getByTestId("agent-message-comment-trigger");
+    await expect(trigger).toBeVisible();
+    await testPage.getByRole("button", { name: "Unrelated selection-preserving control" }).click();
+
+    expect(await testPage.evaluate(() => window.getSelection()?.toString())).toBe(
+      SELECTED_REPLY_TEXT,
+    );
+    await expect(trigger).not.toBeVisible();
+  });
+
   test("adds pending context and restores the highlight after reload", async ({
     testPage,
     apiClient,

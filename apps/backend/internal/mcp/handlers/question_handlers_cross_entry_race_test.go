@@ -36,10 +36,27 @@ func (noopBroadcaster) BroadcastToSession(string, *ws.Message) {}
 // Resolver.ResolveBundle directly twice, which is exactly the shared
 // plumbing this test needs to exercise from both call sites.
 func TestAnswerQuestion_RESTvsMCP_OnlyOneClaims(t *testing.T) {
+	testAnswerQuestionCrossEntry(t, false)
+}
+
+func TestQuestionImagesCrossEntryOnlyOneClaims(t *testing.T) {
+	testAnswerQuestionCrossEntry(t, true)
+}
+
+func testAnswerQuestionCrossEntry(t *testing.T, withImages bool) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
 	seedBundle(t, ctx, svc, repo, "pending-race-1")
+	if withImages {
+		messages, err := repo.FindMessagesByPendingID(ctx, "pending-race-1")
+		require.NoError(t, err)
+		for _, message := range messages {
+			message.Metadata["question"].(map[string]any)["images"] = []any{map[string]any{"id": "shared", "path": "screen.png", "alt": "Screen"}}
+			require.NoError(t, repo.UpdateMessage(ctx, message))
+		}
+	}
 
 	store := clarification.NewStore(time.Minute)
 	resolver := newTestResolver(t, store, repo, svc)

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ExecutorOwnerChoice } from "./executor-ownership";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import {
@@ -45,11 +46,15 @@ function ProfileCreationFields({
   errors,
   onNameChange,
   onValueChange,
+  owner,
+  onOwnerChange,
 }: {
   provider?: ExecutorProvider;
   fields: ReturnType<typeof parseExecutorProfileSchema>["fields"];
   supported: boolean;
   name: string;
+  owner: string;
+  onOwnerChange: (owner: string) => void;
   values: Record<string, string>;
   errors: ReturnType<typeof validateExecutorProfileValues>;
   onNameChange: (name: string) => void;
@@ -74,6 +79,7 @@ function ProfileCreationFields({
         className="min-h-0 flex-1 space-y-5 overflow-y-auto px-1 py-2"
         data-testid="plugin-executor-profile-create-form"
       >
+        <ExecutorOwnerChoice value={owner} onChange={onOwnerChange} creating baseline="" />
         {retentionText && <p className="text-sm text-muted-foreground">{retentionText}</p>}
         {unavailableReason && (
           <p
@@ -161,6 +167,7 @@ export function PluginExecutorProfileDialog({
     [provider?.profile_schema],
   );
   const [name, setName] = useState("");
+  const [owner, setOwner] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState<ReturnType<typeof validateExecutorProfileValues>>(
     {},
@@ -174,6 +181,7 @@ export function PluginExecutorProfileDialog({
   useEffect(() => {
     if (!open) return;
     setName("");
+    setOwner("");
     setValues(Object.fromEntries(parsed.fields.map((field) => [field.name, ""])));
     setFieldErrors({});
     setError(null);
@@ -187,6 +195,7 @@ export function PluginExecutorProfileDialog({
     try {
       const profile = await createExecutorProfile(executorId, {
         name: name.trim(),
+        ...(owner ? { owner_user_id: owner } : {}),
         config: serializeExecutorProfileValues(parsed.fields, values),
       });
       onOpenChange(false);
@@ -202,6 +211,8 @@ export function PluginExecutorProfileDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden pb-[env(safe-area-inset-bottom,0px)] sm:max-w-2xl">
         <ProfileCreationFields
+          owner={owner}
+          onOwnerChange={setOwner}
           provider={provider}
           fields={parsed.fields}
           supported={parsed.supported}

@@ -45,6 +45,20 @@ Kandev will serve modern and legacy MCP from the existing `/mcp` routes.
 
 ## Consequences
 
+### Notification compatibility amendment (2026-10-05)
+
+The shared HTTP route may supplement an absent `params._meta` on a valid
+notification with no `id` member, using a supported modern protocol header.
+This addresses clients that send roots-change notifications while restoring
+conversations. The SDK still owns transport checks, notification dispatch,
+and every request validation rule. Explicit metadata is never repaired.
+
+This is a narrow exception to the no-local-shim boundary, not a protocol fork.
+Returning 202 before the SDK was rejected because it would bypass transport
+protections. Replacing or upgrading the SDK is unnecessary for this correction.
+The [compatibility design](../specs/agents/system-design/mcp-protocol-compatibility.md#header-only-notifications)
+owns the exact eligibility and preservation rules.
+
 Modern clients can select `2026-07-28` without a new Kandev route. Legacy
 clients keep working on the same server and through SSE. Kandev maintains one
 tool and authorization implementation.

@@ -50,7 +50,7 @@ func (in *inspection) cleanupMutations(ctx context.Context, job row, at time.Tim
 	if len(existing) != 0 {
 		return nil, errors.New("cleanup successor already exists")
 	}
-	return []mutation{{"task_resource_cleanup_jobs", stringValue(job, "id"), job, predecessor}, {"task_resource_cleanup_jobs", id, nil, successor}}, nil
+	return []mutation{{Table: cleanupJobTable, ID: stringValue(job, "id"), Before: job, After: predecessor}, {Table: cleanupJobTable, ID: id, After: successor}}, nil
 }
 
 func (in *inspection) successorSnapshot(ctx context.Context, job row, at string) (string, error) {

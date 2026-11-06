@@ -119,7 +119,7 @@ func TestExecuteQueuedMessage_DoesNotPublishVisibleEffectsForReplacedIdentity(t 
 	}
 	lock, release := svc.acquireCancelInFlightGuard(identity.SessionID)
 	lock.Lock()
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, nil)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, queued.ID, nil)
 	lock.Unlock()
 	release()
 

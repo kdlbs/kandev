@@ -876,13 +876,14 @@ func serializeTaskWorkspaceFolders(folders []*models.TaskWorkspaceFolder) []map[
 	out := make([]map[string]interface{}, 0, len(folders))
 	for _, folder := range folders {
 		out = append(out, map[string]interface{}{
-			"id":           folder.ID,
-			"task_id":      folder.TaskID,
-			"local_path":   folder.LocalPath,
-			"display_name": folder.DisplayName,
-			"position":     folder.Position,
-			"created_at":   folder.CreatedAt.Format(time.RFC3339),
-			"updated_at":   folder.UpdatedAt.Format(time.RFC3339),
+			"id":                      folder.ID,
+			"task_id":                 folder.TaskID,
+			"local_path":              folder.LocalPath,
+			"display_name":            folder.DisplayName,
+			"workspace_relative_path": folder.WorkspaceRelativePath,
+			"position":                folder.Position,
+			"created_at":              folder.CreatedAt.Format(time.RFC3339),
+			"updated_at":              folder.UpdatedAt.Format(time.RFC3339),
 		})
 	}
 	return out
@@ -1003,15 +1004,16 @@ func (s *Service) publishExecutorEvent(ctx context.Context, eventType string, ex
 	}
 
 	data := map[string]interface{}{
-		"id":         executor.ID,
-		"name":       executor.Name,
-		"type":       executor.Type,
-		"status":     executor.Status,
-		"is_system":  executor.IsSystem,
-		"resumable":  executor.Resumable,
-		"config":     executor.Config,
-		"created_at": executor.CreatedAt.Format(time.RFC3339),
-		"updated_at": executor.UpdatedAt.Format(time.RFC3339),
+		"owner_user_id": executor.OwnerUserID,
+		"id":            executor.ID,
+		"name":          executor.Name,
+		"type":          executor.Type,
+		"status":        executor.Status,
+		"is_system":     executor.IsSystem,
+		"resumable":     executor.Resumable,
+		"config":        executor.Config,
+		"created_at":    executor.CreatedAt.Format(time.RFC3339),
+		"updated_at":    executor.UpdatedAt.Format(time.RFC3339),
 	}
 
 	s.publishEventToBus(ctx, eventType, "executor", executor.ID, data)
@@ -1027,6 +1029,7 @@ func (s *Service) publishExecutorProfileEvent(ctx context.Context, eventType str
 		provider = executor.Provider
 	}
 	data := map[string]interface{}{
+		"owner_user_id":  profile.OwnerUserID,
 		"id":             profile.ID,
 		"executor_id":    profile.ExecutorID,
 		"name":           profile.Name,

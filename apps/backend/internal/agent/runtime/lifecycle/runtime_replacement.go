@@ -152,7 +152,9 @@ func classifyRuntimeLossStatus(status v1.AgentStatus, submissionID string) (bool
 		return true, submissionID != ""
 	case v1.AgentStatusRunning:
 		return true, true
-	case v1.AgentStatusReady:
+	case v1.AgentStatusReady, v1.AgentStatusFailed:
+		// Local cancellation can fail the execution before durable settlement.
+		// Runtime loss must still publish uncertainty for its pending submission.
 		return submissionID != "", submissionID != ""
 	default:
 		return false, false

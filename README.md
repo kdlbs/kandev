@@ -55,7 +55,7 @@ Release bundles also include `agentctl` helpers for task environments.
 - **Multi-repository tasks** - Span a single task across multiple repositories, with one worktree per repo, per-repo branches, per-repo PRs, and per-repo grouping in the Changes panel and review dialog
 - **Flexible runtimes** - Run agents as local processes, in isolated Docker containers, on remote servers via SSH, or in cloud executors like sprites.dev
 - **Runtime settings** - Executor profiles, secrets, custom prompts, utility agents, and resource metrics are configurable from Settings
-- **Task-agent MCP** - Agents can create subtasks, target sibling repos, attach extra branches for multiple PRs, message other tasks, read conversations, and inspect related tasks
+- **Task-agent MCP** - Agents can create subtasks, target sibling repos, attach extra branches for multiple PRs, message other tasks, read conversations, and inspect related tasks. Choose [native tool packages](docs/public/builtin-mcp-packages.md), including explicit Configuration access for a task.
 - **External MCP** - Manage Kandev from outside coding agents over streamable HTTP or SSE, with copyable config snippets for popular agent CLIs
 - **Plugin marketplace and management** - Browse, install, update, enable, disable, and configure plugins from Settings, including MCP Explorer and the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket)
 - **Workflow portability** - Export and import workflows as portable YAML across workspaces or Kandev installs
@@ -67,7 +67,7 @@ See [docs/features.md](docs/features.md) for the full feature inventory, includi
 
 ### In progress: Office mode
 
-We're working on **Office mode**, a feature-flagged autonomy layer for persistent agent teams. The direction is agent instances with roles and permissions, dashboards, inbox/approvals, routines, task delegation, skills, memory, cost tracking, budgets, and workspace config sync. We'll document Office as a supported feature after it is live.
+**Office mode** is an experimental autonomy layer for persistent agent teams, disabled by default in production. It includes agent roles and permissions, dashboards, inbox/approvals, routines, task delegation, skills, memory, cost tracking, budgets, and workspace config sync. The [Office guide](docs/public/office.md) covers explicit enablement, setup, and evaluation of the current implementation; Office is not yet a stable production contract.
 
 ## Integrations
 
@@ -138,7 +138,7 @@ Kandev can run any agent CLI as a TUI inside a terminal, even when it does not s
 | **SSH** | Runs the agent on a remote server over SSH |
 | **Sprites** | Runs the agent in a remote cloud environment via [sprites.dev](https://sprites.dev) |
 
-Executors support profiles for reusable runtime configuration: prepare scripts, environment variables, credentials, and settings. Worktree-based tasks can also attach multiple repositories or multiple branches from the same repository, which lets one task produce several PRs when the work needs it.
+Executors support profiles for reusable runtime configuration: prepare scripts, environment variables, credentials, and settings. On shared instances, [private executor ownership](docs/public/executors.md#private-executors-and-profiles) limits compute and profile access to the owner and configuration administrators. Worktree-based tasks can also attach multiple repositories or multiple branches from the same repository, which lets one task produce several PRs when the work needs it.
 
 ## Quick Start
 

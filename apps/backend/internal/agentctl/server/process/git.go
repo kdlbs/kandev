@@ -92,6 +92,11 @@ type GitOperator struct {
 	mu         sync.Mutex // Prevents concurrent git operations
 	inProgress bool
 	currentOp  string
+
+	// turnCheckpointBindingMu guards the live generated-branch identity that
+	// turn capture and verified title renames share for this checkout.
+	turnCheckpointBindingMu sync.Mutex
+	turnCheckpointBinding   turnCheckpointBindingState
 }
 
 // NewGitOperator creates a new GitOperator for the given workspace directory.
@@ -277,6 +282,9 @@ func gitOperatorTimeout(args []string) time.Duration {
 func validateGitCommandArgs(args []string) error {
 	// Validate that user-controlled arguments don't introduce command injection risks.
 	// exec.CommandContext does not use a shell, but git still interprets unsafe flags.
+	if isAcceptedTurnCheckpointDelete(args) {
+		return nil
+	}
 	skipNextArg := false
 	afterDoubleDash := false
 	for i, arg := range args {
@@ -292,6 +300,19 @@ func validateGitCommandArgs(args []string) error {
 		afterDoubleDash = separator
 	}
 	return nil
+}
+
+func isAcceptedTurnCheckpointDelete(args []string) bool {
+	if len(args) != 4 || args[0] != "update-ref" || args[1] != "-d" {
+		return false
+	}
+	parts := strings.Split(args[2], "/")
+	if len(parts) != 6 || parts[0] != "refs" || parts[1] != "kandev" || parts[2] != "turn-changes" ||
+		!validTurnChangeIdentity(parts[3]) || !validTurnChangeIdentity(parts[4]) ||
+		(parts[5] != "start" && parts[5] != "end") {
+		return false
+	}
+	return securityutil.LooksLikeCommitSHA(args[3])
 }
 
 func validateGitCommandArgument(arg string) (skipNextArg, separator bool, err error) {
@@ -927,6 +948,10 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool,
 
 	// Stage all changes if requested
 	if stageAll {
+		if err := g.checkAttachedRepositoryStaging(ctx); err != nil {
+			result.Error = fmt.Sprintf("failed to protect attached repositories: %s", err.Error())
+			return result, nil
+		}
 		stageOutput, err := g.runGitCommand(ctx, "add", "-A")
 		if err != nil {
 			result.Error = fmt.Sprintf("failed to stage changes: %s", err.Error())
@@ -934,6 +959,10 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool,
 			return result, nil
 		}
 		result.Output = stageOutput
+		if err := g.finishAttachedRepositoryStaging(ctx); err != nil {
+			result.Error = err.Error()
+			return result, nil
+		}
 	}
 
 	// Create the commit (with --amend if requested)
@@ -956,7 +985,10 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool,
 	if g.workspaceTracker != nil {
 		// Get commit details
 		commitSHA, _ := g.runGitCommand(ctx, "rev-parse", "HEAD")
-		parentSHA, _ := g.runGitCommand(ctx, "rev-parse", "HEAD~1")
+		parentSHA, parentErr := g.runGitCommand(ctx, "show", "-s", "--format=%P", "HEAD")
+		if parentErr == nil {
+			parentSHA, _, _ = strings.Cut(strings.TrimSpace(parentSHA), " ")
+		}
 
 		// Get commit info (author name|author email)
 		authorInfo, _ := g.runGitCommand(ctx, "show", "-s", "--format=%an|%ae", "HEAD")
@@ -1006,6 +1038,10 @@ func (g *GitOperator) Stage(ctx context.Context, paths []string) (*GitOperationR
 	result := &GitOperationResult{
 		Operation: "stage",
 	}
+	if err := g.checkAttachedRepositoryStaging(ctx); err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
 
 	var args []string
 	var environmentOverrides map[string]string
@@ -1025,6 +1061,10 @@ func (g *GitOperator) Stage(ctx context.Context, paths []string) (*GitOperationR
 	result.Output = output
 
 	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+	if err := g.finishAttachedRepositoryStaging(ctx); err != nil {
 		result.Error = err.Error()
 		return result, nil
 	}
@@ -1224,6 +1264,10 @@ func (g *GitOperator) RenameBranch(ctx context.Context, newName string) (*GitOpe
 	}
 
 	result.Success = true
+	// A generic rename is not the verified title handoff. It must not carry
+	// branch-binding continuity to the new name, and it invalidates any binding
+	// still attached to the old checkout identity.
+	g.clearTurnCheckpointBinding()
 	g.logger.Info("branch renamed",
 		zap.String("from", currentBranch),
 		zap.String("to", newName))

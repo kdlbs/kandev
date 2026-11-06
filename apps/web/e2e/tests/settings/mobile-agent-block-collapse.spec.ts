@@ -15,22 +15,22 @@ test.describe("Agent block collapse on mobile", () => {
     // it exists in the DOM only after the discovery response lands (before
     // that, cards render from the boot payload as orphans whose keys change
     // when discovery resolves, remounting the card mid-interaction).
-    await testPage.route("**/api/v1/agents/discovery", async (route) => {
-      const response = await route.fetch();
-      const body = await response.json();
-      body.agents = [
-        ...(body.agents ?? []),
-        {
-          name: ZERO_PROFILE_AGENT,
-          supports_mcp: false,
-          mcp_config_path: null,
-          installation_paths: [],
-          available: true,
-          matched_path: null,
-        },
-      ];
-      await route.fulfill({ response, json: body });
-    });
+    // A reload must not leave a proxy fetch pending in the route handler.
+    const discovery = await apiClient.rawRequest("GET", "/api/v1/agents/discovery");
+    expect(discovery.ok).toBe(true);
+    const body = await discovery.json();
+    body.agents = [
+      ...(body.agents ?? []),
+      {
+        name: ZERO_PROFILE_AGENT,
+        supports_mcp: false,
+        mcp_config_path: null,
+        installation_paths: [],
+        available: true,
+        matched_path: null,
+      },
+    ];
+    await testPage.route("**/api/v1/agents/discovery", (route) => route.fulfill({ json: body }));
 
     try {
       const { agents } = await apiClient.listAgents();

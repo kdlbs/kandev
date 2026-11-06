@@ -32,6 +32,9 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 	if err := s.initSchema(); err != nil {
 		return nil, fmt.Errorf("sentry schema init: %w", err)
 	}
+	if err := s.migrateExecutorCreators(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 

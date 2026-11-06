@@ -119,7 +119,7 @@ func TestExecuteQueuedMessageDrainsNextMessageAfterCompletion(t *testing.T) {
 	queued, ok, _, err := svc.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
 	require.NoError(t, err)
 	require.True(t, ok)
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, queued.ID, queued)
 
 	svc.executeQueuedMessageWithReservation("session-1", queued, reservation)
 

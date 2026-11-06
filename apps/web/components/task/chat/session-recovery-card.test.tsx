@@ -87,12 +87,8 @@ describe("composer recovery ownership", () => {
     ).toBeNull();
     expect(screen.getByTestId(FRESH_BUTTON)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "More options" })).toBeNull();
-    expect(screen.getByTestId("session-recovery-history").textContent).toContain(
-      "This failure is explained in the recovery card above.",
-    );
-    expect(screen.getByTestId("session-recovery-history").textContent).not.toContain(
-      CONNECTION_LOST,
-    );
+    expect(screen.getByTestId("session-recovery-history").textContent).toContain(CONNECTION_LOST);
+    expect(screen.getByTestId("session-recovery-history-details")).toBeTruthy();
     fireEvent.click(screen.getByTestId(RESUME_BUTTON));
     expect(resume).toHaveBeenCalledWith("resume");
     expect(document.body.textContent).not.toContain("hidden-fixture-value");

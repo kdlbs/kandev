@@ -61,6 +61,9 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 	if err != nil {
 		return nil, err
 	}
+	if session != nil {
+		ctx = models.WithExecutorActor(ctx, session.ExecutorActorUserID)
+	}
 
 	workspaceID, err := r.resolvePrincipalWorkspace(ctx, task)
 	if err != nil {

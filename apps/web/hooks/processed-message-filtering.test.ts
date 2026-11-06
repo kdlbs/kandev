@@ -9,6 +9,7 @@ import {
   isSelectionFailureRecoveryMetadata,
   isSuccessfulScriptExecutionMetadata,
 } from "./processed-message-filtering";
+import visibleMessageTypes from "@kandev/types/unread-message-visible-types.json";
 
 const ERROR_AT = "2026-05-30T00:00:00Z";
 const AFTER = "2026-05-30T00:01:00Z";
@@ -556,5 +557,80 @@ describe("hasFailedAgentBootAfter", () => {
   it("ignores non-boot scripts that failed after the failure", () => {
     const setup = bootMessage(AFTER, { script_type: "setup", status: "failed" });
     expect(hasFailedAgentBootAfter([setup], ERROR_AT)).toBe(false);
+  });
+});
+
+describe("filterVisibleMessages permission presentation", () => {
+  it("hides an automatic standalone permission row", () => {
+    const permission = baseMessage({
+      id: "perm-auto",
+      type: "permission_request",
+      metadata: { status: "pending", permission_presentation: "automatic" },
+    });
+
+    expect(filterPlanMessages([permission])).toEqual([]);
+  });
+
+  it("keeps an unavailable row so its feedback is visible", () => {
+    const permission = baseMessage({
+      id: "perm-unavailable",
+      type: "permission_request",
+      metadata: { status: "pending", permission_presentation: "unavailable" },
+    });
+
+    expect(filterPlanMessages([permission]).map((message) => message.id)).toEqual([
+      "perm-unavailable",
+    ]);
+  });
+
+  it("keeps an interactive row actionable", () => {
+    const permission = baseMessage({
+      id: "perm-interactive",
+      type: "permission_request",
+      metadata: { status: "pending", permission_presentation: "interactive" },
+    });
+
+    expect(filterPlanMessages([permission]).map((message) => message.id)).toEqual([
+      "perm-interactive",
+    ]);
+  });
+
+  it("keeps the tool row when an attached unavailable permission is deduplicated", () => {
+    const toolCall = baseMessage({
+      id: "tool-1",
+      type: "tool_call",
+      metadata: { tool_call_id: "call-1", status: "complete" },
+    });
+    const permission = baseMessage({
+      id: "perm-attached",
+      type: "permission_request",
+      metadata: {
+        status: "pending",
+        tool_call_id: "call-1",
+        permission_presentation: "unavailable",
+      },
+    });
+
+    expect(
+      filterVisibleMessages([toolCall, permission], new Set(["call-1"]), new Set()).map(
+        (message) => message.id,
+      ),
+    ).toEqual(["tool-1"]);
+  });
+});
+
+describe("filterVisibleMessages shared visible-type manifest", () => {
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.10
+  it.each(visibleMessageTypes)("renders a %s message as visible", (type) => {
+    const message = baseMessage({ id: `visible-${type}`, type: type as Message["type"] });
+    expect(
+      filterVisibleMessages([message], new Set<string>(), new Set<string>()).map((m) => m.id),
+    ).toEqual([`visible-${type}`]);
+  });
+
+  it("hides a log message, which the manifest does not list", () => {
+    // Literal type: permission-style types are exempt from the manifest by design.
+    const message = baseMessage({ id: "hidden-log", type: "log" as Message["type"] });
+    expect(filterVisibleMessages([message], new Set<string>(), new Set<string>())).toEqual([]);
   });
 });

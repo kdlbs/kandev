@@ -211,7 +211,7 @@ func (s *Service) handleGitLabNewReviewMR(ctx context.Context, event *bus.Event)
 	if src == nil {
 		src = NewGitLabReviewWatcherSource(nil, s.logger)
 	}
-	s.dispatchWatcherEvent(ctx, src, evt,
+	s.dispatchOwnedWatcherEvent(ctx, src, evt, evt.CreatedByUserID,
 		zap.String("review_watch_id", evt.ReviewWatchID),
 		zap.String("project", evt.MR.ProjectPath),
 		zap.Int("iid", evt.MR.IID))
@@ -232,7 +232,7 @@ func (s *Service) handleGitLabNewIssue(ctx context.Context, event *bus.Event) er
 	if src == nil {
 		src = NewGitLabIssueWatcherSource(nil, s.logger)
 	}
-	s.dispatchWatcherEvent(ctx, src, evt,
+	s.dispatchOwnedWatcherEvent(ctx, src, evt, evt.CreatedByUserID,
 		zap.String("issue_watch_id", evt.IssueWatchID),
 		zap.String("project", evt.Issue.ProjectPath),
 		zap.Int("iid", evt.Issue.IID))

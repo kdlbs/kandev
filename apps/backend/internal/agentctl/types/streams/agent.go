@@ -1,5 +1,11 @@
 package streams
 
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/common/modelcatalog"
+)
+
 // AgentEvent type constants define the types of events streamed from the agent.
 const (
 	// EventTypeMessageChunk indicates streaming text content from the agent.
@@ -13,6 +19,9 @@ const (
 
 	// EventTypeToolUpdate indicates a tool status update (running, completed, etc.).
 	EventTypeToolUpdate = "tool_update"
+
+	// EventTypeShellOutputUpdate carries a versioned bounded shell output patch.
+	EventTypeShellOutputUpdate = "shell_output_update"
 
 	// EventTypePlan indicates agent plan/task list updates.
 	EventTypePlan = "plan"
@@ -77,6 +86,10 @@ const (
 	// EventTypeSessionInfo indicates ACP session metadata such as title changed.
 	EventTypeSessionInfo = "session_info"
 
+	// EventTypePromptSuggestion carries the agent's native prediction of the
+	// user's next prompt, emitted after a turn completes. Text holds it.
+	EventTypePromptSuggestion = "prompt_suggestion"
+
 	// EventTypeResponseAttemptReset indicates that the provider abandoned its
 	// current response attempt and will continue the active prompt with a new one.
 	EventTypeResponseAttemptReset = "response_attempt_reset"
@@ -104,6 +117,11 @@ const (
 	// measurement. It is separate from turn completion because one turn can
 	// contain multiple model responses.
 	EventTypeUsageObservation = "usage_observation"
+
+	// EventTypeContextCompactionObservation carries provider-attributed native
+	// compaction evidence. The authoritative count is committed only by durable
+	// canonical projection.
+	EventTypeContextCompactionObservation = "context_compaction_observation"
 
 	// EventTypeBackgroundWorkUpdated carries an update for an agent background workload.
 	EventTypeBackgroundWorkUpdated = "background_work_updated"
@@ -196,6 +214,11 @@ type AgentEvent struct {
 	// when agentctl can establish that association.
 	DeliverySubmissionID string `json:"delivery_submission_id,omitempty"`
 
+	// DeliveryEventID is a stable producer identity for an observation that
+	// can be retried after a lost acknowledgement. The journal stores it
+	// beside the committed event so a retry cannot project twice.
+	DeliveryEventID string `json:"delivery_event_id,omitempty"`
+
 	// OperationID identifies an operation when the agent exposes an operation ID.
 	// It may be empty when no operation ID is available.
 	OperationID string `json:"operation_id,omitempty"`
@@ -222,6 +245,20 @@ type AgentEvent struct {
 	// PromptGeneration -- travels on both observations and survives a
 	// restart that resets the backend's own in-memory generation counter.
 	ControlTurnID int64 `json:"control_turn_id,omitempty"`
+
+	// Recovered marks an event re-applied from a retained outcome or durable
+	// journal. It is backend context and never part of the wire payload.
+	Recovered bool `json:"-"`
+
+	// ActivityAt is the observation time retained with a terminal outcome.
+	// Recovery uses it instead of treating replay as newly observed activity.
+	ActivityAt *time.Time `json:"activity_at,omitempty"`
+	// RecoveredActivityAt is replay context, excluded from durable payload identity.
+	RecoveredActivityAt *time.Time `json:"-"`
+
+	// CanonicalMessageBaseID is the stable identity before segment-boundary
+	// resolution. Retries always derive from this value, never a resolved ID.
+	CanonicalMessageBaseID string `json:"canonical_message_base_id,omitempty"`
 
 	// CanonicalMessageID is assigned by the backend inbox projector for output
 	// events. It is stable across reconnects and is not a transport cursor.
@@ -277,10 +314,26 @@ type AgentEvent struct {
 
 	// ToolStatus indicates the current status: "started", "running", "completed", "error".
 	ToolStatus string `json:"tool_status,omitempty"`
+	// ToolStatusMissing retains ACP wire provenance. It crosses the agentctl
+	// stream so the backend lifecycle boundary can use the same evidence as the
+	// local turn finalizer when deciding whether an update starts a turn.
+	ToolStatusMissing bool `json:"tool_status_missing,omitempty"`
+
+	// ToolOutputBytes preserves legacy v1 receipt serialization, including explicit zero.
+	// New producers leave this read-compatibility field unset.
+	ToolOutputBytes *uint64 `json:"tool_output_bytes,omitempty"`
 
 	// NormalizedPayload contains the normalized tool data as a typed discriminated union.
 	// Provides typed access to tool parameters based on the Kind field.
 	NormalizedPayload *NormalizedPayload `json:"normalized,omitempty"`
+
+	// ShellOutput carries compact output only on a negotiated delivery stream.
+	ShellOutput *ShellOutputPatch `json:"shell_output,omitempty"`
+
+	// ShellOutputEligible is adapter-owned provenance for known output-only carriers.
+	ShellOutputEligible bool `json:"-"`
+	// ShellOutputHasContent preserves substantive output after duplicate carriers are removed.
+	ShellOutputHasContent bool `json:"shell_output_has_content,omitempty"`
 
 	// Diff contains unified diff content for file changes.
 	// Populated when tools modify files, providing the aggregated diff.
@@ -304,6 +357,10 @@ type AgentEvent struct {
 	// Error contains error message when Type is "error".
 	Error string `json:"error,omitempty"`
 
+	// Storage carries host-owned storage evidence for this error. It is never
+	// populated from provider prose or tool output.
+	Storage *DeliveryStorageDiagnostic `json:"storage,omitempty"`
+
 	// ProviderError contains a validated, sanitized provider diagnostic for a
 	// terminal error. Raw stderr never crosses this boundary.
 	ProviderError *ProviderError `json:"provider_error,omitempty"`
@@ -315,6 +372,10 @@ type AgentEvent struct {
 	// MCPAttachmentAttempt starts a new backend-owned evidence timeline. It is
 	// present only on the first EventTypeMCPAttachment event for an attempt.
 	MCPAttachmentAttempt *MCPAttachmentAttempt `json:"mcp_attachment_attempt,omitempty"`
+
+	// ContextCompaction carries validated native compaction evidence when Type
+	// is EventTypeContextCompactionObservation.
+	ContextCompaction *ContextCompactionObservation `json:"context_compaction,omitempty"`
 
 	// --- Permission request fields (for "permission_request" type) ---
 	// RequestID is the Kandev-generated identity for this exact request
@@ -329,6 +390,11 @@ type AgentEvent struct {
 
 	// PermissionOptions contains the available permission choices.
 	PermissionOptions []PermissionOption `json:"permission_options,omitempty"`
+
+	// PermissionHumanInput marks a provider-native question that only a person
+	// can answer. It is set by the host classification, never by the provider
+	// wire payload, and automatic consumers must leave it pending.
+	PermissionHumanInput bool `json:"permission_human_input,omitempty"`
 
 	// RequestedModeID is set on a session_mode event only when Kandev asked for
 	// a mode the agent did not end up in, or could not confirm. It is what makes
@@ -437,6 +503,18 @@ type AgentEvent struct {
 	// does not by itself promise the agent will fold that prompt into the running
 	// turn. See docs/specs/platform/requirements/mid-turn-steering.md.
 	SupportsPromptQueueing bool `json:"supports_prompt_queueing"`
+
+	// SupportsPromptSuggestions indicates this session asked an agent with
+	// established native support for next-prompt suggestions. It is the
+	// effective enablement value: support alone is not enough. Only such
+	// sessions show suggestions.
+	SupportsPromptSuggestions bool `json:"supports_prompt_suggestions,omitempty"`
+
+	// NativePromptSuggestionsSupported reports provider support independently
+	// of user preference and session scope. A new ACP producer emits an explicit
+	// true or false; nil/absence means unknown from an older producer or another
+	// transport. Consumers must not treat it as effective enablement.
+	NativePromptSuggestionsSupported *bool `json:"native_prompt_suggestions_supported,omitempty"`
 
 	// AuthMethods lists authentication methods from ACP initialize.
 	AuthMethods []AuthMethodInfo `json:"auth_methods,omitempty"`
@@ -693,6 +771,10 @@ type ConfigOption struct {
 
 	// Options lists the selectable values.
 	Options []ConfigOptionValue `json:"options,omitempty"`
+
+	// Catalog carries the provider's bounded group structure and verified
+	// composition bindings. Options stays the flat compatibility projection.
+	Catalog *modelcatalog.Catalog `json:"catalog,omitempty"`
 }
 
 // ConfigOptionValue represents a selectable value for a ConfigOption.

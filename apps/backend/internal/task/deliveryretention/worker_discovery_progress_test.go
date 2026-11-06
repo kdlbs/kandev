@@ -2,6 +2,7 @@ package deliveryretention
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -41,6 +42,7 @@ func (r *discoveryProgressRepository) RunAgentDeliveryRetentionBatch(context.Con
 	switch r.calls["retention"] {
 	case 1, 2, 3:
 		result.DiscoveryAdvanced = true
+		result.DiscoveryAfter.SubmissionID = fmt.Sprintf("%03d", r.calls["retention"])
 	case 4:
 		result.EventPayloadsPruned = 1
 	}

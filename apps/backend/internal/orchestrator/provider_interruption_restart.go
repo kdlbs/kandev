@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"math"
 
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -62,6 +64,9 @@ func (s *Service) retireInterruptedNoticeOnStartup(ctx context.Context, session 
 		return
 	}
 	notices := transientRetryNotices(messages, session.TaskID, session.ID)
+	if s.retireLiveCapacityNotice(ctx, session, notices) {
+		return
+	}
 	s.resolveTransientRetryMessagesLocked(ctx, session.ID)
 	if s.wasSessionRetracked(session.ID) || s.agentManager.IsAgentRunningForSession(ctx, session.ID) {
 		return
@@ -83,7 +88,11 @@ func (s *Service) retireInterruptedNoticeOnStartup(ctx context.Context, session 
 
 func (s *Service) settleRestartedContinuation(ctx context.Context, session *models.TaskSession, notice *models.Message) {
 	started := 0
-	if value, ok := notice.Metadata["attempts_started"].(float64); ok && value >= 0 && value <= transientMaxAttempts {
+	maximum := transientMaxAttempts
+	if notice.Metadata["failure_code"] == string(routingerr.CodeModelCapacity) {
+		maximum = capacityMaxAttempts
+	}
+	if value, ok := notice.Metadata["attempts_started"].(float64); ok && value >= 0 && value <= float64(maximum) && value == math.Trunc(value) {
 		started = int(value)
 	}
 	data := watcher.AgentEventData{TaskID: session.TaskID, SessionID: session.ID, AgentExecutionID: session.AgentExecutionID,
@@ -94,4 +103,27 @@ func (s *Service) settleRestartedContinuation(ctx context.Context, session *mode
 	_ = s.persistLastAgentError(ctx, data)
 	_ = s.createRecoveryStatusMessage(ctx, data, "")
 	s.updateTaskSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateWaitingForInput, data.ErrorMessage, false)
+}
+
+func (s *Service) retireLiveCapacityNotice(ctx context.Context, session *models.TaskSession, notices []*models.Message) bool {
+	if len(notices) == 0 || session.State != models.TaskSessionStateWaitingForInput ||
+		notices[0].Metadata["retry_window_ends_at"] == nil ||
+		(!s.wasSessionRetracked(session.ID) && !s.agentManager.IsAgentRunningForSession(ctx, session.ID)) {
+		return false
+	}
+	notice := notices[0]
+	notice.Content = transientFailureLabel(&routingerr.Error{Code: routingerr.CodeModelCapacity})
+	notice.Metadata["retrying"] = false
+	notice.Metadata[metaKeyVariant] = agentEventError
+	notice.Metadata["recovery_disposition"] = "restart_interrupted"
+	notice.Metadata["runtime_retained"] = true
+	notice.Metadata["failure_scope"] = retainedFailureScope
+	for _, key := range []string{"actions", "retry_window_ends_at", "retry_at", "retry_in_seconds", "recovery_phase"} {
+		delete(notice.Metadata, key)
+	}
+	if err := s.transientRetryMessages.UpdateMessage(ctx, notice); err != nil {
+		s.logger.Warn("failed to retire live capacity retry notice", zap.String("session_id", session.ID), zap.Error(err))
+	}
+	s.resolveTransientRetryMessagesLocked(ctx, session.ID)
+	return true
 }

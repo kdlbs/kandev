@@ -17,7 +17,7 @@ including local, container, and SSH execution boundaries.
 ## Ownership
 
 This system owns executor profiles, environment construction, SSH lifecycle,
-runtime resource admission, plugin-provided remote environments, process and port safety, agent process lifetime
+runtime resource admission, plugin-provided remote environments, process and port safety, control-credential containment at executor proxies, agent process lifetime
 across a backend restart, and executor-specific failure and recovery contracts.
 
 ## Exclusions
@@ -50,6 +50,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Remote Docker Executor](requirements/remote-docker-executor.md)
 - [Remote Docker container inputs](requirements/remote-docker-container-inputs.md)
 - [Docker container network selection](requirements/docker-container-networks.md)
+- [Task MCP executor discovery](requirements/task-mcp-discovery.md)
 
 ### System design
 
@@ -75,6 +76,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Remote Docker Executor](system-design/remote-docker-executor.md)
 - [Remote Docker container inputs](system-design/remote-docker-container-inputs.md)
 - [Docker container network selection](system-design/docker-container-networks.md)
+- [Task MCP executor discovery](system-design/task-mcp-discovery.md)
 
 ## Migration record
 
@@ -89,6 +91,11 @@ the shipped lifecycle contract. Kubernetes capability pairs extend it. The
 replace session ownership. Other foundation
 security, admission, and recovery guarantees remain applicable.
 
+Optional per-user ownership of executor resources is defined by the draft
+[ownership requirements](requirements/per-user-ownership.md) and
+[design](system-design/per-user-ownership.md). The executor system owns this
+compute-admission contract; auth continues to own identity and scopes.
+
 ## Related systems
 
 - [Agents](../agents/README.md): supplies the agent command and profile.
@@ -100,3 +107,7 @@ The compact task indicator contract is extracted into
 [requirements](requirements/task-status-indicators.md) and
 [design](system-design/task-status-indicators.md), including automatic freshness
 and desktop/touch disclosure. The foundation retains task-page controls.
+
+Executor proxies consume control credentials before forwarding to applications.
+The contract is in [requirements](requirements/proxy-control-credential-containment.md)
+and [design](system-design/proxy-control-credential-containment.md).

@@ -8,6 +8,7 @@ import { getTaskPRSyncResource, type TaskPRSyncScope } from "./task-pr-sync-reso
 import { unlinkTaskPRAssociation } from "./task-pr-mutations";
 import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
 import type { TaskPR } from "@/lib/types/github";
+import { useScopedTaskPRResult } from "./scoped-task-pr-context";
 
 /** Fetch all PR associations for a workspace. */
 export function useWorkspacePRs(workspaceId: string | null) {
@@ -52,6 +53,12 @@ export function getPrimaryTaskPR(prs: TaskPR[] | undefined): TaskPR | null {
 
 /** Fetch a single task's PR associations, with on-demand sync via WS. */
 export function useTaskPR(taskId: string | null) {
+  const scoped = useScopedTaskPRResult(taskId);
+  const active = useWorkspaceTaskPR(scoped ? null : taskId);
+  return scoped ?? active;
+}
+
+function useWorkspaceTaskPR(taskId: string | null) {
   const store = useAppStoreApi();
   const prs = useAppStore((state) =>
     taskId ? getTaskPRsForCurrentWorkspace(state, taskId) : null,

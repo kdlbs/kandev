@@ -119,6 +119,7 @@ export type GitHubRateLimitUpdate = {
 };
 
 export type GitHubPR = {
+  github_host?: string;
   number: number;
   title: string;
   body?: string;
@@ -204,6 +205,11 @@ export type RepoMergeMethods = {
   rebase: boolean;
 };
 
+export type RepoMergeAccess = {
+  state: "allowed" | "denied" | "unknown";
+  actor: GitHubAuthPrincipal | null;
+};
+
 export type MergeableState =
   | "clean"
   | "blocked"
@@ -226,6 +232,7 @@ export type MergeQueueState =
   | (string & {});
 
 export type TaskPR = {
+  github_host?: string;
   id: string;
   workspace_id: string;
   task_id: string;
@@ -395,6 +402,7 @@ export type TaskCIAutomationPatch = {
 };
 
 export type PRWatch = {
+  github_host?: string;
   id: string;
   session_id: string;
   task_id: string;
@@ -418,6 +426,7 @@ export type GitHubRepoScopeMode = "all" | "orgs" | "repos";
 export type TaskGitCredentialsMode = "managed" | "executor";
 
 export type GitHubWorkspaceSettings = {
+  github_host?: string;
   workspace_id: string;
   task_git_credentials_mode?: TaskGitCredentialsMode;
   repo_scope_mode: GitHubRepoScopeMode;
@@ -430,6 +439,7 @@ export type GitHubWorkspaceSettings = {
 };
 
 export type UpdateGitHubWorkspaceSettingsRequest = {
+  expected_host?: string;
   workspace_id: string;
   task_git_credentials_mode?: TaskGitCredentialsMode;
   repo_scope_mode?: GitHubRepoScopeMode;
@@ -445,6 +455,7 @@ export type GitHubOrg = {
 };
 
 export type GitHubRepoInfo = {
+  github_host?: string;
   full_name: string;
   owner: string;
   name: string;
@@ -465,6 +476,7 @@ export type ReviewScope = "user" | "user_and_teams";
 export type CleanupPolicy = "auto" | "always" | "never";
 
 export type ReviewWatch = {
+  github_host?: string;
   id: string;
   workspace_id: string;
   workflow_id: string;
@@ -545,6 +557,7 @@ export type CleanupTasksResponse = {
 // Issue watch types
 
 export type IssueWatch = {
+  github_host?: string;
   id: string;
   workspace_id: string;
   workflow_id: string;
@@ -629,6 +642,7 @@ export type PRCommitDetail = {
 
 // GitHub Issue (separate from Pull Request)
 export type GitHubIssue = {
+  github_host?: string;
   number: number;
   title: string;
   body: string;
@@ -646,6 +660,7 @@ export type GitHubIssue = {
 };
 
 export type TaskIssueLink = {
+  github_host?: string;
   task_id: string;
   task_title: string;
   owner: string;

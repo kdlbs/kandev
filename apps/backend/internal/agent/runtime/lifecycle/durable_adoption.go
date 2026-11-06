@@ -153,7 +153,7 @@ func (m *Manager) restoreRecoveredDelivery(
 }
 
 func validateRecoveredDeliveryStatus(execution *AgentExecution, status *agentctl.DeliveryStatus) error {
-	if status == nil || !status.Durable || status.Version != journal.CurrentVersion {
+	if status == nil || !status.Durable || !journal.SupportsDeliveryVersion(status.Version) {
 		return fmt.Errorf("%w: peer did not advertise compatible retained storage", ErrDurableAdoptionBlocked)
 	}
 	if status.SessionID == "" || status.IncarnationID == "" || status.HarnessGeneration == 0 || status.StreamID == "" {
@@ -309,7 +309,7 @@ func restoreInitialPromptSubmission(
 	// gives Stop and replay one exact peer-owned target; arbitrary peer
 	// submissions without SQL evidence remain blocked below.
 	execution.setDeliverySubmissionID(activePeer[0].ID)
-	return true, restoreRecoveredPromptTurnBinding(execution, activePeer[0].ID)
+	return true, restoreRecoveredPromptTurnBinding(execution, activePeer[0])
 }
 
 func (m *Manager) restoreRecoveredBackendSubmission(
@@ -547,7 +547,7 @@ func (m *Manager) restoreRecoveredSubmissionRecord(
 		return fmt.Errorf("%w: retained terminal submission %q is not replayable", ErrDurableAdoptionBlocked, peer.ID)
 	}
 	execution.setDeliverySubmissionID(submission.ID)
-	return restoreRecoveredPromptTurnBinding(execution, submission.ID)
+	return restoreRecoveredPromptTurnBinding(execution, peer)
 }
 
 func adoptionReplayCursor(
@@ -605,4 +605,14 @@ func cloneDeliveryStatus(status *agentctl.DeliveryStatus) *agentctl.DeliveryStat
 	}
 	copy.Submissions = append([]journal.SubmissionSummary(nil), status.Submissions...)
 	return &copy
+}
+
+// recoveredDeliveryFailureIsConclusive reports whether durable adoption failed
+// because the recovered identity disagrees with authoritative evidence. Every
+// other blocked or unavailable outcome leaves the candidate incomplete.
+func recoveredDeliveryFailureIsConclusive(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	return errors.Is(err, ErrDurableAdoptionIdentityMismatch)
 }

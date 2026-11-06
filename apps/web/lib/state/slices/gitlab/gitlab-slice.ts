@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { GitLabSlice, GitLabSliceState } from "./types";
 import { normalizeGitLabOrigin } from "@/lib/gitlab-identity";
 
@@ -8,16 +9,13 @@ export const defaultGitLabState: GitLabSliceState = {
   gitlabIssueWatches: { items: [], loaded: false, loading: false },
   gitlabMRWatches: { items: [], loaded: false, loading: false },
   gitlabActionPresets: { byWorkspaceId: {}, loading: false },
-  gitlabStats: { data: null, loading: false, loadedAt: null },
   gitlabStatus: { byWorkspaceId: {} },
   taskMRAutomation: { byTaskId: {}, loading: {}, saving: {}, errors: {}, externalGeneration: {} },
 };
 
-type ImmerSet = Parameters<
-  StateCreator<GitLabSlice, [["zustand/immer", never]], [], GitLabSlice>
->[0];
+type ImmerSet = Parameters<SliceCreator<GitLabSlice>>[0];
 
-type GitLabSliceCreator = StateCreator<GitLabSlice, [["zustand/immer", never]], [], GitLabSlice>;
+type GitLabSliceCreator = SliceCreator<GitLabSlice>;
 
 export const createGitLabSlice: GitLabSliceCreator = (set: ImmerSet) => ({
   ...defaultGitLabState,
@@ -26,7 +24,6 @@ export const createGitLabSlice: GitLabSliceCreator = (set: ImmerSet) => ({
   ...issueWatchActions(set),
   ...mrWatchActions(set),
   ...presetActions(set),
-  ...statsActions(set),
   ...statusActions(set),
   ...taskMRAutomationActions(set),
 });
@@ -171,20 +168,6 @@ function presetActions(set: ImmerSet) {
     setGitLabActionPresetsLoading: (loading: boolean) =>
       set((draft) => {
         draft.gitlabActionPresets.loading = loading;
-      }),
-  };
-}
-
-function statsActions(set: ImmerSet) {
-  return {
-    setGitLabStats: (stats: GitLabSliceState["gitlabStats"]["data"]) =>
-      set((draft) => {
-        draft.gitlabStats.data = stats;
-        draft.gitlabStats.loadedAt = Date.now();
-      }),
-    setGitLabStatsLoading: (loading: boolean) =>
-      set((draft) => {
-        draft.gitlabStats.loading = loading;
       }),
   };
 }

@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
@@ -27,11 +28,11 @@ func seedCancelRun(
 ) string {
 	t.Helper()
 	ctx := context.Background()
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"` + taskID + `"}`,
-		Status:         models.RunStatus(status),
+		Status:         runsmodels.RunStatus(status),
 		CoalescedCount: 1,
 		CancelReason:   cancelReason,
 	}
@@ -46,7 +47,7 @@ func seedCancelRun(
 	return run.ID
 }
 
-func fetchRun(t *testing.T, repo *sqlite.Repository, id string) *models.Run {
+func fetchRun(t *testing.T, repo *sqlite.Repository, id string) *runsmodels.Run {
 	t.Helper()
 	run, err := repo.GetRunByID(context.Background(), id)
 	if err != nil {

@@ -512,5 +512,12 @@
   "user": "User",
   "usesTheLocalDockerDaemonOn": "Uses the local Docker daemon on this machine.",
   "value": "Value",
-  "verifyingConnection": "Verifying connection..."
+  "verifyingConnection": "Verifying connection...",
+  "ownershipProfile": "Profile access",
+  "ownershipExecutor": "Executor access",
+  "ownershipShared": "Shared",
+  "ownershipMe": "Only me",
+  "ownershipDescription": "Only the owner and administrators can view or use private compute. Shared access preserves existing permissions.",
+  "ownershipInherited": "The executor is private. Its owner and administrators retain access even when this profile is shared.",
+  "ownershipUnavailable": "This executor profile is unavailable. Choose an accessible profile before starting."
 }

@@ -410,15 +410,10 @@ function moduleAndVersion(row: GoRow): { module: string; version: string } {
   if (cachePath) {
     // The first capture is the leaf dir; reconstruct the module from row.pkg
     // because the leaf alone loses the host/owner prefix.
-    return { module: stripVersionSuffix(row.pkg), version: cachePath[2] };
+    // Go major-version suffixes are part of the canonical module path.
+    return { module: row.pkg, version: cachePath[2] };
   }
   return { module: row.pkg, version: "" };
-}
-
-// Some modules embed a major version in their import path (`/v2`, `/v3`, etc).
-// Keep that suffix — it's part of the canonical module name in Go.
-function stripVersionSuffix(pkg: string): string {
-  return pkg;
 }
 
 function repoFromGoURL(licenseURL: string): string | undefined {

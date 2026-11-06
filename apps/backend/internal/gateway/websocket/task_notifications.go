@@ -97,6 +97,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TurnStarted, ws.ActionSessionTurnStarted)
 	b.subscribe(eventBus, events.TurnCompleted, ws.ActionSessionTurnCompleted)
 	b.subscribe(eventBus, events.TurnRemoved, ws.ActionSessionTurnRemoved)
+	b.subscribe(eventBus, events.SessionTurnChangesUpdated, ws.ActionSessionTurnChangesUpdated)
 	b.subscribe(eventBus, events.SessionRemoved, ws.ActionSessionRemoved)
 	b.subscribe(eventBus, events.MessageQueueStatusChanged, ws.ActionMessageQueueStatusChanged)
 	b.subscribe(eventBus, events.GitHubTaskPRUpdated, ws.ActionGitHubTaskPRUpdated)
@@ -204,6 +205,10 @@ func (b *TaskEventBroadcaster) broadcastEvent(ctx context.Context, event *bus.Ev
 	if err != nil {
 		b.logger.Error("failed to build websocket notification", zap.String("action", action), zap.Error(err))
 		return nil
+	}
+	if isExecutorConfigurationAction(action) && (b.hub.authPolicy.ExecutorConfiguration != nil ||
+		(b.hub.authPolicy.Enforced != nil && b.hub.authPolicy.Enforced())) {
+		return b.hub.broadcastExecutorConfiguration(ctx, event.Data, msg)
 	}
 	sessionID := extractSessionID(event.Data)
 	b.logSessionStateMetadata(action, sessionID, event.Data)
@@ -351,6 +356,11 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 			return nil
 		}
 	case ws.ActionSessionWorkspaceSourcesUpdated:
+		if sessionID != "" {
+			b.hub.BroadcastToSession(sessionID, msg)
+			return nil
+		}
+	case ws.ActionSessionTurnChangesUpdated:
 		if sessionID != "" {
 			b.hub.BroadcastToSession(sessionID, msg)
 			return nil

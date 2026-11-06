@@ -700,12 +700,12 @@ func TestGetCompletedTaskActivity_ExcludesEphemeralTasks(t *testing.T) {
 	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
 	execOrFatal(t, dbConn, `INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at) VALUES ('step-done', 'board-1', 'Done', 1, ?, ?)`, nowStr, nowStr)
 
-	// Completed task on last step with session completed_at (NOT archived — isolates session path)
-	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-regular', 'ws-1', 'board-1', 'step-done', 'Regular', 0, ?, ?)`, nowStr, nowStr)
+	// Committed completion with session completed_at isolates the session timestamp path.
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, state, is_ephemeral, created_at, updated_at) VALUES ('task-regular', 'ws-1', 'board-1', 'step-done', 'Regular', 'COMPLETED', 0, ?, ?)`, nowStr, nowStr)
 	// Archived task WITHOUT session completed_at — should still count using archived_at
 	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, archived_at, created_at, updated_at) VALUES ('task-archived-no-session', 'ws-1', 'board-1', 'step-done', 'Archived No Session', 0, ?, ?, ?)`, nowStr, nowStr, nowStr)
-	// Task on last step with NO archived_at and NO session completed_at — should NOT count
-	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-last-step-no-dates', 'ws-1', 'board-1', 'step-done', 'No Dates', 0, ?, ?)`, nowStr, nowStr)
+	// Committed completion without either timestamp has no activity bucket.
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, state, is_ephemeral, created_at, updated_at) VALUES ('task-last-step-no-dates', 'ws-1', 'board-1', 'step-done', 'No Dates', 'COMPLETED', 0, ?, ?)`, nowStr, nowStr)
 	// Ephemeral completed task
 	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, archived_at, created_at, updated_at) VALUES ('task-ephemeral', 'ws-1', 'board-1', '', 'Quick Chat', 1, ?, ?, ?)`, nowStr, nowStr, nowStr)
 

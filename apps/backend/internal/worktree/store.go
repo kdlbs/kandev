@@ -93,6 +93,8 @@ const worktreeSelectCols = `
 	ter.worktree_path,
 	ter.worktree_branch,
 	COALESCE(ter.branch_slug, ''),
+	COALESCE(ter.workspace_relative_path, ''),
+	ter.position,
 	COALESCE(s.base_branch, ''),
 	COALESCE(ter.worktree_branch_owner, 'unknown'),
 	COALESCE(ter.worktree_integration_ref, ''),
@@ -105,7 +107,18 @@ const worktreeSelectCols = `
 	ter.updated_at,
 	ter.merged_at,
 	ter.deleted_at,
-	ter.task_environment_id`
+	ter.task_environment_id,
+	` + physicalClaimCount
+
+// Physical claims are counted before session joins. Deleted history cannot
+// compete with a live owner, but multiple historical owners remain ambiguous.
+const physicalClaimCount = `CASE WHEN COALESCE(ter.worktree_id, '') = '' THEN 0
+ WHEN EXISTS (SELECT 1 FROM task_environment_repos claims
+  WHERE claims.worktree_id = ter.worktree_id AND claims.deleted_at IS NULL AND claims.status <> 'deleted')
+ THEN (SELECT COUNT(*) FROM task_environment_repos claims
+  WHERE claims.worktree_id = ter.worktree_id AND claims.deleted_at IS NULL AND claims.status <> 'deleted')
+ ELSE (SELECT COUNT(*) FROM task_environment_repos claims WHERE claims.worktree_id = ter.worktree_id)
+ END`
 
 // rowScanner abstracts *sql.Row and *sql.Rows so worktree rows scan through
 // one helper.
@@ -116,6 +129,7 @@ type rowScanner interface {
 // scanWorktreeRow scans one environment-repository row into a Worktree value.
 func scanWorktreeRow(row rowScanner) (*Worktree, error) {
 	wt := &Worktree{}
+	var claimCount int
 	var compactedAt, mergedAt, deletedAt sql.NullTime
 	var repositoryPath, baseBranch sql.NullString
 
@@ -129,6 +143,8 @@ func scanWorktreeRow(row rowScanner) (*Worktree, error) {
 		&wt.Path,
 		&wt.Branch,
 		&wt.BranchSlug,
+		&wt.WorkspaceRelativePath,
+		&wt.Position,
 		&baseBranch,
 		&wt.BranchOwner,
 		&wt.IntegrationRef,
@@ -142,12 +158,17 @@ func scanWorktreeRow(row rowScanner) (*Worktree, error) {
 		&mergedAt,
 		&deletedAt,
 		&wt.TaskEnvironmentID,
+		&claimCount,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+
+	if claimCount > 1 {
+		return nil, &models.WorktreeIdentityAmbiguousError{WorktreeID: wt.ID}
 	}
 
 	if repositoryPath.Valid {
@@ -258,16 +279,28 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 		return err
 	}
 
+	if err := checkCreateIdentity(ctx, tx, wt); err != nil {
+		return err
+	}
+
 	_, err = tx.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO task_environment_repos (
-			id, task_environment_id, repository_id, branch_slug,
+			id, task_environment_id, repository_id, branch_slug, workspace_relative_path,
 			worktree_id, worktree_path, worktree_branch,
 			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha,
 			worktree_source_clone_path, worktree_source_common_dir,
 			worktree_branch_compacted_at, position,
 			error_message, status, created_at, updated_at, merged_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_environment_id, repository_id, branch_slug) DO UPDATE SET
+			workspace_relative_path = CASE
+				WHEN task_environment_repos.status = 'deleted' AND task_environment_repos.deleted_at IS NOT NULL
+					AND excluded.status = 'active' AND excluded.deleted_at IS NULL
+				THEN excluded.workspace_relative_path ELSE task_environment_repos.workspace_relative_path END,
+			position = CASE
+				WHEN task_environment_repos.status = 'deleted' AND task_environment_repos.deleted_at IS NOT NULL
+					AND excluded.status = 'active' AND excluded.deleted_at IS NULL
+				THEN excluded.position ELSE task_environment_repos.position END,
 			worktree_id = excluded.worktree_id,
 			worktree_path = excluded.worktree_path,
 			worktree_branch = excluded.worktree_branch,
@@ -281,10 +314,10 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 			updated_at = excluded.updated_at,
 			merged_at = excluded.merged_at,
 			deleted_at = excluded.deleted_at
-	`), uuid.New().String(), envID, wt.RepositoryID, wt.BranchSlug,
+	`), uuid.New().String(), envID, wt.RepositoryID, wt.BranchSlug, wt.WorkspaceRelativePath,
 		wt.ID, wt.Path, wt.Branch, wt.BranchOwner, wt.IntegrationRef, wt.RecoveryHeadSHA,
 		wt.SourceClonePath, wt.SourceCommonDir,
-		wt.BranchCompactedAt, 0,
+		wt.BranchCompactedAt, wt.Position,
 		"", wt.Status,
 		wt.CreatedAt, wt.UpdatedAt, wt.MergedAt, wt.DeletedAt)
 	if err != nil {
@@ -299,7 +332,15 @@ func (s *SQLiteStore) CompareAndSwapWorktree(ctx context.Context, expected, repl
 	if expected == nil || replacement == nil || expected.TaskEnvironmentID == "" || expected.RepositoryID == "" {
 		return false, fmt.Errorf("invalid worktree compare-and-swap identity")
 	}
-	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := checkReplacementIdentity(ctx, tx, expected, replacement); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, s.db.Rebind(`
 		UPDATE task_environment_repos
 		SET worktree_id = ?, worktree_path = ?, worktree_branch = ?,
 		    worktree_source_clone_path = ?, worktree_source_common_dir = ?, updated_at = ?
@@ -314,7 +355,10 @@ func (s *SQLiteStore) CompareAndSwapWorktree(ctx context.Context, expected, repl
 		return false, err
 	}
 	rows, err := result.RowsAffected()
-	return rows == 1, err
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, tx.Commit()
 }
 
 // CompareAndSwapWorktreeWithRecoveryClaim publishes a recovery replacement
@@ -334,6 +378,9 @@ func (s *SQLiteStore) CompareAndSwapWorktreeWithRecoveryClaim(
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := recoveryclaim.ValidateTx(ctx, s.db, tx, claim); err != nil {
+		return false, err
+	}
+	if err := checkReplacementIdentity(ctx, tx, expected, replacement); err != nil {
 		return false, err
 	}
 	result, err := tx.ExecContext(ctx, s.db.Rebind(`
@@ -402,6 +449,7 @@ func (s *SQLiteStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree
 		LEFT JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
 		LEFT JOIN repositories r ON ter.repository_id = r.id
 		WHERE ter.worktree_id = ?
+        ORDER BY CASE WHEN ter.deleted_at IS NULL AND ter.status <> 'deleted' THEN 0 ELSE 1 END
 		LIMIT 1
 	`), id)
 	return scanWorktreeRow(row)
@@ -437,7 +485,8 @@ func (s *SQLiteStore) ReadRecoverySelectionSnapshot(
 			COALESCE(r.local_path, ''), COALESCE(r.provider, ''),
 			COALESCE(r.provider_repo_id, ''), COALESCE(r.provider_host, ''),
 			COALESCE(r.provider_scope, ''), COALESCE(r.provider_owner, ''),
-			COALESCE(r.provider_name, ''), COALESCE(r.remote_url, '')
+			COALESCE(r.provider_name, ''), COALESCE(r.remote_url, ''),
+            `+physicalClaimCount+`
 		FROM task_environments te
 		LEFT JOIN task_sessions s ON s.id = ?
 		LEFT JOIN task_environment_repos ter
@@ -459,7 +508,7 @@ func readRecoverySelectionSnapshotRows(rows *sql.Rows) (models.WorkspaceRecovery
 	for rows.Next() {
 		found = true
 		var slotID string
-		var sessionPersisted, repositoryPresent, repositoryDeleted int
+		var sessionPersisted, repositoryPresent, repositoryDeleted, claimCount int
 		var slot models.WorkspaceRecoveryInventorySlot
 		if err := rows.Scan(
 			&snapshot.TaskID, &snapshot.SessionID, &snapshot.SessionTaskEnvironmentID,
@@ -475,9 +524,12 @@ func readRecoverySelectionSnapshotRows(rows *sql.Rows) (models.WorkspaceRecovery
 			&slot.RepositoryWorkspaceID, &slot.RepositoryName, &slot.RepositorySourceType, &slot.RepositoryLocalPath,
 			&slot.RepositoryProvider, &slot.RepositoryProviderRepoID, &slot.RepositoryProviderHost,
 			&slot.RepositoryProviderScope, &slot.RepositoryProviderOwner,
-			&slot.RepositoryProviderName, &slot.RepositoryRemoteURL,
+			&slot.RepositoryProviderName, &slot.RepositoryRemoteURL, &claimCount,
 		); err != nil {
 			return models.WorkspaceRecoverySelectionSnapshot{}, err
+		}
+		if claimCount > 1 {
+			return models.WorkspaceRecoverySelectionSnapshot{}, &models.WorktreeIdentityAmbiguousError{WorktreeID: slot.WorktreeID}
 		}
 		snapshot.SessionPersisted = sessionPersisted == 1
 		if slotID != "" {
@@ -539,7 +591,9 @@ func (s *SQLiteStore) GetWorktreesByTaskID(ctx context.Context, taskID string) (
 		SELECT `+worktreeSelectCols+`
 		FROM task_environment_repos ter
 		INNER JOIN task_environments te ON ter.task_environment_id = te.id
-		LEFT JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
+		LEFT JOIN task_sessions s
+		  ON s.task_environment_id = ter.task_environment_id
+		 AND s.task_id = te.task_id
 		LEFT JOIN repositories r ON ter.repository_id = r.id
 		WHERE te.task_id = ?
 		  AND ter.deleted_at IS NULL
@@ -588,15 +642,15 @@ func (s *SQLiteStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var environmentID string
-	if err := tx.QueryRowContext(ctx, s.db.Rebind(`
-		SELECT task_environment_id FROM task_environment_repos WHERE worktree_id = ?
-	`), wt.ID).Scan(&environmentID); err != nil {
-		if err == sql.ErrNoRows {
-			return fmt.Errorf("%w: %s", ErrWorktreeNotFound, wt.ID)
-		}
+	slot, err := s.lockRecoveryWorktreeSlot(ctx, tx, wt.ID)
+	if err != nil {
 		return err
 	}
+	if slot == nil {
+		return fmt.Errorf("%w: %s", ErrWorktreeNotFound, wt.ID)
+	}
+	environmentID := slot.EnvironmentID
+
 	if wt.TaskEnvironmentID != "" && wt.TaskEnvironmentID != environmentID {
 		return fmt.Errorf("%w: %s", ErrWorktreeNotFound, wt.ID)
 	}
@@ -610,7 +664,7 @@ func (s *SQLiteStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
 			worktree_branch_owner = ?, worktree_integration_ref = ?, worktree_recovery_head_sha = ?,
 			worktree_branch_compacted_at = ?,
 			status = ?, updated_at = ?, merged_at = ?, deleted_at = ?
-		WHERE worktree_id = ?
+		WHERE id = ?
 	`
 	args := []interface{}{
 		wt.Path,
@@ -623,7 +677,7 @@ func (s *SQLiteStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
 		wt.UpdatedAt,
 		wt.MergedAt,
 		wt.DeletedAt,
-		wt.ID,
+		slot.ID,
 	}
 	if wt.TaskEnvironmentID != "" {
 		query += " AND task_environment_id = ?"
@@ -649,19 +703,19 @@ func (s *SQLiteStore) DeleteWorktree(ctx context.Context, id string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var environmentID string
-	if err := tx.QueryRowContext(ctx, s.db.Rebind(`
-		SELECT task_environment_id FROM task_environment_repos WHERE worktree_id = ?
-	`), id).Scan(&environmentID); err != nil {
-		if err == sql.ErrNoRows {
-			return fmt.Errorf("worktree not found: %s", id)
-		}
+	slot, err := s.lockRecoveryWorktreeSlot(ctx, tx, id)
+	if err != nil {
 		return err
 	}
+	if slot == nil {
+		return fmt.Errorf("%w: %s", ErrWorktreeNotFound, id)
+	}
+	environmentID := slot.EnvironmentID
+
 	if err := recoveryclaim.EnsureAvailableTx(ctx, s.db, tx, environmentID); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM task_environment_repos WHERE worktree_id = ?`), id)
+	result, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM task_environment_repos WHERE id = ?`), slot.ID)
 	if err != nil {
 		return err
 	}
@@ -723,8 +777,10 @@ func (s *SQLiteStore) ListActiveWorktreePaths(ctx context.Context) ([]string, er
 // OTHER tasks for the environment that owns the worktree. The worktree is
 // task-owned: sessions of the owning task (which share the environment) never
 // count against cleanup, while a borrower task's session protects the
-// workspace until ownership transfers. A terminal session still protects its
-// task workspace until that task's own cleanup releases the association.
+// workspace until ownership transfers or the borrower can no longer use it.
+// A borrower stops holding the workspace only once its task is archived, its
+// session reached a terminal state, and no runtime row remains; every other
+// borrower session still counts, including one whose task row cannot be joined.
 func (s *SQLiteStore) CountActiveWorktreeReferences(
 	ctx context.Context,
 	worktreeID string,
@@ -737,14 +793,26 @@ func (s *SQLiteStore) CountActiveWorktreeReferences(
 			ON ter.task_environment_id = s.task_environment_id
 		INNER JOIN task_environments te
 			ON te.id = ter.task_environment_id
+		LEFT JOIN tasks bt
+			ON bt.id = s.task_id
 		WHERE ter.worktree_id = ?
 		  AND ter.status <> ?
 		  AND ter.deleted_at IS NULL
 		  AND te.task_id != s.task_id
+		  AND NOT (
+			bt.archived_at IS NOT NULL
+			AND s.state IN (?, ?, ?)
+			AND NOT EXISTS (
+				SELECT 1 FROM executors_running er WHERE er.session_id = s.id
+			)
+		  )
 	`
 	args := []interface{}{
 		worktreeID,
 		StatusDeleted,
+		string(models.TaskSessionStateCompleted),
+		string(models.TaskSessionStateFailed),
+		string(models.TaskSessionStateCancelled),
 	}
 	if len(excludeSessionIDs) > 0 {
 		query += ` AND s.id NOT IN (?)`
@@ -780,12 +848,12 @@ func (s *SQLiteStore) CountWorktreeBranchOwners(
 func (s *SQLiteStore) PersistBranchRecoveryHead(
 	ctx context.Context, worktreeID, expected, recoveryHead string,
 ) (bool, error) {
-	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	result, err := s.execWorktreeSlot(ctx, worktreeID, `
 		UPDATE task_environment_repos
 		SET worktree_recovery_head_sha = ?, updated_at = ?
 		WHERE worktree_id = ?
 		  AND (COALESCE(worktree_recovery_head_sha, '') = ? OR worktree_recovery_head_sha = ?)
-	`), recoveryHead, time.Now().UTC(), worktreeID, expected, recoveryHead)
+	`, recoveryHead, time.Now().UTC(), worktreeID, expected, recoveryHead)
 	if err != nil {
 		return false, err
 	}
@@ -797,13 +865,13 @@ func (s *SQLiteStore) PersistBranchCompactionComplete(
 	ctx context.Context, worktreeID, expectedRecoveryHead string,
 ) (bool, error) {
 	now := time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	result, err := s.execWorktreeSlot(ctx, worktreeID, `
 		UPDATE task_environment_repos
 		SET worktree_branch_compacted_at = ?, updated_at = ?
 		WHERE worktree_id = ?
 		  AND worktree_recovery_head_sha = ?
 		  AND worktree_branch_compacted_at IS NULL
-	`), now, now, worktreeID, expectedRecoveryHead)
+	`, now, now, worktreeID, expectedRecoveryHead)
 	if err != nil {
 		return false, err
 	}
@@ -817,12 +885,12 @@ func (s *SQLiteStore) PersistBranchCompactionComplete(
 func (s *SQLiteStore) PersistBranchRecoveryRestored(
 	ctx context.Context, worktreeID, expectedRecoveryHead string,
 ) (bool, error) {
-	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	result, err := s.execWorktreeSlot(ctx, worktreeID, `
 		UPDATE task_environment_repos
 		SET worktree_recovery_head_sha = '', worktree_branch_compacted_at = NULL, updated_at = ?
 		WHERE worktree_id = ?
 		  AND worktree_recovery_head_sha = ?
-	`), time.Now().UTC(), worktreeID, expectedRecoveryHead)
+	`, time.Now().UTC(), worktreeID, expectedRecoveryHead)
 	if err != nil {
 		return false, err
 	}
@@ -841,6 +909,8 @@ func (s *SQLiteStore) ListArchivedBranchCandidates(
 		LEFT JOIN task_sessions s ON s.task_environment_id = ter.task_environment_id
 		LEFT JOIN repositories r ON ter.repository_id = r.id
 		WHERE t.archived_at IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM task_environment_repos live_claim
+            WHERE live_claim.worktree_id=ter.worktree_id AND live_claim.deleted_at IS NULL AND live_claim.status <> 'deleted')
 		  AND ter.status = ?
 		  AND ter.deleted_at IS NOT NULL
 		  AND ter.worktree_branch_owner = ?
@@ -865,8 +935,16 @@ func (s *SQLiteStore) ListArchivedBranchCandidates(
 }
 
 func (s *SQLiteStore) IsArchivedBranchCandidate(ctx context.Context, worktreeID string) (bool, error) {
+	owner, err := s.GetWorktreeByID(ctx, worktreeID)
+	if err != nil {
+		return false, err
+	}
+	if owner == nil || owner.DeletedAt == nil || owner.Status != StatusDeleted {
+		return false, nil
+	}
+
 	var eligible bool
-	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
+	err = s.ro.QueryRowContext(ctx, s.ro.Rebind(`
 		SELECT EXISTS (
 			SELECT 1
 			FROM task_environment_repos ter
@@ -893,7 +971,7 @@ func (s *SQLiteStore) IsArchivedBranchCandidate(ctx context.Context, worktreeID 
 func (s *SQLiteStore) PersistArchivedBranchRecoveryHead(
 	ctx context.Context, worktreeID, expected, recoveryHead string,
 ) (bool, error) {
-	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	result, err := s.execWorktreeSlot(ctx, worktreeID, `
 		UPDATE task_environment_repos
 		SET worktree_recovery_head_sha = ?, updated_at = ?
 		WHERE worktree_id = ?
@@ -914,7 +992,7 @@ func (s *SQLiteStore) PersistArchivedBranchRecoveryHead(
 				  AND active_session.state IN (?, ?, ?, ?)
 			  )
 		  )
-	`), recoveryHead, time.Now().UTC(), worktreeID, StatusDeleted, BranchOwnerManaged,
+	`, recoveryHead, time.Now().UTC(), worktreeID, StatusDeleted, BranchOwnerManaged,
 		expected, recoveryHead,
 		models.TaskSessionStateCreated, models.TaskSessionStateStarting,
 		models.TaskSessionStateRunning, models.TaskSessionStateWaitingForInput)
@@ -929,7 +1007,7 @@ func (s *SQLiteStore) PersistArchivedBranchCompactionComplete(
 	ctx context.Context, worktreeID, expectedRecoveryHead string,
 ) (bool, error) {
 	now := time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	result, err := s.execWorktreeSlot(ctx, worktreeID, `
 		UPDATE task_environment_repos
 		SET worktree_branch_compacted_at = ?, updated_at = ?
 		WHERE worktree_id = ?
@@ -950,7 +1028,7 @@ func (s *SQLiteStore) PersistArchivedBranchCompactionComplete(
 				  AND active_session.state IN (?, ?, ?, ?)
 			  )
 		  )
-	`), now, now, worktreeID, StatusDeleted, BranchOwnerManaged, expectedRecoveryHead,
+	`, now, now, worktreeID, StatusDeleted, BranchOwnerManaged, expectedRecoveryHead,
 		models.TaskSessionStateCreated, models.TaskSessionStateStarting,
 		models.TaskSessionStateRunning, models.TaskSessionStateWaitingForInput)
 	if err != nil {
@@ -961,11 +1039,11 @@ func (s *SQLiteStore) PersistArchivedBranchCompactionComplete(
 }
 
 func (s *SQLiteStore) TouchArchivedBranchCandidate(ctx context.Context, worktreeID string) error {
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	_, err := s.execWorktreeSlot(ctx, worktreeID, `
 		UPDATE task_environment_repos
 		SET updated_at = ?
 		WHERE worktree_id = ?
-	`), time.Now().UTC(), worktreeID)
+	`, time.Now().UTC(), worktreeID)
 	return err
 }
 
@@ -977,53 +1055,9 @@ func (s *SQLiteStore) scanWorktrees(rows *sql.Rows) ([]*Worktree, error) {
 	var result []*Worktree
 	seen := make(map[string]bool)
 	for rows.Next() {
-		wt := &Worktree{}
-		var compactedAt, mergedAt, deletedAt sql.NullTime
-		var repositoryPath, baseBranch sql.NullString
-
-		err := rows.Scan(
-			&wt.ID,
-			&wt.SessionID,
-			&wt.TaskID,
-			&wt.TaskDirName,
-			&wt.RepositoryID,
-			&repositoryPath,
-			&wt.Path,
-			&wt.Branch,
-			&wt.BranchSlug,
-			&baseBranch,
-			&wt.BranchOwner,
-			&wt.IntegrationRef,
-			&wt.RecoveryHeadSHA,
-			&wt.SourceClonePath,
-			&wt.SourceCommonDir,
-			&compactedAt,
-			&wt.Status,
-			&wt.CreatedAt,
-			&wt.UpdatedAt,
-			&mergedAt,
-			&deletedAt,
-			&wt.TaskEnvironmentID,
-		)
+		wt, err := scanWorktreeRow(rows)
 		if err != nil {
 			return nil, err
-		}
-
-		if repositoryPath.Valid {
-			wt.RepositoryPath = repositoryPath.String
-		}
-		if baseBranch.Valid {
-			wt.BaseBranch = baseBranch.String
-		}
-		if mergedAt.Valid {
-			wt.MergedAt = &mergedAt.Time
-		}
-		if compactedAt.Valid {
-			t := compactedAt.Time
-			wt.BranchCompactedAt = &t
-		}
-		if deletedAt.Valid {
-			wt.DeletedAt = &deletedAt.Time
 		}
 
 		if seen[wt.ID] {

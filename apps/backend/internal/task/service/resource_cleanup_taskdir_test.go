@@ -63,14 +63,7 @@ func TestArchiveReclaimRemovesNonEmptyTaskDir(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	archiveDirectoryTestTask(t, svc, repo, wt.TaskID, false)
-	if _, err := os.Stat(loose); err != nil {
-		t.Fatalf("dirty root removed: %v", err)
-	}
-	job := latestCleanupJob(t, repo, wt.TaskID, models.TaskResourceCleanupTriggerArchiveReclaim)
-	if err := os.Remove(dirty); err != nil {
-		t.Fatal(err)
-	}
+	job := seedRetainedArchiveWorktree(t, svc, repo, wt.TaskID)
 	if err := repo.CompleteTaskResourceCleanupJob(ctx, job.ID, models.TaskResourceCleanupStatePending, "", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -117,14 +110,12 @@ func TestArchiveTaskDirectoryRetriesAfterRestart(t *testing.T) {
 				}
 			}
 			svc.SetWorktreeCleanup(&failingTaskDirectoryCleaner{Manager: manager})
-			archiveDirectoryTestTask(t, svc, repo, wt.TaskID, !reclaim)
 			trigger := models.TaskResourceCleanupTriggerArchive
-			if reclaim {
+			if !reclaim {
+				archiveDirectoryTestTask(t, svc, repo, wt.TaskID, true)
+			} else {
 				trigger = models.TaskResourceCleanupTriggerArchiveReclaim
-				if err := os.Remove(dirty); err != nil {
-					t.Fatal(err)
-				}
-				job := latestCleanupJob(t, repo, wt.TaskID, trigger)
+				job := seedRetainedArchiveWorktree(t, svc, repo, wt.TaskID)
 				if err := repo.CompleteTaskResourceCleanupJob(ctx, job.ID, models.TaskResourceCleanupStatePending, "", nil); err != nil {
 					t.Fatal(err)
 				}
@@ -159,7 +150,7 @@ func TestArchiveTaskDirectoryRetriesAfterRestart(t *testing.T) {
 }
 
 // @covers AC-TASKS-DIRTY-WORKTREE-ARCHIVE-003.2
-func TestArchiveTaskDirectoryPreservesDirtySiblingUntilFinalReclaim(t *testing.T) {
+func TestArchiveTaskDirectoryRemovesCleanAndDirtySiblings(t *testing.T) {
 	ctx := context.Background()
 	svc, _, repo, manager, source, primary := createArchiveReclaimFixture(t)
 	sibling, err := manager.Create(ctx, worktree.CreateRequest{
@@ -182,23 +173,10 @@ func TestArchiveTaskDirectoryPreservesDirtySiblingUntilFinalReclaim(t *testing.T
 	if _, err := os.Stat(primary.Path); !os.IsNotExist(err) {
 		t.Fatalf("clean sibling remains: %v", err)
 	}
-	for _, path := range []string{loose, dirty} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("dirty sibling root removed: %v", err)
+	for _, path := range []string{loose, dirty, root} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("archive retained task contents %s: %v", path, err)
 		}
-	}
-	if err := os.Remove(dirty); err != nil {
-		t.Fatal(err)
-	}
-	job := latestCleanupJob(t, repo, primary.TaskID, models.TaskResourceCleanupTriggerArchiveReclaim)
-	if err := repo.CompleteTaskResourceCleanupJob(ctx, job.ID, models.TaskResourceCleanupStatePending, "", nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(root); !os.IsNotExist(err) {
-		t.Fatalf("root remains after last sibling: %v", err)
 	}
 }
 

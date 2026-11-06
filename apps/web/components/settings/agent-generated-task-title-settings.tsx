@@ -1,7 +1,8 @@
 "use client";
+
+import { useSettingsDraft } from "./use-settings-draft";
 import { SettingsInfo } from "./settings-info";
 
-import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Switch } from "@kandev/ui/switch";
@@ -21,18 +22,7 @@ export function AgentGeneratedTaskTitleSettings({
   const preference = useAppStore((state) => state.userSettings.agentGeneratedTaskTitles);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
-  const [saved, setSaved] = useState(preference);
-  const [draft, setDraft] = useState(preference);
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-  const isDirty = draft !== saved;
-
-  useEffect(() => {
-    setSaved((previous) => {
-      if (draftRef.current === previous) setDraft(preference);
-      return preference;
-    });
-  }, [preference]);
+  const { saved, setSaved, draft, setDraft, isDirty } = useSettingsDraft(preference);
 
   useSettingsSaveContributor({
     id: "general-agent-generated-task-titles",

@@ -159,4 +159,6 @@ export type StepEvents = {
   on_heartbeat?: GenericAction[];
   on_budget_alert?: GenericAction[];
   on_agent_error?: GenericAction[];
+  on_pr_merged?: GenericAction[];
+  on_pr_closed?: GenericAction[];
 };

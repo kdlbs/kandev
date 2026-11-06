@@ -12,7 +12,7 @@ vi.mock("@/lib/api/domains/agent-update-api", () => ({
 import { refreshRuntimeUpdateStatuses } from "./runtime-update-statuses";
 
 function store() {
-  return create<SettingsSlice>()(immer((set, get, api) => createSettingsSlice(set, get, api)));
+  return create<SettingsSlice>()(immer((set, get) => createSettingsSlice(set, get)));
 }
 function status(enabled = false): AgentUpdateStatus {
   return {

@@ -7,6 +7,9 @@ import {
   computeRunnerEditable,
   computeRunnerIneligibleReason,
   findUnresolvedProviderRemote,
+  resolveInitialWorkspaceLayout,
+  resolveInitialWorkspaceLayoutMode,
+  resolveSelectedExecutorType,
   shouldShowTaskTitleField,
   validateCreateInputs,
 } from "./task-create-dialog-helpers";
@@ -353,6 +356,136 @@ describe("buildCreateTaskPayload priority", () => {
       }).workflow_agent_overrides,
     ).toEqual({ "profile-luna": "profile-terra" });
     expect(buildCreateTaskPayload(base).workflow_agent_overrides).toBeUndefined();
+  });
+  it("submits MCP selections together with the selected initial workspace layout", () => {
+    expect(
+      buildCreateTaskPayload({
+        ...base,
+        initialWorkspaceLayout: "task_root",
+        mcpServerIds: ["mcp-selected"],
+      }),
+    ).toMatchObject({
+      initial_workspace_layout: "task_root",
+      mcp_server_ids: ["mcp-selected"],
+    });
+  });
+  it("submits explicit built-in consent atomically with task creation", () => {
+    const preferences = {
+      version: 1 as const,
+      expected_workspace_policy_revision: 4,
+      packages: { configuration: "on" as const, walkthroughs: "off" as const },
+    };
+    const builtinMCPPreferences = { workspaceId: base.workspaceId, preferences };
+    const payload = buildCreateTaskPayload({ ...base, ...{ builtinMCPPreferences } });
+    expect(payload).toHaveProperty("builtin_mcp_preferences", preferences);
+    expect(buildCreateTaskPayload(base)).not.toHaveProperty("builtin_mcp_preferences");
+    expect(() =>
+      buildCreateTaskPayload({ ...base, workspaceId: "foreign", ...{ builtinMCPPreferences } }),
+    ).toThrow();
+  });
+});
+
+describe("initial workspace layout", () => {
+  it("shows the opt-in for one worktree repository and preserves its choice", () => {
+    const mode = resolveInitialWorkspaceLayoutMode({
+      isCreateMode: true,
+      isTaskStarted: false,
+      noRepository: false,
+      repositoryCount: 1,
+      executorType: "worktree",
+    });
+
+    expect(mode).toBe("single-repository");
+    expect(resolveInitialWorkspaceLayout({ requested: "task_root", mode })).toBe("task_root");
+    expect(resolveInitialWorkspaceLayout({ requested: "repository", mode })).toBe("repository");
+  });
+
+  it("offers a parent layout for multi-repository Worktree tasks", () => {
+    const mode = resolveInitialWorkspaceLayoutMode({
+      isCreateMode: true,
+      isTaskStarted: false,
+      noRepository: false,
+      repositoryCount: 2,
+      executorType: "worktree",
+    });
+
+    expect(mode).toBe("multiple-repositories");
+    expect(resolveInitialWorkspaceLayout({ requested: "repository", mode })).toBe("task_root");
+  });
+
+  it("omits the parent layout for multi-repository remote tasks", () => {
+    const mode = resolveInitialWorkspaceLayoutMode({
+      isCreateMode: true,
+      isTaskStarted: false,
+      noRepository: false,
+      repositoryCount: 2,
+      executorType: "ssh",
+    });
+
+    expect(mode).toBe("unavailable");
+    expect(resolveInitialWorkspaceLayout({ requested: "task_root", mode })).toBeUndefined();
+  });
+
+  it.each([
+    [
+      "repositoryless",
+      { noRepository: true, repositoryCount: 0, executorType: "worktree" as const },
+    ],
+    [
+      "unsupported executor",
+      { noRepository: false, repositoryCount: 1, executorType: "local" as const },
+    ],
+    [
+      "editing",
+      {
+        noRepository: false,
+        repositoryCount: 1,
+        executorType: "worktree" as const,
+        isCreateMode: false,
+      },
+    ],
+  ])("omits the layout for %s tasks", (_name, input) => {
+    const mode = resolveInitialWorkspaceLayoutMode({
+      isCreateMode: true,
+      isTaskStarted: false,
+      ...input,
+    });
+
+    expect(mode).toBe("unavailable");
+    expect(resolveInitialWorkspaceLayout({ requested: "task_root", mode })).toBeUndefined();
+  });
+
+  it("resolves a profile's executor type from its containing executor", () => {
+    expect(
+      resolveSelectedExecutorType(
+        [
+          {
+            id: "executor-1",
+            name: "Worktree",
+            type: "worktree",
+            status: "available",
+            is_system: true,
+            profiles: [{ id: "profile-1" }],
+          } as never,
+        ],
+        "profile-1",
+      ),
+    ).toBe("worktree");
+    expect(
+      resolveSelectedExecutorType(
+        [
+          {
+            id: "executor-1",
+            name: "Worktree",
+            type: "worktree",
+            status: "available",
+            is_system: true,
+            profiles: [],
+          } as never,
+        ],
+        "missing-profile",
+      ),
+    ).toBeNull();
   });
 });
 

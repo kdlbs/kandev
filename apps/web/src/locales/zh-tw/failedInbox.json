@@ -13,6 +13,6 @@
   "emptyTitleUnnamedWorkspace": "此工作區中沒有任何失敗事項。",
   "emptyDescription": "失敗的任務會顯示在此處以供排查,永遠不會計入側邊欄的總數。",
   "errorTitle": "無法載入失敗的任務",
-  "errorDescription": "載入此工作區中失敗的任務時出錯,系統將自動重試。",
+  "errorDescription": "無法載入失敗的任務。Kandev 將自動重試。",
   "truncatedNotice": "僅顯示最先出現的失敗任務,還有更多等待處理。"
 }

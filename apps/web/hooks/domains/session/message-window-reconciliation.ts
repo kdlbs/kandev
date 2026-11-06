@@ -6,6 +6,9 @@ export type LatestMessageWindow = {
   oldestCursor: string | null;
 };
 
+// Subscription refreshes retire rows only inside an overlapping response interval.
+export type MessageWindowAuthority = boolean | "overlap";
+
 const MICROSECONDS_PER_MILLISECOND = BigInt(1_000);
 
 /** Parse the same normalized-microsecond precision used by message pagination. */
@@ -47,6 +50,10 @@ function isPendingLocalMessage(message: Message): boolean {
   return message.metadata?.client_queue_id !== undefined;
 }
 
+function hasWindowAuthority(authority: MessageWindowAuthority, overlaps: boolean): boolean {
+  return authority === true || (authority === "overlap" && overlaps);
+}
+
 /** Select matching row revisions independently of pagination membership. */
 function selectFetchedRevisions(
   cachedAtRequest: Message[],
@@ -81,11 +88,11 @@ export function reconcileLatestMessageWindow(params: {
   cachedAtRequest: Message[];
   cachedAtResponse: Message[];
   fetched: Message[];
-  authoritative?: boolean;
+  authoritative?: MessageWindowAuthority;
 }): LatestMessageWindow {
   const { cachedAtRequest, cachedAtResponse, fetched, authoritative = false } = params;
   if (fetched.length === 0) {
-    if (authoritative) {
+    if (authoritative === true) {
       const pendingLocal = cachedAtResponse.filter(isPendingLocalMessage);
       return {
         messages: pendingLocal,
@@ -104,12 +111,15 @@ export function reconcileLatestMessageWindow(params: {
   const overlapsCachedWindow = cachedAtRequest.some((message) => fetchedIds.has(message.id));
   const selectedFetched = selectFetchedRevisions(cachedAtRequest, cachedAtResponse, orderedFetched);
 
-  if (authoritative) {
+  if (hasWindowAuthority(authoritative, overlapsCachedWindow)) {
     const cachedAtRequestIds = new Set(cachedAtRequest.map((message) => message.id));
     const retained = cachedAtResponse.filter((message) => {
       if (fetchedIds.has(message.id)) return false;
       if (isPendingLocalMessage(message)) return true;
       if (compareMessages(message, fetchedBoundary) < 0) return true;
+      if (authoritative === "overlap" && compareMessages(message, orderedFetched.at(-1)!) > 0) {
+        return true;
+      }
       return !cachedAtRequestIds.has(message.id);
     });
     const messages = joinMessages(selectedFetched, retained);

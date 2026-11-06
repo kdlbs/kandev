@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"sync"
 	"testing"
 	"time"
@@ -236,4 +237,18 @@ func TestHandleUpdateExecutorProfileUsesCASWhenConfigIsOmitted(t *testing.T) {
 	stored, err := svc.GetExecutorProfile(ctx, profile.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "true", stored.Config[allowUserNamespacesProfileConfigKey])
+}
+
+func TestExecutorOwnershipMCPUpdateDoesNotDiscloseForeignProfile(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	executor, err := svc.CreateExecutor(t.Context(), &service.CreateExecutorRequest{Name: "Shared", Type: models.ExecutorTypeLocal})
+	require.NoError(t, err)
+	profile := &models.ExecutorProfile{ID: "private-mcp", ExecutorID: executor.ID, Name: "Private", OwnerUserID: "alice", PrepareScript: "private-script"}
+	require.NoError(t, repo.CreateExecutorProfile(t.Context(), profile))
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	bob := authn.WithIdentity(t.Context(), authn.Identity{UserID: "bob", Role: authn.RoleMember})
+	response, err := h.handleUpdateExecutorProfile(bob, makeWSMessage(t, ws.ActionMCPUpdateExecutorProfile, map[string]any{"profile_id": profile.ID, "name": "stolen"}))
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeNotFound)
+	assert.NotContains(t, string(response.Payload), "private-script")
 }

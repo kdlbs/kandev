@@ -179,3 +179,31 @@ These results predate the rebase onto `3fb026365239bbc893fa4a5272d926640c7ef1f9`
 `golangci-lint run ./internal/agent/runtime/lifecycle ./internal/orchestrator --new-from-rev=HEAD --timeout=5m`,
 and `git diff --check` passed. These are local focused results before the pending base reconciliation;
 they do not replace the required post-rebase lifecycle/browser checks or hosted current-head CI.
+
+
+### Pinned silent restore after workspace admission refusal (2026-10-27)
+
+SDK PR integration CI at `b7f1e656796` retained a failed mid-turn restart trace:
+its session showed unresolved recovery while workspace readers and automatic
+restore failed concurrently. That trace does not record shared-operation
+ownership. An independent existing-boundary regression proves the source gap:
+a pinned silent candidate has no manual `RecoveryAction`, so it inherits a
+workspace peer's recovery refusal instead of running its own admission.
+
+Extend the coalescing recovery classification to runtime-only pinned candidate
+identities, preserving serialization, ordinary-launch rejection, caller
+cancellation, unrelated peer errors, and own-launch errors. Do not assign a
+manual recovery action or resolve any delivery evidence early. This enforces
+AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20/.21 through the existing admission path.
+The new silent-candidate regression fails before the production change. Run
+focused lifecycle race/admission checks and rebuilt mid-turn browser coverage
+before delivery. The two mobile CI failures separately passed five unchanged
+local repetitions each; neither original cause is established.
+
+
+Validation result: the focused lifecycle recovery/admission selection passed
+with race detection on the final code, including cancelled silent candidates.
+Fresh host/web/plugin builds and three mid-turn restart repetitions passed with
+retries disabled. Independent review found no actionable issue. These results
+prove the controlled classification correction; the original CI trace does not
+identify shared-operation ownership and therefore cannot prove that causal link.

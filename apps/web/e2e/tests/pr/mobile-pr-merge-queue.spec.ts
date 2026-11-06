@@ -91,6 +91,7 @@ test("adds a GitHub PR to the merge queue from mobile Review", async ({
 });
 
 async function seedEligiblePRFeedback(apiClient: ApiClient) {
+  await apiClient.mockGitHubSetRepositoryDetails("northstar-labs", "relay-console", true);
   await apiClient.mockGitHubSeedPRFeedback({
     owner: "northstar-labs",
     repo: "relay-console",

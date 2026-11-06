@@ -3,16 +3,19 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // AddTaskToWorkflow adds a task to a workflow with placement. Wrapped in a
@@ -25,8 +28,19 @@ func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, taskID)
+	fromWorkflowID, fromStepID, found, err := r.readTaskStepInTx(ctx, tx, taskID)
 	if err != nil {
+		return err
+	}
+	if !found {
+		return tx.Commit()
+	}
+	var currentState v1.TaskState
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state FROM tasks WHERE id = ?`), taskID).Scan(&currentState); err != nil {
+		return err
+	}
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, taskID, currentState, currentState,
+		fromWorkflowID, fromStepID, workflowID, workflowStepID); err != nil {
 		return err
 	}
 
@@ -120,21 +134,23 @@ func (r *Repository) RemoveTaskFromWorkflow(ctx context.Context, taskID, workflo
 // CreateWorkflow creates a new workflow
 func (r *Repository) CreateWorkflow(ctx context.Context, workflow *models.Workflow) error {
 	r.prepareWorkflow(workflow)
+	workflow.CreatedByUserID = workflowCreator(ctx)
 	return r.insertWorkflow(ctx, r.db, workflow)
 }
 
 func (r *Repository) CreateWorkflowIfWorkspaceUnchanged(ctx context.Context, workflow *models.Workflow, expected time.Time) error {
 	r.prepareWorkflow(workflow)
+	workflow.CreatedByUserID = workflowCreator(ctx)
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflows (
-			id, workspace_id, name, description, prompt, agent_profile_id, workflow_template_id,
+			created_by_user_id, id, workspace_id, name, description, prompt, agent_profile_id, workflow_template_id,
 			sort_order, hidden, style, source, source_path, created_at, updated_at
 		)
-		SELECT ?, ?, ?, ?, ?, ?, ?,
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?,
 			(SELECT COALESCE(MAX(sort_order), -1) + 1 FROM workflows WHERE workspace_id = ?),
 			?, ?, ?, ?, ?, ?
 		WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ? AND updated_at = ?)
-	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.Prompt,
+	`), workflow.CreatedByUserID, workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.Prompt,
 		workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.WorkspaceID,
 		dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source),
 		workflow.SourcePath, workflow.CreatedAt, workflow.UpdatedAt, workflow.WorkspaceID, expected)
@@ -161,6 +177,7 @@ func (r *Repository) prepareWorkflow(workflow *models.Workflow) {
 }
 
 func (r *Repository) insertWorkflow(ctx context.Context, exec sqlx.ExtContext, workflow *models.Workflow) error {
+	workflow.CreatedByUserID = workflowCreator(ctx)
 	// Auto-assign sort_order as max+1 within the workspace.
 	// The caller's transaction keeps the read and insert coherent.
 	var maxOrder int
@@ -173,9 +190,9 @@ func (r *Repository) insertWorkflow(ctx context.Context, exec sqlx.ExtContext, w
 	workflow.SortOrder = maxOrder + 1
 
 	_, err = exec.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO workflows (id, workspace_id, name, description, prompt, agent_profile_id, workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.CreatedAt, workflow.UpdatedAt)
+		INSERT INTO workflows (created_by_user_id, id, workspace_id, name, description, prompt, agent_profile_id, workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workflow.CreatedByUserID, workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.CreatedAt, workflow.UpdatedAt)
 
 	return err
 }
@@ -202,7 +219,7 @@ func normalizeWorkflowStyle(style string) string {
 }
 
 const workflowSelectColumns = `
-	id, workspace_id, name, description, prompt, agent_profile_id,
+	created_by_user_id, id, workspace_id, name, description, prompt, agent_profile_id,
 	workflow_template_id, sort_order, hidden, style, source, source_path,
 	created_at, updated_at
 `
@@ -216,6 +233,7 @@ func scanWorkflowRow(scanner workflowScanner) (*models.Workflow, error) {
 	var workflowTemplateID, agentProfileID, style, source, sourcePath sql.NullString
 	var hidden int
 	if err := scanner.Scan(
+		&workflow.CreatedByUserID,
 		&workflow.ID,
 		&workflow.WorkspaceID,
 		&workflow.Name,
@@ -318,7 +336,8 @@ func (r *Repository) UpdateWorkflowIfUnchanged(ctx context.Context, workflow *mo
 }
 
 // DeleteWorkflowsByWorkspace deletes all workflows for a workspace except the excluded IDs (E2E cleanup).
-// Relies on CASCADE foreign keys to remove workflow_steps.
+// It deletes their workflow_steps explicitly: the table the task repository
+// creates first has no foreign key, so no CASCADE removes them.
 func (r *Repository) DeleteWorkflowsByWorkspace(ctx context.Context, workspaceID string, excludeIDs []string) (int64, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -337,11 +356,25 @@ func (r *Repository) DeleteWorkflowsByWorkspace(ctx context.Context, workspaceID
 			return 0, err
 		}
 	}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		lockQuery := `SELECT id FROM workflows WHERE ` + query[len("DELETE FROM workflows WHERE "):] + ` ORDER BY id FOR UPDATE`
+		var lockedIDs []string
+		if err := tx.SelectContext(ctx, &lockedIDs, tx.Rebind(lockQuery), args...); err != nil {
+			return 0, err
+		}
+	}
 	cleanupQuery := `
 		DELETE FROM task_workflow_session_bindings
 		WHERE workflow_id IN (SELECT id FROM workflows WHERE ` + query[len("DELETE FROM workflows WHERE "):] + `)
 	`
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(cleanupQuery), args...); err != nil {
+		return 0, err
+	}
+	stepsQuery := `
+		DELETE FROM workflow_steps
+		WHERE workflow_id IN (SELECT id FROM workflows WHERE ` + query[len("DELETE FROM workflows WHERE "):] + `)
+	`
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(stepsQuery), args...); err != nil {
 		return 0, err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
@@ -355,15 +388,36 @@ func (r *Repository) DeleteWorkflowsByWorkspace(ctx context.Context, workspaceID
 	return rows, nil
 }
 
-// DeleteWorkflow deletes a workflow by ID
+// DeleteWorkflow deletes a workflow by ID together with its workflow_steps.
+// The steps are deleted explicitly rather than through ON DELETE CASCADE: the
+// task repository initializes before the workflow repository and creates
+// workflow_steps without the foreign key, so in a real database no cascade
+// exists. Where the foreign key does exist, the cascade finds nothing left.
 func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if dialect.IsPostgres(r.db.DriverName()) {
+		var lockedID string
+		err := tx.QueryRowxContext(ctx, tx.Rebind(`
+			SELECT id FROM workflows WHERE id = ? FOR UPDATE
+		`), id).Scan(&lockedID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("workflow not found: %s", id)
+		}
+		if err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM task_workflow_session_bindings WHERE workflow_id = ?
+	`), id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM workflow_steps WHERE workflow_id = ?
 	`), id); err != nil {
 		return err
 	}
@@ -497,4 +551,14 @@ func (r *Repository) ReorderWorkflowsIfUnchanged(
 		}
 	}
 	return tx.Commit()
+}
+
+func workflowCreator(ctx context.Context) string {
+	if actor, bound := models.ExecutorActorFromContext(ctx); bound {
+		return actor
+	}
+	if identity, ok := authn.IdentityFromContext(ctx); ok && !identity.Synthetic {
+		return identity.UserID
+	}
+	return ""
 }

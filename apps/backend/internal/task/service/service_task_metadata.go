@@ -32,6 +32,7 @@ func protectedTaskMetadataForCreate(metadata map[string]interface{}, trustedHand
 	delete(created, models.MetaKeyDeferredLaunch)
 	delete(created, models.MetaKeyStepHandoffCarry)
 	delete(created, models.MetaKeyAutomationStartOwned)
+	delete(created, models.MetaKeyRequiredSubtaskCount)
 	if !trustedHandoff {
 		delete(created, models.MetaKeyHandoffSource)
 		delete(created, models.MetaKeyHandoffs)

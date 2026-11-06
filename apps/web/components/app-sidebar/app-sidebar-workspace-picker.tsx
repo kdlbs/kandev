@@ -3,7 +3,19 @@
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@kandev/ui/dropdown-menu";
+import { IconLayoutDashboard } from "@tabler/icons-react";
+import { usePathname } from "@/lib/routing/client-router";
+import {
+  INTEGRATED_CONTROL_HREF,
+  isIntegratedControlPath,
+} from "@/lib/navigation/integrated-control";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { cn } from "@/lib/utils";
@@ -108,6 +120,9 @@ export function AppSidebarWorkspacePicker({
   const { t } = useTranslation();
   const router = useRouter();
   const officeEnabled = useFeature("office");
+  const integratedEnabled = useFeature("integratedControl");
+  const pathname = usePathname();
+  const inControl = integratedEnabled && isIntegratedControlPath(pathname);
   const workspaces = useAppStore((s) => s.workspaces);
   const startupPage = useAppStore((s) => s.userSettings.startupPage);
   const selectWorkspace = useSelectWorkspace();
@@ -115,14 +130,16 @@ export function AppSidebarWorkspacePicker({
 
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
   const activeId = activeWorkspace?.id ?? null;
-  const activeName = activeWorkspace?.name ?? t("sidebar:workspaceFallback");
+  const activeName = inControl
+    ? t("sidebar:integratedControl.title")
+    : (activeWorkspace?.name ?? t("sidebar:workspaceFallback"));
   const menuFocus = useControlledMenuFocus(controlledOpen);
 
   const handleSelect = useCallback(
     (workspace: WorkspaceItem) => {
       const { id } = workspace;
       requestNavigation(() => {
-        if (id === activeId) {
+        if (id === activeId && !inControl) {
           if (officeEnabled && workspaceType(workspace) === "kanban") {
             selectWorkspace(workspace);
             router.push(workspaceHomeHref(workspace, startupPage));
@@ -141,15 +158,21 @@ export function AppSidebarWorkspacePicker({
         onActionComplete?.();
       });
     },
-    [activeId, startupPage, router, selectWorkspace, officeEnabled, onActionComplete, setOpen],
+    [
+      activeId,
+      startupPage,
+      router,
+      selectWorkspace,
+      officeEnabled,
+      inControl,
+      onActionComplete,
+      setOpen,
+    ],
   );
-  const handleNavigate = useCallback(
-    (href: string) => {
-      router.push(href);
-      onActionComplete?.();
-    },
-    [router, onActionComplete],
-  );
+  const handleNavigate = (href: string) => {
+    router.push(href);
+    onActionComplete?.();
+  };
 
   return (
     <DropdownMenu modal={modal} open={open} onOpenChange={setOpen}>
@@ -169,9 +192,15 @@ export function AppSidebarWorkspacePicker({
         align={contentAlign}
         className={cn("w-72", contentClassName)}
       >
+        <IntegratedControlPickerEntry
+          onSelected={() => {
+            setOpen(false);
+            onActionComplete?.();
+          }}
+        />
         <WorkspacePickerContent
           workspaces={workspaces.items}
-          activeId={activeId}
+          activeId={inControl ? null : activeId}
           itemTestIdPrefix={itemTestIdPrefix}
           officeEnabled={officeEnabled}
           onWorkspaceSelect={handleSelect}
@@ -179,5 +208,30 @@ export function AppSidebarWorkspacePicker({
         />
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function IntegratedControlPickerEntry({ onSelected }: { onSelected: () => void }) {
+  const { t } = useTranslation();
+  const enabled = useFeature("integratedControl");
+  const router = useRouter();
+  if (!enabled) return null;
+  return (
+    <>
+      <DropdownMenuItem
+        data-testid="workspace-picker-integrated-control"
+        onSelect={() =>
+          requestNavigation(() => {
+            router.push(INTEGRATED_CONTROL_HREF);
+            onSelected();
+          })
+        }
+        className="cursor-pointer gap-2"
+      >
+        <IconLayoutDashboard className="size-3.5" aria-hidden />
+        {t("sidebar:integratedControl.title")}
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+    </>
   );
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 
 	"go.uber.org/zap"
@@ -23,31 +24,54 @@ type AssignmentStepIDLookup interface {
 	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
 }
 
-// IsAssignmentWakeEligible reports whether a task_assigned wake may be
-// queued for taskID, given its current workflow step.
-//
-// A step is eligible only when it carries an auto_start_agent on_enter
-// action (wfmodels.OnEnterAutoStartAgent) — the same predicate the
-// orchestrator's SelectAutoStartStep uses to decide which step may launch
-// an agent. Waking a task sitting on any other step (Backlog, Review,
-// Approval, ...) would run the agent outside the workflow: it does
-// real work, calls step_complete_kandev, gets accepted:true even though
-// nothing advances, and then the card's later move to an eligible step
-// launches the agent a second time.
-//
-// This intentionally fails OPEN (returns true) whenever eligibility
-// cannot be determined:
-//   - an empty step ID (task has no workflow step bound) preserves
-//     current behavior for non-workflow-driven tasks;
-//   - a step-ID lookup error, a nil getter, a step lookup error, or a nil
-//     step all mean "we don't know", and refusing to wake would silently
-//     strand a task rather than merely misfire it once. Every fail-open
-//     branch logs a WARN so the ambiguity is visible instead of silent.
-//
-// Only the wake decision is gated here. Interrupting a previous
-// assignee's running session must still fire regardless of the new
-// step's eligibility — callers must not route that through this check.
+// AssignmentTaskLookup reads the current workflow step and persisted blockers.
+type AssignmentTaskLookup interface {
+	AssignmentStepIDLookup
+	ListTaskBlockers(ctx context.Context, taskID string) ([]*models.TaskBlocker, error)
+	IsTaskInTerminalStep(ctx context.Context, taskID string) (bool, error)
+}
+
+// IsAssignmentWakeEligible permits assignment wakes only on eligible steps
+// without a known pending blocker. Step uncertainty never bypasses blockers.
+// Previous-assignee interruption remains outside this wake-only decision.
 func IsAssignmentWakeEligible(
+	ctx context.Context,
+	log *logger.Logger,
+	tasks AssignmentTaskLookup,
+	steps AssignmentStepGetter,
+	taskID string,
+	source string,
+) bool {
+	if !isAssignmentStepEligible(ctx, log, tasks, steps, taskID, source) {
+		return false
+	}
+	blockers, err := tasks.ListTaskBlockers(ctx, taskID)
+	if err != nil {
+		log.Warn("office.assignment_wake.blockers_lookup_failed",
+			zap.String("task_id", taskID), zap.String("source", source), zap.Error(err))
+		return true
+	}
+	for _, blocker := range blockers {
+		terminal, err := tasks.IsTaskInTerminalStep(ctx, blocker.BlockerTaskID)
+		if err != nil {
+			log.Warn("office.assignment_wake.blocker_lookup_failed",
+				zap.String("task_id", taskID), zap.String("blocker_task_id", blocker.BlockerTaskID),
+				zap.String("source", source), zap.Error(err))
+			// Unknown evidence preserves admission, but cannot hide a later pending blocker.
+			continue
+		}
+		if !terminal {
+			log.Info("office.assignment_wake.blocker_pending",
+				zap.String("task_id", taskID), zap.String("blocker_task_id", blocker.BlockerTaskID), zap.String("source", source))
+			return false
+		}
+	}
+	return true
+}
+
+// isAssignmentStepEligible preserves assignment admission when a step is unbound
+// or cannot be resolved. Known steps require an auto_start_agent action.
+func isAssignmentStepEligible(
 	ctx context.Context,
 	log *logger.Logger,
 	stepIDs AssignmentStepIDLookup,

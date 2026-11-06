@@ -38,6 +38,8 @@ Users want to schedule an agent to run a prompt on a cron (or on a GitHub PR eve
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.17:** An already-persisted scheduled trigger with no next occurrence shall never be automatically due. Repeated scheduler checks shall create no runs, skipped runs, or automation-triggered events for that trigger and shall leave its config, enabled state, and evaluation cursor unchanged. Other schedulable triggers shall continue to be evaluated independently.
 - **AC-OFFICE-AUTOMATIONS-SETTINGS-001.18:** Schedule validation and automatic due evaluation shall preserve supported five-field expressions, descriptors, intervals, configured timezones (UTC when empty), and daylight-saving behavior. Valid leap-day schedules within the supported search horizon and day-of-month/day-of-week OR expressions such as `0 0 31 2 MON` shall remain eligible. A valid occurrence shall be due at its computed instant and shall not be due before it.
 
+- **AC-OFFICE-AUTOMATIONS-SETTINGS-001.19:** A `github_pr` trigger shall poll for matching open PRs only when its saved event selection contains at least one exact `opened` value, including a mixed selection. Empty, missing, null, or unsupported-only selections shall produce no provider search, automation-triggered event, dedup reservation, admission, or run. The new-trigger default shall remain explicitly `opened`; clearing the selection shall remain cleared. Selecting `opened` shall retain existing enabled, ownership, repository, branch, author, draft, and successful firing/dedup behavior on desktop and phone.
+
 ## List contract exclusions
 
 These criteria govern settings list reads and their visible state. They do not

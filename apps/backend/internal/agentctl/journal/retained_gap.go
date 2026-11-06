@@ -13,7 +13,7 @@ func readRetainedHistoryGap(ctx context.Context, j *Journal, request RetainedRec
 	if err := VerifyReconstructionSubmission(submission, descriptor.Submissions[0]); err != nil {
 		return nil, err
 	}
-	terminated, err := processidentity.OwnedSessionTerminated(request.OriginalRuntime)
+	terminated, err := processidentity.OriginalOwnerTerminated(request.OriginalRuntime)
 	if err != nil || !terminated {
 		return nil, ErrOwnerMismatch
 	}

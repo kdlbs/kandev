@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -102,6 +103,10 @@ func (e *GitHubEvaluator) checkPRTrigger(ctx context.Context, t *AutomationTrigg
 	if err := json.Unmarshal(t.Config, &cfg); err != nil {
 		e.logger.Debug("invalid github_pr trigger config",
 			zap.String("trigger_id", t.ID), zap.Error(err))
+		return
+	}
+
+	if !slices.Contains(cfg.Events, "opened") {
 		return
 	}
 

@@ -22,7 +22,7 @@ Authentication is an **experimental runtime feature toggle** and is disabled in 
 
 - Everyone signs in with email + password. Browser sessions last 30 days (sliding) and can be revoked from `Settings > Account`. The signed-in user is shown in the bottom-left of the sidebar, with a log-out menu.
 - **Workspaces become per-user by default.** You only see workspaces you own, including their tasks, sessions, repositories, terminals, previews, and live updates. Existing data is assigned to the admin created during setup. A workspace can then be shared with colleagues on purpose: see [Team Access](team-access.md).
-- Secrets are per-user. A **Global** secret is user-global across that user's workspaces; a **Workspace** secret belongs to one of their workspaces. With authentication disabled, Global is install-global. Executors and agent profiles remain shared across the instance, so they can reference Global secrets only; repositories may bind Global or same-workspace secrets.
+- Secrets are per-user. A **Global** secret is user-global across that user's workspaces; a **Workspace** secret belongs to one of their workspaces. With authentication disabled, Global is install-global. Executor configurations are shared by default and can have a private owner; agent profiles remain shared. They can reference Global secrets only; repositories may bind Global or same-workspace secrets.
 - With Organizations off, admins manage users and instance settings but do **not** see other users' private workspaces. With Organizations on, org admins manage organization-scoped resources and the separate instance operator manages organizations; neither role grants workspace visibility. The experimental multi-org path still has tenant-boundary gaps in user and system administration; see [Limitations](#limitations).
 - Programmatic clients (external MCP, scripts) authenticate with personal access tokens.
 
@@ -68,6 +68,23 @@ curl -H "Authorization: Bearer kandev_pat_..." https://kandev.example.com/api/v1
 
 External MCP clients (Claude Code, Cursor connecting to `/mcp`) must be configured with a PAT once authentication is enabled. WebSocket clients that cannot send headers can pass `?token=<PAT>` on the connection URL.
 
+## When credential storage is unavailable
+
+Kandev distinguishes a rejected credential from a verification dependency it cannot read. A missing, malformed, expired, or revoked session or token still returns `401` on a protected route, with `WWW-Authenticate: Bearer`. A database read failure for the credential, account, or organization returns instead:
+
+```http
+HTTP/1.1 503 Service Unavailable
+Content-Type: application/json
+
+{"error":"authentication temporarily unavailable","code":"persistence_unavailable"}
+```
+
+A `503` does not carry `WWW-Authenticate`, does not clear the session cookie, and does not revoke the credential. Keep the browser session and retry the request after storage recovers: the same cookie or PAT authenticates again without another login. The same contract applies to WebSocket upgrades, `?token=<PAT>` query credentials, and port-preview forwarding.
+
+Requests whose session or PAT lookup remains unresolved after credential fallback receive `503` even on a public or deferred path, so an outage is not projected as an anonymous user or rewritten as a `401` downstream. A successfully verified fallback credential still authenticates the request. Credentialless health and readiness probes, and requests without a Kandev session or PAT, keep their existing behavior.
+
+Operators can find failed verification reads in the backend log under the `auth.credential_lookup_failed` event. Its bounded fields identify the credential kind, lookup operation, and error category; raw tokens, cookies, hashes, database URLs, headers, and database error text are never logged.
+
 ## Endpoints that stay public
 
 `/health` (liveness probes) and `/ready` (readiness probes), the login/setup/invite pages, `GET /api/v1/features`, and self-authenticating webhook receivers (automation webhooks with `X-Webhook-Secret`, office channel HMAC webhooks). Everything else requires a session or token.
@@ -104,7 +121,7 @@ A custom `auth.cookieName` disables automatic port isolation. It must be unique 
 
 When authentication is on, guarded workspace reads and actions are available only to its owner and users who can reach it through [Team Access](team-access.md). Other users receive "not found" even if they know the ID. This covers workspaces, tasks, workflows, sessions, plans, walkthroughs, terminals, VS Code, port previews, git snapshots, Workspace secrets, repository bindings, **and the workspace's third-party integration settings (GitHub/GitLab/Jira/Linear/Sentry/Azure) and automations**. A user's Global secrets are also private to that user. Admin and operator management authority does not reveal workspaces or secrets they cannot otherwise reach.
 
-Shared across the instance (by design): executors, agent profiles, environments, editors, prompts, and system pages.
+Shared across the instance by default: executor configurations, agent profiles, environments, editors, prompts, and system pages. Executor and profile owners can restrict their configuration and compute access to themselves and configuration administrators. See [Private executors and profiles](executors.md#private-executors-and-profiles).
 
 ## Limitations
 

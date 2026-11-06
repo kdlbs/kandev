@@ -2,6 +2,7 @@
 
 import { TaskGraphPanelRequest } from "@/components/task-graph/task-graph-panel-request";
 import { memo, useCallback, useState } from "react";
+import { ClarificationDraftProvider } from "./chat/clarification-draft-context";
 import dynamic from "@/lib/routing/client-dynamic";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useRouter } from "@/lib/routing/client-router";
@@ -65,7 +66,9 @@ export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
   }
   return (
     <TaskSheetSelectionProvider workspaceId={props.workspaceId}>
-      <ResponsiveTaskLayout {...props} />
+      <ClarificationDraftProvider taskId={props.taskId ?? null}>
+        <ResponsiveTaskLayout {...props} />
+      </ClarificationDraftProvider>
       {props.taskId && (
         <TaskGraphPanelRequest taskId={props.taskId} usesDockview={usesDesktopWorkbench} />
       )}
@@ -167,6 +170,7 @@ const ResponsiveTaskLayout = memo(function ResponsiveTaskLayout({
   // Desktop layout - dockview
   return (
     <DockviewDesktopLayout
+      taskId={taskId}
       workspaceId={workspaceId}
       workflowId={workflowId}
       sessionId={sessionId}

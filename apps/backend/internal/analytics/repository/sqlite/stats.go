@@ -248,11 +248,10 @@ func (r *Repository) GetGlobalStats(
 			SELECT
 				COUNT(*) AS total_tasks,
 				SUM(CASE WHEN t.archived_at IS NOT NULL
-				          OR ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id)
+				          OR t.state = 'COMPLETED'
 				         THEN 1 ELSE 0 END) AS completed_tasks,
 				SUM(CASE WHEN t.state = 'IN_PROGRESS' AND t.archived_at IS NULL THEN 1 ELSE 0 END) AS in_progress_tasks
 			FROM tasks t
-			LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
 			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "t.created_at")+`
 		),
 		session_agg AS (
@@ -388,15 +387,14 @@ func (r *Repository) GetDailyActivity(
 				COUNT(DISTINCT task_id) AS task_count
 			FROM turn_scope
 			GROUP BY activity_date
-		), message_days AS (
-			SELECT DISTINCT task_session_id, activity_date
-			FROM turn_scope
 		), message_activity AS (
-			SELECT md.activity_date, COUNT(msg.id) AS message_count
-			FROM message_days md
-			JOIN task_session_messages msg ON msg.task_session_id = md.task_session_id
-			WHERE %s = md.activity_date
-			GROUP BY md.activity_date
+			SELECT d.date AS activity_date, COUNT(msg.id) AS message_count
+			FROM task_session_messages msg
+			JOIN task_sessions s ON s.id = msg.task_session_id
+			JOIN tasks t ON t.id = s.task_id
+			JOIN dates d ON d.date = %s
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+			GROUP BY d.date
 		)
 		SELECT
 			%s AS date,
@@ -409,7 +407,7 @@ func (r *Repository) GetDailyActivity(
 		ORDER BY d.date ASC
 	`, dateStart, datePlus, curDate, dateOfTurn, dateOfTurn, dateOfMsg, dateText)
 
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), days-1, workspaceID)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), days-1, workspaceID, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -462,14 +460,13 @@ func (r *Repository) GetCompletedTaskActivity(
 		LEFT JOIN (
 			SELECT %s as activity_date, COUNT(DISTINCT t.id) as completed_tasks
 			FROM tasks t
-			LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
 			LEFT JOIN (
 				SELECT task_id, MAX(completed_at) as completed_at
 				FROM task_sessions WHERE completed_at IS NOT NULL GROUP BY task_id
 			) ts ON ts.task_id = t.id
 			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 			  AND (t.archived_at IS NOT NULL
-			       OR ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id))
+			       OR t.state = 'COMPLETED')
 			  AND COALESCE(ts.completed_at, t.archived_at) IS NOT NULL
 			GROUP BY %s
 		) activity ON activity.activity_date = d.date
@@ -556,7 +553,7 @@ func buildRepositoryStatsQuery(drv string) string {
 			WHERE workspace_id = ? AND deleted_at IS NULL
 		), task_repository_scope AS (
 			SELECT DISTINCT er.id AS repository_id,
-				t.id AS task_id, t.state, t.workflow_step_id, t.archived_at, t.created_at
+				t.id AS task_id, t.state, t.archived_at, t.created_at
 			FROM eligible_repositories er
 			JOIN task_repositories tr ON tr.repository_id = er.id
 			JOIN tasks t ON t.id = tr.task_id
@@ -565,11 +562,10 @@ func buildRepositoryStatsQuery(drv string) string {
 			SELECT scope.repository_id,
 				COUNT(*) AS total_tasks,
 				COUNT(CASE WHEN scope.archived_at IS NOT NULL
-					OR ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id)
+					OR scope.state = 'COMPLETED'
 					THEN scope.task_id END) AS completed_tasks,
 				COUNT(CASE WHEN scope.state = 'IN_PROGRESS' AND scope.archived_at IS NULL THEN scope.task_id END) AS in_progress_tasks
 			FROM task_repository_scope scope
-			LEFT JOIN workflow_steps ws ON ws.id = scope.workflow_step_id
 			WHERE `+rangeStartPredicate(drv, "scope.created_at")+`
 			GROUP BY scope.repository_id
 		), session_scope AS (

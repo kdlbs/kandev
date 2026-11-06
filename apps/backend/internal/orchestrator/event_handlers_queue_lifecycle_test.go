@@ -476,7 +476,7 @@ func TestExecuteQueuedMessage_PlanCommentDispatchFailureDoesNotRetryAfterAttempt
 	if err != nil || !ok {
 		t.Fatal("reserve first plan-comment attempt")
 	}
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, first.ID, first)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, first.ID, first)
 	svc.executeQueuedMessageWithReservation("s1", first, reservation)
 	if got := len(messages.userMessages); got != 1 {
 		t.Fatalf("recorded messages after first attempt = %d, want 1", got)

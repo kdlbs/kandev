@@ -52,8 +52,9 @@ type Service struct {
 }
 
 type sessionAdmission struct {
-	mu   sync.Mutex
-	refs int
+	gate       *sessionAdmissionGate
+	refs       int
+	promptRefs int
 }
 
 type sessionAdmissionContextKey struct{}
@@ -328,7 +329,8 @@ func (s *Service) SetSessionAutoMerge(
 // WithSessionAdmission runs fn under the per-session queue admission lock.
 // All queue insertion and mutation paths use the same lock. The callback must
 // complete synchronously; queue methods called with its context reuse the held
-// lock.
+// lock. Acquisition has its own bounded context; admitted work retains the
+// caller's context and error semantics.
 func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn func(context.Context) error) error {
 	if fn == nil {
 		return errors.New("session admission callback is nil")
@@ -338,47 +340,101 @@ func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn
 		if token.sessionID == sessionID {
 			return fn(ctx)
 		}
-		return s.withSessionAdmissionLock(ctx, sessionID, token.afterLifecycleUnlock, fn)
+		waitCtx, cancel, ownBudget := admissionWaitBudget(ctx)
+		defer cancel()
+		return s.withSessionAdmissionLock(waitCtx, ctx, sessionID, token.afterLifecycleUnlock, ownBudget, fn)
 	}
 
 	var afterLifecycleUnlock []func()
-	s.lifecycleMu.RLock()
+	waitCtx, cancel, ownBudget := admissionWaitBudget(ctx)
+	defer cancel()
+	if err := rlockWithContext(waitCtx, &s.lifecycleMu); err != nil {
+		return admissionWaitError(err, ownBudget)
+	}
 	defer func() {
 		s.lifecycleMu.RUnlock()
 		for _, callback := range afterLifecycleUnlock {
 			callback()
 		}
 	}()
-	return s.withSessionAdmissionLock(ctx, sessionID, &afterLifecycleUnlock, fn)
+	return s.withSessionAdmissionLock(waitCtx, ctx, sessionID, &afterLifecycleUnlock, ownBudget, fn)
+}
+
+// WithPromptAdmission marks prompt dispatches while they wait for or hold the
+// shared session admission gate. Other queue operations do not count as work
+// that a user cancellation must interrupt.
+func (s *Service) WithPromptAdmission(ctx context.Context, sessionID string, fn func(context.Context) error) error {
+	if sessionID == "" {
+		return s.WithSessionAdmission(ctx, sessionID, fn)
+	}
+	s.admissionMu.Lock()
+	entry := s.admissions[sessionID]
+	if entry == nil {
+		entry = &sessionAdmission{gate: newSessionAdmissionGate()}
+		s.admissions[sessionID] = entry
+	}
+	entry.promptRefs++
+	s.admissionMu.Unlock()
+	defer func() {
+		s.admissionMu.Lock()
+		entry.promptRefs--
+		if entry.refs == 0 && entry.promptRefs == 0 && s.admissions[sessionID] == entry {
+			delete(s.admissions, sessionID)
+		}
+		s.admissionMu.Unlock()
+	}()
+	return s.WithSessionAdmission(ctx, sessionID, fn)
+}
+
+// SessionAdmissionActive reports whether sessionID's prompt admission gate is
+// held by or awaiting a prompt dispatch. Generic queue admissions are excluded.
+func (s *Service) SessionAdmissionActive(sessionID string) bool {
+	if s == nil || sessionID == "" {
+		return false
+	}
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
+	entry := s.admissions[sessionID]
+	return entry != nil && entry.promptRefs > 0
 }
 
 func (s *Service) withSessionAdmissionLock(
-	ctx context.Context,
+	waitCtx context.Context,
+	callbackCtx context.Context,
 	sessionID string,
 	afterLifecycleUnlock *[]func(),
+	ownBudget bool,
 	fn func(context.Context) error,
 ) error {
 	s.admissionMu.Lock()
 	entry := s.admissions[sessionID]
 	if entry == nil {
-		entry = &sessionAdmission{}
+		entry = &sessionAdmission{gate: newSessionAdmissionGate()}
 		s.admissions[sessionID] = entry
 	}
 	entry.refs++
 	s.admissionMu.Unlock()
 
-	entry.mu.Lock()
-	defer func() {
-		entry.mu.Unlock()
+	if err := entry.gate.lock(waitCtx); err != nil {
 		s.admissionMu.Lock()
 		entry.refs--
-		if entry.refs == 0 && s.admissions[sessionID] == entry {
+		if entry.refs == 0 && entry.promptRefs == 0 && s.admissions[sessionID] == entry {
+			delete(s.admissions, sessionID)
+		}
+		s.admissionMu.Unlock()
+		return admissionWaitError(err, ownBudget)
+	}
+	defer func() {
+		entry.gate.unlock()
+		s.admissionMu.Lock()
+		entry.refs--
+		if entry.refs == 0 && entry.promptRefs == 0 && s.admissions[sessionID] == entry {
 			delete(s.admissions, sessionID)
 		}
 		s.admissionMu.Unlock()
 	}()
 
-	admittedCtx := context.WithValue(ctx, sessionAdmissionContextKey{}, sessionAdmissionToken{
+	admittedCtx := context.WithValue(callbackCtx, sessionAdmissionContextKey{}, sessionAdmissionToken{
 		service: s, sessionID: sessionID, afterLifecycleUnlock: afterLifecycleUnlock,
 	})
 	return fn(admittedCtx)
@@ -1353,16 +1409,6 @@ func (s *Service) resolveAdmissionAutoMergePolicy(
 	return nil
 }
 
-func (s *Service) autoMergeCandidate(
-	ctx context.Context,
-	identity *QueueSessionIdentity,
-	candidate *QueuedMessage,
-	claim *QueueAttachmentClaim,
-	policy *AutoMergePolicy,
-) (*QueuedMessage, bool, error) {
-	return s.autoMergeCandidateAtWorkflowEntry(ctx, identity, nil, candidate, claim, policy)
-}
-
 func (s *Service) autoMergeCandidateAtWorkflowEntry(
 	ctx context.Context,
 	identity *QueueSessionIdentity,
@@ -1535,17 +1581,6 @@ func (s *Service) finalizeAutoMerge(
 		return merged
 	}
 	return source
-}
-
-func (s *Service) insertQueueMessage(
-	ctx context.Context,
-	identity *QueueSessionIdentity,
-	msg *QueuedMessage,
-	claim *QueueAttachmentClaim,
-	maxPerSession int,
-	policy *AutoMergePolicy,
-) error {
-	return s.insertQueueMessageAtWorkflowEntry(ctx, identity, nil, msg, claim, maxPerSession, policy)
 }
 
 func (s *Service) insertQueueMessageAtWorkflowEntry(
@@ -2830,6 +2865,56 @@ func (s *Service) AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowCla
 		zap.String("session_id", sessionID),
 		zap.Int("source_count", len(claim.Sources)))
 	return nil
+}
+
+// CanReleaseSendNowClaim reports whether an unrestorable claim still owns its
+// sources and can be released. It does not mutate the queue, so a status write
+// that follows it can retry while the claim remains available.
+func (s *Service) CanReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error) {
+	if claim == nil {
+		return false, nil
+	}
+	sessionID, err := sendNowClaimSessionID(claim)
+	if err != nil {
+		return false, err
+	}
+	var canRelease bool
+	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var releaseErr error
+		canRelease, releaseErr = s.repo.CanReleaseSendNowClaim(admittedCtx, claim)
+		return releaseErr
+	}); err != nil {
+		return false, err
+	}
+	return canRelease, nil
+}
+
+// ReleaseSendNowClaim removes an unrestorable claim and any source rows it
+// still owns. A false settled result means a successor owns a surviving source,
+// so the message must not be marked not delivered.
+func (s *Service) ReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error) {
+	if claim == nil {
+		return false, nil
+	}
+	sessionID, err := sendNowClaimSessionID(claim)
+	if err != nil {
+		return false, err
+	}
+	var settled bool
+	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var releaseErr error
+		settled, releaseErr = s.repo.ReleaseSendNowClaim(admittedCtx, claim)
+		return releaseErr
+	}); err != nil {
+		return false, err
+	}
+	if settled {
+		s.logger.Info("released unrestorable send-now queue claim",
+			zap.String("session_id", sessionID),
+			zap.String("claim_id", claim.ClaimID),
+			zap.Int("source_count", len(claim.Sources)))
+	}
+	return settled, nil
 }
 
 type pendingSendNowClaimRepository interface {

@@ -15,7 +15,7 @@ import {
   IconGitFork,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import { formatMessageTime } from "@/lib/i18n/message-time";
+import { MessageTimestamp } from "./message-timestamp";
 import { formatPromptDuration, messageTurnDurationSeconds } from "@/lib/turn-duration";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useAppStore } from "@/components/state-provider";
@@ -47,6 +47,7 @@ import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { forkConversation } from "@/lib/services/session-launch-service";
+import { generateUUID } from "@/lib/uuid";
 
 const ACTION_BUTTON_SIZE = "h-5 w-5 p-1";
 const ACTION_BUTTON_HOVER = "hover:bg-muted rounded";
@@ -256,56 +257,6 @@ function MessageDebugDialog({
   );
 }
 
-function MessageTimestamp({ createdAt }: { createdAt: string }) {
-  const { t } = useTranslation();
-  const messageTimeDisplay = useAppStore((state) => state.userSettings.messageTimeDisplay);
-  const usesTouchDrawer = useTouchDrawer();
-  const [open, setOpen] = useState(false);
-  const formatted = formatMessageTime(createdAt, messageTimeDisplay);
-  if (!formatted) return null;
-
-  const timeEl = (
-    <time
-      dateTime={createdAt}
-      title={formatted.counterpart}
-      aria-label={t("task:messageTimestampAriaLabel", {
-        label: formatted.label,
-        counterpart: formatted.counterpart,
-      })}
-      className="min-w-0 text-[10px] text-muted-foreground/60 font-mono"
-    >
-      {formatted.label}
-    </time>
-  );
-  if (!usesTouchDrawer) return timeEl;
-
-  return (
-    <Drawer open={open} onOpenChange={setOpen}>
-      <DrawerTrigger asChild>
-        <button
-          type="button"
-          data-testid="message-timestamp-trigger"
-          className="min-w-0 cursor-pointer border-0 bg-transparent p-0 text-left max-md:min-h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          aria-label={t("task:messageTimestampAriaLabel", {
-            label: formatted.label,
-            counterpart: formatted.counterpart,
-          })}
-        >
-          {timeEl}
-        </button>
-      </DrawerTrigger>
-      <DrawerContent data-testid="message-timestamp-drawer">
-        <DrawerHeader>
-          <DrawerTitle>{t("task:messageTime")}</DrawerTitle>
-          <DrawerDescription>{formatted.counterpart}</DrawerDescription>
-        </DrawerHeader>
-      </DrawerContent>
-    </Drawer>
-  );
-}
-
 /** Selects the message turn and its model-specific usage multiplier. */
 function findMessageTurn(state: AppState, message: Message): Turn | null {
   const sessionId = message.session_id;
@@ -364,7 +315,7 @@ function ForkConversationAction({ message, turn }: { message: Message; turn: Tur
 
   const handleFork = async () => {
     if (!message.session_id || !message.task_id || !turn.completed_at || pending) return;
-    requestId.current ??= crypto.randomUUID();
+    requestId.current ??= generateUUID();
     setPending(true);
     setFailed(false);
     try {

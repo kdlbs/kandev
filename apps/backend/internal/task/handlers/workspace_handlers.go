@@ -37,6 +37,7 @@ func (h *WorkspaceHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/workspaces", h.httpListWorkspaces)
 	api.POST("/workspaces", h.httpCreateWorkspace)
+	api.POST("/workspaces/:id/clone", h.httpCloneWorkspace)
 	api.GET("/workspaces/:id", h.httpGetWorkspace)
 	api.PATCH("/workspaces/:id", h.httpUpdateWorkspace)
 	api.DELETE("/workspaces/:id", h.httpDeleteWorkspace)

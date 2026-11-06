@@ -117,7 +117,9 @@ type Store interface {
 	// non-deleted worktree row that has a non-empty path.
 	ListActiveWorktreePaths(ctx context.Context) ([]string, error)
 	// CountActiveWorktreeReferences counts non-deleted session associations
-	// for a physical worktree, excluding associations owned by the caller.
+	// for a physical worktree, excluding associations owned by the caller. A
+	// session stops counting once its task is archived, its state is
+	// terminal, and no runtime row remains.
 	CountActiveWorktreeReferences(ctx context.Context, worktreeID string, excludeSessionIDs []string) (int, error)
 }
 
@@ -224,16 +226,31 @@ func (m *Manager) SetScriptMessageHandler(handler ScriptMessageHandler) {
 // ListActiveWorktreePaths returns the absolute on-disk paths of all
 // currently active, non-deleted worktrees.
 func (m *Manager) ListActiveWorktreePaths(ctx context.Context) ([]string, error) {
+	if m.store == nil {
+		m.mu.RLock()
+		defer m.mu.RUnlock()
+		paths := make([]string, 0, len(m.worktrees))
+		for _, wt := range m.worktrees {
+			if wt != nil && wt.Status == StatusActive && wt.Path != "" {
+				paths = append(paths, wt.Path)
+			}
+		}
+		return paths, nil
+	}
 	return m.store.ListActiveWorktreePaths(ctx)
 }
 
 // CountActiveWorktreeReferences returns the number of non-deleted session
-// associations for a physical worktree outside the supplied sessions.
+// associations for a physical worktree outside the supplied sessions. An
+// archived terminal session with no runtime row no longer holds the worktree.
 func (m *Manager) CountActiveWorktreeReferences(
 	ctx context.Context,
 	worktreeID string,
 	excludeSessionIDs []string,
 ) (int, error) {
+	if m.store == nil {
+		return 0, nil
+	}
 	return m.store.CountActiveWorktreeReferences(ctx, worktreeID, excludeSessionIDs)
 }
 
@@ -368,6 +385,9 @@ func (m *Manager) getRepoLock(repoPath string) *sync.Mutex {
 	m.repoLockMu.Lock()
 	defer m.repoLockMu.Unlock()
 
+	if m.repoLocks == nil {
+		m.repoLocks = make(map[string]*repoLockEntry)
+	}
 	if entry, exists := m.repoLocks[repoPath]; exists {
 		entry.refCount++
 		return entry.mu

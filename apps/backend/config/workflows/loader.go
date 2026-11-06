@@ -61,6 +61,8 @@ type stepEventsYAML struct {
 	OnHeartbeat         []actionYAML `yaml:"on_heartbeat,omitempty"`
 	OnBudgetAlert       []actionYAML `yaml:"on_budget_alert,omitempty"`
 	OnAgentError        []actionYAML `yaml:"on_agent_error,omitempty"`
+	OnPRMerged          []actionYAML `yaml:"on_pr_merged,omitempty"`
+	OnPRClosed          []actionYAML `yaml:"on_pr_closed,omitempty"`
 }
 
 // actionYAML is the YAML-friendly representation of a step action.
@@ -203,7 +205,7 @@ func convertStageType(stage string) (models.StageType, error) {
 		return models.StageTypeCustom, nil
 	}
 	switch models.StageType(stage) {
-	case models.StageTypeWork, models.StageTypeReview, models.StageTypeApproval, models.StageTypeCustom:
+	case models.StageTypeWork, models.StageTypeReview, models.StageTypeApproval, models.StageTypeCustom, models.StageTypeHold:
 		return models.StageType(stage), nil
 	}
 	return "", fmt.Errorf("invalid stage_type %q", stage)
@@ -301,8 +303,8 @@ func convertEvents(e stepEventsYAML) (models.StepEvents, error) {
 	return events, nil
 }
 
-// convertGenericTriggers translates the YAML actions under the seven
-// Phase 2 (ADR-0004) event-driven triggers into models.GenericAction lists.
+// convertGenericTriggers translates the YAML actions under the generic
+// event-driven triggers into models.GenericAction lists.
 func convertGenericTriggers(e stepEventsYAML, events *models.StepEvents) error {
 	mappings := []struct {
 		name string
@@ -316,6 +318,8 @@ func convertGenericTriggers(e stepEventsYAML, events *models.StepEvents) error {
 		{"on_heartbeat", e.OnHeartbeat, &events.OnHeartbeat},
 		{"on_budget_alert", e.OnBudgetAlert, &events.OnBudgetAlert},
 		{"on_agent_error", e.OnAgentError, &events.OnAgentError},
+		{"on_pr_merged", e.OnPRMerged, &events.OnPRMerged},
+		{"on_pr_closed", e.OnPRClosed, &events.OnPRClosed},
 	}
 	for _, m := range mappings {
 		for _, a := range m.in {

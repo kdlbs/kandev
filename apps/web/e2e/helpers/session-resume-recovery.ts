@@ -123,6 +123,17 @@ export function capturedSessionRecoveryResponseType(
   return capturedSessionRecoveryResponse(requestIds, responses, action)?.type ?? null;
 }
 
+/** Observe the visible pending message and its phase in the same DOM assertion. */
+export async function expectWorkspaceRecoveryResuming(page: Page): Promise<void> {
+  const pending = page.getByTestId("workspace-recovery-agent-pending").filter({ visible: true });
+  const progress = page
+    .getByTestId("workspace-recovery-progress")
+    .filter({ has: pending, visible: true });
+  await expect(progress).toHaveAttribute("data-recovery-phase", "resuming", {
+    timeout: 60_000,
+  });
+}
+
 export function assertSuccessfulRelocationResponse(
   response: { type?: string; payload?: unknown } | undefined,
   runtimeConsumers: unknown,

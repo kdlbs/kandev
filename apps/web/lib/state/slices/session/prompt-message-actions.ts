@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { Message } from "@/lib/types/http";
 import type { SessionSlice, SessionSliceState } from "./types";
 import {
@@ -8,9 +9,7 @@ import {
 } from "@/lib/session-last-prompt";
 import { isIncomingMessageAtLeastAsFresh } from "./message-timestamp";
 
-type ImmerSet = Parameters<
-  StateCreator<SessionSlice, [["zustand/immer", never]], [], SessionSlice>
->[0];
+type ImmerSet = Parameters<SliceCreator<SessionSlice>>[0];
 
 type PromptMeta = SessionSliceState["messagePrompts"]["metaBySession"][string];
 

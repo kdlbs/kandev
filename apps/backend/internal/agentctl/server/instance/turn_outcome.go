@@ -2,6 +2,7 @@ package instance
 
 import (
 	"sync"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
@@ -40,6 +41,8 @@ func (s *turnOutcomeState) Retain(turnID int64, event streams.AgentEvent) {
 	if event.PromptGeneration != 0 && event.PromptGeneration < s.minimumPromptGeneration {
 		return
 	}
+	observedAt := time.Now().UTC()
+	event.ActivityAt = &observedAt
 	s.retained = &TurnOutcome{TurnID: turnID, Event: event}
 }
 

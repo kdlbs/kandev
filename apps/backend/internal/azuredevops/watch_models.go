@@ -55,6 +55,7 @@ func validateMaxInflightTasks(value *int) error {
 
 // WorkItemWatch configures periodic matching of Azure Boards work items.
 type WorkItemWatch struct {
+	CreatedByUserID     string     `json:"-" db:"created_by_user_id"`
 	ID                  string     `json:"id" db:"id"`
 	WorkspaceID         string     `json:"workspaceId" db:"workspace_id"`
 	WorkflowID          string     `json:"workflowId" db:"workflow_id"`
@@ -81,6 +82,7 @@ type WorkItemWatch struct {
 
 // PullRequestWatch configures periodic matching of Azure Repos pull requests.
 type PullRequestWatch struct {
+	CreatedByUserID     string     `json:"-" db:"created_by_user_id"`
 	ID                  string     `json:"id" db:"id"`
 	WorkspaceID         string     `json:"workspaceId" db:"workspace_id"`
 	WorkflowID          string     `json:"workflowId" db:"workflow_id"`
@@ -184,6 +186,7 @@ type UpdatePullRequestWatchRequest struct {
 }
 
 type WorkItemWatchEvent struct {
+	CreatedByUserID   string `json:"created_by_user_id,omitempty"`
 	WatchID           string
 	WatchGeneration   int64
 	WorkspaceID       string
@@ -206,6 +209,7 @@ type WorkItemWatchEvent struct {
 }
 
 type PullRequestWatchEvent struct {
+	CreatedByUserID   string `json:"created_by_user_id,omitempty"`
 	WatchID           string
 	WatchGeneration   int64
 	WorkspaceID       string

@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -20,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
@@ -73,9 +75,17 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 	// prompt-dispatch path (PromptTask / dispatchPromptAsync) and stream
 	// tool/message events, so reacting to the boot signal here would only flicker
 	// a settled WAITING_FOR_INPUT task into the Running bucket during resume.
-	// Passthrough sessions have no PromptTask, so agent.running IS their
-	// turn-start signal: handle on_turn_start and move the session to RUNNING.
+	// Direct terminal input relies on agent.running as its turn-start signal.
+	// Orchestrator-owned PTY prompts also publish it synchronously, carrying
+	// their session guard ownership through this handler.
 	if !s.agentManager.IsPassthroughSession(ctx, data.SessionID) {
+		return
+	}
+	if cancelInFlightGuardHeldForSession(ctx, data.SessionID) {
+		// The borrowed ownership authorizes this entry only, not nested work.
+		ctx = context.WithValue(ctx, cancelInFlightGuardHeldContextKey{}, false)
+		ctx = context.WithValue(ctx, cancelInFlightGuardSessionContextKey{}, "")
+		s.handleAgentRunningWithGuard(ctx, data)
 		return
 	}
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
@@ -89,7 +99,10 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 			zap.Error(err))
 		return
 	}
+	s.handleAgentRunningWithGuard(ctx, data)
+}
 
+func (s *Service) handleAgentRunningWithGuard(ctx context.Context, data watcher.AgentEventData) {
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil {
 		s.logger.Warn("failed to load session for agent running",
@@ -309,7 +322,9 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 		s.requeueLifecycleMessage(ctx, queuedMsg, queuedBy, coalesceKey)
 		return
 	}
-	if err := s.messageQueue.RequeueAtHead(ctx, queuedMsg); err != nil {
+	if err := s.retryQueuedRecoveryMutation(ctx, func(recoveryCtx context.Context) error {
+		return s.messageQueue.RequeueAtHead(recoveryCtx, queuedMsg)
+	}); err != nil {
 		s.logger.Error("failed to requeue message at head",
 			zap.String("session_id", queuedMsg.SessionID),
 			zap.String("task_id", queuedMsg.TaskID),
@@ -335,7 +350,9 @@ func (s *Service) requeueMessageForSession(
 	if queuedMsg.QueuedBy != "" {
 		queuedBy = queuedMsg.QueuedBy
 	}
-	if err := s.messageQueue.RequeueAtHeadForSession(ctx, identity, queuedMsg); err != nil {
+	if err := s.retryQueuedRecoveryMutation(ctx, func(recoveryCtx context.Context) error {
+		return s.messageQueue.RequeueAtHeadForSession(recoveryCtx, identity, queuedMsg)
+	}); err != nil {
 		s.logPostClaimQueueMutationFailure("requeue message at head", identity, queuedMsg, err)
 		return err
 	}
@@ -370,10 +387,16 @@ func (s *Service) requeueLifecycleMessageForSession(
 	queuedMsg *messagequeue.QueuedMessage,
 	queuedBy, coalesceKey string,
 ) (bool, error) {
-	requeuedMsg, replaced, accepted, err := s.messageQueue.RequeueLifecycleMessageWithCoalesceKeyForSession(
-		ctx, identity, queuedMsg.Content, queuedMsg.Model, queuedBy, queuedMsg.PlanMode,
-		queuedMsg.Attachments, queuedMsg.Metadata, coalesceKey, true,
-	)
+	var requeuedMsg *messagequeue.QueuedMessage
+	var replaced, accepted bool
+	err := s.retryQueuedRecoveryMutation(ctx, func(recoveryCtx context.Context) error {
+		var mutationErr error
+		requeuedMsg, replaced, accepted, mutationErr = s.messageQueue.RequeueLifecycleMessageWithCoalesceKeyForSession(
+			recoveryCtx, identity, queuedMsg.Content, queuedMsg.Model, queuedBy, queuedMsg.PlanMode,
+			queuedMsg.Attachments, queuedMsg.Metadata, coalesceKey, true,
+		)
+		return mutationErr
+	})
 	if err != nil {
 		s.logPostClaimQueueMutationFailure("requeue lifecycle message", identity, queuedMsg, err)
 		return false, err
@@ -420,10 +443,16 @@ func (s *Service) requeueLifecycleMessage(
 	queuedMsg *messagequeue.QueuedMessage,
 	queuedBy, coalesceKey string,
 ) bool {
-	requeuedMsg, replaced, accepted, err := s.messageQueue.RequeueLifecycleMessageWithCoalesceKey(
-		ctx, queuedMsg.SessionID, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.Model,
-		queuedBy, queuedMsg.PlanMode, queuedMsg.Attachments, queuedMsg.Metadata, coalesceKey, true,
-	)
+	var requeuedMsg *messagequeue.QueuedMessage
+	var replaced, accepted bool
+	err := s.retryQueuedRecoveryMutation(ctx, func(recoveryCtx context.Context) error {
+		var mutationErr error
+		requeuedMsg, replaced, accepted, mutationErr = s.messageQueue.RequeueLifecycleMessageWithCoalesceKey(
+			recoveryCtx, queuedMsg.SessionID, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.Model,
+			queuedBy, queuedMsg.PlanMode, queuedMsg.Attachments, queuedMsg.Metadata, coalesceKey, true,
+		)
+		return mutationErr
+	})
 	if err != nil {
 		s.logger.Error("failed to requeue lifecycle message",
 			zap.String("session_id", queuedMsg.SessionID),
@@ -1116,6 +1145,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	s.reconcileCompletedCIAutoFixTurn(ctx, data.TaskID, data.SessionID, turnAtEventFire)
 	completionCtx := withWorkflowEffect(ctx, workflowEffectForEvent(data))
 	if turnAtEventFire != "" {
+		fixedResourceKey := s.fixedResourceForCleanCompletion(completionCtx, data, turnAtEventFire)
 		if err := s.completeTurnForTaskSessionCheckedOwned(
 			completionCtx, data.TaskID, data.SessionID, turnAtEventFire,
 		); err != nil {
@@ -1126,6 +1156,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 				zap.Error(err))
 			return
 		}
+		s.profileExecutionResolver.ResetFixedProfileCircuitFailures(completionCtx, fixedResourceKey)
 		s.clearAcceptedQueuedDispatch(data.SessionID)
 	} else {
 		s.completeTurnForSession(completionCtx, data.SessionID)
@@ -1180,11 +1211,12 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		// Check for workflow transition based on session's current step.
 		// Uses the engine when available; falls back to legacy evaluation.
 		// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
+		transitionCtx := agentCompletionTransitionAttribution(completionCtx, data)
 		cause := turnCompletionCauseAgentTurn
 		if data.DeliveryOutcome == string(models.DeliverySubmissionCancelled) {
 			cause = turnCompletionCauseUserCancellation
 		}
-		transitioned := s.processOnTurnCompleteViaEngineWithCause(completionCtx, data.TaskID, session, cause)
+		transitioned := s.processOnTurnCompleteViaEngineWithCause(transitionCtx, data.TaskID, session, cause)
 		if err := s.reconcileAgentDeliverySettlements(context.WithoutCancel(completionCtx), data.SessionID); err != nil {
 			s.logger.Warn("failed to reconcile terminal delivery after workflow evaluation",
 				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
@@ -1228,12 +1260,12 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		// attachments are materialized and included in the prompt. Ordinary
 		// text-only entries retain the historical direct PTY behavior below.
 		if queuedMsg.IsDurableLifecycle() {
-			deferredLifecycleReservation = s.markQueuedDispatchInFlightWithIdentityLocked(identity, queuedMsg.ID, queuedMsg)
+			deferredLifecycleReservation = s.markQueuedDispatchInFlightWithIdentityLocked(ctx, identity, queuedMsg.ID, queuedMsg)
 			deferredLifecycleDispatch = queuedMsg
 			return
 		}
 		if len(queuedMsg.Attachments) > 0 {
-			deferredLifecycleReservation = s.markQueuedDispatchInFlightWithIdentityLocked(identity, queuedMsg.ID, queuedMsg)
+			deferredLifecycleReservation = s.markQueuedDispatchInFlightWithIdentityLocked(ctx, identity, queuedMsg.ID, queuedMsg)
 			deferredLifecycleDispatch = queuedMsg
 			return
 		}
@@ -1537,6 +1569,31 @@ func (s *Service) recordQueuedUserMessageWithPromptContent(
 		s.startTurnForSession(ctx, queuedMsg.SessionID)
 		turnID = s.getActiveTurnID(queuedMsg.SessionID)
 	}
+	record, err := queuedUserMessageRecordFor(queuedMsg, attachments, preparedPromptContent, sourceIDs)
+	if err != nil {
+		return err
+	}
+	if err := s.messageCreator.CreateUserMessageIdempotent(
+		ctx, record.messageID, queuedMsg.TaskID, record.content, queuedMsg.SessionID, turnID, record.metadata,
+	); err != nil {
+		s.logger.Error("failed to create user message for queued message", zap.String("session_id", queuedMsg.SessionID), zap.Error(err))
+		return err
+	}
+	if queuedMsg.Metadata == nil {
+		queuedMsg.Metadata = map[string]interface{}{}
+	}
+	queuedMsg.Metadata[metaKeyUserMessageRecorded] = true
+	return nil
+}
+
+// queuedUserMessageRecordFor composes the identity, content, and metadata a
+// queued prompt's user message must keep across replays.
+func queuedUserMessageRecordFor(
+	queuedMsg *messagequeue.QueuedMessage,
+	attachments []v1.MessageAttachment,
+	preparedPromptContent *string,
+	sourceIDs []string,
+) (queuedUserMessageRecord, error) {
 	references := entityrefs.NormalizePersisted(queuedMsg.Metadata[messagequeue.MetadataEntityReferences])
 	promptContent := queuedMessagePromptContent(queuedMsg)
 	if preparedPromptContent != nil {
@@ -1556,27 +1613,30 @@ func (s *Service) recordQueuedUserMessageWithPromptContent(
 		PlanMode: queuedMsg.PlanMode, Attachments: attachments,
 	})
 	if err != nil {
-		return err
+		return queuedUserMessageRecord{}, err
 	}
 	if metaMap == nil {
 		metaMap = make(map[string]interface{})
 	}
 	metaMap[plancomments.MetadataClientMessageFingerprint] = fingerprint
-	messageID := uuid.NewSHA1(
+	return queuedUserMessageRecord{
+		messageID: queuedTranscriptMessageID(queuedMsg, sourceIDs),
+		content:   promptContent,
+		metadata:  metaMap,
+	}, nil
+}
+
+type queuedUserMessageRecord struct {
+	messageID string
+	content   string
+	metadata  map[string]interface{}
+}
+
+func queuedTranscriptMessageID(queuedMsg *messagequeue.QueuedMessage, sourceIDs []string) string {
+	return uuid.NewSHA1(
 		uuid.NameSpaceOID,
 		[]byte("kandev:queued-transcript:"+queuedMsg.TaskID+":"+queuedMsg.SessionID+":"+strings.Join(sourceIDs, ",")),
 	).String()
-	if err := s.messageCreator.CreateUserMessageIdempotent(
-		ctx, messageID, queuedMsg.TaskID, promptContent, queuedMsg.SessionID, turnID, metaMap,
-	); err != nil {
-		s.logger.Error("failed to create user message for queued message", zap.String("session_id", queuedMsg.SessionID), zap.Error(err))
-		return err
-	}
-	if queuedMsg.Metadata == nil {
-		queuedMsg.Metadata = map[string]interface{}{}
-	}
-	queuedMsg.Metadata[metaKeyUserMessageRecorded] = true
-	return nil
 }
 
 func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messagequeue.QueuedMessage) {
@@ -1588,7 +1648,7 @@ func (s *Service) executeQueuedPassthroughMessageWithReservation(
 	queuedMsg *messagequeue.QueuedMessage,
 	reservation *queuedDispatchReservation,
 ) {
-	ctx := context.Background()
+	ctx := s.queuedRecoveryContext(context.Background(), reservation)
 	state := queuedPassthroughExecutionState{}
 	state.userMessageRecorded, _ = queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
 	defer s.finishQueuedPassthroughExecution(ctx, identity, queuedMsg, reservation, &state)
@@ -1605,7 +1665,38 @@ func (s *Service) executeQueuedPassthroughMessageWithReservation(
 	if state.dispatchErr = s.validateQueuedPassthroughDelivery(ctx, identity); state.dispatchErr != nil {
 		return
 	}
+	turnReservation, refusal := s.admitQueuedPassthroughTurn(ctx, identity)
+	if refusal != nil {
+		state.dispatchErr = refusal
+		return
+	}
+	if turnReservation != nil {
+		defer func() {
+			turnReservation.release()
+			s.signalCeilingSweep()
+		}()
+	}
+	ctx, state.dispatchErr = s.prepareQueuedBuiltinIntent(ctx, queuedMsg)
+	if state.dispatchErr != nil {
+		return
+	}
 	s.deliverQueuedPassthroughPrompt(ctx, identity, queuedMsg, &state)
+}
+
+// admitQueuedPassthroughTurn gates passthrough input before the running claim
+// and PTY write. The ticket is held until the caller returns, after the running
+// state transition has made the session counted.
+func (s *Service) admitQueuedPassthroughTurn(
+	ctx context.Context, identity messagequeue.QueueSessionIdentity,
+) (*messageTurnReservation, *messageTurnCapacityRefusal) {
+	if s.sessionCeiling == nil {
+		return nil, nil
+	}
+	return s.sessionCeiling.admitTurn(ctx, turnAdmissionRequest{
+		taskID: identity.TaskID, sessionID: identity.SessionID,
+		incarnationID: identity.SessionIncarnationID,
+		intent:        turnCapacityBounded, seam: "queued_passthrough",
+	})
 }
 
 type queuedPassthroughExecutionState struct {
@@ -1643,8 +1734,14 @@ func (s *Service) finishQueuedPassthroughExecution(
 		isLifecycleAutomationMessage(queuedMsg),
 		state.userMessageRecorded, state.deliveryAttempted, state.dispatchErr,
 	)
-	s.clearQueuedDispatchInFlightIfCurrent(identity.SessionID, reservation)
-	s.drainQueuedDispatchIfPending(identity.SessionID)
+	if _, refusedForCapacity := messageTurnCapacityRefusalOf(state.dispatchErr); refusedForCapacity {
+		s.clearQueuedDispatchInFlightForCapacityRefusal(identity.SessionID, reservation)
+	} else {
+		s.clearQueuedDispatchInFlightIfCurrent(identity.SessionID, reservation)
+		if !isBuiltinIntentError(state.dispatchErr) {
+			s.drainQueuedDispatchIfPending(ctx, identity.SessionID)
+		}
+	}
 	s.finishPassthroughRunningIfCurrent(ctx, identity, state.finishRunning)
 	if s.onQueuedMessageExecutionComplete != nil {
 		s.onQueuedMessageExecutionComplete()
@@ -1759,6 +1856,7 @@ func (s *Service) markQueuedPassthroughDeliveryAttempt(
 	return nil
 }
 
+// executeQueuedMessageWithReservation dispatches one queue entry under its current session ownership.
 func (s *Service) executeQueuedMessageWithReservation(
 	callerSessionID string,
 	queuedMsg *messagequeue.QueuedMessage,
@@ -1770,10 +1868,11 @@ func (s *Service) executeQueuedMessageWithReservation(
 	if reservation == nil {
 		reservation = s.queuedDispatchReservationForEntry(reservedSessionID, queuedMsg.ID)
 	}
+	promptCtx = s.queuedRecoveryContext(promptCtx, reservation)
 	defer func() {
 		s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
 		if allowFollowupDrain {
-			s.drainQueuedDispatchIfPending(reservedSessionID)
+			s.drainQueuedDispatchIfPending(promptCtx, reservedSessionID)
 		}
 		if s.onQueuedMessageExecutionComplete != nil {
 			s.onQueuedMessageExecutionComplete()
@@ -1856,6 +1955,13 @@ func (s *Service) executeQueuedMessageWithReservation(
 		return
 	}
 
+	var intentErr error
+	promptCtx, intentErr = s.prepareQueuedBuiltinIntent(promptCtx, queuedMsg)
+	if intentErr != nil {
+		allowFollowupDrain = false
+		s.finishQueuedMessageExecution(promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation, lifecyclePrompt, false, false, intentErr)
+		return
+	}
 	attachments := queuedMessageAttachmentsToV1(queuedMsg.Attachments)
 	if err := s.prepareQueuedCIAutoFixOutcomeProtocol(promptCtx, queuedMsg); err != nil {
 		s.reconcileQueuedCIAutoFixDispatchFailure(promptCtx, queuedMsg)
@@ -1930,6 +2036,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 	deliveryProtocol, deliverySubmissionID, deliveryPayloadHash := queuedMsg.DeliverySubmission()
 	options := promptTaskOptions{
+		capacityIntent:       queuedMessageCapacityIntent(queuedMsg),
 		claimEntryID:         claimEntryID,
 		lifecyclePrompt:      lifecyclePrompt,
 		afterClaim:           afterClaim,
@@ -1959,11 +2066,13 @@ func (s *Service) executeQueuedMessageWithReservation(
 		deliveryProtocol:     deliveryProtocol,
 		deliverySubmissionID: deliverySubmissionID,
 		deliveryPayloadHash:  deliveryPayloadHash,
-		deliveryClaimUpdater: func(updateCtx context.Context, protocol, submissionID, payloadHash string) error {
+	}
+	if !lifecyclePrompt && !queuedMsg.IsDurablePlanComment() {
+		options.deliveryClaimUpdater = func(updateCtx context.Context, protocol, submissionID, payloadHash string) error {
 			return s.messageQueue.SetPendingQueueDispatchDelivery(
 				updateCtx, queuedMsg, protocol, submissionID, payloadHash,
 			)
-		},
+		}
 	}
 	if preparedPromptContent != nil {
 		options.promptAlreadyComposed = true
@@ -1975,6 +2084,12 @@ func (s *Service) executeQueuedMessageWithReservation(
 		launchOriginAutomatic,
 		options)
 	if err != nil {
+		if _, refusedForCapacity := messageTurnCapacityRefusalOf(err); refusedForCapacity {
+			// The refusal restores the head and registers a capacity wait. An
+			// immediate tail drain would take the same head back before the
+			// release signal and spin.
+			allowFollowupDrain = false
+		}
 		s.reconcileQueuedCIAutoFixDispatchFailure(promptCtx, queuedMsg)
 		if initialCreatePromptPassthroughQueued(queuedMsg.Metadata) {
 			s.retireInitialCreatePromptPassthroughForQueueEvent(
@@ -2006,11 +2121,18 @@ func (s *Service) executeQueuedMessageWithReservation(
 		// shared FIFO. Ordinary acknowledgement could race a successor input.
 		return
 	}
+	if isBuiltinIntentError(err) {
+		allowFollowupDrain = false
+	}
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
 		lifecyclePrompt, userMessageRecorded, deliveryAttempted, err,
 	)
-	s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
+	if _, refusedForCapacity := messageTurnCapacityRefusalOf(err); refusedForCapacity {
+		s.clearQueuedDispatchInFlightForCapacityRefusal(reservedSessionID, reservation)
+	} else {
+		s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
+	}
 	if err == nil {
 		// A ready event can arrive while this worker still owns the reservation.
 		// Retry through the public guarded drain after releasing that marker so a
@@ -2217,6 +2339,18 @@ func (s *Service) finishQueuedMessageExecution(
 		}
 		return
 	}
+	if s.retainQueuedMessageForDynamicRouteAction(
+		ctx, callerSessionID, queuedMsg, reservation, userMessageRecorded, err,
+	) {
+		return
+	}
+	if refusal, ok := messageTurnCapacityRefusalOf(err); ok {
+		s.deferQueuedMessageForCapacity(ctx, queuedMsg, reservation, refusal)
+		return
+	}
+	if s.retainQueuedMessageForFixedProfile(ctx, callerSessionID, queuedMsg, reservation, userMessageRecorded, err) {
+		return
+	}
 	if isSessionRecoveryRequiredError(err) {
 		if userMessageRecorded {
 			markQueuedUserMessageRecorded(queuedMsg)
@@ -2263,7 +2397,7 @@ func (s *Service) handleQueuedMessageExecutionError(
 		zap.String("queue_id", queuedMsg.ID),
 		zap.Error(err))
 
-	manualRecovery := isManualRecoveryPromptError(err)
+	manualRecovery := isManualRecoveryPromptError(err) || isBuiltinIntentError(err)
 	_, seam3Refusal := isSeam3Refusal(err)
 	passthroughAttachmentRecovery := !lifecyclePrompt &&
 		len(queuedMsg.Attachments) > 0 &&
@@ -2278,7 +2412,7 @@ func (s *Service) handleQueuedMessageExecutionError(
 		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery || seam3Refusal ||
 		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) ||
 		errors.Is(err, ErrSessionRuntimeUnavailable) ||
-		ensureSessionRunningTimeout {
+		errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) || ensureSessionRunningTimeout {
 		if userMessageRecorded {
 			markQueuedUserMessageRecorded(queuedMsg)
 		}
@@ -2487,7 +2621,12 @@ func (s *Service) restoreQueuedMessage(ctx context.Context, queuedMsg *messagequ
 	// Restoration follows a completed take and must survive cancellation of
 	// the request that initiated the dispatch.
 	restoreCtx := context.WithoutCancel(ctx)
-	restored, err := s.messageQueue.RestoreMessage(restoreCtx, queuedMsg)
+	var restored *messagequeue.QueuedMessage
+	err := s.retryQueuedRecoveryMutation(restoreCtx, func(recoveryCtx context.Context) error {
+		var mutationErr error
+		restored, mutationErr = s.messageQueue.RestoreMessage(recoveryCtx, queuedMsg)
+		return mutationErr
+	})
 	if err != nil {
 		s.logger.Error("failed to restore queued message",
 			zap.String("session_id", queuedMsg.SessionID),
@@ -2509,7 +2648,12 @@ func (s *Service) restoreQueuedMessageForSession(
 	identity messagequeue.QueueSessionIdentity,
 	queuedMsg *messagequeue.QueuedMessage,
 ) {
-	restored, err := s.messageQueue.RestoreMessageForSession(ctx, identity, queuedMsg)
+	var restored *messagequeue.QueuedMessage
+	err := s.retryQueuedRecoveryMutation(ctx, func(recoveryCtx context.Context) error {
+		var mutationErr error
+		restored, mutationErr = s.messageQueue.RestoreMessageForSession(recoveryCtx, identity, queuedMsg)
+		return mutationErr
+	})
 	if err != nil {
 		s.logPostClaimQueueMutationFailure("restore message", identity, queuedMsg, err)
 		return
@@ -2720,6 +2864,7 @@ func (s *Service) finishAgentCompleted(
 ) {
 	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
 	s.clearDynamicUnclassifiedStreakForCompletion(ctx, data)
+	s.resetDynamicCircuitFailuresForCompletion(ctx, data, session)
 	// A successful, still-live completion clears retry state and scheduler
 	// ownership only after the guarded terminal/rotation checks above.
 	s.resetTransientRetry(data.SessionID)
@@ -2737,6 +2882,7 @@ func (s *Service) finishAgentCompleted(
 	}
 	completionCtx := withWorkflowEffect(context.WithoutCancel(ctx), workflowEffectForEvent(data))
 	if data.TurnID != "" {
+		fixedResourceKey := s.fixedResourceForCleanCompletion(completionCtx, data, data.TurnID)
 		if err := s.completeTurnForTaskSessionCheckedOwned(
 			completionCtx, data.TaskID, data.SessionID, data.TurnID,
 		); err != nil {
@@ -2748,6 +2894,7 @@ func (s *Service) finishAgentCompleted(
 			go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 			return
 		}
+		s.profileExecutionResolver.ResetFixedProfileCircuitFailures(completionCtx, fixedResourceKey)
 	} else {
 		s.completeTurnForSession(completionCtx, data.SessionID)
 	}
@@ -2764,6 +2911,7 @@ func (s *Service) finishAgentCompleted(
 		return
 	}
 
+	transitionCtx := agentCompletionTransitionAttribution(completionCtx, data)
 	if err := s.reconcileAgentDeliverySettlements(completionCtx, data.SessionID); err != nil {
 		s.logger.Warn("failed to prepare terminal delivery settlement before completed workflow evaluation",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
@@ -2779,13 +2927,37 @@ func (s *Service) finishAgentCompleted(
 		if data.DeliveryOutcome == string(models.DeliverySubmissionCancelled) {
 			cause = turnCompletionCauseUserCancellation
 		}
-		transitioned = s.processOnTurnCompleteViaEngineWithCause(completionCtx, data.TaskID, session, cause)
+		transitioned = s.processOnTurnCompleteViaEngineWithCause(transitionCtx, data.TaskID, session, cause)
 	}
 	if err := s.reconcileAgentDeliverySettlements(completionCtx, data.SessionID); err != nil {
 		s.logger.Warn("failed to reconcile terminal delivery after completed workflow evaluation",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 	}
 	s.finishAgentCompletedTurn(ctx, data, session, transitioned, completionFollowUp, guard)
+}
+
+// agentCompletionTransitionAttribution carries the immutable run identity
+// from the lifecycle event into the transition ledger. Task-owned Office
+// launches carry CausingRunID; run-owned executions use their owner RunID.
+// An explicit outer attribution still wins.
+func agentCompletionTransitionAttribution(ctx context.Context, data watcher.AgentEventData) context.Context {
+	if steptelemetry.HasTrigger(ctx) {
+		return ctx
+	}
+	causingRunID := data.CausingRunID
+	if causingRunID == "" && data.OwnerKind == string(lifecycle.ExecutionOwnerRun) {
+		causingRunID = data.RunID
+	}
+	if causingRunID == "" {
+		return ctx
+	}
+	return steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger:      steptelemetry.TriggerEngineTransition,
+		ActorKind:    steptelemetry.ActorAgent,
+		ActorID:      data.SessionID,
+		SessionID:    data.SessionID,
+		CausingRunID: causingRunID,
+	})
 }
 
 // finishAgentCompletedTurn runs the settle steps after
@@ -4302,8 +4474,10 @@ func (s *Service) handleDynamicAgentStartupFailure(
 	taskID, sessionID, agentExecutionID string,
 	dispatch *func(context.Context),
 ) bool {
+	classified := unavailableDynamicStartupModel(err, *failureData)
+	strictModelFailure := classified != nil
 	var startupFailure *routingerr.AgentStartupFailure
-	if !errors.As(err, &startupFailure) || startupFailure == nil {
+	if classified == nil && (!errors.As(err, &startupFailure) || startupFailure == nil) {
 		return false
 	}
 	attempt, ok := dynamicStartupAttemptFromContext(ctx)
@@ -4313,7 +4487,9 @@ func (s *Service) handleDynamicAgentStartupFailure(
 	failureData.OwnerKind = queueStatusScopeTask
 	failureData.DynamicRouteAttempt = true
 	failureData.EvidenceKnown = true
-	classified := classifyTrustedAgentStartupFailure(startupFailure)
+	if classified == nil {
+		classified = classifyTrustedAgentStartupFailure(startupFailure)
+	}
 	var session *models.TaskSession
 	var sessionErr error
 	if s.repo == nil {
@@ -4322,10 +4498,19 @@ func (s *Service) handleDynamicAgentStartupFailure(
 		session, sessionErr = s.repo.GetTaskSession(ctx, sessionID)
 	}
 	if sessionErr != nil || !startupAttemptOwnsSession(session, agentExecutionID, attempt) ||
-		classified.Code != routingerr.CodeAgentRuntime {
+		(classified.Code != routingerr.CodeAgentRuntime && !strictModelFailure) {
 		return false
 	}
 	evidence := s.unclassifiedStartupEvidence(ctx, *failureData, session, attempt, startupFailure)
+	if strictModelFailure {
+		*failureData = s.withStartupAttemptObservations(*failureData)
+		evidence = s.unclassifiedFailureEvidence(
+			ctx, *failureData, session, attempt.SessionID == sessionID,
+			dynamicruntime.UnclassifiedOriginAgentStartup, routingerr.PhaseSessionInit,
+			attempt.ID, "", "", false, failureData.EvidenceKnown, failureData.OutputObserved, failureData.EffectObserved,
+		)
+		evidence.StrictStartupModelRejection = true
+	}
 	if !evidence.TaskScope || !evidence.CurrentAttempt {
 		return false
 	}
@@ -4346,7 +4531,7 @@ func (s *Service) handleDynamicAgentStartupFailure(
 }
 
 func startupAttemptOwnsSession(session *models.TaskSession, executionID string, attempt dynamicStartupAttempt) bool {
-	return session != nil && session.AgentExecutionID == executionID && session.RouteGeneration == attempt.Generation &&
+	return executionID != "" && session != nil && session.AgentExecutionID == executionID && session.RouteGeneration == attempt.Generation &&
 		session.AgentProfileID == attempt.LogicalProfileID && session.ExecutionProfileID == attempt.ExecutionProfileID
 }
 
@@ -4545,6 +4730,7 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.String("agent_execution_id", data.AgentExecutionID))
+		s.settleBackgroundWorkWithoutWaiting(ctx, data.SessionID, data.AgentExecutionID)
 		return
 	}
 
@@ -4564,6 +4750,10 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.String("agent_execution_id", data.AgentExecutionID))
+		// This is the end of the process that owned the session's workloads.
+		// Settlement must never wait for the session lifecycle lock here: the
+		// stop publisher can be the goroutine that already holds it.
+		s.settleBackgroundWorkWithoutWaiting(context.WithoutCancel(ctx), data.SessionID, data.AgentExecutionID)
 		s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
 		return
 	}

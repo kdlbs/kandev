@@ -4,7 +4,7 @@ import (
 	"expvar"
 	"strings"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // expvar maps for the launch-safety and backpressure capability
@@ -89,19 +89,19 @@ func LaunchSafetyLabel(pairs ...string) string {
 // class already persisted; that "unless already human" check is the
 // caller's responsibility because only the caller holds the run's current
 // persisted class.
-func ClassifyPriority(actorKind models.ActorKind, reason string, isRequeue bool) models.PriorityClass {
-	if actorKind == models.ActorKindUser {
-		return models.PriorityClassHuman
+func ClassifyPriority(actorKind runsmodels.ActorKind, reason string, isRequeue bool) runsmodels.PriorityClass {
+	if actorKind == runsmodels.ActorKindUser {
+		return runsmodels.PriorityClassHuman
 	}
 	if _, ok := ReasonOnlyHumanCanCause[reason]; ok {
-		return models.PriorityClassHuman
+		return runsmodels.PriorityClassHuman
 	}
 	if isRequeue {
-		return models.PriorityClassRecovery
+		return runsmodels.PriorityClassRecovery
 	}
 	if class, ok := PriorityClassForReason(reason); ok {
 		return class
 	}
 	LaunchPriorityUnmappedTotal.Add(LaunchSafetyLabel("reason", reason), 1)
-	return models.PriorityClassEvent
+	return runsmodels.PriorityClassEvent
 }

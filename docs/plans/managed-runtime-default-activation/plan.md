@@ -82,6 +82,7 @@ Run the focused Playwright scenario in `apps/web/e2e/tests/settings/agent-runtim
 - [x] [Task 01: Reconcile managed runtime generations](task-01-reconcile-default-generations.md)
 - [x] [Task 02: Activate defaults during startup](task-02-activate-defaults-at-startup.md)
 - [x] [Task 03: Document and prove upgrade behavior](task-03-document-and-prove-upgrade-behavior.md)
+- [x] [Task 04: Update the Codex ACP default](task-04-update-codex-acp-default.md)
 
 ## Verification results
 

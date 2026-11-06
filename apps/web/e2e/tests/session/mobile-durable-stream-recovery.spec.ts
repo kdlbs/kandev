@@ -72,7 +72,9 @@ test("keeps uncertain delivery recovery usable on a phone", async ({
   await expect(layout).toBeVisible({ timeout: 30_000 });
   const banner = testPage.getByTestId("failed-session-banner");
   await expect(banner).toBeVisible({ timeout: 30_000 });
-  await expect(banner).toContainText("Delivery was interrupted. The prompt outcome is uncertain.");
+  await expect(banner).toContainText(
+    "The connection was interrupted. Kandev cannot confirm whether the agent processed your message.",
+  );
   await expect(banner.getByTestId("recovery-retry-connection-button")).toBeVisible();
   await expect(banner.getByTestId("recovery-stop-button")).toBeVisible();
   await expect(banner.getByTestId("recovery-resume-button")).toHaveCount(0);

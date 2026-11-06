@@ -1,5 +1,6 @@
 import { spawn as spawnProcess, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { killProcessGroup } from "../fixtures/process-group";
 import type { Shard, ShardManifest } from "./plan-shards";
@@ -58,7 +59,7 @@ function startPartition(
   manifest: ShardManifest,
   parent: Shard,
   part: Shard,
-  options: Required<ExecutionOptions>,
+  options: Required<ExecutionOptions> & { cacheRoot: string },
   children: ChildProcess[],
 ): Promise<number> {
   const { spawn, outputDir, extraArgs } = options;
@@ -79,6 +80,7 @@ function startPartition(
             ...process.env,
             E2E_PLANNED_SHARD: String(parent.index),
             E2E_PORT_OFFSET: String(part.index - 1),
+            PWTEST_CACHE_DIR: path.join(options.cacheRoot, String(part.index)),
             PLAYWRIGHT_BLOB_OUTPUT_FILE: undefined,
             PLAYWRIGHT_BLOB_OUTPUT_DIR: path.join(outputDir, ".parts", String(part.index)),
             PLAYWRIGHT_BLOB_OUTPUT_NAME: `report-${name}.zip`,
@@ -146,6 +148,8 @@ export async function executeSubshards(
   const startedAt = new Date().toISOString();
   fs.rmSync(outputDir, { recursive: true, force: true });
   fs.mkdirSync(outputDir, { recursive: true });
+  // Playwright's transform cache permits only one runner invocation per directory.
+  const cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-transform-"));
   const children: ChildProcess[] = [];
   const cleanup: Promise<void>[] = [];
   let interrupted = 0;
@@ -161,7 +165,9 @@ export async function executeSubshards(
   process.on("SIGTERM", interrupt);
   try {
     const exits = await Promise.all(
-      parts.map((part) => startPartition(manifest, shard, part, execution, children)),
+      parts.map((part) =>
+        startPartition(manifest, shard, part, { ...execution, cacheRoot }, children),
+      ),
     );
     const complete = collectReports(manifest, shard, parts, outputDir);
     const exitCode = interrupted || exits.find((code) => code !== 0) || (complete ? 0 : 1);
@@ -174,5 +180,6 @@ export async function executeSubshards(
     await Promise.all(cleanup);
     process.off("SIGINT", interrupt);
     process.off("SIGTERM", interrupt);
+    fs.rmSync(cacheRoot, { recursive: true, force: true });
   }
 }

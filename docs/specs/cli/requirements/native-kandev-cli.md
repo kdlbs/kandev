@@ -27,6 +27,13 @@ Users start Kandev from the terminal through `kandev`, but the current launcher 
 - **AC-CLI-NATIVE-KANDEV-CLI-001.6:** The hidden backend mode is not a public command and is not shown in normal help output.
 - **AC-CLI-NATIVE-KANDEV-CLI-001.7:** Backend restarts restart only the backend child process; the launcher/supervisor remains alive unless the shutdown policy requires the whole app to exit.
 - **AC-CLI-NATIVE-KANDEV-CLI-001.8:** npm/npx continues to expose the `kandev` command through the `kandev` npm package. The npm package may use a minimal JavaScript shim, but that shim only resolves the platform runtime package and execs its native `bin/kandev`.
+- **AC-CLI-NATIVE-KANDEV-CLI-001.9:** When a native Linux user or system service receives generated environment settings, every literal dollar sign shall remain unchanged, including in the Kandev home, selected configuration file, service metadata, bundle directory, and accepted install-time PATH prefixes. Dollar signs shall neither be duplicated nor trigger variable expansion.
+- **AC-CLI-NATIVE-KANDEV-CLI-001.10:** When those service environment settings contain spaces, double quotes, backslashes, or literal percent signs, the service process shall receive the original characters as part of the same environment value.
+- **AC-CLI-NATIVE-KANDEV-CLI-001.11:** The Linux service's built-in PATH home specifiers shall continue to resolve through systemd. Install-time PATH prefixes shall retain their existing eligibility rules and shall not introduce additional specifier expansion.
+
+The service-environment portion of this requirement is designed in
+[Native service configuration](../system-design/native-service-configuration.md).
+Other native CLI behavior retains its existing scope and draft status.
 
 ## Migrated source detail
 

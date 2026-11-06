@@ -31,6 +31,9 @@ type ProviderUsage struct {
 	Plan      string              `json:"plan,omitempty"` // e.g. "max", "pro", "plus", "free"
 	Windows   []UtilizationWindow `json:"windows"`
 	FetchedAt time.Time           `json:"fetched_at"`
+	// Stale marks a preserved success served while the provider refused a
+	// refresh: the reading is real, but FetchedAt may be well behind now.
+	Stale bool `json:"stale,omitempty"`
 }
 
 // ProviderUsageClient fetches live utilization from a provider API.

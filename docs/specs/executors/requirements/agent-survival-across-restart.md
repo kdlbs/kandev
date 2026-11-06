@@ -10,29 +10,14 @@ owners:
 
 ## Overview
 
-A running agent stops whenever the Kandev backend restarts or is upgraded.
-In-flight work is discarded and the session is rebuilt from the agent CLI's own
-store, a cold resume measured at up to roughly 31 minutes per task under load (see
-[startup-listener-before-recovery](../../startup-listener-before-recovery/spec.md)).
-
-Kandev already built the receiving half: the lifecycle manager reconstructs an
-execution for every instance a runtime reports as recovered, and that path has never
-run because every runtime reports nothing. For worktree and local the gap is larger:
-both run on the standalone runtime, whose control server is deliberately terminated
-with the backend by several independent mechanisms and whose agent processes are
-reaped once nothing is attached. Survival needs a detached process lifetime and
-truthful session state after re-tracking.
-
-This document owns process lifetime and the re-tracking mechanism. What must then be
-true of the session a user looks at, and how the whole capability is gated, is stated
-in [survived session state and capability gating](agent-survival-session-state.md).
-Which control server a backend may adopt is stated in
-[standalone control-server ownership](standalone-control-server-ownership.md), and
-which backend drives it and what happens when nobody owns one in
-[standalone control-server single driver and unowned lifetime](standalone-control-server-single-driver.md).
-None of these is restated here. This system owns these contracts because executor ownership
-includes executor-specific failure and recovery contracts; the agent system owns
-provider resume semantics and consumes them without owning process lifetime.
+Local and worktree agent work needs to outlive backend restarts, including
+under a native service manager. This draft owns process lifetime and re-tracking;
+it does not certify all guarantees as shipped.
+[Session state and gating](agent-survival-session-state.md),
+[control-server ownership](standalone-control-server-ownership.md), and
+[single driver and unowned lifetime](standalone-control-server-single-driver.md)
+own the related contracts. Executors owns process lifetime; the agent system owns
+provider resume semantics.
 
 ## Terminology
 
@@ -120,6 +105,25 @@ without stopping my running agents, so a routine restart discards no in-flight w
 - **AC-EXECUTORS-SURVIVAL-001.7:** On every path in this document,
   including refused adoption and unowned shutdown, the system shall leave every
   worktree present on disk and unmodified.
+
+- **AC-EXECUTORS-SURVIVAL-001.11:** When the capability is enabled and the
+  backend runs under a generated Linux user or system service, stopping or
+  restarting that backend, including after an abrupt backend exit, shall not
+  terminate an otherwise eligible retained control server or its agents merely
+  because they belong to the backend service.
+- **AC-EXECUTORS-SURVIVAL-001.12:** Under those generated services, explicit
+  task stops and launch rollback shall still terminate the affected agents.
+  With the capability disabled, normal backend shutdown shall terminate its
+  control server and agents, and backend crash or parent death shall retain the
+  existing parent-liveness termination protections. Native service installation
+  shall not enable the capability.
+
+- **AC-EXECUTORS-SURVIVAL-001.13:** Under a generated Linux service, a
+  healthy backend shall remain tied to its native launcher: abrupt launcher death
+  shall terminate that backend whether agent survival is enabled or disabled.
+  This shall preserve the enabled retention and disabled termination behavior of
+  the backend's agents. Returning from the code that starts a backend shall not
+  terminate a backend whose launcher remains alive.
 
 ### REQ-EXECUTORS-SURVIVAL-002: Re-tracking reconstructs a usable execution
 

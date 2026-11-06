@@ -3,6 +3,7 @@ import type { AppState } from "@/lib/state/app-state-types";
 import type { TaskOverview } from "@/lib/state/slices/task-overview-types";
 import type { SidebarTaskQuery } from "@/lib/types/http";
 import { repositoryId } from "@/lib/types/ids";
+import { isIssueWatchFromMetadata, isPRReviewFromMetadata } from "@/lib/metadata-utils";
 import { getStateBucket } from "./effective-task-tree-state";
 import { matchesSidebarClause } from "./sidebar-local-filter";
 import { sqliteBinary } from "./sidebar-local-order";
@@ -131,11 +132,7 @@ function sidebarBooleanDimensions(overview: TaskOverview) {
   return {
     hasDiff: (git?.additions ?? 0) > 0 || (git?.deletions ?? 0) > 0,
     hasPR: (pullRequest?.count ?? 0) > 0 || Boolean(pullRequest?.url),
-    isPRReview: hasWatchId(overview.metadata?.review_watch_id),
-    isIssueWatch: hasWatchId(overview.metadata?.issue_watch_id),
+    isPRReview: isPRReviewFromMetadata(overview.metadata),
+    isIssueWatch: isIssueWatchFromMetadata(overview.metadata),
   };
-}
-
-function hasWatchId(value: unknown) {
-  return Boolean(value && value !== "undefined");
 }

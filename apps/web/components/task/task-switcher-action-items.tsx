@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  IconAlertCircleOff,
   IconArchive,
   IconHierarchy3,
   IconLoader,
@@ -11,6 +12,7 @@ import {
 import { useOpenTaskGraph } from "@/hooks/domains/task/use-open-task-graph";
 import { ContextMenuItem, ContextMenuSeparator } from "@kandev/ui/context-menu";
 import { useTranslation } from "react-i18next";
+import { useTaskTurnError } from "@/hooks/use-task-turn-error";
 
 export function TaskArchiveItem({
   taskId,
@@ -110,6 +112,31 @@ export function TaskDetachItem({
     >
       <IconUnlink className="mr-2 h-4 w-4" />
       {t("task:detachFromParent")}
+    </ContextMenuItem>
+  );
+}
+
+// Dismisses only the durable failed-turn attention. A visible runtime error
+// keeps its own separate recovery/dismissal affordance.
+export function TaskTurnErrorDismissItem({
+  task,
+  disabled,
+}: {
+  task: { id: string; turnError?: { stamp: string } | null };
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  const { dismiss, pendingStamp } = useTaskTurnError();
+  if (!task.turnError?.stamp) return null;
+  const stamp = task.turnError.stamp;
+  return (
+    <ContextMenuItem
+      data-testid="task-context-dismiss-turn-error"
+      disabled={disabled || pendingStamp === stamp}
+      onSelect={() => void dismiss(task.id, stamp)}
+    >
+      <IconAlertCircleOff className="mr-2 h-4 w-4" />
+      {t("task:dismissTurnError")}
     </ContextMenuItem>
   );
 }

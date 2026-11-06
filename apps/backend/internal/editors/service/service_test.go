@@ -394,7 +394,7 @@ func TestBuildHostedURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := buildHostedURL(tt.baseURL, tt.path, tt.line, tt.column)
+			result, err := buildHostedURL(tt.baseURL, "", tt.path, tt.line, tt.column)
 			if tt.expectErr && err == nil {
 				t.Error("expected error but got none")
 			}

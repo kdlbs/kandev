@@ -20,7 +20,7 @@ func TestContainerResponsesIncludeLabels(t *testing.T) {
 		},
 	}}
 
-	got := newContainerResponses(containers)
+	got := newContainerResponsesWithTaskTitles(context.Background(), containers, nil)
 
 	if got[0].Labels["kandev.executor_profile_id"] != "profile-1" {
 		t.Fatalf("labels = %#v, want executor profile label", got[0].Labels)

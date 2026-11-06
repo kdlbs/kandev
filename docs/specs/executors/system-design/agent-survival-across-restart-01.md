@@ -21,27 +21,15 @@ This design gives the standalone runtime a detached control-server lifetime, an
 ownership protocol, a recovery producer, and truthful post-restart state, so
 that worktree and local agent work survives a backend restart or upgrade.
 
-One design covers all four requirement documents because they are implemented by
-one mechanism: the ownership protocol exists to make re-tracking safe, and
-splitting the design along the requirement seams would duplicate the same control
-flow four times. The requirement documents are
-[agent survival](../requirements/agent-survival-across-restart.md) and
-[survived session state](../requirements/agent-survival-session-state.md) for the
-sessions, and
-[control-server ownership](../requirements/standalone-control-server-ownership.md)
-and
-[single driver and unowned lifetime](../requirements/standalone-control-server-single-driver.md)
-for the server.
+Related contracts are [agent survival](../requirements/agent-survival-across-restart.md),
+[session state](../requirements/agent-survival-session-state.md),
+[control-server ownership](../requirements/standalone-control-server-ownership.md) and
+[single driver](../requirements/standalone-control-server-single-driver.md).
 
-It owns process lifetime, adoption, the recovery producer, the instance
-enumeration contract, and the ordering between recovery and startup state
-reconciliation. It is written in three parts, listed under
-[Requirement mapping](#requirement-mapping); this is part 1, which also carries the
-prior-art record for the whole design. It uses but does not own: provider resume semantics (agent
-system), the durable executor-record write path (already owned by the lifecycle
-manager), runtime-state ownership locking and port probing (owned by
-[port collision and backend ownership safety](../requirements/port-collision-safety.md)),
-the runtime flag registry, and the secret store.
+Part 1 owns process lifetime and ownership; parts 2 and 3 cover recovery,
+reconstruction and reconciliation (see [mapping](#requirement-mapping)). Provider
+resume, executor-record persistence, [runtime-state locking](../requirements/port-collision-safety.md),
+the flag registry and secret store retain their existing owners.
 
 `ExecutorTypeWorktree` and `ExecutorTypeLocal` both resolve to the standalone
 runtime and differ only in workspace preparer, so one producer and one lifetime
@@ -112,40 +100,23 @@ silently does not work:
    whole point of detaching, so `AC-EXECUTORS-SURVIVAL-001.3`'s size and retention
    limits would be stated with no enforcer. agentctl therefore opens the sink itself.
 
-   **It does not reuse the backend's own logger, and naming which mechanism it does use
-   is the point of this paragraph.** The backend does not build its logger from the
-   shared logging configuration at all. It uses a separate backend-specific logger whose
-   rotation is a day-segmented policy, with a per-segment size, a total-size ceiling and
-   a retained-days rule fixed as internal constants rather than exposed as settings, and
-   whose active file name is likewise a constant, accompanied by a day marker and a
-   rollover journal beside it. There is nothing per-caller in it to point a second
-   process at: doing so would put two processes on one active file and one set of
-   rollover journals, each rotating underneath the other. Nor is there an operator
-   setting for its limits to inherit — the startup configuration catalog carries a log
-   level and a log format, and no size or retention key at all.
-
-   What agentctl uses instead is the shared logger package's ordinary rotating-file
-   configuration, which does carry an output path together with a maximum size, a
-   backup count and a maximum age. agentctl already constructs exactly that
-   configuration today and passes `stdout` as its output path, so the change is that
-   path plus those three bounds, not new rotation machinery. The bounds are fixed values
-   of this capability, as `AC-EXECUTORS-SURVIVAL-001.3` requires: they are not operator
-   settings, so they add no catalog key and no environment variable, exactly as the path
-   does not. All three must be set to non-zero values: in that configuration a zero
-   backup count and a zero maximum age each mean unlimited, so leaving either at its
-   default reproduces the unbounded sink this paragraph exists to prevent. The path is computed by the launcher from the resolved Kandev home, names a
-   file distinct from the one the backend writes its own logs to, and is handed to the
-   child as an ordinary start-up argument. So neither the path nor the bounds joins the
-   five tunables in
-   [Configuration surface](agent-survival-across-restart-03.md#configuration-surface-for-the-numeric-tunables).
-   The location is named in the control-server record so that both the next backend and
-   an operator can find it. An unattended server writing without a bound is its own
-   outage.
+   agentctl uses the shared rotating-file logger, not the backend's separate
+   day-segmented sink and journals. It opens its own resolved-home path, passed as
+   a startup argument and recorded in the control-server record, with fixed,
+   non-zero size, backup-count and age limits (zero count/age means unlimited).
+   An inherited descriptor cannot be rotated by an exited backend. No new setting
+   is added; see [Configuration surface](agent-survival-across-restart-03.md#configuration-surface-for-the-numeric-tunables).
 7. **Per-instance idle reaper.** agentctl reaps an instance with no in-flight
    request and no recent activity on its port (default one hour, scanned each
    minute). An attached backend holds workspace and event streams open, so
    in-flight requests are non-zero; a detached instance is idle by construction
    and is reaped once the timeout elapses.
+
+8. **Native Linux service cgroup.** `renderSystemdUnit` in
+   `apps/backend/internal/launcher/service.go` supplies both user and system units.
+   A new SID from `buildSysProcAttr` does not leave that service's cgroup.
+   `KillMode=mixed` sends the final kill to remaining cgroup members after the
+   backend main process exits, defeating an otherwise correct detach.
 
 Paths 1, 2, 4, 5 and 6 are disabled when the capability is enabled. Path 3
 governs platform scope. Path 7 is left in place and is the reason the unowned
@@ -153,6 +124,43 @@ period must be shorter than the idle timeout — while idle reaping is enabled.
 Setting the idle timeout to zero disables the reaper entirely, which removes path 7
 rather than shortening it, and the ordering constraint has nothing left to order; see
 [Unowned shutdown](#unowned-shutdown).
+
+### Native Linux service lifetime
+
+For AC-EXECUTORS-SURVIVAL-001.11-.13, emit `KillMode=process` in both Linux scopes,
+with other properties and launchd unchanged. `runManagedApp` starts `__backend`
+through `restartableBackend.start`/`startProcess`. systemd owns the launcher;
+it owns the backend; Kandev owns retained agents. Install-time flags cannot
+reflect runtime overrides.
+
+[systemd.kill](https://www.freedesktop.org/software/systemd/man/latest/systemd.kill.html#KillMode=)
+warns that process mode lets children outlive a stopped service in its cgroup.
+Retained agents deliberately can; a healthy backend cannot. Linux starts with label `backend` and existing
+`KANDEV_SERVICE_MANAGER=systemd` arm `Pdeathsig=SIGTERM`, preserving
+`Setpgid` and other attributes. Agentctl and other labels are excluded.
+
+`startManagedCommand` returns one Wait function to `startProcess`.
+For those starts, one goroutine locks its OS thread, starts the command,
+reports start success/error, and performs the sole `cmd.Wait` on that thread.
+A buffered result feeds existing exit accounting. Unlock/exit only after Wait
+or start failure; returning from the caller must not retire that thread. This
+follows Go's [thread-scoped Pdeathsig contract](https://pkg.go.dev/syscall@go1.26.0#SysProcAttr).
+Other contexts retain ordinary Start/Wait; no new handoff/configuration is needed.
+
+Preserve disabled agentctl Pdeathsig/pipe/Stop escalation, manager explicit Stop,
+rollback and enabled detach, registered cleanup, expiry and adoption. Backend
+SIGTERM remains graceful; defective children can still outlive a stopped unit
+without the group sweep. Logout/reboot/host cgroup kills and provider continuation
+remain outside this proof. Flag metadata, availability and all-off profiles stay.
+
+Keeping `mixed` defeats retention; disabling final SIGKILL can block restart;
+separate scopes or replacing ExecStart expand startup/ownership contracts.
+Old units change through
+normal install/update regeneration, explained in the how-to.
+
+Test the actual managed launcher -> backend -> agent boundary, launcher death
+with survival on/off, and return of the spawning goroutine. Verify PID birth/SID/cgroup, bounded cleanup and portable renderer/launchd plus
+existing agentctl/manager controls separately.
 
 ### Ownership identity and credential
 

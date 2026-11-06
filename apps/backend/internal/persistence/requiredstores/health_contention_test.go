@@ -18,8 +18,8 @@ func TestPersistenceContentionFixture(t *testing.T) {
 		stage      string
 		poolToHold string
 	}{
-		{name: "writer pool", stage: "writer_ping", poolToHold: "writer"},
-		{name: "reader pool", stage: "reader_ping", poolToHold: "reader"},
+		{name: "writer pool", stage: "writer_acquire", poolToHold: "writer"},
+		{name: "reader pool", stage: "reader_acquire", poolToHold: "reader"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			writer := openSingleConnectionSQLite(t)

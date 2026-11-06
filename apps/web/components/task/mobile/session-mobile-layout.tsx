@@ -13,10 +13,9 @@ import { SessionMobileReviewDialog } from "./session-mobile-review-dialog";
 import { TaskFilesPanel } from "../task-files-panel";
 import { PassthroughToolbar } from "../passthrough-toolbar";
 import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
-import { sendActiveTerminalInput } from "@/lib/terminal/send-shell-input";
-import { isTerminalSessionState } from "@/lib/ws/handlers/agent-session";
 import { MobileTerminalPane } from "./mobile-terminal-pane";
 import { MobileSessionsPicker } from "./mobile-sessions-section";
+import { BackgroundWorkMobilePanel } from "../chat/background-work/background-work-mobile-surface";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
 import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
@@ -26,6 +25,7 @@ import { fetchAndOpenFile } from "../file-browser-hooks";
 import { MobileReviewPanel } from "./mobile-review-panel";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { OpenFileTab } from "@/lib/types/backend";
+import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
 import { useAppStore } from "@/components/state-provider";
 import { useNormalizedTaskReviewsState } from "../review-panel-provider";
 import type {
@@ -40,11 +40,12 @@ import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import { useEffectiveMobilePanel, type MobileReviewSource } from "./mobile-plugin-panel-lifecycle";
 import { useTranslation } from "react-i18next";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { LaunchQueueStatus } from "../launch-queue-status";
 import { WipQueueStatus } from "../wip-queue-status";
 import type { TaskTopbarRepository } from "../task-page-content-helpers";
 
-export { resolveMobilePluginPanel } from "./mobile-plugin-panel-lifecycle";
+export { resolveMobileCorePanel, resolveMobilePluginPanel } from "./mobile-plugin-panel-lifecycle";
 
 function useMobilePanelChangeHandler(
   handlePanelChangeAndClearSheet: (panel: MobileSessionPanel) => void,
@@ -127,6 +128,7 @@ function MobileChatPanelContent({
   isPassthroughMode,
   effectiveSessionId,
   onOpenFile,
+  onOpenHistoricalDiff,
   scrollTarget,
   onScrollTargetConsumed,
   isVisible,
@@ -135,6 +137,7 @@ function MobileChatPanelContent({
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
   onOpenFile: (path: string, repo?: string) => void;
+  onOpenHistoricalDiff?: (target: HistoricalTurnDiffTarget) => void;
   scrollTarget: PendingMessageScrollTarget | null;
   onScrollTargetConsumed: (messageId: string) => void;
   isVisible: boolean;
@@ -169,6 +172,7 @@ function MobileChatPanelContent({
           taskId={effectiveSessionId ? activeTaskId : null}
           statusTaskId={activeTaskId}
           onOpenFile={onOpenFile}
+          onOpenHistoricalDiff={onOpenHistoricalDiff}
           pendingScrollTarget={scrollTarget}
           isVisible={isVisible}
           detailActive={isVisible}
@@ -176,6 +180,69 @@ function MobileChatPanelContent({
           hideLaunchQueueStatus
           hideWipQueueStatus
         />
+      )}
+    </div>
+  );
+}
+
+function MobileChatArea({
+  activeTaskId,
+  isPassthroughMode,
+  effectiveSessionId,
+  onOpenFile,
+  onOpenHistoricalDiff,
+  scrollTarget,
+  onScrollTargetConsumed,
+}: {
+  activeTaskId: string | null;
+  isPassthroughMode: boolean;
+  effectiveSessionId: string | null;
+  onOpenFile: (path: string, repo?: string) => void;
+  onOpenHistoricalDiff?: (target: HistoricalTurnDiffTarget) => void;
+  scrollTarget: PendingMessageScrollTarget | null;
+  onScrollTargetConsumed: (messageId: string) => void;
+}) {
+  return (
+    <div className="flex-1 min-h-0 flex flex-col px-2 pb-2">
+      <MobileChatPanelContent
+        activeTaskId={activeTaskId}
+        isPassthroughMode={isPassthroughMode}
+        effectiveSessionId={effectiveSessionId}
+        onOpenFile={onOpenFile}
+        onOpenHistoricalDiff={onOpenHistoricalDiff}
+        scrollTarget={scrollTarget}
+        onScrollTargetConsumed={onScrollTargetConsumed}
+        isVisible
+      />
+    </div>
+  );
+}
+
+function MobileFilesArea({
+  selectedFile,
+  selectedFilePreview,
+  effectiveSessionId,
+  onOpenFile,
+  onClose,
+}: {
+  selectedFile: OpenFileTab | null;
+  selectedFilePreview: boolean;
+  effectiveSessionId: string | null;
+  onOpenFile: (file: OpenFileTab) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="flex-1 min-h-0 flex flex-col" data-testid="files-panel">
+      {selectedFile ? (
+        <MobileFileViewerPanel
+          key={`${selectedFile.repo ?? ""}\u0000${selectedFile.path}`}
+          file={selectedFile}
+          sessionId={effectiveSessionId}
+          initialRenderedPreview={selectedFilePreview}
+          onClose={onClose}
+        />
+      ) : (
+        <TaskFilesPanel onOpenFile={onOpenFile} />
       )}
     </div>
   );
@@ -189,6 +256,8 @@ type MobilePanelAreaProps = {
   selectedFile: OpenFileTab | null;
   selectedFilePreview: boolean;
   selectedDiff: { path: string; content?: string } | null;
+  onOpenHistoricalDiff?: (target: HistoricalTurnDiffTarget) => void;
+  onCloseHistoricalDiff?: (target: HistoricalTurnDiffTarget) => void;
   handleOpenFileFromChat: (path: string, repo?: string, preview?: boolean) => void;
   handleClearSelectedDiff: () => void;
   handleOpenFile: (file: OpenFileTab) => void;
@@ -237,6 +306,18 @@ function MobileTerminalPanel({
   );
 }
 
+function mobileAreaPaddingBottom(
+  currentMobilePanel: MobileSessionPanel,
+  isPassthroughMode: boolean,
+  bottomNavHeight: string,
+  bottomOffset: number,
+): string {
+  if (currentMobilePanel === "chat" && isPassthroughMode) {
+    return `max(calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px)), ${bottomOffset}px)`;
+  }
+  return `calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px))`;
+}
+
 export function MobilePanelArea({
   currentMobilePanel,
   activeTaskId,
@@ -245,6 +326,8 @@ export function MobilePanelArea({
   selectedFile,
   selectedFilePreview,
   selectedDiff,
+  onOpenHistoricalDiff,
+  onCloseHistoricalDiff,
   handleOpenFileFromChat,
   handleClearSelectedDiff,
   handleOpenFile,
@@ -264,22 +347,25 @@ export function MobilePanelArea({
       className="flex flex-col"
       style={{
         paddingTop: topPadding,
-        paddingBottom: `calc(${bottomNavHeight} + ${currentMobilePanel === "chat" && isPassthroughMode ? `${KEYBAR_HEIGHT_PX}px` : "0px"} + env(safe-area-inset-bottom, 0px))`,
+        paddingBottom: mobileAreaPaddingBottom(
+          currentMobilePanel,
+          isPassthroughMode,
+          bottomNavHeight,
+          bottomOffset,
+        ),
         height: "100%",
       }}
     >
       {currentMobilePanel === "chat" && (
-        <div className="flex-1 min-h-0 flex flex-col px-2 pb-2">
-          <MobileChatPanelContent
-            activeTaskId={activeTaskId}
-            isPassthroughMode={isPassthroughMode}
-            effectiveSessionId={effectiveSessionId}
-            onOpenFile={handleOpenFileFromChat}
-            scrollTarget={mobileScrollTarget}
-            onScrollTargetConsumed={onScrollTargetConsumed}
-            isVisible
-          />
-        </div>
+        <MobileChatArea
+          activeTaskId={activeTaskId}
+          isPassthroughMode={isPassthroughMode}
+          effectiveSessionId={effectiveSessionId}
+          onOpenFile={handleOpenFileFromChat}
+          onOpenHistoricalDiff={onOpenHistoricalDiff}
+          scrollTarget={mobileScrollTarget}
+          onScrollTargetConsumed={onScrollTargetConsumed}
+        />
       )}
       {currentMobilePanel === "plan" && (
         <MobilePlanPanel taskId={activeTaskId} bottomNavHeight={bottomNavHeight} />
@@ -290,28 +376,29 @@ export function MobilePanelArea({
             selectedDiff={selectedDiff}
             onClearSelected={handleClearSelectedDiff}
             onOpenFile={handleOpenFileFromChat}
+            onCloseHistoricalDiff={onCloseHistoricalDiff}
           />
         </div>
       )}
       {currentMobilePanel === "files" && (
-        <div className="flex-1 min-h-0 flex flex-col" data-testid="files-panel">
-          {selectedFile ? (
-            <MobileFileViewerPanel
-              key={`${selectedFile.repo ?? ""}\u0000${selectedFile.path}`}
-              file={selectedFile}
-              sessionId={effectiveSessionId}
-              initialRenderedPreview={selectedFilePreview}
-              onClose={() => handlePanelChangeAndClearSheet("files")}
-            />
-          ) : (
-            <TaskFilesPanel onOpenFile={handleOpenFile} />
-          )}
-        </div>
+        <MobileFilesArea
+          selectedFile={selectedFile}
+          selectedFilePreview={selectedFilePreview}
+          effectiveSessionId={effectiveSessionId}
+          onOpenFile={handleOpenFile}
+          onClose={() => handlePanelChangeAndClearSheet("files")}
+        />
       )}
       {currentMobilePanel === "terminal" && (
         <MobileTerminalPanel
           sessionId={effectiveSessionId}
           paddingBottom={terminalPaddingBottom(keyboardOpen, bottomOffset, bottomNavHeight)}
+        />
+      )}
+      {currentMobilePanel === "background-work" && (
+        <MobileBackgroundWorkArea
+          sessionId={effectiveSessionId}
+          onClose={() => handlePanelChangeAndClearSheet("chat")}
         />
       )}
       <MobileReviewPanel
@@ -338,6 +425,33 @@ function MobilePlanPanel({
   return (
     <div className="flex-1 min-h-0 flex flex-col p-2">
       <TaskPlanPanel taskId={taskId} visible={true} mobileBottomOffset={bottomNavHeight} />
+    </div>
+  );
+}
+
+function MobileBackgroundWorkArea({
+  sessionId,
+  onClose,
+}: {
+  sessionId: string | null;
+  onClose: () => void;
+}) {
+  const closeAndFocusTrigger = () => {
+    onClose();
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>('[data-testid="mobile-session-nav-panels"]')?.focus();
+    });
+  };
+  return (
+    <div
+      className="flex min-h-0 min-w-0 flex-1 flex-col p-2"
+      data-testid="background-work-mobile-panel"
+    >
+      <BackgroundWorkMobilePanel
+        key={sessionId ?? "no-session"}
+        sessionId={sessionId}
+        onClose={closeAndFocusTrigger}
+      />
     </div>
   );
 }
@@ -375,11 +489,13 @@ function useMobileReviewPanelState({
   effectiveSessionId,
   currentMobilePanel,
   handlePanelChangeAndClearSheet,
+  backgroundWorkAvailable,
 }: {
   activeTaskId: string | null;
   effectiveSessionId: string | null;
   currentMobilePanel: MobileSessionPanel;
   handlePanelChangeAndClearSheet: (panel: MobileSessionPanel) => void;
+  backgroundWorkAvailable: boolean;
 }) {
   const preferredReviewId = useAppStore((state) =>
     effectiveSessionId
@@ -412,6 +528,7 @@ function useMobileReviewPanelState({
     effectiveMobilePanel,
     reviews.length > 0 || reviewsLoading ? "reviews" : null,
     handlePanelChangeAndClearSheet,
+    backgroundWorkAvailable,
   );
   return {
     reviews,
@@ -609,24 +726,11 @@ function SessionMobileFooter({
   taskCanvases,
   onOpenCanvas,
 }: SessionMobileFooterProps) {
-  const ended = useAppStore((state) =>
-    isTerminalSessionState(sessionId ? state.taskSessions.items[sessionId]?.state : undefined),
-  );
   return (
     <>
       <MobileTerminalKeybar
         sessionId={sessionId}
-        visible={
-          activePanel === "terminal" ||
-          (activePanel === "chat" && sessionKind === "passthrough" && !ended)
-        }
-        onSend={
-          activePanel === "chat" && sessionKind === "passthrough"
-            ? (data) => {
-                if (sessionId) sendActiveTerminalInput(sessionId, data);
-              }
-            : undefined
-        }
+        visible={activePanel === "terminal"}
         baseBottomOffset={BOTTOM_NAV_HEIGHT}
       />
       <SessionMobileBottomNav
@@ -671,6 +775,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     effectiveSessionId,
     isPassthroughMode,
     selectedDiff,
+    handleSelectHistoricalDiff,
     handleClearSelectedDiff,
     totalChangesCount,
     hasUnseenPlanUpdate,
@@ -681,6 +786,13 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     isTaskSwitcherOpen,
     handleMenuClick,
   } = useSessionLayoutState({ sessionId: props.sessionId });
+  const handleOpenHistoricalDiff = useCallback(
+    (target: HistoricalTurnDiffTarget) => {
+      handleSelectHistoricalDiff(target);
+      handlePanelChange("changes");
+    },
+    [handlePanelChange, handleSelectHistoricalDiff],
+  );
   const {
     selectedFile,
     selectedFilePreview,
@@ -688,6 +800,25 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     handleOpenFile,
     handlePanelChangeAndClearSheet,
   } = useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
+  const handleCloseHistoricalDiff = useCallback(
+    (target: HistoricalTurnDiffTarget) => {
+      handlePanelChangeAndClearSheet("chat");
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const card = [...document.querySelectorAll<HTMLElement>("[data-change-set-id]")].find(
+            (element) => element.dataset.changeSetId === target.changeSetId,
+          );
+          const trigger = target.fileChangeId
+            ? card?.querySelector<HTMLElement>(
+                `[data-turn-file-change-id="${target.fileChangeId}"]`,
+              )
+            : card?.querySelector<HTMLElement>("[data-turn-change-open-diff]");
+          trigger?.focus();
+        });
+      });
+    },
+    [handlePanelChangeAndClearSheet],
+  );
   const workflowFocusRequest = useAppStore((state) => {
     const request = state.workflowSessionFocus.request;
     return request && request.taskId === activeTaskId && request.sessionId === effectiveSessionId
@@ -738,12 +869,21 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
   const handleMobileScrollTargetConsumed = useCallback(() => {
     setMobileScrollTarget(null);
   }, []);
+  let sessionKind: PluginSessionKind = null;
+  if (effectiveSessionId) {
+    sessionKind = isPassthroughMode ? "passthrough" : "managed";
+  }
+  const backgroundWorkEnabled = useFeature("agentBackgroundWork");
+  const backgroundWorkAvailable = Boolean(
+    effectiveSessionId && sessionKind === "managed" && backgroundWorkEnabled,
+  );
   const { reviews, selectedReview, selectReview, effectiveMobilePanel, handleMobilePanelChange } =
     useMobileReviewPanelState({
       activeTaskId,
       effectiveSessionId,
       currentMobilePanel,
       handlePanelChangeAndClearSheet: handlePanelChangeAndClearTarget,
+      backgroundWorkAvailable,
     });
   useLayoutEffect(() => {
     if (currentMobilePanel !== "chat" || effectiveMobilePanel !== "chat") {
@@ -751,10 +891,6 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
       setMobileScrollTarget(null);
     }
   }, [currentMobilePanel, effectiveMobilePanel]);
-  let sessionKind: PluginSessionKind = null;
-  if (effectiveSessionId) {
-    sessionKind = isPassthroughMode ? "passthrough" : "managed";
-  }
   return (
     <div className="relative h-full min-h-0 bg-background" data-testid="mobile-task-layout">
       <MobileTopBarSticky
@@ -774,6 +910,8 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         selectedFile={selectedFile}
         selectedFilePreview={selectedFilePreview}
         selectedDiff={selectedDiff}
+        onOpenHistoricalDiff={handleOpenHistoricalDiff}
+        onCloseHistoricalDiff={handleCloseHistoricalDiff}
         handleOpenFileFromChat={handleOpenFileFromChat}
         handleClearSelectedDiff={handleClearSelectedDiff}
         handleOpenFile={handleOpenFile}

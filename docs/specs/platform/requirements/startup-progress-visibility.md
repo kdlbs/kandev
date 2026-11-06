@@ -22,9 +22,6 @@ both to every startup surface.
 It refines **AC-PLATFORM-STARTUP-LIFECYCLE-001.4**, which forbade every percentage.
 It survives as AC-PLATFORM-STARTUP-PROGRESS-001.6 and 001.7, which it now cites.
 
-No external prior-art source was reachable while this was written, so nothing here
-is confirmed against another product.
-
 ## Terminology
 
 - **Phase:** An existing coarse stage of startup, `opening_database` through
@@ -272,9 +269,9 @@ A third must not.
 - **AC-PLATFORM-STARTUP-PROGRESS-005.3:** Exactly these identifiers shall be
   registered: `database.backup`, `stores.repositories`, `stores.services`,
   `task.prompt_seq.backfill`, `task.message_timestamps.backfill`,
-  `task.subagent_context.backfill`, and `sessions.recovery`; an automated check
-  shall fail on a registered identifier absent from this list or a listed
-  identifier that is unregistered.
+  `task.subagent_context.backfill`, `sessions.recovery`, plus the housekeeping
+  identifiers in the [housekeeping registry](../system-design/startup-housekeeping.md#reporter-history-and-existing-surfaces).
+  An automated check shall reject missing or additional identifiers.
 - **AC-PLATFORM-STARTUP-PROGRESS-005.4:** An automated check shall fail when a
   registered step's label key is missing from any supported backend or web locale,
   and no surface shall build a step name from the identifier.

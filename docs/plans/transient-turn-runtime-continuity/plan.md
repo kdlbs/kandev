@@ -307,3 +307,35 @@ NODE
 - Older remote components lack the attestation and keep conservative recovery until upgraded.
 - Legacy history may contain inaccurate retry copy. Preserve available diagnostics without inventing missing attempt history.
 - Model changes are adapter-dependent. They must use existing capability checks and cannot create another native session.
+
+## PR 4311 cancellation conformance follow-up
+
+Status: local correction and verification complete. The exact shard-5 replay exposed a
+waiting retry with one
+past dispatch and no accepted prompt. Cancellation incorrectly treated that
+history as an active turn and failed its generation fence. Work orders 02 and
+03 own the correction and desktop/phone proof under existing
+AC-PLATFORM-TURN-CONTINUITY-001.4 and -002.3. Historical package results above
+remain unchanged. This correction changes neither the retry budget nor timing.
+
+Focused managed Playwright GREEN: 9/9 tests passed in 9.8m, three repetitions
+per desktop cancellation/exhaustion, phone cancellation, and profile-editor
+case, with retries disabled after a fresh production build. Log:
+`/tmp/clone-fixup-e2e-local/kandev-run.e2e.AN57mwam.log`. Catalog validation
+(362 decisions, 1438 specifications), full specification lint, and whitespace
+checks passed. Scoped lint and current-base composition passed as recorded below.
+
+Final local checks: scoped Go lint reported zero issues; all three browser
+specs passed ESLint and Prettier. A conflict-free merge with the latest main
+passed 124 clone/routing/editor tests across 12 suites, 24 archived-sidebar
+freshness tests, and web TypeScript. The original 13-suite command supplied
+an incorrect sidebar path and ran only 12 suites; the sidebar suite then ran
+separately at `lib/sidebar/sidebar-archived-update-freshness.test.ts`. Logs:
+`/tmp/kandev-run.vitest.21UlgosQ.log`,
+`/tmp/kandev-run.vitest.p4wCbkEc.log`,
+`/tmp/kandev-run.typecheck.2e9Djqxo.log`.
+Actual changed-file work-order coverage passed with all unchanged referenced
+platform requirement/design inputs loaded. Full catalog/specification and
+whitespace checks passed. The primary session records exact merge/head IDs,
+normal hook receipts and fresh remote CI/review results in the external task
+plan, avoiding a documentation-only push that would invalidate those results.

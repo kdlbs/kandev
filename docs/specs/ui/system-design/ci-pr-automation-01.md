@@ -4,7 +4,7 @@ system: ui
 requirements:
   - REQ-UI-CI-PR-AUTOMATION-001
 created: 2026-06-18
-updated: 2026-09-06
+updated: 2026-10-19
 owners:
   - tbd
 ---
@@ -140,6 +140,46 @@ scoping; see that ADR's Consequences section).
   permits only one dispatch of that reservation at a time. A failed executor
   handoff restores the captured lifecycle dispatch state and retains or
   coalesces the row; inactive-task outcomes acknowledge and discard it.
+- Queued lifecycle dispatch (`AC-UI-CI-PR-AUTOMATION-001.18`) uses its retained
+  reservation, final active-task claim, queue generations, current token, and
+  accepted acknowledgement. `executeQueuedMessageWithReservation` must not
+  attach the ordinary `SetPendingQueueDispatchDelivery` updater to lifecycle
+  entries: `reserveRetainedHead` creates no ordinary dispatch attempt or
+  `queue_dispatch_claims` row. Ordinary dispatch continues to attach that
+  updater, and a missing or stale ordinary claim still fails closed.
+- Queue retention and negotiated transport are independent. `IsDurableDelivery`
+  classifies retained rows; it does not advertise `durable_v1`. A lifecycle
+  entry still runs capability negotiation, backend submission preparation,
+  payload hashing, recovery blocking, and transport acceptance for an advertised
+  compatible durable peer. Legacy peers keep their existing transport limits.
+  This repair does not add a persisted reservation-to-submission association or
+  promise exactly-once lifecycle recovery across a crash.
+- Known unaccepted legacy handoffs keep the existing retained-row retry path.
+  Compatible `durable_v1` errors without an authoritative backend terminal
+  outcome preserve conservative recovery: backend
+  submission evidence becomes `DeliverySubmissionInterruptedUnknown`, the
+  lifecycle event stays retained, and a matching `unknown_prompt_outcome`
+  recovery block prevents further admission until existing authoritative
+  reconciliation permits it. Neither a false `dispatchAccepted` value nor
+  error text proves that retry is safe.
+- Shared outcome classification has an existing limitation: agentctl's
+  `SubmissionDelivery.handleDispatchError` can record a known terminal failure
+  as `journal.SubmissionFailed`, while backend
+  `finishPromptExecutorDispatch` conservatively marks executor errors with a
+  durable submission as interrupted-unknown. This repair restores initial
+  lifecycle delivery and accepted acknowledgement; it does not propagate new
+  known-versus-ambiguous outcomes across agentctl/runtime/executor or redesign
+  ordinary/direct settlement. The SQLite durable-error regression
+  protects that conservative fence, not automatic known-failure retry.
+- Plan-comment and managed-input rows also satisfy `IsDurableDelivery`, but
+  have their own replay receipts, attempted-delivery boundaries, and exact
+  accepted-turn handling. This lifecycle repair does not change their updater
+  selection or receipt semantics. A generic bypass for all retained rows would
+  require separately grounded consumer coverage and review of those contracts.
+  The [ordinary claim contract](../../platform/system-design/durable-agent-delivery.md#existing-queue-admission-and-startup-recovery)
+  remains authoritative for ordinary messages. The
+  [delivery repair plan](../../../plans/lifecycle-queue-dispatch/plan.md)
+  owns regression and compatibility evidence.
 - A passthrough session defers a reserved lifecycle row until its ready-handler
   guard is released. It claims that row's in-flight token before releasing the
   guard, and the deferred lifecycle dispatcher consumes the preclaimed token.

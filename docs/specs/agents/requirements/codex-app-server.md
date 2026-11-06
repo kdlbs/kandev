@@ -86,3 +86,4 @@ The [costs system](../../costs/requirements/conversation-usage.md) owns usage at
 ## Implementation plans
 
 - [Native Codex support](../../../plans/codex-app-server/plan.md)
+- [Browser-compatible native fork repair](../../../plans/native-fork-browser-capability/plan.md)

@@ -603,6 +603,7 @@ function useSessionSubscription({
           canFinalizeLoading: isCurrentGeneration,
           hydrationRef,
           hydrationKey,
+          options: { authoritative: "overlap" },
         });
       })
       .catch(() => {});

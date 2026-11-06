@@ -27,13 +27,13 @@ func stagedRepair(t *testing.T, f fixture) *journal {
 
 // @covers AC-TASKS-WORKTREE-INVENTORY-REPAIR-001.5
 func TestInterruptedRepairResumesOrReverses(t *testing.T) {
-	for _, phase := range []string{"prepared", "moved", "committed"} {
+	for _, phase := range []string{phasePrepared, "moved", "committed"} {
 		for _, mode := range []string{"apply", "rollback"} {
 			t.Run(phase+"/"+mode, func(t *testing.T) {
 				f := relocationFixture(t)
 				j := stagedRepair(t, f)
 				ctx := context.Background()
-				if phase != "prepared" {
+				if phase != phasePrepared {
 					if err := j.moveLocations(ctx, true); err != nil {
 						t.Fatal(err)
 					}

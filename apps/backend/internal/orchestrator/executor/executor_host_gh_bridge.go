@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/gitcredentials"
@@ -310,11 +311,11 @@ func hasExplicitGitHubTokenInProfile(profileEnvVars []models.ProfileEnvVar, host
 		}
 		switch envVar.Key {
 		case envGHToken, envGitHubToken:
-			if strings.EqualFold(host, defaultGitHubHost) {
+			if usesPublicGitHubToken(host) {
 				return true
 			}
 		case "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN":
-			if !strings.EqualFold(host, defaultGitHubHost) {
+			if !usesPublicGitHubToken(host) {
 				return true
 			}
 		}
@@ -384,7 +385,7 @@ func hostGitHubIdentityAllowed(repository *models.Repository, host string) bool 
 }
 
 func hasExplicitGitHubToken(env map[string]string, host string) bool {
-	if strings.EqualFold(host, defaultGitHubHost) {
+	if usesPublicGitHubToken(host) {
 		return nonEmptyEnvValue(env, envGHToken) || nonEmptyEnvValue(env, envGitHubToken)
 	}
 	return nonEmptyEnvValue(env, "GH_ENTERPRISE_TOKEN") ||
@@ -482,4 +483,9 @@ func isHostGitHubCommandEnvironmentKey(key string) bool {
 	default:
 		return false
 	}
+}
+
+func usesPublicGitHubToken(raw string) bool {
+	host, err := githubhost.Parse(raw)
+	return err == nil && host.TokenVariable() == "GH_TOKEN"
 }

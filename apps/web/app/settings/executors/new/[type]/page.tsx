@@ -22,6 +22,7 @@ import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { serializeSettingsRevision } from "@/components/settings/settings-save-revision";
+import { ExecutorOwnerChoice } from "@/components/settings/executor-ownership";
 import { ProfileDetailsCard } from "@/components/settings/profile-edit/profile-details-card";
 import { upsertExecutorProfile } from "@/components/settings/profile-edit/profile-edit-page-chrome";
 import {
@@ -228,6 +229,7 @@ function useCreateProfileFormState(executorType: ExecutorType) {
   const [mcpPolicy, setMcpPolicy] = useState("");
   const [prepareScript, setPrepareScript] = useState("");
   const [cleanupScript, setCleanupScript] = useState("");
+  const [owner, setOwner] = useState("");
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows([]);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(null);
@@ -275,6 +277,8 @@ function useCreateProfileFormState(executorType: ExecutorType) {
   return {
     name,
     setName,
+    owner,
+    setOwner,
     mcpPolicy,
     setMcpPolicy,
     prepareScript,
@@ -368,6 +372,7 @@ function CreateProfileSections({
   const { t } = useTranslation();
   return (
     <>
+      <ExecutorOwnerChoice value={form.owner} onChange={form.setOwner} creating baseline="" />
       <ProfileDetailsCard name={form.name} baselineName="" onNameChange={form.setName} />
       {form.isSprites && (
         <SpritesApiKeyCard
@@ -513,6 +518,7 @@ function getCreateDisabledReasonKey(
 
 function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormState>) {
   return {
+    ...(form.owner ? { owner_user_id: form.owner } : {}),
     name: form.name.trim(),
     mcp_policy: form.mcpPolicy || undefined,
     config: buildProfileConfig({
@@ -563,7 +569,7 @@ function CreateProfileForm({
     canSave: !disabledReasonKey,
     invalidReason: disabledReasonKey ? t(disabledReasonKey) : undefined,
     save: () => handleSave(savePayload),
-    discard: () => undefined,
+    discard: () => form.setOwner(""),
   });
 
   return (

@@ -430,6 +430,27 @@ func TestFromTurnPreservesSubsecondOrderingPrecision(t *testing.T) {
 	}
 }
 
+func TestFromTurnOmitsInternalTurnChangeActorMetadata(t *testing.T) {
+	turn := &models.Turn{
+		ID: "turn-privacy", TaskID: "task-privacy", TaskSessionID: "session-privacy",
+		Metadata: map[string]interface{}{
+			models.TurnMetaKeyTurnChangeActorUserID:    "initiating-user",
+			models.TurnMetaKeyTurnChangeSyntheticActor: true,
+			"public": "visible",
+		},
+	}
+	got := FromTurn(turn)
+	if _, ok := got.Metadata[models.TurnMetaKeyTurnChangeActorUserID]; ok {
+		t.Fatal("internal turn-change actor identity leaked through TurnDTO")
+	}
+	if _, ok := got.Metadata[models.TurnMetaKeyTurnChangeSyntheticActor]; ok {
+		t.Fatal("internal synthetic actor marker leaked through TurnDTO")
+	}
+	if got.Metadata["public"] != "visible" {
+		t.Fatalf("public metadata = %#v, want preserved public value", got.Metadata)
+	}
+}
+
 // TestFromTurnPreservesLifecycleOnlyMetadata is AC-11's DTO half: the
 // GET .../turns handler (internal/task/handlers/task_http_handlers.go) does
 // nothing but call FromTurn per row and gin.Context.JSON the result, so

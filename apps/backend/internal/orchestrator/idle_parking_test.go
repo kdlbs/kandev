@@ -86,6 +86,7 @@ func newIdleParkingFixture(t *testing.T, enabled bool, timeout int, provider str
 	agent.currentPromptGeneration.Store(4)
 	agent.currentPromptActivityEpoch.Store(9)
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+	svc.executor = executor.NewExecutor(agent, repo, testLogger(), executor.ExecutorConfig{})
 	svc.turnService = &inactiveTurnService{}
 	return svc, agent, running
 }

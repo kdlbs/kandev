@@ -176,9 +176,10 @@ func TestPrepareSession_Success(t *testing.T) {
 		t.Fatalf("expected first session to carry immutable original marker, metadata = %#v", createdSession.Metadata)
 	}
 
-	// Verify SetSessionPrimary was called
+	// The mock store predates the atomic election contract, so the executor
+	// retains its explicit promotion fallback for legacy repositories.
 	if len(repo.setSessionPrimaryCalls) != 1 {
-		t.Errorf("Expected 1 SetSessionPrimary call, got %d", len(repo.setSessionPrimaryCalls))
+		t.Errorf("Expected 1 SetSessionPrimary fallback call, got %d", len(repo.setSessionPrimaryCalls))
 	}
 }
 
@@ -617,6 +618,9 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalled = true
+			if req.CausingRunID != "office-run-1" {
+				t.Errorf("causing run ID = %q, want office-run-1", req.CausingRunID)
+			}
 			if !req.StartAgent {
 				t.Error("expected lifecycle launch to retain initial-agent activity")
 			}
@@ -650,7 +654,9 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 		Description: "Test description",
 	}
 
-	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{AgentProfileID: "profile-123", Prompt: "test prompt", StartAgent: true})
+	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{
+		AgentProfileID: "profile-123", Prompt: "test prompt", StartAgent: true, CausingRunID: "office-run-1",
+	})
 	if err != nil {
 		t.Fatalf("LaunchPreparedSession failed: %v", err)
 	}

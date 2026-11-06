@@ -9,7 +9,7 @@ import { registerAgentsHandlers } from "./agents";
 
 function makeStore() {
   return create<SettingsSlice>()(
-    immer((set, get, store) => createSettingsSlice(set, get, store)),
+    immer((set, get) => createSettingsSlice(set, get)),
   ) as unknown as StoreApi<AppState>;
 }
 

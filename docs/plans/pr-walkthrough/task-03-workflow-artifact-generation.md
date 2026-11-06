@@ -31,9 +31,10 @@ the separate R2 publication job.
   boundary. The artifact handoff is explicit for the dependent R2 publication
   job.
 - **Acceptance:** The workflow uses `PR_WALKTHROUGH_ENABLED`, the
-  `opencode-go/muse-spark-1.2-contributor` model reference, and the model's
+  `opencode/deepseek-v4.1-flash-free` model reference, and the model's
   native `high` reasoning variant. The workflow passes the variant through
-  `--variant`. The normal review workflow remains independently gated by
+  `--variant`. The model is free, has zero retention, and does not use inputs
+  for training. The normal review workflow remains independently gated by
   `OPENCODE_REVIEW_ENABLED`.
 - **Verification:**
 
@@ -85,3 +86,11 @@ variant through separate OpenCode 1.17.7 CLI options. Live validation on PR
 Verification: workflow contract tests passed; action pinning tests and linter
 passed; `actionlint` passed; `git diff --check` passed. The targeted `zizmor`
 audit still reports the workflow's existing `pull_request_target` warning.
+
+In October 2026, the Muse Spark contributor-free model disappeared from the
+active OpenCode catalog and blocked walkthrough generation. The workflow now
+uses DeepSeek V4.1 Flash Free. The pinned OpenCode 1.19.3 CLI lists this model
+with the `high` variant, and OpenCode documents its zero-retention,
+no-training policy. The workflow contract, runner, and action-pinning tests
+passed. The spec validator and spec linter passed. `zizmor` was unavailable in
+the local environment.

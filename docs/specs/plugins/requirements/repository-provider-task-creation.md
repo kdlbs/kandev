@@ -116,3 +116,4 @@ to register the repository in a separate step.
 ## System design
 
 - [Plugin Repository Task Creation System Design](../system-design/repository-provider-task-creation.md)
+- [Bare URL discovery requirements](repository-url-discovery.md) extend this flow when the caller has no provider hint.

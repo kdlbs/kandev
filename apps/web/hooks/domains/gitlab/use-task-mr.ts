@@ -93,8 +93,8 @@ export function useTaskMRs(taskId: string | null, requestedWorkspaceId?: string 
  * useGitLabStatus hook, so multiple consumers share a single fetch and the
  * status doesn't re-probe on every window focus.
  */
-export function useGitLabAvailable(): boolean {
-  const { status } = useGitLabStatus();
+export function useGitLabAvailable(workspaceId?: string | null): boolean {
+  const { status } = useGitLabStatus(workspaceId);
   return Boolean(status?.authenticated || status?.token_configured);
 }
 

@@ -14,14 +14,20 @@ import (
 // admission fence. The snapshot cannot authorize dispatch or alter old outcomes.
 func (m *Manager) GetNativeResumeDeliveryEvidence(ctx context.Context, sessionID string) (*models.NativeResumeDeliveryEvidence, error) {
 	execution, exists := m.GetExecutionBySessionID(sessionID)
-	if !exists {
+	if !exists || execution == nil {
 		return nil, ErrDurableAdoptionEvidenceUnavailable
 	}
 	client, release := execution.AcquireAgentCtlClient()
-	defer release()
 	if client == nil {
+		release()
 		return nil, ErrDurableAdoptionEvidenceUnavailable
 	}
+	owner := captureNativeResumeProofOwner(execution, client)
+	release()
+	return m.waitForNativeResumeProjection(ctx, owner)
+}
+
+func (m *Manager) nativeResumeDeliveryProof(ctx context.Context, execution *AgentExecution, client *agentctl.Client) (*models.NativeResumeDeliveryEvidence, error) {
 	status, err := m.nativeResumeDeliveryStatus(ctx, execution, client)
 	if err != nil || status == nil {
 		return nil, err
@@ -40,7 +46,7 @@ func (m *Manager) GetNativeResumeDeliveryEvidence(ctx context.Context, sessionID
 	if err != nil {
 		return nil, err
 	}
-	proof := &models.NativeResumeDeliveryEvidence{SessionID: sessionID, IncarnationID: status.IncarnationID,
+	proof := &models.NativeResumeDeliveryEvidence{SessionID: execution.SessionID, IncarnationID: status.IncarnationID,
 		HarnessGeneration: int64(status.HarnessGeneration), StreamID: status.StreamID,
 		ExecutionID: execution.ID, NativeSessionID: execution.ACPSessionID}
 	proof.Cursor, err = nativeResumeProofCursor(ctx, repository, status)
@@ -57,6 +63,9 @@ func (m *Manager) GetNativeResumeDeliveryEvidence(ctx context.Context, sessionID
 		return nil, err
 	}
 	if !sameNativeResumeProofStatus(status, after) {
+		if nativeResumeStreamAdvanced(status, after) {
+			return nil, errNativeResumeStreamProgress
+		}
 		return nil, ErrDeliveryRecordEvidenceStale
 	}
 	return proof, nil
@@ -102,8 +111,9 @@ func nativeResumeProofCursor(ctx context.Context, repository AgentDeliveryReposi
 	if _, err := projectedCursorCoveredByPeer(cursor, status); err != nil {
 		return nil, err
 	}
-	if cursor.ReceivedSequence != cursor.ProjectedSequence {
-		return nil, fmt.Errorf("%w: native resume projection is incomplete", ErrDurableAdoptionBlocked)
+	if cursor.ReceivedSequence != cursor.ProjectedSequence ||
+		(status.Stream != nil && uint64(cursor.ProjectedSequence) < status.Stream.HighWater) {
+		return nil, errNativeResumeProjectionLag
 	}
 	return cursor, nil
 }

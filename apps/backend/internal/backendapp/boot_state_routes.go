@@ -82,7 +82,7 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 	repositorySets := b.repositorySetsForState(ctx, activeWorkspaceID, state)
 	repositoryBranchPolicies := b.repositoryBranchPoliciesForState(ctx, activeWorkspaceID, state)
 	steps := b.workflowStepsForWorkspace(ctx, activeWorkspaceID)
-	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID, tasksListSort)
+	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID, usermodels.TasksListApiSort(tasksListSort))
 	routeData := map[string]any{
 		"activeWorkspaceId":        activeWorkspaceID,
 		"workflows":                workflowsToDTOs(workflows),
@@ -692,13 +692,17 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"confirmTaskArchive":              settings.ConfirmTaskArchive,
 		"preventAutoStartAgentOnOpen":     settings.PreventAutoStartAgentOnOpen,
 		"unreadDivider":                   settings.UnreadDivider,
+		"unreadTaskDot":                   settings.UnreadTaskDot,
+		"unreadTaskDotHideDelaySeconds":   settings.UnreadTaskDotHideDelaySeconds,
 		"agentGeneratedTaskTitles":        settings.AgentGeneratedTaskTitles,
+		"promptSuggestions":               settings.PromptSuggestions,
 		"autoFocusNewTasks":               settings.AutoFocusNewTasks,
 		"mcpTaskAgentProfileDefault":      usermodels.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"showAnchoredPromptBar":           settings.ShowAnchoredPromptBar,
 		"showScrollToLastPrompt":          settings.ShowScrollToLastPrompt,
 		"showScrollToStart":               settings.ShowScrollToStart,
 		"showTranscriptAutoScrollControl": settings.ShowTranscriptAutoScrollControl,
+		"showTurnChangedFiles":            settings.ShowTurnChangedFiles,
 		"showTodoListPanel":               settings.ShowTodoListPanel,
 
 		// Sub-option: only auto-pin when the agent's todo list is not empty.
@@ -783,13 +787,17 @@ func mapWorkspaceItemState(workspace taskdto.WorkspaceDTO) map[string]any {
 	}
 }
 
-// mapWorkflowItemState maps a workflow DTO to its SPA boot shape.
+// mapWorkflowItemState maps a workflow DTO to its SPA boot shape. It must carry
+// every field the workflow settings page saves: an omitted prompt reads there as
+// a cleared value and the next step save persists it. This mirrors the web
+// mapWorkflowItem in apps/web/lib/routing/route-bootstrap.ts.
 func mapWorkflowItemState(workflow taskdto.WorkflowDTO) map[string]any {
 	return map[string]any{
 		"id":               workflow.ID,
 		"workspaceId":      workflow.WorkspaceID,
 		"name":             workflow.Name,
 		"description":      workflow.Description,
+		"prompt":           stringValue(workflow.Prompt),
 		"sortOrder":        workflow.SortOrder,
 		"agent_profile_id": nullString(workflow.AgentProfileID),
 		"hidden":           workflow.Hidden,

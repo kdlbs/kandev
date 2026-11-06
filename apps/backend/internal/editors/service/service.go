@@ -146,7 +146,7 @@ func (s *Service) dispatchEditorKind(editor *models.Editor, worktreePath, absPat
 		if err != nil {
 			return "", err
 		}
-		return buildHostedURL(cfg.URL, absPath, line, column)
+		return buildHostedURL(cfg.URL, worktreePath, absPath, line, column)
 	case editorKindCustomCommand:
 		cfg, err := parseCommandConfig(editor.Config)
 		if err != nil {
@@ -345,13 +345,16 @@ func buildRemoteSSHURL(scheme, user, host, path string, line, column int) string
 	return fmt.Sprintf("%s://vscode-remote/ssh-remote+%s:%s", scheme, remoteHost, location)
 }
 
-func buildHostedURL(baseURL, path string, line, column int) (string, error) {
+func buildHostedURL(baseURL, worktreePath, path string, line, column int) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil {
 		return "", ErrEditorConfigInvalid
 	}
 	query := parsed.Query()
-	if path != "" {
+	switch {
+	case worktreePath != "" && filepath.Clean(path) == filepath.Clean(worktreePath):
+		query.Set("folder", worktreePath)
+	case path != "":
 		location := path
 		if line > 0 {
 			location = fmt.Sprintf("%s:%d", path, line)
@@ -360,7 +363,7 @@ func buildHostedURL(baseURL, path string, line, column int) (string, error) {
 			}
 		}
 		query.Set("file", location)
-	} else {
+	default:
 		query.Set("folder", "/")
 	}
 	parsed.RawQuery = query.Encode()

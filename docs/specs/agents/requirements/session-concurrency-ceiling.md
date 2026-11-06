@@ -2,6 +2,7 @@
 status: active
 system: agents
 created: 2026-09-15
+updated: 2026-11-02
 owners:
   - kandev
 ---
@@ -10,10 +11,18 @@ owners:
 
 ## Overview
 
-An operator can opt into a shared ceiling for new automatic starts. The ceiling
-is disabled by default and preserves explicit user actions and accepted work.
+An operator can enable a shared ceiling for automatic starts and new message
+turns. The ceiling is disabled by default. Explicit execution controls retain
+their override, and admitted work keeps its capacity.
 This contract belongs to the agent system because it
 controls admission of agent executions. Tasks own their durable deferral data.
+
+This contract extends the delivered launch contract with message-turn admission.
+The [message-turn package](../../../plans/idle-session-message-capacity/plan.md)
+records the compatibility change from
+[issue #4998](https://github.com/kdlbs/kandev/issues/4998). Ordinary message
+turns now wait at the enabled ceiling while explicit execution controls keep
+their override.
 
 The disabled default, Settings opt-in, live application, and queue explanation
 are implemented. Delivery and verification are recorded in the
@@ -25,8 +34,12 @@ are implemented. Delivery and verification are recorded in the
   state, including launches admitted in the current process.
 - **Deferred launch:** A durable task record that contains the complete launch
   kind and payload for an automatic request that the ceiling refused.
-- **Manual origin:** A direct user action. It can use a manual override when the
-  ceiling is full.
+- **Manual override:** Capacity admission requested through an explicit Start,
+  Resume, Send Now, or legacy Run next control. Ordinary message submission
+  follows requirement 003, including messages from a user.
+- **Message turn:** New orchestrated work requested through chat, a message API,
+  an agent message, or an automatic prompt queue. Warm runtime readiness does
+  not establish capacity admission for that new work.
 
 ## Requirements
 
@@ -45,6 +58,7 @@ bounded instance capacity, so that one installation does not overload its host.
   replay payload, origin, reason, and enqueue time on the task.
 - **AC-AGENTS-SESSION-CEILING-001.2:** When a manual launch would exceed the
   ceiling, the system shall admit it and record that it used a manual override.
+  Ordinary message submission shall follow requirement 003.
 - **AC-AGENTS-SESSION-CEILING-001.3:** The ceiling shall count sessions in
   `STARTING` and `RUNNING` state together with in-flight reservations, and shall
   release a reservation only after its launch reaches a counted state or fails.
@@ -135,9 +149,58 @@ bounded instance capacity, so that one installation does not overload its host.
   have touch targets of at least 44px and no document horizontal overflow. Labels,
   help, validation, and state messages shall be localized and keyboard accessible.
 - **AC-AGENTS-SESSION-CEILING-002.7:** The section shall explain that the ceiling
-  limits automatic starts, manual starts can exceed it, and workflow WIP is a
-  separate limit. The default maximum offered after enabling shall not activate
+  limits automatic starts and new message turns across all workspaces.
+  It shall name the explicit execution controls that can exceed the limit and
+  distinguish workflow WIP. The default maximum offered after enabling shall not activate
   the ceiling before the user saves.
+
+### REQ-AGENTS-SESSION-CEILING-003: Bound message turns
+
+**Intent:** Operators can submit messages without implementing a separate
+capacity check or queue.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-SESSION-CEILING-003.1:** With the ceiling enabled, a new message
+  turn shall require capacity even when its runtime is already ready.
+  A full or unreadable population shall leave eligible input pending without
+  provider dispatch. The rule shall apply to UI, message API, agent-message,
+  and automatic queue delivery paths.
+- **AC-AGENTS-SESSION-CEILING-003.2:** Concurrent message turns and launches
+  shall share the population in criterion 001.3. A bounded admission shall
+  reserve its slot before work starts. Nested startup, readiness, and stale
+  callbacks shall not release the slot of a pending or successor turn.
+  One session shall count once across these reservations and counted states.
+- **AC-AGENTS-SESSION-CEILING-003.3:** Accepted pending input shall retain its
+  recipient, order, content, model, mode, attachments, references, attribution,
+  and delivery identity. A capacity refusal shall not duplicate transcript
+  messages or processed workflow triggers. A failed admission shall not claim
+  success or clear an unsaved draft.
+- **AC-AGENTS-SESSION-CEILING-003.4:** Capacity release, an increased limit, or
+  a disabled limit shall request retry through the existing capacity worker.
+  Eligible pending messages shall progress without another submission.
+  Auto-run OFF, clarification, WIP, cancellation, recovery, and ownership
+  barriers shall retain their authority. Repeated refusal shall not create an
+  immediate retry loop.
+- **AC-AGENTS-SESSION-CEILING-003.5:** Two pending conversations of one task
+  shall remain independent. Work in one conversation shall not erase or
+  redirect input accepted for its sibling. Among eligible message waits,
+  higher task priority shall run first, then earlier enqueue time.
+- **AC-AGENTS-SESSION-CEILING-003.6:** Backend restart shall preserve accepted
+  queue contents without starting an agent solely to deliver those messages.
+  Later authorized session activity shall restore eligibility under the
+  [resume queue contract](../../tasks/requirements/resume-prompt-queue.md).
+- **AC-AGENTS-SESSION-CEILING-003.7:** Existing session eligibility shall remain
+  in force. An explicitly supported completed-session follow-up shall wait
+  without launching at full capacity. Failed and cancelled targets shall retain
+  their existing rejection. A stale recipient or failed ownership read shall
+  not authorize a replacement session.
+- **AC-AGENTS-SESSION-CEILING-003.8:** Desktop and phone chat shall show accepted
+  pending input through the existing prompt queue. The agent-message tool shall
+  report a queued outcome when delivery waits. A disabled ceiling shall retain
+  current message behavior, including an unreadable population. Explicit
+  execution overrides and accepted-turn continuations shall retain their
+  existing admission and audit behavior.
 
 ## Out of scope
 
@@ -145,3 +208,6 @@ bounded instance capacity, so that one installation does not overload its host.
 - Changing workflow WIP limits or imposing a hard limit on manual launches.
 - A new release toggle, YAML setting, or automatic CPU-based capacity selection.
 - Replacing the orchestrator's existing launch seams or task repository.
+- A separate message-capacity setting or a new release toggle.
+- Direct terminal keystrokes and provider input within an already admitted turn.
+- A global priority guarantee across launch, automation, and message queues.

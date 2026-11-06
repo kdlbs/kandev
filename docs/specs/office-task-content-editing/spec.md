@@ -13,12 +13,8 @@ The Office task detail page (`/office/tasks/[id]`, simple pane) renders the task
 project, parent, blockers, reviewers, approvers, labels) is editable inline. The two fields that
 carry the most meaning are the two a user cannot change.
 
-The description is not decoration: it is the brief the assigned agent works from. A typo in the
-title, a missing constraint in the brief, or a scope note that arrived after the task was filed
-currently has exactly one remedy: leave the Office UI, open `/t/<id>`, and edit from the Kanban
-surface. Users read the absence as a bug. It is not: `docs/specs/office/tasks.md:58` enumerates the
-editable properties and omits both fields, and the shipped code implements that list faithfully.
-This is a spec gap, and this document closes it.
+The description is the agent's brief. This contract adds title and description
+editing to Office without requiring users to open the Kanban editor.
 
 Nothing in the backend blocks it. `PATCH /api/v1/tasks/:id` has accepted `title` and `description`
 since before Office existed, both surfaces read the same `tasks` row, and the resulting
@@ -47,8 +43,9 @@ since before Office existed, both surfaces read the same `tasks` row, and the re
 - The title renders as a text element that the user activates by **double-click**, or by focusing
   it and pressing **Enter**. Activation replaces it with a single-line text input seeded with the
   current title, focused, with its contents selected.
-- **Enter** commits. **Escape** cancels and discards the draft. **Blur** cancels and discards the
-  draft.
+- **Enter** commits. **Escape** and internal blur cancel and discard the draft.
+  External focus changes preserve the edit under the
+  [focus continuity contract](../ui/requirements/inline-edit-focus-continuity.md).
 - **The title baseline.** When the title editor opens it captures the **displayed** title at that
   moment as its **frozen baseline**, frozen for the lifetime of the editor. Wherever this document
   says "the stored title" while a title editor is open (AC-4's restore target, AC-8's equality
@@ -618,8 +615,8 @@ Written in EARS form. Each is observable from the Office task detail page or fro
   trimmed value, and close the editor.
 - AC-4: WHILE the title editor is open, WHEN the user presses Escape, THE SYSTEM SHALL discard the
   draft, close the editor, restore the stored title, and send no request.
-- AC-5: WHILE the title editor is open, WHEN the input loses focus, THE SYSTEM SHALL behave exactly
-  as in AC-4.
+- AC-5: WHILE the title editor is open, WHEN focus moves elsewhere within Kandev,
+  THE SYSTEM SHALL behave as in AC-4. External focus changes preserve the edit.
 - AC-6: WHILE the title editor is open, WHEN the user enters or pastes text that would take the
   field beyond 60 code points, THE SYSTEM SHALL retain only the first 60 and SHALL leave the caret
   at the position the user was typing or pasting at, not at the end of the field.

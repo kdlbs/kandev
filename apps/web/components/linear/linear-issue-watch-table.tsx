@@ -56,6 +56,9 @@ function summarizeFilter(filter: LinearSearchFilter | undefined): string {
   if (filter.stateIds && filter.stateIds.length > 0) {
     parts.push(`state:${filter.stateIds.length} selected`);
   }
+  if (filter.projectIds && filter.projectIds.length > 0) {
+    parts.push(`project:${filter.projectIds.length} selected`);
+  }
   if (filter.assigned) parts.push(`assigned:${filter.assigned}`);
   if (filter.query) parts.push(`q:"${filter.query}"`);
   return parts.length === 0 ? "(any)" : parts.join(" · ");

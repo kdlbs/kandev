@@ -95,14 +95,15 @@ type RunRequest struct {
 // rules in apps/backend/AGENTS.md. A pass detached by Launch is therefore always
 // joined at shutdown rather than leaked.
 type Runner struct {
-	store       Store
-	resolver    *Resolver
-	changes     ChangeSource
-	inference   Inference
-	prompts     PromptBuilder
-	taskContext TaskContextLookup
-	sessions    SessionLookup
-	logger      *logger.Logger
+	store            Store
+	resolver         *Resolver
+	changes          ChangeSource
+	inference        Inference
+	inferenceContext func(context.Context, RunRequest, string, ReviewerIdentity) (context.Context, error)
+	prompts          PromptBuilder
+	taskContext      TaskContextLookup
+	sessions         SessionLookup
+	logger           *logger.Logger
 
 	// budgetBytes overrides PromptBudgetBytes; tests set it to force batching.
 	budgetBytes int
@@ -113,6 +114,9 @@ type Runner struct {
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	started  bool
+	// settlementMu orders explicit cancellation with abandoned native settlement.
+	// It never protects inference or shares the worker-claim critical section.
+	settlementMu sync.Mutex
 }
 
 // inFlightRun is the live state of one review pass. The cancel handle is what
@@ -126,30 +130,32 @@ type inFlightRun struct {
 
 // RunnerDeps groups the runner's collaborators.
 type RunnerDeps struct {
-	Store       Store
-	Resolver    *Resolver
-	Changes     ChangeSource
-	Inference   Inference
-	Prompts     PromptBuilder
-	TaskContext TaskContextLookup
-	Sessions    SessionLookup
-	Logger      *logger.Logger
-	BudgetBytes int
+	Store            Store
+	Resolver         *Resolver
+	Changes          ChangeSource
+	Inference        Inference
+	InferenceContext func(context.Context, RunRequest, string, ReviewerIdentity) (context.Context, error)
+	Prompts          PromptBuilder
+	TaskContext      TaskContextLookup
+	Sessions         SessionLookup
+	Logger           *logger.Logger
+	BudgetBytes      int
 }
 
 // NewRunner builds a Runner.
 func NewRunner(deps RunnerDeps) *Runner {
 	return &Runner{
-		store:       deps.Store,
-		resolver:    deps.Resolver,
-		changes:     deps.Changes,
-		inference:   deps.Inference,
-		prompts:     deps.Prompts,
-		taskContext: deps.TaskContext,
-		sessions:    deps.Sessions,
-		logger:      deps.Logger.WithFields(zap.String("component", "review-runner")),
-		budgetBytes: deps.BudgetBytes,
-		inFlight:    make(map[string]*inFlightRun),
+		store:            deps.Store,
+		resolver:         deps.Resolver,
+		changes:          deps.Changes,
+		inference:        deps.Inference,
+		inferenceContext: deps.InferenceContext,
+		prompts:          deps.Prompts,
+		taskContext:      deps.TaskContext,
+		sessions:         deps.Sessions,
+		logger:           deps.Logger.WithFields(zap.String("component", "review-runner")),
+		budgetBytes:      deps.BudgetBytes,
+		inFlight:         make(map[string]*inFlightRun),
 	}
 }
 
@@ -184,8 +190,8 @@ const runTimeout = 10 * time.Minute
 // Launch starts a review pass in the background and returns the pending run, so
 // the caller's request does not block on inference.
 //
-// A task that already has a pending or running pass returns that run untouched —
-// re-clicking Review must not fan out into duplicate provider calls.
+// A task with a live pass returns that run untouched. An abandoned native pass
+// is retained as failed before a fresh request starts another pass.
 func (r *Runner) Launch(ctx context.Context, req RunRequest) (*models.TaskReviewRun, error) {
 	run, _, err := r.launch(ctx, req)
 	return run, err
@@ -223,9 +229,11 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 		}
 	}()
 
-	// A pass that survived a restart has a DB row but no in-memory claim, so the
-	// claim above succeeds. Rejoin it instead of starting a second one.
-	if existing, err := r.store.ActiveRun(ctx, req.TaskID); err == nil && existing != nil {
+	// The new claim proves that no native worker owns this task in this runner.
+	// Agent-owned and legacy runs retain their existing admission behavior.
+	if existing, err := r.reconcileUnownedRun(ctx, req.TaskID); err != nil {
+		return nil, nil, err
+	} else if existing != nil {
 		return existing, nil, nil
 	}
 
@@ -301,6 +309,8 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 // with a completed one, publishing findings the user already declined.
 func (r *Runner) Cancel(ctx context.Context, runID string) (*models.TaskReviewRun, error) {
 	r.cancelInFlight(runID)
+	r.settlementMu.Lock()
+	defer r.settlementMu.Unlock()
 	return r.store.CancelRun(ctx, runID)
 }
 
@@ -409,6 +419,13 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 	started := time.Now()
 	if _, err := r.store.MarkRunRunning(ctx, runID); err != nil {
 		return err
+	}
+	if r.inferenceContext != nil {
+		verified, err := r.inferenceContext(ctx, req, runID, identity)
+		if err != nil {
+			return r.fail(ctx, runID, err, started)
+		}
+		ctx = verified
 	}
 
 	promptCtx, err := r.promptContext(ctx, req)
@@ -547,6 +564,7 @@ func (r *Runner) fail(ctx context.Context, runID string, cause error, started ti
 	defer cancel()
 	if _, err := r.store.FailRun(failCtx, runID, code, cause.Error(), int(time.Since(started).Milliseconds())); err != nil {
 		r.logger.Error("record review run failure", zap.String("run_id", runID), zap.Error(err))
+		return errors.Join(cause, fmt.Errorf("record review run failure: %w", err))
 	}
 	return cause
 }

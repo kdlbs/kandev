@@ -547,6 +547,8 @@ func TestClearStepReferencesClearsAllTransitionTriggers(t *testing.T) {
 			OnHeartbeat:         genericActions,
 			OnBudgetAlert:       genericActions,
 			OnAgentError:        genericActions,
+			OnPRMerged:          genericActions,
+			OnPRClosed:          genericActions,
 		},
 	}
 	if err := repo.CreateStep(ctx, source); err != nil {
@@ -576,6 +578,8 @@ func TestClearStepReferencesClearsAllTransitionTriggers(t *testing.T) {
 		"on_heartbeat":          got.Events.OnHeartbeat,
 		"on_budget_alert":       got.Events.OnBudgetAlert,
 		"on_agent_error":        got.Events.OnAgentError,
+		"on_pr_merged":          got.Events.OnPRMerged,
+		"on_pr_closed":          got.Events.OnPRClosed,
 	} {
 		if len(actions) != 1 || actions[0].Type != models.GenericActionAutoStartAgent {
 			t.Errorf("%s = %#v, want only auto_start_agent", trigger, actions)

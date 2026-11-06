@@ -11,6 +11,7 @@ import {
 import { routeSessionEntryRecovery } from "../../helpers/session-entry-recovery";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { routeMainWebSocketWithQueueAdmissionDrops } from "../../helpers/ws-drop";
+import { waitForAgentMessage } from "../../helpers/session";
 import {
   openQuickChatSetup,
   sendQuickChatMessage,
@@ -120,6 +121,13 @@ test.describe("queue admission reliability", () => {
       const dialog = await openQuickChatSetup(testPage);
       const started = await startQuickChatFromSetup(dialog, testPage);
       const identity = await apiClient.getQueueSessionIdentity(started.task_id, started.session_id);
+      // Startup can report WAITING_FOR_INPUT before its opening prompt completes.
+      await waitForAgentMessage(
+        apiClient,
+        started.session_id,
+        "I've completed the analysis of your request:",
+        30_000,
+      );
       await waitForSessionSettledBaseline(apiClient, started.task_id, started.session_id);
       await waitForQuickChatDirectInput(dialog);
       await sendQuickChatMessage(dialog, testPage, "/sleep 30");

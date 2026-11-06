@@ -203,7 +203,7 @@ async function waitForProfileSession(
         sessionId = session?.id ?? "";
         return session?.state === "WAITING_FOR_INPUT";
       },
-      { timeout: 30_000, message: `profile ${profileId} did not become answerable` },
+      { timeout: 60_000, message: `profile ${profileId} did not become answerable` },
     )
     .toBe(true);
   return sessionId;

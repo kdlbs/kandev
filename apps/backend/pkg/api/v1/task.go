@@ -135,15 +135,16 @@ type RepositoryCheckoutOptions struct {
 
 // TaskRepository represents a repository associated with a task
 type TaskRepository struct {
-	CheckoutOptions *RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
-	ID              string                     `json:"id"`
-	TaskID          string                     `json:"task_id"`
-	RepositoryID    string                     `json:"repository_id"`
-	BaseBranch      string                     `json:"base_branch"`
-	Position        int                        `json:"position"`
-	Metadata        map[string]interface{}     `json:"metadata,omitempty"`
-	CreatedAt       time.Time                  `json:"created_at"`
-	UpdatedAt       time.Time                  `json:"updated_at"`
+	CheckoutOptions       *RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
+	ID                    string                     `json:"id"`
+	TaskID                string                     `json:"task_id"`
+	RepositoryID          string                     `json:"repository_id"`
+	WorkspaceRelativePath string                     `json:"workspace_relative_path,omitempty"`
+	BaseBranch            string                     `json:"base_branch"`
+	Position              int                        `json:"position"`
+	Metadata              map[string]interface{}     `json:"metadata,omitempty"`
+	CreatedAt             time.Time                  `json:"created_at"`
+	UpdatedAt             time.Time                  `json:"updated_at"`
 }
 
 // TaskWorkspaceFolder represents a non-Git folder associated with a task.
@@ -159,21 +160,22 @@ type TaskWorkspaceFolder struct {
 
 // Task represents a Kanban task
 type Task struct {
-	ID               string                 `json:"id"`
-	WorkspaceID      string                 `json:"workspace_id"`
-	WorkflowID       string                 `json:"workflow_id"`
-	Title            string                 `json:"title"`
-	Description      string                 `json:"description"`
-	State            TaskState              `json:"state"`
-	Priority         string                 `json:"priority"`
-	Repositories     []TaskRepository       `json:"repositories,omitempty"`
-	WorkspaceFolders []TaskWorkspaceFolder  `json:"workspace_folders,omitempty"`
-	CreatedBy        string                 `json:"created_by"`
-	CreatedAt        time.Time              `json:"created_at"`
-	UpdatedAt        time.Time              `json:"updated_at"`
-	StartedAt        *time.Time             `json:"started_at,omitempty"`
-	CompletedAt      *time.Time             `json:"completed_at,omitempty"`
-	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+	ID                     string                 `json:"id"`
+	WorkspaceID            string                 `json:"workspace_id"`
+	InitialWorkspaceLayout string                 `json:"initial_workspace_layout,omitempty"`
+	WorkflowID             string                 `json:"workflow_id"`
+	Title                  string                 `json:"title"`
+	Description            string                 `json:"description"`
+	State                  TaskState              `json:"state"`
+	Priority               string                 `json:"priority"`
+	Repositories           []TaskRepository       `json:"repositories,omitempty"`
+	WorkspaceFolders       []TaskWorkspaceFolder  `json:"workspace_folders,omitempty"`
+	CreatedBy              string                 `json:"created_by"`
+	CreatedAt              time.Time              `json:"created_at"`
+	UpdatedAt              time.Time              `json:"updated_at"`
+	StartedAt              *time.Time             `json:"started_at,omitempty"`
+	CompletedAt            *time.Time             `json:"completed_at,omitempty"`
+	Metadata               map[string]interface{} `json:"metadata,omitempty"`
 	// Interrupted reports that the task's session was mid-turn (STARTING/RUNNING)
 	// when the backend died and has not been resumed since. Derived from the
 	// interrupted_at metadata key at DTO conversion time; the orchestrator
@@ -252,6 +254,9 @@ type MessageAttachment struct {
 	Name         string `json:"name,omitempty"`          // Display name (e.g., filename)
 	SizeBytes    int64  `json:"size_bytes,omitempty"`    // Raw byte size for file-backed descriptors
 	DeliveryMode string `json:"delivery_mode,omitempty"` // "prompt" (native/default) or "path"
+	// Path is a trusted runtime-only executor path. It is never serialized into
+	// durable message or queue metadata.
+	Path string `json:"-"`
 }
 
 func (a MessageAttachment) HasValidDeliveryMode() bool {
@@ -286,6 +291,10 @@ type Message struct {
 	// ascending, ties by id ascending), present only on user messages
 	// produced by an indexed server payload; omitted when zero.
 	PromptIndex int `json:"prompt_index,omitempty"`
+	// TurnErrorAcknowledgementFailed is response-only feedback for an accepted
+	// manual prompt whose client-observed turn-error acknowledgement could not
+	// be persisted. The message itself was accepted; the badge remains visible.
+	TurnErrorAcknowledgementFailed bool `json:"turn_error_acknowledgement_failed,omitempty"`
 }
 
 // CreateMessageRequest for adding a message to a task session

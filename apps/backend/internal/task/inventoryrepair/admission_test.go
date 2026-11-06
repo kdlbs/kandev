@@ -54,7 +54,9 @@ func TestRepairedSharedInventoryPassesExistingAdmission(t *testing.T) {
 }
 
 // @covers AC-TASKS-WORKTREE-INVENTORY-REPAIR-002.3
-func TestBranchRepairKeepsArchiveGuards(t *testing.T) {
+// @covers AC-TASKS-WORKTREE-INVENTORY-REPAIR-001.3
+// @covers AC-TASKS-DIRTY-WORKTREE-ARCHIVE-004.1
+func TestBranchRepairKeepsArchiveIdentityGuards(t *testing.T) {
 	for _, dirty := range []bool{false, true} {
 		t.Run(map[bool]string{false: "clean", true: "dirty"}[dirty], func(t *testing.T) {
 			f := newFixture(t)
@@ -81,20 +83,21 @@ func TestBranchRepairKeepsArchiveGuards(t *testing.T) {
 			if err = repairWithIsolatedHost(p, "apply"); err != nil {
 				t.Fatal(err)
 			}
+			if dirty {
+				content, readErr := os.ReadFile(filepath.Join(r.Path, "tracked"))
+				if readErr != nil || string(content) != "keep uncommitted change" {
+					t.Fatalf("repair changed local work before archive: %q: %v", content, readErr)
+				}
+			}
 			wt, err = mgr.GetByID(ctx, "wt")
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = mgr.CleanupArchivedWorktree(ctx, wt, "owner", r.Path, f.repo)
-			if dirty {
-				if err == nil {
-					t.Fatal("dirty checkout removed")
-				}
-				if _, err = os.Stat(r.Path); err != nil {
-					t.Fatal(err)
-				}
-			} else if err != nil {
-				t.Fatal(err)
+			if err = mgr.CleanupArchivedWorktree(ctx, wt, "owner", r.Path, f.repo); err != nil {
+				t.Fatalf("archive cleanup rejected repaired checkout: %v", err)
+			}
+			if _, err = os.Stat(r.Path); !os.IsNotExist(err) {
+				t.Fatalf("archive retained repaired checkout: %v", err)
 			}
 			if got := git(t, f.repo, "rev-parse", "feature/stale"); got != oldRef {
 				t.Fatal("old branch changed")

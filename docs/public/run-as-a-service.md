@@ -91,6 +91,29 @@ already exists, is not a symlink, and is owned by the selected account before re
 restarting the service. Missing or mismatched ownership fails with guidance; Kandev does not
 recursively chown the data tree or add a broad Git `safe.directory` exception.
 
+## Agent lifetime on Linux
+
+Generated Linux user and system units use `KillMode=process`: systemd stops the
+native launcher, which owns the backend child process. If the launcher dies
+abruptly, the backend receives a termination signal; Kandev manages agent lifetime.
+With experimental
+`features.agentSurvival` enabled, eligible local and worktree agents can remain
+running across a backend stop or restart. The feature remains off by default;
+normal disabled shutdown, explicit task Stop, and launch rollback still terminate
+the affected agents.
+
+A stopped service can therefore still have retained agents consuming resources
+in its cgroup. systemd does not perform a final sweep of all descendants;
+application cleanup and parent-liveness guards remain responsible for ordinary
+agent termination. A host reboot or host-level cgroup kill still ends
+those processes.
+
+Existing generated units acquire this policy only when regenerated through the
+normal install or managed update flow. After upgrading, reinstall with the same
+service scope and account options you used originally; a backend restart alone
+does not rewrite an old unit. See [Install](#install). macOS service behavior is
+unchanged.
+
 ## Bind safely
 
 The backend config loader searches `config.yaml` in its working directory,
@@ -110,8 +133,10 @@ server:
 The working-directory file wins when both exist, followed by the home file and
 then `/etc/kandev/config.yaml`. If the first existing file is unreadable or
 invalid, startup fails instead of falling through. A home configuration file
-cannot set `homeDir`. The service unit has an intentionally small fixed
-environment and does not inherit arbitrary exports from the installing shell.
+cannot set `homeDir`. By default, the service uses a small fixed environment
+and does not inherit arbitrary exports from the installing shell. A macOS user
+service can opt into login initialization; see
+[Optional macOS login initialization](#optional-macos-login-initialization).
 Put supported settings in the configuration file; see
 [Configuration](configuration.md). A system service needs permission to read
 the file, while secret-bearing configuration should use owner-only mode `0600`.
@@ -127,10 +152,10 @@ Then open `http://127.0.0.1:38429` locally. For private phone access, follow [Mo
 ## Commands and flags
 
 ```text
-kandev service install [--system] [--run-as <user>] [--port <port>] [--home-dir <path>] [--no-boot-start]
+kandev service install [--system] [--run-as <user>] [--port <port>] [--home-dir <path>] [--shell <bash|zsh|path|none>] [--no-boot-start]
 kandev service uninstall [--system]
 kandev service start|stop|restart|status [--system]
-kandev service logs [-f] [--system]
+kandev service logs [-f|--follow] [--system] [--lines N|-n N]
 kandev service config [--system]
 ```
 
@@ -139,11 +164,58 @@ kandev service config [--system]
   the account in the existing Kandev-managed unit/plist; on a first root-shell install it is
   required, including `--run-as root` when root is intentional.
 - `--home-dir <path>` records `KANDEV_HOME_DIR` in the unit. For a user service with no flag, the installer first honors its own `KANDEV_HOME_DIR` environment, then falls back to `~/.kandev`; system mode defaults to `/var/lib/kandev`.
+- `--shell <bash|zsh|path>` opts a macOS user LaunchAgent into non-interactive login initialization. It is not supported on Linux or with `--system`. `--shell=none` resets an existing selection.
 - On Linux, `--no-boot-start` starts the service now without enabling the unit, but it does not disable a unit that was already enabled. Disable it explicitly when necessary. On macOS the generated plist has `RunAtLoad=false` but also `KeepAlive=true`; the installer stores it in launchd's normal discovery path, bootstraps and enables it, then kick-starts it. That combination does not provide a dependable “never start at login/boot” guarantee; manage future loading explicitly with launchd if that distinction matters.
-- `-f` or `--follow` follows logs.
+- `-f` or `--follow` follows logs. `--lines N`, `--lines=N`, or `-n N` selects a decimal count from 0 to 1000000; the default is 200. On macOS the count applies separately to each output and error file.
 - `--port <port>` is accepted by the installer, but the current native launcher writes it as `KANDEV_SERVER_PORT` and then replaces that value during startup. Do not rely on this flag to choose the listener. Without an explicit launcher port, Kandev tries `38429` and chooses a free random port in `10000–60000` if needed; find the actual URL in the logs. This is a current implementation limitation.
 
 `config` is diagnostic but deliberately small: it prints the OS manager, selected user/system mode, Kandev home, and unit/plist path. It does not prove that the service is installed or active and does not print all unit environment entries.
+
+### Optional macOS login initialization
+
+The default service starts Kandev directly. On macOS, opt a user LaunchAgent
+into Bash or Zsh login startup when local tools or exported values are defined
+in login files:
+
+```bash
+kandev service install --shell zsh
+# Or select Bash.
+kandev service install --shell bash
+# Or give an absolute executable path.
+kandev service install --shell /opt/homebrew/bin/zsh
+```
+
+The installer resolves `bash` or `zsh` through the installer's `PATH` and saves
+the absolute executable path. It uses the service account's home for startup
+files; `--home-dir` selects Kandev's data directory and does not select those
+files. The shell runs as a non-interactive login shell. Zsh reads `.zshenv`,
+`.zprofile`, and `.zlogin`, but does not normally read `.zshrc`. Bash reads
+`/etc/profile` and the first available file among `.bash_profile`,
+`.bash_login`, and `.profile`. Login files that prompt, wait for a terminal, or
+exit before returning can prevent Kandev from starting. Kandev does not edit
+startup files or enable interactive mode. Aliases, functions, and project
+activation are not provided as executable tools.
+
+The login shell's exported `PATH` and environment reach local tool discovery
+and subprocesses. Values explicitly configured by the service keep precedence.
+An omitted option leaves a new installation on direct startup. Reinstalling an
+existing managed LaunchAgent without `--shell` preserves its selection, and
+supported Apply updates carry it forward. To return to direct startup, keep the
+service's existing data home. If it was installed with a custom `--home-dir`,
+repeat that exact path when resetting; omitting it can move the service to its
+default data home.
+
+```bash
+kandev service install --shell=none
+# For a custom data home, repeat the installed path:
+kandev service install --home-dir /path/to/existing/kandev-home --shell=none
+```
+
+After changing a startup file, use `kandev service restart` to load it again.
+If startup fails or hangs, inspect `kandev service logs`, stop the service,
+repair the login file, then restart. If the shell selection itself is invalid,
+run `kandev service install --shell=none` or select an available Bash or Zsh
+executable. These commands do not modify the account's startup files.
 
 ### Fixed-port operator workaround
 
@@ -169,7 +241,7 @@ On Linux, installation writes the unit, runs `daemon-reload`, and normally runs 
 
 - executes the absolute native `kandev --headless` path;
 - records `KANDEV_HOME_DIR`, `KANDEV_LOG_LEVEL=info`, a service `PATH`, the release bundle, and package version;
-- uses `Restart=on-failure`, a five-second restart delay, `KillMode=mixed`, and a 30-second stop timeout;
+- uses `Restart=on-failure`, a five-second restart delay, `KillMode=process`, and a 30-second stop timeout;
 - orders startup after `network-online.target`.
 
 On macOS, installation writes the plist, removes an already loaded job, bootstraps the new plist, and enables it. Standard output and error go to `<KANDEV_HOME_DIR>/logs/service.out` and `service.err`. The plist always has `KeepAlive=true`; `--no-boot-start` changes only `RunAtLoad` and adds an immediate kick-start.
@@ -186,7 +258,8 @@ kandev service stop
 kandev service restart
 kandev service status
 kandev service logs          # last 200 lines
-kandev service logs --follow
+kandev service logs --lines 1000
+kandev service logs -n 0 --follow  # follow new output only
 ```
 
 Add `--system` to every command for a system service and invoke it with sufficient privilege. Linux log commands use journald. macOS log commands tail the two files under the Kandev home computed by that invocation, rather than reading the installed plist. If installation used a custom home, repeat `--home-dir <path>` (or the same `KANDEV_HOME_DIR`) with `service logs`; also repeat it with `service config` if that diagnostic should print the installed home.

@@ -68,7 +68,9 @@ test("surfaces uncertain delivery with state-only retry and Stop", async ({
 
   const banner = testPage.getByTestId("failed-session-banner");
   await expect(banner).toBeVisible({ timeout: 30_000 });
-  await expect(banner).toContainText("Delivery was interrupted. The prompt outcome is uncertain.");
+  await expect(banner).toContainText(
+    "The connection was interrupted. Kandev cannot confirm whether the agent processed your message.",
+  );
   await expect(banner.getByTestId("recovery-resume-button")).toHaveCount(0);
   await expect(banner.getByTestId("recovery-fresh-button")).toHaveCount(0);
   await expect(testPage.getByTestId("interrupted-sessions-notice")).toHaveCount(0);

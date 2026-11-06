@@ -3,6 +3,17 @@ import { waitForActiveSessionForegroundActivity } from "../../helpers/session-st
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Archive confirmation preference", () => {
+  let previousConfirmation = true;
+  test.beforeEach(async ({ testPage, apiClient }) => {
+    await testPage.goto("/");
+    previousConfirmation =
+      (await apiClient.getUserSettings()).settings.confirm_task_archive !== false;
+    await apiClient.saveUserSettings({ confirm_task_archive: true });
+  });
+  test.afterEach(async ({ apiClient }) => {
+    await apiClient.saveUserSettings({ confirm_task_archive: previousConfirmation });
+  });
+
   test("keeps the full archive warning subordinate to dialog copy", async ({
     testPage,
     apiClient,
@@ -47,7 +58,7 @@ test.describe("Archive confirmation preference", () => {
     await archiveMenuItem.click();
     const dialog = testPage.getByRole("alertdialog");
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText("Clean Git worktrees are removed.");
+    await expect(dialog).toContainText("Git worktrees and local changes are deleted on archive.");
     await expect(dialog).toContainText("Unpublished local branches remain available.");
     const warning = dialog.getByTestId("still-working-warning");
     await expect(warning).toBeVisible();

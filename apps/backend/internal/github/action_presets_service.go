@@ -47,6 +47,12 @@ func (s *Service) UpdateActionPresets(ctx context.Context, req *UpdateActionPres
 	if err := s.authorizeWorkspaceAccess(ctx, req.WorkspaceID); err != nil {
 		return nil, err
 	}
+	lock := s.workspaceConnectionMutationLock(req.WorkspaceID)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := s.validateExpectedGitHubHost(ctx, req.WorkspaceID); err != nil {
+		return nil, err
+	}
 	stored, err := s.store.GetActionPresets(ctx, req.WorkspaceID)
 	if err != nil {
 		return nil, err
@@ -74,6 +80,12 @@ func (s *Service) ResetActionPresets(ctx context.Context, workspaceID string) (*
 		return nil, fmt.Errorf("workspace_id is required")
 	}
 	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
+	}
+	lock := s.workspaceConnectionMutationLock(workspaceID)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := s.validateExpectedGitHubHost(ctx, workspaceID); err != nil {
 		return nil, err
 	}
 	if err := s.store.DeleteActionPresets(ctx, workspaceID); err != nil {

@@ -88,6 +88,41 @@ func TestStepTransitionsSchemaCreatesTableAndIsReplaySafe(t *testing.T) {
 	}
 }
 
+func TestStepTransitionsMigrationAddsCausingRunIDToLegacyTable(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "step-transitions-legacy.db")
+	dbConn, err := dbutil.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.Exec(`CREATE TABLE task_step_transitions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		task_id TEXT NOT NULL,
+		session_id TEXT,
+		from_workflow_id TEXT,
+		from_workflow_step_id TEXT,
+		to_workflow_id TEXT,
+		to_workflow_step_id TEXT,
+		trigger TEXT NOT NULL,
+		actor_kind TEXT NOT NULL,
+		actor_id TEXT,
+		contract_version INTEGER NOT NULL,
+		occurred_at TIMESTAMP NOT NULL
+	)`); err != nil {
+		t.Fatalf("create legacy task_step_transitions: %v", err)
+	}
+	if _, err := NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("initialize schema over legacy table: %v", err)
+	}
+
+	var column string
+	if err := db.Get(&column, `SELECT name FROM pragma_table_info('task_step_transitions') WHERE name = 'causing_run_id'`); err != nil {
+		t.Fatalf("causing_run_id column was not migrated: %v", err)
+	}
+}
+
 func TestStepTransitionsSchemaHasNoForeignKeyToWorkflowObjects(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "step-transitions-no-fk.db")
 	dbConn, err := dbutil.OpenSQLite(dbPath)

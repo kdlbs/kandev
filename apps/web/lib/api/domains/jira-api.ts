@@ -1,3 +1,4 @@
+import { withWorkspace, requestOptions, type WorkspaceApiOptions } from "../workspace-options";
 import { fetchJson, type ApiRequestOptions } from "../client";
 import type {
   CreateJiraIssueWatchInput,
@@ -12,20 +13,6 @@ import type {
   UpdateJiraIssueWatchInput,
 } from "@/lib/types/jira";
 import { invalidateIntegrationAvailabilityAfter } from "@/lib/integrations/integration-availability-events";
-
-type WorkspaceApiOptions = ApiRequestOptions & { workspaceId?: string };
-
-function withWorkspace(path: string, options?: WorkspaceApiOptions): string {
-  if (!options?.workspaceId) return path;
-  const separator = path.includes("?") ? "&" : "?";
-  return `${path}${separator}workspace_id=${encodeURIComponent(options.workspaceId)}`;
-}
-
-function requestOptions(options?: WorkspaceApiOptions): ApiRequestOptions | undefined {
-  if (!options) return undefined;
-  const { workspaceId: _workspaceId, ...rest } = options;
-  return rest;
-}
 
 // getJiraConfig returns null when the backend responds 204 (no config yet).
 // fetchJson already maps 204 → undefined; we narrow it to null for callers.

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,82 +17,38 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
-func TestArchiveReclaimWaitsForCleanCheckoutThenRemovesIt(t *testing.T) {
-	ctx := context.Background()
-	svc, _, repo, manager, sourcePath, wt := createArchiveReclaimFixture(t)
+// @covers AC-TASKS-DIRTY-WORKTREE-ARCHIVE-004.5
+func TestArchiveReclaimRemovesDirtyCheckout(t *testing.T) {
+	svc, _, repo, manager, _, wt := createArchiveReclaimFixture(t)
+	if err := os.WriteFile(filepath.Join(wt.Path, "untracked-recovery.txt"), []byte("local work"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job := seedRetainedArchiveWorktree(t, svc, repo, wt.TaskID)
+	if err := svc.processTaskResourceCleanupJob(t.Context(), job.ID); err != nil {
+		t.Fatal(err)
+	}
+	job, err := repo.GetTaskResourceCleanupJob(t.Context(), job.ID)
+	if err != nil || job.State != models.TaskResourceCleanupStateSucceeded {
+		t.Fatalf("reclaim = %+v: %v", job, err)
+	}
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("reclaim left dirty worktree: %v", err)
+	}
+	if persisted, err := manager.GetByID(t.Context(), wt.ID); err == nil && persisted.Status == worktree.StatusActive {
+		t.Fatalf("worktree remains active: %+v", persisted)
+	}
+}
+
+func seedRetainedArchiveWorktree(t *testing.T, svc *Service, repo *sqliterepo.Repository, taskID string) *models.TaskResourceCleanupJob {
+	t.Helper()
 	svc.StopTaskResourceCleanupWorker()
-	serviceCleanupDone := make(chan struct{}, 1)
-	svc.setCleanupDoneForTestHook(serviceCleanupDone)
-	sentinel := filepath.Join(wt.Path, "untracked-recovery.txt")
-	if err := os.WriteFile(sentinel, []byte("keep this work\n"), 0o600); err != nil {
-		t.Fatalf("write dirty worktree marker: %v", err)
+	if err := repo.ArchiveTask(t.Context(), taskID); err != nil {
+		t.Fatal(err)
 	}
-
-	if err := svc.ArchiveTask(ctx, wt.TaskID); err != nil {
-		t.Fatalf("ArchiveTask: %v", err)
+	if err := svc.persistTaskArchiveReclaimCandidates(t.Context(), taskID); err != nil {
+		t.Fatal(err)
 	}
-	archiveJob := latestCleanupJob(t, repo, wt.TaskID, models.TaskResourceCleanupTriggerArchive)
-	if err := svc.processTaskResourceCleanupJob(ctx, archiveJob.ID); err != nil {
-		t.Fatalf("process archive cleanup: %v", err)
-	}
-	waitForCleanupDone(t, svc)
-
-	archiveJob, err := repo.GetTaskResourceCleanupJob(ctx, archiveJob.ID)
-	if err != nil {
-		t.Fatalf("reload archive cleanup job: %v", err)
-	}
-	if archiveJob.State != models.TaskResourceCleanupStateSucceeded {
-		t.Fatalf("archive cleanup state = %q, want succeeded before follow-up", archiveJob.State)
-	}
-	reclaimJob := latestCleanupJob(t, repo, wt.TaskID, models.TaskResourceCleanupTriggerArchiveReclaim)
-	if reclaimJob.State != models.TaskResourceCleanupStatePending {
-		t.Fatalf("archive reclaim state = %q, want pending", reclaimJob.State)
-	}
-
-	if err := svc.processTaskResourceCleanupJob(ctx, reclaimJob.ID); err != nil {
-		t.Fatalf("defer dirty reclaim: %v", err)
-	}
-	reclaimJob, err = repo.GetTaskResourceCleanupJob(ctx, reclaimJob.ID)
-	if err != nil {
-		t.Fatalf("reload deferred reclaim: %v", err)
-	}
-	if reclaimJob.State != models.TaskResourceCleanupStateWaitingForClean || reclaimJob.NextAttemptAt == nil {
-		t.Fatalf("dirty reclaim state = %q next=%v, want waiting_for_clean with a due time", reclaimJob.State, reclaimJob.NextAttemptAt)
-	}
-	if time.Until(*reclaimJob.NextAttemptAt) < 23*time.Hour {
-		t.Fatalf("dirty reclaim next attempt = %v, want approximately 24 hours from now", reclaimJob.NextAttemptAt)
-	}
-	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "keep this work\n" {
-		t.Fatalf("dirty worktree marker = %q, %v; want it preserved", got, err)
-	}
-	if persisted, err := manager.GetByID(ctx, wt.ID); err != nil || persisted.Status != worktree.StatusActive {
-		t.Fatalf("dirty worktree row = %+v, %v; want active", persisted, err)
-	}
-
-	if err := os.Remove(sentinel); err != nil {
-		t.Fatalf("clean worktree marker: %v", err)
-	}
-	if err := repo.CompleteTaskResourceCleanupJob(
-		ctx, reclaimJob.ID, models.TaskResourceCleanupStatePending, "", nil,
-	); err != nil {
-		t.Fatalf("make reclaim due: %v", err)
-	}
-	if err := svc.processTaskResourceCleanupJob(ctx, reclaimJob.ID); err != nil {
-		t.Fatalf("reclaim clean checkout: %v", err)
-	}
-	reclaimJob, err = repo.GetTaskResourceCleanupJob(ctx, reclaimJob.ID)
-	if err != nil {
-		t.Fatalf("reload successful reclaim: %v", err)
-	}
-	if reclaimJob.State != models.TaskResourceCleanupStateSucceeded {
-		t.Fatalf("clean reclaim state = %q, want succeeded", reclaimJob.State)
-	}
-	if _, err := os.Stat(wt.Path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("clean archived worktree still exists: %v", err)
-	}
-	if branches := strings.TrimSpace(string(runGitTestCmd(t, sourcePath, "branch", "--list", wt.Branch))); branches == "" {
-		t.Fatal("archive reclaim removed the local branch")
-	}
+	return latestCleanupJob(t, repo, taskID, models.TaskResourceCleanupTriggerArchiveReclaim)
 }
 
 func TestResumeBackfillsAndReclaimsArchivedWorktreeWithoutArchiveJob(t *testing.T) {
@@ -676,7 +631,7 @@ func (*lateDirtyCleanupScriptHandler) ExecuteCleanupScript(_ context.Context, re
 	return os.WriteFile(filepath.Join(req.WorkingDir, "late-dirty-work.txt"), []byte("preserve after script\n"), 0o600)
 }
 
-func TestArchiveCleanupRetainsCheckoutDirtiedByCleanupScript(t *testing.T) {
+func TestArchiveCleanupRemovesCheckoutDirtiedByCleanupScript(t *testing.T) {
 	ctx := context.Background()
 	svc, _, repo, manager, _, wt := createArchiveReclaimFixture(t)
 	svc.StopTaskResourceCleanupWorker()
@@ -700,18 +655,13 @@ func TestArchiveCleanupRetainsCheckoutDirtiedByCleanupScript(t *testing.T) {
 
 	archiveJob, err = repo.GetTaskResourceCleanupJob(ctx, archiveJob.ID)
 	if err != nil || archiveJob.State != models.TaskResourceCleanupStateSucceeded {
-		t.Fatalf("archive cleanup job = %+v, %v; want succeeded after retaining late-dirty checkout", archiveJob, err)
+		t.Fatalf("archive cleanup job = %+v, %v; want succeeded after removing checkout", archiveJob, err)
 	}
-	reclaimJob := latestCleanupJob(t, repo, wt.TaskID, models.TaskResourceCleanupTriggerArchiveReclaim)
-	if reclaimJob.State != models.TaskResourceCleanupStatePending {
-		t.Fatalf("archive reclaim state = %q, want pending", reclaimJob.State)
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("script-created dirtiness retained checkout: %v", err)
 	}
-	lateDirtyFile := filepath.Join(wt.Path, "late-dirty-work.txt")
-	if got, err := os.ReadFile(lateDirtyFile); err != nil || string(got) != "preserve after script\n" {
-		t.Fatalf("late dirty file = %q, %v; want preserved", got, err)
-	}
-	if persisted, err := manager.GetByID(ctx, wt.ID); err != nil || persisted.Status != worktree.StatusActive {
-		t.Fatalf("late-dirty worktree row = %+v, %v; want active", persisted, err)
+	if persisted, err := manager.GetByID(ctx, wt.ID); err == nil && persisted.Status == worktree.StatusActive {
+		t.Fatalf("worktree remains active: %+v", persisted)
 	}
 }
 
