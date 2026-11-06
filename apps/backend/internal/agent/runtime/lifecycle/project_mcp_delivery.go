@@ -15,9 +15,16 @@ import (
 // projectMCPDeliveryState keeps execution-bound project delivery evidence
 // private to one execution until the common configure handoff.
 type projectMCPDeliveryState struct {
-	mu               sync.Mutex
-	delivery         *agentctltypes.ProjectMCPDelivery
-	remoteGeneration uint64
+	mu       sync.Mutex
+	delivery *agentctltypes.ProjectMCPDelivery
+	remote   *projectMCPRemoteState
+}
+
+// projectMCPRemoteState binds a preparation generation to the helper client
+// that accepted it. Cleanup must target that helper even after replacement.
+type projectMCPRemoteState struct {
+	client     *agentctl.Client
+	generation uint64
 }
 
 func (e *AgentExecution) setProjectMCPDelivery(delivery *agentctltypes.ProjectMCPDelivery) {
@@ -42,26 +49,34 @@ func (e *AgentExecution) projectMCPDeliverySnapshot() *agentctltypes.ProjectMCPD
 	return e.projectMCP.delivery.Clone()
 }
 
-func (e *AgentExecution) setProjectMCPRemoteGeneration(generation uint64) {
+func (e *AgentExecution) setProjectMCPRemotePrepared(client *agentctl.Client, generation uint64) {
 	if e == nil {
 		return
 	}
 	e.projectMCP.mu.Lock()
-	e.projectMCP.remoteGeneration = generation
+	e.projectMCP.remote = &projectMCPRemoteState{client: client, generation: generation}
 	e.projectMCP.mu.Unlock()
 }
 
-func (e *AgentExecution) projectMCPRemoteGeneration() uint64 {
+func (e *AgentExecution) projectMCPRemotePrepared() (client *agentctl.Client, generation uint64) {
 	if e == nil {
-		return 0
+		return nil, 0
 	}
 	e.projectMCP.mu.Lock()
 	defer e.projectMCP.mu.Unlock()
-	return e.projectMCP.remoteGeneration
+	if e.projectMCP.remote == nil {
+		return nil, 0
+	}
+	return e.projectMCP.remote.client, e.projectMCP.remote.generation
 }
 
-func (e *AgentExecution) clearProjectMCPRemoteGeneration() {
-	e.setProjectMCPRemoteGeneration(0)
+func (e *AgentExecution) clearProjectMCPRemotePrepared() {
+	if e == nil {
+		return
+	}
+	e.projectMCP.mu.Lock()
+	e.projectMCP.remote = nil
+	e.projectMCP.mu.Unlock()
 }
 
 // mcpProjectDeliveryFor returns the execution-bound evidence to configure for

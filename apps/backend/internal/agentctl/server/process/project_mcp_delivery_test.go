@@ -267,12 +267,12 @@ func projectDeliverySessionServers(t *testing.T, manifest *p.BuiltinManifest) []
 func TestProjectMCPDeliveryConsumedByProcessGeneration(t *testing.T) {
 	for _, scenario := range []string{"stop then start", "exit then start"} {
 		t.Run(scenario, func(t *testing.T) {
-			runProjectMCPGenerationScenario(t)
+			runProjectMCPGenerationScenario(t, scenario)
 		})
 	}
 }
 
-func runProjectMCPGenerationScenario(t *testing.T) {
+func runProjectMCPGenerationScenario(t *testing.T, scenario string) {
 	env := newProjectDeliveryTestEnv(t, p.PackageCore, p.PackageDiagnostics)
 	manager := NewManager(env.cfg, newTestLogger(t))
 	t.Cleanup(manager.lifetimeCancel)
@@ -287,7 +287,16 @@ func runProjectMCPGenerationScenario(t *testing.T) {
 	_, err := manager.adapter.NewSession(context.Background(), servers)
 	require.NoError(t, err, "the current adapter retains the immutable delivery copy")
 	require.Equal(t, 1, peer.newCalls())
-	cleanup()
+	if scenario == "stop then start" {
+		require.NoError(t, manager.Stop(context.Background()))
+		cleanup()
+	} else {
+		// Simulate the child exiting on its own: the manager observes a stopped
+		// status with no terminal Stop call, then a replacement Start arrives.
+		manager.status.Store(StatusStopped)
+		manager.exitCode.Store(0)
+		cleanup()
+	}
 
 	// A replacement process must not inherit the consumed evidence without a
 	// fresh authenticated configuration, whether the predecessor stopped or

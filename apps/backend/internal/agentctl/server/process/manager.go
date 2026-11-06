@@ -2054,11 +2054,10 @@ func (m *Manager) startOneShot() error {
 // buildAdapterConfig constructs the adapter configuration and initialises the
 // protocol adapter, including merging any adapter-provided environment variables.
 func (m *Manager) buildAdapterConfig() error {
-	// Delivery evidence authorizes exactly one process generation. The adapter
-	// keeps the immutable clone for same-process load/resume/reset; a
-	// replacement process must be configured with fresh evidence.
+	// Delivery evidence authorizes exactly one process generation. Keep it
+	// pending until this adapter configuration is fully established so a
+	// retryable construction failure does not discard accepted evidence.
 	projectDelivery := m.cfg.ProjectMCPDelivery
-	m.cfg.ProjectMCPDelivery = nil
 	mcpServers, err := m.adapterMCPServers()
 	if err != nil {
 		return fmt.Errorf("resolve MCP servers for agent session: %w", err)
@@ -2143,6 +2142,9 @@ func (m *Manager) buildAdapterConfig() error {
 		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
 	}
 	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
+	// The adapter owns the immutable copy from here; a replacement process
+	// must be configured with fresh evidence.
+	m.cfg.ProjectMCPDelivery = nil
 	return nil
 }
 

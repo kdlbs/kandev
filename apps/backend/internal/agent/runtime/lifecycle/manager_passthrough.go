@@ -749,7 +749,9 @@ func (m *Manager) cleanupPassthroughMCPConfig(execution *AgentExecution) {
 }
 
 func (m *Manager) cleanupPassthroughMCPConfigWithContext(ctx context.Context, execution *AgentExecution) {
-	m.cleanupProjectMCPFiles(ctx, execution)
+	if execution != nil {
+		defer execution.clearProjectMCPDelivery()
+	}
 	if isSSHPassthrough(execution) {
 		m.cleanupSSHPassthroughConfig(ctx, execution)
 		return
@@ -774,7 +776,6 @@ func (m *Manager) cleanupPassthroughMCPConfigWithContext(ctx context.Context, ex
 		m.passthroughMCPMu.Unlock()
 	}
 	if execution != nil {
-		execution.clearProjectMCPDelivery()
 		execution.deleteMetadataValues(metadataKeyPassthroughMCPFiles, metadataKeyPassthroughMCPEnv)
 	}
 }

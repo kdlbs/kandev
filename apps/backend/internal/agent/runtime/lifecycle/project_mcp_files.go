@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -126,9 +127,10 @@ func (m *Manager) writeProjectMCPFiles(
 		return false, fmt.Errorf("prepare project MCP files on the execution runtime: %w", err)
 	}
 	if err := validateProjectMCPPrepareResponse(execution, placement, response, request); err != nil {
+		_ = m.cleanupProjectMCPFiles(ctx, execution, placement.client)
 		return false, err
 	}
-	execution.setProjectMCPRemoteGeneration(response.Generation)
+	execution.setProjectMCPRemotePrepared(placement.client, response.Generation)
 	return true, nil
 }
 
@@ -163,21 +165,31 @@ func validateProjectMCPPrepareResponse(
 	return nil
 }
 
-// cleanupProjectMCPFiles releases remote project-file claims. Local claims are
-// released by the existing local writer cleanup.
-func (m *Manager) cleanupProjectMCPFiles(ctx context.Context, execution *AgentExecution) {
-	if execution == nil || execution.projectMCPRemoteGeneration() == 0 {
-		return
+// cleanupProjectMCPFiles releases remote project-file claims through the
+// helper that prepared them. Callers must supply a client when the execution no
+// longer holds one (for example while its lifecycle lock is already held).
+func (m *Manager) cleanupProjectMCPFiles(ctx context.Context, execution *AgentExecution, fallback *agentctl.Client) error {
+	if execution == nil {
+		return nil
 	}
-	client, release := execution.AcquireAgentCtlClient()
-	defer release()
+	preparedClient, generation := execution.projectMCPRemotePrepared()
+	if generation == 0 {
+		return nil
+	}
+	client := preparedClient
 	if client == nil {
-		return
+		client = fallback
 	}
-	if err := client.CleanupProjectMCP(ctx); err != nil {
+	if client == nil {
+		return errors.New("project MCP helper is unavailable for cleanup")
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := client.CleanupProjectMCP(cleanupCtx); err != nil {
 		m.logger.Warn("failed to clean remote project MCP files",
 			zap.String("execution_id", execution.ID), zap.Error(err))
-		return
+		return err
 	}
-	execution.clearProjectMCPRemoteGeneration()
+	execution.clearProjectMCPRemotePrepared()
+	return nil
 }

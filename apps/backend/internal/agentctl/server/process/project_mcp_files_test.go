@@ -67,10 +67,15 @@ func TestProjectMCPFilesOwnerPrepareMergeAndCleanup(t *testing.T) {
 		Version: types.ProjectMCPFilesVersion, Generation: 2, Files: []passthroughconfig.File{second},
 	})
 	require.NoError(t, err)
+	var merged struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
 	content, err := os.ReadFile(first.Path)
 	require.NoError(t, err)
-	require.Contains(t, string(content), "http://127.0.0.1:43210/mcp/packages/diagnostics")
-	require.Contains(t, string(content), `"lifecycle": "eager"`)
+	require.NoError(t, json.Unmarshal(content, &merged))
+	require.Equal(t, "http://127.0.0.1:43210/mcp/packages/diagnostics", merged.MCPServers["kandev"]["url"])
+	require.Equal(t, "eager", merged.MCPServers["kandev"]["lifecycle"])
+	require.Equal(t, "streamable-http", merged.MCPServers["kandev"]["transport"])
 
 	require.NoError(t, owner.Cleanup(context.Background()))
 	_, statErr := os.Stat(first.Path)
@@ -89,10 +94,14 @@ func TestProjectMCPFilesOwnerPreservesUserFile(t *testing.T) {
 		Version: types.ProjectMCPFilesVersion, Generation: 1, Files: []passthroughconfig.File{file},
 	})
 	require.NoError(t, err)
+	var merged struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
 	content, err := os.ReadFile(path)
 	require.NoError(t, err)
-	require.Contains(t, string(content), "user-tool")
-	require.Contains(t, string(content), "http://127.0.0.1:43210/mcp")
+	require.NoError(t, json.Unmarshal(content, &merged))
+	require.Equal(t, "user-tool", merged.MCPServers["user"]["command"])
+	require.Equal(t, "http://127.0.0.1:43210/mcp", merged.MCPServers["kandev"]["url"])
 
 	require.NoError(t, manager.ProjectMCPFiles().Cleanup(context.Background()))
 	content, err = os.ReadFile(path)

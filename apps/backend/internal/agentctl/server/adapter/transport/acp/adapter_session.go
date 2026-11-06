@@ -183,7 +183,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers, a.projectDeliveryEvidence()); err != nil {
 		return "", err
 	}
-	a.emitMCPDecisionEvidence(ctx, decisions)
+	projectAccepted := a.emitMCPDecisionEvidence(ctx, decisions)
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -211,6 +211,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	for _, server := range filteredServers {
 		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
 	}
+	a.emitProjectMCPSessionAccepted(ctx, projectAccepted)
 
 	sessionID := string(resp.SessionId)
 	if !a.syncNotifQueueThen(func() {
@@ -617,7 +618,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers, a.projectDeliveryEvidence()); err != nil {
 		return err
 	}
-	a.emitMCPDecisionEvidence(ctx, decisions)
+	projectAccepted := a.emitMCPDecisionEvidence(ctx, decisions)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -664,6 +665,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	for _, server := range filteredServers {
 		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
 	}
+	a.emitProjectMCPSessionAccepted(ctx, projectAccepted)
 
 	initialModels, initialConfigOptions := a.initialSessionConfigState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
 
@@ -768,7 +770,7 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers, a.projectDeliveryEvidence()); err != nil {
 		return err
 	}
-	a.emitMCPDecisionEvidence(ctx, decisions)
+	projectAccepted := a.emitMCPDecisionEvidence(ctx, decisions)
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.resume")
 	defer span.End()
 	_, err := conn.ResumeSession(ctx, acp.ResumeSessionRequest{
@@ -786,6 +788,7 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	for _, server := range filteredServers {
 		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
 	}
+	a.emitProjectMCPSessionAccepted(ctx, projectAccepted)
 	a.mu.Lock()
 	a.sessionID = sessionID
 	a.advanceNativeGenerationLocked()

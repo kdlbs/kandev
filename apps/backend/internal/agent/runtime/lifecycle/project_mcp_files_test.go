@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -37,7 +38,9 @@ type remoteProjectMCPHelper struct {
 	files         map[string][]byte
 	requests      []types.ProjectMCPPrepareRequest
 	configureBody map[string]any
+	configureCode int
 	starts        int
+	cleanups      int
 }
 
 func newRemoteProjectMCPHelper(t *testing.T, capable bool) *remoteProjectMCPHelper {
@@ -70,7 +73,12 @@ func (h *remoteProjectMCPHelper) serveHTTP(w http.ResponseWriter, r *http.Reques
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		h.mu.Lock()
 		h.configureBody = body
+		code := h.configureCode
 		h.mu.Unlock()
+		if code != 0 && code != http.StatusOK {
+			w.WriteHeader(code)
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
 	case r.URL.Path == "/api/v1/start" && r.Method == http.MethodPost:
 		h.mu.Lock()
@@ -143,6 +151,7 @@ func (h *remoteProjectMCPHelper) prepare(w http.ResponseWriter, r *http.Request)
 func (h *remoteProjectMCPHelper) cleanup(w http.ResponseWriter) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.cleanups++
 	for path := range h.files {
 		_ = os.Remove(path)
 	}
@@ -155,6 +164,12 @@ func (h *remoteProjectMCPHelper) snapshot() (uint64, map[string]any, int, []type
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.generation, h.configureBody, h.starts, append([]types.ProjectMCPPrepareRequest(nil), h.requests...)
+}
+
+func (h *remoteProjectMCPHelper) cleanupCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.cleanups
 }
 
 func (h *remoteProjectMCPHelper) client(t *testing.T) *agentctl.Client {
@@ -232,10 +247,11 @@ func TestRemoteProjectMCPDeliveryUsesExecutorLocalFilesystem(t *testing.T) {
 	require.Zero(t, starts)
 	require.Len(t, requests, 1)
 
-	manager.cleanupPassthroughMCPConfig(execution)
+	require.NoError(t, manager.cleanupProjectMCPFiles(context.Background(), execution, nil))
 	_, statErr = os.Stat(filepath.Join(helper.workspace, ".pi", "mcp.json"))
 	require.True(t, os.IsNotExist(statErr), "remote project files are released with the execution")
-	require.Zero(t, execution.projectMCPRemoteGeneration())
+	_, preparedGeneration := execution.projectMCPRemotePrepared()
+	require.Zero(t, preparedGeneration)
 }
 
 // @covers AC-AGENTS-BUILTIN-MCP-003.6, AC-AGENTS-MCP-PREP-005.1
@@ -286,6 +302,61 @@ func TestKubernetesRestartConfiguresProjectDelivery(t *testing.T) {
 
 	servers := readRemoteProjectMCP(t, helper)
 	require.Equal(t, remoteProjectMCPURL()+"/packages/diagnostics", servers["kandev-diagnostics"].URL)
+}
+
+// @covers AC-AGENTS-BUILTIN-MCP-003.6
+func TestKubernetesRestartRollsBackProjectDeliveryOnFailure(t *testing.T) {
+	helper := newRemoteProjectMCPHelper(t, true)
+	helper.configureCode = http.StatusInternalServerError
+	client := helper.client(t)
+	execution := newRemoteProjectMCPExecution(t, client)
+	execution.AgentCommand = "pi-acp"
+	execution.AgentArgs = []string{"pi-acp"}
+	prior := &types.ProjectMCPDelivery{
+		Version: types.ProjectMCPDeliveryVersion, Strategy: types.ProjectMCPDeliveryStrategyPi,
+		Workspace: "prior-workspace", TaskID: "task-1", InstanceID: "instance-1",
+		BindingDigest: strings.Repeat("a", 64), Packages: []string{"core"},
+	}
+	execution.setProjectMCPDelivery(prior)
+	execution.setProjectMCPRemotePrepared(client, 7)
+	manager := newTestManager(t)
+	manager.sessionManager = nil
+	agentConfig, ok := manager.registry.Get("pi-acp")
+	require.True(t, ok)
+
+	_, err := manager.prepareRestartedKubernetesAgentctl(context.Background(), execution, &RemoteInstanceRefresh{
+		Instance:    &ExecutorInstance{InstanceID: helper.instanceID, Client: client},
+		AgentConfig: agentConfig,
+	})
+	require.Error(t, err)
+	restored := execution.projectMCPDeliverySnapshot()
+	require.Equal(t, prior, restored, "failed restart must restore the prior evidence")
+	_, generation := execution.projectMCPRemotePrepared()
+	require.Equal(t, uint64(7), generation)
+	require.Equal(t, 1, helper.cleanupCount(), "staged helper files must be released")
+}
+
+// @covers AC-AGENTS-BUILTIN-MCP-003.6
+func TestProjectMCPCleanupDoesNotReacquireLifecycleLock(t *testing.T) {
+	helper := newRemoteProjectMCPHelper(t, true)
+	client := helper.client(t)
+	execution := newRemoteProjectMCPExecution(t, client)
+	execution.setProjectMCPRemotePrepared(client, 1)
+	manager := newTestManager(t)
+
+	execution.agentctlLifecycleMu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		done <- manager.cleanupProjectMCPFiles(context.Background(), execution, client)
+	}()
+	select {
+	case err := <-done:
+		execution.agentctlLifecycleMu.Unlock()
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		execution.agentctlLifecycleMu.Unlock()
+		t.Fatal("project MCP cleanup reacquired a lifecycle lock already held by a rollback")
+	}
 }
 
 func TestProjectMCPDeliveryHandoffAcceptsLongWorkspace(t *testing.T) {

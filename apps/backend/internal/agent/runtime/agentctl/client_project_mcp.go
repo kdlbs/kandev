@@ -19,6 +19,9 @@ var (
 	// ErrProjectMCPConflict means a stale preparation generation or another
 	// execution owns the configuration.
 	ErrProjectMCPConflict = errors.New("project MCP file ownership changed. Reconnect before retrying")
+	// ErrProjectMCPUnavailable means the helper is alive but its project-file
+	// owner is temporarily unavailable.
+	ErrProjectMCPUnavailable = errors.New("remote project MCP file service is unavailable")
 )
 
 func (c *Client) projectMCPJSON(ctx context.Context, method, route string, body, result any) error {
@@ -42,8 +45,10 @@ func (c *Client) projectMCPJSON(ctx context.Context, method, route string, body,
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		switch response.StatusCode {
-		case http.StatusNotFound, http.StatusServiceUnavailable:
+		case http.StatusNotFound:
 			return ErrProjectMCPUnsupported
+		case http.StatusServiceUnavailable:
+			return ErrProjectMCPUnavailable
 		case http.StatusConflict:
 			return ErrProjectMCPConflict
 		}

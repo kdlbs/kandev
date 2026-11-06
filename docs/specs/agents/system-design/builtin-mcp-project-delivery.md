@@ -52,10 +52,13 @@ It contains no endpoint, credential, header, environment value, or file content.
 Use the existing binding canonicalization in `internal/mcp/profile` for digest
 comparison. Do not create a second package resolver.
 
-Lifecycle creates this record only after `writePassthroughMCPFiles` succeeds for
-the prepared operation. The operation must contain an output artifact and every
-package that the record names. A missing port, empty artifact set, unsupported
-strategy, or failed write cannot produce delivery evidence.
+Lifecycle creates this record only after the selected project-file writer
+successfully materializes the prepared operation. Local placement uses the
+backend writer and is skipped when no local port is available; remote placement
+uses the helper project-file writer and the helper-provided MCP URL. The
+operation must contain an output artifact and every package that the record
+names. Unsupported strategies, empty artifacts, mismatched helper responses, or
+failed writes cannot produce delivery evidence.
 
 Keep the record private to `AgentExecution` until the common
 `configureAndStartAgentWithPreparedArgs` handoff. Configure must copy it by value
@@ -99,7 +102,7 @@ start. Direct ACP and retained-process adoption do not require this capability.
 ## Implementation
 
 `agentctl/types.ProjectMCPDelivery` owns the wire record and its structural
-validation. `agentctl/mcpconfig.ProjectDeliveryStrategyKey` admits only the Pi
+validation. `mcpconfig.ProjectDeliveryStrategyKey` admits only the Pi
 producer today. `lifecycle.projectMCPDeliveryEvidence` builds the record from
 the pinned helper instance and the successful write; the common configure
 handoff validates it against the current client and negotiates the capability.

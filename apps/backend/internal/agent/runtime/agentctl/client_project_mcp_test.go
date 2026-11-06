@@ -16,6 +16,7 @@ import (
 func TestProjectMCPClientRoundTrip(t *testing.T) {
 	prepared := 0
 	cleaned := 0
+	requests := make(chan types.ProjectMCPPrepareRequest, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v1/mcp/project" && r.Method == http.MethodGet:
@@ -25,8 +26,11 @@ func TestProjectMCPClientRoundTrip(t *testing.T) {
 			})
 		case r.URL.Path == "/api/v1/mcp/project/prepare" && r.Method == http.MethodPost:
 			var request types.ProjectMCPPrepareRequest
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
-			require.Equal(t, types.ProjectMCPFilesVersion, request.Version)
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			requests <- request
 			prepared++
 			_ = json.NewEncoder(w).Encode(types.ProjectMCPPrepareResponse{
 				Version: types.ProjectMCPFilesVersion, InstanceID: "instance-1", SessionID: "session-1",
@@ -56,6 +60,9 @@ func TestProjectMCPClientRoundTrip(t *testing.T) {
 	require.Equal(t, uint64(1), response.Generation)
 	require.Len(t, response.Files, 1)
 	require.Equal(t, 1, prepared)
+	sent := <-requests
+	require.Equal(t, types.ProjectMCPFilesVersion, sent.Version)
+	require.Equal(t, uint64(1), sent.Generation)
 
 	require.NoError(t, client.CleanupProjectMCP(context.Background()))
 	require.Equal(t, 1, cleaned)
@@ -67,7 +74,7 @@ func TestProjectMCPClientReportsUnsupportedAndConflict(t *testing.T) {
 		want   error
 	}{
 		{status: http.StatusNotFound, want: ErrProjectMCPUnsupported},
-		{status: http.StatusServiceUnavailable, want: ErrProjectMCPUnsupported},
+		{status: http.StatusServiceUnavailable, want: ErrProjectMCPUnavailable},
 		{status: http.StatusConflict, want: ErrProjectMCPConflict},
 	} {
 		t.Run(http.StatusText(tc.status), func(t *testing.T) {

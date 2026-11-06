@@ -1461,6 +1461,16 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		}
 	}
 
+	// Release remote project-file claims while the helper is still reachable.
+	// A failed release keeps the execution and client retryable rather than
+	// orphaning the files behind a torn-down runtime.
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	cleanupErr := m.cleanupProjectMCPFiles(ctx, execution, client)
+	releaseClient()
+	if cleanupErr != nil {
+		return fmt.Errorf("release project MCP files for execution %q: %w", executionID, cleanupErr)
+	}
+
 	// Stop the agent execution via the runtime that created it. A failed stop
 	// must remain tracked: removing it here would turn a retryable cleanup into
 	// an unobservable orphan process.
@@ -1475,10 +1485,6 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 			return fmt.Errorf("delete runtime secrets for execution %s: %w", executionID, err)
 		}
 	}
-
-	// Remote project files are released while the helper client is still
-	// available; the client is detached immediately below.
-	m.cleanupProjectMCPFiles(ctx, execution)
 
 	// The runtime is now terminal. Detach agentctl under its own short critical
 	// section before any cleanup or event snapshot can acquire prompt state.

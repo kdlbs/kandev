@@ -1098,6 +1098,15 @@ func (m *Manager) cleanupStaleExecutionWithCheckpoint(
 		zap.String("session_id", sessionID),
 		zap.String("execution_id", execution.ID))
 
+	// Release remote project-file claims before stopping the helper, which may
+	// make its endpoint unavailable.
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	cleanupErr := m.cleanupProjectMCPFiles(ctx, execution, client)
+	releaseClient()
+	if cleanupErr != nil {
+		return fmt.Errorf("release stale project MCP files %s: %w", execution.ID, cleanupErr)
+	}
+
 	// Stop the runtime instance (workspace tracker, shell, etc.) to prevent leaked
 	// goroutines. Without this, the old agentctl instance keeps running when a new
 	// execution is created for the same session, causing git polling on deleted worktrees.
@@ -1116,9 +1125,6 @@ func (m *Manager) cleanupStaleExecutionWithCheckpoint(
 	// End session trace span only after the runtime has stopped. A failed stop
 	// remains retryable and should keep the execution's lifecycle intact.
 	execution.EndSessionSpan()
-
-	// Release remote project files before the client is detached.
-	m.cleanupProjectMCPFiles(ctx, execution)
 
 	// Close agentctl connection if it exists
 	execution.agentctlLifecycleMu.Lock()

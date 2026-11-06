@@ -223,6 +223,8 @@ Regressions delivered:
   `TestRemoteProjectMCPDeliveryUsesExecutorLocalFilesystem`,
   `TestRemoteProjectMCPDeliveryRequiresHelperSupport`,
   `TestKubernetesRestartConfiguresProjectDelivery`,
+  `TestKubernetesRestartRollsBackProjectDeliveryOnFailure`,
+  `TestProjectMCPCleanupDoesNotReacquireLifecycleLock`,
   `TestProjectMCPDeliveryHandoffAcceptsLongWorkspace`.
 - `process/project_mcp_delivery_test.go`:
   `TestProjectMCPDeliveryConsumedByProcessGeneration`,

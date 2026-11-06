@@ -17,7 +17,14 @@ import (
 // claimed by another execution.
 var ErrProjectMCPConflict = errors.New("project MCP preparation conflict")
 
-const maxProjectMCPFiles = 32
+// ErrProjectMCPInvalid reports malformed client preparation input.
+var ErrProjectMCPInvalid = errors.New("invalid project MCP preparation request")
+
+const (
+	maxProjectMCPFiles      = 32
+	maxProjectMCPFileBytes  = 1 << 20
+	maxProjectMCPTotalBytes = 4 << 20
+)
 
 // ProjectMCPFilesOwner owns executor-local project configuration files for one
 // agent instance. Files are materialized under the instance workspace through
@@ -81,8 +88,8 @@ func (o *ProjectMCPFilesOwner) Prepare(
 	if cfg.SessionID == "" || filepath.Base(cfg.SessionID) != cfg.SessionID {
 		return types.ProjectMCPPrepareResponse{}, ErrProjectMCPConflict
 	}
-	if request.Version != types.ProjectMCPFilesVersion || len(request.Files) > maxProjectMCPFiles {
-		return types.ProjectMCPPrepareResponse{}, errors.New("invalid project MCP preparation request")
+	if err := validateProjectMCPPrepareRequest(request); err != nil {
+		return types.ProjectMCPPrepareResponse{}, err
 	}
 	o.mu.Lock()
 	current := o.generation
@@ -98,6 +105,7 @@ func (o *ProjectMCPFilesOwner) Prepare(
 	}
 	evidence, err := o.readBack(request.Files)
 	if err != nil {
+		_ = passthroughconfig.Cleanup(context.WithoutCancel(ctx), cfg.WorkDir, o.owner(), false)
 		return types.ProjectMCPPrepareResponse{}, err
 	}
 	o.mu.Lock()
@@ -134,6 +142,23 @@ func (o *ProjectMCPFilesOwner) Cleanup(ctx context.Context) error {
 	o.mu.Lock()
 	o.generation = 0
 	o.mu.Unlock()
+	return nil
+}
+
+func validateProjectMCPPrepareRequest(request types.ProjectMCPPrepareRequest) error {
+	if request.Version != types.ProjectMCPFilesVersion || len(request.Files) > maxProjectMCPFiles {
+		return ErrProjectMCPInvalid
+	}
+	totalBytes := 0
+	for _, file := range request.Files {
+		if file.Path == "" || len(file.Content) > maxProjectMCPFileBytes {
+			return ErrProjectMCPInvalid
+		}
+		totalBytes += len(file.Content)
+	}
+	if totalBytes > maxProjectMCPTotalBytes {
+		return ErrProjectMCPInvalid
+	}
 	return nil
 }
 

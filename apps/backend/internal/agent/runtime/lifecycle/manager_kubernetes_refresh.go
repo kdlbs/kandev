@@ -196,8 +196,22 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 	ctx context.Context,
 	execution *AgentExecution,
 	refresh *RemoteInstanceRefresh,
-) (string, error) {
+) (bootCommand string, retErr error) {
 	client := refresh.Instance.Client
+	priorDelivery := execution.projectMCPDeliverySnapshot()
+	priorClient, priorGeneration := execution.projectMCPRemotePrepared()
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		currentClient, currentGeneration := execution.projectMCPRemotePrepared()
+		if currentGeneration == priorGeneration && currentClient == priorClient {
+			return
+		}
+		_ = m.cleanupProjectMCPFiles(context.Background(), execution, client)
+		execution.setProjectMCPDelivery(priorDelivery)
+		execution.setProjectMCPRemotePrepared(priorClient, priorGeneration)
+	}()
 	env := execution.RuntimeEnvironment()
 	if env == nil {
 		env = runtimeEnvFromMetadata(execution.MetadataSnapshot())

@@ -148,13 +148,36 @@ func TestBuiltinProjectDeliveryEvidenceIsNotConnectionHealth(t *testing.T) {
 		}
 	}
 	core := byServer["kandev"]
-	require.Len(t, core, 1, "HTTP/SSE alternatives must deduplicate by package identity")
+	require.Len(t, core, 2, "HTTP/SSE alternatives must deduplicate by package identity")
 	require.Equal(t, streams.MCPAttachmentEvidenceDelivered, core[0].Kind)
 	require.Equal(t, projectMCPDeliveryReasonCode, core[0].ReasonCode)
+	require.Equal(t, streams.MCPAttachmentEvidenceSessionAccepted, core[1].Kind)
+	require.Equal(t, projectMCPDeliveryReasonCode, core[1].ReasonCode)
 	thirdParty := byServer["third-party"]
 	require.Len(t, thirdParty, 1)
 	require.Equal(t, streams.MCPAttachmentEvidenceFiltered, thirdParty[0].Kind)
 	require.Equal(t, mcpFilterReasonHTTPUnsupported, thirdParty[0].ReasonCode)
+}
+
+func TestBuiltinProjectDeliverySkipsDuplicateTransportEvidence(t *testing.T) {
+	a, _ := newSessionResumeAdapter(t, true, true)
+	a.cfg.ProjectMCPDelivery = projectDeliveryRecord(p.PackageCore)
+	servers := builtinProjectDeliveryServers(p.PackageCore)
+	ctx := streams.WithMCPAttachmentContext(context.Background(), streams.MCPAttachmentAttempt{
+		AttemptID: "attempt-1", TaskID: "task-1", SessionID: "session-1", StartedAt: time.Now().UTC(),
+	})
+	_, err := a.NewSession(ctx, servers)
+	require.NoError(t, err)
+	var filtered int
+	for _, event := range drainEvents(a) {
+		if event.MCPAttachment == nil {
+			continue
+		}
+		if event.MCPAttachment.Kind == streams.MCPAttachmentEvidenceFiltered {
+			filtered++
+		}
+	}
+	require.Zero(t, filtered, "a delivered first transport must not emit a duplicate/filtered decision")
 }
 
 func newProjectDeliveryAdapter(t *testing.T, delivery *types.ProjectMCPDelivery) (*Adapter, *sessionResumeAgent) {

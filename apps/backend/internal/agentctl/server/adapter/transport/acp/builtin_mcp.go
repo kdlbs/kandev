@@ -71,13 +71,19 @@ func transportUnsupportedReason(reasonCode string) bool {
 
 // emitMCPDecisionEvidence publishes one safe decision per input server. A
 // package delivered through the project file reports delivery once per package
-// identity instead of an ACP transport failure.
-func (a *Adapter) emitMCPDecisionEvidence(ctx context.Context, decisions []mcpServerFilterDecision) {
+// identity instead of an ACP transport failure. Duplicate transport alternatives
+// are omitted because the attachment history is keyed by server name.
+func (a *Adapter) emitMCPDecisionEvidence(ctx context.Context, decisions []mcpServerFilterDecision) []types.McpServer {
 	projectEvidenced := make(map[p.PackageID]bool)
+	projectDelivered := make([]types.McpServer, 0, len(decisions))
 	for _, decision := range decisions {
+		if decision.ReasonCode == mcpFilterReasonDuplicateName {
+			continue
+		}
 		if a.projectMCPDelivers(decision) {
 			if pkg := decision.Server.BuiltinPackage; !projectEvidenced[pkg] {
 				projectEvidenced[pkg] = true
+				projectDelivered = append(projectDelivered, decision.Server)
 				a.emitMCPAttachmentEvidence(ctx, decision.Server, streams.MCPAttachmentEvidenceDelivered, projectMCPDeliveryReasonCode, "")
 			}
 			continue
@@ -87,5 +93,15 @@ func (a *Adapter) emitMCPDecisionEvidence(ctx context.Context, decisions []mcpSe
 			kind = streams.MCPAttachmentEvidenceFiltered
 		}
 		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
+	}
+	return projectDelivered
+}
+
+// emitProjectMCPSessionAccepted records that a session operation succeeded
+// after project-file materialization. It is acceptance evidence only, not a
+// connection or health observation.
+func (a *Adapter) emitProjectMCPSessionAccepted(ctx context.Context, servers []types.McpServer) {
+	for _, server := range servers {
+		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, projectMCPDeliveryReasonCode, "")
 	}
 }

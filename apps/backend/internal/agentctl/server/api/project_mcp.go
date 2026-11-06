@@ -40,7 +40,7 @@ func (s *Server) handleProjectMCPPrepare(c *gin.Context) {
 		return
 	}
 	var request types.ProjectMCPPrepareRequest
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4<<20)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<20)
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{errKey: "invalid project MCP preparation request"})
 		return
@@ -48,7 +48,10 @@ func (s *Server) handleProjectMCPPrepare(c *gin.Context) {
 	response, err := owner.Prepare(c.Request.Context(), request)
 	if err != nil {
 		status := http.StatusInternalServerError
-		if errors.Is(err, process.ErrProjectMCPConflict) {
+		switch {
+		case errors.Is(err, process.ErrProjectMCPInvalid):
+			status = http.StatusBadRequest
+		case errors.Is(err, process.ErrProjectMCPConflict):
 			status = http.StatusConflict
 		}
 		c.JSON(status, gin.H{errKey: err.Error()})

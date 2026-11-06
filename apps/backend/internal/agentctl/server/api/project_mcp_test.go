@@ -57,6 +57,28 @@ func TestProjectMCPRoutesMaterializeOnHelper(t *testing.T) {
 	require.NoError(t, statErr)
 }
 
+func TestProjectMCPRoutesRejectInvalidPreparation(t *testing.T) {
+	server, cfg := newProjectMCPTestServer(t, "")
+	for _, payload := range [][]byte{
+		[]byte(`{"version":999,"generation":1,"files":[]}`),
+		func() []byte {
+			content := bytes.Repeat([]byte("x"), (1<<20)+1)
+			encoded, err := json.Marshal(types.ProjectMCPPrepareRequest{
+				Version: types.ProjectMCPFilesVersion, Generation: 1,
+				Files: []passthroughconfig.File{{Path: filepath.Join(cfg.WorkDir, ".pi", "mcp.json"), Content: content}},
+			})
+			require.NoError(t, err)
+			return encoded
+		}(),
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/mcp/project/prepare", bytes.NewReader(payload))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		server.Router().ServeHTTP(response, request)
+		require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	}
+}
+
 func TestProjectMCPRoutesRequireAuthentication(t *testing.T) {
 	server, _ := newProjectMCPTestServer(t, "control-token")
 	response := httptest.NewRecorder()
