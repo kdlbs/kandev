@@ -195,6 +195,10 @@ The updater and generator tests passed 18/18. The workflow contracts passed
 13/13 and the documentation workflow contracts passed 7/7. Public documentation
 tests passed 63/63, all 55 public pages validated, and web typecheck passed.
 The generated delivery record compares the pins with the merged main baseline.
+Before the subsequent non-conflicting main sync, the Docker, SSH, and Kubernetes
+Codex executor E2E scenarios passed with one worker. The merge commit's normal
+hooks passed, including Go lint. After that sync, web typecheck and the four
+affected rich-output unit suites passed (91 tests).
 
 ## Risks
 
