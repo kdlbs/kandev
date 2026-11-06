@@ -278,6 +278,8 @@
   "notificationClarificationTitle": "O agente precisa da sua resposta",
   "notificationInboxItemBody": "Um novo item precisa da sua atenção.",
   "notificationInboxItemTitle": "Novo item na caixa de entrada",
+  "notificationChildStallBody": "Uma subtarefa parou e a tarefa principal não pode receber o alerta.",
+  "notificationChildStallTitle": "Subtarefa precisa de atenção",
   "notificationPermissionBody": "O agente está à espera da sua aprovação.",
   "notificationPermissionTitle": "O agente precisa de permissão",
   "notificationSessionFailedBody": "A sessão do agente terminou com um erro.",

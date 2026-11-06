@@ -57,6 +57,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithHandoff(
 	if identity.TaskID != taskID || identity.SessionIncarnationID == "" {
 		return false
 	}
+	s.pruneStaleChildStallAlerts(ctx, identity)
 	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
 	if err != nil || !autoRun || !ok || queuedMsg == nil {
 		return false

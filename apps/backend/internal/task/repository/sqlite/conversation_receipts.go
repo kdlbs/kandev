@@ -436,6 +436,9 @@ func (r *Repository) CreateTurnWithStepStampConversationReceipt(ctx context.Cont
 		}
 		stamped = true
 	}
+	if stepErr == nil && found {
+		r.stampChildStallStartInTx(ctx, tx, turn)
+	}
 	if err := r.insertTurnRow(ctx, tx, turn); err != nil {
 		return false, nil, err
 	}

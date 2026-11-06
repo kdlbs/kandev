@@ -30,6 +30,7 @@ import { renderUserMessageBody } from "./user-message-body";
 import { useMessageTaskOrigin } from "./message-task-origin-context";
 import { WokenByEntry, wakeTurnIdOf } from "./woken-by-entry";
 import { taskMentionReferences } from "@/lib/tasks/task-mention-references";
+import { ChildStallAlertSummary, childStallAlertsFromMetadata } from "./child-stall-alert-summary";
 
 type ChatMessageProps = {
   comment: Message;
@@ -149,14 +150,16 @@ function parseUserMessageMetadata(comment: Message) {
   const { imageAttachments, fileAttachments } = userMessageAttachments(metadata);
   const hasContent = !!(comment.content && comment.content.trim() !== "");
   const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
+  const childStallAlerts = childStallAlertsFromMetadata(comment.metadata);
   const workflowMessage = workflowMessageInfoFromMetadata(metadata);
   return {
     imageAttachments,
     fileAttachments,
     contextFiles: metadata?.context_files || [],
     ...userMessageMetadataFlags(metadata, hasContent, hasAttachments),
-    senderTask: userMessageSenderTask(metadata),
+    senderTask: childStallAlerts.length === 0 ? userMessageSenderTask(metadata) : null,
     workflowMessage,
+    childStallAlerts,
   };
 }
 
@@ -347,6 +350,7 @@ function UserMessageContent({
     senderTask,
     workflowMessage,
     deliveryBlocked,
+    childStallAlerts,
     deliveryNotDelivered,
   } = parseUserMessageMetadata(comment);
 
@@ -363,6 +367,7 @@ function UserMessageContent({
           deliveryBlocked={deliveryBlocked}
           deliveryNotDelivered={deliveryNotDelivered}
         />
+        <ChildStallAlertSummary alerts={childStallAlerts} />
         <div
           data-testid="user-message-bubble"
           className={cn(

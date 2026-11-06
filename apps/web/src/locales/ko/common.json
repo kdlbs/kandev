@@ -282,6 +282,8 @@
   "notificationClarificationTitle": "에이전트가 답변을 기다립니다",
   "notificationInboxItemBody": "새 항목이 처리를 기다립니다.",
   "notificationInboxItemTitle": "새 받은 편지함 항목",
+  "notificationChildStallBody": "하위 작업이 멈췄지만 상위 작업이 알림을 받을 수 없습니다.",
+  "notificationChildStallTitle": "하위 작업 확인 필요",
   "notificationPermissionBody": "에이전트가 승인을 기다리고 있습니다.",
   "notificationPermissionTitle": "에이전트가 권한을 요청합니다",
   "notificationSessionFailedBody": "에이전트 세션이 오류로 종료되었습니다.",

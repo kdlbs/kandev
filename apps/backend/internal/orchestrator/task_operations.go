@@ -10368,6 +10368,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx co
 	if s.resumeAttemptStore().holdsInitialPromptForSession(identity.SessionID) {
 		return false, nil
 	}
+	s.pruneStaleChildStallAlerts(ctx, identity)
 	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
 	if err != nil {
 		return false, err
@@ -11733,6 +11734,7 @@ func (s *Service) cancelAgentWhileUnlocked(
 func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string, prepared cancelAgentPreparation) error {
 	continuation, _ := ctx.Value(continuationCancelContextKey{}).(*transientRetryEntry)
 	requireWaiting := prepared.completionEligible || continuation != nil
+	s.markChildTurnCancelled(ctx, sessionID, prepared)
 	session := prepared.session
 	if session != nil {
 		reconciled, err := s.reconcileCancelledTurnOwned(

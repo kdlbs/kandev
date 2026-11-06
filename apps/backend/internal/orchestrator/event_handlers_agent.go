@@ -1412,7 +1412,12 @@ func queuedMessagePromptContent(queuedMsg *messagequeue.QueuedMessage) string {
 	if queuedMsg == nil {
 		return ""
 	}
-	content := queuedMsg.Content
+	return queuedMessagePromptContentFrom(queuedMsg, queuedMsg.Content)
+}
+
+// queuedMessagePromptContentFrom completes a queued entry's prompt text from
+// its base content.
+func queuedMessagePromptContentFrom(queuedMsg *messagequeue.QueuedMessage, content string) string {
 	// Handler-originated comment sends persist their fully composed transcript
 	// and queue receipt together. Other queue producers store references as
 	// metadata and compose them only when recording/delivering the prompt.
@@ -1974,6 +1979,27 @@ func (s *Service) executeQueuedMessageWithReservation(
 	promptContent := queuedMessagePromptContent(queuedMsg)
 	var promptReferenceContext string
 	var preparedPromptContent *string
+	if messagequeue.IsChildStallAlert(queuedMsg) {
+		// The dispatch boundary rechecks every folded candidate, so a candidate
+		// that stopped qualifying is dropped from the parent prompt.
+		effective, eligible := s.childStallAlertPromptContent(promptCtx, queuedMsg)
+		if !eligible {
+			// No folded candidate qualifies any more, so the queued alert is
+			// discarded without creating a model turn. Requeueing returns it to
+			// the pending state where the stale-alert prune removes it.
+			s.logger.Info("discarding child stall alert without an eligible candidate",
+				zap.String("session_id", queuedMsg.SessionID),
+				zap.String("task_id", queuedMsg.TaskID),
+				zap.String("queue_id", queuedMsg.ID))
+			s.requeueMessageForReservation(promptCtx, reservation, queuedMsg, "child-stall-alert-without-eligible-candidate")
+			return
+		}
+		if effective != promptContent {
+			promptContent = effective
+			composed := effective
+			preparedPromptContent = &composed
+		}
+	}
 	if isQueuedWorkflowAutoStart(queuedMsg) {
 		// Resolve workflow aliases at the drain boundary, before persistence.
 		// Recovery must carry this exact server-generated context because the

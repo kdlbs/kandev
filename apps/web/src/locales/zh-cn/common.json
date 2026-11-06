@@ -277,6 +277,8 @@
   "notificationClarificationTitle": "智能体需要您的回答",
   "notificationInboxItemBody": "有新条目需要您处理。",
   "notificationInboxItemTitle": "新的收件箱条目",
+  "notificationChildStallBody": "子任务已停滞，但父任务无法接收提醒。",
+  "notificationChildStallTitle": "子任务需要处理",
   "notificationPermissionBody": "智能体正在等待您的批准。",
   "notificationPermissionTitle": "智能体需要权限",
   "notificationSessionFailedBody": "智能体会话因错误而结束。",
