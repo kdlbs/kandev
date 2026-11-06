@@ -279,7 +279,7 @@ func copilotRuntimeQualified(version string) bool {
 	}
 	numbers := make([]int, 3)
 	for i := 0; i < 3; i++ {
-		parsed, err := strconv.Atoi(parts[i])
+		parsed, err := strconv.Atoi(strings.TrimSuffix(parts[i], "."))
 		if err != nil || parsed < 0 {
 			return false
 		}

@@ -77,3 +77,19 @@ func TestApplyCopilotNativeLaunchCapability(t *testing.T) {
 		t.Fatal("other providers must not enable Copilot native events")
 	}
 }
+
+func TestCopilotNativeCapabilityCoversEveryAgentctlExecutor(t *testing.T) {
+	executors := []interface{ SupportsCopilotNativeSessionEvents() bool }{
+		&DockerExecutor{},
+		&RemoteDockerExecutor{},
+		&KubernetesExecutor{},
+		&SSHExecutor{},
+		&SpritesExecutor{},
+		&PluginRemoteExecutor{},
+	}
+	for _, executor := range executors {
+		if !executor.SupportsCopilotNativeSessionEvents() {
+			t.Fatalf("%T does not propagate the native-event opt-in", executor)
+		}
+	}
+}

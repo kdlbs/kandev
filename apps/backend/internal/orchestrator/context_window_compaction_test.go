@@ -175,7 +175,9 @@ func TestPublishCommittedContextCompactionMetadata(t *testing.T) {
 	log := testLogger()
 	eventBus := eventbus.NewMemoryEventBus(log)
 	t.Cleanup(eventBus.Close)
-	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-committed", "session-committed", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.eventBus = eventBus
 
 	published := make(chan map[string]interface{}, 2)
@@ -214,6 +216,7 @@ func TestPublishCommittedContextCompactionMetadata(t *testing.T) {
 		reporting, ok := metadata[models.SessionMetaKeyContextCompactionReporting].(map[string]interface{})
 		require.True(t, ok)
 		require.Equal(t, "copilot_native", reporting["source"])
+		require.NotEmpty(t, event["updated_at"], "authoritative session timestamp must accompany the patch")
 	case <-time.After(time.Second):
 		t.Fatal("expected committed compaction metadata publication")
 	}
@@ -271,4 +274,17 @@ func TestContextWindowCopilotUnavailableDowngradesAvailableReporting(t *testing.
 	require.Equal(t, "unavailable", reporting["availability"])
 	require.Equal(t, "partial", reporting["coverage"])
 	require.Greater(t, reporting["revision"], float64(3))
+
+	// A later legacy gauge must not rewrite the same sticky state or advance
+	// its revision on every sample.
+	stableRevision := reporting["revision"]
+	publisher.PublishContextWindow(&lifecycle.AgentExecution{
+		ID: "exec-copilot-downgrade", TaskID: taskID, SessionID: sessionID,
+		AgentID: agents.CopilotACPAgentID, CopilotNativeSessionEvents: false,
+	}, 272000, 10000, 262000, 3.7)
+	session, err = repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	reporting, ok = session.Metadata[models.SessionMetaKeyContextCompactionReporting].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, stableRevision, reporting["revision"])
 }

@@ -27,7 +27,7 @@ func newCopilotNativeTestAdapter(t *testing.T) *Adapter {
 	t.Cleanup(func() { _ = a.Close() })
 	a.mu.Lock()
 	a.sessionID = testCopilotNativeSession
-	a.copilotNativeActive = true
+	a.copilotNativeActive.Store(true)
 	a.mu.Unlock()
 	return a
 }
@@ -253,7 +253,7 @@ func TestCopilotNativeSessionBindingBuffersUntilBound(t *testing.T) {
 		CopilotNativeSessionEvents: true,
 	}, log)
 	t.Cleanup(func() { _ = a.Close() })
-	a.copilotNativeActive = true
+	a.copilotNativeActive.Store(true)
 
 	a.handleCopilotNativeWork(decodeTestCopilotEvent(t, copilotUsageParams(t, nil, 100, 1000)))
 	a.mu.Lock()
@@ -336,7 +336,7 @@ func TestCopilotNativeBindingBuffersAcrossNewSessionReplacement(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close() })
 	a.mu.Lock()
 	a.sessionID = "prior-session"
-	a.copilotNativeActive = true
+	a.copilotNativeActive.Store(true)
 	a.bindingCopilotNative = true
 	a.mu.Unlock()
 
@@ -406,7 +406,7 @@ func TestCopilotNativeGaugeDoesNotChangePromptAccounting(t *testing.T) {
 
 func TestCopilotNativeInactiveRuntimeReportsUnavailable(t *testing.T) {
 	a := newCopilotNativeTestAdapter(t)
-	a.copilotNativeActive = false
+	a.copilotNativeActive.Store(false)
 	a.emitCopilotNativeReporting(
 		testCopilotNativeSession,
 		streams.ContextCompactionAvailabilityAvailable,
@@ -470,8 +470,49 @@ func TestCopilotNativeBindingOverflowReportsPartial(t *testing.T) {
 	}
 	if gauges != copilotPendingNativeLimit || reporting == nil ||
 		reporting.Coverage != streams.ContextCompactionCoveragePartial ||
-		reporting.Reason != "binding_buffer_overflow" {
+		reporting.Reason != "binding_buffer_overflow" ||
+		reporting.Availability != streams.ContextCompactionAvailabilityAvailable {
 		t.Fatalf("gauges=%d reporting=%+v, want bounded gauges and sticky partial", gauges, reporting)
+	}
+}
+
+func TestCopilotNativeOverflowSurvivesDeferredFlush(t *testing.T) {
+	a := newCopilotNativeTestAdapter(t)
+	a.mu.Lock()
+	a.sessionID = "prior-session"
+	a.bindingCopilotNative = true
+	a.mu.Unlock()
+	for i := 0; i < copilotPendingNativeLimit+1; i++ {
+		a.handleCopilotNativeWork(decodeTestCopilotEvent(t, copilotUsageParams(t, nil, 100+int64(i), 272000)))
+	}
+
+	a.mu.Lock()
+	a.sessionID = testCopilotNativeSession
+	a.bindingCopilotNative = false
+	a.isLoadingSession = true
+	a.mu.Unlock()
+	a.flushPendingCopilotNative()
+
+	a.mu.Lock()
+	deferredPending := len(a.pendingCopilotNative)
+	deferredDropped := a.pendingCopilotNativeDropped
+	a.isLoadingSession = false
+	a.mu.Unlock()
+	if deferredPending != copilotPendingNativeLimit || !deferredDropped {
+		t.Fatalf("deferred pending=%d dropped=%v, want the overflow marker restored", deferredPending, deferredDropped)
+	}
+
+	a.flushPendingCopilotNative()
+	var reporting *streams.ContextCompactionObservation
+	for i := 0; i < copilotPendingNativeLimit+1; i++ {
+		event := nextUpdate(t, a)
+		if event.Type == streams.EventTypeContextCompactionObservation {
+			reporting = event.ContextCompaction
+		}
+	}
+	if reporting == nil || reporting.Coverage != streams.ContextCompactionCoveragePartial ||
+		reporting.Reason != "binding_buffer_overflow" {
+		t.Fatalf("reporting=%+v, want deferred overflow to remain partial", reporting)
 	}
 }
 

@@ -847,6 +847,7 @@ func TestContextWindowCompactionCountIsPublishedWithWindowUpdate(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, int64(1), metadata[models.SessionMetaKeyContextCompactionCount])
 	require.NotNil(t, metadata[models.SessionMetaKeyContextWindow])
+	require.NotEmpty(t, payload["updated_at"])
 }
 
 func TestContextWindowResetDropsStaleBroadcast(t *testing.T) {

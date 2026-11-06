@@ -20,8 +20,6 @@ const sessionCompactionsSchema = `
 			PRIMARY KEY (session_id, provider, native_session_id, compaction_attempt_id),
 			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 		);
-		CREATE INDEX IF NOT EXISTS idx_task_session_compactions_session
-			ON task_session_compactions(session_id);
 `
 
 // initSessionCompactionsSchema creates the received-attempt ledger after the

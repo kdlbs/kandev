@@ -72,8 +72,8 @@ New tests use the listed prefixes so these commands must discover them.
 ```bash
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/server/acp -run 'Extension|CopilotNative|Connection' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run '^TestCopilotNative|^TestUsageTracker|^TestConvertUsageUpdate|^TestHandleACPUpdate' -count=1)
-(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agentctl/server/adapter/transport/acp -run '^TestCopilotNativeSessionBinding|^TestCopilotNativeOrdering' -count=1)
-(cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/types/streams ./internal/agentctl/journal ./internal/agentctl/server/process -run 'CopilotNative|CompactionObservation|DeliveryEvent' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agentctl/server/adapter/transport/acp -run '^TestCopilotNative' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/types/streams ./internal/agentctl/journal ./internal/agentctl/server/process -run 'ContextCompaction|CopilotNative|DeliveryEvent' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/server/api ./internal/agentctl/server/instance -run 'CopilotNative|Identity|Capability' -count=1)
 git diff --check
 ```
@@ -86,7 +86,7 @@ No production subscription is enabled by a backend that lacks Task 03's consumer
 
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter.go`, `adapter_helpers.go`, `adapter_updates.go`, and `adapter_prompt_suggestion.go`.
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/dialect_copilot_session_events.go` (new).
-- `apps/backend/internal/agentctl/server/adapter/transport/acp/copilot_native_compaction_test.go`, `copilot_native_usage_test.go`, `copilot_native_ordering_test.go` (new).
+- `apps/backend/internal/agentctl/server/adapter/transport/acp/copilot_native_compaction_test.go`, `copilot_native_qualification_test.go`, and `testdata/copilot-native/*` (new).
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_session_events.go` only for reuse needed by native normalization.
 - `apps/backend/internal/agentctl/types/streams/agent.go`, `context_compaction_observation.go`, and its tests (new carrier files).
 - `apps/backend/internal/agentctl/server/api/identity.go`, `server/config/config.go`, `server/instance/manager.go`, `server/adapter/transport/shared/config.go`, and process adapter-config construction.

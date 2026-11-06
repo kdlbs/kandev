@@ -181,26 +181,46 @@ func TestSessionCompactionsConcurrentWithContextWindowWrites(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	seedCompactionSession(t, repo)
 
+	type concurrentWrite struct {
+		sample  map[string]interface{}
+		event   *models.AgentDeliveryEvent
+		effects []*models.AgentDeliveryEffect
+	}
+	writes := make([]concurrentWrite, 8)
+	for i := range writes {
+		event := compactionObservationEvent(t, 1, fmt.Sprintf("attempt-concurrent-%d", i))
+		event.StreamID = fmt.Sprintf("stream-concurrent-%d", i)
+		writes[i] = concurrentWrite{
+			sample:  contextWindowSample(int64(100000-i*1000), true),
+			event:   event,
+			effects: combinedDeliveryBatchEffects([]*models.AgentDeliveryEvent{event}),
+		}
+	}
+
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
+	errs := make(chan error, len(writes)*2)
+	for i := range writes {
+		w := writes[i]
 		wg.Add(2)
-		go func(index int) {
+		go func() {
 			defer wg.Done()
-			_, err := repo.UpdateSessionContextWindow(context.Background(), compactionSessionID,
-				contextWindowSample(int64(100000-index*1000), true))
-			require.NoError(t, err)
-		}(i)
-		go func(index int) {
+			if _, err := repo.UpdateSessionContextWindow(context.Background(), compactionSessionID, w.sample); err != nil {
+				errs <- err
+			}
+		}()
+		go func() {
 			defer wg.Done()
-			event := compactionObservationEvent(t, 1, fmt.Sprintf("attempt-concurrent-%d", index))
-			event.StreamID = fmt.Sprintf("stream-concurrent-%d", index)
-			effects := combinedDeliveryBatchEffects([]*models.AgentDeliveryEvent{event})
-			_, err := repo.ReceiveAndProjectCanonicalAgentDeliveryEvents(
-				context.Background(), []*models.AgentDeliveryEvent{event}, effects, 0)
-			require.NoError(t, err)
-		}(i)
+			if _, err := repo.ReceiveAndProjectCanonicalAgentDeliveryEvents(
+				context.Background(), []*models.AgentDeliveryEvent{w.event}, w.effects, 0); err != nil {
+				errs <- err
+			}
+		}()
 	}
 	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
 
 	session, err := repo.GetTaskSession(context.Background(), compactionSessionID)
 	require.NoError(t, err)
@@ -333,8 +353,10 @@ func TestSessionCompactionsAcceptsJournaledPredecessorAfterRebind(t *testing.T) 
 	require.NotNil(t, results[0].ContextCompactionCount)
 	require.EqualValues(t, 1, *results[0].ContextCompactionCount)
 
-	count, _ := compactionMetadata(t, repo)
+	count, reporting := compactionMetadata(t, repo)
 	require.EqualValues(t, 1, count)
+	require.Equal(t, streams.ContextCompactionAvailabilityUnavailable, reporting.Availability,
+		"predecessor evidence must not mark the replacement runtime available")
 	session, err := repo.GetTaskSession(context.Background(), compactionSessionID)
 	require.NoError(t, err)
 	require.Nil(t, session.Metadata[models.SessionMetaKeyContextWindow])

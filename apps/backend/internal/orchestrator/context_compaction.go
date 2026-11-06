@@ -2,10 +2,14 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	bus "github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap"
 )
 
 // publishCommittedContextCompaction publishes the count/reporting metadata that
@@ -34,15 +38,51 @@ func (s *Service) publishCommittedContextCompaction(
 	if len(metadata) == 0 {
 		return
 	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		s.logger.Warn("cannot publish committed compaction metadata without the authoritative session",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	eventData := map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"metadata":   metadata,
+	}
+	if !session.UpdatedAt.IsZero() {
+		eventData["updated_at"] = session.UpdatedAt.Format(time.RFC3339Nano)
+	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 		events.TaskSessionStateChanged,
 		"orchestrator",
-		map[string]interface{}{
-			"task_id":    taskID,
-			"session_id": sessionID,
-			"metadata":   metadata,
-		},
+		eventData,
 	))
+}
+
+func compactionReportingFromMetadata(metadata map[string]interface{}) *streams.ContextCompactionReporting {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw, ok := metadata[models.SessionMetaKeyContextCompactionReporting]
+	if !ok || raw == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var reporting streams.ContextCompactionReporting
+	if json.Unmarshal(encoded, &reporting) != nil {
+		return nil
+	}
+	return streams.NormalizeReporting(&reporting)
+}
+
+func compactionReportingUnavailablePartial(reporting *streams.ContextCompactionReporting) bool {
+	return reporting != nil &&
+		reporting.Availability == streams.ContextCompactionAvailabilityUnavailable &&
+		reporting.Coverage == streams.ContextCompactionCoveragePartial
 }
 
 func numericMetadataValue(value interface{}) (interface{}, bool) {

@@ -102,6 +102,16 @@ func TestPublishContextWindowCompactionPolicy(t *testing.T) {
 					t.Fatalf("serialized marker = false, want true")
 				}
 			}
+			rawNative, hasNative := fields["copilot_native_session_events"]
+			if hasNative != tc.native {
+				t.Fatalf("serialized native presence = %v, want %v: %s", hasNative, tc.native, encoded)
+			}
+			if tc.native {
+				var native bool
+				if err := json.Unmarshal(rawNative, &native); err != nil || !native {
+					t.Fatalf("serialized native = %v, want true: %s", native, encoded)
+				}
+			}
 		})
 	}
 }

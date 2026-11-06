@@ -1,6 +1,6 @@
 ---
 created: 2026-11-05
-status: implemented
+status: in_progress
 requirements:
   - REQ-AGENTS-COPILOT-NATIVE-COMPACTION-001
   - REQ-AGENTS-COPILOT-NATIVE-COMPACTION-002
@@ -22,7 +22,7 @@ legacy_specs: []
 Restore useful Copilot compaction counts from successful parent native events while retaining the existing usage-drop exclusion.
 First qualify the protocol and add narrow SDK dispatch support.
 Then normalize attributed observations, implement durable count projection, and prove the visible result through real desktop/mobile flows.
-All four work orders are implemented on this branch. The package records qualification limits explicitly.
+Three of four work orders are implemented on this branch. Task 03 stays blocked until real PostgreSQL parity evidence runs; the package records that qualification limit explicitly.
 
 Branch: `feature/copilot-native-compaction-count`.
 Base: fetched `origin/main`, `ce9918b094855c38e5b3b4c79c1b565fe5c379cb`.
@@ -157,8 +157,8 @@ Update all seven languages, generated Traditional Chinese/pseudo, and the public
 | Combination | Collection/count policy | Required evidence and fallback |
 | --- | --- | --- |
 | Qualified Copilot + new agentctl + new backend | Native root events, durable receipts, inference disabled | Manual/automatic qualified fixtures, real wire and SQL tests |
-| Current 1.0.88 pin | Support not assumed | Task 01 qualifies it or selects a verified replacement pin |
-| 1.0.103 captured runtime | Manual applied completion and root usage observed | Automatic/omitted/failure paths still require qualification |
+| CLI 1.0.88 | Unsupported: generated schema lacks attempt identity and outcome | Runtime qualification rejects it; native count is unavailable and historical totals remain |
+| Current 1.0.103 pin | Qualified from version-pinned schema and sanitized fixtures | Manual applied completion and root usage observed; automatic/omitted/failure behavior qualified from the pinned schema |
 | Missing outcome or attempt ID | No increment | Partial when a potentially lost root completion is recognized; no checkpoint fallback |
 | Old retained agentctl or incompatible durable path | Native count unavailable, total retained | No compulsory process replacement or unsafe counting fallback |
 | New agentctl with old backend | Subscription off when opt-in absent | Existing behavior preserved |
@@ -193,12 +193,12 @@ Backend paths are relative to `apps/backend/`.
 
 | Criteria | Test and boundary |
 | --- | --- |
-| Native 001.1, 004.7 | SDK `TestClientAllowedExtensionNotifications` and Kandev `TestCopilotNativeTransportDispatch`: exact raw method accepted only when opted in; defaults and other providers unchanged |
+| Native 001.1, 004.7 | Kandev `internal/agentctl/server/acp` `TestClientAllowedExtensionNotifications` and adapter `TestCopilotNativeCapabilitySubscription`: exact raw method accepted only when opted in; defaults and other providers unchanged |
 | Native 001.2-.6 | `internal/agentctl/server/adapter/transport/acp/copilot_native_compaction_test.go`: `TestCopilotNativeCompletionAcceptance`; root/child, completion without start, omitted/null/unknown fields, failure/non-applied outcomes |
-| Native 001.4, 002.4 | Same package `TestCopilotNativeSessionBinding`: deterministic creation/load/reset queue barriers, stale events, shutdown, no rebinding to a successor |
+| Native 001.4, 002.4 | Same package `TestCopilotNativeSessionBindingBuffersUntilBound`, `TestCopilotNativeBindingBuffersAcrossNewSessionReplacement`, and `TestCopilotNativeBindingBarrierDrainsBeforeNewerWork`: deterministic creation/load/reset queue barriers, stale events, shutdown, no rebinding to a successor |
 | Native 003.1-.4 | `TestCopilotNativeRootUsage`: alternating parent/child data, raw usage after native usage, accounting and root-gauge independence |
-| Native 002.1-.5 | `internal/task/repository/sqlite/session_compactions_test.go`: `TestSessionCompactionsAtomicProjection`; rollback, duplicate/cross-stream/native IDs, legacy total, concurrent context writes, deletion, reopen |
-| Native 002.1-.5 | `session_compactions_postgres_test.go`: `TestPostgresSessionCompactionsAtomicProjection`; real multi-connection parity and lock order |
+| Native 002.1-.8 | `internal/task/repository/sqlite/session_compactions_test.go`: `TestSessionCompactionsAtomicProjection`; rollback, duplicate/cross-stream/native IDs, legacy total, concurrent context writes, deletion, reopen |
+| Native 002.1-.8 | `session_compactions_postgres_test.go`: `TestPostgresSessionCompactionsAtomicProjection`; real multi-connection parity and lock order (blocked until a DSN runs it) |
 | Native 002.3-.4 | `internal/agent/runtime/lifecycle/copilot_compaction_recovery_test.go`: `TestCopilotCompactionProjectionOnlyRecovery`; journal replay with callbacks suppressed, rebind history, metadata hydration |
 | Native 004.1-.7, shared UI | Parser/WS/hook/component tests for reporting defaults, count-only updates, historical totals, partial/unavailable status, translated info |
 | Native 004.6, standard ACP 002.8 | Existing standard compaction tests plus Copilot timeline fixtures; one row per identity, no generic timeline counter increment |
@@ -225,7 +225,7 @@ Do not use `__KANDEV_E2E_STORE__` count injection as proof of this feature's wir
 
 - [x] [Task 01: Qualify the protocol and narrow SDK dispatch](task-01-qualify-native-transport.md)
 - [x] [Task 02: Normalize native events and root usage](task-02-normalize-native-events.md)
-- [x] [Task 03: Persist deduplicated count projection](task-03-project-durable-counts.md)
+- [ ] [Task 03: Persist deduplicated count projection](task-03-project-durable-counts.md) (blocked on PostgreSQL parity evidence)
 - [x] [Task 04: Expose coverage and prove real desktop/mobile flows](task-04-report-coverage-and-e2e.md)
 
 Dependency order was 01 -> 02 -> 03 -> 04. Work was sequential.
@@ -245,7 +245,7 @@ Implementation completed on branch `feature/copilot-native-compaction-count`:
 - Tests: focused Go packages, 124 component/unit tests, i18n check and ratchet, typecheck, focused Oxlint, and desktop/mobile Playwright suites pass. The PostgreSQL regression test is present and skipped without `KANDEV_TEST_POSTGRES_DSN`.
 - E2E: desktop passed 6 tests (`copilot-native-compaction.spec.ts` 2, `context-window-source.spec.ts` 3, `context-compaction.spec.ts` 1). Phone passed 5 tests (`mobile-copilot-native-compaction.spec.ts` 1, `mobile-context-window-source.spec.ts` 3, `mobile-context-compaction.spec.ts` 1).
 
-Review remediation (nine findings) is included: retained predecessor identity after rebind, native-gauge/accounting separation, explicit clear with retained totals, capability-gated launch opt-in, runtime-version qualification, sticky partial for unusable evidence and binding overflow, atomic binding/drain ordering, historical availability isolation with downgrade, and monotonic session-metadata/hydration merges. Focused regressions cover each schedule.
+Review remediation is included: retained predecessor identity after rebind, native-gauge/accounting separation, explicit clear with retained totals, capability-gated launch opt-in, runtime-version qualification, sticky partial for unusable evidence and binding overflow, atomic binding/drain ordering, historical availability isolation with downgrade, monotonic session-metadata/hydration merges, atomic vendor-subscription state, executor-wide opt-in propagation, advisory-lock ordering before session metadata reads, native-identity current-availability checks, later compaction metadata in batch notifications, and authoritative session timestamps. Focused regressions cover each schedule.
 
 Limitations: no live Copilot account call was available here. Automatic-compaction execution is qualified from the pinned 1.0.103 schema and the shared completion rule, not a live automatic capture. No PostgreSQL execution was available. Historical inflated totals remain unchanged.
 
@@ -286,8 +286,8 @@ Keep the completed prior package's statuses and verification history unchanged.
 
 ## Risks and open evidence
 
-- CLI support floor and automatic producer behavior remain unqualified. Task 01 must record source/version evidence before enabling the path.
-- The SDK change must be merged/published before importing an immutable version; its final SHA is intentionally not specified yet.
+- CLI support floor is 1.0.103 (the pinned runtime); automatic producer behavior is qualified from the pinned schema only, with no live automatic capture. Record any live evidence when available.
+- The SDK change is merged and pinned at `ec6d622b199996ceb8f44544129f7895d88e7f38` (`v0.13.6-0.20261106000654-ec6d622b1999`); confirm its published state before release.
 - Optional fields cannot be assumed present on older/newer versions. Unknown forms fail closed with honest coverage.
 - Provider drops occur before Kandev's journal, so durable downstream replay cannot restore them.
 - Historical totals can already be inflated. The new ledger prevents future duplicate events but does not repair past estimates.

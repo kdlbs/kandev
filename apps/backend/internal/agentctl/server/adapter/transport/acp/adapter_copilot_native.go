@@ -14,7 +14,7 @@ const copilotPendingNativeLimit = 64
 // adapter FIFO. It runs on the SDK receive goroutine, so it must never block on
 // normalization, locks, or downstream delivery.
 func (a *Adapter) enqueueCopilotNativeNotification(method string, params json.RawMessage) {
-	if !a.copilotNativeActive || a.agentID != copilotAgentID {
+	if !a.copilotNativeActive.Load() || a.agentID != copilotAgentID {
 		return
 	}
 	decoded, ok := decodeCopilotNativeEvent(method, params)
@@ -33,7 +33,7 @@ func (a *Adapter) enqueueCopilotNativeNotification(method string, params json.Ra
 // before the native conversation binding is established are retained in a
 // bounded FIFO and drained at the binding barrier.
 func (a *Adapter) handleCopilotNativeWork(event decodedCopilotNativeEvent) {
-	if !a.copilotNativeActive {
+	if !a.copilotNativeActive.Load() {
 		return
 	}
 	a.mu.Lock()
@@ -76,10 +76,15 @@ func (a *Adapter) flushPendingCopilotNative() {
 	a.mu.Unlock()
 	if isLoading {
 		a.mu.Lock()
-		a.pendingCopilotNative = append(pending, a.pendingCopilotNative...)
-		if len(a.pendingCopilotNative) > copilotPendingNativeLimit {
-			a.pendingCopilotNative = a.pendingCopilotNative[:copilotPendingNativeLimit]
+		// A new load has started; retain the older events ahead of anything
+		// buffered since and preserve both overflow and truncation evidence.
+		a.pendingCopilotNativeDropped = a.pendingCopilotNativeDropped || dropped
+		pending = append(pending, a.pendingCopilotNative...)
+		if len(pending) > copilotPendingNativeLimit {
+			pending = pending[:copilotPendingNativeLimit]
+			a.pendingCopilotNativeDropped = true
 		}
+		a.pendingCopilotNative = pending
 		a.mu.Unlock()
 		return
 	}
@@ -90,8 +95,8 @@ func (a *Adapter) flushPendingCopilotNative() {
 		a.applyCopilotNativeEvent(event)
 	}
 	if dropped && activeSession != "" {
-		a.emitCopilotNativeReporting(activeSession, "", streams.ContextCompactionCoveragePartial,
-			"binding_buffer_overflow")
+		a.emitCopilotNativeReporting(activeSession, streams.ContextCompactionAvailabilityAvailable,
+			streams.ContextCompactionCoveragePartial, "binding_buffer_overflow")
 	}
 }
 
@@ -186,7 +191,7 @@ func (a *Adapter) emitCopilotNativeReporting(
 	if !a.copilotNativeSessionEvents || sessionID == "" {
 		return
 	}
-	if availability == streams.ContextCompactionAvailabilityAvailable && !a.copilotNativeActive {
+	if availability == streams.ContextCompactionAvailabilityAvailable && !a.copilotNativeActive.Load() {
 		availability = streams.ContextCompactionAvailabilityUnavailable
 		coverage = streams.ContextCompactionCoveragePartial
 		reason = "runtime_unqualified"
@@ -203,6 +208,13 @@ func (a *Adapter) emitCopilotNativeReporting(
 			Reason:          reason,
 		},
 	})
+}
+
+// CopilotNativeSessionEventsActive reports whether this adapter actually
+// subscribed to the vendor stream for its qualified runtime. Recovery uses it
+// instead of the launch request alone: an older peer ignored the opt-in.
+func (a *Adapter) CopilotNativeSessionEventsActive() bool {
+	return a != nil && a.copilotNativeActive.Load()
 }
 
 // recordNativeGaugeMaxSize keeps the native token-limit baseline independent of

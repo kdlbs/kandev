@@ -35,9 +35,9 @@ func (m *Manager) applyCopilotNativeLaunchCapability(
 // canonicalDeliveryProjectorAvailable reports whether the backend repository
 // can commit native receipts and counts inside canonical projection.
 func (m *Manager) canonicalDeliveryProjectorAvailable() bool {
-	if m == nil || m.streamManager == nil || m.streamManager.delivery == nil {
+	if m == nil || m.streamManager == nil {
 		return false
 	}
-	_, ok := m.streamManager.delivery.(canonicalAgentDeliveryProjector)
+	_, ok := m.streamManager.deliveryRepository().(canonicalAgentDeliveryProjector)
 	return ok
 }

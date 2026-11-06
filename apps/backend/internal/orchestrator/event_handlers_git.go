@@ -764,16 +764,25 @@ func (s *Service) persistAndPublishContextWindowUpdate(
 	if !persisted || err != nil || s.eventBus == nil {
 		return persisted, err
 	}
+	if !s.contextWindowGenerationCurrent(sessionID, generation) {
+		return false, nil
+	}
+	session, readErr := s.repo.GetTaskSession(ctx, sessionID)
+	if readErr != nil || session == nil {
+		s.logger.Warn("cannot publish context window metadata without the authoritative session",
+			zap.String("session_id", sessionID),
+			zap.Error(readErr))
+		return true, readErr
+	}
 	metadata := map[string]interface{}{
 		contextWindowMetadataKey:                    contextWindowData,
 		models.SessionMetaKeyContextCompactionCount: count,
 	}
-	if session, readErr := s.repo.GetTaskSession(ctx, sessionID); readErr == nil && session != nil {
-		if reporting, ok := session.Metadata[models.SessionMetaKeyContextCompactionReporting]; ok {
-			metadata[models.SessionMetaKeyContextCompactionReporting] = reporting
-		}
+	if reporting, ok := session.Metadata[models.SessionMetaKeyContextCompactionReporting]; ok {
+		metadata[models.SessionMetaKeyContextCompactionReporting] = reporting
 	}
-	if nativeCountingUnavailable {
+	if nativeCountingUnavailable &&
+		!compactionReportingUnavailablePartial(compactionReportingFromMetadata(session.Metadata)) {
 		if setter, ok := s.repo.(compactionAvailabilitySetter); ok {
 			reporting, reportErr := setter.SetSessionCompactionAvailability(
 				ctx, sessionID,
@@ -789,14 +798,18 @@ func (s *Service) persistAndPublishContextWindowUpdate(
 			}
 		}
 	}
+	eventData := map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"metadata":   metadata,
+	}
+	if !session.UpdatedAt.IsZero() {
+		eventData["updated_at"] = session.UpdatedAt.Format(time.RFC3339Nano)
+	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 		events.TaskSessionStateChanged,
 		"orchestrator",
-		map[string]interface{}{
-			"task_id":    taskID,
-			"session_id": sessionID,
-			"metadata":   metadata,
-		},
+		eventData,
 	))
 	return true, nil
 }

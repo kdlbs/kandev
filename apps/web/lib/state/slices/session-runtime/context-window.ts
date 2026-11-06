@@ -169,7 +169,12 @@ export function reconcileContextWindowMetadata(
 ): ContextWindowEntry | null | undefined {
   const { current, gauge, hasGauge, count, reporting, timestamp, allowExplicitClear } = input;
   if (hasGauge && gauge === null) {
-    if (!allowExplicitClear) return undefined;
+    if (!allowExplicitClear) {
+      // Hydration must not clear a live gauge, but a newer retained count still
+      // has to reach the cache so the next gauge inherits it.
+      if (!current || !metadataIsNewer(current, count, reporting)) return undefined;
+      return patchContextWindowCompaction(current, count, reporting, timestamp);
+    }
     if (!current) return null;
     const cleared = clearContextWindowGauge(current);
     if (!cleared) return null;
@@ -187,7 +192,10 @@ export function reconcileContextWindowMetadata(
   if (!current) {
     return parseContextWindowEntry(gauge, timestamp, count, reporting);
   }
-  if (!metadataIsNewer(current, count, reporting)) return undefined;
+  // Every non-null gauge sample is a live reading. Normal token growth changes
+  // neither the count nor the reporting revision, so freshness checks belong
+  // only to count-only metadata updates. mergeContextWindowEntry keeps the
+  // lifetime count and reporting metadata monotonic.
   const parsed = parseContextWindowEntry(gauge, timestamp, count, reporting);
   if (!parsed) return undefined;
   return mergeContextWindowEntry(current, parsed);

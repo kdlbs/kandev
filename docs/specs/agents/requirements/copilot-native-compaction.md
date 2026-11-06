@@ -55,7 +55,10 @@ Reset Context creates a fresh native conversation and does not itself increment 
 - **AC-AGENTS-COPILOT-NATIVE-COMPACTION-002.2:** Accepted identity, count mutation, and durable event projection shall commit together or leave all three unchanged.
 - **AC-AGENTS-COPILOT-NATIVE-COMPACTION-002.3:** Backend restart, journal replay, and recovery without lifecycle callbacks shall preserve accepted counts and deduplication. Late client updates shall not lower a newer count.
 - **AC-AGENTS-COPILOT-NATIVE-COMPACTION-002.4:** Native replacement shall reject newly arriving stale observations. Previously journaled evidence shall retain its original owner and count once without changing replacement context usage.
-- **AC-AGENTS-COPILOT-NATIVE-COMPACTION-002.5:** Prior lifetime totals shall remain intact. Context reset, model change, task transfer, receipt retirement, and history compaction shall not erase deduplication or add a compaction.
+- **AC-AGENTS-COPILOT-NATIVE-COMPACTION-002.5:** Prior lifetime totals shall remain intact and readable.
+- **AC-AGENTS-COPILOT-NATIVE-COMPACTION-002.6:** Context reset and model change shall preserve deduplication receipts and shall not add a compaction.
+- **AC-AGENTS-COPILOT-NATIVE-COMPACTION-002.7:** Task transfer and receipt retirement shall preserve deduplication receipts and shall not add a compaction.
+- **AC-AGENTS-COPILOT-NATIVE-COMPACTION-002.8:** History compaction shall preserve deduplication receipts and shall not add a compaction.
 
 ### REQ-AGENTS-COPILOT-NATIVE-COMPACTION-003: Root context gauge and independent accounting
 

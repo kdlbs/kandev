@@ -835,6 +835,11 @@ type ExecutorInstance struct {
 	// "provider session identity" row). Same recovery-only shape as Env above.
 	ProviderSessionID string
 
+	// CopilotNativeSessionEvents reports the adopted instance's actual vendor
+	// subscription state. Recovery must not infer it from the launch request:
+	// an older peer may have ignored the opt-in.
+	CopilotNativeSessionEvents bool
+
 	// DeliveryStatus is the authenticated recovery descriptor captured from the
 	// surviving instance before lifecycle re-tracking. It is nil for legacy
 	// runtimes and isolated recovery callers that do not advertise the durable

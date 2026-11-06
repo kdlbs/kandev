@@ -6,6 +6,7 @@ import {
   mergeContextWindowEntry,
   parseContextWindowEntry,
   patchContextWindowCompaction,
+  reconcileContextWindowMetadata,
 } from "./context-window";
 
 describe("parseContextWindowEntry", () => {
@@ -207,5 +208,66 @@ describe("compaction freshness helpers", () => {
         compactionReporting: expect.objectContaining({ revision: 2 }),
       }),
     );
+  });
+});
+
+describe("reconcileContextWindowMetadata", () => {
+  const entry = {
+    size: 272_000,
+    used: 9_000,
+    remaining: 263_000,
+    efficiency: 3,
+    compactionCount: 3,
+    compactionReporting: {
+      source: "copilot_native" as const,
+      availability: "available" as const,
+      coverage: "observed" as const,
+      revision: 4,
+    },
+  };
+
+  it("applies every live gauge even when count and revision are unchanged", () => {
+    const next = reconcileContextWindowMetadata({
+      current: entry,
+      gauge: { size: 272_000, used: 12_000, remaining: 260_000, efficiency: 4, source: "acp" },
+      hasGauge: true,
+      count: 3,
+      reporting: entry.compactionReporting,
+      timestamp: "live",
+      allowExplicitClear: true,
+    });
+    expect(next).toEqual(
+      expect.objectContaining({ used: 12_000, efficiency: 4, source: "acp", timestamp: "live" }),
+    );
+    expect(next?.compactionCount).toBe(3);
+  });
+
+  it("allows a newer count-only patch from a retained null gauge during hydration", () => {
+    const next = reconcileContextWindowMetadata({
+      current: entry,
+      gauge: null,
+      hasGauge: true,
+      count: 4,
+      reporting: entry.compactionReporting,
+      timestamp: undefined,
+      allowExplicitClear: false,
+    });
+    expect(next).toEqual(
+      expect.objectContaining({ used: 9_000, compactionCount: 4, timestamp: undefined }),
+    );
+  });
+
+  it("still ignores an older retained null gauge", () => {
+    expect(
+      reconcileContextWindowMetadata({
+        current: entry,
+        gauge: null,
+        hasGauge: true,
+        count: 2,
+        reporting: { ...entry.compactionReporting, revision: 1 },
+        timestamp: undefined,
+        allowExplicitClear: false,
+      }),
+    ).toBeUndefined();
   });
 });

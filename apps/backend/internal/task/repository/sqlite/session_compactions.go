@@ -69,6 +69,9 @@ func (r *Repository) projectContextCompactionObservationTx(
 		}
 		return nil, nil, err
 	}
+	if err := lockSessionCompactionWrites(ctx, tx, r.db.DriverName(), stored.SessionID); err != nil {
+		return nil, nil, err
+	}
 	if _, err := lockTaskSessionRow(ctx, tx, stored.SessionID); err != nil {
 		return nil, nil, err
 	}
@@ -76,7 +79,7 @@ func (r *Repository) projectContextCompactionObservationTx(
 	if err != nil {
 		return nil, nil, err
 	}
-	currentGeneration, err := r.isCurrentCompactionGenerationTx(ctx, tx, stored)
+	currentGeneration, err := r.isCurrentCompactionGenerationTx(ctx, tx, stored, observation.NativeSessionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -128,25 +131,43 @@ func (r *Repository) applyCompactionObservationTx(
 var errCompactionNativeIdentity = errors.New("compaction observation does not match the retained native conversation")
 
 // isCurrentCompactionGenerationTx reports whether the durable event belongs to
-// the latest authenticated generation for its session. Historical replay may
-// add its retained increment, but it cannot change current availability.
+// the latest authenticated generation and the native conversation currently
+// bound to it. Historical replay may add its retained increment, but it cannot
+// change current availability. An in-place A -> B rebind keeps the generation
+// number, so generation alone would let A's evidence mark B available.
 func (r *Repository) isCurrentCompactionGenerationTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	stored models.AgentDeliveryEvent,
+	nativeSessionID string,
 ) (bool, error) {
 	var latest int64
+	var bound string
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT generation FROM harness_session_generations
+		SELECT generation, native_session_id FROM harness_session_generations
 		WHERE session_id = ? AND incarnation_id = ?
-		ORDER BY generation DESC LIMIT 1`), stored.SessionID, stored.IncarnationID).Scan(&latest)
+		ORDER BY generation DESC LIMIT 1`), stored.SessionID, stored.IncarnationID).Scan(&latest, &bound)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return latest == stored.HarnessGeneration, nil
+	return latest == stored.HarnessGeneration && bound == nativeSessionID, nil
+}
+
+// lockSessionCompactionWrites acquires the repository's transaction-scoped
+// session advisory lock before reading or rewriting compaction metadata on
+// PostgreSQL. SQLite's single writer already serializes the same section.
+func lockSessionCompactionWrites(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	driverName, sessionID string,
+) error {
+	if !dialect.IsPostgres(driverName) {
+		return nil
+	}
+	return lockAgentDeliveryKey(ctx, tx, agentDeliverySessionLockNamespace+sessionID)
 }
 
 func (r *Repository) validateCompactionNativeIdentityTx(
@@ -372,6 +393,9 @@ func (r *Repository) SetSessionCompactionAvailability(
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionCompactionWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return nil, err
+	}
 	if _, err := lockTaskSessionRow(ctx, tx, sessionID); err != nil {
 		return nil, err
 	}

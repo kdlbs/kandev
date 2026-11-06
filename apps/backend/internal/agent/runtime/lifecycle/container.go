@@ -148,6 +148,7 @@ func buildContainerCreateInstanceRequest(
 		AssumeMcpHttp:              assumeMcpHttp,
 		McpMode:                    config.McpMode,
 		PromptSuggestions:          config.PromptSuggestions,
+		CopilotNativeSessionEvents: copilotNativeSessionEventsForLaunch(agentType, config.DeliveryStreamID),
 		McpProviders:               config.McpProviders,
 		McpProfile:                 config.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),

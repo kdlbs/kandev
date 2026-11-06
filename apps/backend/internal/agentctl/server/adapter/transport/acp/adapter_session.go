@@ -151,7 +151,6 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	priorSessionID := a.sessionID
 	a.pendingCopilotNative = nil
 	a.pendingCopilotNativeDropped = false
-	a.bindingCopilotNative = a.copilotNativeSessionEvents
 	a.mu.Unlock()
 
 	if conn == nil {
@@ -196,6 +195,11 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	a.mu.Lock()
+	// Publish the binding barrier only once every pre-RPC return has been
+	// cleared, so a failed preparation cannot strand the previous session.
+	a.bindingCopilotNative = a.copilotNativeSessionEvents
+	a.mu.Unlock()
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        a.cfg.WorkDir,
 		McpServers: toACPMcpServers(filteredServers),

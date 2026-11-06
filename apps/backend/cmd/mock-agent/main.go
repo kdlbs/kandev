@@ -148,8 +148,11 @@ func (a *mockAgent) Initialize(_ context.Context, req acp.InitializeRequest) (ac
 		return acp.InitializeResponse{}, errors.New("mock ACP initialization failed by E2E fixture")
 	}
 	agentInfo := mockClaudeBridgeAgentInfo()
+	var meta map[string]any
 	if copilotNativeFixtureEnabled() {
 		agentInfo = &acp.Implementation{Name: "GitHub Copilot CLI", Version: "1.0.103"}
+	} else {
+		meta = mockClaudeCodeMeta()
 	}
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
@@ -163,7 +166,7 @@ func (a *mockAgent) Initialize(_ context.Context, req acp.InitializeRequest) (ac
 			SessionCapabilities: acp.SessionCapabilities{
 				Close: &acp.SessionCloseCapabilities{},
 			},
-			Meta: mockClaudeCodeMeta(),
+			Meta: meta,
 		},
 	}, nil
 }

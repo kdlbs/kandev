@@ -33,11 +33,11 @@ test.describe("Copilot native compaction on phone", () => {
         "Partial",
       );
 
-      const widths = await usage.evaluate((element) => ({
-        scroll: element.scrollWidth,
-        client: element.clientWidth,
-      }));
-      expect(widths.scroll).toBeLessThanOrEqual(widths.client + 1);
+      const hasHorizontalOverflow = await testPage.evaluate(() => {
+        const root = document.scrollingElement ?? document.documentElement;
+        return root.scrollWidth > root.clientWidth + 1;
+      });
+      expect(hasHorizontalOverflow).toBe(false);
 
       const helpButton = usage
         .locator('button[aria-label="About inferred compaction count"]')

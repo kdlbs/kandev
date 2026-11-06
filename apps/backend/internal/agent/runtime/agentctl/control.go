@@ -165,6 +165,10 @@ type InstanceInfo struct {
 	// back from the adopted instance (AC-EXECUTORS-SURVIVAL-002.14's
 	// "provider session identity" reconstruction row).
 	ProviderSessionID string `json:"provider_session_id,omitempty"`
+	// CopilotNativeSessionEvents reports whether the adopted adapter actually
+	// subscribed to the vendor's native session-event stream. Older peers omit
+	// it, which remains a truthful "not subscribed".
+	CopilotNativeSessionEvents bool `json:"copilot_native_session_events,omitempty"`
 }
 
 // ControlClientOption configures optional ControlClient settings.

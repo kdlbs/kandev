@@ -118,26 +118,46 @@ func TestPostgresSessionCompactionsConcurrent(t *testing.T) {
 	require.NoError(t, err)
 	seedPostgresCompactionSession(t, repo)
 
+	type concurrentWrite struct {
+		sample  map[string]interface{}
+		event   *models.AgentDeliveryEvent
+		effects []*models.AgentDeliveryEffect
+	}
+	writes := make([]concurrentWrite, 6)
+	for i := range writes {
+		event := postgresCompactionEvent(t, fmt.Sprintf("stream-native-pg-concurrent-%d", i), 1,
+			"native-pg", fmt.Sprintf("attempt-concurrent-%d", i))
+		writes[i] = concurrentWrite{
+			sample:  contextWindowSample(int64(100000-i*1000), true),
+			event:   event,
+			effects: combinedDeliveryBatchEffects([]*models.AgentDeliveryEvent{event}),
+		}
+	}
+
 	var wg sync.WaitGroup
-	for i := 0; i < 6; i++ {
+	errs := make(chan error, len(writes)*2)
+	for i := range writes {
+		w := writes[i]
 		wg.Add(2)
-		go func(index int) {
+		go func() {
 			defer wg.Done()
-			_, err := repo.UpdateSessionContextWindow(context.Background(), "session-native-compactions-pg",
-				contextWindowSample(int64(100000-index*1000), true))
-			require.NoError(t, err)
-		}(i)
-		go func(index int) {
+			if _, err := repo.UpdateSessionContextWindow(context.Background(), "session-native-compactions-pg", w.sample); err != nil {
+				errs <- err
+			}
+		}()
+		go func() {
 			defer wg.Done()
-			streamID := fmt.Sprintf("stream-native-pg-concurrent-%d", index)
-			event := postgresCompactionEvent(t, streamID, 1, "native-pg", fmt.Sprintf("attempt-concurrent-%d", index))
-			effects := combinedDeliveryBatchEffects([]*models.AgentDeliveryEvent{event})
-			_, err := repo.ReceiveAndProjectCanonicalAgentDeliveryEvents(
-				context.Background(), []*models.AgentDeliveryEvent{event}, effects, 0)
-			require.NoError(t, err)
-		}(i)
+			if _, err := repo.ReceiveAndProjectCanonicalAgentDeliveryEvents(
+				context.Background(), []*models.AgentDeliveryEvent{w.event}, w.effects, 0); err != nil {
+				errs <- err
+			}
+		}()
 	}
 	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
 
 	session, err := repo.GetTaskSession(context.Background(), "session-native-compactions-pg")
 	require.NoError(t, err)

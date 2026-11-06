@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/acp-go-sdk"
@@ -126,8 +127,9 @@ type Adapter struct {
 	copilotNativeSessionEvents bool
 	// copilotNativeActive requires both the launch opt-in and a qualified
 	// Copilot runtime contract. An unqualified runtime keeps the legacy gauge
-	// and reports native collection unavailable.
-	copilotNativeActive bool
+	// and reports native collection unavailable. It is written during
+	// Initialize while SDK notifications may already arrive, so it is atomic.
+	copilotNativeActive atomic.Bool
 
 	// pendingCopilotNative buffers bounded vendor events that arrive while the
 	// native conversation is being created, loaded, or replaced. It is drained
@@ -703,8 +705,8 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		a.agentInfo.Version = resp.AgentInfo.Version
 	}
 	a.capabilities = resp.AgentCapabilities
-	a.copilotNativeActive = a.copilotNativeSessionEvents && a.agentInfo != nil &&
-		copilotRuntimeQualified(a.agentInfo.Version)
+	a.copilotNativeActive.Store(a.copilotNativeSessionEvents && a.agentInfo != nil &&
+		copilotRuntimeQualified(a.agentInfo.Version))
 	promptQueueing := agentAdvertisesPromptQueueing(resp.AgentCapabilities)
 	promptSuggestionSupport, suggestionEvidence := claudePromptSuggestionSupport(
 		a.agentInfo.Name, a.agentInfo.Version, resp.AgentCapabilities,

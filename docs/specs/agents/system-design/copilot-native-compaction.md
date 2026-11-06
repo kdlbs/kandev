@@ -38,7 +38,7 @@ Two child calls produced no compaction. Manual `/compact` produced one successfu
 Root native usage omitted `params.agentId`; child usage supplied it.
 A later `session/load` did not replay native compaction notifications.
 
-The [native schema](https://github.com/github/copilot-sdk/blob/main/nodejs/src/generated/session-events.ts) supports optional attempt identity and outcome fields.
+The [native schema](https://github.com/github/copilot-sdk/blob/f2b720c8ec368e035a4d5c72b012fd41b0d533e4/nodejs/src/generated/session-events.ts) at the CLI 1.0.103 snapshot supports optional attempt identity and outcome fields.
 The [event reference](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/streaming-events) documents root/child attribution and separate usage observations.
 Neither source proves ACP passthrough compatibility for every CLI version.
 

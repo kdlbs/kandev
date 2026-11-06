@@ -1,7 +1,7 @@
 ---
 id: "03-project-durable-counts"
 title: "Project deduplicated native counts atomically"
-status: done
+status: blocked
 wave: 3
 depends_on:
   - "02-normalize-native-events"
@@ -16,6 +16,9 @@ acceptance_criteria:
   - AC-AGENTS-COPILOT-NATIVE-COMPACTION-002.3
   - AC-AGENTS-COPILOT-NATIVE-COMPACTION-002.4
   - AC-AGENTS-COPILOT-NATIVE-COMPACTION-002.5
+  - AC-AGENTS-COPILOT-NATIVE-COMPACTION-002.6
+  - AC-AGENTS-COPILOT-NATIVE-COMPACTION-002.7
+  - AC-AGENTS-COPILOT-NATIVE-COMPACTION-002.8
   - AC-AGENTS-COPILOT-NATIVE-COMPACTION-004.2
   - AC-AGENTS-COPILOT-NATIVE-COMPACTION-004.3
   - AC-AGENTS-COPILOT-NATIVE-COMPACTION-004.7
@@ -113,7 +116,7 @@ Deleting receipts with timeline/transport history would re-enable duplicate incr
 
 ## Results
 
-Done.
+Blocked on PostgreSQL parity evidence.
 
 - `task_session_compactions` is created after session/continuity schema with the unique key `(session_id, provider, native_session_id, compaction_attempt_id)` and cascades with the owning session.
 - One transaction helper is shared by single, batch, and combined canonical projection. It validates the authenticated harness generation or rebind history, locks the session row on PostgreSQL, inserts the receipt with conflict-do-nothing, and increments only on insertion.
@@ -125,4 +128,4 @@ Done.
 
 Review remediation added: journaled predecessor completions project once after an in-place native rebind; historical-generation replay can add its retained count without changing current availability; a current-runtime unavailable verdict can downgrade a previously available reporting revision while preserving the lifetime total. Focused rebind, historical-availability, and downgrade regressions pass.
 
-Limitations: no PostgreSQL execution was available here, so dialect parity is not claimed as executed evidence. Receipts are intentionally retained until session deletion.
+Limitations: no PostgreSQL execution was available here, so dialect parity is not claimed as executed evidence. The work order stays blocked until both PostgreSQL tests run against `KANDEV_TEST_POSTGRES_DSN`. Receipts are intentionally retained until session deletion.

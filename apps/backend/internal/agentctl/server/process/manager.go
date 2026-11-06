@@ -2956,6 +2956,19 @@ func (m *Manager) GetSessionID() string {
 	return ""
 }
 
+// CopilotNativeSessionEventsActive reports the live adapter's actual vendor
+// subscription state. An older adapter omits the optional method.
+func (m *Manager) CopilotNativeSessionEventsActive() bool {
+	m.mu.RLock()
+	a := m.adapter
+	m.mu.RUnlock()
+	if a == nil {
+		return false
+	}
+	reporter, ok := a.(interface{ CopilotNativeSessionEventsActive() bool })
+	return ok && reporter.CopilotNativeSessionEventsActive()
+}
+
 // Stop stops the agent process
 func (m *Manager) Stop(ctx context.Context) error {
 	return m.stop(ctx)

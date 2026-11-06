@@ -59,10 +59,15 @@ func (o *ContextCompactionObservation) ValidReporting() bool {
 	if o == nil || o.Kind != ContextCompactionObservationKindReporting || o.Provider == "" {
 		return false
 	}
-	return o.Availability == ContextCompactionAvailabilityAvailable ||
-		o.Availability == ContextCompactionAvailabilityUnavailable ||
-		o.Coverage == ContextCompactionCoverageObserved ||
-		o.Coverage == ContextCompactionCoveragePartial
+	if o.Availability != "" && o.Availability != ContextCompactionAvailabilityAvailable &&
+		o.Availability != ContextCompactionAvailabilityUnavailable {
+		return false
+	}
+	if o.Coverage != "" && o.Coverage != ContextCompactionCoverageObserved &&
+		o.Coverage != ContextCompactionCoveragePartial {
+		return false
+	}
+	return o.Availability != "" || o.Coverage != ""
 }
 
 // ContextCompactionReporting is the persisted reporting state surfaced next to

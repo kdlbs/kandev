@@ -207,7 +207,7 @@ func (a *Adapter) handleACPUpdate(
 	var claudeResumeUpdate *AgentEvent
 	if !suppressed {
 		event = a.convertNotificationForGeneration(n, promptGeneration)
-		if a.copilotNativeActive && n.Update.UsageUpdate != nil &&
+		if a.copilotNativeActive.Load() && n.Update.UsageUpdate != nil &&
 			event != nil && event.Type == streams.EventTypeContextWindow {
 			// The native usage_info stream owns the Copilot gauge. The ordinary
 			// mixed stream already updated accounting above; it must not emit a
