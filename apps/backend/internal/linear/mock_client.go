@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 )
 
@@ -161,7 +162,7 @@ func (m *MockClient) ListTeams(context.Context) ([]LinearTeam, error) {
 	return out, nil
 }
 
-func (m *MockClient) SearchIssues(_ context.Context, _ SearchFilter, _ string, maxResults int) (*SearchResult, error) {
+func (m *MockClient) SearchIssues(_ context.Context, filter SearchFilter, _ string, maxResults int) (*SearchResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]LinearIssue, 0, len(m.issueOrder))
@@ -170,7 +171,16 @@ func (m *MockClient) SearchIssues(_ context.Context, _ SearchFilter, _ string, m
 		if !ok {
 			continue
 		}
-		out = append(out, *issue)
+		if len(filter.IssueIDs) > 0 && !slices.Contains(filter.IssueIDs, issue.ID) {
+			continue
+		}
+		found := *issue
+		if !filter.RequireBlockersDone {
+			// Like the GraphQL client, only a blocker-aware search reads relations.
+			found.Blockers = nil
+			found.BlockersTruncated = false
+		}
+		out = append(out, found)
 		if maxResults > 0 && len(out) >= maxResults {
 			break
 		}

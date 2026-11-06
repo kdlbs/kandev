@@ -132,6 +132,8 @@
   "query": "Query",
   "queryHelp": "Free-text match across title and description (optional).",
   "queryPlaceholder": "auth bug",
+  "requireBlockersDone": "Only start issues whose blockers are done",
+  "requireBlockersDoneHelp": "Holds each matched issue until every Linear issue blocking it is completed. A canceled blocker still holds it.",
   "reEnableItInSettings": "Re-enable it in settings",
   "refresh": "Refresh",
   "removeConfiguration": "Remove configuration",

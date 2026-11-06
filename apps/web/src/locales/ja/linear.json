@@ -132,6 +132,8 @@
   "query": "クエリ",
   "queryHelp": "タイトルと説明をまたぐ自由文一致。任意。",
   "queryPlaceholder": "認証のバグ",
+  "requireBlockersDone": "ブロッカーが完了した課題のみ開始",
+  "requireBlockersDoneHelp": "一致した課題は、それをブロックする Linear 課題がすべて完了するまで待機します。キャンセルされたブロッカーがある場合も待機します。",
   "reEnableItInSettings": "設定で再有効化",
   "refresh": "更新",
   "removeConfiguration": "設定を削除",

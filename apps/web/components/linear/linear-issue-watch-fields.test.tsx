@@ -54,6 +54,10 @@ function WatchFilters({ initial }: { initial: Partial<FormState> }) {
   );
 }
 
+function readFilterState() {
+  return JSON.parse(screen.getByTestId("filter-state").textContent!);
+}
+
 describe("watch dialog filter fields", () => {
   // @covers AC-INTEGRATIONS-LINEAR-PROJECTS-001.3
   it("keeps project-only saved selections visible and removable without a team", async () => {
@@ -71,14 +75,14 @@ describe("watch dialog filter fields", () => {
     const chip = screen.getByTitle(archivedProjectId);
     expect(chip.getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(chip);
-    expect(JSON.parse(screen.getByTestId("filter-state").textContent!)).toMatchObject({
+    expect(readFilterState()).toMatchObject({
       teamKey: "",
       projectIds: ["p-other"],
       query: "keep query",
       priorities: [1],
     });
     fireEvent.click(screen.getByTitle("p-other"));
-    expect(JSON.parse(screen.getByTestId("filter-state").textContent!).projectIds).toEqual([]);
+    expect(readFilterState().projectIds).toEqual([]);
     expect(screen.queryByTestId("linear-watch-projects")).toBeNull();
     expect(api.listLinearProjects).not.toHaveBeenCalled();
   });
@@ -107,6 +111,27 @@ describe("watch dialog filter fields", () => {
       "false",
     );
     expect(api.listLinearProjects).toHaveBeenCalledWith("ENG", { workspaceId: "ws-a" });
+  });
+});
+
+describe("require blockers done toggle", () => {
+  // @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-002.1
+  it("toggles the setting without touching the other filters", async () => {
+    render(<WatchFilters initial={{ teamKey: "ENG", projectIds: ["p1"], query: "q" }} />);
+    await waitFor(() => expect(api.listLinearTeams).toHaveBeenCalled());
+    const toggle = screen.getByRole("switch", {
+      name: "Only start issues whose blockers are done",
+    });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(toggle);
+    expect(readFilterState()).toMatchObject({
+      teamKey: "ENG",
+      projectIds: ["p1"],
+      query: "q",
+      requireBlockersDone: true,
+    });
+    fireEvent.click(toggle);
+    expect(readFilterState().requireBlockersDone).toBe(false);
   });
 });
 

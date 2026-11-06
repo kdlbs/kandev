@@ -56,6 +56,8 @@ export interface FormState {
   creatorId: string;
   estimateMin: string;
   estimateMax: string;
+  /** Hold issues until their Linear blockers are completed. */
+  requireBlockersDone: boolean;
   workflowId: string;
   workflowStepId: string;
   /** Optional repository binding; "" = unbound (repo-less task). */
@@ -91,6 +93,7 @@ export function makeEmptyForm(workspaceId: string): FormState {
     creatorId: "",
     estimateMin: "",
     estimateMax: "",
+    requireBlockersDone: false,
     workflowId: "",
     workflowStepId: "",
     repositoryId: "",
@@ -140,6 +143,7 @@ export function formStateFromWatch(w: LinearIssueWatch): FormState {
     creatorId: f.creatorId ?? "",
     estimateMin: estimateString(f.estimateMin),
     estimateMax: estimateString(f.estimateMax),
+    requireBlockersDone: f.requireBlockersDone ?? false,
     workflowId: w.workflowId,
     workflowStepId: w.workflowStepId,
     repositoryId: w.repositoryId ?? "",
@@ -245,6 +249,8 @@ export function parseEstimate(raw: string): number | undefined {
   return n;
 }
 
+// requireBlockersDone only holds back issues the other fields match, so it is
+// not counted here.
 export function filterIsEmpty(form: FormState): boolean {
   return (
     form.query.trim() === "" &&
@@ -272,6 +278,7 @@ export function buildFilterPayload(form: FormState): LinearSearchFilter {
     creatorId: form.creatorId.trim() || undefined,
     estimateMin: parseEstimate(form.estimateMin),
     estimateMax: parseEstimate(form.estimateMax),
+    requireBlockersDone: form.requireBlockersDone || undefined,
   };
 }
 
