@@ -686,6 +686,7 @@ export type AppState = KanbanSlice & {
     entry: import("./slices/session-runtime/types").LaunchWarningEntry,
   ) => void;
   clearLaunchWarning: (sessionId: string) => void;
+  beginBackgroundWorkRead: (sessionId: string) => number;
   setBackgroundWorkloads: (
     sessionId: string,
     workloads: import("@/lib/types/background-work").WorkloadRunObservation[],

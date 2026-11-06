@@ -664,7 +664,12 @@ type ContextWindowEventPayload struct {
 	ContextWindowUsed      int64   `json:"context_window_used"`
 	ContextWindowRemaining int64   `json:"context_window_remaining"`
 	ContextEfficiency      float64 `json:"context_efficiency"`
-	Timestamp              string  `json:"timestamp"`
+	// CompactionInferenceDisabled excludes this sample from usage-drop
+	// compaction inference. It is derived from the trusted provider type, not
+	// from the payload's agent_id execution identifier, and is omitted for
+	// eligible providers.
+	CompactionInferenceDisabled bool   `json:"compaction_inference_disabled,omitempty"`
+	Timestamp                   string `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

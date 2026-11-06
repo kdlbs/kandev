@@ -219,40 +219,6 @@ describe("TokenUsageDisplay context source", () => {
     expect(getByText(/ACP is the active session's effective window/i)).toBeDefined();
   });
 
-  it("shows the inferred compaction count and its accuracy disclosure", () => {
-    vi.mocked(useSessionContextWindow).mockReturnValue({
-      size: 200_000,
-      used: 56_047,
-      remaining: 143_953,
-      efficiency: 28,
-      compactionCount: 2,
-      source: "acp",
-    });
-
-    const { container, getByLabelText, getByText } = render(
-      <TokenUsageDisplay sessionId="sess-1" />,
-    );
-
-    expect(getByText("Compactions")).toBeDefined();
-    expect(getByText("2", { selector: "span" })).toBeDefined();
-    expect(getByLabelText("About inferred compaction count")).toBeDefined();
-    expect(container.textContent).toContain(
-      "Kandev infers this count from observed context usage drops",
-    );
-
-    const helpButton = getByLabelText("About inferred compaction count");
-    const helpId = helpButton.getAttribute("aria-describedby");
-    if (!helpId) throw new Error("Expected compaction help to be described");
-    const help = document.getElementById(helpId);
-    if (!help) throw new Error("Expected compaction help element");
-    expect(help.className).toContain("opacity-0");
-
-    fireEvent.click(helpButton);
-    expect(help.className).toContain("opacity-100");
-    fireEvent.click(helpButton);
-    expect(help.className).toContain("opacity-0");
-  });
-
   it("labels model API fallback data", () => {
     vi.mocked(useSessionContextWindow).mockReturnValue({
       size: 128_000,
@@ -277,5 +243,72 @@ describe("TokenUsageDisplay context source", () => {
     fireEvent.click(helpButton);
     expect(help.className).toContain("opacity-0");
     expect(getByText(/model's advertised maximum from the catalogue/i)).toBeDefined();
+  });
+});
+
+describe("TokenUsageDisplay compaction count", () => {
+  it("shows the inferred compaction count and its accuracy disclosure", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 56_047,
+      remaining: 143_953,
+      efficiency: 28,
+      compactionCount: 2,
+      source: "acp",
+    });
+
+    const { container, getByLabelText, getByText } = render(
+      <TokenUsageDisplay sessionId="sess-1" />,
+    );
+
+    expect(getByText("Compactions")).toBeDefined();
+    expect(getByText("2", { selector: "span" })).toBeDefined();
+    expect(getByLabelText("About inferred compaction count")).toBeDefined();
+    expect(container.textContent).toContain("Kandev infers this count from context usage drops");
+    expect(container.textContent).toContain(
+      "Copilot ACP usage is excluded because it can mix parent and subagent contexts",
+    );
+    expect(container.textContent).toContain(
+      "Missing samples or provider resets can affect accuracy",
+    );
+
+    const helpButton = getByLabelText("About inferred compaction count");
+    const helpId = helpButton.getAttribute("aria-describedby");
+    if (!helpId) throw new Error("Expected compaction help to be described");
+    const help = document.getElementById(helpId);
+    if (!help) throw new Error("Expected compaction help element");
+    expect(help.className).toContain("opacity-0");
+
+    fireEvent.click(helpButton);
+    expect(help.className).toContain("opacity-100");
+    fireEvent.click(helpButton);
+    expect(help.className).toContain("opacity-0");
+  });
+
+  it("shows zero compactions for a fresh mixed-context session", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 2_877,
+      remaining: 197_123,
+      efficiency: 2,
+      compactionCount: 0,
+      source: "acp",
+    });
+
+    const { getByLabelText, getByTestId, getByText } = render(
+      <TokenUsageDisplay sessionId="sess-1" />,
+    );
+
+    const compactionRow = getByTestId("context-window-compactions-row");
+    expect(compactionRow.textContent).toContain("Compactions");
+    expect(compactionRow.textContent).toContain("0");
+    expect(getByText("0", { selector: "span" })).toBeDefined();
+
+    const helpButton = getByLabelText("About inferred compaction count");
+    const helpId = helpButton.getAttribute("aria-describedby");
+    if (!helpId) throw new Error("Expected compaction help to be described");
+    const help = document.getElementById(helpId);
+    if (!help) throw new Error("Expected compaction help element");
+    expect(help.textContent).toContain("Copilot ACP usage is excluded because it can mix");
   });
 });

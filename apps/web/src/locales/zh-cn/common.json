@@ -126,7 +126,7 @@
   "confirm": "确认",
   "contents": "内容",
   "contentSearchNeedsAnActiveTask": "内容搜索需要处于活动状态的任务会话。",
-  "contextCompactionCountHelp": "Kandev 根据观察到的上下文用量下降推断此计数。样本缺失或提供商重置可能导致结果仅为近似值。",
+  "contextCompactionCountHelp": "Kandev 根据上下文用量下降推断此计数。Copilot ACP 的用量会被排除，因为它可能混合主代理与子代理上下文。样本缺失或提供商重置会影响准确性。",
   "contextCompactions": "压缩次数",
   "contribute": "贡献",
   "contributingAsLogin": "以 <1>@{{login}}</1> 身份贡献。{{access}}",

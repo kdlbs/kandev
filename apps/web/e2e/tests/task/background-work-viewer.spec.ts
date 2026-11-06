@@ -2,6 +2,15 @@ import { expect, test } from "../../fixtures/test-base";
 import { watchWs, type WsWatcher } from "../../helpers/causal-waits";
 import { firstSessionId } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import { expectLiveJobSurvivesSnapshot } from "./background-work-snapshot.helpers";
+
+test("a live background job survives an older empty snapshot", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await expectLiveJobSurvivesSnapshot(testPage, apiClient, seedData);
+});
 
 const RUNNING_ID = "bg-running";
 const WAITING_ID = "bg-waiting";
