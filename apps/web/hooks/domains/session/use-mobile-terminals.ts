@@ -3,7 +3,8 @@
 import { useEffect, useRef } from "react";
 import { useTerminals } from "./use-terminals";
 import { useUserShells } from "./use-user-shells";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { userShellScopeKey } from "@/lib/state/user-shell-scope";
 
 /**
  * Module-level guard for the auto-create-first-shell effect, keyed by
@@ -53,6 +54,7 @@ export function __resetAutoCreatedEnvironmentsForTest(): void {
  * mounted by default. Returns the same interface as `useTerminals`.
  */
 export function useMobileTerminals(sessionId: string | null) {
+  const store = useAppStoreApi();
   const environmentId = useAppStore((s) =>
     sessionId ? (s.environmentIdBySessionId[sessionId] ?? null) : null,
   );
@@ -64,14 +66,21 @@ export function useMobileTerminals(sessionId: string | null) {
   // taskID flows in so the backend's DB-backed ordinary-shell path
   // returns parked + open ordinary rows (the orphan filter drops them
   // otherwise).
-  const { isLoaded: shellsLoaded, shells } = useUserShells(environmentId, taskID);
+  const {
+    isLoaded: shellsLoaded,
+    isLoading,
+    hasSuccessfulList,
+    shells,
+  } = useUserShells(environmentId, taskID);
   const addTerminalRef = useRef(result.addTerminal);
   useEffect(() => {
     addTerminalRef.current = result.addTerminal;
   }, [result.addTerminal]);
 
   useEffect(() => {
-    if (!environmentId || !shellsLoaded) return;
+    // Creation authority comes from a successful current read, never from a
+    // cached success while a new read is pending or from a settled failure.
+    if (!environmentId || !shellsLoaded || isLoading || !hasSuccessfulList) return;
     const scope = autoCreateScope(environmentId, taskID);
     // Wait for a real taskID before auto-creating; otherwise the first
     // mount on a session without a hydrated active task would bootstrap a
@@ -83,6 +92,11 @@ export function useMobileTerminals(sessionId: string | null) {
       autoCreatedScopes.add(scope);
       return;
     }
+    // Recheck authority at the mutation boundary so a read that started
+    // between render and this effect cannot authorize a duplicate create.
+    const key = userShellScopeKey({ environmentId, taskId: taskID });
+    const shellState = store.getState().userShells;
+    if (shellState.loading[key] || !shellState.listed[key]) return;
     autoCreatedScopes.add(scope);
     // Reset the guard if creation fails so the user gets a retry on the next
     // render cycle (e.g. after the WS reconnects). `addTerminal` returns void
@@ -93,7 +107,7 @@ export function useMobileTerminals(sessionId: string | null) {
         autoCreatedScopes.delete(scope);
       });
     }
-  }, [environmentId, taskID, shellsLoaded, shells.length]);
+  }, [environmentId, taskID, store, shellsLoaded, isLoading, hasSuccessfulList, shells.length]);
 
   return { ...result, environmentId };
 }

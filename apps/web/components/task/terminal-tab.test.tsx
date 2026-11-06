@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { i18n } from "@/lib/i18n";
+import { userShellScopeKey } from "@/lib/state/user-shell-scope";
 
 const mockDestroyUserShell = vi.fn();
 const mockRenameUserShell = vi.fn();
@@ -15,8 +16,8 @@ const CONFIRM_CLOSE_BUTTON_NAME = "Close terminal";
 const storeState = {
   tasks: { activeTaskId: "task-1" },
   userShells: {
-    byEnvironmentId: {
-      "env-1": [
+    byScope: {
+      [userShellScopeKey({ environmentId: "env-1", taskId: "task-1" })]: [
         {
           terminalId: "shell-1",
           kind: "ordinary",
