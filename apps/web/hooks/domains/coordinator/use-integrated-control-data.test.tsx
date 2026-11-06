@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import { ApiError } from "@/lib/api/client";
 import { useIntegratedControlData } from "./use-integrated-control-data";
 
 const api = vi.hoisted(() => ({
@@ -123,16 +124,38 @@ describe("Integrated control authorized read lifetime", () => {
     });
     expect(api.workspaces).toHaveBeenCalledTimes(1);
   });
-  it("discards older refreshes and publishes only the latest live response", async () => {
+});
+
+describe("Integrated control refresh pacing and failures", () => {
+  it("never aborts a read in flight; a live event during it settles into one follow-up read", async () => {
     const first = Promise.withResolvers<{ coordinators: (typeof coordinator)[] }>();
     api.coordinators.mockReturnValueOnce(first.promise);
     const { result } = mount();
     await waitFor(() => expect(api.coordinators).toHaveBeenCalledTimes(1));
-    api.coordinators.mockResolvedValueOnce({ coordinators: [{ ...coordinator, id: "latest" }] });
-    emit("coordinator.updated");
-    await waitFor(() => expect(result.current.data?.byWorkspace.beta.items[0].id).toBe("latest"));
-    await act(async () => first.resolve({ coordinators: [coordinator] }));
-    expect(result.current.data?.byWorkspace.beta.items[0].id).toBe("latest");
+    const signal = api.coordinators.mock.calls[0][1].init.signal as AbortSignal;
+    vi.useFakeTimers();
+    try {
+      api.coordinators.mockResolvedValue({ coordinators: [{ ...coordinator, id: "latest" }] });
+      emit("coordinator.updated");
+      emit("workspace.updated");
+      emit("coordinator.updated");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(signal.aborted).toBe(false);
+      expect(api.coordinators).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        first.resolve({ coordinators: [coordinator] });
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(api.coordinators).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(result.current.data?.byWorkspace.beta.items[0].id).toBe("latest");
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("masks and reloads data after an authorization generation changes", async () => {
     const { result } = mount();
@@ -149,12 +172,18 @@ describe("Integrated control authorized read lifetime", () => {
     await act(async () => pending.resolve({ coordinators: [] }));
     expect(result.current.data?.byWorkspace.beta.items).toEqual([]);
   });
-  it("clears selectable data after a failed workspace refresh and remains retryable", async () => {
+  it("keeps the last values after a transient failure and clears them when access is denied", async () => {
     const { result } = mount();
     await waitFor(() => expect(result.current.data).toBeDefined());
-    api.workspaces.mockRejectedValueOnce(new Error("denied"));
+    api.workspaces.mockRejectedValueOnce(
+      new ApiError("busy", 503, { code: "persistence_unavailable" }),
+    );
     await act(async () => result.current.refresh());
-    expect(result.current.error).toBe(true);
+    expect(result.current.failure?.kind).toBe("unavailable");
+    expect(result.current.data).toBeDefined();
+    api.workspaces.mockRejectedValueOnce(new ApiError("denied", 403, {}));
+    await act(async () => result.current.refresh());
+    expect(result.current.failure?.kind).toBe("denied");
     expect(result.current.data).toBeUndefined();
     await act(async () => result.current.refresh());
     expect(result.current.error).toBe(false);

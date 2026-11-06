@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office"
@@ -140,6 +141,19 @@ var officeWorkspacelessPrefixes = map[string]string{
 		"no session-cookie surface here for this guard to protect",
 }
 
+// officeOwnerAggregateRoutes are the Office routes that read per-user data
+// across ALL of the caller's workspaces rather than one. They carry no
+// `:wsId` and no resource id, so the resolver tables cannot scope them; the
+// guard instead requires a real browser identity (denying agent JWTs, which
+// are confined to a single workspace) and the handler lists workspaces through
+// the already identity-scoped task-service ListWorkspaces. Enumerated rather
+// than treated as workspace-less so a future multi-workspace route cannot opt
+// itself out of the identity check.
+var officeOwnerAggregateRoutes = map[string]string{
+	"/workspaces/aggregate": "read-only multi-workspace overview; the handler lists only the caller's own " +
+		"workspaces via the identity-scoped task service",
+}
+
 // officeBodyScopeResolvers covers routes that name their resource in the JSON
 // body instead of the path. Keyed by route pattern (relative to
 // officeRoutePrefix); the resolver reads the parsed body and returns the id
@@ -186,14 +200,22 @@ func officeWorkspaceScopeMiddleware(
 ) gin.HandlerFunc {
 	resolvers := officeParamScopeResolvers(officeRepo)
 	return func(c *gin.Context) {
-		if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
-			c.Next()
-			return
-		}
 		// The comment endpoint has its own task-relation guard for agent
 		// callers. Let that guard decide every target so missing, foreign, and
 		// unrelated tasks all produce the same forbidden response.
 		if isAgentCommentRead(c) {
+			c.Next()
+			return
+		}
+		if isOfficeOwnerAggregateRoute(c) {
+			if err := authorizeOfficeOwnerAggregate(c, authSvc); err != nil {
+				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+				return
+			}
+			c.Next()
+			return
+		}
+		if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
 			c.Next()
 			return
 		}
@@ -235,6 +257,40 @@ func isAgentCommentRead(c *gin.Context) bool {
 	return c.Request.Method == http.MethodGet &&
 		c.FullPath() == officeRoutePrefix+"/tasks/:id/comments" &&
 		officeagents.ClaimsFromContext(c) != nil
+}
+
+// isOfficeOwnerAggregateRoute reports whether the request targets one of the
+// owner-scoped multi-workspace aggregate routes.
+func isOfficeOwnerAggregateRoute(c *gin.Context) bool {
+	route, ok := officeRelativeRoute(c.FullPath())
+	if !ok {
+		return false
+	}
+	_, allowed := officeOwnerAggregateRoutes[route]
+	return allowed
+}
+
+// authorizeOfficeOwnerAggregate gates the multi-workspace aggregate routes.
+// They read per-user data with no workspace or resource id in the path, so the
+// resolver tables cannot scope them. The guard instead:
+//   - denies agent JWTs (an agent token is confined to one workspace and must
+//     not enumerate others), and
+//   - under enforced auth requires a real, non-synthetic browser identity.
+//
+// The handler itself lists workspaces through the identity-scoped task-service
+// ListWorkspaces, so this guard only needs to establish that a legitimate
+// browser identity is present — not which workspaces it may see.
+func authorizeOfficeOwnerAggregate(c *gin.Context, authSvc *auth.Service) error {
+	if officeagents.CallerFromContext(c) != nil {
+		return repoerrors.ErrWorkspaceNotFound
+	}
+	if authSvc != nil && authSvc.Mode() == auth.ModeEnabled {
+		identity, ok := authn.IdentityFromContext(c.Request.Context())
+		if !ok || identity.Synthetic {
+			return repoerrors.ErrWorkspaceNotFound
+		}
+	}
+	return nil
 }
 
 // authorizeOfficeRequest returns nil only when the caller is allowed to reach
