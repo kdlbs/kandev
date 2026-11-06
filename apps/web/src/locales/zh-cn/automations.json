@@ -110,6 +110,8 @@
   "openAutomations": "打开自动化",
   "orUseWebhookInstead": "或者改用 webhook",
   "outcome": "结果",
+  "parentTaskHelp": "每次运行创建的任务都会成为此任务的子任务。留空则保持为顶层任务。",
+  "parentTaskLabel": "父任务(可选)",
   "pickAWorkflowFirst": "请先选择工作流",
   "prMergedDeadConfigWarning": "未选择仓库；此触发器不会触发。请启用“此工作区允许的所有仓库”或至少添加一个仓库。",
   "prEventOpened": "已打开",

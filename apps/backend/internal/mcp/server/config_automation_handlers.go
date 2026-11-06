@@ -18,6 +18,7 @@ const createAutomationSchema = `{
   "description":{"type":"string"},
   "workflow_id":{"type":"string","description":"Required for normal_task; optional for automation_run."},
   "workflow_step_id":{"type":"string","description":"Optional starting step belonging to the selected workflow."},
+  "parent_task_id":{"type":"string","description":"Optional existing task in the same workspace; each firing's task is created under it."},
   "agent_profile_id":{"type":"string"},
   "executor_profile_id":{"type":"string"},
   "repositories":{"type":"array","description":"Ordered repository/base-branch selections. Empty means no repositories.","items":{"type":"object","required":["repository_id"],"additionalProperties":false,"properties":{"repository_id":{"type":"string"},"base_branch":{"type":"string"}}}},

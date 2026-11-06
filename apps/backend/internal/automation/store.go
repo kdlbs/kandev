@@ -49,6 +49,7 @@ const createTablesSQL = `
 		description TEXT DEFAULT '',
 		workflow_id TEXT NOT NULL,
 		workflow_step_id TEXT NOT NULL,
+		parent_task_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT NOT NULL,
 		executor_profile_id TEXT NOT NULL,
 		task_mode TEXT NOT NULL DEFAULT 'automation_run',
@@ -297,6 +298,7 @@ const (
 	migrateRetryPolicySQL                       = `ALTER TABLE automations ADD COLUMN retry_policy TEXT NOT NULL DEFAULT '{}'`
 	migratePluginToolsSQL                       = `ALTER TABLE automations ADD COLUMN plugin_tools TEXT NOT NULL DEFAULT '[]'`
 	migrateRetryAutomationRevisionSQL           = `ALTER TABLE automations ADD COLUMN automation_revision BIGINT NOT NULL DEFAULT 0`
+	migrateAutomationParentTaskIDSQL            = `ALTER TABLE automations ADD COLUMN parent_task_id TEXT NOT NULL DEFAULT ''`
 	migrateTriggerRevisionSQL                   = `ALTER TABLE automation_triggers ADD COLUMN trigger_revision BIGINT NOT NULL DEFAULT 0`
 )
 
@@ -355,7 +357,7 @@ const migrateRunDedupUniqueIndexSQL = `CREATE UNIQUE INDEX IF NOT EXISTS idx_aut
 // mode to branch on, and the whole point of withdrawing it is that no firing
 // path has one. See docs/specs/office/requirements/automations-settings.md § Migration.
 const automationColumns = `created_by_user_id, id, workspace_id, name, description, workflow_id, workflow_step_id,
-	agent_profile_id, executor_profile_id, task_mode, managed_owner_installation_id,
+	parent_task_id, agent_profile_id, executor_profile_id, task_mode, managed_owner_installation_id,
 	managed_destination_installation_id, managed_destination_conversation_id,
 	managed_destination_plugin_id, managed_destination_instance_key, managed_destination_revision,
 	resource_revision, repository_mode, prompt, task_title_template,
@@ -407,6 +409,7 @@ func (s *Store) initSchema() error {
 		{"automations.retry_policy", schemaSQLForDriver(migrateRetryPolicySQL, s.db.DriverName())},
 		{"automations.plugin_tools", schemaSQLForDriver(migratePluginToolsSQL, s.db.DriverName())},
 		{"automations.automation_revision", schemaSQLForDriver(migrateRetryAutomationRevisionSQL, s.db.DriverName())},
+		{"automations.parent_task_id", schemaSQLForDriver(migrateAutomationParentTaskIDSQL, s.db.DriverName())},
 		{"automation_triggers.trigger_revision", schemaSQLForDriver(migrateTriggerRevisionSQL, s.db.DriverName())},
 		{"automation_runs.retry_group_id", schemaSQLForDriver(migrateRunRetryGroupIDSQL, s.db.DriverName())},
 		{"automation_runs.retry_parent_run_id", schemaSQLForDriver(migrateRunRetryParentIDSQL, s.db.DriverName())},
@@ -670,16 +673,16 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	// the honest record for a row created after the choice was withdrawn.
 	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO automations (created_by_user_id, id, workspace_id, name, description, workflow_id, workflow_step_id,
-			agent_profile_id, executor_profile_id,
+			parent_task_id, agent_profile_id, executor_profile_id,
 			task_mode, managed_owner_installation_id, managed_destination_installation_id,
 			managed_destination_conversation_id, managed_destination_plugin_id,
 			managed_destination_instance_key, managed_destination_revision, resource_revision,
 			repository_mode, prompt, task_title_template, execution_mode,
 			enabled, max_concurrent_runs, continuation_policy, continuation_task_id,
 			retry_policy, plugin_tools, automation_revision, webhook_secret, last_triggered_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), a.CreatedByUserID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), a.CreatedByUserID,
 		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
-		a.AgentProfileID, a.ExecutorProfileID,
+		a.ParentTaskID, a.AgentProfileID, a.ExecutorProfileID,
 		string(a.TaskMode), a.ManagedOwnerInstallationID, a.ManagedDestinationInstallationID,
 		a.ManagedDestinationConversationID, a.ManagedDestinationPluginID,
 		a.ManagedDestinationInstanceKey, a.ManagedDestinationRevision, a.ResourceRevision, string(a.RepositoryMode),
@@ -991,6 +994,8 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 
 	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
+			continuation_task_id = CASE WHEN parent_task_id <> ? THEN '' ELSE continuation_task_id END,
+			parent_task_id = ?,
 			agent_profile_id = ?, executor_profile_id = ?,
 			task_mode = ?, managed_owner_installation_id = ?, managed_destination_installation_id = ?,
 			managed_destination_conversation_id = ?, managed_destination_plugin_id = ?,
@@ -1000,6 +1005,8 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 			retry_policy = ?, plugin_tools = ?, automation_revision = automation_revision + 1, updated_at = ?
 		WHERE id = ?`),
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
+		a.ParentTaskID,
+		a.ParentTaskID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		string(a.TaskMode), a.ManagedOwnerInstallationID, a.ManagedDestinationInstallationID,
 		a.ManagedDestinationConversationID, a.ManagedDestinationPluginID,
@@ -1037,6 +1044,9 @@ func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
 	}
 	if req.WorkflowStepID != nil {
 		a.WorkflowStepID = *req.WorkflowStepID
+	}
+	if req.ParentTaskID != nil {
+		a.ParentTaskID = *req.ParentTaskID
 	}
 	if req.AgentProfileID != nil {
 		a.AgentProfileID = *req.AgentProfileID
@@ -1717,7 +1727,16 @@ func (s *Store) BindRunTask(ctx context.Context, runID, taskID, repositoryReason
 	return nil
 }
 
-func (s *Store) SetContinuationTaskID(ctx context.Context, automationID, taskID string) error {
+func (s *Store) SetContinuationTaskID(ctx context.Context, automationID, taskID string, binding ...ContinuationBinding) error {
+	if len(binding) > 0 {
+		expected := binding[0]
+		_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+			UPDATE automations SET continuation_task_id = ?, updated_at = ?
+			WHERE id = ? AND parent_task_id = ? AND automation_revision = ? AND continuation_task_id = ?`),
+			taskID, time.Now().UTC(), automationID, expected.ParentTaskID,
+			expected.AutomationRevision, expected.ContinuationTaskID)
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(
 		`UPDATE automations SET continuation_task_id = ?, updated_at = ? WHERE id = ?`),
 		taskID, time.Now().UTC(), automationID)

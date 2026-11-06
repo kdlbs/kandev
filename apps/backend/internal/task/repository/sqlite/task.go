@@ -4047,6 +4047,23 @@ func (r *Repository) ListChildren(ctx context.Context, parentID string) ([]*mode
 	return r.listChildren(ctx, parentID, false, "", 0)
 }
 
+// ListAutomationChildrenForParent exposes explicit parent links to relation
+// reads only. Board visibility, hierarchy admission and child-ready reads keep
+// their existing automation-run filter.
+func (r *Repository) ListAutomationChildrenForParent(ctx context.Context, parentID string) ([]*models.Task, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+` FROM tasks t
+		JOIN tasks parent ON parent.id=t.parent_id AND parent.workspace_id=t.workspace_id
+		WHERE parent.id=? AND t.origin=? AND t.is_ephemeral=0 AND t.archived_at IS NULL
+		ORDER BY t.created_at ASC,t.id ASC
+	`), parentID, models.TaskOriginAutomationRun)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
+}
+
 // ListChildrenLimited returns at most limit active children without
 // materializing the complete sibling list.
 func (r *Repository) ListChildrenLimited(ctx context.Context, parentID string, limit int) ([]*models.Task, error) {

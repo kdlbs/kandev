@@ -74,6 +74,9 @@ interface ComboboxProps {
   triggerRef?: Ref<HTMLButtonElement>;
   /** Notifies consumers when the popover opens or closes. */
   onOpenChange?: (open: boolean) => void;
+  /** Optional controlled query for consumers backed by server search. */
+  searchValue?: string;
+  onSearchValueChange?: (value: string) => void;
 }
 
 function TriggerLabel({
@@ -274,6 +277,85 @@ function ComboboxHeader({
   );
 }
 
+type ComboboxCommandProps = Pick<
+  ComboboxProps,
+  | "options"
+  | "value"
+  | "onValueChange"
+  | "onOpenChange"
+  | "dropdownLabel"
+  | "headerAction"
+  | "showSearch"
+  | "searchPlaceholder"
+  | "searchValue"
+  | "onSearchValueChange"
+  | "filter"
+  | "dropdownTestId"
+  | "emptyMessage"
+  | "touchTarget"
+> & {
+  highlighted: string;
+  setHighlighted: (value: string) => void;
+  setOpen: (open: boolean) => void;
+};
+
+function ComboboxCommand({
+  options,
+  value,
+  onValueChange,
+  onOpenChange,
+  dropdownLabel,
+  headerAction,
+  showSearch = true,
+  searchPlaceholder,
+  searchValue,
+  onSearchValueChange,
+  filter,
+  dropdownTestId,
+  emptyMessage,
+  touchTarget = false,
+  highlighted,
+  setHighlighted,
+  setOpen,
+}: ComboboxCommandProps) {
+  return (
+    <Command
+      value={highlighted}
+      onValueChange={setHighlighted}
+      filter={filter}
+      shouldFilter={!onSearchValueChange}
+      data-testid={dropdownTestId}
+    >
+      <ComboboxHeader dropdownLabel={dropdownLabel} headerAction={headerAction} />
+      {showSearch && (
+        <CommandInput
+          value={searchValue}
+          onValueChange={onSearchValueChange}
+          placeholder={searchPlaceholder}
+          className={controlSizingClassName("standard")}
+        />
+      )}
+      <CommandList>
+        <CommandEmpty>{emptyMessage}</CommandEmpty>
+        <OptionsList
+          options={options}
+          value={value}
+          touchTarget={touchTarget}
+          onSelect={(selectedValue) =>
+            selectComboboxOption({
+              selectedValue,
+              currentValue: value,
+              onValueChange,
+              setOpen,
+              onOpenChange,
+            })
+          }
+        />
+      </CommandList>
+    </Command>
+  );
+}
+
 export const Combobox = memo(function Combobox({
   options,
   value,
@@ -301,6 +383,8 @@ export const Combobox = memo(function Combobox({
   triggerId,
   triggerRef,
   onOpenChange,
+  searchValue,
+  onSearchValueChange,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   const portalContainer = useTaskCreateDialogPopoverContainer();
@@ -341,37 +425,25 @@ export const Combobox = memo(function Combobox({
         portalContainer={portalContainer}
         onWheel={(event) => event.stopPropagation()}
       >
-        <Command
-          value={highlighted}
-          onValueChange={setHighlighted}
+        <ComboboxCommand
+          options={options}
+          value={value}
+          onValueChange={onValueChange}
+          onOpenChange={onOpenChange}
+          dropdownLabel={dropdownLabel}
+          headerAction={headerAction}
+          showSearch={showSearch}
+          searchPlaceholder={searchPlaceholder}
+          searchValue={searchValue}
+          onSearchValueChange={onSearchValueChange}
           filter={filter}
-          data-testid={dropdownTestId}
-        >
-          <ComboboxHeader dropdownLabel={dropdownLabel} headerAction={headerAction} />
-          {showSearch && (
-            <CommandInput
-              placeholder={searchPlaceholder}
-              className={controlSizingClassName("standard")}
-            />
-          )}
-          <CommandList>
-            <CommandEmpty>{emptyMessage}</CommandEmpty>
-            <OptionsList
-              options={options}
-              value={value}
-              touchTarget={touchTarget}
-              onSelect={(v) =>
-                selectComboboxOption({
-                  selectedValue: v,
-                  currentValue: value,
-                  onValueChange,
-                  setOpen,
-                  onOpenChange,
-                })
-              }
-            />
-          </CommandList>
-        </Command>
+          dropdownTestId={dropdownTestId}
+          emptyMessage={emptyMessage}
+          touchTarget={touchTarget}
+          highlighted={highlighted}
+          setHighlighted={setHighlighted}
+          setOpen={setOpen}
+        />
       </PopoverContent>
     </Popover>
   );

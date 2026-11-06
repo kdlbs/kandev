@@ -41,6 +41,7 @@ var automationFieldDispositions = map[string]fieldDisposition{
 	"Triggers":                         {exported: true, yamlKey: "triggers"},
 	"WorkflowID":                       {exported: true, yamlKey: "workflow.name"},
 	"WorkflowStepID":                   {exported: true, yamlKey: "workflow.step"},
+	"ParentTaskID":                     {exported: false}, // names a task row in this install; workspace-local runtime pointer
 	"AgentProfileID":                   {exported: true, yamlKey: "agent_profile"},
 	"ExecutorProfileID":                {exported: true, yamlKey: "executor_profile"},
 	"RepositoryIDs":                    {exported: true, yamlKey: "repositories"},
