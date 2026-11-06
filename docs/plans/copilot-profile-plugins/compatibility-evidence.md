@@ -272,20 +272,18 @@ contract.
 | Authenticated plugin/MCP use | Not observed | Supplied only | Not observed |
 | Native policy veto | Not observed | Not observed | Not observed |
 
-Inventory qualification: `1.0.88` and `1.0.104` are unscoped. `1.0.105` is
-qualified on `linux/amd64` as recorded above. `1.0.103` and other versions
-remain unqualified and return `runtime_unsupported`; Kandev does not fall back
-to a global CLI.
+The intermediate version gate admitted `1.0.88` and `1.0.104` on supported
+hosts and `1.0.105` on `linux/amd64`. The later contract-admission change
+removed that gate. Current admission checks the selected runtime's capabilities
+and inventory rather than its version or platform.
 
 At the original baseline, mount permission was empty: `policyVerifiedVersions`
 rejected nonempty starts with `policy_unverified` before inventory/start.
 That AC-AGENTS-COPILOT-PLUGINS-007.2 gate is superseded by 007.6 and 005.8.
-Completion WO-04 removed it under native authority. Current preparation admits
-valid local/worktree selections for `1.0.88` and `1.0.104` on every supported
-host and `1.0.105` on `linux/amd64`, while retaining root, identity, executor,
-wrapper, and argument-conflict validation. Other platforms and unknown versions
-remain unsupported. Preparation eligibility is not native policy approval or
-enterprise certification.
+Completion WO-04 removed it under native authority. Current preparation retains
+root, identity, executor, wrapper, and argument-conflict validation, and checks
+the selected runtime's native capabilities. Preparation eligibility is not
+native policy approval or enterprise certification.
 
 ## Not exercised
 
@@ -387,6 +385,33 @@ Copilot regression or an initial process-start denial. Do not describe the
 extended race command as passing. Unrelated process-group cleanup was not
 changed. The disposable baseline archive was removed and raw results remain
 private.
+
+## Inventory qualification: 1.0.105 (2026-11-05)
+
+The scheduled managed runtime pin refresh selected `@github/copilot@1.0.105`.
+A bounded inventory test recorded adapter-format observations for this version:
+
+```bash
+(cd apps/backend && KANDEV_COPILOT_NATIVE_VERSION=1.0.105 go test -trimpath -tags 'copilot_native fts5' -count=1 -timeout 5m ./internal/agent/copilotplugins -run '^TestCopilotPluginNativeInventoryCompatibility$' -v)
+```
+
+Observed on Linux x64 with disposable `HOME`, `COPILOT_HOME`, npm prefix, npm
+cache, plugin roots, and local marketplace fixtures:
+
+- Exact package metadata and `copilot --version` reported `1.0.105`.
+- `plugin list --json` returned the flat array format consumed by the adapter.
+- Two separate `--plugin-dir` values, including a path with spaces and
+  shell-like characters, produced external rows with the expected names and
+  versions.
+- A local marketplace install created `settings.json` metadata containing the
+  marketplace and enabled plugin. The inventory reported a `live` row with
+  `installedFrom`, and the adapter resolved its manifest at the expected source
+  directory.
+
+Limit: this run did not authenticate, start an ACP session, call a plugin tool,
+or exercise managed policy. It establishes inventory and installation-metadata
+compatibility only. It does not certify enterprise enforcement or authenticated
+component behavior for `1.0.105`.
 
 ## Contract admission implementation evidence, 2026-11-05 (WO-04)
 

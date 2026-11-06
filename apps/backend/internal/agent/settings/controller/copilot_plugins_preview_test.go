@@ -24,7 +24,7 @@ func TestCopilotPluginPreview(t *testing.T) {
 	if len(resp.DeferredPluginIDs) != 2 || resp.DeferredPluginIDs[0] != "installed:copilot-plugins/spark" {
 		t.Fatalf("deferred IDs = %#v", resp.DeferredPluginIDs)
 	}
-	if !strings.Contains(resp.CommandString, "@github/copilot@"+agents.MustDefaultManagedNPMRuntimeVersion("@github/copilot")) {
+	if !strings.Contains(resp.CommandString, "@github/copilot@"+copilotPluginTestRuntimeVersion) {
 		t.Fatalf("passthrough preview = %q, want selected managed runtime", resp.CommandString)
 	}
 	encoded, err := json.Marshal(resp)
@@ -41,7 +41,7 @@ func TestCopilotPluginPreview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ACP PreviewAgentCommand: %v", err)
 	}
-	if !strings.Contains(acp.CommandString, "@github/copilot@"+agents.MustDefaultManagedNPMRuntimeVersion("@github/copilot")) {
+	if !strings.Contains(acp.CommandString, "@github/copilot@"+copilotPluginTestRuntimeVersion) {
 		t.Fatalf("ACP preview = %q, want the selected managed runtime", acp.CommandString)
 	}
 
