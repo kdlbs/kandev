@@ -185,6 +185,9 @@ var ErrRunnerCompatibilityConflict = errors.New("target cannot materialize repos
 // the supplied id.
 var ErrExecutorProfileNotFound = errors.New("executor profile not found")
 
+// ExecutorProfileNotFoundCode identifies a missing executor-profile reference.
+const ExecutorProfileNotFoundCode = "executor_profile_not_found"
+
 // ErrRunnerEvaluationUnavailable reports that a runner switch could not be
 // decided or applied — a failed read, a failed lock acquisition, a stale
 // compatibility-gate snapshot, a failed metadata write, or a failed commit.

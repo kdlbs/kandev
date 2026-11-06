@@ -753,13 +753,14 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 		return nil, err
 	}
 	workflow := &models.Workflow{
-		ID:                 req.ID,
-		WorkspaceID:        req.WorkspaceID,
-		Name:               req.Name,
-		Description:        req.Description,
-		Prompt:             req.Prompt,
-		WorkflowTemplateID: req.WorkflowTemplateID,
-		Hidden:             req.Hidden,
+		ID:                          req.ID,
+		WorkspaceID:                 req.WorkspaceID,
+		Name:                        req.Name,
+		Description:                 req.Description,
+		Prompt:                      req.Prompt,
+		WorkflowTemplateID:          req.WorkflowTemplateID,
+		RequireExplicitAgentProfile: req.RequireExplicitAgentProfile,
+		Hidden:                      req.Hidden,
 	}
 	if workflow.ID == "" {
 		workflow.ID = uuid.New().String()
@@ -832,6 +833,9 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	if req.AgentProfileID != nil {
 		workflow.AgentProfileID = strings.TrimSpace(*req.AgentProfileID)
 	}
+	if req.RequireExplicitAgentProfile != nil {
+		workflow.RequireExplicitAgentProfile = *req.RequireExplicitAgentProfile
+	}
 	workflow.UpdatedAt = time.Now().UTC()
 
 	var updateErr error
@@ -844,6 +848,7 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	} else {
 		workflow, updateErr = s.workflows.UpdateWorkflowFields(ctx, id, models.WorkflowFieldUpdate{
 			Name: req.Name, Description: req.Description, Prompt: req.Prompt, AgentProfileID: normalizedWorkflowProfile(req.AgentProfileID),
+			RequireExplicitAgentProfile: req.RequireExplicitAgentProfile,
 		})
 	}
 	if updateErr != nil {

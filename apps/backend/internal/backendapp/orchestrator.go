@@ -881,9 +881,10 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		IsEphemeral:    req.IsEphemeral,
 		Origin:         req.Origin,
 
-		AutomationStartOwned: req.AutomationStartOwned,
-		AutomationStartOwner: req.AutomationStartOwner,
-		ExternalID:           req.ExternalID,
+		AutomationStartOwned:   req.AutomationStartOwned,
+		AutomationStartOwner:   req.AutomationStartOwner,
+		ExplicitAgentProfileID: req.AgentProfileID,
+		ExternalID:             req.ExternalID,
 	})
 	if err != nil {
 		return nil, err
@@ -910,13 +911,14 @@ func (a *issueTaskCreatorAdapter) CreateIssueTask(ctx context.Context, req *orch
 		})
 	}
 	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
-		WorkspaceID:    req.WorkspaceID,
-		WorkflowID:     req.WorkflowID,
-		WorkflowStepID: req.WorkflowStepID,
-		Title:          req.Title,
-		Description:    req.Description,
-		Metadata:       req.Metadata,
-		Repositories:   repos,
+		WorkspaceID:            req.WorkspaceID,
+		WorkflowID:             req.WorkflowID,
+		WorkflowStepID:         req.WorkflowStepID,
+		ExplicitAgentProfileID: req.AgentProfileID,
+		Title:                  req.Title,
+		Description:            req.Description,
+		Metadata:               req.Metadata,
+		Repositories:           repos,
 	})
 	if err != nil {
 		return nil, err
