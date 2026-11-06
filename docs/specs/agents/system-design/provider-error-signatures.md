@@ -16,13 +16,16 @@ how the provider rule table separates provider limit signatures from agent
 prose. It preserves existing rule order, confidence, classification flags,
 unrelated provider-neutral rules, and how dynamic routing acts on a classified
 failure. The bounded additions below add exact signatures while preserving
-the established higher-priority signals and sanitized excerpt contract.
+the established higher-priority signals and sanitized excerpt contract. The
+context-length follow-up adds only a named prompt-send producer and its
+existing exact consumer compatibility.
 
 ## Requirement mapping
 
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose) |
+| `AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.7` | [Context-length producer and consumer](#context-length-producer-and-consumer) |
 
 ## Components and responsibilities
 
@@ -30,6 +33,10 @@ the established higher-priority signals and sanitized excerpt contract.
   `rules.go` and the classification flags applied to each code.
 - **`internal/agent/runtime/dynamic`** evaluates the classified code with the
   candidate's saved recovery policy and opens resource circuits.
+- **Stream terminal projection** selects the provider rule table using the
+  payload's `AgentType`. Stream `AgentID` is the historical execution identity,
+  not a rule-table key. If explicit type is absent, retain the legacy field
+  fallback. Execution, prompt-generation, output and effect fences are unchanged.
 
 ## Inputs that carry prose
 
@@ -97,6 +104,48 @@ provider-neutral rules, or the phase default.
 The existing `agent failure classified for provider routing` log records the
 rule ID. Rule IDs are unchanged.
 
+## Context-length producer and consumer
+
+The provider-neutral table adds `provider.context_length_exceeded.v1` for a
+line-opening context-window rejection, using the captured signature and
+high-confidence runtime-error code. Its matcher receives the phase and applies
+this one new rule only at prompt-send. Existing structured/provider-specific
+rules retain precedence; other neutral rules keep their matching and phases.
+
+`classifyKanbanFailure` keeps its existing diagnostic/evidence path. Within
+that path, the exact pre-result consumer accepts the named rule alongside its
+existing anonymous post-start classification. The named rule additionally
+requires prompt-send. Existing code/class checks, complete diagnostic source
+and identity, known dynamic attempt and no-output/effect checks remain.
+Only that consumer copies the result to `unknown_provider_error`, retaining
+confidence, rule ID and false retry/fallback flags for the existing repeated-
+failure policy. No general fallback, new policy, timer or feature flag is added.
+
+The separate structured-envelope signature and the remaining OpenCode catalogue
+are supplied by current upstream main's bounded catalogue follow-up and
+integrated by the current-main synchronization; they stay a distinct rule set
+from this shared catalogue. Any prefilter and assistant-notice work remains
+with its original delivery owner.
+
+## Literal provider catalog
+
+`provider_catalog_rules.go` holds diagnostic-envelope signatures shared by
+providers and is composed into the neutral rule table before the generic
+unavailable fallback. Structured HTTP input and provider-specific rules retain
+precedence. Catalog rules require an error-line prefix or a diagnostic type,
+and preserve the context-length rule's prompt-send guard. Existing Go quota,
+credit, weekly-limit and reasoning-history rules are reused.
+
+`provider.catalog.request_rejected.v1` remains globally an unclassified runtime
+failure with retry/fallback flags unchanged. The existing exact terminal
+consumer accepts it only at prompt-send with a complete diagnostic, known
+attempt identity, and no observed output or effects, just like the named
+context rejection. Only that consumer projects it to the existing unknown
+provider policy. No generic recovery or implicit replay permission is added.
+
+Usage-account learning is a separate consumer boundary, not a property of
+matching a message. This catalog does not create account IDs, change scope,
+invent reset calendars or alter the candidate's configured quota action.
 
 ## Codex terminal throttling
 

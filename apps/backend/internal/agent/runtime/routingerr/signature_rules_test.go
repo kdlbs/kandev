@@ -49,6 +49,71 @@ func TestCodexRetryExhausted429Classification(t *testing.T) {
 	}
 }
 
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.4
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.5
+func TestClassifySharedProviderCatalog(t *testing.T) {
+	resetInjection()
+	cases := []struct {
+		text, rule string
+		code       Code
+	}{
+		{"Usage limit reached You have reached your current quota for this period", "provider.catalog.quota_notice.v1", CodeQuotaLimited},
+		{"Error: free usage limit reached", "provider.catalog.free_usage.v1", CodeQuotaLimited},
+		{"temporarily rate-limited upstream, please retry shortly", "provider.rate_limit.v1", CodeRateLimited},
+		{"Error: Error from provider (Console): Rate limit exceeded", "provider.catalog.console_rate.v1", CodeRateLimited},
+		{"Error: No endpoints found for model", "provider.catalog.model_unavailable.v1", CodeModelUnavailable},
+		{"Error: Upstream request failed: This Go model requires Global regions", "provider.catalog.go_configuration.v1", CodeProviderNotConfigured},
+		{"ProviderHeaderTimeoutError: Provider response headers timed out", "provider.catalog.timeout.v1", CodeProviderUnavailable},
+		{"Error: Cannot connect to API: The socket connection was closed unexpectedly", "provider.catalog.connection.v1", CodeNetworkUnavailable},
+		{"Upstream error from Nvidia: Service temporarily overloaded", "provider.catalog.overloaded.v1", CodeProviderOverloaded},
+		{"Error: Error from provider host: 429 Too Many Requests capacity_unavailable", "provider.catalog.host_capacity.v1", CodeModelCapacity},
+		{"Error: Error from provider host: 402 Payment Required", "provider.catalog.host_payment.v1", CodeSubscriptionRequired},
+		{"Error: The tool definitions or tool call payload were rejected (invalid_tools)", "provider.catalog.request_rejected.v1", CodeAgentRuntime},
+		{"Error: Upstream response was not valid JSON", "provider.catalog.server_error.v1", CodeProviderUnavailable},
+		{"Streaming response failed: [502] Provider returned an empty response", "provider.catalog.stream_error.v1", CodeProviderUnavailable},
+		{`Error: {"code":502,"message":"JSON error injected into SSE stream"}`, "provider.catalog.sse_error.v1", CodeProviderUnavailable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.rule, func(t *testing.T) {
+			got := Classify(Input{Phase: PhasePromptSend, ProviderID: "catalogue-provider", Stderr: tc.text})
+			if got.Code != tc.code || got.ClassifierRule != tc.rule || got.Confidence != ConfHigh {
+				t.Fatalf("classification = %s/%s/%s, want %s/%s/high", got.Code, got.ClassifierRule, got.Confidence, tc.code, tc.rule)
+			}
+			if got.RawExcerpt != Sanitize(tc.text+"\n") {
+				t.Fatalf("stored excerpt does not use the existing sanitizer: %q", got.RawExcerpt)
+			}
+			// The temporary-upstream-rate signature predates this catalogue and
+			// retains its existing unanchored matching contract.
+			if tc.rule != "provider.rate_limit.v1" {
+				prose := Classify(Input{Phase: PhasePromptSend, ProviderID: "catalogue-provider", Stderr: "Assistant quoted " + tc.text})
+				if prose.ClassifierRule == tc.rule {
+					t.Fatalf("catalogue rule matched mid-sentence prose: %q", tc.text)
+				}
+			}
+		})
+	}
+}
+
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.7
+func TestClassifyContextLengthPhaseBoundary(t *testing.T) {
+	resetInjection()
+	for _, phase := range []Phase{PhaseProcessStart, PhaseSessionInit, PhasePromptSend, PhaseStreaming, PhaseToolExecution} {
+		t.Run(string(phase), func(t *testing.T) {
+			got := Classify(Input{Phase: phase, ProviderID: "catalogue-provider", Stderr: "Error: maximum context length is 8192 tokens"})
+			if phase == PhasePromptSend {
+				if got.Code != CodeAgentRuntime || got.ClassifierRule != "provider.context_length_exceeded.v1" || got.Confidence != ConfHigh {
+					t.Fatalf("prompt rejection = %+v", got)
+				}
+				if got.FallbackAllowed || got.AutoRetryable {
+					t.Fatalf("context wording widened prompt replay flags: %+v", got)
+				}
+			} else if got.ClassifierRule == "provider.context_length_exceeded.v1" {
+				t.Fatalf("prompt-only signature matched phase %s", phase)
+			}
+		})
+	}
+}
+
 // agentProseAboutLimits is agent output that talks about limits it read
 // elsewhere. None of it is the reporting agent's own provider failing.
 var agentProseAboutLimits = []string{

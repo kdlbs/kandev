@@ -34,6 +34,11 @@ because its agent wrote about another one.
 **Intent:** A rate-limit, quota, or subscription classification must come from
 a provider error signature, not from a topic word in agent prose.
 
+The stream consumer shall select the rule table using the emitting agent type,
+not the execution identity or the model-provider prefix. Legacy payloads without
+an explicit type keep their existing fallback. This does not authorize routing
+after output, effects, or a stale prompt.
+
 **User story:** As an operator, I want a provider account suspended only when
 that provider reports a limit, so that an agent summarizing other sessions'
 errors does not take its own healthy account out of rotation.
@@ -64,6 +69,15 @@ errors does not take its own healthy account out of rotation.
   precedence and the existing provider-specific rules (usage limits, session
   limits, credit exhaustion, payment required, authentication, model, and
   installation rules) shall keep their classification.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.7:** At prompt-send, a line that
+  opens with an optional error label and reports
+  `maximum context length is <n> tokens` shall classify at high confidence under
+  `provider.context_length_exceeded.v1`, retaining `agent_runtime_error`,
+  `FallbackAllowed: false` and `AutoRetryable: false`. The existing exact
+  terminal-provider consumer shall preserve its repeated-unclassified-failure
+  route only with complete diagnostic identity, known pre-result evidence and
+  no observed output or effect. Startup and later phases, ordinary manual
+  recovery, typed-limit precedence and existing routing policy remain unchanged.
 - **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.6:** For `opencode-acp`, an
   opening `free usage limit reached` line without an error-envelope label shall
   classify as a quota limit. This criterion covers only the unlabelled
@@ -100,10 +114,31 @@ Criterion 001.11 was added by the October 28
 ## Out of scope
 
 - Changing rule order, confidence levels, or classification flags beyond the
-  narrow additions in criteria 001.6, 001.8, 001.9, 001.10, and 001.11.
-- Changing unrelated provider-neutral rules or any runtime-environment rules.
+  narrow additions in criteria 001.6, 001.7, 001.8, 001.9, 001.10, and 001.11.
+- Changing other or unrelated provider-neutral rules or any runtime-environment
+  rules. The named prompt-send context-length signature in criterion 001.7 is in
+  scope.
 - Changing how classified failures suspend candidates or select a successor.
 
+## Literal catalog follow-up
+
+Recognize bounded upstream error envelopes for timeout, transport, capacity,
+model/endpoint availability, subscription and usage exhaustion, request
+compatibility, and malformed or empty upstream responses. Preserve existing
+provider-specific signatures and their precedence. This catalogue includes
+the error-labelled OpenCode Free usage notice. The unlabelled notice, the named
+daily/raw reasons and the general labelled error_type envelope are supplied by
+upstream main's bounded catalogue follow-up, which the current-main
+synchronization integrates alongside this catalogue; they are not duplicated
+here.
+Do not add another Go quota expression when its existing rule already matches.
+Keep the context-length rule restricted to prompt-send.
+
+The literal catalog must not infer account identity, invent a reset time or
+turn agent prose into an account failure. Request rejection may use only the
+existing exact pre-result repeated-failure policy, preserving no-output/effect
+and diagnostic-identity fences. Configuration and usage-account consumers
+remain responsible for quota-window and account-wide admission decisions.
 
 ## Codex retry-exhaustion signature
 
