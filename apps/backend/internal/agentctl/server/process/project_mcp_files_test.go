@@ -80,7 +80,7 @@ func TestProjectMCPFilesOwnerPrepareMergeAndCleanup(t *testing.T) {
 	require.NoError(t, owner.Cleanup(context.Background()))
 	_, statErr := os.Stat(first.Path)
 	require.True(t, os.IsNotExist(statErr), "an owned project file is removed with its final claim")
-	require.Zero(t, owner.Target().Generation)
+	require.Greater(t, owner.Target().Generation, uint64(2), "cleanup advances the generation fence")
 }
 
 func TestProjectMCPFilesOwnerPreservesUserFile(t *testing.T) {
@@ -107,6 +107,56 @@ func TestProjectMCPFilesOwnerPreservesUserFile(t *testing.T) {
 	content, err = os.ReadFile(path)
 	require.NoError(t, err)
 	require.Contains(t, string(content), "user-tool", "a user-owned file survives cleanup")
+}
+
+func TestProjectMCPFilesOwnerMapsOwnershipConflict(t *testing.T) {
+	manager, workspace := newProjectMCPFilesTestManager(t)
+	path := filepath.Join(workspace, ".pi", "mcp.json")
+	content, err := json.Marshal(map[string]any{
+		"mcpServers": map[string]any{"kandev": map[string]any{"url": "http://other.example/mcp"}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, content, 0o600))
+	require.NoError(t, passthroughconfig.Prepare(context.Background(), workspace, filepath.Join(workspace, ".kandev", "private"),
+		"other-execution:session:project", []passthroughconfig.File{{Path: path, Content: content, MergeKey: "mcpServers"}}))
+
+	file := projectMCPTestFile(t, workspace, "http://127.0.0.1:43210/mcp")
+	_, err = manager.ProjectMCPFiles().Prepare(context.Background(), types.ProjectMCPPrepareRequest{
+		Version: types.ProjectMCPFilesVersion, Generation: 1, Files: []passthroughconfig.File{file},
+	})
+	require.ErrorIs(t, err, ErrProjectMCPConflict)
+}
+
+func TestProjectMCPFilesOwnerVerifiesReadBackEntries(t *testing.T) {
+	manager, workspace := newProjectMCPFilesTestManager(t)
+	path := filepath.Join(workspace, ".pi", "mcp.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte(`{"mcpServers":{"kandev":{"url":"http://stale.example/mcp"}}}`), 0o600))
+	requested := projectMCPTestFile(t, workspace, "http://127.0.0.1:43210/mcp")
+	_, err := manager.ProjectMCPFiles().readBack([]passthroughconfig.File{requested})
+	require.ErrorContains(t, err, "does not contain the requested entries")
+}
+
+func TestProjectMCPFilesOwnerFencesGenerationAcrossCleanup(t *testing.T) {
+	manager, workspace := newProjectMCPFilesTestManager(t)
+	owner := manager.ProjectMCPFiles()
+	file := projectMCPTestFile(t, workspace, "http://127.0.0.1:43210/mcp")
+	_, err := owner.Prepare(context.Background(), types.ProjectMCPPrepareRequest{
+		Version: types.ProjectMCPFilesVersion, Generation: 1, Files: []passthroughconfig.File{file},
+	})
+	require.NoError(t, err)
+	require.NoError(t, owner.Cleanup(context.Background()))
+	fenced := owner.Target().Generation
+	require.Equal(t, uint64(2), fenced)
+	_, err = owner.Prepare(context.Background(), types.ProjectMCPPrepareRequest{
+		Version: types.ProjectMCPFilesVersion, Generation: 1, Files: []passthroughconfig.File{file},
+	})
+	require.ErrorIs(t, err, ErrProjectMCPConflict, "a stale generation must not reinstall after cleanup")
+	_, err = owner.Prepare(context.Background(), types.ProjectMCPPrepareRequest{
+		Version: types.ProjectMCPFilesVersion, Generation: fenced + 1, Files: []passthroughconfig.File{file},
+	})
+	require.NoError(t, err)
 }
 
 func TestProjectMCPFilesOwnerRejectsStaleGenerationAndEscape(t *testing.T) {

@@ -147,7 +147,8 @@ contract:
   never guesses a container, Pod, SSH, or plugin-remote path.
 - `POST /api/v1/mcp/project/prepare` materializes generated files inside
   `os.Root` containment with the existing merge and ownership registry rules,
-  then reads them back and returns fingerprints.
+  then verifies the requested entries by reading them back and returns
+  fingerprints.
 - `POST /api/v1/mcp/project/cleanup` releases that execution's claims.
 
 Delivery evidence is emitted only after the helper confirms its own identity,

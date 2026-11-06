@@ -24,6 +24,9 @@ func validateProjectMCPDelivery(
 	if err := delivery.Validate(); err != nil {
 		return nil, err
 	}
+	if delivery.Strategy == types.ProjectMCPDeliveryStrategyPi && cfg.AgentType != types.ProjectMCPDeliveryAgentPi {
+		return nil, errors.New("project MCP delivery evidence does not match this agent")
+	}
 	if err := validateProjectMCPDeliveryOwner(cfg, delivery); err != nil {
 		return nil, err
 	}

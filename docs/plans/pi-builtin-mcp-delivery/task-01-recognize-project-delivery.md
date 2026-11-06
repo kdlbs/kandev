@@ -177,7 +177,8 @@ Implemented on 2026-11-05.
 - Remote targets: the lifecycle asks the helper for its own workspace and
   loopback MCP URL instead of reading `standalonePort`, materializes generated
   files through the authenticated project-file operation with `os.Root`
-  containment, requires read-back fingerprints, and cleans the claims on stop.
+  containment, verifies read-back entries/fingerprints, and cleans the claims
+  on stop.
   Local/worktree targets keep the existing backend writer.
 - Kubernetes restart: the staged replacement client prepares the project file
   and configures the delivery record before starting the agent.

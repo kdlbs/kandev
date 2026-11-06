@@ -31,11 +31,25 @@ func newProjectMCPTestServer(t *testing.T, authToken string) (*Server, *config.I
 }
 
 // @covers AC-AGENTS-MCP-PREP-005.1
+func projectMCPAuthenticatedRequest(method, path string, body *bytes.Reader, token string) *http.Request {
+	var request *http.Request
+	if body == nil {
+		request = httptest.NewRequest(method, path, nil)
+	} else {
+		request = httptest.NewRequest(method, path, body)
+	}
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	return request
+}
+
 func TestProjectMCPRoutesMaterializeOnHelper(t *testing.T) {
-	server, cfg := newProjectMCPTestServer(t, "")
+	server, cfg := newProjectMCPTestServer(t, "control-token")
 
 	response := httptest.NewRecorder()
-	server.Router().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/mcp/project", nil))
+	server.Router().ServeHTTP(response, projectMCPAuthenticatedRequest(http.MethodGet, "/api/v1/mcp/project", nil, "control-token"))
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	var target types.ProjectMCPTarget
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &target))
@@ -48,8 +62,7 @@ func TestProjectMCPRoutesMaterializeOnHelper(t *testing.T) {
 		Files: []passthroughconfig.File{{Path: file, Content: []byte(`{"mcpServers":{}}`), MergeKey: "mcpServers"}},
 	})
 	require.NoError(t, err)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/mcp/project/prepare", bytes.NewReader(payload))
-	request.Header.Set("Content-Type", "application/json")
+	request := projectMCPAuthenticatedRequest(http.MethodPost, "/api/v1/mcp/project/prepare", bytes.NewReader(payload), "control-token")
 	response = httptest.NewRecorder()
 	server.Router().ServeHTTP(response, request)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
@@ -58,7 +71,7 @@ func TestProjectMCPRoutesMaterializeOnHelper(t *testing.T) {
 }
 
 func TestProjectMCPRoutesRejectInvalidPreparation(t *testing.T) {
-	server, cfg := newProjectMCPTestServer(t, "")
+	server, cfg := newProjectMCPTestServer(t, "control-token")
 	for _, payload := range [][]byte{
 		[]byte(`{"version":999,"generation":1,"files":[]}`),
 		func() []byte {
@@ -71,8 +84,7 @@ func TestProjectMCPRoutesRejectInvalidPreparation(t *testing.T) {
 			return encoded
 		}(),
 	} {
-		request := httptest.NewRequest(http.MethodPost, "/api/v1/mcp/project/prepare", bytes.NewReader(payload))
-		request.Header.Set("Content-Type", "application/json")
+		request := projectMCPAuthenticatedRequest(http.MethodPost, "/api/v1/mcp/project/prepare", bytes.NewReader(payload), "control-token")
 		response := httptest.NewRecorder()
 		server.Router().ServeHTTP(response, request)
 		require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
@@ -84,4 +96,11 @@ func TestProjectMCPRoutesRequireAuthentication(t *testing.T) {
 	response := httptest.NewRecorder()
 	server.Router().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/mcp/project", nil))
 	require.Equal(t, http.StatusUnauthorized, response.Code)
+
+	// Auth disabled leaves no authenticated control identity; the handlers
+	// still refuse project file access instead of trusting the local listener.
+	openServer, _ := newProjectMCPTestServer(t, "")
+	response = httptest.NewRecorder()
+	openServer.Router().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/mcp/project", nil))
+	require.Equal(t, http.StatusForbidden, response.Code)
 }

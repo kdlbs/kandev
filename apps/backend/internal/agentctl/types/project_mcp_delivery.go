@@ -22,6 +22,10 @@ const (
 	// to configure a package-mode launch that depends on project delivery.
 	ProjectMCPDeliveryCapability = "project-mcp-delivery-v1"
 
+	// ProjectMCPDeliveryAgentPi is the only agent that consumes the Pi project
+	// file. Strategy evidence for another agent must be rejected.
+	ProjectMCPDeliveryAgentPi = "pi-acp"
+
 	// ProjectMCPDeliveryStrategyPi is the only project-file strategy admitted
 	// to produce delivery evidence today. Declaring a project strategy is not
 	// enough; each producer needs explicit admission support.

@@ -31,6 +31,7 @@ func projectDeliveryAPIEnv(t *testing.T) (*Server, *config.InstanceConfig, *type
 	cfg := &config.InstanceConfig{
 		InstanceID: "instance-1", Port: 43210, MCPHost: "localhost", WorkDir: workspace,
 		TaskID: "task-1", McpProfile: &profile, AuthToken: "test-control",
+		AgentType: types.ProjectMCPDeliveryAgentPi,
 	}
 	log := newTestLogger()
 	server := NewServer(cfg, process.NewManager(cfg, log), nil, nil, log)

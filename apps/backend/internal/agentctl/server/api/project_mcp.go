@@ -24,7 +24,18 @@ func (s *Server) projectMCPFiles() (*process.ProjectMCPFilesOwner, bool) {
 	return owner, true
 }
 
+func requireProjectMCPControl(c *gin.Context) bool {
+	if c.GetBool(authenticatedControlContextKey) {
+		return true
+	}
+	c.JSON(http.StatusForbidden, gin.H{errKey: "authenticated control is required for project MCP files"})
+	return false
+}
+
 func (s *Server) handleProjectMCPTarget(c *gin.Context) {
+	if !requireProjectMCPControl(c) {
+		return
+	}
 	owner, ok := s.projectMCPFiles()
 	if !ok {
 		c.JSON(http.StatusServiceUnavailable, gin.H{errKey: "project MCP file owner is unavailable"})
@@ -34,6 +45,9 @@ func (s *Server) handleProjectMCPTarget(c *gin.Context) {
 }
 
 func (s *Server) handleProjectMCPPrepare(c *gin.Context) {
+	if !requireProjectMCPControl(c) {
+		return
+	}
 	owner, ok := s.projectMCPFiles()
 	if !ok {
 		c.JSON(http.StatusServiceUnavailable, gin.H{errKey: "project MCP file owner is unavailable"})
@@ -61,6 +75,9 @@ func (s *Server) handleProjectMCPPrepare(c *gin.Context) {
 }
 
 func (s *Server) handleProjectMCPCleanup(c *gin.Context) {
+	if !requireProjectMCPControl(c) {
+		return
+	}
 	owner, ok := s.projectMCPFiles()
 	if !ok {
 		c.JSON(http.StatusServiceUnavailable, gin.H{errKey: "project MCP file owner is unavailable"})

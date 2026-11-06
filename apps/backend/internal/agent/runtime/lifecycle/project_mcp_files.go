@@ -124,10 +124,15 @@ func (m *Manager) writeProjectMCPFiles(
 	}
 	response, err := placement.client.PrepareProjectMCP(ctx, request)
 	if err != nil {
+		if placement.generation == 0 {
+			m.reconcileUncertainProjectMCPPreparation(ctx, execution, placement.client)
+		}
 		return false, fmt.Errorf("prepare project MCP files on the execution runtime: %w", err)
 	}
 	if err := validateProjectMCPPrepareResponse(execution, placement, response, request); err != nil {
-		_ = m.cleanupProjectMCPFiles(ctx, execution, placement.client)
+		if placement.generation == 0 {
+			m.reconcileUncertainProjectMCPPreparation(ctx, execution, placement.client)
+		}
 		return false, err
 	}
 	execution.setProjectMCPRemotePrepared(placement.client, response.Generation)
@@ -163,6 +168,21 @@ func validateProjectMCPPrepareResponse(
 		}
 	}
 	return nil
+}
+
+// reconcileUncertainProjectMCPPreparation releases a first preparation whose
+// response was lost or rejected. Later generations keep their prior claims and
+// are replaced by the next successful preparation.
+func (m *Manager) reconcileUncertainProjectMCPPreparation(ctx context.Context, execution *AgentExecution, client *agentctl.Client) {
+	if client == nil {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := client.CleanupProjectMCP(cleanupCtx); err != nil {
+		m.logger.Warn("failed to reconcile uncertain project MCP preparation",
+			zap.String("execution_id", execution.ID), zap.Error(err))
+	}
 }
 
 // cleanupProjectMCPFiles releases remote project-file claims through the

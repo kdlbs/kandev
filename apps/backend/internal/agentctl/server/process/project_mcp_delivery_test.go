@@ -115,6 +115,18 @@ func TestProjectMCPDeliveryRejectsMismatchedConfiguration(t *testing.T) {
 	}
 }
 
+// @covers AC-AGENTS-BUILTIN-MCP-003.5
+func TestProjectMCPDeliveryRequiresMatchingAgent(t *testing.T) {
+	env := newProjectDeliveryTestEnv(t, p.PackageCore)
+	cfg := env.cloneConfig()
+	cfg.AgentType = "claude-acp"
+	manager := NewManager(cfg, newTestLogger(t))
+	require.ErrorContains(t, manager.ConfigureWithProjectDelivery(
+		"claude-acp", []string{"claude-acp"}, true, nil, "", nil, false, env.delivery,
+	), "does not match this agent")
+	require.Nil(t, manager.cfg.ProjectMCPDelivery)
+}
+
 // @covers AC-AGENTS-BUILTIN-MCP-003.6
 func TestPiProjectMCPDeliveryACPFlow(t *testing.T) {
 	env := newProjectDeliveryTestEnv(t, p.PackageCore, p.PackageDiagnostics)
@@ -149,6 +161,7 @@ func TestPiProjectMCPDeliveryACPFlow(t *testing.T) {
 func newProjectDeliveryACPFlow(t *testing.T, env projectDeliveryTestEnv) (*Manager, *projectDeliveryACP, func()) {
 	t.Helper()
 	manager := NewManager(env.cfg, newTestLogger(t))
+	t.Cleanup(manager.lifetimeCancel)
 	if err := manager.ConfigureWithProjectDelivery("pi-acp", []string{"pi-acp"}, true, nil, "", nil, false, env.delivery); err != nil {
 		t.Fatalf("ConfigureWithProjectDelivery: %v", err)
 	}
@@ -171,13 +184,15 @@ func connectProjectDeliveryAdapter(t *testing.T, manager *Manager) (*projectDeli
 	}
 	peer := &projectDeliveryACP{}
 	peer.conn = acpsdk.NewAgentSideConnection(peer, agentToClientWriter, clientToAgentReader)
+	adapter := manager.adapter
 	cleanup := func() {
-		_ = manager.adapter.Close()
+		_ = adapter.Close()
 		_ = clientToAgentReader.Close()
 		_ = clientToAgentWriter.Close()
 		_ = agentToClientReader.Close()
 		_ = agentToClientWriter.Close()
 	}
+	t.Cleanup(cleanup)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := manager.adapter.Initialize(ctx); err != nil {
@@ -333,4 +348,28 @@ func TestProjectMCPDeliveryAcceptsNestedWorkspacePath(t *testing.T) {
 		"pi-acp", []string{"pi-acp"}, true, nil, "", nil, false, env.delivery,
 	))
 	require.Equal(t, env.delivery, manager.cfg.ProjectMCPDelivery)
+}
+
+// @covers AC-AGENTS-BUILTIN-MCP-003.6
+func TestRebindWorkspaceClearsPendingProjectDelivery(t *testing.T) {
+	env := newProjectDeliveryTestEnv(t, p.PackageCore)
+	manager := NewManager(env.cfg, newTestLogger(t))
+	t.Cleanup(func() {
+		manager.repoTrackersMu.Lock()
+		trackers := append([]*WorkspaceTracker{manager.workspaceTracker}, manager.repoTrackers...)
+		manager.repoTrackersMu.Unlock()
+		for _, tracker := range trackers {
+			if tracker != nil {
+				tracker.Stop()
+			}
+		}
+		manager.lifetimeCancel()
+	})
+	require.NoError(t, manager.ConfigureWithProjectDelivery(
+		"pi-acp", []string{"pi-acp"}, true, nil, "", nil, false, env.delivery,
+	))
+	require.NotNil(t, manager.cfg.ProjectMCPDelivery)
+
+	require.NoError(t, manager.RebindWorkspace(context.Background(), t.TempDir()))
+	require.Nil(t, manager.cfg.ProjectMCPDelivery, "workspace rebind invalidates old delivery evidence")
 }

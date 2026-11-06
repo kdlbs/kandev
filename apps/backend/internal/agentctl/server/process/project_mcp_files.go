@@ -1,11 +1,15 @@
 package process
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -100,12 +104,17 @@ func (o *ProjectMCPFilesOwner) Prepare(
 	if len(request.Files) > 0 {
 		privateRoot := filepath.Join(cfg.WorkDir, ".kandev", "sessions", cfg.SessionID, "project-mcp")
 		if err := passthroughconfig.Prepare(ctx, cfg.WorkDir, privateRoot, o.owner(), request.Files); err != nil {
+			if errors.Is(err, passthroughconfig.ErrOwnershipConflict) {
+				return types.ProjectMCPPrepareResponse{}, ErrProjectMCPConflict
+			}
 			return types.ProjectMCPPrepareResponse{}, err
 		}
 	}
 	evidence, err := o.readBack(request.Files)
 	if err != nil {
-		_ = passthroughconfig.Cleanup(context.WithoutCancel(ctx), cfg.WorkDir, o.owner(), false)
+		if current == 0 {
+			_ = passthroughconfig.Cleanup(context.WithoutCancel(ctx), cfg.WorkDir, o.owner(), false)
+		}
 		return types.ProjectMCPPrepareResponse{}, err
 	}
 	o.mu.Lock()
@@ -127,6 +136,8 @@ func (o *ProjectMCPFilesOwner) Prepare(
 // execution or by the user remain untouched.
 func (o *ProjectMCPFilesOwner) Cleanup(ctx context.Context) error {
 	m := o.manager
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
 	ctx, release, err := m.BeginOwnedOperation(ctx)
 	if err != nil {
 		return err
@@ -139,8 +150,10 @@ func (o *ProjectMCPFilesOwner) Cleanup(ctx context.Context) error {
 	if err := passthroughconfig.Cleanup(ctx, cfg.WorkDir, o.owner(), false); err != nil {
 		return err
 	}
+	// Advance the fence across cleanup so a stale preparation request can never
+	// reinstall obsolete configuration into a cleaned generation.
 	o.mu.Lock()
-	o.generation = 0
+	o.generation++
 	o.mu.Unlock()
 	return nil
 }
@@ -184,19 +197,59 @@ func (o *ProjectMCPFilesOwner) readBack(files []passthroughconfig.File) ([]types
 		if err != nil {
 			return nil, err
 		}
-		info, err := root.Lstat(relative)
-		if err != nil || !info.Mode().IsRegular() {
+		opened, err := root.OpenFile(relative, projectMCPReadFlags(), 0)
+		if err != nil {
 			return nil, fmt.Errorf("project MCP file %q was not materialized", file.Path)
 		}
-		content, err := root.ReadFile(relative)
-		if err != nil || len(content) == 0 {
+		info, statErr := opened.Stat()
+		if statErr != nil || !info.Mode().IsRegular() {
+			_ = opened.Close()
+			return nil, fmt.Errorf("project MCP file %q is not a regular file", file.Path)
+		}
+		content, readErr := io.ReadAll(io.LimitReader(opened, maxProjectMCPFileBytes+1))
+		_ = opened.Close()
+		if readErr != nil || len(content) == 0 || len(content) > maxProjectMCPFileBytes {
 			return nil, fmt.Errorf("project MCP file %q is unreadable", file.Path)
+		}
+		if !projectMCPContentContains(content, file.Content, file.MergeKey) {
+			return nil, fmt.Errorf("project MCP file %q does not contain the requested entries", file.Path)
 		}
 		evidence = append(evidence, types.ProjectMCPPreparedFile{
 			Path: file.Path, Fingerprint: passthroughconfig.Fingerprint(content),
 		})
 	}
 	return evidence, nil
+}
+
+// projectMCPContentContains verifies that the persisted file contains every
+// requested entry. A concurrent writer cannot satisfy read-back with a file
+// that lost the generated server definitions.
+func projectMCPContentContains(actual, requested []byte, mergeKey string) bool {
+	if mergeKey == "" {
+		return bytes.Equal(actual, requested)
+	}
+	var actualDoc, requestedDoc map[string]json.RawMessage
+	if json.Unmarshal(actual, &actualDoc) != nil || json.Unmarshal(requested, &requestedDoc) != nil {
+		return false
+	}
+	var actualEntries, requestedEntries map[string]json.RawMessage
+	if json.Unmarshal(actualDoc[mergeKey], &actualEntries) != nil || json.Unmarshal(requestedDoc[mergeKey], &requestedEntries) != nil {
+		return false
+	}
+	for name, requestedEntry := range requestedEntries {
+		actualEntry, ok := actualEntries[name]
+		if !ok {
+			return false
+		}
+		var actualValue, requestedValue any
+		if json.Unmarshal(actualEntry, &actualValue) != nil || json.Unmarshal(requestedEntry, &requestedValue) != nil {
+			return false
+		}
+		if !reflect.DeepEqual(actualValue, requestedValue) {
+			return false
+		}
+	}
+	return true
 }
 
 func projectMCPRelativePath(workspace, target string) (string, error) {
