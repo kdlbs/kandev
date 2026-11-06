@@ -210,6 +210,9 @@ The second review batch adds compare-and-swap guards for mode transitions, commi
 
 The CI remediation updates four stale web store mocks. Exact-run browser fixtures now use the real automation trigger and durable run binding. A regression reproduces rejected MCP preparation without losing the caller context during environment cleanup. The focused web checks passed 137 tests in 15 files, plus typecheck, lint, translation integrity, and the new-copy ratchet. The broad seven-package backend run passed 15,106 cases. Two existing process tests failed because this Nix host has no `/bin/sleep`; no product assertion failed. The full automation, MCP configuration, handlers, server, orchestrator, and executor packages passed. Focused lifecycle and launch regressions are checked separately. All nine desktop and four phone scenarios passed with retries disabled. Both exact failing CI stop scenarios also passed. Changed-Go lint passed after the resource-field constants were extracted. Normal hook results and live CI/review completion are recorded on the PR.
 
+
+A later review follow-up identified a missing mixed-usage assertion in the deletion tests. `TestAutomationMCPHTTPDeleteReportsMixedUsage` now checks the complete HTTP 409 impact across ordinary selection scopes and automations. Restoring the original early return makes this test fail with a missing automation count; the current implementation passes. `TestAutomationMCPTemplateReloadsSavedSelection` uses a separate service instance and the persisted store to check exact package preferences, policy revision, and definition IDs. The orchestrator retry case also checks the forwarded preference contents. All 26 focused cases across the three affected packages passed, and changed-package Go lint reported zero issues.
+
 ## Risks
 
 - Discovery-only changes leave direct dispatch broken. Test one successful call for every optional package.

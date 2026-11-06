@@ -234,3 +234,29 @@ func TestAutomationMCPUpdateReturnsCommittedRevisions(t *testing.T) {
 	require.Equal(t, actual.ResourceRevision, saved.ResourceRevision)
 	require.Equal(t, actual.AutomationRevision, saved.AutomationRevision)
 }
+
+type durableTemplatePolicyReader struct{}
+
+func (durableTemplatePolicyReader) GetBuiltinPolicySnapshot(_ context.Context, workspace, _ string) (*mcpconfig.BuiltinPolicySnapshot, error) {
+	policy := mcpconfig.DefaultBuiltinWorkspacePolicy(workspace)
+	policy.Revision = 7
+	policy.Packages[p.PackageConfiguration] = mcpconfig.BuiltinPolicyAvailable
+	return &mcpconfig.BuiltinPolicySnapshot{Policy: policy}, nil
+}
+
+func TestAutomationMCPTemplateReloadsSavedSelection(t *testing.T) {
+	svc := newTestService(t)
+	a := &Automation{WorkspaceID: "workspace", Name: "Retry template", TaskMode: TaskModeNormalTask, WorkflowID: "workflow", MCPSelection: &MCPSelection{BuiltinPackages: []p.PackageID{p.PackageCore, p.PackageConfiguration}, DefinitionIDs: []string{"server"}}}
+	require.NoError(t, svc.store.CreateAutomation(t.Context(), a))
+	a.MCPSelection = nil
+	reader := NewService(svc.store, svc.eventBus, svc.logger)
+	reader.SetMCPSelectionReaders(templateDefinitionCatalog{definitions: map[string]*mcpconfig.MCPServerDefinition{"server": {ID: "server", WorkspaceID: "workspace", Enabled: true}}}, durableTemplatePolicyReader{})
+	preferences, ids, decisions, err := reader.AutomationMCPTaskTemplate(t.Context(), a.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"server"}, ids)
+	require.Empty(t, decisions)
+	require.NotNil(t, preferences)
+	require.Equal(t, 1, preferences.Version)
+	require.EqualValues(t, 7, *preferences.ExpectedPolicyRevision)
+	require.Equal(t, mcpconfig.BuiltinPackageChoices{p.PackageConfiguration: mcpconfig.BuiltinPreferenceOn, p.PackageRichOutput: mcpconfig.BuiltinPreferenceOff, p.PackageWalkthroughs: mcpconfig.BuiltinPreferenceOff, p.PackageDiagnostics: mcpconfig.BuiltinPreferenceOff}, preferences.Packages)
+}

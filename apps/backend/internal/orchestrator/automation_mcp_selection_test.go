@@ -34,5 +34,8 @@ func TestAutomationMCPNormalTaskTemplate(t *testing.T) {
 	_, _, _, _, err = svc.prepareAutomationTask(t.Context(), a, &automation.AutomationTriggeredEvent{TriggerType: automation.TriggerTypeManual}, "Retry", "Retry", map[string]interface{}{})
 	require.NoError(t, err)
 	require.NotNil(t, creator.got.BuiltinMCPPreferences)
+	require.Equal(t, 1, creator.got.BuiltinMCPPreferences.Version)
+	require.Equal(t, mcpconfig.BuiltinPackageChoices{p.PackageConfiguration: "on"}, creator.got.BuiltinMCPPreferences.Packages)
+	require.EqualValues(t, 0, *creator.got.BuiltinMCPPreferences.ExpectedPolicyRevision)
 	require.Equal(t, []string{"definition"}, creator.got.MCPServerIDs)
 }
