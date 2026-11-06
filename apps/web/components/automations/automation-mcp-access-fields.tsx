@@ -20,6 +20,9 @@ type FieldsProps = {
 const rowClass = (touch: boolean) =>
   `flex items-start gap-3 py-2 ${touch ? "min-h-11" : "min-h-7"}`;
 
+/**
+ * Keep Core selected and apply workspace blocks only to normal-task templates.
+ */
 export function AutomationBuiltinFields({
   options,
   value,
@@ -72,6 +75,10 @@ export function AutomationBuiltinFields({
   );
 }
 
+/**
+ * Separate inherited servers from explicit selections and retain controls for removing
+ * unavailable references.
+ */
 export function AutomationWorkspaceFields({
   options,
   value,
@@ -152,6 +159,9 @@ export function AutomationWorkspaceFields({
     </div>
   );
 }
+/**
+ * Let users explicitly remove saved references that can no longer attach.
+ */
 function AutomationUnavailableServers({
   ids,
   touch,

@@ -72,6 +72,9 @@ function selectionImpactTotal(impact?: MCPSelectionImpact): number {
   );
 }
 
+/**
+ * Display all referencing owner counts before a server definition is deleted.
+ */
 function SelectionImpact({
   impact = { profile: 0, repository: 0, task: 0, task_session: 0 },
 }: {
@@ -336,6 +339,10 @@ function MCPViewTabs({
   );
 }
 
+/**
+ * Require deletion confirmation and explain how stored automation references affect later process
+ * starts.
+ */
 function DeleteMCPServerDialog({
   target,
   deleting,

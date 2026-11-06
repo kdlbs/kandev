@@ -55,6 +55,10 @@ export function McpSectionHeading({
   );
 }
 
+/**
+ * Group inherited servers by origin while retaining complete provenance and attachment
+ * annotations.
+ */
 export function McpOriginSections({
   inherited,
   context,

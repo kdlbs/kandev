@@ -47,6 +47,9 @@ type MCPSelectionPickerProps = {
   renderServerAnnotation?: (id: string) => ReactNode;
 };
 
+/**
+ * Render inherited selections with owner labels and the session-specific origin sections.
+ */
 function InheritedServers({
   inherited,
   context,

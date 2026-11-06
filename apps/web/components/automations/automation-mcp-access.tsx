@@ -7,6 +7,10 @@ import { useAutomationMCPOptions } from "@/hooks/domains/settings/use-automation
 import type { AutomationMCPSelection, TaskMode } from "@/lib/types/automation";
 import { AutomationBuiltinFields, AutomationWorkspaceFields } from "./automation-mcp-access-fields";
 
+/**
+ * Present mode-specific MCP choices with touch controls and preserve selections during option
+ * reload failures.
+ */
 export function AutomationMCPAccess({
   workspaceId,
   profileId,

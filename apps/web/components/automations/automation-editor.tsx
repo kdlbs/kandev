@@ -355,6 +355,10 @@ function AutomationDeleteControls({
   );
 }
 
+/**
+ * Keep MCP choices and their saved revision with the automation draft throughout save and
+ * conflict recovery.
+ */
 // eslint-disable-next-line max-lines-per-function -- The editor coordinates its form, trigger, settings-save, and deletion lifecycles.
 export function AutomationEditor({ workspaceId, automationId }: AutomationEditorProps) {
   const router = useRouter();

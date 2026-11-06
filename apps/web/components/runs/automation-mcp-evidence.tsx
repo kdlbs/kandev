@@ -5,6 +5,10 @@ import { useBuiltinMCPSession } from "@/hooks/domains/session/use-builtin-mcp-se
 import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { automationMCPEvidence } from "./automation-mcp-evidence-model";
 
+/**
+ * Load run evidence only while expanded and display desired choices separately from bound and
+ * observed tools.
+ */
 export function AutomationMCPEvidence({
   automation,
   run,
