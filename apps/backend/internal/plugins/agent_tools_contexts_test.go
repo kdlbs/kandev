@@ -157,7 +157,7 @@ func TestInvokeInstanceSurfaceRevalidatesDeclaration(t *testing.T) {
 	})
 
 	for name, want := range map[string]string{
-		"task_scoped": "requires instance invocation scope",
+		"task_scoped": "requires instance or workspace invocation scope",
 		"write_tool":  "requires a true read-only hint",
 	} {
 		_, err := svc.InvokeAgentTool(context.Background(), "kandev-provider-usage", name, map[string]any{},

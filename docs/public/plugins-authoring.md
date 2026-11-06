@@ -405,15 +405,43 @@ agent_tools:
       idempotent_hint: true
 ```
 
-`coordinator` and `external` require both instance scope and
-`read_only_hint: true`; a missing or false hint rejects the install. External
-calls arrive only through the configured external MCP endpoint over its
-trusted in-process transport, follow the endpoint authentication setting, and
-have empty task, session, and workspace context, so
-`invocation_workspace_id` must be the empty string. A coordinator conversation binds eligible tools by exact
-reference, including the installation and policy version, when it opens. A
-phase-1 conversation or a version-1 binding exposes no plugin tools; reopen the
-conversation after installing or changing a plugin to gain a new binding.
+`coordinator` requires instance scope. `external` accepts instance or workspace
+scope. Both require `read_only_hint: true`, and a missing or false hint rejects
+the install. External instance reads arrive only through the configured external
+MCP endpoint over its trusted in-process transport, follow the endpoint
+authentication setting, and have empty task, session, and workspace context, so
+`invocation_workspace_id` is the empty string. A coordinator conversation binds
+eligible tools by exact reference, including the installation and policy
+version, when it opens. A phase-1 conversation or a version-1 binding exposes
+no plugin tools; reopen the conversation after installing or changing a plugin
+to gain a new binding.
+
+A workspace read sets `invocation_scope: workspace` and may use `kanban-task`,
+`office-task`, or `external`:
+
+```yaml
+agent_tools:
+  - name: read_workspace_settings
+    description: Read one workspace's settings.
+    surfaces: [kanban-task, external]
+    invocation_scope: workspace
+    input_schema:
+      type: object
+      properties:
+        key: { type: string }
+    annotations:
+      read_only_hint: true
+```
+
+The input schema must have a top-level `type: object`, and it must not declare
+`kandev_workspace_id`; installation rejects the reserved property. On the
+external surface, Kandev advertises `kandev_workspace_id` as a required string,
+checks that the authenticated caller may read that workspace, removes the
+argument before invocation, and passes the verified ID in
+`AgentToolContext.WorkspaceID`. Clients discover IDs with
+`list_workspaces_kandev`. Task-backed calls use the execution workspace and do
+not advertise the argument. Workspace scope first ships in 0.100.0, so set
+`min_kandev_version: "0.100.0"` or later.
 
 The first host release with instance-read contexts is 0.99.0. Set
 `min_kandev_version: "0.99.0"` before publishing a declaration that uses them.
@@ -436,7 +464,8 @@ it is active.
 Plugin tools are never exposed to configuration MCP clients. Kandev validates
 the input and optional output JSON Schemas, supplies task/session/workspace/surface
 context, enforces a 30-second deadline and 1 MiB result limit, and does not retry
-calls. External calls have no task identity; coordinator and automation calls
+calls. External instance reads have no task identity; external workspace reads
+carry only the host-verified workspace ID. Coordinator and automation calls
 keep the host-resolved identity. For managed calls, Kandev also supplies the
 current installation, conversation and approval revisions, manifest digest,
 selected names, and execution ID from the authenticated broker context. Tool

@@ -67,7 +67,8 @@ done
 	if !isPreparedNPMPrefix(args[3], workDir) {
 		t.Fatalf("npx prefix = %q, want prepared absolute private prefix", args[3])
 	}
-	if args[4] != "@openai/codex@0.154.0" || args[5] != "app-server" {
+	codexPackage := "@openai/codex@" + agents.MustDefaultManagedNPMRuntimeVersion("@openai/codex")
+	if args[4] != codexPackage || args[5] != "app-server" {
 		t.Fatalf("npx package and args = %#v", args[4:])
 	}
 }
