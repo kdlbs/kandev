@@ -271,3 +271,34 @@ describe("workspace.deleted queue cleanup", () => {
     expect(store.getState().workspaces.activeIdRevision).toBe(4);
   });
 });
+
+describe("workspace.updated sessionless WIP release policy", () => {
+  it("applies updated policy fields", () => {
+    const store = storeWith([workspace()]);
+    const handlers = registerWorkspacesHandlers(store);
+
+    dispatch(handlers, WORKSPACE_UPDATED, {
+      ...BASE_UPDATED_PAYLOAD,
+      wip_sessionless_release_enabled: true,
+      wip_sessionless_release_grace_minutes: 25,
+    });
+
+    expect(store.getState().workspaces.items[0].wip_sessionless_release_enabled).toBe(true);
+    expect(store.getState().workspaces.items[0].wip_sessionless_release_grace_minutes).toBe(25);
+  });
+
+  it("keeps the current values when the payload omits both keys", () => {
+    const store = storeWith([
+      workspace({
+        wip_sessionless_release_enabled: true,
+        wip_sessionless_release_grace_minutes: 25,
+      }),
+    ]);
+    const handlers = registerWorkspacesHandlers(store);
+
+    dispatch(handlers, WORKSPACE_UPDATED, BASE_UPDATED_PAYLOAD);
+
+    expect(store.getState().workspaces.items[0].wip_sessionless_release_enabled).toBe(true);
+    expect(store.getState().workspaces.items[0].wip_sessionless_release_grace_minutes).toBe(25);
+  });
+});

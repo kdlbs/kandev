@@ -7,6 +7,9 @@ func workspaceFieldUpdate(req *UpdateWorkspaceRequest) models.WorkspaceFieldUpda
 		Name: req.Name, Description: req.Description,
 		ACPIdleSuspensionEnabled: req.ACPIdleSuspensionEnabled,
 		ACPIdleTimeoutMinutes:    req.ACPIdleTimeoutMinutes,
+
+		WIPSessionlessReleaseEnabled:      req.WIPSessionlessReleaseEnabled,
+		WIPSessionlessReleaseGraceMinutes: req.WIPSessionlessReleaseGraceMinutes,
 	}
 	update.DefaultExecutorID = workspaceDefaultUpdate(req.DefaultExecutorID)
 	update.DefaultEnvironmentID = workspaceDefaultUpdate(req.DefaultEnvironmentID)

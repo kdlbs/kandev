@@ -222,7 +222,8 @@ func (r *idleSessionReaper) runLoop(ctx context.Context, tick func(ctx context.C
 // the per-tick work is a thin scan + loop, not a new policy. The tick also
 // drives reclaimStuckSignalSessionsOnce (stuck_signal_watchdog.go),
 // detectOfficeDecisionWaitingOnce (office_decision_stall_watchdog.go) and
-// reapStalePendingMovesOnce (pending_move_reaper.go) — further scans
+// reapStalePendingMovesOnce (pending_move_reaper.go) and
+// releaseSessionlessWIPSlotsOnce (workflow_store_wip_release.go) — further scans
 // sharing this ticker rather than background goroutines of their own,
 // preserving the reaper's single-goroutine-owner invariant. The 30s
 // cadence is far finer than either of those needs; they are here for the
@@ -237,6 +238,7 @@ func (s *Service) startIdleSessionReaper(ctx context.Context) {
 		s.reclaimStuckSignalSessionsOnce(tickCtx)
 		s.detectOfficeDecisionWaitingOnce(tickCtx)
 		s.reapStalePendingMovesOnce(tickCtx)
+		s.releaseSessionlessWIPSlotsOnce(tickCtx)
 	}) {
 		return
 	}

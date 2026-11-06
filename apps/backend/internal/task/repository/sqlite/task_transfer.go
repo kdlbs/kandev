@@ -557,12 +557,14 @@ func (r *Repository) validateTransferLane(
 		return fmt.Errorf("%w: destination lane changes task semantics", repoerrors.ErrTaskTransferConflict)
 	}
 	if placement.WIPAdmitted != 0 && destination.WIPLimit > 0 {
+		releaseFilter, releaseArgs := r.admittedOccupancyFilter(ctx, tx, destinationStepID)
 		var occupants int
 		if err := tx.GetContext(ctx, &occupants, r.db.Rebind(`
 			SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ?
 				AND archived_at IS NULL AND is_ephemeral = 0 AND wip_admitted = 1
 				AND COALESCE(origin, '') <> 'automation_run'
-				AND (queued_for_step_id = '' OR queued_for_step_id IS NULL)`), destinationStepID); err != nil {
+				AND (queued_for_step_id = '' OR queued_for_step_id IS NULL)`+releaseFilter),
+			append([]interface{}{destinationStepID}, releaseArgs...)...); err != nil {
 			return err
 		}
 		if occupants >= destination.WIPLimit {
