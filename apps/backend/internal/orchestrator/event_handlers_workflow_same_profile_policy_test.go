@@ -38,6 +38,7 @@ func TestPrepareWorkflowStepSession_SameProfileNew(t *testing.T) {
 				ProfileSessionEndPolicy: endPolicy,
 			}
 
+			commitProfileSwitchEntry(t, fixture, target.ID)
 			selected, switched, err := fixture.svc.prepareWorkflowStepSession(
 				ctx, "t1", fixture.current, target, source,
 			)
@@ -171,6 +172,7 @@ func TestProcessOnEnter_SameProfileNewPromptRecipient(t *testing.T) {
 		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
 	}
 
+	commitProfileSwitchEntry(t, fixture, target.ID)
 	fixture.svc.processOnEnter(ctx, "t1", fixture.current, target, "task description", 0, source)
 	select {
 	case <-promptDelivered:

@@ -16,6 +16,14 @@ var ErrWorkspaceNotFound = errors.New("workspace not found")
 // ErrWorkflowNotFound reports that no workflow row matched the supplied id.
 var ErrWorkflowNotFound = errors.New("workflow not found")
 
+// ErrWorkflowAllocationRecorded reports a second destination allocation for
+// the same accepted workflow entry.
+var ErrWorkflowAllocationRecorded = errors.New("workflow entry already has a recorded allocation")
+
+// ErrWorkflowAllocationStaleEntry reports that an allocation no longer belongs
+// to the task's current workflow step entry.
+var ErrWorkflowAllocationStaleEntry = errors.New("workflow allocation entry is no longer current")
+
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 
