@@ -23,4 +23,11 @@ type NativeResumeSubmissionEvidence struct {
 	PayloadHash       string
 	TerminalStreamID  string
 	TerminalSequence  int64
+	// UnprovenCompletion marks a historical SQL completion label that has no
+	// terminal proof. Admission must revalidate the full predicate under locks;
+	// the label itself is never terminal authority.
+	UnprovenCompletion bool
+	// Cursor pins the historical stream receipt/projection watermark for an
+	// unproven completion. The locked inventory check must re-read it exactly.
+	Cursor *AgentDeliveryCursor
 }
