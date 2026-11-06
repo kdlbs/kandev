@@ -102,7 +102,7 @@ Never accept this manifest from agent tool arguments.
 Extend the existing action-to-package catalog and `guardedMCPDispatcher` authorization.
 The permitted native action set is Automation Core plus the selected package actions.
 The automation guard still validates resource references, attribution, and coordination self-target restrictions.
-Top-level payload keys use canonical lowercase names so case-insensitive handler decoding cannot bypass these checks.
+Top-level payload keys use canonical lowercase ASCII names so case-insensitive handler decoding, including Unicode case-fold aliases, cannot bypass these checks. Unicode values and nested user content remain valid.
 Profile targets must belong to this workspace or remain accessible under existing shared-profile rules.
 Do not globally bypass `authorizeAutomationRequest` when Configuration is present.
 Existing plugin list/invoke actions continue through their dedicated selection checks.

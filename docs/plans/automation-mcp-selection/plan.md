@@ -218,6 +218,9 @@ The fresh review on `ad8c057` completed with all 90 CI checks passing and added 
 
 This batch passed 144 web cases in 16 files, 39 focused backend cases across four packages with PostgreSQL enabled, changed-Go lint, web lint/typecheck, translation integrity, and the new-copy ratchet. All ten desktop and five phone browser scenarios passed with retries disabled, including the deletion warning and retained-reference checks. The final CI result and dispositions of grouped suggestions remain recorded on PR #5106.
 
+
+The incremental review on `10c3e4d` had no inline findings but reported two grouped issues. A Unicode case-fold alias such as `taſk_id` could pass the lowercase-only check and then bind to `TaskID` in the Go decoder. The new regression reproduced that bypass. Payload keys now require lowercase ASCII; Unicode values and nested user content remain valid. The complete MCP handler suite passed 1,184 cases. The automation usage label now uses a localized count key and plural forms in every shipped locale. The deletion browser flow asserts the singular label. All ten desktop and five phone flows passed after a fresh application build, including all native package invocations. Web lint/typecheck, translation integrity, the new-copy ratchet, and changed-Go lint passed.
+
 ## Risks
 
 - Discovery-only changes leave direct dispatch broken. Test one successful call for every optional package.

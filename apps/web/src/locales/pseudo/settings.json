@@ -1060,6 +1060,8 @@
   "mcpRepositorySelectionDescription": "Ćĥōōśē ḾĆƤ śēŕvēŕś ƒōŕ ţàśķś ũśĩńĝ ţĥĩś ŕēƥōśĩţōŕŷ.",
   "mcpProfileUsage_one": "{{count}} ƥŕōƒĩĺē",
   "mcpProfileUsage_other": "{{count}} ƥŕōƒĩĺēś",
+  "mcpAutomationUsage_one": "{{count}} àũţōḿàţĩōń",
+  "mcpAutomationUsage_other": "{{count}} àũţōḿàţĩōńś",
   "mcpRepositoryUsage_one": "{{count}} ŕēƥōśĩţōŕŷ",
   "mcpRepositoryUsage_other": "{{count}} ŕēƥōśĩţōŕĩēś",
   "mcpTaskUsage_one": "{{count}} ţàśķ",

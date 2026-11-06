@@ -130,6 +130,7 @@ export async function verifyAutomationMCPDeleteWarning({
     .click();
   const dialog = testPage.getByRole("dialog");
   const warning = dialog.getByTestId("mcp-automation-delete-impact");
+  await expect(dialog.getByTestId("mcp-selection-impact")).toContainText("1 automation");
   await expect(warning).toContainText("Automations keep their saved selection after deletion.");
   await expect(warning).toContainText("New agent processes cannot attach this server.");
   const confirm = dialog.getByRole("button", { name: "Delete", exact: true });

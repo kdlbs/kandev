@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"unicode"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
@@ -149,8 +150,8 @@ func automationPayloadFields(payload json.RawMessage) (map[string]json.RawMessag
 		return nil, err
 	}
 	for key := range fields {
-		if key != strings.ToLower(key) {
-			return nil, errors.New("payload field names must use lowercase")
+		if key != strings.ToLower(key) || strings.IndexFunc(key, func(r rune) bool { return r > unicode.MaxASCII }) >= 0 {
+			return nil, errors.New("payload field names must use lowercase ASCII")
 		}
 	}
 	if fields == nil {

@@ -1060,6 +1060,8 @@
   "mcpRepositorySelectionDescription": "Choose MCP servers for tasks using this repository.",
   "mcpProfileUsage_one": "{{count}} profile",
   "mcpProfileUsage_other": "{{count}} profiles",
+  "mcpAutomationUsage_one": "{{count}} automation",
+  "mcpAutomationUsage_other": "{{count}} automations",
   "mcpRepositoryUsage_one": "{{count}} repository",
   "mcpRepositoryUsage_other": "{{count}} repositories",
   "mcpTaskUsage_one": "{{count}} task",

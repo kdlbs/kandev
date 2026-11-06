@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	p "github.com/kandev/kandev/internal/mcp/profile"
@@ -42,6 +43,14 @@ func TestAutomationMCPRawDispatch(t *testing.T) {
 }
 
 func TestAutomationMCPRejectsNoncanonicalResourceKeys(t *testing.T) {
+	var decoded struct {
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(`{"taſk_id":"foreign", "ſession_id":"foreign-session"}`), &decoded))
+	require.Equal(t, "foreign", decoded.TaskID)
+	require.Equal(t, "foreign-session", decoded.SessionID)
+
 	svc, _ := newTestTaskService(t)
 	workspaces, err := svc.ListWorkspaces(t.Context())
 	require.NoError(t, err)
@@ -50,7 +59,7 @@ func TestAutomationMCPRejectsNoncanonicalResourceKeys(t *testing.T) {
 	ctx := scope.WithPrincipal(t.Context(), scope.Principal{AutomationID: "automation", WorkspaceID: workspace, CallerTaskID: "task", CallerSessionID: "session", Surface: p.SurfaceAutomation})
 	ctx = streams.WithMCPExecutionContext(ctx, streams.MCPExecutionContext{TaskID: "task", SessionID: "session", BuiltinAuthority: streams.BuiltinMCPAuthority{Required: true, Manifest: manifest, Actions: []string{ws.ActionMCPGetDiagnosticBundle}}})
 	h := &Handlers{taskSvc: svc, logger: testLogger(t)}
-	for _, fields := range []map[string]any{{}, {"TASK_ID": "foreign"}, {"SESSION_ID": "foreign"}, {"task_id": "task", "TASK_ID": "foreign"}, {"WORKSPACE_ID": "foreign"}} {
+	for _, fields := range []map[string]any{{}, {"TASK_ID": "foreign"}, {"SESSION_ID": "foreign"}, {"task_id": "task", "TASK_ID": "foreign"}, {"WORKSPACE_ID": "foreign"}, {"taſk_id": "foreign"}, {"ſession_id": "foreign"}, {"workſpace_id": "foreign"}, {"taſk_id": "foreign", "ſession_id": "foreign-session"}} {
 		denied, _, err := h.authorizeAutomationRequest(ctx, makeWSMessage(t, ws.ActionMCPGetDiagnosticBundle, fields))
 		require.NoError(t, err)
 		if len(fields) == 0 {
@@ -180,4 +189,11 @@ func TestAutomationMCPExecutorProfileIDsAreNotAgentProfileIDs(t *testing.T) {
 			assertWSError(t, denied, ws.ErrorCodeNotFound)
 		})
 	}
+}
+
+func TestAutomationMCPPayloadFieldsAllowUnicodeContent(t *testing.T) {
+	fields, err := automationPayloadFields(json.RawMessage(`{"title":"任務 ſ K", "metadata":{"セッション":"内容"}}`))
+	require.NoError(t, err)
+	require.JSONEq(t, `"任務 ſ K"`, string(fields["title"]))
+	require.JSONEq(t, `{"セッション":"内容"}`, string(fields["metadata"]))
 }

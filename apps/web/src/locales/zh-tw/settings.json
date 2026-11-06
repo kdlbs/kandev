@@ -1060,6 +1060,8 @@
   "mcpRepositorySelectionDescription": "為使用此儲存庫的任務選擇 MCP 伺服器。",
   "mcpProfileUsage_one": "{{count}} 個設定",
   "mcpProfileUsage_other": "{{count}} 個設定",
+  "mcpAutomationUsage_one": "{{count}} 個自動化",
+  "mcpAutomationUsage_other": "{{count}} 個自動化",
   "mcpRepositoryUsage_one": "{{count}} 個儲存庫",
   "mcpRepositoryUsage_other": "{{count}} 個儲存庫",
   "mcpTaskUsage_one": "{{count}} 個任務",

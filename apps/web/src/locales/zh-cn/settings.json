@@ -1060,6 +1060,8 @@
   "mcpRepositorySelectionDescription": "为使用此仓库的任务选择 MCP 服务器。",
   "mcpProfileUsage_one": "{{count}} 个配置",
   "mcpProfileUsage_other": "{{count}} 个配置",
+  "mcpAutomationUsage_one": "{{count}} 个自动化",
+  "mcpAutomationUsage_other": "{{count}} 个自动化",
   "mcpRepositoryUsage_one": "{{count}} 个仓库",
   "mcpRepositoryUsage_other": "{{count}} 个仓库",
   "mcpTaskUsage_one": "{{count}} 个任务",

@@ -1060,6 +1060,8 @@
   "mcpRepositorySelectionDescription": "이 리포지토리를 사용하는 작업의 MCP 서버를 선택하세요.",
   "mcpProfileUsage_one": "프로필 {{count}}개",
   "mcpProfileUsage_other": "프로필 {{count}}개",
+  "mcpAutomationUsage_one": "자동화 {{count}}개",
+  "mcpAutomationUsage_other": "자동화 {{count}}개",
   "mcpRepositoryUsage_one": "리포지토리 {{count}}개",
   "mcpRepositoryUsage_other": "리포지토리 {{count}}개",
   "mcpTaskUsage_one": "작업 {{count}}개",

@@ -88,9 +88,7 @@ function SelectionImpact({
           })
         : t("settings:mcpSelectionImpactNone")}
       {automation > 0 ? (
-        <span className="block">
-          {t("automations:automations")}: {impact?.automation}
-        </span>
+        <span className="block">{t("settings:mcpAutomationUsage", { count: automation })}</span>
       ) : null}
     </p>
   );
