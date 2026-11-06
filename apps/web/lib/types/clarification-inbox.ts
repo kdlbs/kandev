@@ -39,3 +39,21 @@ export type ClarificationInboxHiddenPage = {
 };
 
 export type ClarificationInboxSnoozeDuration = "1h" | "4h" | "24h";
+
+// Unanswered section (clarification-active-lifecycle AC .10 to .17): questions a
+// newer turn superseded while still pending. The agent is not waiting on them;
+// answering sends an ordinary late-answer message.
+export type ClarificationInboxUnansweredBundle = ClarificationInboxBundle & {
+  original_session_terminal: boolean;
+  /** The task's current primary session, offered only after the asking session ended. */
+  send_to_task_session_id: string | null;
+};
+
+export type ClarificationInboxUnansweredPage = {
+  /** False while the workspace setting is off; the section is then not shown. */
+  enabled: boolean;
+  retention_days: number;
+  bundles: ClarificationInboxUnansweredBundle[];
+  count: number;
+  next_cursor?: string;
+};

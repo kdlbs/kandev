@@ -54,6 +54,9 @@ type WorkspaceDTO struct {
 	CreatedAt                   time.Time `json:"created_at"`
 	UpdatedAt                   time.Time `json:"updated_at"`
 
+	ClarificationUnansweredInboxEnabled  bool `json:"clarification_unanswered_inbox_enabled"`
+	ClarificationUnansweredRetentionDays int  `json:"clarification_unanswered_retention_days"`
+
 	// ViewerRole and Scopes describe what the *requesting* user may do here.
 	// The frontend gates every control on Scopes rather than comparing the
 	// current user ID to OwnerID, so permission logic lives in one place.
@@ -933,6 +936,9 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 		OfficeWorkflowID:            workspace.OfficeWorkflowID,
 		CreatedAt:                   workspace.CreatedAt,
 		UpdatedAt:                   workspace.UpdatedAt,
+
+		ClarificationUnansweredInboxEnabled:  workspace.ClarificationUnansweredInboxEnabled,
+		ClarificationUnansweredRetentionDays: workspace.ClarificationUnansweredRetentionDays,
 	}
 }
 

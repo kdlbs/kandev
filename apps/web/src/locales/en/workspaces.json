@@ -301,5 +301,12 @@
   "cloneSourceMissing": "The source workspace is no longer available.",
   "cloneConfigurationUnsupported": "This workspace has managed settings, unavailable defaults, or workflow references that cannot be cloned.",
   "cloneFailed": "Could not clone the workspace. Please try again.",
-  "workspaceActionsNamed": "Actions for {{name}}"
+  "workspaceActionsNamed": "Actions for {{name}}",
+  "unansweredInboxTitle": "Unanswered questions",
+  "unansweredInboxDescription": "Keep questions an agent moved past without an answer visible in the Needs-you inbox and to agents listing pending questions. This setting is off by default.",
+  "unansweredInboxEnabled": "Show unanswered questions",
+  "unansweredInboxEnabledDescription": "Answers are sent as new messages to the task, and a repeated question replaces the older copy. These questions never block an agent or a workflow step.",
+  "unansweredRetentionDays": "Close after (days)",
+  "unansweredRetentionDescription": "Unanswered questions older than this close automatically. Allowed range: 1 to 90 days.",
+  "unansweredRetentionInvalid": "Enter a whole number from 1 to 90."
 }

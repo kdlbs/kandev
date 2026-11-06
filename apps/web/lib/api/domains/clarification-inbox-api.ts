@@ -3,6 +3,7 @@ import type {
   ClarificationInboxHiddenPage,
   ClarificationInboxPage,
   ClarificationInboxSnoozeDuration,
+  ClarificationInboxUnansweredPage,
 } from "@/lib/types/clarification-inbox";
 
 const BASE = "/api/v1/clarification-inbox";
@@ -67,5 +68,42 @@ export function restoreClarificationInboxBundle(
   return fetchJson<void>(`${BASE}/sidecar/${encodeURIComponent(pendingId)}`, {
     ...options,
     init: { method: "DELETE", ...options?.init },
+  });
+}
+
+export function listUnansweredClarificationInbox(
+  workspaceId: string,
+  options?: ApiRequestOptions,
+): Promise<ClarificationInboxUnansweredPage> {
+  return fetchJson<ClarificationInboxUnansweredPage>(
+    `${BASE}/unanswered?workspace_id=${encodeURIComponent(workspaceId)}`,
+    options,
+  );
+}
+
+export function closeUnansweredClarificationInboxBundle(
+  pendingId: string,
+  options?: ApiRequestOptions,
+): Promise<void> {
+  return fetchJson<void>(`${BASE}/unanswered/${encodeURIComponent(pendingId)}/close`, {
+    ...options,
+    init: { method: "POST", ...options?.init },
+  });
+}
+
+/** Records that an admitted late-answer message answered this unanswered question. */
+export function markClarificationInboxLateAnswer(
+  pendingId: string,
+  admission: { messageId: string; sessionId: string },
+  options?: ApiRequestOptions,
+): Promise<void> {
+  return fetchJson<void>(`${BASE}/unanswered/${encodeURIComponent(pendingId)}/late-answer`, {
+    ...options,
+    init: {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: admission.messageId, session_id: admission.sessionId }),
+      ...options?.init,
+    },
   });
 }

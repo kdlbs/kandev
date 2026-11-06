@@ -13,4 +13,7 @@ type WorkspaceFieldUpdate struct {
 	ACPIdleSuspensionEnabled    *bool
 	ACPIdleTimeoutMinutes       *int
 	UnitID                      *string
+
+	ClarificationUnansweredInboxEnabled  *bool
+	ClarificationUnansweredRetentionDays *int
 }

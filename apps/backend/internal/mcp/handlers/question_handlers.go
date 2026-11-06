@@ -49,6 +49,9 @@ type listPendingQuestionsRequest struct {
 	CreatedSince string `json:"created_since"`
 	Cursor       string `json:"cursor"`
 	Limit        int    `json:"limit"`
+	// IncludeUnanswered also lists questions a newer turn superseded while
+	// they were pending, in workspaces that enable the unanswered inbox.
+	IncludeUnanswered bool `json:"include_unanswered"`
 }
 
 // pendingQuestionBundleView is one bundle in the L11 response envelope,
@@ -61,6 +64,9 @@ type pendingQuestionBundleView struct {
 	AgeSeconds int64                          `json:"age_seconds"`
 	Context    string                         `json:"context"`
 	Questions  []clarification.QuestionStatus `json:"questions"`
+	// State is set only when include_unanswered was requested: "active" for
+	// a bundle the agent is waiting on, "unanswered" for one it is not.
+	State string `json:"state,omitempty"`
 }
 
 // listPendingQuestionsResponse is L11's response envelope. No grand total is
@@ -113,10 +119,21 @@ func (h *Handlers) handleListPendingQuestions(ctx context.Context, msg *ws.Messa
 		h.logger.Error("failed to list unresolved clarification bundles", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list pending questions", nil)
 	}
+	var unansweredIDs map[string]struct{}
+	if req.IncludeUnanswered {
+		page, unansweredIDs, err = h.mergeUnansweredQuestionBundles(ctx, opts, page)
+		if err != nil {
+			h.logger.Error("failed to list unanswered clarification bundles", zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list pending questions", nil)
+		}
+	}
 	resp, err := h.buildListPendingQuestionsResponse(ctx, page)
 	if err != nil {
 		h.logger.Error("failed to build list_pending_questions_kandev response", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list pending questions", nil)
+	}
+	if req.IncludeUnanswered {
+		labelPendingQuestionStates(resp.Bundles, unansweredIDs)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }

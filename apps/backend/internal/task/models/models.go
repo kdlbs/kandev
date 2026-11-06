@@ -1961,6 +1961,13 @@ type Workspace struct {
 	TaskPrefix       string `json:"task_prefix,omitempty"`        // e.g. "KAN"
 	TaskSequence     int    `json:"task_sequence,omitempty"`      // auto-incrementing counter
 	OfficeWorkflowID string `json:"office_workflow_id,omitempty"` // FK to system office workflow
+
+	// ClarificationUnansweredInboxEnabled lists superseded, still-pending
+	// clarifications as unanswered instead of only keeping them in history.
+	ClarificationUnansweredInboxEnabled bool `json:"clarification_unanswered_inbox_enabled"`
+	// ClarificationUnansweredRetentionDays closes unanswered clarifications
+	// older than this many days.
+	ClarificationUnansweredRetentionDays int `json:"clarification_unanswered_retention_days"`
 }
 
 // TaskRepository represents a repository associated with a task

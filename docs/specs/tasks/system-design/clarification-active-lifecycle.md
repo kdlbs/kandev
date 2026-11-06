@@ -4,6 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-CLARIFICATION-LIFECYCLE-001
   - REQ-TASKS-CLARIFICATION-SCENARIOS-001
+  - REQ-TASKS-CLARIFICATION-UNANSWERED-001
 ---
 
 
@@ -25,6 +26,7 @@ The task system owns clarification bundle authority, turn scoping, response pers
 | --- | --- |
 | `REQ-TASKS-CLARIFICATION-LIFECYCLE-001` | Data model, frontend clarification selection, API surface, and state machine. |
 | `REQ-TASKS-CLARIFICATION-SCENARIOS-001` | Frontend clarification selection, failure modes, and persistence guarantees. |
+| `REQ-TASKS-CLARIFICATION-UNANSWERED-001` | [Unanswered clarifications](#unanswered-clarifications). |
 
 
 ## Data model
@@ -339,3 +341,90 @@ session they can already access. Session selection does not broaden task visibil
 - No one-off mutation or backfill of an existing installation database is required. Deploying the
   corrected derivation makes historical older-turn pending rows inert and repairs their summaries on
   normal reads.
+
+## Unanswered clarifications
+
+An opt-in projection over `superseded_history`. It never adds an operational state: an unanswered
+bundle cannot become active, claimed, or answerable through `/respond`.
+
+### Settings
+
+- `workspaces.clarification_unanswered_inbox_enabled BOOLEAN NOT NULL DEFAULT FALSE` and
+  `workspaces.clarification_unanswered_retention_days INTEGER NOT NULL DEFAULT 14` with a 1 to 90
+  check. Both dialects add them through the existing `ALTER TABLE` migration list and the base
+  schema. The service rejects a retention outside the range; omitted fields keep stored values.
+- The workspace DTO, HTTP and WebSocket update requests, `workspace.created`/`workspace.updated`
+  events, and the boot workspace map carry both fields. Clients keep their current value when an
+  older event omits a key.
+
+### Selection
+
+`clarification_unanswered_query.go` owns one derived table. A bundle qualifies when it has a pending
+row, every row has a resolvable `question_id`, no row is an autopilot parent question, no row carries
+`closed_reason` or `merged_into`, its task is unarchived, its workspace enables the setting, and its
+asking turn differs from the session's current turn. The current turn comes from
+`turnAuthorityCurrentTurnIDExpr` alone, as History does, so a superseded bundle stays unanswered after
+its session ends while a terminal session's current-turn bundle keeps the lifecycle's `expired`
+status. The read is separate from every pending-action sink and from the active bundle query, so the
+projection, workflow guards, overlays, and `ListUnresolvedClarificationBundles` are unchanged.
+
+### Writes
+
+All writes are one conditional `UPDATE` of the bundle's rows whose filter re-runs the selection, so a
+bundle that stopped qualifying (closed, merged, archived, setting off) is not written and the caller
+sees zero rows. Values are bound; keys are package constants. Status and turn ownership are never
+touched.
+
+| Write | Metadata |
+| --- | --- |
+| Late answer admitted | `closed_reason=answered_late`, `closed_at`, `late_answered_at`, `late_answer_message_id`, `late_answer_session_id` |
+| User close | `closed_reason=closed_by_user`, `closed_at` |
+| Retention | `closed_reason=expired_unanswered`, `closed_at` |
+| Duplicate | `merged_into=<new pending_id>` |
+
+- **Late answer.** The browser sends the late answer through the unchanged ordinary-message path and,
+  once admission returns sent or queued, posts the admitted client message identity to
+  `POST /api/v1/clarification-inbox/unanswered/:pendingId/late-answer`. The server never infers the
+  answered question from message text. A failed close leaves the question listed; the message stays
+  delivered. An identified admission must be bound to that pending ID and follow the latest persisted
+  question in the bundle. If a question total is declared, all declared distinct questions must be
+  present before automatic close; older bundles without a declared total retain their legacy path.
+  Queued admissions use their own durable admission time, not the timestamp of a merged queue row.
+- **Send to task.** The late-answer body may name another `session_id` only when the asking session
+  is terminal and the target belongs to the same task. The list offers the task's primary session in
+  `send_to_task_session_id` under the same condition.
+- **Duplicates.** After `CreateClarificationRequestMessages` persists a new bundle, the message
+  creator asks the repository to merge older unanswered bundles of the same task whose every question
+  matches the new bundle by agent-chosen `question_id` or normalized prompt. Positional `q<N>`
+  identifiers are generated per call and are ignored as identity. The merge is best effort and runs
+  after the new bundle is durable, so it cannot block or fail the question.
+- **Retention.** Applied lazily inside `ListUnansweredClarificationBundles`: before selecting a page,
+  it closes each enabled workspace's unanswered bundles older than its retention. Every observer of the
+  unanswered state (the inbox endpoint and the MCP option) goes through that read, so a background
+  sweep would add a goroutine and schedule without changing anything a caller can see.
+
+### API surface
+
+- `GET /api/v1/clarification-inbox/unanswered?workspace_id=` uses the Needs-you read's workspace
+  authorization, cursor, limit, and per-user dismiss and snooze filter. It returns `enabled`,
+  `retention_days`, and bundles shaped like Needs-you rows plus `original_session_terminal` and
+  `send_to_task_session_id`. With the setting off it returns `enabled=false` and no rows.
+- `POST .../unanswered/:pendingId/close` requires task write access; `.../late-answer` requires
+  prompt access to the target task session. An unavailable authorizer fails closed. A bundle that is
+  not unanswered returns `409` with `code=not_unanswered`. Late-answer also requires an existing
+  user-message admission receipt for that task and session; an unknown receipt returns `409` and
+  leaves the question unanswered. This establishes admission, not the identity of the sender: another
+  authorized collaborator can associate a known receipt in the same task and session.
+- `list_pending_questions_kandev` accepts `include_unanswered`. When true the handler merges the
+  active page and the unanswered page by `(created_at, pending_id)`, keeps the shared cursor, and
+  labels each bundle `state`. The automation self-filter applies to active bundles only, because an
+  agent must be able to see its own earlier questions and cannot answer unanswered ones through
+  `answer_question_kandev`.
+
+### UI
+
+Settings, Workspace adds a separately saved card with the toggle and retention. The Needs-you tab
+renders the unanswered section only while the active workspace enables it, reloading whenever the
+Needs-you list refreshes. Each row offers the late-answer form, Close, Open task, and, when offered,
+an explicit original-session or task-session target. The late-answer hook records the close only
+while the active workspace enables the setting, so transcript late answers close the same question.
