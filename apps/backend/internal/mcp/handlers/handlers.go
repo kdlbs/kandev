@@ -199,6 +199,7 @@ type SessionLauncher interface {
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error)
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error)
 	QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error
+	QueueUserPromptWithReceipt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) (string, error)
 	GetMessageQueue() *messagequeue.Service
 	// CheckQueueAdmissionReadiness rechecks automatic dispatch for the exact
 	// session incarnation admitted by a queue operation.
@@ -382,6 +383,9 @@ type Handlers struct {
 	// SetClarificationResolver).
 	clarificationResolver *clarification.Resolver
 	clarificationBundles  ClarificationBundleLister
+
+	sendOperationStore     SendOperationStore
+	sendOperationRetention func(context.Context)
 
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
@@ -605,6 +609,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
+	d.RegisterFunc(ws.ActionMCPGetTaskMessageOperation, h.handleGetTaskMessageOperation)
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
 	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
 	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
@@ -2871,6 +2876,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		SenderSessionID   string `json:"sender_session_id"`
 		DeliveryMode      string `json:"delivery_mode"`
 		ReplyToQuestionID string `json:"reply_to_question_id"`
+		OperationID       string `json:"operation_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -2915,6 +2921,15 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "sender task not found", nil)
 	}
 
+	operationRequest := sendOperationClaimRequest{
+		SenderTaskID: req.SenderTaskID, SenderSessionID: req.SenderSessionID,
+		TargetTaskID: req.TaskID, RequestedSession: req.SessionID,
+		RequestedQuestion: req.ReplyToQuestionID, Prompt: req.Prompt,
+		DeliveryMode: req.DeliveryMode, OperationID: req.OperationID,
+	}
+	if response := h.readExistingSendOperation(ctx, msg, operationRequest); response != nil {
+		return response, nil
+	}
 	// Verify the target task exists before looking up its session, so a bad
 	// task_id (e.g. a truncated UUID prefix) reports "task not found" instead
 	// of the misleading "no primary session" error from the session lookup.
@@ -2980,10 +2995,22 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
 			`delivery_mode="interrupt" is only allowed when the sender is the target task's direct parent`, nil)
 	}
+	claim, operationErr := h.claimSendOperation(ctx, msg, operationRequest)
+	if operationErr != nil {
+		return operationErr, nil
+	}
+	if claim.response != nil {
+		return claim.response, nil
+	}
+	if claim.operation != nil {
+		claim.operation.TargetSessionID = session.ID
+		senderMeta[models.MetaKeySendOperationID] = claim.operation.OperationID
+	}
 	if parentReply != nil {
 		// Claim the durable question before dispatch. A failed status update after
 		// delivery would make a retry send the same answer a second time.
 		if err := h.markParentQuestionAnswered(ctx, parentReply.message, req.Prompt); err != nil {
+			h.rejectSendOperationBeforeDispatch(ctx, claim.operation)
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "parent question could not be claimed: "+err.Error(), nil)
 		}
 	}
@@ -3013,6 +3040,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 					zap.String(parentQuestionIDKey, parentReply.message.ID), zap.Error(restoreErr))
 			}
 		}
+		h.settleSendOperation(ctx, claim.operation, result, err)
 		var qfErr *queueFullDispatchError
 		if errors.As(err, &qfErr) {
 			return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode,
@@ -3021,11 +3049,10 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"task_id":         req.TaskID,
-		"session_id":      result.sessionID,
-		stopTaskStatusKey: result.status,
-	})
+	h.settleSendOperation(ctx, claim.operation, result, nil)
+	payload := map[string]interface{}{"task_id": req.TaskID, "session_id": result.sessionID, stopTaskStatusKey: result.status}
+	decorateSendOperationReceipt(payload, claim.operation, result)
+	return ws.NewResponse(msg.ID, msg.Action, payload)
 }
 
 // lookupSenderSessionName resolves the sender session's user-supplied name for
@@ -3322,6 +3349,7 @@ type taskMessageDispatchResult struct {
 	status        string
 	sessionID     string
 	queuedEntryID string
+	messageID     string
 }
 
 type taskMessageReviewRollback struct {
@@ -3855,11 +3883,12 @@ func (h *Handlers) queueTaskMessageUntilWorkflowPromotion(
 	admission orchestrator.PeerMessageStartAdmission,
 ) (taskMessageDispatchResult, error) {
 	releasePeerMessageStartAdmission(admission)
-	if err := h.sessionLauncher.QueueUserPrompt(ctx, taskID, session.ID, prompt, "", false, nil, metadata, false); err != nil {
+	queuedEntryID, err := h.sessionLauncher.QueueUserPromptWithReceipt(ctx, taskID, session.ID, prompt, "", false, nil, metadata, false)
+	if err != nil {
 		h.restoreTaskReviewForTaskMessage(ctx, taskID, *reviewRollback)
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to queue prompt until workflow promotion: %w", err)
 	}
-	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID}, nil
+	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queuedEntryID}, nil
 }
 
 func (h *Handlers) dispatchPreparedTaskMessageWithReviewRollback(
@@ -4016,7 +4045,7 @@ func (h *Handlers) startPreparedPeerTaskMessage(
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to start session: %w", err)
 	}
 	releasePeerMessageStartAdmission(admission)
-	return taskMessageDispatchResult{status: "started", sessionID: session.ID}, nil
+	return taskMessageDispatchResult{status: "started", sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
 }
 
 func (h *Handlers) admitPreparedPeerTaskMessage(
@@ -4086,7 +4115,7 @@ func (h *Handlers) promptPreparedTaskMessage(
 		h.deleteRecordedUserMessage(ctx, recorded)
 		return taskMessageDispatchResult{}, err
 	}
-	return taskMessageDispatchResult{status: status, sessionID: session.ID}, nil
+	return taskMessageDispatchResult{status: status, sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
 }
 
 // queueRecordedTaskMessageForCapacity keeps an already-recorded agent message

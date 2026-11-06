@@ -1150,6 +1150,17 @@ together to continue a page walk. The workspace comes from the short-lived
 runtime token, so `KANDEV_WORKSPACE_ID` is not required for this command.
 Taskless launch and session creation remain separate Office scheduler work.
 
+A task-bound Office run can use the workspace collaboration grants of its
+actual task and session to discover reachable workspaces and communicate with
+tasks in them. `workspaces list`, `workspaces coordinator --id <workspace>`,
+and `workspaces tasks --id <workspace>` read the directory and task list.
+`tasks sessions|transcript|plan --id <task>` read a task, and
+`tasks send --id <task> --prompt <text> [--operation-id <id>]` sends an
+ordinary task message. Read and prompt grants are independent. The signed run
+must still be active and hold the corresponding live Office capability. These
+commands do not give taskless runs foreign workspace access or enable a grant.
+An operation ID follows the existing task-message receipt and retry rules.
+
 </details>
 
 <details>

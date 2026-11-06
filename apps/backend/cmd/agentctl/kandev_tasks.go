@@ -32,7 +32,7 @@ func (f *repeatableFlag) Set(value string) error {
 // the office runtime needs without breaking older scripts.
 func runTasksCmd(args []string) int {
 	if len(args) == 0 {
-		cliError("usage: agentctl kandev tasks <list|move|archive|message|conversation> [flags]")
+		cliError("usage: agentctl kandev tasks <list|move|archive|message|conversation|sessions|transcript|plan|send> [flags]")
 		return 1
 	}
 	switch args[0] {
@@ -46,6 +46,14 @@ func runTasksCmd(args []string) int {
 		return tasksMessage(args[1:])
 	case "conversation":
 		return tasksConversation(args[1:])
+	case "sessions", subcmdTranscript, "plan":
+		suffix := args[0]
+		if suffix == subcmdTranscript {
+			suffix = "conversation"
+		}
+		return tasksCrossRead(args[0], suffix, args[1:])
+	case "send":
+		return tasksSend(args[1:])
 	default:
 		cliError("unknown tasks subcommand: %s", args[0])
 		return 1
@@ -67,6 +75,8 @@ func tasksList(args []string) int {
 	fs.Var(&priority, "priority", "Filter by priority (repeatable)")
 	assignee := fs.String("assignee", "", "Filter by assignee agent ID")
 	project := fs.String("project", "", "Filter by project ID")
+	workspace := fs.String("workspace", "", "Read tasks in a collaboration-granted workspace")
+	workflow := fs.String("workflow", "", "Workflow ID for --workspace")
 	sortField := fs.String("sort", "", "Sort column: updated_at | created_at | priority")
 	order := fs.String("order", "", "Sort direction: asc | desc (default desc)")
 	limit := fs.String("limit", "", "Page size, up to 500 (default 100)")
@@ -76,6 +86,9 @@ func tasksList(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
 		return 1
+	}
+	if strings.TrimSpace(*workspace) != "" {
+		return listWorkspaceTasks(*workspace, *workflow)
 	}
 	values := url.Values{}
 	for _, v := range status {

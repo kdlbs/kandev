@@ -33,6 +33,7 @@ func (s *Server) registerCoreTools() {
 		{external, (*Server).registerAgentPermissionTools},
 		{[]mcpprofile.Surface{mcpprofile.SurfaceKanbanTask, mcpprofile.SurfaceExternal}, (*Server).registerTaskDependencyTools},
 		{kanban, (*Server).registerTaskExecutionTools},
+		{kanban, (*Server).registerGetTaskMessageOperationTool},
 		{kanban, (*Server).registerCoreTaskCapabilities},
 		{kanban, (*Server).registerReviewTools},
 		{kanban, (*Server).registerAddBranchToTaskTool},

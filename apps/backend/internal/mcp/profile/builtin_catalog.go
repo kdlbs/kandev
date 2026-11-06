@@ -29,6 +29,7 @@ var builtinToolPackages = map[string]PackageID{
 	"get_canvas_state_kandev":                       PackageCore,
 	"get_task_conversation_kandev":                  PackageCore,
 	"get_task_document_kandev":                      PackageCore,
+	"get_task_message_operation_kandev":             PackageCore,
 	"get_task_plan_kandev":                          PackageCore,
 	"get_task_plan_revision_kandev":                 PackageCore,
 	"list_executor_profiles_kandev":                 PackageCore,
