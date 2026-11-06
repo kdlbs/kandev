@@ -145,10 +145,11 @@ Terms used below:
   environment of the same task or shared workspace group with no owner and no
   physical evidence, the system shall elect that session as the new owner and run
   full workspace preparation.
-- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.5:** When a `failed` environment has
-  physical evidence, or belongs to a parent task through `inherit_parent`, a
-  start shall keep failing with `workspace_reuse_unsafe` and shall not change the
-  environment. The existing environment reset action remains its recovery.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.5:** A failed environment with physical
+  evidence shall not be re-elected or overwritten. A task-local binding or terminal
+  worktree resume may retain it and reserve a replacement under AC-004.11 below.
+  An inherited owner, live consumer, active materializer, or recovery claim shall
+  keep the existing refusal and reset guidance.
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.6:** When several starts re-elect the
   same environment at the same time, exactly one shall become the owner. A launch
   that loses the race shall wait for the new owner like any `creating` sibling or
@@ -170,6 +171,17 @@ Terms used below:
   guidance shall name the task environment reset action, instead of asking the
   caller to retry after the initial launch or to restore the workspace.
 
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.11:** A selected failed environment
+  may be retired only while its task and ownership generation still match and no
+  materializer, live bound session/runtime, or active recovery consumer remains.
+  Retirement, a fresh creating canonical reservation, and the requesting session
+  binding shall commit in one transaction before physical materialization. The old
+  identity, inventory, files, and historical bindings shall remain. Root selection
+  shall exclude every recorded active or retained root. An already-retired retry
+  shall join the current reservation or elect one when none exists. Failed
+  materialization shall retain its failed reservation; ready publication shall
+  continue requiring the existing complete repository inventory.
+
 ## Out of scope
 
 - A background poller for all repository defaults.
@@ -177,10 +189,8 @@ Terms used below:
 - Changes to ACP resume semantics or bulk repository-default repair.
 - A periodic sweep for abandoned `creating` environments. Abandonment is
   decided when a start needs the environment.
-- Automatic replacement of a `failed` environment that has physical evidence,
-  for example a worktree created before the launch failed. It needs a way to
-  retain the old environment while a new one becomes canonical, which is a
-  separate schema decision.
+- Destructive replacement, automatic background retirement, or retirement of an
+  inherited or consumer-owned environment.
 
 ## System design
 
