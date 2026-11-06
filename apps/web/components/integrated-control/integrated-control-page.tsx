@@ -1,5 +1,8 @@
 import { useTranslation } from "react-i18next";
+import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { cn } from "@/lib/utils";
+import { ControlLastRefresh, ControlRefreshBanner } from "./control-refresh-banner";
 import { AppNavSheet } from "@/components/navigation/app-nav-sheet";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { CONTROL_VIEW_LABEL_KEYS, controlView } from "@/lib/navigation/integrated-control";
@@ -40,16 +43,22 @@ export function IntegratedControlPage() {
             </p>
           )}
         </div>
+        <ControlLastRefresh />
         <Button
           variant="ghost"
           size="sm"
           className="max-md:min-h-11"
-          disabled={control.loading}
           onClick={() => void control.refresh()}
+          data-testid="control-refresh"
         >
+          <IconRefresh
+            className={cn("size-4", control.loading && "animate-spin")}
+            aria-hidden="true"
+          />
           {t("sidebar:integratedControl.refresh")}
         </Button>
       </header>
+      <ControlRefreshBanner />
       <ControlBody
         view={view}
         workspace={workspace}
@@ -73,12 +82,8 @@ function ControlBody({
 }) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
-  if (control?.error)
-    return (
-      <p role="alert" className="p-6 text-sm text-destructive">
-        {t("sidebar:integratedControl.loadError")}
-      </p>
-    );
+  // A failed read is reported by the page banner; the last values stay visible.
+  if (control?.failure && !control.data) return null;
   if (!control?.data)
     return (
       <p role="status" className="p-6 text-sm">
