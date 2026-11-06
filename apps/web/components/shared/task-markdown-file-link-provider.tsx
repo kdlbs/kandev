@@ -8,6 +8,7 @@ import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import {
   buildMarkdownFileRootAliases,
+  buildMarkdownWorkspaceSourcePrefixes,
   type MarkdownAliasRepository,
   type MarkdownAliasWorktree,
 } from "@/lib/markdown/file-link-target";
@@ -35,6 +36,8 @@ type TaskMarkdownFileLinkProviderProps = {
   taskId?: string | null;
   sessionId?: string | null;
   worktreePath?: string | null;
+  /** Overrides the session's confirmed native workspace for relative links. */
+  relativeBasePath?: string | null;
   detailActive?: boolean;
   onOpenFile?: (path: string) => void;
   children: ReactNode;
@@ -87,6 +90,7 @@ export function TaskMarkdownFileLinkProvider({
   taskId,
   sessionId,
   worktreePath,
+  relativeBasePath,
   detailActive = true,
   onOpenFile,
   children,
@@ -113,28 +117,49 @@ export function TaskMarkdownFileLinkProvider({
     true,
   );
   const effectiveWorkspacePath = worktreePath ?? getSessionWorkspacePath(session);
+  const effectiveRelativeBasePath = relativeBasePath ?? session?.agent_workspace_path ?? null;
+  const sourceWorktrees = useMemo(
+    () => toAliasWorktrees(sessionWorktrees, session),
+    [session, sessionWorktrees],
+  );
   const fileRootAliases = useMemo(
     () =>
       buildMarkdownFileRootAliases({
         workspaceRoot: effectiveWorkspacePath,
         taskRepositoryIds,
         repositories: toAliasRepositories(workspaceRepositories),
-        sessionWorktrees: toAliasWorktrees(sessionWorktrees, session),
+        sessionWorktrees: sourceWorktrees,
       }),
-    [effectiveWorkspacePath, session, sessionWorktrees, taskRepositoryIds, workspaceRepositories],
+    [effectiveWorkspacePath, sourceWorktrees, taskRepositoryIds, workspaceRepositories],
+  );
+  const sourcePrefixes = useMemo(
+    () =>
+      buildMarkdownWorkspaceSourcePrefixes({
+        workspaceRoot: effectiveWorkspacePath,
+        sessionWorktrees: sourceWorktrees,
+      }),
+    [effectiveWorkspacePath, sourceWorktrees],
   );
   const contextValue = useMemo<MarkdownFileLinkContextValue>(
     () => ({
+      sessionId: sessionId ?? inheritedContext.sessionId,
       worktreePath: effectiveWorkspacePath ?? inheritedContext.worktreePath,
+      relativeBasePath: effectiveRelativeBasePath ?? inheritedContext.relativeBasePath,
+      sourcePrefixes,
       onOpenFile: onOpenFile ?? inheritedContext.onOpenFile,
       fileRootAliases,
     }),
     [
+      effectiveRelativeBasePath,
       effectiveWorkspacePath,
+      sessionId,
+      inheritedContext.sessionId,
       fileRootAliases,
       inheritedContext.onOpenFile,
+      inheritedContext.relativeBasePath,
       inheritedContext.worktreePath,
       onOpenFile,
+      sourcePrefixes,
     ],
   );
 

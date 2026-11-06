@@ -123,7 +123,9 @@ describe("sleep ratchet wiring", () => {
     const pkg = JSON.parse(read("apps/web/package.json"));
     expect(pkg.scripts["e2e:sleep-ratchet"]).toContain(RATCHET_SCRIPT);
     expect(pkg.scripts["e2e:waits"]).toContain("report-e2e-waits.mjs");
-    expect(pkg.scripts["lint:e2e-sleeps"]).toContain("eslint.e2e-sleeps.config.mjs");
+    // The preview CLI is native; the ratchet above still uses the retained
+    // ESLint API and its focused config.
+    expect(pkg.scripts["lint:e2e-sleeps"]).toContain("oxlint.e2e-sleeps.config.mjs");
   });
 
   /**

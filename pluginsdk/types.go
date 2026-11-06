@@ -99,6 +99,12 @@ type WebhookResponse struct {
 	Body    []byte
 }
 
+// AgentToolContext is the host-owned invocation identity. Surface is one of
+// kanban-task, office-task, managed-conversation, automation, coordinator, or
+// external. TaskID, SessionID, and WorkspaceID are empty for an external
+// instance read; an external workspace read carries only the host-verified
+// WorkspaceID. Task-backed contexts are always derived from the running
+// execution, never from tool arguments.
 type AgentToolContext struct {
 	TaskID               string
 	SessionID            string

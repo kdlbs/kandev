@@ -355,13 +355,97 @@ agent_tools:
       additionalProperties: false
 ```
 
-Tools may target `kanban-task`, `office-task`, or both. A tool that targets
+Task tools may target `kanban-task`, `office-task`, or both. A tool that targets
 `managed-conversation` is separate: the manifest must include
 `capabilities.api_write: [managed_agent_tools]`, and each retained conversation
 selects up to 16 declared tools through `ManagedAgentConversationSpec.AgentToolNames`.
 The workspace must grant `host.v2.write:managed_agent_tools`. The broker exposes
 only that instance's selected tools and rejects native tools, ambient MCP
 servers, and other plugins for the restricted turn.
+
+A tool that targets `automation` is opt-in per private automation:
+
+```yaml
+agent_tools:
+  - name: complete_report
+    description: Record a completed report.
+    surfaces: [automation]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [report]
+      properties:
+        report: { type: string }
+```
+
+Declaring the surface does not grant access. The workspace owner selects exact
+tools in the automation editor, and saving that selection approves the plugin
+installation and policy version that were displayed. The handler receives the
+trusted task, session, workspace, and surface identity; it must accept the
+`automation` surface explicitly. A plugin reinstall or configuration save
+invalidates earlier approvals. Automation tools have no managed-conversation
+capability requirement and receive no additional Host API capability.
+
+An instance read declares `invocation_scope: instance` and adds the
+`coordinator` and `external` surfaces when the operation needs no task identity:
+
+```yaml
+agent_tools:
+  - name: get_provider_usage
+    description: Read the cached provider usage snapshot.
+    surfaces: [kanban-task, office-task, automation, coordinator, external]
+    invocation_scope: instance
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    annotations:
+      read_only_hint: true
+      destructive_hint: false
+      idempotent_hint: true
+```
+
+`coordinator` requires instance scope. `external` accepts instance or workspace
+scope. Both require `read_only_hint: true`, and a missing or false hint rejects
+the install. External instance reads arrive only through the configured external
+MCP endpoint over its trusted in-process transport, follow the endpoint
+authentication setting, and have empty task, session, and workspace context, so
+`invocation_workspace_id` is the empty string. A coordinator conversation binds
+eligible tools by exact reference, including the installation and policy
+version, when it opens. A phase-1 conversation or a version-1 binding exposes
+no plugin tools; reopen the conversation after installing or changing a plugin
+to gain a new binding.
+
+A workspace read sets `invocation_scope: workspace` and may use `kanban-task`,
+`office-task`, or `external`:
+
+```yaml
+agent_tools:
+  - name: read_workspace_settings
+    description: Read one workspace's settings.
+    surfaces: [kanban-task, external]
+    invocation_scope: workspace
+    input_schema:
+      type: object
+      properties:
+        key: { type: string }
+    annotations:
+      read_only_hint: true
+```
+
+The input schema must have a top-level `type: object`, and it must not declare
+`kandev_workspace_id`; installation rejects the reserved property. On the
+external surface, Kandev advertises `kandev_workspace_id` as a required string,
+checks that the authenticated caller may read that workspace, removes the
+argument before invocation, and passes the verified ID in
+`AgentToolContext.WorkspaceID`. Clients discover IDs with
+`list_workspaces_kandev`. Task-backed calls use the execution workspace and do
+not advertise the argument. Workspace scope first ships in 0.100.0, so set
+`min_kandev_version: "0.100.0"` or later.
+
+The first host release with instance-read contexts is 0.99.0. Set
+`min_kandev_version: "0.99.0"` before publishing a declaration that uses them.
+An older host must not install the package.
 
 Managed tool calls are not available on any agent provider yet. Kandev rejects
 the launch before creating an execution until an adapter passes the complete
@@ -377,15 +461,17 @@ save, without restarting the agent or task session. Saving config still restarts
 a running plugin subprocess. A plugin without required fields is listed as soon as
 it is active.
 
-Tools are not exposed to configuration or external MCP clients. Kandev validates
+Plugin tools are never exposed to configuration MCP clients. Kandev validates
 the input and optional output JSON Schemas, supplies task/session/workspace/surface
 context, enforces a 30-second deadline and 1 MiB result limit, and does not retry
-calls. For managed calls, Kandev also supplies the current installation,
-conversation and approval revisions, manifest digest, selected names, and
-execution ID from the authenticated broker context. Tool arguments cannot set
-these values. Approval changes invalidate retained policy and request normal
-runtime cancellation; the plugin must refresh the conversation policy before a
-new managed turn can start.
+calls. External instance reads have no task identity; external workspace reads
+carry only the host-verified workspace ID. Coordinator and automation calls
+keep the host-resolved identity. For managed calls, Kandev also supplies the
+current installation, conversation and approval revisions, manifest digest,
+selected names, and execution ID from the authenticated broker context. Tool
+arguments cannot set these values. Approval changes invalidate retained policy
+and request normal runtime cancellation; the plugin must refresh the
+conversation policy before a new managed turn can start.
 
 The optional SDK method is:
 

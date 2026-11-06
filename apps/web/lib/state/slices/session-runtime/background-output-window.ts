@@ -74,6 +74,7 @@ export function buildBackgroundOutputActions(set: ImmerSet) {
         delete draft.backgroundWork.outputWindowsBySessionId[sessionId];
         delete draft.backgroundWork.activeWorkIdBySessionId[sessionId];
         delete draft.backgroundWork.loadingBySessionId[sessionId];
+        delete draft.backgroundWork.readGenerationBySessionId[sessionId];
       }),
   };
 }

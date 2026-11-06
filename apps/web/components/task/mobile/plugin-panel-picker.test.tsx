@@ -10,6 +10,7 @@ vi.mock("@/components/state-provider", () => ({
           "session-1": { id: "session-1", is_passthrough: false },
         },
       },
+      features: { agentBackgroundWork: false },
     }),
 }));
 import { pluginRegistry } from "@/lib/plugins/registry";
@@ -99,5 +100,33 @@ describe("PluginPanelPicker", () => {
 
     expect(visible).not.toHaveBeenCalled();
     expect(screen.queryByTestId(`mobile-plugin-panel-option-${PLUGIN_A}-notes`)).toBeNull();
+  });
+
+  it("offers the built-in Background Work entry without any plugins", () => {
+    const onSelect = vi.fn();
+    const onOpenChange = vi.fn();
+    render(
+      <PluginPanelPicker
+        taskId="task-1"
+        sessionId="session-1"
+        open
+        backgroundWorkAvailable
+        onOpenChange={onOpenChange}
+        onSelect={onSelect}
+      />,
+    );
+
+    const option = screen.getByTestId("mobile-background-work-open");
+    expect(option.className).toContain("min-h-11");
+    expect(option.textContent).toContain("Background Work");
+
+    fireEvent.click(option);
+    expect(onSelect).toHaveBeenCalledWith("background-work");
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("hides the built-in Background Work entry when unavailable", () => {
+    render(<PluginPanelPicker open onOpenChange={vi.fn()} onSelect={vi.fn()} />);
+    expect(screen.queryByTestId("mobile-background-work-open")).toBeNull();
   });
 });

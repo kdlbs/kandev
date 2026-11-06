@@ -11,6 +11,7 @@ export type AgentErrorCause = {
   attempted_model?: string;
   requested_mode?: string;
   effective_mode?: string;
+  runtime_version?: string;
   prompt_not_sent?: boolean;
   storage?: {
     reason?: string;
@@ -93,6 +94,8 @@ export type TaskStatusSummary = {
   /** Automatic session launch waiting for admission, independent of the selected session. */
   launch_queue?: TaskStatusSummaryLaunchQueue | null;
   completion_gate?: TaskStatusSummaryCompletionGate | null;
+  /** Sorted IDs of sessions with an unread transcript-visible message. */
+  unread_session_ids?: string[];
   active_error?: TaskStatusSummaryActiveError | null;
   /** Current task-owned failure, independent of the selected session. */
   task_error?: TaskStatusSummaryActiveError | null;

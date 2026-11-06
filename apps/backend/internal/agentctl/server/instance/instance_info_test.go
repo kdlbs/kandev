@@ -17,8 +17,9 @@ func TestInstanceInfoReflectsLiveWorkspaceSourceRootsAndProviderSessionID(t *tes
 		Status:    "running",
 		CreatedAt: time.Now(),
 		manager: &fakeProcessManager{
-			workspaceSourceRoots: []string{"/ws/task-1/backend", "/ws/task-1/frontend"},
-			sessionID:            "provider-session-9",
+			workspaceSourceRoots:       []string{"/ws/task-1/backend", "/ws/task-1/frontend"},
+			sessionID:                  "provider-session-9",
+			copilotNativeSessionEvents: true,
 		},
 	}
 
@@ -31,6 +32,9 @@ func TestInstanceInfoReflectsLiveWorkspaceSourceRootsAndProviderSessionID(t *tes
 	}
 	if info.ProviderSessionID != "provider-session-9" {
 		t.Errorf("ProviderSessionID = %q, want provider-session-9", info.ProviderSessionID)
+	}
+	if !info.CopilotNativeSessionEvents {
+		t.Error("CopilotNativeSessionEvents = false, want the live subscription state")
 	}
 }
 
@@ -53,5 +57,8 @@ func TestInstanceInfoWithoutManagerLeavesRecoveryRowsEmpty(t *testing.T) {
 	}
 	if info.ProviderSessionID != "" {
 		t.Errorf("ProviderSessionID = %q, want empty without a manager", info.ProviderSessionID)
+	}
+	if info.CopilotNativeSessionEvents {
+		t.Error("CopilotNativeSessionEvents = true, want empty without a manager")
 	}
 }

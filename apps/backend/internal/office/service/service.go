@@ -439,6 +439,7 @@ type Service struct {
 	apiBaseURL              string
 	agentctlBinaryPath      string
 	syncHandlers            bool // when true, event handlers run synchronously (for tests)
+	handoffCompletionPolicy HandoffCompletionPolicy
 
 	// Phase 4 (ADR-0004): engine-driven run queuing. When set, the four
 	// event subscribers (comment_created, blockers_resolved,

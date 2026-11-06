@@ -528,14 +528,14 @@ describe("cross-agent persisted config reconciliation", () => {
     ).toBe(true);
   });
 
-  it("still requires persisted-only unadvertised keys while the catalog is unsettled", () => {
+  it("hydrates persisted-only unadvertised keys when the unsettled catalog is usable", () => {
     const session = makeSession({
       metadata: { runtime_config: { config_options: { model: providerModelId, effort: "x" } } },
     });
 
     expect(
       hasCompleteDynamicConfig(session, catalogEntry([modelConfigOption], false), noAgents),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 

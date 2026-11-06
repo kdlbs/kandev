@@ -44,7 +44,7 @@ test.describe("Mobile agent profile config selector", () => {
         await route.fallback();
       });
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
-      const selector = testPage.getByRole("button", { name: "Profile start model settings" });
+      const selector = testPage.getByTestId("model-config-trigger");
       await expect(selector).toBeVisible({ timeout: 15_000 });
       await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden({
         timeout: 15_000,

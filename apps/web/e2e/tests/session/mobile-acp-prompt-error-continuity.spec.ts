@@ -1,11 +1,14 @@
 import { test, expect, type Page } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import {
   createPromptErrorFixture,
   expectPromptErrorRow,
   GENERIC_PROMPT_ERROR,
   promptEventCount,
+  waitForAgentResponseAfter,
   waitForPromptError,
+  waitForUserContinueMessages,
 } from "../../helpers/acp-prompt-error-continuity";
 import { SessionPage } from "../../pages/session-page";
 
@@ -67,11 +70,52 @@ test("phone: generic prompt error shows one inline error with a usable composer"
     const dismiss = row.getByTestId("turn-error-dismiss-button");
     await expect(dismiss).toBeVisible();
     const box = await dismiss.boundingBox();
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(43.5);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
     await dismiss.tap();
     await expect(dismiss).toHaveCount(0);
     await expect(row).toContainText(GENERIC_PROMPT_ERROR);
     await expectMobileBadge(testPage, fixture.taskTitle, false);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test("phone: Dismiss and continue stacks above dismissal with a reachable target", async ({
+  testPage,
+  apiClient,
+  backend,
+  seedData,
+}) => {
+  const fixture = await createPromptErrorFixture(backend, apiClient, seedData);
+  try {
+    const session = new SessionPage(testPage);
+    await testPage.goto(`/t/${fixture.taskId}`);
+    await session.waitForLoad();
+    await waitForPromptError(apiClient, fixture.sessionId);
+    await session.waitForDirectInput();
+
+    const row = await expectPromptErrorRow(session, { continue: true });
+    const continueButton = row.getByTestId("turn-error-continue-button");
+    const dismissButton = row.getByTestId("turn-error-dismiss-button");
+    const group = row.getByTestId("turn-error-actions");
+    await expect(group).toBeVisible();
+
+    const continueBox = await continueButton.boundingBox();
+    const dismissBox = await dismissButton.boundingBox();
+    expect(continueBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(dismissBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(continueBox?.y ?? 0).toBeLessThan(dismissBox?.y ?? 0);
+    await assertNoDocumentHorizontalOverflow(testPage);
+
+    await continueButton.tap();
+    const continued = await waitForUserContinueMessages(apiClient, fixture.sessionId);
+    expect(continued).toHaveLength(1);
+    await expect.poll(() => promptEventCount(fixture.tracePath), { timeout: 60_000 }).toBe(2);
+    await waitForAgentResponseAfter(apiClient, fixture.sessionId, continued[0].created_at);
+    await expect(continueButton).toHaveCount(0);
+    await expect(dismissButton).toHaveCount(0);
+    await expectMobileBadge(testPage, fixture.taskTitle, false);
+    await assertNoDocumentHorizontalOverflow(testPage);
   } finally {
     await fixture.dispose();
   }
@@ -96,12 +140,14 @@ test("phone: visible per-row task actions expose Dismiss turn error", async ({
     const trigger = row.locator("button.mobile-task-actions-button");
     await expect(trigger).toBeVisible();
     const triggerBox = await trigger.boundingBox();
-    expect(triggerBox?.width ?? 0).toBeGreaterThanOrEqual(43.5);
+    expect(triggerBox?.width ?? 0).toBeGreaterThanOrEqual(44);
     await trigger.tap();
     const dismiss = testPage.getByTestId("task-context-dismiss-turn-error");
     await expect(dismiss).toBeVisible();
+    const menu = testPage.locator('[data-slot="context-menu-content"]').filter({ has: dismiss });
+    await waitForFiniteAnimations(menu);
     const box = await dismiss.boundingBox();
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(43.5);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
     await dismiss.tap();
 
     await expect(visibleTaskRow(testPage, fixture.taskTitle)).toBeVisible();

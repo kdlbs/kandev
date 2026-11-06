@@ -51,7 +51,9 @@ var mcpServers map[string]mcpServerDef
 // mockAgent implements the acp.Agent interface for the mock agent.
 type mockAgent struct {
 	conn                           sessionUpdater
+	rawOut                         *serializedACPWriter
 	model                          string
+	copilotNativeSubscribed        bool
 	clientSupportsCompaction       bool
 	sessions                       map[acp.SessionId]bool
 	promptCancels                  map[acp.SessionId]context.CancelFunc
@@ -118,7 +120,9 @@ func main() {
 		commandsEmitted:                make(map[acp.SessionId]bool),
 		dynamicFallbackCounterSessions: make(map[acp.SessionId]acp.SessionId),
 	}
-	asc := acp.NewAgentSideConnection(ag, os.Stdout, os.Stdin)
+	rawOut := newSerializedACPWriter(os.Stdout)
+	ag.rawOut = rawOut
+	asc := acp.NewAgentSideConnection(ag, rawOut, os.Stdin)
 	ag.conn = asc
 
 	<-asc.Done()
@@ -137,13 +141,22 @@ func (a *mockAgent) Initialize(_ context.Context, req acp.InitializeRequest) (ac
 	a.mu.Lock()
 	a.clientSupportsCompaction = req.ClientCapabilities.Session != nil &&
 		req.ClientCapabilities.Session.Compaction != nil
+	a.copilotNativeSubscribed = copilotNativeSubscriptionRequested(req.ClientCapabilities)
 	a.mu.Unlock()
 	traceACP("initialize", "", nil)
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("E2E_MOCK_AGENT_FAIL_INITIALIZE")), "true") {
 		return acp.InitializeResponse{}, errors.New("mock ACP initialization failed by E2E fixture")
 	}
+	agentInfo := mockClaudeBridgeAgentInfo()
+	var meta map[string]any
+	if copilotNativeFixtureEnabled() {
+		agentInfo = &acp.Implementation{Name: "GitHub Copilot CLI", Version: "1.0.103"}
+	} else {
+		meta = mockClaudeCodeMeta()
+	}
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
+		AgentInfo:       agentInfo,
 		AgentCapabilities: acp.AgentCapabilities{
 			LoadSession: true,
 			PromptCapabilities: acp.PromptCapabilities{
@@ -153,7 +166,7 @@ func (a *mockAgent) Initialize(_ context.Context, req acp.InitializeRequest) (ac
 			SessionCapabilities: acp.SessionCapabilities{
 				Close: &acp.SessionCloseCapabilities{},
 			},
-			Meta: mockClaudeCodeMeta(),
+			Meta: meta,
 		},
 	}, nil
 }
@@ -490,6 +503,9 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 		a.mu.Unlock()
 	}()
 
+	if resp, err, handled := a.handleCopilotNativeFixture(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	a.emitAvailableCommandsOnce(promptCtx, req.SessionId)
 	if cancelHold != nil {
 		if acceptanceMarker != "" {

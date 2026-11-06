@@ -292,7 +292,11 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 		zap.String("override_protocol", string(overrides.Protocol)))
 
 	// Create instance config using the unified method
-	instanceCfg := m.config.NewInstanceConfig(port, overrides)
+	instanceCfg, err := m.config.NewInstanceConfig(port, overrides)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	instanceCfg.AgentCommandConfigured = req.AgentCommand != ""
 
 	m.logger.Info("CreateInstance: instance config created",
 		zap.String("config_protocol", string(instanceCfg.Protocol)))
@@ -388,6 +392,7 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 		TaskID:                     req.TaskID,
 		DisableAskQuestion:         req.DisableAskQuestion,
 		PromptSuggestions:          req.PromptSuggestions,
+		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
 		AssumeMcpSse:               req.AssumeMcpSse,
 		AssumeMcpHttp:              req.AssumeMcpHttp,
 		McpMode:                    req.McpMode,
@@ -397,6 +402,7 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 		RequiresProcessKill:        req.RequiresProcessKill,
 		StripEnv:                   req.StripEnv,
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,
+		AuthPolicy:                 req.AuthPolicy,
 		BaseBranches:               req.BaseBranches,
 		ComparisonTargets:          req.ComparisonTargets,
 		RemoteContributions:        req.RemoteContributions,

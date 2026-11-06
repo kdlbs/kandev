@@ -20,7 +20,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/antigravityruntime"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -33,9 +35,11 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
@@ -76,6 +80,10 @@ type PendingPermission struct {
 	CreatedAt         time.Time
 	State             string
 	AutoApproveOption *adapter.PermissionOption
+	// HumanInput marks a provider-native question only a person can answer.
+	// It bypasses every automatic policy branch and never carries an
+	// AutoApproveOption.
+	HumanInput bool
 }
 
 // PermissionOperationError carries a stable code across the agentctl stream.
@@ -121,6 +129,8 @@ type Manager struct {
 	questionImageOnce        sync.Once
 	questionImageSlots       chan struct{}
 	cfg                      *config.InstanceConfig
+	builtinCatalogMu         sync.RWMutex
+	builtinCatalog           func() map[mcpprofile.PackageID][]string
 	logger                   *logger.Logger
 	managedGitTools          installedManagedGitTools
 	materializeGitHelperPath string
@@ -195,6 +205,7 @@ type Manager struct {
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
 	passthrough      *PassthroughOwner
+	projectMCP       *ProjectMCPFilesOwner
 	// repoTrackers holds per-repository trackers for multi-repo task roots.
 	// Each tracker stamps RepositoryName onto its emitted events and shares
 	// subscriber channels with the root via the Manager fan-out.
@@ -363,10 +374,19 @@ type Manager struct {
 	killGroupFn      func(int) error
 	waitGroupExitFn  func(context.Context, int) bool
 	managerWaitFn    func(context.Context, <-chan struct{}, time.Duration) bool
+
+	// agentProcessIdentity is the running agent child's process-group identity,
+	// reported in the delivery descriptor for per-session termination proof.
+	agentProcessIdentity atomic.Pointer[processidentity.Identity]
 }
 
 // ErrManagerStopping indicates that process admission is closed for teardown.
 var ErrManagerStopping = errors.New("process manager is stopping")
+
+// ErrConfigureWhileRunning reports a configuration attempt that arrived while
+// the agent process was already starting or running. Callers classify this
+// sentinel instead of matching error text.
+var ErrConfigureWhileRunning = errors.New("cannot configure while agent is running")
 
 func (m *Manager) admitStart() (func(), error) {
 	m.admissionMu.Lock()
@@ -515,6 +535,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
 	m.passthrough = newPassthroughOwner(m)
+	m.projectMCP = newProjectMCPFilesOwner(m)
 	return m
 }
 
@@ -616,6 +637,7 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 				IncarnationID:     m.DeliveryIncarnationID(),
 				HarnessGeneration: m.DeliveryHarnessGeneration(),
 				StreamID:          currentStreamID,
+				AgentProcess:      m.AgentProcessIdentity(),
 			}, nil
 		}
 		return journal.RecoveryDescriptor{}, journal.ErrJournalCorrupt
@@ -636,6 +658,7 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 	}
 	descriptor.StorageCapability = capability
 	descriptor.ProcessManagerID = m.ProcessManagerID()
+	descriptor.AgentProcess = m.AgentProcessIdentity()
 	return descriptor, nil
 }
 
@@ -1382,15 +1405,30 @@ func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]st
 // drove the picker-save.
 func (m *Manager) refreshTrackersDetached(root *WorkspaceTracker, trackers []*WorkspaceTracker, bySubpath map[string]*WorkspaceTracker) {
 	ctx := context.Background()
-	if root != nil {
+	// A plain task-root tracker owns Files events but is not a Git scope.
+	// Refreshing it would publish an unavailable snapshot under the empty
+	// repository name and manufacture a refresh failure the Changes panel
+	// cannot clear.
+	if gitEligibleTracker(root) {
 		root.RefreshGitStatus(ctx)
 	}
 	for _, t := range trackers {
-		t.RefreshGitStatus(ctx)
+		if gitEligibleTracker(t) {
+			t.RefreshGitStatus(ctx)
+		}
 	}
 	for _, t := range bySubpath {
-		t.RefreshGitStatus(ctx)
+		if gitEligibleTracker(t) {
+			t.RefreshGitStatus(ctx)
+		}
 	}
+}
+
+// gitEligibleTracker reports whether a tracker owns a real Git repository.
+// Only those trackers may publish Git status; the empty repository scope is
+// valid exactly when the root tracker passes this check.
+func gitEligibleTracker(tracker *WorkspaceTracker) bool {
+	return tracker != nil && tracker.gitIndexPath != ""
 }
 
 // StartProcess runs a script/process with isolated stdout/stderr.
@@ -1586,11 +1624,13 @@ func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
 	// Refresh in background — RefreshGitStatus blocks on git commands which
 	// can take seconds on large repos; the HTTP caller shouldn't wait.
 	go func() {
-		if root != nil {
+		if gitEligibleTracker(root) {
 			root.RefreshGitStatus(ctx)
 		}
 		for _, t := range trackers {
-			t.RefreshGitStatus(ctx)
+			if gitEligibleTracker(t) {
+				t.RefreshGitStatus(ctx)
+			}
 		}
 	}()
 }
@@ -1945,6 +1985,8 @@ func (m *Manager) startManagedProcess() (uint64, error) {
 		return 0, errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
 
+	m.recordAgentProcessIdentity(m.cmd.Process.Pid)
+
 	// Start stderr reader and exit waiter. Keep the completion channel local to
 	// this process generation so a delayed reader cannot signal a replacement.
 	stderrDone := make(chan stderrReadResult, 1)
@@ -2012,6 +2054,10 @@ func (m *Manager) startOneShot() error {
 // buildAdapterConfig constructs the adapter configuration and initialises the
 // protocol adapter, including merging any adapter-provided environment variables.
 func (m *Manager) buildAdapterConfig() error {
+	// Delivery evidence authorizes exactly one process generation. Keep it
+	// pending until this adapter configuration is fully established so a
+	// retryable construction failure does not discard accepted evidence.
+	projectDelivery := m.cfg.ProjectMCPDelivery
 	mcpServers, err := m.adapterMCPServers()
 	if err != nil {
 		return fmt.Errorf("resolve MCP servers for agent session: %w", err)
@@ -2020,6 +2066,7 @@ func (m *Manager) buildAdapterConfig() error {
 		WorkDir:                    m.cfg.WorkDir,
 		AutoApprove:                m.adapterAutoApprove(),
 		McpServers:                 mcpServers,
+		ProjectMCPDelivery:         projectDelivery.Clone(),
 		AgentID:                    m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 		AssumeMcpSse:               m.cfg.AssumeMcpSse,
 		AssumeMcpHttp:              m.cfg.AssumeMcpHttp,
@@ -2028,7 +2075,24 @@ func (m *Manager) buildAdapterConfig() error {
 		AgentBackgroundWorkEnabled: m.cfg.AgentBackgroundWorkEnabled,
 		PromptCancelJoinTimeout:    m.cfg.PromptCancelJoinTimeout,
 		ProviderGatewayAuth:        m.cfg.ProviderGatewayAuth,
+		AuthPolicy:                 m.cfg.AuthPolicy,
 		PromptSuggestions:          m.cfg.PromptSuggestions,
+		CopilotNativeSessionEvents: m.cfg.CopilotNativeSessionEvents,
+	}
+	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {
+		harness := acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
+		if harness == "" {
+			bundle, err := antigravityruntime.Resolve(context.Background(), antigravityruntime.ResolveOptions{})
+			if err != nil {
+				return fmt.Errorf("resolve Antigravity harness: %w", err)
+			}
+			harness = bundle.HarnessPath
+		}
+		env, err := acpcompat.PrepareLocalAntigravityEnv(m.cfg.AgentEnv, harness)
+		if err != nil {
+			return fmt.Errorf("prepare Antigravity child environment: %w", err)
+		}
+		m.cfg.AgentEnv = env
 	}
 
 	// Configure one-shot mode when a continue command is provided.
@@ -2079,6 +2143,9 @@ func (m *Manager) buildAdapterConfig() error {
 		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
 	}
 	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
+	// The adapter owns the immutable copy from here; a replacement process
+	// must be configured with fresh evidence.
+	m.cfg.ProjectMCPDelivery = nil
 	return nil
 }
 
@@ -2342,7 +2409,7 @@ func lookupEnvValue(env []string, key string) string {
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
 func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, nil, wrapper...)
 }
 
 // ConfigureWithEnvironment sets the agent command and replaces the complete
@@ -2350,15 +2417,28 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 // instance variables that are absent from env remain available to the agent.
 // This must be called before Start() if the instance was created without a command.
 func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, nil, wrapper...)
 }
 
-func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, wrapper ...launchwrapper.Spec) error {
+// ConfigureWithProjectDelivery sets the agent command together with
+// execution-bound project delivery evidence. A missing record clears any
+// previous evidence so a new configuration cannot inherit it by omission.
+func (m *Manager) ConfigureWithProjectDelivery(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, delivery, wrapper...)
+}
+
+// ConfigureWithEnvironmentAndProjectDelivery combines complete environment
+// replacement with execution-bound project delivery evidence.
+func (m *Manager) ConfigureWithEnvironmentAndProjectDelivery(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, delivery, wrapper...)
+}
+
+func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
-		return fmt.Errorf("cannot configure while agent is running")
+		return ErrConfigureWhileRunning
 	}
 
 	spec, err := configuredLaunchWrapper(wrapper, agentArgsPresent)
@@ -2372,15 +2452,9 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	if err := config.ValidateCommandArgs(args); err != nil {
 		return err
 	}
-	if continueArgsPresent {
-		if err := config.ValidateCommandArgs(continueArgs); err != nil {
-			return fmt.Errorf("invalid continue command: %w", err)
-		}
-	} else if continueCommand != "" {
-		continueArgs = config.ParseCommand(continueCommand)
-		if err := config.ValidateCommandArgs(continueArgs); err != nil {
-			return fmt.Errorf("invalid continue command: %w", err)
-		}
+	continueArgs, err = configuredContinueArgs(continueArgs, continueArgsPresent, continueCommand)
+	if err != nil {
+		return err
 	}
 
 	// Compose the environment before changing any other configuration so a
@@ -2389,11 +2463,19 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	if err != nil {
 		return fmt.Errorf("compose configured agent environment: %w", err)
 	}
+	// Delivery evidence is validated before any accepted state changes. An
+	// invalid explicit record fails configuration instead of replacing it.
+	acceptedDelivery, err := m.acceptProjectMCPDelivery(delivery)
+	if err != nil {
+		return err
+	}
 
 	m.cfg.AgentCommand = command
+	m.cfg.AgentCommandConfigured = true
 	m.cfg.AgentArgs = args
 	m.cfg.LaunchWrapper = launchwrapper.Profile(spec.Argv)
 	m.cfg.LaunchWrapperRequired = !spec.IsZero()
+	m.cfg.ProjectMCPDelivery = acceptedDelivery
 
 	// Store continue command for one-shot adapters
 	if continueArgsPresent {
@@ -2413,6 +2495,25 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	m.logger.Info("agent configured", zap.Int("env_count", len(env)), zap.Bool("wrapped", !spec.IsZero()))
 
 	return nil
+}
+
+// configuredContinueArgs normalizes the optional continue command while
+// preserving the present-vs-derived distinction callers already rely on.
+func configuredContinueArgs(continueArgs []string, present bool, command string) ([]string, error) {
+	if present {
+		if err := config.ValidateCommandArgs(continueArgs); err != nil {
+			return nil, fmt.Errorf("invalid continue command: %w", err)
+		}
+		return continueArgs, nil
+	}
+	if command == "" {
+		return continueArgs, nil
+	}
+	parsed := config.ParseCommand(command)
+	if err := config.ValidateCommandArgs(parsed); err != nil {
+		return nil, fmt.Errorf("invalid continue command: %w", err)
+	}
+	return parsed, nil
 }
 
 type installedManagedGitTools struct {
@@ -2896,6 +2997,19 @@ func (m *Manager) GetSessionID() string {
 		return a.GetSessionID()
 	}
 	return ""
+}
+
+// CopilotNativeSessionEventsActive reports the live adapter's actual vendor
+// subscription state. An older adapter omits the optional method.
+func (m *Manager) CopilotNativeSessionEventsActive() bool {
+	m.mu.RLock()
+	a := m.adapter
+	m.mu.RUnlock()
+	if a == nil {
+		return false
+	}
+	reporter, ok := a.(interface{ CopilotNativeSessionEventsActive() bool })
+	return ok && reporter.CopilotNativeSessionEventsActive()
 }
 
 // Stop stops the agent process
@@ -3583,6 +3697,7 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 	// The manager owns stderr's read/write pipe, so Wait can reap the process
 	// without closing the reader. The reader drains the pipe concurrently.
 	err := m.cmd.Wait()
+	m.clearAgentProcessIdentity(pid)
 	// Wait has observed process exit; now bound the reader drain in case a child
 	// process inherited the stderr writer and kept the pipe open.
 	stderrComplete, stderrPresent := m.waitForStderrDrain(stderrDone)
@@ -3692,18 +3807,25 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		pendingID = fmt.Sprintf("%s-%s-%d", req.SessionID, req.ToolCallID, time.Now().UnixNano())
 	}
 
+	req.HumanInput = m.classifyHumanInputPermission(req)
 	m.logger.Info("handling permission request",
 		zap.String("pending_id", pendingID),
 		zap.String("session_id", req.SessionID),
 		zap.String("tool_call_id", req.ToolCallID),
+		zap.Bool("human_input", req.HumanInput),
 		zap.Bool("auto_approve", m.cfg.AutoApprovePermissions))
 
-	// A coordinator session's agentctl instance does not consult its own
-	// blanket AutoApprovePermissions flag or the generic "any kandev tool"
-	// injected-MCP approval; only the exact seven-tool coordinator allowlist
-	// decides (docs/specs/coordinator/system-design/copilot.md#permission-policy).
+	// A native human question is classified before every automatic policy
+	// branch. Coordinator, managed-MCP, and blanket auto-approval would
+	// otherwise select an offered allow option, which is the user's answer.
 	switch {
+	case req.HumanInput:
+		// Wait for the person. Nothing below may answer this request.
 	case m.cfg.McpMode == mcpmode.Coordinator:
+		// A coordinator session's agentctl instance does not consult its own
+		// blanket AutoApprovePermissions flag or the generic "any kandev tool"
+		// injected-MCP approval; only the exact seven-tool coordinator allowlist
+		// decides (docs/specs/coordinator/system-design/copilot.md#permission-policy).
 		if response, approved := m.autoApproveCoordinatorPermission(req); approved {
 			return response, nil
 		}
@@ -3723,8 +3845,9 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 
 	// A coordinator session never takes the blanket or injected-tool approval:
 	// only its allowlist above decides, and anything else waits for a person.
+	// A human question never takes any automatic approval at all.
 	var autoApproveOption *adapter.PermissionOption
-	if m.cfg.McpMode != mcpmode.Coordinator {
+	if !req.HumanInput && m.cfg.McpMode != mcpmode.Coordinator {
 		var response *adapter.PermissionResponse
 		if autoApproveOption, response = m.nonCoordinatorAutoApproval(req); response != nil {
 			return response, nil
@@ -3741,6 +3864,7 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		CreatedAt:         createdAt,
 		State:             streams.PermissionStatusPending,
 		AutoApproveOption: autoApproveOption,
+		HumanInput:        req.HumanInput,
 	}
 	pending.Snapshot = m.permissionSnapshot(pending)
 
@@ -3879,15 +4003,16 @@ func (m *Manager) permissionRequestEvent(pending *PendingPermission) adapter.Age
 		}
 	}
 	event := adapter.AgentEvent{
-		Type:              adapter.EventTypePermissionRequest,
-		SessionID:         m.permissionSessionID(pending),
-		ToolCallID:        pending.Request.ToolCallID,
-		RequestID:         pending.RequestID,
-		PendingID:         pending.ID,
-		PermissionTitle:   pending.Snapshot.Title,
-		PermissionOptions: options,
-		ActionType:        pending.Snapshot.Action.Type,
-		ActionDetails:     permissionActionDetailsForEvent(pending.Snapshot.Action),
+		Type:                 adapter.EventTypePermissionRequest,
+		SessionID:            m.permissionSessionID(pending),
+		ToolCallID:           pending.Request.ToolCallID,
+		RequestID:            pending.RequestID,
+		PendingID:            pending.ID,
+		PermissionTitle:      pending.Snapshot.Title,
+		PermissionOptions:    options,
+		PermissionHumanInput: pending.HumanInput,
+		ActionType:           pending.Snapshot.Action.Type,
+		ActionDetails:        permissionActionDetailsForEvent(pending.Snapshot.Action),
 	}
 	if pending.AutoApproveOption != nil {
 		event.AutoApprovedOptionID = pending.AutoApproveOption.OptionID
@@ -3915,7 +4040,7 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 		event = persisted
 	}
 
-	if !m.IsAttached() {
+	if !m.IsAttached() || pending.HumanInput {
 		m.sendUpdateBlocking(event)
 		return
 	}
@@ -4012,9 +4137,10 @@ func (m *Manager) permissionSnapshot(pending *PendingPermission) streams.Pending
 			Tool:        action.Tool,
 			Redacted:    action.Redacted,
 		},
-		Options:   options,
-		CreatedAt: pending.CreatedAt,
-		Status:    streams.PermissionStatusPending,
+		Options:    options,
+		HumanInput: pending.HumanInput,
+		CreatedAt:  pending.CreatedAt,
+		Status:     streams.PermissionStatusPending,
 	}
 }
 

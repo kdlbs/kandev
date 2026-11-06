@@ -14,6 +14,9 @@ import (
 
 const registryPath = ".kandev/passthrough-claims.json"
 
+// ErrOwnershipConflict reports incompatible content claimed by another owner.
+var ErrOwnershipConflict = errors.New("MCP configuration is in use by another session")
+
 type registryEntry struct {
 	Fingerprint string          `json:"fingerprint"`
 	Owned       bool            `json:"owned"`
@@ -181,7 +184,7 @@ func validateRemoteFileClaims(previous *registryEntry, owner string, existing, p
 		}
 		var before, after any
 		if json.Unmarshal(existing, &before) != nil || json.Unmarshal(proposed, &after) != nil || !reflect.DeepEqual(before, after) {
-			return errors.New("MCP configuration is in use by another session")
+			return ErrOwnershipConflict
 		}
 	}
 	return nil

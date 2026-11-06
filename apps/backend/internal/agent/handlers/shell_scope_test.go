@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	terminalrepo "github.com/kandev/kandev/internal/terminal/repository"
 	terminalservice "github.com/kandev/kandev/internal/terminal/service"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // The two SSR terminal-listing routes read terminal state straight from the
@@ -369,5 +370,101 @@ func TestSSRTaskTerminalsRefusesUnpairedEnvironment(t *testing.T) {
 	if unrelated.Code != foreign.Code || unrelated.Body.String() != foreign.Body.String() {
 		t.Errorf("unrelated = %d %s, foreign = %d %s", unrelated.Code, unrelated.Body.String(),
 			foreign.Code, foreign.Body.String())
+	}
+}
+
+// TestUserShellListFiltersOrdinaryRowsByEnvironment pins the environment
+// qualifier on the WS list: a task can own terminals in more than one
+// environment, and the response must contain only rows for the requested
+// environment. Task ownership itself stays with the terminal service.
+func TestUserShellListFiltersOrdinaryRowsByEnvironment(t *testing.T) {
+	context := context.Background()
+	svc := seededTerminalService(t)
+	inScope, err := svc.Create(context, ownTaskID, ownEnvID, "echo in scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outOfScope, err := svc.Create(context, ownTaskID, unrelatedEnvID, "echo out of scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewShellHandlers(newTestManager(), nil, newTestLogger())
+	h.SetTerminalService(svc)
+
+	msg, err := ws.NewRequest("list-1", ws.ActionUserShellList, UserShellListRequest{
+		TaskID:            ownTaskID,
+		TaskEnvironmentID: ownEnvID,
+		IncludeParked:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := h.wsUserShellList(context, msg)
+	if err != nil {
+		t.Fatalf("wsUserShellList: %v", err)
+	}
+	var payload struct {
+		Shells []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"shells"`
+	}
+	if err := resp.ParsePayload(&payload); err != nil {
+		t.Fatalf("parse payload: %v", err)
+	}
+
+	ids := map[string]bool{}
+	for _, item := range payload.Shells {
+		if item.Kind != "ordinary" {
+			continue
+		}
+		ids[item.ID] = true
+	}
+	if !ids[inScope.ID] {
+		t.Fatalf("in-scope terminal %s missing from %+v", inScope.ID, payload.Shells)
+	}
+	if ids[outOfScope.ID] {
+		t.Fatalf("out-of-scope terminal %s leaked into the environment list", outOfScope.ID)
+	}
+}
+
+// TestTaskTerminalsHTTPListFiltersOnlyWhenEnvironmentIsSupplied keeps the
+// task-wide SSR contract while refusing to merge another environment's
+// ordinary rows with the named environment's unmanaged shells.
+func TestTaskTerminalsHTTPListFiltersOnlyWhenEnvironmentIsSupplied(t *testing.T) {
+	context := context.Background()
+	svc := seededTerminalService(t)
+	inScope, err := svc.Create(context, ownTaskID, ownEnvID, "echo in scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outOfScope, err := svc.Create(context, ownTaskID, unrelatedEnvID, "echo out of scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewShellHandlers(newTestManager(), nil, newTestLogger())
+	h.SetTerminalService(svc)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterShellRoutesOn(router, h)
+
+	qualified := getPath(t, router, "/api/v1/tasks/"+ownTaskID+"/terminals?task_environment_id="+ownEnvID)
+	if qualified.Code != http.StatusOK {
+		t.Fatalf("qualified status = %d (body %s)", qualified.Code, qualified.Body.String())
+	}
+	if !strings.Contains(qualified.Body.String(), inScope.ID) {
+		t.Errorf("qualified list lost its own terminal: %s", qualified.Body.String())
+	}
+	if strings.Contains(qualified.Body.String(), outOfScope.ID) {
+		t.Errorf("qualified list leaked another environment's terminal: %s", qualified.Body.String())
+	}
+
+	taskWide := getPath(t, router, "/api/v1/tasks/"+ownTaskID+"/terminals")
+	if taskWide.Code != http.StatusOK {
+		t.Fatalf("task-wide status = %d (body %s)", taskWide.Code, taskWide.Body.String())
+	}
+	if !strings.Contains(taskWide.Body.String(), inScope.ID) ||
+		!strings.Contains(taskWide.Body.String(), outOfScope.ID) {
+		t.Errorf("task-wide list changed contract: %s", taskWide.Body.String())
 	}
 }

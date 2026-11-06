@@ -11,6 +11,7 @@ import {
 } from "../../helpers/navigation-response-hold";
 import { SessionPage } from "../../pages/session-page";
 import { waitForSessionDone, waitForSessionGitHydration } from "../../helpers/session";
+import { watchWs } from "../../helpers/causal-waits";
 import { workspaceInventoryRevision } from "../../../components/task/file-browser-repository-labels";
 import type { AppState } from "../../../lib/state/store";
 import type { StoreApi } from "zustand";
@@ -179,6 +180,7 @@ export async function assertProgressiveNavigation(
   const [a, b] = await seedNavigationTasks(api, seed, backend);
   const gate = await routeNavigationResponses(page);
   const initialRequestOffset = gate.requests.length;
+  const ws = watchWs(page);
   await exposeNavigationStore(page);
   await page.goto(`/t/${a.id}`);
   const session = new SessionPage(page);
@@ -191,7 +193,16 @@ export async function assertProgressiveNavigation(
   await saveExpandedPaths(page, a.session_id!, [AVAILABLE, HELD], mobile);
   gate.hold((r) => r.action === "workspace.tree.get" && r.payload.path === HELD);
   const reloadRequestOffset = gate.requests.length;
+  const restoredCommits = ws.waitForResponse("session.git.commits", {
+    requestWhere: (payload) => payload.session_id === a.session_id,
+    where: (payload) => {
+      const response = payload as { ready?: boolean; commits?: unknown };
+      return response?.ready !== false && Array.isArray(response?.commits);
+    },
+  });
   await page.reload();
+  if (!mobile) await session.waitForDockviewReady();
+  await restoredCommits;
   await waitForSessionGitHydration(page, a.session_id!);
   await showNavigationFiles(page, mobile);
   await expect.poll(() => gate.heldCount()).toBeGreaterThan(0);

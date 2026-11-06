@@ -1373,7 +1373,16 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
 	execution.cancelStartupRecovery()
-	execution.remoteInstanceLifecycleMu.Lock()
+	stopCtx := ctx
+	preserveRuntime := shouldPreserveRecoverableRuntime(execution, reason)
+	if force || preserveRuntime {
+		var cancelStop context.CancelFunc
+		stopCtx, cancelStop = kubernetesDurableContext(ctx)
+		defer cancelStop()
+	}
+	if err := execution.remoteInstanceLifecycleMu.LockContext(stopCtx); err != nil {
+		return err
+	}
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
@@ -1385,13 +1394,8 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		m.streamManager.cancelDeliveryReconciliation(executionID)
 	}
 	backendForce := force
-	stopCtx := ctx
-	preserveRuntime := shouldPreserveRecoverableRuntime(execution, reason)
 	if preserveRuntime {
 		backendForce = false
-		var cancelStop context.CancelFunc
-		stopCtx, cancelStop = kubernetesDurableContext(ctx)
-		defer cancelStop()
 	}
 	activityLease, err := m.acquireActivity(stopCtx, activity.KindExecutionStopping)
 	if err != nil {
@@ -1434,7 +1438,12 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// A retained runtime gets a bounded non-cancelled opportunity to
 	// stop the failed process before its environment is preserved for another retry.
 	if reason != StopReasonBackendShutdown {
-		m.preserveTurnChangesBeforeStop(stopCtx, execution, reason)
+		if err := m.preserveTurnChangesBeforeStop(stopCtx, execution, reason); err != nil {
+			if m.streamManager != nil {
+				m.streamManager.restoreDeliveryReconciliation(executionID)
+			}
+			return fmt.Errorf("preserve turn changes for execution %q: %w", executionID, err)
+		}
 	}
 	agentStopFailed := m.stopExecutionAgentctl(stopCtx, executionID, execution, backendForce)
 	// A preserved runtime must not fall through to the executor's
@@ -1447,7 +1456,19 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// Backend shutdown retains interrupted delivery outcomes. Its terminal
 	// checkpoint follows confirmed process termination, before runtime cleanup.
 	if reason == StopReasonBackendShutdown && !backendForce && !agentStopFailed {
-		m.preserveTurnChangesBeforeStop(stopCtx, execution, reason)
+		if err := m.preserveTurnChangesBeforeStop(stopCtx, execution, reason); err != nil {
+			return fmt.Errorf("preserve shutdown turn changes for execution %q: %w", executionID, err)
+		}
+	}
+
+	// Release remote project-file claims while the helper is still reachable.
+	// A failed release keeps the execution and client retryable rather than
+	// orphaning the files behind a torn-down runtime.
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	cleanupErr := m.cleanupProjectMCPFiles(ctx, execution, client)
+	releaseClient()
+	if cleanupErr != nil {
+		return fmt.Errorf("release project MCP files for execution %q: %w", executionID, cleanupErr)
 	}
 
 	// Stop the agent execution via the runtime that created it. A failed stop
@@ -2011,6 +2032,66 @@ func (m *Manager) GetExecutionBySessionID(sessionID string) (*AgentExecution, bo
 	return m.executionStore.GetBySessionID(sessionID)
 }
 
+// ErrNoActiveAnswerExecution means no live execution currently owns the
+// answering session. Callers treat it as a retryable materialization failure;
+// detached answers materialize through their resume prompt instead.
+var ErrNoActiveAnswerExecution = errors.New("no active execution for answer attachments")
+
+// MaterializeAnswerAttachments streams already-claimed answer files into the
+// session's current execution without starting or steering a prompt. It is
+// only valid for a live waiter whose execution still owns the session.
+func (m *Manager) MaterializeAnswerAttachments(
+	ctx context.Context,
+	sessionID string,
+	attachments []v1.MessageAttachment,
+) ([]v1.MessageAttachment, error) {
+	if len(attachments) == 0 {
+		return attachments, nil
+	}
+	execution, err := m.activeAnswerAttachmentExecution(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if m.sessionManager == nil {
+		return nil, errors.New("answer attachment runtime is unavailable")
+	}
+	executionID := execution.ID
+	taskID := execution.TaskID
+	materialized, err := m.sessionManager.materializeAttachments(ctx, execution, attachments)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.verifyAnswerAttachmentExecutionCurrent(executionID, taskID, sessionID); err != nil {
+		return nil, err
+	}
+	for _, attachment := range materialized {
+		if attachment.AttachmentID != "" && strings.TrimSpace(attachment.Path) == "" {
+			return nil, fmt.Errorf("attachment %q has no readable executor path", attachment.AttachmentID)
+		}
+	}
+	return materialized, nil
+}
+
+func (m *Manager) activeAnswerAttachmentExecution(sessionID string) (*AgentExecution, error) {
+	execution, ok := m.GetExecutionBySessionID(sessionID)
+	if !ok || execution == nil || execution.ID == "" ||
+		execution.SessionID != sessionID || execution.ACPSessionID == "" {
+		return nil, ErrNoActiveAnswerExecution
+	}
+	return execution, nil
+}
+
+func (m *Manager) verifyAnswerAttachmentExecutionCurrent(
+	executionID, taskID, sessionID string,
+) error {
+	current, stillCurrent := m.executionStore.GetBySessionID(sessionID)
+	if !stillCurrent || current == nil || current.ID != executionID ||
+		current.TaskID != taskID || current.SessionID != sessionID {
+		return fmt.Errorf("answer attachment execution changed during transfer")
+	}
+	return nil
+}
+
 // ResolveTaskEnvironmentID returns the task environment ID for a session.
 // User shell resources must be environment-scoped; missing mappings are
 // lifecycle errors and must not be converted into session-scoped shell state.
@@ -2412,12 +2493,16 @@ func (m *Manager) OwnsPromptActivity(
 // active prompt for sessionID. Orchestrator cancellation uses this together
 // with the execution and turn IDs to reject stale terminal events while the
 // lifecycle manager waits for an acknowledged cancel to settle.
-func (m *Manager) GetPromptGenerationForSession(_ context.Context, sessionID string) (uint64, error) {
+func (m *Manager) GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error) {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		return 0, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
-	return execution.promptGenerationSnapshot(), nil
+	if err := execution.promptLifecycleMu.LockContext(ctx); err != nil {
+		return 0, err
+	}
+	defer execution.promptLifecycleMu.Unlock()
+	return execution.promptGeneration, nil
 }
 
 // AcknowledgeRetainedPromptFailure releases successor admission only after the

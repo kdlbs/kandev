@@ -78,6 +78,11 @@ jobs:
       - name: Test frontend timing helper
         run: node --test .github/scripts/frontend-timings.test.mjs
 
+      - name: Test native web toolchain evidence
+        run: |
+          python3 .github/scripts/web-toolchain-evidence_test.py
+          python3 .github/scripts/upgrade-regression-workflow-contract_test.py
+
       - name: Test CI efficiency and required gates
         run: |
           python3 .github/scripts/ci-efficiency_test.py
@@ -141,6 +146,9 @@ jobs:
       - name: Test managed runtime pin update workflow contract
         run: python3 .github/scripts/update-agent-runtime-pins-workflow-contract_test.py
 
+      - name: Test managed runtime pin delivery record generator
+        run: node --test .github/scripts/record-agent-runtime-pin-refresh.test.mjs
+
       - name: Test backend tests workflow contract
         run: python3 .github/scripts/backend-tests-workflow-contract_test.py
 
@@ -159,7 +167,7 @@ jobs:
         run: bash scripts/release/signpath-signing-ready.test.sh
 
       - name: Test npm release helpers
-        run: node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs
+        run: node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs scripts/release/existing-release.test.mjs
 
       - name: Verify action refs
         run: python3 .github/scripts/lint-action-pinning.py

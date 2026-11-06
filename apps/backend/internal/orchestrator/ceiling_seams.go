@@ -187,6 +187,9 @@ func seam1StartPayload(
 		"entry_options":          opts.EntryOptions,
 		"workflow_entry_id":      opts.WorkflowEntryID,
 		"origin":                 string(opts.Origin),
+		// Retain the spawn-only binding policy so a deferred replay creates the
+		// helper without rebinding the source step it was spawned from.
+		"preserve_workflow_source_binding": opts.PreserveWorkflowSourceBinding,
 	}
 	if opts.SpawnOrigin != nil {
 		payload["spawn_origin"] = map[string]interface{}{

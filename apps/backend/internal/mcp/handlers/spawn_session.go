@@ -44,11 +44,12 @@ func (h *Handlers) handleSpawnSession(ctx context.Context, msg *ws.Message) (*ws
 	profileID := h.resolveSpawnAgentProfile(ctx, &req, spawner)
 
 	resp, err := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
-		TaskID:         req.TaskID,
-		Intent:         orchestrator.IntentStart,
-		AgentProfileID: profileID,
-		Prompt:         req.Prompt,
-		SpawnOrigin:    spawnOriginFromSession(spawner),
+		TaskID:                        req.TaskID,
+		Intent:                        orchestrator.IntentStart,
+		AgentProfileID:                profileID,
+		Prompt:                        req.Prompt,
+		SpawnOrigin:                   spawnOriginFromSession(spawner),
+		PreserveWorkflowSourceBinding: true,
 	})
 	if err != nil {
 		if errors.Is(err, models.ErrWorkspaceReuseUnsupported) {
