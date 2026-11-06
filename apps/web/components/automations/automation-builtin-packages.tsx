@@ -38,6 +38,7 @@ function AutomationPackageChoice({
         <div className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-3">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <label className="text-sm font-medium" htmlFor={`automation-package-${item.id}`}>
+              <span className="sr-only">{t(item.label_key)} </span>
               {t("automations:mcpAccess")}
             </label>
             <Select

@@ -116,6 +116,7 @@ test.describe("Narrow fine pointer", () => {
     await testPage.keyboard.press("Tab");
     const choice = detail.getByRole("combobox");
     await expect(choice).toBeFocused();
+    await expect(choice).toHaveAccessibleName("Configuration MCP access");
     expect((await choice.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await testPage.keyboard.press("Enter");
     await testPage.getByRole("option", { name: "On", exact: true }).click();
