@@ -169,6 +169,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agent-profiles/dynamic-preview", h.requireDynamicTiers, cfg, h.httpPreviewDynamicTiers)
 	api.POST("/agent-profiles/:id/dynamic-preview", h.requireDynamicTiers, cfg, h.httpPreviewDynamicTiers)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
+	api.GET("/agent-profiles/:id/usage", cfg, h.httpReadNativeProfileUsage)
 	api.POST("/agent-profiles/:id/mcp-config", cfg, h.interlock, h.httpUpdateProfileMcpConfig)
 	api.GET("/agent-profiles/:id/mcp-selections", h.httpListProfileMCPSelections)
 	api.PUT("/agent-profiles/:id/mcp-selections", h.interlock, h.httpReplaceProfileMCPSelections)

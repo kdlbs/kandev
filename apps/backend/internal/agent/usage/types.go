@@ -20,6 +20,8 @@ const (
 
 // UtilizationWindow represents one rate-limit window's utilization.
 type UtilizationWindow struct {
+	// Model is the explicit provider scope, empty for shared account windows.
+	Model          string    `json:"-"`
 	Label          string    `json:"label"`           // e.g. "5-hour", "7-day"
 	UtilizationPct float64   `json:"utilization_pct"` // 0–100
 	ResetAt        time.Time `json:"reset_at"`
@@ -51,10 +53,12 @@ func utilizationObserved(value *float64) bool {
 
 // ProviderUsage is the full utilization response for one provider credential.
 type ProviderUsage struct {
-	Provider  string              `json:"provider"`       // "anthropic", "openai"
-	Plan      string              `json:"plan,omitempty"` // e.g. "max", "pro", "plus", "free"
-	Windows   []UtilizationWindow `json:"windows"`
-	FetchedAt time.Time           `json:"fetched_at"`
+	AccountRef      string              `json:"-"`
+	OrganizationRef string              `json:"-"`
+	Provider        string              `json:"provider"`       // "anthropic", "openai"
+	Plan            string              `json:"plan,omitempty"` // e.g. "max", "pro", "plus", "free"
+	Windows         []UtilizationWindow `json:"windows"`
+	FetchedAt       time.Time           `json:"fetched_at"`
 	// Stale marks a preserved success served while the provider refused a
 	// refresh: the reading is real, but FetchedAt may be well behind now.
 	Stale bool `json:"stale,omitempty"`

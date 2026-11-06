@@ -579,7 +579,15 @@ view labels a default local account or local proxy explicitly; it does not
 measure a different account selected by a remote executor. Missing credentials,
 unsupported bindings and unavailable readings remain unknown. Free OpenCode
 models and services without a usage API do not inherit a paid usage window.
-A measured zero is shown as zero. A reading alone does not enforce a limit.
+A measured zero is shown as zero. The profile-list snapshot is informational.
+
+When the feature is enabled, a supported running local execution can also
+report usage from its own provider account and refuse a new prompt for a
+measured exhausted window. Its account is established by that execution's
+environment, not by assuming the host profile's account. A missing or
+unsupported execution source remains unknown. The configuration-authorized
+`GET /api/v1/agent-profiles/:id/usage` reads the matching running executions;
+it can refresh provider usage and does not start an execution.
 
 The same feature also applies explicitly configured shared **Kandev-turn**
 allowances to task and Office prompts. No allowance is configured by default.

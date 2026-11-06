@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 )
 
@@ -27,6 +28,11 @@ func (m *Manager) SetInferenceConsumer(consumer agentctl.InferenceConsumer) {
 }
 
 func (m *Manager) executeOwnedInference(ctx context.Context, execution *AgentExecution, client *agentctl.Client, req *utility.PromptRequest, profileID string) (*utility.PromptResponse, error) {
+	if m.providerUsageLimits {
+		copy := *req
+		copy.UsagePolicy = &usage.ExecutionUsagePolicy{ProfileID: profileID, AgentID: req.AgentID, ExecutorType: execution.ExecutorType}
+		req = &copy
+	}
 	if m.inferenceConsumer == nil {
 		return client.InferencePromptOwned(ctx, req)
 	}

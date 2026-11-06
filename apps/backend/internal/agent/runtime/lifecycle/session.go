@@ -67,6 +67,7 @@ type SessionManager struct {
 	executorAdmission        func(context.Context, string, string, string) (context.Context, error)
 	providerTurnAdmission    ProviderTurnAdmission
 	providerTurnSettler      ProviderTurnSettlement
+	providerUsageLimits      bool
 	logger                   *logger.Logger
 	eventPublisher           *EventPublisher
 	streamManager            *StreamManager
@@ -1854,6 +1855,9 @@ func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 	// A failure here returns instead of falling back: the ordinary prompt route
 	// would carry the same unresolved descriptor, and the agent would receive a
 	// reference to bytes that are absent from the session.
+	if err := sm.checkExecutionUsage(ctx, execution); err != nil {
+		return nil, err
+	}
 	materialized, err := sm.materializeAttachments(ctx, execution, attachments)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSteerAttachmentMaterialization, err)
@@ -2223,6 +2227,9 @@ func (sm *SessionManager) preparePrompt(
 		if execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
 			return ctx, "", fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
 		}
+	}
+	if err := sm.checkExecutionUsage(ctx, execution); err != nil {
+		return ctx, "", err
 	}
 	effectivePrompt := sm.buildEffectivePrompt(execution, prompt)
 	sm.logger.Info("sending prompt to agent",

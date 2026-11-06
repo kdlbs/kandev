@@ -188,6 +188,7 @@ func claudeLimitWindows(limits []claudeLimit) []UtilizationWindow {
 		}
 		windows = append(windows, UtilizationWindow{
 			Label:          label,
+			Model:          claudeLimitModel(l),
 			UtilizationPct: legacyUtilization(l.Percent),
 			ResetAt:        resetAt,
 			Observation: &WindowObservation{
@@ -341,4 +342,11 @@ func parseResetAt(raw string, now time.Time, windowDuration time.Duration) time.
 		}
 	}
 	return now.Add(windowDuration)
+}
+
+func claudeLimitModel(limit claudeLimit) string {
+	if limit.Scope != nil && limit.Scope.Model != nil {
+		return limit.Scope.Model.DisplayName
+	}
+	return ""
 }

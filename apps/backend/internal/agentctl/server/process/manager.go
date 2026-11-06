@@ -124,6 +124,7 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
+	executionUsage           nativeExecutionUsage
 	processManagerID         string
 	questionImageWorkDir     string
 	questionImageOnce        sync.Once
@@ -1929,6 +1930,7 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	// One-shot adapters manage their own subprocess per prompt.
 	// Skip process creation — the adapter spawns processes in Prompt().
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
+		m.bindExecutionUsage(ctx)
 		if err := m.startOneShot(); err != nil {
 			return 0, err
 		}
@@ -1941,6 +1943,7 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 		m.closeOpenCodePlugin(context.Background())
 		return 0, err
 	}
+	m.bindExecutionUsage(ctx, m.cmd.Args)
 	generation, err := m.startManagedProcess()
 	if err != nil {
 		m.closeOpenCodePlugin(context.Background())

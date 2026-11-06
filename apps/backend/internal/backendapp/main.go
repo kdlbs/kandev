@@ -1242,6 +1242,11 @@ func startGatewayAndServe(
 	hostUtilityMgr.SetProfileEnvironmentResolver(lifecycleMgr.ResolveUtilityProfileEnvironment)
 	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
+	lifecycleMgr.SetProviderUsageLimitsEnabled(cfg.Features.ProviderUsageLimits)
+	if cfg.Features.ProviderUsageLimits {
+		agentSettingsController.SetNativeUsageReader(lifecycleMgr.ReadProfileExecutionUsage)
+	}
+	hostUtilityMgr.SetProviderUsageLimitsEnabled(cfg.Features.ProviderUsageLimits)
 	sharedInferenceOwner := wireSharedInferenceCapacity(orchestratorSvc, repos.SystemSettings, log.Zap(), lifecycleMgr, hostUtilityMgr)
 	wireNativeRouteCapacity(services.DynamicProfileResolver, orchestratorSvc, sharedInferenceOwner, repos.Task, repos.Utility)
 	// Wire the host utility manager into the settings controller so
@@ -1366,7 +1371,7 @@ func startGatewayAndServe(
 	if cfg.Features.ProviderUsageLimits || (services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil) {
 		usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
 		if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
-			services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
+			services.OfficeSvcs.Agents.SetUsageProvider(officeUsageProvider(cfg.Features.ProviderUsageLimits, lifecycleMgr.ReadOfficeProfileExecutionUsage, usageAdapter))
 		}
 		if cfg.Features.ProviderUsageLimits {
 			tierUsage := newTierUsageSnapshot()
