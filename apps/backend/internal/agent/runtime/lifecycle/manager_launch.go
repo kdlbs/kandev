@@ -2297,30 +2297,11 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 		return nil, err
 	}
-	// A reset/relaunch receives the complete durable repository projection from
-	// the orchestrator. Reconcile it through the fresh live agentctl rather than
-	// relying on the legacy primary-repository prepare script alone.
-	// Plugin environments have no prepare script, so the primary repository is
-	// materialized the same way.
-	pluginRemote := reqWithWorktree.ExecutorType == string(models.ExecutorTypePluginRemote)
-	minimumRepos := 2
-	if pluginRemote {
-		minimumRepos = 1
-	}
-	if rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) >= minimumRepos && execInstance != nil && execInstance.Client != nil {
-		projection, projectionErr := remoteWorkspaceProjectionFromLaunch(&reqWithWorktree, pluginRemote)
-		if projectionErr == nil {
-			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection)
-		}
-		if projectionErr != nil {
-			rollbackErr := m.stopLaunchRuntimeOnRollback(context.WithoutCancel(ctx), rt, execInstance, nil)
-			err = errors.Join(
-				fmt.Errorf("reconstruct remote workspace repositories: %w", projectionErr),
-				rollbackErr,
-			)
-			m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
-			return nil, err
-		}
+	if projectionErr := reconcileLaunchWorkspace(ctx, rt, &reqWithWorktree, execInstance); projectionErr != nil {
+		rollbackErr := m.stopLaunchRuntimeOnRollback(context.WithoutCancel(ctx), rt, execInstance, nil)
+		err = errors.Join(fmt.Errorf("reconstruct remote workspace repositories: %w", projectionErr), rollbackErr)
+		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
+		return nil, err
 	}
 
 	// Remote executors clone the workspace inside the
