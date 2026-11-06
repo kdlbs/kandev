@@ -550,6 +550,19 @@ func TestPromptTask_EmptySessionID(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-TERMINAL-SESSION-HISTORY-001.6
+func TestLoadPromptableSession_ArchivedSessionRejected(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	archivedAt := time.Now().UTC()
+	_, err := repo.DB().ExecContext(ctx, `UPDATE task_sessions SET archived_at = ? WHERE id = ?`, archivedAt, "session1")
+	require.NoError(t, err)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	_, err = svc.loadPromptableSession(ctx, "task1", "session1")
+	require.ErrorIs(t, err, ErrSessionNotPromptable)
+}
+
 func TestPromptTask_SessionAlreadyRunning(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -2702,6 +2715,8 @@ func TestQueueAndInterruptForPeerMessageRejectsReplacementIncarnationWhileWaitin
 	}()
 	coordinatorStopWaitForGuardRefs(t, svc, original.ID, 2)
 
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, original.ID, models.TaskSessionStateCompleted, ""))
+	original.State = models.TaskSessionStateCompleted
 	require.NoError(t, repo.DeleteTaskSession(ctx, original))
 	_, err = repo.DB().ExecContext(ctx, `
 		DELETE FROM agent_delivery_cleanup_jobs
@@ -3118,6 +3133,34 @@ func TestQueueAndInterruptForPeerMessage_CancelFailureLeavesMessageQueuedWhenSti
 	status := svc.messageQueue.GetStatus(ctx, "session1")
 	if status.Count != 1 {
 		t.Fatalf("expected the message to remain queued for the still-running turn's own eventual completion, count=%d entries=%+v", status.Count, status.Entries)
+	}
+}
+
+func TestQueueAndInterruptForPeerMessage_CoalescesIdenticalRoutineWakeOnCancelFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true, repoForExecutionLookup: repo,
+		cancelAgentErr: errors.New("agent manager unreachable"),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+	metadata := map[string]interface{}{
+		messagequeue.MetadataRoutineWake: true,
+		messagequeue.MetadataCoalesceKey: "routine-key",
+	}
+	first, dispatched, err := queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "wake", metadata)
+	if first == nil || dispatched || err == nil {
+		t.Fatalf("first interrupt = %+v, %t, %v", first, dispatched, err)
+	}
+	second, dispatched, err := queueAndInterruptForPeerMessage(svc, ctx, "task1", "session1", "wake", metadata)
+	if second == nil || dispatched || err == nil {
+		t.Fatalf("second interrupt = %+v, %t, %v", second, dispatched, err)
+	}
+	if second.ID != first.ID || svc.messageQueue.GetStatus(ctx, "session1").Count != 1 {
+		t.Fatalf("identical routine wakes accumulated: first=%s second=%s", first.ID, second.ID)
 	}
 }
 
@@ -5999,6 +6042,31 @@ func TestResumeTaskSession_NotResumable(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no executor running record exists")
 	}
+}
+
+// @covers AC-TASKS-TERMINAL-SESSION-HISTORY-001.6
+func TestResumeTaskSession_ArchivedSessionCannotResume(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCancelled)
+	archivedAt := time.Now().UTC()
+	_, err := repo.DB().ExecContext(ctx, `UPDATE task_sessions SET archived_at = ?, agent_profile_id = ? WHERE id = ?`, archivedAt, "profile-1", "session1")
+	require.NoError(t, err)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	launchCalled := false
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalled = true
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-2"}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	_, err = svc.ResumeTaskSession(ctx, "task1", "session1")
+	require.ErrorIs(t, err, ErrSessionNotPromptable)
+	require.False(t, launchCalled, "archived history must not launch an agent")
 }
 
 func TestResumeTaskSession_ArchivedTaskSkipsFailedState(t *testing.T) {

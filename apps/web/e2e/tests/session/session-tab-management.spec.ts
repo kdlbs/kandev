@@ -120,6 +120,13 @@ test.describe("Session tab management — close behavior", () => {
       await testPage.reload();
       await session.waitForLoad();
 
+      await expect
+        .poll(
+          async () =>
+            (await apiClient.listTaskSessions(task.id)).sessions.find((s) => s.id === session1Id)
+              ?.is_primary,
+        )
+        .toBe(true);
       await session.sessionTabBySessionId(session1Id).click();
       await expect(session.sessionTabCloseButton(session1Id)).toHaveAccessibleName("Hide panel");
       await session.sessionTabCloseButton(session1Id).click();

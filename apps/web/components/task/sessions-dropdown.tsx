@@ -7,6 +7,7 @@ import {
   IconStar,
   IconPlayerPlayFilled,
   IconTrash,
+  IconHistory,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -21,14 +22,19 @@ import { TaskCreateDialog } from "../task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 
 import { useTaskSessions } from "@/hooks/use-task-sessions";
-import { performLayoutSwitch } from "@/lib/state/dockview-store";
+import { performLayoutSwitch, useDockviewStore } from "@/lib/state/dockview-store";
 import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { deleteTaskAfterUserAction } from "@/lib/api/domains/kanban-api";
 import { resolveSessionDeletionTarget } from "@/lib/session/session-deletion";
 import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
-import { buildAgentLabelsById, resolveAgentLabelFor, sortSessions } from "./session-sort";
+import {
+  buildAgentLabelsById,
+  filterSessionHistory,
+  resolveAgentLabelFor,
+  sortSessions,
+} from "./session-sort";
 import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
@@ -237,6 +243,10 @@ export const SessionsDropdown = memo(function SessionsDropdown({
 }: SessionsDropdownProps) {
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [open, setOpen] = useState(false);
+  const showHistory = useDockviewStore((state) =>
+    taskId ? (state.sessionHistoryVisibleByTaskId[taskId] ?? false) : false,
+  );
+  const setSessionHistoryVisible = useDockviewStore((state) => state.setSessionHistoryVisible);
   const storePrimarySessionId = useAppStore((state) => {
     const activeTaskId = state.tasks.activeTaskId;
     if (!activeTaskId) return null;
@@ -257,6 +267,13 @@ export const SessionsDropdown = memo(function SessionsDropdown({
   );
   const { sortedSessions, currentTime, loadSessions, resolveAgentLabel } =
     useSessionsDropdownState(taskId);
+  const visibleSessions = useMemo(() => {
+    const visible = filterSessionHistory(sortedSessions, showHistory);
+    const active = sortedSessions.find((session) => session.id === activeSessionId);
+    return active && !visible.some((session) => session.id === active.id)
+      ? sortSessions([...visible, active])
+      : visible;
+  }, [activeSessionId, showHistory, sortedSessions]);
   const { handleSelectSession } = useSessionSelectionHandlers(taskId);
   const { handleResumeSession, handleDeleteSession, handleSetPrimary } = useSessionLifecycleActions(
     taskId,
@@ -284,12 +301,16 @@ export const SessionsDropdown = memo(function SessionsDropdown({
           >
             <IconStack2 className="h-4 w-4 text-muted-foreground" />
             <Badge variant="secondary" className="h-5 px-1.5 text-xs font-normal">
-              {sortedSessions.length}
+              {visibleSessions.length}
             </Badge>
           </Button>
         </DropdownMenuTrigger>
         <SessionDropdownContent
-          sortedSessions={sortedSessions}
+          sortedSessions={visibleSessions}
+          showHistory={showHistory}
+          onToggleHistory={() => {
+            if (taskId) setSessionHistoryVisible(taskId, !showHistory);
+          }}
           activeSessionId={activeSessionId}
           primarySessionId={primarySessionId}
           currentTime={currentTime}
@@ -331,6 +352,8 @@ function SessionDropdownContent({
   onSelectSession,
   onSetPrimary,
   onNewSession,
+  showHistory,
+  onToggleHistory,
 
   onResumeSession,
   onDeleteSession,
@@ -343,6 +366,8 @@ function SessionDropdownContent({
   onSelectSession: (sessionId: string) => void;
   onSetPrimary?: (sessionId: string) => void;
   onNewSession: () => void;
+  showHistory: boolean;
+  onToggleHistory: () => void;
 } & SessionLifecycleCallbacks) {
   const { t } = useTranslation();
   return (
@@ -370,6 +395,16 @@ function SessionDropdownContent({
         onResumeSession={onResumeSession}
         onDeleteSession={onDeleteSession}
       />
+      <DropdownMenuSeparator />
+      <button
+        type="button"
+        className="flex min-h-11 w-full items-center gap-2 rounded-sm px-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+        onClick={onToggleHistory}
+        data-testid="session-history-toggle"
+      >
+        <IconHistory className="h-4 w-4" />
+        {showHistory ? t("task:hideSessionHistory") : t("task:showSessionHistory")}
+      </button>
     </DropdownMenuContent>
   );
 }
@@ -559,7 +594,7 @@ function SessionRowActions({
           <TooltipContent side="left">{t("task:setAsPrimary")}</TooltipContent>
         </Tooltip>
       )}
-      {isSessionResumable(session.state) && (
+      {!session.archived_at && isSessionResumable(session.state) && (
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -573,7 +608,7 @@ function SessionRowActions({
           <TooltipContent side="left">{t("task:resumeAgent")}</TooltipContent>
         </Tooltip>
       )}
-      {isSessionDeletable(session.state) && (
+      {!session.archived_at && !isPrimary && isSessionDeletable(session.state) && (
         <Tooltip>
           <TooltipTrigger asChild>
             <button

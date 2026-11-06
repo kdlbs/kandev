@@ -453,6 +453,7 @@ type TaskSessionDTO struct {
 	RepositorySnapshot   map[string]interface{}   `json:"repository_snapshot,omitempty"`
 	StartedAt            time.Time                `json:"started_at"`
 	CompletedAt          *time.Time               `json:"completed_at,omitempty"`
+	ArchivedAt           *time.Time               `json:"archived_at,omitempty"`
 	UpdatedAt            time.Time                `json:"updated_at"`
 	// Workflow fields
 	IsPrimary         bool                  `json:"is_primary"`
@@ -651,6 +652,7 @@ type TaskSessionSummaryDTO struct {
 	Metadata          map[string]interface{}   `json:"metadata,omitempty"`
 	StartedAt         time.Time                `json:"started_at"`
 	CompletedAt       *time.Time               `json:"completed_at,omitempty"`
+	ArchivedAt        *time.Time               `json:"archived_at,omitempty"`
 	UpdatedAt         time.Time                `json:"updated_at"`
 	IsPrimary         bool                     `json:"is_primary"`
 	IsPassthrough     bool                     `json:"is_passthrough"`
@@ -1266,6 +1268,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		Metadata:           session.Metadata,
 		StartedAt:          session.StartedAt,
 		CompletedAt:        session.CompletedAt,
+		ArchivedAt:         session.ArchivedAt,
 		UpdatedAt:          session.UpdatedAt,
 		IsPrimary:          session.IsPrimary,
 		IsPassthrough:      session.IsPassthrough,
@@ -1318,6 +1321,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		RepositorySnapshot:   session.RepositorySnapshot,
 		StartedAt:            session.StartedAt,
 		CompletedAt:          session.CompletedAt,
+		ArchivedAt:           session.ArchivedAt,
 		UpdatedAt:            session.UpdatedAt,
 		// Workflow fields
 		IsPrimary:             session.IsPrimary,

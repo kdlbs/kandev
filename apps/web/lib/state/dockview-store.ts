@@ -232,6 +232,8 @@ export type TranscriptScrollTarget = {
 type DockviewStore = {
   api: DockviewApi | null;
   setApi: (api: DockviewApi | null) => void;
+  sessionHistoryVisibleByTaskId: Record<string, boolean>;
+  setSessionHistoryVisible: (taskId: string, visible: boolean) => void;
   openFiles: Map<string, FileEditorState>;
   setFileState: (path: string, state: FileEditorState) => void;
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
@@ -1855,6 +1857,11 @@ function buildSetApiAction(set: StoreSet): DockviewStore["setApi"] {
 
 export const useDockviewStore = create<DockviewStore>((set, get) => ({
   api: null,
+  sessionHistoryVisibleByTaskId: {},
+  setSessionHistoryVisible: (taskId, visible) =>
+    set((state) => ({
+      sessionHistoryVisibleByTaskId: { ...state.sessionHistoryVisibleByTaskId, [taskId]: visible },
+    })),
   activeFilePath: null,
   activeFileRepo: null,
   activePanelComponent: null,

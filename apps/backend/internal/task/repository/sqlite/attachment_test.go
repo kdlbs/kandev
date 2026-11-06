@@ -258,7 +258,7 @@ func TestClaimMessageAttachments_RejectsExpiredStagedDescriptor(t *testing.T) {
 		t.Fatalf("expired attachment state = %q, want staged", got.State)
 	}
 }
-func TestDeleteTaskSessionWithAttachmentsReturnsDeletedClaimDescriptors(t *testing.T) {
+func TestDeleteTaskSessionWithAttachmentsRetainsClaimedEvidence(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedWorkspace(t, repo, "workspace-session-attachments")
@@ -280,11 +280,15 @@ func TestDeleteTaskSessionWithAttachmentsReturnsDeletedClaimDescriptors(t *testi
 	if err != nil {
 		t.Fatalf("DeleteTaskSessionWithAttachments: %v", err)
 	}
-	if len(deleted) != 1 || deleted[0].ID != attachment.ID {
-		t.Fatalf("deleted attachments = %+v, want %s", deleted, attachment.ID)
+	if len(deleted) != 0 {
+		t.Fatalf("deleted attachments = %+v, want preserved claim", deleted)
 	}
-	if _, err := repo.GetMessageAttachment(ctx, attachment.ID); !errors.Is(err, models.ErrAttachmentNotFound) {
-		t.Fatalf("attachment registry row still exists: %v", err)
+	if _, err := repo.GetMessageAttachment(ctx, attachment.ID); err != nil {
+		t.Fatalf("attachment registry row missing after archive: %v", err)
+	}
+	archived, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil || archived.ArchivedAt == nil {
+		t.Fatalf("archived session = %+v, error = %v", archived, err)
 	}
 }
 

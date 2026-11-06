@@ -172,3 +172,20 @@ func seedRetentionBoundsStream(
 	currentTime = baseTime.Add(26 * time.Hour)
 	return repo, events
 }
+
+func retireRetentionSessionForTest(t *testing.T, repo *Repository, session *models.TaskSession) {
+	t.Helper()
+	// These retention tests model history from sessions hard-deleted before
+	// transcript-preserving cleanup was introduced.
+	if _, err := repo.db.Exec(repo.db.Rebind(`DELETE FROM task_sessions WHERE id = ?`), session.ID); err != nil {
+		t.Fatal(err)
+	}
+	now := repo.nowUTC()
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO agent_delivery_cleanup_jobs
+			(session_id, incarnation_id, retired_at, phase, created_at, updated_at)
+		VALUES (?, ?, ?, 'pending', ?, ?)
+	`), session.ID, session.QueueIncarnationID, now, now, now); err != nil {
+		t.Fatal(err)
+	}
+}

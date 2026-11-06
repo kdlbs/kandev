@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -53,5 +54,23 @@ func TestActiveSessionStateMatchesSQLFilter(t *testing.T) {
 				t.Fatalf("GetActiveTaskSessionByTaskID(%q) = (%v, %v), want ErrTaskSessionNotFound (state %q is not active)", taskID, got, err, state)
 			}
 		})
+	}
+}
+
+func TestActiveSessionLookupExcludesArchivedLegacyRow(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-archived-active", Title: "Archived active"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-archived-active", TaskID: "task-archived-active", State: models.TaskSessionStateRunning}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.DB().ExecContext(ctx, `UPDATE task_sessions SET archived_at = ? WHERE id = ?`, time.Now().UTC(), "session-archived-active"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetActiveTaskSessionByTaskID(ctx, "task-archived-active")
+	if !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Fatalf("archived active lookup = %+v, %v", got, err)
 	}
 }

@@ -245,7 +245,7 @@ func TestManagedConversationAdmissionRollback(t *testing.T) {
 				before, err = repos[1].GetTaskSession(ctx, first.SessionID)
 				require.NoError(t, err)
 				if mode == "repair" {
-					require.NoError(t, repos[1].DeleteTaskSession(ctx, before))
+					retireLegacyConversationPrimaryForTest(t, ctx, repos[1], before)
 				}
 				spec.ExpectedRevision = first.Revision
 				spec.AgentProfileID, spec.BasePrompt = "replacement-profile", "replacement instructions"

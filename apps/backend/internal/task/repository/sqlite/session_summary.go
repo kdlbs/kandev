@@ -111,7 +111,7 @@ func taskSessionSummarySelectCols(driver string) string {
 		"e.type AS executor_type", "e.name AS executor_name",
 		dialect.JSONExtract(driver, "ts.repository_snapshot", "path"),
 		"ts.state", "ts.error_message", dialect.JSONExtract(driver, metadata, models.SessionMetaKeyLastAgentError), modelID, modelName,
-		"ts.started_at", "ts.completed_at", "ts.updated_at", "ts.is_primary", "ts.review_status",
+		"ts.started_at", "ts.completed_at", "ts.archived_at", "ts.updated_at", "ts.is_primary", "ts.review_status",
 		"ts.is_passthrough", "ts.task_environment_id", "ts.name", "ts.last_read_message_id",
 	}, ", ")
 }
@@ -143,6 +143,7 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 		modelName           sql.NullString
 		lastAgentErrorJSON  sql.NullString
 		completedAt         sql.NullTime
+		archivedAt          sql.NullTime
 		isPrimary           int
 		reviewStatus        sql.NullString
 		isPassthrough       int
@@ -158,7 +159,7 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 		&environmentID, &repositoryID, &baseBranch, &baseCommitSHA, &workspacePath, &agentWorkspacePath,
 		&agentProfileName, &agentProfileAgentID, &executorType, &executorName, &repositoryPath,
 		&state, &errorMessage, &lastAgentErrorJSON, &modelID, &modelName,
-		&observation.StartedAt, &completedAt, &observation.UpdatedAt, &isPrimary,
+		&observation.StartedAt, &completedAt, &archivedAt, &observation.UpdatedAt, &isPrimary,
 		&reviewStatus, &isPassthrough, &taskEnvironmentID, &name, &lastReadMessageID,
 	); err != nil {
 		return nil, err
@@ -191,6 +192,9 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 	observation.LastReadMessageID = sessionSummaryNullableString(lastReadMessageID)
 	if completedAt.Valid {
 		observation.CompletedAt = &completedAt.Time
+	}
+	if archivedAt.Valid {
+		observation.ArchivedAt = &archivedAt.Time
 	}
 	metadata, err := sessionSummaryMetadata(lastAgentErrorJSON, modelID.String, modelName.String)
 	if err != nil {
