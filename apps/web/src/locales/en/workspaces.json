@@ -301,5 +301,13 @@
   "cloneSourceMissing": "The source workspace is no longer available.",
   "cloneConfigurationUnsupported": "This workspace has managed settings, unavailable defaults, or workflow references that cannot be cloned.",
   "cloneFailed": "Could not clone the workspace. Please try again.",
-  "workspaceActionsNamed": "Actions for {{name}}"
+  "workspaceActionsNamed": "Actions for {{name}}",
+  "dynamicRoutingPolicyTitle": "Dynamic routing",
+  "dynamicRoutingPolicyDescription": "Choose how dynamic agent profiles in this workspace recover when a provider fails during a turn. This setting is off by default.",
+  "midTurnFailoverEnabled": "Try the next candidate after a provider limit",
+  "midTurnFailoverDescription": "When a rate limit, exhausted quota, or overloaded provider stops a turn that already produced output, switch to the next candidate once and continue from the saved task context. The failed request is not sent again. When off, the session waits for you.",
+  "failedRouteAutoRetryEnabled": "Retry a failed route automatically",
+  "failedRouteAutoRetryDescription": "When a rate limit, exhausted quota, or overloaded provider leaves the route waiting for you, retry it once the provider's limit has passed, and no sooner than one minute. The retry continues from the saved task context; the failed request is not sent again. If the same provider fails the same way again, or the limit is reached, the session waits for you. When off, the session waits for you.",
+  "failedRouteAutoRetryMax": "Automatic retries before a turn succeeds",
+  "failedRouteAutoRetryMaxRange": "Enter a whole number from 1 to 3."
 }

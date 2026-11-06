@@ -128,7 +128,7 @@ func TestRunDynamicPolicyRecovery_FlagFlippedOffAfterArmSkipsLaunch(t *testing.T
 	repo := &recordingRouteStateLoader{Repository: baseRepo}
 	svc := &Service{
 		logger: testLogger(), repo: repo, profileExecutionResolver: resolver,
-		dynamicRecoveryTimers: make(map[string]*time.Timer),
+		dynamicRecoveryTimers: make(map[string]*dynamicRecoveryTimer),
 	}
 	// Stands in for a recovery context installed by an earlier
 	// startDynamicPolicyRecovery call whose timer is now firing.

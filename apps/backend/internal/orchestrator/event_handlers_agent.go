@@ -2868,6 +2868,8 @@ func (s *Service) finishAgentCompleted(
 	// A successful, still-live completion clears retry state and scheduler
 	// ownership only after the guarded terminal/rotation checks above.
 	s.resetTransientRetry(data.SessionID)
+	s.resetMidTurnFailoverChain(data.SessionID)
+	s.resetFailedRouteAutoRetryChain(ctx, session)
 	if !completionFollowUp {
 		s.scheduler.HandleTaskCompleted(data.TaskID, true)
 		s.scheduler.RemoveTask(data.TaskID)
