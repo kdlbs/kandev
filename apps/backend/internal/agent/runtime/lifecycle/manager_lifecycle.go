@@ -1117,6 +1117,9 @@ func (m *Manager) cleanupStaleExecutionWithCheckpoint(
 	// remains retryable and should keep the execution's lifecycle intact.
 	execution.EndSessionSpan()
 
+	// Release remote project files before the client is detached.
+	m.cleanupProjectMCPFiles(ctx, execution)
+
 	// Close agentctl connection if it exists
 	execution.agentctlLifecycleMu.Lock()
 	if client := execution.currentAgentCtlClient(); client != nil { // protected by agentctlLifecycleMu

@@ -1476,6 +1476,10 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		}
 	}
 
+	// Remote project files are released while the helper client is still
+	// available; the client is detached immediately below.
+	m.cleanupProjectMCPFiles(ctx, execution)
+
 	// The runtime is now terminal. Detach agentctl under its own short critical
 	// section before any cleanup or event snapshot can acquire prompt state.
 	// Failed runtime stops intentionally retain the closed-but-reusable client so

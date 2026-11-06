@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -205,9 +206,18 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 	if execution.AgentCommand == "" {
 		return "", fmt.Errorf("execution %q has no recorded agent command for Kubernetes restart", execution.ID)
 	}
-	if err := client.ConfigureAgent(
+	delivery, err := m.prepareRestartedProjectMCP(ctx, execution, refresh, client)
+	if err != nil {
+		return "", fmt.Errorf("prepare project MCP after Kubernetes restart: %w", err)
+	}
+	if delivery != nil {
+		if err := client.RequireCapability(ctx, agentctltypes.ProjectMCPDeliveryCapability); err != nil {
+			return "", err
+		}
+	}
+	if err := client.ConfigureAgentWithProjectDelivery(
 		ctx, execution.AgentCommand, execution.AgentArgs, env,
-		execution.ContinueCommand, execution.ContinueArgs, execution.LaunchWrapper,
+		execution.ContinueCommand, execution.ContinueArgs, delivery, execution.LaunchWrapper,
 	); err != nil {
 		return "", fmt.Errorf("configure agent after Kubernetes restart: %w", err)
 	}
@@ -375,4 +385,51 @@ func (m *Manager) persistActiveKubernetesRefresh(
 		return errors.Join(secretErr, rowErr)
 	}
 	return rollback, nil
+}
+
+// prepareRestartedProjectMCP rebuilds Pi's project file on the staged helper
+// and returns evidence bound to that replacement client. Strategies without
+// explicit project-delivery support keep their existing restart behavior.
+func (m *Manager) prepareRestartedProjectMCP(
+	ctx context.Context,
+	execution *AgentExecution,
+	refresh *RemoteInstanceRefresh,
+	client *agentctlclient.Client,
+) (*agentctltypes.ProjectMCPDelivery, error) {
+	agentConfig := refresh.AgentConfig
+	if agentConfig == nil {
+		// A restarted helper without a recorded agent configuration keeps its
+		// previous restart behavior; only an authoritative profile can opt into
+		// project delivery.
+		if m.profileResolver == nil || execution.AgentProfileID == "" {
+			return nil, nil
+		}
+		var err error
+		agentConfig, err = m.getAgentConfigForExecution(execution)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if agentConfig == nil {
+		return nil, nil
+	}
+	rt := agentConfig.Runtime()
+	if rt == nil || rt.ProjectMCPStrategy == nil {
+		execution.clearProjectMCPDelivery()
+		return nil, nil
+	}
+	if _, supported := mcpconfig.ProjectDeliveryStrategyKey(rt.ProjectMCPStrategy); !supported {
+		execution.clearProjectMCPDelivery()
+		return nil, nil
+	}
+	operation, err := m.prepareExecutionMCP(ctx, execution, agentConfig)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.materializeRuntimeProjectMCPWithClient(
+		ctx, execution, agentConfig, nil, execution.ExecutorType, client, nil, operation,
+	); err != nil {
+		return nil, err
+	}
+	return execution.mcpProjectDeliveryFor(client)
 }

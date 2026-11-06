@@ -180,16 +180,10 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
-	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers); err != nil {
+	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers, a.projectDeliveryEvidence()); err != nil {
 		return "", err
 	}
-	for _, decision := range decisions {
-		kind := streams.MCPAttachmentEvidenceDelivered
-		if !decision.Included {
-			kind = streams.MCPAttachmentEvidenceFiltered
-		}
-		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
-	}
+	a.emitMCPDecisionEvidence(ctx, decisions)
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -620,16 +614,10 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	// Filter MCP servers by agent capabilities (same logic as NewSession).
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
-	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers); err != nil {
+	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers, a.projectDeliveryEvidence()); err != nil {
 		return err
 	}
-	for _, decision := range decisions {
-		kind := streams.MCPAttachmentEvidenceDelivered
-		if !decision.Included {
-			kind = streams.MCPAttachmentEvidenceFiltered
-		}
-		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
-	}
+	a.emitMCPDecisionEvidence(ctx, decisions)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -777,16 +765,10 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	}
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
-	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers); err != nil {
+	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers, a.projectDeliveryEvidence()); err != nil {
 		return err
 	}
-	for _, decision := range decisions {
-		kind := streams.MCPAttachmentEvidenceDelivered
-		if !decision.Included {
-			kind = streams.MCPAttachmentEvidenceFiltered
-		}
-		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
-	}
+	a.emitMCPDecisionEvidence(ctx, decisions)
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.resume")
 	defer span.End()
 	_, err := conn.ResumeSession(ctx, acp.ResumeSessionRequest{

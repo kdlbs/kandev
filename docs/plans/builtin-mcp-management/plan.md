@@ -13,6 +13,16 @@ legacy_specs: []
 
 # Implementation plan: Selectable built-in MCP packages
 
+## Pi delivery follow-up (2026-11-05)
+
+[Issue #5090](https://github.com/kdlbs/kandev/issues/5090) exposes a gap in the
+completed runtime-binding work: ACP admission ignores successful project-file
+delivery. The [repair package](../pi-builtin-mcp-delivery/plan.md) owns its
+implementation and regression evidence and is now implemented. Earlier
+completion results remain historical evidence. They do not certify Pi package
+startup; the repair's [work order](../pi-builtin-mcp-delivery/task-01-recognize-project-delivery.md#results)
+records the current Pi coverage.
+
 ## New-task MCP placement correction (2026-11-04)
 
 PR #4762 merged at `a1013e89fc460b39b17003e5022d756bf480e3d2` before this

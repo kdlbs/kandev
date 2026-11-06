@@ -124,6 +124,7 @@ func (s *Server) setupRoutes() {
 	// Agent control
 	api := s.router.Group("/api/v1")
 	s.registerPassthroughRoutes(api)
+	s.registerProjectMCPRoutes(api)
 	{
 		// Status and info
 		api.GET("/status", s.handleStatus)
@@ -510,6 +511,10 @@ type AgentConfigureRequest struct {
 	ContinueArgs    optionalArgs       `json:"continue_args"`
 	Env             map[string]string  `json:"env,omitempty"`
 	ReplaceEnv      bool               `json:"replace_env,omitempty"`
+	// ProjectMCPDelivery carries execution-bound project-file delivery
+	// evidence. It is trusted only on an authenticated control request and is
+	// validated against this instance before accepted configuration changes.
+	ProjectMCPDelivery *agentctltypes.ProjectMCPDelivery `json:"project_mcp_delivery,omitempty"`
 	// ApprovalPolicy is accepted and ignored. It was never consulted by any
 	// code path; the field remains so an older backend configuring a newer
 	// agentctl still succeeds. Permission auto-approval travels on
@@ -554,6 +559,11 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		}
 	}
 
+	if req.ProjectMCPDelivery != nil && !c.GetBool(authenticatedControlContextKey) {
+		c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated control is required for project MCP delivery"})
+		return
+	}
+
 	if !req.AgentArgs.Present && req.Command == "" {
 		c.JSON(http.StatusBadRequest, AgentConfigureResponse{
 			Success: false,
@@ -564,9 +574,9 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 
 	var configureErr error
 	if req.ReplaceEnv {
-		configureErr = s.procMgr.ConfigureWithEnvironment(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.LaunchWrapper)
+		configureErr = s.procMgr.ConfigureWithEnvironmentAndProjectDelivery(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.LaunchWrapper)
 	} else {
-		configureErr = s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.LaunchWrapper)
+		configureErr = s.procMgr.ConfigureWithProjectDelivery(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.LaunchWrapper)
 	}
 	if configureErr != nil {
 		s.logger.Error("failed to configure agent",

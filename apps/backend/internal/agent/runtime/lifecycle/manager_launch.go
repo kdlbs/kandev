@@ -2925,6 +2925,7 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 		client.Close()
 	}
 	execution.EndSessionSpan()
+	execution.clearProjectMCPDelivery()
 	m.cleanupPassthroughMCPConfig(execution)
 }
 
@@ -3218,7 +3219,16 @@ func (m *Manager) configureAndStartAgentWithPreparedArgs(
 			return "", err
 		}
 	}
-	if err := client.ConfigureAgent(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, execution.LaunchWrapper); err != nil {
+	delivery, err := execution.mcpProjectDeliveryFor(client)
+	if err != nil {
+		return "", err
+	}
+	if delivery != nil {
+		if err := client.RequireCapability(ctx, agentctltypes.ProjectMCPDeliveryCapability); err != nil {
+			return "", err
+		}
+	}
+	if err := client.ConfigureAgentWithProjectDelivery(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, execution.LaunchWrapper); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 
