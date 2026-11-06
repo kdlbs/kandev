@@ -2,7 +2,7 @@
 status: draft
 system: agents
 created: 2026-08-13
-updated: 2026-11-01
+updated: 2026-11-02
 owners:
   - cfl
 ---
@@ -46,6 +46,7 @@ Users often name profiles by the capability they want rather than a provider bra
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.24:** `features.dynamicAgentRouting` shall be the sole release toggle for dynamic selection and fixed-profile circuit admission, failure charging, and completion resets. It shall remain off in prod, dev, and e2e profiles and require a restart. When it is off, fixed-profile dispatch shall retain its existing behavior and shall not charge or reset shared circuit counts. Candidate policies remain independent routing data, not additional feature toggles.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.25:** The retired `features.dynamicCircuitBackoffEscalation` key and `KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION` environment variable shall have no active effect. Old true and false values shall neither enable dynamic agents nor change their default backoff. Saved overrides shall be retained as inert data. The retired identities shall not be reused.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.26:** Feature discovery and Settings > System > Feature Toggles shall expose only the dynamic-agent release toggle for this capability. Desktop and phone shall expose the same remaining control, including its restart and environment-lock behavior. They shall expose no separate circuit-backoff switch.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.28:** An explicit Retry route action for a FAILED session whose route generation is still `starting` shall mark that same generation `action_required` and then apply the retry, so the user can relaunch it. This applies only when the request carries the current generation, no runtime is live for the session, and the session has only the stopped standalone local or worktree history row of its own execution; that history row shall be preserved. A live runtime, an unknown liveness probe, an absent `executors_running` row, or any other executor row shall leave the session and its route unchanged and report `dynamic_route_pending`; a stale generation, another session state, and another route state keep the existing route-action behavior. The resulting manual relaunch may reopen the FAILED session for the retried prompt and reschedule its FAILED task; automatic relaunches and stale generations shall still refuse a terminal session.
 
 ### REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002: Repeated unclassified failure fallback
 
