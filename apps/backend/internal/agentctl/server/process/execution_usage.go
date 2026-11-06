@@ -59,7 +59,7 @@ func (m *Manager) bindExecutionUsage(ctx context.Context, commands ...[]string) 
 		input.Command = append([]string(nil), commands[0]...)
 	}
 	reason := "provider_selection_unknown"
-	if m.cfg.ProviderGatewayAuth == nil && usage.NativeProviderSelectionKnown(input) {
+	if m.cfg.ProviderGatewayAuth == nil && m.cfg.LaunchWrapper.IsZero() && usage.NativeProviderSelectionKnown(input) {
 		input, reason, _ = service.BindExecutionUsage(ctx, input)
 	}
 	m.executionUsage.mu.Lock()
