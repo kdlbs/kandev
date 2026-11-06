@@ -72,7 +72,11 @@ export function layoutGroupedTaskGraph(
     g.setNode(group.id, {});
     for (const id of group.memberIds) if (displayed.has(id)) g.setParent(id, group.id);
   }
-  for (const e of model.edges) g.setEdge(e.from, e.to);
+  // Only dependency edges imply an execution order; a related edge is
+  // non-blocking and must not shift dagre's horizontal ranks.
+  for (const e of model.edges) {
+    if (e.kind === "dependency") g.setEdge(e.from, e.to);
+  }
   dagre.layout(g);
 
   const nodes: TaskGraphLayout = new Map();

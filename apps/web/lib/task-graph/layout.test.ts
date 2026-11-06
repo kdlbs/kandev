@@ -66,6 +66,28 @@ describe("layoutTaskGraph", () => {
 });
 
 describe("layoutGroupedTaskGraph", () => {
+  it("does not let a non-blocking related edge shift horizontal rank", () => {
+    const response: TaskGraphResponse = {
+      mode: "chain",
+      available_modes: ["chain"],
+      focus_task_id: "a",
+      nodes: ["a", "b"].map((id) => ({
+        id,
+        title: id,
+        state: "TODO",
+        depth: 0,
+        role: "member",
+        archived: false,
+        blocked: false,
+      })),
+      edges: [{ from: "a", to: "b", kind: "related", status: "pending" }],
+      truncated: false,
+    };
+    const m = buildTaskGraphModel(response);
+    const { nodes } = layoutGroupedTaskGraph(m, []);
+    expect(nodes.get("a")?.x).toBe(nodes.get("b")?.x);
+  });
+
   it("frames each group around its members without overlapping other nodes", () => {
     const m = model(["p", "x", "y", "solo"], [["x", "y"]]);
     const { nodes, groups } = layoutGroupedTaskGraph(m, [{ id: "group:p", memberIds: ["x", "y"] }]);
