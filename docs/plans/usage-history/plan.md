@@ -241,12 +241,12 @@ Recorded passes apply only to their stated source and scope. They do not close t
 
 ### Full five-year measurement status (BLOCKED)
 
-The run on current #3660 head `a39942aa5e74be35461bdc09961f44199eb79e0f` attempted SQLite and real PostgreSQL 18.6 with 1,000,000 native rows, 100,000 external rows, and ten samples. SQLite stopped during five-year fixture projection before its five-year query phase; PostgreSQL was not run.
+The run on then-current #3660 head `a39942aa5e74be35461bdc09961f44199eb79e0f` attempted SQLite and real PostgreSQL 18.6 with 1,000,000 native rows, 100,000 external rows, and ten samples. SQLite stopped during five-year fixture projection before its five-year query phase; PostgreSQL was not run. Commit `3d43b09752a` later changed PostgreSQL report SQL. No full-scale result for the updated source is recorded.
 
 | Required run | Status |
 | --- | --- |
-| Current-source SQLite, 1,000,000 native and 100,000 external rows, ten samples | Failed during fixture projection at scope 0, page 12,403, after 2,052.861 seconds (`analytics busy: context deadline exceeded`). Sixteen one-year receipts exist; the five-year phase did not run. Log: `/tmp/usage-gate-sqlite.log`. |
-| Current-source PostgreSQL 18.6, same fixture and sample count | Not run. Task 04 stopped after the SQLite fixture-projection timeout. |
+| SQLite, 1,000,000 native and 100,000 external rows, ten samples | On `a39942a`, fixture projection failed at scope 0, page 12,403, after 2,052.861 seconds (`analytics busy: context deadline exceeded`). Sixteen one-year receipts exist; the five-year phase did not run. No updated-source result is recorded. Log: `/tmp/usage-gate-sqlite.log`. |
+| PostgreSQL 18.6, same fixture and sample count | Not run in Task 04 after the SQLite timeout. No updated-source result is recorded. |
 | C4 construction diagnostics, SQLite | Complete at 20,000/2,000 rows in 59.597 seconds and 100,000/10,000 rows in 664.684 seconds. |
 | 100,000/10,000 actual rows | 100,005 native, 10,013 external, 110,017 facts, and 220,032 contributions. The recorder dropped zero SQL statements. |
 

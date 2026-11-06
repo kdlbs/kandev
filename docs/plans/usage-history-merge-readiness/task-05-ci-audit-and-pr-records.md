@@ -75,4 +75,8 @@ Task 04.
 
 ## Results
 
-Blocked by Task 04's SQLite fixture-projection timeout. No PR body was edited. `scripts/pr-await 3660` completed cleanly at head `a39942aa5e74be35461bdc09961f44199eb79e0f` with 93 passed, 11 skipped, and no failures or pending checks. `scripts/pr-state --summary 3660` returned a complete snapshot, and `scripts/pr-resolve list 3660` returned no threads. `gh run download 41432117932 --repo kdlbs/kandev --name e2e-flake-history --dir /tmp/e2e-flake-history-a399` provided the matching E2E history: zero flaky tests in 4,572 executions. Its latest `main` baseline (`runId` `41430702732`) had three in 4,558 executions: OpenCode capacity retry, mobile Git title/branch rename, and mobile Threads selection ordering. These do not touch stats, usage, plugins, or task deletion. PR body updates, including the `Also included` heading, remain pending.
+Blocked by Task 04: the `a39942a` SQLite fixture-projection run timed out, and later report SQL changed. No full-scale result for the updated source is recorded.
+
+At core head `bf843362ec6124d9cb61941fe002dc412d5110e5`, `scripts/pr-await 3660` reported 91 passed, 13 skipped, and no failed or pending checks; `scripts/pr-state --compact 3660` and `scripts/pr-resolve list 3660` reported no unresolved threads. The `e2e-flake-history` artifact for run `41439159801` recorded one unrelated Threads composer disclosure flake in 4,579 executions. Its latest `main` baseline, run `41436181885`, recorded two flakes and one unexpected result in 4,565 executions.
+
+The core PR's marked validation section was updated through REST after `gh pr edit --body-file` hit the Projects Classic warning. The live body was checked, including the `Also included` list and unchanged text outside the markers. The plugin PR body and final database-gate audit remain open. Refresh CI and review evidence after the final push.

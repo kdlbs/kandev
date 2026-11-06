@@ -88,7 +88,7 @@ No new browser flow. Task 05 audits the existing E2E suites on the final head. T
 - [x] [Task 01: Retain pre-upgrade native usage during migration](task-01-native-backfill-order.md)
 - [x] [Task 02: Allow deletion of unprovable native usage with a gap](task-02-deletion-of-unprovable-usage.md)
 - [x] [Task 03: Split unrelated fixes out of #3660](task-03-split-unrelated-fixes.md) (cancelled per user)
-- [ ] [Task 04: Run the full database gate](task-04-database-gate.md) (blocked during SQLite fixture projection)
+- [ ] [Task 04: Run the full database gate](task-04-database-gate.md) (blocked; current-source full-scale evidence is missing)
 - [ ] [Task 05: Audit CI and refresh PR descriptions](task-05-ci-audit-and-pr-records.md) (blocked by Task 04)
 - [ ] [Task 06: Finalize the plugin pin and minimum Host version](task-06-plugin-pin-and-floor.md)
 - [x] [Task 07: Name both remedies when retained usage is unavailable](task-07-unavailable-message.md)
@@ -97,12 +97,12 @@ Order: 01, 02, 07, 04, 05, then the user merges core, then 06. Task 03 is cancel
 
 ## Verification results
 
-Tasks 01 and 02 passed their targeted, package, race, and Go lint checks. Task 02's public documentation validators also passed. Their focused PostgreSQL tests passed on PostgreSQL 18.6 during Task 04. Task 07 passed the plugin's targeted tests and full `make test` gate. The full SQLite five-year gate stopped during fixture projection at head `a39942a`; the PostgreSQL five-year benchmark did not run.
+Tasks 01 and 02 passed their targeted, package, race, and Go lint checks. Task 02's public documentation validators also passed. Their focused PostgreSQL tests passed on PostgreSQL 18.6 during Task 04. Task 07 passed the plugin's targeted tests and full `make test` gate. The SQLite five-year gate stopped during fixture projection at head `a39942a`; PostgreSQL did not run. Later report SQL changed in `3d43b09`, and no full-scale result for that source is recorded.
 
 ## Risks
 
-- **Gate is blocked.** The current SQLite run timed out during five-year fixture projection before that phase's scenarios ran. Task 04 stops on failure; investigating it needs a stronger design pass.
+- **Gate is blocked.** The `a39942a` SQLite run timed out during five-year fixture projection. Later report SQL changed, and the required full-scale results for the updated source are not recorded.
 - **Task 02 drops usage.** Events that stay ineligible are deleted with their task and leave only a workspace-level notice. Forked or transferred sessions are the main source. Events recorded inside a tracked turn are retained normally.
-- **Unrelated fixes remain in #3660.** Task 05 must list them under `Also included` in the core PR description.
-- **Flake rule changes.** Task 05 applies "no flake in usage history code". The exact-head E2E artifact for `a39942a` recorded zero flakes in 4,572 executions; the latest `main` baseline recorded three unrelated flakes in 4,558 executions.
+- **Unrelated fixes remain in #3660.** The core PR description lists them under `Also included`.
+- **Flake rule changes.** Task 05 applies "no flake in usage history code". The `bf84336` E2E artifact recorded one unrelated flake in 4,579 executions. Its `main` baseline recorded two flakes in 4,565 executions. A final-head audit remains required.
 - **Plugin release order.** Publishing 0.5.0 before the toggle is on in `prod` removes composer cost for existing users.
