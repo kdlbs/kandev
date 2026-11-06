@@ -149,6 +149,15 @@ describe("TaskGraphContent", () => {
     expect(screen.getByText("This task has no dependencies.")).toBeTruthy();
   });
 
+  it("shows a retry banner alongside the stale graph when a refresh fails", () => {
+    setHook({ error: true });
+    render(<TaskGraphContent taskId="p" onNavigate={vi.fn()} />);
+    expect(screen.getByTestId("stub-renderer")).toBeTruthy();
+    expect(screen.getAllByText("Could not load the graph.").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(hook.value.retry).toHaveBeenCalled();
+  });
+
   it("passes emphasis for the hovered node to the renderer", () => {
     render(<TaskGraphContent taskId="p" onNavigate={vi.fn()} />);
     expect(rendered.props?.emphasis).toBeNull();

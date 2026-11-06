@@ -61,6 +61,28 @@ function StatusArea({ error, onRetry }: { error: boolean; onRetry: () => void })
   );
 }
 
+/** A refresh/mode-switch failure alongside the still-displayed stale model. */
+function RefreshErrorBanner({ onRetry }: { onRetry: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="alert"
+      className="flex flex-wrap items-center gap-1.5 text-xs text-red-600 dark:text-red-400"
+    >
+      <IconAlertTriangle aria-hidden="true" className="size-3.5 shrink-0" />
+      {t("task:taskGraphError")}
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-6 cursor-pointer px-2 text-xs"
+        onClick={onRetry}
+      >
+        {t("task:taskGraphRetry")}
+      </Button>
+    </div>
+  );
+}
+
 /** Step-column canvas with optional parallel-step bands. */
 function SteppedCanvas({
   model,
@@ -116,6 +138,7 @@ export function TaskGraphContent({
         {model && <TaskGraphParallelToggle pressed={parallel} onPressedChange={setParallel} />}
       </div>
       {model && <GraphNotices model={model} />}
+      {model && error && <RefreshErrorBanner onRetry={retry} />}
       <div
         data-testid="task-graph-canvas"
         className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-md border"
