@@ -1,0 +1,40 @@
+version: 1
+rules:
+  - id: example.gateway.quota_notice
+    match:
+      pattern: '(?im)^\s*Error:\s*monthly\s+credit\s+balance\s+exhausted\b'
+      providers: [example-gateway]
+    result:
+      code: quota_limited
+      confidence: high
+  - id: example.capacity.terms
+    match:
+      terms: [capacity, try again later]
+      minTerms: 2
+      phases: [prompt_send, streaming]
+      httpStatus: [503]
+      context:
+        minOtherPaths: 1
+    result:
+      code: model_capacity
+      confidence: medium
+      scope: model
+      backoff: 10m
+  - id: example.free_daily.limit
+    match:
+      terms: [daily, limit, reached]
+      minTerms: 2
+      context:
+        freeDaily: true
+    result:
+      code: quota_limited
+      confidence: high
+      reset: free_daily
+  - id: example.model.retired
+    match:
+      pattern: '(?i)model\s+\S+\s+has\s+been\s+retired'
+      httpStatus: [404]
+    result:
+      code: model_unavailable
+      confidence: high
+      reset: until_model_change
