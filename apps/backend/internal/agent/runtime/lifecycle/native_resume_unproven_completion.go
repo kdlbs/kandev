@@ -75,38 +75,58 @@ func nativeResumeUnprovenBackendRows(
 	}
 	var rows []*models.AgentDeliverySubmission
 	for _, submission := range peer {
-		if seen[submission.ID] || submission.State != journal.SubmissionInterruptedUnknown || submission.Retired {
+		if seen[submission.ID] {
 			continue
 		}
-		row, err := nativeResumeSubmissionMetadata(ctx, repository, submission.ID)
-		if errors.Is(err, repoerrors.ErrAgentDeliverySubmissionNotFound) {
-			continue
-		}
+		row, include, err := nativeResumeUnprovenDiscoveryRow(ctx, execution, status, submission, repository)
 		if err != nil {
 			return nil, err
 		}
-		if row == nil || !peerMatchesUnprovenCompletion(execution, status, submission, row) {
-			continue
-		}
-		cursor, err := nativeResumeRowCursor(ctx, repository, submission)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if !nativeTerminalCursorMatches(cursor, submission, 0) {
-			continue
-		}
-		verified, err := verifyNativeResumeUnprovenCompletion(ctx, repository, execution, status, submission, row)
-		if err != nil {
-			return nil, err
-		}
-		if !verified {
+		if !include {
 			continue
 		}
 		rows = append(rows, row)
 		seen[row.ID] = true
 	}
 	return rows, nil
+}
+
+func nativeResumeUnprovenDiscoveryRow(
+	ctx context.Context,
+	execution *AgentExecution,
+	status *agentctl.DeliveryStatus,
+	submission journal.Submission,
+	repository AgentDeliveryRepository,
+) (*models.AgentDeliverySubmission, bool, error) {
+	if submission.State != journal.SubmissionInterruptedUnknown || submission.Retired {
+		return nil, false, nil
+	}
+	row, err := nativeResumeSubmissionMetadata(ctx, repository, submission.ID)
+	if errors.Is(err, repoerrors.ErrAgentDeliverySubmissionNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if row == nil || !peerMatchesUnprovenCompletion(execution, status, submission, row) {
+		return nil, false, nil
+	}
+	cursor, err := nativeResumeRowCursor(ctx, repository, submission)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if !nativeTerminalCursorMatches(cursor, submission, 0) || cursor.ReceivedSequence < cursor.RemoteHighWater {
+		return nil, false, nil
+	}
+	verified, err := verifyNativeResumeUnprovenCompletion(ctx, repository, execution, status, submission, row)
+	if err != nil {
+		return nil, false, err
+	}
+	if !verified {
+		return nil, false, nil
+	}
+	return row, true, nil
 }

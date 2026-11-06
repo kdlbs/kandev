@@ -287,7 +287,8 @@ func nativeResumeSubmissionMap(proof *models.NativeResumeDeliveryEvidence) (map[
 		if row.UnprovenCompletion && (row.State != models.DeliverySubmissionCompleted || row.TerminalSequence != 0 ||
 			row.TerminalStreamID != "" || row.Cursor == nil || row.Cursor.StreamID != row.StreamID ||
 			row.Cursor.SessionID != proof.SessionID || row.Cursor.IncarnationID != proof.IncarnationID ||
-			row.Cursor.HarnessGeneration != row.HarnessGeneration) {
+			row.Cursor.HarnessGeneration != row.HarnessGeneration ||
+			row.Cursor.ReceivedSequence < row.Cursor.RemoteHighWater) {
 			return nil, false
 		}
 		if _, duplicate := retired[row.ID]; duplicate {

@@ -121,7 +121,7 @@ func newHistoricalCursorFixture(t *testing.T, repo *Repository, suffix string) *
 	}, 1)
 	require.NoError(t, err)
 	require.True(t, committed)
-	_, err = repo.DB().ExecContext(ctx, `UPDATE executors_running SET agent_execution_id = 'current-execution' WHERE session_id = ?`, fixture.session.ID)
+	_, err = repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE executors_running SET agent_execution_id = 'current-execution' WHERE session_id = ?`), fixture.session.ID)
 	require.NoError(t, err)
 	currentStream := "stream-current-" + suffix
 	currentCursor := projectUnprovenCursor(t, repo, fixture.session.ID, fixture.session.QueueIncarnationID, 2, currentStream)
@@ -159,13 +159,13 @@ func testNativeResumeUnprovenSQLCompletionHistoricalCursor(t *testing.T, repo *R
 	t.Helper()
 	ctx := context.Background()
 	fixture := newHistoricalCursorFixture(t, repo, suffix+"-gap")
-	_, err := repo.DB().ExecContext(ctx, `UPDATE agent_delivery_cursors SET received_sequence = 2 WHERE stream_id = ?`, fixture.oldStream)
+	_, err := repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE agent_delivery_cursors SET received_sequence = 2 WHERE stream_id = ?`), fixture.oldStream)
 	require.NoError(t, err)
 	changed, err := repo.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, fixture.block.ID, fixture.proof, time.Now().UTC())
 	require.NoError(t, err)
 	require.False(t, changed, "an unprojected historical receipt must block resolution")
 
-	_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_cursors SET projected_sequence = 2 WHERE stream_id = ?`, fixture.oldStream)
+	_, err = repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE agent_delivery_cursors SET projected_sequence = 2 WHERE stream_id = ?`), fixture.oldStream)
 	require.NoError(t, err)
 	fixture.refreshProofCursor(t, repo)
 	changed, err = repo.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, fixture.block.ID, fixture.proof, time.Now().UTC())
@@ -178,6 +178,19 @@ func testNativeResumeUnprovenSQLCompletionHistoricalCursor(t *testing.T, repo *R
 	changed, err = repo.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, missing.block.ID, missing.proof, time.Now().UTC())
 	require.NoError(t, err)
 	require.False(t, changed, "a missing historical cursor must block resolution")
+
+	highWater := newHistoricalCursorFixture(t, repo, suffix+"-high-water")
+	_, err = repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE agent_delivery_cursors SET remote_high_water = 2 WHERE stream_id = ?`), highWater.oldStream)
+	require.NoError(t, err)
+	changed, err = repo.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, highWater.block.ID, highWater.proof, time.Now().UTC())
+	require.NoError(t, err)
+	require.False(t, changed, "an unreceived historical high-water mark must block resolution")
+	_, err = repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE agent_delivery_cursors SET received_sequence = 2, projected_sequence = 2 WHERE stream_id = ?`), highWater.oldStream)
+	require.NoError(t, err)
+	highWater.refreshProofCursor(t, repo)
+	changed, err = repo.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, highWater.block.ID, highWater.proof, time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, changed, "a fresh proof admits the received high-water mark")
 }
 
 func TestNativeResumeUnprovenCompletionInboxQueryPlan(t *testing.T) {

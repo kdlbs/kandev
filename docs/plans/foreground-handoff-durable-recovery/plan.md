@@ -208,6 +208,10 @@ Implementation evidence:
   not configured. The new environment-gated tests cover the locked proof
   matrix, the historical cursor, the query plan, and a concurrent receipt
   schedule. They remain for an authorized database run in CI.
+- Review fixup: historical cursors also pin the peer-reported high-water mark;
+  PostgreSQL fixtures use `Rebind`; negative tests capture metadata before
+  acknowledgement; and uncertainty-state E2E assertions document the
+  Retry/Stop UI. The focused backend checks and docs validators were rerun.
 - Documentation: `list-docs.py validate`, `lint-spec-files.py --all`, and the
   public-docs validators passed. `docs/public/sessions-and-review.md` explains
   the guarded recovery and preserved uncertainty.

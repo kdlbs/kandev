@@ -54,6 +54,7 @@ func (r *Repository) verifyUnprovenCursorTx(ctx context.Context, tx *sqlx.Tx, pr
 		cursor.IncarnationID != proof.IncarnationID || cursor.HarnessGeneration != row.HarnessGeneration ||
 		row.HarnessGeneration <= 0 || row.HarnessGeneration > proof.HarnessGeneration ||
 		cursor.ReceivedSequence != cursor.ProjectedSequence ||
+		cursor.ReceivedSequence < cursor.RemoteHighWater ||
 		cursor.RetiredSequence < 0 || cursor.RetiredSequence > cursor.ProjectedSequence {
 		return false, nil
 	}
@@ -62,9 +63,10 @@ func (r *Repository) verifyUnprovenCursorTx(ctx context.Context, tx *sqlx.Tx, pr
   SELECT 1 FROM agent_delivery_cursors c
   WHERE c.stream_id = ? AND c.session_id = ? AND c.incarnation_id = ?
   AND c.harness_generation = ? AND c.received_sequence = ?
-  AND c.projected_sequence = ? AND c.retired_sequence = ?
+  AND c.projected_sequence = ? AND c.remote_high_water = ?
+  AND c.retired_sequence = ?
   )`), cursor.StreamID, proof.SessionID, proof.IncarnationID, cursor.HarnessGeneration,
-		cursor.ReceivedSequence, cursor.ProjectedSequence, cursor.RetiredSequence,
+		cursor.ReceivedSequence, cursor.ProjectedSequence, cursor.RemoteHighWater, cursor.RetiredSequence,
 	).Scan(&valid)
 	return valid, err
 }

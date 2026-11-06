@@ -77,6 +77,13 @@ func (f *unprovenCompletionFixture) submission(t *testing.T) *models.AgentDelive
 	return row
 }
 
+func (f *unprovenCompletionFixture) submissionMetadata(t *testing.T) *models.AgentDeliverySubmission {
+	t.Helper()
+	row, err := f.repo.GetAgentDeliverySubmissionMetadata(t.Context(), f.peer.ID)
+	require.NoError(t, err)
+	return row
+}
+
 func (f *unprovenCompletionFixture) requireRecoveryBlocked(t *testing.T, before *models.AgentDeliverySubmission) {
 	t.Helper()
 	block, err := f.repo.GetSessionRecoveryBlock(t.Context(), "block")
@@ -89,9 +96,7 @@ func (f *unprovenCompletionFixture) requireRecoveryBlocked(t *testing.T, before 
 	require.Equal(t, f.peer.Payload, retained.Payload)
 	after, err := f.repo.GetAgentDeliverySubmissionMetadata(t.Context(), f.peer.ID)
 	require.NoError(t, err)
-	beforeMetadata, err := f.repo.GetAgentDeliverySubmissionMetadata(t.Context(), before.ID)
-	require.NoError(t, err)
-	require.Equal(t, beforeMetadata, after)
+	require.Equal(t, before, after)
 }
 
 func TestNativeResumeUnprovenSQLCompletionRecovery(t *testing.T) {
@@ -235,6 +240,16 @@ func TestNativeResumeUnprovenSQLCompletionHistoricalStream(t *testing.T) {
 	refreshed, err := manager.GetNativeResumeDeliveryEvidence(ctx, "session")
 	require.NoError(t, err)
 	require.Equal(t, int64(2), refreshed.Submissions[0].Cursor.ProjectedSequence)
+	_, err = repo.DB().Exec(`UPDATE agent_delivery_cursors SET remote_high_water = 3 WHERE stream_id = 'earlier'`)
+	require.NoError(t, err)
+	_, err = manager.GetNativeResumeDeliveryEvidence(ctx, "session")
+	require.Error(t, err, "an unreceived historical high-water mark must invalidate the proof")
+	_, err = repo.DB().Exec(`UPDATE agent_delivery_cursors SET received_sequence = 3, projected_sequence = 3 WHERE stream_id = 'earlier'`)
+	require.NoError(t, err)
+	refreshed, err = manager.GetNativeResumeDeliveryEvidence(ctx, "session")
+	require.NoError(t, err)
+	require.Equal(t, int64(3), refreshed.Submissions[0].Cursor.ProjectedSequence)
+	require.Equal(t, int64(3), refreshed.Submissions[0].Cursor.RemoteHighWater)
 }
 
 func TestNativeResumeUnprovenSQLCompletionNegativeEvidence(t *testing.T) {
@@ -258,9 +273,9 @@ func TestNativeResumeUnprovenSQLCompletionNegativeEvidence(t *testing.T) {
 	for scenario, mutation := range mutations {
 		t.Run(scenario, func(t *testing.T) {
 			f := newUnprovenCompletionFixture(t)
-			before := f.submission(t)
 			_, err := f.repo.DB().Exec(mutation)
 			require.NoError(t, err)
+			before := f.submissionMetadata(t)
 			require.Error(t, f.manager.AcknowledgeNativeResumeDelivery(t.Context(), "session"))
 			f.requireRecoveryBlocked(t, before)
 		})
@@ -270,11 +285,11 @@ func TestNativeResumeUnprovenSQLCompletionNegativeEvidence(t *testing.T) {
 func TestNativeResumeUnprovenSQLCompletionMixedInventory(t *testing.T) {
 	t.Run("independent live work", func(t *testing.T) {
 		f := newUnprovenCompletionFixture(t)
-		before := f.submission(t)
 		_, err := f.repo.PrepareAgentDeliverySubmission(t.Context(), &models.AgentDeliverySubmission{ID: "live", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 2, OwnerGeneration: 2, PayloadHash: "live", Payload: []byte("live"), State: models.DeliverySubmissionAccepted})
 		require.NoError(t, err)
 		_, err = f.store.PutSubmission(t.Context(), journal.Submission{ID: "live", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 2, StreamID: "stream", Hash: "live", Payload: []byte("live"), State: journal.SubmissionAccepted})
 		require.NoError(t, err)
+		before := f.submissionMetadata(t)
 		require.Error(t, f.manager.AcknowledgeNativeResumeDelivery(t.Context(), "session"))
 		f.requireRecoveryBlocked(t, before)
 		live, err := f.repo.GetAgentDeliverySubmission(t.Context(), "live")
@@ -283,12 +298,12 @@ func TestNativeResumeUnprovenSQLCompletionMixedInventory(t *testing.T) {
 	})
 	t.Run("conflicting candidate after eligible", func(t *testing.T) {
 		f := newUnprovenCompletionFixture(t)
-		before := f.submission(t)
 		conflict := journal.Submission{ID: "conflict", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 2, StreamID: "stream", Hash: "conflict-hash", Payload: []byte("conflict prompt"), State: journal.SubmissionInterruptedUnknown}
 		_, err := f.store.PutSubmission(t.Context(), conflict)
 		require.NoError(t, err)
 		_, err = f.repo.PrepareAgentDeliverySubmission(t.Context(), &models.AgentDeliverySubmission{ID: conflict.ID, SessionID: conflict.SessionID, IncarnationID: conflict.IncarnationID, HarnessGeneration: 2, OwnerGeneration: 2, PayloadHash: "foreign-hash", Payload: conflict.Payload, State: models.DeliverySubmissionCompleted, Outcome: string(models.DeliverySubmissionCompleted)})
 		require.NoError(t, err)
+		before := f.submissionMetadata(t)
 		require.Error(t, f.manager.AcknowledgeNativeResumeDelivery(t.Context(), "session"))
 		f.requireRecoveryBlocked(t, before)
 		retained, err := f.store.GetSubmission(t.Context(), conflict.ID)
@@ -329,8 +344,8 @@ func TestNativeResumeUnprovenSQLCompletionRequiresExactOwner(t *testing.T) {
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			f := newUnprovenCompletionFixture(t)
-			before := f.submission(t)
 			mutate(f)
+			before := f.submissionMetadata(t)
 			require.Error(t, f.manager.AcknowledgeNativeResumeDelivery(t.Context(), "session"))
 			f.requireRecoveryBlocked(t, before)
 		})

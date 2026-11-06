@@ -78,6 +78,9 @@ func nativeResumeUnlistedRow(
 		if status.SubmissionsTruncated {
 			return nil, nil, false, fmt.Errorf("%w: native resume submission inventory is truncated", ErrDurableAdoptionBlocked)
 		}
+		if cursor.ReceivedSequence < cursor.RemoteHighWater {
+			return nil, nil, false, fmt.Errorf("%w: native resume historical stream high-water mark is not received", ErrDurableAdoptionBlocked)
+		}
 		valid, verifyErr := verifyNativeResumeUnprovenCompletion(ctx, repository, execution, status, submission, row)
 		if verifyErr != nil {
 			return nil, nil, false, verifyErr

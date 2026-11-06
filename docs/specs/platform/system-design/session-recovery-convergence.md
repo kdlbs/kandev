@@ -224,9 +224,10 @@ Its terminal-only path cannot substitute for original-owner termination proof.
 terminals. Under the existing session/turn/delivery admission locks, repeat the
 SQL predicate against the exact proof identities before resolving a matching fence.
 Carry and pin each unproven submission's historical stream cursor, then re-read
-its session, incarnation, generation, stream, received, projected, and retired
-sequences under those locks. A receipt or projection change invalidates the
-proof. A fresh proof is required after complete projection.
+its session, incarnation, generation, stream, received, projected, retired, and
+peer-reported high-water values under those locks. A receipt, projection, or
+high-water change invalidates the proof. A fresh proof is required after
+complete projection and receipt of the authenticated watermark.
 Use the PostgreSQL advisory-lock discipline already required for this transaction.
 A terminal that arrives after assessment invalidates the unproven classification.
 Retry through ordinary terminal reconciliation instead of clearing a stale fence.

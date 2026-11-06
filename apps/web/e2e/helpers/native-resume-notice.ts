@@ -241,6 +241,13 @@ export async function verifyNativeResumeClearsRecoveryNotice(
   await expect(page.getByTestId("failed-session-banner")).toContainText(
     "Kandev cannot confirm whether the agent processed your message.",
   );
+  if (unproven) {
+    // An uncertain notice intentionally exposes Retry connection and Stop only.
+    // Resume is available on the legacy and readiness recovery paths below.
+    await expect(page.getByTestId("recovery-resume-button")).toHaveCount(0);
+    await expect(page.getByTestId("recovery-retry-connection-button")).toBeVisible();
+    await expect(page.getByTestId("recovery-stop-button")).toBeVisible();
+  }
   await triggerNativeResume({
     page,
     api,

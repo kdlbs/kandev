@@ -36,7 +36,7 @@ Prove recovery, reload, and later new input through the existing desktop and pho
 - Implement the exact unproven-completion predicate from the system design with a read-only repository verifier.
 - Include eligible completed SQL metadata during native inventory discovery without broadening ordinary live adoption.
 - Carry an explicit `UnprovenCompletion` proof classification through assessment, retirement, and proof creation.
-- Pin and revalidate each accepted historical stream's receive/projection cursor under the admission locks.
+- Pin and revalidate each accepted historical stream's receive/projection cursor and authenticated peer high-water mark under the admission locks.
 - Use a dedicated replayable partial inbox index for the terminal-absence predicate.
 - Revalidate that class in `verifyNativeResumeInventoryTx` under existing locks before resolving any matching fence.
 - Keep `hasProjectedTerminalRetirement` false for this class. Unproven history cannot use a terminal-only recovery shortcut.
@@ -218,3 +218,17 @@ Verification results:
 - PostgreSQL was skipped locally because `KANDEV_TEST_POSTGRES_DSN` was unset. The environment-gated proof, cursor, query-plan, and concurrent-receipt tests remain for an authorized database run.
 - Public docs were updated. Documentation and public-docs validators passed.
 - Browser suites were authored but not run locally; CI owns them.
+
+Review fixup for PR #5109:
+
+- Pinned and revalidated each historical stream's peer-reported high-water mark
+  in addition to its receive/projection/retire cursor. An unreceived watermark
+  invalidates the proof until a fresh proof covers it.
+- Rebound PostgreSQL fixture statements through `repo.db.Rebind` so the
+  environment-gated tests use `$n` placeholders.
+- Captured submission metadata immediately after each deliberate negative
+  mutation and before acknowledgement, so rejected recovery is compared with
+  the post-mutation snapshot.
+- Added uncertainty-state assertions that the rendered banner exposes Retry
+  connection and Stop but not Resume; the Resume UI path remains covered by the
+  existing legacy and readiness scenarios.
