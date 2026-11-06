@@ -53,7 +53,7 @@ type circuit struct {
 // held reports whether the circuit stays open until an owner release: it has
 // no expiry and admits no probe.
 func (c circuit) held() bool {
-	return c.state == CircuitOpen && routingerr.HoldsUntilRelease(c.code)
+	return c.state == CircuitOpen && (routingerr.HoldsUntilRelease(c.code) || (c.code == routingerr.CodeModelUnavailable && c.until.IsZero()))
 }
 
 // CircuitSnapshot is the durable representation of one resource circuit.
@@ -305,6 +305,8 @@ func (r *CircuitRegistry) AcquireProbe(key string, duration time.Duration) (Prob
 	return lease, true
 }
 
+// ReleaseProbe settles a probe result. Zero backoff on an unsuccessful release
+// cancels an unlaunched reservation without charging a provider failure.
 func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff time.Duration) {
 	if lease.Key == "" {
 		return
@@ -324,6 +326,8 @@ func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff t
 		entry.state = CircuitClosed
 		entry.until = time.Time{}
 		entry.code = ""
+	} else if backoff == 0 {
+		entry.state = CircuitOpen
 	} else {
 		entry.state = CircuitOpen
 		entry.until = now.Add(backoff)

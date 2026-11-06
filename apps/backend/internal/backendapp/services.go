@@ -227,6 +227,7 @@ func initCoreTaskServices(
 	storeTracker *requiredstores.Tracker,
 	log *logger.Logger,
 ) (*coreTaskServices, error) {
+	installProviderErrorCatalog(cfg, log)
 	userSvc := userservice.NewService(repos.User, eventBus, log)
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)
 	promptSvc := promptservice.NewService(repos.Prompts)

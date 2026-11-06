@@ -108,7 +108,7 @@ func (s *Service) continuationPolicyForFailure(
 	data watcher.AgentEventData,
 	previous *transientRetryEntry,
 ) continuationPolicy {
-	classified := classifyKanbanFailure(data)
+	classified := s.classifyKanbanFailure(data)
 	if classified == nil {
 		return ""
 	}
@@ -170,7 +170,7 @@ func (s *Service) agentManagedPendingFailureHasEvidence(
 }
 
 func (s *Service) capacityContinuationFailureHasEvidence(data watcher.AgentEventData) bool {
-	classified := classifyKanbanFailure(data)
+	classified := s.classifyKanbanFailure(data)
 	return classified != nil && classified.Code == routingerr.CodeModelCapacity &&
 		data.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime &&
 		data.PromptFailureDisposition.Valid() && data.OwnerKind == queueStatusScopeTask &&
@@ -204,7 +204,7 @@ func (s *Service) capacityContinuationRetryHasEvidence(data watcher.AgentEventDa
 }
 
 func (s *Service) continuationRefusalReason(ctx context.Context, data watcher.AgentEventData) string {
-	classified := classifyKanbanFailure(data)
+	classified := s.classifyKanbanFailure(data)
 	if classified != nil && classified.Code == routingerr.CodeModelCapacity {
 		return s.capacityContinuationRefusalReason(ctx, data)
 	}
