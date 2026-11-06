@@ -11,15 +11,18 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/winproc"
+	commonwinproc "github.com/kandev/kandev/internal/common/winproc"
 	"golang.org/x/sys/windows"
 )
 
 // setProcGroup configures the command to run in its own process group. HideWindow
-// hides a newly created console while keeping the process attached to it.
+// hides a newly created console while keeping the process attached to it. When
+// agentctl has no console window to share, CREATE_NO_WINDOW keeps the child's
+// new console from opening as a visible terminal window.
 func setProcGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | commonwinproc.NoConsoleWindowFlag(),
 	}
 }
 

@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	commonwinproc "github.com/kandev/kandev/internal/common/winproc"
 	"github.com/stretchr/testify/require"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -59,7 +61,7 @@ func TestWindowsProcGroupsHideConsoleWindow(t *testing.T) {
 			require.NotNil(t, cmd.SysProcAttr)
 			flags := cmd.SysProcAttr.CreationFlags
 			require.True(t, cmd.SysProcAttr.HideWindow, "HideWindow = false, want true")
-			require.Zero(t, flags&windows.CREATE_NO_WINDOW, "CreationFlags = %#x, must not include CREATE_NO_WINDOW", flags)
+			require.Equal(t, commonwinproc.NoConsoleWindowFlag(), flags&windows.CREATE_NO_WINDOW, "CreationFlags = %#x, conditional CREATE_NO_WINDOW", flags)
 		})
 	}
 }

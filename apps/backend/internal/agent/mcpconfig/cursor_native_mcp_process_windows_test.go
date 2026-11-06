@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/winproc"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -30,8 +32,8 @@ func TestPrepareNativeMCPProcessHidesConsoleWindow(t *testing.T) {
 	if !cmd.SysProcAttr.HideWindow {
 		t.Fatal("HideWindow = false, want true")
 	}
-	if flags&windows.CREATE_NO_WINDOW != 0 {
-		t.Fatalf("CreationFlags = %#x, must not include CREATE_NO_WINDOW", flags)
+	if got, want := flags&windows.CREATE_NO_WINDOW, winproc.NoConsoleWindowFlag(); got != want {
+		t.Fatalf("CREATE_NO_WINDOW flags = %#x, want %#x", got, want)
 	}
 
 	console := exec.Command(os.Args[0], "mcp", "list")

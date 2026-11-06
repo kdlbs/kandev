@@ -19,9 +19,9 @@ for.
 
 Platform owns this contract because the helpers belong to several systems
 (managed Git, agentctl process management, agent launch, and ACP utilities)
-and share one Windows console behavior. Managed console helpers keep their
-console attachment while Windows hides newly created console windows, so
-console descendants inherit the hidden console.
+and share one Windows console behavior. HideWindow-only helpers retain console
+attachment. The four conditional CREATE_NO_WINDOW paths suppress helper windows
+without promising a console handle or console inheritance to descendants.
 
 ## Terminology
 
@@ -56,8 +56,15 @@ console windows over my work.
   process runs without a console window, the system shall still pass its input,
   capture its output, and stop it together with its owner.
 - **AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001.4:** When a managed console
-  helper runs without a visible console window, it shall keep a console handle
-  so that default console descendants inherit the hidden console.
+  helper uses HideWindow without CREATE_NO_WINDOW, it shall keep its console
+  attachment so that default console descendants inherit that console. This
+  does not promise a console handle for CREATE_NO_WINDOW helpers.
+- **AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001.5:** When the process that starts
+  agentctl, an agentctl-managed process, an ACP utility command, or a Cursor
+  native MCP command has no console window to share and Windows Terminal is the
+  default terminal application, the system shall still start the helper without
+  a visible terminal window. When a console window exists, the helper shall keep
+  attaching to it as before.
 
 ## Out of scope
 
