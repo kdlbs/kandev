@@ -133,7 +133,7 @@ is added.
 
 - [x] [Task 01: Keep queued messages after an expired runtime wait](task-01-requeue-expired-runtime-wait.md)
 - [x] [Task 02: Restart interrupted automatic starts](task-02-restart-interrupted-automatic-starts.md)
-- [x] [Task 03: Keep one usable primary session](task-03-single-usable-primary-session.md)
+- [x] [Task 03: Keep one usable primary session](task-03-single-usable-primary-session.md) (recovery-selection follow-up verified)
 - [x] [Task 04: Keep the deferred start on an agentless step](task-04-agentless-step-deferred-start.md)
 
 ## Verification results
@@ -183,3 +183,24 @@ Office-read-error findings with two passing positive controls. This is synthetic
 boundary evidence; real SQL, race, PostgreSQL 16/18, Windows, runtime, and browser
 acceptance remain hosted verification gates. Production hooks and dependency
 installation are prohibited on the shared host for this review.
+
+## Primary recovery-selection follow-up (2026-10-27)
+
+The original four work orders above retain their recorded results. Work order
+03 adds one verified correctness increment: exclude a recovery-blocked or
+unreadable session after a stop, retain it as a removal fallback, and preserve
+the primary during a live, unaccepted resume attempt's FAILED rollback. Existing recovery
+and resume-attempt APIs are reused. Explicit promotion, queue targets, automatic
+recovery policy and schema contracts are unchanged. Terminal queue handoff and
+terminal-session revival remain outside this increment.
+
+Original-source disposable probes reproduced the selection and ownership
+defects. Nine scenario groups now extend the existing primary-session candidate
+test file. Those cases and existing stop/removal controls passed directly with
+fts5 and the race detector (2.391s), including cancelled attempts, unknown blocks,
+queue identity, explicit selection, optional-store compatibility and the
+provider-accepted-before-finish boundary. Normal
+commit hooks and the unchanged documentation coverage evaluator passed. The
+follow-up was submitted in #4843; hosted CI is tracked separately. These focused
+repository/service checks do not claim installed-provider or browser acceptance
+or reuse the original work orders' results as proof for this increment.
