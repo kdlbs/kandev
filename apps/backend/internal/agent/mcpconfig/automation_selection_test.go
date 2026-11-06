@@ -2,7 +2,6 @@ package mcpconfig
 
 import (
 	"context"
-	"encoding/json"
 	"github.com/stretchr/testify/require"
 	"testing"
 )
@@ -15,8 +14,7 @@ func TestAutomationMCPSelectionUnion(t *testing.T) {
 	require.NoError(t, err)
 	selections := newSelectionRepositoryFake()
 	selections.values[selections.key(SelectionScopeProfile, "workspace", "profile")] = []string{d.ID}
-	rc := ResolutionContext{WorkspaceID: "workspace", TaskID: "task", ProfileID: "profile"}
-	require.NoError(t, json.Unmarshal([]byte(`{"Automation":{"AutomationID":"automation","WorkspaceID":"workspace","TaskID":"task","Revision":1,"DefinitionIDs":["`+d.ID+`"]}}`), &rc))
+	rc := ResolutionContext{WorkspaceID: "workspace", TaskID: "task", ProfileID: "profile", Automation: &AutomationMCPContribution{AutomationID: "automation", WorkspaceID: "workspace", TaskID: "task", Revision: 1, DefinitionIDs: []string{d.ID}}}
 	result, err := NewResolver(catalogRepo, selections).Resolve(t.Context(), rc, Policy{AllowHTTP: true})
 	require.NoError(t, err)
 	require.Len(t, result.Servers, 1)

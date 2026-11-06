@@ -38,7 +38,7 @@ func TestAutomationMCPSelectionSave(t *testing.T) {
 	var update UpdateAutomationRequest
 	require.NoError(t, json.Unmarshal([]byte(`{"mcp_selection":{"builtin_packages":["core"],"definition_ids":[]},"expected_mcp_selection_revision":0}`), &update))
 	_, err = svc.UpdateAutomation(ctx, a.ID, &update)
-	require.Error(t, err, "stale selection must fail")
+	require.ErrorIs(t, err, ErrMCPSelectionConflict)
 	require.NoError(t, json.Unmarshal([]byte(`{"mcp_selection":{"builtin_packages":["core"],"definition_ids":[]},"expected_mcp_selection_revision":1}`), &update))
 	_, err = svc.UpdateAutomation(ctx, a.ID, &update)
 	require.NoError(t, err)

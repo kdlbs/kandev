@@ -2,6 +2,7 @@ import { watchWs } from "../helpers/causal-waits";
 import { test, expect } from "../fixtures/test-base";
 import {
   OPTIONAL_AUTOMATION_PACKAGES,
+  verifyAutomationMCPDeleteWarning,
   saveAutomationMCP,
   verifyAutomationMCPRecovery,
 } from "../helpers/automation-mcp";
@@ -361,4 +362,13 @@ test("starts a normal task with a deleted template server recorded as unavailabl
       { timeout: 60000 },
     )
     .toBe("definition_missing");
+});
+
+test("warns before deleting a server selected by an automation", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  await verifyAutomationMCPDeleteWarning({ testPage, apiClient, seedData, prCapture });
 });

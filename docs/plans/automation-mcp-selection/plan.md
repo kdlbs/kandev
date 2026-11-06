@@ -213,6 +213,11 @@ The CI remediation updates four stale web store mocks. Exact-run browser fixture
 
 A later review follow-up identified a missing mixed-usage assertion in the deletion tests. `TestAutomationMCPHTTPDeleteReportsMixedUsage` now checks the complete HTTP 409 impact across ordinary selection scopes and automations. Restoring the original early return makes this test fail with a missing automation count; the current implementation passes. `TestAutomationMCPTemplateReloadsSavedSelection` uses a separate service instance and the persisted store to check exact package preferences, policy revision, and definition IDs. The orchestrator retry case also checks the forwarded preference contents. All 26 focused cases across the three affected packages passed, and changed-package Go lint reported zero issues.
 
+
+The fresh review on `ad8c057` completed with all 90 CI checks passing and added one inline finding plus 15 grouped suggestions. The next batch corrects executor-profile ID classification, scopes MCP save recovery to the update request, moves reload ownership changes into committed effects, rejects stale options callbacks, and handles the browser response wait with the pending click. The editor save operation has its own module and stage-specific failure tests. The deletion dialog now explains retained automation selections and the loss of attachment at a new process start in all shipped locales. The support table and targeted test assertions were corrected.
+
+This batch passed 144 web cases in 16 files, 39 focused backend cases across four packages with PostgreSQL enabled, changed-Go lint, web lint/typecheck, translation integrity, and the new-copy ratchet. All ten desktop and five phone browser scenarios passed with retries disabled, including the deletion warning and retained-reference checks. The final CI result and dispositions of grouped suggestions remain recorded on PR #5106.
+
 ## Risks
 
 - Discovery-only changes leave direct dispatch broken. Test one successful call for every optional package.

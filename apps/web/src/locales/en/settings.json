@@ -986,6 +986,7 @@
   "mcpDeleted": "MCP server deleted.",
   "mcpDeleteFailed": "Could not delete the MCP server.",
   "mcpDeleteDescription": "Delete {{name}}? Any profile, repository, task, or session selections will also be removed after confirmation.",
+  "mcpAutomationDeleteWarning": "Automations keep their saved selection after deletion. New agent processes cannot attach this server. Remove or replace it in each automation.",
   "mcpEnabled": "Enabled",
   "mcpDisabled": "Disabled",
   "mcpEnable": "Enable",

@@ -986,6 +986,7 @@
   "mcpDeleted": "MCP 伺服器已刪除。",
   "mcpDeleteFailed": "無法刪除 MCP 伺服器。",
   "mcpDeleteDescription": "刪除 {{name}}？確認後，所有設定、儲存庫、任務或工作階段選擇也會被刪除。",
+  "mcpAutomationDeleteWarning": "刪除後，自動化會保留已儲存的選擇，但新的代理程式處理程序無法連線此伺服器。請在每個自動化中移除或替換此伺服器。",
   "mcpEnabled": "已啟用",
   "mcpDisabled": "已停用",
   "mcpEnable": "啟用",

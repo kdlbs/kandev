@@ -54,14 +54,16 @@ func TestAutomationMCPOptionsErrorCodes(t *testing.T) {
 		err  error
 		code string
 	}{{errors.New("database unavailable"), ws.ErrorCodeInternalError}, {ErrRepositoryNotInWorkspace, ws.ErrorCodeBadRequest}, {ErrAgentProfileNotFound, ws.ErrorCodeNotFound}} {
-		svc := newTestService(t)
-		svc.SetWorkspaceAuthorizer(func(context.Context, string) error { return tc.err })
-		raw, err := json.Marshal(map[string]any{"workspace_id": "workspace"})
-		require.NoError(t, err)
-		response, err := wsMCPOptions(svc)(t.Context(), &ws.Message{ID: "request", Action: "automation.mcp_options", Payload: raw})
-		require.NoError(t, err)
-		var payload ws.ErrorPayload
-		require.NoError(t, json.Unmarshal(response.Payload, &payload))
-		require.Equal(t, tc.code, payload.Code)
+		t.Run(tc.code, func(t *testing.T) {
+			svc := newTestService(t)
+			svc.SetWorkspaceAuthorizer(func(context.Context, string) error { return tc.err })
+			raw, err := json.Marshal(map[string]any{"workspace_id": "workspace"})
+			require.NoError(t, err)
+			response, err := wsMCPOptions(svc)(t.Context(), &ws.Message{ID: "request", Action: "automation.mcp_options", Payload: raw})
+			require.NoError(t, err)
+			var payload ws.ErrorPayload
+			require.NoError(t, json.Unmarshal(response.Payload, &payload))
+			require.Equal(t, tc.code, payload.Code)
+		})
 	}
 }

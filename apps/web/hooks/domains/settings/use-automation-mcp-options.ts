@@ -10,8 +10,7 @@ export function useAutomationMCPOptions(
   repositoryIds: string[],
 ) {
   const key = JSON.stringify([workspaceId, profileId, repositoryIds]);
-  const active = useRef({ key, sequence: 0 });
-  if (active.current.key !== key) active.current = { key, sequence: 0 };
+  const active = useRef({ key, sequence: 0, active: false });
   const [loaded, setLoaded] = useState<{
     key: string;
     options?: AutomationMCPOptions;
@@ -20,8 +19,9 @@ export function useAutomationMCPOptions(
   const [pending, setPending] = useState<string>();
   const reload = useCallback(async () => {
     const owner = active.current;
+    if (owner.key !== key || !owner.active) return;
     const sequence = ++owner.sequence;
-    const current = () => active.current === owner && owner.sequence === sequence;
+    const current = () => owner.active && active.current === owner && owner.sequence === sequence;
     setPending(key);
     try {
       const options = await getAutomationMCPOptions(workspaceId, profileId, repositoryIds);
@@ -40,11 +40,13 @@ export function useAutomationMCPOptions(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
   useEffect(() => {
+    const owner = { key, sequence: 0, active: true };
+    active.current = owner;
     void reload();
     return () => {
-      active.current.sequence++;
+      owner.active = false;
     };
-  }, [reload]);
+  }, [key, reload]);
   const matching = loaded?.key === key ? loaded : undefined;
   return {
     options: matching?.options,
@@ -56,18 +58,17 @@ export function useAutomationMCPOptions(
 
 export function useAutomationMCPSelectionReload(workspaceId: string, automationId: string | null) {
   const key = JSON.stringify([workspaceId, automationId]);
-  const owner = useRef({ key, active: true, sequence: 0 });
-  if (owner.current.key !== key) owner.current = { key, active: true, sequence: 0 };
+  const owner = useRef({ key, active: false, sequence: 0 });
   useEffect(() => {
-    const captured = owner.current;
-    captured.active = true;
+    const captured = { key, active: true, sequence: 0 };
+    owner.current = captured;
     return () => {
       captured.active = false;
     };
   }, [key]);
-  const captured = owner.current;
   return useCallback(async () => {
-    if (!automationId || captured !== owner.current || !captured.active) return undefined;
+    const captured = owner.current;
+    if (!automationId || captured.key !== key || !captured.active) return undefined;
     const sequence = ++captured.sequence;
     const saved = await getAutomation(automationId);
     if (

@@ -986,6 +986,7 @@
   "mcpDeleted": "MCP 서버를 삭제했습니다.",
   "mcpDeleteFailed": "MCP 서버를 삭제하지 못했습니다.",
   "mcpDeleteDescription": "{{name}}을(를) 삭제할까요? 확인 후 모든 프로필, 리포지토리, 작업 및 세션에서 해당 선택 항목도 제거됩니다.",
+  "mcpAutomationDeleteWarning": "삭제 후에도 자동화의 저장된 선택은 유지되지만 새 에이전트 프로세스는 이 서버에 연결할 수 없습니다. 각 자동화에서 이 서버를 선택 해제하거나 다른 서버로 바꾸세요.",
   "mcpEnabled": "활성화됨",
   "mcpDisabled": "비활성화됨",
   "mcpEnable": "활성화",

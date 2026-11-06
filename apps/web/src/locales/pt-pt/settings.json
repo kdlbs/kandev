@@ -986,6 +986,7 @@
   "mcpDeleted": "Servidor MCP eliminado.",
   "mcpDeleteFailed": "Não foi possível eliminar o servidor MCP.",
   "mcpDeleteDescription": "Eliminar {{name}}? Todas as seleções de perfil, repositório, tarefa ou sessão também serão removidas após a confirmação.",
+  "mcpAutomationDeleteWarning": "As automações mantêm a seleção guardada após a eliminação. Os novos processos do agente não podem ligar-se a este servidor. Remova-o ou substitua-o em cada automação.",
   "mcpEnabled": "Ativado",
   "mcpDisabled": "Desativado",
   "mcpEnable": "Ativar",

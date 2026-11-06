@@ -56,7 +56,7 @@ func TestAutomationMCPRejectsNoncanonicalResourceKeys(t *testing.T) {
 		if len(fields) == 0 {
 			require.Nil(t, denied)
 		} else {
-			require.NotNil(t, denied, "%v", fields)
+			assertWSError(t, denied, ws.ErrorCodeBadRequest)
 		}
 	}
 }
@@ -157,5 +157,27 @@ func TestAutomationMCPLocalActionsCannotReachOtherTasks(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestAutomationMCPExecutorProfileIDsAreNotAgentProfileIDs(t *testing.T) {
+	svc, _ := newTestTaskService(t)
+	workspaces, err := svc.ListWorkspaces(t.Context())
+	require.NoError(t, err)
+	workspace := workspaces[0].ID
+	manifest := &p.BuiltinManifest{Version: 2, CatalogVersion: 1, WorkspaceID: workspace, TaskID: "task", Surface: p.SurfaceAutomation, AutomationID: "automation", AutomationRevision: 1, Packages: []p.PackageID{p.PackageCore, p.PackageConfiguration}, Origins: map[p.PackageID]string{p.PackageCore: "required", p.PackageConfiguration: "automation"}}
+	actions := []string{ws.ActionMCPUpdateExecutorProfile, ws.ActionMCPDeleteExecutorProfile}
+	ctx := scope.WithPrincipal(t.Context(), scope.Principal{AutomationID: "automation", WorkspaceID: workspace, CallerTaskID: "task", CallerSessionID: "session", Surface: p.SurfaceAutomation})
+	ctx = streams.WithMCPExecutionContext(ctx, streams.MCPExecutionContext{TaskID: "task", SessionID: "session", BuiltinAuthority: streams.BuiltinMCPAuthority{Required: true, Manifest: manifest, Actions: actions}})
+	h := &Handlers{taskSvc: svc, logger: testLogger(t)}
+	for _, action := range actions {
+		t.Run(action, func(t *testing.T) {
+			denied, _, err := h.authorizeAutomationRequest(ctx, makeWSMessage(t, action, map[string]any{"profile_id": "executor-profile"}))
+			require.NoError(t, err)
+			require.Nil(t, denied)
+			denied, _, err = h.authorizeAutomationRequest(ctx, makeWSMessage(t, action, map[string]any{"profile_id": "executor-profile", "agent_profile_id": "foreign-agent-profile"}))
+			require.NoError(t, err)
+			assertWSError(t, denied, ws.ErrorCodeNotFound)
+		})
 	}
 }

@@ -387,7 +387,7 @@ package-capable start.
 | Local/worktree and remote executors | Shared manifest plus each launch carrier; round-trip and helper negotiation tests | Old helper fails before fresh start |
 | Retained monolithic agent | Existing routes/catalog and honest legacy evidence | No hot migration or automatic restart |
 | External/Coordinator/managed conversation | Existing catalogs and gates | No user package grants |
-| Automation | Linked extension | Native automation grants |
+| Automation | Linked extension | Task preference fallback; agent-authored grants |
 
 Mock wire tests do not certify installed provider connectivity. Record provider
 and transport coverage precisely; do not claim all providers from a shared code path.

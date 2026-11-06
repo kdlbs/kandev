@@ -62,6 +62,25 @@ describe("automation MCP options", () => {
     rerender({ profile: "second", repos: ["repo"] });
     await waitFor(() => expect(api.options).toHaveBeenCalledWith("workspace", "second", ["repo"]));
   });
+  it("ignores an options callback retained from another workspace", async () => {
+    api.options.mockResolvedValueOnce(options("old")).mockResolvedValueOnce(options("new"));
+    const { result, rerender } = renderHook(
+      ({ workspace }) => useAutomationMCPOptions(workspace, "profile", []),
+      { initialProps: { workspace: "old" } },
+    );
+    await waitFor(() => expect(result.current.options).toEqual(options("old")));
+    const staleReload = result.current.reload;
+    rerender({ workspace: "new" });
+    await waitFor(() => expect(result.current.options).toEqual(options("new")));
+    await act(async () => {
+      await staleReload();
+    });
+    expect(api.options).toHaveBeenCalledTimes(2);
+    expect(result.current.options).toEqual(options("new"));
+  });
+});
+
+describe("saved automation MCP selection", () => {
   it("does not reconcile a late saved selection into a different editor", async () => {
     let finish!: (value: unknown) => void;
     api.get.mockImplementationOnce(
@@ -81,48 +100,57 @@ describe("automation MCP options", () => {
     );
     expect(await pending).toBeUndefined();
   });
-});
-
-it("rejects a stale reload callback invoked after the editor changes", async () => {
-  api.get.mockResolvedValue({ id: "old", workspace_id: "old" });
-  const { result, rerender } = renderHook(
-    ({ workspace, id }) => useAutomationMCPSelectionReload(workspace, id),
-    { initialProps: { workspace: "old", id: "old" } },
-  );
-  const staleReload = result.current;
-  rerender({ workspace: "new", id: "new" });
-  expect(await staleReload()).toBeUndefined();
-  expect(api.get).not.toHaveBeenCalled();
-});
-
-it("clears a failed unsaved editor after reloading choices", async () => {
-  const { useAutomationMCPReconciliation } = await import("./use-automation-mcp-reconciliation");
-  const { result } = renderHook(() =>
-    useAutomationMCPReconciliation("workspace", null, vi.fn(), vi.fn()),
-  );
-  act(() => result.current.failed());
-  expect(result.current.saveFailed).toBe(true);
-  await act(() => result.current.reload());
-  expect(result.current.saveFailed).toBe(false);
-});
-
-it("rejects an older overlapping saved-selection reload", async () => {
-  let finish!: (value: unknown) => void;
-  api.get
-    .mockImplementationOnce(
-      () =>
-        new Promise((done) => {
-          finish = done;
-        }),
-    )
-    .mockResolvedValueOnce({
-      id: "automation",
-      workspace_id: "workspace",
-      mcp_selection_revision: 4,
+  it("rejects a stale reload callback invoked after the editor changes", async () => {
+    api.get.mockResolvedValue({ id: "old", workspace_id: "old" });
+    const { result, rerender } = renderHook(
+      ({ workspace, id }) => useAutomationMCPSelectionReload(workspace, id),
+      { initialProps: { workspace: "old", id: "old" } },
+    );
+    const staleReload = result.current;
+    rerender({ workspace: "new", id: "new" });
+    expect(await staleReload()).toBeUndefined();
+    expect(api.get).not.toHaveBeenCalled();
+  });
+  it("clears a failed unsaved editor after reloading choices", async () => {
+    const { useAutomationMCPReconciliation } = await import("./use-automation-mcp-reconciliation");
+    const { result } = renderHook(() =>
+      useAutomationMCPReconciliation("workspace", null, vi.fn(), vi.fn()),
+    );
+    act(() => result.current.failed());
+    expect(result.current.saveFailed).toBe(true);
+    await act(() => result.current.reload());
+    expect(result.current.saveFailed).toBe(false);
+  });
+  it("rejects an older overlapping saved-selection reload", async () => {
+    let finish!: (value: unknown) => void;
+    api.get
+      .mockImplementationOnce(
+        () =>
+          new Promise((done) => {
+            finish = done;
+          }),
+      )
+      .mockResolvedValueOnce({
+        id: "automation",
+        workspace_id: "workspace",
+        mcp_selection_revision: 4,
+      });
+    const { result } = renderHook(() => useAutomationMCPSelectionReload("workspace", "automation"));
+    const older = result.current();
+    expect((await result.current())?.mcp_selection_revision).toBe(4);
+    finish({ id: "automation", workspace_id: "workspace", mcp_selection_revision: 3 });
+    expect(await older).toBeUndefined();
+  });
+  it("retains the recovery action when saved selection reload fails", async () => {
+    const { useAutomationMCPReconciliation } = await import("./use-automation-mcp-reconciliation");
+    api.get.mockRejectedValue(new Error("offline"));
+    const { result } = renderHook(() =>
+      useAutomationMCPReconciliation("workspace", "automation", vi.fn(), vi.fn()),
+    );
+    act(() => result.current.failed());
+    await act(async () => {
+      await result.current.reload();
     });
-  const { result } = renderHook(() => useAutomationMCPSelectionReload("workspace", "automation"));
-  const older = result.current();
-  expect((await result.current())?.mcp_selection_revision).toBe(4);
-  finish({ id: "automation", workspace_id: "workspace", mcp_selection_revision: 3 });
-  expect(await older).toBeUndefined();
+    expect(result.current.saveFailed).toBe(true);
+  });
 });

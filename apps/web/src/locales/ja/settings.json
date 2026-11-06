@@ -986,6 +986,7 @@
   "mcpDeleted": "MCP サーバーを削除しました。",
   "mcpDeleteFailed": "MCP サーバーを削除できませんでした。",
   "mcpDeleteDescription": "「{{name}}」を削除しますか？確認後、プロファイル、リポジトリ、タスク、セッションの選択からも削除されます。",
+  "mcpAutomationDeleteWarning": "削除後もオートメーションの保存済みの選択は残りますが、新しいエージェントプロセスはこのサーバーに接続できません。各オートメーションの選択から外すか、別のサーバーに置き換えてください。",
   "mcpEnabled": "有効",
   "mcpDisabled": "無効",
   "mcpEnable": "有効にする",

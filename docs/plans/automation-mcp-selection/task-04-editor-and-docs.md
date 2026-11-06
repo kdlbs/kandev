@@ -114,6 +114,8 @@ git diff --check
 ## Files likely touched
 
 - `apps/web/components/automations/automation-editor.tsx`
+- `apps/web/components/automations/automation-editor-save.ts`
+- `apps/web/components/automations/automation-editor-save.test.ts`
 - `apps/web/components/automations/automation-payload.ts`
 - `apps/web/components/automations/automation-mcp-access.tsx (new)`
 - `apps/web/hooks/domains/settings/use-automation-mcp-options.ts (new)`
@@ -167,3 +169,5 @@ The editor, stale-save reconciliation, run evidence, locales, and public docs ar
 ### PR remediation
 
 PR remediation covers canonical save values, retained in-flight edits, task-mode round trips, stale callbacks, unsaved recovery, named automation origins, removable blocked/direct inherited choices, corrected translations, and disclosure-scoped evidence reads. The plan records the expanded tests and browser results.
+
+The final review batch passed 144 focused web cases and ten desktop plus five phone browser scenarios. The browser checks include the deletion warning, new-process attachment limit, and retained automation references. Save-stage regressions distinguish repository, creation, update, and trigger errors. Hook regressions cover committed ownership, stale callbacks, and recovery after a failed reload.

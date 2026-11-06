@@ -122,7 +122,7 @@ func (h *Handlers) authorizeAutomationRequest(ctx context.Context, msg *ws.Messa
 	if automationLocalPackageAction(msg.Action) && ((jsonStringField(fields, "task_id") != "" && jsonStringField(fields, "task_id") != principal.CallerTaskID) || (jsonStringField(fields, "session_id") != "" && jsonStringField(fields, "session_id") != principal.CallerSessionID)) {
 		return automationNotFound(msg)
 	}
-	if !h.authorizeAutomationProfileFields(ctx, principal, fields) ||
+	if !h.authorizeAutomationProfileFields(ctx, principal, msg.Action, fields) ||
 		!h.authorizeAutomationScalarFields(ctx, principal, msg.Action, fields) ||
 		!h.authorizeAutomationReferenceFields(ctx, principal, msg.Action, fields) {
 		return automationNotFound(msg)
@@ -347,8 +347,12 @@ const (
 const automationAgentProfileField = "agent_profile_id"
 const automationProfileField = "profile_id"
 
-func (h *Handlers) authorizeAutomationProfileFields(ctx context.Context, principal mcpscope.Principal, fields map[string]json.RawMessage) bool {
-	for _, key := range []string{automationProfileField, automationAgentProfileField} {
+func (h *Handlers) authorizeAutomationProfileFields(ctx context.Context, principal mcpscope.Principal, action string, fields map[string]json.RawMessage) bool {
+	keys := []string{automationAgentProfileField}
+	if action != ws.ActionMCPUpdateExecutorProfile && action != ws.ActionMCPDeleteExecutorProfile {
+		keys = append(keys, automationProfileField)
+	}
+	for _, key := range keys {
 		id := jsonStringField(fields, key)
 		if id == "" {
 			continue

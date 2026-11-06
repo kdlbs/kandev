@@ -354,6 +354,11 @@ function DeleteMCPServerDialog({
           <DialogTitle>{t("settings:deleteMcpServer")}</DialogTitle>
           <DialogDescription>
             {t("settings:mcpDeleteDescription", { name: target?.display_name ?? "" })}
+            {(target?.selection_impact?.automation ?? 0) > 0 && (
+              <span className="mt-2 block" data-testid="mcp-automation-delete-impact">
+                {t("settings:mcpAutomationDeleteWarning")}
+              </span>
+            )}
           </DialogDescription>
         </DialogHeader>
         {selectionImpactTotal(target?.selection_impact) > 0 && (
