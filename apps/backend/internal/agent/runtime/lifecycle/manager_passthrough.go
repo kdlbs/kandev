@@ -501,7 +501,7 @@ func (m *Manager) applyPassthroughMCPWithPreparation(
 	if err != nil {
 		return preparedPassthroughMCP{}, fmt.Errorf("build passthrough MCP config: %w", err)
 	}
-	if err := m.writePassthroughMCPFiles(ctx, execution, artifacts.Files); err != nil {
+	if _, err := m.writePassthroughMCPFiles(ctx, execution, artifacts.Files); err != nil {
 		return preparedPassthroughMCP{}, err
 	}
 	setPassthroughMCPEnv(execution, artifacts.Env)
@@ -560,16 +560,23 @@ func (m *Manager) passthroughMCPPaths(execution *AgentExecution) mcpconfig.Passt
 // a fingerprint claim for every file kandev owns. An existing MergeKey file is
 // owned only when its bytes match a known Kandev generation; otherwise it is a
 // user/unknown file and teardown leaves it alone.
-func (m *Manager) writePassthroughMCPFiles(ctx context.Context, execution *AgentExecution, files []mcpconfig.PassthroughConfigFile) error {
+//
+// It reports whether every generated file was actually materialized by this
+// call. A merge can leave a malformed or unreadable user file untouched, so a
+// nil error alone is not proof that the host entries reached the file.
+func (m *Manager) writePassthroughMCPFiles(ctx context.Context, execution *AgentExecution, files []mcpconfig.PassthroughConfigFile) (bool, error) {
 	written := getPassthroughMCPFiles(execution)
+	generated, materialized := 0, true
 	for _, f := range files {
 		if f.Path == "" {
 			continue
 		}
-		ok, err := m.materializePassthroughFile(ctx, execution, f)
+		generated++
+		ok, wrote, err := m.materializePassthroughFile(ctx, execution, f)
 		if err != nil {
-			return err
+			return false, err
 		}
+		materialized = materialized && wrote
 		if ok {
 			written = appendUnique(written, f.Path)
 		} else {
@@ -585,20 +592,20 @@ func (m *Manager) writePassthroughMCPFiles(ctx context.Context, execution *Agent
 			m.persistExecutorRunning(context.WithoutCancel(context.Background()), execution)
 		}
 	}
-	return nil
+	return generated > 0 && materialized, nil
 }
 
 // materializePassthroughFile writes one config file and reports whether kandev
-// owns the result (true = track for cleanup). It refuses to write through an
-// existing symlink (a malicious repo could point it outside the worktree),
-// guards against a symlinked parent escaping the worktree, and creates new files
-// with O_EXCL. For an existing MergeKey file, Kandev preserves the user's
-// entries and records ownership only when the existing bytes match a known
-// Kandev generation.
-func (m *Manager) materializePassthroughFile(ctx context.Context, execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
+// owns the result (true = track for cleanup) and whether this call actually
+// wrote it. It refuses to write through an existing symlink (a malicious repo
+// could point it outside the worktree), guards against a symlinked parent
+// escaping the worktree, and creates new files with O_EXCL. For an existing
+// MergeKey file, Kandev preserves the user's entries and records ownership only
+// when the existing bytes match a known Kandev generation.
+func (m *Manager) materializePassthroughFile(ctx context.Context, execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, bool, error) {
 	lockFile, err := acquirePassthroughMCPFileLock(ctx, f.Path)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	defer func() {
 		if releaseErr := releasePassthroughMCPFileLock(lockFile); releaseErr != nil {
@@ -611,14 +618,14 @@ func (m *Manager) materializePassthroughFile(ctx context.Context, execution *Age
 	return m.materializePassthroughFileLocked(execution, f)
 }
 
-func (m *Manager) materializePassthroughFileLocked(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
+func (m *Manager) materializePassthroughFileLocked(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, bool, error) {
 	if escapes, err := workspacePathEscapes(execution.WorkspacePath, f.Path); err != nil {
-		return false, fmt.Errorf("validate passthrough MCP config path: %w", err)
+		return false, false, fmt.Errorf("validate passthrough MCP config path: %w", err)
 	} else if escapes {
 		m.logger.Warn("passthrough MCP config path escapes workspace via symlink; skipping",
 			zap.String("path", f.Path))
 		m.forgetPassthroughMCPClaimLocked(execution, f.Path)
-		return false, nil
+		return false, false, nil
 	}
 
 	info, statErr := os.Lstat(f.Path)
@@ -629,60 +636,61 @@ func (m *Manager) materializePassthroughFileLocked(execution *AgentExecution, f 
 		m.logger.Warn("passthrough MCP config is a symlink; leaving it untouched",
 			zap.String("path", f.Path))
 		m.forgetPassthroughMCPClaimLocked(execution, f.Path)
-		return false, nil
+		return false, false, nil
 	case statErr == nil && f.MergeKey != "":
 		return m.materializeExistingMergeFileLocked(execution, f)
 	case statErr == nil:
 		return m.overwritePassthroughFileLocked(execution, f)
 	case !os.IsNotExist(statErr):
-		return false, fmt.Errorf("lstat passthrough MCP config: %w", statErr)
+		return false, false, fmt.Errorf("lstat passthrough MCP config: %w", statErr)
 	default:
 		return m.createPassthroughFileLocked(execution, f)
 	}
 }
 
-func (m *Manager) materializeExistingMergeFileLocked(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
+func (m *Manager) materializeExistingMergeFileLocked(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, bool, error) {
 	content, readErr := os.ReadFile(f.Path)
 	knownOwned := readErr == nil && m.knownPassthroughMCPGenerationLocked(f.Path, passthroughMCPFingerprint(content))
-	if err := m.mergePassthroughConfig(f); err != nil {
-		return false, err
+	wrote, err := m.mergePassthroughConfig(f)
+	if err != nil {
+		return false, false, err
 	}
 	if !knownOwned {
 		// An existing MergeKey file with no matching Kandev generation is
 		// user/unknown owned. It may contain a stale Kandev entry, but its
 		// teardown ownership remains with the user.
 		m.forgetPassthroughMCPClaimLocked(execution, f.Path)
-		return false, nil
+		return false, wrote, nil
 	}
 	merged, err := os.ReadFile(f.Path)
 	if err != nil {
-		return false, fmt.Errorf("read merged passthrough MCP config: %w", err)
+		return false, false, fmt.Errorf("read merged passthrough MCP config: %w", err)
 	}
 	fingerprint := passthroughMCPFingerprint(merged)
 	m.adoptPassthroughMCPGenerationLocked(f.Path, fingerprint)
 	m.recordPassthroughMCPClaimLocked(execution, passthroughMCPFileClaim{
 		Path: f.Path, Fingerprint: fingerprint, Owned: true,
 	})
-	return true, nil
+	return true, wrote, nil
 }
 
-func (m *Manager) overwritePassthroughFileLocked(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
+func (m *Manager) overwritePassthroughFileLocked(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, bool, error) {
 	if err := os.WriteFile(f.Path, f.Content, 0o600); err != nil {
-		return false, fmt.Errorf("write passthrough MCP config: %w", err)
+		return false, false, fmt.Errorf("write passthrough MCP config: %w", err)
 	}
 	m.recordPassthroughMCPClaimLocked(execution, passthroughMCPFileClaim{
 		Path: f.Path, Fingerprint: passthroughMCPFingerprint(f.Content), Owned: true,
 	})
-	return true, nil
+	return true, true, nil
 }
 
-func (m *Manager) createPassthroughFileLocked(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
+func (m *Manager) createPassthroughFileLocked(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, bool, error) {
 	if err := os.MkdirAll(filepath.Dir(f.Path), 0o700); err != nil {
-		return false, fmt.Errorf("create passthrough MCP config dir: %w", err)
+		return false, false, fmt.Errorf("create passthrough MCP config dir: %w", err)
 	}
 	owned, err := m.writeFileNoFollow(f.Path, f.Content)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if owned {
 		m.recordPassthroughMCPClaimLocked(execution, passthroughMCPFileClaim{
@@ -691,31 +699,31 @@ func (m *Manager) createPassthroughFileLocked(execution *AgentExecution, f mcpco
 	} else {
 		m.forgetPassthroughMCPClaimLocked(execution, f.Path)
 	}
-	return owned, nil
+	return owned, owned, nil
 }
 
 // mergePassthroughConfig merges kandev's servers (f.Content's f.MergeKey object)
 // into the existing regular file at f.Path, preserving the user's other entries.
 // A malformed or unreadable existing file is left untouched (logged), never
 // clobbered. The file is confirmed to be a regular file (not a symlink) by the
-// caller before this runs.
-func (m *Manager) mergePassthroughConfig(f mcpconfig.PassthroughConfigFile) error {
+// caller before this runs. It reports whether the merged bytes were written.
+func (m *Manager) mergePassthroughConfig(f mcpconfig.PassthroughConfigFile) (bool, error) {
 	existing, err := os.ReadFile(f.Path)
 	if err != nil {
 		m.logger.Warn("cannot read existing MCP config to merge; leaving it untouched",
 			zap.String("path", f.Path), zap.Error(err))
-		return nil
+		return false, nil
 	}
 	merged, err := mcpconfig.MergeJSONUnderKey(existing, f.Content, f.MergeKey)
 	if err != nil {
 		m.logger.Warn("cannot merge into existing MCP config; leaving it untouched",
 			zap.String("path", f.Path), zap.Error(err))
-		return nil
+		return false, nil
 	}
 	if err := os.WriteFile(f.Path, merged, 0o600); err != nil {
-		return fmt.Errorf("write merged passthrough MCP config: %w", err)
+		return false, fmt.Errorf("write merged passthrough MCP config: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // writeFileNoFollow creates path with O_EXCL so it never follows or overwrites
@@ -741,6 +749,9 @@ func (m *Manager) cleanupPassthroughMCPConfig(execution *AgentExecution) {
 }
 
 func (m *Manager) cleanupPassthroughMCPConfigWithContext(ctx context.Context, execution *AgentExecution) {
+	if execution != nil {
+		defer execution.clearProjectMCPDelivery()
+	}
 	if isSSHPassthrough(execution) {
 		m.cleanupSSHPassthroughConfig(ctx, execution)
 		return

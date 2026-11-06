@@ -6,12 +6,17 @@ import { IconPlus, IconLayoutSidebarRightCollapse } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { useUserShells } from "@/hooks/domains/session/use-user-shells";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
+import {
+  captureUserShellPublicationOwner,
+  isActiveUserShellPublicationOwner,
+  makeUserShellScope,
+} from "@/lib/state/user-shell-scope";
 import { AddPanelMenuItems } from "./dockview-add-panel-items";
 import { NewSessionDialog } from "./new-session-dialog";
 import { useActiveSessionDevScript } from "./repository-scripts-menu";
@@ -120,13 +125,17 @@ function useWatermarkHandlers(
   const { t } = useTranslation();
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
   const addUserShell = useAppStore((s) => s.addUserShell);
+  const storeApi = useAppStoreApi();
   const devScript = useActiveSessionDevScript();
 
   const handleAddTerminal = useCallback(async () => {
     if (!environmentId || !groupId) return;
+    const scope = makeUserShellScope(environmentId, taskID);
+    if (!scope) return;
+    const owner = captureUserShellPublicationOwner(storeApi.getState(), scope);
     try {
       const result = await createUserShell(environmentId, { taskId: taskID ?? undefined });
-      addUserShell(environmentId, {
+      addUserShell(scope, {
         terminalId: result.terminalId,
         kind: result.kind,
         seq: result.seq,
@@ -139,43 +148,67 @@ function useWatermarkHandlers(
         closable: result.closable ?? true,
         initialCommand: result.initialCommand,
       });
+      if (!isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
       addTerminalPanel(result.terminalId, groupId, environmentId, taskID ?? undefined, "Terminal");
     } catch (error) {
       console.error("Failed to create terminal:", error);
     }
-  }, [environmentId, taskID, groupId, addTerminalPanel, addUserShell]);
+  }, [environmentId, taskID, groupId, addTerminalPanel, addUserShell, storeApi]);
 
   const handleRunScript = useCallback(
     async (scriptId: string) => {
       if (!environmentId || !groupId) return;
+      const scope = makeUserShellScope(environmentId, taskID);
+      if (!scope) return;
+      const owner = captureUserShellPublicationOwner(storeApi.getState(), scope);
       try {
         const result = await createUserShell(environmentId, { scriptId });
-        addTerminalPanel(
-          result.terminalId,
-          groupId,
-          environmentId,
-          undefined,
-          result.label ?? t("common:script"),
+        const title = result.label ?? t("common:script");
+        addUserShell(
+          { environmentId, taskId: null },
+          {
+            ...result,
+            kind: "script",
+            label: title,
+            closable: result.closable ?? true,
+            running: result.ptyStatus === "running",
+          },
         );
+        if (!isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
+        addTerminalPanel(result.terminalId, groupId, environmentId, undefined, title);
       } catch (error) {
         console.error("Failed to run script:", error);
       }
     },
-    [environmentId, groupId, addTerminalPanel],
+    [environmentId, taskID, groupId, addTerminalPanel, addUserShell, storeApi],
   );
 
   const handleRunDevScript = useCallback(async () => {
     if (!environmentId || !devScript || !groupId) return;
+    const scope = makeUserShellScope(environmentId, taskID);
+    if (!scope) return;
+    const owner = captureUserShellPublicationOwner(storeApi.getState(), scope);
     try {
       const result = await createUserShell(environmentId, {
         command: devScript,
         label: t("task:devServer"),
       });
+      addUserShell(
+        { environmentId, taskId: null },
+        {
+          ...result,
+          kind: "script",
+          label: t("task:devServer"),
+          closable: result.closable ?? true,
+          running: result.ptyStatus === "running",
+        },
+      );
+      if (!isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
       addTerminalPanel(result.terminalId, groupId, environmentId, undefined, t("task:devServer"));
     } catch (error) {
       console.error("Failed to start dev script:", error);
     }
-  }, [environmentId, devScript, groupId, addTerminalPanel]);
+  }, [environmentId, taskID, devScript, groupId, addTerminalPanel, addUserShell, storeApi]);
 
   return { handleAddTerminal, handleRunScript, handleRunDevScript };
 }

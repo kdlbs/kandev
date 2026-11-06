@@ -150,6 +150,17 @@ func (m *Manager) RebindWorkspaceWithSourceRoots(ctx context.Context, workDir st
 		return fmt.Errorf("workspace work_dir must be an absolute path")
 	}
 	resolved := filepath.Clean(workDir)
+	// A pending project-delivery record is bound to the previous workspace.
+	// Clear it under the configuration lock so a rebind cannot be admitted
+	// against stale evidence.
+	m.startMu.Lock()
+	if filepath.Clean(m.cfg.WorkDir) != resolved {
+		m.cfg.ProjectMCPDelivery = nil
+		if m.adapterCfg != nil {
+			m.adapterCfg.ProjectMCPDelivery = nil
+		}
+	}
+	m.startMu.Unlock()
 	// codeql[go/path-injection] Rebind accepts an authenticated absolute workspace root and rejects inaccessible directories.
 	info, err := os.Stat(resolved)
 	if err != nil || !info.IsDir() {

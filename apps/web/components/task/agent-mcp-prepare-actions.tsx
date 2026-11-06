@@ -20,6 +20,11 @@ import {
   type NativeMCPDiagnosticStage,
 } from "@/lib/prepare/native-mcp-diagnostic";
 import { cn } from "@/lib/utils";
+import {
+  captureUserShellPublicationOwner,
+  isActiveUserShellPublicationOwner,
+  makeUserShellScope,
+} from "@/lib/state/user-shell-scope";
 import type { PrepareStepInfo, UserShellInfo } from "@/lib/state/slices/session-runtime/types";
 
 const FAILURE_LABEL_KEYS: Record<string, string> = {
@@ -232,41 +237,54 @@ function RecoveryActionControls({
   );
 }
 
-export function AgentMcpPrepareActions({
-  step,
-  sessionId,
-  taskId,
-}: {
-  step: PrepareStepInfo;
+type AuthenticateOptions = {
   sessionId: string;
   taskId: string;
-}) {
+  serverId: string | undefined;
+  usesDesktopWorkbench: boolean;
+  pending: "authenticate" | "retry" | null;
+  setPending: (value: "authenticate" | null) => void;
+  setFeedback: (value: string) => void;
+};
+
+function useAgentMcpAuthenticate({
+  sessionId,
+  taskId,
+  serverId,
+  usesDesktopWorkbench,
+  pending,
+  setPending,
+  setFeedback,
+}: AuthenticateOptions) {
   const { t } = useTranslation();
-  const { isFinePointer, isMobile, usesDesktopWorkbench } = useResponsiveBreakpoint();
   const store = useAppStoreApi();
   const addTerminalPanel = useDockviewStore((state) => state.addTerminalPanel);
-  const [pending, setPending] = useState<"authenticate" | "retry" | null>(null);
-  const [feedback, setFeedback] = useState("");
-  const [retryDiagnosticOverride, setRetryDiagnosticOverride] = useState<{
-    source: PrepareStepInfo;
-    diagnostic?: NativeMCPDiagnostic;
-  } | null>(null);
-  const serverId = step.mcpServerId;
-  const failed = step.status === "failed";
-  const currentDiagnostic =
-    retryDiagnosticOverride?.source === step
-      ? retryDiagnosticOverride.diagnostic
-      : step.mcpDiagnostic;
-  const buttonSize = isFinePointer && !isMobile ? "min-h-7" : "min-h-11 w-full";
-
-  const authenticate = async () => {
+  return async () => {
     if (!serverId || pending) return;
+    const stateAtStart = store.getState();
+    const ownerScope = makeUserShellScope(
+      stateAtStart.environmentIdBySessionId[sessionId] ?? null,
+      taskId,
+    );
+    const owner = ownerScope ? captureUserShellPublicationOwner(stateAtStart, ownerScope) : null;
     setPending("authenticate");
     setFeedback("");
     try {
       const result = await authenticateAgentMcp(sessionId, serverId);
       const shell = await resolveRecoveryShell(taskId, result);
-      store.getState().addUserShell(result.task_environment_id, shell);
+      const scope = makeUserShellScope(result.task_environment_id, taskId);
+      if (scope) store.getState().addUserShell(scope, shell);
+      // The login terminal always lands in its captured cache. Opening it in
+      // the UI waits until the user is still in that task/environment and the
+      // surrounding workspace context has not been replaced.
+      if (!owner || !isActiveUserShellPublicationOwner(store.getState(), owner)) return;
+      if (
+        !scope ||
+        scope.environmentId !== owner.scope.environmentId ||
+        scope.taskId !== owner.scope.taskId
+      ) {
+        return;
+      }
       if (usesDesktopWorkbench) {
         addTerminalPanel(
           result.terminal_id,
@@ -287,6 +305,42 @@ export function AgentMcpPrepareActions({
       setPending(null);
     }
   };
+}
+
+export function AgentMcpPrepareActions({
+  step,
+  sessionId,
+  taskId,
+}: {
+  step: PrepareStepInfo;
+  sessionId: string;
+  taskId: string;
+}) {
+  const { t } = useTranslation();
+  const { isFinePointer, isMobile, usesDesktopWorkbench } = useResponsiveBreakpoint();
+  const [pending, setPending] = useState<"authenticate" | "retry" | null>(null);
+  const [feedback, setFeedback] = useState("");
+  const [retryDiagnosticOverride, setRetryDiagnosticOverride] = useState<{
+    source: PrepareStepInfo;
+    diagnostic?: NativeMCPDiagnostic;
+  } | null>(null);
+  const serverId = step.mcpServerId;
+  const failed = step.status === "failed";
+  const currentDiagnostic =
+    retryDiagnosticOverride?.source === step
+      ? retryDiagnosticOverride.diagnostic
+      : step.mcpDiagnostic;
+  const buttonSize = isFinePointer && !isMobile ? "min-h-7" : "min-h-11 w-full";
+
+  const authenticate = useAgentMcpAuthenticate({
+    sessionId,
+    taskId,
+    serverId,
+    usesDesktopWorkbench,
+    pending,
+    setPending,
+    setFeedback,
+  });
 
   const retry = async () => {
     if (!serverId || pending) return;
