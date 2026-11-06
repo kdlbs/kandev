@@ -1158,11 +1158,15 @@ func validatePluginToolSnapshot(snapshot plugintools.Snapshot) error {
 			return err
 		}
 		if definition.InvocationScope != "" && definition.InvocationScope != plugintools.InvocationScopeTask &&
-			definition.InvocationScope != plugintools.InvocationScopeInstance {
+			definition.InvocationScope != plugintools.InvocationScopeInstance &&
+			definition.InvocationScope != plugintools.InvocationScopeWorkspace {
 			return fmt.Errorf("%s has unsupported invocation scope %q", name, definition.InvocationScope)
 		}
-		if declaresInstanceOnlySurface(definition.Surfaces) && !definition.IsInstanceRead() {
+		if declaresCoordinatorSurface(definition.Surfaces) && !definition.IsInstanceRead() {
 			return fmt.Errorf("%s requires instance scope and a true read-only hint", name)
+		}
+		if declaresExternalSurface(definition.Surfaces) && !definition.IsInstanceRead() && !definition.IsWorkspaceRead() {
+			return fmt.Errorf("%s requires instance or workspace scope and a true read-only hint", name)
 		}
 		if err := validatePluginToolSchema(definition.ExposedName+"/input", definition.InputSchema); err != nil {
 			return fmt.Errorf("%s input schema: %w", name, err)
@@ -1206,9 +1210,18 @@ func validatePluginToolSchema(name string, raw json.RawMessage) error {
 	return nil
 }
 
-func declaresInstanceOnlySurface(surfaces []string) bool {
+func declaresCoordinatorSurface(surfaces []string) bool {
 	for _, surface := range surfaces {
-		if surface == plugintools.SurfaceCoordinator || surface == plugintools.SurfaceExternal {
+		if surface == plugintools.SurfaceCoordinator {
+			return true
+		}
+	}
+	return false
+}
+
+func declaresExternalSurface(surfaces []string) bool {
+	for _, surface := range surfaces {
+		if surface == plugintools.SurfaceExternal {
 			return true
 		}
 	}
@@ -1290,7 +1303,10 @@ func (s *Server) registerPluginTools() {
 				!s.profile.CoordinatorToolPolicy.AllowsPlugin(definition.PluginID, definition.LocalName, definition.InstallationID, definition.PolicyVersion)) {
 			continue
 		}
-		if (surface == mcpprofile.SurfaceCoordinator || surface == mcpprofile.SurfaceExternal) && !definition.IsInstanceRead() {
+		if surface == mcpprofile.SurfaceCoordinator && !definition.IsInstanceRead() {
+			continue
+		}
+		if surface == mcpprofile.SurfaceExternal && !definition.IsInstanceRead() && !definition.IsWorkspaceRead() {
 			continue
 		}
 		tool := mcp.NewToolWithRawSchema(definition.ExposedName, definition.Description, definition.InputSchema)
