@@ -2,7 +2,7 @@
 status: current
 system: platform
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-11-05
 requirements:
   - REQ-PLATFORM-TURN-CONTINUITY-001
   - REQ-PLATFORM-TURN-CONTINUITY-002
@@ -18,6 +18,7 @@ owners:
 
 Platform owns the shared lifetime boundary between a failed prompt and a usable ACP runtime.
 This extends the [existing design](transient-turn-runtime-continuity.md) across ACP providers and prompt error classes.
+[Requirements 004 and 005](../requirements/acp-prompt-error-continuity.md) own prompt errors, task attention, and manual continuation.
 The [decision](../../../decisions/2026-10-29-acp-prompt-error-runtime-lifetime.md) records why protocol origin replaces an error allowlist.
 
 | Requirement | Design boundary |
@@ -25,7 +26,7 @@ The [decision](../../../decisions/2026-10-29-acp-prompt-error-runtime-lifetime.m
 | REQ-PLATFORM-TURN-CONTINUITY-001 | Runtime proof and lifecycle settlement |
 | REQ-PLATFORM-TURN-CONTINUITY-002 | Failed-turn history and desktop/phone Chat |
 | REQ-PLATFORM-TURN-CONTINUITY-004 | Response provenance, provider-neutral retention, ownership, compatibility, and verification |
-| REQ-PLATFORM-TURN-CONTINUITY-005 | Durable task attention, acknowledgement, and sidebar/Chat/task-menu presentation |
+| REQ-PLATFORM-TURN-CONTINUITY-005 | Durable task attention, acknowledgement, manual Dismiss and continue, and sidebar/Chat/task-menu presentation |
 
 Scope covers concrete-profile interactive task sessions on ACP, including task-backed Quick Chat.
 Quick Chat receives the same runtime retention and durable task attention.
@@ -157,7 +158,7 @@ They do not become startup recovery solely because the turn failed.
 Reload, pagination, and another viewer preserve each historical failure without granting runtime or retry authority.
 Later genuine runtime loss can expose normal recovery without rewriting earlier turn errors.
 The [plan](../../../plans/acp-prompt-error-continuity/plan.md) contains the desktop and phone previews.
-Quick Chat uses its current inline surface and Dismiss only; ordinary sidebar/menu geometry requirements do not create new Quick Chat surfaces.
+Quick Chat uses the same inline error controls. Ordinary sidebar/menu geometry requirements do not create new Quick Chat surfaces.
 
 ## Durable task attention
 
@@ -255,6 +256,56 @@ Independent sibling runtime failures remain visible through existing recovery pr
 
 Opening Chat, focusing the task, marking messages read, changing tabs, loading history, and unrelated agent output do not acknowledge this record.
 This task-level acknowledgement is shared across authorized viewers, matching existing durable error dismissal.
+
+## Manual Dismiss and continue
+
+The November 5 [delivery package](../../../plans/turn-error-continue-capacity/plan.md) extends criteria 005.9 through 005.12.
+`SettledFailureMessage` keeps its observed-error matching through `resolveTurnErrorDisplay`.
+Add Dismiss and continue before the existing Dismiss turn error control for the current same-session retained failure.
+Use the message's explicit task/session IDs and displayed stamp, never whichever tab is active later.
+Historical rows and sibling-session attention do not acquire continuation controls.
+Current ordinary prompt-admission selectors govern readiness. Historical `runtime_retained` metadata cannot prove present readiness.
+Automatic recovery, an active foreground turn, pending permissions, and cancellation suppress or disable this action.
+Genuine runtime recovery retains its own controls.
+
+A proposed `use-continue-turn-error.ts` hook owns the asynchronous action.
+It calls existing `sendMessageRequest` with exact content `continue` and `observedTurnErrorStamp`.
+This is an explicit manual user message, unlike hidden automatic continuation.
+Use current applied session configuration through the existing message path. Do not consume unsent model or composer changes.
+Do not attach, clear, or alter the composer's draft, attachments, references, or review comments.
+The control-flow prompt remains English with an explained i18n exemption. Labels and feedback use translations.
+
+Derive one stable `client_message_id` from the source session ID and observed error stamp.
+The value must fit the existing 128-byte limit. The current UUID session ID and 64-byte stamp fit with a short fixed prefix.
+Repeated clicks, viewers, remounts, and request reconciliation use that same identity.
+Keep the payload immutable during retries. An identity conflict must not generate a replacement ID or another prompt.
+Use the existing `message.add` replay fingerprint, message admission, access checks, and durable delivery ownership.
+`sendMessageRequest` already reconciles a lost response by ID before retrying the same request.
+Its result enters the normal message store and existing `notifyTurnErrorAcknowledgementFailure` feedback.
+Do not call the dismissal endpoint before sending or add a second send after acknowledgement failure.
+
+Acceptance owns acknowledgement through the existing backend stamp comparison.
+A stale stamp cannot clear a newer error. A rejected send leaves the badge and controls available with localized failure feedback.
+An accepted send whose acknowledgement fails leaves the badge, but never resends that continuation to repair attention.
+Once the stable message is accepted, show Dismiss only while any acknowledgement failure remains.
+Reconcile by that message ID after reload or an uncertain response rather than creating another continuation identity.
+Backend capacity queuing remains normal admission. A capacity-queued continuation appears through the existing queued-message UI; this action reports one accepted continuation and never claims the agent resumed.
+No new endpoint, metadata reason, schema, timer, or restoration action is required.
+
+Desktop controls form a compact row with Dismiss and continue first, then Dismiss turn error.
+Phone controls occupy separate full-width rows in that order, with actual targets of at least 44px.
+Use 28px fine-pointer desktop controls and existing shared control sizing.
+The nearest curated layout is `mobile/session-mobile-layout.tsx`; the shipped inline exemplar is `turn-error-dismiss-button.tsx`.
+Inline presentation fits this short, frequent action and preserves transcript context without navigation or another overlay.
+The transcript remains the single scroll owner. Existing composer keyboard and safe-area behavior remains authoritative.
+Use one localized status region for pending/queued/error feedback. Keep the button's accessible name stable and preserve focus.
+Do not announce countdown ticks or discard drafts when the layout changes.
+Update unsafe-work copy to describe tool results that require review without asserting that every failed command remains pending.
+
+Browser proof covers task Chat, preview Chat, task-backed Quick Chat, and phone Chat.
+Include accepted/rejected sends, response loss, rapid activation, another viewer, newer sibling errors, reload, and acknowledgement failure.
+Measure desktop and phone controls, including a narrow fine-pointer viewport.
+The [plan's UI preview](../../../plans/turn-error-continue-capacity/plan.md#ui-preview) owns control order and state descriptions.
 
 ## Sidebar, Chat, and task actions
 

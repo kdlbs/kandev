@@ -121,7 +121,7 @@ acceptance check can run with a separately supplied test credential.
 
 ### Evidence and correction
 
-Kandev pins Claude ACP to `0.81.2` in
+Kandev pins Claude ACP to `0.100.0` in
 `apps/backend/internal/agent/agents/managed_npm_runtime_versions.json`.
 The npm release identifies upstream commit
 `5dbb453c63a89746627799b2b06b31ba01a1b674`.

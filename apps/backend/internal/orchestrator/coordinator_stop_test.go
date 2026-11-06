@@ -138,6 +138,27 @@ func TestStopTaskForCoordinator_NotRunningDisarmsTransientRetry(t *testing.T) {
 	require.Empty(t, history, "not_running stop must not change task state")
 }
 
+func TestCancelTaskExecutionSynchronouslyRetriesCancelledSessionRuntime(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-retained-cancelled", "session-retained-cancelled", models.TaskSessionStateCancelled)
+	var stoppedExecutionIDs []string
+	agentManager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-retained-cancelled", nil
+		},
+		stopAgentWithReasonFunc: func(_ context.Context, executionID, _ string, _ bool) error {
+			stoppedExecutionIDs = append(stoppedExecutionIDs, executionID)
+			return nil
+		},
+	}
+	svc := newCoordinatorStopTestService(repo, newMockTaskRepo(), agentManager)
+
+	require.NoError(t, svc.CancelTaskExecutionSynchronously(ctx, "task-retained-cancelled", "task tree deleted", false))
+	require.Equal(t, []string{"execution-retained-cancelled"}, stoppedExecutionIDs,
+		"strict deletion must retry a retained execution after its session is already CANCELLED")
+}
+
 func TestStopManagedInputExecutionTargetsObservedGeneration(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

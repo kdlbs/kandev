@@ -103,6 +103,12 @@ const (
 	// AgentToolInvocationScopeInstance marks a read that does not require task
 	// identity and may therefore be exposed to instance-only contexts.
 	AgentToolInvocationScopeInstance = "instance"
+	// AgentToolInvocationScopeWorkspace marks a read that requires a
+	// host-verified workspace on the external surface.
+	AgentToolInvocationScopeWorkspace = "workspace"
+	// AgentToolWorkspaceArgument is the host-owned external argument that
+	// carries the verified workspace ID. Plugin input schemas cannot declare it.
+	AgentToolWorkspaceArgument = "kandev_workspace_id"
 )
 
 // AgentTool is an MCP tool a plugin contributes to matching task sessions.

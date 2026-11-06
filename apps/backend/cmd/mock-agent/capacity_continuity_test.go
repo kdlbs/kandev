@@ -17,6 +17,7 @@ func TestParseRetainedCapacityCmd(t *testing.T) {
 	}{
 		{prompt: "/capacity-after-tools", name: "after-tools", fails: 1, ok: true},
 		{prompt: "/capacity-completed-tools", name: "completed-tools", fails: 1, ok: true},
+		{prompt: "/capacity-known-failed-command", name: "known-failed-command", fails: 1, ok: true},
 		{prompt: "/capacity-retry:2", name: "retry", fails: 2, ok: true},
 		{prompt: "/capacity-cancel", name: "cancel", fails: 9, ok: true},
 		{prompt: "/capacity-exhaust", name: "exhaust", fails: 9, ok: true},
@@ -146,6 +147,50 @@ func TestRetainedCapacityContinuationDoesNotRepeatCompletedTools(t *testing.T) {
 	}
 	if toolUpdates != 2 || len(updates) != len(initialUpdates)+1 || updates[len(updates)-1].notification.Update.AgentMessageChunk == nil {
 		t.Fatalf("continuation updates = %#v, want only a success message and no repeated tool", updates)
+	}
+}
+
+func TestRetainedCapacityKnownFailedCommandEmitsTerminalProofOnce(t *testing.T) {
+	const sid acp.SessionId = "retained-capacity-known-command-test"
+	clearRetainedCapacityCounters(sid)
+	t.Cleanup(func() { clearRetainedCapacityCounters(sid) })
+	updater := &mockUpdater{}
+	a := &mockAgent{conn: updater}
+
+	_, initialErr, handled := a.handleRetainedCapacity(context.Background(), sid, "/capacity-known-failed-command")
+	if !handled || initialErr == nil {
+		t.Fatalf("initial request handled=%v error=%v, want capacity failure", handled, initialErr)
+	}
+	terminalUpdates := 0
+	for _, update := range updater.getUpdates() {
+		call := update.notification.Update.ToolCallUpdate
+		if call == nil || call.Meta == nil {
+			continue
+		}
+		exit, ok := call.Meta["terminal_exit"].(map[string]any)
+		if !ok {
+			continue
+		}
+		terminalUpdates++
+		if exit["exit_code"] != 1 || exit["signal"] != nil ||
+			exit["terminal_id"] != string(call.ToolCallId) {
+			t.Fatalf("terminal exit = %#v, want matching identity, integer exit, and no signal", exit)
+		}
+	}
+	if terminalUpdates != 1 {
+		t.Fatalf("terminal proof updates = %d, want exactly one", terminalUpdates)
+	}
+
+	initialCount := len(updater.getUpdates())
+	_, continuationErr, handled := a.handleRetainedCapacity(context.Background(), sid,
+		"Your previous turn stopped because the selected model was at capacity. Continue the unfinished request.")
+	if !handled || continuationErr != nil {
+		t.Fatalf("continuation handled=%v error=%v, want successful continuation", handled, continuationErr)
+	}
+	for _, update := range updater.getUpdates()[initialCount:] {
+		if update.notification.Update.ToolCall != nil || update.notification.Update.ToolCallUpdate != nil {
+			t.Fatal("continuation must not repeat the failed command or read")
+		}
 	}
 }
 

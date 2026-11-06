@@ -924,6 +924,13 @@ func (m *Manager) createExecutionWithMode(
 	if err != nil {
 		return nil, err
 	}
+	copilotAgentType := ""
+	if inputs.preparation.request.AgentConfig != nil {
+		copilotAgentType = inputs.preparation.request.AgentConfig.ID()
+	}
+	inputs.preparation.request.CopilotNativeSessionEvents = m.copilotNativeLaunchAllowed(
+		inputs.runtime, copilotAgentType, inputs.preparation.request.DeliveryStreamID,
+	)
 	activityLease, err := m.acquireActivity(operationCtx, activity.KindExecutionStarting)
 	if err != nil {
 		return nil, err
@@ -1295,6 +1302,7 @@ func (m *Manager) initializeCreatedExecution(
 ) *AgentExecution {
 	execution := runtimeInstance.ToAgentExecution(preparation.request)
 	execution.RuntimeName = rt.Name()
+	m.applyCopilotNativeLaunchCapability(execution, rt, preparation.request.DeliveryStreamID)
 	// Set before executionStore.Add: once the execution is registered, a
 	// concurrent EnsurePassthroughExecution can reach it, and it must never
 	// observe a half-initialised resume intent.
@@ -1519,6 +1527,12 @@ func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend
 	m.logger.Warn("rolling back duplicate execution after session-conflict race",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if err := m.cleanupProjectMCPFiles(ctx, execution, client); err != nil {
+		m.logger.Warn("failed to release project MCP files during raced launch rollback",
+			zap.String("execution_id", execution.ID), zap.Error(err))
+	}
+	releaseClient()
 	if rt != nil && runtimeInstance != nil {
 		if stopErr := m.stopLaunchRuntimeOnRollback(ctx, rt, runtimeInstance, execution); stopErr != nil {
 			m.logger.Warn("failed to stop raced runtime instance during rollback",

@@ -96,3 +96,4 @@ business operations during readiness checks are excluded.
 - [Setup recovery UX](../../../plans/setup-recovery-ux/plan.md)
 - [Agent MCP preparation](../../../plans/agent-mcp-preparation/plan.md)
 - [Pi project MCP ownership](../../../plans/pi-project-mcp-ownership/plan.md)
+- [Pi built-in MCP delivery](../../../plans/pi-builtin-mcp-delivery/plan.md)

@@ -105,6 +105,7 @@ func taskSessionSummarySelectCols(driver string) string {
 		"ts.executor_id", "ts.executor_profile_id", "ts.environment_id",
 		"ts.repository_id", "ts.base_branch", "ts.base_commit_sha",
 		"COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path)",
+		taskSessionAgentWorkspaceSelect,
 		dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "name"),
 		dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "agent_id"),
 		"e.type AS executor_type", "e.name AS executor_name",
@@ -130,6 +131,7 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 		baseBranch          sql.NullString
 		baseCommitSHA       sql.NullString
 		workspacePath       sql.NullString
+		agentWorkspacePath  sql.NullString
 		agentProfileName    sql.NullString
 		agentProfileAgentID sql.NullString
 		executorType        sql.NullString
@@ -153,7 +155,7 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 		&observation.AgentExecutionID, &observation.ContainerID,
 		&agentProfileID, &executionProfileID, &observation.RouteGeneration,
 		&routeState, &routeReason, &executorID, &executorProfileID,
-		&environmentID, &repositoryID, &baseBranch, &baseCommitSHA, &workspacePath,
+		&environmentID, &repositoryID, &baseBranch, &baseCommitSHA, &workspacePath, &agentWorkspacePath,
 		&agentProfileName, &agentProfileAgentID, &executorType, &executorName, &repositoryPath,
 		&state, &errorMessage, &lastAgentErrorJSON, &modelID, &modelName,
 		&observation.StartedAt, &completedAt, &observation.UpdatedAt, &isPrimary,
@@ -173,6 +175,7 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 	observation.BaseBranch = sessionSummaryNullableString(baseBranch)
 	observation.BaseCommitSHA = sessionSummaryNullableString(baseCommitSHA)
 	observation.WorkspacePath = sessionSummaryNullableString(workspacePath)
+	observation.AgentWorkspacePath = sessionSummaryNullableString(agentWorkspacePath)
 	observation.AgentProfileName = sessionSummaryNullableString(agentProfileName)
 	observation.AgentProfileAgentID = sessionSummaryNullableString(agentProfileAgentID)
 	observation.ExecutorType = sessionSummaryNullableString(executorType)
