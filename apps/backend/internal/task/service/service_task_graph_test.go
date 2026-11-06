@@ -213,7 +213,7 @@ func TestBuildTaskGraphChainFollowsOnlyTransitiveDirections(t *testing.T) {
 	}
 	assertStrings(t, "nodes", graphNodeIDs(g), []string{"down1", "down2", "focus", "old", "up1", "up2"})
 	assertStrings(t, "edges", graphEdgeKeys(g), []string{
-		"down1>down2:pending", "focus>down1:pending", "old>focus:pending", "up1>focus:pending", "up2>up1:pending",
+		"down1>down2:pending", "focus>down1:pending", "old>focus:resolved", "up1>focus:pending", "up2>up1:pending",
 	})
 	if old := graphNode(g, "old"); old.Task.ArchivedAt == nil {
 		t.Fatal("archived predecessor must be kept and flagged")

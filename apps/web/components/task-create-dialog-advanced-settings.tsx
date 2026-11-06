@@ -249,7 +249,19 @@ function TaskCreateWorkflowAgentOverridesSection({
   );
 }
 
-type NormalizedAdvancedSettingsProps = Required<TaskCreateAdvancedSettingsProps>;
+type OptionalRelationshipKeys =
+  | "parentTaskId"
+  | "selectedParentTaskId"
+  | "onSelectedParentTaskIdChange"
+  | "relatedTaskIds"
+  | "onRelatedTaskIdsChange"
+  | "contextStepId"
+  | "taskId";
+
+type NormalizedAdvancedSettingsProps = Required<
+  Omit<TaskCreateAdvancedSettingsProps, OptionalRelationshipKeys>
+> &
+  Pick<TaskCreateAdvancedSettingsProps, OptionalRelationshipKeys>;
 
 function valueOrDefault<T>(value: T | undefined, fallback: T): T {
   return value ?? fallback;
