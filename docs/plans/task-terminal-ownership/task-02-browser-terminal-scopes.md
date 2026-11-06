@@ -129,7 +129,9 @@ Completed. `lib/state/user-shell-scope.ts` owns the tuple key and the active
 scope guard. Ordinary rows, tombstones, loading, loaded, and listed flags live
 in task/environment scopes; `byEnvironmentId` holds only fixed, script, and
 unmanaged rows. Shell reads publish to that tuple, so tasks sharing an
-environment no longer replace each other's writer. A pending read withdraws
+environment no longer replace each other's writer. Environment-shared rows are
+ordered by request generation, so a delayed older list cannot remove a newer
+script terminal. A pending read withdraws
 older successful-list authority. Create, script, resume, and authentication
 callbacks keep results in their captured cache and publish panels or local
 selection only while that scope is still active.
@@ -144,5 +146,5 @@ rg -n 'userShells|setUserShells|addUserShell|removeUserShell|updateUserShell' ap
 git diff --check
 ```
 
-The focused suites passed (98 tests at the Task 02 boundary), typecheck and
+The focused suites passed (100 tests at the Task 02 boundary), typecheck and
 lint passed, and the `rg` inventory contains no ordinary-environment access.

@@ -188,6 +188,15 @@ describe("userShells read authority", () => {
     expect(scoped(store, SCOPE_A)?.map((item) => item.terminalId)).toEqual(["a"]);
   });
 
+  it("keeps newer shared rows when an older task list resolves late", () => {
+    store.getState().setUserShells(SCOPE_B, [shell("script-1", { kind: "script" })], 2);
+    store.getState().setUserShells(SCOPE_A, [shell("shell-a")], 1);
+
+    expect(shared(store)?.map((item) => item.terminalId)).toEqual(["script-1"]);
+    expect(scoped(store, SCOPE_A)?.map((item) => item.terminalId)).toEqual(["shell-a"]);
+    expect(store.getState().userShells.sharedGeneration[ENV]).toBe(2);
+  });
+
   it("keeps sibling scope authority when one scope's read fails", () => {
     store.getState().setUserShells(SCOPE_A, [shell("a")]);
     store.getState().setUserShells(SCOPE_B, [shell("b")]);

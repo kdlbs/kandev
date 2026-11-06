@@ -77,6 +77,7 @@ describe("user shell scope", () => {
       loading: { a: false },
       loaded: { a: true },
       listed: { a: true },
+      sharedGeneration: { e: 2 },
     };
     const merged = mergeUserShellsState(defaults, {
       byScope: { b: [] },
@@ -89,5 +90,6 @@ describe("user shell scope", () => {
     expect(merged.loading).toEqual({ a: false, b: true });
     expect(merged.loaded).toEqual({ a: true });
     expect(merged.listed).toEqual({ a: true });
+    expect(merged.sharedGeneration).toEqual({ e: 2 });
   });
 });

@@ -521,6 +521,12 @@ export type UserShellsState = {
    * failure is `loaded` but not `listed`, so it cannot authorize creation.
    */
   listed: Record<string, boolean>;
+  /**
+   * Newest shell-list request generation applied to the environment-shared
+   * rows. Task-scoped lists can finish out of order, so a delayed response
+   * may not overwrite newer fixed/script rows.
+   */
+  sharedGeneration: Record<string, number>;
 };
 
 export type PrepareStepInfo = {
@@ -741,7 +747,11 @@ export type SessionRuntimeSliceActions = {
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions - ordinary rows are task/environment scoped; unmanaged
   // rows (fixed/script) remain environment scoped.
-  setUserShells: (scope: UserShellScope, shells: UserShellInfo[]) => void;
+  setUserShells: (
+    scope: UserShellScope,
+    shells: UserShellInfo[],
+    sharedGeneration?: number,
+  ) => void;
   setUserShellsLoading: (scope: UserShellScope, loading: boolean) => void;
   /** Settles a failed read without granting creation authority. */
   setUserShellsFailed: (scope: UserShellScope) => void;

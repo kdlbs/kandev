@@ -671,7 +671,11 @@ export type AppState = KanbanSlice & {
   // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions
-  setUserShells: (scope: UserShellScope, shells: UserShellInfo[]) => void;
+  setUserShells: (
+    scope: UserShellScope,
+    shells: UserShellInfo[],
+    sharedGeneration?: number,
+  ) => void;
   setUserShellsLoading: (scope: UserShellScope, loading: boolean) => void;
   setUserShellsFailed: (scope: UserShellScope) => void;
   addUserShell: (scope: UserShellScope, shell: UserShellInfo) => void;

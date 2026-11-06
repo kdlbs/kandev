@@ -30,6 +30,24 @@ interface UseUserShellsReturn {
 const EMPTY_SHELLS: UserShellInfo[] = [];
 
 /**
+ * Per-store request generation for the environment-shared rows. Each list
+ * request allocates its generation before awaiting, so a delayed older
+ * response cannot replace newer fixed/script terminals from a sibling task.
+ */
+const sharedReadGenerations = new WeakMap<object, Map<string, number>>();
+
+function nextSharedReadGeneration(store: object, environmentId: string): number {
+  let generations = sharedReadGenerations.get(store);
+  if (!generations) {
+    generations = new Map();
+    sharedReadGenerations.set(store, generations);
+  }
+  const next = (generations.get(environmentId) ?? 0) + 1;
+  generations.set(environmentId, next);
+  return next;
+}
+
+/**
  * Wire shape of an item in the `user_shell.list` response. Backend returns
  * a discriminated union — `kind: "ordinary"` carries DB metadata, `fixed`
  * and `script` only carry the id + pty_status + label.
@@ -108,6 +126,7 @@ export function useUserShells(
           publishKey: scopeKey,
           onLoading: (loading) => store.getState().setUserShellsLoading(scope, loading),
           fetch: async (isCurrent) => {
+            const sharedGeneration = nextSharedReadGeneration(store, scope.environmentId);
             const payload: Record<string, unknown> = {
               task_environment_id: scope.environmentId,
               include_parked: true,
@@ -121,7 +140,7 @@ export function useUserShells(
               );
               const mapped = (response.shells ?? []).map(mapListItemToShell);
               if (!isCurrent()) return {};
-              store.getState().setUserShells(scope, mapped);
+              store.getState().setUserShells(scope, mapped, sharedGeneration);
               return { data: mapped };
             } catch {
               if (!isCurrent()) return {};

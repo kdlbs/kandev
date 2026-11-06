@@ -152,6 +152,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
     loading: {},
     loaded: {},
     listed: {},
+    sharedGeneration: {},
   },
   prepareProgress: { bySessionId: {} },
   launchWarning: { bySessionId: {} },

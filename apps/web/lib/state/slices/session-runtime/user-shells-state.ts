@@ -43,20 +43,27 @@ function withoutDismissed(
 }
 
 function setUserShells(set: ImmerSet): UserShellActions["setUserShells"] {
-  return (scope, shells) =>
+  return (scope, shells, sharedGeneration) =>
     set((draft) => {
       if (!scope.environmentId) return;
       const key = userShellScopeKey(scope);
       const { ordinary, unmanaged } = partitionUserShells(shells);
-      const envDismissed = draft.userShells.dismissedByEnvironmentId[scope.environmentId];
-      draft.userShells.byEnvironmentId[scope.environmentId] = withoutDismissed(
-        unmanaged,
-        envDismissed,
-      );
+      const environmentId = scope.environmentId;
+      const previousGeneration = draft.userShells.sharedGeneration[environmentId] ?? 0;
+      const appliesShared =
+        sharedGeneration === undefined || sharedGeneration >= previousGeneration;
+      if (appliesShared) {
+        const envDismissed = draft.userShells.dismissedByEnvironmentId[environmentId];
+        draft.userShells.byEnvironmentId[environmentId] = withoutDismissed(unmanaged, envDismissed);
+        if (sharedGeneration !== undefined && sharedGeneration > previousGeneration) {
+          draft.userShells.sharedGeneration[environmentId] = sharedGeneration;
+        }
+      }
       if (scope.taskId) {
         // A task-scoped list is the only authority for ordinary rows. A
         // taskless list cannot prove ownership, so its ordinary items are
-        // discarded rather than adopted into a scope.
+        // discarded rather than adopted into a scope. Ordinary rows keep
+        // their own scope even when the shared snapshot is stale.
         const dismissed = draft.userShells.dismissedByScope[key];
         draft.userShells.byScope[key] = withoutDismissed(ordinary, dismissed);
       }
@@ -180,6 +187,7 @@ export function purgeUserShellEnvironment(
 ) {
   delete userShells.byEnvironmentId[envKey];
   delete userShells.dismissedByEnvironmentId[envKey];
+  delete userShells.sharedGeneration[envKey];
   for (const key of Object.keys(userShells.byScope)) {
     if (userShellScopeEnvironment(key) === envKey) delete userShells.byScope[key];
   }

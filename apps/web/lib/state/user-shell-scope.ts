@@ -101,6 +101,7 @@ export function mergeUserShellsState(
     loading: { ...defaults.loading, ...source.loading },
     loaded: { ...defaults.loaded, ...source.loaded },
     listed: { ...defaults.listed, ...source.listed },
+    sharedGeneration: { ...defaults.sharedGeneration, ...source.sharedGeneration },
   };
 }
 

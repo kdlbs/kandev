@@ -150,6 +150,37 @@ describe("task-scoped shell result ownership", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a newer shared script when an older task list resolves late", async () => {
+    const responseA = deferred<{ shells: { id: string; kind: string }[] }>();
+    const responseB = deferred<{ shells: { id: string; kind: string }[] }>();
+    const request = vi
+      .fn()
+      .mockReturnValueOnce(responseA.promise)
+      .mockReturnValueOnce(responseB.promise);
+    setWebSocketClient({ request } as unknown as WebSocketClient);
+    const { result } = renderSessionRead(
+      () => ({
+        a: useUserShells("environment", "task-a"),
+        b: useUserShells("environment", "task-b"),
+      }),
+      undefined,
+    );
+
+    await act(async () => responseB.resolve({ shells: [{ id: "script-1", kind: "script" }] }));
+    await act(async () => responseA.resolve({ shells: [{ id: "shell-a", kind: "ordinary" }] }));
+
+    expect(
+      result.current.store
+        .getState()
+        .userShells.byEnvironmentId.environment?.map((shell) => shell.terminalId),
+    ).toEqual(["script-1"]);
+    expect(result.current.value.a.shells.map((shell) => shell.terminalId)).toEqual([
+      "shell-a",
+      "script-1",
+    ]);
+    expect(result.current.value.b.shells.map((shell) => shell.terminalId)).toEqual(["script-1"]);
+  });
+
   it("publishes concurrent shared-environment tasks independently", async () => {
     const responseA = deferred<{ shells: { id: string; kind: string }[] }>();
     const responseB = deferred<{ shells: { id: string; kind: string }[] }>();

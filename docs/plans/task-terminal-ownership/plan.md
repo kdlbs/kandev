@@ -201,7 +201,7 @@ was implemented on 2026-11-06. Implementation checks:
   Working-tree status confirms all three new work orders remain untracked.
 
 Implementation and browser verification passed: Go build, race tests, and
-changed-file lint; web typecheck and lint; 308 focused unit tests; 12 Chromium
+changed-file lint; web typecheck and lint; 310 focused unit tests; 12 Chromium
 and 3 mobile-chrome E2E tests; and the documentation/specification checks.
 The PR-documentation coverage preflight returned `covered` for all three work
 orders and their requirement/design references. Exact commands and results are
