@@ -20,7 +20,8 @@ import (
 // durable dynamic continuation package is stored with the route generation
 // separately.
 type promptAttemptEvidence struct {
-	mu sync.Mutex
+	keywordHistory []keywordObservation
+	mu             sync.Mutex
 	// retirementState and retirementGeneration identify the notice lifecycle
 	// observed when this attempt began. Reclaimed entries can be replaced by a
 	// state with the same generation, so the counter alone is not unique.
@@ -92,7 +93,9 @@ func (s *Service) beginPromptAttempt(
 	}
 	state, release := s.acquireTransientRetryNoticeState(sessionID)
 	state.mu.Lock()
+	history := s.previousKeywordHistory(sessionID)
 	evidence := &promptAttemptEvidence{
+		keywordHistory:       history,
 		executionID:          executionID,
 		promptGeneration:     promptGeneration,
 		evidenceKnown:        true,
