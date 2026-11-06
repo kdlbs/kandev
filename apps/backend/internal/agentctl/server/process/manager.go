@@ -205,6 +205,7 @@ type Manager struct {
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
 	passthrough      *PassthroughOwner
+	projectMCP       *ProjectMCPFilesOwner
 	// repoTrackers holds per-repository trackers for multi-repo task roots.
 	// Each tracker stamps RepositoryName onto its emitted events and shares
 	// subscriber channels with the root via the Manager fan-out.
@@ -534,6 +535,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
 	m.passthrough = newPassthroughOwner(m)
+	m.projectMCP = newProjectMCPFilesOwner(m)
 	return m
 }
 
@@ -2052,6 +2054,10 @@ func (m *Manager) startOneShot() error {
 // buildAdapterConfig constructs the adapter configuration and initialises the
 // protocol adapter, including merging any adapter-provided environment variables.
 func (m *Manager) buildAdapterConfig() error {
+	// Delivery evidence authorizes exactly one process generation. Keep it
+	// pending until this adapter configuration is fully established so a
+	// retryable construction failure does not discard accepted evidence.
+	projectDelivery := m.cfg.ProjectMCPDelivery
 	mcpServers, err := m.adapterMCPServers()
 	if err != nil {
 		return fmt.Errorf("resolve MCP servers for agent session: %w", err)
@@ -2060,6 +2066,7 @@ func (m *Manager) buildAdapterConfig() error {
 		WorkDir:                    m.cfg.WorkDir,
 		AutoApprove:                m.adapterAutoApprove(),
 		McpServers:                 mcpServers,
+		ProjectMCPDelivery:         projectDelivery.Clone(),
 		AgentID:                    m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 		AssumeMcpSse:               m.cfg.AssumeMcpSse,
 		AssumeMcpHttp:              m.cfg.AssumeMcpHttp,
@@ -2136,6 +2143,9 @@ func (m *Manager) buildAdapterConfig() error {
 		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
 	}
 	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
+	// The adapter owns the immutable copy from here; a replacement process
+	// must be configured with fresh evidence.
+	m.cfg.ProjectMCPDelivery = nil
 	return nil
 }
 
@@ -2399,7 +2409,7 @@ func lookupEnvValue(env []string, key string) string {
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
 func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, nil, wrapper...)
 }
 
 // ConfigureWithEnvironment sets the agent command and replaces the complete
@@ -2407,10 +2417,23 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 // instance variables that are absent from env remain available to the agent.
 // This must be called before Start() if the instance was created without a command.
 func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, nil, wrapper...)
 }
 
-func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, wrapper ...launchwrapper.Spec) error {
+// ConfigureWithProjectDelivery sets the agent command together with
+// execution-bound project delivery evidence. A missing record clears any
+// previous evidence so a new configuration cannot inherit it by omission.
+func (m *Manager) ConfigureWithProjectDelivery(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, delivery, wrapper...)
+}
+
+// ConfigureWithEnvironmentAndProjectDelivery combines complete environment
+// replacement with execution-bound project delivery evidence.
+func (m *Manager) ConfigureWithEnvironmentAndProjectDelivery(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, delivery, wrapper...)
+}
+
+func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 
@@ -2429,15 +2452,9 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	if err := config.ValidateCommandArgs(args); err != nil {
 		return err
 	}
-	if continueArgsPresent {
-		if err := config.ValidateCommandArgs(continueArgs); err != nil {
-			return fmt.Errorf("invalid continue command: %w", err)
-		}
-	} else if continueCommand != "" {
-		continueArgs = config.ParseCommand(continueCommand)
-		if err := config.ValidateCommandArgs(continueArgs); err != nil {
-			return fmt.Errorf("invalid continue command: %w", err)
-		}
+	continueArgs, err = configuredContinueArgs(continueArgs, continueArgsPresent, continueCommand)
+	if err != nil {
+		return err
 	}
 
 	// Compose the environment before changing any other configuration so a
@@ -2446,12 +2463,19 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	if err != nil {
 		return fmt.Errorf("compose configured agent environment: %w", err)
 	}
+	// Delivery evidence is validated before any accepted state changes. An
+	// invalid explicit record fails configuration instead of replacing it.
+	acceptedDelivery, err := m.acceptProjectMCPDelivery(delivery)
+	if err != nil {
+		return err
+	}
 
 	m.cfg.AgentCommand = command
 	m.cfg.AgentCommandConfigured = true
 	m.cfg.AgentArgs = args
 	m.cfg.LaunchWrapper = launchwrapper.Profile(spec.Argv)
 	m.cfg.LaunchWrapperRequired = !spec.IsZero()
+	m.cfg.ProjectMCPDelivery = acceptedDelivery
 
 	// Store continue command for one-shot adapters
 	if continueArgsPresent {
@@ -2471,6 +2495,25 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	m.logger.Info("agent configured", zap.Int("env_count", len(env)), zap.Bool("wrapped", !spec.IsZero()))
 
 	return nil
+}
+
+// configuredContinueArgs normalizes the optional continue command while
+// preserving the present-vs-derived distinction callers already rely on.
+func configuredContinueArgs(continueArgs []string, present bool, command string) ([]string, error) {
+	if present {
+		if err := config.ValidateCommandArgs(continueArgs); err != nil {
+			return nil, fmt.Errorf("invalid continue command: %w", err)
+		}
+		return continueArgs, nil
+	}
+	if command == "" {
+		return continueArgs, nil
+	}
+	parsed := config.ParseCommand(command)
+	if err := config.ValidateCommandArgs(parsed); err != nil {
+		return nil, fmt.Errorf("invalid continue command: %w", err)
+	}
+	return parsed, nil
 }
 
 type installedManagedGitTools struct {
