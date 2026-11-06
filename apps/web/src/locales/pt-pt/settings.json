@@ -1219,5 +1219,8 @@
   "builtinMcp.backToPackages": "Voltar aos pacotes",
   "builtinMcp.packageDetails": "Detalhes do pacote",
   "builtinMcp.packageSummary": "Escolha as ferramentas do Kandev disponíveis para as suas tarefas.",
-  "builtinMcp.currentUnknown": "Os pacotes do agente atual são desconhecidos. Estas são as opções guardadas para o próximo arranque do agente."
+  "builtinMcp.currentUnknown": "Os pacotes do agente atual são desconhecidos. Estas são as opções guardadas para o próximo arranque do agente.",
+  "mcpFromAutomation": "Da automatização",
+  "mcpFromAutomationDescription": "Servidores selecionados pela automatização que iniciou este processo.",
+  "builtinMcp.surfaces.automation": "Automatização"
 }

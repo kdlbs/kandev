@@ -1219,5 +1219,8 @@
   "builtinMcp.backToPackages": "返回工具包",
   "builtinMcp.packageDetails": "工具包詳情",
   "builtinMcp.packageSummary": "選擇任務可使用的 Kandev 工具。",
-  "builtinMcp.currentUnknown": "無法確定目前代理程式的工具包。以下是為下次啓動代理程式儲存的選擇。"
+  "builtinMcp.currentUnknown": "無法確定目前代理程式的工具包。以下是為下次啓動代理程式儲存的選擇。",
+  "mcpFromAutomation": "來自自動化",
+  "mcpFromAutomationDescription": "啓動此程序的自動化所選的伺服器。",
+  "builtinMcp.surfaces.automation": "自動化"
 }

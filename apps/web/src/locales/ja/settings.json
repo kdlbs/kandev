@@ -1219,5 +1219,8 @@
   "builtinMcp.backToPackages": "パッケージに戻る",
   "builtinMcp.packageDetails": "パッケージの詳細",
   "builtinMcp.packageSummary": "タスクで使用できる Kandev のツールを選択します。",
-  "builtinMcp.currentUnknown": "現在のエージェントのパッケージは不明です。次回のエージェント起動時に適用される保存済みの選択を表示しています。"
+  "builtinMcp.currentUnknown": "現在のエージェントのパッケージは不明です。次回のエージェント起動時に適用される保存済みの選択を表示しています。",
+  "mcpFromAutomation": "自動化から",
+  "mcpFromAutomationDescription": "このプロセスを開始した自動化が選択したサーバーです。",
+  "builtinMcp.surfaces.automation": "自動化"
 }

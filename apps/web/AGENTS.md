@@ -1,6 +1,6 @@
 # Frontend (Vite/React SPA) — architecture and conventions
 
-Scoped guidance for `apps/web/`. Repo-wide rules (commit format, code-quality limits, etc.) live in the root `AGENTS.md`.
+Scoped guidance for `apps/web/`. Repo-wide rules (commit format, code-quality limits, etc.) live in the root `AGENTS.md`. Primary commands: `pnpm run lint` runs the Oxlint configuration; `pnpm run typecheck` runs `tsrs --noEmit --fast` after generation. Retained ESLint and classic TypeScript API roles, focused previews, and wiring evidence are in [`TOOLCHAIN.md`](TOOLCHAIN.md).
 
 ## Plugin authoring
 
@@ -258,7 +258,7 @@ README markup and for stripping executable HTML and unsafe URLs.
 
 ## Code-quality limits
 
-Enforced by `apps/web/eslint.config.mjs` (warnings, will become errors):
+Enforced by `apps/web/oxlint.config.mjs` (warnings become failures through `--deny-warnings`):
 
 - Files: ≤600 lines · Functions: ≤100 lines · Absolute-positioned virtualizer rows do not collapse CSS margins; do not layer row padding/gaps over an item's existing margin. Preserve the old rendered gap with a focused bounding-box regression.
 - Cyclomatic complexity: ≤15 · Cognitive complexity: ≤20

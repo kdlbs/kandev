@@ -98,10 +98,14 @@ Its closing comment identifies a released fix. It is related evidence, not proof
 - **AC-OFFICE-AUTOMATION-MCP-004.3:** Run details shall distinguish desired choices, accepted execution choices, and observed connections.
   A reused process with changed choices shall show next-process timing. Historical runs shall not display today's choices as their accepted selection.
 - **AC-OFFICE-AUTOMATION-MCP-004.4:** Phone and desktop shall support the same selection and recovery actions.
-  Phone and coarse-pointer targets shall measure at least 44px. Ordinary desktop controls shall retain 28px sizing.
-  Long names shall wrap without horizontal page overflow. Keyboard focus and drafts shall survive viewport changes.
+
 - **AC-OFFICE-AUTOMATION-MCP-004.5:** New copy and accessible labels shall use all shipped locale catalogs.
   Reasons shall remain readable without hover, color, or motion alone.
+- **AC-OFFICE-AUTOMATION-MCP-004.6:** Phone and coarse-pointer targets shall measure at least 44px.
+- **AC-OFFICE-AUTOMATION-MCP-004.7:** Ordinary desktop controls shall retain 28px sizing.
+- **AC-OFFICE-AUTOMATION-MCP-004.8:** Long names shall wrap without horizontal page overflow.
+- **AC-OFFICE-AUTOMATION-MCP-004.9:** Keyboard focus shall survive viewport changes.
+- **AC-OFFICE-AUTOMATION-MCP-004.10:** Drafts shall survive viewport changes.
 
 ## Exclusions
 

@@ -2,13 +2,14 @@ import { useCallback, useState, type Dispatch, type SetStateAction } from "react
 import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast/sonner";
 import { useAutomationMCPSelectionReload } from "@/hooks/domains/settings/use-automation-mcp-options";
-import type { FormState } from "./automation-payload";
+import type { AutomationMCPSelection } from "@/lib/types/automation";
+type MCPDraft = { mcpSelection?: AutomationMCPSelection | null; mcpSelectionRevision?: number };
 
-export function useAutomationMCPReconciliation(
+export function useAutomationMCPReconciliation<T extends MCPDraft>(
   workspaceId: string,
   automationId: string | null,
-  setForm: Dispatch<SetStateAction<FormState>>,
-  setSavedForm: Dispatch<SetStateAction<FormState>>,
+  setForm: Dispatch<SetStateAction<T>>,
+  setSavedForm: Dispatch<SetStateAction<T>>,
 ) {
   const { t } = useTranslation();
   const [saveFailed, setSaveFailed] = useState(false);
@@ -16,7 +17,10 @@ export function useAutomationMCPReconciliation(
   const reload = useCallback(async () => {
     try {
       const saved = await reloadSaved();
-      if (!saved) return;
+      if (!saved) {
+        if (!automationId) setSaveFailed(false);
+        return;
+      }
       setSavedForm((previous) => ({
         ...previous,
         mcpSelection: saved.mcp_selection,
@@ -30,7 +34,7 @@ export function useAutomationMCPReconciliation(
     } catch {
       toast.error(t("automations:mcpOptionsFailed"));
     }
-  }, [reloadSaved, setForm, setSavedForm, t]);
+  }, [automationId, reloadSaved, setForm, setSavedForm, t]);
   return {
     saveFailed,
     reload,

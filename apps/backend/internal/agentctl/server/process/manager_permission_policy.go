@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	"github.com/kandev/kandev/internal/mcp/profile"
 	"go.uber.org/zap"
 )
@@ -25,12 +26,20 @@ const injectedKandevMCPServerName = "kandev"
 // AGENTCTL_AUTO_APPROVE_PERMISSIONS
 // (docs/specs/coordinator/system-design/permissions.md#auto-approval): the
 // names bound at conversation open, or the phase-1 seven when the session has
-// no binding. An instance without a coordinator profile approves nothing.
+// no binding, plus the derived MCP names of its exact instance-read plugin
+// references. An instance without a coordinator profile approves nothing.
 func (m *Manager) coordinatorAutoApprovedNames() []string {
 	if m.cfg == nil || m.cfg.McpProfile == nil || m.cfg.McpProfile.Surface != profile.SurfaceCoordinator {
 		return nil
 	}
-	return profile.BoundCoordinatorToolNames(*m.cfg.McpProfile)
+	names := profile.BoundCoordinatorToolNames(*m.cfg.McpProfile)
+	if policy := m.cfg.McpProfile.CoordinatorToolPolicy; policy != nil &&
+		policy.Version == profile.CoordinatorToolPolicyVersionV2 {
+		for _, tool := range policy.PluginTools {
+			names = append(names, plugintools.ExposedName(tool.PluginID, tool.LocalName))
+		}
+	}
+	return names
 }
 
 // classifyHumanInputPermission reports whether req is a provider-native

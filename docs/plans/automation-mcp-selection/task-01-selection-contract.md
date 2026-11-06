@@ -49,9 +49,9 @@ New test paths named by this work order must exist before its verification compl
 Provision an isolated test PostgreSQL service and set `KANDEV_TEST_POSTGRES_DSN` before the database command. Do not use production data.
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/automation -run 'AutomationMCP|AutomationPluginTools' -count=1)
-(cd apps/backend && go test -trimpath ./internal/mcp/handlers ./internal/mcp/server -run 'ConfigAutomation|AutomationMCP' -count=1)
-(cd apps/backend && test -n "$KANDEV_TEST_POSTGRES_DSN" && go test -trimpath ./internal/automation -run 'AutomationMCP.*Postgres|AutomationPluginToolsPostgres' -count=1)
+(cd apps/backend && go test -tags fts5 -trimpath ./internal/automation -run 'AutomationMCP|AutomationPluginTools' -count=1)
+(cd apps/backend && go test -tags fts5 -trimpath ./internal/mcp/handlers ./internal/mcp/server -run 'ConfigAutomation|AutomationMCP' -count=1)
+(cd apps/backend && test -n "$KANDEV_TEST_POSTGRES_DSN" && go test -tags fts5 -trimpath ./internal/automation -run 'AutomationMCP.*Postgres|AutomationPluginToolsPostgres' -count=1)
 git diff --check
 ```
 
@@ -94,8 +94,12 @@ Keep the exact committed selection response. A later reread can mislabel another
 Selection models, migrations, conditional saves, safe options, export omission, and the durable launch reader are implemented.
 
 - The combined command and results in [the plan](plan.md#verification-results) cover this work order. Automation tests include native-only writes, positive native controls, invalid and stale choices, exact revisions, durable ownership, safe option summaries, and portable export omission.
-- `go test -trimpath ./internal/automation ./internal/agent/settings/store -count=1`, with the isolated PostgreSQL DSN: passed after correcting the UTF8 and secret-resolution test fixtures.
-- `go test -trimpath ./internal/automation -run AutomationMCP -count=1`, with PostgreSQL enabled: passed after the final PostgreSQL reference-count assertions.
+- `go test -tags fts5 -trimpath ./internal/automation ./internal/agent/settings/store -count=1`, with the isolated PostgreSQL DSN: passed after correcting the UTF8 and secret-resolution test fixtures.
+- `go test -tags fts5 -trimpath ./internal/automation -run AutomationMCP -count=1`, with PostgreSQL enabled: passed after the final PostgreSQL reference-count assertions.
 - Real PostgreSQL migration replay, stale saves, omission preservation, and reference counts passed. No PostgreSQL tests were skipped.
 - Native Configuration grant-denial coverage lives in `internal/automation/mcp_selection_test.go`, where the actual service and shared dispatcher can enforce the save boundary.
 - Changed-Go lint is recorded centrally in the plan.
+
+### PR remediation
+
+PR remediation verifies specific ownership and options errors, limits repository lookups to 100 IDs, and counts durable definition references without write-time package validation. The expanded PostgreSQL-backed command and results are in the plan.

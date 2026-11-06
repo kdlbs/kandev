@@ -1,5 +1,9 @@
 import { test, expect } from "../fixtures/test-base";
-import { OPTIONAL_AUTOMATION_PACKAGES, saveAutomationMCP } from "../helpers/automation-mcp";
+import {
+  OPTIONAL_AUTOMATION_PACKAGES,
+  saveAutomationMCP,
+  verifyAutomationMCPRecovery,
+} from "../helpers/automation-mcp";
 import type { Automation, AutomationRun } from "@/lib/types/automation";
 import type { BuiltinMCPSessionView } from "@/lib/types/builtin-mcp";
 
@@ -7,6 +11,7 @@ test("saves all native packages and workspace servers, then invokes native tools
   testPage,
   apiClient,
   seedData,
+  prCapture,
 }) => {
   test.setTimeout(180000);
   const server = await apiClient.createMCPServer(seedData.workspaceId, {
@@ -39,7 +44,10 @@ test("saves all native packages and workspace servers, then invokes native tools
     await section.getByTestId(`automation-mcp-package-${id}`).click();
   const serverRow = section.getByTestId(`automation-mcp-server-${server.id}`);
   await serverRow.click();
-  await section.screenshot({ path: "/tmp/automation-mcp-desktop.png" });
+  await section.evaluate((element) => element.scrollIntoView({ block: "start" }));
+  await prCapture.screenshot("automation-mcp-desktop", {
+    caption: "Automation MCP selection on desktop",
+  });
   await saveAutomationMCP(testPage);
   let saved = await apiClient.wsRequest<Automation>("automation.get", { id: automation.id });
   expect(saved.mcp_selection?.definition_ids).toEqual([server.id]);
@@ -277,3 +285,8 @@ test("keeps a running private binding until the next process starts", async ({
   expect((await view()).bound?.execution_id).not.toBe(accepted.execution_id);
   expect((await view()).bound?.manifest.packages).toEqual(["core"]);
 });
+
+test(
+  "removes blocked and inherited direct MCP choices without losing inheritance",
+  verifyAutomationMCPRecovery,
+);

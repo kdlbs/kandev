@@ -53,9 +53,9 @@ New test paths named by this work order must exist before its verification compl
 Provision an isolated test PostgreSQL service and set `KANDEV_TEST_POSTGRES_DSN` before the database command. Do not use production data.
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/agent/mcpconfig ./internal/agent/settings/store -run 'AutomationMCP|MCPResolution|MCPSelection|MCPDelete' -count=1)
-(cd apps/backend && go test -trimpath ./internal/orchestrator ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle -run 'AutomationMCP|Automation.*Retry|Automation.*Continuation|MCP.*Setup' -count=1)
-(cd apps/backend && test -n "$KANDEV_TEST_POSTGRES_DSN" && go test -trimpath ./internal/agent/settings/store ./internal/automation -run 'Postgres.*AutomationMCP|AutomationMCP.*Postgres|PostgresMCPResolution|PostgresConfirmedMCPDelete' -count=1)
+(cd apps/backend && go test -tags fts5 -trimpath ./internal/agent/mcpconfig ./internal/agent/settings/store -run 'AutomationMCP|MCPResolution|MCPSelection|MCPDelete' -count=1)
+(cd apps/backend && go test -tags fts5 -trimpath ./internal/orchestrator ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle -run 'AutomationMCP|Automation.*Retry|Automation.*Continuation|MCP.*Setup' -count=1)
+(cd apps/backend && test -n "$KANDEV_TEST_POSTGRES_DSN" && go test -tags fts5 -trimpath ./internal/agent/settings/store ./internal/automation -run 'Postgres.*AutomationMCP|AutomationMCP.*Postgres|PostgresMCPResolution|PostgresConfirmedMCPDelete' -count=1)
 git diff --check
 ```
 
@@ -102,3 +102,7 @@ Automation origins compose through both resolver paths. Launch metadata captures
 - The normal-task browser scenario checked first-process acceptance and changed task preferences through the native API. It reused the task and proved that the template preserved the task's choices.
 - Race checks for automation and executor selections passed.
 - Changed-Go lint is recorded centrally in the plan.
+
+### PR remediation
+
+PR remediation verifies durable templates for retry snapshots, exact package/revision content at task creation, batched workspace usage reads, and the route-owned HTTP deletion guard. Forced deletion is followed by a missing-definition assertion. The expanded backend command and results are in the plan.

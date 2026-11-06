@@ -199,6 +199,9 @@ function useMCPOriginContext(workspaceId?: string | null) {
       tasks: state.kanban.tasks,
       workflows: state.workflows.items,
       sessions: state.taskSessions.items,
+      automations:
+        state.automations.byWorkspace?.[workspaceId ?? state.workspaces.activeId ?? ""]?.items ??
+        state.automations.items,
     })),
   );
 }

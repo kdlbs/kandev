@@ -291,6 +291,7 @@ export function canonicalMCPSelection(selection: AutomationMCPSelection | null |
 }
 
 export function mcpSelectionForUpdate(form: FormState, saved: FormState) {
+  if (form.taskMode !== saved.taskMode) return form.mcpSelection ?? undefined;
   if (
     JSON.stringify(canonicalMCPSelection(form.mcpSelection)) ===
     JSON.stringify(canonicalMCPSelection(saved.mcpSelection))
@@ -308,5 +309,21 @@ export function withSavedMCPSelection(form: FormState, saved: Automation): FormS
 
 export function automationDraftRevision(form: FormState): string {
   const { mcpSelectionRevision: _serverRevision, ...draft } = form;
-  return JSON.stringify(draft);
+  return JSON.stringify({ ...draft, mcpSelection: canonicalMCPSelection(draft.mcpSelection) });
+}
+
+export function reconcileSavedMCPSelection(
+  current: FormState,
+  submitted: FormState,
+  saved: Automation,
+): FormState {
+  const unchanged =
+    current.taskMode === submitted.taskMode &&
+    JSON.stringify(canonicalMCPSelection(current.mcpSelection)) ===
+      JSON.stringify(canonicalMCPSelection(submitted.mcpSelection));
+  if (unchanged) return withSavedMCPSelection(current, saved);
+  return {
+    ...current,
+    mcpSelectionRevision: saved.mcp_selection_revision ?? current.mcpSelectionRevision,
+  };
 }

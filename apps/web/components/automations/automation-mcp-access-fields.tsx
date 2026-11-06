@@ -42,7 +42,7 @@ export function AutomationBuiltinFields({
           >
             <Checkbox
               checked={value.builtin_packages.includes(pkg.id)}
-              disabled={pkg.id === "core" || blocked}
+              disabled={pkg.id === "core" || (blocked && !value.builtin_packages.includes(pkg.id))}
               onCheckedChange={(checked) =>
                 onChange({
                   ...value,
@@ -85,7 +85,7 @@ export function AutomationWorkspaceFields({
   const definitions =
     options?.definitions.filter(
       (item) =>
-        !inherited.has(item.id) &&
+        (!inherited.has(item.id) || value.definition_ids.includes(item.id)) &&
         item.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
     ) ?? [];
   const toggle = (id: string, checked: boolean) =>

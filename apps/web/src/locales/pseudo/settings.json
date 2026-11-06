@@ -1219,5 +1219,8 @@
   "builtinMcp.backToPackages": "Ɓàćķ ţō ƥàćķàĝēś",
   "builtinMcp.packageDetails": "Ƥàćķàĝē ďēţàĩĺś",
   "builtinMcp.packageSummary": "Ćĥōōśē ţĥē Ķàńďēv ţōōĺś àvàĩĺàƀĺē ţō ŷōũŕ ţàśķś.",
-  "builtinMcp.currentUnknown": "Ćũŕŕēńţ àĝēńţ ƥàćķàĝēś àŕē ũńķńōŵń. Ţĥēśē àŕē ţĥē śàvēď ćĥōĩćēś ƒōŕ ţĥē ńēxţ àĝēńţ śţàŕţ."
+  "builtinMcp.currentUnknown": "Ćũŕŕēńţ àĝēńţ ƥàćķàĝēś àŕē ũńķńōŵń. Ţĥēśē àŕē ţĥē śàvēď ćĥōĩćēś ƒōŕ ţĥē ńēxţ àĝēńţ śţàŕţ.",
+  "mcpFromAutomation": "Ƒŕōḿ àũţōḿàţĩōń",
+  "mcpFromAutomationDescription": "Śēŕvēŕś śēĺēćţēď ƀŷ ţĥē àũţōḿàţĩōń ţĥàţ śţàŕţēď ţĥĩś ƥŕōćēśś.",
+  "builtinMcp.surfaces.automation": "Àũţōḿàţĩōń"
 }

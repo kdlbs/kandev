@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	p "github.com/kandev/kandev/internal/mcp/profile"
 )
@@ -22,6 +23,11 @@ var SurvivalCapabilities = []string{
 	acpcompat.AntigravityPersonalAuthCapability,
 	p.BuiltinPackagesCapability,
 	p.AutomationMCPSelectionCapability,
+	// CopilotNativeCompactionCapability advertises that this agentctl build can
+	// request and normalize Copilot's native session events. It is optional for
+	// retained-process adoption.
+	acpcompat.CopilotNativeCompactionCapability,
+	agentctltypes.ProjectMCPDeliveryCapability,
 }
 
 // handleIdentity reports this launch's opaque identity and capability

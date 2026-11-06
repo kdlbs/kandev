@@ -3,26 +3,35 @@ package automation
 import (
 	"context"
 	"encoding/json"
-	"slices"
 )
 
 func (s *Service) CountMCPDefinitionSelections(ctx context.Context, workspaceID, definitionID string) (int, error) {
+	counts, err := s.MCPDefinitionSelectionCounts(ctx, workspaceID)
+	return counts[definitionID], err
+}
+
+// MCPDefinitionSelectionCounts reads reference usage without revalidating grants.
+func (s *Service) MCPDefinitionSelectionCounts(ctx context.Context, workspaceID string) (map[string]int, error) {
 	var rows []string
 	if err := s.store.ro.SelectContext(ctx, &rows, s.store.ro.Rebind(`SELECT mcp_selection FROM automations WHERE workspace_id = ?`), workspaceID); err != nil {
-		return 0, err
+		return nil, err
 	}
-	count := 0
+	counts := make(map[string]int)
 	for _, raw := range rows {
 		var selection *MCPSelection
 		if err := json.Unmarshal([]byte(raw), &selection); err != nil {
-			return 0, err
+			return nil, err
 		}
-		if err := selection.validate(); err != nil {
-			return 0, err
+		if selection == nil {
+			continue
 		}
-		if selection != nil && slices.Contains(selection.DefinitionIDs, definitionID) {
-			count++
+		seen := make(map[string]bool)
+		for _, id := range selection.DefinitionIDs {
+			if !seen[id] {
+				counts[id]++
+				seen[id] = true
+			}
 		}
 	}
-	return count, nil
+	return counts, nil
 }

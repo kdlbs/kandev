@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { KandevToolMessage } from "./kandev-tool-message";
+import { hasKandevRenderer, KandevToolMessage } from "./kandev-tool-message";
+import type { ToolCallMetadata } from "../types";
 import { richOutputExamples } from "@/lib/rich-output/examples";
 import { kandevToolCall } from "./kandev-tool-message.test-helpers";
 import { TooltipProvider } from "@kandev/ui/tooltip";
@@ -35,6 +36,68 @@ function copilotToolCall(status: "pending" | "running" | "error" | "complete" = 
     status,
   });
 }
+
+describe("Built-in package rich output", () => {
+  // @covers AC-AGENTS-AGENT-RICH-OUTPUT-001.1, AC-AGENTS-AGENT-RICH-OUTPUT-002.6
+  it("renders accepted package-qualified previews, table, and status list", () => {
+    const comment = kandevToolCall({
+      toolName: "mcp.kandev-rich-output.show_rich_output_kandev",
+      input: {
+        version: 2,
+        catalog_version: 1,
+        title: "Package report",
+        spec: {
+          root: "report",
+          elements: {
+            report: {
+              type: "Stack",
+              props: { direction: "vertical" },
+              children: ["desktop", "phone", "table", "checks"],
+            },
+            desktop: {
+              type: "FilePreview",
+              props: { path: "desktop.png", title: "Desktop capture" },
+              children: [],
+            },
+            phone: {
+              type: "FilePreview",
+              props: { path: "phone.png", title: "Phone capture" },
+              children: [],
+            },
+            table: {
+              type: "Table",
+              props: { columns: [{ key: "result", label: "Result" }], rows: [["Retained value"]] },
+              children: [],
+            },
+            checks: {
+              type: "StatusList",
+              props: { items: [{ label: "Package check", status: "passed" }] },
+              children: [],
+            },
+          },
+        },
+      },
+      output: {
+        structuredContent: null,
+        content: [{ type: "text", text: "Rich output accepted." }],
+      },
+    });
+    const generic = (comment.metadata as ToolCallMetadata).normalized!.generic!;
+    generic.name = "kandev-rich-output/show_rich_output_kandev";
+    expect(hasKandevRenderer(comment)).toBe(true);
+    const html = renderToStaticMarkup(<KandevToolMessage comment={comment} />);
+    for (const value of ["Desktop capture", "Phone capture", "Retained value", "Package check"])
+      expect(html).toContain(value);
+    expect(html).not.toContain(UNAVAILABLE);
+    for (const name of [
+      "kandev-rich-output/unregistered_kandev",
+      "kandev-rich-output-extra-foo_kandev",
+    ]) {
+      generic.name = name;
+      expect(hasKandevRenderer(comment)).toBe(false);
+    }
+  });
+});
 
 describe("KandevToolMessage rich output", () => {
   // @covers AC-AGENTS-AGENT-RICH-OUTPUT-002.6

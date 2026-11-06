@@ -19,6 +19,7 @@ export type {
 import type { AgentProfile } from "./agent-profile";
 import type { CLIFlag } from "./agent-profile";
 import type { BackendMessage } from "./backend-message";
+import type { ModelCatalog } from "@kandev/types/model-catalog";
 
 /**
  * How kandev drives a custom agent's command. Absent means terminal
@@ -170,6 +171,8 @@ export type ConfigOptionEntry = {
   current_value: string;
   category?: string;
   options?: { value: string; name: string; description?: string }[];
+  /** Bounded provider group structure and verified composition bindings. */
+  catalog?: ModelCatalog;
 };
 
 // CapabilityStatus mirrors the host utility probe status. "probing" is the
@@ -188,6 +191,8 @@ export type ProfileLaunchSettingsRequest = {
   env_vars: { key: string; value?: string; secret_id?: string }[];
   cli_flags: CLIFlag[];
   command_prefix: string;
+  /** Draft ACP mode. Omission keeps the saved value for an older client. */
+  mode?: string;
   /** Draft selection for a capability or model probe. Omit to use the saved value. */
   copilot_selected_plugins?: string[];
 };

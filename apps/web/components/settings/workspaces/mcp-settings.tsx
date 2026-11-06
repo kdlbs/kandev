@@ -69,20 +69,25 @@ function selectionImpactTotal(impact?: MCPSelectionImpact): number {
   );
 }
 
-function SelectionImpact({ impact }: { impact?: MCPSelectionImpact }) {
+function SelectionImpact({
+  impact = { profile: 0, repository: 0, task: 0, task_session: 0 },
+}: {
+  impact?: MCPSelectionImpact;
+}) {
   const { t } = useTranslation();
-  const total = selectionImpactTotal(impact);
+  const automation = impact.automation ?? 0;
+  const total = selectionImpactTotal(impact) - automation;
   return (
     <p className="text-xs text-muted-foreground" data-testid="mcp-selection-impact">
       {total > 0
         ? t("settings:mcpSelectionImpact", {
-            profile: t("settings:mcpProfileUsage", { count: impact?.profile ?? 0 }),
-            repository: t("settings:mcpRepositoryUsage", { count: impact?.repository ?? 0 }),
-            task: t("settings:mcpTaskUsage", { count: impact?.task ?? 0 }),
-            taskSession: t("settings:mcpSessionUsage", { count: impact?.task_session ?? 0 }),
+            profile: t("settings:mcpProfileUsage", { count: impact.profile }),
+            repository: t("settings:mcpRepositoryUsage", { count: impact.repository }),
+            task: t("settings:mcpTaskUsage", { count: impact.task }),
+            taskSession: t("settings:mcpSessionUsage", { count: impact.task_session }),
           })
         : t("settings:mcpSelectionImpactNone")}
-      {(impact?.automation ?? 0) > 0 ? (
+      {automation > 0 ? (
         <span className="block">
           {t("automations:automations")}: {impact?.automation}
         </span>

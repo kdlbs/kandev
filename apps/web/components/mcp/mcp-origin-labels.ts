@@ -2,6 +2,7 @@ import type { MCPSelectionOrigin } from "@/lib/types/http-mcp";
 
 export type MCPOriginContext = {
   workspaceId: string | null;
+  automations?: readonly { id: string; name: string; workspace_id: string }[];
   profiles: readonly { id: string; label: string; workspace_id?: string | null }[];
   repositories: Record<string, readonly { id: string; name: string; workspace_id: string }[]>;
   tasks: readonly { id: string; title: string; workspaceId?: string; workflowId: string }[];
@@ -22,6 +23,10 @@ function taskInWorkspace(id: string, workspaceId: string, context: MCPOriginCont
 function originName(origin: MCPSelectionOrigin, context: MCPOriginContext): string | undefined {
   const { owner_id, workspace_id } = origin;
   switch (origin.scope) {
+    case "automation":
+      return context.automations?.find(
+        (item) => item.id === owner_id && item.workspace_id === workspace_id,
+      )?.name;
     case "profile":
       return context.profiles.find(
         (profile) =>

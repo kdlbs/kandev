@@ -51,8 +51,8 @@ Run from the repository root. Use `/tdd` for meaningful logic tests.
 New test paths named by this work order must exist before its verification completes.
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/mcp/profile ./internal/mcp/server ./internal/mcp/handlers ./internal/mcp/scope -run 'AutomationMCP|Automation|Builtin' -count=1)
-(cd apps/backend && go test -trimpath ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle ./internal/agentctl/server/... ./internal/sysprompt/... -run 'AutomationMCP|Builtin' -count=1)
+(cd apps/backend && go test -tags fts5 -trimpath ./internal/mcp/profile ./internal/mcp/server ./internal/mcp/handlers ./internal/mcp/scope -run 'AutomationMCP|Automation|Builtin' -count=1)
+(cd apps/backend && go test -tags fts5 -trimpath ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle ./internal/agentctl/server/... ./internal/sysprompt/... -run 'AutomationMCP|Builtin' -count=1)
 git diff --check
 ```
 
@@ -104,3 +104,7 @@ Version 2 Automation manifests, package catalogs and actual handlers, principal 
 - A save during a live private process preserved its accepted packages. The next process on the reused conversation accepted the new packages.
 - Existing generic binding/recovery and surface-exclusion checks ran with the `Builtin` filter. Shared Configuration service guards remain in force.
 - Changed-Go lint is recorded centrally in the plan.
+
+### PR remediation
+
+PR remediation verifies canonical resource keys, workspace-owned profile targets, preparation-time helper negotiation, Core question/permission publication, and automation-surface mismatch rejection. The raw-dispatch test uses the guarded dispatcher. The expanded backend command and results are in the plan.

@@ -25,6 +25,9 @@ func TestAutomationMCPPackageInvocation(t *testing.T) {
 	require.Contains(t, catalog[p.PackageWalkthroughs], "show_walkthrough_kandev")
 	require.Contains(t, catalog[p.PackageDiagnostics], "get_diagnostic_bundle_kandev")
 	require.NotContains(t, catalog[p.PackageCore], "ask_user_question_kandev")
+	for _, name := range []string{"answer_question_kandev", "list_pending_questions_kandev", "list_pending_agent_permissions_kandev", "resolve_agent_permission_kandev"} {
+		require.Contains(t, catalog[p.PackageCore], name)
+	}
 	actions, err := ResolveBuiltinActions(profile, newTestLogger(t))
 	require.NoError(t, err)
 	require.Contains(t, actions, "mcp.create_automation")
@@ -54,4 +57,12 @@ func assertAutomationPackageCalls(t *testing.T, s *Server, backend *testBackend)
 			require.Equal(t, tc.action, backend.lastAction)
 		})
 	}
+}
+
+func TestAutomationMCPBindingRejectsTaskSurface(t *testing.T) {
+	s := NewWithProfile(&testBackend{}, "session", "task", 10005, newTestLogger(t), "", false, p.NewAutomation())
+	t.Cleanup(func() { require.NoError(t, s.Close(context.Background())) })
+	profile := p.New(p.SurfaceKanbanTask, nil, nil)
+	profile.BuiltinPackages = &p.BuiltinManifest{Version: 1, CatalogVersion: 1, WorkspaceID: "ws", TaskID: "task", Surface: p.SurfaceKanbanTask, Packages: []p.PackageID{p.PackageCore}, Origins: map[p.PackageID]string{p.PackageCore: "required"}}
+	require.EqualError(t, s.BindInitialProfile(profile, 10005), "built-in binding surface mismatch")
 }

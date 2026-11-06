@@ -71,7 +71,7 @@ export {
 export { preserveNewerProfileDraft } from "@/components/settings/agent-profile-page-state";
 
 function toProfileFormData(
-  profile: AgentProfile,
+  profile: AgentProfile & { devinSandboxInherited?: boolean },
   permissionSettings: Record<string, PermissionSetting>,
 ): ProfileFormData {
   const pv = profilePermissionValues(profile, permissionSettings);
@@ -93,6 +93,7 @@ function toProfileFormData(
     copilot_selected_plugins: profile.copilotSelectedPlugins ?? [],
     cli_flags: profile.cliFlags ?? [],
     env_vars: profile.envVars ?? [],
+    devin_sandbox_inherited: profile.devinSandboxInherited,
     command_prefix: profile.commandPrefix ?? "",
     provider_kind: profile.providerKind ?? "",
   };

@@ -36,8 +36,9 @@ export function AutomationMCPAccess({
     profileId,
     repositoryIds,
   );
+  const defaults = taskMode === "normal_task" ? options?.task_defaults : undefined;
   const value: AutomationMCPSelection = selection ?? {
-    builtin_packages: taskMode === "normal_task" ? (options?.task_defaults ?? ["core"]) : ["core"],
+    builtin_packages: defaults ?? ["core"],
     definition_ids: [],
   };
   return (

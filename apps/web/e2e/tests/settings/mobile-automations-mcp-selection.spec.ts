@@ -1,11 +1,17 @@
 import { test, expect } from "../../fixtures/test-base";
-import { OPTIONAL_AUTOMATION_PACKAGES, saveAutomationMCP } from "../../helpers/automation-mcp";
+import {
+  OPTIONAL_AUTOMATION_PACKAGES,
+  saveAutomationMCP,
+  verifyAutomationMCPRecovery,
+} from "../../helpers/automation-mcp";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
+// @covers AC-OFFICE-AUTOMATION-MCP-004.4, AC-OFFICE-AUTOMATION-MCP-004.6, AC-OFFICE-AUTOMATION-MCP-004.8, AC-OFFICE-AUTOMATION-MCP-004.9, AC-OFFICE-AUTOMATION-MCP-004.10
 test("selects and saves every optional package on a phone with reachable controls", async ({
   testPage,
   apiClient,
   seedData,
+  prCapture,
 }) => {
   const automation = await apiClient.seedAutomation({
     workspaceId: seedData.workspaceId,
@@ -20,7 +26,10 @@ test("selects and saves every optional package on a phone with reachable control
     expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await row.tap();
   }
-  await section.screenshot({ path: "/tmp/automation-mcp-phone.png" });
+  await section.evaluate((element) => element.scrollIntoView({ block: "start" }));
+  await prCapture.screenshot("automation-mcp-phone", {
+    caption: "Automation MCP selection on a phone",
+  });
   await saveAutomationMCP(testPage);
   await testPage.reload();
   for (const id of OPTIONAL_AUTOMATION_PACKAGES)
@@ -31,9 +40,11 @@ test("selects and saves every optional package on a phone with reachable control
     .getByTestId("automation-mcp-package-diagnostics")
     .getByRole("checkbox");
   await diagnostics.tap();
+  await diagnostics.focus();
   for (const width of [320, 393, 767, 768]) {
     await expect(diagnostics).not.toBeChecked();
     await testPage.setViewportSize({ width, height: 851 });
+    await expect(diagnostics).toBeFocused();
     await assertNoDocumentHorizontalOverflow(testPage, `automation MCP at ${width}px`);
     expect(
       (await section.getByTestId("automation-mcp-package-configuration").boundingBox())!.height,
@@ -72,3 +83,8 @@ test.describe("Narrow fine pointer", () => {
     await assertNoDocumentHorizontalOverflow(testPage, "automation MCP with a narrow fine pointer");
   });
 });
+
+test(
+  "removes blocked and inherited direct MCP choices without losing inheritance",
+  verifyAutomationMCPRecovery,
+);

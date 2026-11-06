@@ -1,9 +1,9 @@
 import type { MCPInheritedSelection, MCPSelectionOrigin } from "@/lib/types/http-mcp";
 
-export type MCPOriginGroupScope = "task" | "repository" | "profile" | "unknown";
+export type MCPOriginGroupScope = "task" | "repository" | "profile" | "automation" | "unknown";
 export type MCPOriginGroup = { scope: MCPOriginGroupScope; items: MCPInheritedSelection[] };
 
-const SCOPES = ["task", "repository", "profile"] as const;
+const SCOPES = ["task", "automation", "repository", "profile"] as const;
 
 function uniqueOrigins(origins: MCPSelectionOrigin[]): MCPSelectionOrigin[] {
   const seen = new Set<string>();
@@ -28,6 +28,7 @@ export function groupMCPOrigins(inherited: MCPInheritedSelection[]): MCPOriginGr
     task: [],
     repository: [],
     profile: [],
+    automation: [],
     unknown: [],
   };
   for (const item of definitions.values()) {

@@ -52,8 +52,11 @@ Private choices do not inherit the setting labelled Allow Configuration for regu
 Selection updates require `expected_mcp_selection_revision`. Compare and increment inside the automation write transaction.
 Legacy creation uses revision zero. An explicit creation starts at revision one. Unrelated updates omit the selection and do not change its revision.
 Validate current catalog references before the write. Compare the revision in the transactional UPDATE on both databases.
-All automation updates use this comparison so an unrelated concurrent update cannot restore an older grant.
+Every update uses the revision read by the service in its transactional compare-and-swap.
+Only selection updates require a client-supplied revision. Unrelated updates can conflict if another write changes the selection before their transaction commits.
 Delivery resolves current definitions again and reports deleted or disabled references as unavailable.
+MCP options reject more than 100 repository IDs before lookup.
+Catalog usage counts scan automation references once per workspace response.
 Never hold database locks over provider or MCP calls.
 Return the exact committed selection. Conflicts return a typed conflict and preserve the editor draft.
 
@@ -96,6 +99,8 @@ Never accept this manifest from agent tool arguments.
 Extend the existing action-to-package catalog and `guardedMCPDispatcher` authorization.
 The permitted native action set is Automation Core plus the selected package actions.
 The automation guard still validates resource references, attribution, and coordination self-target restrictions.
+Top-level payload keys use canonical lowercase names so case-insensitive handler decoding cannot bypass these checks.
+Profile targets must belong to this workspace or remain accessible under existing shared-profile rules.
 Do not globally bypass `authorizeAutomationRequest` when Configuration is present.
 Existing plugin list/invoke actions continue through their dedicated selection checks.
 

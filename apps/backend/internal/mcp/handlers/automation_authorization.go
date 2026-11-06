@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
@@ -120,7 +122,8 @@ func (h *Handlers) authorizeAutomationRequest(ctx context.Context, msg *ws.Messa
 	if automationLocalPackageAction(msg.Action) && ((jsonStringField(fields, "task_id") != "" && jsonStringField(fields, "task_id") != principal.CallerTaskID) || (jsonStringField(fields, "session_id") != "" && jsonStringField(fields, "session_id") != principal.CallerSessionID)) {
 		return automationNotFound(msg)
 	}
-	if !h.authorizeAutomationScalarFields(ctx, principal, msg.Action, fields) ||
+	if !h.authorizeAutomationProfileFields(ctx, principal, fields) ||
+		!h.authorizeAutomationScalarFields(ctx, principal, msg.Action, fields) ||
 		!h.authorizeAutomationReferenceFields(ctx, principal, msg.Action, fields) {
 		return automationNotFound(msg)
 	}
@@ -144,6 +147,11 @@ func automationPayloadFields(payload json.RawMessage) (map[string]json.RawMessag
 	}
 	if err := json.Unmarshal(payload, &fields); err != nil {
 		return nil, err
+	}
+	for key := range fields {
+		if key != strings.ToLower(key) {
+			return nil, errors.New("payload field names must use lowercase")
+		}
 	}
 	if fields == nil {
 		fields = make(map[string]json.RawMessage)
@@ -324,4 +332,24 @@ func automationLocalPackageAction(action string) bool {
 	default:
 		return false
 	}
+}
+
+const automationAgentProfileField = "agent_profile_id"
+const automationProfileField = "profile_id"
+
+func (h *Handlers) authorizeAutomationProfileFields(ctx context.Context, principal mcpscope.Principal, fields map[string]json.RawMessage) bool {
+	for _, key := range []string{automationProfileField, automationAgentProfileField} {
+		id := jsonStringField(fields, key)
+		if id == "" {
+			continue
+		}
+		if h.agentSettingsCtrl == nil {
+			return false
+		}
+		allowed, err := h.agentSettingsCtrl.AgentProfileBelongsToWorkspace(ctx, id, principal.WorkspaceID)
+		if err != nil || !allowed {
+			return false
+		}
+	}
+	return h.taskSvc.AuthorizeWorkspaceAccess(ctx, principal.WorkspaceID) == nil
 }

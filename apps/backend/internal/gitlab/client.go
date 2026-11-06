@@ -128,6 +128,10 @@ type Client interface {
 	// project merge method. squashCommitMessage is used when squash=true.
 	MergeMR(ctx context.Context, projectPath string, iid int, squash bool, squashCommitMessage string) (*MR, error)
 
+	// MarkMRReady strips the leading draft marker from an open draft MR's title
+	// and returns the re-read MR. A non-draft MR is returned unchanged.
+	MarkMRReady(ctx context.Context, projectPath string, iid int) (*MR, error)
+
 	// GetProjectMergeMethods reads the project's merge_method + squash_option
 	// settings.
 	GetProjectMergeMethods(ctx context.Context, projectPath string) (*ProjectMergeMethods, error)

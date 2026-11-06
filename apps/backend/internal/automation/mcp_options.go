@@ -10,6 +10,8 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
+var errMCPOptionsTooManyRepositories = errors.New("too many repository IDs (maximum 100)")
+
 type MCPDefinitionOption struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
@@ -78,13 +80,23 @@ func wsMCPOptions(svc *Service) ws.HandlerFunc {
 		}
 		options, err := svc.mcpOptionsWithInheritance(ctx, request.WorkspaceID, request.ProfileID, request.RepositoryIDs)
 		if err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, err.Error(), nil)
+			code := ws.ErrorCodeInternalError
+			if errors.Is(err, ErrRepositoryNotInWorkspace) || errors.Is(err, errMCPOptionsTooManyRepositories) {
+				code = ws.ErrorCodeBadRequest
+			}
+			if errors.Is(err, ErrAgentProfileNotFound) {
+				code = ws.ErrorCodeNotFound
+			}
+			return ws.NewError(msg.ID, msg.Action, code, "Unable to load automation MCP options", nil)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, options)
 	}
 }
 
 func (s *Service) mcpOptionsWithInheritance(ctx context.Context, workspaceID, profileID string, repositories []string) (*MCPOptions, error) {
+	if len(repositories) > 100 {
+		return nil, errMCPOptionsTooManyRepositories
+	}
 	options, err := s.MCPOptions(ctx, workspaceID)
 	if err != nil {
 		return nil, err

@@ -28,14 +28,17 @@ func TestAutomationMCPDefinitionDeletionRequiresConfirmation(t *testing.T) {
 	repo := newCatalogRepositoryFake()
 	catalog := NewCatalogService(repo)
 	writer, ok := any(catalog).(interface {
-		SetAutomationUsageReader(func(context.Context, string, string) (int, error))
+		SetAutomationUsageReader(func(context.Context, string) (map[string]int, error))
 	})
 	require.True(t, ok, "catalog deletion must include automation references")
-	writer.SetAutomationUsageReader(func(context.Context, string, string) (int, error) { return 1, nil })
+
 	d, err := catalog.Create(t.Context(), CreateDefinitionInput{WorkspaceID: "workspace", RuntimeName: "reports", DisplayName: "Reports", ExecutionMode: ExecutionModeRemote, Transport: ServerTypeHTTP, Configuration: MCPServerConfiguration{URL: "https://reports.example.test/mcp"}})
 	require.NoError(t, err)
+	writer.SetAutomationUsageReader(func(context.Context, string) (map[string]int, error) { return map[string]int{d.ID: 1}, nil })
 	require.ErrorIs(t, catalog.Delete(t.Context(), "workspace", d.ID, d.Revision, false), ErrMCPDefinitionSelected)
 	_, err = catalog.Get(t.Context(), "workspace", d.ID)
 	require.NoError(t, err)
 	require.NoError(t, catalog.Delete(t.Context(), "workspace", d.ID, d.Revision, true))
+	_, err = catalog.Get(t.Context(), "workspace", d.ID)
+	require.ErrorIs(t, err, ErrMCPServerDefinitionNotFound)
 }

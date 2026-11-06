@@ -3,6 +3,7 @@ status: current
 system: tasks
 requirements:
   - REQ-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001
+updated: 2026-11-05
 ---
 
 # Cancelled turn completion: dispatch and stream coordination
@@ -18,7 +19,9 @@ The [queued ownership design](queued-session-ownership.md#replay-and-reconciliat
 continues to own task admission and review reconciliation locking.
 The [UI progress design](../../ui/system-design/cancel-turn-progress.md) owns the
 existing cancellation projection and desktop/phone presentation.
-This design describes the implemented repair and the compatibility invariants that govern it.
+The preparation repair and acknowledgement amendment are implemented.
+The [settlement deadlock package](../../../plans/cancellation-completion-delete-deadlock/plan.md)
+records the acknowledgement and prompt-identity deadline regressions.
 
 ## Existing components
 
@@ -97,7 +100,7 @@ attempt and a completed pause no longer has an active operation.
 | Lifecycle prompt serialization before admission | Prior stream drain and preparation | Holding the session guard while waiting for publication |
 | Final admission through acceptance | Revalidation, generation allocation, transport acceptance, ownership publication | Turn completion or synchronous stream-consumer re-entry |
 | Stream publication | Existing ordered delivery and guarded persistence | A reverse dependency from guarded dispatch to the same publisher |
-| Cancellation reconciliation | Captured-identity validation and local writes | Lifecycle cancellation while holding the session guard |
+| Cancellation reconciliation | Captured-identity validation and local writes | Lifecycle cancellation or settlement acknowledgement while holding the session guard |
 
 Preserve `emitMu` ordering and `handleAgentStreamEvent` serialization.
 Removing either lock or making each publication an independent goroutine would weaken existing guarantees.
@@ -106,12 +109,47 @@ Admission rejection uses a cleanup callback distinct from provider delivery fail
 replacement cannot mark an already-running execution failed. Preparation failure callbacks must
 run after any dispatch guard is released.
 
+## Settlement acknowledgement and late completion
+
+This amendment applies the existing lock invariant to retained-failure acknowledgement.
+It covers AC-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001.1 and .2.
+
+`runExplicitCancellationOwned` retains logical operation ownership while it releases
+the physical session guard before `AcknowledgeRetainedPromptFailure`.
+That lifecycle call can wait for `promptLifecycleMu`.
+Completion can hold that mutex while `flushMessageBuffer` waits for `emitMu`.
+The publisher can hold `emitMu` while its synchronous consumer needs the session guard.
+Acknowledgement under the guard therefore creates a circular wait after cancellation escalation.
+
+The cancellation registry, captured execution identity, and prompt generation remain authoritative during this interval.
+Concurrent cancellation sources still join the same operation.
+Queued prompts remain parked. Acknowledgement validates the registered execution and generation before it changes settlement state.
+A stale acknowledgement cannot release successor admission.
+
+Reacquire through `lockedCancelInFlightGuard.relockWithContext` before any remaining guarded mutation.
+Revalidate the captured cancellation identity after reacquisition.
+If reacquisition expires, return the existing operation error and release only this operation's projection reference.
+Do not dispatch a joined action after its operation expires.
+
+`handleAgentTurnFailed` applies the same boundary after durable turn and delivery settlement.
+Release its session guard before `acknowledgeRetainedTurnFailure` enters lifecycle code.
+Keep runtime settlement fenced until the acknowledgement validates the captured generation.
+Do not weaken stream serialization or change event-bus delivery to hide the circular wait.
+
+Verification requires the real lifecycle completion handler, stream coalescer, and synchronous event bus.
+Use barriers to overlap a timer publication, a late completion, and cancellation acknowledgement.
+Prove exact transcript order, one cancellation outcome, cleared pending progress, and safe successor admission.
+Separate service tests prove that both acknowledgement callers release their actual session guard.
+An isolated fixture must terminate after an expected pre-fix failure without stranding the test process.
+
 ## Bounded cancellation guard acquisition
 
 The existing `cancellationOperationTTL` remains the service-owned operation deadline.
 Every guard acquisition performed by that operation must observe its context.
 This includes initial preparation, reacquisition after lifecycle cancellation, explicit joined
 reconciliation, and source-specific actions in `finishCancellationWithActions`.
+`GetPromptGenerationForSession` also observes that context when it reads the identity under `promptLifecycleMu`.
+A blocked prompt-identity read returns the context error without acquiring the mutex after expiry.
 
 Use the same reference-counted guard registry with a FIFO, context-aware lock.
 `LockContext` places a blocked caller in the waiter queue, and unlock hands ownership directly to

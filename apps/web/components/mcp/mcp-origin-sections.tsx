@@ -21,6 +21,10 @@ const SECTION_KEYS: Record<MCPOriginGroupScope, { title: string; description: st
     title: "settings:mcpFromAgentProfile",
     description: "settings:mcpFromAgentProfileDescription",
   },
+  automation: {
+    title: "settings:mcpFromAutomation",
+    description: "settings:mcpFromAutomationDescription",
+  },
   unknown: { title: "settings:mcpFromTaskSetup", description: "settings:mcpOriginUnavailable" },
 };
 

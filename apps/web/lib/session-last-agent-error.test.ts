@@ -18,6 +18,7 @@ const OTHER_TAB_STAMP = "stamp-other";
 const THIS_TAB_STAMP = "stamp-this";
 const MANAGED_RUNTIME_NPM_FAILURE = "managed_runtime_npm_resolution";
 const NPM_ERROR_CODE_ETARGET = "npm error code ETARGET";
+const BOOTSTRAP_ERROR_MESSAGE = "The agent could not start.";
 
 describe("readLastAgentError", () => {
   it("reads structured failure fields in snake_case", () => {
@@ -93,7 +94,7 @@ describe("readLastAgentError optional metadata", () => {
     expect(
       readLastAgentError({
         last_agent_error: {
-          message: "The agent could not start.",
+          message: BOOTSTRAP_ERROR_MESSAGE,
           execution_id: "execution-1",
           phase: "bootstrap",
           attempt_id: "attempt-1",
@@ -123,7 +124,7 @@ describe("readLastAgentError optional metadata", () => {
   it("reads safe typed selection evidence and drops malformed optional fields", () => {
     const error = readLastAgentError({
       last_agent_error: {
-        message: "The agent could not start.",
+        message: BOOTSTRAP_ERROR_MESSAGE,
         causes: [
           {
             operation: "start",
@@ -167,7 +168,7 @@ describe("readLastAgentError optional metadata", () => {
     expect(
       readLastAgentError({
         last_agent_error: {
-          message: "The agent could not start.",
+          message: BOOTSTRAP_ERROR_MESSAGE,
           causes: [
             {
               operation: "resume",
@@ -180,6 +181,79 @@ describe("readLastAgentError optional metadata", () => {
         },
       })?.causes,
     ).toEqual([{ operation: "resume", code: "model_selection_failed" }]);
+  });
+
+  it("reads typed Copilot plugin evidence and validates the exact runtime identity", () => {
+    const error = readLastAgentError({
+      last_agent_error: {
+        message: BOOTSTRAP_ERROR_MESSAGE,
+        causes: [
+          {
+            operation: "start",
+            code: "plugin_preparation_failed",
+            detail: "private plugin path=/Users/alice/.config/copilot/plugins",
+            reason: "invalid_inventory",
+            runtime_version: "1.2.3+build.4",
+            plugin_id: "private-plugin",
+          },
+          {
+            operation: "resume",
+            code: "model_unavailable",
+            reason: "requested_not_advertised",
+            runtime_version: "/private/runtime",
+          },
+        ],
+      },
+    });
+
+    expect(error?.causes).toEqual([
+      {
+        operation: "start",
+        code: "plugin_preparation_failed",
+        detail: "The selected Copilot plugins could not be prepared.",
+        reason: "invalid_inventory",
+        runtime_version: "1.2.3+build.4",
+      },
+      {
+        operation: "resume",
+        code: "model_unavailable",
+        reason: "requested_not_advertised",
+      },
+    ]);
+
+    const invalid = readLastAgentError({
+      last_agent_error: {
+        message: BOOTSTRAP_ERROR_MESSAGE,
+        causes: [
+          {
+            operation: "start",
+            code: "plugin_preparation_failed",
+            detail: "private output",
+            reason: "invalid_inventory",
+            runtime_version: "1.2.3-beta.1",
+          },
+          {
+            operation: "start",
+            code: "plugin_preparation_failed",
+            reason: "private_reason",
+            runtime_version: "1.2.3",
+          },
+        ],
+      },
+    });
+    expect(invalid?.causes).toEqual([
+      {
+        operation: "start",
+        code: "plugin_preparation_failed",
+        detail: "The selected Copilot plugins could not be prepared.",
+        reason: "invalid_inventory",
+      },
+      {
+        operation: "start",
+        code: "plugin_preparation_failed",
+        detail: "The selected Copilot plugins could not be prepared.",
+      },
+    ]);
   });
 
   it("reads typed launch recovery fields and keeps action order bounded", () => {

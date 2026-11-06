@@ -149,7 +149,7 @@ Implementation checks on 2026-11-04:
 
 - Backend work-order suite: 380 passing cases (210 top-level tests), 27 successful packages, zero failures or skipped tests. PostgreSQL 17 ran with UTF8 encoding. This includes actual optional-package handlers, direct-dispatch checks, native grant denial, SQLite/PostgreSQL save conflicts, resolver snapshots, helper capabilities, and continuation/retry contracts.
 - Full affected package suites also passed after correcting test fixtures. The full automation and settings-store suites passed against the isolated PostgreSQL service. Export disposition and portable grant omission passed.
-- Race checks: `GOMAXPROCS=2 go test -trimpath -race -p=2 ./internal/automation ./internal/orchestrator/executor -run AutomationMCP -count=1`: passed.
+- Race checks: `GOMAXPROCS=2 go test -tags fts5 -trimpath -race -p=2 ./internal/automation ./internal/orchestrator/executor -run AutomationMCP -count=1`: passed.
 - Web verification command in Task 04: 80 tests passed in eight files. The existing built-in attachment and plugin domain regressions are included.
 - Web typecheck passed with `NODE_OPTIONS=--max-old-space-size=8192`. The default Node heap was insufficient for this repository.
 - Full web lint, `i18n:check`, and `i18n:ratchet`: passed. All seven locales and pseudo were checked.
@@ -164,7 +164,7 @@ Implementation checks on 2026-11-04:
 The following command ran the combined backend work-order suite from `apps/backend`, with `KANDEV_TEST_POSTGRES_DSN` set to the isolated database:
 
 ```bash
-go test -trimpath -json ./internal/automation ./internal/mcp/profile ./internal/mcp/server ./internal/mcp/handlers ./internal/mcp/scope ./internal/orchestrator/executor ./internal/orchestrator ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/agentctl/server/... ./internal/agentctl/types/streams ./internal/agent/mcpconfig ./internal/agent/settings/store ./internal/sysprompt/... -run 'AutomationMCP|AutomationPluginTools|Builtin|Automation.*Retry|Automation.*Continuation|MCP.*Setup|PostgresMCPResolution|PostgresConfirmedMCPDelete' -count=1
+go test -tags fts5 -trimpath -json ./internal/automation ./internal/mcp/profile ./internal/mcp/server ./internal/mcp/handlers ./internal/mcp/scope ./internal/orchestrator/executor ./internal/orchestrator ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/agentctl/server/... ./internal/agentctl/types/streams ./internal/agent/mcpconfig ./internal/agent/settings/store ./internal/sysprompt/... -run 'AutomationMCP|AutomationPluginTools|Builtin|Automation.*Retry|Automation.*Continuation|MCP.*Setup|PostgresMCPResolution|PostgresConfirmedMCPDelete' -count=1
 ```
 
 Browser commands ran from `apps/web` with inherited Kandev service settings removed, an unused port offset, and the host Chromium library path. The runner built the backend, fixture binaries, and web assets before the final `--no-build` runs:
@@ -189,6 +189,21 @@ bash scripts/lint-go-changed apps/backend/internal/automation/mcp_selection_test
 The wrapper supplies the installed `golangci-lint` through PATH and bounds Go memory and workers. An initial cold-cache lint attempt exceeded the loading timeout. The complete rerun reached analysis. The final two-package fix rerun reported zero issues.
 
 The user authorized a ready-for-review PR on 2026-11-05. Publication uses the repository template and fresh desktop/phone screenshots.
+
+## PR remediation
+
+PR #5106 remediation runs in the primary session. The base merge preserves both new helper capabilities and automation selection.
+
+The first review batch identified 41 findings. Changes cover resource-key and profile ownership checks, helper negotiation before preparation, retry templates, native question tools, batched usage and HTTP deletion guards, editor reconciliation and removable stale choices, translated origins, and stronger regressions. The shared requirement keeps its stable ID and gains separate UI criteria.
+
+Local verification on 2026-11-06:
+
+- The expanded backend command uses `-tags fts5`, the Task 04 package set plus agent-settings handlers, and the existing isolated PostgreSQL database. It passed 987 cases across 28 packages. One host-ownership case skipped because `chown` is unavailable. Provider E2E and Windows-only packages remain platform-gated.
+- The focused web command adds the origin-label and origin-group tests. All 116 tests passed in ten files, including reconciliation, mode changes, and origin projection.
+- Web typecheck, lint, translation integrity, and the new-copy ratchet passed. Specification structure and catalog checks passed.
+- Changed-Go lint passed after extracting the two resource-field constants. The full affected-package scan reported only those findings. The final handler-package rerun reported zero issues.
+- All eight desktop and four phone scenarios passed, including blocked-package removal, inherited/direct server removal, and keyboard focus across viewport changes. Both used the managed runner and fresh application/fixture builds.
+- Normal commit hooks and external CI/review completion remain pending. Screenshot capture follows the final commit.
 
 ## Risks
 

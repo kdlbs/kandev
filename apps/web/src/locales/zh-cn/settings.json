@@ -1219,5 +1219,8 @@
   "builtinMcp.backToPackages": "返回工具包",
   "builtinMcp.packageDetails": "工具包详情",
   "builtinMcp.packageSummary": "选择任务可使用的 Kandev 工具。",
-  "builtinMcp.currentUnknown": "无法确定当前智能体的工具包。以下是为下次启动智能体保存的选择。"
+  "builtinMcp.currentUnknown": "无法确定当前智能体的工具包。以下是为下次启动智能体保存的选择。",
+  "mcpFromAutomation": "来自自动化",
+  "mcpFromAutomationDescription": "启动此进程的自动化所选的服务器。",
+  "builtinMcp.surfaces.automation": "自动化"
 }

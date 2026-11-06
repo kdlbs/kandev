@@ -35,5 +35,5 @@ func assertAutomationMCPStoreResolution(t *testing.T, repo *sqliteRepository) {
 	require.Equal(t, "automation", string(result.Servers[0].Origins[0].Scope))
 	rc.Automation.WorkspaceID = "foreign"
 	_, err = resolver.Resolve(t.Context(), rc, mcpconfig.Policy{AllowHTTP: true})
-	require.Error(t, err)
+	require.ErrorContains(t, err, "automation MCP contribution owner mismatch")
 }

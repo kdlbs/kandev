@@ -23,7 +23,7 @@ describe("automation MCP evidence", () => {
       session_id: "session",
       workspace_id: "workspace",
       binding_state: "accepted",
-      bound: { session_id: "session", manifest: { task_id: "foreign", packages: ["diagnostics"] } },
+      bound: { session_id: "session", manifest: { task_id: "task", packages: ["diagnostics"] } },
     } as unknown as BuiltinMCPSessionView;
     expect(automationMCPEvidence(automation, run, view).bound).toBeUndefined();
   });

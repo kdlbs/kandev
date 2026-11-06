@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"testing"
@@ -129,4 +130,11 @@ func TestAutomationMCPConfigurationGrantDenial(t *testing.T) {
 	require.Len(t, items, 1)
 	_, err = svc.UpdateAutomation(native, existing.ID, &UpdateAutomationRequest{MCPSelection: selection, ExpectedMCPSelectionRevision: &revision})
 	require.NoError(t, err)
+}
+
+func TestAutomationMCPRejectsForeignDefinition(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetMCPSelectionReaders(automationMCPOptionsCatalog{definitions: []*mcpconfig.MCPServerDefinition{{ID: "foreign", WorkspaceID: "other", Enabled: true}}}, nil)
+	err := svc.validateMCPSelection(WithNativePluginToolIntent(t.Context()), "workspace", TaskModeAutomationRun, &MCPSelection{BuiltinPackages: []p.PackageID{p.PackageCore}, DefinitionIDs: []string{"foreign"}})
+	require.EqualError(t, err, "MCP definition unavailable in this workspace")
 }

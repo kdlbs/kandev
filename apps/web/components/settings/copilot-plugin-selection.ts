@@ -3,7 +3,8 @@ export type CopilotPluginSelectionRow = {
   name: string;
   marketplace: string | null;
   version: string | null;
-  nativeEnabled: boolean;
+  /** Null when no current successful inventory observation covers this row. */
+  nativeEnabled: boolean | null;
   selected: boolean;
   available: boolean;
   /** Present when the backend reported a bounded reason code. */
@@ -46,7 +47,7 @@ export function buildCopilotPluginSelectionRows(
     name: plugin.name,
     marketplace: plugin.marketplace?.trim() || null,
     version: plugin.version?.trim() || null,
-    nativeEnabled: plugin.native_enabled,
+    nativeEnabled: fresh ? plugin.native_enabled : null,
     selected: selected.has(plugin.id),
     available: fresh && plugin.availability === "available",
     reasonCode: fresh ? (plugin.reason_code ?? null) : null,
@@ -61,7 +62,7 @@ export function buildCopilotPluginSelectionRows(
       name: pluginDisplayName(id),
       marketplace: null,
       version: null,
-      nativeEnabled: false,
+      nativeEnabled: null,
       selected: true,
       available: false,
       reasonCode: null,

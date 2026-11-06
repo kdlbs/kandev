@@ -35,6 +35,7 @@ import {
   automationDraftRevision,
   mcpSelectionForUpdate,
   withSavedMCPSelection,
+  reconcileSavedMCPSelection,
   buildCreatePayload,
   buildUpdatePayload,
   buildWebhookUrl,
@@ -44,7 +45,7 @@ import { resolveExecutorType } from "./automation-repository-selection";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
 import { AutomationDeleteConfirmDialog } from "./automation-delete-confirm-dialog";
-import { useAutomationMCPReconciliation } from "./use-automation-mcp-reconciliation";
+import { useAutomationMCPReconciliation } from "@/hooks/domains/settings/use-automation-mcp-reconciliation";
 import { AutomationMCPAccess } from "./automation-mcp-access";
 import { AutomationPluginTools } from "./automation-plugin-tools";
 import { useAutomationPluginTools } from "@/hooks/domains/settings/use-automation-plugin-tools";
@@ -210,7 +211,7 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
           const savedTriggers = a.triggers ?? [];
           triggerActions.loadTriggers(savedTriggers);
           triggerActions.clearPending();
-          setForm((prev) => ({ ...prev, mcpSelectionRevision: a.mcp_selection_revision ?? 0 }));
+          setForm((prev) => reconcileSavedMCPSelection(prev, form, a));
           onSaved(withSavedMCPSelection(formWithPromotedSelections, a), savedTriggers);
           setCurrentId(a.id);
           setCreatedWebhook({ url: buildWebhookUrl(a.id), secret: a.webhook_secret });
@@ -231,8 +232,7 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
           ),
         );
         const persistedForm = withSavedMCPSelection(formWithPromotedSelections, saved);
-        const selectionRevision = persistedForm.mcpSelectionRevision;
-        setForm((prev) => ({ ...prev, mcpSelectionRevision: selectionRevision }));
+        setForm((prev) => reconcileSavedMCPSelection(prev, form, saved));
 
         const persistedTriggers = await triggerActions.persistDrafts();
         promoteSelections();
@@ -528,7 +528,6 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         return {
           ...next,
           retryPolicy: normalizeRetryPolicyForTaskMode(next.taskMode, prev.retryPolicy),
-          mcpSelection: undefined,
         };
       }
       return next;

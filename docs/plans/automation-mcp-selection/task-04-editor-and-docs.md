@@ -98,7 +98,7 @@ New test paths named by this work order must exist before its verification compl
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/web && pnpm exec vitest run components/automations/automation-payload.test.ts components/automations/automation-plugin-tools.test.tsx hooks/domains/settings/use-automation-mcp-options.test.ts hooks/domains/settings/use-automation-plugin-tools.test.ts lib/state/slices/session-runtime/automation-mcp-validation.test.ts lib/state/slices/session-runtime/builtin-mcp-attachment.test.ts components/runs/automation-mcp-evidence.test.ts components/runs/automation-detail-page.test.tsx)
+(cd apps/web && pnpm exec vitest run components/automations/automation-payload.test.ts components/automations/automation-plugin-tools.test.tsx hooks/domains/settings/use-automation-mcp-options.test.ts hooks/domains/settings/use-automation-plugin-tools.test.ts lib/state/slices/session-runtime/automation-mcp-validation.test.ts lib/state/slices/session-runtime/builtin-mcp-attachment.test.ts components/mcp/mcp-origin-labels.test.ts components/mcp/mcp-origin-groups.test.ts components/runs/automation-mcp-evidence.test.ts components/runs/automation-detail-page.test.tsx)
 (cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck)
 (cd apps && pnpm --filter @kandev/web lint)
 (cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet)
@@ -155,7 +155,7 @@ An unrelated save must not approve loaded choices. Do not display desired choice
 
 The editor, stale-save reconciliation, run evidence, locales, and public docs are implemented.
 
-- The exact web command above passed 80 tests in eight files. Rendering is covered through focused desktop/phone browser flows. State and request behavior use pure-model and domain-hook tests.
+- The implementation baseline passed 80 tests in eight files. The expanded command above passed 116 tests in ten files during PR remediation. Rendering is covered through focused desktop/phone browser flows. State and request behavior use pure-model and domain-hook tests.
 - Typecheck passed with an 8 GiB Node heap. Full web lint, translation checks, and new-copy ratchet passed.
 - Four new desktop scenarios passed. The prior combined run also passed the existing plugin-tool and both target-mode scenarios.
 - Three phone scenarios passed, including the existing plugin flow. New checks cover Save/Reset, all optional packages, viewport draft retention and overflow at 320/393/767/768px, 44px rows, and a narrow fine pointer with keyboard selection.
@@ -163,3 +163,7 @@ The editor, stale-save reconciliation, run evidence, locales, and public docs ar
 - Public docs updated: `docs/public/automation-and-mcp.md` (how-to) and `docs/public/builtin-mcp-packages.md` (reference). The root README and screenshot catalog were checked. No new overview or media change was needed.
 - Public validators passed 63 tests and validated 55 pages. Catalog/spec lint and actual-diff work-order coverage passed.
 - Detailed commands, environment adjustments, final lint, and limits are recorded in [the plan](plan.md#verification-results).
+
+### PR remediation
+
+PR remediation covers canonical save values, retained in-flight edits, task-mode round trips, stale callbacks, unsaved recovery, named automation origins, removable blocked/direct inherited choices, corrected translations, and disclosure-scoped evidence reads. The plan records the expanded tests and browser results.

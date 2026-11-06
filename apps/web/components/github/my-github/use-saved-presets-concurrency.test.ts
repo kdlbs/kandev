@@ -254,7 +254,8 @@ async function expectQueuedWorkspaceSaveIsolation() {
 
   const secondPayload = vi.mocked(updateGitHubWorkspaceSettings).mock.calls[1]?.[0];
   expect(secondPayload?.workspace_id).toBe(firstWorkspaceId);
-  expect((secondPayload?.saved_presets as SavedPreset[]).map((preset) => preset.label)).toEqual([
+  const savedPresets = secondPayload?.saved_presets as SavedPreset[] | undefined;
+  expect(savedPresets?.map((preset) => preset.label)).toEqual([
     "Workspace A",
     "First queued",
     "Second queued",

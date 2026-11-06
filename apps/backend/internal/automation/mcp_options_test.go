@@ -3,6 +3,8 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	ws "github.com/kandev/kandev/pkg/websocket"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -38,4 +40,28 @@ func TestAutomationMCPOptionsPreserveOriginsWithoutConfiguration(t *testing.T) {
 	require.Len(t, options.Packages, 5)
 	_, err = svc.mcpOptionsWithInheritance(t.Context(), "workspace", "profile", []string{"foreign"})
 	require.ErrorIs(t, err, ErrRepositoryNotInWorkspace)
+}
+
+func TestAutomationMCPOptionsRejectsOversizedRepositoryList(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetMCPSelectionReaders(automationMCPOptionsCatalog{}, nil)
+	_, err := svc.mcpOptionsWithInheritance(t.Context(), "workspace", "", make([]string, 101))
+	require.ErrorContains(t, err, "too many repository IDs")
+}
+
+func TestAutomationMCPOptionsErrorCodes(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{{errors.New("database unavailable"), ws.ErrorCodeInternalError}, {ErrRepositoryNotInWorkspace, ws.ErrorCodeBadRequest}, {ErrAgentProfileNotFound, ws.ErrorCodeNotFound}} {
+		svc := newTestService(t)
+		svc.SetWorkspaceAuthorizer(func(context.Context, string) error { return tc.err })
+		raw, err := json.Marshal(map[string]any{"workspace_id": "workspace"})
+		require.NoError(t, err)
+		response, err := wsMCPOptions(svc)(t.Context(), &ws.Message{ID: "request", Action: "automation.mcp_options", Payload: raw})
+		require.NoError(t, err)
+		var payload ws.ErrorPayload
+		require.NoError(t, json.Unmarshal(response.Payload, &payload))
+		require.Equal(t, tc.code, payload.Code)
+	}
 }

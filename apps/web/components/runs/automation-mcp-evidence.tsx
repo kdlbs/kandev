@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useBuiltinMCPSession } from "@/hooks/domains/session/use-builtin-mcp-session";
 import type { Automation, AutomationRun } from "@/lib/types/automation";
@@ -12,18 +13,23 @@ export function AutomationMCPEvidence({
   run: AutomationRun;
 }) {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
   const { view } = useBuiltinMCPSession(
     run.task_id || null,
     run.session_id ?? null,
     automation.workspace_id,
-    true,
+    open,
   );
   const evidence = automationMCPEvidence(automation, run, view);
   const names = (packages: typeof evidence.desired) =>
     packages?.map((id) => t(`settings:builtinMcp.packages.${id}.label`)).join(", ") ||
     t("automations:mcpUnknown");
   return (
-    <details className="shrink-0 border-b px-4 py-2 text-xs" data-testid="automation-mcp-evidence">
+    <details
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      className="shrink-0 border-b px-4 py-2 text-xs"
+      data-testid="automation-mcp-evidence"
+    >
       <summary className="cursor-pointer py-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11">
         {t("automations:mcpAccess")}
       </summary>

@@ -7,6 +7,9 @@ vi.mock("@/app/actions/workspaces", () => ({
 }));
 
 import {
+  automationDraftRevision,
+  reconcileSavedMCPSelection,
+  mcpSelectionForUpdate,
   buildCreatePayload,
   buildUpdatePayload,
   canonicalPluginTools,
@@ -389,4 +392,51 @@ describe("automation draft revision", () => {
       }),
     );
   });
+});
+
+it("treats an absent MCP draft like the saved null selection", () => {
+  const form = { ...baseForm(), mcpSelection: undefined };
+  expect(automationDraftRevision(form)).toEqual(
+    automationDraftRevision({ ...form, mcpSelection: null }),
+  );
+});
+
+it("applies canonical MCP save values without losing in-flight edits", () => {
+  const submitted = baseForm({
+    mcpSelection: { builtin_packages: ["core"], definition_ids: [] },
+    mcpSelectionRevision: 1,
+  });
+  const saved = {
+    mcp_selection: null,
+    mcp_selection_revision: 2,
+  } as import("@/lib/types/automation").Automation;
+  expect(reconcileSavedMCPSelection(submitted, submitted, saved).mcpSelection).toBeNull();
+  const edited = {
+    ...submitted,
+    mcpSelection: { builtin_packages: ["core", "configuration"], definition_ids: [] },
+  } as FormState;
+  expect(reconcileSavedMCPSelection(edited, submitted, saved)).toMatchObject({
+    mcpSelection: edited.mcpSelection,
+    mcpSelectionRevision: 2,
+  });
+});
+it("omits MCP grants from managed conversation payloads", () => {
+  const form = baseForm({
+    taskMode: "managed_conversation",
+    mcpSelection: { builtin_packages: ["core"], definition_ids: [] },
+  });
+  for (const payload of [
+    buildCreatePayload("workspace", form, [], []),
+    buildUpdatePayload(form, [], undefined, form.mcpSelection!),
+  ]) {
+    expect(payload).not.toHaveProperty("mcp_selection");
+    expect(payload).not.toHaveProperty("expected_mcp_selection_revision");
+  }
+});
+
+it("resubmits the displayed selection when changing task mode", () => {
+  const saved = baseForm({ mcpSelection: { builtin_packages: ["core"], definition_ids: [] } });
+  expect(mcpSelectionForUpdate({ ...saved, taskMode: "normal_task" }, saved)).toEqual(
+    saved.mcpSelection,
+  );
 });

@@ -65,9 +65,9 @@ export function useAutomationMCPSelectionReload(workspaceId: string, automationI
       captured.active = false;
     };
   }, [key]);
+  const captured = owner.current;
   return useCallback(async () => {
-    if (!automationId) return undefined;
-    const captured = owner.current;
+    if (!automationId || captured !== owner.current || !captured.active) return undefined;
     const saved = await getAutomation(automationId);
     if (
       captured !== owner.current ||

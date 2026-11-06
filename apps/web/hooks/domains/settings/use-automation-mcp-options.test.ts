@@ -82,3 +82,26 @@ describe("automation MCP options", () => {
     expect(await pending).toBeUndefined();
   });
 });
+
+it("rejects a stale reload callback invoked after the editor changes", async () => {
+  api.get.mockResolvedValue({ id: "old", workspace_id: "old" });
+  const { result, rerender } = renderHook(
+    ({ workspace, id }) => useAutomationMCPSelectionReload(workspace, id),
+    { initialProps: { workspace: "old", id: "old" } },
+  );
+  const staleReload = result.current;
+  rerender({ workspace: "new", id: "new" });
+  expect(await staleReload()).toBeUndefined();
+  expect(api.get).not.toHaveBeenCalled();
+});
+
+it("clears a failed unsaved editor after reloading choices", async () => {
+  const { useAutomationMCPReconciliation } = await import("./use-automation-mcp-reconciliation");
+  const { result } = renderHook(() =>
+    useAutomationMCPReconciliation("workspace", null, vi.fn(), vi.fn()),
+  );
+  act(() => result.current.failed());
+  expect(result.current.saveFailed).toBe(true);
+  await act(() => result.current.reload());
+  expect(result.current.saveFailed).toBe(false);
+});

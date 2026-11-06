@@ -281,13 +281,7 @@ Both accept any value `time.ParseDuration` accepts (`30m`, `2h`, `500ms`, …). 
 
 `instance.Manager.buildMcpServerConfigs` calls `exec.LookPath` on every stdio MCP `Command` before passing the list to the agent. Entries whose command can't be resolved are dropped with a warn log (URL-transport MCPs always pass through). This prevents the `/snap/bin/brave` repro in GH issue #1247 — an MCP whose binary was uninstalled after config save no longer causes a permanently broken child process to be spawned every session.
 
-## Testing
+## Built-in MCP package delivery
 
-PTY-backed shell tests run on Windows through the supported ConPTY path. Skip
-only assertions that require Unix-specific PTY semantics; keep environment and
-configuration-merge tests platform-neutral so they remain covered on every
-supported OS.
-
-## Further scoped notes
-
-- `server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`) and iframe-blocking header stripping.
+See [MCP delivery](MCP_DELIVERY.md) for the configure record, helper capability,
+remote project-file endpoints, and per-process evidence rules.
