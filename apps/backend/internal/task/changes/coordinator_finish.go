@@ -211,8 +211,7 @@ func (c *Coordinator) claimTerminalInterval(terminal Terminal, client Checkpoint
 		return changeSet, terminal, done, err
 	}
 	if !sameTurnChangeTerminalOwner(changeSet, terminal.Admission) {
-		terminal = terminalWithAcceptedOwner(terminal, changeSet)
-		return nil, terminal, true, c.finalizeUnavailable(context.Background(), changeSet, terminal, models.TurnChangeReasonCheckoutUnavailable, client)
+		return nil, terminal, true, repoerrors.ErrTurnChangeRelationship
 	}
 	claimed, latest, done, err := c.claimTerminalCapture(changeSet, terminal, client)
 	if err != nil || done {
@@ -255,17 +254,6 @@ func (c *Coordinator) loadTerminalTurnChangeSet(terminal Terminal, changeSetID s
 	return changeSet, terminal, false, nil
 }
 
-func terminalWithAcceptedOwner(terminal Terminal, changeSet *models.TurnChangeSet) Terminal {
-	terminal.Admission = Admission{
-		TaskID: changeSet.TaskID, SessionID: changeSet.TaskSessionID,
-		TaskEnvironmentID: changeSet.TaskEnvironmentID, TurnID: changeSet.TurnID,
-		ExecutionID: changeSet.RuntimeExecutionID, StartupAttemptID: changeSet.StartupAttemptID,
-		PromptGeneration: uint64(changeSet.PromptGeneration),
-	}
-	terminal.Outcome = "boundary_lost"
-	return terminal
-}
-
 func (c *Coordinator) claimTerminalCapture(
 	changeSet *models.TurnChangeSet,
 	terminal Terminal,
@@ -302,8 +290,11 @@ func (c *Coordinator) resolveExistingTerminalClaim(
 		return false, latest, true, nil
 	}
 	if !terminalChangeClaimMatches(latest, claim) {
-		err := c.finalizeUnavailable(context.Background(), latest, terminal, models.TurnChangeReasonCheckoutUnavailable, client)
-		return false, latest, true, err
+		if latest.TerminalCaptureStartedAt == nil && sameTurnChangeTerminalOwner(latest, terminal.Admission) {
+			err := c.finalizeUnavailable(context.Background(), latest, terminal, models.TurnChangeReasonCheckoutUnavailable, client)
+			return false, latest, true, err
+		}
+		return false, latest, true, repoerrors.ErrTurnChangeRelationship
 	}
 	return true, latest, false, nil
 }
@@ -325,6 +316,9 @@ func (c *Coordinator) reloadTerminalCapture(terminal Terminal, changeSetID strin
 	}
 	if changeSet.ID != changeSetID || changeSet.TerminalCaptureStartedAt == nil {
 		return nil, errors.New("claimed terminal turn change set has no durable capture timestamp")
+	}
+	if !sameTurnChangeTerminalOwner(changeSet, terminal.Admission) {
+		return nil, repoerrors.ErrTurnChangeRelationship
 	}
 	return changeSet, nil
 }
@@ -702,6 +696,9 @@ func (c *Coordinator) persistTerminalFinalization(
 		return nil
 	}
 	if readErr == nil {
+		if !sameTurnChangeTerminalOwner(latest, terminal.Admission) {
+			return repoerrors.ErrTurnChangeRelationship
+		}
 		if settleErr := c.finalizeUnavailable(context.Background(), latest, terminal, models.TurnChangeReasonContentUnavailable, client); settleErr != nil {
 			return errors.Join(err, settleErr)
 		}
