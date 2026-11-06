@@ -112,6 +112,7 @@ var providerRules = map[string][]rule{
 		mustRule("opencode.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
 		// Keep this provider-scoped rule limited to OpenCode's unlabelled opening line only.
 		mustRule("opencode.stderr.free_usage_unlabelled.v1", `(?im)^\s*free\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
+		mustRule("opencode.stderr.free_usage_prefixed.v1", `(?im)^\s*(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*free\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
 		// OpenCode's upstream admission refusal is temporary capacity pressure,
 		// not a quota or generic runtime error. The bracketed token and the full
 		// opening line are required so bare capacity prose or a quoted example
