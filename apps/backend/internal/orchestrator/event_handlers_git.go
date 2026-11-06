@@ -722,6 +722,7 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 	// samples and produce an incorrect compaction count.
 	persisted, err := s.persistAndPublishContextWindowUpdate(
 		context.Background(), data.TaskID, data.TaskSessionID, generation, contextWindowData,
+		data.CompactionInferenceDisabled && !data.CopilotNativeSessionEvents,
 	)
 	switch {
 	case err != nil:
@@ -740,15 +741,53 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 	}
 }
 
+// compactionAvailabilitySetter is implemented by the task repository that owns
+// the native compaction reporting metadata. Kept optional so lightweight
+// orchestrator test doubles do not need to implement it.
+type compactionAvailabilitySetter interface {
+	SetSessionCompactionAvailability(
+		ctx context.Context,
+		sessionID string,
+		availability string,
+		coverage string,
+	) (*streams.ContextCompactionReporting, error)
+}
+
 func (s *Service) persistAndPublishContextWindowUpdate(
 	ctx context.Context,
 	taskID, sessionID string,
 	generation uint64,
 	contextWindowData map[string]interface{},
+	nativeCountingUnavailable bool,
 ) (bool, error) {
 	persisted, count, err := s.persistContextWindowUpdate(ctx, sessionID, generation, contextWindowData)
 	if !persisted || err != nil || s.eventBus == nil {
 		return persisted, err
+	}
+	metadata := map[string]interface{}{
+		contextWindowMetadataKey:                    contextWindowData,
+		models.SessionMetaKeyContextCompactionCount: count,
+	}
+	if session, readErr := s.repo.GetTaskSession(ctx, sessionID); readErr == nil && session != nil {
+		if reporting, ok := session.Metadata[models.SessionMetaKeyContextCompactionReporting]; ok {
+			metadata[models.SessionMetaKeyContextCompactionReporting] = reporting
+		}
+	}
+	if nativeCountingUnavailable {
+		if setter, ok := s.repo.(compactionAvailabilitySetter); ok {
+			reporting, reportErr := setter.SetSessionCompactionAvailability(
+				ctx, sessionID,
+				streams.ContextCompactionAvailabilityUnavailable,
+				streams.ContextCompactionCoveragePartial,
+			)
+			if reportErr != nil {
+				s.logger.Warn("failed to persist unavailable compaction reporting",
+					zap.String("session_id", sessionID),
+					zap.Error(reportErr))
+			} else if reporting != nil {
+				metadata[models.SessionMetaKeyContextCompactionReporting] = reporting
+			}
+		}
 	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 		events.TaskSessionStateChanged,
@@ -756,10 +795,7 @@ func (s *Service) persistAndPublishContextWindowUpdate(
 		map[string]interface{}{
 			"task_id":    taskID,
 			"session_id": sessionID,
-			"metadata": map[string]interface{}{
-				contextWindowMetadataKey:                    contextWindowData,
-				models.SessionMetaKeyContextCompactionCount: count,
-			},
+			"metadata":   metadata,
 		},
 	))
 	return true, nil

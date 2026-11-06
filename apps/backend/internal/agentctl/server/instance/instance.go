@@ -196,6 +196,10 @@ type CreateRequest struct {
 	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
 	PromptSuggestions bool `json:"prompt_suggestions,omitempty"`
 
+	// CopilotNativeSessionEvents asks Copilot for its opt-in native compaction
+	// and attributed usage notifications. Older agentctl builds ignore it.
+	CopilotNativeSessionEvents bool `json:"copilot_native_session_events,omitempty"`
+
 	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
 	AssumeMcpSse bool `json:"assume_mcp_sse,omitempty"`
 

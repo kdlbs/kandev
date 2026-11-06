@@ -1,3 +1,4 @@
+//nolint:revive // Existing ordered stream manager; compaction metadata stays with the projection call sites.
 package lifecycle
 
 import (
@@ -792,6 +793,7 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 		notify = canonicalProjectionShouldNotify(event, projectionResult)
 	}
 	event.CanonicalProjection = true
+	applyCanonicalCompactionResult(&event, projectionResult)
 	// Projection is the canonical commit boundary. ACK transport is scheduled
 	// independently so a lost ACK cannot hide output that is already durable.
 	if scheduleAcknowledgement {
@@ -1008,6 +1010,7 @@ func (sm *StreamManager) notifyCanonicalAgentEventBatch(
 		event.CanonicalMessageID = projectionResults[i].CanonicalMessageID
 		event.CanonicalProjection = true
 		event.CanonicalMessageAppend = projectionResults[i].Appended
+		applyCanonicalCompactionResult(&event, projectionResults[i])
 		sm.scheduleDurableDeliveryAck(execution, client, event)
 		if item.skipCallback || !canonicalProjectionShouldNotify(event, projectionResults[i]) {
 			continue
@@ -1334,4 +1337,25 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready
 	sm.logger.Error("failed to connect to workspace stream after retries",
 		zap.String("instance_id", execution.ID),
 		zap.Int("max_retries", maxRetries))
+}
+
+// applyCanonicalCompactionResult attaches committed count/reporting metadata to
+// the live notification. It never recomputes the count: the projector is the
+// only authority, and a lost publish is repaired by normal hydration.
+func applyCanonicalCompactionResult(
+	event *agentctl.AgentEvent,
+	result models.CanonicalAgentDeliveryProjectionResult,
+) {
+	if event == nil || (result.ContextCompactionCount == nil && result.ContextCompactionReporting == nil) {
+		return
+	}
+	if event.Data == nil {
+		event.Data = make(map[string]any)
+	}
+	if result.ContextCompactionCount != nil {
+		event.Data[models.SessionMetaKeyContextCompactionCount] = *result.ContextCompactionCount
+	}
+	if result.ContextCompactionReporting != nil {
+		event.Data[models.SessionMetaKeyContextCompactionReporting] = result.ContextCompactionReporting
+	}
 }

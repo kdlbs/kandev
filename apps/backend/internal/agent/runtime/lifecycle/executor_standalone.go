@@ -296,6 +296,7 @@ func buildStandaloneCreateInstanceRequest(
 		AssumeMcpHttp:              assumeMcpHttp,
 		McpMode:                    req.McpMode,
 		PromptSuggestions:          req.PromptSuggestions,
+		CopilotNativeSessionEvents: copilotNativeSessionEventsForLaunch(agentType, req.DeliveryStreamID),
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
@@ -909,6 +910,19 @@ func (r *StandaloneExecutor) buildRecoveredInstancesWithLease(
 }
 
 const durableDeliveryCapabilityName = "agent-delivery.v1"
+
+// SupportsCopilotNativeSessionEvents reports whether this runtime can collect
+// Copilot native events. A fresh standalone launch uses the same agentctl build,
+// while an adopted retained peer must advertise the optional capability.
+func (r *StandaloneExecutor) SupportsCopilotNativeSessionEvents() bool {
+	if r == nil {
+		return false
+	}
+	if !r.peerCapabilitiesSet {
+		return true
+	}
+	return r.peerHasCapability(acpcompat.CopilotNativeCompactionCapability)
+}
 
 func (r *StandaloneExecutor) peerHasCapability(name string) bool {
 	for _, capability := range r.peerCapabilities {

@@ -1295,6 +1295,7 @@ func (m *Manager) initializeCreatedExecution(
 ) *AgentExecution {
 	execution := runtimeInstance.ToAgentExecution(preparation.request)
 	execution.RuntimeName = rt.Name()
+	m.applyCopilotNativeLaunchCapability(execution, rt, preparation.request.DeliveryStreamID)
 	// Set before executionStore.Add: once the execution is registered, a
 	// concurrent EnsurePassthroughExecution can reach it, and it must never
 	// observe a half-initialised resume intent.

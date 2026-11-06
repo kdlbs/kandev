@@ -521,6 +521,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		PlanContent:                      event.PlanContent,
 		MCPAttachment:                    event.MCPAttachment,
 		MCPAttachmentAttempt:             event.MCPAttachmentAttempt,
+		ContextCompaction:                event.ContextCompaction,
 		BackgroundWork:                   event.BackgroundWork,
 		BackgroundWorkOutput:             event.BackgroundWorkOutput,
 	}
@@ -934,6 +935,7 @@ func (p *EventPublisher) PublishContextWindow(execution *AgentExecution, size, u
 		ContextWindowRemaining:      remaining,
 		ContextEfficiency:           efficiency,
 		CompactionInferenceDisabled: compactionInferenceDisabledForProvider(execution.AgentID),
+		CopilotNativeSessionEvents:  execution.CopilotNativeSessionEvents,
 		Timestamp:                   time.Now().UTC().Format(time.RFC3339Nano),
 	}
 

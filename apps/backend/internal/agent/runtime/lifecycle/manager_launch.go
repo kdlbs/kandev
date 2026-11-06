@@ -2518,6 +2518,7 @@ func (m *Manager) buildExecutionFromInstance(
 ) (*AgentExecution, error) {
 	execution := execInstance.ToAgentExecution(execReq)
 	execution.ExecutionProfileID = executionProfileID(req)
+	m.applyCopilotNativeLaunchCapability(execution, rt, execReq.DeliveryStreamID)
 	if profileInfo != nil {
 		execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
 	}

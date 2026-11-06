@@ -370,6 +370,10 @@ type InstanceConfig struct {
 	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
 	PromptSuggestions bool
 
+	// CopilotNativeSessionEvents enables Copilot's opt-in native compaction and
+	// attributed usage notifications for this launch.
+	CopilotNativeSessionEvents bool
+
 	// AssumeMcpSse overrides MCP capability filtering to assume the agent supports SSE.
 	AssumeMcpSse bool
 
@@ -791,6 +795,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.PromptSuggestions {
 		cfg.PromptSuggestions = true
 	}
+	if overrides.CopilotNativeSessionEvents {
+		cfg.CopilotNativeSessionEvents = true
+	}
 	if overrides.AssumeMcpSse {
 		cfg.AssumeMcpSse = true
 	}
@@ -883,6 +890,7 @@ type InstanceOverrides struct {
 	TaskID                     string
 	DisableAskQuestion         bool
 	PromptSuggestions          bool
+	CopilotNativeSessionEvents bool
 	AssumeMcpSse               bool
 	AssumeMcpHttp              bool
 	McpMode                    string
