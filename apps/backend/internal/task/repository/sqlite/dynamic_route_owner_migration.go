@@ -81,12 +81,12 @@ func (r *Repository) migrateNativeRouteOwnersSQLite(ctx context.Context, tx *sql
    id TEXT PRIMARY KEY, session_id TEXT REFERENCES task_sessions(id) ON DELETE CASCADE, route_id TEXT,
    logical_profile_id TEXT NOT NULL, execution_profile_id TEXT NOT NULL DEFAULT '',
    route_generation BIGINT NOT NULL, profile_version BIGINT NOT NULL, reason TEXT NOT NULL DEFAULT '',
-   created_at TIMESTAMP NOT NULL, UNIQUE (session_id, route_generation),
+   created_at TIMESTAMP NOT NULL, selection_ordinal BIGINT, UNIQUE (session_id, route_generation),
    CHECK ((session_id IS NOT NULL AND route_id IS NULL) OR (session_id IS NULL AND route_id IS NOT NULL AND route_id <> ''))
   )`,
 		`INSERT INTO dynamic_route_attempts_native_shadow
-   (id, session_id, logical_profile_id, execution_profile_id, route_generation, profile_version, reason, created_at)
-   SELECT id, session_id, logical_profile_id, execution_profile_id, route_generation, profile_version, reason, created_at FROM dynamic_route_attempts`,
+   (id, session_id, logical_profile_id, execution_profile_id, route_generation, profile_version, reason, created_at, selection_ordinal)
+   SELECT id, session_id, logical_profile_id, execution_profile_id, route_generation, profile_version, reason, created_at, selection_ordinal FROM dynamic_route_attempts`,
 		`DROP TABLE dynamic_route_attempts`,
 		`DROP TABLE dynamic_route_states`,
 		`ALTER TABLE dynamic_route_states_native_shadow RENAME TO dynamic_route_states`,
@@ -104,6 +104,7 @@ func ensureNativeRouteOwnerIndexes(ctx context.Context, tx *sqlx.Tx) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_route_states_owner ON dynamic_route_states ((COALESCE(route_id, session_id)))`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_route_attempts_owner_generation ON dynamic_route_attempts ((COALESCE(route_id, session_id)), route_generation)`,
 		`CREATE INDEX IF NOT EXISTS idx_dynamic_route_attempts_session ON dynamic_route_attempts(session_id, route_generation)`,
+		`CREATE INDEX IF NOT EXISTS idx_dynamic_route_attempts_profile_ordinal ON dynamic_route_attempts(logical_profile_id, selection_ordinal)`,
 	} {
 		if _, err := tx.ExecContext(ctx, query); err != nil {
 			return err

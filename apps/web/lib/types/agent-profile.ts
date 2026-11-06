@@ -57,10 +57,20 @@ export type DynamicUnclassifiedPolicy = {
 };
 
 export type DynamicAgentPolicy = {
+  selection?: DynamicAgentSelection;
   version: number;
   transient: DynamicErrorPolicy;
   hard: DynamicErrorPolicy;
   unclassified: DynamicUnclassifiedPolicy;
+};
+
+// The tier editor changes adjacency only. Other selection fields remain opaque
+// so a partial editor cannot erase model/usage or future policy metadata.
+export type DynamicAgentSelection = {
+  [key: string]: unknown;
+  join_previous?: boolean;
+  tier?: { [key: string]: unknown; mode?: string; on_failure?: string };
+  model?: unknown;
 };
 
 export type DynamicAgentCandidate = {

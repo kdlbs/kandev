@@ -149,6 +149,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.migrate.Apply("dynamic_resource_circuits.failure_count", `ALTER TABLE dynamic_resource_circuits ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := r.ensureRouteSelectionOrdinal(ctx); err != nil {
+		return err
+	}
 	if err := r.backfillLegacyActiveDynamicRoutes(); err != nil {
 		return err
 	}

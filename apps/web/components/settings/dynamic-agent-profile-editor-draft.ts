@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { moveTierCandidate, removeTierCandidate, toggleTierJoin } from "./ordered-dynamic-tiers";
 import type { AgentProfile } from "@/lib/types/http";
 import type {
   DynamicAgentCandidate,
@@ -33,6 +35,7 @@ export type DynamicAgentProfileEditorDraft = {
   addCandidate: (executionProfileId: string) => void;
   moveCandidate: (index: number, direction: -1 | 1) => void;
   removeCandidate: (index: number) => void;
+  toggleJoin: (index: number) => void;
   updateCandidate: (index: number, patch: Partial<DynamicAgentCandidate>) => void;
   updateCandidatePolicy: (
     index: number,
@@ -71,6 +74,7 @@ export function useDynamicAgentProfileEditorDraft({
   profile,
   onDraftChange,
 }: DynamicAgentProfileEditorDraftProps): DynamicAgentProfileEditorDraft {
+  const tiersEnabled = useFeature("dynamicProfileTiers");
   const [name, setName] = useState(profile.name);
   const [candidates, setCandidates] = useState<DynamicAgentCandidate[]>(
     profile.dynamic?.candidates ?? [],
@@ -133,6 +137,11 @@ export function useDynamicAgentProfileEditorDraft({
 
   const moveCandidate = (index: number, direction: -1 | 1) => {
     setCandidates((current) => {
+      if (tiersEnabled) {
+        const next = moveTierCandidate(current, index, direction);
+        notifyDraft(name, next);
+        return next;
+      }
       const target = index + direction;
       if (target < 0 || target >= current.length) return current;
       const next = [...current];
@@ -145,6 +154,11 @@ export function useDynamicAgentProfileEditorDraft({
 
   const removeCandidate = (index: number) => {
     setCandidates((current) => {
+      if (tiersEnabled) {
+        const next = removeTierCandidate(current, index);
+        notifyDraft(name, next);
+        return next;
+      }
       const next = current
         .filter((_, candidateIndex) => candidateIndex !== index)
         .map((candidate, position) => ({ ...candidate, position }));
@@ -158,6 +172,15 @@ export function useDynamicAgentProfileEditorDraft({
       const next = current.map((candidate, candidateIndex) =>
         candidateIndex === index ? { ...candidate, ...patch } : candidate,
       );
+      notifyDraft(name, next);
+      return next;
+    });
+  };
+
+  const toggleJoin = (index: number) => {
+    if (!tiersEnabled) return;
+    setCandidates((current) => {
+      const next = toggleTierJoin(current, index);
       notifyDraft(name, next);
       return next;
     });
@@ -259,6 +282,7 @@ export function useDynamicAgentProfileEditorDraft({
     addCandidate,
     moveCandidate,
     removeCandidate,
+    toggleJoin,
     updateCandidate,
     updateCandidatePolicy,
     applyProfile,

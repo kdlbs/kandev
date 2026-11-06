@@ -49,6 +49,11 @@ type ProfileExecutionResolver struct {
 	bindingResolver *dynamic.CredentialBindingResolver
 	enabled         atomic.Bool
 	nativeAdmission *nativeRouteAdmission
+	// candidateUsage reads the last observed provider usage for one concrete
+	// profile. It never fetches; an absent observation leaves the candidate
+	// unknown, which the engine ranks below measured capacity but above a
+	// measured exhausted allowance.
+	candidateUsage func(string) dynamic.CandidateUsage
 }
 
 func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engine, enabled bool) *ProfileExecutionResolver {
@@ -62,6 +67,13 @@ func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engi
 }
 
 func (r *ProfileExecutionResolver) SetEnabled(enabled bool) { r.enabled.Store(enabled) }
+
+// SetCandidateUsageLookup supplies the last observed provider usage per
+// concrete profile. The resolver only reads it while composing candidates, so
+// the lookup must not perform provider I/O.
+func (r *ProfileExecutionResolver) SetCandidateUsageLookup(lookup func(string) dynamic.CandidateUsage) {
+	r.candidateUsage = lookup
+}
 
 // Enabled reports the effective dynamic-agent-routing flag value this
 // resolver was constructed or last set with. Callers outside this package
@@ -866,8 +878,12 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 	if err != nil {
 		return dynamic.Profile{}, fmt.Errorf("load dynamic profile %s: %w", profileID, err)
 	}
+	return r.dynamicProfileFromRoutes(ctx, profileID, config.Version, routes)
+}
+
+func (r *ProfileExecutionResolver) dynamicProfileFromRoutes(ctx context.Context, profileID string, version int64, routes []agentsettingsmodels.DynamicAgentRoute) (dynamic.Profile, error) {
 	profile := dynamic.Profile{
-		ID: profileID, Version: config.Version,
+		ID: profileID, Version: version,
 		Candidates: make([]dynamic.Candidate, 0, len(routes)),
 	}
 	for _, route := range routes {
@@ -875,7 +891,17 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 			ID: route.ExecutionProfileID, Enabled: route.Enabled,
 			BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
 		}
+		if r.candidateUsage != nil {
+			candidate.Usage = r.candidateUsage(route.ExecutionProfileID)
+		}
 		if route.RulesJSON != "" {
+			var selection struct {
+				Selection json.RawMessage `json:"selection"`
+			}
+			if err := json.Unmarshal([]byte(route.RulesJSON), &selection); err != nil {
+				return dynamic.Profile{}, err
+			}
+			candidate.SelectionJSON = selection.Selection
 			policy, legacyRules, policyErr := decodeDynamicRoutePolicy(route.RulesJSON)
 			if policyErr != nil {
 				return dynamic.Profile{}, fmt.Errorf("decode dynamic route %s: %w", route.ExecutionProfileID, policyErr)
