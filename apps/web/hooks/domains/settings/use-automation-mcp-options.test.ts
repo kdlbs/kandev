@@ -105,3 +105,24 @@ it("clears a failed unsaved editor after reloading choices", async () => {
   await act(() => result.current.reload());
   expect(result.current.saveFailed).toBe(false);
 });
+
+it("rejects an older overlapping saved-selection reload", async () => {
+  let finish!: (value: unknown) => void;
+  api.get
+    .mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          finish = done;
+        }),
+    )
+    .mockResolvedValueOnce({
+      id: "automation",
+      workspace_id: "workspace",
+      mcp_selection_revision: 4,
+    });
+  const { result } = renderHook(() => useAutomationMCPSelectionReload("workspace", "automation"));
+  const older = result.current();
+  expect((await result.current())?.mcp_selection_revision).toBe(4);
+  finish({ id: "automation", workspace_id: "workspace", mcp_selection_revision: 3 });
+  expect(await older).toBeUndefined();
+});

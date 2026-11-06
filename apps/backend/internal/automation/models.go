@@ -649,6 +649,8 @@ type CreateTriggerSpec struct {
 
 // UpdateAutomationRequest is the payload for updating an automation.
 type UpdateAutomationRequest struct {
+	validatedTaskMode *TaskMode
+
 	MCPSelection                 *MCPSelection `json:"mcp_selection,omitempty"`
 	ExpectedMCPSelectionRevision *int64        `json:"expected_mcp_selection_revision,omitempty"`
 	Name                         *string       `json:"name,omitempty"`

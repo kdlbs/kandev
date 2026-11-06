@@ -19,6 +19,7 @@ export function AutomationMCPEvidence({
     run.session_id ?? null,
     automation.workspace_id,
     open,
+    run,
   );
   const evidence = automationMCPEvidence(automation, run, view);
   const names = (packages: typeof evidence.desired) =>

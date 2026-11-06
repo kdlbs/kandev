@@ -261,9 +261,7 @@ function ActivityView({
       )}
       {/* Keyed on the exact session turn so selecting two runs in one shared
           session remounts the conversation for the requested firing. */}
-      {automation.mcp_selection ? (
-        <AutomationMCPEvidence automation={automation} run={selected} />
-      ) : null}
+      <AutomationMCPEvidence automation={automation} run={selected} />
       <RunTranscript
         key={`${selected.session_id}:${selected.turn_id ?? ""}:${selected.id}`}
         sessionId={selected.session_id ?? ""}

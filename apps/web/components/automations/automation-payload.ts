@@ -242,13 +242,16 @@ export function buildUpdatePayload(
   repositories: AutomationRepository[],
   pluginTools?: AutomationPluginToolSelection[],
   mcpSelection?: AutomationMCPSelection,
+  modeChanged = false,
 ): UpdateAutomationRequest {
   return {
     ...(mcpSelection && form.taskMode !== "managed_conversation"
       ? {
           mcp_selection: mcpSelection,
-          expected_mcp_selection_revision: form.mcpSelectionRevision ?? 0,
         }
+      : {}),
+    ...((mcpSelection && form.taskMode !== "managed_conversation") || modeChanged
+      ? { expected_mcp_selection_revision: form.mcpSelectionRevision ?? 0 }
       : {}),
     name: form.name,
     description: form.description,

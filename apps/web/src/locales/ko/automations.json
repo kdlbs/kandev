@@ -380,7 +380,7 @@
   "mcpBuiltinPackages": "기본 제공 패키지",
   "mcpRequired": "필수",
   "mcpBlocked": "워크스페이스 정책에 의해 차단됨",
-  "mcpConfigurationAuthority": "구성은 권한이 있는 워크플로, 프로필, MCP 설정, 프롬프트, 실행기 및 자동화를 변경할 수 있습니다. 에이전트는 MCP 접근 권한을 변경할 수 없습니다.",
+  "mcpConfigurationAuthority": "Configuration은 권한이 있는 워크플로, 프로필, 프롬프트, 실행기 및 자동화를 변경할 수 있습니다. 네이티브 도구는 MCP 접근 권한을 변경할 수 없습니다. 타사 서버는 자체 권한을 사용합니다.",
   "mcpWorkspaceServers": "워크스페이스 MCP 서버",
   "mcpSearch": "MCP 서버 검색",
   "mcpInherited": "{{name}} (상속됨)",

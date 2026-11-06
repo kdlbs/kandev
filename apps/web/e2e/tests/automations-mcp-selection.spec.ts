@@ -1,3 +1,4 @@
+import { watchWs } from "../helpers/causal-waits";
 import { test, expect } from "../fixtures/test-base";
 import {
   OPTIONAL_AUTOMATION_PACKAGES,
@@ -35,6 +36,7 @@ test("saves all native packages and workspace servers, then invokes native tools
       'e2e:mcp:kandev-diagnostics:get_diagnostic_bundle_kandev({"source":"backend"})',
     ].join("\n"),
   });
+  const watcher = watchWs(testPage);
   await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`);
   const section = testPage.getByTestId("automation-mcp-access");
   await expect(
@@ -48,7 +50,7 @@ test("saves all native packages and workspace servers, then invokes native tools
   await prCapture.screenshot("automation-mcp-desktop", {
     caption: "Automation MCP selection on desktop",
   });
-  await saveAutomationMCP(testPage);
+  await saveAutomationMCP(testPage, watcher);
   let saved = await apiClient.wsRequest<Automation>("automation.get", { id: automation.id });
   expect(saved.mcp_selection?.definition_ids).toEqual([server.id]);
   expect(saved.mcp_selection?.builtin_packages).toEqual(["core", ...OPTIONAL_AUTOMATION_PACKAGES]);
@@ -60,7 +62,7 @@ test("saves all native packages and workspace servers, then invokes native tools
     ).toBeChecked();
   // The external endpoint is only a saved-definition fixture. Native execution uses no external service.
   await serverRow.click();
-  await saveAutomationMCP(testPage);
+  await saveAutomationMCP(testPage, watcher);
   const fired = await apiClient.triggerAutomationManual(automation.id);
   expect(fired.skipped).not.toBe(true);
   expect(fired.run_task_id).toBeTruthy();
@@ -104,6 +106,22 @@ test("saves all native packages and workspace servers, then invokes native tools
     mcp_selection: { builtin_packages: ["core"], definition_ids: [] },
     expected_mcp_selection_revision: saved.mcp_selection_revision,
   });
+  const latest = await apiClient.wsRequest<Automation>("automation.get", { id: automation.id });
+  await apiClient.wsRequest("automation.update", {
+    id: automation.id,
+    task_mode: "normal_task",
+    workflow_id: seedData.workflowId,
+    expected_mcp_selection_revision: latest.mcp_selection_revision,
+  });
+  const retainedResponse = await apiClient.rawRequest(
+    "GET",
+    `/api/v1/task-sessions/${run!.session_id}/mcp-built-in`,
+  );
+  expect(retainedResponse.ok).toBe(true);
+  const retained = (await retainedResponse.json()) as BuiltinMCPSessionView;
+  expect(retained.history?.current).toBeTruthy();
+  await testPage.reload();
+  await expect(testPage.getByTestId("automation-mcp-evidence")).toBeVisible();
   await apiClient.deleteMCPServer(seedData.workspaceId, server.id, server.revision);
 });
 
@@ -117,6 +135,7 @@ test("retains an MCP draft after a stale save and reconciles only after reload",
     name: "Concurrent MCP edit",
     repositoryMode: "none",
   });
+  const watcher = watchWs(testPage);
   await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/automations/${a.id}`);
   const row = testPage.getByTestId("automation-mcp-package-configuration");
   await row.click();
@@ -135,7 +154,7 @@ test("retains an MCP draft after a stale save and reconciles only after reload",
   await section.getByRole("button", { name: "Reload choices", exact: true }).click();
   await expect(section.getByRole("alert")).toHaveCount(0);
   await expect(row.getByRole("checkbox")).toBeChecked();
-  await saveAutomationMCP(testPage);
+  await saveAutomationMCP(testPage, watcher);
   const saved = await apiClient.wsRequest<Automation>("automation.get", { id: a.id });
   expect(saved.mcp_selection?.builtin_packages).toEqual(["core", "configuration"]);
 });
@@ -290,3 +309,56 @@ test(
   "removes blocked and inherited direct MCP choices without losing inheritance",
   verifyAutomationMCPRecovery,
 );
+
+test("starts a normal task with a deleted template server recorded as unavailable", async ({
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(90000);
+  const server = await apiClient.createMCPServer(seedData.workspaceId, {
+    runtime_name: "retired-reports",
+    display_name: "Retired reports",
+    execution_mode: "remote",
+    transport: "streamable_http",
+    configuration: { url: "https://reports.example.test/mcp" },
+    source: "custom",
+  });
+  const automation = await apiClient.seedAutomation({
+    workspaceId: seedData.workspaceId,
+    name: "Unavailable template server",
+    workflowId: seedData.workflowId,
+    taskMode: "normal_task",
+    repositoryMode: "none",
+    agentProfileId: seedData.agentProfileId,
+    executorProfileId: seedData.worktreeExecutorProfileId,
+    prompt: 'e2e:message("unavailable-template-ready")',
+  });
+  await apiClient.wsRequest("automation.update", {
+    id: automation.id,
+    mcp_selection: { builtin_packages: ["core"], definition_ids: [server.id] },
+    expected_mcp_selection_revision: 0,
+  });
+  await apiClient.deleteMCPServer(seedData.workspaceId, server.id, server.revision);
+  const fired = await apiClient.triggerAutomationManual(automation.id);
+  expect(fired.run_task_id).toBeTruthy();
+  await expect
+    .poll(
+      async () => {
+        const runs = await apiClient.wsRequest<AutomationRun[]>("automation.runs.list", {
+          automation_id: automation.id,
+        });
+        const run = runs.find((item) => item.task_id === fired.run_task_id);
+        if (run?.error_message) throw new Error(run.error_message);
+        if (!run?.session_id) return undefined;
+        const response = await apiClient.rawRequest(
+          "GET",
+          `/api/v1/task-sessions/${run.session_id}/mcp-built-in`,
+        );
+        const view = (await response.json()) as BuiltinMCPSessionView;
+        return view.history?.current.servers.find((item) => item.definition_id === server.id)
+          ?.reason_code;
+      },
+      { timeout: 60000 },
+    )
+    .toBe("definition_missing");
+});

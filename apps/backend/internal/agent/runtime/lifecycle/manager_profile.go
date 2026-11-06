@@ -150,6 +150,7 @@ func (m *Manager) resolveEffectiveMCPResolution(
 	if err != nil {
 		return nil, err
 	}
+	mcpconfig.AddTemplateUnavailableDecisions(result, metadata)
 	for _, decision := range result.Decisions {
 		m.logger.Warn("MCP server was not attached",
 			zap.String("profile_id", profileID), zap.String("executor_id", executorID),

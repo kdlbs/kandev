@@ -44,7 +44,7 @@ Its closing comment identifies a released fix. It is related evidence, not proof
 - **AC-OFFICE-AUTOMATION-MCP-001.3:** New private automations shall initially use their existing Core capabilities, with optional packages off and no additional definitions.
   Existing automations without a saved selection shall preserve current delivery, including inherited servers and approved plugin tools.
 - **AC-OFFICE-AUTOMATION-MCP-001.4:** Omitted selection updates shall preserve saved choices. Explicit empty additions shall clear only direct additions.
-  Invalid, foreign, disabled, unknown, duplicate, or stale selection writes shall reject without partial changes.
+  Invalid, foreign, disabled, unknown, duplicate, or stale selection writes shall reject without partial changes. Mode changes that clear a selection shall also require its editor revision.
 - **AC-OFFICE-AUTOMATION-MCP-001.5:** Native automation configuration shall support normal-task templates using the same package and server controls.
   Normal tasks shall retain regular-task package limits and defaults. Managed-conversation automations shall retain destination-owned tool policy.
 - **AC-OFFICE-AUTOMATION-MCP-001.6:** Portable export shall omit selections, authorization revisions, and accepted execution state.

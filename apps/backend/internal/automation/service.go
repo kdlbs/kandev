@@ -857,6 +857,9 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 		clone.RepositoryMode = &repositoryMode
 		storeReq = &clone
 	}
+	validated := *storeReq
+	validated.validatedTaskMode = &existing.TaskMode
+	storeReq = &validated
 	selectionChanged := req.PluginTools != nil || (req.TaskMode != nil && taskMode != existing.TaskMode)
 	notifySelectionChanged := func() {
 		if selectionChanged {

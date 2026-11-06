@@ -12,9 +12,9 @@ import (
 
 type templateAutomationService struct{ *stubAutomationService }
 
-func (s *templateAutomationService) AutomationMCPTaskTemplate(context.Context, string) (*mcpconfig.BuiltinCreationPreferences, []string, error) {
+func (s *templateAutomationService) AutomationMCPTaskTemplate(context.Context, string) (*mcpconfig.BuiltinCreationPreferences, []string, []mcpconfig.MCPResolutionDecision, error) {
 	revision := int64(0)
-	return &mcpconfig.BuiltinCreationPreferences{Version: 1, ExpectedPolicyRevision: &revision, Packages: mcpconfig.BuiltinPackageChoices{p.PackageConfiguration: "on"}}, []string{"definition"}, nil
+	return &mcpconfig.BuiltinCreationPreferences{Version: 1, ExpectedPolicyRevision: &revision, Packages: mcpconfig.BuiltinPackageChoices{p.PackageConfiguration: "on"}}, []string{"definition"}, []mcpconfig.MCPResolutionDecision{{DefinitionID: "missing", ReasonCode: "definition_missing"}}, nil
 }
 func TestAutomationMCPNormalTaskTemplate(t *testing.T) {
 	repo := setupTestRepo(t)
@@ -26,6 +26,7 @@ func TestAutomationMCPNormalTaskTemplate(t *testing.T) {
 	_, _, _, _, err := svc.prepareAutomationTask(t.Context(), a, &automation.AutomationTriggeredEvent{TriggerType: automation.TriggerTypeManual}, "Report", "Report", map[string]interface{}{})
 	require.NoError(t, err)
 	require.NotNil(t, creator.got.BuiltinMCPPreferences)
+	require.Contains(t, creator.got.Metadata, mcpconfig.TemplateUnavailableMetadataKey)
 	require.Equal(t, mcpconfig.BuiltinPackageChoices{p.PackageConfiguration: "on"}, creator.got.BuiltinMCPPreferences.Packages)
 	require.EqualValues(t, 0, *creator.got.BuiltinMCPPreferences.ExpectedPolicyRevision)
 	require.Equal(t, []string{"definition"}, creator.got.MCPServerIDs)

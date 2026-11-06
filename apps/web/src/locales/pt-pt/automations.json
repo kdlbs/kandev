@@ -380,7 +380,7 @@
   "mcpBuiltinPackages": "Pacotes integrados",
   "mcpRequired": "Obrigatório",
   "mcpBlocked": "Bloqueado pela política do espaço de trabalho",
-  "mcpConfigurationAuthority": "A Configuração pode alterar fluxos de trabalho, perfis, definições MCP, instruções, executores e automações autorizados. Os agentes não podem alterar permissões de acesso MCP.",
+  "mcpConfigurationAuthority": "A Configuração pode alterar fluxos de trabalho, perfis, instruções, executores e automatizações autorizados. As ferramentas nativas não podem alterar permissões de acesso MCP. Os servidores de terceiros usam as suas próprias permissões.",
   "mcpWorkspaceServers": "Servidores MCP do espaço de trabalho",
   "mcpSearch": "Pesquisar servidores MCP",
   "mcpInherited": "{{name}} (herdado)",

@@ -6,6 +6,8 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	p "github.com/kandev/kandev/internal/mcp/profile"
 	scope "github.com/kandev/kandev/internal/mcp/scope"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 	"testing"
@@ -77,10 +79,82 @@ func TestAutomationMCPConfigurationProfileOwnership(t *testing.T) {
 		for _, action := range []string{ws.ActionMCPGetMcpConfig, ws.ActionMCPUpdateMcpConfig} {
 			denied, _, err := h.authorizeAutomationRequest(ctx, makeWSMessage(t, action, map[string]any{"profile_id": profile.ID}))
 			require.NoError(t, err)
-			if owner == "foreign" {
+			if owner == "foreign" || action == ws.ActionMCPUpdateMcpConfig {
 				require.NotNil(t, denied)
 			} else {
 				require.Nil(t, denied)
+			}
+		}
+	}
+}
+
+func TestAutomationMCPWorkflowStepOwnership(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	workspaces, err := svc.ListWorkspaces(t.Context())
+	require.NoError(t, err)
+	workspace := workspaces[0].ID
+	foreign := &taskmodels.Workspace{ID: "foreign", Name: "Foreign"}
+	require.NoError(t, repo.CreateWorkspace(t.Context(), foreign))
+	require.NoError(t, repo.CreateWorkflow(t.Context(), &taskmodels.Workflow{ID: "own-flow", WorkspaceID: workspace, Name: "Own"}))
+	require.NoError(t, repo.CreateWorkflow(t.Context(), &taskmodels.Workflow{ID: "other-flow", WorkspaceID: foreign.ID, Name: "Other"}))
+	svc.SetWorkflowStepGetter(&staticWorkflowStepGetter{steps: map[string]*workflowmodels.WorkflowStep{"own-step": {ID: "own-step", WorkflowID: "own-flow"}, "other-step": {ID: "other-step", WorkflowID: "other-flow"}}})
+	manifest := &p.BuiltinManifest{Version: 2, CatalogVersion: 1, WorkspaceID: workspace, TaskID: "task", Surface: p.SurfaceAutomation, AutomationID: "automation", AutomationRevision: 1, Packages: []p.PackageID{p.PackageCore, p.PackageConfiguration}, Origins: map[p.PackageID]string{p.PackageCore: "required", p.PackageConfiguration: "automation"}}
+	ctx := scope.WithPrincipal(t.Context(), scope.Principal{AutomationID: "automation", WorkspaceID: workspace, CallerTaskID: "task", CallerSessionID: "session", Surface: p.SurfaceAutomation})
+	ctx = streams.WithMCPExecutionContext(ctx, streams.MCPExecutionContext{TaskID: "task", SessionID: "session", BuiltinAuthority: streams.BuiltinMCPAuthority{Required: true, Manifest: manifest, Actions: []string{ws.ActionMCPUpdateWorkflowStep}}})
+	h := &Handlers{taskSvc: svc, logger: testLogger(t)}
+	d := &guardedMCPDispatcher{Dispatcher: ws.NewDispatcher(), handlers: h}
+	d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, func(_ context.Context, msg *ws.Message) (*ws.Message, error) {
+		return ws.NewResponse(msg.ID, msg.Action, nil)
+	})
+	for _, id := range []string{"own-step", "other-step"} {
+		response, err := d.Dispatch(ctx, makeWSMessage(t, ws.ActionMCPUpdateWorkflowStep, map[string]any{"step_id": id}))
+		require.NoError(t, err)
+		if id == "own-step" {
+			require.Equal(t, ws.MessageTypeResponse, response.Type)
+		} else {
+			assertWSError(t, response, ws.ErrorCodeNotFound)
+		}
+	}
+}
+
+func TestAutomationMCPLocalActionsCannotReachOtherTasks(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	workspaces, err := svc.ListWorkspaces(t.Context())
+	require.NoError(t, err)
+	workspace := workspaces[0].ID
+	for _, id := range []string{"self", "other"} {
+		require.NoError(t, repo.CreateTask(t.Context(), &taskmodels.Task{ID: id, WorkspaceID: workspace, Title: id}))
+		require.NoError(t, repo.CreateTaskSession(t.Context(), &taskmodels.TaskSession{ID: id + "-session", TaskID: id, State: taskmodels.TaskSessionStateCreated}))
+	}
+	actions := []string{ws.ActionMCPShowWalkthrough, ws.ActionMCPGetWalkthrough, ws.ActionMCPDeleteWalkthrough, ws.ActionMCPGetDiagnosticBundle}
+	manifest := &p.BuiltinManifest{Version: 2, CatalogVersion: 1, WorkspaceID: workspace, TaskID: "self", Surface: p.SurfaceAutomation, AutomationID: "automation", AutomationRevision: 1, Packages: []p.PackageID{p.PackageCore, p.PackageWalkthroughs, p.PackageDiagnostics}, Origins: map[p.PackageID]string{p.PackageCore: "required", p.PackageWalkthroughs: "automation", p.PackageDiagnostics: "automation"}}
+	ctx := scope.WithPrincipal(t.Context(), scope.Principal{AutomationID: "automation", WorkspaceID: workspace, CallerTaskID: "self", CallerSessionID: "self-session", Surface: p.SurfaceAutomation})
+	ctx = streams.WithMCPExecutionContext(ctx, streams.MCPExecutionContext{TaskID: "self", SessionID: "self-session", BuiltinAuthority: streams.BuiltinMCPAuthority{Required: true, Manifest: manifest, Actions: actions}})
+	h := &Handlers{taskSvc: svc, logger: testLogger(t)}
+	d := &guardedMCPDispatcher{Dispatcher: ws.NewDispatcher(), handlers: h}
+	for _, action := range actions {
+		d.RegisterFunc(action, func(_ context.Context, msg *ws.Message) (*ws.Message, error) {
+			return ws.NewResponse(msg.ID, msg.Action, nil)
+		})
+	}
+	for _, action := range actions {
+		for _, target := range []string{"", "self", "other"} {
+			for _, key := range []string{"task_id", "session_id"} {
+				fields := map[string]any{}
+				if target != "" {
+					value := target
+					if key == "session_id" {
+						value += "-session"
+					}
+					fields[key] = value
+				}
+				response, err := d.Dispatch(ctx, makeWSMessage(t, action, fields))
+				require.NoError(t, err)
+				if target == "other" {
+					assertWSError(t, response, ws.ErrorCodeNotFound)
+				} else {
+					require.Equal(t, ws.MessageTypeResponse, response.Type)
+				}
 			}
 		}
 	}

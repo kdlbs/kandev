@@ -210,7 +210,7 @@ func (h *Handlers) authorizeAutomationReferenceFields(
 			return false
 		}
 	}
-	return h.authorizeAutomationRepositoryFields(ctx, principal, fields)
+	return h.authorizeAutomationStepFields(ctx, principal, fields) && h.authorizeAutomationRepositoryFields(ctx, principal, fields)
 }
 
 func (h *Handlers) authorizeAutomationRepositoryFields(
@@ -317,6 +317,9 @@ var _ mcpActionRegistrar = (*guardedMCPDispatcher)(nil)
 
 // The stream carries the accepted grant. Resource and caller checks still run.
 func automationPackageAction(ctx context.Context, action string) bool {
+	if action == ws.ActionMCPUpdateMcpConfig {
+		return false
+	}
 	execution, ok := streams.MCPExecutionContextFromContext(ctx)
 	if !ok || !execution.BuiltinAuthority.Required || execution.BuiltinAuthority.Manifest == nil {
 		return false
@@ -333,6 +336,13 @@ func automationLocalPackageAction(action string) bool {
 		return false
 	}
 }
+
+const (
+	automationStepField         = "step_id"
+	automationWorkflowStepField = "workflow_step_id"
+	automationPullFromStepField = "pull_from_step_id"
+	automationStepsField        = "step_ids"
+)
 
 const automationAgentProfileField = "agent_profile_id"
 const automationProfileField = "profile_id"
@@ -352,4 +362,24 @@ func (h *Handlers) authorizeAutomationProfileFields(ctx context.Context, princip
 		}
 	}
 	return h.taskSvc.AuthorizeWorkspaceAccess(ctx, principal.WorkspaceID) == nil
+}
+
+func (h *Handlers) authorizeAutomationStepFields(ctx context.Context, principal mcpscope.Principal, fields map[string]json.RawMessage) bool {
+	ids := jsonStringSliceField(fields, automationStepsField)
+	for _, key := range []string{automationStepField, automationWorkflowStepField, automationPullFromStepField} {
+		if id := jsonStringField(fields, key); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	for _, id := range ids {
+		step, err := h.taskSvc.GetWorkflowStep(ctx, id)
+		if err != nil || step == nil {
+			return false
+		}
+		workflow, err := h.taskSvc.GetWorkflow(ctx, step.WorkflowID)
+		if err != nil || workflow == nil || workflow.WorkspaceID != principal.WorkspaceID {
+			return false
+		}
+	}
+	return true
 }

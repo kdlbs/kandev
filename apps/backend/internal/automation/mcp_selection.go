@@ -170,26 +170,26 @@ func (s *Service) GetAutomationMCPBinding(ctx context.Context, workspaceID, task
 }
 
 // AutomationMCPTaskTemplate captures the current template before creating a normal task.
-func (s *Service) AutomationMCPTaskTemplate(ctx context.Context, automationID string) (*mcpconfig.BuiltinCreationPreferences, []string, error) {
+func (s *Service) AutomationMCPTaskTemplate(ctx context.Context, automationID string) (*mcpconfig.BuiltinCreationPreferences, []string, []mcpconfig.MCPResolutionDecision, error) {
 	a, err := s.GetAutomationForDispatch(ctx, automationID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if a == nil || a.TaskMode != TaskModeNormalTask {
-		return nil, nil, errors.New("normal automation template unavailable")
+		return nil, nil, nil, errors.New("normal automation template unavailable")
 	}
 	if a.MCPSelection == nil {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	if s.mcpBuiltinPolicy == nil {
-		return nil, nil, errors.New("built-in policy unavailable")
+		return nil, nil, nil, errors.New("built-in policy unavailable")
 	}
 	snapshot, err := s.mcpBuiltinPolicy.GetBuiltinPolicySnapshot(ctx, a.WorkspaceID, "")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if snapshot == nil || snapshot.Policy == nil {
-		return nil, nil, errors.New("built-in policy unavailable")
+		return nil, nil, nil, errors.New("built-in policy unavailable")
 	}
 	choices := make(mcpconfig.BuiltinPackageChoices)
 	for _, d := range p.BuiltinPackageCatalog() {
@@ -202,5 +202,9 @@ func (s *Service) AutomationMCPTaskTemplate(ctx context.Context, automationID st
 		}
 	}
 	revision := snapshot.Policy.Revision
-	return &mcpconfig.BuiltinCreationPreferences{Version: 1, ExpectedPolicyRevision: &revision, Packages: choices}, append([]string(nil), a.MCPSelection.DefinitionIDs...), nil
+	ids, decisions, err := s.automationMCPTemplateDefinitions(ctx, a)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return &mcpconfig.BuiltinCreationPreferences{Version: 1, ExpectedPolicyRevision: &revision, Packages: choices}, ids, decisions, nil
 }

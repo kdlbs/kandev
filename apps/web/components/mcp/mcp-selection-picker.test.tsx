@@ -10,6 +10,7 @@ vi.mock("@/components/state-provider", () => ({
       kanban: { tasks: [] },
       workflows: { items: [] },
       taskSessions: { items: {} },
+      automations: { items: [], byWorkspace: {} },
     }),
 }));
 it("can remove an existing direct selection after the definition is disabled", () => {

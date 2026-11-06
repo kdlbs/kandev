@@ -963,9 +963,10 @@ func (s *Store) updateAutomationReturning(ctx context.Context, id string, req *U
 	if a == nil {
 		return nil, ErrAutomationNotFound
 	}
+	previousTaskMode := a.TaskMode
 	previousMCPRevision := a.MCPSelectionRevision
-	if req.MCPSelection != nil && (req.ExpectedMCPSelectionRevision == nil || *req.ExpectedMCPSelectionRevision != previousMCPRevision) {
-		return nil, ErrMCPSelectionConflict
+	if err := validateAutomationUpdateCondition(a, req); err != nil {
+		return nil, err
 	}
 	if err := prepareAutomationUpdate(a, req); err != nil {
 		return nil, err
@@ -975,7 +976,7 @@ func (s *Store) updateAutomationReturning(ctx context.Context, id string, req *U
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := writeAutomationUpdateRow(ctx, tx, id, a, previousMCPRevision); err != nil {
+	if err := writeAutomationUpdateRow(ctx, tx, id, a, automationUpdateCondition{previousMCPRevision, previousTaskMode}); err != nil {
 		return nil, err
 	}
 	if err := replaceAutomationUpdateRepositories(ctx, tx, id, a, req); err != nil {
@@ -984,10 +985,19 @@ func (s *Store) updateAutomationReturning(ctx context.Context, id string, req *U
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	a.ResourceRevision++
-	a.AutomationRevision++
 	a.PluginTools = decodePluginTools(a.PluginToolsJSON)
 	return a, nil
+}
+
+func validateAutomationUpdateCondition(a *Automation, req *UpdateAutomationRequest) error {
+	if req.validatedTaskMode != nil && *req.validatedTaskMode != a.TaskMode {
+		return ErrMCPSelectionConflict
+	}
+	clearsSelection := req.TaskMode != nil && *req.TaskMode != a.TaskMode && a.MCPSelection != nil
+	if (req.MCPSelection != nil || clearsSelection) && (req.ExpectedMCPSelectionRevision == nil || *req.ExpectedMCPSelectionRevision != a.MCPSelectionRevision) {
+		return ErrMCPSelectionConflict
+	}
+	return nil
 }
 
 func prepareAutomationUpdate(a *Automation, req *UpdateAutomationRequest) error {
@@ -1048,8 +1058,13 @@ func normalizeAutomationUpdateSettings(a *Automation) error {
 	return nil
 }
 
-func writeAutomationUpdateRow(ctx context.Context, tx *sqlx.Tx, id string, a *Automation, previousMCPRevision int64) error {
-	result, err := tx.ExecContext(ctx, tx.Rebind(`
+type automationUpdateCondition struct {
+	revision int64
+	taskMode TaskMode
+}
+
+func writeAutomationUpdateRow(ctx context.Context, tx *sqlx.Tx, id string, a *Automation, condition automationUpdateCondition) error {
+	err := tx.QueryRowxContext(ctx, tx.Rebind(`
 		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
 			agent_profile_id = ?, executor_profile_id = ?,
 			task_mode = ?, managed_owner_installation_id = ?, managed_destination_installation_id = ?,
@@ -1058,7 +1073,7 @@ func writeAutomationUpdateRow(ctx context.Context, tx *sqlx.Tx, id string, a *Au
 			repository_mode = ?, prompt = ?, task_title_template = ?,
 			enabled = ?, max_concurrent_runs = ?, continuation_policy = ?,
 			retry_policy = ?, plugin_tools = ?, mcp_selection = ?, mcp_selection_revision = ?, automation_revision = automation_revision + 1, updated_at = ?
-		WHERE id = ? AND mcp_selection_revision = ?`),
+		WHERE id = ? AND mcp_selection_revision = ? AND task_mode = ? RETURNING resource_revision, automation_revision`),
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		string(a.TaskMode), a.ManagedOwnerInstallationID, a.ManagedDestinationInstallationID,
@@ -1066,16 +1081,11 @@ func writeAutomationUpdateRow(ctx context.Context, tx *sqlx.Tx, id string, a *Au
 		a.ManagedDestinationInstanceKey, a.ManagedDestinationRevision, string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
 		a.Enabled, a.MaxConcurrentRuns, a.ContinuationPolicy,
-		a.RetryPolicyJSON, a.PluginToolsJSON, a.MCPSelectionJSON, a.MCPSelectionRevision, a.UpdatedAt, id, previousMCPRevision)
-	if err != nil {
-		return err
-	}
-	if count, err := result.RowsAffected(); err != nil {
-		return err
-	} else if count != 1 {
+		a.RetryPolicyJSON, a.PluginToolsJSON, a.MCPSelectionJSON, a.MCPSelectionRevision, a.UpdatedAt, id, condition.revision, condition.taskMode).Scan(&a.ResourceRevision, &a.AutomationRevision)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrMCPSelectionConflict
 	}
-	return nil
+	return err
 }
 
 func replaceAutomationUpdateRepositories(ctx context.Context, tx *sqlx.Tx, id string, a *Automation, req *UpdateAutomationRequest) error {

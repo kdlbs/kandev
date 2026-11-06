@@ -9,6 +9,7 @@ export function useBuiltinMCPSession(
   sessionId: string | null,
   workspaceId: string,
   enabled: boolean,
+  refreshKey?: object,
 ) {
   const history = useAppStore((state) =>
     sessionId ? state.sessionMcpStatus.bySessionId[sessionId] : undefined,
@@ -50,7 +51,7 @@ export function useBuiltinMCPSession(
     } catch (error) {
       if (live()) setLoaded({ key, error });
     }
-  }, [enabled, key, taskId, sessionId, workspaceId]);
+  }, [enabled, key, taskId, sessionId, workspaceId, refreshKey]);
   useEffect(() => {
     void refresh();
     return () => {

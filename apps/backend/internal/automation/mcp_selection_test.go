@@ -138,3 +138,99 @@ func TestAutomationMCPRejectsForeignDefinition(t *testing.T) {
 	err := svc.validateMCPSelection(WithNativePluginToolIntent(t.Context()), "workspace", TaskModeAutomationRun, &MCPSelection{BuiltinPackages: []p.PackageID{p.PackageCore}, DefinitionIDs: []string{"foreign"}})
 	require.EqualError(t, err, "MCP definition unavailable in this workspace")
 }
+
+func TestAutomationMCPModeClearRequiresEditorRevision(t *testing.T) {
+	svc := newTestService(t)
+	ctx := WithNativePluginToolIntent(t.Context())
+	a, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{WorkspaceID: "workspace", Name: "Report", MCPSelection: &MCPSelection{BuiltinPackages: []p.PackageID{p.PackageCore}, DefinitionIDs: []string{}}})
+	require.NoError(t, err)
+	mode := TaskModeNormalTask
+	workflow := "workflow"
+	req := &UpdateAutomationRequest{TaskMode: &mode, WorkflowID: &workflow}
+	require.ErrorIs(t, svc.store.UpdateAutomation(ctx, a.ID, req), ErrMCPSelectionConflict)
+	revision := a.MCPSelectionRevision
+	req.ExpectedMCPSelectionRevision = &revision
+	require.NoError(t, svc.store.UpdateAutomation(ctx, a.ID, req))
+	current, err := svc.store.GetAutomation(ctx, a.ID)
+	require.NoError(t, err)
+	require.Nil(t, current.MCPSelection)
+}
+
+type changingModeMCPCatalog struct {
+	automationMCPOptionsCatalog
+	change func()
+}
+
+func (c changingModeMCPCatalog) GetMCPServerDefinition(ctx context.Context, w, id string) (*mcpconfig.MCPServerDefinition, error) {
+	c.change()
+	return c.automationMCPOptionsCatalog.GetMCPServerDefinition(ctx, w, id)
+}
+
+func TestAutomationMCPValidationCannotCrossTaskModes(t *testing.T) {
+	svc := newTestService(t)
+	ctx := WithNativePluginToolIntent(t.Context())
+	a, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{WorkspaceID: "workspace", Name: "Report"})
+	require.NoError(t, err)
+	svc.SetMCPSelectionReaders(changingModeMCPCatalog{automationMCPOptionsCatalog: automationMCPOptionsCatalog{definitions: []*mcpconfig.MCPServerDefinition{{ID: "server", WorkspaceID: "workspace", Enabled: true}}}, change: func() {
+		mode := TaskModeNormalTask
+		workflow := "workflow"
+		require.NoError(t, svc.store.UpdateAutomation(ctx, a.ID, &UpdateAutomationRequest{TaskMode: &mode, WorkflowID: &workflow}))
+	}}, nil)
+	revision := a.MCPSelectionRevision
+	_, err = svc.UpdateAutomation(ctx, a.ID, &UpdateAutomationRequest{MCPSelection: &MCPSelection{BuiltinPackages: []p.PackageID{p.PackageCore, p.PackageConfiguration}, DefinitionIDs: []string{"server"}}, ExpectedMCPSelectionRevision: &revision})
+	require.ErrorIs(t, err, ErrMCPSelectionConflict)
+	saved, err := svc.GetAutomation(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, TaskModeNormalTask, saved.TaskMode)
+	require.Nil(t, saved.MCPSelection)
+}
+
+type templateDefinitionCatalog struct {
+	automationMCPOptionsCatalog
+	definitions map[string]*mcpconfig.MCPServerDefinition
+}
+
+func (c templateDefinitionCatalog) GetMCPServerDefinition(_ context.Context, w, id string) (*mcpconfig.MCPServerDefinition, error) {
+	return c.definitions[id], nil
+}
+
+type templatePolicyReader struct{}
+
+func (templatePolicyReader) GetBuiltinPolicySnapshot(_ context.Context, w, id string) (*mcpconfig.BuiltinPolicySnapshot, error) {
+	return &mcpconfig.BuiltinPolicySnapshot{Policy: mcpconfig.DefaultBuiltinWorkspacePolicy(w)}, nil
+}
+func TestAutomationMCPTemplateUnavailableDefinitions(t *testing.T) {
+	svc := newTestService(t)
+	a := &Automation{WorkspaceID: "workspace", Name: "Template", TaskMode: TaskModeNormalTask, WorkflowID: "workflow", MCPSelection: &MCPSelection{BuiltinPackages: []p.PackageID{p.PackageCore}, DefinitionIDs: []string{"available", "disabled", "missing"}}}
+	require.NoError(t, svc.store.CreateAutomation(t.Context(), a))
+	svc.SetMCPSelectionReaders(templateDefinitionCatalog{definitions: map[string]*mcpconfig.MCPServerDefinition{"available": {ID: "available", WorkspaceID: "workspace", Enabled: true}, "disabled": {ID: "disabled", WorkspaceID: "workspace"}}}, templatePolicyReader{})
+	_, ids, decisions, err := svc.AutomationMCPTaskTemplate(t.Context(), a.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"available"}, ids)
+	require.Len(t, decisions, 2)
+	require.Equal(t, "definition_disabled", decisions[0].ReasonCode)
+	require.Equal(t, "definition_missing", decisions[1].ReasonCode)
+}
+
+func TestAutomationMCPUpdateReturnsCommittedRevisions(t *testing.T) {
+	svc := newTestService(t)
+	ctx := WithNativePluginToolIntent(t.Context())
+	a, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{WorkspaceID: "workspace", Name: "Report"})
+	require.NoError(t, err)
+	_, err = svc.store.db.Exec(`UPDATE automations SET resource_revision=resource_revision+7 WHERE id=?`, a.ID)
+	require.NoError(t, err)
+	tx, err := svc.store.db.BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	require.NoError(t, writeAutomationUpdateRow(ctx, tx, a.ID, a, automationUpdateCondition{a.MCPSelectionRevision, a.TaskMode}))
+	require.NoError(t, tx.Commit())
+	actual, err := svc.store.GetAutomation(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, actual.ResourceRevision, a.ResourceRevision)
+	saved, err := svc.store.updateAutomationReturning(ctx, a.ID, &UpdateAutomationRequest{})
+	require.NoError(t, err)
+	actual, err = svc.store.GetAutomation(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, actual.ResourceRevision, saved.ResourceRevision)
+	require.Equal(t, actual.AutomationRevision, saved.AutomationRevision)
+}

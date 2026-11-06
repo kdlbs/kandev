@@ -21,6 +21,7 @@ func TestAutomationMCPPackageInvocation(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, s.Close(context.Background())) })
 	catalog := s.BuiltinCatalog()
 	require.Contains(t, catalog[p.PackageConfiguration], "create_automation_kandev")
+	require.NotContains(t, catalog[p.PackageConfiguration], "update_mcp_config_kandev")
 	require.Contains(t, catalog[p.PackageRichOutput], "show_rich_output_kandev")
 	require.Contains(t, catalog[p.PackageWalkthroughs], "show_walkthrough_kandev")
 	require.Contains(t, catalog[p.PackageDiagnostics], "get_diagnostic_bundle_kandev")

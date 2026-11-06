@@ -1,3 +1,4 @@
+import { watchWs, type WsWatcher } from "./causal-waits";
 import type { ApiClient } from "./api-client";
 import type { SeedData } from "../fixtures/test-base";
 import type { Automation } from "@/lib/types/automation";
@@ -9,10 +10,12 @@ export const OPTIONAL_AUTOMATION_PACKAGES = [
   "walkthroughs",
   "diagnostics",
 ] as const;
-export async function saveAutomationMCP(page: Page) {
+export async function saveAutomationMCP(page: Page, watcher: WsWatcher) {
   const save = page.getByTestId("settings-floating-save");
+  const updated = watcher.waitForResponse("automation.update");
   await save.getByRole("button", { name: /^(Save changes|Retry save)$/ }).click();
-  await expect(save).toHaveAttribute("data-status", "saved", { timeout: 15000 });
+  await updated;
+  await expect(save).toHaveAttribute("data-status", "saved");
 }
 
 export async function verifyAutomationMCPRecovery({
@@ -24,6 +27,7 @@ export async function verifyAutomationMCPRecovery({
   apiClient: ApiClient;
   seedData: SeedData;
 }) {
+  const watcher = watchWs(testPage);
   const workspace = await apiClient.createWorkspace("MCP recovery workspace");
   const workflow = await apiClient.createWorkflow(workspace.id, "MCP recovery workflow", "simple");
   const recovery = { ...seedData, workspaceId: workspace.id, workflowId: workflow.id };
@@ -77,7 +81,7 @@ export async function verifyAutomationMCPRecovery({
   const direct = section.getByTestId(`automation-mcp-server-${server.id}`).getByRole("checkbox");
   await expect(direct).toBeChecked();
   await direct.click();
-  await saveAutomationMCP(testPage);
+  await saveAutomationMCP(testPage, watcher);
   const saved = await apiClient.wsRequest<Automation>("automation.get", { id: automation.id });
   expect(saved.mcp_selection).toEqual({ builtin_packages: ["core"], definition_ids: [] });
   expect(

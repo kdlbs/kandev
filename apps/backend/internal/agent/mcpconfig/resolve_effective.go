@@ -154,12 +154,12 @@ func (r *Resolver) resolveDefinition(
 	}
 	if definition == nil {
 		return nil, &MCPResolutionDecision{
-			DefinitionID: id, ReasonCode: "definition_missing",
+			DefinitionID: id, ReasonCode: reasonDefinitionMissing,
 			Summary: "MCP definition is no longer available", Origins: origins,
 		}, nil
 	}
 	if !definition.Enabled {
-		return nil, decisionPointer(definitionDecision(definition, "definition_disabled", "MCP definition is disabled", origins)), nil
+		return nil, decisionPointer(definitionDecision(definition, reasonDefinitionDisabled, "MCP definition is disabled", origins)), nil
 	}
 	server, secretErr := r.deliveryServer(ctx, resolutionContext.WorkspaceID, definition)
 	if secretErr != nil {

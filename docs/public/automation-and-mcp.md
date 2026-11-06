@@ -337,7 +337,7 @@ Private automation sessions receive required, workspace-scoped Core tools for co
 3. Select additional **Workspace MCP servers** from that workspace's saved catalog. Repository and agent-profile inheritance remains additive.
 4. Use **Save changes**. Use **Discard** to remove unsaved edits.
 
-**Configuration grants mutation access** to authorized workflows, profiles, MCP settings, prompts, executors, and automations. The private run keeps its automation identity and workspace restrictions. Agents cannot change package grants, automation MCP selections, or plugin approvals.
+**Configuration grants mutation access** to authorized workflows, profiles, prompts, executors, and automations. The private run keeps its automation identity and workspace restrictions. Native Configuration tools cannot change package grants, automation MCP selections, plugin approvals, or profile MCP server access. Selected third-party servers use their own tools and credentials. The native dispatcher does not sandbox those servers.
 
 Private-run choices apply at the **next agent process start**. Saving does not restart a run. A new turn in a reused process keeps its accepted selection. A fresh process, including a retry or replacement, reads current choices. Run details distinguish desired packages, the current process binding, and observed tool catalogs. Unknown evidence stays Unknown.
 

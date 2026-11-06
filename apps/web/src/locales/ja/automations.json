@@ -380,7 +380,7 @@
   "mcpBuiltinPackages": "組み込みパッケージ",
   "mcpRequired": "必須",
   "mcpBlocked": "ワークスペースのポリシーによりブロックされています",
-  "mcpConfigurationAuthority": "設定は、権限のあるワークフロー、プロファイル、MCP 設定、プロンプト、実行環境、自動化を変更できます。エージェントは MCP アクセス権を変更できません。",
+  "mcpConfigurationAuthority": "設定は、権限のあるワークフロー、プロファイル、プロンプト、実行環境、自動化を変更できます。ネイティブツールは MCP アクセス権を変更できません。サードパーティーサーバーは独自の権限を使用します。",
   "mcpWorkspaceServers": "ワークスペースの MCP サーバー",
   "mcpSearch": "MCP サーバーを検索",
   "mcpInherited": "{{name}}（継承）",

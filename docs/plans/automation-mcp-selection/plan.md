@@ -203,7 +203,12 @@ Local verification on 2026-11-06:
 - Web typecheck, lint, translation integrity, and the new-copy ratchet passed. Specification structure and catalog checks passed.
 - Changed-Go lint passed after extracting the two resource-field constants. The full affected-package scan reported only those findings. The final handler-package rerun reported zero issues.
 - All eight desktop and four phone scenarios passed, including blocked-package removal, inherited/direct server removal, and keyboard focus across viewport changes. Both used the managed runner and fresh application/fixture builds.
-- Normal commit hooks and external CI/review completion remain pending. Screenshot capture follows the final commit.
+- The first remediation commit passed the normal hooks and was pushed. Live CI, review dispositions, and final screenshot publication are tracked on PR #5106.
+
+
+The second review batch adds compare-and-swap guards for mode transitions, committed revision responses, workflow-step ownership checks, and the private Configuration write boundary. Historical evidence remains visible when current settings change. Normal-task templates omit unavailable servers and preserve diagnostic reasons without granting those servers. Reloads reject older responses. Browser saves wait for their matching update response.
+
+The CI remediation updates four stale web store mocks. Exact-run browser fixtures now use the real automation trigger and durable run binding. A regression reproduces rejected MCP preparation without losing the caller context during environment cleanup. The focused web checks passed 137 tests in 15 files, plus typecheck, lint, translation integrity, and the new-copy ratchet. The broad seven-package backend run passed 15,106 cases. Two existing process tests failed because this Nix host has no `/bin/sleep`; no product assertion failed. The full automation, MCP configuration, handlers, server, orchestrator, and executor packages passed. Focused lifecycle and launch regressions are checked separately. All nine desktop and four phone scenarios passed with retries disabled. Both exact failing CI stop scenarios also passed. Changed-Go lint passed after the resource-field constants were extracted. Normal hook results and live CI/review completion are recorded on the PR.
 
 ## Risks
 

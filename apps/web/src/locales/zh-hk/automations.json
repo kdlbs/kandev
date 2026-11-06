@@ -380,7 +380,7 @@
   "mcpBuiltinPackages": "內置包",
   "mcpRequired": "必需",
   "mcpBlocked": "已被工作區策略阻止",
-  "mcpConfigurationAuthority": "設定可更改已獲授權的工作流程、設定檔、MCP 設定、提示詞、執行器和自動化。代理無法更改 MCP 存取授權。",
+  "mcpConfigurationAuthority": "設定可更改已獲授權的工作流程、設定檔、提示詞、執行器和自動化。原生工具無法更改 MCP 存取授權。第三方伺服器使用各自的權限。",
   "mcpWorkspaceServers": "工作區 MCP 伺服器",
   "mcpSearch": "搜尋 MCP 伺服器",
   "mcpInherited": "{{name}}（繼承）",

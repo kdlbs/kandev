@@ -103,7 +103,7 @@ actions such as messaging and restarting task sessions.
 ## Later decision
 
 [Explicit automation MCP selection](2026-11-04-automation-mcp-selection.md) accepts human-selected native packages, including Configuration.
-It supersedes the rejection of human-selected per-automation packages.
+It supersedes the rejection of human-selected per-automation packages, the fixed catalog, and the related Configuration, authoring, Rich Output, and Diagnostics exclusions in decision 8.
 The remaining continuity and coordination decisions continue to apply.
 
 ## Consequences

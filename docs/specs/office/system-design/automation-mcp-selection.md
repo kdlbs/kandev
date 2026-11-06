@@ -47,17 +47,20 @@ An omitted update preserves the value. Request null is invalid.
 `definition_ids: []` clears direct additions. `builtin_packages: ["core"]` removes optional private packages for future starts.
 Reject unknown IDs, duplicates, missing Core, disabled/foreign definitions, malformed arrays, and managed-conversation selection writes.
 Validate explicit normal-task packages against existing regular-task workspace policy.
+Native profile MCP server writes are excluded from private automation Configuration because legacy profile fallback would bypass native grants.
 Private choices do not inherit the setting labelled Allow Configuration for regular tasks.
 
 Selection updates require `expected_mcp_selection_revision`. Compare and increment inside the automation write transaction.
 Legacy creation uses revision zero. An explicit creation starts at revision one. Unrelated updates omit the selection and do not change its revision.
-Validate current catalog references before the write. Compare the revision in the transactional UPDATE on both databases.
+Validate current catalog references before the write. Compare the revision and validated task mode in the transactional UPDATE on both databases.
 Every update uses the revision read by the service in its transactional compare-and-swap.
-Only selection updates require a client-supplied revision. Unrelated updates can conflict if another write changes the selection before their transaction commits.
+Selection updates and mode changes that clear a selection require the editor revision. Unrelated updates can conflict if another write changes the selection before their transaction commits.
 Delivery resolves current definitions again and reports deleted or disabled references as unavailable.
 MCP options reject more than 100 repository IDs before lookup.
 Catalog usage counts scan automation references once per workspace response.
 Never hold database locks over provider or MCP calls.
+Catalog validation is optimistic across stores. Confirmed deletion can race a save and leave an unavailable reference.
+Unconfirmed deletion never removes a definition, even when no reference is observed. Runtime resolution rechecks availability.
 Return the exact committed selection. Conflicts return a typed conflict and preserve the editor draft.
 
 Retain plugin selections independently. Target-mode changes clear incompatible explicit selections in the same save.
@@ -175,7 +178,8 @@ Seed existing task MCP selections and built-in task preferences through their va
 Do not copy runtime manifests or native-intent flags.
 A partial template application must prevent agent start and remain recoverable through existing dispatch/retry handling.
 Retries must not create duplicate tasks or overwrite task choices after successful creation.
-Reused normal tasks retain their task-owned choices. New tasks receive the latest template.
+Reused normal tasks retain their task-owned choices. New tasks receive the latest template. Unavailable definitions are omitted from new task grants and recorded as creation-time resolution decisions in task metadata.
+These diagnostics never authorize a server. Current resolution decisions take precedence when that definition is selected later.
 
 Managed-conversation targets omit these controls and keep destination-owned policy.
 They reject explicit selection payloads rather than silently ignoring them.

@@ -440,3 +440,10 @@ it("resubmits the displayed selection when changing task mode", () => {
     saved.mcpSelection,
   );
 });
+
+it("carries the editor revision when switching to a managed conversation", () => {
+  const form = baseForm({ taskMode: "managed_conversation", mcpSelectionRevision: 3 });
+  const payload = buildUpdatePayload(form, [], undefined, undefined, true);
+  expect(payload).not.toHaveProperty("mcp_selection");
+  expect(payload.expected_mcp_selection_revision).toBe(3);
+});

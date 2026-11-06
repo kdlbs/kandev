@@ -1,3 +1,4 @@
+import { watchWs } from "../../helpers/causal-waits";
 import { test, expect } from "../../fixtures/test-base";
 import {
   OPTIONAL_AUTOMATION_PACKAGES,
@@ -18,6 +19,7 @@ test("selects and saves every optional package on a phone with reachable control
     name: "Phone MCP selection",
     repositoryMode: "none",
   });
+  const watcher = watchWs(testPage);
   await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`);
   const section = testPage.getByTestId("automation-mcp-access");
   for (const id of OPTIONAL_AUTOMATION_PACKAGES) {
@@ -30,7 +32,7 @@ test("selects and saves every optional package on a phone with reachable control
   await prCapture.screenshot("automation-mcp-phone", {
     caption: "Automation MCP selection on a phone",
   });
-  await saveAutomationMCP(testPage);
+  await saveAutomationMCP(testPage, watcher);
   await testPage.reload();
   for (const id of OPTIONAL_AUTOMATION_PACKAGES)
     await expect(
@@ -69,6 +71,7 @@ test.describe("Narrow fine pointer", () => {
       name: "Fine pointer MCP choices",
       repositoryMode: "none",
     });
+    const watcher = watchWs(testPage);
     await testPage.goto(
       `/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`,
     );
@@ -79,7 +82,7 @@ test.describe("Narrow fine pointer", () => {
     await checkbox.focus();
     await testPage.keyboard.press("Space");
     await expect(checkbox).toBeChecked();
-    await saveAutomationMCP(testPage);
+    await saveAutomationMCP(testPage, watcher);
     await assertNoDocumentHorizontalOverflow(testPage, "automation MCP with a narrow fine pointer");
   });
 });

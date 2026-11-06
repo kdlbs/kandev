@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"os"
 	"sort"
 	"strings"
@@ -973,9 +974,15 @@ func (s *Service) prepareAutomationTask(
 	if err := s.verifyRetryTaskOperation(ctx, evt, operations...); err != nil {
 		return nil, nil, action, reasons, err
 	}
-	builtinPreferences, definitionIDs, err := s.automationMCPTemplate(ctx, a)
+	builtinPreferences, definitionIDs, decisions, err := s.automationMCPTemplate(ctx, a)
 	if err != nil {
 		return nil, nil, action, reasons, err
+	}
+	if len(decisions) > 0 {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[mcpconfig.TemplateUnavailableMetadataKey] = decisions
 	}
 	task, err = s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
 		BuiltinMCPPreferences: builtinPreferences, MCPServerIDs: definitionIDs,

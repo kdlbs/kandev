@@ -229,6 +229,7 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
             repositories,
             pluginToolsChanged ? form.pluginTools : undefined,
             mcpSelectionForUpdate(form, savedForm),
+            form.taskMode !== savedForm.taskMode,
           ),
         );
         const persistedForm = withSavedMCPSelection(formWithPromotedSelections, saved);

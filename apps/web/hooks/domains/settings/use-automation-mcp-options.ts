@@ -56,8 +56,8 @@ export function useAutomationMCPOptions(
 
 export function useAutomationMCPSelectionReload(workspaceId: string, automationId: string | null) {
   const key = JSON.stringify([workspaceId, automationId]);
-  const owner = useRef({ key, active: true });
-  if (owner.current.key !== key) owner.current = { key, active: true };
+  const owner = useRef({ key, active: true, sequence: 0 });
+  if (owner.current.key !== key) owner.current = { key, active: true, sequence: 0 };
   useEffect(() => {
     const captured = owner.current;
     captured.active = true;
@@ -68,9 +68,11 @@ export function useAutomationMCPSelectionReload(workspaceId: string, automationI
   const captured = owner.current;
   return useCallback(async () => {
     if (!automationId || captured !== owner.current || !captured.active) return undefined;
+    const sequence = ++captured.sequence;
     const saved = await getAutomation(automationId);
     if (
       captured !== owner.current ||
+      sequence !== captured.sequence ||
       !captured.active ||
       saved.id !== automationId ||
       saved.workspace_id !== workspaceId

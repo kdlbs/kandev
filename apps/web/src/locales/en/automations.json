@@ -380,7 +380,7 @@
   "mcpBuiltinPackages": "Built-in packages",
   "mcpRequired": "Required",
   "mcpBlocked": "Blocked by workspace policy",
-  "mcpConfigurationAuthority": "Configuration can change authorized workflows, profiles, MCP settings, prompts, executors, and automations. Agents cannot change MCP access grants.",
+  "mcpConfigurationAuthority": "Configuration can change authorized workflows, profiles, prompts, executors, and automations. Native tools cannot change MCP access grants. Third-party servers use their own permissions.",
   "mcpWorkspaceServers": "Workspace MCP servers",
   "mcpSearch": "Search MCP servers",
   "mcpInherited": "{{name}} (inherited)",
