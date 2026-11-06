@@ -144,3 +144,7 @@ Passed after that fix:
 - `bash scripts/lint-go-changed` for the three conflict-fixup Go files: 0 issues.
 
 The first changed-package Go lint over the complete PR diff reached its 5-minute timeout after printing `0 issues`; that output is not treated as a successful full lint. Re-running the same full PR-diff scope in five sequential groups of four, four, four, four, and three packages completed successfully, with `0 issues` for every group.
+
+The exact-head PR run on merge commit `a8f19ab0eae075b3fb88a977685762c0b28096b5` settled after the 15-minute strict wait and a further 7m13s all-terminal wait: `scripts/pr-await 4980` reported 89 passed, 13 skipped, 0 neutral, 0 failed, and 0 pending. `scripts/pr-state --compact 4980` confirmed the same head, complete check evidence, and `MERGEABLE` / `CLEAN`; `scripts/pr-resolve list 4980` found no unresolved review threads.
+
+While those checks ran, `main` advanced from `08a36b3fe0d49e1dd23007f30fc82ac426a2c1c8` to `628da65a0e0b48ada18d2e43f8d623e956becdfb`. The two diffs had no overlapping paths. The synthetic merge tree `7bc5dbaacea75692905dfb451a1aaa9131930ff3` was conflict-free, and the detached synthetic commit `819721790a5dfff7a9dcca6c4225df204ec50e75` passed `(cd apps/backend && go test -trimpath ./internal/mcp/profile ./internal/mcp/server -count=1)`.
