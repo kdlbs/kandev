@@ -1,4 +1,5 @@
 import { watchWs, type WsWatcher } from "./causal-waits";
+import { waitForFiniteAnimations } from "./pr-capture";
 import type { PrAssetCapture } from "./pr-asset-capture";
 import type { ApiClient } from "./api-client";
 import type { SeedData } from "../fixtures/test-base";
@@ -133,6 +134,7 @@ export async function verifyAutomationMCPDeleteWarning({
   await expect(warning).toContainText("New agent processes cannot attach this server.");
   const confirm = dialog.getByRole("button", { name: "Delete", exact: true });
   await expect(confirm).toBeInViewport();
+  await waitForFiniteAnimations(dialog);
   await prCapture.screenshot("automation-mcp-delete-warning", {
     caption: "Deletion retains automation selections and prevents new server attachments",
   });
