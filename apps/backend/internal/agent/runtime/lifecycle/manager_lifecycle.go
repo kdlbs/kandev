@@ -346,6 +346,10 @@ func (m *Manager) Start(ctx context.Context) error {
 				// session -- never from a durable/database value, which could be
 				// stale relative to what the instance actually resumed.
 				ACPSessionID: ri.ProviderSessionID,
+				// Native collection state comes from the subscribed instance,
+				// not the current launch request. Peer support alone does not
+				// prove an older retained peer subscribed.
+				CopilotNativeSessionEvents: ri.CopilotNativeSessionEvents,
 			}
 			execution.restoreIdleActivity(ri.Metadata)
 			// AC-EXECUTORS-SURVIVAL-002.14's declared source for task

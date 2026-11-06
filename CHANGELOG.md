@@ -2,6 +2,29 @@
 
 All notable changes to Kandev.
 
+## 0.99.1 - 2026-11-06
+
+### Features
+
+- count Copilot compactions from native events ([#5098](https://github.com/kdlbs/kandev/pull/5098))
+- continue failed turns after capacity and command errors ([#5087](https://github.com/kdlbs/kandev/pull/5087))
+
+### Bug Fixes
+
+- index task session environment lookups ([#5088](https://github.com/kdlbs/kandev/pull/5088)) ([#5092](https://github.com/kdlbs/kandev/pull/5092))
+- check Copilot plugin contracts and retain startup errors ([#5064](https://github.com/kdlbs/kandev/pull/5064)) ([#5078](https://github.com/kdlbs/kandev/pull/5078))
+- exclude Copilot mixed usage from compaction count ([#5089](https://github.com/kdlbs/kandev/pull/5089)) ([#5093](https://github.com/kdlbs/kandev/pull/5093))
+- preserve chat links and Changes health after live attachment ([#5084](https://github.com/kdlbs/kandev/pull/5084))
+- prevent cancellation and deletion deadlocks ([#5083](https://github.com/kdlbs/kandev/pull/5083))
+- settle Claude background terminal exits ([#5082](https://github.com/kdlbs/kandev/pull/5082))
+- recover SDK publication after immutable host releases ([#5085](https://github.com/kdlbs/kandev/pull/5085))
+- stop session creation from scanning delivery effects ([#5080](https://github.com/kdlbs/kandev/pull/5080))
+- preserve durable delivery startup budget ([#5057](https://github.com/kdlbs/kandev/pull/5057)) ([#5077](https://github.com/kdlbs/kandev/pull/5077))
+- resolve local Markdown links and image previews ([#5058](https://github.com/kdlbs/kandev/pull/5058)) by @sonicLee
+- honor proven startup model rejection policy ([#5060](https://github.com/kdlbs/kandev/pull/5060)) by @dreampiler
+- log entry deferral at WIP capacity ([#5061](https://github.com/kdlbs/kandev/pull/5061)) by @dreampiler
+- recognize retained local executor alias ([#5059](https://github.com/kdlbs/kandev/pull/5059)) by @dreampiler
+
 ## 0.99.0 - 2026-11-05
 
 ### Features

@@ -399,6 +399,10 @@ type Config struct {
 
 	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
 	PromptSuggestions bool
+
+	// CopilotNativeSessionEvents enables Copilot's opt-in native compaction and
+	// attributed usage notifications for this launch.
+	CopilotNativeSessionEvents bool
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -438,6 +442,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		ProviderGatewayAuth:        c.ProviderGatewayAuth,
 		AuthPolicy:                 c.AuthPolicy,
 		PromptSuggestions:          c.PromptSuggestions,
+		CopilotNativeSessionEvents: c.CopilotNativeSessionEvents,
 	}
 }
 

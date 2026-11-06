@@ -139,7 +139,7 @@ func TestPiProjectMCPDeliveryACPFlow(t *testing.T) {
 	_, err := sessionAdapter.NewSession(ctx, servers)
 	require.NoError(t, err)
 	require.NoError(t, sessionAdapter.LoadSession(ctx, "saved-1", servers))
-	require.NoError(t, sessionAdapter.ResumeSession(ctx, "saved-2", servers))
+	require.NoError(t, sessionAdapter.ResumeSession(ctx, "saved-1", servers))
 	_, err = sessionAdapter.ResetSession(ctx, servers)
 	require.NoError(t, err)
 

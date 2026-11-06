@@ -99,17 +99,20 @@ type AgentExecution struct {
 	ExecutionProfileID string
 	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
 	// launches, where AgentProfileID owns both identity and execution config.
-	OfficeAgentProfileID      string
-	AgentID                   string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
-	AuthPolicy                *acpcompat.AuthPolicy
-	ContainerID               string
-	ContainerIP               string   // IP address of the container for agentctl communication
-	WorkspacePath             string   // Path to the workspace (worktree or repository path)
-	WorkspaceSourceRoots      []string // Canonical durable source roots permitted by agentctl file operations
-	ACPSessionID              string   // ACP session ID to resume, if available
-	DeliveryStreamID          string   // Generation-scoped durable agentctl stream
-	DeliveryIncarnationID     string   // Kandev session incarnation owning the stream
-	DeliveryHarnessGeneration uint64   // Native harness generation owning the stream
+	OfficeAgentProfileID string
+	AgentID              string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
+	// CopilotNativeSessionEvents reports whether this launch requested the
+	// Copilot native event stream from a capable agentctl peer.
+	CopilotNativeSessionEvents bool
+	AuthPolicy                 *acpcompat.AuthPolicy
+	ContainerID                string
+	ContainerIP                string   // IP address of the container for agentctl communication
+	WorkspacePath              string   // Path to the workspace (worktree or repository path)
+	WorkspaceSourceRoots       []string // Canonical durable source roots permitted by agentctl file operations
+	ACPSessionID               string   // ACP session ID to resume, if available
+	DeliveryStreamID           string   // Generation-scoped durable agentctl stream
+	DeliveryIncarnationID      string   // Kandev session incarnation owning the stream
+	DeliveryHarnessGeneration  uint64   // Native harness generation owning the stream
 	// Fresh native startup buffers delivery until its initial SQL generation exists.
 	deliveryBootstrap          atomic.Bool
 	deliveryStartup            atomic.Pointer[deliveryStartupAttempt]

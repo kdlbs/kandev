@@ -22,6 +22,10 @@ var SurvivalCapabilities = []string{
 	launchwrapper.Capability,
 	acpcompat.AntigravityPersonalAuthCapability,
 	p.BuiltinPackagesCapability,
+	// CopilotNativeCompactionCapability advertises that this agentctl build can
+	// request and normalize Copilot's native session events. It is optional for
+	// retained-process adoption.
+	acpcompat.CopilotNativeCompactionCapability,
 	agentctltypes.ProjectMCPDeliveryCapability,
 }
 
