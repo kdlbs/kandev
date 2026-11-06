@@ -337,8 +337,21 @@ func redactLocalPaths(s string) string {
 	dates := make([]string, 0, len(indices))
 	var masked strings.Builder
 	last := 0
+	scanned, tokenHasSlash := 0, false
 	for _, index := range indices {
 		start, end := index[0], index[1]
+		for scanned < start {
+			switch s[scanned] {
+			case ' ', '\t', '\r', '\n':
+				tokenHasSlash = false
+			case '/', '\\':
+				tokenHasSlash = true
+			}
+			scanned++
+		}
+		if tokenHasSlash {
+			continue
+		}
 		if start > 0 && (s[start-1] == '/' || s[start-1] == '\\') {
 			continue
 		}
