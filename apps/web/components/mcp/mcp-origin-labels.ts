@@ -20,6 +20,9 @@ function taskInWorkspace(id: string, workspaceId: string, context: MCPOriginCont
   });
 }
 
+/**
+ * Resolve an origin's display name only from matching workspace owners.
+ */
 function originName(origin: MCPSelectionOrigin, context: MCPOriginContext): string | undefined {
   const { owner_id, workspace_id } = origin;
   switch (origin.scope) {

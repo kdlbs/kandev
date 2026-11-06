@@ -141,6 +141,9 @@ func (h *Handlers) authorizeAutomationRequest(ctx context.Context, msg *ws.Messa
 	return nil, &replacement, nil
 }
 
+// automationPayloadFields requires lowercase ASCII root keys before authorization and typed JSON
+// decoding.
+// This prevents alternate JSON field spellings from bypassing resource checks.
 func automationPayloadFields(payload json.RawMessage) (map[string]json.RawMessage, error) {
 	fields := make(map[string]json.RawMessage)
 	if len(payload) == 0 {
@@ -184,6 +187,8 @@ func (h *Handlers) authorizeAutomationScalarFields(
 	return taskID == "" || h.authorizeAutomationTask(ctx, principal, taskID, action, true)
 }
 
+// authorizeAutomationReferenceFields requires referenced workflows, sessions, dependencies, steps,
+// and repositories to share the principal's workspace.
 func (h *Handlers) authorizeAutomationReferenceFields(
 	ctx context.Context,
 	principal mcpscope.Principal,
@@ -329,6 +334,8 @@ func automationPackageAction(ctx context.Context, action string) bool {
 	return manifest.AutomationID != "" && manifest.Validate() == nil && mcpscope.BuiltinPrincipalMatches(ctx, manifest) && execution.BuiltinAuthority.Allows(action)
 }
 
+// automationLocalPackageAction identifies tools whose task and session targets must match the
+// calling automation run.
 func automationLocalPackageAction(action string) bool {
 	switch action {
 	case ws.ActionMCPShowWalkthrough, ws.ActionMCPGetWalkthrough, ws.ActionMCPDeleteWalkthrough, ws.ActionMCPGetDiagnosticBundle:
@@ -348,6 +355,8 @@ const (
 const automationAgentProfileField = "agent_profile_id"
 const automationProfileField = "profile_id"
 
+// authorizeAutomationProfileFields checks agent profile ownership while preserving executor profile
+// field semantics.
 func (h *Handlers) authorizeAutomationProfileFields(ctx context.Context, principal mcpscope.Principal, action string, fields map[string]json.RawMessage) bool {
 	keys := []string{automationAgentProfileField}
 	if action != ws.ActionMCPUpdateExecutorProfile && action != ws.ActionMCPDeleteExecutorProfile {
@@ -369,6 +378,8 @@ func (h *Handlers) authorizeAutomationProfileFields(ctx context.Context, princip
 	return h.taskSvc.AuthorizeWorkspaceAccess(ctx, principal.WorkspaceID) == nil
 }
 
+// authorizeAutomationStepFields verifies every supplied step through its owning workflow's
+// workspace.
 func (h *Handlers) authorizeAutomationStepFields(ctx context.Context, principal mcpscope.Principal, fields map[string]json.RawMessage) bool {
 	ids := jsonStringSliceField(fields, automationStepsField)
 	for _, key := range []string{automationStepField, automationWorkflowStepField, automationPullFromStepField} {

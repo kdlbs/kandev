@@ -5,6 +5,9 @@ import { useAutomationMCPSelectionReload } from "@/hooks/domains/settings/use-au
 import type { AutomationMCPSelection } from "@/lib/types/automation";
 type MCPDraft = { mcpSelection?: AutomationMCPSelection | null; mcpSelectionRevision?: number };
 
+/**
+ * Refresh the saved selection baseline and revision without discarding the user's unsaved choices.
+ */
 export function useAutomationMCPReconciliation<T extends MCPDraft>(
   workspaceId: string,
   automationId: string | null,

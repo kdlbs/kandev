@@ -199,6 +199,9 @@ async function resolveOneRepositoryId(
 }
 
 // The save boundary carries decimal strings without number coercion.
+/**
+ * Build a creation request with MCP choices only for automation modes that accept native selections.
+ */
 export function buildCreatePayload(
   workspaceId: string,
   form: FormState,
@@ -237,6 +240,10 @@ export function buildCreatePayload(
   };
 }
 
+/**
+ * Build a partial update that preserves omitted grants and supplies the revision for selection
+ * changes or mode changes.
+ */
 export function buildUpdatePayload(
   form: FormState,
   repositories: AutomationRepository[],
@@ -284,6 +291,9 @@ export function buildWebhookUrl(automationId: string): string {
 
 export type CreatedWebhookDetails = { url: string; secret: string };
 
+/**
+ * Compare selections independently of package order and definition order without mutating the draft.
+ */
 export function canonicalMCPSelection(selection: AutomationMCPSelection | null | undefined) {
   return selection
     ? {
@@ -293,6 +303,9 @@ export function canonicalMCPSelection(selection: AutomationMCPSelection | null |
     : null;
 }
 
+/**
+ * Submit a selection only when its values or task mode differ from the saved draft.
+ */
 export function mcpSelectionForUpdate(form: FormState, saved: FormState) {
   if (form.taskMode !== saved.taskMode) return form.mcpSelection ?? undefined;
   if (
@@ -302,6 +315,9 @@ export function mcpSelectionForUpdate(form: FormState, saved: FormState) {
     return undefined;
   return form.mcpSelection ?? undefined;
 }
+/**
+ * Use the server's accepted selection and revision while preserving the draft's other fields.
+ */
 export function withSavedMCPSelection(form: FormState, saved: Automation): FormState {
   return {
     ...form,
@@ -315,6 +331,10 @@ export function automationDraftRevision(form: FormState): string {
   return JSON.stringify({ ...draft, mcpSelection: canonicalMCPSelection(draft.mcpSelection) });
 }
 
+/**
+ * Preserve newer local choices when an older save completes, but advance their revision for the next
+ * save.
+ */
 export function reconcileSavedMCPSelection(
   current: FormState,
   submitted: FormState,

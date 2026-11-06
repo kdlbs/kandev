@@ -28,6 +28,7 @@ func (c *Client) VerifyBuiltinMCP(ctx context.Context, profile p.Context) error 
 	return c.checkBuiltinMCP(ctx, http.MethodGet, nil, profile)
 }
 
+// checkBuiltinMCP requires helper support and confirmation of the exact admitted package binding.
 func (c *Client) checkBuiltinMCP(ctx context.Context, method string, body io.Reader, profile p.Context) error {
 	expected, err := p.MarshalBuiltinBinding(profile)
 	if err != nil {

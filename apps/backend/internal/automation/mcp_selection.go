@@ -21,6 +21,7 @@ type MCPSelection struct {
 	DefinitionIDs   []string      `json:"definition_ids"`
 }
 
+// Clone copies selection slices so drafts cannot mutate stored grants.
 func (s *MCPSelection) Clone() *MCPSelection {
 	if s == nil {
 		return nil
@@ -28,6 +29,7 @@ func (s *MCPSelection) Clone() *MCPSelection {
 	return &MCPSelection{BuiltinPackages: append([]p.PackageID{}, s.BuiltinPackages...), DefinitionIDs: append([]string{}, s.DefinitionIDs...)}
 }
 
+// validate requires Core, explicit definition IDs, and unique packages supported on task surfaces.
 func (s *MCPSelection) validate() error {
 	if s == nil {
 		return nil
@@ -52,6 +54,7 @@ func (s *MCPSelection) validate() error {
 	return nil
 }
 
+// decodeMCPSelection preserves legacy absence and validates each stored explicit selection.
 func decodeMCPSelection(a *Automation) error {
 	if a.MCPSelectionJSON == "" || a.MCPSelectionJSON == automationMCPNullJSON {
 		a.MCPSelection = nil
@@ -76,6 +79,8 @@ func (s *Service) SetMCPSelectionReaders(definitions MCPDefinitionReader, policy
 	s.mcpBuiltinPolicy = policy
 }
 
+// validateMCPSelection admits only native editor grants to available workspace definitions.
+// Normal-task templates also obey workspace package policy.
 func (s *Service) validateMCPSelection(ctx context.Context, workspaceID string, mode TaskMode, selection *MCPSelection) error {
 	if selection == nil {
 		return nil
@@ -107,6 +112,8 @@ func (s *Service) validateMCPSelection(ctx context.Context, workspaceID string, 
 	return nil
 }
 
+// validateMCPTaskPackages rejects template choices that workspace policy would remove at task
+// creation.
 func (s *Service) validateMCPTaskPackages(ctx context.Context, workspaceID string, selection *MCPSelection) error {
 	if s.mcpBuiltinPolicy == nil {
 		return errors.New("built-in package policy unavailable")

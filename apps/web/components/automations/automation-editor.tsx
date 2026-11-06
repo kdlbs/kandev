@@ -81,6 +81,9 @@ const defaultForm: FormState = {
   retryPolicy: DEFAULT_RETRY_POLICY,
   pluginTools: [],
 };
+/**
+ * Initialize an editor draft from persisted settings, including the current MCP selection revision.
+ */
 function formFromAutomation(a: Automation): FormState {
   return {
     name: a.name,

@@ -6,6 +6,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 )
 
+// automationMCPTemplateDefinitions separates attachable references from missing or disabled
+// definition evidence.
 func (s *Service) automationMCPTemplateDefinitions(ctx context.Context, a *Automation) ([]string, []mcpconfig.MCPResolutionDecision, error) {
 	ids := make([]string, 0, len(a.MCPSelection.DefinitionIDs))
 	var decisions []mcpconfig.MCPResolutionDecision

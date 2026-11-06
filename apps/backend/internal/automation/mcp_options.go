@@ -30,6 +30,8 @@ type MCPOptions struct {
 	Definitions  []MCPDefinitionOption        `json:"definitions"`
 }
 
+// MCPOptions returns workspace definitions and normal-task package policy after workspace
+// authorization.
 func (s *Service) MCPOptions(ctx context.Context, workspaceID string) (*MCPOptions, error) {
 	if err := s.authorizeWs(ctx, workspaceID); err != nil {
 		return nil, err
@@ -68,6 +70,8 @@ func (s *Service) MCPOptions(ctx context.Context, workspaceID string) (*MCPOptio
 	}
 	return result, nil
 }
+
+// wsMCPOptions exposes validated inheritance choices without returning internal lookup errors.
 func wsMCPOptions(svc *Service) ws.HandlerFunc {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 		var request struct {
@@ -93,6 +97,8 @@ func wsMCPOptions(svc *Service) ws.HandlerFunc {
 	}
 }
 
+// mcpOptionsWithInheritance validates selected owners before adding their inherited definition
+// origins.
 func (s *Service) mcpOptionsWithInheritance(ctx context.Context, workspaceID, profileID string, repositories []string) (*MCPOptions, error) {
 	if len(repositories) > 100 {
 		return nil, errMCPOptionsTooManyRepositories
@@ -145,6 +151,7 @@ func (s *Service) mcpOptionsWithInheritance(ctx context.Context, workspaceID, pr
 	return options, nil
 }
 
+// validateMCPOptionRepository requires an available repository owned by the selected workspace.
 func (s *Service) validateMCPOptionRepository(ctx context.Context, workspaceID, id string) error {
 	if s.repoLookup == nil {
 		return ErrRepositoryLookupUnavailable

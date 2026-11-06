@@ -19,12 +19,18 @@ function identity(value: unknown): value is string {
 function revision(value: unknown): boolean {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
+/**
+ * Restrict packages to the execution surface's fixed allowlist.
+ */
 function eligible(id: BuiltinMCPPackage, surface: unknown): boolean {
   if (surface === "kanban-task" || surface === "automation") return true;
   if (surface === "office-task") return id === "core" || id === "rich-output";
   if (surface === "configuration") return id === "core" || id === "configuration";
   return false;
 }
+/**
+ * Require unique supported packages, Core, and a valid origin for every selected package.
+ */
 function validPackages(value: Record<string, unknown>): boolean {
   const packages = value.packages;
   const origins = value.origins;
@@ -39,6 +45,10 @@ function validPackages(value: Record<string, unknown>): boolean {
     return origins[id] === "task" || (origins[id] === "workspace" && id !== "configuration");
   });
 }
+/**
+ * Require automation identity only on version 2 automation manifests and reject it on legacy task
+ * manifests.
+ */
 function validBindingVersion(value: Record<string, unknown>): boolean {
   if (value.surface !== "automation")
     return (
@@ -57,6 +67,10 @@ function validBindingVersion(value: Record<string, unknown>): boolean {
       (Array.isArray(ids) && ids.every(identity) && new Set(ids).size === ids.length))
   );
 }
+/**
+ * Validate manifest identity, revision fields, package eligibility, and origins before accepting
+ * runtime evidence.
+ */
 export function isBuiltinMCPManifest(value: unknown): value is BuiltinMCPManifest {
   return (
     record(value) &&

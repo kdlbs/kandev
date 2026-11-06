@@ -15,6 +15,8 @@ type BuiltinPolicyReader interface {
 
 func (e *Executor) SetBuiltinPolicyReader(reader BuiltinPolicyReader) { e.builtinPolicyReader = reader }
 
+// PrepareTaskSessionMCPProfile reuses an admitted launch profile or resolves packages for the
+// matching task session.
 func (e *Executor) PrepareTaskSessionMCPProfile(ctx context.Context, taskID string, session *models.TaskSession, title bool) (p.Context, error) {
 	if session != nil {
 		if prepared := preparedMCPLaunchProfile(ctx, taskID, session.ID); prepared != nil {
@@ -90,6 +92,8 @@ type AutomationMCPReader interface {
 	GetAutomationMCPBinding(context.Context, string, string) (*p.BuiltinManifest, error)
 }
 
+// prepareAutomationMCPProfile validates the durable automation grant against the launch workspace,
+// task, and surface.
 func (e *Executor) prepareAutomationMCPProfile(ctx context.Context, taskID string, session *models.TaskSession, profile p.Context) (p.Context, error) {
 	reader, ok := e.builtinPolicyReader.(AutomationMCPReader)
 	if !ok {

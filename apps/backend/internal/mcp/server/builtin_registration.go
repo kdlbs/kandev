@@ -6,6 +6,8 @@ import (
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
+// registerContextTools selects the catalog for the execution surface and its admitted package
+// binding.
 func (s *Server) registerContextTools() {
 	switch s.profile.Surface {
 	case mcpprofile.SurfaceManagedConversation:
@@ -49,6 +51,8 @@ func (s *Server) registerBuiltinTools() {
 	}
 }
 
+// registerBuiltinPackage assembles one selected package while preserving the automation-specific
+// Core catalog.
 func (s *Server) registerBuiltinPackage(id mcpprofile.PackageID) {
 	switch id {
 	case mcpprofile.PackageCore:

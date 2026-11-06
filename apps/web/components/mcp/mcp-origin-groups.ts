@@ -15,6 +15,9 @@ function uniqueOrigins(origins: MCPSelectionOrigin[]): MCPSelectionOrigin[] {
   });
 }
 
+/**
+ * Group retained origins by scope without dropping unsupported scopes from the fallback display.
+ */
 export function groupMCPOrigins(inherited: MCPInheritedSelection[]): MCPOriginGroup[] {
   const definitions = new Map<string, MCPInheritedSelection>();
   for (const item of inherited) {

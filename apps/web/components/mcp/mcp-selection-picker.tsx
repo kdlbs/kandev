@@ -190,6 +190,9 @@ function AdditionalServersHeading({
   );
 }
 
+/**
+ * Supply workspace owner data for selection provenance labels.
+ */
 function useMCPOriginContext(workspaceId?: string | null) {
   return useAppStore(
     useShallow((state) => ({

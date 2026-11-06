@@ -36,6 +36,7 @@ func resolveBuiltinPrompt(name string, values map[string]string, manifest *p.Bui
 	return Resolve(name, values)
 }
 
+// builtinPackageGuidance describes only packages admitted by the current process manifest.
 func builtinPackageGuidance(manifest *p.BuiltinManifest) string {
 	if manifest.Validate() != nil {
 		return "Built-in MCP binding is unavailable. Do not infer tool availability from previous turns."

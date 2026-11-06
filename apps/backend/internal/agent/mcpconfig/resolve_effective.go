@@ -139,6 +139,8 @@ func (r *Resolver) Resolve(ctx context.Context, resolutionContext ResolutionCont
 	return result, nil
 }
 
+// resolveDefinition returns attachment evidence for unavailable definitions and rejects runtime name
+// collisions.
 func (r *Resolver) resolveDefinition(
 	ctx context.Context,
 	resolutionContext ResolutionContext,
@@ -191,6 +193,7 @@ func (r *Resolver) ResolveEffective(ctx context.Context, resolutionContext Resol
 	return r.Resolve(ctx, resolutionContext, policy)
 }
 
+// loadOrigins combines workspace-scoped selections while retaining each contributing owner.
 func (r *Resolver) loadOrigins(ctx context.Context, rc ResolutionContext) (map[string][]SelectionOrigin, map[string]ServerDef, error) {
 	origins := make(map[string][]SelectionOrigin)
 	legacyServers := make(map[string]ServerDef)

@@ -98,6 +98,7 @@ func wsGet(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.M
 	}
 }
 
+// wsCreate admits native editor selections and rejects automation-authored configuration changes.
 func wsCreate(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 		if isMCPAutomationContext(ctx) {
@@ -132,6 +133,7 @@ func wsCreate(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.
 	}
 }
 
+// wsUpdate preserves omitted selections and admits explicit changes only through the native editor.
 func wsUpdate(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 		if isMCPAutomationContext(ctx) {

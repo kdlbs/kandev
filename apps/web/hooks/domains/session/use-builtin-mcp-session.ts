@@ -4,6 +4,9 @@ import { getBuiltinMCPSession } from "@/lib/api/domains/builtin-mcp-api";
 import type { BuiltinMCPSessionView } from "@/lib/types/builtin-mcp";
 import { getBackendConfig } from "@/lib/config";
 
+/**
+ * Load and refresh MCP evidence only for the current workspace, task, and session owner.
+ */
 export function useBuiltinMCPSession(
   taskId: string | null,
   sessionId: string | null,

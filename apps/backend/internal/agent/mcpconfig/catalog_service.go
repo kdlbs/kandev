@@ -144,6 +144,8 @@ func (s *CatalogService) Update(ctx context.Context, input UpdateDefinitionInput
 	return cloneDefinition(candidate), nil
 }
 
+// Delete requires the current revision and explicit confirmation of all selection impacts.
+// Automation references remain stored so later resolutions can report missing definitions.
 func (s *CatalogService) Delete(ctx context.Context, workspaceID, id string, expectedRevision int64, confirm bool) error {
 	if err := s.authorize(ctx, workspaceID); err != nil {
 		return err

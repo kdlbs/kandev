@@ -3,6 +3,10 @@ import type { BuiltinMCPSessionView, BuiltinMCPManifest } from "@/lib/types/buil
 function sameValues(left: readonly string[], right: readonly string[]) {
   return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
 }
+/**
+ * Accept runtime evidence only when its workspace, task, and session match the displayed automation
+ * run.
+ */
 function ownedView(automation: Automation, run: AutomationRun, view?: BuiltinMCPSessionView) {
   if (
     !view ||
@@ -13,12 +17,18 @@ function ownedView(automation: Automation, run: AutomationRun, view?: BuiltinMCP
     return undefined;
   return view;
 }
+/**
+ * Expose bound packages only after the matching run's process binding is accepted.
+ */
 function acceptedManifest(run: AutomationRun, view?: BuiltinMCPSessionView) {
   if (view?.binding_state !== "accepted" || !view.bound) return undefined;
   if (view.bound.manifest.task_id !== run.task_id || view.bound.session_id !== run.session_id)
     return undefined;
   return view.bound.manifest;
 }
+/**
+ * Compare desired packages and definition references with the accepted process manifest.
+ */
 function selectionPending(
   automation: Automation,
   bound: BuiltinMCPManifest | undefined,
@@ -34,6 +44,9 @@ function selectionPending(
     ),
   );
 }
+/**
+ * Keep desired choices, accepted process packages, and observed tools separate for the matching run.
+ */
 export function automationMCPEvidence(
   automation: Automation,
   run: AutomationRun,

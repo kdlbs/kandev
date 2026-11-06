@@ -50,6 +50,7 @@ type mcpDefinitionListItem struct {
 	SelectionImpact mcpconfig.SelectionImpact `json:"selection_impact"`
 }
 
+// httpListMCPCatalog includes selection impacts so deletion warnings cover every owner type.
 func (h *Handlers) httpListMCPCatalog(c *gin.Context) {
 	if !h.requireMCPCatalog(c) {
 		return

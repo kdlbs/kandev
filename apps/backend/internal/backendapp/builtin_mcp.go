@@ -16,6 +16,8 @@ func wireBuiltinMCPActions(params routeParams) {
 	})
 }
 
+// configureBuiltinMCPServices shares package policy across task creation, automation dispatch, and
+// management routes.
 func configureBuiltinMCPServices(params routeParams) {
 	repo, ok := params.agentSettingsRepo.(mcpconfig.BuiltinPolicyRepository)
 	if !ok || params.orchestratorSvc == nil || params.taskSvc == nil || params.router == nil {

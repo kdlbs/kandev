@@ -117,6 +117,8 @@ func (m *Manager) resolveEffectiveMcpServers(
 	return mcpconfig.ToACPServers(result.Servers), nil
 }
 
+// resolveEffectiveMCPResolution applies executor policy to the process-bound automation selection.
+// Unavailable template definitions remain visible as resolution decisions.
 func (m *Manager) resolveEffectiveMCPResolution(
 	ctx context.Context,
 	resolutionContext mcpconfig.ResolutionContext,

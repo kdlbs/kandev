@@ -52,6 +52,10 @@ export type SaveHandlerOpts = {
   router: ReturnType<typeof useRouter>;
 };
 
+/**
+ * Save the automation and reconcile server revisions without overwriting edits made during the
+ * request.
+ */
 export function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
   const { isNew, workspaceId, form, savedForm, currentId, create, update, supportsMultiRepo } =
     opts;

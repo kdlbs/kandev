@@ -39,6 +39,8 @@ func BuiltinBindingDigest(ctx Context) (string, error) {
 	return digest, err
 }
 
+// canonicalBuiltinBinding validates and sorts package authority before computing its stable binding
+// digest.
 func canonicalBuiltinBinding(ctx Context) (Context, string, error) {
 	if ctx.BuiltinPackages == nil || ctx.BuiltinPackages.Validate() != nil || ctx.Surface != ctx.BuiltinPackages.Surface || ctx.ManagedToolPolicy != nil || ctx.CoordinatorToolPolicy != nil {
 		return Context{}, "", errors.New("invalid built-in MCP binding")

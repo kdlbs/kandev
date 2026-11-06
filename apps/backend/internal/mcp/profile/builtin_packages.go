@@ -37,6 +37,7 @@ type BuiltinManifest struct {
 	Origins                 map[PackageID]string `json:"origins"`
 }
 
+// Clone copies package, definition, and origin collections so launch snapshots remain independent.
 func (m *BuiltinManifest) Clone() *BuiltinManifest {
 	if m == nil {
 		return nil
@@ -75,6 +76,8 @@ func (m *BuiltinManifest) Validate() error {
 	return nil
 }
 
+// validateIdentity separates version 2 automation grants from version 1 task grants and validates
+// their owners.
 func (m *BuiltinManifest) validateIdentity() error {
 	if m.Surface == SurfaceAutomation {
 		if m.Version != 2 || m.AutomationID == "" || strings.TrimSpace(m.AutomationID) != m.AutomationID || m.AutomationRevision < 1 {
@@ -104,6 +107,7 @@ func (m *BuiltinManifest) validateIdentity() error {
 	return nil
 }
 
+// validOrigin requires package origins that match the manifest surface and mandatory Core authority.
 func (m *BuiltinManifest) validOrigin(id PackageID) bool {
 	origin := m.Origins[id]
 	if id == PackageCore || m.Surface == SurfaceConfiguration {
@@ -115,6 +119,7 @@ func (m *BuiltinManifest) validOrigin(id PackageID) bool {
 	return origin == "task" || (origin == "workspace" && id != PackageConfiguration)
 }
 
+// PackageEligible defines the complete package allowlist for each execution surface.
 func PackageEligible(id PackageID, surface Surface) bool {
 	switch surface {
 	case SurfaceKanbanTask, SurfaceAutomation:

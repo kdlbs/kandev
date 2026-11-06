@@ -58,6 +58,9 @@ function transportLabel(transport: string, t: (key: string) => string): string {
   return t("settings:mcpTransportStreamable");
 }
 
+/**
+ * Count references from every selection owner, including automations, for deletion confirmation.
+ */
 function selectionImpactTotal(impact?: MCPSelectionImpact): number {
   if (!impact) return 0;
   return (

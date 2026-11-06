@@ -365,6 +365,8 @@ const automationColumns = `created_by_user_id, id, workspace_id, name, descripti
 	retry_policy, plugin_tools, mcp_selection, mcp_selection_revision, automation_revision, last_triggered_at, created_at, updated_at,
 	execution_mode = 'task' AS legacy_board_card`
 
+// initSchema creates automation tables and applies required migrations for the active database
+// driver.
 func (s *Store) initSchema() error {
 	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL+pluginWebhookTablesSQL+retryLaunchTablesSQL, s.db.DriverName())); err != nil {
 		return err
@@ -955,6 +957,9 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 	return err
 }
 
+// updateAutomationReturning commits settings and repositories together under the observed mode and
+// MCP revision.
+// The returned automation carries revisions assigned by the committed database update.
 func (s *Store) updateAutomationReturning(ctx context.Context, id string, req *UpdateAutomationRequest) (*Automation, error) {
 	a, err := s.GetAutomation(ctx, id)
 	if err != nil {
@@ -989,6 +994,8 @@ func (s *Store) updateAutomationReturning(ctx context.Context, id string, req *U
 	return a, nil
 }
 
+// validateAutomationUpdateCondition rejects stale selection edits and stale mode-dependent
+// validation.
 func validateAutomationUpdateCondition(a *Automation, req *UpdateAutomationRequest) error {
 	if req.validatedTaskMode != nil && *req.validatedTaskMode != a.TaskMode {
 		return ErrMCPSelectionConflict
@@ -1000,6 +1007,8 @@ func validateAutomationUpdateCondition(a *Automation, req *UpdateAutomationReque
 	return nil
 }
 
+// prepareAutomationUpdate applies partial fields and serializes validated settings before opening
+// the write transaction.
 func prepareAutomationUpdate(a *Automation, req *UpdateAutomationRequest) error {
 	applyAutomationUpdate(a, req)
 	selectionJSON, err := json.Marshal(a.MCPSelection)
@@ -1025,6 +1034,8 @@ func prepareAutomationUpdate(a *Automation, req *UpdateAutomationRequest) error 
 	return normalizeAutomationUpdateSettings(a)
 }
 
+// normalizeAutomationUpdateSettings resolves legacy defaults and validates the resulting automation
+// target.
 func normalizeAutomationUpdateSettings(a *Automation) error {
 	if a.ContinuationPolicy == "" {
 		a.ContinuationPolicy = ContinuationPolicyNewTask
@@ -1063,6 +1074,8 @@ type automationUpdateCondition struct {
 	taskMode TaskMode
 }
 
+// writeAutomationUpdateRow compares the observed mode and MCP revision before returning
+// database-assigned revisions.
 func writeAutomationUpdateRow(ctx context.Context, tx *sqlx.Tx, id string, a *Automation, condition automationUpdateCondition) error {
 	err := tx.QueryRowxContext(ctx, tx.Rebind(`
 		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
@@ -1088,6 +1101,8 @@ func writeAutomationUpdateRow(ctx context.Context, tx *sqlx.Tx, id string, a *Au
 	return err
 }
 
+// replaceAutomationUpdateRepositories replaces explicit bindings or clears them when their mode no
+// longer selects repositories.
 func replaceAutomationUpdateRepositories(ctx context.Context, tx *sqlx.Tx, id string, a *Automation, req *UpdateAutomationRequest) error {
 
 	if req.Repositories != nil || req.RepositoryIDs != nil {
@@ -1105,6 +1120,8 @@ func replaceAutomationUpdateRepositories(ctx context.Context, tx *sqlx.Tx, id st
 	return nil
 }
 
+// applyAutomationUpdate preserves omitted fields and retires the previous MCP grant when the task
+// mode changes.
 func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
 	if req.TaskMode != nil && *req.TaskMode != a.TaskMode && a.MCPSelection != nil {
 		a.MCPSelection = nil

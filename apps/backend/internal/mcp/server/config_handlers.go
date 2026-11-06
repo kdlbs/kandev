@@ -183,6 +183,7 @@ func (s *Server) registerConfigAgentTools() {
 
 // --- MCP config tools ---
 
+// registerConfigMcpTools keeps legacy MCP configuration writes unavailable to private automations.
 func (s *Server) registerConfigMcpTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_agent_profiles_kandev",

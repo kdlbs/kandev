@@ -79,6 +79,7 @@ func boundedMCPIdentity(value string) string {
 
 const automationMCPOrigin = "automation"
 
+// normalizeMCPOrigins retains known origin scopes with bounded identities and at most 64 entries.
 func normalizeMCPOrigins(origins []MCPSelectionOrigin) []MCPSelectionOrigin {
 	result := make([]MCPSelectionOrigin, 0, min(len(origins), 64))
 	for _, origin := range origins {

@@ -918,6 +918,8 @@ func (s *Service) verifyRetryTaskOperation(ctx context.Context, evt *automation.
 	return fence.VerifyRetryTaskOperation(ctx, evt.RunID, evt.RetryGroupGeneration, operation.LeaseToken)
 }
 
+// prepareAutomationTask preserves a continued task's MCP settings and applies templates only to
+// newly created tasks.
 func (s *Service) prepareAutomationTask(
 	ctx context.Context,
 	a *automation.Automation,

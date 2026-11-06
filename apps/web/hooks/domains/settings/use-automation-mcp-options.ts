@@ -4,6 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getAutomation, getAutomationMCPOptions } from "@/lib/api/domains/automation-api";
 import type { AutomationMCPOptions } from "@/lib/types/automation";
 
+/**
+ * Publish only the newest options response for the current workspace, profile, and repository
+ * selection.
+ */
 export function useAutomationMCPOptions(
   workspaceId: string,
   profileId: string,
@@ -56,6 +60,9 @@ export function useAutomationMCPOptions(
   };
 }
 
+/**
+ * Reload saved selections only for the active editor owner and ignore superseded requests.
+ */
 export function useAutomationMCPSelectionReload(workspaceId: string, automationId: string | null) {
   const key = JSON.stringify([workspaceId, automationId]);
   const owner = useRef({ key, active: false, sequence: 0 });
