@@ -4,11 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
-import type {
-  AutomationMCPOptions,
-  AutomationMCPSelection,
-  TaskMode,
-} from "@/lib/types/automation";
+import type { AutomationMCPOptions, AutomationMCPSelection } from "@/lib/types/automation";
 
 type FieldsProps = {
   options?: AutomationMCPOptions;
@@ -19,61 +15,6 @@ type FieldsProps = {
 };
 const rowClass = (touch: boolean) =>
   `flex items-start gap-3 py-2 ${touch ? "min-h-11" : "min-h-7"}`;
-
-/**
- * Keep Core selected and apply workspace blocks only to normal-task templates.
- */
-export function AutomationBuiltinFields({
-  options,
-  value,
-  onChange,
-  touch,
-  disabled,
-  taskMode,
-}: FieldsProps & { taskMode: TaskMode }) {
-  const { t } = useTranslation();
-  return (
-    <fieldset disabled={disabled} className="min-w-0 space-y-1">
-      <legend className="text-sm font-medium">{t("automations:mcpBuiltinPackages")}</legend>
-      {options?.packages.map((pkg) => {
-        const blocked = taskMode === "normal_task" && options.task_blocked.includes(pkg.id);
-        return (
-          <label
-            key={pkg.id}
-            className={rowClass(touch)}
-            data-testid={`automation-mcp-package-${pkg.id}`}
-          >
-            <Checkbox
-              checked={value.builtin_packages.includes(pkg.id)}
-              disabled={pkg.id === "core" || (blocked && !value.builtin_packages.includes(pkg.id))}
-              onCheckedChange={(checked) =>
-                onChange({
-                  ...value,
-                  builtin_packages:
-                    checked === true
-                      ? [...value.builtin_packages, pkg.id]
-                      : value.builtin_packages.filter((id) => id !== pkg.id),
-                })
-              }
-            />
-            <span className="min-w-0 break-words text-sm">
-              <span className="font-medium">{t(pkg.label_key)}</span>
-              {pkg.id === "core" ? (
-                <span className="ml-2 text-xs text-muted-foreground">
-                  {t("automations:mcpRequired")}
-                </span>
-              ) : null}
-              <span className="block text-xs text-muted-foreground">{t(pkg.description_key)}</span>
-              {blocked ? (
-                <span className="block text-xs">{t("automations:mcpBlocked")}</span>
-              ) : null}
-            </span>
-          </label>
-        );
-      })}
-    </fieldset>
-  );
-}
 
 /**
  * Separate inherited servers from explicit selections and retain controls for removing

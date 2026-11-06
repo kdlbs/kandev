@@ -333,7 +333,7 @@ Private automation sessions receive required, workspace-scoped Core tools for co
 ### Choose MCP access
 
 1. Open **Settings > Workspaces > your workspace > Automations** and select an automation.
-2. Under **MCP access**, select optional built-in packages: Configuration, Rich Output, Walkthroughs, and Diagnostics. Core stays required.
+2. Under **MCP access**, open a built-in package and choose **On** or **Off**. Use **Back to packages** to return to the list. Configuration, Rich Output, Walkthroughs, and Diagnostics are optional. Core stays required.
 3. Select additional **Workspace MCP servers** from that workspace's saved catalog. Repository and agent-profile inheritance remains additive.
 4. Use **Save changes**. Use **Discard** to remove unsaved edits.
 

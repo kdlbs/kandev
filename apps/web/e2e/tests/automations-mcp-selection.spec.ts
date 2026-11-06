@@ -2,6 +2,7 @@ import { watchWs } from "../helpers/causal-waits";
 import { test, expect } from "../fixtures/test-base";
 import {
   OPTIONAL_AUTOMATION_PACKAGES,
+  chooseAutomationPackage,
   verifyAutomationMCPDeleteWarning,
   saveAutomationMCP,
   verifyAutomationMCPRecovery,
@@ -59,16 +60,23 @@ test("saves all native packages and workspace servers, then invokes native tools
   await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`);
   const section = testPage.getByTestId("automation-mcp-access");
   await expect(
-    section.getByTestId("automation-mcp-package-core").getByRole("checkbox"),
-  ).toBeChecked();
-  for (const id of OPTIONAL_AUTOMATION_PACKAGES)
-    await section.getByTestId(`automation-mcp-package-${id}`).click();
+    section.getByTestId("automation-mcp-package-core").locator('[data-slot="badge"]'),
+  ).toHaveText("Required");
+  for (const id of OPTIONAL_AUTOMATION_PACKAGES) await chooseAutomationPackage(testPage, id, true);
   const serverRow = section.getByTestId(`automation-mcp-server-${server.id}`);
   await serverRow.click();
   await section.evaluate((element) => element.scrollIntoView({ block: "start" }));
   await prCapture.screenshot("automation-mcp-desktop", {
     caption: "Automation MCP selection on desktop",
   });
+  await section.getByTestId("automation-mcp-package-configuration").click();
+  const detail = section.getByTestId("automation-mcp-package-detail");
+  expect((await detail.getByRole("combobox").boundingBox())!.height).toBeCloseTo(28, 0);
+  await detail.evaluate((element) => element.scrollIntoView({ block: "start" }));
+  await prCapture.screenshot("automation-mcp-package-detail-desktop", {
+    caption: "Automation package detail uses the shared MCP package presentation",
+  });
+  await detail.getByRole("button", { name: "Back to packages", exact: true }).click();
   await saveAutomationMCP(testPage, watcher);
   let saved = await apiClient.wsRequest<Automation>("automation.get", { id: automation.id });
   expect(saved.mcp_selection?.definition_ids).toEqual([server.id]);
@@ -77,8 +85,8 @@ test("saves all native packages and workspace servers, then invokes native tools
   await expect(serverRow.getByRole("checkbox")).toBeChecked();
   for (const id of OPTIONAL_AUTOMATION_PACKAGES)
     await expect(
-      section.getByTestId(`automation-mcp-package-${id}`).getByRole("checkbox"),
-    ).toBeChecked();
+      section.getByTestId(`automation-mcp-package-${id}`).locator('[data-slot="badge"]'),
+    ).toHaveText("On");
   // The external endpoint is only a saved-definition fixture. Native execution uses no external service.
   await serverRow.click();
   await saveAutomationMCP(testPage, watcher);
@@ -157,7 +165,7 @@ test("retains an MCP draft after a stale save and reconciles only after reload",
   const watcher = watchWs(testPage);
   await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/automations/${a.id}`);
   const row = testPage.getByTestId("automation-mcp-package-configuration");
-  await row.click();
+  await chooseAutomationPackage(testPage, "configuration", true);
   await apiClient.wsRequest("automation.update", {
     id: a.id,
     mcp_selection: { builtin_packages: ["core", "diagnostics"], definition_ids: [] },
@@ -169,10 +177,10 @@ test("retains an MCP draft after a stale save and reconciles only after reload",
     .click();
   const section = testPage.getByTestId("automation-mcp-access");
   await expect(section.getByRole("alert")).toContainText("Choices changed");
-  await expect(row.getByRole("checkbox")).toBeChecked();
+  await expect(row.locator('[data-slot="badge"]')).toHaveText("On");
   await section.getByRole("button", { name: "Reload choices", exact: true }).click();
   await expect(section.getByRole("alert")).toHaveCount(0);
-  await expect(row.getByRole("checkbox")).toBeChecked();
+  await expect(row.locator('[data-slot="badge"]')).toHaveText("On");
   await saveAutomationMCP(testPage, watcher);
   const saved = await apiClient.wsRequest<Automation>("automation.get", { id: a.id });
   expect(saved.mcp_selection?.builtin_packages).toEqual(["core", "configuration"]);

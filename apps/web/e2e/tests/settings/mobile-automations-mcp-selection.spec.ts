@@ -2,6 +2,7 @@ import { watchWs } from "../../helpers/causal-waits";
 import { test, expect } from "../../fixtures/test-base";
 import {
   OPTIONAL_AUTOMATION_PACKAGES,
+  chooseAutomationPackage,
   verifyAutomationMCPDeleteWarning,
   saveAutomationMCP,
   verifyAutomationMCPRecovery,
@@ -46,25 +47,30 @@ test("selects and saves every optional package on a phone with reachable control
     const row = section.getByTestId(`automation-mcp-package-${id}`);
     await expect(row).toBeVisible();
     expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    await row.tap();
+    await chooseAutomationPackage(testPage, id, true, true);
   }
   await section.evaluate((element) => element.scrollIntoView({ block: "start" }));
   await prCapture.screenshot("automation-mcp-phone", {
     caption: "Automation MCP selection on a phone",
   });
+  await section.getByTestId("automation-mcp-package-configuration").tap();
+  const detail = section.getByTestId("automation-mcp-package-detail");
+  expect((await detail.getByRole("combobox").boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await detail.evaluate((element) => element.scrollIntoView({ block: "start" }));
+  await prCapture.screenshot("automation-mcp-package-detail-phone", {
+    caption: "Automation package detail with touch-sized controls",
+  });
+  await detail.getByRole("button", { name: "Back to packages", exact: true }).tap();
   await saveAutomationMCP(testPage, watcher);
   await testPage.reload();
   for (const id of OPTIONAL_AUTOMATION_PACKAGES)
     await expect(
-      section.getByTestId(`automation-mcp-package-${id}`).getByRole("checkbox"),
-    ).toBeChecked();
-  const diagnostics = section
-    .getByTestId("automation-mcp-package-diagnostics")
-    .getByRole("checkbox");
-  await diagnostics.tap();
-  await diagnostics.focus();
+      section.getByTestId(`automation-mcp-package-${id}`).locator('[data-slot="badge"]'),
+    ).toHaveText("On");
+  const diagnostics = section.getByTestId("automation-mcp-package-diagnostics");
+  await chooseAutomationPackage(testPage, "diagnostics", false, true);
   for (const width of [320, 393, 767, 768]) {
-    await expect(diagnostics).not.toBeChecked();
+    await expect(diagnostics.locator('[data-slot="badge"]')).toHaveText("Off");
     await testPage.setViewportSize({ width, height: 851 });
     await expect(diagnostics).toBeFocused();
     await assertNoDocumentHorizontalOverflow(testPage, `automation MCP at ${width}px`);
@@ -76,7 +82,7 @@ test("selects and saves every optional package on a phone with reachable control
     .getByTestId("settings-floating-save")
     .getByRole("button", { name: "Reset", exact: true })
     .tap();
-  await expect(diagnostics).toBeChecked();
+  await expect(diagnostics.locator('[data-slot="badge"]')).toHaveText("On");
 });
 
 test.describe("Narrow fine pointer", () => {
@@ -98,10 +104,23 @@ test.describe("Narrow fine pointer", () => {
     const row = testPage.getByTestId("automation-mcp-package-configuration");
     await expect(row).toBeVisible();
     expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    const checkbox = row.getByRole("checkbox");
-    await checkbox.focus();
-    await testPage.keyboard.press("Space");
-    await expect(checkbox).toBeChecked();
+    await row.focus();
+    await testPage.keyboard.press("Enter");
+    const detail = testPage.getByTestId("automation-mcp-package-detail");
+    const back = detail.getByRole("button", { name: "Back to packages", exact: true });
+    await expect(back).toBeFocused();
+    expect((await back.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await testPage.keyboard.press("Tab");
+    const choice = detail.getByRole("combobox");
+    await expect(choice).toBeFocused();
+    expect((await choice.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await testPage.keyboard.press("Enter");
+    await testPage.getByRole("option", { name: "On", exact: true }).click();
+    await detail.getByRole("button", { name: /registered tools/ }).click();
+    await expect(detail.getByText("list_shared_prompts_kandev", { exact: true })).toBeVisible();
+    await back.click();
+    await expect(row).toBeFocused();
+    await expect(row.locator('[data-slot="badge"]')).toHaveText("On");
     await saveAutomationMCP(testPage, watcher);
     await assertNoDocumentHorizontalOverflow(testPage, "automation MCP with a narrow fine pointer");
   });

@@ -189,7 +189,9 @@ They reject explicit selection payloads rather than silently ignoring them.
 Extend `apps/web/components/automations/automation-editor.tsx` through small domain components and hooks.
 MCP access appears after Then and before Settings, using the existing plugin section as the local exemplar.
 Order: Built-in packages, Workspace MCP servers, Plugin tools.
-Show Core as Required. Show labelled checkboxes for optional packages, concise descriptions, and a visible Configuration authority notice.
+Show Core as Required. Reuse the shared bordered package rows, status badges, detail header, and tool information from task/workspace pickers.
+Each row opens an inline detail view with an explicit On/Off choice. Core has a required notice instead.
+Return focus to the package row when Back to packages closes its detail. Keep the Configuration authority notice visible.
 Workspace servers use the existing searchable checkbox picker and explicit inherited origins.
 Keep plugin approval state and its live application notice intact.
 
@@ -201,7 +203,8 @@ Unavailable selected items remain visible with a Remove action.
 
 The phone entry point remains workspace Automations > editor.
 Use the existing full-page editor with inline groups and one page scroll owner.
-The shipped exemplar is `settings/mobile-automation-plugin-tools.spec.ts` and the plugin section it exercises.
+The package list/detail exemplar is `components/mcp/builtin-package-list.tsx` and `builtin-package-detail.tsx`.
+Reuse the same inline composition on phones. The plugin section retains its existing mobile composition.
 A second drawer is unnecessary for these short groups. Long catalogs use the existing bounded searchable list within the editor.
 Retain the settings save surface and safe-area clearance. Use 44px phone/coarse targets and 28px ordinary desktop controls.
 Keep one draft/controller across responsive changes, keyboard focus, visible labels, and wrapped names.

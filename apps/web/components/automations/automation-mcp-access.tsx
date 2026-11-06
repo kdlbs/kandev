@@ -5,7 +5,8 @@ import { Button } from "@kandev/ui/button";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAutomationMCPOptions } from "@/hooks/domains/settings/use-automation-mcp-options";
 import type { AutomationMCPSelection, TaskMode } from "@/lib/types/automation";
-import { AutomationBuiltinFields, AutomationWorkspaceFields } from "./automation-mcp-access-fields";
+import { AutomationWorkspaceFields } from "./automation-mcp-access-fields";
+import { AutomationBuiltinPackages } from "./automation-builtin-packages";
 
 /**
  * Present mode-specific MCP choices with touch controls and preserve selections during option
@@ -75,11 +76,10 @@ export function AutomationMCPAccess({
           {t("common:loading")}
         </p>
       ) : null}
-      <AutomationBuiltinFields
+      <AutomationBuiltinPackages
         options={options}
         value={value}
         onChange={onChange}
-        touch={touch}
         disabled={loading || error}
         taskMode={taskMode}
       />

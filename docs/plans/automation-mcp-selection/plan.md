@@ -74,9 +74,9 @@ The existing Then section precedes MCP access. Its groups appear in this order:
 2. Workspace MCP servers: search, inherited rows with source labels, then additional selectable definitions.
 3. Plugin tools: existing grouped selection and approval state.
 
-Configuration's explanation stays beside its checkbox. The private timing notice says changes apply at the next agent process start.
+Package rows share the task/workspace list, status badges, and inline detail view. Open a package to choose On or Off. Configuration's explanation stays visible below the picker. The private timing notice says changes apply at the next agent process start.
 Existing Save changes and Discard controls remain in the settings save surface.
-Checked sample choices are illustrative. Group order, required Core, authority notice, and shared save ownership are required.
+Sample package choices are illustrative. Group order, required Core, authority notice, and shared save ownership are required.
 
 **UI-02: Phone editor, same selection.** Use the existing full-page automation editor and inline groups.
 The hierarchy matches UI-01. One page scroll owner contains the sections, with the existing save surface clear of safe areas.
@@ -86,7 +86,7 @@ A long workspace catalog uses the existing bounded searchable list. Do not intro
 **UI-03: Recovery and run evidence.** Loading preserves saved choices. An options error offers Retry and retains unavailable selected rows.
 A stale save retains the draft and offers Reload choices before an explicit retry.
 A saved package change on a reused process shows Desired and Current process separately, plus next-process timing.
-Missing historical evidence says Unknown. A checked row never implies Connected.
+Missing historical evidence says Unknown. An On badge never implies Connected.
 
 UI-01/02 map to AC-OFFICE-AUTOMATION-MCP-004.1, .2, .4, and .5.
 UI-03 maps to AC-OFFICE-AUTOMATION-MCP-003.1, .4, .5 and AC-OFFICE-AUTOMATION-MCP-004.2, .3.

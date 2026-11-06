@@ -16,6 +16,30 @@ export const OPTIONAL_AUTOMATION_PACKAGES = [
   "walkthroughs",
   "diagnostics",
 ] as const;
+/** Choose a package through the same list/detail interaction used by task settings. */
+export async function chooseAutomationPackage(
+  page: Page,
+  id: string,
+  enabled: boolean,
+  touch = false,
+) {
+  const row = page.getByTestId(`automation-mcp-package-${id}`);
+  if (touch) await row.tap();
+  else await row.click();
+  const detail = page.getByTestId("automation-mcp-package-detail");
+  const choice = detail.getByRole("combobox");
+  if (touch) await choice.tap();
+  else await choice.click();
+  const option = page.getByRole("option", { name: enabled ? "On" : "Off", exact: true });
+  if (touch) await option.tap();
+  else await option.click();
+  const back = detail.getByRole("button", { name: "Back to packages", exact: true });
+  if (touch) await back.tap();
+  else await back.click();
+  await expect(row).toBeFocused();
+  await expect(row.locator('[data-slot="badge"]')).toHaveText(enabled ? "On" : "Off");
+}
+
 export async function saveAutomationMCP(page: Page, watcher: WsWatcher) {
   const save = page.getByTestId("settings-floating-save");
   const updated = watcher.waitForResponse("automation.update");
@@ -151,12 +175,14 @@ export async function verifyAutomationMCPRecovery({
   expect(blocked.ok).toBe(true);
   await testPage.goto(`/settings/workspaces/${recovery.workspaceId}/automations/${automation.id}`);
   const section = testPage.getByTestId("automation-mcp-access");
-  const configuration = section
-    .getByTestId("automation-mcp-package-configuration")
-    .getByRole("checkbox");
-  await expect(configuration).toBeChecked();
-  await expect(configuration).toBeEnabled();
+  const configuration = section.getByTestId("automation-mcp-package-configuration");
+  await expect(configuration.locator('[data-slot="badge"]')).toHaveText("On");
+  await chooseAutomationPackage(testPage, "configuration", false);
   await configuration.click();
+  await section.getByRole("combobox").click();
+  await expect(testPage.getByRole("option", { name: "On", exact: true })).toBeDisabled();
+  await testPage.keyboard.press("Escape");
+  await section.getByRole("button", { name: "Back to packages", exact: true }).click();
   const direct = section.getByTestId(`automation-mcp-server-${server.id}`).getByRole("checkbox");
   await expect(direct).toBeChecked();
   await direct.click();

@@ -72,9 +72,9 @@ The existing Then section precedes MCP access. Its groups appear in this order:
 2. Workspace MCP servers: search, inherited rows with source labels, then additional selectable definitions.
 3. Plugin tools: existing grouped selection and approval state.
 
-Configuration's explanation stays beside its checkbox. The private timing notice says changes apply at the next agent process start.
+Package rows use the shared task/workspace list, with status badges and chevrons. Select a row to open its inline detail and On/Off selector. Core remains Required. Configuration's explanation stays visible below the package picker. The private timing notice says changes apply at the next agent process start.
 Existing Save changes and Discard controls remain in the settings save surface.
-Checked sample choices are illustrative. Group order, required Core, authority notice, and shared save ownership are required.
+Sample package choices are illustrative. Group order, required Core, authority notice, and shared save ownership are required.
 
 **UI-02: Phone editor, same selection.** Use the existing full-page automation editor and inline groups.
 The hierarchy matches UI-01. One page scroll owner contains the sections, with the existing save surface clear of safe areas.
@@ -84,7 +84,7 @@ A long workspace catalog uses the existing bounded searchable list. Do not intro
 **UI-03: Recovery and run evidence.** Loading preserves saved choices. An options error offers Retry and retains unavailable selected rows.
 A stale save retains the draft and offers Reload choices before an explicit retry.
 A saved package change on a reused process shows Desired and Current process separately, plus next-process timing.
-Missing historical evidence says Unknown. A checked row never implies Connected.
+Missing historical evidence says Unknown. An On badge never implies Connected.
 
 UI-01/02 map to AC-OFFICE-AUTOMATION-MCP-004.1, .2, .4, and .5.
 UI-03 maps to AC-OFFICE-AUTOMATION-MCP-003.1, .4, .5 and AC-OFFICE-AUTOMATION-MCP-004.2, .3.
@@ -171,3 +171,11 @@ The editor, stale-save reconciliation, run evidence, locales, and public docs ar
 PR remediation covers canonical save values, retained in-flight edits, task-mode round trips, stale callbacks, unsaved recovery, named automation origins, removable blocked/direct inherited choices, corrected translations, and disclosure-scoped evidence reads. The plan records the expanded tests and browser results.
 
 The final review batch passed 144 focused web cases and ten desktop plus five phone browser scenarios. The browser checks include the deletion warning, new-process attachment limit, and retained automation references. Save-stage regressions distinguish repository, creation, update, and trigger errors. Hook regressions cover committed ownership, stale callbacks, and recovery after a failed reload.
+
+### Package picker consistency refinement
+
+- Reuse shared package rows, detail headers, and tool information across workspace, task, and automation editors.
+- Keep the phone entry point and page scroll owner. Open package details inline, use touch-sized controls, and return focus on Back to packages.
+- Preserve explicit automation On/Off grants, required Core, normal-task workspace blocks, and shared Save/Reset ownership.
+- Verify touch selection, keyboard navigation, registered tools, reload, conflict recovery, blocked-choice removal, and responsive draft retention in the existing desktop/phone suites.
+- Validation: the keyboard detail test failed before implementation. After implementation, 18 desktop and 15 phone E2E cases passed with retries disabled. These include the existing task/workspace package picker suites. The 17 focused unit cases, web typecheck, changed-file lint, translation integrity/ratchet, public-doc checks, and specification checks passed.
