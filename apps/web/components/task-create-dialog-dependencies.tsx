@@ -173,8 +173,10 @@ type DependencyPickerContentProps = {
   setOpen: (open: boolean) => void;
   portalContainer: HTMLElement | null;
   candidatesLoading: boolean;
-  searchValue?: string;
-  onSearchValueChange?: (value: string) => void;
+  searchValue: string;
+  onSearchValueChange: (value: string) => void;
+  /** True for the edit dialog's server-backed search, which has no #PR/MR number syntax. */
+  isServerBackedSearch: boolean;
 };
 
 function DependencyPickerContent({
@@ -187,12 +189,9 @@ function DependencyPickerContent({
   candidatesLoading,
   searchValue,
   onSearchValueChange,
+  isServerBackedSearch,
 }: DependencyPickerContentProps) {
   const { t } = useTranslation();
-  const commandInputProps =
-    onSearchValueChange === undefined
-      ? {}
-      : { value: searchValue ?? "", onValueChange: onSearchValueChange };
   return (
     <PopoverContent
       align="start"
@@ -205,11 +204,10 @@ function DependencyPickerContent({
         <div className="flex items-center gap-1">
           <div className="min-w-0 flex-1">
             <CommandInput
-              {...commandInputProps}
+              value={searchValue}
+              onValueChange={onSearchValueChange}
               placeholder={t(
-                onSearchValueChange === undefined
-                  ? "task:searchTasksOrChangeRequest"
-                  : "task:searchTasks",
+                isServerBackedSearch ? "task:searchTasks" : "task:searchTasksOrChangeRequest",
               )}
             />
           </div>
@@ -489,9 +487,8 @@ export function TaskCreateDependencies({
           portalContainer={portalContainer}
           candidatesLoading={candidatesLoading}
           searchValue={effectiveSearch}
-          onSearchValueChange={
-            onSearchValueChange ?? (searchValue === undefined ? undefined : setLocalSearch)
-          }
+          onSearchValueChange={onSearchValueChange ?? setLocalSearch}
+          isServerBackedSearch={onSearchValueChange !== undefined}
         />
       </Popover>
     </div>

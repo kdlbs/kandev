@@ -345,6 +345,36 @@ describe("TaskCreateDependencies change-request search", () => {
       .map((option) => option.getAttribute("data-testid"));
     expect(options).toEqual([optionTestId(BETA_ID), optionTestId(ALPHA_ID)]);
   });
+
+  it("ranks a typed title match above a more recently updated non-match", () => {
+    const titleMatchId = "task-gamma-title";
+    const idMatchId = "task-gamma-id";
+    mockStore = {
+      ...emptyStore(),
+      kanban: {
+        tasks: [
+          task(titleMatchId, "Gamma rollout", { updatedAt: "2026-01-01T00:00:00Z" }),
+          task(idMatchId, "Zzz unrelated task", { updatedAt: "2026-06-01T00:00:00Z" }),
+        ],
+      },
+    };
+
+    renderDependencies();
+    fireEvent.click(screen.getByTestId(TRIGGER_TEST_ID));
+
+    const picker = screen.getByTestId(POPOVER_TEST_ID);
+    const search = within(picker).getByPlaceholderText(SEARCH_TASKS_LABEL);
+    fireEvent.change(search, { target: { value: "gamma" } });
+
+    // idMatchId is newer and would rank first on recency alone; it only
+    // matches via its id, so a working title-match boost must still rank
+    // the exact title match ahead of it, proving the typed query reached
+    // rankCreateDialogCandidates rather than only cmdk's own filtering.
+    const options = within(picker)
+      .getAllByTestId(/task-create-dependency-option-/)
+      .map((option) => option.getAttribute("data-testid"));
+    expect(options).toEqual([optionTestId(titleMatchId), optionTestId(idMatchId)]);
+  });
 });
 
 describe("TaskCreateDependencies multi-PR change requests", () => {
