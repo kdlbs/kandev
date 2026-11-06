@@ -1512,6 +1512,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		DeliveryStreamID:               reqWithWorktree.DeliveryStreamID,
 		DeliveryIncarnationID:          reqWithWorktree.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:      reqWithWorktree.DeliveryHarnessGeneration,
+		CopilotNativeSessionEvents:     m.copilotNativeLaunchAllowed(rt, agentConfig.ID(), reqWithWorktree.DeliveryStreamID),
 		DurableJournalHostRoot:         m.dataDir,
 		DurableJournalOwnerID:          journalOwnerID,
 		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
@@ -2518,6 +2519,7 @@ func (m *Manager) buildExecutionFromInstance(
 ) (*AgentExecution, error) {
 	execution := execInstance.ToAgentExecution(execReq)
 	execution.ExecutionProfileID = executionProfileID(req)
+	m.applyCopilotNativeLaunchCapability(execution, rt, execReq.DeliveryStreamID)
 	if profileInfo != nil {
 		execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
 	}
@@ -2840,6 +2842,13 @@ func (m *Manager) stopRegisteredLaunchRuntime(
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	execution.agentctlLifecycleMu.Lock()
 	defer execution.agentctlLifecycleMu.Unlock()
+	// Release remote files before the runtime (and its helper endpoint) stops.
+	if client := execution.currentAgentCtlClient(); client != nil {
+		if err := m.cleanupProjectMCPFiles(context.Background(), execution, client); err != nil {
+			m.logger.Warn("failed to release project MCP files during registered launch rollback",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
+	}
 	if rt != nil && execInstance != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		retainedRuntime := retainsRuntimeOnLaunchRollback(execution)
@@ -2912,6 +2921,14 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
 		zap.String("reason", reason))
+	// Cleanup may use the client while the lifecycle write lease is already
+	// held; never re-acquire it here.
+	if client := execution.currentAgentCtlClient(); client != nil {
+		if err := m.cleanupProjectMCPFiles(context.Background(), execution, client); err != nil {
+			m.logger.Warn("failed to release project MCP files during launch rollback",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
+	}
 	if rt != nil && execInstance != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -2925,6 +2942,7 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 		client.Close()
 	}
 	execution.EndSessionSpan()
+	execution.clearProjectMCPDelivery()
 	m.cleanupPassthroughMCPConfig(execution)
 }
 
@@ -3218,7 +3236,16 @@ func (m *Manager) configureAndStartAgentWithPreparedArgs(
 			return "", err
 		}
 	}
-	if err := client.ConfigureAgent(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, execution.LaunchWrapper); err != nil {
+	delivery, err := execution.mcpProjectDeliveryFor(client)
+	if err != nil {
+		return "", err
+	}
+	if delivery != nil {
+		if err := client.RequireCapability(ctx, agentctltypes.ProjectMCPDeliveryCapability); err != nil {
+			return "", err
+		}
+	}
+	if err := client.ConfigureAgentWithProjectDelivery(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, execution.LaunchWrapper); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 

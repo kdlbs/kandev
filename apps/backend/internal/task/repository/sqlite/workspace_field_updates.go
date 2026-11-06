@@ -43,6 +43,9 @@ func (r *Repository) UpdateWorkspaceFields(ctx context.Context, id string, updat
 	if update.ACPIdleTimeoutMinutes != nil {
 		appendValue("acp_idle_timeout_minutes", *update.ACPIdleTimeoutMinutes)
 	}
+	if update.DynamicMidTurnFailoverEnabled != nil {
+		appendValue("dynamic_midturn_failover_enabled", *update.DynamicMidTurnFailoverEnabled)
+	}
 	args = append(args, id)
 	query := "UPDATE workspaces SET " + strings.Join(assignments, ", ") + " WHERE id = ?"
 	if expected != nil {

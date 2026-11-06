@@ -38,6 +38,7 @@ export function descriptor(id: string, values: Partial<Item> = {}): Item {
     default_config_agent_profile_id: "config-profile-id",
     acp_idle_suspension_enabled: true,
     acp_idle_timeout_minutes: 45,
+    dynamic_midturn_failover_enabled: true,
     office_workflow_id: null,
     created_at: "2026-10-01T00:00:00Z",
     updated_at: "2026-10-02T00:00:00Z",

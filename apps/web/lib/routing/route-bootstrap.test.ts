@@ -68,6 +68,7 @@ describe("mapWorkspaceItem", () => {
       default_config_agent_profile_id: null,
       acp_idle_suspension_enabled: false,
       acp_idle_timeout_minutes: 120,
+      dynamic_midturn_failover_enabled: false,
       office_workflow_id: null,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-02T00:00:00Z",

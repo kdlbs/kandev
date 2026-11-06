@@ -5,8 +5,9 @@ import "github.com/kandev/kandev/internal/task/models"
 func workspaceFieldUpdate(req *UpdateWorkspaceRequest) models.WorkspaceFieldUpdate {
 	update := models.WorkspaceFieldUpdate{
 		Name: req.Name, Description: req.Description,
-		ACPIdleSuspensionEnabled: req.ACPIdleSuspensionEnabled,
-		ACPIdleTimeoutMinutes:    req.ACPIdleTimeoutMinutes,
+		ACPIdleSuspensionEnabled:      req.ACPIdleSuspensionEnabled,
+		ACPIdleTimeoutMinutes:         req.ACPIdleTimeoutMinutes,
+		DynamicMidTurnFailoverEnabled: req.DynamicMidTurnFailoverEnabled,
 	}
 	update.DefaultExecutorID = workspaceDefaultUpdate(req.DefaultExecutorID)
 	update.DefaultEnvironmentID = workspaceDefaultUpdate(req.DefaultEnvironmentID)

@@ -291,6 +291,8 @@ export type WorkspacePayload = {
    */
   acp_idle_suspension_enabled?: boolean;
   acp_idle_timeout_minutes?: number;
+  /** Absent from older backends; consumers check key presence like the idle policy. */
+  dynamic_midturn_failover_enabled?: boolean;
   created_at?: string;
   updated_at?: string;
 };

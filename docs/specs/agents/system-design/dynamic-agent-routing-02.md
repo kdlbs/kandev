@@ -165,6 +165,30 @@ require the current exclusive probe lease.
   the diagnostic but the shared recovery evidence treats the attempt as
   pre-result. A mismatch or later progress remains effect-unsafe and enters
   manual recovery.
+- If a provider fails after output or effects, the failure route still
+  declines and the session settles into its ordinary recovery state. A
+  workspace that enables `dynamic_midturn_failover_enabled` (default off) adds
+  one exception for a classified provider-capacity failure (`rate_limited`,
+  `quota_limited`, `provider_unavailable`, `provider_overloaded`,
+  `model_capacity`, fallback allowed). The trigger is fenced on the live
+  prompt attempt: its execution and prompt generation must still own the
+  session's evidence record, the evidence must be known, and the session must
+  be a non-terminal, non-Office task session. A process-local claim admits one
+  handoff per failed route generation and per failed execution, so a
+  redelivered failure never charges the successor's generation. A detached
+  worker then takes the same per-session route-action lock and settled-turn
+  check as a manual action, re-reads the session (same generation, no other
+  execution, WAITING_FOR_INPUT, no completed turn since the claim), and
+  submits `try_next` with `Automatic` set to the same backend route-action
+  transaction. The resolver records `auto_provider_failover` as the route
+  reason, the launch uses the automatic origin, and the successor receives the
+  bounded continuation package without the failed attempt's conversation or
+  tool output. The claim chain records each failed candidate and code since the
+  last completed turn; a repeated code on a candidate already in the chain, an
+  exhausted candidate list, or a stale generation leaves the existing recovery
+  surface in place. The chain is process-local: a restart forgets it, which can
+  allow at most one further handoff per remaining candidate and never replays a
+  turn.
 - If a trusted reset is beyond the configured maximum wait, Kandev does not
   wait for or shorten it. It proceeds to retry or the exhausted outcome.
 - If dynamic routing is disabled after a session is persisted, Kandev keeps its
@@ -324,6 +348,14 @@ require the current exclusive probe lease.
   profile, **THEN** candidates and class policies use a single-column touch
   layout. Routing status and recovery actions remain available without
   horizontal page overflow.
+
+- **GIVEN** a workspace with mid-turn provider failover enabled and a dynamic
+  task whose Fable candidate hits a rate limit after editing files, **WHEN**
+  the failed turn settles, **THEN** Kandev submits one automatic Try next, the
+  next candidate starts with the continuation package, and the failed prompt is
+  not resent. **WHEN** that chain returns to Fable and it hits the same rate
+  limit again, **THEN** no further automatic handoff runs and the session keeps
+  its recovery controls.
 
 ## Out of scope
 

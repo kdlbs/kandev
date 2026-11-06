@@ -122,6 +122,11 @@ not previously approved behavior. Implementation needs a later explicit request.
   package-mode start. A collision with a user-defined server identity shall
   preserve that definition and require resolution. Package selection shall not
   silently fall back to an unrestricted monolithic server.
+- **AC-AGENTS-BUILTIN-MCP-003.6:** When every selected package has a valid delivery
+  channel, a supported agent shall start, restore, or reset a session. Missing
+  ACP HTTP/SSE support alone shall not invalidate a successfully prepared
+  alternate channel. If any selected package lacks a valid channel, the session
+  request shall fail before the provider receives it.
 
 ### REQ-AGENTS-BUILTIN-MCP-004: Evidence and responsive management
 
@@ -163,3 +168,6 @@ Existing agent instructions and operation-specific user consent still apply.
 [System design](../system-design/builtin-mcp-management.md) defines the technical
 contract. [Implementation plan](../../../plans/builtin-mcp-management/plan.md)
 contains sequential work orders and evidence requirements.
+
+[Pi delivery repair](../../../plans/pi-builtin-mcp-delivery/plan.md) covers
+alternate-channel admission without changing package grants or defaults.

@@ -34,6 +34,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initSessionSchema,
 		r.initMessageShellOutputSchema,
 		r.initSessionContinuitySchema,
+		r.initSessionCompactionsSchema,
 		r.initAgentDeliverySchema,
 		r.initTurnChangesSchema,
 		r.initDynamicRoutingSchema,
@@ -614,6 +615,7 @@ const infraSchemaDDL = `
 		default_config_agent_profile_id TEXT DEFAULT '',
 		acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE,
 		acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0),
+		dynamic_midturn_failover_enabled BOOLEAN NOT NULL DEFAULT FALSE,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);

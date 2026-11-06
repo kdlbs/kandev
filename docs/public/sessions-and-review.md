@@ -603,10 +603,17 @@ when the agent reports a trustworthy window size. Open it to see used and total
 tokens; it focuses on the active session's context window. The hover also shows
 a session compaction count inferred from drops in used tokens. Copilot ACP
 sessions, which can mix parent and subagent usage, are excluded from that
-inference, so genuine compactions in those sessions can be missed. Missing
-samples or provider resets can make eligible counts approximate. Existing
-sessions keep their previously inferred totals because Kandev cannot attribute
-old increments.
+inference. On a supported Copilot runtime, new increments instead use successful
+parent compaction events with an explicit applied outcome. Child and subagent
+events do not add to the parent total. Older runtimes and retained agentctl
+processes without this collection show **Unavailable** and keep their previous
+totals. A zero count on an unavailable runtime does not prove that no compaction
+occurred. If evidence was omitted or lost, the row shows **Partial** for the rest
+of the session. Later events do not repair the missing history. Historical
+estimated increments remain in the total, and Kandev does not relabel them as
+confirmed native events or backfill old compactions. Missing samples or provider
+resets can make eligible inferred counts approximate. Existing sessions keep
+their previously inferred totals because Kandev cannot attribute old increments.
 For account-wide
 provider usage, install the [Provider Usage
 plugin](https://github.com/kdlbs/kandev-plugin-provider-usage), which adds a

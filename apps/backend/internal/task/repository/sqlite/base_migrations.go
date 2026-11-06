@@ -367,6 +367,7 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	r.migrate.Apply("workspaces.office_workflow_id", `ALTER TABLE workspaces ADD COLUMN office_workflow_id TEXT DEFAULT ''`)
 	_ = r.migrate.Apply("workspaces.acp_idle_suspension_enabled", `ALTER TABLE workspaces ADD COLUMN acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE`)
 	_ = r.migrate.Apply("workspaces.acp_idle_timeout_minutes", `ALTER TABLE workspaces ADD COLUMN acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0)`)
+	_ = r.migrate.Apply("workspaces.dynamic_midturn_failover_enabled", `ALTER TABLE workspaces ADD COLUMN dynamic_midturn_failover_enabled BOOLEAN NOT NULL DEFAULT FALSE`)
 	_ = r.migrate.Apply("executors_running.idle_suspension_state", `ALTER TABLE executors_running ADD COLUMN idle_suspension_state TEXT NOT NULL DEFAULT ''`)
 	_ = r.migrate.Apply("executors_running.idle_suspension_policy_updated_at", `ALTER TABLE executors_running ADD COLUMN idle_suspension_policy_updated_at TIMESTAMP`)
 
@@ -703,6 +704,17 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 
 	if err := r.migrateTurnChangeHistorySchema(); err != nil {
 		return err
+	}
+
+	// Delivery refresh resolves snapshots through their environment owner or a
+	// task/session binding. Both keys are needed by that correlated lookup, and
+	// the environment must lead because each outer snapshot supplies it. Create
+	// the index after both legacy session-table rebuilds above so neither
+	// rebuild can drop it.
+	if err := r.migrate.ApplyContext(ctx, "task_sessions.environment_task_index", `
+		CREATE INDEX IF NOT EXISTS idx_task_sessions_environment_task
+		ON task_sessions(task_environment_id, task_id)`); err != nil {
+		return fmt.Errorf("create task session environment index: %w", err)
 	}
 
 	// Checked last so a failure on any required migration above --

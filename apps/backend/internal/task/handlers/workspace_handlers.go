@@ -123,14 +123,15 @@ func (h *WorkspaceHandlers) httpGetWorkspace(c *gin.Context) {
 }
 
 type httpUpdateWorkspaceRequest struct {
-	Name                        *string `json:"name,omitempty"`
-	Description                 *string `json:"description,omitempty"`
-	DefaultExecutorID           *string `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
-	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
-	ACPIdleSuspensionEnabled    *bool   `json:"acp_idle_suspension_enabled,omitempty"`
-	ACPIdleTimeoutMinutes       *int    `json:"acp_idle_timeout_minutes,omitempty"`
+	Name                          *string `json:"name,omitempty"`
+	Description                   *string `json:"description,omitempty"`
+	DefaultExecutorID             *string `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID          *string `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID         *string `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID   *string `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled      *bool   `json:"acp_idle_suspension_enabled,omitempty"`
+	ACPIdleTimeoutMinutes         *int    `json:"acp_idle_timeout_minutes,omitempty"`
+	DynamicMidTurnFailoverEnabled *bool   `json:"dynamic_midturn_failover_enabled,omitempty"`
 	// UnitID moves the workspace to another unit, changing who reaches it.
 	UnitID *string `json:"unit_id,omitempty"`
 }
@@ -142,15 +143,16 @@ func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
 		return
 	}
 	workspace, err := h.service.UpdateWorkspace(c.Request.Context(), c.Param("id"), &service.UpdateWorkspaceRequest{
-		Name:                        body.Name,
-		Description:                 body.Description,
-		DefaultExecutorID:           body.DefaultExecutorID,
-		DefaultEnvironmentID:        body.DefaultEnvironmentID,
-		DefaultAgentProfileID:       body.DefaultAgentProfileID,
-		DefaultConfigAgentProfileID: body.DefaultConfigAgentProfileID,
-		ACPIdleSuspensionEnabled:    body.ACPIdleSuspensionEnabled,
-		ACPIdleTimeoutMinutes:       body.ACPIdleTimeoutMinutes,
-		UnitID:                      body.UnitID,
+		Name:                          body.Name,
+		Description:                   body.Description,
+		DefaultExecutorID:             body.DefaultExecutorID,
+		DefaultEnvironmentID:          body.DefaultEnvironmentID,
+		DefaultAgentProfileID:         body.DefaultAgentProfileID,
+		DefaultConfigAgentProfileID:   body.DefaultConfigAgentProfileID,
+		ACPIdleSuspensionEnabled:      body.ACPIdleSuspensionEnabled,
+		ACPIdleTimeoutMinutes:         body.ACPIdleTimeoutMinutes,
+		DynamicMidTurnFailoverEnabled: body.DynamicMidTurnFailoverEnabled,
+		UnitID:                        body.UnitID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workspace not updated")
@@ -262,15 +264,16 @@ func (h *WorkspaceHandlers) wsGetWorkspace(ctx context.Context, msg *ws.Message)
 }
 
 type wsUpdateWorkspaceRequest struct {
-	ID                          string  `json:"id"`
-	Name                        *string `json:"name,omitempty"`
-	Description                 *string `json:"description,omitempty"`
-	DefaultExecutorID           *string `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
-	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
-	ACPIdleSuspensionEnabled    *bool   `json:"acp_idle_suspension_enabled,omitempty"`
-	ACPIdleTimeoutMinutes       *int    `json:"acp_idle_timeout_minutes,omitempty"`
+	ID                            string  `json:"id"`
+	Name                          *string `json:"name,omitempty"`
+	Description                   *string `json:"description,omitempty"`
+	DefaultExecutorID             *string `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID          *string `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID         *string `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID   *string `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled      *bool   `json:"acp_idle_suspension_enabled,omitempty"`
+	ACPIdleTimeoutMinutes         *int    `json:"acp_idle_timeout_minutes,omitempty"`
+	DynamicMidTurnFailoverEnabled *bool   `json:"dynamic_midturn_failover_enabled,omitempty"`
 }
 
 func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -283,14 +286,15 @@ func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Messa
 	}
 
 	workspace, err := h.service.UpdateWorkspace(ctx, req.ID, &service.UpdateWorkspaceRequest{
-		Name:                        req.Name,
-		Description:                 req.Description,
-		DefaultExecutorID:           req.DefaultExecutorID,
-		DefaultEnvironmentID:        req.DefaultEnvironmentID,
-		DefaultAgentProfileID:       req.DefaultAgentProfileID,
-		DefaultConfigAgentProfileID: req.DefaultConfigAgentProfileID,
-		ACPIdleSuspensionEnabled:    req.ACPIdleSuspensionEnabled,
-		ACPIdleTimeoutMinutes:       req.ACPIdleTimeoutMinutes,
+		Name:                          req.Name,
+		Description:                   req.Description,
+		DefaultExecutorID:             req.DefaultExecutorID,
+		DefaultEnvironmentID:          req.DefaultEnvironmentID,
+		DefaultAgentProfileID:         req.DefaultAgentProfileID,
+		DefaultConfigAgentProfileID:   req.DefaultConfigAgentProfileID,
+		ACPIdleSuspensionEnabled:      req.ACPIdleSuspensionEnabled,
+		ACPIdleTimeoutMinutes:         req.ACPIdleTimeoutMinutes,
+		DynamicMidTurnFailoverEnabled: req.DynamicMidTurnFailoverEnabled,
 	})
 	if err != nil {
 		h.logger.Error("failed to update workspace", zap.Error(err))

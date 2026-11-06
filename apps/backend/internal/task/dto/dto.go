@@ -37,22 +37,23 @@ type WorkflowDTO struct {
 }
 
 type WorkspaceDTO struct {
-	ID                          string    `json:"id"`
-	Name                        string    `json:"name"`
-	Description                 *string   `json:"description,omitempty"`
-	OwnerID                     string    `json:"owner_id"`
-	UnitID                      string    `json:"unit_id,omitempty"`
-	DefaultExecutorID           *string   `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
-	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
-	ACPIdleSuspensionEnabled    bool      `json:"acp_idle_suspension_enabled"`
-	ACPIdleTimeoutMinutes       int       `json:"acp_idle_timeout_minutes"`
-	TaskPrefix                  string    `json:"task_prefix,omitempty"`
-	TaskSequence                int       `json:"task_sequence,omitempty"`
-	OfficeWorkflowID            string    `json:"office_workflow_id,omitempty"`
-	CreatedAt                   time.Time `json:"created_at"`
-	UpdatedAt                   time.Time `json:"updated_at"`
+	ID                            string    `json:"id"`
+	Name                          string    `json:"name"`
+	Description                   *string   `json:"description,omitempty"`
+	OwnerID                       string    `json:"owner_id"`
+	UnitID                        string    `json:"unit_id,omitempty"`
+	DefaultExecutorID             *string   `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID          *string   `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID         *string   `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID   *string   `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled      bool      `json:"acp_idle_suspension_enabled"`
+	ACPIdleTimeoutMinutes         int       `json:"acp_idle_timeout_minutes"`
+	DynamicMidTurnFailoverEnabled bool      `json:"dynamic_midturn_failover_enabled"`
+	TaskPrefix                    string    `json:"task_prefix,omitempty"`
+	TaskSequence                  int       `json:"task_sequence,omitempty"`
+	OfficeWorkflowID              string    `json:"office_workflow_id,omitempty"`
+	CreatedAt                     time.Time `json:"created_at"`
+	UpdatedAt                     time.Time `json:"updated_at"`
 
 	// ViewerRole and Scopes describe what the *requesting* user may do here.
 	// The frontend gates every control on Scopes rather than comparing the
@@ -917,22 +918,23 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 	}
 
 	return WorkspaceDTO{
-		ID:                          workspace.ID,
-		Name:                        workspace.Name,
-		Description:                 description,
-		OwnerID:                     workspace.OwnerID,
-		UnitID:                      workspace.UnitID,
-		DefaultExecutorID:           workspace.DefaultExecutorID,
-		DefaultEnvironmentID:        workspace.DefaultEnvironmentID,
-		DefaultAgentProfileID:       workspace.DefaultAgentProfileID,
-		DefaultConfigAgentProfileID: workspace.DefaultConfigAgentProfileID,
-		ACPIdleSuspensionEnabled:    workspace.ACPIdleSuspensionEnabled,
-		ACPIdleTimeoutMinutes:       workspace.ACPIdleTimeoutMinutes,
-		TaskPrefix:                  workspace.TaskPrefix,
-		TaskSequence:                workspace.TaskSequence,
-		OfficeWorkflowID:            workspace.OfficeWorkflowID,
-		CreatedAt:                   workspace.CreatedAt,
-		UpdatedAt:                   workspace.UpdatedAt,
+		ID:                            workspace.ID,
+		Name:                          workspace.Name,
+		Description:                   description,
+		OwnerID:                       workspace.OwnerID,
+		UnitID:                        workspace.UnitID,
+		DefaultExecutorID:             workspace.DefaultExecutorID,
+		DefaultEnvironmentID:          workspace.DefaultEnvironmentID,
+		DefaultAgentProfileID:         workspace.DefaultAgentProfileID,
+		DefaultConfigAgentProfileID:   workspace.DefaultConfigAgentProfileID,
+		ACPIdleSuspensionEnabled:      workspace.ACPIdleSuspensionEnabled,
+		ACPIdleTimeoutMinutes:         workspace.ACPIdleTimeoutMinutes,
+		DynamicMidTurnFailoverEnabled: workspace.DynamicMidTurnFailoverEnabled,
+		TaskPrefix:                    workspace.TaskPrefix,
+		TaskSequence:                  workspace.TaskSequence,
+		OfficeWorkflowID:              workspace.OfficeWorkflowID,
+		CreatedAt:                     workspace.CreatedAt,
+		UpdatedAt:                     workspace.UpdatedAt,
 	}
 }
 

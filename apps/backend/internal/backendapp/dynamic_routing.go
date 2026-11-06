@@ -118,8 +118,18 @@ func resolveDynamicRouteAction(
 		session.AgentProfileID,
 		session.ExecutionProfileID,
 		request.ExpectedGeneration,
-		string(request.Action),
+		resolverRouteAction(request),
 	)
+}
+
+// resolverRouteAction names the resolver action for a request. The
+// orchestrator's unattended Try next selects like try_next but records its
+// own route reason; every client request keeps its submitted action.
+func resolverRouteAction(request orchestrator.RouteActionRequest) string {
+	if request.Automatic && request.Action == orchestrator.RouteActionTryNext {
+		return agentruntime.RouteActionAutoTryNext
+	}
+	return string(request.Action)
 }
 
 func handleDynamicRouteActionError(

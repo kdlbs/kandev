@@ -36,12 +36,14 @@ func TestPublishContextWindowCompactionPolicy(t *testing.T) {
 		name        string
 		agentID     string
 		executionID string
+		native      bool
 		want        bool
 	}{
-		{name: "copilot acp", agentID: agents.CopilotACPAgentID, executionID: "exec-copilot", want: true},
+		{name: "copilot acp", agentID: agents.CopilotACPAgentID, executionID: "exec-copilot", native: true, want: true},
 		// Restoration retains the provider type on AgentExecution even when a
 		// replacement execution identifier is allocated.
-		{name: "copilot with replacement execution id", agentID: agents.CopilotACPAgentID, executionID: "exec-restored", want: true},
+		{name: "copilot with replacement execution id", agentID: agents.CopilotACPAgentID, executionID: "exec-restored", native: true, want: true},
+		{name: "copilot without native collection", agentID: agents.CopilotACPAgentID, executionID: "exec-copilot-legacy", want: true},
 		{name: "other provider", agentID: "claude-acp", executionID: "exec-claude", want: false},
 		{name: "legacy execution without provider", agentID: "", executionID: "exec-legacy", want: false},
 	}
@@ -49,7 +51,10 @@ func TestPublishContextWindowCompactionPolicy(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			publisher.PublishContextWindow(
-				&AgentExecution{ID: tc.executionID, TaskID: "task-policy", SessionID: "sess-policy", AgentID: tc.agentID},
+				&AgentExecution{
+					ID: tc.executionID, TaskID: "task-policy", SessionID: "sess-policy",
+					AgentID: tc.agentID, CopilotNativeSessionEvents: tc.native,
+				},
 				200000, 50000, 150000, 25,
 			)
 
@@ -65,6 +70,9 @@ func TestPublishContextWindowCompactionPolicy(t *testing.T) {
 			}
 			if payload.CompactionInferenceDisabled != tc.want {
 				t.Fatalf("compaction_inference_disabled = %v, want %v", payload.CompactionInferenceDisabled, tc.want)
+			}
+			if payload.CopilotNativeSessionEvents != tc.native {
+				t.Fatalf("copilot_native_session_events = %v, want %v", payload.CopilotNativeSessionEvents, tc.native)
 			}
 			if payload.AgentID != tc.executionID {
 				t.Fatalf("agent_id = %q, want execution identifier %q", payload.AgentID, tc.executionID)
@@ -92,6 +100,16 @@ func TestPublishContextWindowCompactionPolicy(t *testing.T) {
 				}
 				if !marker {
 					t.Fatalf("serialized marker = false, want true")
+				}
+			}
+			rawNative, hasNative := fields["copilot_native_session_events"]
+			if hasNative != tc.native {
+				t.Fatalf("serialized native presence = %v, want %v: %s", hasNative, tc.native, encoded)
+			}
+			if tc.native {
+				var native bool
+				if err := json.Unmarshal(rawNative, &native); err != nil || !native {
+					t.Fatalf("serialized native = %v, want true: %s", native, encoded)
 				}
 			}
 		})

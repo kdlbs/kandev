@@ -10,6 +10,7 @@ export type SavedState = {
   agentProfileId: string;
   idleSuspensionEnabled: boolean;
   idleTimeoutMinutes: number;
+  midTurnFailoverEnabled: boolean;
 };
 
 export type WorkspaceUpdates = {
@@ -18,6 +19,7 @@ export type WorkspaceUpdates = {
   default_agent_profile_id?: string;
   acp_idle_suspension_enabled?: boolean;
   acp_idle_timeout_minutes?: number;
+  dynamic_midturn_failover_enabled?: boolean;
 };
 
 export type WorkspaceDraftState = {
@@ -26,6 +28,7 @@ export type WorkspaceDraftState = {
   defaultAgentProfileId: string;
   idleSuspensionEnabled: boolean;
   idleTimeoutMinutes: string;
+  midTurnFailoverEnabled: boolean;
 };
 
 type SaveRequestLike = {
@@ -62,6 +65,9 @@ function buildWorkspaceUpdates(draft: WorkspaceDraftState, saved: SavedState): W
   if (timeoutMinutes !== saved.idleTimeoutMinutes) {
     updates.acp_idle_timeout_minutes = timeoutMinutes;
   }
+  if (draft.midTurnFailoverEnabled !== saved.midTurnFailoverEnabled) {
+    updates.dynamic_midturn_failover_enabled = draft.midTurnFailoverEnabled;
+  }
   return updates;
 }
 
@@ -89,6 +95,8 @@ export function buildWorkspaceSaveHandler({
         agentProfileId: updated.default_agent_profile_id ?? "",
         idleSuspensionEnabled: updated.acp_idle_suspension_enabled ?? draft.idleSuspensionEnabled,
         idleTimeoutMinutes: updated.acp_idle_timeout_minutes ?? Number(draft.idleTimeoutMinutes),
+        midTurnFailoverEnabled:
+          updated.dynamic_midturn_failover_enabled ?? draft.midTurnFailoverEnabled,
       });
       const { workspaces, setWorkspaces } = storeApi.getState();
       setWorkspaces(
@@ -102,6 +110,7 @@ export function buildWorkspaceSaveHandler({
                 default_agent_profile_id: updated.default_agent_profile_id ?? null,
                 acp_idle_suspension_enabled: updated.acp_idle_suspension_enabled,
                 acp_idle_timeout_minutes: updated.acp_idle_timeout_minutes,
+                dynamic_midturn_failover_enabled: updated.dynamic_midturn_failover_enabled,
               }
             : workspace,
         ),
