@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/kandev/kandev/internal/agentctl/server/winproc"
+	commonwinproc "github.com/kandev/kandev/internal/common/winproc"
 )
 
 func ignoreBrokenPipeSignal() {
@@ -28,6 +29,11 @@ func managedProcessGracefulScope(_ bool) gracefulSignalScope {
 }
 
 func terminateManagedProcess(pid, _ int, _ bool) error {
+	// A Kandev child registers a cooperative shutdown event. Console-less
+	// children cannot receive taskkill's window-close request, so use it first.
+	if err := commonwinproc.RequestShutdown(pid); err == nil {
+		return nil
+	}
 	// The dev backend is launched through make on Windows. Signalling only make
 	// would orphan the backend, so retain tree-wide graceful cleanup there.
 	return terminateManagedProcessGroup(pid)
