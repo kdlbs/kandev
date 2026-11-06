@@ -11,6 +11,51 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
+func TestService_ArchivedRecoveryBlockReconciliationClosesOnlyArchivedOwners(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seed := func(taskID, sessionID, blockID string) {
+		t.Helper()
+		if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: taskID}); err != nil {
+			t.Fatalf("CreateTask(%s): %v", taskID, err)
+		}
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID: sessionID, TaskID: taskID, State: models.TaskSessionStateCancelled,
+		}); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", sessionID, err)
+		}
+		if err := repo.UpsertSessionRecoveryBlock(ctx, &models.SessionRecoveryBlock{
+			ID: blockID, SessionID: sessionID, IncarnationID: "incarnation-1",
+			ExpectedGeneration: 0, Reason: "unknown_prompt_outcome",
+			State: models.RecoveryBlockOpen, ConsumerReference: "agent_delivery",
+		}); err != nil {
+			t.Fatalf("UpsertSessionRecoveryBlock(%s): %v", blockID, err)
+		}
+	}
+	seed("task-archived-owner", "session-archived-owner", "block-archived-owner")
+	seed("task-live-owner", "session-live-owner", "block-live-owner")
+	if err := repo.ArchiveTask(ctx, "task-archived-owner"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+
+	svc.runArchivedRecoveryBlockReconciliation(ctx)
+
+	archived, err := repo.GetSessionRecoveryBlock(ctx, "block-archived-owner")
+	if err != nil {
+		t.Fatalf("GetSessionRecoveryBlock(archived): %v", err)
+	}
+	if archived.State != models.RecoveryBlockResolved || archived.AuthorizedAction != models.RecoveryBlockActionTaskArchived {
+		t.Fatalf("archived block = %+v, want resolved with %q", archived, models.RecoveryBlockActionTaskArchived)
+	}
+	live, err := repo.GetSessionRecoveryBlock(ctx, "block-live-owner")
+	if err != nil {
+		t.Fatalf("GetSessionRecoveryBlock(live): %v", err)
+	}
+	if live.State != models.RecoveryBlockOpen {
+		t.Fatalf("live block = %+v, want open", live)
+	}
+}
+
 // TestService_ArchivedSessionReconciliationRecoversStrandedSessions is the
 // regression test for the residual gap Greptile flagged on finalizeCancelledSessions:
 // its bounded in-line retry (3 attempts x 10s) can still be exhausted by

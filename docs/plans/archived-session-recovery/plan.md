@@ -147,6 +147,7 @@ production path. Do not grow oversized Go test files; use focused siblings.
 - [x] [Task 01: Gate backend recovery on archive state](task-01-backend-archive-gate.md)
 - [x] [Task 02: Reconcile recovery across archive transitions](task-02-client-archive-lifecycle.md)
 - [x] [Task 03: Present compact recovery feedback](task-03-recovery-feedback.md)
+- [x] [Task 04: Preserve archived recovery fences](task-04-archived-recovery-fences.md)
 
 Each work order contains exact commands and must record its red/green results.
 Managed E2E commands build the current backend and web artifacts and run

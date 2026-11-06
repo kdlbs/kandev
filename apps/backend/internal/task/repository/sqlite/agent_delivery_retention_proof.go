@@ -54,8 +54,8 @@ const agentDeliveryRetainedTerminalProofSQL = `EXISTS (
    SELECT 1 FROM session_recovery_blocks blocked WHERE blocked.session_id = settled.session_id
     AND blocked.incarnation_id = settled.incarnation_id AND blocked.expected_generation = settled.harness_generation
     AND blocked.consumer_reference = 'agent_delivery' AND blocked.delivery_submission_id = settled.id
-    AND blocked.state = 'open'
-  )
+    AND (blocked.state = 'open' OR blocked.authorized_action = 'task_archived')
+   )
 )`
 
 // Known canonical output is redundant after its generic effect commits, even
