@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"sync/atomic"
 
-	"github.com/kandev/kandev/internal/agentctl/server/winproc"
 	"github.com/kandev/kandev/internal/common/processidentity"
+	"github.com/kandev/kandev/internal/common/winproc"
 	"go.uber.org/zap"
 	"golang.org/x/sys/windows"
 )
@@ -31,11 +31,11 @@ func (l *Launcher) installChildLifecycle(cmd *exec.Cmd) error {
 		return fmt.Errorf("installChildLifecycle: process not started")
 	}
 
-	job, err := winproc.InstallKillOnCloseJobForSuspendedCommand(cmd)
+	jobName := l.processIdentity.WindowsJobName
+	job, err := winproc.InstallNamedKillOnCloseJobForSuspendedProcess(cmd.Process.Pid, jobName)
 	if err != nil {
 		return err
 	}
-
 	// Defensive: if a previous lifecycle was somehow installed without a
 	// matching release (unexpected restart, future code change), close the
 	// stale handle instead of silently leaking it. Doing the swap *after* the

@@ -60,7 +60,13 @@ func InstallKillOnCloseJobForProcess(pid int) (KillOnCloseJob, error) {
 }
 
 func InstallKillOnCloseJobForSuspendedProcess(pid int) (KillOnCloseJob, error) {
-	job, err := createKillOnCloseJob()
+	return InstallNamedKillOnCloseJobForSuspendedProcess(pid, "")
+}
+
+// InstallNamedKillOnCloseJobForSuspendedProcess retains the job's kernel name
+// so a saved runtime owner can inspect containment after its launcher exits.
+func InstallNamedKillOnCloseJobForSuspendedProcess(pid int, name string) (KillOnCloseJob, error) {
+	job, err := createNamedKillOnCloseJob(name)
 	if err != nil {
 		return KillOnCloseJob{}, errors.Join(err, terminateSuspendedProcess(pid))
 	}
@@ -207,7 +213,19 @@ func activeJobProcesses(job windows.Handle) (uint32, error) {
 }
 
 func createKillOnCloseJob() (windows.Handle, error) {
-	job, err := windows.CreateJobObject(nil, nil)
+	return createNamedKillOnCloseJob("")
+}
+
+func createNamedKillOnCloseJob(name string) (windows.Handle, error) {
+	var jobName *uint16
+	if name != "" {
+		var err error
+		jobName, err = windows.UTF16PtrFromString(name)
+		if err != nil {
+			return 0, err
+		}
+	}
+	job, err := windows.CreateJobObject(nil, jobName)
 	if err != nil {
 		return 0, fmt.Errorf("CreateJobObject: %w", err)
 	}
