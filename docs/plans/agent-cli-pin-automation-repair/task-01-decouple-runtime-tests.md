@@ -150,3 +150,9 @@ Completed on 2026-11-05.
 - `bash scripts/lint-go-changed $(git diff --name-only a8b8ac18e0f08cafc48f303eafc88ffd546f31f4...HEAD -- '*.go')`
   passed for every changed Go path.
 - `git diff --check` passed.
+- PR #5076 backend CI exposed a temporary-directory cleanup race in
+  `TestAgentctlResolverSingleflightsConcurrentDownloads`: cancellation releases
+  cache leases asynchronously. The test now waits for lease cleanup under the
+  cache lock before its temporary directory is removed; runtime behavior is
+  unchanged. The affected test and the shared-download cancellation test passed
+  100 repetitions with the Go race detector.
