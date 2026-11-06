@@ -568,6 +568,12 @@ export type AppState = AppStateBase & {
   ) => void;
   clearGitStatus: (sessionId: string) => void;
   clearLegacyGitStatusEntry: (sessionId: string) => void;
+  invalidateGitStatusInventory: (sessionId: string) => void;
+  reconcileGitStatusInventory: (
+    environmentId: string,
+    generation: number,
+    scopes: readonly string[],
+  ) => boolean;
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
   setSessionCommits: (
     sessionId: string,
@@ -686,6 +692,7 @@ export type AppState = AppStateBase & {
     entry: import("./slices/session-runtime/types").LaunchWarningEntry,
   ) => void;
   clearLaunchWarning: (sessionId: string) => void;
+  beginBackgroundWorkRead: (sessionId: string) => number;
   setBackgroundWorkloads: (
     sessionId: string,
     workloads: import("@/lib/types/background-work").WorkloadRunObservation[],

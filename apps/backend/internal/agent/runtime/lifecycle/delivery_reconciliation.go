@@ -187,7 +187,7 @@ func captureDeliveryReconciliationIdentityWithClient(execution *AgentExecution, 
 		execution.DeliveryStreamID == "" || submissionID == "" {
 		return DeliveryReconciliationIdentity{}, fmt.Errorf("durable delivery reconciliation identity is incomplete")
 	}
-	originalRuntime := client.RuntimeProcessIdentity()
+	originalRuntime := boundAgentProcessGroup(execution, client.RuntimeProcessIdentity(), submissionID)
 	return DeliveryReconciliationIdentity{
 		OriginalRuntime: originalRuntime,
 		SessionID:       execution.SessionID, ExecutionID: execution.ID, Owner: execution.Owner,
@@ -344,6 +344,14 @@ func (sm *StreamManager) cancelDeliveryReconciliation(executionID string) {
 	if cycle != nil {
 		cycle.cancel()
 	}
+	sm.reconciliationMu.Unlock()
+}
+
+// restoreDeliveryReconciliation re-enables recovery when stop admission fails
+// and the execution remains attached to this stream manager.
+func (sm *StreamManager) restoreDeliveryReconciliation(executionID string) {
+	sm.reconciliationMu.Lock()
+	delete(sm.stoppedReconciliations, executionID)
 	sm.reconciliationMu.Unlock()
 }
 

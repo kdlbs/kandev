@@ -357,6 +357,7 @@ const (
 // are NOT copied on resume.
 var persistentMetadataKeys = map[string]bool{
 	MetadataKeyResourceCircuitIdentity:   true,
+	"kandev.builtin_mcp_binding":         true,
 	idleActivityMetadataKey:              true,
 	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
@@ -474,6 +475,7 @@ var persistentMetadataPrefixes = []string{
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
 	MetadataKeyResourceCircuitIdentity:   true,
+	"kandev.builtin_mcp_binding":         true,
 	idleActivityMetadataKey:              true,
 	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
@@ -697,10 +699,14 @@ type ExecutorCreateRequest struct {
 	DeliveryStreamID          string
 	DeliveryIncarnationID     string
 	DeliveryHarnessGeneration uint64
-	WorkspaceSourceRoots      []string
-	Protocol                  string
-	CodexAppServerEnabled     bool
-	Env                       map[string]string
+	// CopilotNativeSessionEvents is the manager-resolved opt-in after checking
+	// the provider, durable delivery, canonical projector, and authenticated
+	// peer capability. Executors only forward it; they never re-derive it.
+	CopilotNativeSessionEvents bool
+	WorkspaceSourceRoots       []string
+	Protocol                   string
+	CodexAppServerEnabled      bool
+	Env                        map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string
@@ -832,6 +838,11 @@ type ExecutorInstance struct {
 	// identity, read back rather than pushed (AC-EXECUTORS-SURVIVAL-002.14's
 	// "provider session identity" row). Same recovery-only shape as Env above.
 	ProviderSessionID string
+
+	// CopilotNativeSessionEvents reports the adopted instance's actual vendor
+	// subscription state. Recovery must not infer it from the launch request:
+	// an older peer may have ignored the opt-in.
+	CopilotNativeSessionEvents bool
 
 	// DeliveryStatus is the authenticated recovery descriptor captured from the
 	// surviving instance before lifecycle re-tracking. It is nil for legacy

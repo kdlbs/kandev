@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { firstSessionId } from "../../helpers/session";
 import type { SeedData } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
 /**
@@ -30,23 +31,24 @@ export async function expectProcessEndClearsBackgroundWork(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
 
-  const activeChip = testPage.getByTestId("background-work-chip");
-  await expect(activeChip).toBeVisible({ timeout: 30_000 });
-  await expect(activeChip).toContainText("Background Job");
-
   const sessionId = await firstSessionId(apiClient, task.id);
-  const activeWorkloadCount = async (): Promise<number> => {
+  const runningWorkloadCount = async (): Promise<number> => {
     const { workloads } = await apiClient.listBackgroundWorkloads(sessionId);
-    return workloads.filter((w) => ["running", "waiting", "unknown"].includes(w.state)).length;
+    return workloads.filter((w) => w.state === "running").length;
   };
-  // The provider shape may register more than one workload; only the fact that
-  // work is active before the process ends matters here.
+  // The composer chip is running-only, so wait for the authoritative running
+  // projection before asserting its rendered shadow. CI runs several subshards
+  // concurrently, so registration can exceed a single-process local budget.
   await expect
-    .poll(activeWorkloadCount, {
-      message: "the detached launch should register active background work",
-      timeout: 30_000,
+    .poll(runningWorkloadCount, {
+      message: "the detached launch should register a running background workload",
+      timeout: 60_000,
     })
     .toBeGreaterThan(0);
+
+  const activeChip = testPage.getByTestId("background-work-chip");
+  await expect(activeChip).toBeVisible();
+  await expect(activeChip).toContainText("Background Job");
 
   // Restart the session exactly as the UI does: stop the owning process, then
   // resume the conversation under a new execution.
@@ -71,15 +73,31 @@ export async function expectProcessEndClearsBackgroundWork(
     90_000,
   );
 
-  // The workload can no longer report completion, so it settles and the active
-  // count disappears instead of staying wrong for the new process. Poll the
-  // authoritative projection first, then assert the rendered chip.
+  // The workload can no longer report completion, so it settles and the
+  // running-only composer chip disappears instead of staying wrong for the new
+  // process. Poll the authoritative projection first, then assert the chip.
   await expect
-    .poll(activeWorkloadCount, {
-      message: "background workload should settle after the process ends",
+    .poll(runningWorkloadCount, {
+      message: "background workload should leave the running summary after the process ends",
       timeout: 60_000,
     })
     .toBe(0);
   await expect(activeChip).toHaveCount(0);
-  await expect(testPage.getByTestId("background-work-history-chip")).toBeVisible();
+  await expect(testPage.getByTestId("background-work-history-chip")).toHaveCount(0);
+
+  // History remains reachable through the independent desktop or phone entry.
+  if ((testPage.viewportSize()?.width ?? 0) < 768) {
+    await testPage.getByTestId("mobile-session-nav-panels").tap();
+    await testPage.getByTestId("mobile-background-work-open").tap();
+    await expect(testPage.getByTestId("background-work-mobile-panel")).toBeVisible();
+  } else {
+    await testPage.getByTestId("dockview-add-panel-btn").first().click();
+    await testPage.getByTestId("add-panel-background-work").click();
+    await expect(testPage.getByTestId("background-work-overview")).toBeVisible();
+  }
+  await expect(testPage.getByTestId("background-work-tab-history")).toHaveAttribute(
+    "data-state",
+    "active",
+  );
+  await expect(testPage.getByTestId(/^background-workload-card-/).first()).toBeVisible();
 }

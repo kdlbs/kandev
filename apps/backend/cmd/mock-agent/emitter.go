@@ -24,6 +24,9 @@ type emitter struct {
 	mcpServers           map[string]mcpServerDef
 	registerDetachedWork func(acp.SessionId, context.CancelFunc) func()
 	supportsCompaction   bool
+	// scenarioArgs carries the text after `/e2e:<name>` for scenarios that
+	// accept per-session arguments. Empty for ordinary predefined scenarios.
+	scenarioArgs string
 }
 
 // callMCPTool invokes an MCP tool through the server definitions attached to
@@ -112,12 +115,29 @@ func (e *emitter) startTool(id acp.ToolCallId, title string, kind acp.ToolKind, 
 
 // completeTool marks a tool call as completed with output.
 func (e *emitter) completeTool(id acp.ToolCallId, output any) {
+	e.completeToolWithMeta(id, acp.ToolCallStatusCompleted, output, nil)
+}
+
+// completeToolWithMeta marks a tool call terminal with output and _meta. The
+// acp-go-sdk has no WithUpdateMeta option, so the option closure sets it.
+func (e *emitter) completeToolWithMeta(
+	id acp.ToolCallId,
+	status acp.ToolCallStatus,
+	output any,
+	meta map[string]any,
+) {
+	opts := []acp.ToolCallUpdateOpt{
+		acp.WithUpdateStatus(status),
+		acp.WithUpdateRawOutput(output),
+	}
+	if meta != nil {
+		opts = append(opts, func(update *acp.SessionToolCallUpdate) {
+			update.Meta = meta
+		})
+	}
 	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
 		SessionId: e.sid,
-		Update: acp.UpdateToolCall(id,
-			acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
-			acp.WithUpdateRawOutput(output),
-		),
+		Update:    acp.UpdateToolCall(id, opts...),
 	})
 }
 

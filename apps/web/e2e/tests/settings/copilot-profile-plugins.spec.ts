@@ -208,6 +208,7 @@ test("reports a missing saved plugin after a successful inventory", async ({
     const selector = testPage.getByTestId("copilot-plugins-selection");
     await expect(selector).toBeVisible({ timeout: 15_000 });
     await expect(selector.getByText(/Plugin is missing/)).toBeVisible({ timeout: 15_000 });
+    await expect(selector.getByText("Native status: unknown")).toBeVisible();
     await expect(
       selector.getByText(/A new process cannot start with this selection/),
     ).toBeVisible();
@@ -224,6 +225,64 @@ test("reports a missing saved plugin after a successful inventory", async ({
     await expect
       .poll(async () => (await apiClient.getAgentProfile(fixture.profileId)).copilotSelectedPlugins)
       .toEqual([]);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+// @covers AC-AGENTS-COPILOT-PLUGINS-006.9, AC-AGENTS-COPILOT-PLUGINS-006.10
+test("shows current runtime recovery and unknown native status without losing the selection", async ({
+  testPage,
+  apiClient,
+}) => {
+  test.setTimeout(60_000);
+  const fixture = await createCopilotPluginFixture(apiClient);
+  test.skip(!fixture, "Copilot agent is not registered in this E2E runtime");
+  if (!fixture) return;
+
+  try {
+    await apiClient.updateAgentProfile(fixture.profileId, {
+      model: COPILOT_RECOVERY_MODEL_ID,
+      copilot_selected_plugins: [COPILOT_RECOVERY_PLUGIN_ID],
+    });
+    await testPage.route(`**/api/v1/agents/${fixture.agentId}/plugin-discovery`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          copilotPluginDiscovery(fixture.agentId, fixture.profileId, {
+            status: "unsupported",
+            reason: "plugin_loading_unsupported",
+            runtime_version: "9.9.9",
+            mount_permitted: false,
+            plugins: [],
+          }),
+        ),
+      });
+    });
+    await testPage.goto(`/settings/agents/${fixture.agentName}/profiles/${fixture.profileId}`);
+    const selector = testPage.getByTestId("copilot-plugins-selection");
+    await expect(selector).toBeVisible({ timeout: 15_000 });
+    await expect(selector.getByTestId("copilot-plugins-unsupported")).toContainText(
+      "Selected runtime: Copilot 9.9.9",
+    );
+    await expect(selector.getByTestId("copilot-plugins-unsupported")).toContainText(
+      "This selected Copilot runtime does not advertise profile plugin loading.",
+    );
+    await expect(selector.getByText("Native status: unknown")).toBeVisible();
+    const spark = selector.getByRole("checkbox", { name: "Select spark" });
+    await expect(spark).toBeChecked();
+    await expect(spark).not.toHaveAttribute("disabled", "");
+    await spark.click();
+    await expect(spark).toHaveCount(0);
+    const actions = copilotProfileSaveActions(testPage);
+    await expect(actions.save).toHaveCount(1);
+    await actions.save.click();
+    await expect
+      .poll(async () => (await apiClient.getAgentProfile(fixture.profileId)).copilotSelectedPlugins)
+      .toEqual([]);
+    const saved = await apiClient.getAgentProfile(fixture.profileId);
+    expect(saved.model).toBe(COPILOT_RECOVERY_MODEL_ID);
   } finally {
     await fixture.dispose();
   }
@@ -328,7 +387,7 @@ test("recovers a policy-blocked profile capability probe without changing saved 
     );
 
     await spark.click();
-    await expect(spark).not.toBeChecked();
+    await expect(pluginSection.getByRole("checkbox", { name: "Select spark" })).toHaveCount(0);
     const actions = copilotProfileSaveActions(testPage);
     await expect(actions.save).toHaveCount(1);
     await actions.save.click();
@@ -342,7 +401,7 @@ test("recovers a policy-blocked profile capability probe without changing saved 
     recovery.allowRecovery();
     await testPage.reload();
     await expect(pluginSection).toBeVisible({ timeout: 15_000 });
-    await expect(spark).not.toBeChecked();
+    await expect(pluginSection.getByRole("checkbox", { name: "Select spark" })).toHaveCount(0);
     await expect(capabilityStatus).toHaveAttribute("data-status", "ready", { timeout: 20_000 });
     await expect(capabilityStatus).not.toContainText(
       "Model discovery is blocked by this plugin selection.",

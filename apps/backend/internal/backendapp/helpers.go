@@ -216,6 +216,11 @@ func refreshGitStatusFromSources(ctx context.Context, taskRepo *sqliterepo.Repos
 	rpcCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	live := false
+	// Every accepted aggregate response must describe one selected source's
+	// complete repository set. Concatenating a failed sibling-source attempt
+	// with a later successful source would mix inventories, so keep the first
+	// failed attempt only as the no-success fallback.
+	var failedSource *gateways.SessionGitRefreshResult
 	for _, sourceSessionID := range sources.sessionIDs {
 		if rpcCtx.Err() != nil {
 			break
@@ -225,10 +230,30 @@ func refreshGitStatusFromSources(ctx context.Context, taskRepo *sqliterepo.Repos
 		if multi == nil {
 			continue
 		}
-		appendGitStatusRefreshSnapshots(&result, sources, sessionID, multi)
-		if result.Success {
-			return result
+		attempt := gateways.SessionGitRefreshResult{
+			SessionID:         result.SessionID,
+			Mode:              result.Mode,
+			TaskEnvironmentID: result.TaskEnvironmentID,
+			StatusState:       "unavailable",
+			Snapshots:         []*ws.Message{},
 		}
+		appendGitStatusRefreshSnapshots(&attempt, sources, sessionID, multi)
+		if attempt.Success {
+			// A sibling execution can retain the pre-attachment tracker graph.
+			// Its aggregate then describes only that checkout, not the whole
+			// environment. Only a source covering every registered repository
+			// may define the complete inventory.
+			if len(multi.Repos) < sources.repositoryCount {
+				continue
+			}
+			return attempt
+		}
+		if failedSource == nil {
+			failedSource = &attempt
+		}
+	}
+	if failedSource != nil {
+		return *failedSource
 	}
 	if live && rpcCtx.Err() != nil {
 		result.ErrorCode = "status_timeout"
@@ -1207,6 +1232,9 @@ func registerRoutes(p routeParams) {
 		p.orchestratorSvc.HandleClarificationPrimaryAnswered,
 		p.log,
 	)
+	clarificationResolver.SetAnswerAttachmentMaterializer(
+		&clarificationAnswerAttachmentMaterializer{runtime: p.lifecycleMgr},
+	)
 
 	asyncQuestionSvc := taskquestions.NewService(p.taskRepo, nil, p.log.Zap())
 	asyncQuestionSvc.SetDeliveryQueue(&asyncQuestionQueueAdapter{
@@ -1830,6 +1858,12 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, referenceValidators...,
 	)
 	processHandlers := taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
+	if p.agentSettingsController != nil && p.taskSvc != nil {
+		processHandlers.SetSessionModelConfigResolver(&sessionModelConfigResolver{
+			sessions: p.taskSvc,
+			settings: p.agentSettingsController,
+		})
+	}
 	if p.services != nil && p.services.Terminal != nil {
 		processHandlers.SetTerminalService(p.services.Terminal)
 	}
@@ -1846,6 +1880,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 func configureMCPServices(
 	p routeParams,
 ) (mcpconfig.CatalogRepository, *mcpconfig.CatalogService, *mcpconfig.SelectionService) {
+	configureBuiltinMCPServices(p)
 	catalogRepo, ok := p.agentSettingsRepo.(mcpconfig.CatalogRepository)
 	if !ok {
 		return nil, nil, nil
@@ -2098,6 +2133,8 @@ func registerSecondaryRoutes(
 	if p.services.Automation != nil {
 		if p.services.Plugins != nil {
 			p.services.Automation.Service.SetPluginAutomationProvider(p.services.Plugins)
+			p.services.Automation.Service.SetPluginToolOptionsProvider(p.services.Plugins)
+			p.services.Automation.Service.SetPluginToolCatalogNotifier(p.services.Plugins.NotifyAgentToolCatalogChanged)
 			p.services.Plugins.SetAutomationRevoker(p.services.Automation.Service.CancelPluginWebhookDeliveries)
 		}
 		automation.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Automation.Service, p.log)
@@ -2617,6 +2654,7 @@ func registerMCPAndDebugRoutes(
 	}
 	if p.services.Automation != nil {
 		mcpHandlers.SetAutomationCreator(p.services.Automation.Service)
+		mcpHandlers.SetAutomationPluginTools(p.services.Automation.Service)
 	}
 	mcpHandlers.SetSettingsBroadcaster(p.gateway.Hub)
 	if settingsRegistry, err := buildSettingsRegistry(); err != nil {
@@ -2769,6 +2807,7 @@ func registerMCPAndDebugRoutes(
 		mcpScopeResolver.SetCoordinatorLookup(p.services.Coordinator)
 	}
 	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
+	wireBuiltinMCPActions(p)
 	if p.authSvc != nil {
 		p.lifecycleMgr.SetMCPIdentityScoper(mcpScopeResolver.Scope)
 		p.log.Debug("In-session MCP dispatch scoped to task owner")
@@ -2803,8 +2842,13 @@ func registerExternalMCP(p routeParams) {
 	srv := mcpserver.NewExternal(backendClient, p.log, "")
 	mcpGroup := p.router.Group("", externalMCPAuthMiddleware(p.authSvc))
 	srv.RegisterBackendRoutes(mcpGroup)
+	unsubscribe := func() {}
+	if p.services != nil && p.services.PluginToolCatalog != nil {
+		unsubscribe = p.services.PluginToolCatalog.Subscribe(srv)
+	}
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {
+			unsubscribe()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			return srv.Close(ctx)

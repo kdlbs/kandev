@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	"github.com/kandev/kandev/internal/mcp/profile"
 	"go.uber.org/zap"
 )
@@ -25,12 +26,20 @@ const injectedKandevMCPServerName = "kandev"
 // AGENTCTL_AUTO_APPROVE_PERMISSIONS
 // (docs/specs/coordinator/system-design/permissions.md#auto-approval): the
 // names bound at conversation open, or the phase-1 seven when the session has
-// no binding. An instance without a coordinator profile approves nothing.
+// no binding, plus the derived MCP names of its exact instance-read plugin
+// references. An instance without a coordinator profile approves nothing.
 func (m *Manager) coordinatorAutoApprovedNames() []string {
 	if m.cfg == nil || m.cfg.McpProfile == nil || m.cfg.McpProfile.Surface != profile.SurfaceCoordinator {
 		return nil
 	}
-	return profile.BoundCoordinatorToolNames(*m.cfg.McpProfile)
+	names := profile.BoundCoordinatorToolNames(*m.cfg.McpProfile)
+	if policy := m.cfg.McpProfile.CoordinatorToolPolicy; policy != nil &&
+		policy.Version == profile.CoordinatorToolPolicyVersionV2 {
+		for _, tool := range policy.PluginTools {
+			names = append(names, plugintools.ExposedName(tool.PluginID, tool.LocalName))
+		}
+	}
+	return names
 }
 
 // classifyHumanInputPermission reports whether req is a provider-native
@@ -68,8 +77,8 @@ func (m *Manager) autoApproveCoordinatorPermission(req *adapter.PermissionReques
 }
 
 func (m *Manager) autoApproveInjectedKandevPermission(req *adapter.PermissionRequest) (*adapter.PermissionResponse, bool) {
-	server, tool, option, ok := m.resolveInjectedKandevPermission(req)
-	if !ok || server != injectedKandevMCPServerName {
+	_, tool, option, ok := m.resolveInjectedKandevPermission(req)
+	if !ok {
 		return nil, false
 	}
 	m.logger.Info("auto-approving injected Kandev MCP permission",
@@ -96,6 +105,13 @@ func (m *Manager) resolveInjectedKandevPermission(req *adapter.PermissionRequest
 	}
 	server, tool, parsed := types.ParseQualifiedMCPToolName(*req.ToolName)
 	if !parsed {
+		return "", "", adapter.PermissionOption{}, false
+	}
+	if m.cfg.McpProfile != nil && m.cfg.McpProfile.BuiltinPackages != nil {
+		if !m.builtinPermissionAllowed(server, tool) {
+			return "", "", adapter.PermissionOption{}, false
+		}
+	} else if server != injectedKandevMCPServerName {
 		return "", "", adapter.PermissionOption{}, false
 	}
 	option, ok = injectedKandevPermissionOption(req.Options)

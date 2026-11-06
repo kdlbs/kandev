@@ -35,9 +35,11 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
@@ -127,6 +129,8 @@ type Manager struct {
 	questionImageOnce        sync.Once
 	questionImageSlots       chan struct{}
 	cfg                      *config.InstanceConfig
+	builtinCatalogMu         sync.RWMutex
+	builtinCatalog           func() map[mcpprofile.PackageID][]string
 	logger                   *logger.Logger
 	managedGitTools          installedManagedGitTools
 	materializeGitHelperPath string
@@ -369,10 +373,19 @@ type Manager struct {
 	killGroupFn      func(int) error
 	waitGroupExitFn  func(context.Context, int) bool
 	managerWaitFn    func(context.Context, <-chan struct{}, time.Duration) bool
+
+	// agentProcessIdentity is the running agent child's process-group identity,
+	// reported in the delivery descriptor for per-session termination proof.
+	agentProcessIdentity atomic.Pointer[processidentity.Identity]
 }
 
 // ErrManagerStopping indicates that process admission is closed for teardown.
 var ErrManagerStopping = errors.New("process manager is stopping")
+
+// ErrConfigureWhileRunning reports a configuration attempt that arrived while
+// the agent process was already starting or running. Callers classify this
+// sentinel instead of matching error text.
+var ErrConfigureWhileRunning = errors.New("cannot configure while agent is running")
 
 func (m *Manager) admitStart() (func(), error) {
 	m.admissionMu.Lock()
@@ -622,6 +635,7 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 				IncarnationID:     m.DeliveryIncarnationID(),
 				HarnessGeneration: m.DeliveryHarnessGeneration(),
 				StreamID:          currentStreamID,
+				AgentProcess:      m.AgentProcessIdentity(),
 			}, nil
 		}
 		return journal.RecoveryDescriptor{}, journal.ErrJournalCorrupt
@@ -642,6 +656,7 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 	}
 	descriptor.StorageCapability = capability
 	descriptor.ProcessManagerID = m.ProcessManagerID()
+	descriptor.AgentProcess = m.AgentProcessIdentity()
 	return descriptor, nil
 }
 
@@ -1388,15 +1403,30 @@ func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]st
 // drove the picker-save.
 func (m *Manager) refreshTrackersDetached(root *WorkspaceTracker, trackers []*WorkspaceTracker, bySubpath map[string]*WorkspaceTracker) {
 	ctx := context.Background()
-	if root != nil {
+	// A plain task-root tracker owns Files events but is not a Git scope.
+	// Refreshing it would publish an unavailable snapshot under the empty
+	// repository name and manufacture a refresh failure the Changes panel
+	// cannot clear.
+	if gitEligibleTracker(root) {
 		root.RefreshGitStatus(ctx)
 	}
 	for _, t := range trackers {
-		t.RefreshGitStatus(ctx)
+		if gitEligibleTracker(t) {
+			t.RefreshGitStatus(ctx)
+		}
 	}
 	for _, t := range bySubpath {
-		t.RefreshGitStatus(ctx)
+		if gitEligibleTracker(t) {
+			t.RefreshGitStatus(ctx)
+		}
 	}
+}
+
+// gitEligibleTracker reports whether a tracker owns a real Git repository.
+// Only those trackers may publish Git status; the empty repository scope is
+// valid exactly when the root tracker passes this check.
+func gitEligibleTracker(tracker *WorkspaceTracker) bool {
+	return tracker != nil && tracker.gitIndexPath != ""
 }
 
 // StartProcess runs a script/process with isolated stdout/stderr.
@@ -1592,11 +1622,13 @@ func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
 	// Refresh in background — RefreshGitStatus blocks on git commands which
 	// can take seconds on large repos; the HTTP caller shouldn't wait.
 	go func() {
-		if root != nil {
+		if gitEligibleTracker(root) {
 			root.RefreshGitStatus(ctx)
 		}
 		for _, t := range trackers {
-			t.RefreshGitStatus(ctx)
+			if gitEligibleTracker(t) {
+				t.RefreshGitStatus(ctx)
+			}
 		}
 	}()
 }
@@ -1951,6 +1983,8 @@ func (m *Manager) startManagedProcess() (uint64, error) {
 		return 0, errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
 
+	m.recordAgentProcessIdentity(m.cmd.Process.Pid)
+
 	// Start stderr reader and exit waiter. Keep the completion channel local to
 	// this process generation so a delayed reader cannot signal a replacement.
 	stderrDone := make(chan stderrReadResult, 1)
@@ -2036,6 +2070,7 @@ func (m *Manager) buildAdapterConfig() error {
 		ProviderGatewayAuth:        m.cfg.ProviderGatewayAuth,
 		AuthPolicy:                 m.cfg.AuthPolicy,
 		PromptSuggestions:          m.cfg.PromptSuggestions,
+		CopilotNativeSessionEvents: m.cfg.CopilotNativeSessionEvents,
 	}
 	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {
 		harness := acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
@@ -2380,7 +2415,7 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	defer m.startMu.Unlock()
 
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
-		return fmt.Errorf("cannot configure while agent is running")
+		return ErrConfigureWhileRunning
 	}
 
 	spec, err := configuredLaunchWrapper(wrapper, agentArgsPresent)
@@ -2413,6 +2448,7 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	}
 
 	m.cfg.AgentCommand = command
+	m.cfg.AgentCommandConfigured = true
 	m.cfg.AgentArgs = args
 	m.cfg.LaunchWrapper = launchwrapper.Profile(spec.Argv)
 	m.cfg.LaunchWrapperRequired = !spec.IsZero()
@@ -2918,6 +2954,19 @@ func (m *Manager) GetSessionID() string {
 		return a.GetSessionID()
 	}
 	return ""
+}
+
+// CopilotNativeSessionEventsActive reports the live adapter's actual vendor
+// subscription state. An older adapter omits the optional method.
+func (m *Manager) CopilotNativeSessionEventsActive() bool {
+	m.mu.RLock()
+	a := m.adapter
+	m.mu.RUnlock()
+	if a == nil {
+		return false
+	}
+	reporter, ok := a.(interface{ CopilotNativeSessionEventsActive() bool })
+	return ok && reporter.CopilotNativeSessionEventsActive()
 }
 
 // Stop stops the agent process
@@ -3605,6 +3654,7 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 	// The manager owns stderr's read/write pipe, so Wait can reap the process
 	// without closing the reader. The reader drains the pipe concurrently.
 	err := m.cmd.Wait()
+	m.clearAgentProcessIdentity(pid)
 	// Wait has observed process exit; now bound the reader drain in case a child
 	// process inherited the stderr writer and kept the pipe open.
 	stderrComplete, stderrPresent := m.waitForStderrDrain(stderrDone)

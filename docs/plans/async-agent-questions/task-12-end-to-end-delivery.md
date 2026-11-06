@@ -128,3 +128,19 @@ Passed:
 - `scripts/pr-await 4980` confirmed the settled `04fab2bde635e54ee7de933cbfeb9f3eb0f55053` head: 89 passed, 13 skipped, 0 neutral, 0 failed, and 0 pending.
 - PR CI runs `41375027965` and `41375027984` attempt 1 on `f082c57c3bc482b18bc7a33c7728e4dedb2bc1e5` initially failed in the unrelated Windows `TestDeliveryStorageSharedSamplerServesMultipleInstances` test and Kubernetes container setup (Docker image builds and Kind load/bootstrap); aggregate checks reflected those leaf failures. The container job log endpoint returned 404, while its test artifacts recorded setup errors. No source change was made for these failures.
 - Rerunning only failed jobs (attempt 2) passed `Backend (windows, process 4/4)` and `E2E Containers Shard 1/6`. `scripts/pr-await 4980` confirmed the exact `f082c57c3bc482b18bc7a33c7728e4dedb2bc1e5` head: 89 passed, 13 skipped, 0 neutral, 0 failed, and 0 pending; merge state was CLEAN, with no unresolved review threads.
+
+### Current-base conflict fixup (2026-11-06)
+
+Merged `origin/main` at `08a36b3fe0d49e1dd23007f30fc82ac426a2c1c8` and resolved the conflicts while preserving the async question paths and current-main behavior. The post-merge desktop and mobile runs exposed that the new built-in MCP package catalog did not assign the async question tools to Core. Added `TestAsyncQuestionToolsBelongToCorePackage` and `TestBuiltinCorePublishesAsyncQuestionTools`, then mapped the four async tools to Core.
+
+Passed after that fix:
+
+- `(cd apps/backend && go test -trimpath ./internal/mcp/profile ./internal/mcp/server -count=1)`.
+- `(cd apps/backend && go test -trimpath ./internal/clarification ./internal/sysprompt ./internal/mcp/server ./internal/backendapp -count=1)`; backendapp passed in 157.199 seconds.
+- `(cd apps/backend && KANDEV_TEST_POSTGRES_DSN='<local PostgreSQL 16 DSN>' go test -trimpath ./internal/task/repository/sqlite -run 'TestAsyncQuestions|PendingAction' -count=1 -v)`; the run passed in 22.274 seconds. Named PostgreSQL cases included `TestAsyncQuestionsPostgresResolutionRace`, `TestAsyncQuestionsPostgresCreateReplay`, `TestAsyncQuestionsPostgresConcurrentCreateAndWait`, `TestAsyncQuestionsPostgresAuthoritySweepStalesReparentedRequest`, `TestAsyncQuestionsPostgresForwardedConversationVisibility`, and `TestPostgresAsyncQuestionsParkedGateProjectsPendingAction`.
+- `(cd apps/web && pnpm e2e:run --project chromium tests/chat/async-agent-questions.spec.ts)`: 8 passed.
+- `(cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-async-agent-questions.spec.ts)`: 2 passed.
+- `python3 scripts/list-docs.py validate`: 437 decisions and 1930 specifications validated; `python3 scripts/lint-spec-files.py --all`: passed.
+- `bash scripts/lint-go-changed` for the three conflict-fixup Go files: 0 issues.
+
+The first changed-package Go lint over the complete PR diff reached its 5-minute timeout after printing `0 issues`; that output is not treated as a successful full lint. Re-running the same full PR-diff scope in five sequential groups of four, four, four, four, and three packages completed successfully, with `0 issues` for every group.

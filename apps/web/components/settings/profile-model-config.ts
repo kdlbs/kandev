@@ -26,6 +26,7 @@ export function modelConfigOptions(modelConfig: ModelConfig): SelectConfigOption
       currentValue: option.current_value,
       category: option.category,
       options: option.options,
+      catalog: option.catalog,
     })),
   );
 }

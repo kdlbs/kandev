@@ -144,10 +144,14 @@ export type TaskSessionAgentctlPayload = {
   agent_execution_id?: string;
   error_message?: string;
   worktree_id?: string;
+  /** Repository that owns the materialized worktree, when the event carries it. */
+  worktree_repository_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
   /** Effective task workspace root when the agentctl payload carries it. */
   workspace_path?: string;
+  /** Launched execution's confirmed working directory for relative chat links. */
+  agent_workspace_path?: string;
   /** Task root that contains every per-repo worktree as a sibling subdir.
    *  Set only when the event signals a sibling worktree addition (multi-branch
    *  add_branch flow) — the frontend repoints the file browser to it instead of

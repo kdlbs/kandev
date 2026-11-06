@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: release
 created: 2026-09-23
 owners:
@@ -113,6 +113,11 @@ the only way to obtain remote execution.
   verified on-demand helper resolution as other standard installs. An update
   from an older complete Desktop installation shall keep the app launchable
   and use the existing updater track without restoring bundled helpers.
+- **AC-RELEASE-COMPACT-RUNTIME-003.7:** When the selected host release is
+  published and immutable, recovery shall verify and reuse its complete artifact
+  set. Recovery shall preserve its assets, notes, and tag. If required artifacts
+  are missing, conflicting, or unreadable, recovery shall stop before dependent
+  publication proceeds.
 
 ## Out of scope
 
@@ -128,3 +133,4 @@ the only way to obtain remote execution.
 ## Implementation plan
 
 - [Compact runtime distribution](../../../plans/compact-runtime-distribution/plan.md)
+- [Immutable release recovery](../../../plans/immutable-release-sdk-recovery/plan.md)

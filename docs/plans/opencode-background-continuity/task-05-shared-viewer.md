@@ -26,6 +26,13 @@ system_design:
 
 # Task 05: Reuse the shared desktop and phone viewer
 
+## UX follow-up
+
+The [running/history package](../background-work-running-history/plan.md)
+supersedes this work order's all-state summary and composer history-chip UX.
+Its work orders own the new entries, tabs, command containment, and updated E2E
+expectations. This completed record retains its historical status and results.
+
 ## Summary
 
 Use the existing background-work UI for OpenCode through normalized state.

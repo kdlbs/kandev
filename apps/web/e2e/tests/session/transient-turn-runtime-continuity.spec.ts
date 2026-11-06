@@ -2,14 +2,18 @@ import { test, expect } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
 import {
   assertCompletedCapacityACPTrace,
+  assertKnownFailedCommandCapacityACPTrace,
   assertRetainedACPTrace,
   assertRetainedFailureMessage,
   createRetainedCapacityFixture,
   expectCompletedCapacityProgress,
+  expectKnownFailedCommandVisible,
+  waitForKnownFailedCommandMessage,
   expectRetainedTurnReady,
   readMockACPTrace,
   waitForRetainedTurnFailure,
 } from "../../helpers/transient-turn-runtime-continuity";
+import { advanceCapacityRetries, waitForCapacityRetry } from "../../helpers/capacity-retry-clock";
 import { pollUntil } from "../../helpers/poll-until";
 import { SessionPage } from "../../pages/session-page";
 
@@ -266,6 +270,69 @@ test("desktop: completed tools continue once on the same runtime across reload a
     expect(await countRetainedFailures(apiClient, fixture.sessionId)).toHaveLength(0);
     assertCompletedCapacityACPTrace(fixture.tracePath, "/capacity-completed-tools");
     await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test("desktop: confirmed failed command keeps capacity continuation on the same runtime", async ({
+  testPage,
+  apiClient,
+  backend,
+  seedData,
+}) => {
+  const fixture = await createRetainedCapacityFixture(
+    backend,
+    apiClient,
+    seedData,
+    "known-failed-command",
+    { controlRetryClock: true },
+  );
+  try {
+    const session = new SessionPage(testPage);
+    await testPage.goto(`/t/${fixture.taskId}`);
+    await session.waitForLoad();
+    const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
+
+    await expectKnownFailedCommandVisible(session);
+    await waitForKnownFailedCommandMessage(apiClient, fixture.sessionId);
+    const notice = await waitForCapacityRetry(apiClient, fixture.sessionId, 1);
+    expect(notice.metadata?.retry_in_seconds).toBeGreaterThan(0);
+    await advanceCapacityRetries(backend, Number(notice.metadata?.retry_in_seconds));
+
+    await expect
+      .poll(
+        () =>
+          readMockACPTrace(fixture.tracePath).filter((record) => record.event === "prompt").length,
+        { timeout: 90_000 },
+      )
+      .toBe(2);
+    await expect
+      .poll(async () => {
+        const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+        return messages.filter(
+          (message) =>
+            message.author_type === "agent" &&
+            message.content?.includes(
+              "continued the unfinished request without repeating completed work",
+            ) === true,
+        ).length;
+      })
+      .toBeGreaterThan(0);
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
+        return sessions.find((candidate) => candidate.id === fixture.sessionId)?.state;
+      })
+      .toBe("WAITING_FOR_INPUT");
+
+    expect(await countRetainedFailures(apiClient, fixture.sessionId)).toHaveLength(0);
+    expect(await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId)).toBe(
+      executionId,
+    );
+    await expectKnownFailedCommandVisible(session);
+    assertKnownFailedCommandCapacityACPTrace(fixture.tracePath);
+    await expect(session.transientRetryCard()).toHaveCount(0);
   } finally {
     await fixture.dispose();
   }

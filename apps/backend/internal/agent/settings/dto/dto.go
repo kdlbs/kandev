@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/internal/common/modelcatalog"
 )
 
 type AgentProfileDTO struct {
@@ -303,6 +304,7 @@ type ConfigOptionDTO struct {
 	CurrentValue string                  `json:"current_value"`
 	Category     string                  `json:"category,omitempty"`
 	Options      []ConfigOptionChoiceDTO `json:"options,omitempty"`
+	Catalog      *modelcatalog.Catalog   `json:"catalog,omitempty"`
 }
 
 type ConfigOptionChoiceDTO struct {
@@ -515,25 +517,36 @@ type AgentUpdateJobDTO struct {
 // AgentUpdatePreviewDTO is a read-only representation of the next managed
 // runtime update. The command is derived from trusted built-in agent metadata.
 type AgentUpdatePreviewDTO struct {
-	UpdateMode          AgentUpdateMode         `json:"update_mode"`
-	ManagedFallback     bool                    `json:"managed_fallback,omitempty"`
-	AgentName           string                  `json:"agent_name"`
-	Package             string                  `json:"package"`
-	CurrentVersion      string                  `json:"current_version,omitempty"`
-	DefaultVersion      string                  `json:"default_version"`
-	ActiveVersion       string                  `json:"active_version,omitempty"`
-	EffectiveVersion    string                  `json:"effective_version"`
-	TargetVersion       string                  `json:"target_version"`
-	StableLatestVersion string                  `json:"stable_latest_version,omitempty"`
-	Operation           string                  `json:"operation"`
-	AvailableVersions   []AgentUpdateVersionDTO `json:"available_versions"`
-	Command             []string                `json:"command"`
-	CommandString       string                  `json:"command_string"`
-	Family              string                  `json:"family,omitempty"`
-	Source              string                  `json:"source,omitempty"`
-	TargetFamily        string                  `json:"target_family,omitempty"`
-	RuntimeRevision     uint64                  `json:"runtime_revision,omitempty"`
-	MigrationAvailable  bool                    `json:"migration_available,omitempty"`
+	UpdateMode                 AgentUpdateMode                `json:"update_mode"`
+	ManagedFallback            bool                           `json:"managed_fallback,omitempty"`
+	AgentName                  string                         `json:"agent_name"`
+	Package                    string                         `json:"package"`
+	CurrentVersion             string                         `json:"current_version,omitempty"`
+	DefaultVersion             string                         `json:"default_version"`
+	ActiveVersion              string                         `json:"active_version,omitempty"`
+	EffectiveVersion           string                         `json:"effective_version"`
+	TargetVersion              string                         `json:"target_version"`
+	StableLatestVersion        string                         `json:"stable_latest_version,omitempty"`
+	Operation                  string                         `json:"operation"`
+	AvailableVersions          []AgentUpdateVersionDTO        `json:"available_versions"`
+	Command                    []string                       `json:"command"`
+	CommandString              string                         `json:"command_string"`
+	Family                     string                         `json:"family,omitempty"`
+	Source                     string                         `json:"source,omitempty"`
+	TargetFamily               string                         `json:"target_family,omitempty"`
+	RuntimeRevision            uint64                         `json:"runtime_revision,omitempty"`
+	MigrationAvailable         bool                           `json:"migration_available,omitempty"`
+	CopilotPluginCompatibility *CopilotPluginCompatibilityDTO `json:"copilot_plugin_compatibility,omitempty"`
+}
+
+// CopilotPluginCompatibilityDTO is the read-only plugin compatibility
+// projection for the built-in Copilot managed package. Agent-wide preview has
+// no concrete profile context and therefore normally remains unchecked.
+type CopilotPluginCompatibilityDTO struct {
+	RuntimeVersion       string `json:"runtime_version"`
+	State                string `json:"state"`
+	Reason               string `json:"reason,omitempty"`
+	SelectedProfileCount *int   `json:"selected_profile_count"`
 }
 
 // AgentUpdateVersionDTO is one stable, selectable package version.
@@ -626,6 +639,10 @@ type ProfileLaunchSettingsRequest struct {
 	EnvVars       *[]ProfileEnvVarDTO `json:"env_vars"`
 	CLIFlags      *[]CLIFlagDTO       `json:"cli_flags"`
 	CommandPrefix *string             `json:"command_prefix"`
+	// Mode is the draft ACP mode. A pointer distinguishes an explicit empty
+	// value from an omitted field on an older client. It is request-only and
+	// never persisted by discovery.
+	Mode *string `json:"mode,omitempty"`
 	// CopilotSelectedPlugins optionally replaces the saved selection for this
 	// request. Omission uses the saved profile value, or an empty set for a
 	// new draft.

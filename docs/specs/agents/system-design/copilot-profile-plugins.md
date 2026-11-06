@@ -36,7 +36,7 @@ Related contracts:
 - [Portable configuration](../requirements/portable-agent-configuration.md): no implied plugin or credential portability.
 - [Context reset decision](../../../decisions/2026-08-18-context-reset-preserves-runtime-configuration.md): retained sessions and replacement processes differ.
 - [Native MCP preparation decision](../../../decisions/2026-09-28-profile-authorized-mcp-preparation.md): native policy remains authoritative, without adopting Cursor preparation here.
-- [Native authority](copilot-profile-plugins-native-qualification.md): version-bounded preparation, diagnostic evidence, and failure recovery.
+- [Native authority](copilot-profile-plugins-native-qualification.md): native policy, diagnostic evidence, and failure recovery.
 
 The linked native-authority ADR records the policy-ownership trade-off.
 
@@ -201,7 +201,7 @@ Reject lexical traversal, control characters, device namespaces, and unsupported
 Canonicalize an explicitly recorded symlink target once. Accept external targets only as explicit metadata evidence.
 Never discover another directory through a symlink or a search.
 Bound manifests to 256 KiB and native state to 2 MiB, including file-growth checks.
-Use the exact manifest locations and precedence qualified for the runtime, then match the manifest name and compatible version.
+Use supported manifest locations and precedence, then match the manifest name and compatible plugin version.
 Reject ambiguous manifests and symlinked manifest files. Do not parse executable components to reproduce them.
 Recheck canonical identity immediately before process configuration. A changed root fails that start.
 
@@ -459,7 +459,7 @@ They do not expose filesystem paths or raw provider errors.
 ## Compatibility qualification
 
 The [admission contract](copilot-profile-plugins-native-qualification.md#qualification-and-admission)
-keeps inventory/metadata versions bounded while delegating policy to Copilot.
+uses [observed contracts](copilot-plugin-contract-compatibility.md) while delegating policy to Copilot.
 Remove the separate policy-only allowlist; do not replace it with an
 OS/architecture certification gate. Diagnostic evidence records its actual
 platform without claiming unobserved enterprise enforcement.
@@ -468,3 +468,4 @@ platform without claiming unobserved enterprise enforcement.
 
 - [Copilot profile plugins](../../../plans/copilot-profile-plugins/plan.md).
 - [Copilot profile plugin completion](../../../plans/copilot-profile-plugin-completion/plan.md).
+- [Copilot runtime plugin compatibility](../../../plans/copilot-runtime-plugin-compatibility/plan.md): issue #5064; qualification and runtime/profile recovery.

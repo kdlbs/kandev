@@ -277,6 +277,9 @@ type InstanceConfig struct {
 	// AgentCommand is the command to run the agent
 	AgentCommand string
 
+	// AgentCommandConfigured distinguishes an explicit command from the inherited default.
+	AgentCommandConfigured bool `json:"-"`
+
 	// AgentArgs is the parsed command (derived from AgentCommand)
 	AgentArgs             []string
 	LaunchWrapper         launchwrapper.Spec `json:"launch_wrapper,omitzero"`
@@ -366,6 +369,10 @@ type InstanceConfig struct {
 
 	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
 	PromptSuggestions bool
+
+	// CopilotNativeSessionEvents enables Copilot's opt-in native compaction and
+	// attributed usage notifications for this launch.
+	CopilotNativeSessionEvents bool
 
 	// AssumeMcpSse overrides MCP capability filtering to assume the agent supports SSE.
 	AssumeMcpSse bool
@@ -694,7 +701,7 @@ func generateSelfToken() string {
 
 // NewInstanceConfig creates an InstanceConfig from defaults with optional overrides.
 // If port is 0, it should be allocated by the caller.
-func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *InstanceConfig {
+func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) (*InstanceConfig, error) {
 	cfg := &InstanceConfig{
 		HomeDir:                    c.HomeDir,
 		Port:                       port,
@@ -720,13 +727,20 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 	}
 
 	applyOverrides(cfg, overrides)
+	if cfg.McpProfile != nil && cfg.McpProfile.BuiltinPackages != nil && port <= 0 {
+		return nil, fmt.Errorf("built-in MCP packages require an instance port")
+	}
 
 	// Inject local kandev MCP server for MCP tunneling through the agent stream.
 	// This adds the kandev MCP server as an entry in InstanceConfig.McpServers.
 	// The MCP server uses the agent stream WebSocket connection (bidirectional)
 	// to forward tool calls to the backend.
 	if port > 0 {
-		cfg.McpServers = injectKandevMcpServerAtHost(cfg.McpServers, port, cfg.MCPHost)
+		servers, err := injectInstanceBuiltinMCP(cfg)
+		if err != nil {
+			return nil, err
+		}
+		cfg.McpServers = servers
 		cfg.InjectedKandevMCP = true
 	}
 
@@ -738,7 +752,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		cfg.AgentEnv = CollectAgentEnv(nil)
 	}
 
-	return cfg
+	return cfg, nil
 }
 
 // applyOverrides applies non-zero fields from overrides to cfg.
@@ -754,6 +768,7 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	}
 	if overrides.AgentCommand != "" {
 		cfg.AgentCommand = overrides.AgentCommand
+		cfg.AgentCommandConfigured = true
 	}
 	if overrides.WorkDir != "" {
 		cfg.WorkDir = overrides.WorkDir
@@ -779,6 +794,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	}
 	if overrides.PromptSuggestions {
 		cfg.PromptSuggestions = true
+	}
+	if overrides.CopilotNativeSessionEvents {
+		cfg.CopilotNativeSessionEvents = true
 	}
 	if overrides.AssumeMcpSse {
 		cfg.AssumeMcpSse = true
@@ -872,6 +890,7 @@ type InstanceOverrides struct {
 	TaskID                     string
 	DisableAskQuestion         bool
 	PromptSuggestions          bool
+	CopilotNativeSessionEvents bool
 	AssumeMcpSse               bool
 	AssumeMcpHttp              bool
 	McpMode                    string
