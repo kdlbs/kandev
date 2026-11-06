@@ -13,7 +13,7 @@ These images run the Kandev server. Their tools are available to local/worktree 
 
 ## What's in `:universal` (and what's not)
 
-**Language toolchains:** Go (latest stable), Rust (rustup, stable default toolchain), pnpm (preinstalled through npm into `/usr/local` so `pnpm` is on `$PATH` for everyone).
+**Language toolchains:** Go at the version pinned by that release's `Dockerfile.universal`, Rust from the stable channel resolved during the image build, and pnpm installed under `/usr/local`.
 
 **Build essentials:** `build-essential` (gcc, g++, make, libc-dev), `pkg-config`, `python3-dev`, `libssl-dev`. These cover CGO compilation, native Python pip wheels, and native Node modules.
 
@@ -39,16 +39,13 @@ We add a tool to universal when **all four** of these hold:
 
 We **decline** additions that fail any of these. The escape hatch is always *derive your own image* - see below.
 
+For an optional native client in the server image, use the [pinned PostgreSQL-client Dockerfile](../examples/docker-server-extension/Dockerfile) and the [disposable Local or Worktree validation procedure](public/docker.md#check-an-extension-in-a-disposable-deployment).
+
 ## Switching between flavors
 
 At the same release version, both flavors use the same database schema and `/data` layout. Before switching to universal, ensure the mounted data is writable by `kandev` (UID 1000). Universal does not repair volume ownership at startup. See [image runtime behavior](public/docker.md#image-runtime-behavior) for ownership requirements. For a version upgrade, also follow the [upgrade procedure](public/docker.md#upgrade-and-remove).
 
-**Docker:**
-```bash
-docker pull ghcr.io/kdlbs/kandev:X.Y.Z-universal
-docker stop kandev && docker rm kandev
-docker run -p 38429:38429 -v kandev-data:/data ghcr.io/kdlbs/kandev:X.Y.Z-universal
-```
+**Docker:** Follow the [Docker upgrade procedure](public/docker.md#upgrade-and-remove) for an existing deployment. Preserve its `/data` volume, and test an extension separately on the guide's loopback-bound disposable instance instead of stopping the existing container.
 
 **Kubernetes:**
 ```bash
