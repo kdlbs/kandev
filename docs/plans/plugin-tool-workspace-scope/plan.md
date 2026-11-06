@@ -92,7 +92,8 @@ validation. External catalogs advertise the host-owned
 `kandev_workspace_id` argument; each call resolves and authorizes the
 workspace, strips the argument, and dispatches only the verified ID.
 `ProjectLegacySafe` projects surviving workspace task descriptors to task
-scope so retained pre-workspace agentctl builds keep the catalog.
+scope so retained pre-workspace agentctl builds keep the catalog. The
+manifest contract change carries an additive plugin SDK `0.2.0` record.
 Transport tests confirm caller identity propagation over streamable HTTP and
 SSE, revoked-token rejection, failed-closed identity handling, and the
 authentication-disabled path. Public manifest and authoring docs describe the

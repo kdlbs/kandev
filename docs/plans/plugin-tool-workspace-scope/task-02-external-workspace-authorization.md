@@ -93,7 +93,9 @@ sequential
 
 Implemented. The external catalog returns a copy of each workspace tool with
 a required `kandev_workspace_id` string (`minLength: 1`) and keeps the plugin
-catalog schema unchanged. External invocations validate and strip the
+catalog schema unchanged. Root `minProperties` and `maxProperties` bounds are
+widened for the injected argument so plugin-defined count constraints still
+accept valid external calls. External invocations validate and strip the
 argument, resolve the workspace, and require current caller read permission
 through `GetWorkspace` plus `AuthorizeWorkspaceAccess` on every call.
 Not-found and denied share `workspace is not available`; missing, blank, and
@@ -112,4 +114,5 @@ Verified with `go test -trimpath ./internal/mcp/... ./internal/plugins/...
 `TestExternalWorkspaceToolCallerIdentity` (streamable HTTP and SSE, revoked
 token, disabled auth), and `TestWorkspaceAgentToolReceivesVerifiedContext`.
 Real PAT authentication over both transports is covered by
-`TestExternalWorkspaceToolPATIdentityHTTPAndSSE`.
+`TestExternalWorkspaceToolPATIdentityHTTPAndSSE`. The additive manifest
+contract bump is recorded as plugin SDK `0.2.0`.
