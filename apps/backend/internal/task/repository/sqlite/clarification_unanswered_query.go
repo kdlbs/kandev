@@ -22,7 +22,7 @@ const clarificationRequestTypeLiteral = "'clarification_request'"
 
 // unansweredBundlesExpr is the derived table every read and write in this
 // file selects from. Columns: pending_id, session_id, task_id, workspace_id,
-// created_at.
+// created_at, last_created_at.
 //
 // Supersession is resolved on turn authority alone, as the History read does:
 // a terminal session's current-turn bundle is expired by the lifecycle, not
@@ -47,13 +47,14 @@ func unansweredBundlesExpr(drv string) string {
 	notParentQuestion := dialect.ExcludeTruthyMetadataPredicate(drv, "m.metadata", models.MetaKeyParentQuestion)
 	currentTurnIDExpr := turnAuthorityCurrentTurnIDExpr(drv, "g.session_id")
 	return fmt.Sprintf(`(
-		SELECT g.pending_id, g.session_id, g.task_id, t.workspace_id, g.created_at
+		SELECT g.pending_id, g.session_id, g.task_id, t.workspace_id, g.created_at, g.last_created_at
 		FROM (
 			SELECT
 				%[1]s AS pending_id,
 				m.task_session_id AS session_id,
 				COALESCE(NULLIF(MIN(m.task_id), ''), MIN(ts.task_id)) AS task_id,
 				MIN(m.created_at) AS created_at,
+				MAX(m.created_at) AS last_created_at,
 				MIN(COALESCE(m.turn_id, '')) AS turn_id,
 				MAX(CASE WHEN COALESCE(%[2]s, '') IN ('', 'pending') THEN 1 ELSE 0 END) AS has_pending,
 				MAX(CASE WHEN %[3]s = '' THEN 1 ELSE 0 END) AS has_missing_question_id,

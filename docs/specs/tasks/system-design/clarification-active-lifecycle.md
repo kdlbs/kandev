@@ -386,7 +386,10 @@ touched.
   once admission returns sent or queued, posts the admitted client message identity to
   `POST /api/v1/clarification-inbox/unanswered/:pendingId/late-answer`. The server never infers the
   answered question from message text. A failed close leaves the question listed; the message stays
-  delivered.
+  delivered. An identified admission must be bound to that pending ID and follow the latest persisted
+  question in the bundle. If a question total is declared, all declared distinct questions must be
+  present before automatic close; older bundles without a declared total retain their legacy path.
+  Queued admissions use their own durable admission time, not the timestamp of a merged queue row.
 - **Send to task.** The late-answer body may name another `session_id` only when the asking session
   is terminal and the target belongs to the same task. The list offers the task's primary session in
   `send_to_task_session_id` under the same condition.

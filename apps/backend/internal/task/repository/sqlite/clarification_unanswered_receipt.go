@@ -92,6 +92,13 @@ func validateLateAnswerReceipt(ctx context.Context, tx *sqlx.Tx, pendingID, task
 	if _, err := uuid.Parse(strings.TrimPrefix(request.MessageID, prefix)); err != nil {
 		return models.ErrUnansweredAdmissionUnknown
 	}
+	complete, err := lateAnswerBundleComplete(ctx, tx, pendingID, sourceSessionID)
+	if err != nil {
+		return err
+	}
+	if !complete {
+		return models.ErrUnansweredAdmissionUnknown
+	}
 	accepted, err := hasLateAnswerAdmission(ctx, tx, taskID, request.SessionID, request.MessageID)
 	if err != nil {
 		return err
@@ -109,6 +116,59 @@ func validateLateAnswerReceipt(ctx context.Context, tx *sqlx.Tx, pendingID, task
 	return nil
 }
 
+// A partially persisted bundle can be observed while its creator is still
+// adding questions. Legacy rows with no declared total retain their old path.
+func lateAnswerBundleComplete(ctx context.Context, tx *sqlx.Tx, pendingID, sourceSessionID string) (bool, error) {
+	query := `SELECT COALESCE(metadata, '') FROM task_session_messages WHERE task_session_id = ? AND type = 'clarification_request' AND ` +
+		dialect.JSONExtract(tx.DriverName(), "metadata", "pending_id") + ` = ?`
+	rows, err := tx.QueryContext(ctx, tx.Rebind(query), sourceSessionID, pendingID)
+	if err != nil {
+		return false, fmt.Errorf("read late answer bundle completeness: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	expected, missing := 0, false
+	questions := make(map[string]bool)
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return false, err
+		}
+		var metadata struct {
+			Total      *int   `json:"question_total"`
+			QuestionID string `json:"question_id"`
+			Question   struct {
+				ID string `json:"id"`
+			} `json:"question"`
+		}
+		if json.Unmarshal([]byte(raw), &metadata) != nil {
+			return false, nil
+		}
+		id := metadata.QuestionID
+		if id == "" {
+			id = metadata.Question.ID
+		}
+		if id == "" {
+			return false, nil
+		}
+		questions[id] = true
+		if metadata.Total == nil {
+			missing = true
+			continue
+		}
+		if *metadata.Total <= 0 || (expected != 0 && expected != *metadata.Total) {
+			return false, nil
+		}
+		expected = *metadata.Total
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	if expected == 0 {
+		return true, nil
+	}
+	return !missing && len(questions) == expected, nil
+}
+
 // Identified queue admissions have their own durable time even when queue
 // merging keeps multiple IDs on one row with only the newest row timestamp.
 // Prefer that receipt over a later materialized transcript timestamp.
@@ -120,7 +180,7 @@ func lateAnswerAdmittedAfterQuestion(ctx context.Context, tx *sqlx.Tx, pendingID
 	bundles := unansweredBundlesExpr(tx.DriverName())
 	if exists {
 		var total, timely int
-		query := `SELECT COUNT(*), COALESCE(SUM(CASE WHEN q.admitted_at >= b.created_at THEN 1 ELSE 0 END), 0)
+		query := `SELECT COUNT(*), COALESCE(SUM(CASE WHEN q.admitted_at >= b.last_created_at THEN 1 ELSE 0 END), 0)
 			FROM queue_admission_receipts q JOIN ` + bundles + ` b ON b.pending_id = ? AND b.task_id = ? AND b.session_id = ?
 			WHERE q.task_id = ? AND q.session_id = ? AND q.client_queue_id = ?`
 		if err := tx.QueryRowContext(ctx, tx.Rebind(query), pendingID, taskID, sourceSessionID, taskID, sessionID, id).Scan(&total, &timely); err != nil {
@@ -134,7 +194,7 @@ func lateAnswerAdmittedAfterQuestion(ctx context.Context, tx *sqlx.Tx, pendingID
 	// Metadata aliases and legacy merged rows cannot establish their own time.
 	query := `SELECT COALESCE(m.metadata, '') FROM task_session_messages m JOIN ` + bundles + ` b ON b.pending_id = ? AND b.task_id = ? AND b.session_id = ?
 		WHERE m.task_id = ? AND m.task_session_id = ? AND m.id = ?
-		AND m.author_type = 'user' AND m.type = 'message' AND m.created_at >= b.created_at`
+		AND m.author_type = 'user' AND m.type = 'message' AND m.created_at >= b.last_created_at`
 	var raw string
 	if err := tx.QueryRowContext(ctx, tx.Rebind(query), pendingID, taskID, sourceSessionID, taskID, sessionID, id).Scan(&raw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
