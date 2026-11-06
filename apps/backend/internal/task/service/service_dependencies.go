@@ -79,7 +79,7 @@ type DependencyView struct {
 	BlockedReason      string
 	DependsOn          []DependencyRef
 	Blocks             []DependencyRef
-	Related            []string
+	Related            []DependencyRef
 	DependsOnTruncated bool
 	BlocksTruncated    bool
 }
@@ -538,6 +538,7 @@ func (s *Service) dependencyEventFields(ctx context.Context, task *models.Task) 
 		"blocked_reason": view.BlockedReason,
 		"depends_on":     view.DependsOn,
 		"blocks":         view.Blocks,
+		"related":        view.Related,
 	}
 }
 
@@ -655,10 +656,15 @@ func (s *Service) buildDependencyViews(
 		// (Blocked: false) — an indistinguishable, silent "not blocked".
 		views := withheldDependencyViews(ids)
 		if s.relations != nil {
-			if related, relationErr := s.relations.ListRelationsForTasks(ctx, ids); relationErr == nil {
+			related, relationErr := s.relations.ListRelationsForTasks(ctx, ids)
+			if relationErr != nil {
+				s.logger.Warn("failed to load task relations", zap.Error(relationErr))
+			} else if refs, refErr := s.resolveDependencyRefs(ctx, nil, nil, related); refErr != nil {
+				s.logger.Warn("failed to resolve related task refs", zap.Error(refErr))
+			} else {
 				for _, id := range ids {
 					view := views[id]
-					view.Related = related[id]
+					view.Related = relatedRefs(related[id], refs)
 					views[id] = view
 				}
 			}
@@ -697,7 +703,16 @@ func (s *Service) buildDependencyViews(
 	if enforceFanOut && distinctEdgeEndCount(predecessors, dependents) > maxDependencyFanOut {
 		return nil, ErrDependencyFanOutExceeded
 	}
-	refs, err := s.resolveDependencyRefs(ctx, predecessors, dependents)
+	var related map[string][]string
+	if s.relations != nil {
+		var relationErr error
+		related, relationErr = s.relations.ListRelationsForTasks(ctx, ids)
+		if relationErr != nil {
+			s.logger.Warn("failed to load task relations", zap.Error(relationErr))
+			related = nil
+		}
+	}
+	refs, err := s.resolveDependencyRefs(ctx, predecessors, dependents, related)
 	if err != nil {
 		if !isRequestCancellationError(ctx, err) {
 			s.logger.Warn("failed to resolve dependency edge ends", zap.Error(err))
@@ -708,19 +723,9 @@ func (s *Service) buildDependencyViews(
 		return withheldDependencyViews(ids), nil
 	}
 	for _, id := range ids {
-		out[id] = buildDependencyView(refs, predecessors[id], dependents[id], blocksTruncated[id])
-	}
-	if s.relations != nil {
-		related, relationErr := s.relations.ListRelationsForTasks(ctx, ids)
-		if relationErr != nil {
-			s.logger.Warn("failed to load task relations", zap.Error(relationErr))
-		} else {
-			for _, id := range ids {
-				view := out[id]
-				view.Related = related[id]
-				out[id] = view
-			}
-		}
+		view := buildDependencyView(refs, predecessors[id], dependents[id], blocksTruncated[id])
+		view.Related = relatedRefs(related[id], refs)
+		out[id] = view
 	}
 	return out, nil
 }
@@ -774,10 +779,10 @@ func withheldDependencyViews(ids []string) map[string]DependencyView {
 // batch closed: a derivation step that cannot complete blocks every task in
 // the batch, not just the tasks whose edges could not resolve.
 func (s *Service) resolveDependencyRefs(
-	ctx context.Context, predecessors, dependents map[string][]string,
+	ctx context.Context, predecessors, dependents, related map[string][]string,
 ) (map[string]DependencyRef, error) {
 	seen := map[string]struct{}{}
-	for _, group := range []map[string][]string{predecessors, dependents} {
+	for _, group := range []map[string][]string{predecessors, dependents, related} {
 		for _, ids := range group {
 			for _, id := range ids {
 				seen[id] = struct{}{}
@@ -818,6 +823,27 @@ func (s *Service) resolveDependencyRefs(
 		}
 	}
 	return refs, nil
+}
+
+// relatedRefs resolves non-blocking "related" edge ends to the same
+// id/title/state shape the depends-on and blocks lists use, so the frontend
+// has one consumer contract for every edge kind. A related edge carries no
+// resolution verdict, so Status is always cleared; a dangling edge to a
+// deleted task is dropped rather than rendered as a blank link.
+func relatedRefs(ids []string, refs map[string]DependencyRef) []DependencyRef {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]DependencyRef, 0, len(ids))
+	for _, id := range ids {
+		ref := refs[id]
+		if ref.Status == dependencyMissing {
+			continue
+		}
+		ref.Status = ""
+		out = append(out, ref)
+	}
+	return out
 }
 
 // buildDependencyView derives blocked/reason plus both edge lists for one

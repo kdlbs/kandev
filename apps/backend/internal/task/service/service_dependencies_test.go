@@ -343,8 +343,15 @@ func TestBuildDependencyViewsIncludesRelatedIDs(t *testing.T) {
 	svc.SetRelationRepository(relations)
 	svc.SetBlockerRepository(&mockBlockerRepo{})
 	views := svc.BuildDependencyViews(ctx, []*models.Task{{ID: "task-123"}})
-	if got := views["task-123"].Related; len(got) != 1 || got[0] != "related-peer" {
-		t.Fatalf("related IDs = %v", got)
+	got := views["task-123"].Related
+	if len(got) != 1 || got[0].ID != "related-peer" {
+		t.Fatalf("related IDs = %+v", got)
+	}
+	if got[0].Title != "Peer" {
+		t.Errorf("related entry should carry the title for the chip, got %q", got[0].Title)
+	}
+	if got[0].Status != "" {
+		t.Errorf("related entry should not carry a resolution status, got %q", got[0].Status)
 	}
 }
 

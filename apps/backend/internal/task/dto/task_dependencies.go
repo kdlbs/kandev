@@ -25,7 +25,7 @@ type TaskDependencyProjection struct {
 	BlockedReason string
 	DependsOn     []TaskDependencyRefDTO
 	Blocks        []TaskDependencyRefDTO
-	Related       []string
+	Related       []TaskDependencyRefDTO
 }
 
 // EnrichTaskDependencies stamps the derived dependency projection onto a task
