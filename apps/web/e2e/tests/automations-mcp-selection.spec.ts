@@ -5,9 +5,27 @@ import {
   verifyAutomationMCPDeleteWarning,
   saveAutomationMCP,
   verifyAutomationMCPRecovery,
+  verifyAutomationMCPRepositoryInheritance,
 } from "../helpers/automation-mcp";
 import type { Automation, AutomationRun } from "@/lib/types/automation";
 import type { BuiltinMCPSessionView } from "@/lib/types/builtin-mcp";
+
+// @covers AC-OFFICE-AUTOMATION-MCP-001.2
+test("matches MCP inheritance to the saved repository for a loaded automation", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+  prCapture,
+}) => {
+  await verifyAutomationMCPRepositoryInheritance({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+  });
+});
 
 test("saves all native packages and workspace servers, then invokes native tools in a private run", async ({
   testPage,

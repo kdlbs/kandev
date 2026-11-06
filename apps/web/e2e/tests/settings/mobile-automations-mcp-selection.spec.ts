@@ -5,8 +5,27 @@ import {
   verifyAutomationMCPDeleteWarning,
   saveAutomationMCP,
   verifyAutomationMCPRecovery,
+  verifyAutomationMCPRepositoryInheritance,
 } from "../../helpers/automation-mcp";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+
+// @covers AC-OFFICE-AUTOMATION-MCP-001.2, AC-OFFICE-AUTOMATION-MCP-004.4
+test("matches MCP inheritance to the saved repository for a loaded automation", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+  prCapture,
+}) => {
+  await verifyAutomationMCPRepositoryInheritance({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+    touch: true,
+  });
+});
 
 // @covers AC-OFFICE-AUTOMATION-MCP-004.4, AC-OFFICE-AUTOMATION-MCP-004.6, AC-OFFICE-AUTOMATION-MCP-004.8, AC-OFFICE-AUTOMATION-MCP-004.9, AC-OFFICE-AUTOMATION-MCP-004.10
 test("selects and saves every optional package on a phone with reachable controls", async ({

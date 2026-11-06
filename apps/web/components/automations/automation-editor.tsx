@@ -31,7 +31,10 @@ import {
   canonicalMCPSelection,
   automationDraftRevision,
 } from "./automation-payload";
-import { resolveExecutorType } from "./automation-repository-selection";
+import {
+  normalizeRepositorySelections,
+  resolveExecutorType,
+} from "./automation-repository-selection";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
 import { useSaveHandler, type SaveHandlerOpts } from "./automation-editor-save";
@@ -473,9 +476,13 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
           onReloadSaved={mcpReconciliation.reload}
           workspaceId={workspaceId}
           profileId={form.agentProfileId}
-          repositoryIds={form.repositorySelections
-            .filter((item) => item.kind === "registered")
-            .map((item) => item.id)}
+          repositoryIds={
+            form.repositoryMode === "selected"
+              ? normalizeRepositorySelections(form.repositorySelections, { supportsMultiRepo })
+                  .filter((item) => item.kind === "registered")
+                  .map((item) => item.id)
+              : []
+          }
           taskMode={form.taskMode}
           selection={form.mcpSelection}
           onChange={(value) => updateField("mcpSelection", value)}

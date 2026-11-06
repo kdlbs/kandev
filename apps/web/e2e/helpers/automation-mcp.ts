@@ -6,6 +6,10 @@ import type { SeedData } from "../fixtures/test-base";
 import type { Automation } from "@/lib/types/automation";
 import type { BuiltinMCPManagementView } from "@/lib/types/builtin-mcp";
 import { expect, type Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import type { BackendContext } from "../fixtures/backend";
 export const OPTIONAL_AUTOMATION_PACKAGES = [
   "configuration",
   "rich-output",
@@ -20,6 +24,77 @@ export async function saveAutomationMCP(page: Page, watcher: WsWatcher) {
     save.getByRole("button", { name: /^(Save changes|Retry save)$/ }).click(),
   ]);
   await expect(save).toHaveAttribute("data-status", "saved");
+}
+
+/** Keep inheritance aligned with the single repository retained when a loaded automation is saved. */
+export async function verifyAutomationMCPRepositoryInheritance({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+  prCapture,
+  touch = false,
+}: {
+  testPage: Page;
+  apiClient: ApiClient;
+  seedData: SeedData;
+  backend: BackendContext;
+  prCapture: PrAssetCapture;
+  touch?: boolean;
+}) {
+  const workspace = await apiClient.createWorkspace("Loaded MCP inheritance workspace");
+  const primary = await apiClient.createRepository(workspace.id, seedData.repositoryPath);
+  const path = mkdtempSync(join(backend.tmpDir, "mcp-inheritance-"));
+  execFileSync("git", ["clone", "--local", seedData.repositoryPath, path]);
+  const omitted = await apiClient.createRepository(workspace.id, path, "main", {
+    name: "Omitted repository",
+  });
+  const createServer = (role: string) =>
+    apiClient.createMCPServer(workspace.id, {
+      runtime_name: `${role.toLowerCase()}-repository-reports`,
+      display_name: `${role} repository reports`,
+      execution_mode: "remote",
+      transport: "streamable_http",
+      configuration: { url: "https://reports.example.test/mcp" },
+      source: "custom",
+    });
+  const server = await createServer("Omitted");
+  const retained = await createServer("Retained");
+  await apiClient.replaceMCPSelections("repository", omitted.id, workspace.id, [server.id]);
+  await apiClient.replaceMCPSelections("repository", primary.id, workspace.id, [retained.id]);
+  const automation = await apiClient.seedAutomation({
+    workspaceId: workspace.id,
+    name: "Loaded repository inheritance",
+    repositoryMode: "selected",
+    repositoryIds: [primary.id, omitted.id],
+    agentProfileId: seedData.agentProfileId,
+  });
+  const loaded = await apiClient.wsRequest<Automation>("automation.get", { id: automation.id });
+  expect(loaded.repository_ids).toEqual([primary.id, omitted.id]);
+  const watcher = watchWs(testPage);
+  await testPage.goto(`/settings/workspaces/${workspace.id}/automations/${automation.id}`);
+  const section = testPage.getByTestId("automation-mcp-access");
+  const direct = section.getByTestId(`automation-mcp-server-${server.id}`).getByRole("checkbox");
+  await expect(section.getByText("Retained repository reports (inherited)")).toBeVisible();
+  await expect(direct).toBeVisible();
+  await expect(direct).toBeEnabled();
+  await expect(section.getByText("Omitted repository reports (inherited)")).toHaveCount(0);
+  if (touch) await direct.tap();
+  else await direct.click();
+  await expect(direct).toBeChecked();
+  await section.evaluate((element) => element.scrollIntoView({ block: "start" }));
+  await prCapture.screenshot("automation-mcp-repository-inheritance", {
+    caption: "MCP inheritance follows the repositories that the automation will save",
+  });
+  await saveAutomationMCP(testPage, watcher);
+  const saved = await apiClient.wsRequest<Automation>("automation.get", { id: automation.id });
+  expect(saved.repository_ids).toEqual([primary.id]);
+  expect(saved.mcp_selection?.definition_ids).toEqual([server.id]);
+  await testPage.reload();
+  await expect(direct).toBeChecked();
+  expect(
+    (await apiClient.getMCPSelections("repository", omitted.id, workspace.id)).definition_ids,
+  ).toEqual([server.id]);
 }
 
 export async function verifyAutomationMCPRecovery({
