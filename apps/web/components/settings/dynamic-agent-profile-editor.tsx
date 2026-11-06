@@ -123,6 +123,8 @@ export function DynamicAgentProfileEditor({
         removeCandidate={state.removeCandidate}
         updateCandidate={state.updateCandidate}
         updateCandidatePolicy={state.updateCandidatePolicy}
+        updateCandidateUnclassified={state.updateCandidateUnclassified}
+        applyUnclassifiedToAllCandidates={state.applyUnclassifiedToAllCandidates}
       />
     </>
   );

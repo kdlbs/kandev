@@ -210,9 +210,8 @@ Use the existing profile-session-policy fields as a propagation reference, inclu
 Candidate policy API serialization, browser normalization, editor drafts, and save requests preserve the new section.
 A browser edit of unrelated settings must not disable an API-configured policy.
 
-No rendered controls or layout changes are planned. Desktop and phone use existing manual recovery and route-change presentation.
-Use the existing `policy_skip` path and structured unknown error code. Do not manufacture a classified provider reason.
-Existing chat state, composer contents, and historical provider attribution remain intact.
+The dynamic profile editor renders one unclassified policy per candidate inside each expanded candidate row: a switch and a bounded consecutive-failure threshold (2 to 10), with a summary above the transient, hard and unclassified policy editors and an invalid threshold annotating the save reason. A profile-wide apply control sets every candidate to enabled with a threshold of 2, leaving candidate order, model options, and the transient and hard policies unchanged. Desktop and phone use the existing manual recovery and route-change presentation; the workflow veto is unchanged.
+The parent agent setup save flow validates the current dynamic draft with the same unclassified-policy predicate as the standalone editor. An enabled fractional or out-of-range threshold blocks the shared Save and exposes the threshold validation reason; valid and disabled policies retain their existing save behavior.
 Public documentation must explain API configuration, threshold counting, the workflow veto, and the conservative eligibility limits when implementation ships.
 
 ## Verification boundaries
@@ -222,3 +221,4 @@ Engine/repository tests prove restart, resets, deduplication, and generation/sta
 Conductor/orchestrator tests prove actual evidence admission, not caller-supplied true booleans alone.
 API and workflow tests prove round trips and veto propagation.
 Desktop and mobile E2E seed the policy through the API and exercise existing recovery controls.
+
