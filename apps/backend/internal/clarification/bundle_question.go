@@ -1,6 +1,8 @@
 package clarification
 
 import (
+	"encoding/json"
+	"github.com/kandev/kandev/internal/clarification/protocol"
 	"sort"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -52,12 +54,13 @@ func bundleQuestions(msgs []*taskmodels.Message) []Question {
 // question_id (not id, which list_pending_questions_kandev callers never
 // see), plus the question's D3 effective status. Options is never nil (L4a).
 type QuestionStatus struct {
-	QuestionID      string   `json:"question_id"`
-	Title           string   `json:"title"`
-	Prompt          string   `json:"prompt"`
-	Status          string   `json:"status"`
-	Options         []Option `json:"options"`
-	AllowCustomText *bool    `json:"allow_custom_text,omitempty"`
+	QuestionID      string                  `json:"question_id"`
+	Title           string                  `json:"title"`
+	Prompt          string                  `json:"prompt"`
+	Status          string                  `json:"status"`
+	Options         []Option                `json:"options"`
+	AllowCustomText *bool                   `json:"allow_custom_text,omitempty"`
+	Images          protocol.QuestionImages `json:"images,omitempty"`
 }
 
 // BundleQuestionStatuses builds the D2/L5-ordered, L4-shaped question list
@@ -82,6 +85,7 @@ func BundleQuestionStatuses(msgs []*taskmodels.Message) []QuestionStatus {
 			Status:          effectiveMessageStatus(m),
 			Options:         options,
 			AllowCustomText: q.AllowCustomText,
+			Images:          q.Images,
 		})
 	}
 	return out
@@ -116,6 +120,12 @@ func questionFromMessageMetadataFull(meta map[string]any) Question {
 		q.AllowCustomText = &v
 	}
 	q.Options = optionsFromQuestionData(qData)
+	if raw, ok := qData["images"]; ok {
+		data, err := json.Marshal(raw)
+		if err == nil {
+			_ = json.Unmarshal(data, &q.Images)
+		}
+	}
 	return q
 }
 
@@ -165,6 +175,11 @@ func optionsFromQuestionData(qData map[string]any) []Option {
 		}
 		if v, ok := om["description"].(string); ok {
 			opt.Description = v
+		}
+		if raw, ok := om["images"]; ok {
+			if data, err := json.Marshal(raw); err == nil {
+				_ = json.Unmarshal(data, &opt.Images)
+			}
 		}
 		out = append(out, opt)
 	}

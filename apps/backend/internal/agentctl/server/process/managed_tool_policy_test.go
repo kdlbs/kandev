@@ -59,3 +59,21 @@ func TestManagedToolPolicyAdapter(t *testing.T) {
 	require.Equal(t, "native_tool_denied", entries[0].ContextMap()["reason"])
 	require.Equal(t, "terminal.exec", entries[0].ContextMap()["tool_name"])
 }
+
+func TestAdapterMCPServersPreservesAttachmentEvidence(t *testing.T) {
+	origin := types.McpServerOrigin{Scope: "task", WorkspaceID: "workspace-1", OwnerID: "task-1"}
+	m := &Manager{cfg: &config.InstanceConfig{
+		McpServers: []config.McpServerConfig{{
+			Name: "docs", Type: "http", URL: "https://mcp.example.test",
+			DefinitionID: "definition-1", DefinitionRevision: 7,
+			Origins: []types.McpServerOrigin{origin},
+		}},
+	}}
+
+	servers, err := m.adapterMCPServers()
+	require.NoError(t, err)
+	require.Len(t, servers, 1)
+	require.Equal(t, "definition-1", servers[0].DefinitionID)
+	require.EqualValues(t, 7, servers[0].DefinitionRevision)
+	require.Equal(t, []types.McpServerOrigin{origin}, servers[0].Origins)
+}

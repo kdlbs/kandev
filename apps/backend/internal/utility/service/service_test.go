@@ -46,7 +46,7 @@ func TestMigrateLegacyBindingsUpdatesOnlyUnambiguousRows(t *testing.T) {
 
 func TestPreparePromptRequestUsesFreshUtilityRouteForTaskBoundCall(t *testing.T) {
 	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
-		"utility": {ID: "utility", AgentProfileID: "dynamic", ProfileBindingState: models.ProfileBindingExplicit, Prompt: "summarize"},
+		"utility": {ID: "utility", Enabled: true, AgentProfileID: "dynamic", ProfileBindingState: models.ProfileBindingExplicit, Prompt: "summarize"},
 	}}
 	resolver := &recordingExecutionDetailsResolver{}
 	svc := NewService(repo)
@@ -377,6 +377,7 @@ func TestPreparePromptRequest_UsesDefaultAgentWhenAgentIDIsUnset(t *testing.T) {
 	svc := NewService(&fakeRepository{agents: map[string]*models.UtilityAgent{
 		"custom": {
 			ID:      "custom",
+			Enabled: true,
 			Prompt:  "Do {{UserPrompt}}",
 			AgentID: "",
 			Model:   "custom-model",
@@ -411,6 +412,7 @@ func TestPreparePromptRequest_PreservesConfiguredAgentAndModelWithoutDefaults(t 
 	svc := NewService(&fakeRepository{agents: map[string]*models.UtilityAgent{
 		"custom": {
 			ID:      "custom",
+			Enabled: true,
 			Prompt:  "Do {{UserPrompt}}",
 			AgentID: "custom-acp",
 			Model:   "custom-model",
@@ -442,6 +444,7 @@ func TestPreparePromptRequest_IgnoresDefaultsWhenAgentAndModelAreConfigured(t *t
 	svc := NewService(&fakeRepository{agents: map[string]*models.UtilityAgent{
 		"custom": {
 			ID:      "custom",
+			Enabled: true,
 			Prompt:  "Do {{UserPrompt}}",
 			AgentID: "custom-acp",
 			Model:   "custom-model",

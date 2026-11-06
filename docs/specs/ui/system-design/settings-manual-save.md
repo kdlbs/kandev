@@ -22,7 +22,7 @@ reconciliation remain outside it.
 
 | Requirement | Design sections |
 | --- | --- |
-| REQ-UI-SETTINGS-MANUAL-SAVE-001 | Contributor registration; Submission and reconciliation; Reset and recovery; Desktop and phone |
+| REQ-UI-SETTINGS-MANUAL-SAVE-001 | Contributor registration; Submission and reconciliation; Workflow store projections; Reset and recovery; Desktop and phone |
 
 The terminal-font repair uses existing AC-UI-SETTINGS-MANUAL-SAVE-001.1,
 .2, and .4. It adds no product requirement.
@@ -82,6 +82,19 @@ editor state; guarding only the accepted family misses pre-blur raw edits.
 The second explicit Save submits the newer raw value and becomes clean only when
 that submission is still current. A blank unchanged snapshot may canonicalize to
 its retained family after successful Save; it never erases that family.
+
+## Workflow store projections
+
+The workflow settings contributor reconciles its clean drafts and baselines with
+the shared workflow store, and its Save sends name, description, prompt and
+default profile together. Every route that hydrates that store from a workflow
+list therefore writes the full editable projection through the shared
+`mapWorkflowItem` in `lib/routing/route-bootstrap.ts`, and the Go boot payload's
+`mapWorkflowItemState` (`backendapp/boot_state_routes.go`) emits the same
+fields for the first render. A projection
+that omits a field would read as a cleared server value after in-app navigation,
+and the next unrelated step Save would persist it (AC-UI-SETTINGS-MANUAL-SAVE-001.9).
+The list API omits an empty prompt, so the projection maps an absent prompt to "".
 
 ## Reset and recovery
 
@@ -193,6 +206,7 @@ rendered action, store, and PATCH payloads; no new telemetry is needed.
 - [Original rollout](../../../plans/settings-manual-save/plan.md)
 - [Save-surface refinement](../../../plans/settings-save-action-redesign/plan.md)
 - [Custom-font draft repair](../../../plans/preserve-custom-terminal-font/plan.md)
+- [Workflow prompt hydration repair](../../../plans/workflow-store-prompt-hydration/plan.md)
 
 This design fills the missing vertical design paired with the existing active
 requirement. Its terminal-editor refinement was reviewed, implemented, and locally validated.

@@ -121,7 +121,7 @@ func (m *retentionOrchestrator) LaunchSession(ctx context.Context, req *orchestr
 	return m.captureOrchestrator.LaunchSession(ctx, req)
 }
 
-func TestQuickChatFailureRetention_PostAllocationFailure_RetainsIdentityAndReturns500WithIDs(t *testing.T) {
+func TestQuickChatFailureRetention_AcceptedThenAsyncFailure_RetainsIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	log := newTestLogger(t)
 	repo := &quickChatRetentionRepo{
@@ -136,6 +136,7 @@ func TestQuickChatFailureRetention_PostAllocationFailure_RetainsIdentityAndRetur
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
 
+	startFinished := make(chan struct{})
 	orch := &retentionOrchestrator{
 		launchFn: func(_ context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
 			session := &models.TaskSession{
@@ -143,11 +144,16 @@ func TestQuickChatFailureRetention_PostAllocationFailure_RetainsIdentityAndRetur
 				TaskID:         req.TaskID,
 				AgentProfileID: req.AgentProfileID,
 				IsPrimary:      true,
-				State:          models.TaskSessionStateFailed,
+				State:          models.TaskSessionStateCreated,
 				StartedAt:      time.Now().UTC(),
 			}
 			repo.sessionsByTask[req.TaskID] = []*models.TaskSession{session}
 			repo.primaryByTask[req.TaskID] = session
+			if req.Intent == orchestrator.IntentPrepare {
+				return &orchestrator.LaunchSessionResponse{SessionID: session.ID}, nil
+			}
+			session.State = models.TaskSessionStateFailed
+			close(startFinished)
 			return nil, errors.New("agent bootstrap failed")
 		},
 	}
@@ -162,11 +168,15 @@ func TestQuickChatFailureRetention_PostAllocationFailure_RetainsIdentityAndRetur
 	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
 
 	h.httpStartQuickChat(c)
+	select {
+	case <-startFinished:
+	case <-time.After(time.Second):
+		t.Fatal("deferred Quick Chat failure did not complete")
+	}
 
-	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	require.Equal(t, http.StatusOK, rec.Code)
 	var resp map[string]interface{}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.Equal(t, "failed to start session", resp["error"])
 	assert.NotEmpty(t, resp["task_id"])
 	assert.Equal(t, "sess-retained-1", resp["session_id"])
 	assert.Empty(t, repo.deletedTaskID, "ephemeral task should not be deleted on post-allocation failure")

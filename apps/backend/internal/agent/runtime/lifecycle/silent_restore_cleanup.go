@@ -3,7 +3,6 @@ package lifecycle
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -18,27 +17,15 @@ func (m *Manager) CleanupFailedRestoreIfCurrent(
 	if sessionID == "" || executionID == "" || updatedAt.IsZero() || checkpoint == nil {
 		return errors.New("failed restore cleanup requires exact identity and a checkpoint")
 	}
-	var ownsCleanup atomic.Bool
 	cleanup := func(sharedCtx context.Context) (interface{}, error) {
-		ownsCleanup.Store(true)
 		sharedCtx, cancel := context.WithCancel(sharedCtx)
 		defer cancel()
 		stop := context.AfterFunc(ctx, cancel)
 		defer stop()
 		return nil, m.cleanupOwnedFailedRestore(sharedCtx, sessionID, executionID, updatedAt, checkpoint)
 	}
-	// A workspace operation can own the shared slot. Its result does not prove
-	// that this cleanup ran, so retry admission after that operation completes.
-	for attempt := 0; attempt < 3; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		_, err := m.doCoalescedExecution(ctx, sessionID, cleanup)
-		if ownsCleanup.Load() {
-			return err
-		}
-	}
-	return errors.New("failed restore cleanup could not acquire runtime ownership")
+	_, err := m.doSerializedExecution(ctx, sessionID, cleanup)
+	return err
 }
 
 func (m *Manager) cleanupOwnedFailedRestore(

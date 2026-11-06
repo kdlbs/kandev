@@ -31,6 +31,7 @@ This system owns:
   records and their compare-and-set write discipline.
 - The idempotent-create and start-reporting response contract for this one
   action.
+- The authorized completion report and source-task wake for a delivery task.
 
 ## Exclusions
 
@@ -46,8 +47,8 @@ This system owns:
 - An MCP tool for this capability is permanently excluded — see
   [Command and route surface](requirements/command-and-route-surface.md).
 - A UI surface for the handoff, a settings toggle for the runtime capability,
-  and a deadline or reverse-direction link for an open handoff are all out of
-  scope; see the exclusions recorded in each requirement document.
+  and a deadline for an open handoff are out of scope; see the exclusions
+  recorded in each requirement document.
 
 ## Specification map
 
@@ -61,11 +62,13 @@ This system owns:
 - [Idempotent creation and settlement](requirements/idempotent-creation.md)
 - [Reverse-link integrity](requirements/reverse-link-integrity.md)
 - [Start semantics and the response contract](requirements/start-semantics.md)
+- [Completion report and source-task wake](requirements/completion-notification.md)
 
 ### System design
 
 - [Handoff mechanism](system-design/handoff-mechanism.md)
 - [Failure modes and verification](system-design/failure-modes-and-verification.md)
+- [Completion notification](system-design/completion-notification.md)
 
 ## History
 

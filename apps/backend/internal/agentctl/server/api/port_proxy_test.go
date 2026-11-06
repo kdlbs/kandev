@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -8,7 +9,53 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/common/httpmw"
 )
+
+func TestPortProxy_ConsumesControlCredentialBeforeApplication(t *testing.T) {
+	app := gin.New()
+	app.Use(httpmw.InterimSettingsInterlock("test-spa-interlock"))
+	app.PUT("/selection", func(c *gin.Context) {
+		if c.GetHeader("Authorization") != "" {
+			t.Error("control authorization reached application")
+		}
+		c.Status(http.StatusNoContent)
+	})
+	upstream := httptest.NewServer(app)
+	t.Cleanup(upstream.Close)
+	for _, dynamic := range []bool{false, true} {
+		name := "static"
+		if dynamic {
+			name = "rotating"
+		}
+		t.Run(name, func(t *testing.T) {
+			srv := newTestServer(t)
+			if dynamic {
+				srv.SetCredentialSource(newCredentialState("test-control-credential"))
+			}
+			router := gin.New()
+			router.Use(srv.instanceAuth("test-control-credential"))
+			router.PUT("/api/v1/port-proxy/:port/*path", srv.handlePortProxy)
+			req := httptest.NewRequest(http.MethodPut,
+				"/api/v1/port-proxy/"+strconv.Itoa(portOf(t, upstream.URL))+"/selection", nil)
+			req.Header.Set("Authorization", "Bearer test-control-credential")
+			req.Header.Set(httpmw.InterimSettingsInterlockHeader, "test-spa-interlock")
+			ctx, cancel := context.WithCancel(req.Context())
+			defer cancel()
+			req = req.WithContext(ctx)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, req)
+			if response.Code != http.StatusNoContent {
+				t.Fatalf("forwarded selection status = %d, want 204: %s", response.Code, response.Body.String())
+			}
+			if req.Header.Get("Authorization") == "" {
+				t.Error("original authenticated request was mutated")
+			}
+		})
+	}
+}
 
 // startCapturingHTMLServer starts an httptest server that captures the
 // Accept-Encoding header it receives and replies with HTML plus a couple

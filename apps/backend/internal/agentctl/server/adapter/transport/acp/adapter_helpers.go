@@ -22,6 +22,9 @@ import (
 func clientCapabilitiesForAgent(agentID string, gateway bool) acp.ClientCapabilities {
 	caps := acp.ClientCapabilities{
 		Meta: acpcompat.ClientCapabilityMeta(agentID, map[string]any{"terminal_output": true}),
+		Session: &acp.ClientSessionCapabilities{
+			Compaction: &acp.CompactionCapabilities{},
+		},
 	}
 	if gateway {
 		caps.Auth = acp.AuthCapabilities{Meta: acpprovider.ClientAuthMeta()}

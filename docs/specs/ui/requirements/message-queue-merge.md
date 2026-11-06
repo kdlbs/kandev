@@ -20,7 +20,7 @@ When a session is busy, users queue follow-up prompts that drain one-per-turn. A
 #### Acceptance criteria
 
 - **AC-UI-MESSAGE-QUEUE-MERGE-001.1:** A queued message that has another queued message above it (i.e. it is not the head of the queue) offers a **Merge with above** control in the queue panel, next to the existing Edit and Remove controls.
-- **AC-UI-MESSAGE-QUEUE-MERGE-001.2:** Clicking **Merge with above** folds the message into the message directly above it: the above message keeps its identity (id, position, sender, queued-at time) and its content is concatenated with the folded message's content, separated by a blank line.
+- **AC-UI-MESSAGE-QUEUE-MERGE-001.2:** Clicking **Merge with above** folds the message into the message directly above it. The surviving message keeps its ID, position, and sender. Its queued time becomes the later of the two queued times. Its content combines both bodies, separated by a blank line.
 - **AC-UI-MESSAGE-QUEUE-MERGE-001.3:** The folded message is removed from the queue; the queue count decreases by one and remaining entries keep their FIFO order.
 - **AC-UI-MESSAGE-QUEUE-MERGE-001.4:** Attachments from both messages are carried over to the merged message.
 - **AC-UI-MESSAGE-QUEUE-MERGE-001.5:** Entity references from both messages are carried over to the merged message, deduplicated by canonical reference.
@@ -53,9 +53,9 @@ above it — before the agent picks them up.
   head of the queue) offers a **Merge with above** control in the queue panel,
   next to the existing Edit and Remove controls.
 - Clicking **Merge with above** folds the message into the message directly
-  above it: the above message keeps its identity (id, position, sender,
-  queued-at time) and its content is concatenated with the folded message's
-  content, separated by a blank line.
+  above it. The surviving message keeps its ID, position, and sender.
+  Its queued time becomes the later of the two queued times. Its content
+  combines both bodies, separated by a blank line.
 - The folded message is removed from the queue; the queue count decreases by
   one and remaining entries keep their FIFO order.
 - Attachments from both messages are carried over to the merged message.
@@ -127,9 +127,10 @@ queue view, exactly like the other queue mutations.
 
 No schema change. The merge reuses the existing `queued_messages` table:
 
-- The above entry's `content`, `attachments_json`, and `metadata_json` are
-  rewritten in place (identity, `position`, `queued_by`, `queued_at`, `model`,
+- The above entry's `content`, `attachments_json`, `metadata_json`, and
+  `queued_at` are rewritten in place (identity, `position`, `queued_by`, `model`,
   `plan_mode`, `task_id` unchanged).
+- `queued_at` becomes the maximum of the target and source values.
 - The folded entry's row is deleted (same rule as `DeleteByID`: rows with
   `queued_by` in the reserved set are never deleted by this operation).
 - Positions are not renumbered; gaps are allowed and ordering stays correct

@@ -39,6 +39,8 @@ async function navigateIntoDeepDirectory(picker: Locator): Promise<void> {
   for (const segment of DEEP_SEGMENTS) {
     await picker.getByRole("button", { name: segment, exact: true }).tap();
   }
+  const leaf = DEEP_SEGMENTS[DEEP_SEGMENTS.length - 1];
+  await expect(picker.getByRole("button", { name: leaf, exact: true })).toBeDisabled();
 }
 
 // @covers AC-WORKSPACES-HIDDEN-FOLDERS-001.10, AC-WORKSPACES-HIDDEN-FOLDERS-001.3

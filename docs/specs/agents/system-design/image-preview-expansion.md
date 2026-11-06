@@ -52,9 +52,11 @@ can shrink to half the available viewport and display a smaller image than
 the thumbnail. Keep the desktop and `sm:` maximum-width overrides.
 
 The transcript owns scrolling before and after inspection. During inspection,
-the modal locks background scrolling. Fit the image rather than adding a second
-image scroll region. Check narrow, tall, and tiny images. Keep the close control
-inside the viewport and clear of safe-area edges.
+the modal locks background scrolling and initially fits the image. The proposed
+[shared image inspection design](shared-image-inspection.md) extends this with
+an opt-in bounded image scroll region for actual-size inspection. Check narrow,
+tall, and tiny images. Keep the close control inside the viewport and clear of
+safe-area edges.
 
 The shared trigger has a 48px minimum on phones and coarse pointers.
 `ImagePreviewDialog` supplies its own translated `DialogClose` button with a

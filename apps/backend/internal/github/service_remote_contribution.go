@@ -20,7 +20,15 @@ var ErrInvalidRemoteContributionURL = errors.New("invalid GitHub pull request UR
 func (s *Service) ResolveRemoteContributionForWorkspace(
 	ctx context.Context, workspaceID, userID, rawURL string,
 ) (*taskmodels.RemoteContributionResolution, error) {
-	owner, repo, number, err := parseGitHubContributionURL(rawURL)
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
+	}
+	host, err := s.selectedGitHubHost(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	ctx = withExpectedGitHubHost(ctx, host.String())
+	owner, repo, number, err := parseGitHubContributionURLForHost(rawURL, host)
 	if err != nil {
 		return nil, err
 	}
@@ -73,11 +81,15 @@ func buildGitHubRemoteContribution(rawURL, owner, repo string, number int, pr *P
 	if err != nil {
 		return nil, err
 	}
-	canonicalURL := fmt.Sprintf("https://github.com/%s/%s/pull/%d", owner, repo, number)
+	host, err := providerGitHubURLHost(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	canonicalURL := fmt.Sprintf("%s/%s/%s/pull/%d", host.WebURL(), owner, repo, number)
 	sourceRepository := taskmodels.RemoteContributionRepository{
-		Host:       "github.com",
+		Host:       host.String(),
 		Path:       sourceOwner + "/" + sourceName,
-		RemoteURL:  fmt.Sprintf("https://github.com/%s/%s.git", sourceOwner, sourceName),
+		RemoteURL:  fmt.Sprintf("%s/%s/%s.git", host.WebURL(), sourceOwner, sourceName),
 		ProviderID: githubHeadProviderID(pr),
 	}
 	binding := taskmodels.RemoteContribution{
@@ -99,10 +111,10 @@ func buildGitHubRemoteContribution(rawURL, owner, repo string, number int, pr *P
 	return &taskmodels.RemoteContributionResolution{
 		Binding:             binding,
 		TargetProvider:      taskmodels.RemoteContributionProviderGitHub,
-		TargetHost:          "https://github.com",
+		TargetHost:          host.WebURL(),
 		TargetPath:          owner + "/" + repo,
 		TargetProviderID:    positiveID(pr.BaseRepoID),
-		TargetRemoteURL:     fmt.Sprintf("https://github.com/%s/%s.git", owner, repo),
+		TargetRemoteURL:     fmt.Sprintf("%s/%s/%s.git", host.WebURL(), owner, repo),
 		TargetDefaultBranch: pr.BaseDefaultBranch,
 	}, nil
 }

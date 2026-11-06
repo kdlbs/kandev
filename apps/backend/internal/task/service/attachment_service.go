@@ -419,6 +419,15 @@ func (s *AttachmentService) Delete(ctx context.Context, ownerID, id string) erro
 	return s.repo.DeleteMessageAttachment(ctx, id, ownerID)
 }
 
+// withClaimAdmission serializes a task-insert attachment claim with staged-row
+// deletion and expiry, the same fence Claim and Delete use. Callers must not
+// hold it across event publication or other external work.
+func (s *AttachmentService) withClaimAdmission(fn func() error) error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return fn()
+}
+
 func (s *AttachmentService) Claim(ctx context.Context, ownerID, workspaceID, taskID, sessionID string, ids []string) error {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()

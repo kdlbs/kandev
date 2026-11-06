@@ -11,6 +11,9 @@ import {
   waitForRouteActionRequired,
 } from "../../helpers/dynamic-unclassified-fallback";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
+import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
+
+test.use({ trace: "retain-on-failure" });
 
 test.describe("dynamic unclassified fallback", () => {
   test("uses repeated safe failures and keeps unsafe cases on manual recovery", async ({
@@ -18,8 +21,9 @@ test.describe("dynamic unclassified fallback", () => {
     apiClient,
     seedData,
     backend,
-  }) => {
+  }, testInfo) => {
     test.setTimeout(360_000);
+    const { frames } = attachGatewayTrafficCapture(testPage);
     const releaseFeature = await backend.useEnv({
       KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING: "true",
     });
@@ -193,6 +197,12 @@ test.describe("dynamic unclassified fallback", () => {
         prompt: "/e2e:dynamic-unclassified:tool:3",
         enabled: true,
       });
+    } catch (error) {
+      await testInfo.attach("dynamic-fallback-gateway", {
+        body: JSON.stringify(frames, null, 2),
+        contentType: "application/json",
+      });
+      throw error;
     } finally {
       try {
         try {
@@ -211,4 +221,10 @@ test.describe("dynamic unclassified fallback", () => {
       }
     }
   });
+});
+
+test.afterEach(async ({ backend }, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus) {
+    await testInfo.attach("backend-log", { path: backend.logPath, contentType: "text/plain" });
+  }
 });

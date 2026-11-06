@@ -620,6 +620,85 @@ describe("useSessionResumption", () => {
     }
   });
 
+  it("does not prioritize a restart focus for a suspendable session when the preference is on", async () => {
+    mockPreventAutoStart = true;
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const status = Promise.withResolvers<unknown>();
+    mockSessionItems[SESSION_ID] = {
+      state: "WAITING_FOR_INPUT",
+      session_recovery_blocks: [{ consumer_reference: "agent_delivery" }],
+    };
+    mockRequest.mockImplementation((action: string) =>
+      action === STATUS_ACTION ? status.promise : Promise.resolve({ success: true }),
+    );
+    try {
+      renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+      await waitFor(() =>
+        expect(mockRequest).toHaveBeenCalledWith(
+          STATUS_ACTION,
+          expect.anything(),
+          expect.any(Number),
+        ),
+      );
+      expect(mockRequest.mock.calls.some(([action]) => action === LAUNCH_ACTION)).toBe(false);
+
+      await act(async () =>
+        status.resolve({
+          session_id: SESSION_ID,
+          task_id: TASK_ID,
+          state: "WAITING_FOR_INPUT",
+          is_agent_running: false,
+          is_resumable: true,
+          needs_resume: true,
+          is_idle_suspended: true,
+          auto_resume_allowed: true,
+          resume_reason: "idle_suspension",
+          updated_at: STARTED_AT,
+        }),
+      );
+      await waitFor(() => expect(mockSetResumeSkipped).toHaveBeenCalledWith(SESSION_ID, true));
+      expect(mockRequest.mock.calls.some(([action]) => action === LAUNCH_ACTION)).toBe(false);
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it("sends one focus resume for a live settled session after skipping restart priority", async () => {
+    mockPreventAutoStart = true;
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    mockSessionItems[SESSION_ID] = {
+      state: "WAITING_FOR_INPUT",
+      session_recovery_blocks: [{ consumer_reference: "agent_delivery" }],
+    };
+    mockRequest.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: true,
+      is_resumable: false,
+      needs_resume: false,
+      is_idle_suspended: false,
+      updated_at: LATER_AT,
+    });
+    try {
+      renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+      await waitFor(() =>
+        expect(mockRequest).toHaveBeenCalledWith(
+          LAUNCH_ACTION,
+          expect.objectContaining({
+            activation_source: "session_focus",
+            intent: "resume",
+            session_id: SESSION_ID,
+          }),
+          expect.any(Number),
+        ),
+      );
+      expect(mockRequest.mock.calls.filter(([action]) => action === LAUNCH_ACTION)).toHaveLength(1);
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
   it("does not mint client timestamps when status has no updated_at", async () => {
     mockRequest.mockResolvedValueOnce({
       session_id: SESSION_ID,
@@ -1362,7 +1441,7 @@ describe("idle-suspended session focus recovery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockConnectionStatus = "connected";
-    mockPreventAutoStart = true;
+    mockPreventAutoStart = false;
     mockSessionItems = {
       s1: {
         started_at: STARTED_AT,
@@ -1430,45 +1509,134 @@ describe("idle-suspended session focus recovery", () => {
     expect(mockRequest.mock.calls.some(([action]) => action === LAUNCH_ACTION)).toBe(false);
   });
 
-  it("resumes the selected session without a prompt despite the preference", async () => {
-    mockRequest
-      .mockResolvedValueOnce({
-        session_id: SESSION_ID,
-        task_id: TASK_ID,
-        state: "WAITING_FOR_INPUT",
-        is_agent_running: false,
-        is_resumable: true,
-        needs_resume: true,
-        is_idle_suspended: true,
-        auto_resume_allowed: true,
-        resume_reason: "idle_suspension",
-        updated_at: STARTED_AT,
-      })
-      .mockResolvedValueOnce({
-        success: true,
-        task_id: TASK_ID,
-        session_id: SESSION_ID,
-        state: "STARTING",
-      })
-      .mockResolvedValueOnce({
-        session_id: SESSION_ID,
-        task_id: TASK_ID,
-        state: "RUNNING",
-        is_agent_running: true,
-        is_resumable: false,
-        needs_resume: false,
-      });
+  it("keeps an idle-suspended session stopped when the preference is on", async () => {
+    mockPreventAutoStart = true;
+    mockRequest.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: false,
+      is_resumable: true,
+      needs_resume: true,
+      is_idle_suspended: true,
+      auto_resume_allowed: true,
+      resume_reason: "idle_suspension",
+      updated_at: STARTED_AT,
+    });
 
     renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
 
     await waitFor(() => {
-      expect(mockRequest).toHaveBeenCalledWith(
-        LAUNCH_ACTION,
-        expect.objectContaining({ intent: "resume", activation_source: "session_focus" }),
-        expect.any(Number),
-      );
+      expect(mockSetResumeSkipped).toHaveBeenCalledWith(SESSION_ID, true);
     });
-    expect(mockSetResumeSkipped).not.toHaveBeenCalledWith(SESSION_ID, true);
+    expect(mockRequest.mock.calls.some(([action]) => action === LAUNCH_ACTION)).toBe(false);
+  });
+
+  it("does not resume an idle-suspended session on window focus when the preference is on", async () => {
+    mockPreventAutoStart = true;
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    let statusRequestCount = 0;
+    const settledStatus = {
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "COMPLETED",
+      is_agent_running: false,
+      is_resumable: false,
+      needs_resume: false,
+      updated_at: STARTED_AT,
+    };
+    const suspendedStatus = {
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: false,
+      is_resumable: true,
+      needs_resume: true,
+      is_idle_suspended: true,
+      auto_resume_allowed: true,
+      resume_reason: "idle_suspension",
+      updated_at: LATER_AT,
+    };
+    mockRequest.mockImplementation((action: string) => {
+      if (action === STATUS_ACTION) {
+        statusRequestCount += 1;
+        return Promise.resolve(statusRequestCount === 1 ? settledStatus : suspendedStatus);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    try {
+      renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+      await waitFor(() => expect(statusRequestCount).toBe(1));
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      await waitFor(() => expect(statusRequestCount).toBe(2));
+      await waitFor(() => {
+        expect(mockSetResumeSkipped).toHaveBeenCalledWith(SESSION_ID, true);
+      });
+      expect(mockRequest.mock.calls.some(([action]) => action === LAUNCH_ACTION)).toBe(false);
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it("resumes an idle-suspended session on window focus when the preference is off", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    let statusRequestCount = 0;
+    const settledStatus = {
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "COMPLETED",
+      is_agent_running: false,
+      is_resumable: false,
+      needs_resume: false,
+      updated_at: STARTED_AT,
+    };
+    const suspendedStatus = {
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: false,
+      is_resumable: true,
+      needs_resume: true,
+      is_idle_suspended: true,
+      auto_resume_allowed: true,
+      resume_reason: "idle_suspension",
+      updated_at: LATER_AT,
+    };
+    mockRequest.mockImplementation((action: string) => {
+      if (action === STATUS_ACTION) {
+        statusRequestCount += 1;
+        return Promise.resolve(statusRequestCount === 1 ? settledStatus : suspendedStatus);
+      }
+      if (action === LAUNCH_ACTION) {
+        return Promise.resolve({
+          success: true,
+          task_id: TASK_ID,
+          session_id: SESSION_ID,
+          state: "STARTING",
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    try {
+      renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+      await waitFor(() => expect(statusRequestCount).toBe(1));
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      await waitFor(() => {
+        expect(mockRequest).toHaveBeenCalledWith(
+          LAUNCH_ACTION,
+          expect.objectContaining({ intent: "resume", activation_source: "session_focus" }),
+          expect.any(Number),
+        );
+      });
+    } finally {
+      visibility.mockRestore();
+    }
   });
 
   it("joins an in-flight startup recovery when the selected session receives focus", async () => {

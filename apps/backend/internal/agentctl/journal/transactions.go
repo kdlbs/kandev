@@ -15,5 +15,5 @@ func (j *Journal) updateLocked(fn func(*bolt.Tx) error) error {
 	if j.db == nil {
 		return bolt.ErrDatabaseNotOpen
 	}
-	return j.db.Update(fn)
+	return classifyStorageCommitError(j.db.Update(fn))
 }

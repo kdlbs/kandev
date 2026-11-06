@@ -7,6 +7,7 @@ requirements:
   - REQ-PLATFORM-STARTUP-PROGRESS-003
   - REQ-PLATFORM-STARTUP-PROGRESS-004
   - REQ-PLATFORM-STARTUP-PROGRESS-005
+  - REQ-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001
 ---
 
 # Startup progress visibility design
@@ -55,6 +56,7 @@ switch ([startup lifecycle](startup-lifecycle.md)), the required-store catalog i
 | `REQ-PLATFORM-STARTUP-PROGRESS-003` | [Surfaces](#surfaces), [Naming and localization](#naming-and-localization) |
 | `REQ-PLATFORM-STARTUP-PROGRESS-004` | [Stall detection](#stall-detection) |
 | `REQ-PLATFORM-STARTUP-PROGRESS-005` | [Step registry](#step-registry) |
+| `REQ-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001` | [Measuring each step](#measuring-each-step), session recovery |
 
 ## Components and responsibilities
 
@@ -242,7 +244,7 @@ reporter's only seeding entry point. An `opaque` step declares none of the three
 | `task.prompt_seq.backfill` | `applying_migrations` | `opaque` | rows | both | n/a | n/a | n/a |
 | `task.message_timestamps.backfill` | `applying_migrations` | `opaque` | rows | both | n/a | n/a | n/a |
 | `task.subagent_context.backfill` | `applying_migrations` | `opaque` | rows | both | n/a | n/a | n/a |
-| `sessions.recovery` | `recovering_sessions` | `counted` | sessions | both | the `executors_running` record set read before the sweep | n/a | n/a |
+| `sessions.recovery` | `recovering_sessions` | `counted` | sessions | both | the filtered recovery candidate set after confirmed passthrough exclusions | n/a | n/a |
 
 Three identifiers were retired on 2026-09-18, after this design first froze, and
 AC-PLATFORM-STARTUP-PROGRESS-005.6 bars their reuse: `task.journal.turns.backfill`,
@@ -323,30 +325,22 @@ Completeness tests give the registry teeth:
   (`base_migrations.go:208`), and `migrateSubagentContextBackfill` is a single
   `INSERT … SELECT`. None has a loop to advance from, and inventing one would
   change the work being measured.
-- **Session recovery** (`recovering_sessions`): `counted` in sessions. The total is
-  the record set actually handed to the fan-out, after `recoverableRecords`
-  (`manager_lifecycle.go:96`) drops confirmed-passthrough sessions - not the raw
-  inventory read, because a passthrough record is never a re-tracking candidate and
-  counting it would put the total permanently out of reach. The sweep advances by
-  one per instance the consumer loop (`manager_lifecycle.go:122`) finishes
-  reconstructing, which is the only per-record point at which
-  AC-PLATFORM-STARTUP-PROGRESS-001.21's rule is met. It cannot advance inside the
-  fan-out: `RecoverInstances` (`executor_registry.go:138`) returns only the
-  instances a backend revived, so no backend can report that it examined and
-  declined a record, and six backends share that signature. Nor is `RecoverAll`'s
-  return (`:114`) such a point: it yields partial results beside an error, and
-  reconstruction, deadline expiry and refusal all happen after it. A record no
-  backend revived, or one the loop declines, is therefore never counted, so this
-  step too can end below its total, which AC-PLATFORM-STARTUP-PROGRESS-001.22 makes
-  audible. It declares no order because it advances in no query's order (`RecoverAll`
-  iterates a Go map, `executor_registry.go:137`). A failed inventory read leaves the
-  set unknown rather than empty (`manager_lifecycle.go:70`) and skips recovery
-  outright, so the step calls `Degrade` once and ends `opaque`: reporting an unknown
-  inventory as a measured zero is the dishonest count
-  AC-PLATFORM-STARTUP-PROGRESS-001.11 exists to prevent. A read that succeeds and
-  finds nothing is the other case: the total is honestly zero, and
-  AC-PLATFORM-STARTUP-PROGRESS-001.17 ends the step without ever reporting
-  `counted`. Nothing is counted while a record is merely selected.
+- **Session recovery** (`recovering_sessions`): the total is the filtered inventory passed to recovery, after confirmed passthrough exclusions.
+  `Manager.Start` owns a per-pass completion ledger for those exact input candidates.
+  A reconstructed candidate advances only after its work finishes.
+  Successful detailed enumeration can also resolve a candidate as `no_matching_instance` without returning a reconstructed instance.
+  Definitive task, environment, agent, turn-status, or duplicate-ownership refusals complete classification only after the applicable existing guard work settles.
+  Each candidate advances once, regardless of duplicate backend results or later summary aggregation.
+  A provisional producer outcome does not advance a candidate still undergoing reconstruction.
+  Unknown omissions, failed enumeration, and unresolved cancellation or deadline outcomes remain incomplete.
+  A backend without detailed evidence cannot classify an omitted candidate as absent.
+  Do not infer completion from total minus returned instances or force the final count to equal the total.
+  Keep retracked success separate from completed classification.
+  The reporter retains its below-total warning and waits for owned stop workers before step closure.
+  A failed inventory read degrades the step to opaque.
+  A successful empty inventory follows the existing zero-total contract.
+  No query order is declared, and selection alone never advances progress.
+  This implements AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.7 through the existing reporter.
 
 Degradation is uniform: any counter source that fails calls `Degrade` once and the
 work continues. No measurement is on a failure path.

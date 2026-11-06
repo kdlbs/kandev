@@ -45,6 +45,7 @@ vi.mock("./plan-drag-handle", () => ({ PlanDragHandle: () => null }));
 vi.mock("./plan-slash-menu", () => ({ PlanSlashMenu: () => null }));
 
 import { TipTapPlanEditor } from "./tiptap-plan-editor";
+import { PlanReadOnlyMarkdown } from "./tiptap-plan-readonly";
 
 const EDITOR_SELECTOR = ".ProseMirror";
 const TABLE_MARKDOWN = ["| Left | Right |", "| --- | --- |", "| One | Two |"].join("\n");
@@ -366,4 +367,62 @@ it("toggles read-only without replacing the editor or publishing content", async
   expect(onReady).toHaveBeenCalledTimes(1);
   expect(onChange).not.toHaveBeenCalled();
   expect(getMarkdown(editor)).toContain("Left");
+});
+
+describe("Plan editor extension ownership", () => {
+  it.each(["editable", "revision"])("registers each mark once in the %s renderer", async (mode) => {
+    const view = render(
+      mode === "editable" ? (
+        <TipTapPlanEditor taskId="task-1" value="Plan content" onChange={() => undefined} />
+      ) : (
+        <PlanReadOnlyMarkdown content="Plan content" />
+      ),
+    );
+    let editor: Editor | undefined;
+    await waitFor(() => {
+      editor = (
+        view.container.querySelector(EDITOR_SELECTOR) as (HTMLElement & { editor?: Editor }) | null
+      )?.editor;
+      expect(editor).toBeDefined();
+    });
+
+    expect(
+      editor!.extensionManager.extensions
+        .filter((extension) => ["link", "underline"].includes(extension.name))
+        .map((extension) => extension.name)
+        .sort(),
+    ).toEqual(["link", "underline"]);
+  });
+
+  it("round-trips linked and underlined plan text", async () => {
+    const editor = await renderReadyEditor(() => undefined);
+    const content = "[Reference](https://example.com/plan) and <u>underlined text</u>";
+    act(() => editor.commands.setContent(content));
+    const markdown = getMarkdown(editor);
+    expect(markdown).toContain("[Reference](https://example.com/plan)");
+    expect(markdown).toContain("<u>underlined text</u>");
+    act(() => editor.commands.setContent(markdown));
+    expect(editor.view.dom.querySelector("a")?.getAttribute("href")).toBe(
+      "https://example.com/plan",
+    );
+    expect(editor.view.dom.querySelector("u")?.textContent).toBe("underlined text");
+  });
+
+  it("keeps link clicks inside the editable plan", async () => {
+    const editor = await renderReadyEditor(() => undefined);
+    act(() => editor.commands.setContent("[Plan reference](https://example.com/plan)"));
+    const anchor = editor.view.dom.querySelector("a");
+    expect(anchor).not.toBeNull();
+    const event = new MouseEvent("click", { button: 0 });
+    Object.defineProperty(event, "target", { value: anchor });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    try {
+      act(() => {
+        editor.view.someProp("handleClick", (handler) => handler(editor.view, 2, event));
+      });
+      expect(open).not.toHaveBeenCalled();
+    } finally {
+      open.mockRestore();
+    }
+  });
 });

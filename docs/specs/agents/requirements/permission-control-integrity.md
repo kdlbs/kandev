@@ -11,33 +11,16 @@ The [explicit Auggie recovery amendment](explicit-resume-settings.md) permits on
 
 ## Overview
 
-An agent profile exposes three permission controls: a permission `mode`, an
-`auto_approve` toggle, and a list of `cli_flags`. Each control currently reports
-success after Kandev has written it somewhere, not after it has reached the
-component that enforces it. A user therefore cannot tell a control that took
-effect from one that was accepted and discarded.
+An agent profile exposes a permission `mode`, an `auto_approve` toggle, and
+`cli_flags`. Kandev must distinguish a delivered control from an accepted but
+ineffective control. It must report the effective mode and its source.
 
-Three observed consequences:
+Automatic approval must preserve both unattended execution and the interactive
+path for requests that need a person. Its audit history must survive replay.
+An automatic decision in progress must not appear as a request for user input.
 
-- An enabled `cli_flag` is appended to the ACP bridge process. The bridge does
-  not forward unrecognized arguments to the agent CLI it wraps, so the flag
-  never reaches the process whose behavior the user intended to change.
-- The original report associated permission refusals with the startup mode.
-  That report did not establish that ACP cannot change enforcement. The reviewed
-  Claude bridge calls the SDK permission-mode API. The revised contract uses
-  that session API before the first prompt.
-- That switch is then written and logged as applied. Kandev neither reads the
-  mode the agent reports back nor records which of the profile mode, a persisted
-  session mode, and a workflow-step mode won, so a clamped, overridden, or
-  ineffective mode is indistinguishable from an applied one.
-- With `auto_approve` enabled, Kandev selects an offered option by position when
-  no option declares an allow kind, and returns a cancellation when the provider
-  offers no option at all. Both outcomes reach the agent as a denial, produce no
-  permission request, and are reported to the user as auto-approval.
-
-The user-visible effect is that an agent session cannot be configured to run
-state-changing Git commands unattended, which blocks multi-repository work where
-each repository gets its own task and its own pull request.
+Agents owns this contract because it owns permission policy and provider
+request semantics. Task storage, desktop chat, and phone chat consume it.
 
 ## Requirements
 
@@ -90,11 +73,6 @@ as an allow. It must never turn into a denial or a cancellation without the user
 seeing a prompt, and it must never remove the interactive path that exists when
 the control is disabled.
 
-Measured today: enabling the control produces no prompt and an immediate
-refusal, while the same workspace with the control disabled holds the call
-pending until a person answers it. A control named for automation currently
-removes the only path that works.
-
 #### Acceptance criteria
 
 - **AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-003.1:** With `auto_approve` enabled, Kandev selects only an option whose kind is `allow_once` or `allow_always`.
@@ -108,6 +86,12 @@ removes the only path that works.
 - **AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-003.9:** Whether a permission request reached Kandev, which option Kandev selected, and whether Kandev answered with a cancellation are each determinable from recorded evidence, without reproducing the session.
 - **AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-003.10:** **GIVEN** `auto_approve` is enabled and a request Kandev cannot approve, **WHEN** the session runs unattended, **THEN** the request is visible as pending rather than resolved, and answering it lets the call proceed.
 - **AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-003.11:** After reload or session replay, each automatic approval still identifies its selected option ID, option kind, and automatic source in durable permission history; a dropped notification cannot silently erase this evidence.
+- **AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-003.12:** During automatic approval, Kandev shall show normal tool progress without an approval prompt, approval controls, amber permission styling, or a permission attention indicator.
+- **AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-003.13:** If automatic approval fails before dispatch and the exact current request remains answerable, Kandev shall expose that request for a person to answer.
+- **AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-003.14:** If an automatic decision has a dispatched, uncertain, or terminal outcome, Kandev shall not offer another answer for that decision. A failed or uncertain outcome shall remain visible through non-actionable failure or recovery feedback.
+- **AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-003.15:** Live delivery, reload, reconnect, and replay shall preserve the automatic or interactive presentation of each request. An older update shall not reverse a newer outcome.
+- **AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-003.16:** Presentation shall remain scoped to the exact task, session, and request. An automatic request shall not hide a current interactive request in another session. Superseded requests shall remain superseded.
+- **AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-003.17:** Desktop and phone chat shall provide the same outcomes. Automatic approval shall not move focus or insert and remove a prompt region. An interactive fallback shall remain reachable by keyboard and touch.
 
 ### REQ-AGENTS-PERMISSION-CONTROL-INTEGRITY-004: The permission contract carries no unread field
 

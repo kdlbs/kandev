@@ -15,10 +15,49 @@ import {
   waitForPreviewTaskSessionsLoaded,
 } from "./workflow-move-preview-stability-helpers";
 
-/** Observes a successful preview for the requested task and destination step. */
-function waitForPreviewResponse(page: Page, taskId: string, workflowStepId: string) {
-  const matchesRequest = movePreviewRequestPredicate(taskId, workflowStepId);
-  return page.waitForResponse((response) => matchesRequest(response.request()) && response.ok());
+async function injectCompetingPreview(
+  page: Page,
+  taskId: string,
+  stepId: string,
+  previousStepId: string,
+) {
+  let injected = false;
+  const matches = movePreviewRequestPredicate(taskId, stepId);
+  await page.route(`**/api/v1/tasks/${taskId}/move-preview`, async (route) => {
+    const request = route.request();
+    if (injected || !matches(request)) return route.continue();
+    injected = true;
+    await page.evaluate(
+      async ({ url, payload }) => {
+        const response = await fetch(url, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) throw new Error(`Competing preview failed: ${response.status}`);
+        await response.json();
+      },
+      {
+        url: request.url(),
+        payload: { ...request.postDataJSON(), workflow_step_id: previousStepId },
+      },
+    );
+    await route.continue();
+  });
+  return () => injected;
+}
+
+/** Observes a completed successful preview for the requested task and destination step. */
+async function waitForPreviewResult(page: Page, taskId: string, workflowStepId: string) {
+  const isPreviewRequest = movePreviewRequestPredicate(taskId, workflowStepId);
+  const request = await page.waitForEvent("requestfinished", {
+    predicate: async (request) =>
+      isPreviewRequest(request) && (await request.response())?.ok() === true,
+  });
+  const response = await request.response();
+  if (!response) throw new Error("Completed preview request has no response");
+  return response.json();
 }
 
 /** Reads the response body before later UI transitions can discard it. */
@@ -29,13 +68,18 @@ async function openStepPreview(
   workflowStepId: string,
 ) {
   await waitForPreviewTaskSessionsLoaded(page, taskId);
+  await expect(page.getByTestId(`workflow-step-${stepName}`)).toHaveAttribute(
+    "data-workflow-step-id",
+    workflowStepId,
+  );
   const [preview] = await Promise.all([
-    waitForPreviewResponse(page, taskId, workflowStepId).then((response) => response.json()),
+    waitForPreviewResult(page, taskId, workflowStepId),
     page.getByTestId(`workflow-step-${stepName}`).hover(),
   ]);
   const popover = page.locator('[data-testid="workflow-step-popover"]:visible');
   await expect(popover).toBeVisible();
   await expect(popover.getByTestId("workflow-move-preview")).toBeVisible({ timeout: 15_000 });
+  expect(preview).toMatchObject({ task_id: taskId, workflow_step_id: workflowStepId });
   return { popover, preview };
 }
 
@@ -237,7 +281,9 @@ test.describe("Workflow move preview", () => {
     );
     await waitForPreviewTaskSessionsLoaded(testPage, task.id, initialSessionId);
 
+    const wasInjected = await injectCompetingPreview(testPage, task.id, freshStep.id, source.id);
     const freshPreview = await openStepPreview(testPage, task.id, "Fresh C", freshStep.id);
+    expect(wasInjected()).toBe(true);
     expect(freshPreview.preview.outcome).toBe("create_new");
     expect(freshPreview.preview.recipient.session_id ?? "").toBe("");
     expect(freshPreview.preview.model.after.known).toBe(true);

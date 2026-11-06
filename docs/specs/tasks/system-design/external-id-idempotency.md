@@ -173,6 +173,8 @@ Transitions:
 External-ID ownership has no caller reclaim/lease. A CreationHandle authorizes
 only the Created owner; the mandatory Runtime alone may obtain an expired
 creation recovery lease. Found outcomes expose neither handle.
+The endpoint-specific Quick Chat retry exception is scoped in its design; it
+does not change this protocol's generic `Found` contract.
 Lookup locks the external-ID identity and any `preparing-release` operation row;
 release and lookup serialize on that key. `preparing-release` returns the same
 FoundUnsettled outcome as other unsettled states and never exposes a handle.

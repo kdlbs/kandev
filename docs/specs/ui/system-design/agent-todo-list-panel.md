@@ -3,6 +3,7 @@ status: draft
 system: ui
 requirements:
   - REQ-UI-AGENT-TODO-LIST-PANEL-001
+  - REQ-UI-AGENT-TODO-LIST-PANEL-002
 created: 2026-08-03
 updated: 2026-08-11
 owners:
@@ -19,6 +20,29 @@ This design preserves the technical source detail for `REQ-UI-AGENT-TODO-LIST-PA
 | Requirement | Design section |
 | --- | --- |
 | `REQ-UI-AGENT-TODO-LIST-PANEL-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-UI-AGENT-TODO-LIST-PANEL-002` | [Status chip disclosure](#status-chip-disclosure) |
+
+## Status chip disclosure
+
+`ChatStatusBar` supplies the active session's todo items to `TodoIndicator`.
+`useSessionTodoItems` retains the live-session and persisted-message fallback
+used by the pinned panel. `TodoIndicatorContent` remains the shared checklist,
+including its bounded internal list scroll and the panel's `fillHeight` mode.
+
+`TodoIndicator` selects the existing interactive `Popover` when compact task
+chrome is active or `useTouchDrawer` reports a coarse pointer. This local use
+of the pointer predicate does not change the hook's drawer semantics or the
+width-based workbench composition. Fine-pointer desktop retains `HoverCard`
+hover and focus behavior. The existing Popover is retained on phone and tablet
+and used for wide touch: it is a short, temporary checklist, already anchored
+to the chip, with one list scroll owner. The existing trigger has a 44px minimum
+hit area for phones and coarse pointers; the fine desktop chip remains compact.
+The overlay must stay within the viewport, support dismissal and focus return,
+and not introduce horizontal page overflow. Both surfaces share counts, status,
+order and localized copy; no new state, data transport or preference is added.
+
+The earlier panel-only exclusion of changes to the inline chip remains in force
+for panel configuration; this disclosure repair changes only its interaction.
 
 ## Migrated source detail
 

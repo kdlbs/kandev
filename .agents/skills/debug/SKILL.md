@@ -45,6 +45,13 @@ Rules:
 
 Start with the cheapest faithful reproduction:
 
+For Kandev task issues, inspect the database and session-scoped ACP logs directly
+before using conversation MCP tools. Use read-only queries. Follow the task
+evidence procedure in [references/instance.md](references/instance.md#task-database-and-acp-evidence).
+Use `get_task_conversation_kandev` only as a last resort when the database is
+inaccessible. State that limitation and distinguish persisted messages from raw
+protocol frames.
+
 1. Backend logic: write a throwaway focused Go repro test against the real service path. If it reproduces, convert it via `/fix`.
 2. Live instance in a task session: call `get_diagnostic_bundle_kandev` with `backend`, `frontend`, or `all`; inspect `manifest.json` before assuming a source is complete.
 3. Host-side instance: use `scripts/kandev-logs <port> --source backend|frontend|all`; do not relaunch. Set `KANDEV_API_TOKEN` only when authentication is enabled.
@@ -131,7 +138,7 @@ stderr draining.
 Load only the reference needed for the selected path:
 
 - `references/backend-repro.md` - targeted Go repro tests and backend-first debugging.
-- `references/instance.md` - instance discovery, isolated launch, logs/export, and teardown.
+- `references/instance.md` - task database/ACP evidence, instance discovery, isolated launch, logs/export, and teardown.
 - `references/browser.md` - workspace-pinned `playwright-cli` browser debugging against isolated instances.
 - `references/instrumentation.md` - temporary vs persistent frontend/backend logging rules.
 

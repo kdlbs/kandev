@@ -16,7 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 type pluginExecutorRecoveryProfileLoaderFake struct {
@@ -187,7 +187,7 @@ func TestPluginExecutorRestartRecovery(t *testing.T) {
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
 	runtime.SetRecoveryDependencies(loader, store)
 	setPluginRecoveredInstanceInfoFixture(t, runtime)
-	runtime.newRecoveredAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
+	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 		if executionID != "execution-plugin-recovery" || token != "agentctl-secret" {
 			t.Fatalf("recovered client identity = %q token=%q", executionID, token)
 		}
@@ -245,7 +245,7 @@ func TestPluginExecutorRecoveredClientRequiresRecordedInstancePort(t *testing.T)
 	var clientFactoryCalled bool
 	operations := &pluginExecutorOperationsFake{}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
-	runtime.newRecoveredAgentctlClient = func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, error) {
+	runtime.newAgentctlClient = func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, error) {
 		clientFactoryCalled = true
 		return nil, errors.New("unexpected client creation")
 	}
@@ -415,7 +415,7 @@ func TestPluginExecutorPostHandshakeRecoveryAttachesEveryCheckpointPhase(t *test
 			runtime := NewPluginRemoteExecutor(operations, newTestLogger())
 			runtime.SetRecoveryDependencies(loader, store)
 			setPluginRecoveredInstanceInfoFixture(t, runtime)
-			runtime.newRecoveredAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
+			runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 				if executionID != "execution-plugin-recovery" || token != "agentctl-secret" {
 					t.Fatalf("recovered client execution=%q token=%q", executionID, token)
 				}

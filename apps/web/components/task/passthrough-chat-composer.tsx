@@ -286,7 +286,7 @@ export function clearPassthroughComposerContext(panelState: ReturnType<typeof us
     panelState.handleClearPRFeedback();
   }
   if (panelState.walkthroughComments.length > 0) {
-    panelState.handleClearWalkthroughComments();
+    panelState.markCommentsSent(panelState.walkthroughComments.map((comment) => comment.id));
   }
   if (panelState.messageComments.length > 0) {
     panelState.handleClearMessageComments();

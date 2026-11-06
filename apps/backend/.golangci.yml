@@ -67,7 +67,7 @@ linters:
       # exempt from the file-length limit only. Excluding them from every
       # linter (a `paths:` entry) would silently drop correctness checks on
       # the contract's own implementation.
-      - path: pkg/pluginsdk/(host|data_types)\.go$
+      - path: (^|/)pluginsdk/(host|data_types)\.go$
         linters:
           - revive
         text: file-length-limit

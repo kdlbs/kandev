@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
 useRegularMode();
@@ -24,6 +25,7 @@ test("mobile creates in the selected workspace after leaving an open task", asyn
   const mobile = new MobileKanbanPage(testPage);
   await mobile.goto();
   await mobile.mobileMenuButton.tap();
+  await waitForFiniteAnimations(mobile.menuCard);
   await testPage.getByTestId("mobile-workspace-trigger").tap();
   await testPage.getByTestId(`mobile-workspace-item-${workspaceA.id}`).tap();
   await expect(mobile.taskCard(taskA.id)).toBeVisible({ timeout: 10_000 });
@@ -37,6 +39,7 @@ test("mobile creates in the selected workspace after leaving an open task", asyn
   await testPage.getByRole("link", { name: "Task overview" }).tap();
   await expect(mobile.mobileKanbanLayout()).toBeVisible();
   await mobile.mobileMenuButton.tap();
+  await waitForFiniteAnimations(mobile.menuCard);
   await testPage.getByTestId("mobile-workspace-trigger").tap();
   await testPage.getByTestId(`mobile-workspace-item-${seedData.workspaceId}`).tap();
 
@@ -68,6 +71,7 @@ test("mobile creates in the selected workspace after leaving an open task", asyn
   await expect(mobile.taskCard(taskA.id)).not.toBeVisible();
 
   await mobile.mobileMenuButton.tap();
+  await waitForFiniteAnimations(mobile.menuCard);
   await testPage.getByTestId("mobile-workspace-trigger").tap();
   await testPage.getByTestId(`mobile-workspace-item-${workspaceA.id}`).tap();
   await expect(mobile.taskCard(taskA.id)).toBeVisible({ timeout: 10_000 });

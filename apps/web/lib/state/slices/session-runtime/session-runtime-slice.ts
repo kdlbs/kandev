@@ -4,6 +4,10 @@ import type { SessionRuntimeSlice, SessionRuntimeSliceState, SessionPollMode } f
 import { normalizeGitStatusEntry } from "./git-status-normalizer";
 import { applyGitStatus } from "./git-status-state";
 import {
+  invalidateGitStatusInventory as invalidateInventoryState,
+  reconcileGitStatusInventory as reconcileInventoryState,
+} from "./git-status-inventory";
+import {
   beginWorkspaceRestoration,
   clearWorkspaceRestoration,
   completeWorkspaceRestoration,
@@ -11,6 +15,7 @@ import {
 } from "./workspace-restoration";
 import { buildSessionViewActions } from "./session-runtime-view-actions";
 import { buildSessionGitCheckoutActions } from "./session-runtime-git-checkout-actions";
+import { buildBackgroundWorkActions } from "./session-runtime-background-work";
 
 const maxProcessOutputBytes = 2 * 1024 * 1024;
 // Shell + terminal streams are unbounded over a session's lifetime; cap them at
@@ -54,8 +59,10 @@ function purgePerSessionRuntime(state: SessionRuntimeSliceState, sessionId: stri
   delete state.sessionPollMode.bySessionId[sessionId];
   delete state.embeddedVscodeSupport.bySessionId[sessionId];
   delete state.backgroundWork.workloadsBySessionId[sessionId];
+  delete state.backgroundWork.outputWindowsBySessionId[sessionId];
   delete state.backgroundWork.activeWorkIdBySessionId[sessionId];
   delete state.backgroundWork.loadingBySessionId[sessionId];
+  delete state.backgroundWork.readGenerationBySessionId[sessionId];
 }
 
 /** Process status + output for every process owned by the session. */
@@ -82,6 +89,7 @@ function purgeEnvScopedRuntime(state: SessionRuntimeSliceState, envKey: string) 
   delete state.gitStatusDisplay.byEnvironmentRepo[envKey];
   delete state.gitStatus.refreshByEnvironmentId?.[envKey];
   delete state.gitStatus.refreshByEnvironmentRepo?.[envKey];
+  delete state.gitStatus.inventoryByEnvironment?.[envKey];
   delete state.sessionCommits.byEnvironmentId[envKey];
   delete state.sessionCommits.loading[envKey];
   delete state.sessionCommits.refetchTrigger[envKey];
@@ -118,6 +126,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
     byEnvironmentRepo: {},
     refreshByEnvironmentId: {},
     refreshByEnvironmentRepo: {},
+    inventoryByEnvironment: {},
   },
   gitStatusDisplay: { byEnvironmentRepo: {} },
   environmentIdBySessionId: {},
@@ -142,8 +151,12 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   workspaceRestoration: { byEnvironmentId: {} },
   backgroundWork: {
     workloadsBySessionId: {},
+    outputWindowsBySessionId: {},
+    nextOutputWindowGeneration: 1,
     activeWorkIdBySessionId: {},
     loadingBySessionId: {},
+    readGenerationBySessionId: {},
+    nextReadGeneration: 1,
   },
 };
 
@@ -260,9 +273,15 @@ function buildSessionCommitActions(set: ImmerSet) {
           draft.sessionCommits.byEnvironmentId[envKey] = existing;
           return;
         }
-        // For amend: only replace HEAD (first entry) if it has the same parent
-        if (existing.length > 0 && existing[0].parent_sha === commit.parent_sha) {
-          existing[0] = commit;
+        // An amend replaces only the leading commit within its repository scope.
+        const repositoryHeadIndex = existing.findIndex(
+          (current) => (current.repository_name ?? "") === (commit.repository_name ?? ""),
+        );
+        if (
+          repositoryHeadIndex >= 0 &&
+          existing[repositoryHeadIndex].parent_sha === commit.parent_sha
+        ) {
+          existing[repositoryHeadIndex] = commit;
           draft.sessionCommits.byEnvironmentId[envKey] = existing;
         } else {
           draft.sessionCommits.byEnvironmentId[envKey] = [commit, ...existing];
@@ -345,104 +364,6 @@ function buildUserShellActions(set: ImmerSet) {
   };
 }
 
-function isTerminalRunState(s?: string) {
-  return s === "completed" || s === "failed" || s === "interrupted" || s === "ended";
-}
-
-function buildBackgroundWorkActions(set: ImmerSet) {
-  return {
-    setBackgroundWorkloads: (
-      sessionId: string,
-      workloads: Parameters<SessionRuntimeSlice["setBackgroundWorkloads"]>[1],
-    ) =>
-      set((draft) => {
-        const existingList = draft.backgroundWork.workloadsBySessionId[sessionId] ?? [];
-        const existingMap = new Map(existingList.map((w) => [w.work_id, w]));
-        const merged = workloads.map((incoming) => {
-          const existing = existingMap.get(incoming.work_id);
-          if (!existing) return incoming;
-          if (existing.revision > incoming.revision) {
-            return existing;
-          }
-          if (isTerminalRunState(existing.state) && !isTerminalRunState(incoming.state)) {
-            return {
-              ...incoming,
-              state: existing.state,
-              exit_code: existing.exit_code,
-              finished_at: existing.finished_at,
-              revision: Math.max(incoming.revision, existing.revision),
-            };
-          }
-          return incoming;
-        });
-        draft.backgroundWork.workloadsBySessionId[sessionId] = merged;
-        draft.backgroundWork.loadingBySessionId[sessionId] = false;
-      }),
-    updateBackgroundWorkload: (
-      sessionId: string,
-      workload: Parameters<SessionRuntimeSlice["updateBackgroundWorkload"]>[1],
-    ) =>
-      set((draft) => {
-        const list = draft.backgroundWork.workloadsBySessionId[sessionId] ?? [];
-        const idx = list.findIndex((w) => w.work_id === workload.work_id);
-        if (idx >= 0) {
-          const existing = list[idx]!;
-          if (existing.revision > workload.revision) {
-            return;
-          }
-          if (isTerminalRunState(existing.state) && !isTerminalRunState(workload.state)) {
-            return;
-          }
-          list[idx] = {
-            ...existing,
-            ...workload,
-            output: workload.output !== undefined ? workload.output : existing.output,
-          };
-        } else {
-          list.push(workload);
-        }
-        draft.backgroundWork.workloadsBySessionId[sessionId] = list;
-      }),
-    appendBackgroundWorkloadOutput: (
-      sessionId: string,
-      chunk: Parameters<SessionRuntimeSlice["appendBackgroundWorkloadOutput"]>[1],
-    ) =>
-      set((draft) => {
-        const list = draft.backgroundWork.workloadsBySessionId[sessionId] ?? [];
-        const workload = list.find((w) => w.work_id === chunk.work_id);
-        if (workload && chunk.chunk) {
-          const currentOutput = workload.output || "";
-          const newOutput = currentOutput + chunk.chunk;
-          const maxLen = 200 * 1024;
-          if (newOutput.length > maxLen) {
-            workload.output = newOutput.slice(newOutput.length - maxLen);
-            workload.output_truncated = true;
-          } else {
-            workload.output = newOutput;
-          }
-          workload.output_offset = chunk.offset;
-          if (chunk.truncated) {
-            workload.output_truncated = true;
-          }
-        }
-      }),
-    setActiveBackgroundWorkload: (sessionId: string, workId: string) =>
-      set((draft) => {
-        draft.backgroundWork.activeWorkIdBySessionId[sessionId] = workId;
-      }),
-    clearBackgroundWork: (sessionId: string) =>
-      set((draft) => {
-        delete draft.backgroundWork.workloadsBySessionId[sessionId];
-        delete draft.backgroundWork.activeWorkIdBySessionId[sessionId];
-        delete draft.backgroundWork.loadingBySessionId[sessionId];
-      }),
-    setBackgroundWorkLoading: (sessionId: string, loading: boolean) =>
-      set((draft) => {
-        draft.backgroundWork.loadingBySessionId[sessionId] = loading;
-      }),
-  };
-}
-
 /**
  * Migrate any env-keyed data stored under the fallback `sessionId` key to the
  * proper `environmentId` key so selectors don't see stale data after the
@@ -465,6 +386,9 @@ export function migrateEnvKeyedData(
   migrate(draft.sessionCommits.byEnvironmentId);
   migrate(draft.gitStatus.byEnvironmentRepo);
   migrate(draft.gitStatusDisplay.byEnvironmentRepo);
+  if (draft.gitStatus.refreshByEnvironmentId) migrate(draft.gitStatus.refreshByEnvironmentId);
+  if (draft.gitStatus.refreshByEnvironmentRepo) migrate(draft.gitStatus.refreshByEnvironmentRepo);
+  if (draft.gitStatus.inventoryByEnvironment) migrate(draft.gitStatus.inventoryByEnvironment);
   migrate(draft.sessionCommits.loading);
   migrate(draft.sessionCommits.refetchTrigger);
   migrate(draft.gitCheckoutGeneration.byEnvironmentId);
@@ -547,6 +471,27 @@ function buildWorkspaceRestorationActions(set: ImmerSet) {
   };
 }
 
+function buildGitInventoryActions(set: ImmerSet) {
+  return {
+    invalidateGitStatusInventory: (sessionId: string) =>
+      set((draft) => {
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        invalidateInventoryState(draft, envKey);
+      }),
+    reconcileGitStatusInventory: (
+      environmentId: string,
+      generation: number,
+      scopes: readonly string[],
+    ) => {
+      let applied = false;
+      set((draft) => {
+        applied = reconcileInventoryState(draft, environmentId, generation, scopes);
+      });
+      return applied;
+    },
+  };
+}
+
 export const createSessionRuntimeSlice: SliceCreator<SessionRuntimeSlice> = (set) => ({
   ...defaultSessionRuntimeState,
   ...buildTerminalShellProcessActions(set),
@@ -604,14 +549,27 @@ export const createSessionRuntimeSlice: SliceCreator<SessionRuntimeSlice> = (set
       // backend and will never emit another update under the empty key. The
       // per-repo entries (real repo names) are intentionally left in place;
       // they continue to receive fresh status updates from the new trackers.
+      // Refresh failures belong to the same retired scope and must go too, or
+      // a blank repository name keeps the warning visible after every named
+      // repository has recovered.
       const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
       const repoMap = draft.gitStatus.byEnvironmentRepo[envKey];
       if (repoMap && "" in repoMap) {
         delete repoMap[""];
       }
+      const refreshRepoMap = draft.gitStatus.refreshByEnvironmentRepo?.[envKey];
+      if (refreshRepoMap && "" in refreshRepoMap) {
+        delete refreshRepoMap[""];
+        if (Object.keys(refreshRepoMap).length === 0) {
+          delete draft.gitStatus.refreshByEnvironmentRepo?.[envKey];
+        }
+      }
       delete draft.gitStatusDisplay.byEnvironmentRepo[envKey]?.[""];
       delete draft.gitStatus.byEnvironmentId[envKey];
+      // The environment-level failure belonged to the retired unnamed root.
+      delete draft.gitStatus.refreshByEnvironmentId?.[envKey];
     }),
+  ...buildGitInventoryActions(set),
   registerSessionEnvironment: (sessionId, environmentId) =>
     set((draft) => {
       draft.environmentIdBySessionId[sessionId] = environmentId;
