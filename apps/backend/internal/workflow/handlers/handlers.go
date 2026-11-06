@@ -78,6 +78,10 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/workspaces/:id/workflows/import/preview", h.httpPreviewImportWorkflows)
 	api.POST("/workspaces/:id/workflows/import", h.httpImportWorkflows)
 
+	api.POST("/prompt-sources/import", h.httpImportPromptSources)
+	api.POST("/prompt-sources/import/preview", h.httpPreviewPromptSources)
+	api.GET("/prompt-sources/diff", h.httpDiffPromptSources)
+
 	// History routes
 	api.GET("/sessions/:id/workflow/history", h.httpListHistoryBySession)
 }
@@ -227,7 +231,7 @@ func writeNotVisible(c *gin.Context, err error, message string) bool {
 }
 
 func (h *Handlers) writeStepMutationError(c *gin.Context, err error) {
-	if errors.Is(err, service.ErrWorkflowReadOnly) || errors.Is(err, service.ErrWorkflowWorkspaceReadOnly) {
+	if errors.Is(err, service.ErrWorkflowReadOnly) || errors.Is(err, models.ErrPromptSourceLocked) || errors.Is(err, service.ErrWorkflowWorkspaceReadOnly) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}

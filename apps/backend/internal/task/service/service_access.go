@@ -371,6 +371,9 @@ func (s *Service) WorkflowMutationReadOnly(ctx context.Context, workflowID strin
 	if err != nil {
 		return false, false, err
 	}
+	if workflow.Source == models.WorkflowSourcePromptSource {
+		return false, false, models.ErrPromptSourceLocked
+	}
 	if workflow.Source == models.WorkflowSourceGitHub {
 		return true, false, nil
 	}
