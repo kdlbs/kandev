@@ -48,7 +48,7 @@ func (r *Repository) lockTaskMaterializationForBindingTx(ctx context.Context, tx
 		return nil
 	}
 	var environmentID string
-	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT id FROM task_environments WHERE task_id = ?`), taskID).Scan(&environmentID)
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT id FROM task_environments WHERE task_id = ? AND retired_at IS NULL`), taskID).Scan(&environmentID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}

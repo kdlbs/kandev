@@ -133,6 +133,26 @@ type ShellLaunchInfo struct {
 	InitialCommandOnce bool
 }
 
+// ShellOwnerTaskID reads an ordinary terminal's persisted owner without
+// claiming its initial command. The caller must authorize this task/environment
+// pair before resolving an execution or returning terminal metadata.
+func (s *Service) ShellOwnerTaskID(ctx context.Context, environmentID, id string) (string, error) {
+	if !IsManaged(id) {
+		return "", ErrNotManaged
+	}
+	term, err := s.repo.Get(ctx, id)
+	if errors.Is(err, repository.ErrNotFound) {
+		return "", ErrTaskMismatch
+	}
+	if err != nil {
+		return "", err
+	}
+	if term == nil || term.TaskID == "" || term.EnvironmentID != environmentID {
+		return "", ErrTaskMismatch
+	}
+	return term.TaskID, nil
+}
+
 // ShellLaunchInfo returns launch metadata for an ordinary terminal owned by
 // taskID and environmentID. The terminal ID alone is never sufficient to
 // cross task or environment boundaries.
