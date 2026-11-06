@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/system/backups"
 	"github.com/kandev/kandev/internal/system/database"
+	"github.com/kandev/kandev/internal/system/dataretention"
 	"github.com/kandev/kandev/internal/system/disk"
 	"github.com/kandev/kandev/internal/system/frontenderrors"
 	"github.com/kandev/kandev/internal/system/info"
@@ -108,6 +109,7 @@ type Service struct {
 	Restart              restart.Manager
 	Storage              *storage.Handler
 	ToolRetention        *toolretention.Service
+	DataRetention        *dataretention.Service
 	AgentRuntimeRecovery AgentRuntimeRecoveryTarget
 	// StorageRuntime owns the scheduler, reconciliation, and durable cleanup worker.
 	StorageRuntime *storage.Runtime
@@ -151,12 +153,24 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	backupsSvc.RetentionSources = wiring.HistoryBackup
 	backupsSvc.PersistenceUnavailable = markPersistenceUnavailable
 	retentionSvc := provideToolRetention(pool, backupsSvc, eventBus, log, wiring)
-	dbSvc.DatabaseQuiesce = retentionQuiesce(retentionSvc, wiring.DatabaseQuiesce)
+	dataRetentionSvc := dataretention.New(pool, dataretention.Options{
+		CreateBackup: retentionBackupCreator(backupsSvc),
+		VerifyBackup: retentionBackupVerifier(backupsSvc),
+		Changed:      wiring.ToolPayloadChanged,
+		Report:       func(ctx context.Context, op *dataretention.Operation) { reportDataRetention(ctx, eventBus, log, op) },
+		Log: func(_ context.Context, message string, err error) {
+			if log != nil {
+				log.Error(message, zap.Error(err))
+			}
+		},
+	})
+	stopRetention := retentionStopper(retentionSvc, dataRetentionSvc)
+	dbSvc.DatabaseQuiesce = retentionQuiesce(stopRetention, wiring.DatabaseQuiesce)
 	restoreQuiesce := wiring.RestoreQuiesce
 	if restoreQuiesce == nil && wiring.OrchestratorShutdown != nil {
 		restoreQuiesce = func() error { wiring.OrchestratorShutdown(); return nil }
 	}
-	backupsSvc.RestoreQuiesce = retentionQuiesce(retentionSvc, func() error {
+	backupsSvc.RestoreQuiesce = retentionQuiesce(stopRetention, func() error {
 		dbSvc.InvalidateDatabase()
 		if restoreQuiesce != nil {
 			return restoreQuiesce()
@@ -224,6 +238,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		Database:      dbSvc,
 		Backups:       backupsSvc,
 		ToolRetention: retentionSvc,
+		DataRetention: dataRetentionSvc,
 		LogBundles: logbundle.New(logbundle.Config{
 			HomeDir: homeDir, Version: build.Version, Commit: build.Commit,
 			BuildTime: build.BuildTime, Log: log,
@@ -280,6 +295,9 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	if s.ToolRetention != nil {
 		toolretention.RegisterRoutes(g, admin, s.ToolRetention)
 	}
+	if s.DataRetention != nil {
+		dataretention.RegisterRoutes(g, admin, s.DataRetention)
+	}
 
 	if s.FrontendErrors != nil {
 		g.POST("/logs/frontend-errors", frontenderrors.Handle(s.FrontendErrors))
@@ -319,6 +337,9 @@ func (s *Service) StartBackground(ctx context.Context) {
 	if s.ToolRetention != nil {
 		s.ToolRetention.Start(ctx)
 	}
+	if s.DataRetention != nil {
+		s.DataRetention.Start(ctx)
+	}
 	if s.LogBundles != nil {
 		s.LogBundles.Start(ctx)
 	}
@@ -344,6 +365,9 @@ func (s *Service) StopBackground() {
 	}
 	if s.ToolRetention != nil {
 		s.ToolRetention.Stop()
+	}
+	if s.DataRetention != nil {
+		s.DataRetention.Stop()
 	}
 	if s.SleepInhibition != nil {
 		s.SleepInhibition.Stop()
@@ -391,15 +415,72 @@ func provideToolRetention(pool *db.Pool, snapshots *backups.Service, eventBus bu
 	})
 }
 
-func retentionQuiesce(service *toolretention.Service, next func() error) func() error {
+// retentionBackupCreator takes the pre-mutation snapshot both retention policies
+// share, so a verified receipt means the same thing whichever policy holds it.
+func retentionBackupCreator(snapshots *backups.Service) func(context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
+		receipt, err := snapshots.CreateForRetention(ctx)
+		if err != nil {
+			return "", err
+		}
+		encoded, err := json.Marshal(receipt)
+		return string(encoded), err
+	}
+}
+
+func retentionBackupVerifier(snapshots *backups.Service) func(context.Context, string) error {
+	return func(ctx context.Context, raw string) error {
+		var receipt backups.RetentionReceipt
+		if err := json.Unmarshal([]byte(raw), &receipt); err != nil {
+			return err
+		}
+		return snapshots.VerifyRetentionBackupUnderLease(ctx, receipt)
+	}
+}
+
+// retentionStopper stops both retention workers. They share the maintenance
+// admission guard, so a destructive operation that stopped only one could leave
+// the other holding the writer.
+func retentionStopper(tool *toolretention.Service, data *dataretention.Service) func() {
+	return func() {
+		tool.Stop()
+		data.Stop()
+	}
+}
+
+func retentionQuiesce(stop func(), next func() error) func() error {
 	return func() error {
 		// Stop cancels pending admission before joining the worker. Restore/reset
 		// already owns maintenance admission when this callback runs.
-		service.Stop()
+		stop()
 		if next != nil {
 			return next()
 		}
 		return nil
+	}
+}
+
+func reportDataRetention(ctx context.Context, eventBus bus.EventBus, log *logger.Logger, op *dataretention.Operation) {
+	if eventBus == nil || op == nil {
+		return
+	}
+	state := jobs.State(op.State)
+	if op.State == "cancelled" {
+		state = jobs.StateFailed
+	}
+	result := map[string]interface{}{
+		"state":         op.State,
+		"messages":      op.Messages,
+		"cleanup_jobs":  op.CleanupJobs,
+		"skipped":       op.Messages.SkippedTotal() + op.CleanupJobs.SkippedTotal(),
+		"analysis_only": op.AnalysisOnly,
+	}
+	job := &jobs.Job{ID: op.ID, Kind: "archived-data-retention-" + op.Kind, State: state, StartedAt: op.StartedAt, Result: result}
+	if op.FinishedAt != nil {
+		job.EndedAt = *op.FinishedAt
+	}
+	if err := eventBus.Publish(ctx, events.SystemJobUpdate, bus.NewEvent(events.SystemJobUpdate, "archived-data-retention", job)); err != nil && log != nil {
+		log.Warn("failed to publish archived data retention progress", zap.Error(err))
 	}
 }
 
