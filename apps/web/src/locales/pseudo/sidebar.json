@@ -281,5 +281,10 @@
   "controlCircuits.failures_other": "{{count}} ćōńśēćũţĩvē ƒàĩĺũŕēś",
   "controlCircuits.lastRecorded": "Ĺàśţ ŕēćōŕďēď: {{time}}",
   "controlRestore.contractUnavailable": "Ţĥĩś ƀũĩĺď ďōēś ńōţ ƥŕōvĩďē ţĥĩś ōvēŕvĩēŵ. Ţĥēśē vàĺũēś àŕē ũńćōńƒĩŕḿēď.",
+  "controlRestore.noProviderHealth": "Ńō ńōń-ĥēàĺţĥŷ ƥŕōvĩďēŕ ŕōũţĩńĝ ŕēćōŕďś ŵēŕē ŕēţũŕńēď ƒōŕ ţĥĩś ŵōŕķśƥàćē.",
+  "controlRestore.healthScope": "Ŕēćōŕďēď śćōƥē",
+  "controlRestore.recordedRetryAt": "Ŕēćōŕďēď ŕēţŕŷ ţĩḿē",
+  "controlRestore.retryElapsed": "Ţĥē ŕēćōŕďēď ŕēţŕŷ ţĩḿē ĥàś ƥàśśēď. Ŕēćōvēŕŷ ĥàś ńōţ ƀēēń ćōńƒĩŕḿēď.",
+  "controlRestore.lastFailureAt": "Ŕēćōŕďēď ĺàśţ ƒàĩĺũŕē",
   "controlRefresh.retainedAt": "Ŕēƒŕēśĥ ƒàĩĺēď · śĥōŵĩńĝ vàĺũēś ƒŕōḿ {{time}}"
 }

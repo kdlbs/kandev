@@ -281,5 +281,10 @@
   "controlCircuits.failures_other": "{{count}} consecutive failures",
   "controlCircuits.lastRecorded": "Last recorded: {{time}}",
   "controlRestore.contractUnavailable": "This build does not provide this overview. These values are unconfirmed.",
+  "controlRestore.noProviderHealth": "No non-healthy provider routing records were returned for this workspace.",
+  "controlRestore.healthScope": "Recorded scope",
+  "controlRestore.recordedRetryAt": "Recorded retry time",
+  "controlRestore.retryElapsed": "The recorded retry time has passed. Recovery has not been confirmed.",
+  "controlRestore.lastFailureAt": "Recorded last failure",
   "controlRefresh.retainedAt": "Refresh failed · showing values from {{time}}"
 }

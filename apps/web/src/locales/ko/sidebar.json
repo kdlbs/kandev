@@ -281,5 +281,10 @@
   "controlCircuits.failures_other": "연속 실패 {{count}}회",
   "controlCircuits.lastRecorded": "마지막 기록: {{time}}",
   "controlRestore.contractUnavailable": "이 빌드는 이 종합 현황을 제공하지 않습니다. 해당 값은 미확인입니다.",
+  "controlRestore.noProviderHealth": "이 워크스페이스에서 비정상 공급자 라우팅 기록이 반환되지 않았습니다.",
+  "controlRestore.healthScope": "기록된 범위",
+  "controlRestore.recordedRetryAt": "기록된 재시도 시각",
+  "controlRestore.retryElapsed": "기록된 재시도 시각이 지났습니다. 복구 여부는 미확인입니다.",
+  "controlRestore.lastFailureAt": "기록된 마지막 실패 시각",
   "controlRefresh.retainedAt": "갱신 실패 · {{time}} 값 표시"
 }

@@ -8,6 +8,7 @@ import { ControlAggregateOverview } from "./control-aggregate-overview";
 import { ControlGroupedHistory } from "./control-grouped-history";
 import { ControlNativeComparison } from "./control-native-comparison";
 import { ControlProviderCircuits } from "./control-provider-circuits";
+import { ControlModelBlocks } from "./control-model-blocks";
 
 export function IntegratedControlDashboard({ view }: { view: ControlView }) {
   const { t } = useTranslation();
@@ -22,7 +23,12 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
       className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 md:p-6"
       data-testid={`control-dashboard-${view}`}
     >
-      {view === "providers" && workspaces.length > 0 && <ControlProviderCircuits />}
+      {view === "providers" && workspaces.length > 0 && (
+        <>
+          <ControlModelBlocks />
+          <ControlProviderCircuits />
+        </>
+      )}
       {view === "overview" && (
         <div className="grid gap-3 sm:grid-cols-3">
           <Fact label={t("sidebar:integratedControl.workspaces")} value={workspaces.length} />

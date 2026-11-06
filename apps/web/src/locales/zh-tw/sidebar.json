@@ -281,5 +281,10 @@
   "controlCircuits.failures_other": "連續失敗 {{count}} 次",
   "controlCircuits.lastRecorded": "最後記錄：{{time}}",
   "controlRestore.contractUnavailable": "此版本不提供此概覽。這些數值尚未確認。",
+  "controlRestore.noProviderHealth": "此工作區未返回異常供應商路由記錄。",
+  "controlRestore.healthScope": "記錄範圍",
+  "controlRestore.recordedRetryAt": "已記錄的重試時間",
+  "controlRestore.retryElapsed": "已記錄的重試時間已過，恢復情況尚未確認。",
+  "controlRestore.lastFailureAt": "已記錄的最後失敗時間",
   "controlRefresh.retainedAt": "重新整理失敗 · 顯示 {{time}} 的值"
 }
