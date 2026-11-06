@@ -52,3 +52,28 @@ export type NativeTaskList = {
   generated_at: string;
   tasks: NativeTask[];
 };
+export type NativeModel = {
+  model: string;
+  provider: string;
+  measurement_source: string;
+  usage_completeness: string;
+  cost_source: string;
+  estimated: boolean;
+  event_count: number;
+  tokens_in: number;
+  tokens_out: number | null;
+  tokens_cached_read: number | null;
+  tokens_cached_write: number | null;
+  tokens_total: number;
+  cost_subcents: number;
+};
+export type NativeLedger = {
+  basis: "task_usage_events";
+  workspace_id: string;
+  since: string;
+  generated_at: string;
+  account_attribution: "unavailable";
+  coverage: string;
+  truncated: boolean;
+  models: NativeModel[];
+};

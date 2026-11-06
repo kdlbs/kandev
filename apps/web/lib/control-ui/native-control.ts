@@ -1,4 +1,4 @@
-import type { NativeDashboard, NativeTaskList } from "@/lib/types/control-native";
+import type { NativeDashboard, NativeLedger, NativeTaskList } from "@/lib/types/control-native";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 
 export const nativeRecord = (v: unknown): v is Record<string, unknown> =>
@@ -81,5 +81,27 @@ export function nativeTasks(
       (r.hold_mode === undefined || typeof r.hold_mode === "string") &&
       (r.queued_paused_messages === undefined || count(r.queued_paused_messages)) &&
       (r.queued_auto_run_messages === undefined || count(r.queued_auto_run_messages)),
+  );
+}
+export function nativeLedger(v: unknown, id: string): v is NativeLedger {
+  if (
+    !nativeRecord(v) ||
+    !nativeWindow(v, id) ||
+    v.basis !== "task_usage_events" ||
+    v.account_attribution !== "unavailable" ||
+    typeof v.coverage !== "string" ||
+    typeof v.truncated !== "boolean" ||
+    !Array.isArray(v.models)
+  )
+    return false;
+  return v.models.every(
+    (r) =>
+      nativeRecord(r) &&
+      texts(r, ["model", "provider", "measurement_source", "usage_completeness", "cost_source"]) &&
+      typeof r.estimated === "boolean" &&
+      [r.event_count, r.tokens_in, r.tokens_total, r.cost_subcents].every(count) &&
+      [r.tokens_out, r.tokens_cached_read, r.tokens_cached_write].every(
+        (n) => n === null || count(n),
+      ),
   );
 }

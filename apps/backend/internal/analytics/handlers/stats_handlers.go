@@ -155,6 +155,10 @@ func (h *StatsHandlers) httpGetCompletedActivity(c *gin.Context) {
 }
 
 func (h *StatsHandlers) httpGetModelUsage(c *gin.Context) {
+	if c.Query("source") == "ledger" {
+		h.httpGetRecordedModelUsage(c)
+		return
+	}
 	workspaceID, start, _, ok := h.parseRequest(c)
 	if !ok {
 		return

@@ -9,6 +9,7 @@ import { ControlGroupedHistory } from "./control-grouped-history";
 import { ControlNativeComparison } from "./control-native-comparison";
 import { ControlProviderCircuits } from "./control-provider-circuits";
 import { ControlModelBlocks } from "./control-model-blocks";
+import { ControlModelActivity } from "./control-model-activity";
 
 export function IntegratedControlDashboard({ view }: { view: ControlView }) {
   const { t } = useTranslation();
@@ -25,6 +26,7 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
     >
       {view === "providers" && workspaces.length > 0 && (
         <>
+          <ControlModelActivity />
           <ControlModelBlocks />
           <ControlProviderCircuits />
         </>

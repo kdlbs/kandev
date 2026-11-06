@@ -1,8 +1,25 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
-import { nativeDashboard, nativeTasks } from "@/lib/control-ui/native-control";
-import type { NativeArchive, NativeDashboard, NativeTaskList } from "@/lib/types/control-native";
+import { nativeDashboard, nativeLedger, nativeTasks } from "@/lib/control-ui/native-control";
+import type {
+  NativeArchive,
+  NativeDashboard,
+  NativeLedger,
+  NativeTaskList,
+} from "@/lib/types/control-native";
 
 export class NativeControlContractError extends Error {}
+
+export async function readNativeLedger(id: string, options?: ApiRequestOptions) {
+  const value = await fetchJson<unknown>(
+    `/api/v1/workspaces/${encodeURIComponent(id)}/stats/model-usage?source=ledger&range=day`,
+    options,
+  );
+  if (!nativeLedger(value, id)) {
+    // i18n-exempt: transport diagnostic; rendered copy is localized.
+    throw new NativeControlContractError("Unsupported native control projection");
+  }
+  return value as NativeLedger;
+}
 
 export async function readNativeDashboard(id: string, options?: ApiRequestOptions) {
   const value = await fetchJson<unknown>(
