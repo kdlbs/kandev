@@ -10,11 +10,14 @@ export async function findCopilotProfileId(apiClient: ApiClient): Promise<string
     throw new Error("Copilot agent is unavailable after enabling KANDEV_E2E_MOCK_COPILOT");
   }
   const existing = copilot.profiles?.[0]?.id;
-  if (existing) return existing;
+  if (existing) {
+    await apiClient.updateAgentProfile(existing, { model: "mock-fast" });
+    return existing;
+  }
   const profile = await apiClient.createAgentProfile(
     copilot.id,
     `Copilot native ${Date.now().toString(36)}`,
-    { model: "auto" },
+    { model: "mock-fast" },
   );
   return profile.id;
 }

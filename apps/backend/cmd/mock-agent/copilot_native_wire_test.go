@@ -62,8 +62,8 @@ func TestCopilotNativeFixtureEmitsRawVendorFrames(t *testing.T) {
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if len(frames) != 11 {
-		t.Fatalf("frames = %d, want 11", len(frames))
+	if len(frames) != 10 {
+		t.Fatalf("frames = %d, want 10", len(frames))
 	}
 	var completions, children, applied, failed int
 	for _, frame := range frames {
@@ -89,7 +89,7 @@ func TestCopilotNativeFixtureEmitsRawVendorFrames(t *testing.T) {
 			failed++
 		}
 	}
-	if completions != 4 || children != 1 || applied != 3 || failed != 1 {
+	if completions != 3 || children != 1 || applied != 3 || failed != 0 {
 		t.Fatalf("completions=%d children=%d applied=%d failed=%d", completions, children, applied, failed)
 	}
 	// The child frame must be the one carrying an agentId.

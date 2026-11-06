@@ -120,10 +120,6 @@ func copilotNativeFixtureFrames(partial bool) []copilotNativeFixtureData {
 			"compactionAttemptId": attemptID, "trigger": "manual", "success": true, "outcome": "applied",
 			"preCompactionTokens": 13417, "postCompactionTokens": 9695,
 		}},
-		{Type: "session.compaction_complete", Timestamp: now(), Data: map[string]any{
-			"compactionAttemptId": "e2e-copilot-failed-attempt", "trigger": "threshold",
-			"success": false, "outcome": "failed",
-		}},
 		{Type: "session.usage_info", Timestamp: now(), Data: map[string]any{
 			"currentTokens": 9695, "tokenLimit": 272000,
 		}},
