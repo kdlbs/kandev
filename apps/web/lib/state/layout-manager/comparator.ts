@@ -1,5 +1,5 @@
 import type { SerializedDockview } from "dockview-react";
-import type { LayoutState, LayoutGroup } from "./types";
+import type { LayoutState, LayoutGroup, LayoutNode } from "./types";
 import { filterEphemeral } from "./serializer";
 import { STRUCTURAL_COMPONENTS } from "./constants";
 
@@ -49,56 +49,53 @@ export function layoutStructuresMatch(a: LayoutState, b: LayoutState): boolean {
   return true;
 }
 
-/**
- * Build a component-count fingerprint from a SerializedDockview.
- * Returns a sorted "component:count" string for structural comparison.
- * Counts preserve multiplicity (e.g. two terminals ≠ one terminal).
- */
-function componentCountsFromSerialized(serialized: SerializedDockview): string {
-  const counts = new Map<string, number>();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const panels = (serialized as any).panels as
-    | Record<string, { contentComponent?: string }>
-    | undefined;
-  if (!panels) return "";
-  for (const p of Object.values(panels)) {
-    if (p.contentComponent && STRUCTURAL_COMPONENTS.has(p.contentComponent)) {
-      counts.set(p.contentComponent, (counts.get(p.contentComponent) ?? 0) + 1);
-    }
-  }
-  return [...counts.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${k}:${v}`)
-    .join(",");
+type StructuralShape =
+  | { type: "leaf"; components: string[] }
+  | { type: "branch"; children: StructuralShape[] };
+
+function structuralGroup(components: string[]): StructuralShape {
+  return {
+    type: "leaf",
+    components: components.filter((component) => STRUCTURAL_COMPONENTS.has(component)).sort(),
+  };
 }
 
-/** Build a component-count fingerprint from a LayoutState (filtered). */
-function componentCountsFromLayout(state: LayoutState): string {
-  const counts = new Map<string, number>();
-  const filtered = filterEphemeral(state);
-  for (const col of filtered.columns) {
-    for (const group of col.groups) {
-      for (const panel of group.panels) {
-        if (STRUCTURAL_COMPONENTS.has(panel.component)) {
-          counts.set(panel.component, (counts.get(panel.component) ?? 0) + 1);
-        }
-      }
-    }
-  }
-  return [...counts.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${k}:${v}`)
-    .join(",");
+function liveGroupShape(group: LayoutGroup): StructuralShape {
+  return structuralGroup(group.panels.map((panel) => panel.component));
 }
 
-/**
- * Quick check: do a live LayoutState and a saved SerializedDockview have
- * the same structural panels (including multiplicity)?
- *
- * This is a weaker check than `layoutStructuresMatch` (doesn't verify
- * column arrangement) but works without deserializing the grid tree.
- * Counts are compared so two terminals ≠ one terminal.
- */
+function liveNodeShape(node: LayoutNode): StructuralShape {
+  if (node.type === "leaf") return liveGroupShape(node.group);
+  return { type: "branch", children: node.children.map(liveNodeShape) };
+}
+
+function liveLayoutShape(live: LayoutState): StructuralShape {
+  return {
+    type: "branch",
+    children: live.columns.map((column) => {
+      if (column.tree) return liveNodeShape(column.tree);
+      if (column.groups.length === 1) return liveGroupShape(column.groups[0]);
+      return { type: "branch", children: column.groups.map(liveGroupShape) };
+    }),
+  };
+}
+
+function savedNodeShape(
+  node: SerializedDockview["grid"]["root"],
+  panels: SerializedDockview["panels"],
+): StructuralShape {
+  if (Array.isArray(node.data))
+    return { type: "branch", children: node.data.map((child) => savedNodeShape(child, panels)) };
+  return structuralGroup(node.data.views.map((id) => panels[id]?.contentComponent ?? ""));
+}
+
+/** Reuse a saved layout only when its split tree and structural groups match.
+ * Sizes, active tabs, and environment-owned panel IDs are restored separately. */
 export function savedLayoutMatchesLive(live: LayoutState, saved: SerializedDockview): boolean {
-  return componentCountsFromLayout(live) === componentCountsFromSerialized(saved);
+  if (!saved.grid?.root || !saved.panels) return false;
+  if ((live.rootOrientation ?? "HORIZONTAL") !== saved.grid.orientation) return false;
+  return (
+    JSON.stringify(liveLayoutShape(live)) ===
+    JSON.stringify(savedNodeShape(saved.grid.root, saved.panels))
+  );
 }

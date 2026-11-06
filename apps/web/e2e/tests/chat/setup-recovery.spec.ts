@@ -151,111 +151,136 @@ test.describe("Setup recovery UX (desktop)", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    const failure = "The agent could not start.";
-    let created!: { task_id: string; session_id: string };
-    await testPage.route("**/quick-chat", async (route) => {
-      if (route.request().method() !== "POST") return route.continue();
-      const response = await route.fetch();
-      expect(response.ok()).toBe(true);
-      created = await response.json();
+    const { settings } = await apiClient.getUserSettings();
+    await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
+    try {
+      const failure = "The agent could not start.";
+      let created!: { task_id: string; session_id: string };
+      await testPage.route("**/quick-chat", async (route) => {
+        if (route.request().method() !== "POST") return route.continue();
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        created = await response.json();
+        await expect
+          .poll(
+            async () =>
+              (await apiClient.listTaskSessions(created.task_id)).sessions.find(
+                (row) => row.id === created.session_id,
+              )?.state,
+            { timeout: 30_000 },
+          )
+          .toMatch(/WAITING_FOR_INPUT|COMPLETED/);
+        expect(
+          await apiClient.stopSession({ session_id: created.session_id, force: true }),
+        ).toEqual({
+          success: true,
+        });
+        await expect
+          .poll(
+            async () =>
+              (
+                await apiClient.wsRequest<{ is_agent_running: boolean }>("task.session.status", {
+                  task_id: created.task_id,
+                  session_id: created.session_id,
+                })
+              ).is_agent_running,
+            { message: "a synthetic bootstrap failure must not retain a live mock runtime" },
+          )
+          .toBe(false);
+        const occurredAt = new Date().toISOString();
+        await apiClient.seedTaskSession(created.task_id, {
+          state: "FAILED",
+          completedAt: occurredAt,
+          sessionId: created.session_id,
+          agentProfileId: seedData.agentProfileId,
+          errorMessage: failure,
+          metadata: {
+            last_agent_error: {
+              message: failure,
+              occurred_at: occurredAt,
+              code: "generic_launch_failure",
+              phase: "bootstrap",
+              scope: "session",
+              stamp: "retained-setup-e2e",
+            },
+          },
+        });
+        await apiClient.seedSessionMessage(created.session_id, {
+          type: "status",
+          content: failure,
+          createdAt: occurredAt,
+          metadata: {
+            recovery_actions: true,
+            scope: "session",
+            error_stamp: "retained-setup-e2e",
+            actions: [
+              {
+                type: "ws_request",
+                label: "Resume session",
+                icon: "refresh",
+                test_id: "recovery-resume-button",
+                params: {
+                  method: "session.recover",
+                  payload: {
+                    task_id: created.task_id,
+                    session_id: created.session_id,
+                    action: "resume",
+                  },
+                },
+              },
+            ],
+          },
+        });
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "failed to start session", ...created }),
+        });
+      });
+      const dialog = await openQuickChatSetup(testPage);
+      await selectAgentIfNeeded(dialog, testPage);
+      await dialog.getByTestId("task-description-input").fill("Keep this request for recovery.");
+      const retainedResponse = testPage.waitForResponse(
+        (response) =>
+          response.url().endsWith("/quick-chat") && response.request().method() === "POST",
+      );
+      await dialog.getByTestId("quick-chat-send").click();
+      expect((await retainedResponse).status()).toBe(500);
+      await expect(
+        dialog.getByTestId("session-recovery-action-message").getByText(failure, { exact: true }),
+      ).toBeVisible();
+      await expect(
+        dialog.getByTestId("session-recovery-action-message").getByTestId("recovery-resume-button"),
+      ).toBeVisible();
+      await testPage.reload();
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      await testPage.keyboard.press(`${modifier}+Shift+q`);
       await expect
         .poll(
           async () =>
             (await apiClient.listTaskSessions(created.task_id)).sessions.find(
               (row) => row.id === created.session_id,
             )?.state,
-          { timeout: 30_000 },
-        )
-        .toMatch(/WAITING_FOR_INPUT|COMPLETED/);
-      const occurredAt = new Date().toISOString();
-      await apiClient.seedTaskSession(created.task_id, {
-        state: "FAILED",
-        completedAt: occurredAt,
-        sessionId: created.session_id,
-        agentProfileId: seedData.agentProfileId,
-        errorMessage: failure,
-        metadata: {
-          last_agent_error: {
-            message: failure,
-            occurred_at: occurredAt,
-            code: "generic_launch_failure",
-            phase: "bootstrap",
-            scope: "session",
-            stamp: "retained-setup-e2e",
+          {
+            timeout: 30_000,
+            message: "the persisted setup failure should remain failed after reload",
           },
-        },
+        )
+        .toBe("FAILED");
+      await expect(
+        dialog.getByTestId("session-recovery-action-message").getByText(failure, { exact: true }),
+      ).toBeVisible();
+      await expect(
+        dialog.getByTestId("session-recovery-action-message").getByTestId("recovery-resume-button"),
+      ).toBeVisible();
+      const sessions = (await apiClient.listTaskSessions(created.task_id)).sessions;
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].id).toBe(created.session_id);
+      expect(sessions[0].state).toBe("FAILED");
+    } finally {
+      await apiClient.saveUserSettings({
+        prevent_auto_start_agent_on_open: settings.prevent_auto_start_agent_on_open === true,
       });
-      await apiClient.seedSessionMessage(created.session_id, {
-        type: "status",
-        content: failure,
-        createdAt: occurredAt,
-        metadata: {
-          recovery_actions: true,
-          scope: "session",
-          error_stamp: "retained-setup-e2e",
-          actions: [
-            {
-              type: "ws_request",
-              label: "Resume session",
-              icon: "refresh",
-              test_id: "recovery-resume-button",
-              params: {
-                method: "session.recover",
-                payload: {
-                  task_id: created.task_id,
-                  session_id: created.session_id,
-                  action: "resume",
-                },
-              },
-            },
-          ],
-        },
-      });
-      await route.fulfill({
-        status: 500,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "failed to start session", ...created }),
-      });
-    });
-    const dialog = await openQuickChatSetup(testPage);
-    await selectAgentIfNeeded(dialog, testPage);
-    await dialog.getByTestId("task-description-input").fill("Keep this request for recovery.");
-    const retainedResponse = testPage.waitForResponse(
-      (response) =>
-        response.url().endsWith("/quick-chat") && response.request().method() === "POST",
-    );
-    await dialog.getByTestId("quick-chat-send").click();
-    expect((await retainedResponse).status()).toBe(500);
-    await expect(
-      dialog.getByTestId("session-recovery-action-message").getByText(failure, { exact: true }),
-    ).toBeVisible();
-    await expect(
-      dialog.getByTestId("session-recovery-action-message").getByTestId("recovery-resume-button"),
-    ).toBeVisible();
-    await testPage.reload();
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
-    await testPage.keyboard.press(`${modifier}+Shift+q`);
-    await expect
-      .poll(
-        async () =>
-          (await apiClient.listTaskSessions(created.task_id)).sessions.find(
-            (row) => row.id === created.session_id,
-          )?.state,
-        {
-          timeout: 30_000,
-          message: "the persisted setup failure should remain failed after reload",
-        },
-      )
-      .toBe("FAILED");
-    await expect(
-      dialog.getByTestId("session-recovery-action-message").getByText(failure, { exact: true }),
-    ).toBeVisible();
-    await expect(
-      dialog.getByTestId("session-recovery-action-message").getByTestId("recovery-resume-button"),
-    ).toBeVisible({ timeout: 30_000 });
-    const sessions = (await apiClient.listTaskSessions(created.task_id)).sessions;
-    expect(sessions).toHaveLength(1);
-    expect(sessions[0].id).toBe(created.session_id);
-    expect(sessions[0].state).toBe("FAILED");
+    }
   });
 });

@@ -28,6 +28,7 @@ import (
 const (
 	RunReasonTaskAssigned          = shared.RunReasonTaskAssigned
 	RunReasonTaskComment           = shared.RunReasonTaskComment
+	RunReasonHandoffCompleted      = shared.RunReasonHandoffCompleted
 	RunReasonTaskBlockersResolved  = shared.RunReasonTaskBlockersResolved
 	RunReasonTaskChildrenCompleted = shared.RunReasonTaskChildrenCompleted
 	RunReasonApprovalResolved      = shared.RunReasonApprovalResolved
@@ -185,6 +186,7 @@ func (s *Service) queueRunFromTaskBoundary(
 		_, err := s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
 			Reason:                reason,
 			IdempotencyKey:        idempotencyKey,
+			SkipCoalesce:          reason == RunReasonHandoffCompleted,
 			Payload:               PayloadWithAgent(payload, agentInstanceID),
 			ActorKind:             actorKind,
 			ActorID:               actorID,
@@ -408,15 +410,17 @@ func (s *Service) queueRunInlineAsActor(
 		}
 	}
 
-	coalesced, err := s.repo.CoalesceRun(ctx, agentInstanceID, reason, CoalesceWindowSeconds, payload)
-	if err != nil {
-		return runsservice.QueueOutcomeNone, fmt.Errorf("coalesce check: %w", err)
-	}
-	if coalesced {
-		s.logger.Debug("run coalesced",
-			zap.String("agent", agentInstanceID),
-			zap.String("reason", reason))
-		return runsservice.QueueOutcomeCoalesced, nil
+	if reason != RunReasonHandoffCompleted {
+		coalesced, err := s.repo.CoalesceRun(ctx, agentInstanceID, reason, CoalesceWindowSeconds, payload)
+		if err != nil {
+			return runsservice.QueueOutcomeNone, fmt.Errorf("coalesce check: %w", err)
+		}
+		if coalesced {
+			s.logger.Debug("run coalesced",
+				zap.String("agent", agentInstanceID),
+				zap.String("reason", reason))
+			return runsservice.QueueOutcomeCoalesced, nil
+		}
 	}
 
 	var idemKeyPtr *string

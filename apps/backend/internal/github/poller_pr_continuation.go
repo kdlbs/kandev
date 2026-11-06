@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"time"
 
@@ -23,6 +24,16 @@ const (
 type prMonitorPendingTarget struct {
 	watches map[string]*PRWatch
 	retryAt time.Time
+	// workflowOnly resumes the Actions-attention phase without repeating a
+	// completed status phase.
+	workflowOnly bool
+}
+
+// prMonitorDueWork is one workspace's due targets split by the phase that must
+// resume. A target never needs both phases in one wake.
+type prMonitorDueWork struct {
+	status   []*PRWatch
+	workflow []*PRWatch
 }
 
 // prMonitorPendingWork is the monitor's bounded record of one workspace's
@@ -235,30 +246,51 @@ func (p *Poller) recordPRMonitorPending(
 func prMonitorPendingFromOutcome(
 	outcome prWatchWorkspaceBatchOutcome, now time.Time,
 ) *prMonitorPendingWork {
-	if outcome.state != prWatchBatchDeferred || len(outcome.unfinished) == 0 {
+	if outcome.state != prWatchBatchDeferred ||
+		(len(outcome.unfinished) == 0 && len(outcome.workflowUnfinished) == 0) {
 		return nil
 	}
-	retryAt, ok := prMonitorPendingBoundary(outcome, now)
-	if !ok {
+	statusBoundary, statusOK := prMonitorPendingBoundary(outcome.deferred, outcome.err, now)
+	workflowBoundary, workflowOK := prMonitorPendingBoundary(outcome.workflowDeferred, nil, now)
+	if !workflowOK {
+		workflowBoundary, workflowOK = statusBoundary, statusOK
+	}
+	targets := make(map[string]*prMonitorPendingTarget, len(outcome.unfinished)+len(outcome.workflowUnfinished))
+	if statusOK {
+		addPRMonitorPendingWatches(targets, outcome.unfinished, false, statusBoundary)
+	}
+	if workflowOK {
+		addPRMonitorPendingWatches(targets, outcome.workflowUnfinished, true, workflowBoundary)
+	}
+	if len(targets) == 0 {
 		return nil
 	}
-	targets := make(map[string]*prMonitorPendingTarget, len(outcome.unfinished))
-	for _, watch := range outcome.unfinished {
+	return &prMonitorPendingWork{workspaceID: outcome.workspaceID, targets: targets}
+}
+
+// addPRMonitorPendingWatches merges consumers into their provider target. A
+// status consumer always wins the phase marker: it resumes first and the
+// workflow phase then joins the completed status pass.
+func addPRMonitorPendingWatches(
+	targets map[string]*prMonitorPendingTarget, watches []*PRWatch,
+	workflowOnly bool, retryAt time.Time,
+) {
+	for _, watch := range watches {
 		if watch == nil {
 			continue
 		}
 		key := prWatchDiscoveryTargetKey(watch)
 		target := targets[key]
 		if target == nil {
-			target = &prMonitorPendingTarget{watches: make(map[string]*PRWatch), retryAt: retryAt}
+			target = &prMonitorPendingTarget{
+				watches: make(map[string]*PRWatch), retryAt: retryAt, workflowOnly: workflowOnly,
+			}
 			targets[key] = target
+		} else if !workflowOnly {
+			target.workflowOnly = false
 		}
 		target.watches[prMonitorWatchConsumerKey(watch)] = watch
 	}
-	if len(targets) == 0 {
-		return nil
-	}
-	return &prMonitorPendingWork{workspaceID: outcome.workspaceID, targets: targets}
 }
 
 // removePRMonitorPendingConsumer drops only the consumer a pass attempted.
@@ -288,6 +320,9 @@ func mergePRMonitorPendingTarget(
 	for consumerKey, watch := range next.watches {
 		existing.watches[consumerKey] = watch
 	}
+	if !next.workflowOnly {
+		existing.workflowOnly = false
+	}
 	if existing.retryAt.IsZero() || (!next.retryAt.IsZero() && next.retryAt.Before(existing.retryAt)) {
 		existing.retryAt = next.retryAt
 	}
@@ -296,8 +331,10 @@ func mergePRMonitorPendingTarget(
 // prMonitorPendingBoundary prefers the deferral's next authorization boundary,
 // then its positive delay, then the retry floor. A provider deadline is kept as
 // a lower bound and is never replaced by the floor.
-func prMonitorPendingBoundary(outcome prWatchWorkspaceBatchOutcome, now time.Time) (time.Time, bool) {
-	if deferred := outcome.deferred; deferred != nil {
+func prMonitorPendingBoundary(
+	deferred *AdmissionDeferredError, err error, now time.Time,
+) (time.Time, bool) {
+	if deferred != nil {
 		if deferred.RetryAt.After(now) {
 			return deferred.RetryAt.UTC(), true
 		}
@@ -306,7 +343,7 @@ func prMonitorPendingBoundary(outcome prWatchWorkspaceBatchOutcome, now time.Tim
 		}
 		return now.Add(prMonitorPendingRetryFloor), true
 	}
-	if retryAt := prDiscoveryRetryAtFromError(outcome.err); retryAt != nil && retryAt.After(now) {
+	if retryAt := prDiscoveryRetryAtFromError(err); retryAt != nil && retryAt.After(now) {
 		return retryAt.UTC(), true
 	}
 	return time.Time{}, false
@@ -382,7 +419,7 @@ func (p *Poller) prMonitorPendingDeadline() (time.Time, bool) {
 // takeDuePRMonitorPending returns due targets in rotating workspace order.
 // Targets whose own boundary is still in the future stay queued. Entries stay in
 // place until the resumed pass records their new state.
-func (p *Poller) takeDuePRMonitorPending(now time.Time) map[string][]*PRWatch {
+func (p *Poller) takeDuePRMonitorPending(now time.Time) map[string]*prMonitorDueWork {
 	p.pendingMu.Lock()
 	defer p.pendingMu.Unlock()
 	if len(p.pending) == 0 {
@@ -390,7 +427,7 @@ func (p *Poller) takeDuePRMonitorPending(now time.Time) map[string][]*PRWatch {
 	}
 	workspaceIDs := make([]string, 0, len(p.pending))
 	for workspaceID, work := range p.pending {
-		if prMonitorPendingDueWatches(work, now) != nil {
+		if prMonitorPendingDueWork(work, now) != nil {
 			workspaceIDs = append(workspaceIDs, workspaceID)
 		}
 	}
@@ -400,19 +437,20 @@ func (p *Poller) takeDuePRMonitorPending(now time.Time) map[string][]*PRWatch {
 	sort.Strings(workspaceIDs)
 	start := p.pendingCursor % len(workspaceIDs)
 	p.pendingCursor = (start + 1) % len(workspaceIDs)
-	due := make(map[string][]*PRWatch, len(workspaceIDs))
+	due := make(map[string]*prMonitorDueWork, len(workspaceIDs))
 	for offset := range workspaceIDs {
 		work := p.pending[workspaceIDs[(start+offset)%len(workspaceIDs)]]
-		if watches := prMonitorPendingDueWatches(work, now); len(watches) > 0 {
-			due[work.workspaceID] = watches
+		if next := prMonitorPendingDueWork(work, now); next != nil {
+			due[work.workspaceID] = next
 		}
 	}
 	return due
 }
 
-// prMonitorPendingDueWatches lists every consumer of due targets, sorted for a
-// stable wake order. Each consumer appears once.
-func prMonitorPendingDueWatches(work *prMonitorPendingWork, now time.Time) []*PRWatch {
+// prMonitorPendingDueWork lists every consumer of due targets, sorted for a
+// stable wake order and split by the phase that must resume. Each consumer
+// appears once.
+func prMonitorPendingDueWork(work *prMonitorPendingWork, now time.Time) *prMonitorDueWork {
 	if work == nil {
 		return nil
 	}
@@ -426,25 +464,35 @@ func prMonitorPendingDueWatches(work *prMonitorPendingWork, now time.Time) []*PR
 		return nil
 	}
 	sort.Strings(targetKeys)
-	consumerKeys := make([]string, 0, len(targetKeys))
-	byConsumer := make(map[string]*PRWatch)
+	due := &prMonitorDueWork{}
+	seen := make(map[string]struct{})
 	for _, key := range targetKeys {
-		for consumerKey, watch := range work.targets[key].watches {
+		target := work.targets[key]
+		consumerKeys := make([]string, 0, len(target.watches))
+		for consumerKey := range target.watches {
+			consumerKeys = append(consumerKeys, consumerKey)
+		}
+		sort.Strings(consumerKeys)
+		for _, consumerKey := range consumerKeys {
+			watch := target.watches[consumerKey]
 			if watch == nil {
 				continue
 			}
-			if _, exists := byConsumer[consumerKey]; !exists {
-				byConsumer[consumerKey] = watch
-				consumerKeys = append(consumerKeys, consumerKey)
+			if _, exists := seen[consumerKey]; exists {
+				continue
 			}
+			seen[consumerKey] = struct{}{}
+			if target.workflowOnly {
+				due.workflow = append(due.workflow, watch)
+				continue
+			}
+			due.status = append(due.status, watch)
 		}
 	}
-	sort.Strings(consumerKeys)
-	watches := make([]*PRWatch, 0, len(consumerKeys))
-	for _, consumerKey := range consumerKeys {
-		watches = append(watches, byConsumer[consumerKey])
+	if len(due.status) == 0 && len(due.workflow) == 0 {
+		return nil
 	}
-	return watches
+	return due
 }
 
 // resumePRMonitorPending retries due unfinished work through the normal batched
@@ -457,21 +505,69 @@ func (p *Poller) resumePRMonitorPending(ctx context.Context) {
 	if len(due) == 0 {
 		return
 	}
-	eligible := make(map[string][]*PRWatch, len(due))
-	for workspaceID, watches := range due {
-		remaining := p.filterOpenCircuitWatches(ctx, watches)
-		if len(remaining) == 0 {
+	statusByWorkspace := make(map[string][]*PRWatch, len(due))
+	workflowByWorkspace := make(map[string][]*PRWatch, len(due))
+	for workspaceID, work := range due {
+		statuses := p.filterOpenCircuitWatches(ctx, work.status)
+		workflow := p.filterOpenCircuitWatches(ctx, work.workflow)
+		if len(statuses) == 0 && len(workflow) == 0 {
 			p.deferPRMonitorPendingWorkspace(workspaceID, now.Add(defaultPRPollInterval), now)
 			continue
 		}
-		eligible[workspaceID] = remaining
+		if len(statuses) > 0 {
+			statusByWorkspace[workspaceID] = statuses
+		}
+		if len(workflow) > 0 {
+			workflowByWorkspace[workspaceID] = workflow
+		}
 	}
-	if len(eligible) == 0 {
+	if len(statusByWorkspace) == 0 && len(workflowByWorkspace) == 0 {
 		return
 	}
-	outcomes := p.runBatchedPRWatchCheck(ctx, eligible)
+	outcomes := p.runBatchedPRWatchCheck(ctx, statusByWorkspace)
+	outcomes = append(outcomes, p.runWorkflowPhaseWakes(ctx, workflowByWorkspace)...)
 	p.recordPRMonitorPending(ctx, outcomes, p.now())
 	p.logger.Debug("resumed deferred PR monitoring", zap.Int("workspaces", len(outcomes)))
+}
+
+// runWorkflowPhaseWakes resumes Actions-attention work alone. A status phase
+// is never re-fetched or republished by these wakes.
+func (p *Poller) runWorkflowPhaseWakes(
+	ctx context.Context, byWorkspace map[string][]*PRWatch,
+) []prWatchWorkspaceBatchOutcome {
+	if len(byWorkspace) == 0 {
+		return nil
+	}
+	workspaceIDs := make([]string, 0, len(byWorkspace))
+	for workspaceID := range byWorkspace {
+		workspaceIDs = append(workspaceIDs, workspaceID)
+	}
+	sort.Strings(workspaceIDs)
+	outcomes := make([]prWatchWorkspaceBatchOutcome, 0, len(workspaceIDs))
+	for _, workspaceID := range workspaceIDs {
+		watches := byWorkspace[workspaceID]
+		syncOutcome := p.service.runWorkspaceWorkflowPhaseForPoller(ctx, workspaceID, watches)
+		p.circuits.recordError(workspaceID, syncOutcome.Err, time.Now().UTC())
+		outcome := prWatchWorkspaceBatchOutcome{
+			workspaceID:        workspaceID,
+			watches:            watches,
+			results:            syncOutcome.Results,
+			workflowUnfinished: prWatchWorkflowPendingWatches(syncOutcome.Pending),
+			deferred:           syncOutcome.Deferred,
+			workflowDeferred:   syncOutcome.WorkflowDeferred,
+			err:                syncOutcome.Err,
+		}
+		if len(outcome.workflowUnfinished) > 0 || outcome.deferred != nil {
+			outcome.state = prWatchBatchDeferred
+		} else {
+			outcome.state = prWatchBatchCompleted
+		}
+		outcomes = append(outcomes, outcome)
+		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			break
+		}
+	}
+	return outcomes
 }
 
 // refreshPRMonitorPendingTargets revalidates retained consumers against the

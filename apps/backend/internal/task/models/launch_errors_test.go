@@ -239,6 +239,96 @@ func TestLoadLastAgentErrorKeepsCauseWhenOptionalEvidenceIsMalformed(t *testing.
 	require.Nil(t, cause.PromptNotSent)
 }
 
+func TestCopilotPluginPreparationCauseRoundTripsSafeEvidence(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyLastAgentError: map[string]interface{}{
+			"message":     "The selected Copilot plugins could not be prepared.",
+			"occurred_at": "2026-11-05T10:00:00Z",
+			"causes": []map[string]interface{}{{
+				"operation":       AgentErrorCauseOperationStart,
+				"code":            "plugin_preparation_failed",
+				"detail":          "The selected Copilot plugins could not be prepared.",
+				"reason":          "invalid_inventory",
+				"runtime_version": "9.9.9",
+			}},
+		},
+	}
+
+	lastError, ok := LoadLastAgentError(metadata)
+	require.True(t, ok)
+	require.Len(t, lastError.Causes, 1)
+	encoded, err := json.Marshal(lastError.Causes[0])
+	require.NoError(t, err)
+	var cause map[string]interface{}
+	require.NoError(t, json.Unmarshal(encoded, &cause))
+	require.Equal(t, "plugin_preparation_failed", cause["code"])
+	require.Equal(t, "invalid_inventory", cause["reason"])
+	require.Equal(t, "9.9.9", cause["runtime_version"])
+}
+
+func TestCopilotPluginPreparationCauseDropsInvalidEvidence(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyLastAgentError: map[string]interface{}{
+			"message":     "The agent could not start.",
+			"occurred_at": "2026-11-05T10:00:00Z",
+			"causes": []map[string]interface{}{{
+				"operation":       AgentErrorCauseOperationStart,
+				"code":            "plugin_preparation_failed",
+				"detail":          "private native document /home/private",
+				"reason":          "private_native_document",
+				"runtime_version": "9.9.9 /home/private",
+			}},
+		},
+	}
+
+	lastError, ok := LoadLastAgentError(metadata)
+	require.True(t, ok)
+	require.Len(t, lastError.Causes, 1)
+	encoded, err := json.Marshal(lastError.Causes[0])
+	require.NoError(t, err)
+	var cause map[string]interface{}
+	require.NoError(t, json.Unmarshal(encoded, &cause))
+	require.Equal(t, "plugin_preparation_failed", cause["code"])
+	require.NotContains(t, cause, "reason")
+	require.NotContains(t, cause, "runtime_version")
+	require.NotContains(t, string(encoded), "private native document")
+	require.Equal(t, AgentErrorCausePluginPreparationDetail, cause["detail"])
+}
+
+func TestSafeAgentErrorRuntimeVersionMatchesManagedSelector(t *testing.T) {
+	for _, version := range []string{"1.0.104", "10.20.30+build.7"} {
+		require.Equal(t, version, safeAgentErrorRuntimeVersion(version))
+	}
+	for _, version := range []string{
+		"1.2.3-beta.1", "latest", "^1.2.3", "@github/copilot@1.2.3", "1.2.3 /home/private", "1.2.3\x00",
+	} {
+		require.Empty(t, safeAgentErrorRuntimeVersion(version), "version %q must be rejected", version)
+	}
+}
+
+func TestNonPluginAgentErrorCausesDropRuntimeVersionEvidence(t *testing.T) {
+	causes := NormalizeAgentErrorCauses([]AgentErrorCause{
+		{
+			Operation:      AgentErrorCauseOperationStart,
+			Code:           AgentErrorCauseCodeModelUnavailable,
+			Reason:         AgentErrorCauseReasonRequestedNotAdvertised,
+			RequestedModel: "provider-model",
+			RuntimeVersion: "1.0.105 /private/path",
+		},
+		{
+			Operation:      AgentErrorCauseOperationStart,
+			Code:           AgentErrorCauseCodePermissionModeFailed,
+			Reason:         AgentErrorCauseReasonApplicationFailed,
+			RequestedMode:  "safe",
+			RuntimeVersion: "1.0.105 /private/path",
+		},
+	})
+	require.Len(t, causes, 2)
+	for _, cause := range causes {
+		require.Empty(t, cause.RuntimeVersion)
+	}
+}
+
 func TestSelectionCauseRoundTrip(t *testing.T) {
 	metadata := map[string]interface{}{
 		SessionMetaKeyLastAgentError: map[string]interface{}{

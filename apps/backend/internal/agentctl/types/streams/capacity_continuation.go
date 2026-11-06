@@ -4,8 +4,11 @@ package streams
 type CapacityContinuationSupport string
 
 const (
-	CapacityContinuationCodexLiveSessionV1 CapacityContinuationSupport = "codex_live_session_v1"
-	CapacityContinuationMockLiveSessionV1  CapacityContinuationSupport = "mock_live_session_v1"
+	CapacityContinuationCodexLiveSessionV1    CapacityContinuationSupport = "codex_live_session_v1"
+	CapacityContinuationCodexLiveSessionV2    CapacityContinuationSupport = "codex_live_session_v2"
+	CapacityContinuationOpenCodeLiveSessionV1 CapacityContinuationSupport = "opencode_live_session_v1"
+	CapacityContinuationMockLiveSessionV1     CapacityContinuationSupport = "mock_live_session_v1"
+	CapacityContinuationMockLiveSessionV2     CapacityContinuationSupport = "mock_live_session_v2"
 )
 
 // CapacityContinuationSnapshot contains only bounded outcome evidence for one prompt.
@@ -20,17 +23,39 @@ type CapacityContinuationSnapshot struct {
 	PermissionPending     bool                        `json:"permission_pending"`
 	UnaccountedBackground bool                        `json:"unaccounted_background"`
 	CompletedTools        uint16                      `json:"completed_tools"`
+	// KnownFailedShellTools counts commands that ended with authoritative
+	// nonzero terminal evidence. They remain failed in history but do not
+	// block V2 capacity continuation.
+	KnownFailedShellTools uint16 `json:"known_failed_shell_tools,omitempty"`
 }
 
-// SafeFor reports whether this exact prompt has only provider-confirmed completed work.
-func (s *CapacityContinuationSnapshot) SafeFor(generation uint64) bool {
-	if s == nil || generation == 0 || s.PromptGeneration != generation || !s.EvidenceComplete ||
-		s.CompletedTools == 0 || s.PendingTools || s.FailedTools || s.UnknownOutcomes || s.PermissionPending || s.UnaccountedBackground {
+// SupportsKnownFailedShellTools reports whether this support version accepts
+// confirmed terminal command failures as capacity continuation evidence.
+func (s *CapacityContinuationSnapshot) SupportsKnownFailedShellTools() bool {
+	if s == nil {
 		return false
 	}
 	switch s.Support {
-	case CapacityContinuationCodexLiveSessionV1, CapacityContinuationMockLiveSessionV1:
+	case CapacityContinuationCodexLiveSessionV2, CapacityContinuationMockLiveSessionV2:
 		return true
+	default:
+		return false
+	}
+}
+
+// SafeFor reports whether this exact prompt has only bounded, provider-confirmed
+// work that the versioned contract permits.
+func (s *CapacityContinuationSnapshot) SafeFor(generation uint64) bool {
+	if s == nil || generation == 0 || s.PromptGeneration != generation || !s.EvidenceComplete ||
+		s.PendingTools || s.FailedTools || s.UnknownOutcomes || s.PermissionPending || s.UnaccountedBackground {
+		return false
+	}
+	switch s.Support {
+	case CapacityContinuationCodexLiveSessionV1, CapacityContinuationOpenCodeLiveSessionV1,
+		CapacityContinuationMockLiveSessionV1:
+		return s.CompletedTools > 0 && s.KnownFailedShellTools == 0
+	case CapacityContinuationCodexLiveSessionV2, CapacityContinuationMockLiveSessionV2:
+		return s.CompletedTools > 0 || s.KnownFailedShellTools > 0
 	default:
 		return false
 	}

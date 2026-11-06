@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/common/modelcatalog"
 )
 
 // Status reports the state of a host utility instance for a given agent type.
@@ -100,13 +101,14 @@ type Mode struct {
 }
 
 type ConfigOption struct {
-	Type         string               `json:"type"`
-	ID           string               `json:"id"`
-	Name         string               `json:"name"`
-	Description  string               `json:"description,omitempty"`
-	CurrentValue string               `json:"current_value"`
-	Category     string               `json:"category,omitempty"`
-	Options      []ConfigOptionChoice `json:"options,omitempty"`
+	Type         string                `json:"type"`
+	ID           string                `json:"id"`
+	Name         string                `json:"name"`
+	Description  string                `json:"description,omitempty"`
+	CurrentValue string                `json:"current_value"`
+	Category     string                `json:"category,omitempty"`
+	Options      []ConfigOptionChoice  `json:"options,omitempty"`
+	Catalog      *modelcatalog.Catalog `json:"catalog,omitempty"`
 }
 
 type ConfigOptionChoice struct {
@@ -145,6 +147,7 @@ type ProfileCapabilityRequest struct {
 type ProfileCapabilityResult struct {
 	Capabilities    AgentCapabilities
 	ContextRevision string
+	ReasonCode      string `json:"-"`
 }
 
 // ModelConfigResolution is the provider's complete option snapshot for one
@@ -156,6 +159,7 @@ type ModelConfigResolution struct {
 	ConfigOptions   []ConfigOption
 	Error           string
 	ContextRevision string
+	ReasonCode      string `json:"-"`
 }
 
 // PromptResult is returned from ExecutePrompt and RawPrompt calls.

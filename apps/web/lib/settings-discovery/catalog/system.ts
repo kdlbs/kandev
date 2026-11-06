@@ -64,6 +64,7 @@ export const SYSTEM_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
   },
   {
     id: "system-retention",
+    requires: "office",
     kind: "section",
     labelKey: "system:navRetention",
     parentId: SYSTEM_STORAGE_DISCOVERY_ID,

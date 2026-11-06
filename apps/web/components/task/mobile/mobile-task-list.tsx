@@ -8,6 +8,7 @@ import { applyView } from "@/lib/sidebar/apply-view";
 import { useAppStore } from "@/components/state-provider";
 import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
+import { useUnreadTaskDotDisplay } from "@/hooks/domains/sidebar/use-unread-task-dot-display";
 import { buildMobileTaskSwitcherProps } from "./session-task-switcher-sheet-props";
 import { SidebarTaskQueryStatus } from "../sidebar-task-query-status";
 import { SidebarTaskPagination } from "../sidebar-task-pagination";
@@ -38,8 +39,6 @@ export type MobileTaskListProps = {
   onArchiveTask: (taskId: string, opts?: { cascade?: boolean }) => void;
   onDeleteTask: (taskId: string) => Promise<void> | void;
   onDetachTask: (taskId: string) => Promise<void> | void;
-  archivingTaskId?: string | null;
-  isArchiving?: boolean;
   onNestTask?: (taskId: string, parentTaskId: string) => void;
   onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
   onLinkIssue?: (taskId: string, taskTitle?: string) => void;
@@ -79,6 +78,7 @@ export function MobileTaskList(props: MobileTaskListProps) {
   } = useSidebarTaskPrefs();
   const collapsedSubtaskParents = useAppStore((s) => s.collapsedSubtaskParents);
   const toggleSubtaskCollapsed = useAppStore((s) => s.toggleSubtaskCollapsed);
+  const unreadDotDisplay = useUnreadTaskDotDisplay();
   const handleToggleGroup = useSidebarGroupToggle(view.id);
   // See useGroupedSidebarView: the executorType group label is catalog-backed.
   const { i18n } = useTranslation();
@@ -118,6 +118,7 @@ export function MobileTaskList(props: MobileTaskListProps) {
     showActivityTime: sidebarSortHasKey(view.sort, "lastActivityAt"),
     groupIndent: view.groupIndent,
     taskRowPresentation: view.taskRow,
+    ...unreadDotDisplay,
   });
   return (
     <>

@@ -121,7 +121,7 @@ beforeEach(() => {
   mockHistory.getItem.mockReset();
 });
 
-// @covers AC-TASKS-TURN-CHANGES-004.8
+// @covers AC-TASKS-TURN-CHANGES-004.15
 describe("turn change subscription handoff", () => {
   it("refreshes an initial pending capture after subscription acknowledgment", async () => {
     let acknowledge!: () => void;

@@ -324,6 +324,12 @@ func (h *ShellHandlers) wsUserShellList(ctx context.Context, msg *ws.Message) (*
 			return nil, fmt.Errorf("list ordinary terminals: %w", err)
 		}
 		for _, it := range ordinary {
+			// An environment-qualified list may only contain rows that belong
+			// to that environment. Service.List is task-wide because tasks can
+			// span environments; the requested scope wins here.
+			if it.EnvironmentID != req.TaskEnvironmentID {
+				continue
+			}
 			items = append(items, userShellListItem{
 				ID:             it.ID,
 				Kind:           it.Kind,
@@ -823,6 +829,13 @@ func (h *ShellHandlers) httpListTaskTerminals(c *gin.Context) {
 			return
 		}
 		for _, it := range ordinary {
+			// The task-only list stays task-wide. When the caller also names
+			// an environment, the request is environment-qualified: merging a
+			// sibling environment's ordinary rows with this environment's
+			// unmanaged shells would mix unrelated scopes.
+			if envID != "" && it.EnvironmentID != envID {
+				continue
+			}
 			items = append(items, userShellListItem{
 				ID:             it.ID,
 				Kind:           it.Kind,

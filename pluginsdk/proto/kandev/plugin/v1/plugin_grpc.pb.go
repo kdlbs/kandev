@@ -822,6 +822,9 @@ const (
 	Host_ListPendingTaskTransitionsExact_FullMethodName            = "/kandev.plugin.v1.Host/ListPendingTaskTransitionsExact"
 	Host_ListChangeRequestEvidenceExact_FullMethodName             = "/kandev.plugin.v1.Host/ListChangeRequestEvidenceExact"
 	Host_ListTaskUsageExact_FullMethodName                         = "/kandev.plugin.v1.Host/ListTaskUsageExact"
+	Host_ListAutomationDefinitionsExact_FullMethodName             = "/kandev.plugin.v1.Host/ListAutomationDefinitionsExact"
+	Host_ListAutomationRunsExact_FullMethodName                    = "/kandev.plugin.v1.Host/ListAutomationRunsExact"
+	Host_GetAutomationRunExact_FullMethodName                      = "/kandev.plugin.v1.Host/GetAutomationRunExact"
 	Host_GetState_FullMethodName                                   = "/kandev.plugin.v1.Host/GetState"
 	Host_SetState_FullMethodName                                   = "/kandev.plugin.v1.Host/SetState"
 	Host_DeleteState_FullMethodName                                = "/kandev.plugin.v1.Host/DeleteState"
@@ -962,6 +965,12 @@ type HostClient interface {
 	ListPendingTaskTransitionsExact(ctx context.Context, in *ListPendingTaskTransitionsExactRequest, opts ...grpc.CallOption) (*ListPendingTaskTransitionsExactResponse, error)
 	ListChangeRequestEvidenceExact(ctx context.Context, in *ListChangeRequestEvidenceExactRequest, opts ...grpc.CallOption) (*ListChangeRequestEvidenceExactResponse, error)
 	ListTaskUsageExact(ctx context.Context, in *ListTaskUsageExactRequest, opts ...grpc.CallOption) (*ListTaskUsageExactResponse, error)
+	// Workspace-authorized automation history reads. Definitions and runs use
+	// the shared bounded exact-read snapshot; GetAutomationRunExact refreshes one
+	// known run through its owning workspace.
+	ListAutomationDefinitionsExact(ctx context.Context, in *ListAutomationDefinitionsExactRequest, opts ...grpc.CallOption) (*ListAutomationDefinitionsExactResponse, error)
+	ListAutomationRunsExact(ctx context.Context, in *ListAutomationRunsExactRequest, opts ...grpc.CallOption) (*ListAutomationRunsExactResponse, error)
+	GetAutomationRunExact(ctx context.Context, in *GetAutomationRunExactRequest, opts ...grpc.CallOption) (*GetAutomationRunExactResponse, error)
 	GetState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*GetStateResponse, error)
 	SetState(ctx context.Context, in *SetStateRequest, opts ...grpc.CallOption) (*SetStateResponse, error)
 	DeleteState(ctx context.Context, in *DeleteStateRequest, opts ...grpc.CallOption) (*DeleteStateResponse, error)
@@ -1688,6 +1697,36 @@ func (c *hostClient) ListTaskUsageExact(ctx context.Context, in *ListTaskUsageEx
 	return out, nil
 }
 
+func (c *hostClient) ListAutomationDefinitionsExact(ctx context.Context, in *ListAutomationDefinitionsExactRequest, opts ...grpc.CallOption) (*ListAutomationDefinitionsExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAutomationDefinitionsExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListAutomationDefinitionsExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListAutomationRunsExact(ctx context.Context, in *ListAutomationRunsExactRequest, opts ...grpc.CallOption) (*ListAutomationRunsExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAutomationRunsExactResponse)
+	err := c.cc.Invoke(ctx, Host_ListAutomationRunsExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetAutomationRunExact(ctx context.Context, in *GetAutomationRunExactRequest, opts ...grpc.CallOption) (*GetAutomationRunExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAutomationRunExactResponse)
+	err := c.cc.Invoke(ctx, Host_GetAutomationRunExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) GetState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*GetStateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetStateResponse)
@@ -2213,6 +2252,12 @@ type HostServer interface {
 	ListPendingTaskTransitionsExact(context.Context, *ListPendingTaskTransitionsExactRequest) (*ListPendingTaskTransitionsExactResponse, error)
 	ListChangeRequestEvidenceExact(context.Context, *ListChangeRequestEvidenceExactRequest) (*ListChangeRequestEvidenceExactResponse, error)
 	ListTaskUsageExact(context.Context, *ListTaskUsageExactRequest) (*ListTaskUsageExactResponse, error)
+	// Workspace-authorized automation history reads. Definitions and runs use
+	// the shared bounded exact-read snapshot; GetAutomationRunExact refreshes one
+	// known run through its owning workspace.
+	ListAutomationDefinitionsExact(context.Context, *ListAutomationDefinitionsExactRequest) (*ListAutomationDefinitionsExactResponse, error)
+	ListAutomationRunsExact(context.Context, *ListAutomationRunsExactRequest) (*ListAutomationRunsExactResponse, error)
+	GetAutomationRunExact(context.Context, *GetAutomationRunExactRequest) (*GetAutomationRunExactResponse, error)
 	GetState(context.Context, *GetStateRequest) (*GetStateResponse, error)
 	SetState(context.Context, *SetStateRequest) (*SetStateResponse, error)
 	DeleteState(context.Context, *DeleteStateRequest) (*DeleteStateResponse, error)
@@ -2511,6 +2556,15 @@ func (UnimplementedHostServer) ListChangeRequestEvidenceExact(context.Context, *
 }
 func (UnimplementedHostServer) ListTaskUsageExact(context.Context, *ListTaskUsageExactRequest) (*ListTaskUsageExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTaskUsageExact not implemented")
+}
+func (UnimplementedHostServer) ListAutomationDefinitionsExact(context.Context, *ListAutomationDefinitionsExactRequest) (*ListAutomationDefinitionsExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAutomationDefinitionsExact not implemented")
+}
+func (UnimplementedHostServer) ListAutomationRunsExact(context.Context, *ListAutomationRunsExactRequest) (*ListAutomationRunsExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAutomationRunsExact not implemented")
+}
+func (UnimplementedHostServer) GetAutomationRunExact(context.Context, *GetAutomationRunExactRequest) (*GetAutomationRunExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetAutomationRunExact not implemented")
 }
 func (UnimplementedHostServer) GetState(context.Context, *GetStateRequest) (*GetStateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetState not implemented")
@@ -3757,6 +3811,60 @@ func _Host_ListTaskUsageExact_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_ListAutomationDefinitionsExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAutomationDefinitionsExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListAutomationDefinitionsExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListAutomationDefinitionsExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListAutomationDefinitionsExact(ctx, req.(*ListAutomationDefinitionsExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListAutomationRunsExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAutomationRunsExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListAutomationRunsExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListAutomationRunsExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListAutomationRunsExact(ctx, req.(*ListAutomationRunsExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetAutomationRunExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAutomationRunExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetAutomationRunExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetAutomationRunExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetAutomationRunExact(ctx, req.(*GetAutomationRunExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_GetState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetStateRequest)
 	if err := dec(in); err != nil {
@@ -4756,6 +4864,18 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTaskUsageExact",
 			Handler:    _Host_ListTaskUsageExact_Handler,
+		},
+		{
+			MethodName: "ListAutomationDefinitionsExact",
+			Handler:    _Host_ListAutomationDefinitionsExact_Handler,
+		},
+		{
+			MethodName: "ListAutomationRunsExact",
+			Handler:    _Host_ListAutomationRunsExact_Handler,
+		},
+		{
+			MethodName: "GetAutomationRunExact",
+			Handler:    _Host_GetAutomationRunExact_Handler,
 		},
 		{
 			MethodName: "GetState",

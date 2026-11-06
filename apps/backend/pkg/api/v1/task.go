@@ -254,6 +254,9 @@ type MessageAttachment struct {
 	Name         string `json:"name,omitempty"`          // Display name (e.g., filename)
 	SizeBytes    int64  `json:"size_bytes,omitempty"`    // Raw byte size for file-backed descriptors
 	DeliveryMode string `json:"delivery_mode,omitempty"` // "prompt" (native/default) or "path"
+	// Path is a trusted runtime-only executor path. It is never serialized into
+	// durable message or queue metadata.
+	Path string `json:"-"`
 }
 
 func (a MessageAttachment) HasValidDeliveryMode() bool {
@@ -288,6 +291,10 @@ type Message struct {
 	// ascending, ties by id ascending), present only on user messages
 	// produced by an indexed server payload; omitted when zero.
 	PromptIndex int `json:"prompt_index,omitempty"`
+	// TurnErrorAcknowledgementFailed is response-only feedback for an accepted
+	// manual prompt whose client-observed turn-error acknowledgement could not
+	// be persisted. The message itself was accepted; the badge remains visible.
+	TurnErrorAcknowledgementFailed bool `json:"turn_error_acknowledgement_failed,omitempty"`
 }
 
 // CreateMessageRequest for adding a message to a task session

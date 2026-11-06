@@ -546,6 +546,11 @@ func (h *TerminalHandler) startUserShellProcess(
 	return info.ID, 0, ""
 }
 
+// errTerminalNotFound is the non-disclosing launch error. Missing metadata,
+// a foreign environment, and an unauthorized owner share it so a caller
+// cannot distinguish them.
+const errTerminalNotFound = "terminal not found"
+
 func (h *TerminalHandler) resolveOrdinaryTerminalLaunch(
 	c *gin.Context,
 	execution *lifecycle.AgentExecution,
@@ -554,11 +559,31 @@ func (h *TerminalHandler) resolveOrdinaryTerminalLaunch(
 	if h.terminalSvc == nil || !terminalservice.IsManaged(terminalID) {
 		return label, initialCommand, false, ""
 	}
-	info, err := h.terminalSvc.ClaimShellLaunchInfo(c.Request.Context(), execution.TaskID, scopeID, terminalID)
+	// Ownership comes from persisted terminal metadata, never from the
+	// execution that happens to serve this environment. Tasks can share one
+	// environment, so execution.TaskID may name a sibling task.
+	owner, err := h.terminalSvc.OwnerForTerminal(c.Request.Context(), scopeID, terminalID)
+	if err != nil {
+		h.logger.Warn("failed to resolve persisted terminal owner",
+			zap.String("session_id", execution.SessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Error(err))
+		return "", "", false, errTerminalNotFound
+	}
+	if err := h.lifecycleMgr.CheckTaskEnvironmentAccess(c.Request.Context(), owner, scopeID); err != nil {
+		h.logger.Warn("terminal owner is not authorized for this environment",
+			zap.String("session_id", execution.SessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Error(err))
+		return "", "", false, errTerminalNotFound
+	}
+	// The one-shot command is consumed only after the task/environment pair
+	// above is authorized.
+	info, err := h.terminalSvc.ClaimShellLaunchInfo(c.Request.Context(), owner, scopeID, terminalID)
 	if err != nil {
 		h.logger.Warn("failed to resolve persisted terminal launch info",
 			zap.String("session_id", execution.SessionID), zap.Error(err))
-		return "", "", false, "terminal not found"
+		return "", "", false, errTerminalNotFound
 	}
 	return info.Label, info.InitialCommand, info.InitialCommandOnce, ""
 }

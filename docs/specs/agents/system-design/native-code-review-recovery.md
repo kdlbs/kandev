@@ -3,6 +3,7 @@ status: current
 system: agents
 requirements:
   - REQ-AGENTS-NATIVE-CODE-REVIEW-001
+  - REQ-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-001
 ---
 
 # Abandoned native review admission
@@ -41,6 +42,44 @@ that entry identity can start fresh work.
 AC-AGENTS-NATIVE-CODE-REVIEW-001.14 is satisfied by the task claim, classified
 native settlement, terminal readback and retained entry-ID deduplication. No
 schema, timer, provider retry policy or public command is added.
+
+AC-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-001.1 through .4 are satisfied by the
+task-bound local source fallback. `ReviewChangeSource` first uses the existing
+execution lookup, which checks `session.exec` before it reads agentctl data. If
+that read fails, the source checks `session.exec` again before it calls the
+local reader. A missing access checker or a denied check stops the fallback
+before the local reader opens the persisted checkout. An agentctl cumulative
+diff response with an error state also enters the fallback. A remote executor
+still requires agentctl.
+
+The backend reader (`internal/backendapp/review_local_source.go`) admits only
+`local`, `worktree`, and `local_pc` executors. It uses the persisted session
+worktree paths and accepts no caller-supplied filesystem path. The local Git
+collector rejects a path that is not absolute and local or that carries a `..`
+segment. Its per-file, output, and total diff limits match agentctl. The
+per-file limit checks the working file, base blob, and index blob before a
+staged-only diff is read.
+
+Working-tree, index-only, untracked, and committed changes remain separate
+sources. Both agentctl and the local collector use the bounded formatter in
+`internal/common/unidiff` for untracked files. This keeps normalized patch text
+and hashes consistent across the two sources.
+
+For committed changes, the reader finds the `TaskRepository` row for the
+session task and repository. If that attachment has a validated
+`comparison_target`, the reader resolves only its `ComparisonRef`. A missing or
+unmergeable ref returns `review_workspace_unavailable`; it does not fall back
+to a same-named origin branch or a stored base. Without an explicit target, the
+reader keeps the live target branch (`origin/<branch>` first, then the local
+branch), with the stored session base as its fallback. This excludes changes
+already merged from an ordinary target. A single repository keeps the legacy
+bare-path scope key. A multi-repository task uses its workspace-relative
+repository path, matching the Review panel.
+
+`CollectChanges` propagates a committed-source `review_workspace_unavailable`
+error. It does not start a partial review when an explicit comparison target
+cannot be resolved. Other committed-source errors remain non-fatal so valid
+working-tree changes can still be reviewed when no committed range exists.
 
 
 ## Permanent verification

@@ -72,6 +72,21 @@ type VirtualAgent interface {
 	IsVirtual() bool
 }
 
+// LocalInstallAgent is an agent whose runtime can be installed explicitly
+// through the server-owned install job path. The implementation owns the
+// trusted artifact table; requests never supply a URL or version.
+type LocalInstallAgent interface {
+	SupportsLocalInstall() bool
+	LocalInstall(ctx context.Context, progress func(string)) error
+}
+
+// LocalRuntimeAgent resolves a complete local runtime executable and the
+// environment entries that pin its validated helper. It is only consulted for
+// host-local executions.
+type LocalRuntimeAgent interface {
+	ResolveLocalRuntime(ctx context.Context) (Command, map[string]string, error)
+}
+
 // StoredProfilePreserver marks a disabled optional agent whose saved profiles
 // remain valid historical configuration and must not be orphan-cleaned.
 type StoredProfilePreserver interface {

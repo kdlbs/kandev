@@ -30,6 +30,9 @@ type PromptContext struct {
 	// prompt body. Office runs build their prompt from a template rather than
 	// the durable step, so move instructions ride on the run payload.
 	OneTimeInstructions string
+	RoutineID           string
+	RoutineName         string
+	RoutineDescription  string
 
 	// Task fields
 	TaskID          string
@@ -43,6 +46,11 @@ type PromptContext struct {
 	CommentBody       string
 	CommentAuthor     string
 	CommentAuthorType string
+
+	// Handoff completion fields come from the durable delivery-task record.
+	HandoffDeliveryTaskID string
+	HandoffDeliveryTitle  string
+	HandoffDeliveryState  string
 
 	// Blocker fields
 	ResolvedBlockerTitles []string
@@ -123,6 +131,8 @@ func BuildPrompt(pc *PromptContext) string {
 		} else {
 			prompt = buildTaskCommentPrompt(pc)
 		}
+	case RunReasonHandoffCompleted:
+		prompt = buildHandoffCompletedPrompt(pc)
 	case RunReasonTaskBlockersResolved:
 		prompt = buildBlockersResolvedPrompt(pc)
 	case legacyRunReasonBlockersResolved:
@@ -143,6 +153,9 @@ func BuildPrompt(pc *PromptContext) string {
 		prompt = fmt.Sprintf("You have been woken for reason: %s.", pc.Reason)
 	}
 	prompt = appendOneTimeInstructions(prompt, pc.OneTimeInstructions)
+	if pc.RoutineID != "" {
+		prompt += fmt.Sprintf("\n\n## Routine work contract\n\nRoutine: %s (%s)\n\n%s\n\nPreserve the target, evidence locations, and result references above. Reuse existing work; do not replay completed tasks. Record a result reference or the exact blocker; a successful wake is not completion of the routine's work.", pc.RoutineName, pc.RoutineID, pc.RoutineDescription)
+	}
 	prompt = appendMissedTicksSection(prompt, pc)
 	prompt = appendHandoffSection(prompt, pc.HandoffContext)
 	return appendRuntimeContext(prompt, pc)
@@ -411,6 +424,21 @@ func buildTaskCommentPrompt(pc *PromptContext) string {
 	}
 	fmt.Fprintf(&b, "Comment: %s\n", pc.CommentBody)
 	b.WriteString("Address this comment.")
+	return b.String()
+}
+
+func buildHandoffCompletedPrompt(pc *PromptContext) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "The handed-off task %q (%s) reached state %s.\n",
+		pc.HandoffDeliveryTitle, pc.HandoffDeliveryTaskID, pc.HandoffDeliveryState)
+	if pc.CommentBody != "" {
+		fmt.Fprintf(&b, "\nCompletion report:\n%s\n", pc.CommentBody)
+		fmt.Fprintf(&b, "\nReview the completion report for your task %s: %s, then continue if work remains.",
+			taskRef(pc), pc.TaskTitle)
+	} else {
+		fmt.Fprintf(&b, "\nReview this completion status for your task %s: %s, then continue if work remains.",
+			taskRef(pc), pc.TaskTitle)
+	}
 	return b.String()
 }
 

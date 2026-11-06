@@ -1,7 +1,13 @@
 "use client";
 
 import { IconCheck, IconCornerDownLeft, IconArrowLeft, IconArrowRight } from "@tabler/icons-react";
-import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  type ClipboardEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { Textarea } from "@kandev/ui/textarea";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
@@ -10,6 +16,7 @@ import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip"
 import { KEYS } from "@/lib/keyboard/constants";
 import { useTranslation } from "react-i18next";
 import { ClarificationMarkdown } from "./clarification-markdown";
+import { readClipboardAttachments } from "./clipboard-attachments";
 
 // Grow the custom-answer box up to ~6 lines, then scroll internally so the
 // clarification overlay stays compact.
@@ -197,6 +204,11 @@ type CustomInputProps = {
   // Called after Cmd/Ctrl+Enter so the parent can attempt a batch submit
   // (no-op when not all questions are answered yet).
   onRequestFinalSubmit?: () => void;
+  attachmentActions?: ReactNode;
+  onPasteFiles?: (files: File[], issue?: "unreadable-image") => void;
+  showFinalSubmit?: boolean;
+  finalSubmitDisabled?: boolean;
+  onFinalSubmit?: () => void;
 };
 
 // Trailing controls for the custom-answer row. Hardware keyboards get the
@@ -209,14 +221,41 @@ function CustomInputControls({
   isSubmitting,
   overLimit,
   onSubmit,
+  showFinalSubmit = false,
+  finalSubmitDisabled = true,
+  onFinalSubmit,
 }: {
   isFinePointer: boolean;
   trimmed: string;
   isSubmitting: boolean;
   overLimit: boolean;
   onSubmit: (text: string) => void;
+  showFinalSubmit?: boolean;
+  finalSubmitDisabled?: boolean;
+  onFinalSubmit?: () => void;
 }) {
   const { t } = useTranslation();
+  if (showFinalSubmit) {
+    const canSubmit = !finalSubmitDisabled && !isSubmitting;
+    return (
+      <button
+        type="button"
+        onClick={() => onFinalSubmit?.()}
+        disabled={!canSubmit}
+        data-testid="clarification-custom-submit"
+        aria-label={t("task:sendAnswer")}
+        className={cn(
+          "flex h-7 flex-shrink-0 items-center gap-1 rounded px-2 text-xs font-medium transition-colors [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:px-3",
+          canSubmit
+            ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
+            : "bg-muted text-muted-foreground cursor-not-allowed",
+        )}
+      >
+        {t("task:send")}
+        <IconCornerDownLeft className="h-3 w-3" />
+      </button>
+    );
+  }
   if (isFinePointer) {
     return (
       <div className="flex flex-shrink-0 items-center gap-1">
@@ -242,7 +281,7 @@ function CustomInputControls({
       data-testid="clarification-custom-submit"
       aria-label={t("task:sendAnswer")}
       className={cn(
-        "flex flex-shrink-0 items-center gap-1 text-xs px-2 py-1 rounded font-medium transition-colors",
+        "flex h-7 flex-shrink-0 items-center gap-1 rounded px-2 text-xs font-medium transition-colors [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:px-3",
         canSend
           ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
           : "bg-muted text-muted-foreground cursor-not-allowed",
@@ -286,6 +325,37 @@ function ClarificationRuneCounter({
   );
 }
 
+// Single-question Send is the explicit final submit, so plain Enter on a
+// hardware keyboard performs it after the live draft has already been recorded.
+function handleFinalSubmitEnter(
+  event: KeyboardEvent<HTMLTextAreaElement>,
+  overLimit: boolean,
+  onRequestFinalSubmit?: () => void,
+): void {
+  event.preventDefault();
+  if (!event.repeat && !overLimit) onRequestFinalSubmit?.();
+}
+
+function buildPasteHandler(onPasteFiles?: (files: File[], issue?: "unreadable-image") => void) {
+  return (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!onPasteFiles) return;
+    const { files, issue } = readClipboardAttachments(event.clipboardData);
+    if (files.length === 0 && !issue) return;
+    onPasteFiles(files, issue);
+    // Mixed clipboard content keeps native text insertion. Image-only or
+    // unreadable-image content is fully handled by the upload path.
+    if (files.length === 0 || !event.clipboardData.getData("text/plain").trim()) {
+      event.preventDefault();
+    }
+  };
+}
+
+function isPlainEnter(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  return (
+    event.key === "Enter" && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing
+  );
+}
+
 // Builds the Textarea's onKeyDown handler. Extracted so ClarificationCustomInput
 // stays under the file's function-length lint limit; behavior (Enter submits,
 // Shift+Enter newlines, Cmd/Ctrl+Enter finalizes, overLimit blocks both submit
@@ -294,15 +364,17 @@ function buildCustomInputKeyDown(ctx: {
   isFinePointer: boolean;
   trimmed: string;
   overLimit: boolean;
+  finalSubmitMode: boolean;
   onSubmit: (text: string) => void;
   onRequestFinalSubmit?: () => void;
 }) {
-  const { isFinePointer, trimmed, overLimit, onSubmit, onRequestFinalSubmit } = ctx;
+  const { isFinePointer, trimmed, overLimit, finalSubmitMode, onSubmit, onRequestFinalSubmit } =
+    ctx;
   return (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Shift+Enter (and Alt+Enter) fall through so the textarea inserts a
     // newline instead of submitting. isComposing ignores the Enter that
     // confirms an IME candidate (CJK keyboards).
-    if (e.key !== "Enter" || e.shiftKey || e.altKey || e.nativeEvent.isComposing) return;
+    if (!isPlainEnter(e)) return;
     if (e.metaKey || e.ctrlKey) {
       // Cmd/Ctrl+Enter only asks the parent to finalize. The draft was
       // already live-recorded via onChange, so we skip the per-question
@@ -313,6 +385,10 @@ function buildCustomInputKeyDown(ctx: {
       // Cmd+Enter can't slip an over-limit answer past the input (W4).
       e.preventDefault();
       if (!e.repeat && !overLimit) onRequestFinalSubmit?.();
+      return;
+    }
+    if (finalSubmitMode && isFinePointer) {
+      handleFinalSubmitEnter(e, overLimit, onRequestFinalSubmit);
       return;
     }
     // On touch devices Enter inserts a newline (submit via the button).
@@ -336,6 +412,11 @@ export function ClarificationCustomInput({
   onChange,
   onSubmit,
   onRequestFinalSubmit,
+  attachmentActions,
+  onPasteFiles,
+  showFinalSubmit = false,
+  finalSubmitDisabled = true,
+  onFinalSubmit,
 }: CustomInputProps) {
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -372,7 +453,7 @@ export function ClarificationCustomInput({
         textareaRef.current?.focus({ preventScroll: true });
       }}
       className={cn(
-        "mt-2.5 flex min-h-11 flex-wrap items-center gap-2 px-3 py-2 rounded-lg border transition-colors",
+        "mt-2.5 flex min-h-11 flex-nowrap items-center gap-2 px-3 py-0 rounded-lg border transition-colors",
         active
           ? "bg-blue-500/15 border-blue-500/50 text-foreground"
           : "border-dashed border-border/70 bg-muted/30",
@@ -389,6 +470,7 @@ export function ClarificationCustomInput({
         }
         value={draft}
         onChange={(e) => onChange(e.target.value)}
+        onPaste={buildPasteHandler(onPasteFiles)}
         disabled={isSubmitting}
         data-testid="clarification-input"
         // A coarse backstop only — never the enforcement mechanism (W4a).
@@ -396,22 +478,27 @@ export function ClarificationCustomInput({
         // 2000-rune server cap or it could reject an astral-heavy answer the
         // server would accept.
         maxLength={CLARIFICATION_CUSTOM_TEXT_MAX_RUNES * 2}
-        style={{ maxHeight: MAX_CUSTOM_INPUT_HEIGHT }}
-        className="min-w-0 flex-1 min-h-0 resize-none overflow-y-auto border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 dark:bg-transparent placeholder:text-muted-foreground/60"
+        style={{ maxHeight: MAX_CUSTOM_INPUT_HEIGHT, minHeight: 0 }}
+        className="block min-w-0 flex-1 min-h-0 field-sizing-fixed resize-none overflow-y-auto border-0 bg-transparent px-0 py-2 text-sm shadow-none focus-visible:ring-0 dark:bg-transparent placeholder:text-muted-foreground/60 placeholder:whitespace-nowrap placeholder:text-ellipsis"
         onKeyDown={buildCustomInputKeyDown({
           isFinePointer,
           trimmed,
           overLimit,
+          finalSubmitMode: showFinalSubmit,
           onSubmit,
           onRequestFinalSubmit,
         })}
       />
+      {attachmentActions}
       <CustomInputControls
         isFinePointer={isFinePointer}
         trimmed={trimmed}
         isSubmitting={isSubmitting}
         overLimit={overLimit}
         onSubmit={onSubmit}
+        showFinalSubmit={showFinalSubmit}
+        finalSubmitDisabled={finalSubmitDisabled}
+        onFinalSubmit={onFinalSubmit}
       />
       {active && <IconCheck className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />}
       {showCounter && (

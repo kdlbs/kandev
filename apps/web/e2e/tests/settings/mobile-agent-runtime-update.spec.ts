@@ -34,7 +34,7 @@ test.describe("managed agent runtime updates on mobile", () => {
       caption: "Mobile update preview before approval",
     });
     await testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`).tap();
-    expect(runtime.postCount()).toBe(1);
+    await expect.poll(() => runtime.postCount()).toBe(1);
     expect(runtime.postTargets()).toEqual(["0.63.0"]);
 
     await runtime.emitUpdate(

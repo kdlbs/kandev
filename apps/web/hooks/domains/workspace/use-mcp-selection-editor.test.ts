@@ -254,3 +254,37 @@ describe("conditional selection writes", () => {
     });
   });
 });
+
+it("saves explicit session exclusions with the accepted revision and preserves omission", async () => {
+  const initial = { ...selection(), excluded_definition_ids: ["inherited"] };
+  vi.mocked(getMCPSelections).mockResolvedValue(initial);
+  vi.mocked(replaceMCPSelections).mockResolvedValue({
+    ...initial,
+    excluded_definition_ids: [],
+    selection_revision: 3,
+  });
+  const { result } = renderHook(() =>
+    useMCPSelectionEditor("task_session", "session-a", WORKSPACE_A),
+  );
+  await waitFor(() => expect(result.current.selection).toEqual(initial));
+  await act(async () => {
+    await result.current.save(["saved-mcp"], []);
+  });
+  expect(replaceMCPSelections).toHaveBeenLastCalledWith(
+    "task_session",
+    "session-a",
+    WORKSPACE_A,
+    ["saved-mcp"],
+    { expected_revision: 2, excluded_definition_ids: [] },
+  );
+  await act(async () => {
+    await result.current.save(["saved-mcp"]);
+  });
+  expect(replaceMCPSelections).toHaveBeenLastCalledWith(
+    "task_session",
+    "session-a",
+    WORKSPACE_A,
+    ["saved-mcp"],
+    { expected_revision: 3 },
+  );
+});

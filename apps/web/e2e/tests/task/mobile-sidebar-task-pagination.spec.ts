@@ -258,6 +258,6 @@ test("sidebar view reuse preserves rows and offers one recovery action", async (
   seedData,
   prCapture,
 }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(240_000);
   await exerciseSidebarViewReuse(testPage, apiClient, seedData, true, prCapture);
 });

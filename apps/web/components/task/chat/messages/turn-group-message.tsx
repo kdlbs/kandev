@@ -10,6 +10,7 @@ import type { TurnGroup } from "@/hooks/use-processed-messages";
 import { hasProjectedShellOutput, type ToolCallMetadata } from "@/components/task/chat/types";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { isSubagentEffectivelyActive } from "@/components/task/chat/messages/tool-subagent-message";
+import { isContextCompactionEffectivelyActive } from "@/components/task/chat/messages/context-compaction-message";
 
 type TurnGroupMessageProps = {
   group: TurnGroup;
@@ -68,20 +69,25 @@ const TOOL_MESSAGE_TYPES = new Set([
  * Check if any tool or subagent in the group is still running.
  * A tool/subagent is considered running if it's not in a terminal state.
  */
-function hasRunningTool(messages: Message[], isContainingTurnActive: boolean): boolean {
-  for (const msg of messages) {
-    const metadata = msg.metadata as ToolCallMetadata | undefined;
-    const isToolMessage = msg.type && TOOL_MESSAGE_TYPES.has(msg.type);
-    const isSubagent = metadata?.normalized?.kind === "subagent_task";
-    if (!isToolMessage && !isSubagent) continue;
-    if (isSubagent) {
-      if (isSubagentEffectivelyActive(metadata, isContainingTurnActive)) return true;
-      continue;
-    }
-    const status = metadata?.status;
-    if (status !== "complete" && status !== "error" && status !== "cancelled") return true;
+function isMessageRunning(msg: Message, isContainingTurnActive: boolean): boolean {
+  const metadata = msg.metadata as ToolCallMetadata | undefined;
+  const normalized = metadata?.normalized;
+  if (normalized?.kind === "subagent_task") {
+    return isSubagentEffectivelyActive(metadata, isContainingTurnActive);
   }
-  return false;
+  if (normalized?.kind === "context_compaction") {
+    return isContextCompactionEffectivelyActive(
+      normalized.context_compaction,
+      isContainingTurnActive,
+    );
+  }
+  if (!msg.type || !TOOL_MESSAGE_TYPES.has(msg.type)) return false;
+  const status = metadata?.status;
+  return status !== "complete" && status !== "error" && status !== "cancelled";
+}
+
+function hasRunningTool(messages: Message[], isContainingTurnActive: boolean): boolean {
+  return messages.some((msg) => isMessageRunning(msg, isContainingTurnActive));
 }
 
 type TurnGroupHeaderProps = {
