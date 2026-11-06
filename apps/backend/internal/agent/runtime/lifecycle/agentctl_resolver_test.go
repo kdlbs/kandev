@@ -201,16 +201,17 @@ func TestAgentctlResolverSingleflightsConcurrentDownloads(t *testing.T) {
 	})
 	platform := SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}
 	results := make(chan error, 2)
-	// Keep successful caller contexts uncanceled through TempDir cleanup because
-	// cancellation schedules cache-lease release asynchronously.
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { waitForRemoteHelperLeaseCleanup(t, home) })
 	callers := []*observedDoneContext{
-		{Context: context.Background(), observed: make(chan struct{})},
-		{Context: context.Background(), observed: make(chan struct{})},
+		{Context: ctx, observed: make(chan struct{})},
+		{Context: ctx, observed: make(chan struct{})},
 	}
 	var releaseOnce sync.Once
 	releaseResponse := func() { releaseOnce.Do(func() { close(release) }) }
 	received := 0
 	defer func() {
+		cancel()
 		releaseResponse()
 		for received < len(callers) {
 			select {
@@ -255,6 +256,20 @@ func TestAgentctlResolverSingleflightsConcurrentDownloads(t *testing.T) {
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("download requests = %d, want 1", got)
 	}
+}
+
+func waitForRemoteHelperLeaseCleanup(t *testing.T, home string) {
+	t.Helper()
+	cacheRoot := filepath.Join(home, "cache", remoteHelperCacheDir)
+	require.Eventually(t, func() bool {
+		lock, err := lockRemoteHelperCache(cacheRoot)
+		if err != nil {
+			return false
+		}
+		markers, globErr := filepath.Glob(filepath.Join(cacheRoot, remoteHelperCacheActiveDir, "lease-*.json"))
+		unlockErr := unlockRemoteHelperCache(lock)
+		return globErr == nil && unlockErr == nil && len(markers) == 0
+	}, 5*time.Second, 10*time.Millisecond, "resolver callers must release cache leases before temporary directory cleanup")
 }
 
 type observedDoneContext struct {

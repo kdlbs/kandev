@@ -33,7 +33,11 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
-	builtinMCPMu                 sync.Mutex
+	builtinMCPMu sync.Mutex
+	// projectMCP carries execution-bound evidence that the host materialized
+	// the selected built-in packages into a project configuration file. It is
+	// produced only after a successful write and never persisted.
+	projectMCP                   projectMCPDeliveryState
 	builtinDispatch              *builtinDispatchState
 	RequiredNativeConversationID string
 	InterruptedSubmissionID      string

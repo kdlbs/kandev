@@ -32,3 +32,33 @@ func TestBuiltinBindingMetadataRejectsTamperingAndPreservesCanonicalSelection(t 
 		require.Error(t, err, invalid)
 	}
 }
+
+func TestBuiltinBindingDigestMatchesSealedMetadata(t *testing.T) {
+	ctx := New(SurfaceKanbanTask, nil, nil)
+	ctx.BuiltinPackages = &BuiltinManifest{Version: 1, CatalogVersion: 1, WorkspaceID: "workspace", TaskID: "task", Surface: ctx.Surface,
+		Packages: []PackageID{PackageCore, PackageDiagnostics}, Origins: map[PackageID]string{PackageCore: "required", PackageDiagnostics: "task"}}
+	digest, err := BuiltinBindingDigest(ctx)
+	require.NoError(t, err)
+	encoded, err := MarshalBuiltinBinding(ctx)
+	require.NoError(t, err)
+	var binding struct {
+		Digest string `json:"digest"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(encoded), &binding))
+	require.Equal(t, binding.Digest, digest)
+
+	reordered := ctx
+	reordered.BuiltinPackages = ctx.BuiltinPackages.Clone()
+	reordered.BuiltinPackages.Packages = []PackageID{PackageDiagnostics, PackageCore}
+	canonical, err := BuiltinBindingDigest(reordered)
+	require.NoError(t, err)
+	require.Equal(t, digest, canonical, "package order must not change the canonical digest")
+
+	changed := ctx
+	changed.BuiltinPackages = ctx.BuiltinPackages.Clone()
+	changed.BuiltinPackages.Packages = []PackageID{PackageCore}
+	changed.BuiltinPackages.Origins = map[PackageID]string{PackageCore: "required"}
+	other, err := BuiltinBindingDigest(changed)
+	require.NoError(t, err)
+	require.NotEqual(t, digest, other)
+}

@@ -166,7 +166,7 @@ export async function smokeGo({
     const { validatePublicTrust } = await import("./public-trust.mjs");
     await validatePublicTrust();
   }
-  if (mode === "local" && !version) version = await localSDKVersion(sourceRoot);
+  if (!version) version = await localSDKVersion(sourceRoot);
   const root = await mkdtemp(join(tmpdir(), "kandev-sdk-consumer-"));
   let proxy;
   try {

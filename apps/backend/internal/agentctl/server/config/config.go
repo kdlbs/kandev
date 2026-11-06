@@ -391,6 +391,12 @@ type InstanceConfig struct {
 	// McpProfile is the backend-owned typed MCP tool profile.
 	McpProfile *mcpprofile.Context
 
+	// ProjectMCPDelivery is execution-bound evidence that the host materialized
+	// the bound built-in packages into a project configuration file. It is
+	// accepted only through the authenticated configure request and is never
+	// persisted or serialized.
+	ProjectMCPDelivery *agentctltypes.ProjectMCPDelivery `json:"-"`
+
 	// NamespacesMCPToolsByServer enables the per-instance MCP name adapter for
 	// clients that append the injected server name to every tool.
 	NamespacesMCPToolsByServer bool
