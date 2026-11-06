@@ -15,7 +15,8 @@ The existing requirement remains canonical. This bounded repair creates no paral
 
 The agent runtime owns execution identity and provider observations.
 Task storage owns the session row and atomic metadata updates.
-The frontend consumes the persisted count without implementing provider policy.
+The frontend consumes the persisted count and reporting metadata without implementing provider policy.
+The [Copilot native design](../../agents/system-design/copilot-native-compaction.md) owns the additional explicit counter and root-usage path.
 The [ACP session-events design](../../agents/system-design/acp-session-events.md) owns explicit compaction timeline entries.
 
 ## Requirement mapping
@@ -53,7 +54,8 @@ The handler stores this boolean in the context-window sample.
 | `context_compaction_count` | Non-negative session lifetime count. Absence means zero |
 
 The `source` field retains `acp` or `api`; it does not encode provider identity or eligibility.
-No table, repository interface signature, HTTP route, or raw agentctl journal schema changes.
+The existing usage-inference path needs no table, repository interface, or HTTP route changes.
+The native provider path defines its additional ledger and normalized events in its owning design.
 
 ## Control flow
 
@@ -106,8 +108,11 @@ Existing session-scoped logs remain the diagnostic surface. No metric or provide
 
 ## Presentation
 
-The frontend continues to consume `compactionCount` through its current parser and session-runtime store.
-It does not need to expose or interpret the exclusion marker.
+The frontend consumes `compactionCount` and optional `context_compaction_reporting` through its parser and session-runtime store.
+Missing reporting metadata preserves legacy inference help. Native reporting comes from the provider-owned backend projection.
+It does not interpret the exclusion marker as proof that all counting is unavailable.
+Native reporting availability and coverage select the explanation and any partial/unavailable status.
+The native provider design defines those states and keeps old inferred totals intact.
 The existing count row and accessible info control retain their composition.
 
 Update `common:contextCompactionCountHelp` to explain excluded streams and approximate counts.
@@ -138,3 +143,15 @@ Both the real backend regression and desktop/mobile presentation checks are requ
 - [Executor and session ownership](../../../decisions/0003-executors-running-as-execution-id-source-of-truth.md).
 - [Original implementation](../../../plans/context-compaction-count/plan.md).
 - [Copilot inference correction](../../../plans/copilot-compaction-inference/plan.md).
+
+## Native-event follow-up
+
+The [native counting package](../../../plans/copilot-native-compaction-count/plan.md) extends this presentation contract.
+It preserves the existing `UpdateSessionContextWindow` guards and adds confirmed increments through canonical projection.
+A first gauge reading must retain any explicit increments already stored before it arrived.
+An explicit count-only patch updates adjacent reporting/count state without inventing a zero-token gauge sample.
+The same parser/hook merge behavior applies to live metadata, page hydration, and recovery.
+
+Lifetime counts merge monotonically when a delayed gauge patch or HTTP snapshot follows a newer explicit increment.
+Native reporting revisions prevent older availability/coverage patches from replacing newer reporting state.
+These consumer freshness rules do not move authoritative increments into the browser.

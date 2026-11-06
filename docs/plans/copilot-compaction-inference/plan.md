@@ -232,3 +232,9 @@ Keep original package results intact. New results are recorded here and in the r
 - Explicit-event counting needs provider support and replay/dedup semantics beyond this repair.
 - High-water usage or discarded child-like samples distort current usage and can affect accounting.
 - No fresh live-provider run occurred here; the runtime propagation is covered by the real publisher-to-storage regression instead. PostgreSQL parity was verified against a disposable PostgreSQL 16 container.
+
+## Native-event follow-up
+
+The [native Copilot counting package](../copilot-native-compaction-count/plan.md) adds attributed, successful completion evidence.
+It retains this package's usage-drop exclusion and completed verification history.
+Its separate ledger, qualification gates, reporting states, and new checks belong to that follow-up.

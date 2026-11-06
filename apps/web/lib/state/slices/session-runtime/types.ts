@@ -265,12 +265,20 @@ export type GitCheckoutGenerationState = {
   byEnvironmentId: Record<string, Record<string, number>>;
 };
 
+export type ContextCompactionReporting = {
+  source: "usage_drop" | "copilot_native";
+  availability: "available" | "unavailable";
+  coverage: "observed" | "partial";
+  revision: number;
+};
+
 export type ContextWindowEntry = {
   size: number;
   used: number;
   remaining: number;
   efficiency: number;
   compactionCount: number;
+  compactionReporting?: ContextCompactionReporting;
   source?: "acp" | "api";
   timestamp?: string;
 };
