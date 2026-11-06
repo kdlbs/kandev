@@ -63,6 +63,13 @@ type CreateTriggerRequest struct {
 	Secret         string `json:"secret"`
 }
 
+// UpdateTriggerRequest changes a trigger's schedule without replacing its identity.
+type UpdateTriggerRequest struct {
+	CronExpression *string `json:"cron_expression,omitempty"`
+	Timezone       *string `json:"timezone,omitempty"`
+	Enabled        *bool   `json:"enabled,omitempty"`
+}
+
 // TriggerResponse wraps a single routine trigger.
 type TriggerResponse struct {
 	Trigger *RoutineTrigger `json:"trigger"`

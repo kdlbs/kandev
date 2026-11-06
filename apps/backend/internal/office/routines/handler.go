@@ -75,6 +75,7 @@ func RegisterRoutes(api *gin.RouterGroup, h *Handler) {
 	api.POST("/routines/:id/run", h.runRoutine)
 	api.GET("/routines/:id/triggers", h.listTriggers)
 	api.POST("/routines/:id/triggers", h.createTrigger)
+	api.PATCH("/routine-triggers/:triggerId", h.updateTrigger)
 	api.DELETE("/routine-triggers/:triggerId", h.deleteTrigger)
 	api.GET("/routines/:id/runs", h.listRuns)
 	api.POST("/routine-triggers/:publicId/fire", h.fireWebhookTrigger)
