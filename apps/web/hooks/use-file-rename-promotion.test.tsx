@@ -5,11 +5,16 @@ import type { DockviewApi } from "dockview-react";
 import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getOpenFileTabs, setOpenFileTabs } from "@/lib/local-storage";
+import { calculateHash } from "@/lib/utils/file-diff";
 import type { TaskSession } from "@/lib/types/http";
 import { useFileEditors } from "./use-file-editors";
 import { useFileOperations } from "./use-file-operations";
 
 const mocks = vi.hoisted(() => ({ rename: vi.fn(), save: vi.fn(), read: vi.fn(), toast: vi.fn() }));
+vi.mock("@/lib/utils/file-diff", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/utils/file-diff")>();
+  return { ...original, calculateHash: vi.fn(original.calculateHash) };
+});
 vi.mock("@/lib/ws/connection", () => ({ getWebSocketClient: () => ({}) }));
 vi.mock("@/lib/ws/workspace-files", () => ({
   createFile: vi.fn(),
@@ -113,7 +118,7 @@ function host() {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   sessionStorage.clear();
   useDockviewStore.getState().clearFileStates();
   useDockviewStore.setState({ api: null, centerGroupId: "center", isRestoringLayout: false });
@@ -177,6 +182,10 @@ it.each(["current", "host replaced", "visit retired"])(
       { path: "other.txt", name: "other.txt", pinned: true },
     ]);
     let finishOther!: (value: { content: string; is_binary: boolean }) => void;
+    let finishFirstHash!: (hash: string) => void;
+    vi.mocked(calculateHash).mockReturnValueOnce(
+      new Promise((resolve) => (finishFirstHash = resolve)),
+    );
     mocks.read
       .mockResolvedValueOnce({ content: "first", is_binary: false })
       .mockReturnValueOnce(new Promise((resolve) => (finishOther = resolve)));
@@ -201,6 +210,13 @@ it.each(["current", "host replaced", "visit retired"])(
       })),
     );
     await waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(2));
+    expect(useDockviewStore.getState().openFiles.get("old.txt")?.originalHash).not.toBeTruthy();
+    await act(async () => finishFirstHash("restored-hash"));
+    await waitFor(() =>
+      expect(useDockviewStore.getState().openFiles.get("old.txt")?.originalHash).toBe(
+        "restored-hash",
+      ),
+    );
     await act(async () => expect(await h.result.current.rename("old.txt", "new.txt")).toBe(true));
     expect(useDockviewStore.getState().openFiles.has("new.txt")).toBe(true);
     if (owner === "host replaced") act(() => useDockviewStore.setState({ api: null }));
