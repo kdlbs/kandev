@@ -9,6 +9,32 @@ import (
 
 const externalCatalogRulePrefix = "external_catalog."
 
+// catalogMayRefineUnknownHTTP leaves known structured and built-in rules in
+// control while allowing an explicitly configured catalog to refine an HTTP
+// status for which the built-in classifier has no specific mapping.
+func catalogMayRefineUnknownHTTP(in Input, excerpt, rawText string) bool {
+	if externalCatalog.Load() == nil || in.HTTPStatus < 400 || in.HTTPStatus > 599 ||
+		(in.ExitCode != nil && *in.ExitCode == exitCodeBinaryMissing) {
+		return false
+	}
+	if classifyManagedRuntimeNpmPolicy(in, rawText) != nil {
+		return false
+	}
+	if _, ok := matchProviderRules(in.ProviderID, excerpt, rawText); ok {
+		return false
+	}
+	if _, ok := matchProviderNeutralRules(excerpt); ok {
+		return false
+	}
+	if _, ok := matchRuntimeEnvironmentRulesForProvider(in.ProviderID, excerpt, rawText); ok {
+		return false
+	}
+	if _, ok := matchLegacyRuntimeEnvironmentRulesForProvider(in.ProviderID, rawText, rawText); ok {
+		return false
+	}
+	return true
+}
+
 var externalCatalog atomic.Pointer[externalcatalog.Catalog]
 
 // externalCatalogCodes are the provider recovery codes an operator catalog

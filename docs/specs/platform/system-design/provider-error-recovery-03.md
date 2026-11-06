@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-09-04
-updated: 2026-10-06
+updated: 2026-10-31
 owners:
   - Kandev
 ---
@@ -40,8 +40,8 @@ candidate ordering.
 
 Acceptance criteria `.20` and `.21` are owned by
 [Marker propagation](#marker-propagation). `.23` is owned by
-[Diagnostic text correlation](#diagnostic-text-correlation). `.22` is owned by
-[Allowlisted prompt-error metadata](#allowlisted-prompt-error-metadata).
+[Diagnostic text correlation](#diagnostic-text-correlation). `.22` and `.32`
+are owned by [Allowlisted prompt-error metadata](#allowlisted-prompt-error-metadata).
 `.24` is owned by [Failure modes](#failure-modes), which states the exclusion it
 observes. `.17` through `.19` are owned by
 [Part 2](provider-error-recovery-02.md), whose `## Input inventory` records the
@@ -64,7 +64,13 @@ the actual sanitized error rather than replacing it with a generic initial
 prompt-delivery failure. The dynamic and concrete recovery gates may disregard
 the recorded diagnostic as output only if the terminal failure classifies to
 the identical semantic code and the same generation has no later assistant
-output, thought output, partial utility result, or tool activity.
+output, thought output, partial utility result, or tool activity. A chunk
+recorded from text alone is compared with the terminal failure at both
+fidelities: its structured classification (`http_status`, `rpc_code`,
+`error_kind`) and its text-only classification. Structured signals may refine
+the code (a Codex usage-limit message is `quota_limited` by text and
+`rate_limited` with HTTP 429), and recovery must not depend on whether the
+chunk or the terminal failure is delivered first.
 
 This is a correlation rule, not broad error-text suppression. A changed code
 (for example, a 529 diagnostic followed by a 500 failure), a stale generation,
@@ -270,7 +276,7 @@ reason.
 ## Allowlisted prompt-error metadata
 
 `providerErrorFromACPPrompt` projects a sanitised message from a terminal
-`acp.RequestError`. It gains four allowlisted fields and no others.
+`acp.RequestError`. Only explicit scalar fields are projected; raw data stays local.
 
 | Field | Source | Rule |
 | --- | --- | --- |
@@ -278,6 +284,8 @@ reason.
 | `error_kind` | `RequestError.Data["errorKind"]` | Accepted only when `Data` is a map and the value is a string of at most 64 bytes matching `[A-Za-z0-9_.-]+`. Anything else is dropped. |
 | `provider_id` | the adapter's negotiated agent id | Never parsed out of the error text. |
 | `model_id` | the session's settled model id | Omitted when no model is settled. |
+| `http_status` | `Data["statusCode"]`, when explicitly supplied | Integral HTTP error status, 400 through 599; absent/invalid is omitted. |
+| `provider_code` | `Data["errorCode"]`, when explicitly supplied | Same bounded scalar allowlist as `error_kind`; opaque, never inferred from prose or a body. |
 
 **Settled model.** A session's model is settled once the adapter has emitted a
 session-configuration or model event carrying a non-empty current model id for
@@ -287,16 +295,11 @@ and for an agent that never surfaces a model id, no model is settled and
 `model_id` is omitted. The definition is observable rather than internal
 because an omitted `modelId` in a fixture is an assertion of absence.
 
-**Where the two new fields live.** `streams.ProviderError` already carries
-`ProviderID` and `ModelID`, so `provider_id` and `model_id` need no new
-storage. It has nothing for the other two, so it gains exactly two fields:
-`RPCCode int` (`json:"rpc_code,omitempty"`) and `ErrorKind string`
-(`json:"error_kind,omitempty"`). Both are omitempty, which is what makes the
-"`0` means absent" rule above expressible on the wire without a pointer.
-`ProviderError.Valid()` is **unchanged** — it gates on `Source`, `Message` and
-`OccurredAt`, and neither new field participates, because a projection that
-carries a message but no metadata is still a valid projection. A fixture
-asserting `rpcCode` or `errorKind` is asserting content, never validity.
+**Wire compatibility.** `streams.ProviderError` carries the optional scalar
+fields with `omitempty`. `0` means absent for numeric status/RPC code, and an
+empty string means absent for kind/provider code. `ProviderError.Valid()` is
+unchanged: it requires `Source`, `Message`, and `OccurredAt`. New metadata is
+not required for old agentctl versions or message-only errors.
 
 **Contention on the settled model.** A session-configuration or model event can
 land while a terminal error is being projected. The rule is last-published-wins,
@@ -310,10 +313,11 @@ microsecond is a slightly thinner log line, not a wrong decision. This is also
 why a fixture's `model_settled` frame is ordered strictly before its
 `prompt_error` frame rather than raced against it.
 
-Raw `RequestError.Data` never crosses the boundary, and no field other than
-`errorKind` is read from it. A `Data` that is a string, an array, `nil`, or a
-map without `errorKind` yields a projection with no `error_kind`; the
-projection stays valid on its message alone.
+Raw `RequestError.Data` never crosses the boundary. Only the exact scalar
+keys `errorKind`, `statusCode`, and `errorCode` are read. These are optional,
+adapter-defined metadata, not fields guaranteed by ACP or every OpenCode
+version. Headers, bodies, prompts, arbitrary nested data, and credentials are
+not inspected or transported. Missing data stays unknown.
 
 **Call site and merge order.** The merge happens in `ProviderErrorFromError`,
 which is already the ordered extractor chain: a correlated stderr
@@ -332,16 +336,31 @@ paths in `adapter_prompt.go` return before reaching this chain and are
 unchanged; they carry their own provider-specific projections and this design
 does not add metadata to them.
 
-**Not an authorisation input.** The metadata is transported, logged, and
-assertable in fixtures. No classifier rule keys on it in this version. Making
-`errorKind` outrank the message-text catalogue would let a gateway authorise
-dynamic recovery through a field no fixture constrains yet, so it is deferred
-to a later contract change.
+**Structured normalization.** Existing normalized `routingerr.Error` values
+take precedence without mutation. Otherwise provider HTTP statuses precede
+message rules. A valid but unmapped HTTP error remains unknown; prose cannot
+relabel it as authentication. ACP's documented authentication-required code
+`-32000` is distinct from HTTP status and generic JSON-RPC internal errors.
+Known typed kinds are interpreted only in their adapter namespace; generic
+`AI_APICallError`, `APIError`, or internal errors carry no authentication
+meaning. Opaque provider codes are retained without an unverified mapping.
+Absent or non-specific structured signals retain the existing text catalogue.
+
+Kanban, Office, retained-turn and diagnostic-correlation consumers use the same
+safe projection and central classifier. The existing retry/fallback policy,
+execution/generation fences, diagnostic text matching, and output/effect guards
+remain authoritative. Metadata does not bypass them or repair old attempts.
+
+Manual ACP runtime preservation follows the separate
+[response-provenance continuity contract](acp-prompt-error-continuity.md).
+Structured classification supplies diagnostics and supported automatic-recovery
+or capacity-continuation evidence; it does not replace the remote-response,
+current-turn, connection, cancellation, or effect gates.
 
 ## Failure modes
 
-- Metadata present but the message unclassifiable: the projection carries the
-  metadata, the diagnostic stays ordinary output, recovery fails closed.
+- Non-specific metadata and an unclassifiable message stay unknown; metadata
+  alone does not establish safe replay or authenticate an account.
 - The marker is absent from a skewed remote: manual recovery, as above.
 - The terminal message classifies to nothing because the signature lives only
   in `RequestError.Data`: the projection carries whatever allowlisted metadata
