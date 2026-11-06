@@ -71,6 +71,7 @@ func IsCompleteProviderDiagnostic(raw string) bool {
 }
 
 const (
+	ProviderErrorSourceAgentMessage   = "agent_message"
 	ProviderErrorSourceOpenCodeStderr = "opencode_stderr"
 	// ProviderErrorSourceOpenCodeACP marks a provider diagnostic projected
 	// from a structured ACP service-failure response.

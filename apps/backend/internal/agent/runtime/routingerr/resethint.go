@@ -21,6 +21,44 @@ var resetClockHintPattern = regexp.MustCompile(
 	`(?i)\bresets\s+(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\s+\(([^()\r\n]+)\)`,
 )
 
+var relativeQuotaResetPattern = regexp.MustCompile(`(?i)\breset\s+in\s+((?:\d+\s*(?:days?|hours?|hrs?|minutes?|mins?|min)\b[,\s]*)+)`)
+var relativeQuotaUnitPattern = regexp.MustCompile(`(?i)(\d+)\s*(days?|hours?|hrs?|minutes?|mins?|min)\b`)
+
+func parseRelativeQuotaResetAt(text string, now time.Time) *time.Time {
+	indices := relativeQuotaResetPattern.FindStringSubmatchIndex(text)
+	if indices == nil {
+		return nil
+	}
+	valueText := text[indices[2]:indices[3]]
+	remainder := strings.TrimSpace(text[indices[1]:])
+	// An ACP chunk can end after a complete unit while more units are still in
+	// flight. Without a sentence terminator the full duration is not known.
+	if strings.HasSuffix(strings.TrimSpace(valueText), ",") || remainder == "" || (remainder[0] != '.' && remainder[0] != '!') {
+		return nil
+	}
+	units := relativeQuotaUnitPattern.FindAllStringSubmatch(valueText, -1)
+	var duration time.Duration
+	for _, unit := range units {
+		value, ok := parseIntInRange(unit[1], 0, 999)
+		if !ok {
+			return nil
+		}
+		switch strings.ToLower(unit[2][:1]) {
+		case "d":
+			duration += time.Duration(value) * 24 * time.Hour
+		case "h":
+			duration += time.Duration(value) * time.Hour
+		default:
+			duration += time.Duration(value) * time.Minute
+		}
+	}
+	if duration <= 0 {
+		return nil
+	}
+	reset := now.Add(duration)
+	return &reset
+}
+
 // shortResetHintPattern is OpenCode's relative retry suffix, e.g.
 // "retry shortly (after 24 s)". Only the diagnostic's own trailing suffix
 // qualifies; the bounded capture keeps a malformed value out of the duration

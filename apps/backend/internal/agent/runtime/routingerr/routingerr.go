@@ -200,6 +200,9 @@ func Classify(in Input) *Error {
 		// consumer (short retry, circuit breaker) honor it uniformly.
 		text := in.Stderr + "\n" + in.Stdout
 		hint := parseResetHintAt(text, observedAt)
+		if hint == nil && e.ClassifierRule == "provider.quota_notice.v1" {
+			hint = parseRelativeQuotaResetAt(text, observedAt)
+		}
 		if hint == nil && e.ClassifierRule == "claude.stderr.session_limit.v1" {
 			hint = parseResetClockHintAt(text, observedAt)
 			e.ResetHintInferred = hint != nil
