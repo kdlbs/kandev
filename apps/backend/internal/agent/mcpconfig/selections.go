@@ -76,6 +76,7 @@ type CompareAndSwapMCPSelectionStateRepository interface {
 // Associations remain present when a definition is disabled so re-enabling it
 // restores the user's choices.
 type SelectionImpact struct {
+	Automation  int `json:"automation"`
 	Profile     int `json:"profile"`
 	Repository  int `json:"repository"`
 	Task        int `json:"task"`
@@ -83,7 +84,7 @@ type SelectionImpact struct {
 }
 
 func (i SelectionImpact) Total() int {
-	return i.Profile + i.Repository + i.Task + i.TaskSession
+	return i.Profile + i.Repository + i.Task + i.TaskSession + i.Automation
 }
 
 // MCPSelectionImpactError is returned by a guarded delete before any rows are
@@ -129,6 +130,7 @@ type SelectionOwnerValidator func(context.Context, SelectionScope, string, strin
 // SelectionService validates workspace ownership and atomically replaces
 // scope selections. It deliberately has no resolver or runtime side effects.
 type SelectionService struct {
+	automationUsage   func(context.Context, string, string) (int, error)
 	usageOwnerReader  UsageOwnerReader
 	usageCursor       usageCursorCodec
 	repo              SelectionRepository
@@ -310,7 +312,14 @@ func (s *SelectionService) SelectionImpact(ctx context.Context, workspaceID, def
 	if strings.TrimSpace(definitionID) == "" {
 		return SelectionImpact{}, ErrMCPInvalidSelection
 	}
-	return s.repo.SelectionImpact(ctx, workspaceID, definitionID)
+	impact, err := s.repo.SelectionImpact(ctx, workspaceID, definitionID)
+	if err != nil {
+		return impact, err
+	}
+	if s.automationUsage != nil {
+		impact.Automation, err = s.automationUsage(ctx, workspaceID, definitionID)
+	}
+	return impact, err
 }
 
 func (s *SelectionService) DeleteDefinitionSelections(ctx context.Context, workspaceID, definitionID string) error {

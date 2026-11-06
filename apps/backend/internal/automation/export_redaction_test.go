@@ -9,6 +9,7 @@ import (
 	"time"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	p "github.com/kandev/kandev/internal/mcp/profile"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	"gopkg.in/yaml.v3"
@@ -430,6 +431,25 @@ func walkKeysExceptConfig(node *yaml.Node, visit func(key string)) {
 	case yaml.SequenceNode:
 		for _, c := range node.Content {
 			walkKeysExceptConfig(c, visit)
+		}
+	}
+}
+
+// @covers AC-OFFICE-AUTOMATION-MCP-001.6
+func TestAutomationMCPExportOmitsLocalGrants(t *testing.T) {
+	svc, _, _, _, _, _ := resolveTestFixture(t)
+	svc.SetExportWorkspaceLookup(&fakeExportWorkspaceLookup{exists: map[string]bool{"ws-1": true}})
+	const definitionID = "workspace-local-mcp-definition-sentinel"
+	err := svc.store.CreateAutomation(t.Context(), &Automation{ID: "auto-mcp-export", WorkspaceID: "ws-1", Name: "Portable automation", MCPSelection: &MCPSelection{BuiltinPackages: []p.PackageID{p.PackageCore, p.PackageConfiguration}, DefinitionIDs: []string{definitionID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, entries := exportBothForms(t, svc, "ws-1")
+	for _, body := range append(entries, doc) {
+		for _, forbidden := range []string{definitionID, "mcp_selection", "builtin_packages", "definition_ids"} {
+			if bytes.Contains(body, []byte(forbidden)) {
+				t.Fatalf("export included local grant %q", forbidden)
+			}
 		}
 	}
 }

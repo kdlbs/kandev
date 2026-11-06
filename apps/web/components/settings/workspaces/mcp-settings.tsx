@@ -60,7 +60,13 @@ function transportLabel(transport: string, t: (key: string) => string): string {
 
 function selectionImpactTotal(impact?: MCPSelectionImpact): number {
   if (!impact) return 0;
-  return impact.profile + impact.repository + impact.task + impact.task_session;
+  return (
+    impact.profile +
+    impact.repository +
+    impact.task +
+    impact.task_session +
+    (impact.automation ?? 0)
+  );
 }
 
 function SelectionImpact({ impact }: { impact?: MCPSelectionImpact }) {
@@ -76,6 +82,11 @@ function SelectionImpact({ impact }: { impact?: MCPSelectionImpact }) {
             taskSession: t("settings:mcpSessionUsage", { count: impact?.task_session ?? 0 }),
           })
         : t("settings:mcpSelectionImpactNone")}
+      {(impact?.automation ?? 0) > 0 ? (
+        <span className="block">
+          {t("automations:automations")}: {impact?.automation}
+        </span>
+      ) : null}
     </p>
   );
 }

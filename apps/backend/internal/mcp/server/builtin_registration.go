@@ -11,8 +11,12 @@ func (s *Server) registerContextTools() {
 	case mcpprofile.SurfaceManagedConversation:
 		return
 	case mcpprofile.SurfaceAutomation:
-		s.registerAutomationTools()
-		s.registerCoreQuestionTools()
+		if s.profile.BuiltinPackages != nil {
+			s.registerBuiltinTools()
+		} else {
+			s.registerAutomationTools()
+			s.registerCoreQuestionTools()
+		}
 	case mcpprofile.SurfaceCoordinator:
 		s.registerCoordinatorTools()
 		s.registerCoreQuestionTools()
@@ -48,7 +52,12 @@ func (s *Server) registerBuiltinTools() {
 func (s *Server) registerBuiltinPackage(id mcpprofile.PackageID) {
 	switch id {
 	case mcpprofile.PackageCore:
-		s.registerCoreTools()
+		if s.profile.Surface == mcpprofile.SurfaceAutomation {
+			s.registerAutomationTools()
+			s.registerCoreQuestionTools()
+		} else {
+			s.registerCoreTools()
+		}
 	case mcpprofile.PackageConfiguration:
 		s.registerConfigurationTools()
 	case mcpprofile.PackageRichOutput:

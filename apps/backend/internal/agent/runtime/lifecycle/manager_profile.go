@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentruntime"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -134,6 +135,16 @@ func (m *Manager) resolveEffectiveMCPResolution(
 	policy, executorID, err := m.applyExecutorMcpPolicy(profileID, "", metadata, policy)
 	if err != nil {
 		return nil, err
+	}
+	if raw, ok := metadata[mcpprofile.BuiltinBindingMetadataKey]; ok {
+		binding, err := mcpprofile.ParseBuiltinBindingMetadata(raw)
+		if err != nil {
+			return nil, err
+		}
+		manifest := binding.BuiltinPackages
+		if manifest.AutomationID != "" {
+			resolutionContext.Automation = &mcpconfig.AutomationMCPContribution{AutomationID: manifest.AutomationID, WorkspaceID: manifest.WorkspaceID, TaskID: manifest.TaskID, Revision: manifest.AutomationRevision, DefinitionIDs: append([]string(nil), manifest.AutomationDefinitionIDs...)}
+		}
 	}
 	result, err := m.mcpResolver.Resolve(ctx, resolutionContext, policy)
 	if err != nil {

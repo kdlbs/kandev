@@ -352,3 +352,41 @@ describe("retryPolicyAfterModeChange", () => {
     });
   });
 });
+
+describe("automation MCP selection", () => {
+  const selection: import("@/lib/types/automation").AutomationMCPSelection = {
+    builtin_packages: ["core", "configuration"],
+    definition_ids: ["reports"],
+  };
+  it("includes an explicit selection in native creation", () => {
+    const form = Object.assign(baseForm(), { mcpSelection: selection, mcpSelectionRevision: 0 });
+    expect(buildCreatePayload("workspace", form, [], [])).toHaveProperty(
+      "mcp_selection",
+      selection,
+    );
+  });
+  it("preserves omission on unrelated updates and conditions changed selections", () => {
+    const form = Object.assign(baseForm(), { mcpSelection: selection, mcpSelectionRevision: 3 });
+    expect(buildUpdatePayload(form, [])).not.toHaveProperty("mcp_selection");
+    expect(buildUpdatePayload(form, [], undefined, selection)).toMatchObject({
+      mcp_selection: selection,
+      expected_mcp_selection_revision: 3,
+    });
+  });
+});
+
+describe("automation draft revision", () => {
+  it("ignores the server selection token but tracks package edits", async () => {
+    const { automationDraftRevision } = await import("./automation-payload");
+    const form = Object.assign(baseForm(), { mcpSelectionRevision: 0 });
+    expect(automationDraftRevision(form)).toBe(
+      automationDraftRevision({ ...form, mcpSelectionRevision: 1 }),
+    );
+    expect(automationDraftRevision(form)).not.toBe(
+      automationDraftRevision({
+        ...form,
+        mcpSelection: { builtin_packages: ["core", "configuration"], definition_ids: [] },
+      }),
+    );
+  });
+});

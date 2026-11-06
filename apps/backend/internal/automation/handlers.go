@@ -38,6 +38,7 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerDelete, wsDeleteTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerTypes, wsTriggerTypes(svc))
 	dispatcher.RegisterFunc(ws.ActionAutomationPluginToolOptions, wsPluginToolOptions(svc))
+	dispatcher.RegisterFunc("automation.mcp_options", wsMCPOptions(svc))
 	dispatcher.RegisterFunc(ws.ActionAutomationWebhookRevealSecret, wsRevealWebhookSecret(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationRunDelete, wsDeleteRun(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationRunStop, wsStopRun(svc, log))
@@ -102,6 +103,10 @@ func wsCreate(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.
 		if isMCPAutomationContext(ctx) {
 			return automationMCPMutationDenied(msg)
 		}
+		payload, _ := parseMap(msg)
+		if raw, present := payload["mcp_selection"]; present && raw == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "mcp_selection cannot be null", nil)
+		}
 		var req CreateAutomationRequest
 		if err := msg.ParsePayload(&req); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
@@ -139,6 +144,9 @@ func wsUpdate(svc *Service, log *logger.Logger) func(ctx context.Context, msg *w
 		}
 		if raw, present := payload["plugin_tools"]; present && raw == nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "plugin_tools cannot be null", nil)
+		}
+		if raw, present := payload["mcp_selection"]; present && raw == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "mcp_selection cannot be null", nil)
 		}
 		var req UpdateAutomationRequest
 		if err := msg.ParsePayload(&req); err != nil {

@@ -31,6 +31,10 @@ import {
   DEFAULT_RETRY_POLICY,
   normalizeRetryPolicyForTaskMode,
   canonicalPluginTools,
+  canonicalMCPSelection,
+  automationDraftRevision,
+  mcpSelectionForUpdate,
+  withSavedMCPSelection,
   buildCreatePayload,
   buildUpdatePayload,
   buildWebhookUrl,
@@ -40,6 +44,8 @@ import { resolveExecutorType } from "./automation-repository-selection";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
 import { AutomationDeleteConfirmDialog } from "./automation-delete-confirm-dialog";
+import { useAutomationMCPReconciliation } from "./use-automation-mcp-reconciliation";
+import { AutomationMCPAccess } from "./automation-mcp-access";
 import { AutomationPluginTools } from "./automation-plugin-tools";
 import { useAutomationPluginTools } from "@/hooks/domains/settings/use-automation-plugin-tools";
 import {
@@ -109,6 +115,8 @@ function formFromAutomation(a: Automation): FormState {
     continuationPolicy: a.continuation_policy ?? "new_task",
     retryPolicy: a.retry_policy ?? DEFAULT_RETRY_POLICY,
     pluginTools: a.plugin_tools ?? [],
+    mcpSelection: a.mcp_selection,
+    mcpSelectionRevision: a.mcp_selection_revision ?? 0,
   };
 }
 
@@ -133,7 +141,7 @@ type SaveHandlerOpts = {
   // save. See normalizeRepositorySelections.
   supportsMultiRepo: boolean;
   create: (payload: CreateAutomationRequest) => Promise<CreateAutomationResponse>;
-  update: (id: string, payload: UpdateAutomationRequest) => Promise<unknown>;
+  update: (id: string, payload: UpdateAutomationRequest) => Promise<Automation>;
   setSaving: React.Dispatch<React.SetStateAction<boolean>>;
   setCurrentId: React.Dispatch<React.SetStateAction<string | null>>;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
@@ -146,6 +154,7 @@ type SaveHandlerOpts = {
   // save so a changed policy is visible for explicit reselection without
   // discarding other dirty fields.
   onPluginToolsSaveFailed: () => void;
+  onMCPSelectionSaveFailed?: () => void;
   triggerActions: ReturnType<typeof useAutomationTriggerDrafts>;
   router: ReturnType<typeof useRouter>;
 };
@@ -164,6 +173,9 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
     const pluginToolsChanged =
       JSON.stringify(canonicalPluginTools(form.pluginTools)) !==
       JSON.stringify(canonicalPluginTools(savedForm.pluginTools));
+    const mcpSelectionChanged =
+      JSON.stringify(canonicalMCPSelection(form.mcpSelection)) !==
+      JSON.stringify(canonicalMCPSelection(savedForm.mcpSelection));
     const pluginToolsSubmitted = isNew ? form.pluginTools.length > 0 : pluginToolsChanged;
     setSaving(true);
     try {
@@ -198,7 +210,8 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
           const savedTriggers = a.triggers ?? [];
           triggerActions.loadTriggers(savedTriggers);
           triggerActions.clearPending();
-          onSaved(formWithPromotedSelections, savedTriggers);
+          setForm((prev) => ({ ...prev, mcpSelectionRevision: a.mcp_selection_revision ?? 0 }));
+          onSaved(withSavedMCPSelection(formWithPromotedSelections, a), savedTriggers);
           setCurrentId(a.id);
           setCreatedWebhook({ url: buildWebhookUrl(a.id), secret: a.webhook_secret });
         } else {
@@ -208,15 +221,25 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
           );
         }
       } else if (currentId) {
-        await update(
+        const saved = await update(
           currentId,
-          buildUpdatePayload(form, repositories, pluginToolsChanged ? form.pluginTools : undefined),
+          buildUpdatePayload(
+            form,
+            repositories,
+            pluginToolsChanged ? form.pluginTools : undefined,
+            mcpSelectionForUpdate(form, savedForm),
+          ),
         );
+        const persistedForm = withSavedMCPSelection(formWithPromotedSelections, saved);
+        const selectionRevision = persistedForm.mcpSelectionRevision;
+        setForm((prev) => ({ ...prev, mcpSelectionRevision: selectionRevision }));
+
         const persistedTriggers = await triggerActions.persistDrafts();
         promoteSelections();
-        onSaved(formWithPromotedSelections, persistedTriggers);
+        onSaved(persistedForm, persistedTriggers);
       }
     } catch (err) {
+      if (mcpSelectionChanged) opts.onMCPSelectionSaveFailed?.();
       if (pluginToolsSubmitted) {
         onPluginToolsSaveFailed();
       }
@@ -471,6 +494,12 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
   const isNew = currentId === null;
   const triggerActions = useAutomationTriggerDrafts(currentId);
   const [savedForm, setSavedForm] = useState(defaultForm);
+  const mcpReconciliation = useAutomationMCPReconciliation(
+    workspaceId,
+    currentId,
+    setForm,
+    setSavedForm,
+  );
   const triggerTypes = useTriggerTypeMetadata(workspaceId);
   const pluginToolOptions = useAutomationPluginTools(
     workspaceId,
@@ -499,6 +528,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         return {
           ...next,
           retryPolicy: normalizeRetryPolicyForTaskMode(next.taskMode, prev.retryPolicy),
+          mcpSelection: undefined,
         };
       }
       return next;
@@ -528,7 +558,11 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     savedRevision,
     discard,
     remove,
-    onSaved: (nextSavedForm) => setSavedForm(nextSavedForm),
+    onSaved: (nextSavedForm) => {
+      setSavedForm(nextSavedForm);
+      mcpReconciliation.saved();
+    },
+    onMCPSelectionSaveFailed: mcpReconciliation.failed,
     onPluginToolsSaveFailed: pluginToolOptions.reload,
   });
   const { dirtyBaseline, triggersDirty } = useEditorDirtyState(isNew, savedForm, triggerActions);
@@ -558,6 +592,24 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         savedForm={dirtyBaseline}
         updateField={updateField}
       />
+      {form.taskMode !== "managed_conversation" ? (
+        <AutomationMCPAccess
+          saveFailed={mcpReconciliation.saveFailed}
+          onReloadSaved={mcpReconciliation.reload}
+          workspaceId={workspaceId}
+          profileId={form.agentProfileId}
+          repositoryIds={form.repositorySelections
+            .filter((item) => item.kind === "registered")
+            .map((item) => item.id)}
+          taskMode={form.taskMode}
+          selection={form.mcpSelection}
+          onChange={(value) => updateField("mcpSelection", value)}
+          isDirty={
+            JSON.stringify(canonicalMCPSelection(form.mcpSelection)) !==
+            JSON.stringify(canonicalMCPSelection(dirtyBaseline.mcpSelection))
+          }
+        />
+      ) : null}
       {form.taskMode === "automation_run" ? (
         <AutomationPluginTools
           groups={pluginToolOptions.groups}
@@ -605,7 +657,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
 
 function automationRevision(form: FormState, triggers: AutomationTrigger[]): string {
   return JSON.stringify({
-    form,
+    form: automationDraftRevision(form),
     triggers: triggers.map(({ id, type, config, enabled }) => ({ id, type, config, enabled })),
   });
 }

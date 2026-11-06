@@ -63,12 +63,13 @@ export type MCPDefinitionPatch = Partial<MCPDefinitionInput> & {
 export type MCPSelectionScope = "profile" | "repository" | "task" | "task_session";
 
 export type MCPSelectionOrigin = {
-  scope: MCPSelectionScope;
+  scope: MCPSelectionScope | "automation";
   workspace_id: string;
   owner_id: string;
 };
 
 export type MCPSelectionImpact = {
+  automation?: number;
   profile: number;
   repository: number;
   task: number;

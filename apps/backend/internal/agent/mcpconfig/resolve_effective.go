@@ -27,6 +27,7 @@ type SelectionOrigin struct {
 // selections. RepositoryIDs are ordered only for reproducible reads; the
 // effective set itself has no scope precedence.
 type ResolutionContext struct {
+	Automation    *AutomationMCPContribution
 	WorkspaceID   string
 	RepositoryIDs []string
 	ProfileID     string
@@ -221,6 +222,9 @@ func (r *Resolver) loadOrigins(ctx context.Context, rc ResolutionContext) (map[s
 			return nil, nil, err
 		}
 		addOrigins(origins, ids, SelectionOrigin{Scope: SelectionScopeTaskSession, WorkspaceID: rc.WorkspaceID, OwnerID: rc.SessionID})
+	}
+	if err := AddAutomationMCPOrigins(rc, origins); err != nil {
+		return nil, nil, err
 	}
 	return origins, legacyServers, nil
 }

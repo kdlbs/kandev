@@ -102,7 +102,7 @@ func (h *Handlers) authorizeAutomationRequest(ctx context.Context, msg *ws.Messa
 	if !ok || !principal.IsAutomation() {
 		return nil, msg, nil
 	}
-	if _, allowed := automationSurfaceActions[msg.Action]; !allowed {
+	if _, allowed := automationSurfaceActions[msg.Action]; !allowed && !automationPackageAction(ctx, msg.Action) {
 		response, err := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction,
 			"tool is not available on the automation MCP surface", nil)
 		return response, nil, err
@@ -116,6 +116,9 @@ func (h *Handlers) authorizeAutomationRequest(ctx context.Context, msg *ws.Messa
 		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest,
 			"Invalid payload: "+err.Error(), nil)
 		return response, nil, responseErr
+	}
+	if automationLocalPackageAction(msg.Action) && ((jsonStringField(fields, "task_id") != "" && jsonStringField(fields, "task_id") != principal.CallerTaskID) || (jsonStringField(fields, "session_id") != "" && jsonStringField(fields, "session_id") != principal.CallerSessionID)) {
+		return automationNotFound(msg)
 	}
 	if !h.authorizeAutomationScalarFields(ctx, principal, msg.Action, fields) ||
 		!h.authorizeAutomationReferenceFields(ctx, principal, msg.Action, fields) {
@@ -303,3 +306,22 @@ func automationNotFound(msg *ws.Message) (*ws.Message, *ws.Message, error) {
 }
 
 var _ mcpActionRegistrar = (*guardedMCPDispatcher)(nil)
+
+// The stream carries the accepted grant. Resource and caller checks still run.
+func automationPackageAction(ctx context.Context, action string) bool {
+	execution, ok := streams.MCPExecutionContextFromContext(ctx)
+	if !ok || !execution.BuiltinAuthority.Required || execution.BuiltinAuthority.Manifest == nil {
+		return false
+	}
+	manifest := execution.BuiltinAuthority.Manifest
+	return manifest.AutomationID != "" && manifest.Validate() == nil && mcpscope.BuiltinPrincipalMatches(ctx, manifest) && execution.BuiltinAuthority.Allows(action)
+}
+
+func automationLocalPackageAction(action string) bool {
+	switch action {
+	case ws.ActionMCPShowWalkthrough, ws.ActionMCPGetWalkthrough, ws.ActionMCPDeleteWalkthrough, ws.ActionMCPGetDiagnosticBundle:
+		return true
+	default:
+		return false
+	}
+}

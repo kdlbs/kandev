@@ -77,6 +77,8 @@ const createTablesSQL = `
 		webhook_secret TEXT DEFAULT '',
 		retry_policy TEXT NOT NULL DEFAULT '{}',
 		plugin_tools TEXT NOT NULL DEFAULT '[]',
+ mcp_selection TEXT NOT NULL DEFAULT 'null',
+ mcp_selection_revision BIGINT NOT NULL DEFAULT 0,
 		automation_revision BIGINT NOT NULL DEFAULT 0,
 		last_triggered_at DATETIME,
 		created_at DATETIME NOT NULL,
@@ -360,7 +362,7 @@ const automationColumns = `created_by_user_id, id, workspace_id, name, descripti
 	managed_destination_plugin_id, managed_destination_instance_key, managed_destination_revision,
 	resource_revision, repository_mode, prompt, task_title_template,
 	enabled, max_concurrent_runs, continuation_policy, continuation_task_id, webhook_secret,
-	retry_policy, plugin_tools, automation_revision, last_triggered_at, created_at, updated_at,
+	retry_policy, plugin_tools, mcp_selection, mcp_selection_revision, automation_revision, last_triggered_at, created_at, updated_at,
 	execution_mode = 'task' AS legacy_board_card`
 
 func (s *Store) initSchema() error {
@@ -406,6 +408,8 @@ func (s *Store) initSchema() error {
 		{"automation_runs.managed_delivery_attempts", schemaSQLForDriver(migrateRunDeliveryAttemptsSQL, s.db.DriverName())},
 		{"automations.retry_policy", schemaSQLForDriver(migrateRetryPolicySQL, s.db.DriverName())},
 		{"automations.plugin_tools", schemaSQLForDriver(migratePluginToolsSQL, s.db.DriverName())},
+		{"automations.mcp_selection", `ALTER TABLE automations ADD COLUMN mcp_selection TEXT NOT NULL DEFAULT 'null'`},
+		{"automations.mcp_selection_revision", `ALTER TABLE automations ADD COLUMN mcp_selection_revision BIGINT NOT NULL DEFAULT 0`},
 		{"automations.automation_revision", schemaSQLForDriver(migrateRetryAutomationRevisionSQL, s.db.DriverName())},
 		{"automation_triggers.trigger_revision", schemaSQLForDriver(migrateTriggerRevisionSQL, s.db.DriverName())},
 		{"automation_runs.retry_group_id", schemaSQLForDriver(migrateRunRetryGroupIDSQL, s.db.DriverName())},
@@ -690,6 +694,16 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	if err != nil {
 		return err
 	}
+	selectionJSON, err := json.Marshal(a.MCPSelection)
+	if err != nil {
+		return err
+	}
+	if a.MCPSelection != nil {
+		a.MCPSelectionRevision = 1
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE automations SET mcp_selection = ?, mcp_selection_revision = ? WHERE id = ?`), string(selectionJSON), a.MCPSelectionRevision, a.ID); err != nil {
+		return err
+	}
 	if err := insertAutomationRepositories(ctx, tx, a.ID, a.Repositories); err != nil {
 		return err
 	}
@@ -729,6 +743,9 @@ func (s *Store) GetAutomation(ctx context.Context, id string) (*Automation, erro
 		return nil, err
 	}
 	a.PluginTools = decodePluginTools(a.PluginToolsJSON)
+	if err := decodeMCPSelection(&a); err != nil {
+		return nil, err
+	}
 	hydrateManagedDestination(&a)
 	triggers, err := s.ListTriggers(ctx, id)
 	if err != nil {
@@ -895,6 +912,9 @@ func (s *Store) hydrateAutomations(ctx context.Context, automations []*Automatio
 			return fmt.Errorf("hydrate retry policy: %w", err)
 		}
 		a.PluginTools = decodePluginTools(a.PluginToolsJSON)
+		if err := decodeMCPSelection(a); err != nil {
+			return err
+		}
 		a.Triggers = triggersByAutomation[a.ID]
 		a.Repositories = repositoriesByAutomation[a.ID]
 		a.RepositoryIDs = repositoryIDs(a.Repositories)
@@ -931,14 +951,52 @@ func hydrateManagedDestination(a *Automation) {
 // automation_repositories rows. An explicit non-selected repository mode also
 // clears the rows when a partial client omits repository data.
 func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAutomationRequest) error {
+	_, err := s.updateAutomationReturning(ctx, id, req)
+	return err
+}
+
+func (s *Store) updateAutomationReturning(ctx context.Context, id string, req *UpdateAutomationRequest) (*Automation, error) {
 	a, err := s.GetAutomation(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if a == nil {
+		return nil, ErrAutomationNotFound
+	}
+	previousMCPRevision := a.MCPSelectionRevision
+	if req.MCPSelection != nil && (req.ExpectedMCPSelectionRevision == nil || *req.ExpectedMCPSelectionRevision != previousMCPRevision) {
+		return nil, ErrMCPSelectionConflict
+	}
+	if err := prepareAutomationUpdate(a, req); err != nil {
+		return nil, err
+	}
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := writeAutomationUpdateRow(ctx, tx, id, a, previousMCPRevision); err != nil {
+		return nil, err
+	}
+	if err := replaceAutomationUpdateRepositories(ctx, tx, id, a, req); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	a.ResourceRevision++
+	a.AutomationRevision++
+	a.PluginTools = decodePluginTools(a.PluginToolsJSON)
+	return a, nil
+}
+
+func prepareAutomationUpdate(a *Automation, req *UpdateAutomationRequest) error {
+	applyAutomationUpdate(a, req)
+	selectionJSON, err := json.Marshal(a.MCPSelection)
 	if err != nil {
 		return err
 	}
-	if a == nil {
-		return fmt.Errorf("automation not found: %s", id)
-	}
-	applyAutomationUpdate(a, req)
+	a.MCPSelectionJSON = string(selectionJSON)
 	normalizedPolicy, err := NormalizeRetryPolicy(a.RetryPolicy)
 	if err != nil {
 		return err
@@ -954,6 +1012,10 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 		return err
 	}
 	a.PluginToolsJSON = pluginToolsJSON
+	return normalizeAutomationUpdateSettings(a)
+}
+
+func normalizeAutomationUpdateSettings(a *Automation) error {
 	if a.ContinuationPolicy == "" {
 		a.ContinuationPolicy = ContinuationPolicyNewTask
 	}
@@ -983,13 +1045,11 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 	}
 	a.UpdatedAt = time.Now().UTC()
 
-	tx, err := s.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
+	return nil
+}
 
-	_, err = tx.ExecContext(ctx, tx.Rebind(`
+func writeAutomationUpdateRow(ctx context.Context, tx *sqlx.Tx, id string, a *Automation, previousMCPRevision int64) error {
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
 			agent_profile_id = ?, executor_profile_id = ?,
 			task_mode = ?, managed_owner_installation_id = ?, managed_destination_installation_id = ?,
@@ -997,8 +1057,8 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 			managed_destination_instance_key = ?, managed_destination_revision = ?, resource_revision = resource_revision + 1,
 			repository_mode = ?, prompt = ?, task_title_template = ?,
 			enabled = ?, max_concurrent_runs = ?, continuation_policy = ?,
-			retry_policy = ?, plugin_tools = ?, automation_revision = automation_revision + 1, updated_at = ?
-		WHERE id = ?`),
+			retry_policy = ?, plugin_tools = ?, mcp_selection = ?, mcp_selection_revision = ?, automation_revision = automation_revision + 1, updated_at = ?
+		WHERE id = ? AND mcp_selection_revision = ?`),
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		string(a.TaskMode), a.ManagedOwnerInstallationID, a.ManagedDestinationInstallationID,
@@ -1006,10 +1066,20 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 		a.ManagedDestinationInstanceKey, a.ManagedDestinationRevision, string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
 		a.Enabled, a.MaxConcurrentRuns, a.ContinuationPolicy,
-		a.RetryPolicyJSON, a.PluginToolsJSON, a.UpdatedAt, id)
+		a.RetryPolicyJSON, a.PluginToolsJSON, a.MCPSelectionJSON, a.MCPSelectionRevision, a.UpdatedAt, id, previousMCPRevision)
 	if err != nil {
 		return err
 	}
+	if count, err := result.RowsAffected(); err != nil {
+		return err
+	} else if count != 1 {
+		return ErrMCPSelectionConflict
+	}
+	return nil
+}
+
+func replaceAutomationUpdateRepositories(ctx context.Context, tx *sqlx.Tx, id string, a *Automation, req *UpdateAutomationRequest) error {
+
 	if req.Repositories != nil || req.RepositoryIDs != nil {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_repositories WHERE automation_id = ?`), id); err != nil {
 			return fmt.Errorf("clear automation_repositories: %w", err)
@@ -1022,10 +1092,18 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 			return fmt.Errorf("clear automation_repositories for repository mode: %w", err)
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
+	if req.TaskMode != nil && *req.TaskMode != a.TaskMode && a.MCPSelection != nil {
+		a.MCPSelection = nil
+		a.MCPSelectionRevision++
+	}
+	if req.MCPSelection != nil {
+		a.MCPSelection = req.MCPSelection.Clone()
+		a.MCPSelectionRevision++
+	}
 	if req.Name != nil {
 		a.Name = *req.Name
 	}

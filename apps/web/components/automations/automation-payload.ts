@@ -1,6 +1,8 @@
 import { createRepositoryAction } from "@/app/actions/workspaces";
 import type {
   CreateAutomationRequest,
+  Automation,
+  AutomationMCPSelection,
   AutomationRepository,
   AutomationPluginToolSelection,
   ContinuationPolicy,
@@ -30,6 +32,8 @@ export const DEFAULT_RETRY_POLICY: RetryPolicy = {
 // aligned while keeping automation-editor.tsx under its file-length limit.
 
 export type FormState = {
+  mcpSelection?: AutomationMCPSelection | null;
+  mcpSelectionRevision?: number;
   name: string;
   description: string;
   workflowId: string;
@@ -227,6 +231,9 @@ export function buildCreatePayload(
     })),
     retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
     plugin_tools: form.taskMode === "automation_run" ? form.pluginTools : [],
+    ...(form.taskMode !== "managed_conversation" && form.mcpSelection
+      ? { mcp_selection: form.mcpSelection }
+      : {}),
   };
 }
 
@@ -234,8 +241,15 @@ export function buildUpdatePayload(
   form: FormState,
   repositories: AutomationRepository[],
   pluginTools?: AutomationPluginToolSelection[],
+  mcpSelection?: AutomationMCPSelection,
 ): UpdateAutomationRequest {
   return {
+    ...(mcpSelection && form.taskMode !== "managed_conversation"
+      ? {
+          mcp_selection: mcpSelection,
+          expected_mcp_selection_revision: form.mcpSelectionRevision ?? 0,
+        }
+      : {}),
     name: form.name,
     description: form.description,
     workflow_id: form.workflowId,
@@ -266,3 +280,33 @@ export function buildWebhookUrl(automationId: string): string {
 }
 
 export type CreatedWebhookDetails = { url: string; secret: string };
+
+export function canonicalMCPSelection(selection: AutomationMCPSelection | null | undefined) {
+  return selection
+    ? {
+        builtin_packages: [...selection.builtin_packages].sort(),
+        definition_ids: [...selection.definition_ids].sort(),
+      }
+    : null;
+}
+
+export function mcpSelectionForUpdate(form: FormState, saved: FormState) {
+  if (
+    JSON.stringify(canonicalMCPSelection(form.mcpSelection)) ===
+    JSON.stringify(canonicalMCPSelection(saved.mcpSelection))
+  )
+    return undefined;
+  return form.mcpSelection ?? undefined;
+}
+export function withSavedMCPSelection(form: FormState, saved: Automation): FormState {
+  return {
+    ...form,
+    mcpSelection: saved.mcp_selection,
+    mcpSelectionRevision: saved.mcp_selection_revision ?? form.mcpSelectionRevision ?? 0,
+  };
+}
+
+export function automationDraftRevision(form: FormState): string {
+  const { mcpSelectionRevision: _serverRevision, ...draft } = form;
+  return JSON.stringify(draft);
+}

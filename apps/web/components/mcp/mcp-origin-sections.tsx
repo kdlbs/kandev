@@ -62,6 +62,7 @@ export function McpOriginSections({
 }) {
   const { t } = useTranslation();
   const labels: Record<MCPSelectionOrigin["scope"], string> = {
+    automation: t("automations:automation"),
     profile: t("settings:mcpOriginProfile"),
     repository: t("settings:mcpOriginRepository"),
     task: t("settings:mcpOriginTask"),

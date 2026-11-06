@@ -21,6 +21,7 @@ var SurvivalCapabilities = []string{
 	launchwrapper.Capability,
 	acpcompat.AntigravityPersonalAuthCapability,
 	p.BuiltinPackagesCapability,
+	p.AutomationMCPSelectionCapability,
 }
 
 // handleIdentity reports this launch's opaque identity and capability

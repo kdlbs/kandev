@@ -52,9 +52,10 @@ func (e *MCPRevisionConflictError) Unwrap() error { return ErrMCPRevisionConflic
 
 // CatalogService validates and persists MCP definitions without materializing them.
 type CatalogService struct {
-	repo          CatalogRepository
-	authorizer    WorkspaceAuthorizer
-	selectionRepo SelectionRepository
+	automationUsage func(context.Context, string, string) (int, error)
+	repo            CatalogRepository
+	authorizer      WorkspaceAuthorizer
+	selectionRepo   SelectionRepository
 }
 
 func NewCatalogService(repo CatalogRepository) *CatalogService {
@@ -153,6 +154,15 @@ func (s *CatalogService) Delete(ctx context.Context, workspaceID, id string, exp
 	}
 	if current.Revision != expectedRevision {
 		return revisionConflict(current)
+	}
+	if s.automationUsage != nil {
+		count, err := s.automationUsage(ctx, workspaceID, id)
+		if err != nil {
+			return err
+		}
+		if count > 0 && !confirm {
+			return &MCPSelectionImpactError{Impact: SelectionImpact{Automation: count}}
+		}
 	}
 	if s.selectionRepo != nil {
 		impact, impactErr := s.selectionRepo.SelectionImpact(ctx, workspaceID, id)

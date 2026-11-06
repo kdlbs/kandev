@@ -77,10 +77,13 @@ func boundedMCPIdentity(value string) string {
 	return value
 }
 
+const automationMCPOrigin = "automation"
+
 func normalizeMCPOrigins(origins []MCPSelectionOrigin) []MCPSelectionOrigin {
 	result := make([]MCPSelectionOrigin, 0, min(len(origins), 64))
 	for _, origin := range origins {
 		switch origin.Scope {
+		case automationMCPOrigin:
 		case "profile", "repository", "task", "task_session":
 		default:
 			continue

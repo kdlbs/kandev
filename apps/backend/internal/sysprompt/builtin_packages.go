@@ -48,7 +48,12 @@ func builtinPackageGuidance(manifest *p.BuiltinManifest) string {
 	}
 	text := "BUILT-IN PACKAGES: " + strings.Join(names, ", ") + ". This execution binding supersedes earlier optional-tool guidance. Discover tools only within these selected built-in servers. Do not rediscover an excluded package. Canonical tool names keep their _kandev suffix."
 	if slices.Contains(manifest.Packages, p.PackageConfiguration) {
-		text += " Configuration tools can change authorized shared resources, including workflows, agents, profiles, MCP settings, prompts, executors, and automations. Tool availability does not authorize a change. A regular task keeps its task identity and cannot change built-in package policy or grant packages."
+		text += " Configuration tools can change authorized shared resources, including workflows, agents, profiles, MCP settings, prompts, executors, and automations. Tool availability does not authorize a change."
+		if manifest.Surface == p.SurfaceAutomation {
+			text += " This private automation keeps its automation identity. It cannot change MCP access grants or plugin approvals."
+		} else {
+			text += " A regular task keeps its task identity and cannot change built-in package policy or grant packages."
+		}
 	}
 	return text
 }

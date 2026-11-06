@@ -12,6 +12,7 @@ import (
 
 const BuiltinBindingMetadataKey = "kandev.builtin_mcp_binding"
 const BuiltinPackagesCapability = "builtin-mcp-packages-v1"
+const AutomationMCPSelectionCapability = "automation-mcp-selection-v1"
 
 type builtinBinding struct {
 	Profile Context `json:"profile"`
@@ -36,6 +37,7 @@ func canonicalBuiltinBinding(ctx Context) (Context, string, error) {
 	}
 	canonical := Normalize(ctx)
 	slices.Sort(canonical.BuiltinPackages.Packages)
+	slices.Sort(canonical.BuiltinPackages.AutomationDefinitionIDs)
 	slices.Sort(canonical.Capabilities)
 	encoded, err := json.Marshal(canonical)
 	if err != nil {

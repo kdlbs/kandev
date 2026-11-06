@@ -973,7 +973,12 @@ func (s *Service) prepareAutomationTask(
 	if err := s.verifyRetryTaskOperation(ctx, evt, operations...); err != nil {
 		return nil, nil, action, reasons, err
 	}
-	task, err := s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
+	builtinPreferences, definitionIDs, err := s.automationMCPTemplate(ctx, a)
+	if err != nil {
+		return nil, nil, action, reasons, err
+	}
+	task, err = s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
+		BuiltinMCPPreferences: builtinPreferences, MCPServerIDs: definitionIDs,
 		WorkspaceID:    a.WorkspaceID,
 		WorkflowID:     a.WorkflowID,
 		WorkflowStepID: a.WorkflowStepID,

@@ -23,15 +23,18 @@ const (
 // BuiltinManifest is the backend-owned package selection bound to an execution.
 // A nil manifest denotes a retained legacy, monolithic MCP catalog.
 type BuiltinManifest struct {
-	Version           int                  `json:"version"`
-	CatalogVersion    int                  `json:"catalog_version"`
-	WorkspaceID       string               `json:"workspace_id"`
-	TaskID            string               `json:"task_id"`
-	Surface           Surface              `json:"surface"`
-	WorkspaceRevision int64                `json:"workspace_revision"`
-	TaskRevision      int64                `json:"task_revision"`
-	Packages          []PackageID          `json:"packages"`
-	Origins           map[PackageID]string `json:"origins"`
+	AutomationID            string               `json:"automation_id,omitempty"`
+	AutomationRevision      int64                `json:"automation_revision,omitempty"`
+	AutomationDefinitionIDs []string             `json:"automation_definition_ids,omitempty"`
+	Version                 int                  `json:"version"`
+	CatalogVersion          int                  `json:"catalog_version"`
+	WorkspaceID             string               `json:"workspace_id"`
+	TaskID                  string               `json:"task_id"`
+	Surface                 Surface              `json:"surface"`
+	WorkspaceRevision       int64                `json:"workspace_revision"`
+	TaskRevision            int64                `json:"task_revision"`
+	Packages                []PackageID          `json:"packages"`
+	Origins                 map[PackageID]string `json:"origins"`
 }
 
 func (m *BuiltinManifest) Clone() *BuiltinManifest {
@@ -40,6 +43,7 @@ func (m *BuiltinManifest) Clone() *BuiltinManifest {
 	}
 	copy := *m
 	copy.Packages = slices.Clone(m.Packages)
+	copy.AutomationDefinitionIDs = slices.Clone(m.AutomationDefinitionIDs)
 	copy.Origins = maps.Clone(m.Origins)
 	return &copy
 }
@@ -72,7 +76,21 @@ func (m *BuiltinManifest) Validate() error {
 }
 
 func (m *BuiltinManifest) validateIdentity() error {
-	if m.Version != 1 || m.CatalogVersion != 1 || m.WorkspaceRevision < 0 || m.TaskRevision < 0 {
+	if m.Surface == SurfaceAutomation {
+		if m.Version != 2 || m.AutomationID == "" || strings.TrimSpace(m.AutomationID) != m.AutomationID || m.AutomationRevision < 1 {
+			return errors.New("invalid automation package binding")
+		}
+		ids := make(map[string]bool)
+		for _, id := range m.AutomationDefinitionIDs {
+			if id == "" || strings.TrimSpace(id) != id || ids[id] {
+				return errors.New("invalid automation MCP definitions")
+			}
+			ids[id] = true
+		}
+	} else if m.Version != 1 || m.AutomationID != "" || m.AutomationRevision != 0 || len(m.AutomationDefinitionIDs) != 0 {
+		return errors.New("invalid built-in package binding version")
+	}
+	if m.CatalogVersion != 1 || m.WorkspaceRevision < 0 || m.TaskRevision < 0 {
 		return errors.New("unsupported built-in package manifest version or revision")
 	}
 	for _, id := range []string{m.WorkspaceID, m.TaskID} {
@@ -91,12 +109,15 @@ func (m *BuiltinManifest) validOrigin(id PackageID) bool {
 	if id == PackageCore || m.Surface == SurfaceConfiguration {
 		return origin == "required"
 	}
+	if m.Surface == SurfaceAutomation {
+		return origin == "automation"
+	}
 	return origin == "task" || (origin == "workspace" && id != PackageConfiguration)
 }
 
 func PackageEligible(id PackageID, surface Surface) bool {
 	switch surface {
-	case SurfaceKanbanTask:
+	case SurfaceKanbanTask, SurfaceAutomation:
 		return id == PackageCore || id == PackageConfiguration || id == PackageRichOutput || id == PackageWalkthroughs || id == PackageDiagnostics
 	case SurfaceOfficeTask:
 		return id == PackageCore || id == PackageRichOutput

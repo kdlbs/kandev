@@ -46,6 +46,8 @@ Backend paths are relative to `apps/backend`; web paths are relative to `apps/we
 | REQ-AGENTS-BUILTIN-MCP-003 | Persistence; Binding; Compatibility |
 | REQ-AGENTS-BUILTIN-MCP-004 | Evidence; Desktop and phone |
 
+[Automation extension](../../office/system-design/automation-mcp-selection.md).
+
 ## Packages and defaults
 
 These are logical MCP servers in the existing agentctl process, each with its
