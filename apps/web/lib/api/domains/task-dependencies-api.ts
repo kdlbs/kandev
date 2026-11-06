@@ -16,6 +16,7 @@ export type TaskDependencyProjectionResponse = {
   blocked_reason?: string;
   depends_on?: TaskDependencyRefResponse[];
   blocks?: TaskDependencyRefResponse[];
+  related?: TaskDependencyRefResponse[];
 };
 
 /**

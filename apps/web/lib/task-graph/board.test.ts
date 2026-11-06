@@ -16,7 +16,9 @@ describe("buildBoardGraph", () => {
       "b",
     );
     expect(response.nodes.map((n) => n.id)).toEqual(["a", "b", "c"]);
-    expect(response.edges).toEqual([{ from: "a", to: "b", status: "resolved" }]);
+    expect(response.edges).toEqual([
+      { from: "a", to: "b", kind: "dependency", status: "resolved" },
+    ]);
     expect(response.focus_task_id).toBe("b");
     expect(response.nodes[2]).toMatchObject({
       blocked: true,
@@ -46,5 +48,13 @@ describe("buildBoardGraph", () => {
       null,
     );
     expect(response.edges[0].status).toBe("pending");
+  });
+
+  it("includes same-board related edges without affecting dependencies", () => {
+    const { response } = buildBoardGraph(
+      [task("a"), task("b", { related: [{ id: "a" }, { id: "outside" }] })],
+      null,
+    );
+    expect(response.edges).toEqual([{ from: "a", to: "b", kind: "related" }]);
   });
 });

@@ -11,6 +11,7 @@ export type BoardGraphTask = {
   blocked?: boolean;
   blockedReason?: string;
   dependsOn?: Array<{ id: string; status?: TaskGraphEdgeStatus }>;
+  related?: Array<{ id: string }>;
 };
 
 export type BoardGraphGroup = {
@@ -46,11 +47,19 @@ export function buildBoardGraph(
       blocked: Boolean(t.blocked),
       blocked_reason: t.blockedReason,
     })),
-    edges: tasks.flatMap((t) =>
-      (t.dependsOn ?? [])
+    edges: tasks.flatMap((t) => [
+      ...(t.dependsOn ?? [])
         .filter((dep) => ids.has(dep.id))
-        .map((dep) => ({ from: dep.id, to: t.id, status: dep.status ?? "pending" })),
-    ),
+        .map((dep) => ({
+          from: dep.id,
+          to: t.id,
+          kind: "dependency" as const,
+          status: dep.status ?? "pending",
+        })),
+      ...(t.related ?? [])
+        .filter((relation) => ids.has(relation.id))
+        .map((relation) => ({ from: relation.id, to: t.id, kind: "related" as const })),
+    ]),
     truncated: false,
   };
   const groups = new Map<string, BoardGraphGroup>();

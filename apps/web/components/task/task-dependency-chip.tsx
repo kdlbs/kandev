@@ -150,6 +150,22 @@ function DependencyLists({
           ))}
         </section>
       )}
+      {data.related.length > 0 && (
+        <section>
+          <h4 className="px-2 pb-1 text-[10px] font-semibold uppercase text-muted-foreground">
+            {t("task:taskDependencyRelated")}
+          </h4>
+          {data.related.map((entry) => (
+            <DependencyRow
+              key={entry.id}
+              ref={entry}
+              showStatus={false}
+              touchTarget={touchTarget}
+              onNavigated={onNavigated}
+            />
+          ))}
+        </section>
+      )}
       {data.blockedReason === "failed" && (
         <p className="px-2 text-[11px] text-red-600 dark:text-red-400">
           {t("task:dependencyChainHalted")}
@@ -170,6 +186,10 @@ function ChipTriggerContent({ data }: { data: DependencyChipData }) {
           t("task:dependencyCountBlockedBy", { count: data.dependsOn.length })}
         {data.dependsOn.length > 0 && data.blocks.length > 0 && " · "}
         {data.blocks.length > 0 && t("task:dependencyCountBlocks", { count: data.blocks.length })}
+        {data.dependsOn.length === 0 &&
+          data.blocks.length === 0 &&
+          data.related.length > 0 &&
+          t("task:taskDependencyRelatedCount", { count: data.related.length })}
       </span>
     </>
   );

@@ -37,5 +37,6 @@ type TaskGraphNodeDTO struct {
 type TaskGraphEdgeDTO struct {
 	From   string `json:"from"`
 	To     string `json:"to"`
-	Status string `json:"status"`
+	Kind   string `json:"kind"`
+	Status string `json:"status,omitempty"`
 }

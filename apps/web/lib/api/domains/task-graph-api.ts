@@ -1,6 +1,7 @@
 import { fetchJson, type ApiRequestOptions } from "@/lib/api/client";
 
 export type TaskGraphMode = "subtasks" | "chain";
+export type TaskGraphEdgeKind = "dependency" | "related";
 export type TaskGraphEdgeStatus = "resolved" | "pending" | "failed";
 
 export type TaskGraphNodeResponse = {
@@ -19,7 +20,8 @@ export type TaskGraphNodeResponse = {
 export type TaskGraphEdgeResponse = {
   from: string;
   to: string;
-  status: TaskGraphEdgeStatus;
+  kind: TaskGraphEdgeKind;
+  status?: TaskGraphEdgeStatus;
 };
 
 export type TaskGraphResponse = {

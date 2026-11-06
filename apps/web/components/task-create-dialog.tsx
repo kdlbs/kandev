@@ -216,6 +216,13 @@ function DialogFormBody(props: DialogFormBodyProps) {
         isTaskStarted={isTaskStarted}
         blockedBy={props.fs.blockedBy}
         onBlockedByChange={props.fs.setBlockedBy}
+        parentTaskId={props.parentTaskId}
+        selectedParentTaskId={props.fs.selectedParentTaskId}
+        onSelectedParentTaskIdChange={props.fs.setSelectedParentTaskId}
+        relatedTaskIds={props.fs.relatedTaskIds ?? []}
+        onRelatedTaskIdsChange={props.fs.setRelatedTaskIds}
+        contextStepId={props.defaultStepId}
+        taskId={props.taskId}
         priority={props.fs.priority}
         onPriorityChange={props.fs.setPriority}
         dependenciesDisabled={props.isCreatingSession || props.isCreatingTask}

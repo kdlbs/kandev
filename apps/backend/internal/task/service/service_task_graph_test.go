@@ -14,10 +14,11 @@ import (
 )
 
 type graphFixture struct {
-	t        *testing.T
-	svc      *Service
-	repo     *sqliterepo.Repository
-	blockers *mockBlockerRepo
+	t         *testing.T
+	svc       *Service
+	repo      *sqliterepo.Repository
+	blockers  *mockBlockerRepo
+	relations *mockRelationRepo
 }
 
 func newGraphFixture(t *testing.T) *graphFixture {
@@ -25,8 +26,10 @@ func newGraphFixture(t *testing.T) *graphFixture {
 	svc, _, repo := createTestService(t)
 	setupTestTask(t, repo)
 	blockers := &mockBlockerRepo{}
+	relations := newMockRelationRepo()
 	svc.SetBlockerRepository(blockers)
-	return &graphFixture{t: t, svc: svc, repo: repo, blockers: blockers}
+	svc.SetRelationRepository(relations)
+	return &graphFixture{t: t, svc: svc, repo: repo, blockers: blockers, relations: relations}
 }
 
 func (f *graphFixture) task(id, parentID string, state v1.TaskState) {
@@ -49,6 +52,13 @@ func (f *graphFixture) archive(id string) {
 // edge records "dependent depends on predecessor".
 func (f *graphFixture) edge(predecessor, dependent string) {
 	f.blockers.blockers = append(f.blockers.blockers, &orchmodels.TaskBlocker{TaskID: dependent, BlockerTaskID: predecessor})
+}
+
+func (f *graphFixture) related(a, b string) {
+	f.t.Helper()
+	if err := f.relations.AddRelation(context.Background(), a, b); err != nil {
+		f.t.Fatalf("add relation %s/%s: %v", a, b, err)
+	}
 }
 
 func (f *graphFixture) build(taskID, mode string) *TaskGraph {
@@ -237,6 +247,53 @@ func TestBuildTaskGraphDeduplicatesEdgesAndDropsDanglingEnds(t *testing.T) {
 	g := f.build("parent", TaskGraphModeSubtasks)
 	assertStrings(t, "nodes", graphNodeIDs(g), []string{"a", "b"})
 	assertStrings(t, "edges", graphEdgeKeys(g), []string{"a>b:pending"})
+}
+
+func TestBuildTaskGraphSubtasksAddsOnlyRelatedEdgesBetweenMembers(t *testing.T) {
+	f := newGraphFixture(t)
+	f.task("parent-related", "", v1.TaskStateTODO)
+	f.task("member-a", "parent-related", v1.TaskStateTODO)
+	f.task("member-b", "parent-related", v1.TaskStateTODO)
+	f.task("outside-related", "", v1.TaskStateTODO)
+	f.related("member-a", "member-b")
+	f.related("member-a", "outside-related")
+	g := f.build("parent-related", TaskGraphModeSubtasks)
+	if len(g.Edges) != 1 || g.Edges[0].Kind != TaskGraphEdgeRelated || g.Edges[0].From != "member-a" || g.Edges[0].To != "member-b" {
+		t.Fatalf("edges = %+v", g.Edges)
+	}
+	if graphNode(g, "outside-related") != nil {
+		t.Fatal("related-to edge pulled an external node into the subtree")
+	}
+}
+
+func TestBuildTaskGraphChainAddsRelatedEdgesAndKeepsKindsDistinct(t *testing.T) {
+	f := newGraphFixture(t)
+	for _, id := range []string{"focus-related", "upstream-a", "upstream-b", "dependent-related"} {
+		f.task(id, "", v1.TaskStateTODO)
+	}
+	f.edge("upstream-a", "focus-related")
+	f.edge("upstream-b", "focus-related")
+	f.edge("focus-related", "dependent-related")
+	f.related("upstream-a", "upstream-b")
+	f.related("focus-related", "dependent-related")
+	g := f.build("focus-related", TaskGraphModeChain)
+	relatedPairs := map[string]bool{}
+	pairKinds := 0
+	for _, edge := range g.Edges {
+		if edge.Kind == TaskGraphEdgeRelated {
+			relatedPairs[edge.From+">"+edge.To] = true
+		}
+		if (edge.From == "focus-related" && edge.To == "dependent-related") ||
+			(edge.From == "dependent-related" && edge.To == "focus-related") {
+			pairKinds++
+		}
+	}
+	if !relatedPairs["upstream-a>upstream-b"] || !relatedPairs["dependent-related>focus-related"] {
+		t.Fatalf("related edges = %v", relatedPairs)
+	}
+	if pairKinds != 2 {
+		t.Fatalf("parallel dependency/related edges = %d, want 2: %+v", pairKinds, g.Edges)
+	}
 }
 
 func TestBuildTaskGraphUnknownTaskIsNotFound(t *testing.T) {

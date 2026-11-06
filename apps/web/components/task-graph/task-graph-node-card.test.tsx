@@ -88,7 +88,7 @@ describe("TaskGraphNodeCard", () => {
 describe("TaskGraphLegend", () => {
   it("names each edge style in text", () => {
     render(<TaskGraphLegend showExternal />);
-    for (const label of ["Done", "Waiting", "Failed", "Task outside the subtree"]) {
+    for (const label of ["Done", "Waiting", "Failed", "Related", "Task outside the subtree"]) {
       expect(screen.getByText(label)).toBeTruthy();
     }
   });

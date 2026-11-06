@@ -91,6 +91,7 @@ export interface Task {
   blockedReason?: string;
   dependsOn?: TaskDependencyRef[];
   blocks?: TaskDependencyRef[];
+  related?: TaskDependencyRef[];
   startWhenUnblocked?: boolean;
   queuedAt?: string;
   issueUrl?: string;

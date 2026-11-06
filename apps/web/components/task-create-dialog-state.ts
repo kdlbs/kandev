@@ -86,7 +86,16 @@ function useWorkflowAgentProfileState() {
  */
 function useTaskDependencyState() {
   const [blockedBy, setBlockedBy] = useState<string[]>([]);
-  return { blockedBy, setBlockedBy };
+  const [selectedParentTaskId, setSelectedParentTaskId] = useState<string | undefined>();
+  const [relatedTaskIds, setRelatedTaskIds] = useState<string[]>([]);
+  return {
+    blockedBy,
+    setBlockedBy,
+    selectedParentTaskId,
+    setSelectedParentTaskId,
+    relatedTaskIds,
+    setRelatedTaskIds,
+  };
 }
 
 function useFreshBranchState() {
@@ -250,6 +259,8 @@ export function useDialogFormState(
     lockedWorkflow,
     resetters: {
       setBlockedBy: dependencies.setBlockedBy,
+      setSelectedParentTaskId: dependencies.setSelectedParentTaskId,
+      setRelatedTaskIds: dependencies.setRelatedTaskIds,
       setTaskName: form.setTaskName,
       setHasTitle: form.setHasTitle,
       setHasDescription: form.setHasDescription,

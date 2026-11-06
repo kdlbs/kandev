@@ -10,6 +10,7 @@ type StoreTask = {
   parentTaskId?: string | null;
   dependsOn?: Array<{ id: string }>;
   blocks?: Array<{ id: string }>;
+  related?: Array<{ id: string }>;
 };
 
 const store = vi.hoisted(() => ({
@@ -83,6 +84,13 @@ describe("taskGraphSignature", () => {
     expect(
       taskGraphSignature(
         [{ id: "a", title: "A", state: "TODO", dependsOn: [{ id: "z" } as never] }],
+        {},
+        watched,
+      ),
+    ).not.toBe(base);
+    expect(
+      taskGraphSignature(
+        [{ id: "a", title: "A", state: "TODO", related: [{ id: "z" }] }],
         {},
         watched,
       ),

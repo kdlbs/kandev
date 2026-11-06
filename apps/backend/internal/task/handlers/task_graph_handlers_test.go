@@ -98,7 +98,7 @@ func TestHTTPGetTaskGraphDefaultsToSubtasks(t *testing.T) {
 	require.Equal(t, 1, body.Nodes[0].Depth)
 	require.Equal(t, "member", body.Nodes[0].Role)
 	require.Equal(t, "Parent", body.Nodes[0].ParentTitle)
-	require.Equal(t, []dto.TaskGraphEdgeDTO{{From: "child-a", To: "child-b", Status: "resolved"}}, body.Edges)
+	require.Equal(t, []dto.TaskGraphEdgeDTO{{From: "child-a", To: "child-b", Kind: "dependency", Status: "resolved"}}, body.Edges)
 	require.False(t, body.Truncated)
 }
 

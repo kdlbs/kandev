@@ -16,7 +16,12 @@ function response(
     available_modes: ["subtasks", "chain"],
     focus_task_id: ids[0],
     nodes: ids.map((id) => node(id)),
-    edges: edges.map(([from, to]) => ({ from, to, status: "pending" as const })),
+    edges: edges.map(([from, to]) => ({
+      from,
+      to,
+      kind: "dependency" as const,
+      status: "pending" as const,
+    })),
     truncated: false,
     ...extra,
   };
@@ -82,6 +87,32 @@ describe("buildTaskGraphModel", () => {
     expect(buildTaskGraphModel(response(["a", "b"], [["a", "b"]])).noOrderSet).toBe(false);
   });
 
+  it("keeps related edges without using them to compute steps or order", () => {
+    const model = buildTaskGraphModel(
+      response(["a", "b", "c"], [], {
+        edges: [
+          { from: "a", to: "c", kind: "dependency", status: "pending" },
+          { from: "a", to: "b", kind: "related" },
+        ],
+      }),
+    );
+    expect(steps(model)).toEqual({ a: 1, b: 1, c: 2 });
+    expect(model.edges).toHaveLength(2);
+    expect(model.predecessors.get("b")).toEqual([]);
+  });
+
+  it("keeps dependency and related links between the same pair distinct", () => {
+    const model = buildTaskGraphModel(
+      response(["a", "b"], [], {
+        edges: [
+          { from: "a", to: "b", kind: "dependency", status: "pending" },
+          { from: "a", to: "b", kind: "related" },
+        ],
+      }),
+    );
+    expect(new Set(model.edges.map((edge) => edge.id)).size).toBe(2);
+  });
+
   it("never flags the chain view as unordered", () => {
     const model = buildTaskGraphModel(response(["a"], [], { mode: "chain" }));
     expect(model.noOrderSet).toBe(false);
@@ -109,6 +140,10 @@ describe("traceChain", () => {
     );
     const chain = traceChain(model, "b");
     expect([...chain.nodeIds].sort()).toEqual(["a", "b", "c", "d"]);
-    expect([...chain.edgeIds].sort()).toEqual(["a->b", "b->c", "b->d"]);
+    expect([...chain.edgeIds].sort()).toEqual([
+      "dependency:a->b",
+      "dependency:b->c",
+      "dependency:b->d",
+    ]);
   });
 });

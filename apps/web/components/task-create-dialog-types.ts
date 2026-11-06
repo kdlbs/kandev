@@ -396,6 +396,10 @@ export type DialogFormState = {
   /** Predecessor task IDs chosen in the dialog's "Depends on" selector. */
   blockedBy: string[];
   setBlockedBy: (v: string[]) => void;
+  selectedParentTaskId?: string;
+  setSelectedParentTaskId?: (v: string | undefined) => void;
+  relatedTaskIds?: string[];
+  setRelatedTaskIds?: (v: string[]) => void;
   taskName: string;
   setTaskName: (v: string) => void;
   hasTitle: boolean;
@@ -598,6 +602,7 @@ export type SubmitHandlersDeps = {
   noRepository: boolean;
   /** Predecessor task IDs to link at creation time. */
   blockedBy?: string[];
+  relatedTaskIds?: string[];
   /** Edit-mode dependency draft and persistence state. */
   editDependencies?: Pick<TaskEditDialogDependenciesState, "isDirty" | "ready" | "save">;
   /** Optional host folder for repo-less tasks; empty means kandev creates a scratch workspace. */
@@ -636,6 +641,9 @@ export type DialogFormBodyProps = {
   isTaskStarted: boolean;
   initialDescription: string;
   workspaceId: string | null;
+  taskId?: string | null;
+  parentTaskId?: string;
+  defaultStepId?: string | null;
   onJiraImport?: (ticket: JiraTicket) => void;
   onLinearImport?: (issue: LinearIssue) => void;
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;

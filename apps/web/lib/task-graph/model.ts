@@ -30,13 +30,22 @@ export function taskGraphEdgeId(from: string, to: string): string {
   return `${from}->${to}`;
 }
 
+export function taskGraphEdgeKey(from: string, to: string, kind: string): string {
+  return `${kind}:${from}->${to}`;
+}
+
 export function buildTaskGraphModel(response: TaskGraphResponse): TaskGraphModel {
   const ids = new Set(response.nodes.map((n) => n.id));
   const edges = response.edges
     .filter((e) => ids.has(e.from) && ids.has(e.to) && e.from !== e.to)
-    .map((e) => ({ ...e, id: taskGraphEdgeId(e.from, e.to) }));
-  const predecessors = adjacency(ids, edges, "to", "from");
-  const dependents = adjacency(ids, edges, "from", "to");
+    .map((e) => ({
+      ...e,
+      kind: e.kind ?? "dependency",
+      id: taskGraphEdgeKey(e.from, e.to, e.kind ?? "dependency"),
+    }));
+  const dependencyEdges = edges.filter((edge) => edge.kind === "dependency");
+  const predecessors = adjacency(ids, dependencyEdges, "to", "from");
+  const dependents = adjacency(ids, dependencyEdges, "from", "to");
   const stepById = computeSteps(response.nodes, predecessors, dependents);
   const discovery = new Map(response.nodes.map((n, i) => [n.id, i]));
   const nodes = response.nodes
@@ -97,7 +106,7 @@ function computeSteps(
 
 function hasMemberOrder(nodes: TaskGraphNodeResponse[], edges: TaskGraphEdge[]): boolean {
   const members = new Set(nodes.filter((n) => n.role === "member").map((n) => n.id));
-  return edges.some((e) => members.has(e.from) && members.has(e.to));
+  return edges.some((e) => e.kind === "dependency" && members.has(e.from) && members.has(e.to));
 }
 
 /** Transitive predecessors and dependents of nodeId, plus the edges between them. */

@@ -44,8 +44,14 @@ type TaskGraphNode struct {
 type TaskGraphEdge struct {
 	From   string
 	To     string
+	Kind   string
 	Status string
 }
+
+const (
+	TaskGraphEdgeDependency = "dependency"
+	TaskGraphEdgeRelated    = "related"
+)
 
 // TaskGraph is the result of BuildTaskGraph.
 type TaskGraph struct {
@@ -266,7 +272,23 @@ func (s *Service) addTaskGraphTasks(ctx context.Context, b *taskGraphBuilder, id
 // taskGraphEdges returns every edge between displayed nodes. Subtasks mode
 // keeps only edges touching a member, so externals stay unexpanded.
 func (s *Service) taskGraphEdges(ctx context.Context, b *taskGraphBuilder, includeAll bool) ([]TaskGraphEdge, error) {
-	if s.blockers == nil || len(b.order) == 0 {
+	if len(b.order) == 0 {
+		return nil, nil
+	}
+	seen := map[taskGraphEdgeKey]bool{}
+	blockerEdges, err := s.appendBlockerEdges(ctx, b, includeAll, seen)
+	if err != nil {
+		return nil, err
+	}
+	relatedEdges, err := s.appendRelatedEdges(ctx, b, includeAll, seen)
+	if err != nil {
+		return nil, err
+	}
+	return append(blockerEdges, relatedEdges...), nil
+}
+
+func (s *Service) appendBlockerEdges(ctx context.Context, b *taskGraphBuilder, includeAll bool, seen map[taskGraphEdgeKey]bool) ([]TaskGraphEdge, error) {
+	if s.blockers == nil {
 		return nil, nil
 	}
 	preds, err := s.blockers.ListBlockersForTasks(ctx, b.order)
@@ -274,18 +296,51 @@ func (s *Service) taskGraphEdges(ctx context.Context, b *taskGraphBuilder, inclu
 		return nil, err
 	}
 	var edges []TaskGraphEdge
-	seen := map[[2]string]bool{}
 	for _, to := range b.order {
 		for _, from := range preds[to] {
 			fromNode, toNode := b.nodes[from], b.nodes[to]
-			if fromNode == nil || seen[[2]string{from, to}] {
+			key := taskGraphEdgeKey{from, to, TaskGraphEdgeDependency}
+			if fromNode == nil || seen[key] {
 				continue
 			}
 			if !includeAll && fromNode.Role != TaskGraphRoleMember && toNode.Role != TaskGraphRoleMember {
 				continue
 			}
-			seen[[2]string{from, to}] = true
-			edges = append(edges, TaskGraphEdge{From: from, To: to, Status: DependencyStatusForTask(fromNode.Task)})
+			seen[key] = true
+			edges = append(edges, TaskGraphEdge{From: from, To: to, Kind: TaskGraphEdgeDependency, Status: DependencyStatusForTask(fromNode.Task)})
+		}
+	}
+	return edges, nil
+}
+
+func (s *Service) appendRelatedEdges(ctx context.Context, b *taskGraphBuilder, includeAll bool, seen map[taskGraphEdgeKey]bool) ([]TaskGraphEdge, error) {
+	if s.relations == nil {
+		return nil, nil
+	}
+	relations, err := s.relations.ListRelationsForTasks(ctx, b.order)
+	if err != nil {
+		return nil, err
+	}
+	var edges []TaskGraphEdge
+	for _, taskID := range b.order {
+		for _, relatedID := range relations[taskID] {
+			a, z := taskID, relatedID
+			if a > z {
+				a, z = z, a
+			}
+			fromNode, toNode := b.nodes[a], b.nodes[z]
+			if fromNode == nil || toNode == nil {
+				continue
+			}
+			if !includeAll && (fromNode.Role != TaskGraphRoleMember || toNode.Role != TaskGraphRoleMember) {
+				continue
+			}
+			key := taskGraphEdgeKey{a, z, TaskGraphEdgeRelated}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			edges = append(edges, TaskGraphEdge{From: a, To: z, Kind: TaskGraphEdgeRelated})
 		}
 	}
 	return edges, nil
@@ -301,6 +356,8 @@ func (s *Service) applyTaskGraphViews(ctx context.Context, nodes []TaskGraphNode
 		nodes[i].View = views[nodes[i].Task.ID]
 	}
 }
+
+type taskGraphEdgeKey struct{ from, to, kind string }
 
 type taskGraphBuilder struct {
 	workspaceID string

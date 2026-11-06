@@ -79,6 +79,7 @@ type DependencyView struct {
 	BlockedReason      string
 	DependsOn          []DependencyRef
 	Blocks             []DependencyRef
+	Related            []string
 	DependsOnTruncated bool
 	BlocksTruncated    bool
 }
@@ -652,7 +653,17 @@ func (s *Service) buildDependencyViews(
 		// edges can exist), the projection reports the withheld verdict here,
 		// because an omitted map entry reads as the zero-value DependencyView
 		// (Blocked: false) — an indistinguishable, silent "not blocked".
-		return withheldDependencyViews(ids), nil
+		views := withheldDependencyViews(ids)
+		if s.relations != nil {
+			if related, relationErr := s.relations.ListRelationsForTasks(ctx, ids); relationErr == nil {
+				for _, id := range ids {
+					view := views[id]
+					view.Related = related[id]
+					views[id] = view
+				}
+			}
+		}
+		return views, nil
 	}
 	if ctx.Err() != nil {
 		return withheldDependencyViews(ids), nil
@@ -698,6 +709,18 @@ func (s *Service) buildDependencyViews(
 	}
 	for _, id := range ids {
 		out[id] = buildDependencyView(refs, predecessors[id], dependents[id], blocksTruncated[id])
+	}
+	if s.relations != nil {
+		related, relationErr := s.relations.ListRelationsForTasks(ctx, ids)
+		if relationErr != nil {
+			s.logger.Warn("failed to load task relations", zap.Error(relationErr))
+		} else {
+			for _, id := range ids {
+				view := out[id]
+				view.Related = related[id]
+				out[id] = view
+			}
+		}
 	}
 	return out, nil
 }
@@ -1028,6 +1051,12 @@ func (s *Service) ListDependentTaskIDs(ctx context.Context, taskID string) ([]st
 // deleteDependencyEdgesForTask removes both directions of every edge touching
 // taskID. task_blockers predates the tasks foreign key, so nothing cascades.
 func (s *Service) deleteDependencyEdgesForTask(ctx context.Context, taskID string) {
+	if s.relations != nil {
+		if err := s.relations.RemoveRelationsForTask(ctx, taskID); err != nil {
+			s.logger.Warn("failed to clean up task relations",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+	}
 	if s.blockers == nil {
 		return
 	}

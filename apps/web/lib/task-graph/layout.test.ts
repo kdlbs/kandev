@@ -23,7 +23,7 @@ function model(ids: string[], edges: Array<[string, string]>) {
       archived: false,
       blocked: false,
     })),
-    edges: edges.map(([from, to]) => ({ from, to, status: "pending" })),
+    edges: edges.map(([from, to]) => ({ from, to, kind: "dependency", status: "pending" })),
     truncated: false,
   };
   return buildTaskGraphModel(response);

@@ -57,7 +57,7 @@ function graph(overrides: Partial<TaskGraphResponse> = {}): TaskGraphResponse {
         blocked: true,
       },
     ],
-    edges: [{ from: "a", to: "b", status: "resolved" }],
+    edges: [{ from: "a", to: "b", kind: "dependency", status: "resolved" }],
     truncated: false,
     ...overrides,
   };

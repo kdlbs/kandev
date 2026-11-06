@@ -51,6 +51,14 @@ describe("useTaskGraphAvailable", () => {
     expect(count.calls.every(([open]) => !open)).toBe(true);
   });
 
+  it("is true for a related-only task", () => {
+    store.state = {
+      kanban: { tasks: [{ id: "t", related: [{ id: "other" }] }] },
+      kanbanMulti: { snapshots: {} },
+    };
+    expect(renderHook(() => useTaskGraphAvailable("t")).result.current).toBe(true);
+  });
+
   it("is true for a subtask", () => {
     store.state = {
       kanban: { tasks: [{ id: "t", parentTaskId: "p" }] },

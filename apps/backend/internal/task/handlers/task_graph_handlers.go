@@ -42,7 +42,7 @@ func taskGraphDTO(graph *service.TaskGraph) dto.TaskGraphDTO {
 		})
 	}
 	for _, e := range graph.Edges {
-		out.Edges = append(out.Edges, dto.TaskGraphEdgeDTO{From: e.From, To: e.To, Status: e.Status})
+		out.Edges = append(out.Edges, dto.TaskGraphEdgeDTO{From: e.From, To: e.To, Kind: e.Kind, Status: e.Status})
 	}
 	return out
 }

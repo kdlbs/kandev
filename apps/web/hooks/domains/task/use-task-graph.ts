@@ -17,6 +17,7 @@ type SignatureTask = {
   isArchived?: boolean;
   dependsOn?: Array<{ id: string }>;
   blocks?: Array<{ id: string }>;
+  related?: Array<{ id: string }>;
 };
 
 /**
@@ -34,9 +35,22 @@ export function taskGraphSignature(
     if (!watched.has(t.id) && !(t.parentTaskId && watched.has(t.parentTaskId))) return;
     const deps = (t.dependsOn ?? []).map((d) => d.id).join(",");
     const blocks = (t.blocks ?? []).map((d) => d.id).join(",");
+    const related = (t.related ?? [])
+      .map((d) => d.id)
+      .sort()
+      .join(",");
     parts.set(
       t.id,
-      [t.id, t.title, t.state, t.parentTaskId ?? "", t.isArchived ? 1 : 0, deps, blocks].join("|"),
+      [
+        t.id,
+        t.title,
+        t.state,
+        t.parentTaskId ?? "",
+        t.isArchived ? 1 : 0,
+        deps,
+        blocks,
+        related,
+      ].join("|"),
     );
   };
   tasks.forEach(visit);

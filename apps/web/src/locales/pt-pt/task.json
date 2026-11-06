@@ -2814,5 +2814,11 @@
   "taskGraphParallelSteps": "Passos paralelos",
   "taskGraphStepLabel": "Passo {{step}}",
   "taskGraphStepParallel_one": "Passo {{step}} · {{count}} pode ser executada em paralelo",
-  "taskGraphStepParallel_other": "Passo {{step}} · {{count}} podem ser executadas em paralelo"
+  "taskGraphStepParallel_other": "Passo {{step}} · {{count}} podem ser executadas em paralelo",
+  "noRelatedTasks": "Sem tarefas relacionadas",
+  "relatedTo": "Relacionada com",
+  "taskDependencyRelated": "Relacionadas",
+  "taskDependencyRelatedCount_one": "{{count}} tarefa relacionada",
+  "taskDependencyRelatedCount_other": "{{count}} tarefas relacionadas",
+  "taskGraphLegendRelated": "Relacionada"
 }

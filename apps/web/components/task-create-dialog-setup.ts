@@ -201,7 +201,7 @@ function useSubmitHandlersWiring({
     refreshBranchPolicies,
     preserveTaskCreateLastUsedOnClose: preserveQueuedLastUsedOnClose,
     taskId,
-    parentTaskId,
+    parentTaskId: parentTaskId ?? fs.selectedParentTaskId,
     descriptionInputRef: fs.descriptionInputRef,
     setIsCreatingSession: fs.setIsCreatingSession,
     setIsCreatingTask: fs.setIsCreatingTask,
@@ -224,6 +224,7 @@ function useSubmitHandlersWiring({
     workflowAgentOverrides: fs.workflowAgentOverrides,
     workflowAgentOverridesBlockedReason,
     blockedBy: fs.blockedBy,
+    relatedTaskIds: fs.relatedTaskIds,
     editDependencies,
   });
 }

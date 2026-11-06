@@ -2814,5 +2814,11 @@
   "taskGraphParallelSteps": "並行步驟",
   "taskGraphStepLabel": "第 {{step}} 步",
   "taskGraphStepParallel_one": "第 {{step}} 步 · {{count}} 個可並行執行",
-  "taskGraphStepParallel_other": "第 {{step}} 步 · {{count}} 個可並行執行"
+  "taskGraphStepParallel_other": "第 {{step}} 步 · {{count}} 個可並行執行",
+  "noRelatedTasks": "無相關任務",
+  "relatedTo": "相關任務",
+  "taskDependencyRelated": "相關任務",
+  "taskDependencyRelatedCount_one": "{{count}} 個相關任務",
+  "taskDependencyRelatedCount_other": "{{count}} 個相關任務",
+  "taskGraphLegendRelated": "相關"
 }

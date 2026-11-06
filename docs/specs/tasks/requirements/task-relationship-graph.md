@@ -32,6 +32,9 @@ first, which work can run in parallel, and what is waiting.
   greater than its highest displayed predecessor.
 - **External node:** A task outside the subtree that has a dependency edge to or
   from a subtree member.
+- **Related-to link:** A non-blocking, symmetric association between two tasks
+  that does not order one before the other. See
+  [`task-create-relationships.md`](task-create-relationships.md).
 
 ## Requirements
 
@@ -45,11 +48,13 @@ can see how its related cards are ordered without opening each card.
 #### Acceptance criteria
 
 - **AC-TASKS-TASK-RELATIONSHIP-GRAPH-001.1:** When a task has at least one
-  dependency edge, a parent, or a non-archived subtask, the task-detail status
-  row shall show a Task graph control.
+  dependency edge, a parent, a non-archived subtask, or a related-to link, the
+  task-detail status row shall show a Task graph control. (Amended by
+  REQ-TASKS-TASK-RELATIONSHIP-GRAPH-011.)
 - **AC-TASKS-TASK-RELATIONSHIP-GRAPH-001.2:** When a task has no dependency
-  edge, no parent, and no non-archived subtask, the system shall not show the
-  Task graph control.
+  edge, no parent, no non-archived subtask, and no related-to link, the system
+  shall not show the Task graph control. (Amended by
+  REQ-TASKS-TASK-RELATIONSHIP-GRAPH-011.)
 - **AC-TASKS-TASK-RELATIONSHIP-GRAPH-001.3:** The control shall open the graph
   as a Task graph tab in the task workbench on desktop and in a full-screen
   sheet on phones. (Amended by REQ-TASKS-TASK-RELATIONSHIP-GRAPH-009.)
@@ -134,8 +139,9 @@ can see how its related cards are ordered without opening each card.
   title, its task state, and whether it is blocked by a pending or failed
   predecessor.
 - **AC-TASKS-TASK-RELATIONSHIP-GRAPH-005.2:** Each connector shall
-  distinguish resolved, pending, and failed edges by line style and color, and
-  the dialog shall show a legend for those three styles.
+  distinguish resolved, pending, and failed dependency edges by line style and
+  color, and the dialog shall show a legend for those three styles. (Amended
+  by REQ-TASKS-TASK-RELATIONSHIP-GRAPH-011.)
 - **AC-TASKS-TASK-RELATIONSHIP-GRAPH-005.3:** The focused node shall be
   visually distinct from other nodes.
 - **AC-TASKS-TASK-RELATIONSHIP-GRAPH-005.4:** State meaning shall not depend
@@ -259,10 +265,36 @@ first.
   the board it replaces the parent frames while on. The choice shall be
   remembered on the device.
 
+### REQ-TASKS-TASK-RELATIONSHIP-GRAPH-011: Show related-to connections in the graph
+
+**Intent:** Let a related-to link, established through
+[`task-create-relationships.md`](task-create-relationships.md), make a task
+and its association visible in the same graph as dependency and parent
+relationships.
+
+#### Acceptance criteria
+
+- **AC-TASKS-TASK-RELATIONSHIP-GRAPH-011.1:** When a displayed task has a
+  related-to link to another task already displayed in the same view, the
+  view shall draw a connector between them that is visually distinct from a
+  dependency edge, with no arrowhead and no step-order implication.
+- **AC-TASKS-TASK-RELATIONSHIP-GRAPH-011.2:** The legend required by
+  AC-TASKS-TASK-RELATIONSHIP-GRAPH-005.2 shall include the related-to
+  connector style alongside resolved, pending, and failed.
+- **AC-TASKS-TASK-RELATIONSHIP-GRAPH-011.3:** A related-to link shall not
+  affect step-number computation, layout rank, or the Parallel-steps grouping
+  in AC-TASKS-TASK-RELATIONSHIP-GRAPH-010.8.
+- **AC-TASKS-TASK-RELATIONSHIP-GRAPH-011.4:** A related-to link to a task
+  outside the current Subtasks subtree or Chain, or outside the board's
+  filtered set in the Graph view, shall not pull that task into the view. This
+  requirement draws a related-to connector only between two tasks the view
+  already displays under its existing inclusion rules.
+
 ## Out of scope
 
-- Creating, removing, or editing dependency edges or parents in the graph. The
-  Edit task dialog remains the editor.
+- Creating, removing, or editing dependency edges, parents, or related-to
+  links in the graph. The create dialogs own establishing a related-to link;
+  the Edit task dialog remains the editor for dependencies and parents.
 - Cross-workspace edges, which the dependency system does not allow.
 - Office task pages and the Office blocker picker.
 - Persisting node positions, zoom, or the selected view.

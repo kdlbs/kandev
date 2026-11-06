@@ -425,6 +425,9 @@ func (s *Service) resolveTaskCreationReferences(
 	if err := s.validateBlockerReferences(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.validateRelationReferences(ctx, req); err != nil {
+		return nil, err
+	}
 	repositories, err := s.resolveTaskRepositoryRowsWithResolvedIdentityDedup(
 		ctx, req.WorkspaceID, req.Repositories, req.projectRepositoryDefaults,
 	)
@@ -487,6 +490,11 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 	for _, blockerID := range req.BlockedBy {
 		if err := s.AddBlocker(ctx, task.ID, blockerID); err != nil {
 			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, fmt.Errorf("add blocker %s: %w", blockerID, err))
+		}
+	}
+	for _, relatedID := range req.RelatedTaskIDs {
+		if err := s.relations.AddRelation(ctx, task.ID, relatedID); err != nil {
+			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, fmt.Errorf("add related task %s: %w", relatedID, err))
 		}
 	}
 

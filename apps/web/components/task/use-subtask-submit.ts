@@ -33,6 +33,7 @@ type UseSubtaskSubmitOpts = {
   onClose: () => void;
   /** Workspace mode for the new subtask (handoffs phase 5). */
   workspaceMode: SubtaskWorkspaceMode;
+  relatedTaskIds?: string[];
   /** Whether the selected executor profile runs directly on the local clone. */
   isLocalExecutor?: boolean;
 };
@@ -50,6 +51,7 @@ type CreateSubtaskArgs = {
   autoTitle: boolean;
   autopilot: boolean;
   workspaceMode: SubtaskWorkspaceMode;
+  relatedTaskIds: string[];
   isLocalExecutor: boolean;
   freshBranchEnabled: boolean;
   onClose: () => void;
@@ -70,6 +72,7 @@ async function createSubtask({
   autoTitle,
   autopilot,
   workspaceMode,
+  relatedTaskIds,
   isLocalExecutor,
   freshBranchEnabled,
   onClose,
@@ -102,6 +105,7 @@ async function createSubtask({
     executor_profile_id:
       workspaceMode === "inherit_parent" ? undefined : fs.executorProfileId || undefined,
     parent_id: parentTaskId,
+    related_task_ids: relatedTaskIds.length ? relatedTaskIds : undefined,
     attachments: toMessageAttachments(attachments),
     workspace_mode: workspaceMode,
     autopilot: autopilot || undefined,
@@ -138,6 +142,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
     setIsCreating,
     onClose,
     workspaceMode,
+    relatedTaskIds = [],
     isLocalExecutor = false,
   } = opts;
   const freshBranchEnabled = fs.freshBranchEnabled;
@@ -174,6 +179,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
           autoTitle,
           autopilot,
           workspaceMode,
+          relatedTaskIds,
           isLocalExecutor,
           freshBranchEnabled,
           onClose,
@@ -206,6 +212,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
       setActiveTask,
       setActiveSession,
       workspaceMode,
+      relatedTaskIds,
       isLocalExecutor,
       freshBranchEnabled,
       setIsCreating,

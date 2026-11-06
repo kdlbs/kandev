@@ -8,6 +8,7 @@ export type DependencyChipData = {
   blockedReason?: string;
   dependsOn: TaskDependencyRef[];
   blocks: TaskDependencyRef[];
+  related: TaskDependencyRef[];
 };
 
 /**
@@ -56,14 +57,16 @@ function useFetchedTaskDependencies(
         if (cancelled) return;
         const dependsOn = (task.depends_on ?? []) as TaskDependencyRef[];
         const blocks = (task.blocks ?? []) as TaskDependencyRef[];
+        const related = (task.related ?? []) as TaskDependencyRef[];
         setData(
-          dependsOn.length === 0 && blocks.length === 0
+          dependsOn.length === 0 && blocks.length === 0 && related.length === 0
             ? null
             : {
                 blocked: task.blocked ?? false,
                 blockedReason: task.blocked_reason,
                 dependsOn,
                 blocks,
+                related,
               },
         );
       })
@@ -100,15 +103,18 @@ function useTaskDependenciesFromStore(
   return useMemo(() => {
     if (!task) return undefined;
     // No projection on this copy: the caller must ask the server.
-    if (task.dependsOn === undefined && task.blocks === undefined) return undefined;
+    if (task.dependsOn === undefined && task.blocks === undefined && task.related === undefined)
+      return undefined;
     const dependsOn = task.dependsOn ?? [];
     const blocks = task.blocks ?? [];
-    if (dependsOn.length === 0 && blocks.length === 0) return null;
+    const related = task.related ?? [];
+    if (dependsOn.length === 0 && blocks.length === 0 && related.length === 0) return null;
     return {
       blocked: task.blocked ?? false,
       blockedReason: task.blockedReason,
       dependsOn,
       blocks,
+      related,
     };
   }, [task]);
 }

@@ -329,6 +329,25 @@ func TestBuildDependencyViews_ReportsBothDirections(t *testing.T) {
 	}
 }
 
+func TestBuildDependencyViewsIncludesRelatedIDs(t *testing.T) {
+	ctx := context.Background()
+	svc, _, repo := createTestService(t)
+	setupTestTask(t, repo)
+	if err := repo.CreateTask(ctx, &models.Task{ID: "related-peer", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Peer", Priority: "medium"}); err != nil {
+		t.Fatal(err)
+	}
+	relations := newMockRelationRepo()
+	if err := relations.AddRelation(ctx, "task-123", "related-peer"); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetRelationRepository(relations)
+	svc.SetBlockerRepository(&mockBlockerRepo{})
+	views := svc.BuildDependencyViews(ctx, []*models.Task{{ID: "task-123"}})
+	if got := views["task-123"].Related; len(got) != 1 || got[0] != "related-peer" {
+		t.Fatalf("related IDs = %v", got)
+	}
+}
+
 // BuildDependencyViews must fail closed too: the board reads dependency state
 // through it, and a task reported unblocked on a read failure could be launched.
 func TestBuildDependencyViews_FailsClosedOnReadError(t *testing.T) {

@@ -2814,5 +2814,11 @@
   "taskGraphParallelSteps": "병렬 단계",
   "taskGraphStepLabel": "{{step}}단계",
   "taskGraphStepParallel_one": "{{step}}단계 · {{count}}개 병렬 실행 가능",
-  "taskGraphStepParallel_other": "{{step}}단계 · {{count}}개 병렬 실행 가능"
+  "taskGraphStepParallel_other": "{{step}}단계 · {{count}}개 병렬 실행 가능",
+  "noRelatedTasks": "관련 작업 없음",
+  "relatedTo": "관련 항목",
+  "taskDependencyRelated": "관련 항목",
+  "taskDependencyRelatedCount_one": "관련 작업 {{count}}개",
+  "taskDependencyRelatedCount_other": "관련 작업 {{count}}개",
+  "taskGraphLegendRelated": "관련"
 }

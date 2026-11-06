@@ -32,6 +32,8 @@ export type FormResetters = {
   setFreshBranchEnabled: (value: boolean) => void;
   setCurrentLocalBranch: (value: string) => void;
   setBlockedBy: (value: string[]) => void;
+  setSelectedParentTaskId?: (value: string | undefined) => void;
+  setRelatedTaskIds?: (value: string[]) => void;
 };
 
 export function resetTaskForm(

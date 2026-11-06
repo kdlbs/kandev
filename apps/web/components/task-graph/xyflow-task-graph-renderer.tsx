@@ -17,7 +17,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { cn } from "@/lib/utils";
 import type { TaskGraphNode } from "@/lib/task-graph/model";
-import { TASK_GRAPH_EDGE_STYLES } from "./task-graph-edge-styles";
+import { taskGraphEdgeStyle } from "./task-graph-edge-styles";
 import { nodeRenderState, type TaskGraphRendererProps } from "./task-graph-renderer";
 import { useNodePress } from "./use-node-press";
 
@@ -102,14 +102,15 @@ function FrameNode({ data }: NodeProps<FrameFlowNode>) {
 
 export function toFlowEdges(props: TaskGraphRendererProps): Edge[] {
   return props.model.edges.map((edge) => {
-    const style = TASK_GRAPH_EDGE_STYLES[edge.status];
+    const style = taskGraphEdgeStyle(edge.kind, edge.status);
     const dimmed = props.emphasis !== null && !props.emphasis.edgeIds.has(edge.id);
     return {
       id: edge.id,
       source: edge.from,
       target: edge.to,
       type: "smoothstep",
-      markerEnd: { type: MarkerType.ArrowClosed, color: style.stroke },
+      markerEnd:
+        edge.kind === "related" ? undefined : { type: MarkerType.ArrowClosed, color: style.stroke },
       style: { ...style, opacity: dimmed ? DIMMED_OPACITY : 1 },
       selectable: false,
       deletable: false,

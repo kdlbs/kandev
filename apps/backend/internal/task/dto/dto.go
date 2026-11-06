@@ -265,7 +265,8 @@ type TaskDTO struct {
 	DependsOn []TaskDependencyRefDTO `json:"depends_on,omitempty"`
 	// Blocks lists direct dependents so the dependency chip can render both
 	// directions without a second round trip.
-	Blocks []TaskDependencyRefDTO `json:"blocks,omitempty"`
+	Blocks  []TaskDependencyRefDTO `json:"blocks,omitempty"`
+	Related []string               `json:"related,omitempty"`
 	// StartWhenUnblocked reports that a launch intent is waiting on dependency
 	// resolution. Read-only here; set through the create request or the picker.
 	StartWhenUnblocked bool `json:"start_when_unblocked,omitempty"`

@@ -12,6 +12,7 @@ requirements:
   - REQ-TASKS-TASK-RELATIONSHIP-GRAPH-008
   - REQ-TASKS-TASK-RELATIONSHIP-GRAPH-009
   - REQ-TASKS-TASK-RELATIONSHIP-GRAPH-010
+  - REQ-TASKS-TASK-RELATIONSHIP-GRAPH-011
 created: 2026-10-17
 owners:
   - kandev
@@ -26,6 +27,13 @@ to the web task-detail surface. It reuses the dependency edges in
 `task_blockers` and the subtask hierarchy in `tasks.parent_id`. It does not
 change edge storage, validation, cycle checks, launch gating, or events defined
 in [`task-dependencies.md`](task-dependencies.md).
+
+[`task-create-relationships.md`](task-create-relationships.md) adds a second,
+non-blocking edge kind: the related-to link, stored in its own `task_relations`
+table. This design (REQ-TASKS-TASK-RELATIONSHIP-GRAPH-011) draws that edge kind
+wherever both of its endpoints are already displayed by the existing
+Subtasks/Chain/board inclusion rules. It does not expand those inclusion rules,
+does not change step computation, and does not add related-to editing.
 
 The task system owns this design because it owns both relationships. The
 graph is the shipped answer to the "whole-graph view" exclusion in
@@ -49,6 +57,7 @@ Renderer isolation follows
 | `REQ-TASKS-TASK-RELATIONSHIP-GRAPH-008` | [Responsive behavior](#responsive-behavior) |
 | `REQ-TASKS-TASK-RELATIONSHIP-GRAPH-009` | [Workbench tab](#workbench-tab), [Show in graph](#show-in-graph) |
 | `REQ-TASKS-TASK-RELATIONSHIP-GRAPH-010` | [Board Graph view](#board-graph-view) |
+| `REQ-TASKS-TASK-RELATIONSHIP-GRAPH-011` | [Graph read contract](#graph-read-contract), [Node and edge presentation](#node-and-edge-presentation), [Graph model](#graph-model) |
 
 ## Graph read contract
 
@@ -84,7 +93,8 @@ Response (`dto.TaskGraphDTO` in `internal/task/dto/task_graph.go`):
     }
   ],
   "edges": [
-    { "from": "task-a", "to": "task-b", "status": "resolved" }
+    { "from": "task-a", "to": "task-b", "kind": "dependency", "status": "resolved" },
+    { "from": "task-b", "to": "task-c", "kind": "related" }
   ],
   "truncated": false
 }
@@ -96,13 +106,19 @@ Response (`dto.TaskGraphDTO` in `internal/task/dto/task_graph.go`):
   `focus_task_id`, never by role, so a focused node keeps its membership.
 - `depth` is the `parent_id` distance from the root, starting at 1. It is `0`
   for external nodes and for every node in `chain` mode.
+- `kind` is `dependency` or `related` (REQ-TASKS-TASK-RELATIONSHIP-GRAPH-011).
+  A `dependency` edge points from predecessor to dependent and carries
+  `status`. A `related` edge has no direction and omits `status`; the service
+  always emits it with the lower task ID as `from` so the same pair never
+  produces two edges.
 - An edge points from predecessor to dependent. `status` uses the existing edge
   verdicts `resolved`, `failed`, and `pending` from
-  `internal/task/service/service_dependencies.go`.
+  `internal/task/service/service_dependencies.go`, and applies only to
+  `dependency` edges.
 - `blocked` and `blocked_reason` come from `BuildDependencyViews`, so node
   blockage matches the board and the dependency chip.
 - `nodes` are ordered by first discovery. Edges are deduplicated by
-  `(from, to)`.
+  `(from, to, kind)`.
 
 ## Mode selection
 
@@ -122,9 +138,14 @@ otherwise.
    remaining node budget is the limit for each call. A visited set guards
    against corrupt hierarchy loops.
 3. Reads the edges of all members in one batch with `ListBlockersForTasks` and
-   `ListDependentsForTasks`.
+   `ListDependentsForTasks`, plus related-to links with
+   `ListRelationsForTasks` (`internal/task/service/repository_relations.go`,
+   added by [`task-create-relationships.md`](task-create-relationships.md)).
 4. Adds each edge end that is not a member as an `external` node, without
-   following its other edges. This can include the root itself.
+   following its other edges. This can include the root itself. A related-to
+   link whose other end is not a member is dropped rather than added as an
+   external node (AC-TASKS-TASK-RELATIONSHIP-GRAPH-011.4); only `dependency`
+   edges pull in external nodes.
 5. Resolves external rows with `GetTasksByIDs` and computes every node's
    `DependencyView` with `BuildDependencyViews`.
 
@@ -135,8 +156,10 @@ The upstream search follows `ListBlockersForTasks` one level per batch. The
 downstream search follows `ListDependentsForTasks` one level per batch. The
 walk never follows an edge in the opposite direction, so a sibling predecessor
 of a dependent is excluded. Archived tasks remain nodes with `archived: true`.
-The result contains every edge between two displayed nodes, including an edge
-between two upstream nodes.
+The result contains every `dependency` edge between two displayed nodes,
+including an edge between two upstream nodes, plus every `related` link
+between two displayed nodes (read with `ListRelationsForTasks` over the final
+node set, since a related-to link does not define chain membership).
 
 Edges are acyclic because writes reject cycles. Visited sets still bound the
 walk if a corrupt row forms a loop.
@@ -186,10 +209,14 @@ neither library enters the task-detail bundle until the dialog opens.
 `buildTaskGraphModel(response)` in `lib/task-graph/model.ts` is a pure
 function. It returns the nodes with a `step` number, the edges, the focus ID,
 and adjacency maps. The step number is the longest-path rank over displayed
-edges: a node without a displayed predecessor has step 1, and every other node
-has `1 + max(step of displayed predecessors)`. The computation is a Kahn
-topological pass. A node left in a cycle receives the highest assigned step
-plus one, so corrupt data cannot hang the dialog.
+`dependency` edges: a node without a displayed predecessor has step 1, and
+every other node has `1 + max(step of displayed predecessors)`. The
+computation is a Kahn topological pass. A node left in a cycle receives the
+highest assigned step plus one, so corrupt data cannot hang the dialog.
+`related` edges are excluded from this pass entirely
+(AC-TASKS-TASK-RELATIONSHIP-GRAPH-011.3): they contribute no adjacency to the
+step computation, so a related-to link can never introduce a step dependency
+or a false cycle.
 
 `traceChain(model, nodeId)` returns the transitive predecessor and dependent
 node IDs and the edge IDs between them. It powers emphasis
@@ -225,7 +252,8 @@ type TaskGraphRendererProps = {
 - `xyflow-task-graph-renderer.tsx` is the only importer of `@xyflow/react`. It
   maps the model and layout into xyflow nodes and edges, uses one custom node
   type that calls `renderNode`, and uses the built-in smooth-step edge with a
-  marker arrow. Nodes are not draggable or connectable, and edges are not
+  marker arrow for `dependency` edges and the same edge type with no marker for
+  `related` edges. Nodes are not draggable or connectable, and edges are not
   selectable or deletable (AC-TASKS-TASK-RELATIONSHIP-GRAPH-006.5).
 - `task-graph-node-card.tsx` is plain React with design tokens, so a
   replacement renderer reuses it unchanged.
@@ -242,8 +270,10 @@ A lint rule (`no-restricted-imports` in `apps/web/eslint.config.mjs`) rejects
   uses reduced opacity and an "Archived" label. The focused node uses a
   primary-color ring and a "This task" label.
 - Edge styles: `resolved` is a solid muted line; `pending` is a dashed
-  primary-color line; `failed` is a solid destructive-color line. The legend
-  shows the three styles with text labels.
+  primary-color line; `failed` is a solid destructive-color line; `related` is
+  a dotted neutral-color line with no arrowhead marker, so it reads as an
+  association rather than an order. The legend shows all four styles with text
+  labels.
 - Colors come from the app's CSS variables (`--border`, `--primary`,
   `--destructive`, `--muted-foreground`, `--card`). The renderer passes
   `colorMode` from `useTheme().resolvedTheme` to `ReactFlow` and overrides the
@@ -257,8 +287,10 @@ A lint rule (`no-restricted-imports` in `apps/web/eslint.config.mjs`) rejects
 `TaskGraphButton` is a labelled "Task graph" pill styled like the dependency chip. It is mounted next to
 `TaskDependencyChip` in `components/task/chat/chat-status-bar.tsx` and
 `components/task/passthrough-toolbar.tsx`. It renders when the store task has
-dependency refs, a `parentTaskId`, or a subtask from `useTaskSubtasks`. Only
-when none of those is known does it read `GET /tasks/:id/subtask-count`, which
+dependency refs, a `parentTaskId`, a subtask from `useTaskSubtasks`, or a
+related-to link (`task.related` from
+[`task-create-relationships.md`](task-create-relationships.md)). Only when
+none of those is known does it read `GET /tasks/:id/subtask-count`, which
 covers a parent whose subtasks are not on a loaded board.
 `TaskDependencyChip` adds a "View graph" action to its popover and drawer that
 opens the same dialog with the default mode.
@@ -305,7 +337,7 @@ canvas when `truncated` is true.
 signature changes. The signature is derived from store tasks whose ID is a
 displayed node or whose `parentTaskId` is a displayed member or the root, and
 includes each one's `state`, `title`, `parentTaskId`, `archivedAt`, `dependsOn`
-IDs, and `blocks` IDs. Existing `task.updated`, `task.created`, and
+IDs, `blocks` IDs, and `related` IDs. Existing `task.updated`, `task.created`, and
 `task.deleted` handling keeps the store current, so the graph does not add a
 WebSocket subscription. A refetch keeps the previous graph visible and does not
 reset the viewport unless the node set changes.
@@ -361,9 +393,12 @@ already-filtered `tasks` (`ViewContentProps`). Phones fall back to Kanban in bot
 backend change is needed: `kanbanViewMode` is an opaque string.
 
 The lane lazy-loads `BoardGraph`, which builds the graph client-side with
-`buildBoardGraph` (`lib/task-graph/board.ts`): nodes are the lane's tasks, edges
-are `dependsOn` refs whose predecessor is also on the lane, and each parent
-becomes a frame. `layoutGroupedTaskGraph` uses dagre's compound mode to keep a
+`buildBoardGraph` (`lib/task-graph/board.ts`): nodes are the lane's tasks,
+`dependency` edges are `dependsOn` refs whose predecessor is also on the lane,
+`related` edges are `related` refs whose other end is also on the lane
+(AC-TASKS-TASK-RELATIONSHIP-GRAPH-011.4: this view's existing same-lane
+inclusion rule is not widened for related-to), and each parent becomes a
+frame. `layoutGroupedTaskGraph` uses dagre's compound mode to keep a
 parent's subtasks contiguous and sizes each frame from its members. Frames are
 non-interactive xyflow background nodes (`TaskGraphRendererProps.frames`).
 Node activation calls the board's `onPreviewTask`. The shared `TaskGraphCanvas`
@@ -397,7 +432,9 @@ forms. xyflow's built-in English aria labels are replaced through
 
 - Go service tests: root selection, multi-level subtree, archived and ephemeral
   filtering, external nodes, chain direction rules, archived chain nodes,
-  truncation, dedupe, and mode availability.
+  truncation, dedupe, mode availability, and `related` edges (included when
+  both ends are displayed, dropped when one end is external, excluded from
+  step computation).
 - Go handler tests: response shape, default mode, `graph_mode_unavailable`,
   not-found, and authorization.
 - Vitest: API client, `buildTaskGraphModel` step numbers and cycle guard,

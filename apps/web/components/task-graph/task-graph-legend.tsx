@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
-import type { TaskGraphEdgeStatus } from "@/lib/api/domains/task-graph-api";
-import { TASK_GRAPH_EDGE_STYLES } from "./task-graph-edge-styles";
+import type { TaskGraphEdgeKind, TaskGraphEdgeStatus } from "@/lib/api/domains/task-graph-api";
+import { TASK_GRAPH_EDGE_STYLES, TASK_GRAPH_RELATED_EDGE_STYLE } from "./task-graph-edge-styles";
 
 const EDGE_LABEL_KEYS: Array<[TaskGraphEdgeStatus, string]> = [
   ["resolved", "task:taskGraphLegendResolved"],
@@ -8,8 +8,11 @@ const EDGE_LABEL_KEYS: Array<[TaskGraphEdgeStatus, string]> = [
   ["failed", "task:taskGraphLegendFailed"],
 ];
 
-function LineSample({ status }: { status: TaskGraphEdgeStatus }) {
-  const style = TASK_GRAPH_EDGE_STYLES[status];
+function LineSample({ status, kind }: { status?: TaskGraphEdgeStatus; kind?: TaskGraphEdgeKind }) {
+  const style =
+    kind === "related"
+      ? TASK_GRAPH_RELATED_EDGE_STYLE
+      : TASK_GRAPH_EDGE_STYLES[status ?? "pending"];
   return (
     <svg aria-hidden="true" width="28" height="8" className="shrink-0">
       <line
@@ -38,6 +41,10 @@ export function TaskGraphLegend({ showExternal }: { showExternal: boolean }) {
           {t(key)}
         </li>
       ))}
+      <li className="flex items-center gap-1.5">
+        <LineSample kind="related" />
+        {t("task:taskGraphLegendRelated")}
+      </li>
       {showExternal && (
         <li className="flex items-center gap-1.5">
           <span

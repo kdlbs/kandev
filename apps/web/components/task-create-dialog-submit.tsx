@@ -324,6 +324,7 @@ export function useTaskSubmitHandlers({
   workflowAgentOverrides,
   workflowAgentOverridesBlockedReason,
   blockedBy,
+  relatedTaskIds,
   editDependencies,
   transformDescriptionBeforeSubmit,
 }: SubmitHandlersDeps) {
@@ -737,6 +738,7 @@ export function useTaskSubmitHandlers({
           priority,
           workflowAgentOverrides,
           blockedBy,
+          relatedTaskIds,
         });
         submittedPayload = payload;
         return payload;
@@ -1094,6 +1096,7 @@ export function useTaskSubmitHandlers({
     descriptionInputRef,
     setIsCreatingTask,
     blockedBy,
+    relatedTaskIds,
     workflowAgentOverrides,
     workflowAgentOverridesBlockedReason,
   ]);

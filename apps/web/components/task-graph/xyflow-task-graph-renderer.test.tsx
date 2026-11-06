@@ -35,8 +35,8 @@ const response: TaskGraphResponse = {
     blocked: false,
   })),
   edges: [
-    { from: "a", to: "b", status: "resolved" },
-    { from: "b", to: "c", status: "failed" },
+    { from: "a", to: "b", kind: "dependency", status: "resolved" },
+    { from: "b", to: "c", kind: "dependency", status: "failed" },
   ],
   truncated: false,
 };
@@ -78,7 +78,7 @@ describe("toFlowNodes / toFlowEdges", () => {
     const p = props();
     const emphasis = traceChain(p.model, "a");
     const edges = toFlowEdges({ ...p, emphasis });
-    const failed = edges.find((e) => e.id === "b->c");
+    const failed = edges.find((e) => e.id === "dependency:b->c");
     expect(failed?.style?.stroke).toBe("var(--destructive)");
     expect(
       edges.every((e) => e.selectable === false && e.deletable === false && e.focusable === false),
@@ -87,6 +87,16 @@ describe("toFlowNodes / toFlowEdges", () => {
     expect(edges.every((e) => e.style?.opacity === 1)).toBe(true);
     const zChain = toFlowEdges({ ...p, emphasis: traceChain(p.model, "z") });
     expect(zChain.every((e) => e.style?.opacity !== 1)).toBe(true);
+  });
+
+  it("draws related edges dotted and without an arrow", () => {
+    const relatedModel = buildTaskGraphModel({
+      ...response,
+      edges: [{ from: "a", to: "b", kind: "related" }],
+    });
+    const edge = toFlowEdges({ ...props(), model: relatedModel })[0];
+    expect(edge.markerEnd).toBeUndefined();
+    expect(edge.style?.strokeDasharray).toBe("2 4");
   });
 });
 
