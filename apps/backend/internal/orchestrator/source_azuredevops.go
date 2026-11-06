@@ -40,6 +40,12 @@ func NewAzureDevOpsWorkItemWatcherSource(svc AzureDevOpsWatchService, log *logge
 
 func (s *AzureDevOpsWorkItemWatcherSource) Name() string { return "azure_devops_work_item" }
 
+// ReservationClaimed identifies reservations owned by this published event.
+func (s *AzureDevOpsWorkItemWatcherSource) ReservationClaimed(evt any) bool {
+	e, err := azureWorkItemWatchEvent(evt)
+	return err == nil && e.ReservationClaimed
+}
+
 func (s *AzureDevOpsWorkItemWatcherSource) Reserve(ctx context.Context, evt any) (bool, error) {
 	e, err := azureWorkItemWatchEvent(evt)
 	if err != nil {
@@ -156,6 +162,12 @@ func NewAzureDevOpsPullRequestWatcherSource(svc AzureDevOpsWatchService, log *lo
 }
 
 func (s *AzureDevOpsPullRequestWatcherSource) Name() string { return "azure_devops_pull_request" }
+
+// ReservationClaimed identifies reservations owned by this published event.
+func (s *AzureDevOpsPullRequestWatcherSource) ReservationClaimed(evt any) bool {
+	e, err := azurePullRequestWatchEvent(evt)
+	return err == nil && e.ReservationClaimed
+}
 
 func (s *AzureDevOpsPullRequestWatcherSource) Reserve(ctx context.Context, evt any) (bool, error) {
 	e, err := azurePullRequestWatchEvent(evt)
