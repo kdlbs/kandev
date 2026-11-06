@@ -2,7 +2,7 @@
 
 import type { ClarificationRequestMetadata, Message, TaskPendingAction } from "@/lib/types/http";
 import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
-import { extractKandevStem, isKandevServerName } from "./messages/kandev/parse";
+import { extractKandevStem } from "./messages/kandev/parse";
 
 export type SubagentTaskPayload = {
   name?: string;
@@ -215,7 +215,7 @@ function hasForeignKandevProvider(input: unknown): boolean {
   const rawInputRecord = rawInput as Record<string, unknown>;
   if (!Object.hasOwn(rawInputRecord, "providerIdentifier")) return false;
   const provider = rawInputRecord.providerIdentifier;
-  return typeof provider !== "string" || !isKandevServerName(provider);
+  return typeof provider !== "string" || provider.trim() !== "kandev";
 }
 
 function legacyKandevToolCandidates(

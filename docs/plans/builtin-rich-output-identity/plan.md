@@ -61,9 +61,10 @@ file authorization, or visual components. Do not broaden third-party trust.
 
 ## Technical approach
 
-Update `messages/kandev/parse.ts` and the provider guard in chat `types.ts`.
-Keep one exact server-name predicate shared by the two paths. The canonical
-server inventory is `apps/backend/internal/mcp/profile/builtin_descriptors.go`.
+Update `messages/kandev/parse.ts`. Keep the historical provider fallback guard
+in chat `types.ts` unchanged: legacy imported external definitions can retain
+new reserved names. Current calls use normalized qualified identities. The
+canonical server inventory is `apps/backend/internal/mcp/profile/builtin_descriptors.go`.
 Do not reuse the MCP explorer's broader reserved-name policy: reserving a name
 does not establish a native renderer identity.
 
@@ -141,12 +142,13 @@ the planned parser edit as an input without modifying production code.
 ## Implementation outcome
 
 The shared parser now recognizes the five exact built-in server names. The
-historical provider guard uses the same inventory. Existing payload validation,
+historical provider fallback guard still accepts only `kandev`. Existing payload validation,
 foreign-provider rejection, and native components are unchanged. Saved valid
 reports can render after loading the patched frontend. The running user instance
 was not restarted or modified.
 
-The four focused unit suites passed (83 tests). Desktop Chromium and mobile
+The initial four focused unit suites passed (83 tests). Review remediation
+adds four provider-collision cases; see the work-order results. Desktop Chromium and mobile
 Chrome each passed the live-and-reload scenario with two loaded image previews,
 a table, neighboring activity groups, and a foreign-name control. Type checking,
 focused lint, specification checks, and documentation coverage passed. See the

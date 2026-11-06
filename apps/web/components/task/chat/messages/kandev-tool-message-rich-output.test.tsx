@@ -89,8 +89,13 @@ describe("Built-in package rich output", () => {
     for (const value of ["Desktop capture", "Phone capture", "Retained value", "Package check"])
       expect(html).toContain(value);
     expect(html).not.toContain(UNAVAILABLE);
-    generic.name = "kandev-rich-output/unregistered_kandev";
-    expect(hasKandevRenderer(comment)).toBe(false);
+    for (const name of [
+      "kandev-rich-output/unregistered_kandev",
+      "kandev-rich-output-extra-foo_kandev",
+    ]) {
+      generic.name = name;
+      expect(hasKandevRenderer(comment)).toBe(false);
+    }
   });
 });
 

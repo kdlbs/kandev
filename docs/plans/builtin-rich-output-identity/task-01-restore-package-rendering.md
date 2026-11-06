@@ -41,9 +41,9 @@ Assert `kandevToolStemOf` returns `show_rich_output`, native dispatch succeeds,
 and grouping retains the report between ordinary tool groups. Run this test
 before modifying production code and record the expected failure.
 
-Implement exact built-in server matching in `parse.ts`. Reuse its server
-predicate for the historic provider guard in `types.ts`. Test all five server
-names and existing identity formats. Test longer prefixes before `kandev-`.
+Implement exact built-in server matching in `parse.ts`. Preserve the historical
+provider fallback guard in `types.ts`: only `kandev` permits title fallback.
+Test all five server names and existing identity formats. Test longer prefixes before `kandev-`.
 Preserve bare and monolithic compatibility. Unknown stems must not select a
 renderer. Preserve foreign normalized-name precedence and foreign wrapper guards.
 
@@ -187,3 +187,22 @@ capture specs were removed; images remain in the ignored PR-assets directory.
 The commit hook found that the expanded renderer test group exceeded its
 function-length limit. The new case now has its own test group; the renderer
 suite passed again without changing its assertions or production code.
+
+## Review remediation
+
+Cubic identified that legacy imports preserve external definitions with reserved
+package names. The historical provider fallback guard now keeps its original
+`kandev`-only rule. Normalized qualified package calls retain native rendering.
+Four added provider-collision cases failed before the correction; this directly
+reproduced the finding. The unused exact-server predicate was removed.
+
+Cubic and Claude also noted the legacy hyphenated syntax. Compatibility remains
+unchanged; the design now distinguishes exact qualified namespaces from legacy
+hyphenated tool stems. The full renderer test confirms that a hyphenated unknown
+stem cannot select a native renderer. No new authorization or provenance claim
+is derived from this presentation selector.
+
+Validation after remediation: all four focused unit suites passed (87 tests),
+and `pnpm run typecheck` passed. The existing desktop/phone evidence remains
+applicable to the unchanged qualified report path; only ambiguous historical
+provider fallback is narrowed. No visual component or layout changed.

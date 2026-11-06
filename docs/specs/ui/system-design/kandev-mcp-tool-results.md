@@ -97,13 +97,16 @@ Apply this finite server set to the already supported slash, dotted,
 double-underscore, colon-space, and hyphenated identity formats. Match a full
 server name and delimiter before removing the tool suffix. Match longer server
 names before `kandev-` so package names cannot become part of the tool stem.
-Do not accept arbitrary `kandev-*` or `kandev.*` servers. Registration in the
-renderer registry remains a separate condition for native rendering.
+Qualified namespaces use the exact server inventory. The legacy
+`kandev-<tool>_kandev` format still permits hyphens in the tool stem; such a stem
+selects native rendering only if it has a registered renderer. This parser is a
+presentation selector, not proof of built-in authorization or execution origin.
 
-Use the same exact-server predicate for historical
-`raw_input.providerIdentifier` guards. An explicit foreign normalized identity
-still prevents fallback to a trusted-looking title. A foreign provider in a
-historical wrapper also prevents title fallback.
+Preserve the historical `raw_input.providerIdentifier` fallback guard: only
+`kandev` permits title fallback. A legacy imported external definition can retain
+one of the new reserved package names, so that name alone must not relax this
+guard. Current package calls use the normalized qualified identity. An explicit
+foreign normalized identity still prevents fallback to a trusted-looking title.
 
 Both renderer dispatch and rich-output grouping continue through
 `kandevToolStemOf`. Existing package-qualified messages recover on replay

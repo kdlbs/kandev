@@ -37,14 +37,23 @@ describe("kandevToolStemOf", () => {
     expect(isRichOutputMessage(message)).toBe(true);
   });
 
-  it.each(["kandev-rich-output", "kandev-rich-output-extra", "foreign", null])(
+  it.each([
+    "kandev",
+    "kandev-configuration",
+    "kandev-rich-output",
+    "kandev-walkthroughs",
+    "kandev-diagnostics",
+    "kandev-rich-output-extra",
+    "foreign",
+    null,
+  ])(
     "checks the explicit historical provider %s before package-title fallback",
     (providerIdentifier) => {
       const message = toolCall("kandev-rich-output: show_rich_output_kandev");
       const metadata = message.metadata as ToolCallMetadata;
       metadata.normalized!.generic!.input = { raw_input: { providerIdentifier, args: {} } };
       expect(kandevToolStemOf(message)).toBe(
-        providerIdentifier === "kandev-rich-output" ? "show_rich_output" : null,
+        providerIdentifier === "kandev" ? "show_rich_output" : null,
       );
     },
   );

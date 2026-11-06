@@ -33,10 +33,6 @@ const KANDEV_NAMESPACES = KANDEV_SERVER_NAMES.flatMap((server) => [
 ]);
 const KANDEV_SUFFIX = "_kandev";
 
-export function isKandevServerName(value: string): boolean {
-  return KANDEV_SERVER_NAMES.some((server) => server === value.trim());
-}
-
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   return value as Record<string, unknown>;
