@@ -38,6 +38,18 @@ var (
 	ErrExecutionFailed = errors.New(CodeExecutionFailed)
 )
 
+// NoChangesError retains the session whose workspace was inspected without
+// creating a review run. Its code and text match the existing manual rejection.
+type NoChangesError struct {
+	SessionID string
+}
+
+func (e *NoChangesError) Error() string {
+	return ErrNoChanges.Error() + ": the task has no changed files to review"
+}
+
+func (e *NoChangesError) Unwrap() error { return ErrNoChanges }
+
 // CodeFor maps an error to the run error code the client branches on.
 func CodeFor(err error) string {
 	switch {

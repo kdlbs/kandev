@@ -269,7 +269,7 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 		return nil, nil, err
 	}
 	if len(files) == 0 {
-		return nil, nil, fmt.Errorf("%w: the task has no changed files to review", ErrNoChanges)
+		return nil, nil, &NoChangesError{SessionID: sessionID}
 	}
 
 	run, err := r.store.CreateRun(ctx, taskservice.CreateRunRequest{
