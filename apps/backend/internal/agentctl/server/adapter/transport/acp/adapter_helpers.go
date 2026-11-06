@@ -23,7 +23,7 @@ import (
 // makes a gateway-capable agent (codex-acp >= 1.7) offer its OpenAI-compatible
 // gateway auth method. Only advertised when this launch actually carries a
 // provider gateway to authenticate against.
-func clientCapabilitiesForAgent(agentID string, gateway bool, copilotNative bool) acp.ClientCapabilities {
+func clientCapabilitiesForAgent(agentID string, gateway bool, copilotNative bool, archivedRestore ...bool) acp.ClientCapabilities {
 	meta := acpcompat.ClientCapabilityMeta(agentID, map[string]any{"terminal_output": true})
 	if copilotNative && agentID == copilotAgentID {
 		meta[copilotCapabilityMetaKey] = map[string]any{
@@ -42,6 +42,12 @@ func clientCapabilitiesForAgent(agentID string, gateway bool, copilotNative bool
 	}
 	if gateway {
 		caps.Auth = acp.AuthCapabilities{Meta: acpprovider.ClientAuthMeta()}
+	}
+	if agentID == codexAgentID && len(archivedRestore) > 0 && archivedRestore[0] {
+		if caps.Meta == nil {
+			caps.Meta = make(map[string]any)
+		}
+		caps.Meta["jetbrains"] = map[string]any{"air": map[string]any{"version": 1, "capabilities": []string{"sessionIndex"}}}
 	}
 	return caps
 }

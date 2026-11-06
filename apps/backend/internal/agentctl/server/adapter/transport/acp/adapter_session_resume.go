@@ -10,9 +10,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// restoreSessionState uses advertised session/resume to restore the provider
+// restoreSessionStateOnce uses advertised session/resume to restore the provider
 // conversation without transferring history that Kandev already stores.
-func (a *Adapter) restoreSessionState(
+func (a *Adapter) restoreSessionStateOnce(
 	ctx context.Context,
 	conn *acp.ClientSideConnection,
 	capabilities acp.AgentCapabilities,

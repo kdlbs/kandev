@@ -8,13 +8,28 @@ import (
 
 const restartRestoreConcurrency = 2
 
+type restartRestoreAction uint8
+
+const (
+	restartRestoreNative restartRestoreAction = iota
+	restartRestoreAutomatic
+)
+
 type restartRestoreJob struct {
+	action    restartRestoreAction
 	candidate models.SilentRestoreCandidate
 	run       func(context.Context, models.SilentRestoreCandidate) error
 	ctx       context.Context
 	cancel    context.CancelFunc
 	done      chan struct{}
 	err       error
+}
+
+type restartRestoreWork struct {
+	job       *restartRestoreJob
+	action    restartRestoreAction
+	candidate models.SilentRestoreCandidate
+	run       func(context.Context, models.SilentRestoreCandidate) error
 }
 
 type restartRestoreQueue struct {
@@ -33,13 +48,17 @@ func newRestartRestoreQueue(ctx context.Context) *restartRestoreQueue {
 }
 
 func (q *restartRestoreQueue) submit(candidate models.SilentRestoreCandidate, run func(context.Context, models.SilentRestoreCandidate) error) *restartRestoreJob {
+	return q.submitAction(candidate, restartRestoreNative, run)
+}
+
+func (q *restartRestoreQueue) submitAction(candidate models.SilentRestoreCandidate, action restartRestoreAction, run func(context.Context, models.SilentRestoreCandidate) error) *restartRestoreJob {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if job := q.jobs[candidate.SessionID]; job != nil {
 		return job
 	}
 	ctx, cancel := context.WithCancel(q.ctx)
-	job := &restartRestoreJob{candidate: candidate, run: run, ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	job := &restartRestoreJob{action: action, candidate: candidate, run: run, ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	if q.stopped || q.ctx.Err() != nil {
 		cancel()
 		job.err = context.Canceled
@@ -50,6 +69,31 @@ func (q *restartRestoreQueue) submit(candidate models.SilentRestoreCandidate, ru
 	q.pending = append(q.pending, job)
 	q.dispatchLocked()
 	return job
+}
+
+func (q *restartRestoreQueue) submitWork(candidate models.SilentRestoreCandidate, action restartRestoreAction, run func(context.Context, models.SilentRestoreCandidate) error) *restartRestoreWork {
+	return &restartRestoreWork{job: q.submitAction(candidate, action, run), action: action, candidate: candidate, run: run}
+}
+
+// Matching actions share completion; a different action waits for its own session job.
+func (q *restartRestoreQueue) waitForWork(ctx context.Context, work *restartRestoreWork) bool {
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-work.job.done:
+		}
+		if work.job.action == work.action {
+			return true
+		}
+		q.mu.Lock()
+		stopped := q.stopped || q.ctx.Err() != nil
+		q.mu.Unlock()
+		if stopped {
+			return false
+		}
+		work = q.submitWork(work.candidate, work.action, work.run)
+	}
 }
 
 func (q *restartRestoreQueue) prioritize(sessionID string) {
