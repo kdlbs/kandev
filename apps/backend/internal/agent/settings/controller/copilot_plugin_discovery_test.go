@@ -120,7 +120,7 @@ func TestCopilotPluginDiscoveryMountPermission(t *testing.T) {
 	if got.Status != "ready" || !got.MountPermitted {
 		t.Fatalf("supported inventory must permit native mounts: %#v", got)
 	}
-	if got.RuntimeVersion != "1.0.88" {
+	if got.RuntimeVersion != agents.MustDefaultManagedNPMRuntimeVersion("@github/copilot") {
 		t.Fatalf("discovery runtime = %q, want the selected default", got.RuntimeVersion)
 	}
 	if len(runner.calls) != 1 || len(runner.helpCalls) != 1 {

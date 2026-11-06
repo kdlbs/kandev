@@ -607,6 +607,9 @@ const (
 	SessionOriginTaskInitial             = "task_initial"
 	SessionMetaKeyContextWindow          = "context_window"
 	SessionMetaKeyContextCompactionCount = "context_compaction_count"
+	// SessionMetaKeyContextCompactionReporting holds provider-derived collection
+	// availability, coverage, and a monotonic revision next to the lifetime count.
+	SessionMetaKeyContextCompactionReporting = "context_compaction_reporting"
 	// SessionMetaKeyRecoveryResolvedAt stores the server timestamp of the
 	// latest successful agent boot. Recovery cards compare this timestamp with
 	// their own creation time, so the result survives transcript write failures.

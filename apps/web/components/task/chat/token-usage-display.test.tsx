@@ -9,6 +9,9 @@ import {
 import { isContextWindowReliable, TokenUsageDisplay } from "./token-usage-display";
 
 const TOOLTIP_ROOT_TESTID = "tooltip-root";
+const COPILOT_NATIVE = "copilot_native" as const;
+const COMPACTIONS_LABEL = "Compactions";
+const COMPACTIONS_ROW_TESTID = "context-window-compactions-row";
 
 vi.mock("@/hooks/domains/session/use-session-context-window", () => ({
   useSessionContextWindow: vi.fn(),
@@ -125,8 +128,8 @@ describe("TokenUsageDisplay", () => {
     fireEvent.click(getByRole("button", { name: "Context window: 28% used" }));
 
     expect(getByTestId(TOOLTIP_ROOT_TESTID).getAttribute("data-open")).toBe("true");
-    const compactionRow = getByTestId("context-window-compactions-row");
-    expect(compactionRow.textContent).toContain("Compactions");
+    const compactionRow = getByTestId(COMPACTIONS_ROW_TESTID);
+    expect(compactionRow.textContent).toContain(COMPACTIONS_LABEL);
     expect(compactionRow.textContent).toContain("0");
   });
 
@@ -153,7 +156,7 @@ describe("TokenUsageDisplay", () => {
     expect(usage.textContent).not.toContain("0%");
     expect(usage.textContent).not.toContain("0 of");
     expect(usage.textContent).toContain("ACP");
-    expect(usage.textContent).toContain("Compactions");
+    expect(usage.textContent).toContain(COMPACTIONS_LABEL);
   });
 
   it("closes a tapped tooltip when Escape is pressed", () => {
@@ -299,8 +302,8 @@ describe("TokenUsageDisplay compaction count", () => {
       <TokenUsageDisplay sessionId="sess-1" />,
     );
 
-    const compactionRow = getByTestId("context-window-compactions-row");
-    expect(compactionRow.textContent).toContain("Compactions");
+    const compactionRow = getByTestId(COMPACTIONS_ROW_TESTID);
+    expect(compactionRow.textContent).toContain(COMPACTIONS_LABEL);
     expect(compactionRow.textContent).toContain("0");
     expect(getByText("0", { selector: "span" })).toBeDefined();
 
@@ -310,5 +313,63 @@ describe("TokenUsageDisplay compaction count", () => {
     const help = document.getElementById(helpId);
     if (!help) throw new Error("Expected compaction help element");
     expect(help.textContent).toContain("Copilot ACP usage is excluded because it can mix");
+  });
+});
+
+describe("TokenUsageDisplay compaction coverage", () => {
+  function renderWithReporting(reporting: {
+    source: typeof COPILOT_NATIVE;
+    availability: "available" | "unavailable";
+    coverage: "observed" | "partial";
+    revision: number;
+  }) {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 272_000,
+      used: 12_171,
+      remaining: 259_829,
+      efficiency: 4,
+      compactionCount: 3,
+      compactionReporting: reporting,
+    });
+    const view = render(<TokenUsageDisplay sessionId="sess-1" />);
+    fireEvent.click(view.getByRole("button", { name: "Context window: 4% used" }));
+    return view;
+  }
+
+  it("explains available native counting without a status badge", () => {
+    const { getByTestId, queryByTestId } = renderWithReporting({
+      source: COPILOT_NATIVE,
+      availability: "available",
+      coverage: "observed",
+      revision: 2,
+    });
+    expect(queryByTestId("context-window-compactions-status")).toBeNull();
+    const row = getByTestId(COMPACTIONS_ROW_TESTID);
+    expect(row.textContent).toContain("successful parent compaction events");
+    expect(row.textContent).toContain("Historical estimates");
+  });
+
+  it("shows partial coverage as sticky missing evidence", () => {
+    const { getByTestId } = renderWithReporting({
+      source: COPILOT_NATIVE,
+      availability: "available",
+      coverage: "partial",
+      revision: 3,
+    });
+    expect(getByTestId("context-window-compactions-status").textContent).toBe("Partial");
+    expect(getByTestId(COMPACTIONS_ROW_TESTID).textContent).toContain(
+      "Some compaction evidence is missing",
+    );
+  });
+
+  it("shows unavailable collection without claiming zero compactions", () => {
+    const { getByTestId } = renderWithReporting({
+      source: COPILOT_NATIVE,
+      availability: "unavailable",
+      coverage: "partial",
+      revision: 4,
+    });
+    expect(getByTestId("context-window-compactions-status").textContent).toBe("Unavailable");
+    expect(getByTestId(COMPACTIONS_ROW_TESTID).textContent).toContain("zero does not prove");
   });
 });

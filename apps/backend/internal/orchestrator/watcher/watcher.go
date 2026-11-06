@@ -165,6 +165,7 @@ type ContextWindowData struct {
 	ContextWindowRemaining      int64   `json:"context_window_remaining"`
 	ContextEfficiency           float64 `json:"context_efficiency"`
 	CompactionInferenceDisabled bool    `json:"compaction_inference_disabled,omitempty"`
+	CopilotNativeSessionEvents  bool    `json:"copilot_native_session_events,omitempty"`
 	Timestamp                   string  `json:"timestamp"`
 }
 
