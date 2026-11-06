@@ -8,7 +8,10 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -759,6 +762,52 @@ func TestCreateTask_WithRelatedTaskIDs(t *testing.T) {
 	reverse, _ := relations.ListRelationsForTask(context.Background(), peer.ID)
 	if len(forward) != 1 || forward[0] != peer.ID || len(reverse) != 1 || reverse[0] != result.Task.ID {
 		t.Fatalf("related links = %v and %v", forward, reverse)
+	}
+}
+
+// TestCreateTask_WithRelatedTaskIDs_PublishesPeerUpdate covers the existing
+// peer: creating a task related to it only writes the DB row unless the peer
+// also gets a task.updated carrying its refreshed related list, so an already
+// open client learns about the new edge instead of showing a stale chip.
+func TestCreateTask_WithRelatedTaskIDs_PublishesPeerUpdate(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	relations := newMockRelationRepo()
+	svc.SetRelationRepository(relations)
+	peer := mustSeedTask(t, svc, "Related task")
+
+	eventBus := bus.NewMemoryEventBus(svc.logger)
+	svc.eventBus = eventBus
+	t.Cleanup(eventBus.Close)
+	peerUpdates := make(chan *bus.Event, 4)
+	subscription, err := eventBus.Subscribe(events.TaskUpdated, func(_ context.Context, event *bus.Event) error {
+		data, ok := event.Data.(map[string]interface{})
+		if ok && data["task_id"] == peer.ID {
+			peerUpdates <- event
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe to task.updated: %v", err)
+	}
+	t.Cleanup(func() { _ = subscription.Unsubscribe() })
+
+	result, err := svc.CreateTask(context.Background(), &CreateTaskRequest{
+		WorkspaceID: "ws-1", Title: "New task", ProjectID: "proj-1",
+		RelatedTaskIDs: []string{peer.ID},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	select {
+	case event := <-peerUpdates:
+		data := event.Data.(map[string]interface{})
+		related, ok := data["related"].([]DependencyRef)
+		if !ok || len(related) != 1 || related[0].ID != result.Task.ID {
+			t.Fatalf("peer related projection = %#v, want one ref to %s", data["related"], result.Task.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("peer never received a task.updated after the new task was linked to it")
 	}
 }
 
