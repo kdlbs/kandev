@@ -56,8 +56,9 @@ test.describe("queued message after an agent-started follow-up", () => {
       await waitForComposerQueueMode(testPage, 30_000);
       const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
       await typeWhileBusy(testPage, editor, 'e2e:message("queued follow-up delivered")');
-      await testPage.getByTestId("submit-message-button").click();
       const queueIdentity = await apiClient.getQueueSessionIdentity(task.id, sessionId);
+      await waitForComposerQueueMode(testPage, 5_000);
+      await testPage.getByTestId("submit-message-button").click();
       await expect
         .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count), {
           message: "the submitted follow-up should be present in the durable queue",

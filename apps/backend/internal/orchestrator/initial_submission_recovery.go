@@ -488,15 +488,20 @@ func (s *Service) wrapInitialSubmissionReplayPrompt(
 		}
 	}
 	includeCanvasGuidance := false
+	asyncQuestionsSupported := false
 	if (prompt != "" || len(attachments) > 0) && !isOfficeTask && !session.IsPassthrough && !configMode {
 		includeCanvasGuidance, err = s.taskSessionCanvasGuidanceEnabled(ctx, taskID, session, true)
 		if err != nil {
 			return "", fmt.Errorf("resolve canvas prompt capability for initial submission replay: %w", err)
 		}
+		asyncQuestionsSupported, err = s.taskSessionAsyncQuestionsSupported(ctx, taskID, session, true)
+		if err != nil {
+			return "", fmt.Errorf("resolve async question prompt capability for initial submission replay: %w", err)
+		}
 	}
 	return s.wrapCreatedSessionPrompt(
 		ctx, prompt, taskID, sessionID, session, dbTask,
-		isOfficeTask, configMode, titleOwner, includeCanvasGuidance, nil, "",
+		isOfficeTask, configMode, titleOwner, includeCanvasGuidance, asyncQuestionsSupported, nil, "",
 	), nil
 }
 

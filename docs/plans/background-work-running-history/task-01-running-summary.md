@@ -183,5 +183,3 @@ desktop and phone specs capture overview/detail screenshots through `prCapture`.
   status/actions, and output remain reachable without horizontal scrolling.
 - Associated each tab with a Radix `TabsContent` panel and added role,
   `aria-controls`, `aria-labelledby`, and keyboard-navigation coverage.
-
-

@@ -571,7 +571,7 @@ func TestInjectAutoStartRuntimeContext_NilStepPreservesPrompt(t *testing.T) {
 		agentPrompt: "queued prompt",
 	}
 	recorded, dispatched := svc.injectAutoStartRuntimeContext(
-		state, "recorded prompt", "dispatched prompt", false, nil, false, false, "",
+		state, "recorded prompt", "dispatched prompt", false, nil, false, false, false, "",
 	)
 	require.Equal(t, "recorded prompt", recorded)
 	require.Equal(t, "dispatched prompt", dispatched)

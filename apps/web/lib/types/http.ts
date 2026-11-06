@@ -1180,6 +1180,7 @@ export type MessageType =
   | "todo"
   | "permission_request"
   | "clarification_request"
+  | "agent_question_request"
   | "script_execution"
   | "agent_plan";
 

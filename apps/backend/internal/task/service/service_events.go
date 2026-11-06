@@ -1305,6 +1305,34 @@ func (s *Service) publishSessionPendingActionChanged(
 	}
 }
 
+// AsyncQuestionWaitChanged republishes the compact pending-action projection
+// after an explicit question gate changes state.
+func (s *Service) AsyncQuestionWaitChanged(ctx context.Context, taskID, sessionID string) error {
+	if s.messages == nil || taskID == "" || sessionID == "" {
+		return nil
+	}
+	s.pendingActionProjectionMu.Lock()
+	_, previouslyPublished := s.lastPendingActionProjections[sessionID]
+	s.pendingActionProjectionMu.Unlock()
+	actions, revisions, err := s.GetPendingActionProjectionsForSessions(ctx, []string{sessionID})
+	if err != nil {
+		return err
+	}
+	action := actions[sessionID]
+	if action == "" && !previouslyPublished {
+		return nil
+	}
+	revision := revisions[sessionID]
+	projection := pendingActionProjection{
+		action: action, revision: revision,
+		changed: s.pendingActionProjectionChanged(sessionID, action, revision),
+	}
+	s.publishSessionPendingActionChanged(ctx, &models.Message{
+		TaskID: taskID, TaskSessionID: sessionID,
+	}, projection)
+	return nil
+}
+
 func messageEventChangesPendingAction(eventType string, message *models.Message) bool {
 	switch eventType {
 	case events.MessageAdded, events.MessageDeleted:

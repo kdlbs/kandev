@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import type { ClarificationInboxBundle } from "@/lib/types/clarification-inbox";
+import type {
+  ClarificationInboxAsyncQuestion,
+  ClarificationInboxBundle,
+} from "@/lib/types/clarification-inbox";
 import { createNeedsYouInboxSlice } from "./needs-you-inbox-slice";
 import type { NeedsYouInboxSlice } from "./types";
 
@@ -32,6 +35,27 @@ function bundle(overrides: Partial<ClarificationInboxBundle> = {}): Clarificatio
   };
 }
 
+type PageInput = {
+  bundles: ClarificationInboxBundle[];
+  asyncQuestions: ClarificationInboxAsyncQuestion[];
+  count: number;
+  hiddenCount: number;
+  nextSnoozeExpiry: string | null;
+  hasMore: boolean;
+};
+
+function page(overrides: Partial<PageInput> = {}): PageInput {
+  return {
+    bundles: [],
+    asyncQuestions: [],
+    count: 0,
+    hiddenCount: 0,
+    nextSnoozeExpiry: null,
+    hasMore: false,
+    ...overrides,
+  };
+}
+
 describe("needs-you-inbox slice retry signals", () => {
   it("keeps explicit retry requests separate from WebSocket refresh ticks", () => {
     const store = newStore();
@@ -54,13 +78,17 @@ describe("needs-you-inbox slice", () => {
     const store = newStore();
     const generation = store.getState().beginNeedsYouInboxRead("w1");
 
-    store.getState().setNeedsYouInboxPage("w1", generation, {
-      bundles: [bundle()],
-      count: 1,
-      hiddenCount: 2,
-      nextSnoozeExpiry: "2026-09-03T05:00:00Z",
-      hasMore: true,
-    });
+    store.getState().setNeedsYouInboxPage(
+      "w1",
+      generation,
+      page({
+        bundles: [bundle()],
+        count: 1,
+        hiddenCount: 2,
+        nextSnoozeExpiry: "2026-09-03T05:00:00Z",
+        hasMore: true,
+      }),
+    );
 
     const state = store.getState().needsYouInbox.byWorkspaceId.w1;
     expect(state.status).toBe("ready");
@@ -79,21 +107,21 @@ describe("needs-you-inbox slice", () => {
     const freshGeneration = store.getState().beginNeedsYouInboxRead("w1");
     expect(freshGeneration).not.toBe(staleGeneration);
 
-    store.getState().setNeedsYouInboxPage("w1", freshGeneration, {
-      bundles: [bundle({ pending_id: "fresh" })],
-      count: 1,
-      hiddenCount: 0,
-      nextSnoozeExpiry: null,
-      hasMore: false,
-    });
+    store
+      .getState()
+      .setNeedsYouInboxPage(
+        "w1",
+        freshGeneration,
+        page({ bundles: [bundle({ pending_id: "fresh" })], count: 1 }),
+      );
     // The stale response lands after the fresh one and must be dropped.
-    store.getState().setNeedsYouInboxPage("w1", staleGeneration, {
-      bundles: [bundle({ pending_id: "stale" })],
-      count: 1,
-      hiddenCount: 0,
-      nextSnoozeExpiry: null,
-      hasMore: false,
-    });
+    store
+      .getState()
+      .setNeedsYouInboxPage(
+        "w1",
+        staleGeneration,
+        page({ bundles: [bundle({ pending_id: "stale" })], count: 1 }),
+      );
 
     const state = store.getState().needsYouInbox.byWorkspaceId.w1;
     expect(state.bundles[0].pending_id).toBe("fresh");
@@ -102,13 +130,9 @@ describe("needs-you-inbox slice", () => {
   it("clears rows and count in the same update on a failed read that follows a successful one", () => {
     const store = newStore();
     const okGeneration = store.getState().beginNeedsYouInboxRead("w1");
-    store.getState().setNeedsYouInboxPage("w1", okGeneration, {
-      bundles: [bundle()],
-      count: 1,
-      hiddenCount: 0,
-      nextSnoozeExpiry: null,
-      hasMore: false,
-    });
+    store
+      .getState()
+      .setNeedsYouInboxPage("w1", okGeneration, page({ bundles: [bundle()], count: 1 }));
 
     const failGeneration = store.getState().beginNeedsYouInboxRead("w1");
     store.getState().setNeedsYouInboxError("w1", failGeneration);
@@ -127,13 +151,9 @@ describe("needs-you-inbox slice", () => {
   it("marks lastAppliedOk true after a successful page and false after a failed read, unaffected by the loading transition between them", () => {
     const store = newStore();
     const okGeneration = store.getState().beginNeedsYouInboxRead("w1");
-    store.getState().setNeedsYouInboxPage("w1", okGeneration, {
-      bundles: [bundle()],
-      count: 1,
-      hiddenCount: 0,
-      nextSnoozeExpiry: null,
-      hasMore: false,
-    });
+    store
+      .getState()
+      .setNeedsYouInboxPage("w1", okGeneration, page({ bundles: [bundle()], count: 1 }));
     expect(store.getState().needsYouInbox.byWorkspaceId.w1.lastAppliedOk).toBe(true);
 
     const failGeneration = store.getState().beginNeedsYouInboxRead("w1");
@@ -158,13 +178,9 @@ describe("needs-you-inbox slice", () => {
     const store = newStore();
     const staleGeneration = store.getState().beginNeedsYouInboxRead("w1");
     const freshGeneration = store.getState().beginNeedsYouInboxRead("w1");
-    store.getState().setNeedsYouInboxPage("w1", freshGeneration, {
-      bundles: [bundle()],
-      count: 1,
-      hiddenCount: 0,
-      nextSnoozeExpiry: null,
-      hasMore: false,
-    });
+    store
+      .getState()
+      .setNeedsYouInboxPage("w1", freshGeneration, page({ bundles: [bundle()], count: 1 }));
 
     store.getState().setNeedsYouInboxError("w1", staleGeneration);
 
@@ -195,13 +211,7 @@ describe("needs-you-inbox slice — boot seeding", () => {
     });
 
     const generation = store.getState().beginNeedsYouInboxRead("w1");
-    store.getState().setNeedsYouInboxPage("w1", generation, {
-      bundles: [],
-      count: 0,
-      hiddenCount: 0,
-      nextSnoozeExpiry: null,
-      hasMore: false,
-    });
+    store.getState().setNeedsYouInboxPage("w1", generation, page({ bundles: [] }));
 
     expect(store.getState().needsYouInbox.byWorkspaceId.w1.count).toBe(0);
     expect(store.getState().needsYouInbox.byWorkspaceId.w1.status).toBe("ready");

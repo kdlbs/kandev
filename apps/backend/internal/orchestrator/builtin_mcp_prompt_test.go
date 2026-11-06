@@ -37,7 +37,7 @@ func TestBuiltinPromptProducersUsePreparedSelection(t *testing.T) {
 	ctx, err := svc.executor.PrepareMCPLaunch(context.Background(), "task", session, true)
 	require.NoError(t, err)
 	prompts := []string{
-		svc.wrapCreatedSessionPrompt(ctx, "request", "task", "session", session, task, false, false, false, false, nil, ""),
+		svc.wrapCreatedSessionPrompt(ctx, "request", "task", "session", session, task, false, false, false, false, false, nil, ""),
 		svc.applyLaunchPromptContext(ctx, launchPromptContext{prompt: "request", taskID: "task", sessionID: "session"}),
 	}
 	for _, prompt := range prompts {

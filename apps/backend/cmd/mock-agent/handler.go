@@ -448,6 +448,10 @@ func handleAutopilotParentQuestion(e *emitter, prompt string) bool {
 // handlePrompt routes a user prompt to the appropriate sequence generator.
 func handlePrompt(e *emitter, prompt, model string) {
 	prompt = strings.TrimSpace(prompt)
+	if result := asyncQuestionDeliveryResult(prompt); result != "" {
+		e.text(result)
+		return
+	}
 
 	// Extract the user-facing content for command routing.
 	cmd := stripKandevSystem(prompt)

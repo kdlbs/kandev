@@ -32,6 +32,12 @@ type parentQuestionRequest struct {
 	TaskID    string                   `json:"task_id"`
 	Questions []clarification.Question `json:"questions"`
 	Context   string                   `json:"context"`
+	// Async requests a durable receipt instead of pausing the child turn.
+	Async bool `json:"async,omitempty"`
+	// RequestID is an optional async-only stable retry identity.
+	RequestID string `json:"request_id,omitempty"`
+	// RetryKey is the connection-scoped transport identity.
+	RetryKey string `json:"retry_key"`
 }
 
 type parentQuestionError struct {
@@ -70,6 +76,9 @@ func parentQuestionRequestFromMessage(msg *ws.Message) (parentQuestionRequest, *
 	}
 	if errMsg := clarification.NormalizeAndValidateQuestions(req.Questions); errMsg != "" {
 		return req, &parentQuestionError{ws.ErrorCodeValidation, errMsg}
+	}
+	if !req.Async && req.RequestID != "" {
+		return req, &parentQuestionError{ws.ErrorCodeValidation, "request_id is valid only with async=true"}
 	}
 	return req, nil
 }
@@ -131,6 +140,9 @@ func (h *Handlers) handleAskParentQuestion(ctx context.Context, msg *ws.Message)
 	req, requestErr := parentQuestionRequestFromMessage(msg)
 	if requestErr != nil {
 		return ws.NewError(msg.ID, msg.Action, requestErr.code, requestErr.message, nil)
+	}
+	if req.Async {
+		return h.handleAsyncParentQuestion(ctx, msg, req)
 	}
 	target, targetErr := h.loadParentQuestionTarget(ctx, req)
 	if targetErr != nil {

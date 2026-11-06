@@ -600,7 +600,7 @@ func TestStartCreatedSession_InitialTaskBrief(t *testing.T) {
 
 			_, err := svc.StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
 				ctx, taskID, sessionID, "profile1", taskBrief+"\n\n"+instruction,
-				false, false, false, nil, nil, "", false, true, false,
+				false, false, false, nil, nil, "", false, true, false, false, false,
 			)
 			require.NoError(t, err)
 			require.NotEmpty(t, launchedPrompt)

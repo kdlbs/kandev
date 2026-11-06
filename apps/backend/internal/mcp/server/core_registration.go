@@ -55,6 +55,9 @@ func (s *Server) registerCoreQuestionTools() {
 	if s.profile.HasCapability(mcpprofile.CapabilityUserQuestion) {
 		s.registerInteractionTools()
 	}
+	if s.profile.Surface == mcpprofile.SurfaceKanbanTask && s.profile.HasCapability(mcpprofile.CapabilityAsyncQuestions) {
+		s.addListQuestionAnswersTool()
+	}
 }
 
 func (s *Server) registerCoreTaskCapabilities() {

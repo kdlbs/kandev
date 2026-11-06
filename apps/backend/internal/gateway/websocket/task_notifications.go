@@ -1,6 +1,8 @@
 package websocket
 
 import (
+	"strings"
+
 	"context"
 	"sync"
 
@@ -149,6 +151,9 @@ func (b *TaskEventBroadcaster) subscribeLifecycleStateEvents(eventBus bus.EventB
 		case events.TaskSessionStateChanged:
 			return ws.ActionSessionStateChanged
 		default:
+			if strings.HasPrefix(event.EffectiveSubject(), "task.question.") {
+				return ws.ActionTaskQuestionChanged
+			}
 			return ""
 		}
 	})

@@ -19,13 +19,13 @@ func TestWrapCreatedSessionPrompt_CanvasPromptFollowsResolvedCapability(t *testi
 
 	withoutCanvas := (&Service{}).wrapCreatedSessionPrompt(
 		context.Background(), "build the requested app", "task", "session", session, task,
-		false, false, false, false, nil, "",
+		false, false, false, false, false, nil, "",
 	)
 	assert.NotContains(t, withoutCanvas, "create_canvas_kandev")
 
 	withCanvas := (&Service{}).wrapCreatedSessionPrompt(
 		context.Background(), "build the requested app", "task", "session", session, task,
-		false, false, false, true, nil, "",
+		false, false, false, true, false, nil, "",
 	)
 	assertCanvasPrompt(t, withCanvas)
 }

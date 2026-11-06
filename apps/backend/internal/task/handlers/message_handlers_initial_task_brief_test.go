@@ -434,6 +434,7 @@ func (o *firstTurnCaptureOrchestrator) StartCreatedSessionWithPromptContextAndCa
 	promptReferenceContext string,
 	_ bool,
 	_, _ bool,
+	_, _ bool,
 ) (*executor.TaskExecution, error) {
 	o.started <- capturedFirstTurn{
 		content:                content,
