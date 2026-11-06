@@ -147,7 +147,7 @@ replace state verification, installation association, or HMAC verification.
 - `Manager` (`manager.go`, `manager_*.go`) - central coordinator for agent lifecycle
 - `ExecutorBackend` interface (`executor_backend.go`) - abstracts execution environment (Docker, Standalone, Sprites, SSH, Kubernetes, Remote Docker)
 - `ExecutionStore` (`execution_store.go`) - thread-safe in-memory execution tracking
-- `session.go` - ACP session initialization and resume
+- `session.go` - ACP session initialization and resume. **Provider usage:** `features.providerUsageLimits` gates on-demand profile snapshots through Office's shared cache and optional shared Kandev-turn allowances for task/Office prompts. Unknown bindings remain explicit. Disabled admission retains settlement of existing claims; provider-request, token/USD and inference-child budgets are separate consumers.
 - `streams.go` - WebSocket stream connections to agentctl
 - `process_runner.go` - agent process launch and management
 - `profile_resolver.go` - resolves agent profiles/settings

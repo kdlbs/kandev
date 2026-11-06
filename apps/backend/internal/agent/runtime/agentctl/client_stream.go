@@ -29,6 +29,9 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	c.mu.RUnlock()
 
 	if conn == nil {
+		if action == agentPromptAction {
+			return nil, &promptUnsentError{ErrAgentStreamNotConnected}
+		}
 		return nil, ErrAgentStreamNotConnected
 	}
 

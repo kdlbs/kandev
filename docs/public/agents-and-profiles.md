@@ -567,6 +567,38 @@ At task startup, the selected executor must confirm the requested mode before
 the first prompt. If it cannot, startup fails. Leaving the mode unset uses the
 agent's default.
 
+### View provider usage
+
+Enable **Provider usage and limits** in **Settings > System > Feature Toggles**
+and restart Kandev to show usage beside profiles on **Settings > Agents**. The
+toggle is off by default. Select **Refresh** for another reading; this view does
+not poll in the background.
+
+Profiles sharing a supported local account show the same account usage. The
+view labels a default local account or local proxy explicitly; it does not
+measure a different account selected by a remote executor. Missing credentials,
+unsupported bindings and unavailable readings remain unknown. Free OpenCode
+models and services without a usage API do not inherit a paid usage window.
+A measured zero is shown as zero. A reading alone does not enforce a limit.
+
+The same feature also applies explicitly configured shared **Kandev-turn**
+allowances to task and Office prompts. No allowance is configured by default.
+The current settings API is
+`GET/PATCH /api/v1/agent-profiles/:id/turn-allowance`; editing requires native
+organization configuration permission. Optional settings are
+`concurrent_turns`, `turns_per_window` with `window_seconds`, `reset_anchor` and
+`block_until`. Omitted fields keep saved values, null removes an override, and
+zero disables that numeric dimension. Profiles using the same supported local
+credential share the allowance. Unknown potentially matching credential
+bindings stop configured admission; unrelated known provider families retain
+their own behavior.
+
+One Kandev turn can contain multiple provider requests. These allowances are
+not provider HTTP-request, token or USD budgets. Separate utility/review
+inference children, model/group limits, remote accounts and a native allowance
+editor remain subsequent work. Disabling the feature retains saved settings
+and admitted claims.
+
 ### Use an OpenAI-compatible provider
 
 Open the **Provider** section in a profile that supports this feature. Select
