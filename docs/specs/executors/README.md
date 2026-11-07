@@ -111,3 +111,8 @@ and desktop/touch disclosure. The foundation retains task-page controls.
 Executor proxies consume control credentials before forwarding to applications.
 The contract is in [requirements](requirements/proxy-control-credential-containment.md)
 and [design](system-design/proxy-control-credential-containment.md).
+
+## Docker storage bounds
+
+- [Requirements](requirements/docker-storage-bounds.md)
+- [System design](system-design/docker-storage-bounds.md)

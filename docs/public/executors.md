@@ -54,6 +54,21 @@ The connection test's **Docker daemon** step reports which of three different pr
 
 Choose Remote Docker over a single-node Kubernetes cluster when you want a container per task on one machine and do not otherwise run Kubernetes. Kubernetes covers the same ground and adds resource limits, admission control, and scheduling, but it asks for a storage provisioner, a namespace, RBAC, and a worker image built and pushed to a registry by digest. Remote Docker keeps the Docker executor's Dockerfile-and-build loop, with no registry in the basic case.
 
+## Docker log and temporary storage limits
+
+New containers created by the Docker client use rotating `json-file` logs with
+`max-size=100m` and `max-file=3`. This applies to normal and interactive creation,
+including a remote Docker daemon. Existing containers keep their storage
+configuration when Kandev reconnects to them.
+
+The default `/tmp` is a 2 GiB tmpfs with mode 1777, `nosuid`, and `nodev`. An
+explicit task mount at `/tmp` keeps its own storage policy. Tmpfs uses host
+memory and swap while allocated, and its contents disappear when the container
+is removed. Write required outputs and evidence to persistent task storage.
+
+These limits do not bound the writable layer, workspaces, other bind mounts, or
+evidence archives; those still need their own retention and cleanup.
+
 ## Plugin-managed remote executors
 
 Plugin remote providers appear in **Settings > Executors** when an installed, active plugin declares a compatible `executor_providers` contract. No separate feature flag or restart is required. Disabled, incompatible, or unavailable providers remain ineligible for new launches, and built-in executors continue to work when no provider plugin is installed.
