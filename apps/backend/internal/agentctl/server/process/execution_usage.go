@@ -17,6 +17,7 @@ type nativeExecutionUsage struct {
 	policy                *usage.ExecutionUsagePolicy
 	input                 usage.ExecutionUsageInput
 	reason                string
+	diagnostic            *usage.ExecutionUsageDiagnostic
 	service               *usage.UsageService
 }
 
@@ -37,6 +38,7 @@ func (m *Manager) ConfigureExecutionUsage(policy *usage.ExecutionUsagePolicy) er
 	m.executionUsage.selectionModelPending = false
 	m.executionUsage.input = usage.ExecutionUsageInput{}
 	m.executionUsage.reason = "execution_unknown"
+	m.executionUsage.diagnostic = nil
 	if policy != nil {
 		copy := *policy
 		m.executionUsage.policy = &copy
@@ -63,9 +65,12 @@ func (m *Manager) bindExecutionUsage(ctx context.Context, commands ...[]string) 
 	if len(commands) == 1 {
 		input.Command = append([]string(nil), commands[0]...)
 	}
-	reason := "provider_selection_unknown"
-	if m.cfg.ProviderGatewayAuth == nil && m.cfg.LaunchWrapper.IsZero() && usage.NativeProviderSelectionKnown(input) {
-		input, reason, _ = service.BindExecutionUsage(ctx, input)
+	reason := usage.NativeProviderSelectionReason(input)
+	var bindingErr error
+	if m.cfg.ProviderGatewayAuth != nil || !m.cfg.LaunchWrapper.IsZero() {
+		reason = "provider_selection_unknown"
+	} else if reason == "" {
+		input, reason, bindingErr = service.BindExecutionUsage(ctx, input)
 	}
 	changed := usage.ExecutionUsageSelectionChanged(*policy, input, reason, "", false)
 	if changed {
@@ -73,6 +78,7 @@ func (m *Manager) bindExecutionUsage(ctx context.Context, commands ...[]string) 
 	}
 	m.executionUsage.mu.Lock()
 	m.executionUsage.input, m.executionUsage.reason = input, reason
+	m.executionUsage.diagnostic = usage.ExecutionUsageErrorDiagnostic(bindingErr)
 	m.executionUsage.mu.Unlock()
 	if changed {
 		return &usage.ExecutionUsageBindingError{}
@@ -97,6 +103,11 @@ func (m *Manager) readExecutionUsage(ctx context.Context, cachedOnly bool) *usag
 	m.executionUsage.mu.RLock()
 	input, reason, service, policy := m.executionUsage.input, m.executionUsage.reason, m.executionUsage.service, m.executionUsage.policy
 	selectionPending := m.executionUsage.selectionModelPending
+	var diagnostic *usage.ExecutionUsageDiagnostic
+	if m.executionUsage.diagnostic != nil {
+		copy := *m.executionUsage.diagnostic
+		diagnostic = &copy
+	}
 	m.executionUsage.mu.RUnlock()
 	if reason != "ok" || service == nil {
 		if reason == "" {
@@ -106,7 +117,7 @@ func (m *Manager) readExecutionUsage(ctx context.Context, cachedOnly bool) *usag
 		if changed {
 			reason = nativeUsageBindingChanged
 		}
-		return &usage.ExecutionUsageReport{Reason: reason, Model: model, BindingChanged: changed}
+		return &usage.ExecutionUsageReport{Reason: reason, Model: model, BindingChanged: changed, Diagnostic: diagnostic}
 	}
 	input.Model = model
 	if policy != nil && usage.ExecutionUsageSelectionChanged(*policy, input, reason, model, selectionPending) {

@@ -39,15 +39,16 @@ type ObservedUsageSample struct {
 // ExecutionUsageReport contains provider facts only. No environment, token,
 // credential filename, profile-derived account ID, or invented reset is sent.
 type ExecutionUsageReport struct {
-	SourceKnown    bool                 `json:"source_known"`
-	Reason         string               `json:"reason"`
-	Model          string               `json:"model,omitempty"`
-	Current        *ObservedUsageSample `json:"current,omitempty"`
-	Previous       *ObservedUsageSample `json:"previous,omitempty"`
-	Limited        bool                 `json:"limited"`
-	BlockingWindow string               `json:"blocking_window,omitempty"`
-	ResetAt        *time.Time           `json:"reset_at,omitempty"`
-	BindingChanged bool                 `json:"binding_changed,omitempty"`
+	Diagnostic     *ExecutionUsageDiagnostic `json:"diagnostic,omitempty"`
+	SourceKnown    bool                      `json:"source_known"`
+	Reason         string                    `json:"reason"`
+	Model          string                    `json:"model,omitempty"`
+	Current        *ObservedUsageSample      `json:"current,omitempty"`
+	Previous       *ObservedUsageSample      `json:"previous,omitempty"`
+	Limited        bool                      `json:"limited"`
+	BlockingWindow string                    `json:"blocking_window,omitempty"`
+	ResetAt        *time.Time                `json:"reset_at,omitempty"`
+	BindingChanged bool                      `json:"binding_changed,omitempty"`
 }
 
 // ExecutionInputFromEnvironment must receive the native child's final env,
@@ -70,6 +71,7 @@ func ExecutionInputFromEnvironment(policy ExecutionUsagePolicy, executionID, mod
 func ReadExecutionUsageReport(ctx context.Context, service ExecutionUsageReader, input ExecutionUsageInput) *ExecutionUsageReport {
 	report := &ExecutionUsageReport{Reason: "account_unknown", Model: input.Model}
 	result, err := service.CheckExecutionUsage(ctx, input)
+	report.Diagnostic = ExecutionUsageErrorDiagnostic(err)
 	if result != nil {
 		report.SourceKnown, report.Reason = result.SourceKnown, result.Reason
 		report.Current, report.Previous = observedUsageSample(result.Current), observedUsageSample(result.Previous)
