@@ -42,6 +42,11 @@ const (
 	LaunchQueueReasonReplayError          = "replay_error"
 )
 
+// QuotaWaitReasonQuotaLimited is the only reason a quota wait is projected for.
+// A deadline-backed wait caused by any other provider failure keeps its
+// routing-owned presentation instead of being reported as a limit wait.
+const QuotaWaitReasonQuotaLimited = "quota_limited"
+
 // TaskStatusSummary is the complete replacement value delivered to task-list
 // consumers. Revision and UpdatedAt are transport metadata and are ignored by
 // SemanticEqual when deciding whether a projection actually changed.
@@ -79,6 +84,20 @@ type TaskStatusSummary struct {
 	// transcript-visible message. The task is unread when it is non-empty.
 	// Omitted when empty.
 	UnreadSessionIDs []string `json:"unread_session_ids,omitempty"`
+	// QuotaWait is the live task-level projection for a session parked on a
+	// provider limit. It carries the reason identity and the instant the limit
+	// lifts, never the policy body or provider payload behind the decision.
+	QuotaWait *QuotaWaitSummary `json:"quota_wait,omitempty"`
+}
+
+// QuotaWaitSummary is the bounded form of one session's deadline-backed limit
+// wait. Deadline is the instant a fresh selection is attempted again, so it is
+// the only time value a consumer needs; it is omitted from no projection because
+// a wait without a deadline is not a wait this projection describes.
+type QuotaWaitSummary struct {
+	SessionID string    `json:"session_id"`
+	Reason    string    `json:"reason"`
+	Deadline  time.Time `json:"deadline"`
 }
 
 // CompletionGateSummary keeps task-list transport bounded while exposing the
@@ -222,6 +241,9 @@ func (s TaskStatusSummary) Validate() error {
 	if err := validateUnreadSessionIDs(s.UnreadSessionIDs); err != nil {
 		return err
 	}
+	if err := validateQuotaWait(s.QuotaWait); err != nil {
+		return err
+	}
 	return validateCompletionGate(s.CompletionGate)
 }
 
@@ -260,6 +282,25 @@ func validateUnreadSessionIDs(ids []string) error {
 		if i > 0 && ids[i-1] >= id {
 			return fmt.Errorf("unread session ids must be sorted and unique")
 		}
+	}
+	return nil
+}
+
+func validateQuotaWait(wait *QuotaWaitSummary) error {
+	if wait == nil {
+		return nil
+	}
+	if err := validateUTF8Bytes("quota wait session id", wait.SessionID, maxSessionIDBytes); err != nil {
+		return err
+	}
+	if err := validateUTF8Bytes("quota wait reason", wait.Reason, maxLaunchQueueReasonBytes); err != nil {
+		return err
+	}
+	if wait.Reason != QuotaWaitReasonQuotaLimited {
+		return fmt.Errorf("quota wait has unknown reason")
+	}
+	if wait.Deadline.IsZero() {
+		return fmt.Errorf("quota wait deadline is required")
 	}
 	return nil
 }
@@ -453,6 +494,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 		LaunchQueue:         s.LaunchQueue,
 		CompletionGate:      s.CompletionGate,
 		UnreadSessionIDs:    s.UnreadSessionIDs,
+		QuotaWait:           s.QuotaWait,
 	})
 }
 
@@ -472,6 +514,7 @@ type semanticPayload struct {
 	LaunchQueue         *LaunchQueueSummary    `json:"launch_queue,omitempty"`
 	CompletionGate      *CompletionGateSummary `json:"completion_gate,omitempty"`
 	UnreadSessionIDs    []string               `json:"unread_session_ids,omitempty"`
+	QuotaWait           *QuotaWaitSummary      `json:"quota_wait,omitempty"`
 }
 
 // TurnErrorSummaryFromMetadata projects the current task turn-error attention.
