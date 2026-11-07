@@ -20,8 +20,8 @@ type inferenceClosureRuntime interface {
 
 var errRestartInferenceClaimsChanged = errors.New("restart inference claims changed")
 
-// StopForRestart uses closure only for configured shared inference, while an
-// interrupted closure is always resumed even if configuration has changed.
+// StopForRestart preserves the existing owner scope even if capacity settings
+// changed, and resumes an interrupted closure before considering a new one.
 func (s *Service) StopForRestart(ctx context.Context, sid, reason string) (*models.InferenceClosureCheckpoint, bool, error) {
 	if err := s.authorizeSessionControl(ctx, sid); err != nil {
 		return nil, true, err
@@ -31,7 +31,7 @@ func (s *Service) StopForRestart(ctx context.Context, sid, reason string) (*mode
 	if err != nil {
 		return nil, true, err
 	}
-	result, handled, err := s.stopInferenceClosureForRestart(ctx, sid, all && finite || retained)
+	result, handled, err := s.stopInferenceClosureForRestart(ctx, sid, all && finite || retained || s.hasInferenceClosureComposition())
 	if err != nil || handled {
 		return result, handled, err
 	}
@@ -40,6 +40,20 @@ func (s *Service) StopForRestart(ctx context.Context, sid, reason string) (*mode
 		return s.stopInferenceClosureForRestart(ctx, sid, true)
 	}
 	return result, handled, err
+}
+
+func (s *Service) hasInferenceClosureComposition() bool {
+	if s == nil || s.sessionCeiling == nil {
+		return false
+	}
+	_, hasStore := s.repo.(inferenceClosureStore)
+	_, hasProbe := s.agentManager.(interface {
+		ProbeInferenceClosure(context.Context, string, string) error
+	})
+	s.sessionCeiling.mu.Lock()
+	hasCapacityStore := s.sessionCeiling.inferenceStore != nil
+	s.sessionCeiling.mu.Unlock()
+	return hasStore && hasProbe && hasCapacityStore
 }
 
 // stopLegacyRestartWithFence serializes the final claim check with admission.
@@ -178,6 +192,9 @@ func (s *Service) startInferenceClosureForRestart(ctx context.Context, sid strin
 		return s.legacyInferenceRestart(ctx, sid)
 	}
 	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sid)
+	if errors.Is(err, agentruntime.ErrNoExecutionForSession) {
+		return s.legacyInferenceRestart(ctx, sid)
+	}
 	if err != nil || executionID == "" {
 		return nil, true, models.ErrInferenceClosureBlocked
 	}
