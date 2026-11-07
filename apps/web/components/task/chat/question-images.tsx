@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
-import { useAppStore } from "@/components/state-provider";
-import { getBackendConfig } from "@/lib/config";
 import type { QuestionImage } from "@/lib/types/http";
-import { useQuestionImages } from "@/hooks/domains/session/use-question-images";
+import {
+  useQuestionImageOwner,
+  useQuestionImages,
+} from "@/hooks/domains/session/use-question-images";
 import { QuestionImageViewer } from "./question-image-viewer";
 
 type Props = {
@@ -19,7 +20,7 @@ type Props = {
   onInspectionChange?: (open: boolean) => void;
 };
 
-function imageErrorKey(code: string) {
+export function imageErrorKey(code: string) {
   switch (code) {
     case "not_found":
       return "task:questionImageNotFound";
@@ -42,15 +43,8 @@ export function QuestionImages(props: Props) {
 
 function QuestionImagesContent(props: Props) {
   const { t } = useTranslation();
-  const auth = useAppStore((state) => state.auth);
+  const { owner, authenticated } = useQuestionImageOwner(props.sessionId);
   const [expanded, setExpanded] = useState(false);
-  const owner = JSON.stringify([
-    getBackendConfig().apiBaseUrl,
-    props.sessionId,
-    auth.mode,
-    auth.authenticated,
-    auth.user?.id,
-  ]);
   const images = Array.isArray(props.images)
     ? props.images
         .filter((image) => image && typeof image.id === "string" && typeof image.alt === "string")
@@ -59,7 +53,7 @@ function QuestionImagesContent(props: Props) {
   const active =
     props.enabled !== false &&
     (!props.historical || expanded) &&
-    auth.authenticated &&
+    authenticated &&
     Boolean(props.sessionId);
   const { states, retry } = useQuestionImages(
     props.pendingId,

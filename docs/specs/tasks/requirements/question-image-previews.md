@@ -40,8 +40,10 @@ not yet describe a released version.
 #### Acceptance criteria
 
 - **AC-TASKS-QUESTION-IMAGES-001.1:** An agent shall be able to attach zero to four
-  image references to each question. A bundle shall contain at most four distinct
-  image IDs. Several questions can reference the same image with identical metadata.
+  image references to each question. A bundle shall contain at most 16 distinct
+  image IDs, as raised by
+  [AC-TASKS-QUESTION-IMAGE-REVIEW-006.1](question-image-review.md). Several
+  questions can reference the same image with identical metadata.
 - **AC-TASKS-QUESTION-IMAGES-001.2:** Each image shall appear above its associated
   prompt and choices. Multiple questions about one image shall remain independent
   questions, each with its own options and permitted text.
@@ -139,8 +141,8 @@ not yet describe a released version.
 
 - **AC-TASKS-QUESTION-IMAGES-005.1:** An operator question shall accept zero or one
   image reference per choice. Question and choice images can coexist. Each question
-  shall contain at most four references in total. The bundle limit remains four
-  distinct image IDs. Repeated IDs shall have identical metadata across placements.
+  shall contain at most four references in total. The bundle limit is 16 distinct
+  image IDs. Repeated IDs shall have identical metadata across placements.
 - **AC-TASKS-QUESTION-IMAGES-005.2:** Each preview shall remain visibly associated
   with its choice label. The selection action and inspection action shall be separate
   accessible controls. Clicking, tapping, or keyboard-activating inspection shall not
@@ -163,9 +165,10 @@ not yet describe a released version.
 
 ## Out of scope
 
-Multiple images on one choice, image uploads in answers, annotations, image editing,
-HTML/SVG rendering, external image URLs, image archives, interactive rich-output
-forms, and larger question bundles are excluded. PNG and JPEG cover the screenshot
+Multiple images on one choice, image uploads in answers, image editing,
+HTML/SVG rendering, external image URLs, image archives, and interactive rich-output
+forms are excluded. The large review view, comparison, region annotations, and the
+16-image bundle limit belong to [question image review](question-image-review.md). PNG and JPEG cover the screenshot
 workflow. Additional formats require a later scoped extension.
 
 This feature does not redesign the answer envelope or independently fix

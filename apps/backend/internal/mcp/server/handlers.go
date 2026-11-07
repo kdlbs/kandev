@@ -1159,6 +1159,9 @@ func simplifyAnswer(ans map[string]interface{}, rejected bool) map[string]interf
 	if attachments, ok := ans["attachments"].([]interface{}); ok && len(attachments) > 0 {
 		out["attachments"] = attachments
 	}
+	if annotations, ok := ans["annotations"].([]interface{}); ok && len(annotations) > 0 {
+		out["annotations"] = annotations
+	}
 	if rejected && len(out) == 0 {
 		return map[string]interface{}{answeredFieldKey: false, rejectedFieldKey: true}
 	}

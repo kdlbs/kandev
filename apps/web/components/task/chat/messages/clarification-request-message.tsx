@@ -15,6 +15,7 @@ import { ClarificationChoiceImages } from "../clarification-choice-images";
 import { ClarificationMarkdown } from "../clarification-markdown";
 import { ClarificationInputOverlay } from "../clarification-input-overlay";
 import { ClarificationAttachmentSummary } from "../clarification-answer-attachments";
+import { AnswerRegionSummary } from "../question-review/answer-region-summary";
 import type {
   LateClarificationSnapshot,
   LateClarificationState,
@@ -160,6 +161,10 @@ export function ClarificationRequestMessage({
                 <AnswerSummary question={question} response={metadata.response} />
                 <ClarificationAttachmentSummary
                   attachments={metadata.response?.attachments ?? []}
+                />
+                <AnswerRegionSummary
+                  question={question}
+                  annotations={metadata.response?.annotations}
                 />
               </span>
               {metadata.agent_disconnected && (

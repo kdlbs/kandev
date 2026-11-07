@@ -61,6 +61,15 @@ func (images *QuestionImages) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MaxBundleImages bounds the distinct image IDs in one question bundle.
+const MaxBundleImages = 16
+
+// MaxQuestionImageReferences bounds image placements across one question and its choices.
+const MaxQuestionImageReferences = 4
+
+// MaxChoiceImages bounds image placements on one choice.
+const MaxChoiceImages = 1
+
 var imageIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 var imageSchemePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*:`)
 
@@ -100,13 +109,13 @@ func (image QuestionImage) Validate() error {
 func ValidateQuestionImages(questions []Question) error {
 	shared := map[string]QuestionImage{}
 	for _, q := range questions {
-		if len(q.ImageReferences()) > 4 {
-			return fmt.Errorf("each question supports at most 4 image references across the question and choices")
+		if len(q.ImageReferences()) > MaxQuestionImageReferences {
+			return fmt.Errorf("each question supports at most %d image references across the question and choices", MaxQuestionImageReferences)
 		}
 		groups := []QuestionImages{q.Images}
 		for _, option := range q.Options {
-			if len(option.Images) > 1 {
-				return fmt.Errorf("each choice supports at most 1 image")
+			if len(option.Images) > MaxChoiceImages {
+				return fmt.Errorf("each choice supports at most %d image", MaxChoiceImages)
 			}
 			groups = append(groups, option.Images)
 		}
@@ -116,8 +125,8 @@ func ValidateQuestionImages(questions []Question) error {
 			}
 		}
 	}
-	if len(shared) > 4 {
-		return fmt.Errorf("a question bundle supports at most 4 distinct images")
+	if len(shared) > MaxBundleImages {
+		return fmt.Errorf("a question bundle supports at most %d distinct images", MaxBundleImages)
 	}
 	return nil
 }

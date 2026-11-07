@@ -1,4 +1,4 @@
-import type { ClarificationAnswer } from "@/lib/types/http";
+import type { ClarificationAnswer, ClarificationAnswerAnnotation } from "@/lib/types/http";
 
 /**
  * Browser-memory retention for unsubmitted clarification answers.
@@ -15,6 +15,8 @@ export type RetainedAnswerDraft = {
   customDrafts: Record<string, string>;
   activeIndex: number;
   answers: readonly ClarificationAnswer[];
+  /** Image regions drawn in the review view, keyed by question ID. */
+  annotations?: Record<string, readonly ClarificationAnswerAnnotation[]>;
 };
 
 type DraftCache = {
