@@ -13,6 +13,10 @@ import (
 // model's request scope, never the account-wide daily allowance.
 const limitDimensionModelDaily = "model_daily"
 
+// Older observations identify only a profile, not an overridden model. Keep
+// those observations out of profile-default same-minute grouping.
+const limitDimensionOverrideModelDaily = "model_daily_override"
+
 // readScopeUsage counts each scope's requests since its daily reset over the
 // tier's account profiles whose model the scope covers.
 func (s *providerTierLimitService) readScopeUsage(ctx context.Context, c tierLimitContext, now time.Time, used *agentusage.LimitUsage) error {
@@ -97,6 +101,19 @@ func (s *providerTierLimitService) learnModelScope(ctx context.Context, c tierLi
 }
 
 func (s *providerTierLimitService) scopeToLearn(ctx context.Context, c tierLimitContext, models map[string]string, used agentusage.LimitUsage, at time.Time) (agentusage.RequestScope, float64, error) {
+	if c.modelOverride {
+		scope, ok := agentusage.CoveringScope(c.effective.Scopes, c.profile.Model)
+		if !ok {
+			model := agentusage.ScopeModelID(c.profile.Model)
+			scope = agentusage.RequestScope{ID: agentusage.ModelScopeID(model), Kind: agentusage.ScopeKindModel, Models: []string{model}}
+		}
+		start, _, err := agentusage.DailyLimitWindow(at, scope.DailyReset)
+		if err != nil {
+			return scope, 0, err
+		}
+		counted, err := s.readModelRequestCount(ctx, c.ids, scope.Models, start, at)
+		return scope, counted, err
+	}
 	if group, ok := s.sameMinuteGroup(ctx, c, models, at); ok {
 		counted, err := s.countScope(ctx, models, group, at)
 		return group, counted, err

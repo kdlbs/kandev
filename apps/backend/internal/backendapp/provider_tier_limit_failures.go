@@ -132,13 +132,11 @@ func (s *providerTierLimitService) enrichObservation(ctx context.Context, candid
 		return err
 	}
 	dimension := classifyLimitDimension(candidate, failure, c.observed)
-	if c.modelOverride && dimension == limitDimensionModelDaily {
-		// The scope learner groups requests by configured profile model; that
-		// cannot attribute a session override without mixing model histories.
-		return fmt.Errorf("overridden model daily allowance learning is unavailable")
-	}
 	observation.Tier = string(c.tier)
 	observation.Dimension = dimension
+	if c.modelOverride && dimension == limitDimensionModelDaily {
+		observation.Dimension = limitDimensionOverrideModelDaily
+	}
 	observation.RequestsMinute = used.RequestsMinute
 	observation.RequestsDay = used.RequestsDay
 	observation.ActiveTurns = used.ActiveTurns
