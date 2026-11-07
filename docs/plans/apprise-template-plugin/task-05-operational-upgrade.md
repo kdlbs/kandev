@@ -199,3 +199,27 @@ Private receipts and screenshots remain with the operator's recovery set and
 are not public PR attachments. Public SDK publication, upstream merge, and the
 broader matrix limitations recorded in Task 04 remain separate from this
 successful operational deployment. No destructive legacy cleanup was performed.
+
+### Review follow-up deployment
+
+The PR #5141 fixes in `21a19ace7ca288962ad049aa7684d9893203ab61` were backported
+onto the same stable base as `c846cf1027dc5e4ff08aee2281a8ef4d0421e418` and
+deployed as private build `v0.99.1+notification-formatter.2`. Host SHA-256:
+`197887ef12698a72ad0fa22a59d88d60972b6eaa10ed462473c7f241151e8c3d`.
+The installed plugin archive and active configuration revision were retained.
+
+A fresh pre-transition capture, rather than the earlier rollout snapshot, was
+used as the preservation baseline. Task/session IDs remained at 1,327 each;
+three providers, 11 subscriptions, two legacy overrides, one active binding,
+and all 11 active plugins were preserved. The newer subscription and session
+state changes were not reverted to the earlier rollout's values. Both private
+recovery sets validated eight files and their installation/binding references;
+post-transition manifest SHA-256:
+`7e347b7a5ec5ccf11b8cd95a66eec916618dd7c34a9d8e8fed49238168e3f783`.
+
+The exact candidate passed packaged desktop/phone checks, synthetic migration
+and recovery, and formatter-focused stable race tests before replacement. The
+upgraded instance then passed six non-sending previews, exact active-binding
+and configuration-digest readback, desktop/Pixel 5 saved-template checks, and
+external health verification. No reimport, template activation, subscription
+write, or artificial real-recipient send was required for this patch update.
