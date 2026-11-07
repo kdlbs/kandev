@@ -3,7 +3,6 @@ package usage
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math"
 	"net/http"
 	"strings"
@@ -32,13 +31,16 @@ func (c *claudeExecutionUsageClient) token(ctx context.Context) (string, string,
 	}
 	creds, err := c.base.readCredentials()
 	if err != nil {
-		return "", "", err
+		return "", "", accountFailure("credentials_read", 0, err)
 	}
 	if creds.ClaudeAiOauth == nil || creds.ClaudeAiOauth.AccessToken == "" {
-		return "", "", fmt.Errorf("execution subscription account is unavailable")
+		return "", "", accountFailure("credentials_missing_oauth", 0, nil)
 	}
 	token, err := c.base.freshAccessToken(ctx, creds.ClaudeAiOauth)
-	return token, creds.ClaudeAiOauth.SubscriptionType, err
+	if err != nil {
+		return "", "", accountFailure("token_refresh", 0, err)
+	}
+	return token, creds.ClaudeAiOauth.SubscriptionType, nil
 }
 
 func (c *claudeExecutionUsageClient) resolveIdentity(ctx context.Context, token string) (executionAccount, error) {
@@ -49,18 +51,18 @@ func (c *claudeExecutionUsageClient) resolveIdentity(ctx context.Context, token 
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.profileURL, nil)
 	if err != nil {
-		return executionAccount{}, err
+		return executionAccount{}, accountFailure("profile_request", 0, err)
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Cache-Control", "no-cache")
 	response, err := c.base.httpClient.Do(request)
 	if err != nil {
-		return executionAccount{}, err
+		return executionAccount{}, accountFailure("profile_transport", 0, err)
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
-		return executionAccount{}, fmt.Errorf("execution account profile returned status %d", response.StatusCode)
+		return executionAccount{}, accountFailure("profile_http", response.StatusCode, nil)
 	}
 	var profile struct {
 		Account struct {
@@ -71,10 +73,10 @@ func (c *claudeExecutionUsageClient) resolveIdentity(ctx context.Context, token 
 		} `json:"organization"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&profile); err != nil {
-		return executionAccount{}, err
+		return executionAccount{}, accountFailure("profile_decode", 0, err)
 	}
 	if profile.Account.UUID == "" || profile.Organization.UUID == "" {
-		return executionAccount{}, fmt.Errorf("execution account profile identity is incomplete")
+		return executionAccount{}, accountFailure("profile_identity", 0, nil)
 	}
 	c.identity = executionAccount{account: profile.Account.UUID, organization: profile.Organization.UUID}
 	c.identityToken, c.identityAt = token, time.Now()

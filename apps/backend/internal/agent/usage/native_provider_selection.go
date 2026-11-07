@@ -168,10 +168,36 @@ func claudeUsageConfigKnown(fields map[string]any) bool {
 	}
 	if env, ok := fields["env"].(map[string]any); ok {
 		for key, value := range env {
-			if usageEnvironmentKey(key) && value != "" {
+			if usageEnvironmentKey(key) && !claudeExecutionControlKey(key) && value != "" {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+// These execution limits do not select a provider, credential source or account.
+// Unrecognized Claude settings still require a proven subscription source.
+func claudeExecutionControlKey(key string) bool {
+	switch usageEnvironmentName(key) {
+	case "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH", "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS":
+		return true
+	default:
+		return false
+	}
+}
+
+// NativeProviderSelectionReason separates unsupported collection from an
+// ambiguous supported provider. Neither result asserts a quota or account.
+func NativeProviderSelectionReason(input ExecutionUsageInput) string {
+	if !localUsageExecution(input.ExecutorType) {
+		return "unsupported_executor"
+	}
+	if input.AgentID != executionAgentCodex && input.AgentID != executionAgentClaude {
+		return "unsupported_agent"
+	}
+	if !NativeProviderSelectionKnown(input) {
+		return executionSelectionUnknown
+	}
+	return ""
 }
