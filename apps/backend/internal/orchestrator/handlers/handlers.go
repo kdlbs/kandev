@@ -746,6 +746,7 @@ func (h *Handlers) wsGetTaskSessionStatus(ctx context.Context, msg *ws.Message) 
 
 type wsSessionActionRequest struct {
 	InferenceClosureOperationID string `json:"inference_closure_operation_id,omitempty"`
+	CloseInferenceForRestart    bool   `json:"close_inference_for_restart,omitempty"`
 	AwaitTerminal               bool   `json:"await_terminal,omitempty"`
 	ExpectedExecutionID         string `json:"expected_execution_id,omitempty"`
 	SessionID                   string `json:"session_id"`
@@ -776,6 +777,18 @@ func (h *Handlers) wsStopSession(ctx context.Context, msg *ws.Message) (*ws.Mess
 	reason := req.Reason
 	if reason == "" {
 		reason = "stopped via API"
+	}
+	if req.CloseInferenceForRestart {
+		if req.Force || req.AwaitTerminal || req.InferenceClosureOperationID != "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid restart stop options", nil)
+		}
+		result, handled, err := h.service.StopForRestart(ctx, req.SessionID)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), map[string]any{"closure": result.PublicStatus()})
+		}
+		if handled {
+			return ws.NewResponse(msg.ID, msg.Action, result.PublicStatus())
+		}
 	}
 	if req.InferenceClosureOperationID != "" {
 		if req.Force || !req.AwaitTerminal || req.ExpectedExecutionID == "" {

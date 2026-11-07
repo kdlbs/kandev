@@ -17,8 +17,11 @@ type inferenceClosureSettler interface {
 
 func (m *Manager) closureClient(sid, executionID string) (*agentctl.Client, func(), error) {
 	execution, ok := m.executionStore.Get(executionID)
-	if !ok || execution.SessionID != sid || execution.ExecutorType != closureStandaloneExecutor {
+	if !ok || execution.SessionID != sid {
 		return nil, nil, utility.ErrInferenceClosureIncomplete
+	}
+	if execution.ExecutorType != closureStandaloneExecutor {
+		return nil, nil, agentctl.ErrInferenceOwnershipUnsupported
 	}
 	for _, other := range m.ListExecutions() {
 		if other.SessionID == sid && other.ID != executionID {

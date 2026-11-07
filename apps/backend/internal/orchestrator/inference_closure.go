@@ -2,8 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/google/uuid"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/task/models"
@@ -14,6 +16,62 @@ type inferenceClosureRuntime interface {
 	CaptureInferenceClosureClaims(context.Context, string, string) (json.RawMessage, error)
 	SettleInferenceClosure(context.Context, string, string, *utility.InferenceClosureResponse, json.RawMessage) error
 	VerifyInferenceClosureClaims(context.Context, string, string) error
+}
+
+// StopForRestart uses closure only for configured shared inference, while an
+// interrupted closure is always resumed even if configuration has changed.
+func (s *Service) StopForRestart(ctx context.Context, sid string) (*models.InferenceClosureCheckpoint, bool, error) {
+	all, finite := s.InferenceCapacityPolicy()
+	return s.stopInferenceClosureForRestart(ctx, sid, all && finite)
+}
+
+func (s *Service) stopInferenceClosureForRestart(ctx context.Context, sid string, enabled bool) (*models.InferenceClosureCheckpoint, bool, error) {
+	if err := s.authorizeSessionControl(ctx, sid); err != nil {
+		return nil, true, err
+	}
+	store, ok := s.repo.(inferenceClosureStore)
+	if !ok {
+		return nil, false, nil
+	}
+	raw, err := store.ReadInferenceClosure(ctx, sid)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, true, err
+	}
+	if err == nil {
+		var prior models.InferenceClosureCheckpoint
+		if json.Unmarshal(raw, &prior) != nil || !prior.Valid() || prior.SessionID != sid {
+			return nil, true, models.ErrInferenceClosureBlocked
+		}
+		if prior.Stage != models.InferenceClosureConsumed {
+			result, stopErr := s.StopSessionForInferenceClosure(ctx, sid, prior.SourceExecutionID, prior.OperationID)
+			return result, true, stopErr
+		}
+	}
+	if !enabled {
+		return nil, false, nil
+	}
+	return s.startInferenceClosureForRestart(ctx, sid)
+}
+
+func (s *Service) startInferenceClosureForRestart(ctx context.Context, sid string) (*models.InferenceClosureCheckpoint, bool, error) {
+	prober, ok := s.agentManager.(interface {
+		ProbeInferenceClosure(context.Context, string, string) error
+	})
+	if !ok {
+		return nil, false, nil
+	}
+	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sid)
+	if err != nil || executionID == "" {
+		return nil, true, models.ErrInferenceClosureBlocked
+	}
+	if err = prober.ProbeInferenceClosure(ctx, sid, executionID); err != nil {
+		if errors.Is(err, agentruntime.ErrInferenceOwnershipUnsupported) {
+			return nil, false, nil
+		}
+		return nil, true, err
+	}
+	result, err := s.StopSessionForInferenceClosure(ctx, sid, executionID, uuid.NewString())
+	return result, true, err
 }
 
 // StopSessionForInferenceClosure holds admission across separate durable stores.

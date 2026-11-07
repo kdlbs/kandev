@@ -60,19 +60,26 @@ func (s *Service) legacyWithoutClosureState(ctx context.Context, sessionID, sour
 	if needsConfirmation && (session == nil || !session.InferenceClosureAbsenceConfirmed) {
 		return models.ErrInferenceClosureBlocked
 	}
-	if session != nil && session.Metadata != nil {
-		if value, present := session.Metadata[models.InferenceClosureMetadataKey]; present {
-			if !session.InferenceClosureAbsenceConfirmed {
-				return models.ErrInferenceClosureBlocked
-			}
-			raw, err := json.Marshal(value)
-			var checkpoint models.InferenceClosureCheckpoint
-			if err != nil || json.Unmarshal(raw, &checkpoint) != nil || !checkpoint.ReadyForSuccessor() ||
-				checkpoint.SessionID != sessionID || checkpoint.Stage != models.InferenceClosureConsumed ||
-				(sourceInstanceID != "" && sourceInstanceID == checkpoint.SourceExecutionID) {
-				return models.ErrInferenceClosureBlocked
-			}
-		}
+	return checkLegacyClosureMetadata(session, sessionID, sourceInstanceID)
+}
+
+func checkLegacyClosureMetadata(session *models.TaskSession, sessionID, sourceInstanceID string) error {
+	if session == nil || session.Metadata == nil {
+		return nil
+	}
+	value, present := session.Metadata[models.InferenceClosureMetadataKey]
+	if !present {
+		return nil
+	}
+	if !session.InferenceClosureAbsenceConfirmed {
+		return models.ErrInferenceClosureBlocked
+	}
+	raw, err := json.Marshal(value)
+	var checkpoint models.InferenceClosureCheckpoint
+	if err != nil || json.Unmarshal(raw, &checkpoint) != nil || !checkpoint.ReadyForSuccessor() ||
+		checkpoint.SessionID != sessionID || checkpoint.Stage != models.InferenceClosureConsumed ||
+		(sourceInstanceID != "" && sourceInstanceID == checkpoint.SourceExecutionID) {
+		return models.ErrInferenceClosureBlocked
 	}
 	return nil
 }
@@ -109,12 +116,16 @@ func (s *Service) checkInferenceClosureAdmission(ctx context.Context, sessionID 
 		return err
 	}
 	var saved models.InferenceClosureCheckpoint
-	if json.Unmarshal(raw, &saved) != nil || !saved.ReadyForSuccessor() || saved.Stage != models.InferenceClosureCommitted || saved.OperationID != permit.OperationID ||
-		saved.SessionID != permit.SessionID || saved.SourceExecutionID != permit.SourceExecutionID ||
-		saved.CandidateExecutionID != permit.CandidateExecutionID || saved.IncarnationID != permit.IncarnationID {
+	if json.Unmarshal(raw, &saved) != nil || !matchesInferenceClosurePermit(&saved, permit) {
 		return models.ErrInferenceClosureBlocked
 	}
 	return nil
+}
+
+func matchesInferenceClosurePermit(saved, permit *models.InferenceClosureCheckpoint) bool {
+	return saved.ReadyForSuccessor() && saved.Stage == models.InferenceClosureCommitted && saved.OperationID == permit.OperationID &&
+		saved.SessionID == permit.SessionID && saved.SourceExecutionID == permit.SourceExecutionID &&
+		saved.CandidateExecutionID == permit.CandidateExecutionID && saved.IncarnationID == permit.IncarnationID
 }
 
 func (s *Service) inferenceClosureResumeOptions(ctx context.Context, sessionID string, options executor.ResumeOptions) executor.ResumeOptions {
