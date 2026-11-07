@@ -234,6 +234,15 @@ func clarificationBundleScopedTableExpr(drv, joinExtra, whereExtra string, earli
 	notParentQuestion := dialect.ExcludeTruthyMetadataPredicate(drv, "m.metadata", "parent_question")
 	nonTerminalSession := nonTerminalSessionPredicate("m")
 	turnScope, hasPending := clarificationBundleTurnScope(drv, statusExpr, earlierTurns)
+	closedSelection := ""
+	if earlierTurns {
+		// Unanswered close/merge writes preserve status. Filter the whole bundle
+		// here, before pagination, without changing the active claim scope.
+		closedSelection = fmt.Sprintf(",\n\t\t\t\tMAX(CASE WHEN COALESCE(%s, '') <> '' OR COALESCE(%s, '') <> '' THEN 1 ELSE 0 END) AS is_closed",
+			dialect.JSONExtract(drv, "m.metadata", models.ClarificationMetaClosedReason),
+			dialect.JSONExtract(drv, "m.metadata", models.ClarificationMetaMergedInto))
+		whereExtra = "AND b.is_closed = 0 " + whereExtra
+	}
 	return fmt.Sprintf(`
 		FROM (
 			SELECT
@@ -242,7 +251,7 @@ func clarificationBundleScopedTableExpr(drv, joinExtra, whereExtra string, earli
 				COALESCE(NULLIF(MIN(m.task_id), ''), MIN(ts.task_id)) AS task_id,
 				MIN(m.created_at) AS created_at,
 				MAX(CASE WHEN %[2]s THEN 1 ELSE 0 END) AS has_pending,
-				MAX(CASE WHEN %[7]s = '' THEN 1 ELSE 0 END) AS has_missing_question_id
+				MAX(CASE WHEN %[7]s = '' THEN 1 ELSE 0 END) AS has_missing_question_id%[9]s
 			FROM task_session_messages m
 			JOIN task_sessions ts ON ts.id = m.task_session_id
 			WHERE m.type = 'clarification_request'
@@ -256,7 +265,7 @@ func clarificationBundleScopedTableExpr(drv, joinExtra, whereExtra string, earli
 		WHERE b.has_pending = 1
 		  AND b.has_missing_question_id = 0
 		  %[3]s
-	`, pendingIDExpr, hasPending, whereExtra, notParentQuestion, nonTerminalSession, turnScope, questionIDExpr, joinExtra)
+	`, pendingIDExpr, hasPending, whereExtra, notParentQuestion, nonTerminalSession, turnScope, questionIDExpr, joinExtra, closedSelection)
 }
 
 // scanClarificationBundleRows scans the bundle rows. The created_at column
