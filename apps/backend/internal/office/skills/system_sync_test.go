@@ -233,8 +233,6 @@ func TestBundledTaskCreateSkillContract(t *testing.T) {
 	for slug, content := range contents {
 		for _, flag := range []string{
 			"--priority",
-			"--blocked-by",
-			"--workspace-mode",
 			"--workspace-group-id",
 			"--default-child-workspace",
 			"--default-child-ordering",
@@ -248,7 +246,10 @@ func TestBundledTaskCreateSkillContract(t *testing.T) {
 	expectedFlags := map[string][]string{
 		"kandev-escalation": {"--title", "--description"},
 		"kandev-projects":   {"--title", "--project", "--assignee"},
-		"kandev-protocol":   {"--title", "--description", "--parent", "--assignee", "--project"},
+		"kandev-protocol": {
+			"--title", "--description", "--parent", "--assignee", "--project",
+			"--blocked-by", "--workspace-mode",
+		},
 	}
 	for slug, flags := range expectedFlags {
 		content, ok := contents[slug]
@@ -322,12 +323,10 @@ func TestBundledSkillCLIExamplesAvoidKnownUnsupportedOperations(t *testing.T) {
 		"author_id",
 		"author_type",
 		"--add-blocker",
-		"--blocked-by",
 		"--default-child-ordering",
 		"--default-child-workspace",
 		"--priority",
 		"--workspace-group-id",
-		"--workspace-mode",
 		"$KANDEV_CLI kandev task message",
 		"$KANDEV_CLI kandev comment add",
 		"$KANDEV_CLI kandev tasks create",

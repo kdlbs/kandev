@@ -196,7 +196,7 @@ Agents call the `kandev` command group on the agentctl binary instead of raw cur
 # Task operations (singular)
 agentctl kandev task get    [--id ID]
 agentctl kandev task update [--id ID] [--status STATUS] [--comment BODY]
-agentctl kandev task create --title TITLE [--description TEXT] [--parent ID] [--assignee AGENT_ID] [--project PROJECT_ID]
+agentctl kandev task create --title TITLE [--description TEXT] [--parent ID] [--assignee AGENT_ID] [--project PROJECT_ID] [--blocked-by ID,ID] [--workspace-mode inherit_parent|new_workspace]
 
 # Task operations (plural)
 agentctl kandev tasks list         [--status S] [--assignee ID] [--project ID]

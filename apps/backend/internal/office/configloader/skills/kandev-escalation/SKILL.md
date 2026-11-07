@@ -53,8 +53,8 @@ $KANDEV_CLI kandev tasks message --id "$KANDEV_TASK_ID" \
   --prompt "Escalated to human task $HUMAN_TASK_ID. Waiting for decision on: <question>"
 ```
 
-The Office CLI does not currently expose a secure operation for adding a blocker
-relationship. The human task description links back to the blocked task, and the
+The Office CLI can declare blockers only on a task it is creating, so it cannot
+make your existing task wait for the human task. The human task description links back to the blocked task, and the
 comment above links the blocked task to the human task. Do not comment on the new
 human task: a run may only message tasks granted by its signed runtime scope.
 These references do not create a task dependency.
