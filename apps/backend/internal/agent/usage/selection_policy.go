@@ -25,7 +25,7 @@ func SelectionPolicyForReport(profileID, model string, report *ExecutionUsageRep
 // Each actual attempt replaces the request-local selected projection. An
 // unknown successor must not inherit a previous candidate's proved account.
 func WithSelectedUsagePolicy(ctx context.Context, policy *ExecutionUsagePolicy) context.Context {
-	state := &candidateUsageContext{selected: make(map[string]ExecutionUsagePolicy)}
+	state := &candidateUsageContext{dispatched: true, selected: make(map[string]ExecutionUsagePolicy)}
 	if policy != nil {
 		state.selected[policy.ProfileID] = *policy
 	}
