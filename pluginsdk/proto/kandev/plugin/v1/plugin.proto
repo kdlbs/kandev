@@ -1466,6 +1466,7 @@ message VerifiedActionContext {
   string head_branch = 6;
   // Host-authorized provider identity; never taken from the action body.
   string notification_provider_id = 7;
+  string notification_formatter_key = 8;
 }
 message PluginActionResponse {
   bytes body = 1;

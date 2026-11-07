@@ -150,3 +150,44 @@ it("does not publish an old activation acknowledgement over a newer clear", asyn
   expect(result.current.settings?.binding?.revision).toBe("cleared");
   expect(result.current.selected).toBe("");
 });
+
+it.each([false, true])(
+  "rejects a removed editor callback before dispatch (reselected=%s)",
+  async (reselected) => {
+    const { result } = renderHook(() => useNotificationFormatter("mail"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const abandonedActivate = result.current.activate;
+    api.select.mockResolvedValue({ binding });
+    act(() => result.current.select(""));
+    if (reselected) {
+      act(() => result.current.select(JSON.stringify(["formatter", "installation", "text"])));
+    }
+    await act(async () => {
+      await expect(
+        abandonedActivate({ revision: "prepared", digest: "digest" }, "original"),
+      ).rejects.toMatchObject({ name: "AbortError" });
+    });
+    expect(api.select).not.toHaveBeenCalled();
+  },
+);
+
+it("retains a current editor callback across authoritative readback", async () => {
+  const { result } = renderHook(() => useNotificationFormatter("mail"));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  const activate = result.current.activate;
+  api.get.mockResolvedValueOnce({
+    ...settings,
+    formatters: settings.formatters.map((choice) => ({ ...choice })),
+  });
+  await act(async () => {
+    await result.current.readActiveBinding();
+  });
+  const active = { ...binding, revision: "next" };
+  api.select.mockResolvedValueOnce({ binding: active });
+  await act(async () => {
+    await expect(activate({ revision: "snapshot", digest: "digest" }, "original")).resolves.toEqual(
+      active,
+    );
+  });
+  expect(api.select).toHaveBeenCalledOnce();
+});

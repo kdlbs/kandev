@@ -11121,9 +11121,10 @@ type VerifiedActionContext struct {
 	SessionId    string                 `protobuf:"bytes,5,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	HeadBranch   string                 `protobuf:"bytes,6,opt,name=head_branch,json=headBranch,proto3" json:"head_branch,omitempty"`
 	// Host-authorized provider identity; never taken from the action body.
-	NotificationProviderId string `protobuf:"bytes,7,opt,name=notification_provider_id,json=notificationProviderId,proto3" json:"notification_provider_id,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	NotificationProviderId   string `protobuf:"bytes,7,opt,name=notification_provider_id,json=notificationProviderId,proto3" json:"notification_provider_id,omitempty"`
+	NotificationFormatterKey string `protobuf:"bytes,8,opt,name=notification_formatter_key,json=notificationFormatterKey,proto3" json:"notification_formatter_key,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *VerifiedActionContext) Reset() {
@@ -11201,6 +11202,13 @@ func (x *VerifiedActionContext) GetHeadBranch() string {
 func (x *VerifiedActionContext) GetNotificationProviderId() string {
 	if x != nil {
 		return x.NotificationProviderId
+	}
+	return ""
+}
+
+func (x *VerifiedActionContext) GetNotificationFormatterKey() string {
+	if x != nil {
+		return x.NotificationFormatterKey
 	}
 	return ""
 }
@@ -26467,7 +26475,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\n" +
 	"action_key\x18\x01 \x01(\tR\tactionKey\x12A\n" +
 	"\acontext\x18\x02 \x01(\v2'.kandev.plugin.v1.VerifiedActionContextR\acontext\x12\x12\n" +
-	"\x04body\x18\x03 \x01(\fR\x04body\"\x8d\x02\n" +
+	"\x04body\x18\x03 \x01(\fR\x04body\"\xcb\x02\n" +
 	"\x15VerifiedActionContext\x12\x19\n" +
 	"\bactor_id\x18\x01 \x01(\tR\aactorId\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
@@ -26477,7 +26485,8 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"session_id\x18\x05 \x01(\tR\tsessionId\x12\x1f\n" +
 	"\vhead_branch\x18\x06 \x01(\tR\n" +
 	"headBranch\x128\n" +
-	"\x18notification_provider_id\x18\a \x01(\tR\x16notificationProviderId\"\xcd\x01\n" +
+	"\x18notification_provider_id\x18\a \x01(\tR\x16notificationProviderId\x12<\n" +
+	"\x1anotification_formatter_key\x18\b \x01(\tR\x18notificationFormatterKey\"\xcd\x01\n" +
 	"\x14PluginActionResponse\x12\x12\n" +
 	"\x04body\x18\x01 \x01(\fR\x04body\x12M\n" +
 	"\aheaders\x18\x02 \x03(\v23.kandev.plugin.v1.PluginActionResponse.HeadersEntryR\aheaders\x12\x16\n" +

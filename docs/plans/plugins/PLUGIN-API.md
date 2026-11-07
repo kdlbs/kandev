@@ -408,6 +408,13 @@ for that provider. Its `NotificationFormatterSlotProps` contains the owned
 provider's ID/name/type/subscriptions, event catalog, exact installation/key,
 and canonical binding. It excludes provider config and credentials. Use the
 host's React/UI components and `useSettingsSaveContributor` for editor drafts.
+The optional `selectionChanged` flag also marks a selection-only draft. Editors
+must register that draft with shared Save (order below 50); Save prepares a first
+configuration, while its first activation still requires the explicit activation
+control. The host keeps selection changes dirty for navigation/discard until an
+authoritative binding matches; it never assumes a plugin registered a writer or
+implicitly activates an unknown revision. Callbacks captured by a removed editor
+are invalidated before dispatch, including a select-away/select-back cycle.
 
 For each management call, forward the observed context outside `body`:
 
@@ -428,6 +435,9 @@ await host.api.invokeAction("templates.prepare", {
 `active` additionally requires that the canonical selected binding matches this
 plugin, installation, and formatter key. Both modes require the observed
 binding revision, including an empty string before any binding exists. The
+formatter key must be nonempty. The Go action context exposes the host-verified
+`NotificationFormatterKey`, so shared management actions can distinguish keys;
+body fields do not select the authorized formatter. The
 host checks ownership, manifest declaration, installation, and binding revision
 before dispatch and again before publishing a response. Missing context is
 400; a changed binding/installation is 409; configuration capture or unavailable
@@ -450,7 +460,7 @@ existing 44px coarse-pointer targets and shared settings Save/Reset behavior.
 
 Backend plugins implement optional `pluginsdk.NotificationFormatter`; legacy
 plugins need not implement it. Each admitted delivery captures its immutable
-binding once, formats under a one-second deadline, and uses the complete
+binding once, formats under a shared one-second fanout budget, and uses the complete
 default pair on unsupported context, cancellation, invalid output, or failure.
 Configuration inspection and binding commit retain one installation lease.
 Management inspection is bounded to five seconds. The request limit is 128 KiB;

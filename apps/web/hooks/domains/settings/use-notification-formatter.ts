@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+  type MutableRefObject,
+} from "react";
 import type { NotificationFormatterBinding, NotificationFormatterChoice } from "@kdlbs/plugin-sdk";
 import {
   getNotificationFormatter,
@@ -19,6 +27,15 @@ export function formatterBindingId(binding: NotificationFormatterBinding | null 
     : "";
 }
 
+function updateSelection(
+  setState: Dispatch<SetStateAction<NotificationFormatterState>>,
+  generation: MutableRefObject<number>,
+  selected: string | null,
+) {
+  generation.current++;
+  setState((current) => ({ ...current, selected }));
+}
+
 export function useNotificationFormatter(providerId: string) {
   const [state, setState] = useState<NotificationFormatterState>({
     settings: null,
@@ -28,6 +45,7 @@ export function useNotificationFormatter(providerId: string) {
   });
   const generation = useRef(0);
   const scope = useRef<string | null>(providerId);
+  const selectionGeneration = useRef(0);
   const reload = useCallback(
     async (signal?: AbortSignal) => {
       const request = ++generation.current;
@@ -85,6 +103,8 @@ export function useNotificationFormatter(providerId: string) {
     scope,
     setState,
     readActiveBinding,
+    selectionGeneration,
+    selectionVersion: selectionGeneration.current,
   });
   return {
     ...state,
@@ -108,7 +128,7 @@ export function useNotificationFormatter(providerId: string) {
         },
         signal,
       ),
-    select: (value: string) => setState((current) => ({ ...current, selected: value })),
-    discard: () => setState((current) => ({ ...current, selected: null })),
+    select: (value: string) => updateSelection(setState, selectionGeneration, value),
+    discard: () => updateSelection(setState, selectionGeneration, null),
   };
 }

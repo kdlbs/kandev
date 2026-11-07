@@ -12,7 +12,12 @@ requirements:
 
 ## Status and source evidence
 
-All formatter names below are proposed additions, not available SDK methods.
+This checkout implements the optional Go `pluginsdk.NotificationFormatter`
+interface, the `FormatNotification` and `InspectNotificationConfiguration` RPCs,
+and provider-scoped formatter management. Published SDK `0.1.0` does not include
+these additions; coordinated private builds use the explicitly pinned checkout.
+The historical research observations below describe the original baseline,
+not absence of the API implemented in this contribution.
 The maintainer approved the split direction in the
 [follow-up comment](https://github.com/kdlbs/kandev/issues/5011#issuecomment-6683963471),
 including two coordinated contributions and desktop/mobile screenshots. Detailed
@@ -77,8 +82,8 @@ semantic occurrence -> recipient -> enabled/subscribed provider -> existing clai
   -> validated replacement OR original pair -> existing provider.Send
 ```
 
-Introduce an optional SDK `NotificationFormatterPlugin` interface and additive
-Plugin RPC `FormatNotification`. Preserve the existing base `Plugin` interface;
+The optional SDK `NotificationFormatter` interface and additive Plugin RPC
+`FormatNotification` preserve the existing base `Plugin` interface;
 old implementations return Unimplemented through SDK glue. Add manifest
 `notification_formatters` declarations with a unique key, contract version,
 supported provider types, and declared bounded management action keys. Host
@@ -97,8 +102,8 @@ mutate a shared message or map. Fixed-copy provider test sends bypass formatters
 
 ## Semantic DTO and result
 
-`FormatNotificationRequest` proposes contract version 1, a host-issued provider
-reference, formatter key, selected configuration revision, invocation ID,
+`NotificationFormatRequest` carries contract version 1, a host-issued provider
+reference, owner identity, formatter key, selected configuration revision,
 immutable default pair, event type,
 occurrence ID when one exists, and a typed event context union:
 
@@ -114,14 +119,16 @@ Bound the serialized request to 128 KiB. If required context cannot fit or be
 resolved safely, skip formatting and use defaults rather than truncate identities
 or expose raw objects. No invented occurrence is required for inbox.
 
-`FormatNotificationResponse` proposes explicit `custom` or `default` disposition.
-Custom output is a complete pair, valid UTF-8 with no NUL, title at most 2,048
+`NotificationFormatResponse` uses `custom=false` for defaults and `custom=true`
+for a complete replacement pair. Custom output is valid UTF-8 with no NUL, title at most 2,048
 bytes without CR/LF and body at most 65,536 bytes. Bound the serialized response
-to 512 KiB to allow JSON/protobuf escaping overhead. Empty, unknown-disposition,
-partial, or over-limit custom output is invalid. No response can override
+to 512 KiB to allow JSON/protobuf escaping overhead. Empty, partial, or over-limit
+custom output is invalid. No response can override
 destinations, headers, config, recipients, or delivery identity.
 
-Set a one-second formatter deadline bounded by caller cancellation/deadline.
+Share one one-second formatter budget across an occurrence's provider/recipient
+fanout, bounded by caller cancellation/deadline. Later providers use defaults
+when it expires; their sender still receives the original delivery context.
 Formatting is side-effect-free; no automatic retry is needed. On unavailable,
 Unimplemented, timeout, invalid result, missing binding, or plugin-local error,
 send defaults through the same admitted transport exactly once. If the caller
@@ -276,9 +283,17 @@ not discard drafts. See the plan's UI-01 preview.
    complete. A host full-DB backup alone does not cover `KANDEV_PLUGIN_DATA_DIR`.
 
 Rollback before live adoption discards only candidate state. After an authorized
-cutover, quiesce template edits and binding changes, export plugin changes, clear the binding, and
-restore the prior runtime/config with a version-compatible private database
-snapshot if needed. Arbitrary database downgrade is not promised. Do not replay
+cutover, quiesce template edits and binding changes and export plugin changes.
+Before clearing bindings or replacing any host database, account for every host
+change since the proposed restore point: task/session transitions, messages,
+provider settings, subscriptions, claims, and other domain writes. Plugin exports
+alone cannot preserve those changes. Prefer a verified compatible in-place
+runtime rollback; otherwise require a tested lossless preservation/replay
+strategy for all later host changes before restoring a version-compatible
+snapshot. If later host changes cannot be verified as preserved, stop rollback
+and retain the current host/plugin state and recovery evidence. A task completed
+after a snapshot must never be reverted by restoring that older snapshot.
+Arbitrary database downgrade is not promised. Do not replay
 test notifications or restore delivery claims into a running host. Preserve
 legacy rows; removal is a separate approved migration after a retention decision.
 The plugin export preserves all six event configurations. A legacy restoration

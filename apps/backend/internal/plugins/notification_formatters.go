@@ -34,7 +34,7 @@ func (s *Service) CaptureFormatterLifecycle(ctx context.Context) (func(), error)
 		if len(record.NotificationFormatters) == 0 {
 			continue
 		}
-		unlock, err := s.dispatchLocks.lockFor(record.ID).RLockContext(ctx)
+		unlock, err := s.formatterLifecycleLock(record.ID).RLockContext(ctx)
 		if err != nil {
 			release()
 			return nil, err
@@ -47,6 +47,12 @@ func (s *Service) CaptureFormatterLifecycle(ctx context.Context) (func(), error)
 		}
 	}
 	return release, nil
+}
+
+// formatterLifecycleLock fences configuration capture independently of RPC
+// admission, so a waiting lifecycle writer never blocks ordinary plugin calls.
+func (s *Service) formatterLifecycleLock(id string) *contextRWMutex {
+	return s.formatterLifecycleLocks.lockFor(id)
 }
 
 func (s *Service) SetNotificationProviderAccess(access NotificationProviderAccess) {

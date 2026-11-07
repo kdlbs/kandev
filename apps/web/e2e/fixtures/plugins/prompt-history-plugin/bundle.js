@@ -125,7 +125,37 @@
         "notification-formatter",
         function FixtureFormatter({ slotProps: props }) {
           const h = host.jsx;
-          const [notice, setNotice] = host.React.useState("");
+          const { t } = host.i18n.useTranslation();
+          const [notice, setNotice] = host.React.useState(null);
+          const [prepared, setPrepared] = host.React.useState(null);
+          const prepare = async () => {
+            const receipt = await host.api.invokeAction("notification.prepare", {
+              notificationProviderId: props.provider.id,
+              notificationFormatter: {
+                installationId: props.formatter.installation_id,
+                formatterKey: props.formatter.key,
+                expectedBindingRevision: props.binding?.revision ?? "",
+                mode: "candidate",
+              },
+              body: {},
+            });
+            setPrepared(receipt);
+            setNotice({ kind: "formatterPrepared" });
+            return receipt;
+          };
+          host.useSettingsSaveContributor({
+            id: `fixture-formatter:${props.provider.id}`,
+            order: 40,
+            revision: JSON.stringify([props.selectionChanged, prepared?.revision]),
+            isDirty: Boolean(props.selectionChanged && !prepared),
+            save: prepare,
+            discard: () => {
+              setPrepared(null);
+              setNotice(null);
+            },
+          });
+          let noticeText = "";
+          if (notice) noticeText = notice.kind === "preview" ? notice.title : t(notice.kind);
           return h(
             "div",
             { "data-testid": "fixture-notification-formatter", className: "space-y-3" },
@@ -137,10 +167,10 @@
                 "data-testid": "fixture-formatter-preview",
                 onClick: async () => {
                   const result = await props.previewConfiguration({}, "session.failed", "normal");
-                  setNotice(result.title);
+                  setNotice({ kind: "preview", title: result.title });
                 },
               },
-              "Preview fixture formatter",
+              t("formatterPreview"),
             ),
             h(
               host.ui.Button,
@@ -149,23 +179,14 @@
                 className: "cursor-pointer [@media(pointer:coarse)]:min-h-11",
                 "data-testid": "fixture-formatter-activate",
                 onClick: async () => {
-                  const receipt = await host.api.invokeAction("notification.prepare", {
-                    notificationProviderId: props.provider.id,
-                    notificationFormatter: {
-                      installationId: props.formatter.installation_id,
-                      formatterKey: props.formatter.key,
-                      expectedBindingRevision: props.binding?.revision ?? "",
-                      mode: "candidate",
-                    },
-                    body: {},
-                  });
+                  const receipt = prepared ?? (await prepare());
                   await props.activateConfiguration(receipt, props.binding?.revision ?? "");
-                  setNotice("Fixture formatter active");
+                  setNotice({ kind: "formatterActive" });
                 },
               },
-              "Activate fixture formatter",
+              t("formatterActivate"),
             ),
-            h("p", { role: "status", "data-testid": "fixture-formatter-status" }, notice),
+            h("p", { role: "status", "data-testid": "fixture-formatter-status" }, noticeText),
           );
         },
       );
@@ -1701,6 +1722,10 @@
 
       registry.registerTranslations({
         en: {
+          formatterPreview: "Preview fixture formatter",
+          formatterActivate: "Activate fixture formatter",
+          formatterActive: "Fixture formatter active",
+          formatterPrepared: "Configuration prepared. Activate it explicitly.",
           promptHistoryTitle: "Prompt history fixture",
           loading: "Loading prompt history",
           retry: "Retry",
@@ -1723,7 +1748,48 @@
           profileWorkspaceLabelDescription:
             "A long optional label that verifies narrow form layouts.",
         },
+        ko: {
+          formatterPreview: "예제 포매터 미리보기",
+          formatterActivate: "예제 포매터 활성화",
+          formatterActive: "예제 포매터 활성화됨",
+          formatterPrepared: "설정이 준비됐습니다. 명시적으로 활성화하세요.",
+        },
+        ja: {
+          formatterPreview: "サンプルフォーマッターをプレビュー",
+          formatterActivate: "サンプルフォーマッターを有効化",
+          formatterActive: "サンプルフォーマッターは有効です",
+          formatterPrepared: "設定を準備しました。明示的に有効化してください。",
+        },
+        "pt-pt": {
+          formatterPreview: "Pré-visualizar o formatador de exemplo",
+          formatterActivate: "Ativar o formatador de exemplo",
+          formatterActive: "Formatador de exemplo ativo",
+          formatterPrepared: "Configuração preparada. Ative-a explicitamente.",
+        },
+        "zh-cn": {
+          formatterPreview: "预览示例格式器",
+          formatterActivate: "启用示例格式器",
+          formatterActive: "示例格式器已启用",
+          formatterPrepared: "配置已准备。请明确启用。",
+        },
+        // Generated from zh-cn with the shared OpenCC/glossary converter.
+        "zh-tw": {
+          formatterPreview: "預覽示例格式器",
+          formatterActivate: "啟用示例格式器",
+          formatterActive: "示例格式器已啟用",
+          formatterPrepared: "設定已準備。請明確啟用。",
+        },
+        "zh-hk": {
+          formatterPreview: "預覽示例格式器",
+          formatterActivate: "啓用示例格式器",
+          formatterActive: "示例格式器已啓用",
+          formatterPrepared: "設定已準備。請明確啓用。",
+        },
         pseudo: {
+          formatterPreview: "Ƥřḗṽīḗẇ ƒīẋŧŭřḗ ƒǿřḿȧŧŧḗř",
+          formatterActivate: "Ȧƈŧīṽȧŧḗ ƒīẋŧŭřḗ ƒǿřḿȧŧŧḗř",
+          formatterActive: "Ƒīẋŧŭřḗ ƒǿřḿȧŧŧḗř ȧƈŧīṽḗ",
+          formatterPrepared: "Ƈǿƞƒīɠŭřȧŧīǿƞ ƥřḗƥȧřḗḓ. Ȧƈŧīṽȧŧḗ īŧ ḗẋƥŀīƈīŧŀẏ.",
           promptHistoryTitle: "Ƥřǿɱƥŧ ħīşŧǿřẏ ƒīẋŧŭřḗ",
           loading: "Ŀǿȧḓīƞɠ ƥřǿɱƥŧ ħīşŧǿřẏ",
           retry: "Řḗŧřẏ",

@@ -20,6 +20,25 @@ type FormatterRuntime interface {
 	FormatNotification(context.Context, *models.FormatterBinding, *pluginsdk.NotificationFormatRequest) (*pluginsdk.NotificationFormatResponse, error)
 }
 
+type formatterBudgetKey struct{}
+
+// withFormatterBudget limits cumulative formatting work without shortening the
+// caller's delivery context. Later providers use defaults after it expires.
+func withFormatterBudget(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx.Value(formatterBudgetKey{}) != nil {
+		return ctx, func() {}
+	}
+	budget, cancel := context.WithTimeout(ctx, time.Second)
+	return context.WithValue(ctx, formatterBudgetKey{}, budget), cancel
+}
+
+func formatterContext(ctx context.Context) context.Context {
+	if budget, ok := ctx.Value(formatterBudgetKey{}).(context.Context); ok {
+		return budget
+	}
+	return ctx
+}
+
 func (s *Service) SetFormatterRuntime(runtime FormatterRuntime) {
 	s.formatterMu.Lock()
 	defer s.formatterMu.Unlock()
@@ -33,12 +52,20 @@ func (s *Service) runtimeFormatter() FormatterRuntime {
 }
 
 func (s *Service) captureFormatter(ctx context.Context, owner string, provider *models.Provider) *models.FormatterBinding {
+	ctx = formatterContext(ctx)
+	if ctx.Err() != nil {
+		return nil
+	}
 	repository, ok := s.repo.(notificationstore.FormatterRepository)
 	if !ok || s.runtimeFormatter() == nil {
 		return nil
 	}
 	binding, err := repository.GetFormatterBinding(ctx, owner, provider.ID)
-	if err != nil || binding == nil || binding.PluginID == "" {
+	if err != nil {
+		s.logger.Warn("notification formatter fallback", zap.String("provider_id", provider.ID), zap.String("reason", "binding_lookup_failed"))
+		return nil
+	}
+	if binding == nil || binding.PluginID == "" || binding.ProviderType != provider.Type {
 		return nil
 	}
 	copy := *binding
@@ -46,6 +73,7 @@ func (s *Service) captureFormatter(ctx context.Context, owner string, provider *
 }
 
 func (s *Service) formatNotification(ctx context.Context, owner string, payload notificationPayload) notificationPayload {
+	ctx = formatterContext(ctx)
 	runtime := s.runtimeFormatter()
 	if payload.formatter == nil || runtime == nil || ctx.Err() != nil {
 		return payload

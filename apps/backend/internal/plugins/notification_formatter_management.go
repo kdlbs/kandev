@@ -19,6 +19,11 @@ func boundFormatterManagement(ctx *gin.Context, scope string) context.CancelFunc
 	bounded, cancel := context.WithTimeout(ctx.Request.Context(), 5*time.Second)
 	ctx.Request = ctx.Request.WithContext(bounded)
 	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, 128*1024)
+	controller := http.NewResponseController(ctx.Writer)
+	deadline, _ := bounded.Deadline()
+	_ = controller.SetReadDeadline(deadline)
+	// Keep the deadline through net/http's unread-body drain. The server resets
+	// connection deadlines when it admits the next keep-alive request.
 	return cancel
 }
 
@@ -36,8 +41,13 @@ type formatterActionContext struct {
 	Mode                    string  `json:"mode"`
 }
 
+func (c *formatterActionContext) valid() bool {
+	return c != nil && c.FormatterKey != "" && c.ExpectedBindingRevision != nil &&
+		(c.Mode == "active" || c.Mode == "candidate")
+}
+
 func (c *Controller) beginFormatterAction(ctx *gin.Context, record *store.Record, verified pluginsdk.VerifiedActionContext, observed *formatterActionContext) (func(), func() bool, bool) {
-	if observed == nil || observed.ExpectedBindingRevision == nil || (observed.Mode != "active" && observed.Mode != "candidate") {
+	if !observed.valid() {
 		ctx.JSON(http.StatusBadRequest, gin.H{actionErrorField: "formatter management context required"})
 		return nil, nil, false
 	}

@@ -311,6 +311,8 @@ export interface NotificationFormatterSlotProps {
   events: readonly string[];
   formatter: NotificationFormatterChoice;
   binding: NotificationFormatterBinding | null;
+  /** Register selection-only drafts with shared Save; first activation stays explicit. */
+  selectionChanged?: boolean;
   activateConfiguration(
     prepared: { revision: string; digest: string },
     expectedBindingRevision: string,

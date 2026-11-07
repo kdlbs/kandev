@@ -324,6 +324,8 @@ func (s *Service) HandleUpdateAvailable(ctx context.Context, version, releaseURL
 }
 
 func (s *Service) handleSemanticOccurrence(ctx context.Context, taskID, sessionID, occurrenceID, eventType string, payload map[string]string) {
+	ctx, finishFormatting := withFormatterBudget(ctx)
+	defer finishFormatting()
 	if occurrenceID == "" {
 		return
 	}
@@ -350,6 +352,8 @@ func (s *Service) handleSemanticOccurrence(ctx context.Context, taskID, sessionI
 // providers. Every provider it can reach belongs to userID, so a webhook only
 // ever receives events from workspaces its owner can see.
 func (s *Service) deliverOccurrence(ctx context.Context, userID string, message notificationPayload) {
+	ctx, finishFormatting := withFormatterBudget(ctx)
+	defer finishFormatting()
 	providers, subscriptions, err := s.ListProviders(ctx, userID)
 	if err != nil {
 		s.logger.Error("failed to load notification providers", zap.Error(err))
@@ -475,6 +479,8 @@ func (s *Service) providerOwners(ctx context.Context) ([]string, bool) {
 // resolvable owner, so under enforced authentication it is dropped rather than
 // delivered to whichever account the fallback would pick.
 func (s *Service) HandleInboxItem(ctx context.Context, workspaceID, itemType, title string) {
+	ctx, finishFormatting := withFormatterBudget(ctx)
+	defer finishFormatting()
 	userID, ok := s.workspaceOwner(ctx, workspaceID)
 	if !ok {
 		return

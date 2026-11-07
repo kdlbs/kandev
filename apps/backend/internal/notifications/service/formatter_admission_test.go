@@ -29,7 +29,7 @@ func TestRuntimeSummaryRetainsFormatterCapturedBeforeDeliveryClaims(t *testing.T
 		notificationTestRepository: &notificationTestRepository{
 			providers:     []*models.Provider{{ID: "mail", UserID: userstore.DefaultUserID, Type: models.ProviderTypeApprise, Enabled: true}},
 			subscriptions: map[string][]*models.Subscription{"mail": {{EventType: EventSystemUpdateAvailable, Enabled: true}}},
-		}, binding: &models.FormatterBinding{ProviderID: "mail", PluginID: "formatter", ConfigurationRevision: "snapshot-a"},
+		}, binding: &models.FormatterBinding{ProviderID: "mail", ProviderType: models.ProviderTypeApprise, PluginID: "formatter", ConfigurationRevision: "snapshot-a"},
 	}}
 	service := NewService(repository, nil, nil, log, nil, false)
 	runtime := &formatterRuntimeFixture{result: &pluginsdk.NotificationFormatResponse{}}

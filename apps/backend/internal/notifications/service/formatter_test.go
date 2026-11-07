@@ -16,7 +16,9 @@ import (
 
 type formatterRepositoryFixture struct {
 	*notificationTestRepository
-	binding *models.FormatterBinding
+	binding    *models.FormatterBinding
+	bindingErr error
+	bindings   map[string]*models.FormatterBinding
 }
 
 func TestFormatterPreviewUsesSyntheticContextWithoutDelivery(t *testing.T) {
@@ -34,8 +36,11 @@ func TestFormatterPreviewUsesSyntheticContextWithoutDelivery(t *testing.T) {
 	require.Empty(t, repo.deliveries)
 }
 
-func (r *formatterRepositoryFixture) GetFormatterBinding(context.Context, string, string) (*models.FormatterBinding, error) {
-	return r.binding, nil
+func (r *formatterRepositoryFixture) GetFormatterBinding(_ context.Context, _ string, id string) (*models.FormatterBinding, error) {
+	if r.bindings != nil {
+		return r.bindings[id], r.bindingErr
+	}
+	return r.binding, r.bindingErr
 }
 
 func (r *formatterRepositoryFixture) SetFormatterBinding(context.Context, string, string, string, *models.FormatterBinding) (*models.FormatterBinding, error) {
@@ -72,7 +77,7 @@ func TestFormatterDeliveryRetainsAdmissionAndWholePairFallback(t *testing.T) {
 					providers:     []*models.Provider{{ID: "mail", UserID: userstore.DefaultUserID, Type: models.ProviderTypeApprise, Enabled: true}},
 					subscriptions: map[string][]*models.Subscription{"mail": {{EventType: EventTaskSessionTurnFinished, Enabled: true}}},
 				},
-				binding: &models.FormatterBinding{ProviderID: "mail", PluginID: "formatter", ConfigurationRevision: "snapshot-a"},
+				binding: &models.FormatterBinding{ProviderID: "mail", ProviderType: models.ProviderTypeApprise, PluginID: "formatter", ConfigurationRevision: "snapshot-a"},
 			}
 			svc := NewService(repo, notificationTestTaskGetter{task: &taskmodels.Task{ID: "task", Title: "Example"}}, nil, log, nil, false)
 			capture := &captureProvider{}

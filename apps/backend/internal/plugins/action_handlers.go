@@ -73,6 +73,7 @@ func (c *Controller) action(ctx *gin.Context) {
 		}
 		defer release()
 		formatterCurrent = current
+		verified.NotificationFormatterKey = envelope.NotificationFormatter.FormatterKey
 	}
 	if c.actionInvoker == nil {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{actionErrorField: "plugin action unavailable"})

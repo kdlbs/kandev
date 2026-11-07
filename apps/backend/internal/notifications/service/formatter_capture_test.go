@@ -2,9 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/notifications/models"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestFormatterCaptureDrainsWritesAndResumesAfterCancellation(t *testing.T) {
@@ -39,4 +44,27 @@ func TestFormatterCaptureLeaseIsOwnedAndReleasesTheGate(t *testing.T) {
 	finish, err := svc.BeginFormatterManagement(context.Background())
 	require.NoError(t, err)
 	finish()
+}
+
+func TestCaptureFormatterRejectsBindingForChangedProviderType(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	require.NoError(t, err)
+	repo := &formatterRepositoryFixture{notificationTestRepository: &notificationTestRepository{},
+		binding: &models.FormatterBinding{ProviderID: "mail", ProviderType: models.ProviderTypeApprise, PluginID: "formatter"}}
+	svc := NewService(repo, nil, nil, log, nil, false)
+	svc.SetFormatterRuntime(&formatterRuntimeFixture{})
+	require.Nil(t, svc.captureFormatter(t.Context(), "owner", &models.Provider{ID: "mail", Type: models.ProviderTypeLocal}))
+}
+
+func TestCaptureFormatterReportsLookupFailureWithoutRawError(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	repo := &formatterRepositoryFixture{notificationTestRepository: &notificationTestRepository{}, bindingErr: errors.New("private database details")}
+	svc := NewService(repo, nil, nil, log, nil, false)
+	svc.SetFormatterRuntime(&formatterRuntimeFixture{})
+	require.Nil(t, svc.captureFormatter(t.Context(), "owner", &models.Provider{ID: "mail", Type: models.ProviderTypeApprise}))
+	require.Equal(t, 1, logs.Len())
+	require.Equal(t, "binding_lookup_failed", logs.All()[0].ContextMap()["reason"])
+	require.NotContains(t, logs.All()[0].Message, "private database details")
 }

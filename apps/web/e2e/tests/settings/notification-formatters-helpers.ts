@@ -33,6 +33,15 @@ export async function notificationFormatterScenario(
     const options = await select.locator("option").allTextContents();
     expect(options.some((label) => label.includes(PLUGIN_ID))).toBe(true);
     await select.selectOption({ label: `${PLUGIN_ID} / fixture-text (1.0.0)` });
+    const preparation = waitForHttp(page, "POST", /\/actions\/notification\.prepare$/);
+    const preparedReadback = waitForHttp(page, "GET", /\/formatter$/);
+    await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    expect((await preparation).ok()).toBe(true);
+    const unbound = await (await preparedReadback).json();
+    expect(unbound.binding?.plugin_id ?? "").toBe("");
+    await expect(row.getByTestId("fixture-formatter-status")).toHaveText(
+      "Configuration prepared. Activate it explicitly.",
+    );
     const preview = waitForHttp(page, "POST", /\/formatter\/preview$/);
     await row.getByTestId("fixture-formatter-preview").click();
     expect((await preview).ok()).toBe(true);

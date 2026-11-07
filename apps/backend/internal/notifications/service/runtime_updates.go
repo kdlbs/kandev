@@ -25,6 +25,8 @@ func (s *Service) HandleAgentRuntimeUpdate(ctx context.Context, notice agents.Ru
 // HandleAgentRuntimeUpdates delivers available versions as one occurrence per
 // recipient and provider while retaining each runtime's durable delivery claim.
 func (s *Service) HandleAgentRuntimeUpdates(ctx context.Context, notices []agents.RuntimeUpdateNotice) {
+	ctx, finishFormatting := withFormatterBudget(ctx)
+	defer finishFormatting()
 	valid := uniqueAvailableRuntimeNotices(notices)
 	if len(valid) == 0 {
 		return
@@ -66,6 +68,8 @@ func uniqueAvailableRuntimeNotices(notices []agents.RuntimeUpdateNotice) []agent
 }
 
 func (s *Service) deliverRuntimeUpdateBatch(ctx context.Context, userID string, notices []agents.RuntimeUpdateNotice) {
+	ctx, finishFormatting := withFormatterBudget(ctx)
+	defer finishFormatting()
 	providerList, subscriptions, err := s.ListProviders(ctx, userID)
 	if err != nil {
 		s.logger.Error("failed to load notification providers", zap.Error(err))

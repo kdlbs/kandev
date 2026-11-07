@@ -49,6 +49,10 @@ notification_formatters:
     contract_version: 1
     provider_types: [apprise]
     management_actions: [prepare]
+  - key: other-text
+    contract_version: 1
+    provider_types: [apprise]
+    management_actions: [prepare]
 actions:
   - key: prepare
     scope: notification_provider
@@ -82,10 +86,19 @@ runtime:
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	require.Equal(t, "user-1", invoker.request.Context.ActorID)
 	require.Equal(t, "mail", invoker.request.Context.NotificationProviderID)
+	require.Equal(t, "text", invoker.request.Context.NotificationFormatterKey)
+	emptyKey := strings.Replace(input, `"formatterKey":"text"`, `"formatterKey":""`, 1)
+	response = doAuthenticatedActionRequest(router, "/api/plugins/formatter-fixture/actions/prepare", emptyKey)
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	require.Equal(t, 1, invoker.calls, "empty formatter selection must not dispatch")
+	otherKey := strings.Replace(input, `"formatterKey":"text"`, `"formatterKey":"other-text"`, 1)
+	response = doAuthenticatedActionRequest(router, "/api/plugins/formatter-fixture/actions/prepare", otherKey)
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "other-text", invoker.request.Context.NotificationFormatterKey)
 	access.binding = &models.FormatterBinding{Revision: "new-binding"}
 	response = doAuthenticatedActionRequest(router, "/api/plugins/formatter-fixture/actions/prepare", input)
 	require.Equal(t, http.StatusConflict, response.Code)
-	require.Equal(t, 1, invoker.calls, "stale context must not dispatch")
+	require.Equal(t, 2, invoker.calls, "stale context must not dispatch")
 	access.binding = nil
 	invoker.invoke = func(context.Context, string, *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
 		access.binding = &models.FormatterBinding{Revision: "changed-during-action"}

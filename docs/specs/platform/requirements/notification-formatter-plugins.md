@@ -51,7 +51,10 @@ plugin's implementation and permanent tests belong in a dedicated repository.
 - **AC-PLATFORM-NOTIFICATION-FORMATTER-001.4:** An unavailable, disabled,
   incompatible, cancelled, timed-out, or invalid formatter result shall preserve
   the whole default pair. Formatting shall have a maximum one-second deadline
-  within the caller's remaining budget and shall cause no second send. Existing
+  shared across an occurrence's provider/recipient fanout within the caller's
+  remaining budget and shall cause no second send. After that formatting budget
+  expires, later providers shall use defaults without shortening the delivery
+  context. Existing
   caller cancellation shall still cancel delivery rather than restart it.
 
 ### REQ-PLATFORM-NOTIFICATION-FORMATTER-002: Owned management and preview
@@ -80,7 +83,7 @@ plugin's implementation and permanent tests belong in a dedicated repository.
   localized labels, and no horizontal page scrolling. Coarse-pointer controls
   shall have at least 44px targets. Unsupported-host status shall prevent binding.
 - **AC-PLATFORM-NOTIFICATION-FORMATTER-002.5:** Before initial activation, the
-  owner shall import and validate prepared configuration without connecting it
+  owner shall prepare and validate configuration through the editor or import without connecting it
   to delivery. Activation shall select only the exact validated revision.
   Failed preparation or activation shall retain the previous delivery selection.
 - **AC-PLATFORM-NOTIFICATION-FORMATTER-002.6:** For an active formatter, one

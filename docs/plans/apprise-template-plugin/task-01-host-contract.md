@@ -160,3 +160,28 @@ against the host's non-loopback interface. The same test failed on unchanged
 source at this worktree's base. A complete frontend Vitest run exceeded its
 600-second command budget without a final summary; it is not reported passed.
 Final contribution/candidate checks remain tracked with Task 04.
+
+### PR #5141 review follow-up
+
+Addressed the removed-editor activation race (including selection ABA), separated
+capture/lifecycle fencing from dispatch admission, removed blocking process kill
+from runtime lookup critical sections, and added closed-reason binding lookup
+diagnostics and loaded-provider type validation. Formatter work now shares one
+one-second fanout budget without shortening the sender's caller context.
+Management body reads use the HTTP request deadline, reject empty formatter keys,
+and forward the verified key through the additive Go/protobuf action context.
+
+Selection-only drafts participate in shared Save/navigation guarding. The editor
+prepares before explicit first activation; Save does not implicitly select an
+unknown revision. Failed discovery has a Retry control, and fixture controls and
+activation notices use reactive plugin translations. The rollback design now
+requires preservation of later host-domain changes, not just plugin exports.
+
+Validation: affected plugin/runtime/notification race suites passed with the
+previously baseline-failing packaged executor case explicitly excluded; the
+notification service suite passed after aligning its fixture with the stored
+provider type. Complete SDK race tests, seven formatter hook tests, four other
+formatter component/API tests, frontend typecheck/full lint/i18n checks,
+changed-package Go lint, and specification validation passed. Managed desktop
+and Pixel 5 E2E checks passed, including selection-only preparation, no implicit
+first binding, explicit activation, preview, and shared default restoration.

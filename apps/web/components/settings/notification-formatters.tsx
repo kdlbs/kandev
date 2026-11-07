@@ -1,13 +1,15 @@
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import type { NotificationFormatterSlotProps } from "@kdlbs/plugin-sdk";
+import { Button } from "@kandev/ui/button";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import {
   formatterChoiceId,
+  formatterBindingId,
   useNotificationFormatter,
 } from "@/hooks/domains/settings/use-notification-formatter";
 import { SettingsGroup } from "./settings-group";
-import { useSettingsSaveContributor } from "./settings-save-provider";
+import { SettingsSaveCancelledError, useSettingsSaveContributor } from "./settings-save-provider";
 
 type FormatterProvider = NotificationFormatterSlotProps["provider"];
 
@@ -51,11 +53,49 @@ function formatterSlotProps(
     events: state.settings?.events ?? [],
     formatter: state.choice,
     binding: state.settings?.binding ?? null,
+    selectionChanged: state.selected !== formatterBindingId(state.settings?.binding),
     activateConfiguration: state.activate,
     reload: () => state.reload(),
     previewConfiguration: state.preview,
     readActiveBinding: state.readActiveBinding,
   };
+}
+
+async function saveFormatterSelection(
+  state: ReturnType<typeof useNotificationFormatter>,
+  clearing: boolean,
+) {
+  if (clearing) return state.clear();
+  const active = await state.readActiveBinding();
+  if (formatterBindingId(active) !== state.selected) throw new SettingsSaveCancelledError();
+}
+
+function FormatterStatus({
+  state,
+  unavailable,
+}: {
+  state: ReturnType<typeof useNotificationFormatter>;
+  unavailable: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {state.loading && <p role="status">{t("common:loading")}</p>}
+      {(state.error || unavailable) && (
+        <p role="status">{t("settings:notificationFormatterUnavailable")}</p>
+      )}
+      {state.error && (
+        <Button
+          type="button"
+          variant="outline"
+          className="cursor-pointer [@media(pointer:coarse)]:min-h-11"
+          onClick={() => void state.reload()}
+        >
+          {t("plugins:retry")}
+        </Button>
+      )}
+    </>
+  );
 }
 
 function NotificationFormatterProvider({ provider }: { provider: FormatterProvider }) {
@@ -64,13 +104,14 @@ function NotificationFormatterProvider({ provider }: { provider: FormatterProvid
   const state = useNotificationFormatter(provider.id);
   const binding = state.settings?.binding ?? null;
   const clearing = state.selected === "" && Boolean(binding?.plugin_id);
+  const selectionChanged = state.selected !== formatterBindingId(binding);
   useSettingsSaveContributor({
     id: `notification-formatter:${provider.id}`,
-    order: 30,
+    order: 50,
     revision: JSON.stringify([state.selected, binding?.revision]),
-    isDirty: clearing,
-    canSave: !state.loading && !state.error,
-    save: state.clear,
+    isDirty: selectionChanged,
+    canSave: !state.loading && !state.error && (state.selected === "" || Boolean(state.choice)),
+    save: () => saveFormatterSelection(state, clearing),
     discard: state.discard,
   });
   const slotProps = formatterSlotProps(provider, state);
@@ -90,10 +131,7 @@ function NotificationFormatterProvider({ provider }: { provider: FormatterProvid
       >
         <FormatterOptions state={state} unavailable={unavailable} />
       </select>
-      {state.loading && <p role="status">{t("common:loading")}</p>}
-      {(state.error || unavailable) && (
-        <p role="status">{t("settings:notificationFormatterUnavailable")}</p>
-      )}
+      <FormatterStatus state={state} unavailable={unavailable} />
       {slotProps && (
         <PluginSlot
           name="notification-formatter"

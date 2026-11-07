@@ -18,20 +18,35 @@ export type NotificationFormatterState = {
   loading: boolean;
 };
 
+function sameChoice(
+  current: NotificationFormatterChoice | undefined,
+  captured: NotificationFormatterChoice,
+) {
+  return (
+    current?.plugin_id === captured.plugin_id &&
+    current?.installation_id === captured.installation_id &&
+    current?.key === captured.key
+  );
+}
+
 type MutationOptions = {
   providerId: string;
   choice: NotificationFormatterChoice | undefined;
   expectedRevision: string;
   generation: MutableRefObject<number>;
   scope: MutableRefObject<string | null>;
+  selectionGeneration: MutableRefObject<number>;
+  selectionVersion: number;
   setState: Dispatch<SetStateAction<NotificationFormatterState>>;
   readActiveBinding(): Promise<NotificationFormatterBinding | null>;
 };
 
 function useFormatterMutationPublication(options: MutationOptions) {
   const operation = useRef(0);
-  const isCurrent = (sequence: number) =>
-    sequence === operation.current && options.scope.current === options.providerId;
+  const isCurrentSelection = () =>
+    options.scope.current === options.providerId &&
+    options.selectionGeneration.current === options.selectionVersion;
+  const isCurrent = (sequence: number) => sequence === operation.current && isCurrentSelection();
   const begin = () => {
     options.generation.current++;
     return ++operation.current;
@@ -59,17 +74,23 @@ function useFormatterMutationPublication(options: MutationOptions) {
       selected: current.selected === selected ? null : current.selected,
     }));
   };
-  return { begin, assertCurrent, isCurrent, publish };
+  return { begin, assertCurrent, isCurrent, isCurrentSelection, publish };
 }
 
 export function useNotificationFormatterMutations(options: MutationOptions) {
   const pendingClear = useRef<string | null>(null);
+  const currentChoice = useRef(options.choice);
+  currentChoice.current = options.choice;
   const publication = useFormatterMutationPublication(options);
   const activate = useCallback(
     async (prepared: { revision: string; digest: string }, expected: string) => {
       const { choice } = options;
       // i18n-exempt: private control-flow error, never displayed as user copy.
       if (!choice) throw new Error("Notification formatter selection unavailable");
+      if (!publication.isCurrentSelection() || !sameChoice(currentChoice.current, choice)) {
+        // i18n-exempt: private cancellation error, never displayed as user copy.
+        throw new DOMException("Formatter editor removed", "AbortError");
+      }
       const sequence = publication.begin();
       const result = await selectNotificationFormatter(options.providerId, expected, {
         plugin_id: choice.plugin_id,
