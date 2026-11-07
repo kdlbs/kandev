@@ -397,15 +397,19 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	// Fall back to the task's current workflow step when the caller didn't provide one.
 	// This ensures sessions created via the kanban card (which doesn't send workflow_step_id)
 	// inherit the task's step and participate in workflow events.
+	dbTask, dbTaskErr := s.repo.GetTask(ctx, taskID)
 	if workflowStepID == "" {
-		dbTask, err := s.repo.GetTask(ctx, taskID)
-		if err != nil {
+		if dbTaskErr != nil {
 			s.logger.Warn("failed to fetch task for workflow step fallback",
 				zap.String("task_id", taskID),
-				zap.Error(err))
+				zap.Error(dbTaskErr))
 		} else if dbTask.WorkflowStepID != "" {
 			workflowStepID = dbTask.WorkflowStepID
 		}
+	}
+	preservePreparedOfficeProfile := false
+	if dbTaskErr == nil {
+		agentProfileID, preservePreparedOfficeProfile = s.officeLaunchProfileForPrepare(ctx, dbTask, agentProfileID)
 	}
 	if s.profileExecutionResolver != nil {
 		if err := s.profileExecutionResolver.ValidateProfile(ctx, agentProfileID); err != nil {
@@ -460,7 +464,9 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 				}
 			}()
 			if s.profileExecutionResolver != nil {
-				route, routeErr := s.resolvePreparedSessionDynamicRoute(bgCtx, sessionID, launchProfileID)
+				route, routeErr := s.resolvePreparedSessionDynamicRoute(
+					bgCtx, sessionID, launchProfileID, preservePreparedOfficeProfile,
+				)
 				if routeErr != nil {
 					launchSession := route.session
 					switch {
@@ -521,6 +527,7 @@ type preparedSessionDynamicRoute struct {
 func (s *Service) resolvePreparedSessionDynamicRoute(
 	ctx context.Context,
 	sessionID, launchProfileID string,
+	preservePreparedOfficeProfile bool,
 ) (preparedSessionDynamicRoute, error) {
 	route := preparedSessionDynamicRoute{launchProfileID: launchProfileID}
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
@@ -536,7 +543,11 @@ func (s *Service) resolvePreparedSessionDynamicRoute(
 		route.resolutionErr = err
 		return route, err
 	}
-	if resolved.ExecutionProfileID == "" {
+	// A non-dynamic profile resolves to itself. An Office session's owner is
+	// its agent identity, so only a concrete dynamic choice may replace the
+	// prepared execution profile.
+	if resolved.ExecutionProfileID == "" ||
+		(resolved.ExecutionProfileID == resolved.LogicalProfileID && preservePreparedOfficeProfile) {
 		return route, nil
 	}
 	route.launchProfileID = resolved.ExecutionProfileID
