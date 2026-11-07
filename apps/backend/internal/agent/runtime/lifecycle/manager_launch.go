@@ -1903,23 +1903,13 @@ func (m *Manager) publishExecutionPrepareCompleted(execution *AgentExecution, re
 //
 // If req.SessionID is empty (quick chat / pre-session contexts), no
 // deduplication key exists and we fall through to direct execution.
-func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
+func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (launched *AgentExecution, launchResultErr error) {
 	if req == nil {
 		return nil, errors.New("launch request is required")
 	}
-	if req.McpProfile != nil && req.McpProfile.BuiltinPackages != nil {
-		if err := m.validateBuiltinOwner(ctx, req.TaskID, req.SessionID, req.WorkspaceID, req.McpProfile); err != nil {
-			return nil, err
-		}
-	}
-	if m.executorAdmission != nil {
-		var err error
-		ctx, err = m.executorAdmission(ctx, req.SessionID, getMetadataString(req.Metadata, "executor_id"), getMetadataString(req.Metadata, MetadataKeyExecutorProfileID))
-		if err != nil {
-			return nil, err
-		}
-	}
-	if err := m.validateManagedToolPolicyAdmission(ctx, req); err != nil {
+	defer m.beginLaunchFlow(ctx, req, &launched, &launchResultErr)()
+	ctx, err := m.prepareLaunchAdmission(ctx, req)
+	if err != nil {
 		return nil, err
 	}
 	if err := m.admitExecutionOwner(ctx, req); err != nil {
@@ -1935,24 +1925,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		}
 	}
 	if req.SessionID == "" {
-		activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
-		if err != nil {
-			return nil, err
-		}
-		transferredActivity := false
-		defer func() {
-			if !transferredActivity {
-				activityLease.Release()
-			}
-		}()
-		activityLease.SetKind(activity.KindExecutionPreparing)
-		execution, launchErr := m.launchInternal(ctx, req)
-		if launchErr == nil && req.StartAgent {
-			m.markAgentStartPending(execution)
-			m.trackActivity(executionActivityKey(execution.ID), activityLease)
-			transferredActivity = true
-		}
-		return execution, launchErr
+		return m.launchWithoutSession(ctx, req)
 	}
 	value, err := m.coalesceSessionLaunch(ctx, req)
 	if err != nil {

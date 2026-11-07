@@ -28,7 +28,12 @@ func (b *sharedInferenceConsumer) retainInferenceTerminal(ctx context.Context, b
 	})
 }
 
-func (b *sharedInferenceConsumer) removeSettledInference(ctx context.Context, binding sessioncapacity.InferenceBinding) error {
+func (b *sharedInferenceConsumer) removeSettledInference(ctx context.Context, binding sessioncapacity.InferenceBinding) (removeErr error) {
+	defer func() {
+		if removeErr == nil {
+			b.logInferenceFlow(ctx, binding, "inference_settlement", "binding_removed", "", 0)
+		}
+	}()
 	return b.capacity.UpdateInferenceCapacity(ctx, func(active map[string]sessioncapacity.InferenceBinding) error {
 		held, ok := active[binding.Key]
 		if !ok || !sameHeldInference(held, binding) || held.TerminalState != binding.TerminalState || held.TerminalPromptDispatch != binding.TerminalPromptDispatch {

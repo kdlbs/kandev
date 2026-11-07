@@ -26,6 +26,7 @@ type inferenceClientSource interface {
 }
 
 type sharedInferenceConsumer struct {
+	flowLogger       *zap.Logger
 	populationLogger *zap.Logger
 	capacity         *orchestrator.Service
 	settler          inferenceClaimSettler
@@ -37,7 +38,11 @@ type sharedInferenceConsumer struct {
 
 func inferenceBindingKey(owner, attempt string) string { return "inference:" + owner + ":" + attempt }
 
-func (b *sharedInferenceConsumer) Execute(ctx context.Context, client *agentruntime.InferenceClient, req *utility.PromptRequest, identity agentruntime.InferenceIdentity) (*utility.PromptResponse, error) {
+func (b *sharedInferenceConsumer) Execute(ctx context.Context, client *agentruntime.InferenceClient, req *utility.PromptRequest, identity agentruntime.InferenceIdentity) (finalResponse *utility.PromptResponse, executeErr error) {
+	binding := sessioncapacity.InferenceBinding{TaskID: identity.TaskID, SessionID: identity.SessionID, ParentExecutionID: identity.ParentExecutionID, ExecutionProfileID: identity.ExecutionProfileID}
+	requestStarted := time.Now()
+	b.logInferenceFlow(ctx, binding, "inference_request", "started", "", 0)
+	defer func() { b.finishInferenceFlow(ctx, binding, requestStarted, finalResponse, executeErr) }()
 	if req == nil || b.capacity == nil {
 		return nil, &agentruntime.InferenceCapacityError{Reason: "owner_unavailable"}
 	}
@@ -66,7 +71,8 @@ func (b *sharedInferenceConsumer) Execute(ctx context.Context, client *agentrunt
 		return nil, &agentruntime.InferenceCapacityError{Reason: "ownership_unavailable", Cause: err}
 	}
 	request.AttemptID = prepared.AttemptID
-	binding := b.newBinding(ctx, prepared, identity, &request)
+	binding = b.newBinding(ctx, prepared, identity, &request)
+	b.logInferenceFlow(ctx, binding, "inference", "prepared", "", 0)
 	defer b.markWorker(binding.Key, false)
 	defer b.cancelUnsentPrepared(client, binding)
 	if !prepared.Retained {
@@ -95,7 +101,10 @@ func (b *sharedInferenceConsumer) executeSharedInference(ctx context.Context, cl
 		b.cancelAndSettle(client, binding)
 		return nil, &agentruntime.InferenceCapacityError{Reason: "reservation_unconfirmed", Cause: err}
 	}
+	b.logInferenceFlow(ctx, binding, "inference", "started", "", 0)
+	started := time.Now()
 	response, err := client.InferencePrompt(ctx, request)
+	b.logInferenceResult(ctx, binding, started, response, err)
 	return b.finishInferencePrompt(client, binding, response, err)
 }
 
@@ -108,6 +117,8 @@ func (b *sharedInferenceConsumer) newBinding(ctx context.Context, prepared *util
 }
 
 func (b *sharedInferenceConsumer) waitInferenceCapacity(ctx context.Context, client *agentruntime.InferenceClient, binding sessioncapacity.InferenceBinding, identity agentruntime.InferenceIdentity) error {
+	started := time.Now()
+	lastReason := ""
 	for {
 		b.refresh(ctx, agentruntime.InferenceClientRef{Client: client, Identity: identity, Release: func() {}})
 		wake := b.capacity.InferenceCapacityChanged()
@@ -119,7 +130,12 @@ func (b *sharedInferenceConsumer) waitInferenceCapacity(ctx context.Context, cli
 		admitted, reason, err := b.capacity.ReserveInferenceCapacity(ctx, binding)
 		b.refreshMu.Unlock()
 		if admitted {
+			b.logInferenceFlow(ctx, binding, "inference_admission", "admitted", "", time.Since(started).Milliseconds())
 			return nil
+		}
+		if reason != lastReason {
+			b.logInferenceFlow(ctx, binding, "inference_admission", "waiting", reason, time.Since(started).Milliseconds())
+			lastReason = reason
 		}
 		all, finite := b.capacity.InferenceCapacityPolicy()
 		if !all || !finite {
@@ -221,7 +237,9 @@ func (b *sharedInferenceConsumer) releaseSettledRetention(ctx context.Context, c
 	if _, exists := held[binding.Key]; exists {
 		return
 	}
-	_, _ = client.ReleaseInferenceAttempt(ctx, binding.AttemptID)
+	if _, releaseErr := client.ReleaseInferenceAttempt(ctx, binding.AttemptID); releaseErr == nil {
+		b.logInferenceFlow(ctx, binding, "inference_settlement", "acknowledged", "", 0)
+	}
 }
 
 func (b *sharedInferenceConsumer) settle(ctx context.Context, binding sessioncapacity.InferenceBinding, status *utility.AttemptStatus) bool {
