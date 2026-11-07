@@ -14,6 +14,7 @@ import { useFileTreeState } from "./file-browser-tree-state";
 import type { FileTreeCacheBinding } from "./file-browser-tree-cache";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { applyFileChanges, invalidateFileChanges, FolderRefreshes } from "./file-browser-refresh";
+import type { FileBrowserChange } from "./file-browser-refresh";
 
 const debugLoad = createDebugLogger("file-browser:load");
 const debugChanges = createDebugLogger("file-browser:changes");
@@ -44,8 +45,8 @@ type FileBrowserTreeResult = {
   isLoading: (path: string) => boolean;
   collapseAll: () => void;
   isCurrentTree: () => boolean;
-  invalidateChanges: (changes: Array<{ path: string }>) => void;
-  refreshChanges: (changes: Array<{ path: string }>) => void;
+  invalidateChanges: (changes: FileBrowserChange[]) => void;
+  refreshChanges: (changes: FileBrowserChange[]) => void;
 };
 
 function useMemoizedFileBrowserTreeResult(result: FileBrowserTreeResult) {
@@ -246,14 +247,14 @@ function useFileChangeSubscription({
     [refreshes, cacheBinding],
   );
   const invalidateChanges = useCallback(
-    (changes: Array<{ path: string }>) => {
+    (changes: FileBrowserChange[]) => {
       if (!isCurrentTree()) return;
       invalidateFileChanges({ changes, expandedPaths: expandedPathsRef.current }, refreshes);
     },
     [expandedPathsRef, refreshes, isCurrentTree],
   );
   const refreshChanges = useCallback(
-    (changes: Array<{ path: string }>) => {
+    (changes: FileBrowserChange[]) => {
       const client = getWebSocketClient();
       if (!client || !isCurrentTree() || changes.length === 0) return;
       applyFileChanges({
