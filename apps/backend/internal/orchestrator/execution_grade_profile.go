@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -81,7 +82,20 @@ func (s *Service) resolveExplicitWorkflowStartRoute(
 	} else if recordedSession != nil {
 		session, route = recordedSession, recordedRoute
 	}
+	s.logWorkflowSelection(ctx, taskID, stepID, entryIdentity, profileID, previewTask, session)
 	return session, profileID, route, nil
+}
+
+func (s *Service) logWorkflowSelection(ctx context.Context, taskID, stepID, entryID, profileID string, task *models.Task, session *models.TaskSession) {
+	flow := logger.ExecutionFlow{Stage: "workflow_selection", Outcome: "selected", TaskID: taskID, StepID: stepID, EntryID: entryID, ProfileID: profileID}
+	if session != nil {
+		flow.SessionID = session.ID
+		flow.RouteGeneration = uint64(session.RouteGeneration)
+	}
+	if task != nil {
+		flow.WorkflowID = task.WorkflowID
+	}
+	s.logger.Flow(ctx, flow)
 }
 
 // reserveSelectedStartLocked credits a counted destination without borrowing any

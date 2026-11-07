@@ -344,6 +344,7 @@ func (sm *StreamManager) receiveDurableAgentDeliveryEvent(
 		return false, err
 	}
 	if inserted {
+		sm.logDeliveryFlow(ctx, deliveryEvent, "received")
 		return true, nil
 	}
 	cursor, err := repository.GetAgentDeliveryCursor(ctx, deliveryEvent.StreamID)
@@ -381,6 +382,9 @@ func (sm *StreamManager) projectDurableAgentDeliveryEventWithEffect(
 		return nil
 	}
 	_, err := settler.SettleAgentDeliveryTerminal(ctx, deliveryEvent.StreamID, deliveryEvent.Sequence, outcome, time.Now().UTC())
+	if err == nil {
+		sm.logDeliveryFlow(ctx, deliveryEvent, string(outcome))
+	}
 	return err
 }
 

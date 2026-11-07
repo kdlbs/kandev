@@ -14,7 +14,7 @@ type sharedInferenceEndpoint interface {
 }
 
 func wireSharedInferenceCapacity(capacity *orchestrator.Service, settings *systemsettings.Store, log *zap.Logger, endpoints ...sharedInferenceEndpoint) *sharedInferenceConsumer {
-	consumer := &sharedInferenceConsumer{capacity: capacity, populationLogger: newInferencePopulationLogger(log)}
+	consumer := &sharedInferenceConsumer{capacity: capacity, flowLogger: log, populationLogger: newInferencePopulationLogger(log)}
 	for _, endpoint := range endpoints {
 		consumer.sources = append(consumer.sources, endpoint)
 		endpoint.SetInferenceConsumer(consumer)

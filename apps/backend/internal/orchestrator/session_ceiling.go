@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/constants"
@@ -529,6 +530,9 @@ func (c *sessionCeilingController) logDecision(req admissionRequest, origin laun
 		zap.String("task_id", req.taskID),
 		zap.String("session_id", req.sessionID),
 		zap.String("origin", string(origin)),
+		zap.String("grade", req.grade), zap.Bool("grade_known", req.gradeKnown),
+		zap.String("profile_id", req.profileID), zap.String("workflow_step_id", req.workflowStepID),
+		zap.String("reservation_id", decision.reservationKey), zap.Bool("population_known", decision.populationKnown),
 		zap.Int(ceilingFieldCeiling, decision.ceiling),
 		zap.Bool("admitted", decision.admitted),
 	}
@@ -548,8 +552,19 @@ func (c *sessionCeilingController) release(key string) {
 		return
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	held, exists := c.reservations[key]
+	flow := logger.ExecutionFlow{Stage: "reservation", Outcome: "released", ReservationID: key}
+	if held != nil {
+		flow.SessionID, flow.Grade = held.sessionID, held.grade
+		if !held.takenAt.IsZero() {
+			flow.DurationMS = time.Since(held.takenAt).Milliseconds()
+		}
+	}
 	delete(c.reservations, key)
+	c.mu.Unlock()
+	if exists {
+		logger.EmitExecutionFlow(c.logger, context.Background(), flow)
+	}
 }
 
 // rebind moves a launch-scoped reservation onto the session id that launch just

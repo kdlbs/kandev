@@ -217,7 +217,19 @@ func (sm *SessionManager) initializeSessionWithSettingsPolicy(
 	settingsPolicy SessionSettingsPolicy,
 	attempt *deliveryStartupAttempt,
 	restoreIdentities ...RestoreIdentity,
-) (*InitializeResult, error) {
+) (finalResult *InitializeResult, initErr error) {
+	flow := logger.ExecutionFlow{Stage: "session_restore"}
+	if execution != nil {
+		flow.TaskID, flow.SessionID, flow.ExecutionID, flow.AttemptID, flow.ProfileID = execution.TaskID, execution.SessionID, execution.ID, execution.currentStartupAttemptID(), execution.AgentProfileID
+	}
+	finishFlow := sm.logger.BeginFlow(ctx, flow)
+	defer func() {
+		if initErr != nil {
+			finishFlow("failed", "session_initialization_failed")
+		} else {
+			finishFlow("ready", "")
+		}
+	}()
 	if settingsPolicy != SessionSettingsPolicyStrict && settingsPolicy != SessionSettingsPolicyProviderRestored {
 		return nil, fmt.Errorf("unsupported session settings policy: %d", settingsPolicy)
 	}
