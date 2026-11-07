@@ -2,6 +2,7 @@ import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client
 import type { DashboardData } from "@/lib/state/slices/office/types";
 import type { QuorumResponseDTO } from "@/lib/state/slices/office/quorum-types";
 import { normalizeOfficeTask, type OfficeTaskWire } from "./office-task-normalize";
+import type { RawActivityEntry } from "./office-activity-normalize";
 
 const BASE = "/api/v1/office";
 
@@ -600,6 +601,33 @@ export function removeLabel(
 
 export function getDashboard(workspaceId: string, options?: ApiRequestOptions) {
   return fetchJson<DashboardData>(`${BASE}/workspaces/${workspaceId}/dashboard`, options);
+}
+
+/**
+ * One workspace row of the read-only multi-workspace aggregate
+ * (GET /api/v1/office/workspaces/aggregate). Mirrors the snake_case wire shape.
+ */
+export type WorkspaceAggregateEntry = {
+  workspace_id: string;
+  name: string;
+  task_count: number;
+  open_tasks: number;
+  in_progress_tasks: number;
+  blocked_tasks: number;
+  done_tasks: number;
+  pending_approvals: number;
+  agent_count: number;
+  running_agents: number;
+};
+
+export type WorkspaceAggregateWire = {
+  workspaces: WorkspaceAggregateEntry[];
+  recent_activity: RawActivityEntry[];
+};
+
+/** Every Office workspace the caller can reach, with counts and a merged activity feed. */
+export function getWorkspaceAggregate(options?: ApiRequestOptions) {
+  return fetchJson<WorkspaceAggregateWire>(`${BASE}/workspaces/aggregate`, options);
 }
 
 export * from "./office-runs-api";
