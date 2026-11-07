@@ -113,7 +113,14 @@ func (s *providerTierLimitService) enrichObservation(ctx context.Context, candid
 	if candidate.RequireExecutionUsage && candidate.UsagePolicy == nil {
 		return fmt.Errorf("execution allowance account is unknown")
 	}
-	c, err := s.contextFor(ctx, candidate.ID)
+	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID != candidate.ID {
+		return fmt.Errorf("execution allowance profile does not match candidate")
+	}
+	model := ""
+	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID == candidate.ID && agentusage.MatchesSelectedUsage(ctx, candidate.UsagePolicy) {
+		model = candidate.UsagePolicy.ExpectedModel
+	}
+	c, err := s.contextForModel(ctx, candidate.ID, model)
 	if err != nil {
 		return err
 	}
@@ -125,6 +132,11 @@ func (s *providerTierLimitService) enrichObservation(ctx context.Context, candid
 		return err
 	}
 	dimension := classifyLimitDimension(candidate, failure, c.observed)
+	if c.modelOverride && dimension == limitDimensionModelDaily {
+		// The scope learner groups requests by configured profile model; that
+		// cannot attribute a session override without mixing model histories.
+		return fmt.Errorf("overridden model daily allowance learning is unavailable")
+	}
 	observation.Tier = string(c.tier)
 	observation.Dimension = dimension
 	observation.RequestsMinute = used.RequestsMinute

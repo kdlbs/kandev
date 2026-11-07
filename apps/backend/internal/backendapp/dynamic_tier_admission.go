@@ -119,7 +119,7 @@ func (a *tierLimitAdapter) monthlyReset(ctx context.Context, candidate dynamicru
 // ObserveLimit records the classified limit and learns an undisclosed
 // allowance. It runs off the routing path.
 func (a *tierLimitAdapter) ObserveLimit(
-	_ context.Context,
+	ctx context.Context,
 	candidate dynamicruntime.Candidate,
 	failure *routingerr.Error,
 	at time.Time,
@@ -130,8 +130,10 @@ func (a *tierLimitAdapter) ObserveLimit(
 	if failure.Code != routingerr.CodeRateLimited && failure.Code != routingerr.CodeQuotaLimited {
 		return
 	}
+	// Keep the request's selected account/model evidence while allowing the
+	// detached observer to finish after the originating request is canceled.
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		observation := &sqliterepo.UsageLimitObservation{
 			ID: uuid.NewString(), ExecutionProfileID: candidate.ID,
