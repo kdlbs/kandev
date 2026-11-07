@@ -277,30 +277,32 @@ const (
 
 // classifyIdleReclaim is the single decision matrix for the idle-session
 // reclaim primitive. Reclaim is fail-closed: only sessions in an idle-yet-
-// resumable OR terminal shape AND without a live runtime AND without an
-// active turn proceed. Any uncertain signal falls into a skipped
+// resumable shape without a live runtime, or a failed/cancelled session, and
+// without an active turn proceed. Any uncertain signal falls into a skipped
 // disposition and the caller leaves the row untouched.
 //
 // Why include Completed in the allowed set: the subtask terminal collapse
 // in setSessionWaitingForInputIfRequested writes session.state=Completed
 // when the agent's last turn did not request input, and the parent task
-// has no further use for the provider-runtime reservation. Failed and
-// Cancelled are deliberately excluded — those have separate cancellation
-// cleanup paths (handleTerminalSessionOnStartup and the cancel pipelines)
-// that already reconcile executor rows.
+// has no further use for the provider-runtime reservation. A failed or
+// cancelled session can retain its live runtime after the transition; the
+// existing cleanup path releases that owner while preserving the session row.
 func classifyIdleReclaim(
 	sessionState models.TaskSessionState,
 	agentRunning, hasActiveTurn, hasResumeToken bool,
 	rowStatus string,
 ) idleReclaimDisposition {
+	terminal := false
 	switch sessionState {
 	case models.TaskSessionStateWaitingForInput,
 		models.TaskSessionStateIdle,
 		models.TaskSessionStateCompleted:
+	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
+		terminal = true
 	default:
 		return idleReclaimDispositionSkippedState
 	}
-	if agentRunning {
+	if agentRunning && !terminal {
 		return idleReclaimDispositionSkippedLive
 	}
 	if hasActiveTurn {
@@ -338,6 +340,12 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 	if sessionID == "" {
 		return nil
 	}
+	return s.withSessionPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.reclaimIdleSessionAdmitted(admittedCtx, sessionID)
+	})
+}
+
+func (s *Service) reclaimIdleSessionAdmitted(ctx context.Context, sessionID string) error {
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
 	if s.lspLeases != nil && s.lspLeases.HasActiveLSPLease(sessionID) {
@@ -374,6 +382,18 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 	if decision != idleReclaimDispositionReclaimed {
 		return nil
 	}
+	if agentRunning && (session.State == models.TaskSessionStateFailed || session.State == models.TaskSessionStateCancelled) {
+		// A terminal label alone does not prove the runtime has no pending work.
+		if !s.canReclaimLiveTerminal(ctx, running) {
+			return nil
+		}
+	}
+	return s.releaseIdleRuntime(ctx, running, agentRunning)
+}
+
+// releaseIdleRuntime runs while prompt admission and the lifecycle lock are held.
+func (s *Service) releaseIdleRuntime(ctx context.Context, running *models.ExecutorRunning, agentRunning bool) error {
+	sessionID := running.SessionID
 	var cleanupErr error
 	if cleaner, ok := s.agentManager.(executionIdentityCleaner); ok {
 		cleanupErr = cleaner.CleanupStaleExecutionBySessionIDIfCurrent(
@@ -382,8 +402,10 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 			running.AgentExecutionID,
 			running.UpdatedAt,
 		)
-	} else {
+	} else if !agentRunning {
 		cleanupErr = s.agentManager.CleanupStaleExecutionBySessionID(ctx, sessionID)
+	} else {
+		return nil
 	}
 	if cleanupErr != nil {
 		s.logger.Warn("idle reclaim: cleanup failed; row preserved",
@@ -403,6 +425,16 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 		zap.Bool("has_resume_token", running.ResumeToken != ""),
 		zap.Bool("has_worktree", running.WorktreePath != ""))
 	return nil
+}
+
+func (s *Service) canReclaimLiveTerminal(ctx context.Context, running *models.ExecutorRunning) bool {
+	if running.AgentExecutionID == "" || running.UpdatedAt.IsZero() || s.messageQueue == nil {
+		return false
+	}
+	if _, ok := s.repo.(executionIdentityRepairer); !ok {
+		return false
+	}
+	return !s.sessionHasKnownIdleWork(ctx, running.SessionID)
 }
 
 // sessionHasActiveTurn reports whether the orchestrator has any in-flight
