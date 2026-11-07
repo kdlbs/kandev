@@ -500,6 +500,7 @@ type RemoteStatusPollRequest struct {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
+	ExecutionGrade             string
 	ProfileID                  string
 	ProfileName                string
 	AgentID                    string
