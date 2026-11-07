@@ -294,6 +294,13 @@ func (m *Manager) claimPromptCompletion(
 		}
 		return claim, true
 	}
+	if deliverySubmissionIdentityMismatch(execution, event.DeliverySubmissionID) {
+		m.logger.Debug("ignoring completion for superseded prompt submission",
+			zap.String("execution_id", execution.ID),
+			zap.String("event_submission_id", event.DeliverySubmissionID),
+			zap.String("current_submission_id", currentDeliverySubmissionID(execution)))
+		return claim, false
+	}
 
 	execution.promptLifecycleMu.Lock()
 	claim.locked = true

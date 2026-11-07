@@ -350,3 +350,46 @@ lifecycle also retires it. A managed exit without an ID is retired when the
 current descriptor has an ID, because the producer cannot be identified. Older
 descriptors keep the existing generation check for compatibility.
 Delivery: [Uncommitted bootstrap relaunch](../../../plans/uncommitted-bootstrap-relaunch/plan.md).
+
+## Uncommitted fresh-start successor relaunch
+
+An explicit fresh start can fail before its replacement native conversation commits.
+SQL still identifies generation N, while agentctl retains startup events for N+1.
+Another fresh-start attempt selects N+1 again through `Executor.applyDeliveryIdentity`.
+The selected stream can therefore contain retained events without a SQL cursor.
+
+`canReplayFreshBootstrapEvents` permits replay from zero under the common
+fresh-bootstrap safeguards: no native identity or required
+native conversation, no SQL cursor, a fully retained prefix, zero acknowledgments,
+and no unresolved or incompletely enumerated submission evidence.
+The authenticated execution must carry `ReplacesNativeConversation`.
+SQL must identify the same session and incarnation at exactly the preceding
+positive generation, as checked by `replacementGenerationPending`.
+A committed selected generation, missing predecessor, generation gap, foreign
+owner, or failed authority read cannot authorize this exception.
+
+The generation-one path still requires `deliveryBootstrap` and absent SQL
+generation authority. A successor keeps that flag false and uses
+`awaitSilentRestoreGeneration` under its existing successor owner and timeout.
+Widening the generation-one bootstrap flag uses the wrong authority wait:
+its predecessor already exists and is not the successor's committed authority.
+Preflight creates no receipt or checkpoint and does not initialize ACP itself.
+Normal startup creates the replacement, and event admission waits for its
+execution-fenced `native_replaced` commit before receipt, projection, or ACK.
+Retained process-exit errors retain the process-manager fencing defined above.
+
+`receiveResumedBootstrapCheckpoint` remains the separate generation-one recovery
+path for a committed native identity. It cannot receive an uncommitted successor
+event against predecessor authority. Predecessor history remains untouched.
+Replayed terminal events retain their original prompt-attempt identity. A terminal
+event whose submission does not match the execution's current or expected initial
+prompt is still received, projected, settled, and acknowledged, but it cannot
+complete the live prompt; prompt generation alone is not a sufficient attempt
+identity.
+These rules extend existing fresh-start recovery and durable ownership contracts.
+They add no journal mutation, schema, protocol, or recovery action.
+
+Verification includes registered agentctl routes with a real journal, SQL-backed
+successor admission, repeated failed starts, cancellation, and mixed predecessor
+history with an uncommitted successor. Stray non-adjacent streams remain ineligible.
+Delivery: [Fresh-start bootstrap replay](../../../plans/fresh-start-bootstrap-replay/plan.md).
