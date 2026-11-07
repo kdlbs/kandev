@@ -266,8 +266,8 @@ func TestSSHKeepaliveWatchdogDeclaresLossOnProbeError(t *testing.T) {
 	w.awaitProbeExit()
 }
 
-// A stop observed at the common loss-notification boundary suppresses both
-// probe-error and deadline notifications. Running watchdogs still report loss.
+// TestSSHKeepaliveWatchdogStopSignalSuppressesLoss checks both loss reasons
+// at the notification boundary. Running watchdogs still report loss.
 //
 // @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.10
 func TestSSHKeepaliveWatchdogStopSignalSuppressesLoss(t *testing.T) {

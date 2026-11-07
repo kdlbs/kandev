@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// Queue every input before starting the loop, so stop priority does not depend
-// on the scheduler running two channel operations without interruption.
+// TestSSHKeepaliveRunLoopPendingStopAndProbeError checks loop-level priority
+// with every input queued before startup, without assumptions about scheduling.
 //
 // @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.10
 func TestSSHKeepaliveRunLoopPendingStopAndProbeError(t *testing.T) {

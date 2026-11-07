@@ -23,6 +23,7 @@ afterEach(() => {
   cleanup();
   vi.resetAllMocks();
 });
+/** Build a complete form with explicit defaults for automation save tests. */
 function baseForm(overrides: Partial<FormState> = {}): FormState {
   return {
     name: "Test",
@@ -51,6 +52,7 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
   };
 }
 
+/** Keep saved MCP grants separate from edited grants when exercising save failures. */
 function saveOptions(): SaveHandlerOpts {
   const savedForm = baseForm({
     mcpSelection: { builtin_packages: ["core"], definition_ids: [] },
