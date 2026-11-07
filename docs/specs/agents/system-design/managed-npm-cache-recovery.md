@@ -80,13 +80,15 @@ Do not add `ENOENT` to the generic transient-npm allowlist.
 
 ## Private preparation
 
-Add a proposed `PreparedRuntime` owner under `agent/managedruntime`.
+The `PreparedRuntime` owner lives under `agent/managedruntime`.
 It receives a trusted package descriptor, the effective environment, and a
 process runner owned by the local agentctl instance. The descriptor includes
 the exact selected version and expected command from built-in metadata.
 
 The owner creates a private `0700` root under the execution host's temporary
-directory. It records an opaque owner marker and creates separate project
+directory. Resolve the trusted temporary parent to its canonical path before
+allocation. Retain no-follow inspection of the private root and its descendants.
+It records an opaque owner marker and creates separate project
 and npm-cache directories. Paths remain outside the task checkout, mounted
 provider home, shared npm cache, and other preparation roots.
 

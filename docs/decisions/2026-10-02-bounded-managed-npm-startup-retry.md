@@ -52,9 +52,9 @@ other probe failures remain strict ETARGET-only.
 It does not authorize mutation or deletion of a shared runtime tree.
 
 The [incomplete-cache extension](2026-11-07-isolated-managed-npm-cache-recovery.md)
-also permits private preparation for verified missing execution metadata or
-executable links. It includes managed ACP and native Codex app-server paths.
-Its implementation remains pending; shared-tree protection remains mandatory.
+also permits private preparation for an independently verified missing
+execution-tree root manifest. It includes managed ACP and native Codex app-server paths.
+Its implementation is delivered; shared-tree protection remains mandatory.
 
 ## Alternatives considered
 

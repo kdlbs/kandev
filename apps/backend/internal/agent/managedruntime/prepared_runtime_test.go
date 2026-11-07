@@ -250,7 +250,7 @@ func TestPreparedRuntimeNPM(t *testing.T) {
 	if prepared.ProjectPrefix() == sharedProject || prepared.CacheDirectory() == sharedCache {
 		t.Fatalf("prepared paths = %q and %q, want private project/cache", prepared.ProjectPrefix(), prepared.CacheDirectory())
 	}
-	if runtime.GOOS == "windows" && !strings.EqualFold(filepath.Base(command[0]), "npx.cmd") {
+	if runtime.GOOS == preparedRuntimeWindowsOS && !strings.EqualFold(filepath.Base(command[0]), "npx.cmd") {
 		t.Logf("Windows npx command resolved as %q", command[0])
 	}
 }
@@ -379,7 +379,7 @@ func populatePreparedRuntimeCache(args []string, packageSpec string) error {
 	if err := os.MkdirAll(binDirectory, 0o700); err != nil {
 		return err
 	}
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == preparedRuntimeWindowsOS {
 		shim := `@ECHO off` + "\r\n" + `"%~dp0\..\managed-acp\bin\cli.js" %*` + "\r\n"
 		return os.WriteFile(filepath.Join(binDirectory, "managed-acp.cmd"), []byte(shim), 0o600)
 	}

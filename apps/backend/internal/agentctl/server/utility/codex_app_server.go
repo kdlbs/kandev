@@ -243,7 +243,11 @@ func (e *CodexAppServerInferenceExecutor) startForProbe(
 	args = append([]string(nil), args...)
 	if prepared != nil {
 		var err error
-		args, err = prepared.RewriteNpxCommand(args)
+		var rewritten []string
+		rewritten, err = prepared.RewriteNpxCommand(append([]string{command}, args...))
+		if err == nil {
+			command, args = rewritten[0], rewritten[1:]
+		}
 		if err != nil {
 			return nil, nil, nil, "", nil, nil, err
 		}

@@ -16,19 +16,19 @@ export const MANAGED_RUNTIME_CACHE_ROOT = "/tmp/kandev-managed-npm-cache";
 const MANAGED_RUNTIME_AGENT_NAME = "opencode-acp";
 const MANAGED_RUNTIME_TEST_MODEL = "opencode/big-pickle";
 const OPENCODE_SELECTION_KEY = "managed_runtime.opencode.selection";
-const nativeSelections = new WeakMap<BackendContext, string>();
+const originalRuntimeSelections = new WeakMap<BackendContext, string>();
 
 function selectManagedRuntime(backend: BackendContext, restore = false): void {
   const database = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
   try {
     database.exec("PRAGMA busy_timeout = 10000");
     if (restore) {
-      const original = nativeSelections.get(backend);
+      const original = originalRuntimeSelections.get(backend);
       if (original === undefined) return;
       database
         .prepare("UPDATE settings SET value = ? WHERE key = ?")
         .run(original, OPENCODE_SELECTION_KEY);
-      nativeSelections.delete(backend);
+      originalRuntimeSelections.delete(backend);
       return;
     }
     const row = database
@@ -37,9 +37,44 @@ function selectManagedRuntime(backend: BackendContext, restore = false): void {
     if (!row) throw new Error("OpenCode runtime selection must exist before managed-runtime setup");
     const selection = JSON.parse(row.value);
     if (selection.source !== "native") return;
-    nativeSelections.set(backend, row.value);
+    originalRuntimeSelections.set(backend, row.value);
     selection.source = "managed";
     selection.selected_version = "";
+    selection.revision += 1;
+    database
+      .prepare("UPDATE settings SET value = ? WHERE key = ?")
+      .run(JSON.stringify(selection), OPENCODE_SELECTION_KEY);
+  } finally {
+    database.close();
+  }
+}
+
+function selectManagedRuntimeFamily(backend: BackendContext, family?: "v1" | "v2"): void {
+  if (!family) {
+    selectManagedRuntime(backend);
+    return;
+  }
+  const database = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+  try {
+    const row = database
+      .prepare("SELECT value FROM settings WHERE key = ?")
+      .get(OPENCODE_SELECTION_KEY) as { value: string };
+    if (!originalRuntimeSelections.has(backend)) originalRuntimeSelections.set(backend, row.value);
+    const selection = JSON.parse(row.value);
+    const versions = JSON.parse(
+      fs.readFileSync(
+        path.resolve(
+          __dirname,
+          "../../../backend/internal/agent/agents/managed_npm_runtime_versions.json",
+        ),
+        "utf8",
+      ),
+    ) as Record<string, string>;
+    selection.family = family;
+    selection.package = family === "v2" ? "@opencode/cli" : "opencode-ai";
+    selection.source = "managed";
+    selection.selected_version = versions[selection.package];
+    selection.applied_default_version = selection.selected_version;
     selection.revision += 1;
     database
       .prepare("UPDATE settings SET value = ? WHERE key = ?")
@@ -96,6 +131,7 @@ export type ManagedRuntimePreparationOptions = {
   retryReleaseFile?: string;
   cacheRoot?: string;
   registryHost?: string;
+  runtimeFamily?: "v1" | "v2";
 };
 
 export type IncompleteManagedRuntimeFixture = {
@@ -150,6 +186,7 @@ export async function prepareIncompleteManagedRuntimeProfile(
   const launchId = options.launchId ?? randomUUID();
   const cacheRoot =
     options.cacheRoot ?? `/tmp/kandev-managed-npm-cache-${createSha512(launchId).slice(0, 12)}`;
+  selectManagedRuntimeFamily(backend, options.runtimeFamily);
   const packageSpec = readOpenCodePackageSpec(backend);
   const registry = await startManagedRuntimeTestRegistry({
     root: backend.tmpDir,
@@ -186,7 +223,6 @@ export async function prepareIncompleteManagedRuntimeProfile(
   seedManagedRuntimeExecutionTree(cacheRoot, packageSpec, "opencode", launchId);
   if (!options.seedHealthyCache) fs.rmSync(path.join(sharedRoot, "package.json"));
 
-  selectManagedRuntime(backend);
   const inheritedPath = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
   const pathWithoutNativeOpenCode = inheritedPath.filter(
     (directory) => !fs.existsSync(path.join(directory, "opencode")),

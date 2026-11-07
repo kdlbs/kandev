@@ -164,3 +164,29 @@ All task-defined verification selections are terminal.
 
 Existing browser regression selection: 7 passed. The primary conversation owns
 the normal-hook commit, PR publication, and requested CI/review follow-up.
+
+
+## PR 5164 remediation
+
+Review reproduced two missing integration cases before the fixes:
+`TestManagedRuntimePreparationNativeCodexProbeReplacesFailedProcess` failed
+because the native executor passed argv without its executable to the shared
+rewriter. `TestPreparedRuntimeResolvesTrustedTemporaryParent` failed when a
+trusted temporary parent contained a symlink. Both are now GREEN, including
+under the race detector. The private root and descendants retain no-follow
+inspection; only the trusted system temporary parent is canonicalized.
+
+CI's Linux, poisoned-environment, and Windows failures shared one existing
+stderr expectation. The test now accepts the sanitized path marker and still
+explicitly rejects the raw private path. CI lint's repeated Windows literal
+uses one package constant. The incomplete-cache ADR now records delivered
+recovery while the separate dependency package remains pending.
+
+The desktop and phone session scenarios now exercise both registered OpenCode
+families. Their manifest assertions derive the selected package name/version
+instead of assuming the v1 package. The fixture stores a complete, validated
+family/package selection and restores the original selection after each case.
+The expanded desktop and phone selections pass 3 cases each.
+
+The primary conversation records final executor reruns, the normal-hook fixup
+commit, exact-head CI results, and review-thread dispositions.

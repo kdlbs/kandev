@@ -14,7 +14,10 @@ import (
 	"sync"
 )
 
-const preparedRuntimeOwnerMarker = ".kandev-managed-runtime-owner"
+const (
+	preparedRuntimeOwnerMarker = ".kandev-managed-runtime-owner"
+	preparedRuntimeWindowsOS   = "windows"
+)
 
 // ManagedRuntimeCommand is an owned process request for npm preparation.
 type ManagedRuntimeCommand struct {
@@ -52,7 +55,11 @@ func PreparePrivateRuntime(
 	if run == nil {
 		return nil, errors.New("managed runtime command runner is required")
 	}
-	root, err := os.MkdirTemp("", "kandev-managed-runtime-")
+	tempParent, err := canonicalManagedRuntimeTempParent()
+	if err != nil {
+		return nil, err
+	}
+	root, err := os.MkdirTemp(tempParent, "kandev-managed-runtime-")
 	if err != nil {
 		return nil, fmt.Errorf("create private managed runtime root: %w", err)
 	}
@@ -304,7 +311,7 @@ func validatePreparedNpmBinLink(executionRoot string, inventory NpxExecutionTree
 	binDirectory := filepath.Join(executionRoot, "node_modules", ".bin")
 	packageDirectory := filepath.Join(executionRoot, "node_modules", filepath.FromSlash(inventory.PackageName))
 	executable := filepath.Join(packageDirectory, filepath.FromSlash(inventory.BinTarget))
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == preparedRuntimeWindowsOS {
 		return validateWindowsNpmBinShim(binDirectory, inventory.BinName, executable)
 	}
 	link := filepath.Join(binDirectory, inventory.BinName)
@@ -369,8 +376,20 @@ func pathWithin(root, candidate string) bool {
 
 func sameFilesystemPath(left, right string) bool {
 	left, right = filepath.Clean(left), filepath.Clean(right)
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == preparedRuntimeWindowsOS {
 		return strings.EqualFold(left, right)
 	}
 	return left == right
+}
+
+func canonicalManagedRuntimeTempParent() (string, error) {
+	parent, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		return "", fmt.Errorf("resolve managed runtime temporary parent: %w", err)
+	}
+	parent, err = filepath.Abs(parent)
+	if err != nil {
+		return "", fmt.Errorf("normalize managed runtime temporary parent: %w", err)
+	}
+	return parent, nil
 }
