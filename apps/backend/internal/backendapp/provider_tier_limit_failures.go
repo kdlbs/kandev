@@ -134,9 +134,7 @@ func (s *providerTierLimitService) enrichObservation(ctx context.Context, candid
 	dimension := classifyLimitDimension(candidate, failure, c.observed)
 	observation.Tier = string(c.tier)
 	observation.Dimension = dimension
-	if c.modelOverride && dimension == limitDimensionModelDaily {
-		observation.Dimension = limitDimensionOverrideModelDaily
-	}
+	observation.ModelID = c.profile.Model
 	observation.RequestsMinute = used.RequestsMinute
 	observation.RequestsDay = used.RequestsDay
 	observation.ActiveTurns = used.ActiveTurns

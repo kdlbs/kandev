@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
@@ -12,10 +13,6 @@ import (
 // limitDimensionModelDaily is a per-model daily allowance error. It learns the
 // model's request scope, never the account-wide daily allowance.
 const limitDimensionModelDaily = "model_daily"
-
-// Older observations identify only a profile, not an overridden model. Keep
-// those observations out of profile-default same-minute grouping.
-const limitDimensionOverrideModelDaily = "model_daily_override"
 
 // readScopeUsage counts each scope's requests since its daily reset over the
 // tier's account profiles whose model the scope covers.
@@ -102,7 +99,10 @@ func (s *providerTierLimitService) learnModelScope(ctx context.Context, c tierLi
 
 func (s *providerTierLimitService) scopeToLearn(ctx context.Context, c tierLimitContext, models map[string]string, used agentusage.LimitUsage, at time.Time) (agentusage.RequestScope, float64, error) {
 	if c.modelOverride {
-		scope, ok := agentusage.CoveringScope(c.effective.Scopes, c.profile.Model)
+		scope, ok, _ := s.sameMinuteGroup(ctx, c, models, at)
+		if !ok {
+			scope, ok = agentusage.CoveringScope(c.effective.Scopes, c.profile.Model)
+		}
 		if !ok {
 			model := agentusage.ScopeModelID(c.profile.Model)
 			scope = agentusage.RequestScope{ID: agentusage.ModelScopeID(model), Kind: agentusage.ScopeKindModel, Models: []string{model}}
@@ -114,7 +114,15 @@ func (s *providerTierLimitService) scopeToLearn(ctx context.Context, c tierLimit
 		counted, err := s.readModelRequestCount(ctx, c.ids, scope.Models, start, at)
 		return scope, counted, err
 	}
-	if group, ok := s.sameMinuteGroup(ctx, c, models, at); ok {
+	if group, ok, usesActualModels := s.sameMinuteGroup(ctx, c, models, at); ok {
+		if usesActualModels {
+			start, _, err := agentusage.DailyLimitWindow(at, group.DailyReset)
+			if err != nil {
+				return group, 0, err
+			}
+			counted, err := s.readModelRequestCount(ctx, c.ids, group.Models, start, at)
+			return group, counted, err
+		}
 		counted, err := s.countScope(ctx, models, group, at)
 		return group, counted, err
 	}
@@ -138,25 +146,31 @@ func (s *providerTierLimitService) countScope(ctx context.Context, models map[st
 // sameMinuteGroup finds other unconfigured models of the account whose
 // per-model daily block was observed within a minute of this one. Observation
 // read errors fall back to model learning.
-func (s *providerTierLimitService) sameMinuteGroup(ctx context.Context, c tierLimitContext, models map[string]string, at time.Time) (agentusage.RequestScope, bool) {
+func (s *providerTierLimitService) sameMinuteGroup(ctx context.Context, c tierLimitContext, models map[string]string, at time.Time) (agentusage.RequestScope, bool, bool) {
 	configured := configuredScopes(c)
 	if agentusage.ConfiguredScopeCovers(configured, c.profile.Model) {
-		return agentusage.RequestScope{}, false
+		return agentusage.RequestScope{}, false, false
 	}
 	observations, err := s.store.ListUsageLimitObservationsSince(ctx, at.Add(-sameMinuteWindow))
 	if err != nil {
-		return agentusage.RequestScope{}, false
+		return agentusage.RequestScope{}, false, false
 	}
 	var partners []string
+	usesActualModels := false
 	for _, o := range observations {
-		if o.AccountKey != c.key || o.Dimension != limitDimensionModelDaily || o.ExecutionProfileID == c.profile.ID || o.ObservedAt.After(at.Add(sameMinuteWindow)) {
+		if o.AccountKey != c.key || o.Dimension != limitDimensionModelDaily || o.ObservedAt.After(at.Add(sameMinuteWindow)) {
 			continue
 		}
-		if model, ok := models[o.ExecutionProfileID]; ok && !agentusage.ConfiguredScopeCovers(configured, model) {
+		model := o.ModelID
+		if model != "" && !agentusage.ConfiguredScopeCovers(configured, model) {
 			partners = append(partners, model)
+			if o.ModelID != "" && !strings.EqualFold(agentusage.ScopeModelID(o.ModelID), agentusage.ScopeModelID(models[o.ExecutionProfileID])) {
+				usesActualModels = true
+			}
 		}
 	}
-	return agentusage.ProvisionalGroupFor(c.learned.Tiers[c.tier].Scopes, c.profile.Model, partners)
+	group, ok := agentusage.ProvisionalGroupFor(c.learned.Tiers[c.tier].Scopes, c.profile.Model, partners)
+	return group, ok, usesActualModels
 }
 
 // configuredScopes are catalog defaults and every scope the owner set. An
