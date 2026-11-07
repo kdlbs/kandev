@@ -196,8 +196,7 @@ func readNpxPackageManifest(packageDir *os.File) (npmPackageManifest, error) {
 	if len(data) > maxNpxPackageManifestBytes {
 		return manifest, errors.New("npm package manifest exceeds inspection limit")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	if err := decoder.Decode(&manifest); err != nil {
+	if err := json.Unmarshal(data, &manifest); err != nil {
 		return manifest, err
 	}
 	return manifest, nil
@@ -209,6 +208,7 @@ func selectedNpmPackageBin(packageName string, raw json.RawMessage) (string, str
 	}
 	var single string
 	if err := json.Unmarshal(raw, &single); err == nil {
+		single = strings.TrimPrefix(single, "./")
 		return npmPackageBase(packageName), single, validPackageBinTarget(single)
 	}
 	var bins map[string]string
@@ -224,6 +224,7 @@ func selectedNpmPackageBin(packageName string, raw json.RawMessage) (string, str
 		name = npmPackageBase(packageName)
 	}
 	target, ok := bins[name]
+	target = strings.TrimPrefix(target, "./")
 	return name, target, ok && validNpmBinName(name) && validPackageBinTarget(target)
 }
 
@@ -236,7 +237,7 @@ func validNpmBinName(name string) bool {
 }
 
 func validPackageBinTarget(target string) bool {
-	if target == "" || strings.ContainsAny(target, "\\\x00") || strings.HasPrefix(target, "/") {
+	if target == "" || strings.ContainsAny(target, "\\\x00:") || strings.HasPrefix(target, "/") {
 		return false
 	}
 	for _, component := range strings.Split(target, "/") {

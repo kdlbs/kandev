@@ -13,7 +13,6 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
-	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	"go.uber.org/zap"
 )
 
@@ -61,7 +60,7 @@ done
 		t.Fatalf("models = %#v, want fake model", response.Models)
 	}
 	bridge := runtimeComponentByRole(t, response.RuntimeInfo, agents.RuntimeComponentBridge)
-	if bridge.Name != "Codex" || bridge.Source != agents.RuntimeComponentManaged || bridge.ObservedVersion != parseCodexVersion([]byte(protocol.SupportedCodexVersion)) {
+	if bridge.Name != "Codex" || bridge.Source != agents.RuntimeComponentManaged || bridge.ObservedVersion != "" || response.AgentVersion != "" {
 		t.Fatalf("runtime bridge = %#v", bridge)
 	}
 	if !slices.Equal(command, originalCommand) {

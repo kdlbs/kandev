@@ -164,7 +164,7 @@ func (m *Manager) prepareManagedRuntimePrivately(
 	) error {
 		_, err := m.runManagedRuntimeCommand(commandCtx, tools.CommandSpec{
 			Path: command.Path, Args: command.Args, Dir: command.Dir, Env: env, StripEnv: stripEnv,
-		})
+		}, command.RetainWhile)
 		if err != nil && ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -172,8 +172,8 @@ func (m *Manager) prepareManagedRuntimePrivately(
 	})
 }
 
-func (m *Manager) runManagedRuntimeCommand(ctx context.Context, spec tools.CommandSpec) ([]byte, error) {
-	release, err := m.admitStart()
+func (m *Manager) runManagedRuntimeCommand(parent context.Context, spec tools.CommandSpec, retainWhile ...func(func() bool)) ([]byte, error) {
+	ctx, release, err := m.BeginOwnedOperation(parent)
 	if err != nil {
 		return nil, err
 	}
@@ -189,19 +189,48 @@ func (m *Manager) runManagedRuntimeCommand(ctx context.Context, spec tools.Comma
 	if err != nil {
 		return nil, err
 	}
+	for _, retain := range retainWhile {
+		retain(func() bool {
+			select {
+			case <-proc.Done:
+				return m.processGroupAlive(proc.process.cmd.Process.Pid)
+			default:
+				return true
+			}
+		})
+	}
 	_ = proc.Stdin.Close()
+	defer func() { _ = proc.Stdout.Close() }()
+	defer func() { _ = proc.Stderr.Close() }()
 	stdout := collectManagedCommandOutput(proc.Stdout)
 	stderr := collectManagedCommandOutput(proc.Stderr)
+	return m.waitManagedRuntimeCommand(ctx, proc, stdout, stderr)
+}
+
+func (m *Manager) waitManagedRuntimeCommand(ctx context.Context, proc *PipedProcess, stdout, stderr <-chan []byte) ([]byte, error) {
 	select {
 	case <-proc.Done:
 	case <-ctx.Done():
 		stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
 		_ = m.processRunner.Stop(stopCtx, StopProcessRequest{ProcessID: proc.ID})
-		cancel()
-		<-proc.Done
+		select {
+		case <-proc.Done:
+		case <-stopCtx.Done():
+			return nil, errors.Join(ctx.Err(), stopCtx.Err())
+		}
 	}
-	output := <-stdout
-	<-stderr
+	var output []byte
+	select {
+	case output = <-stdout:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case <-stderr:
+	case <-ctx.Done():
+		return output, ctx.Err()
+	}
 	waitErr := proc.Wait()
 	if ctx.Err() != nil {
 		return output, ctx.Err()

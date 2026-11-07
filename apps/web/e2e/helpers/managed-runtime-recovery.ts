@@ -56,6 +56,7 @@ function selectManagedRuntimeFamily(backend: BackendContext, family?: "v1" | "v2
   }
   const database = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
   try {
+    database.exec("PRAGMA busy_timeout = 10000");
     const row = database
       .prepare("SELECT value FROM settings WHERE key = ?")
       .get(OPENCODE_SELECTION_KEY) as { value: string };
@@ -214,7 +215,7 @@ export async function prepareIncompleteManagedRuntimeProfile(
     npmInvocationLog = path.join(backend.tmpDir, `managed-runtime-npm-${launchId}.log`);
     fs.writeFileSync(
       npmPath,
-      `#!/bin/sh\nprintf '%s\\n' "$*" >> "$E2E_NPM_EXEC_LOG"\nexec "${realNpmPath}" "$@" 2>> "$E2E_NPM_EXEC_LOG.stderr"\n`,
+      `#!/bin/sh\nnode -e 'require("node:fs").appendFileSync(process.env.E2E_NPM_EXEC_LOG, JSON.stringify(process.argv.slice(1))+"\\n")' -- "$@"\nexec "${realNpmPath}" "$@" 2>> "$E2E_NPM_EXEC_LOG.stderr"\n`,
       { mode: 0o755 },
     );
     hostFixturePaths.push(npmPath);

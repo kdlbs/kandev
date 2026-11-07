@@ -165,7 +165,6 @@ All task-defined verification selections are terminal.
 Existing browser regression selection: 7 passed. The primary conversation owns
 the normal-hook commit, PR publication, and requested CI/review follow-up.
 
-
 ## PR 5164 remediation
 
 Review reproduced two missing integration cases before the fixes:
@@ -190,3 +189,62 @@ The expanded desktop and phone selections pass 3 cases each.
 
 The primary conversation records final executor reruns, the normal-hook fixup
 commit, exact-head CI results, and review-thread dispositions.
+
+### Additional CI and review remediation
+
+The next CI run passed all backend, frontend, Windows, and container jobs.
+Its desktop restart scenario exposed a fixture write during SQLite startup
+contention. The write now has a five-second busy timeout and guaranteed
+connection cleanup. This changes fixture setup, not application database policy.
+
+New regression tests reproduced the ordinary HTTP timeout, stale flight
+registration, configuration-evidence reuse, npm line
+boundary, descriptive-path redaction, and utility teardown defects. Tests ran
+against the prior production files before the fixes were restored. An actual
+owned command also reproduced missing instance-lifetime cancellation.
+Publication coverage rejects superseded results. A further regression reproduced
+a delayed exit publishing evidence after configuration changed; configuration
+now closes the evidence channel and invalidates the snapshot without changing
+the launched process generation.
+
+Preparation now uses the long-running client and the caller deadline. Changed
+commands or wrappers retire prior startup evidence; unchanged retry configuration
+preserves it. A regression covers that required retry handshake. Probe registration and cache
+publication share their generation and flight locks. A separate case preserves
+returning to a previously valid profile context. The utility handler cancels
+and drains active probes before instance cleanup; failed drainage retains the
+cleanup hook. Private preparation registers live-consumer guards, bounds process
+and output waits, and retains files until consumer cleanup can be confirmed.
+
+Inventory accepts safe leading `./` bin targets and rejects trailing manifest
+data. Raw diagnostics discard overlong-line suffixes and redact path-bearing
+ENOENT descriptions. Start preparation requires authenticated control. Native
+Codex probes leave unverified versions unknown rather than substituting a
+compiled schema version. The native process probe asserts both unknown fields.
+
+The npm fixture records JSON argument arrays. Its settings scenario skips
+Windows before invoking POSIX fixture tools. Desktop validation uses a temporary
+parent containing spaces to exercise argument and path handling.
+
+Focused regression and race command (six affected packages):
+
+```bash
+cd apps/backend
+GOCACHE=/tmp/kandev-go-cache go test -trimpath -race ./internal/agent/managedruntime ./internal/agent/runtime/agentctl ./internal/agent/hostutility ./internal/agentctl/server/utility ./internal/agentctl/server/api ./internal/agentctl/server/process -run 'TestManagedRuntime|TestPreparedRuntime|TestProfileFlight|TestProfile.*(Context|Refresh|Invalid)|TestRuntimeObservationCodex|TestHandleStart|TestProbeFailureLog|TestProfileProbeFailure' -count=1
+```
+
+All six packages pass. Real npm preparation against the local registry passes.
+Changed-package Go lint and changed-file web lint pass. Fresh helper builds and
+post-remediation browser results are recorded by the primary conversation.
+The first repeated desktop run passed five cases and timed out in one v2 resume
+case. An isolated v2 rerun passed, then all six repeated cases passed with pprof
+enabled for diagnosis. These runs do not establish the timeout's cause. The
+primary conversation keeps this observation open while checking the remaining
+executors and fresh CI.
+
+Final affected browser selections pass with retries disabled: repeated desktop
+6/6 (temporary parent contains spaces), phone 3/3, Docker/SSH 4/4, and existing
+startup/profile regressions 7/7. These are 17 distinct cases and 20 passing
+executions in the final selections. The earlier isolated timeout remains
+recorded above; fresh exact-head CI and review evidence remain externally
+pending until the primary conversation completes delivery checks.

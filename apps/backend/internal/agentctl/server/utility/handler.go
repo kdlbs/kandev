@@ -27,6 +27,7 @@ type Handler struct {
 	authenticatedControl func(*gin.Context) bool
 	instanceID           string
 	preparation          *managedRuntimePreparationState
+	probes               probeLifecycle
 }
 
 // NewHandler creates a new inference handler.
@@ -43,8 +44,11 @@ func NewHandler(_ string, logger *zap.Logger) *Handler {
 // Close retires attempt evidence and retries cleanup for any owner retained
 // after a prior filesystem cleanup failure.
 func (h *Handler) Close() error {
-	if h == nil || h.preparation == nil {
+	if h == nil {
 		return nil
+	}
+	if err := h.probes.close(); err != nil {
+		return err
 	}
 	return h.preparation.close()
 }
@@ -75,7 +79,13 @@ func (h *Handler) handleProbe(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.probeExecutor(req).Probe(c.Request.Context(), &req)
+	ctx, release, err := h.probes.begin(c.Request.Context())
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, ProbeResponse{Success: false, Error: "utility probes are stopping"})
+		return
+	}
+	defer release()
+	resp, err := h.probeExecutor(req).Probe(ctx, &req)
 	if err != nil {
 		h.logger.Error("inference probe failed",
 			append(h.probeExecutionFailureFields(err), zap.Error(err))...)

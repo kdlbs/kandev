@@ -965,7 +965,11 @@ func (c *Client) start(ctx context.Context, preparation *types.ManagedRuntimePre
 		return "", err
 	}
 
-	resp, err := c.httpClient.Do(req)
+	httpClient := c.httpClient
+	if preparation != nil {
+		httpClient = c.longRunningHTTPClient
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		tracing.TraceHTTPResponse(span, 0, err)
 		return "", err

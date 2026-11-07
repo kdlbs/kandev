@@ -31,6 +31,12 @@ func (m *Manager) beginProfileDiscoveryFlight(
 ) (context.Context, func()) {
 	flightCtx, cancel := context.WithCancelCause(parent)
 	scopeKey, signature := m.profileDiscoveryFlightIdentity(agentType, scope, baseRevision, runtimeGeneration, contextGeneration)
+	m.modelGenerationMu.Lock()
+	defer m.modelGenerationMu.Unlock()
+	if m.profileGenerations[agentType] != runtimeGeneration || m.profileContextGenerations[baseRevision] != contextGeneration {
+		cancel(errProfileContextChanged)
+		return flightCtx, func() {}
+	}
 	m.profileFlightMu.Lock()
 	if m.profileDiscoveryFlights == nil {
 		m.profileDiscoveryFlights = make(map[uint64]profileDiscoveryFlight)
@@ -68,13 +74,11 @@ func (m *Manager) profileDiscoveryFlightIdentity(
 	return scopeKey, signature
 }
 
-func (m *Manager) profileDiscoveryFlightIsCurrent(
+func (m *Manager) profileDiscoveryFlightIsCurrentLocked(
 	agentType, scope, baseRevision string,
 	runtimeGeneration, contextGeneration uint64,
 ) bool {
 	scopeKey, signature := m.profileDiscoveryFlightIdentity(agentType, scope, baseRevision, runtimeGeneration, contextGeneration)
-	m.profileFlightMu.Lock()
-	defer m.profileFlightMu.Unlock()
 	for _, flight := range m.profileDiscoveryFlights {
 		if flight.agentType == agentType && flight.scopeKey == scopeKey && flight.signature == signature {
 			return true
@@ -238,6 +242,9 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 		zap.String("status", string(caps.Status)),
 		zap.String("context_revision", revision),
 		zap.Int("duration_ms", caps.DurationMs))
+	if errors.Is(context.Cause(ctx), errProfileContextChanged) {
+		return ProfileCapabilityResult{}, errProfileContextChanged
+	}
 	return result, nil
 }
 
@@ -415,6 +422,9 @@ func (m *Manager) resolveProfileModelConfigFlight(
 		zap.String("agent_type", inst.agentType),
 		zap.String("status", string(resolution.Status)),
 		zap.String("context_revision", revision))
+	if errors.Is(context.Cause(ctx), errProfileContextChanged) {
+		return ModelConfigResolution{}, errProfileContextChanged
+	}
 	return resolution, nil
 }
 
@@ -460,8 +470,8 @@ func (m *Manager) invalidateProfileCapabilities(agentType string) uint64 {
 		m.profileCache.invalidateAgent(agentType)
 	}
 	generation := m.profileGenerations[agentType]
-	m.modelGenerationMu.Unlock()
 	m.cancelProfileDiscoveryFlights(agentType)
+	m.modelGenerationMu.Unlock()
 	return generation
 }
 
@@ -541,7 +551,9 @@ func (m *Manager) setProfileCapabilityIfCurrent(agentType, scope, baseRevision s
 	if m.profileGenerations[agentType] != runtimeGeneration || m.profileContextGenerations[baseRevision] != contextGeneration {
 		return false
 	}
-	if !m.profileDiscoveryFlightIsCurrent(agentType, scope, baseRevision, runtimeGeneration, contextGeneration) {
+	m.profileFlightMu.Lock()
+	defer m.profileFlightMu.Unlock()
+	if !m.profileDiscoveryFlightIsCurrentLocked(agentType, scope, baseRevision, runtimeGeneration, contextGeneration) {
 		return false
 	}
 	m.profileCache.setCapability(key, agentType, result, time.Now())
@@ -554,7 +566,9 @@ func (m *Manager) setProfileResolutionIfCurrent(agentType, scope, baseRevision s
 	if m.profileGenerations[agentType] != runtimeGeneration || m.profileContextGenerations[baseRevision] != contextGeneration {
 		return false
 	}
-	if !m.profileDiscoveryFlightIsCurrent(agentType, scope, baseRevision, runtimeGeneration, contextGeneration) {
+	m.profileFlightMu.Lock()
+	defer m.profileFlightMu.Unlock()
+	if !m.profileDiscoveryFlightIsCurrentLocked(agentType, scope, baseRevision, runtimeGeneration, contextGeneration) {
 		return false
 	}
 	m.profileCache.setResolution(key, agentType, resolution, time.Now())

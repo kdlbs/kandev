@@ -165,14 +165,14 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 		e.preparation.retireProbeAttempt(req.Preparation.ProbeAttemptID)
 	}
 	response := &ProbeResponse{
-		Success: true, AgentName: "OpenAI Codex app-server", AgentVersion: protocol.SupportedCodexVersion,
+		Success: true, AgentName: "OpenAI Codex app-server",
 		Models: models, DurationMs: int(time.Since(start).Milliseconds()),
 	}
 	observer := &ACPInferenceExecutor{logger: e.logger, preparation: e.preparation}
 	response.RuntimeInfo = observer.collectRuntimeObservation(
 		ctx, req.RuntimeObservation, req.InferenceConfig.Command, nil,
 		launchArgs, launchEnv, launchedExecutable, req.InferenceConfig.WorkDir,
-		parseCodexVersion([]byte(protocol.SupportedCodexVersion)),
+		"",
 	)
 	return response, nil
 }

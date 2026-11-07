@@ -502,6 +502,10 @@ func (s *Server) handleStart(c *gin.Context) {
 	var processGeneration uint64
 	var err error
 	if req.Preparation != nil {
+		if !c.GetBool(authenticatedControlContextKey) {
+			c.AbortWithStatusJSON(http.StatusForbidden, StartResponse{Success: false, Error: "authenticated control is required for managed runtime preparation"})
+			return
+		}
 		processGeneration, err = s.procMgr.StartWithManagedRuntimePreparation(c.Request.Context(), *req.Preparation)
 	} else {
 		processGeneration, err = s.procMgr.StartWithGeneration(c.Request.Context())

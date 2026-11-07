@@ -1885,6 +1885,11 @@ func (m *Manager) StartWithManagedRuntimePreparation(
 	ctx context.Context,
 	directive types.ManagedRuntimePreparationDirective,
 ) (uint64, error) {
+	ctx, release, err := m.BeginOwnedOperation(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
 	m.startOperationMu.Lock()
 	defer m.startOperationMu.Unlock()
 
@@ -2565,6 +2570,10 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 		return err
 	}
 
+	if !sameManagedCommand(m.cfg.AgentArgs, args) || !sameManagedCommand(m.cfg.LaunchWrapper.Argv, spec.Argv) {
+		m.invalidateManagedStartupEvidence()
+		m.managedRuntimeCommand = nil
+	}
 	m.cfg.AgentCommand = command
 	m.cfg.AgentCommandConfigured = true
 	m.cfg.AgentArgs = args

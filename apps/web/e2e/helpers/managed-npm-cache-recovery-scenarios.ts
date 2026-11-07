@@ -86,16 +86,19 @@ export function registerManagedNpmCacheRecoveryTests() {
           if (!npmLog)
             throw new Error("host npm invocation capture is required for private preparation");
           await expect.poll(() => fs.existsSync(npmLog)).toBe(true);
-          const installLine =
+          const args =
             fs
               .readFileSync(npmLog, "utf8")
               .trim()
               .split(/\r?\n/)
-              .filter((line) => line.includes("--package="))
-              .at(-1) ?? "";
-          expect(installLine).toContain("exec --yes --prefer-online");
-          expect(installLine).toContain(`--package=${fixture.packageSpec}`);
-          const args = installLine.split(/\s+/);
+              .filter(Boolean)
+              .map((invocation) => JSON.parse(invocation) as string[])
+              .filter((invocation) => invocation.some((arg) => arg.startsWith("--package=")))
+              .at(-1) ?? [];
+          expect(args).toContain("exec");
+          expect(args).toContain("--yes");
+          expect(args).toContain("--prefer-online");
+          expect(args).toContain(`--package=${fixture.packageSpec}`);
           const prefixIndex = args.indexOf("--prefix");
           const cacheIndex = args.indexOf("--cache");
           expect(prefixIndex).toBeGreaterThanOrEqual(0);
@@ -140,12 +143,16 @@ export function registerManagedNpmCacheRecoveryTests() {
           expect(token.resume_token).toBeTruthy();
           await backend.restart();
           const failedSession = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
-          failedSession
-            .prepare(
-              "UPDATE task_sessions SET state = 'FAILED', error_message = 'ACP initialize failed' WHERE id = ?",
-            )
-            .run(sessionId);
-          failedSession.close();
+          try {
+            failedSession.exec("PRAGMA busy_timeout=5000");
+            failedSession
+              .prepare(
+                "UPDATE task_sessions SET state = 'FAILED', error_message = 'ACP initialize failed' WHERE id = ?",
+              )
+              .run(sessionId);
+          } finally {
+            failedSession.close();
+          }
           await testPage.goto(`/t/${taskId}`);
           await session.waitForLoad();
           await waitForSessionState(apiClient, {
@@ -176,6 +183,16 @@ export function registerManagedNpmCacheRecoveryTests() {
                 message.author_type === "user" && message.content?.trim() === "/e2e:simple-message",
             ),
           ).toHaveLength(2);
+        } catch (error) {
+          await test.info().attach("managed-runtime-recovery-error", {
+            body: error instanceof Error ? (error.stack ?? error.message) : String(error),
+            contentType: "text/plain",
+          });
+          await test.info().attach("managed-runtime-backend-log", {
+            path: backend.logPath,
+            contentType: "text/plain",
+          });
+          throw error;
         } finally {
           if (sessionId) {
             await apiClient

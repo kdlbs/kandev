@@ -21,10 +21,10 @@ It covers the observed missing execution manifest and executable-link state.
 The [decision](../../../decisions/2026-11-07-isolated-managed-npm-cache-recovery.md)
 records the choice to preserve shared files and prepare privately.
 
-| Requirement | Design boundary |
-| --- | --- |
-| `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002` | Executor-local evidence; private preparation |
-| `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-004` | Task recovery and its single replacement budget |
+| Requirement                               | Design boundary                                                              |
+| ----------------------------------------- | ---------------------------------------------------------------------------- |
+| `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002` | Executor-local evidence; private preparation                                 |
+| `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-004` | Task recovery and its single replacement budget                              |
 | `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-006` | Evidence, restart recovery, task/probe integration, compatibility, and proof |
 
 This draft owns the common private-preparation primitive. The pending
@@ -73,7 +73,9 @@ package manifest. Do not reject ordinary contained npm links as hostile roots.
 Do not execute an incomplete cached binary to establish eligibility.
 
 The first implementation supports registered package `bin` declarations for
-the selected built-in command. Reject ambiguous multi-bin declarations and
+the selected built-in command. Normalize a leading `./` in relative bin targets
+before contained inspection. Reject trailing data in package manifests,
+ambiguous multi-bin declarations and
 paths outside the package. Never install a package named only in stderr.
 Preserve authentication, policy, disk-space, and intentional-stop precedence.
 Do not add `ENOENT` to the generic transient-npm allowlist.
@@ -121,6 +123,12 @@ Cancellation must stop and reap their descendants before private-root cleanup.
 Task prepared files remain owned by the instance until all consuming processes
 stop; backend request completion and detach/adoption do not release them.
 Utility preparation remains owned until the final probe tree stops.
+Instance teardown closes probe admission, cancels active probes, and drains
+request cleanup before removing retained private roots. A bounded drain failure
+keeps the instance cleanup hook available for retry. Command runners register
+live-consumer guards before installation; cancellation cannot remove private
+files while a process or its descendants remain owned. Output collection and
+process waits honor cancellation, including inherited output pipes.
 Cleanup removes only the verified owner root. A marker does not authorize a
 startup-wide orphan sweep. Failed cleanup retains ownership for a later retry.
 
@@ -217,18 +225,18 @@ and actual provider-start count. No new metric label or database schema is neede
 
 ## Verification matrix
 
-| Shape | Required result | Proof |
-| --- | --- | --- |
-| Managed Claude/Codex ACP, installed manifest but missing execution manifest | Private prepare and same-session retry | Real subprocess inventory and local npm fixture |
-| Managed native Codex app-server | Same cache recovery before native initialize | Utility and lifecycle native-protocol tests |
-| Other registered managed ACP package | Same generic condition and bin validation | Synthetic second-package fixture |
-| Existing FAILED session after backend restart | Normal automatic resume, same token, no repair click | Restart/browser tests and session status regression |
-| Agent-wide bootstrap, profile baseline, model options | Matching recovered results, no saved selection changes | Hostutility tests and desktop/phone settings flows |
-| Healthy, recovering, exhausted siblings | Healthy process can read files and serve another request | Mixed real-process test with shared sentinels |
-| Local Docker and SSH | Preparation occurs on execution host | Existing containers-project fixtures |
-| Missing whole tree, unrelated ENOENT, malformed or unreadable inventory | No new repair classification | Negative inventory/classifier tests |
-| Native binary, wrapper, passthrough, old peer, unsupported executor | Existing visible failure, no private preparation | Compatibility tests |
-| Auth/policy/permissions/disk/stop or post-init error | Existing precedence, no replay | Negative phase and cancellation tests |
+| Shape                                                                       | Required result                                          | Proof                                               |
+| --------------------------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------- |
+| Managed Claude/Codex ACP, installed manifest but missing execution manifest | Private prepare and same-session retry                   | Real subprocess inventory and local npm fixture     |
+| Managed native Codex app-server                                             | Same cache recovery before native initialize             | Utility and lifecycle native-protocol tests         |
+| Other registered managed ACP package                                        | Same generic condition and bin validation                | Synthetic second-package fixture                    |
+| Existing FAILED session after backend restart                               | Normal automatic resume, same token, no repair click     | Restart/browser tests and session status regression |
+| Agent-wide bootstrap, profile baseline, model options                       | Matching recovered results, no saved selection changes   | Hostutility tests and desktop/phone settings flows  |
+| Healthy, recovering, exhausted siblings                                     | Healthy process can read files and serve another request | Mixed real-process test with shared sentinels       |
+| Local Docker and SSH                                                        | Preparation occurs on execution host                     | Existing containers-project fixtures                |
+| Missing whole tree, unrelated ENOENT, malformed or unreadable inventory     | No new repair classification                             | Negative inventory/classifier tests                 |
+| Native binary, wrapper, passthrough, old peer, unsupported executor         | Existing visible failure, no private preparation         | Compatibility tests                                 |
+| Auth/policy/permissions/disk/stop or post-init error                        | Existing precedence, no replay                           | Negative phase and cancellation tests               |
 
 Tests use local package archives and a local registry fixture, with no paid
 provider requests or public registry dependency. The npm-backed regression

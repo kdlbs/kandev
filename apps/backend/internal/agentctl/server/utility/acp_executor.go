@@ -1505,6 +1505,7 @@ type stderrBuffer struct {
 	buf                   bytes.Buffer
 	consentScan           bytes.Buffer
 	managedNPMPartial     bytes.Buffer
+	managedNPMDiscardLine bool
 	managedNPMRaw         bytes.Buffer
 	managedNPMRawOverflow bool
 	partialFirstLine      bool
@@ -1590,6 +1591,14 @@ func (b *stderrBuffer) collectManagedNPMDiagnosticLocked(p []byte) {
 	if b.managedNPMRawOverflow {
 		return
 	}
+	if b.managedNPMDiscardLine {
+		newline := bytes.IndexByte(p, '\n')
+		if newline < 0 {
+			return
+		}
+		p = p[newline+1:]
+		b.managedNPMDiscardLine = false
+	}
 	combined := make([]byte, 0, b.managedNPMPartial.Len()+len(p))
 	combined = append(combined, b.managedNPMPartial.Bytes()...)
 	combined = append(combined, p...)
@@ -1613,6 +1622,7 @@ func (b *stderrBuffer) collectManagedNPMDiagnosticLocked(p []byte) {
 		combined = combined[newline+1:]
 	}
 	if len(combined) > maxManagedRuntimeRawNPMDiagnosticBytes {
+		b.managedNPMDiscardLine = true
 		if looksLikeManagedNPMEvidencePrefix(combined) {
 			b.managedNPMRawOverflow = true
 			b.managedNPMRaw.Reset()
@@ -1638,7 +1648,7 @@ func (b *stderrBuffer) managedNPMDiagnosticSnapshot() (string, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	partialDiagnostic := looksLikeManagedNPMEvidencePrefix(b.managedNPMPartial.Bytes())
-	return strings.TrimSpace(b.managedNPMRaw.String()), !b.managedNPMRawOverflow && !partialDiagnostic
+	return strings.TrimSpace(b.managedNPMRaw.String()), !b.managedNPMRawOverflow && !b.managedNPMDiscardLine && !partialDiagnostic
 }
 
 // tail returns what was retained, trimmed — the end of the output rather than

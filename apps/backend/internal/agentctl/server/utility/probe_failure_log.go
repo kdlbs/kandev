@@ -22,6 +22,10 @@ func redactManagedNPMPaths(value string) string {
 			lines[index] = "npm error path <path>"
 			continue
 		}
+		if strings.HasPrefix(lower, "npm error enoent ") || strings.HasPrefix(lower, "npm err! enoent ") {
+			lines[index] = "npm error enoent <redacted>"
+			continue
+		}
 		if strings.HasPrefix(lower, "npm error syscall ") || strings.HasPrefix(lower, "npm err! syscall ") {
 			fields := strings.Fields(trimmed)
 			if len(fields) == 4 && (strings.EqualFold(fields[3], "open") || strings.EqualFold(fields[3], "read")) {

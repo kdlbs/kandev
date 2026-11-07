@@ -42,6 +42,12 @@ func TestManagedRuntimePreparationDirectiveBindsExactFailureAndVersion(t *testin
 	if !sameManagedCommand(snapshot.Command, command) {
 		t.Fatalf("validated command = %#v, want exact selected version command %#v", snapshot.Command, command)
 	}
+	if err := manager.Configure("", command, true, nil, "", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.validateManagedRuntimePreparationDirective(directive); err != nil {
+		t.Fatalf("unchanged retry configuration retired verified evidence: %v", err)
+	}
 
 	for name, mutate := range map[string]func(*types.ManagedRuntimePreparationDirective){
 		"stale generation": func(value *types.ManagedRuntimePreparationDirective) { value.FailedProcessGeneration++ },
@@ -60,7 +66,10 @@ func TestManagedRuntimePreparationDirectiveBindsExactFailureAndVersion(t *testin
 		})
 	}
 
-	manager.cfg.AgentArgs = []string{"npx", "--yes", "--prefer-offline", "operator-package"}
+	manager.managedRuntimeCommand = append([]string(nil), command...)
+	if err := manager.Configure("", []string{"npx", "--yes", "--prefer-offline", "operator-package"}, true, nil, "", nil, false); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := manager.validateManagedRuntimePreparationDirective(directive); err == nil {
 		t.Fatal("accepted evidence after the managed command changed")
 	}
@@ -83,6 +92,30 @@ func TestPreparedRuntimeOwnerSurvivesStopAndClosesOnlyAtInstanceTeardown(t *test
 	}
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
 		t.Fatalf("private owner root after instance teardown = %v, want removed", err)
+	}
+}
+
+func TestManagedRuntimePreparationRejectsLateEvidenceAfterConfigure(t *testing.T) {
+	command := agents.NewClaudeACP().ManagedNPMRuntime().RuntimeCommand("1.2.3").Args()
+	manager := NewManager(&config.InstanceConfig{AgentType: "claude-acp", AgentArgs: command, WorkDir: t.TempDir()}, newTestLogger(t))
+	t.Cleanup(func() { _ = manager.StopForTeardown(context.Background()) })
+	generation := manager.beginManagedStartupGeneration()
+	done := manager.startupEvidenceDone
+	changed := agents.NewClaudeACP().ManagedNPMRuntime().RuntimeCommand("1.2.4").Args()
+	if err := manager.Configure("", changed, true, nil, "", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	manager.recordManagedStartupEvidence(&types.ManagedStartupEvidence{ProcessGeneration: generation})
+	if evidence := manager.ManagedStartupEvidence(context.Background(), generation); evidence != nil {
+		t.Fatalf("accepted late evidence from before reconfiguration: %#v", evidence)
+	}
+	select {
+	case <-done:
+	default:
+		t.Fatal("configuration did not release pending evidence readers")
+	}
+	if manager.ProcessGeneration() != generation {
+		t.Fatal("configuration changed the launched process identity")
 	}
 }
 

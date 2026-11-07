@@ -25,6 +25,8 @@ type ManagedRuntimeCommand struct {
 	Args []string
 	Dir  string
 	Env  []string
+	// RetainWhile prevents removal while the runner still owns consumers.
+	RetainWhile func(func() bool)
 }
 
 // ManagedRuntimeCommandRunner starts and reaps an owned process tree.
@@ -39,6 +41,7 @@ type PreparedRuntime struct {
 	ownerID     string
 	mu          sync.Mutex
 	closed      bool
+	consumers   []func() bool
 }
 
 // PreparePrivateRuntime installs and validates one exact managed package in
@@ -90,8 +93,9 @@ func PreparePrivateRuntime(
 			"exec", "--yes", "--prefer-online", "--package=" + packageSpec,
 			"--", "node", "-e", "",
 		},
-		Dir: prepared.project,
-		Env: append([]string(nil), env...),
+		Dir:         prepared.project,
+		Env:         append([]string(nil), env...),
+		RetainWhile: prepared.retainWhile,
 	}
 	if err := run(ctx, command); err != nil {
 		if ctx.Err() != nil {
@@ -108,6 +112,12 @@ func PreparePrivateRuntime(
 		return prepared.cleanupAfterPreparationFailure(err)
 	}
 	return prepared, nil
+}
+
+func (p *PreparedRuntime) retainWhile(consumerLive func() bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.consumers = append(p.consumers, consumerLive)
 }
 
 func (p *PreparedRuntime) createOwnedRoot() error {
@@ -272,6 +282,11 @@ func (p *PreparedRuntime) Close() error {
 	defer p.mu.Unlock()
 	if p.closed {
 		return nil
+	}
+	for _, live := range p.consumers {
+		if live() {
+			return errors.New("private managed runtime consumers are still owned")
+		}
 	}
 	info, err := os.Lstat(p.root)
 	if errors.Is(err, os.ErrNotExist) {

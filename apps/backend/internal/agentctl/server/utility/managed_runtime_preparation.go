@@ -157,14 +157,25 @@ func preparePrivateProbeRuntime(
 		cmd.Stdout = io.Discard
 		cmd.Stderr = io.Discard
 		configureACPCommand(cmd, logger)
+		cmd.WaitDelay = 2 * acpCommandTerminateGrace
 		if err := cmd.Start(); err != nil {
 			return err
 		}
+		waited := make(chan struct{})
+		command.RetainWhile(func() bool {
+			select {
+			case <-waited:
+				return acpProcessGroupAlive(cmd.Process.Pid)
+			default:
+				return true
+			}
+		})
 		lifecycle, lifecycleErr := installACPCommandLifecycle(cmd)
 		if lifecycleErr != nil {
 			acpCommandLogger(logger).Warn("failed to install private npm lifecycle", zap.Error(lifecycleErr))
 		}
 		waitErr := cmd.Wait()
+		close(waited)
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(commandCtx), 2*acpCommandTerminateGrace+2*acpCommandForceKillGrace)
 		reapACPProcessGroup(cleanupCtx, cmd.Process.Pid, logger)
 		cancel()
@@ -224,11 +235,7 @@ func (s *managedRuntimePreparationState) retainOwner(owner *managedruntime.Prepa
 	}
 	s.mu.Lock()
 	s.owners = append(s.owners, owner)
-	closed := s.closed
 	s.mu.Unlock()
-	if closed {
-		_ = s.close()
-	}
 }
 
 func (s *managedRuntimePreparationState) close() error {

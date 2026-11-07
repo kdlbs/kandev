@@ -9,6 +9,7 @@ export function registerManagedNpmProbeRecoveryTests() {
     backend,
     testPage,
   }, testInfo) => {
+    test.skip(process.platform === "win32", "fixture uses POSIX scripts");
     test.setTimeout(150_000);
     const fixture = await prepareIncompleteManagedRuntimeProfile(apiClient, backend, {
       hostSubprocess: true,

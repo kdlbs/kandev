@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
@@ -144,11 +145,19 @@ func TestHandleStart_DispatchesPreparationDirective(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/start", strings.NewReader(string(body)))
-	srv.Router().ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusInternalServerError || !strings.Contains(recorder.Body.String(), "managed runtime preparation evidence is stale") {
-		t.Fatalf("directive response = %d %s, want stale-evidence start failure", recorder.Code, recorder.Body.String())
+	for _, authenticated := range []bool{false, true} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/start", strings.NewReader(string(body)))
+		c.Set(authenticatedControlContextKey, authenticated)
+		srv.handleStart(c)
+		if !authenticated {
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("unauthenticated preparation = %d %s", recorder.Code, recorder.Body.String())
+			}
+		} else if recorder.Code != http.StatusInternalServerError || !strings.Contains(recorder.Body.String(), "managed runtime preparation evidence is stale") {
+			t.Fatalf("directive response = %d %s, want stale-evidence start failure", recorder.Code, recorder.Body.String())
+		}
 	}
 }
 

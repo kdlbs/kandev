@@ -38,6 +38,8 @@ func TestManagedRuntimeCacheEvidenceRejectsUnmatchedInventory(t *testing.T) {
 		"wrong package":              `{"name":"@scope/other","version":"1.2.3","bin":"bin/cli.js"}`,
 		"wrong version":              `{"name":"@scope/managed-acp","version":"1.2.4","bin":"bin/cli.js"}`,
 		"malformed package manifest": `{"name":`,
+		"trailing garbage":           `{"name":"@scope/managed-acp","version":"1.2.3","bin":"bin/cli.js"}garbage`,
+		"second JSON value":          `{"name":"@scope/managed-acp","version":"1.2.3","bin":"bin/cli.js"}{}`,
 		"invalid bin path":           `{"name":"@scope/managed-acp","version":"1.2.3","bin":"../escape"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -75,6 +77,22 @@ func TestManagedRuntimeCacheEvidenceRejectsUnmatchedInventory(t *testing.T) {
 			t.Fatal("symlinked execution root should not establish cache evidence")
 		}
 	})
+}
+
+func TestManagedRuntimeCacheNormalizesRelativeBinTargets(t *testing.T) {
+	for _, target := range []string{"bin/cli.js", "./bin/cli.js", "./bin/opencode.exe"} {
+		t.Run(target, func(t *testing.T) {
+			_, got, valid := selectedNpmPackageBin("managed-acp", []byte(`{"managed-acp":"`+target+`"}`))
+			if !valid || got != filepath.ToSlash(filepath.Clean(target)) {
+				t.Fatalf("selected bin = %q, %v for %q", got, valid, target)
+			}
+		})
+	}
+	for _, target := range []string{"../escape", "bin/../escape", "/absolute", "./../escape", "C:/escape", "bin//cli.js"} {
+		if _, _, valid := selectedNpmPackageBin("managed-acp", []byte(`{"managed-acp":"`+target+`"}`)); valid {
+			t.Fatalf("accepted unsafe bin target %q", target)
+		}
+	}
 }
 
 func writeNpxInventoryFixture(t *testing.T, cacheRoot, packageSpec, manifest string) string {

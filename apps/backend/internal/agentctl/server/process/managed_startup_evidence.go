@@ -191,3 +191,14 @@ func preferredManagedStartupCode(codes []string) string {
 	}
 	return codes[0]
 }
+
+func (m *Manager) invalidateManagedStartupEvidence() {
+	m.startupEvidenceMu.Lock()
+	defer m.startupEvidenceMu.Unlock()
+	m.startupEvidence = nil
+	if m.startupEvidenceDone != nil {
+		close(m.startupEvidenceDone)
+		m.startupEvidenceDone = nil
+	}
+	m.startupRuntime.Valid = false
+}
