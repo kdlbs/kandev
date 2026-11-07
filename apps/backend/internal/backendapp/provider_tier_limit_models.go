@@ -9,6 +9,7 @@ import (
 	"time"
 
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
@@ -17,9 +18,21 @@ type modelWindowUsageReader interface {
 	GetManualModelWindowUsageForProfiles(context.Context, []string, time.Time, time.Time) ([]sqliterepo.ManualModelWindowUsage, error)
 }
 
+type selectedModelWindowUsageReader interface {
+	GetManualSelectedModelWindowUsage(context.Context, []string, time.Time, time.Time, func(string, string) (bool, error)) (sqliterepo.ManualWindowUsage, error)
+}
+
+type modelProfileSnapshot struct {
+	profile   settingsmodels.AgentProfile
+	agentType string
+}
+
 // readModelBudgetUsage keeps each recorded model paired with its profile. A
 // turn spanning multiple selected models cannot be summed without double count.
 func (s *providerTierLimitService) readModelBudgetUsage(ctx context.Context, c tierLimitContext, budget agentusage.LimitBudget, start, end time.Time) (float64, bool, error) {
+	if budget.Unit == "turns" {
+		return s.readDistinctModelBudgetTurns(ctx, c, budget, start, end)
+	}
 	reader, ok := s.store.(modelWindowUsageReader)
 	if !ok {
 		return 0, false, errModelAttributionUnavailable
@@ -42,12 +55,38 @@ func (s *providerTierLimitService) readModelBudgetUsage(ctx context.Context, c t
 			continue
 		}
 		selected[group.ProfileID]++
-		if budget.Unit == "turns" && selected[group.ProfileID] > 1 {
-			return 0, false, errModelAttributionUnavailable
-		}
 		amount += budgetAmount(group.Usage, budget.Unit)
 	}
 	return amount, len(selected) > 0, nil
+}
+
+func (s *providerTierLimitService) readDistinctModelBudgetTurns(ctx context.Context, c tierLimitContext, budget agentusage.LimitBudget, start, end time.Time) (float64, bool, error) {
+	reader, ok := s.store.(selectedModelWindowUsageReader)
+	if !ok {
+		return 0, false, errModelAttributionUnavailable
+	}
+	profiles := make(map[string]modelProfileSnapshot, len(c.ids))
+	for _, id := range c.ids {
+		profile, agentType, found := s.usage.loadProfile(ctx, id)
+		if !found || profile == nil {
+			return 0, false, errModelAttributionUnavailable
+		}
+		profiles[id] = modelProfileSnapshot{profile: *profile, agentType: agentType}
+	}
+	selected := false
+	usage, err := reader.GetManualSelectedModelWindowUsage(ctx, c.ids, start, end, func(id, model string) (bool, error) {
+		profile, found := profiles[id]
+		if !found || strings.TrimSpace(model) == "" {
+			return false, errModelAttributionUnavailable
+		}
+		matches, matchErr := s.modelSnapshotMatchesScope(ctx, c, profile, model, budget.Scope)
+		if matchErr != nil {
+			return false, matchErr
+		}
+		selected = selected || matches
+		return matches, nil
+	})
+	return float64(usage.TurnCount), selected, err
 }
 
 func (s *providerTierLimitService) recordedModelMatchesScope(ctx context.Context, c tierLimitContext, profileID, model, scope string) (bool, error) {
@@ -55,9 +94,13 @@ func (s *providerTierLimitService) recordedModelMatchesScope(ctx context.Context
 	if !ok || profile == nil {
 		return false, errModelAttributionUnavailable
 	}
-	copy := *profile
+	return s.modelSnapshotMatchesScope(ctx, c, modelProfileSnapshot{profile: *profile, agentType: agentType}, model, scope)
+}
+
+func (s *providerTierLimitService) modelSnapshotMatchesScope(ctx context.Context, c tierLimitContext, snapshot modelProfileSnapshot, model, scope string) (bool, error) {
+	copy := snapshot.profile
 	copy.Model = model
-	bound, ok := s.usage.bindingFor(&copy, agentType)
+	bound, ok := s.usage.bindingFor(&copy, snapshot.agentType)
 	if !ok || bound.accountKey != c.key {
 		return false, errModelAttributionUnavailable
 	}
