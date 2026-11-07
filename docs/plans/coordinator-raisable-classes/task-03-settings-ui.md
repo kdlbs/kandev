@@ -6,6 +6,7 @@ wave: 2
 depends_on: ["01-eligibility-settings"]
 plan: "plan.md"
 requirements:
+  - REQ-COORDINATOR-AUTOMATIC-001
   - REQ-COORDINATOR-AUTOMATIC-005
   - REQ-COORDINATOR-AUTOMATIC-006
   - REQ-COORDINATOR-AUTOMATIC-007
