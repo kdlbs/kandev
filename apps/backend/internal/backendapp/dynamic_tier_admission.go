@@ -58,15 +58,7 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 	if a == nil || a.usage == nil || a.usage.tierLimits == nil {
 		return failure, dynamicruntime.SuspensionBinding
 	}
-	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID == candidate.ID &&
-		agentusage.MatchesSelectedUsage(ctx, candidate.UsagePolicy) && candidate.ModelID != candidate.UsagePolicy.ExpectedModel {
-		candidate.ModelID = candidate.UsagePolicy.ExpectedModel
-		candidate.CatalogFree = false
-		if catalog := a.usage.tierLimits.freeModels; catalog != nil {
-			free, known := catalog.IsFreeModel(ctx, candidate.ModelID)
-			candidate.CatalogFree = known && free
-		}
-	}
+	candidate = a.withSelectedExpectedModel(ctx, candidate)
 	if !a.usage.tierLimits.matchesSelectedAccount(ctx, candidate) {
 		return failure, dynamicruntime.SuspensionBinding
 	}
@@ -74,20 +66,7 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 	if resolved == nil {
 		resolved = failure
 	}
-	scope := dynamicruntime.SuspensionBinding
-	if resolved != failure {
-		// The OpenRouter key counter separates a minute block from the
-		// account's daily free allowance. A minute block is account scope; a
-		// free daily exhaustion suspends only the failing model.
-		scope = dynamicruntime.SuspensionProvider
-		if resolved.ClassifierRule == "account_limit.daily" &&
-			(dynamicruntime.IsFreeModel(candidate.ModelID) || candidate.CatalogFree) {
-			scope = dynamicruntime.SuspensionModel
-		}
-	} else if dynamicruntime.FailureCauseFor(candidate, failure) == dynamicruntime.CauseFreeDailyLimit &&
-		(dynamicruntime.IsFreeModel(candidate.ModelID) || dynamicruntime.ModelScoped(candidate.ModelID)) {
-		scope = dynamicruntime.SuspensionModel
-	}
+	scope := limitSuspensionScope(candidate, failure, resolved)
 	// A classified quota limit on a paid model without the provider's own
 	// reset uses the operator-entered monthly reset. The monthly allowance is
 	// provider-scoped.
@@ -97,6 +76,42 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 		return &copy, dynamicruntime.SuspensionProvider
 	}
 	return resolved, scope
+}
+
+// withSelectedExpectedModel evaluates the selected usage binding's expected
+// model when the running candidate reports a different model.
+func (a *tierLimitAdapter) withSelectedExpectedModel(ctx context.Context, candidate dynamicruntime.Candidate) dynamicruntime.Candidate {
+	policy := candidate.UsagePolicy
+	if policy == nil || policy.ProfileID != candidate.ID || candidate.ModelID == policy.ExpectedModel ||
+		!agentusage.MatchesSelectedUsage(ctx, policy) {
+		return candidate
+	}
+	candidate.ModelID = policy.ExpectedModel
+	candidate.CatalogFree = false
+	if catalog := a.usage.tierLimits.freeModels; catalog != nil {
+		free, known := catalog.IsFreeModel(ctx, candidate.ModelID)
+		candidate.CatalogFree = known && free
+	}
+	return candidate
+}
+
+// limitSuspensionScope chooses how widely a limit failure suspends routing.
+func limitSuspensionScope(candidate dynamicruntime.Candidate, failure, resolved *routingerr.Error) dynamicruntime.LimitSuspension {
+	if resolved != failure {
+		// The OpenRouter key counter separates a minute block from the
+		// account's daily free allowance. A minute block is account scope; a
+		// free daily exhaustion suspends only the failing model.
+		if resolved.ClassifierRule == "account_limit.daily" &&
+			(dynamicruntime.IsFreeModel(candidate.ModelID) || candidate.CatalogFree) {
+			return dynamicruntime.SuspensionModel
+		}
+		return dynamicruntime.SuspensionProvider
+	}
+	if dynamicruntime.FailureCauseFor(candidate, failure) == dynamicruntime.CauseFreeDailyLimit &&
+		(dynamicruntime.IsFreeModel(candidate.ModelID) || dynamicruntime.ModelScoped(candidate.ModelID)) {
+		return dynamicruntime.SuspensionModel
+	}
+	return dynamicruntime.SuspensionBinding
 }
 
 // monthlyReset returns the operator-entered monthly reset for a paid-model

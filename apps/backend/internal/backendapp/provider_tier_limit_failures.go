@@ -110,22 +110,9 @@ func (s *providerTierLimitService) enrichObservation(ctx context.Context, candid
 	if candidate.RemoteExecution {
 		return nil
 	}
-	if candidate.RequireExecutionUsage && candidate.UsagePolicy == nil {
-		return fmt.Errorf("execution allowance account is unknown")
-	}
-	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID != candidate.ID {
-		return fmt.Errorf("execution allowance profile does not match candidate")
-	}
-	model := ""
-	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID == candidate.ID && agentusage.MatchesSelectedUsage(ctx, candidate.UsagePolicy) {
-		model = candidate.UsagePolicy.ExpectedModel
-	}
-	c, err := s.contextForModel(ctx, candidate.ID, model)
+	c, err := s.observationContext(ctx, candidate)
 	if err != nil {
 		return err
-	}
-	if candidate.UsagePolicy != nil && !tierContextMatchesSelection(c, candidate.UsagePolicy) {
-		return fmt.Errorf("configured allowance account does not match execution selection")
 	}
 	used, err := s.readUsage(ctx, c, "", observation.ObservedAt)
 	if err != nil {
@@ -159,6 +146,30 @@ func (s *providerTierLimitService) enrichObservation(ctx context.Context, candid
 	c.learned.Tiers[c.tier] = learnedOnly(c.defaults, c.learned.Tiers[c.tier], learned)
 
 	return s.store.SaveAccountTierLearned(ctx, c.key, c.learned)
+}
+
+// observationContext resolves the allowance account a limit observation
+// belongs to and verifies it matches the execution's selected usage binding.
+func (s *providerTierLimitService) observationContext(ctx context.Context, candidate dynamicruntime.Candidate) (tierLimitContext, error) {
+	policy := candidate.UsagePolicy
+	if candidate.RequireExecutionUsage && policy == nil {
+		return tierLimitContext{}, fmt.Errorf("execution allowance account is unknown")
+	}
+	if policy != nil && policy.ProfileID != candidate.ID {
+		return tierLimitContext{}, fmt.Errorf("execution allowance profile does not match candidate")
+	}
+	model := ""
+	if policy != nil && agentusage.MatchesSelectedUsage(ctx, policy) {
+		model = policy.ExpectedModel
+	}
+	c, err := s.contextForModel(ctx, candidate.ID, model)
+	if err != nil {
+		return tierLimitContext{}, err
+	}
+	if policy != nil && !tierContextMatchesSelection(c, policy) {
+		return tierLimitContext{}, fmt.Errorf("configured allowance account does not match execution selection")
+	}
+	return c, nil
 }
 
 func learnedOnly(defaults, prior, learned agentusage.TierLimits) agentusage.TierLimits {

@@ -40,10 +40,6 @@ func (r *requestLimitObservations) count(ids []string, start, end time.Time) flo
 	return count
 }
 
-func (r *requestLimitObservations) record(profile, key string, at time.Time) {
-	r.recordForModel(profile, key, "", at)
-}
-
 func (r *requestLimitObservations) recordForModel(profile, key, model string, at time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
