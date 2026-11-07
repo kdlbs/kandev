@@ -39,6 +39,9 @@ is omitted or marked unavailable, never converted into zero or unlimited quota.
 the observation scope explicit: a profile can later run with an executor or task
 override, so this snapshot does not claim to measure that execution's account.
 Explicit loopback proxies use `local_proxy`; unresolved bindings stay unknown.
+Execution-owned reports may include a fixed account-lookup failure stage and
+HTTP status. They do not expose provider response bodies, credential paths,
+tokens, or transport error text. Unsupported execution sources remain unknown.
 Go windows retain their paid-model scope and explicit provider exhaustion.
 Existing provider fetch behavior, fetch coalescing and cache TTL remain unchanged.
 A preserved reading carries the existing shared cache's stale flag through the

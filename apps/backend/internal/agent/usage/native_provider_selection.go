@@ -175,3 +175,18 @@ func claudeUsageConfigKnown(fields map[string]any) bool {
 	}
 	return true
 }
+
+// NativeProviderSelectionReason separates unsupported collection from an
+// ambiguous supported provider. Neither result asserts a quota or account.
+func NativeProviderSelectionReason(input ExecutionUsageInput) string {
+	if !localUsageExecution(input.ExecutorType) {
+		return "unsupported_executor"
+	}
+	if input.AgentID != executionAgentCodex && input.AgentID != executionAgentClaude {
+		return "unsupported_agent"
+	}
+	if !NativeProviderSelectionKnown(input) {
+		return executionSelectionUnknown
+	}
+	return ""
+}
