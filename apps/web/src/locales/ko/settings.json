@@ -1,4 +1,8 @@
 {
+  "notificationFormatterLabel": "알림 내용",
+  "notificationFormatterDefault": "원래 알림 내용 사용",
+  "notificationFormatterUnavailable": "포매터를 사용할 수 없습니다. 원래 알림 내용으로 발송됩니다.",
+  "notificationFormatterDescription": "제공자별로 포매터를 선택합니다. 구독과 발송 대상은 바뀌지 않습니다.",
   "notificationEventPermissionRequested": "에이전트가 권한을 요청합니다",
   "notificationEventPermissionRequestedDescription": "에이전트가 작업 승인을 기다릴 때 알립니다.",
   "notificationEventSessionFailed": "에이전트 세션 실패",

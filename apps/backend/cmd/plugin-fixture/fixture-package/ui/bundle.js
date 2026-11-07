@@ -121,6 +121,29 @@
 
   window.registerKandevPlugin("kandev-plugin-e2e", {
     initialize: function (registry, host) {
+      registry.registerComponent("notification-formatter", function FixtureFormatter({ slotProps: props }) {
+        const h = host.jsx;
+        const [notice, setNotice] = host.React.useState("");
+        return h("div", { "data-testid": "fixture-notification-formatter", className: "space-y-3" },
+          h(host.ui.Button, {
+            type: "button", className: "cursor-pointer [@media(pointer:coarse)]:min-h-11", "data-testid": "fixture-formatter-preview",
+            onClick: async () => {
+              const result = await props.previewConfiguration({}, "session.failed", "normal");
+              setNotice(result.title);
+            },
+          }, "Preview fixture formatter"),
+          h(host.ui.Button, {
+            type: "button", className: "cursor-pointer [@media(pointer:coarse)]:min-h-11", "data-testid": "fixture-formatter-activate",
+            onClick: async () => {
+              const receipt = await host.api.invokeAction("notification.prepare", { notificationProviderId: props.provider.id,
+                notificationFormatter: { installationId: props.formatter.installation_id, formatterKey: props.formatter.key, expectedBindingRevision: props.binding?.revision ?? "", mode: "candidate" }, body: {} });
+              await props.activateConfiguration(receipt, props.binding?.revision ?? "");
+              setNotice("Fixture formatter active");
+            },
+          }, "Activate fixture formatter"),
+          h("p", { role: "status", "data-testid": "fixture-formatter-status" }, notice),
+        );
+      });
       var React = host.React;
       var jsx = host.jsx;
       var ui = host.ui;

@@ -54,7 +54,8 @@ type Manifest struct {
 	Endpoints    Endpoints    `yaml:"endpoints" json:"endpoints"`
 	Capabilities Capabilities `yaml:"capabilities" json:"capabilities"`
 
-	AutomationConditions []AutomationCondition `yaml:"automation_conditions,omitempty" json:"automation_conditions,omitempty"`
+	AutomationConditions   []AutomationCondition   `yaml:"automation_conditions,omitempty" json:"automation_conditions,omitempty"`
+	NotificationFormatters []NotificationFormatter `yaml:"notification_formatters,omitempty" json:"notification_formatters,omitempty"`
 
 	Webhooks []Webhook `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
 	Actions  []Action  `yaml:"actions,omitempty" json:"actions,omitempty"`
@@ -288,11 +289,12 @@ type Action struct {
 }
 
 const (
-	ActionScopeWorkspace      = "workspace"
-	ActionScopeTask           = "task"
-	ActionScopeRepository     = "repository"
-	ActionAccessAuthenticated = "authenticated"
-	ActionAccessAdmin         = "admin"
+	ActionScopeWorkspace            = "workspace"
+	ActionScopeTask                 = "task"
+	ActionScopeRepository           = "repository"
+	ActionScopeNotificationProvider = "notification_provider"
+	ActionAccessAuthenticated       = "authenticated"
+	ActionAccessAdmin               = "admin"
 )
 
 // EffectiveAccess preserves the original action contract: actions are

@@ -7,6 +7,11 @@ func (m Manifest) Clone() Manifest {
 	clone.Categories = cloneStrings(m.Categories)
 	clone.Webhooks = cloneWebhooks(m.Webhooks)
 	clone.Actions = cloneActions(m.Actions)
+	clone.NotificationFormatters = append([]NotificationFormatter(nil), m.NotificationFormatters...)
+	for index := range clone.NotificationFormatters {
+		clone.NotificationFormatters[index].ProviderTypes = cloneStrings(m.NotificationFormatters[index].ProviderTypes)
+		clone.NotificationFormatters[index].ManagementActions = cloneStrings(m.NotificationFormatters[index].ManagementActions)
+	}
 	clone.RepositoryProviders = cloneStrings(m.RepositoryProviders)
 	clone.ExecutorProviders = cloneExecutorProviders(m.ExecutorProviders)
 	clone.ReferenceSources = cloneReferenceSources(m.ReferenceSources)

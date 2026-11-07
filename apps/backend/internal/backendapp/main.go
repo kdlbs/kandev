@@ -1203,6 +1203,11 @@ func startGatewayAndServe(
 		log.Error("Failed to initialize WebSocket gateway", zap.Error(err))
 		return false
 	}
+	if services.Plugins != nil {
+		services.Plugins.SetNotificationProviderAccess(notificationSvc)
+		notificationSvc.SetFormatterRuntime(services.Plugins)
+	}
+	addCleanup(func() error { notificationSvc.CloseFormatterCaptures(); return nil })
 
 	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
 	if cfg.Features.Canvases {

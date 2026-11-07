@@ -86,7 +86,13 @@ func (r *sqliteRepository) updateProvider(ctx context.Context, writer providerWr
 	if err != nil {
 		return err
 	}
-	return errIfNoRows(result)
+	if err := errIfNoRows(result); err != nil {
+		return err
+	}
+	_, err = writer.ExecContext(ctx, r.db.Rebind(`UPDATE notification_formatter_bindings
+SET provider_type = ?, plugin_id = '', installation_id = '', formatter_key = '', configuration_revision = '', digest = '', revision = ?
+WHERE provider_id = ? AND provider_type <> ?`), provider.Type, uuid.NewString(), provider.ID, provider.Type)
+	return err
 }
 
 func (r *sqliteRepository) replaceSubscriptions(ctx context.Context, writer providerWriter, providerID, userID string, events []string) error {

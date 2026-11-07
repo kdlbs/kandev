@@ -75,6 +75,7 @@ func (s *Service) deliverRuntimeUpdateBatch(ctx context.Context, userID string, 
 		if !provider.Enabled || !containsEvent(subscriptions[provider.ID], EventSystemUpdateAvailable) {
 			continue
 		}
+		formatter := s.captureFormatter(ctx, userID, provider)
 		claimed := make([]agents.RuntimeUpdateNotice, 0, len(notices))
 		for _, notice := range notices {
 			inserted, err := s.repo.InsertDelivery(ctx, &models.Delivery{
@@ -93,6 +94,7 @@ func (s *Service) deliverRuntimeUpdateBatch(ctx context.Context, userID string, 
 			continue
 		}
 		message := runtimeUpdateBatchMessage(claimed)
+		message.formatter = formatter
 		if err := s.dispatchProvider(ctx, userID, provider, message); err != nil {
 			s.logger.Warn("runtime update notification delivery failed", zap.String("provider_id", provider.ID), zap.Error(err))
 			rollbackCtx := context.WithoutCancel(ctx)

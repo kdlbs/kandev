@@ -145,6 +145,27 @@ describe("buildHostApi — API", () => {
 });
 
 describe("buildHostApi", () => {
+  it("forwards the notification provider selector through the authenticated action envelope", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const host = buildHostApi("formatter", createAppStore());
+    const notificationFormatter = {
+      installationId: "installation",
+      formatterKey: "text",
+      expectedBindingRevision: "binding",
+      mode: "candidate" as const,
+    };
+    await host.api.invokeAction("templates.prepare", {
+      notificationProviderId: "owned-mail",
+      notificationFormatter,
+      body: { configuration: {} },
+    });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      notificationProviderId: "owned-mail",
+      notificationFormatter,
+      body: { configuration: {} },
+    });
+  });
   afterEach(() => {
     vi.unstubAllEnvs();
   });
