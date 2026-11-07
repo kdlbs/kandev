@@ -556,6 +556,7 @@ func startServices( //nolint:cyclop
 	// AGENTCTL LAUNCHER (for standalone mode)
 	// ============================================
 	agentRuntimeAvailability := agentctlclient.NewRuntimeOwner(eventBus, log, systeminfo.NewBootID())
+	logger.SetExecutionBootID(agentRuntimeAvailability.BootID())
 	addCleanup(func() error {
 		agentRuntimeAvailability.Stop()
 		return nil

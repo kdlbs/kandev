@@ -1879,14 +1879,20 @@ func (m *Manager) Start(ctx context.Context) error {
 
 // StartWithGeneration starts the agent process and returns the generation
 // created by this call while startup remains serialized against replacement.
-func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
+func (m *Manager) StartWithGeneration(ctx context.Context) (startedGeneration uint64, startErr error) {
+	finishFlow := m.logger.BeginFlow(ctx, logger.ExecutionFlow{Stage: "bootstrap", TaskID: m.cfg.TaskID, SessionID: m.cfg.SessionID, ExecutionID: m.cfg.InstanceID, HarnessGeneration: m.cfg.DeliveryHarnessGeneration})
+	failurePhase := "process_start"
+	successOutcome := "process_started"
+	defer finishProcessFlow(finishFlow, &startErr, &failurePhase, &successOutcome)
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 	release, err := m.admitStart()
 	if err != nil {
+		failurePhase = m.processAdmissionFailureReason(err)
 		return 0, err
 	}
 	defer release()
+	failurePhase = "already_running"
 	if m.passthrough.Live() {
 		return 0, fmt.Errorf("passthrough agent is already running")
 	}
@@ -1894,6 +1900,7 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
 		return 0, fmt.Errorf("agent is already running")
 	}
+	failurePhase = "delivery_journal"
 	if m.cfg.DurableJournalPath != "" && m.deliveryJournalErr != nil {
 		m.status.Store(StatusError)
 		return 0, fmt.Errorf("durable delivery journal unavailable: %w", m.deliveryJournalErr)
@@ -1903,22 +1910,16 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	// never ran teardown, and Start is reachable without an intervening Stop.
 	m.finishPreviousLifecycle(ctx)
 
-	m.logger.Info("starting agent process",
-		zap.String("protocol", string(m.cfg.Protocol)),
-		zap.Strings("args", m.cfg.AgentArgs),
-		zap.String("workdir", m.cfg.WorkDir),
-		zap.Int("mcp_servers", len(m.cfg.McpServers)))
+	m.markProcessStarting()
 
-	m.status.Store(StatusStarting)
-	m.exitCode.Store(-1)
-	m.exitErr.Store(errorWrapper{err: nil})
-
+	failurePhase = "command_validation"
 	if err := config.ValidateCommandArgs(m.cfg.AgentArgs); err != nil {
 		m.status.Store(StatusError)
 		return 0, err
 	}
 
 	// Build adapter config and create protocol adapter
+	failurePhase = "adapter_configuration"
 	if err := m.buildAdapterConfig(); err != nil {
 		m.status.Store(StatusError)
 		return 0, err
@@ -1926,7 +1927,10 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 
 	// One-shot adapters manage their own subprocess per prompt.
 	// Skip process creation — the adapter spawns processes in Prompt().
+	failurePhase = "usage_binding"
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
+		failurePhase = "oneshot_admission"
+		successOutcome = "adapter_ready"
 		if err := m.startOneShot(); err != nil {
 			return 0, err
 		}
@@ -1934,11 +1938,13 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	}
 
 	// Assemble final command (does not start the process yet)
+	failurePhase = "command_assembly"
 	if err := m.buildFinalCommand(); err != nil {
 		m.status.Store(StatusError)
 		m.closeOpenCodePlugin(context.Background())
 		return 0, err
 	}
+	failurePhase = "managed_process_start"
 	generation, err := m.startManagedProcess()
 	if err != nil {
 		m.closeOpenCodePlugin(context.Background())

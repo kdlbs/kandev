@@ -715,6 +715,7 @@ const (
 	childJSONTimestampField
 	childJSONCallerField
 	childJSONMessageField
+	childJSONFlowField
 )
 
 func childJSONLogLevel(line string) string {
@@ -747,6 +748,7 @@ func childJSONLogRecord(line string) (string, string, bool) {
 		Timestamp: timestamp,
 		Caller:    caller,
 		Message:   message,
+		Flow:      childExecutionFlow(message, values[childJSONFlowField]),
 	}
 	context.apply(&record)
 	encoded, err := json.Marshal(record)
@@ -756,8 +758,8 @@ func childJSONLogRecord(line string) (string, string, bool) {
 	return level, string(encoded), true
 }
 
-func childJSONLogEnvelope(line string) ([4]json.RawMessage, *childLogContext, bool) {
-	var empty [4]json.RawMessage
+func childJSONLogEnvelope(line string) ([5]json.RawMessage, *childLogContext, bool) {
+	var empty [5]json.RawMessage
 	context := newChildLogContext()
 	decoder := json.NewDecoder(strings.NewReader(line))
 	token, err := decoder.Token()
@@ -783,8 +785,8 @@ func childJSONLogEnvelope(line string) ([4]json.RawMessage, *childLogContext, bo
 	return values, context, true
 }
 
-func childJSONLogFields(decoder *json.Decoder, context *childLogContext) ([4]json.RawMessage, bool) {
-	var values [4]json.RawMessage
+func childJSONLogFields(decoder *json.Decoder, context *childLogContext) ([5]json.RawMessage, bool) {
+	var values [5]json.RawMessage
 	var seen uint8
 	for decoder.More() {
 		keyToken, err := decoder.Token()
@@ -811,7 +813,7 @@ func childJSONLogFields(decoder *json.Decoder, context *childLogContext) ([4]jso
 		seen |= mask
 		values[field] = value
 	}
-	return values, seen == 0b1111
+	return values, seen&0b1111 == 0b1111
 }
 
 func childJSONLogFieldIndex(key string) int {
@@ -824,9 +826,18 @@ func childJSONLogFieldIndex(key string) int {
 		return childJSONCallerField
 	case "msg":
 		return childJSONMessageField
+	case "flow":
+		return childJSONFlowField
 	default:
 		return -1
 	}
+}
+
+func childExecutionFlow(message string, raw json.RawMessage) *logger.ExecutionFlow {
+	if message != logger.ExecutionFlowMessage {
+		return nil
+	}
+	return logger.ParseExecutionFlow(raw)
 }
 
 func validChildJSONLogTimestamp(timestamp string) bool {
