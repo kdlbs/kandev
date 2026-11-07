@@ -18,8 +18,8 @@ func (s *UsageService) PeekExecutionUsage(ctx context.Context, input ExecutionUs
 // The input belongs to a native prepared request, composed with that native
 // executor's inherited environment. A cold cache cannot trigger a provider probe.
 func (s *UsageService) PeekPreparedExecutionUsage(ctx context.Context, input ExecutionUsageInput) *ExecutionUsageReport {
-	if !NativeProviderSelectionKnown(input) {
-		return &ExecutionUsageReport{Reason: "provider_selection_unknown", Model: input.Model}
+	if reason := NativeProviderSelectionReason(input); reason != "" {
+		return &ExecutionUsageReport{Reason: reason, Model: input.Model}
 	}
 	return s.peekExecutionUsage(ctx, input)
 }
