@@ -3438,33 +3438,9 @@ func (s *Service) transferQueuedSessionState(ctx context.Context, taskID, oldSes
 	if s.messageQueue == nil {
 		return nil
 	}
+	prepare, rollback := s.queuedAttachmentTransferCallbacks(taskID, oldSessionID, newSessionID)
 	transferErr := s.messageQueue.TransferSessionWithDurableAttachmentPreparation(
-		ctx,
-		taskID,
-		oldSessionID,
-		newSessionID,
-		func(admittedCtx context.Context, attachmentIDs []string) error {
-			if len(attachmentIDs) == 0 {
-				return nil
-			}
-			if !sessionAttachmentTransfererAvailable(s.sessionAttachmentTransferer) {
-				return errSessionAttachmentTransferUnavailable
-			}
-			return s.sessionAttachmentTransferer.TransferSessionMessageAttachments(
-				admittedCtx, taskID, oldSessionID, newSessionID, attachmentIDs,
-			)
-		},
-		func(rollbackCtx context.Context, attachmentIDs []string) error {
-			if len(attachmentIDs) == 0 {
-				return nil
-			}
-			if !sessionAttachmentTransfererAvailable(s.sessionAttachmentTransferer) {
-				return errSessionAttachmentTransferUnavailable
-			}
-			return s.sessionAttachmentTransferer.TransferSessionMessageAttachments(
-				rollbackCtx, taskID, newSessionID, oldSessionID, attachmentIDs,
-			)
-		},
+		ctx, taskID, oldSessionID, newSessionID, prepare, rollback,
 	)
 	if transferErr != nil {
 		return fmt.Errorf("transfer queued state: %w", transferErr)
@@ -3472,6 +3448,31 @@ func (s *Service) transferQueuedSessionState(ctx context.Context, taskID, oldSes
 	s.publishQueueStatusEvent(ctx, oldSessionID)
 	s.publishQueueStatusEvent(ctx, newSessionID)
 	return nil
+}
+
+// queuedAttachmentTransferCallbacks moves claimed attachment bindings with
+// the queue rows of a session transfer and moves them back on rollback.
+func (s *Service) queuedAttachmentTransferCallbacks(
+	taskID, oldSessionID, newSessionID string,
+) (prepare, rollback func(context.Context, []string) error) {
+	move := func(ctx context.Context, from, to string, attachmentIDs []string) error {
+		if len(attachmentIDs) == 0 {
+			return nil
+		}
+		if !sessionAttachmentTransfererAvailable(s.sessionAttachmentTransferer) {
+			return errSessionAttachmentTransferUnavailable
+		}
+		return s.sessionAttachmentTransferer.TransferSessionMessageAttachments(
+			ctx, taskID, from, to, attachmentIDs,
+		)
+	}
+	prepare = func(admittedCtx context.Context, attachmentIDs []string) error {
+		return move(admittedCtx, oldSessionID, newSessionID, attachmentIDs)
+	}
+	rollback = func(rollbackCtx context.Context, attachmentIDs []string) error {
+		return move(rollbackCtx, newSessionID, oldSessionID, attachmentIDs)
+	}
+	return prepare, rollback
 }
 
 func (s *Service) reconcileSessionTransferCompensationsOnStartup(ctx context.Context) error {
