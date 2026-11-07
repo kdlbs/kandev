@@ -26,6 +26,10 @@ func (h *Handler) handleInferenceClosure(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid closure request"})
 		return
 	}
+	if req.Action == "probe" && h.attempts != nil && h.attempts.cfg != nil && h.attempts.cfg.DurableJournalPath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "durable inference closure unsupported"})
+		return
+	}
 	result, err := h.inferenceClosure(c.Request.Context(), req)
 	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
