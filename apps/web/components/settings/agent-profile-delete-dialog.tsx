@@ -25,6 +25,7 @@ import type {
   UtilityAgentReference,
 } from "@/lib/types/agent-profile-errors";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import { groupSessionsByWorkspace } from "@/lib/settings/agent-profile-delete-conflict";
 
 // The watcher `kind` values are the wire enum and are never translated; only
 // their labels are copy, so they travel as catalog keys and resolve at render.
@@ -186,6 +187,7 @@ export function AgentProfileDeleteConflictDialog({
   const watchersByKind = groupWatchersByKind(watchers);
   const workspaces = useAppStore((s) => s.workspaces.items);
   const providers = useAppStore((s) => s.settingsAgents.items);
+  const workspaceLabels = new Map(workspaces.map((w) => [w.id, w.name]));
 
   return (
     <AlertDialog open={!!conflict} onOpenChange={onOpenChange}>
@@ -210,21 +212,23 @@ export function AgentProfileDeleteConflictDialog({
               title={t("agents:conflictTasksTitle")}
               sessions={tasks}
               fallback={t("agents:untitledTask")}
+              workspaceLabels={workspaceLabels}
             />
             <SessionConflictSection
               title={t("agents:conflictQuickChatsTitle")}
               sessions={quickChats}
               fallback={t("agents:untitledQuickChat")}
+              workspaceLabels={workspaceLabels}
             />
             <WatcherConflictSection watchersByKind={watchersByKind} />
             <RoutingTierConflictSection
               routingTiers={routingTiers}
-              workspaceLabels={new Map(workspaces.map((w) => [w.id, w.name]))}
+              workspaceLabels={workspaceLabels}
               providerLabels={new Map(providers.map((p) => [p.id, p.name]))}
             />
             <AutomationConflictSection
               automations={automations}
-              workspaceLabels={new Map(workspaces.map((w) => [w.id, w.name]))}
+              workspaceLabels={workspaceLabels}
             />
             <UtilityAgentConflictSection utilityAgents={utilityAgents} />
             {hasHardBlockers ? (
@@ -279,22 +283,41 @@ function SessionConflictSection({
   title,
   sessions,
   fallback,
+  workspaceLabels,
 }: {
   title: string;
   sessions: ActiveSessionInfo[];
   fallback: string;
+  workspaceLabels: Map<string, string>;
 }) {
+  const { t } = useTranslation();
   if (sessions.length === 0) return null;
   return (
     <div className="space-y-1">
       <p className="font-medium text-sm">{title}</p>
-      <ul className="list-disc list-inside space-y-0.5">
-        {sessions.map((t) => (
-          <li key={t.task_id} className="text-sm">
-            {t.task_title || fallback}
-          </li>
-        ))}
-      </ul>
+      {groupSessionsByWorkspace(sessions, (id) => workspaceLabels.get(id)).map((group) => (
+        <div
+          key={group.workspaceId}
+          className="space-y-0.5 pl-2"
+          data-testid="profile-conflict-workspace-group"
+        >
+          <h3
+            className="text-sm font-medium break-words"
+            data-testid="profile-conflict-workspace-name"
+          >
+            {group.workspaceName ||
+              workspaceLabels.get(group.workspaceId) ||
+              t("agents:conflictUnknownWorkspace")}
+          </h3>
+          <ul className="list-disc list-inside space-y-0.5 pl-2">
+            {group.sessions.map((s) => (
+              <li key={s.task_id} className="text-sm">
+                {s.task_title || fallback}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }

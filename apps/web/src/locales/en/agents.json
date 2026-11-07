@@ -127,6 +127,7 @@
   "conflictAutomationsTitle": "Automations:",
   "conflictQuickChatsTitle": "Quick Chats:",
   "conflictTasksTitle": "Tasks:",
+  "conflictUnknownWorkspace": "Unknown workspace",
   "conflictTierMappingRow": "<0>{{tier}}</0> tier in {{workspace}} for {{provider}}",
   "conflictTierMappingsTitle": "Workspace tier mappings:",
   "conflictWatchersTitle": "Watchers (will be disabled):",
