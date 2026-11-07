@@ -7031,6 +7031,11 @@ func (promptTaskOptions) failureContext(ctx context.Context) (context.Context, c
 // block on an agent turn.
 func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, origin launchOrigin, options promptTaskOptions) (*PromptResult, error) {
 	if err := s.checkInferenceClosureAdmission(ctx, sessionID, false); err != nil {
+		// A cancelled resume continuation keeps reporting its cancellation
+		// rather than the context error of the closure read.
+		if attemptErr := s.validateResumeAttempt(options.resumeAttempt); attemptErr != nil {
+			return nil, attemptErr
+		}
 		return nil, err
 	}
 	if retryLaunchInContext(ctx) == nil && s.automationOwnsRetrySession(ctx, taskID, sessionID) {
