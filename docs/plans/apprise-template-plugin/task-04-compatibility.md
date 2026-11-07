@@ -136,6 +136,18 @@ readback of three bindings, including the migrated provider. Native backup tests
 foreign ownership/installation, unsupported runtime configuration, and expired
 capture leases. These results do not prove arbitrary host downgrade safety.
 
-The latest-stable-plus-patch, unchanged-host rejection, full lifecycle/ownership
-matrix, and released-SDK lane remain separate unfinished acceptance gates. The
-earlier template v0.99.0 smoke is not formatter compatibility evidence.
+Latest stable was resolved as `v0.99.1`, source
+`813a741b21108ea8ed10ab58954d85c2e5205999`. An unmodified stable-source binary
+rejected the actual formatter archive with HTTP 400 before activation. The
+minimal patched stable candidate `cf8579699e40e38dcb2063d1692c18444c8afbd5`
+reports `v0.99.1+notification-formatter.1` and passed the same packaged editor,
+six-event preview, four-template migration, and three-binding recovery drill.
+The candidate uses the normal `fts5` backend target; protobuf regeneration is
+clean, SDK race tests pass, and frontend typecheck/build pass. These are local
+stable-source builds, not verification of official release archive bytes.
+
+Remaining gates are the full lifecycle/authenticated ownership matrix, the
+minimum-host v0.99.0 rejection case, released-SDK lane, and actual operational
+runtime/session continuity. The earlier template v0.99.0 smoke is not formatter
+compatibility evidence. Synthetic screenshots and provenance are committed in
+the independent plugin repository under `docs/images/formatter/`.

@@ -37,7 +37,7 @@ development evidence, remaining matrix checks, and production authorization.
    the minimal patch is also an isolated compatibility target.
 2. Create public community repository
    `illuwa-soft/kandev-plugin-apprise-templates` from the official template.
-   Canonical checkout: `/Users/cinos81/works/kandev-plugin-apprise-templates`;
+   Canonical checkout: `<workspace>/kandev-plugin-apprise-templates`;
    task worktrees stay under its `.worktrees/`. Core PR targets
    `kdlbs/kandev:main` from the Illuwa fork; plugin PR targets its own `main`.
 3. Support all six current events, including permission requests and session
