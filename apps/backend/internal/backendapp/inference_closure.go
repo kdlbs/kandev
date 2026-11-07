@@ -54,18 +54,33 @@ func (b *sharedInferenceConsumer) SettleInferenceClosure(ctx context.Context, cl
 	for _, status := range observation.Snapshot.Attempts {
 		statuses[inferenceBindingKey(status.OwnerID, status.AttemptID)] = status
 	}
+	if err = b.settleClosureClaims(ctx, c, claims, statuses, all); err != nil {
+		return err
+	}
+	if err = b.verifyInferenceClosureClaimsLocked(ctx, c.SessionID, c.SourceInstanceID); err != nil {
+		return err
+	}
+	return releaseRetainedClosureAttempts(ctx, client, claims, statuses)
+}
+
+// settleClosureClaims settles every captured claim against its recorded
+// terminal attempt proof from the same source instance.
+func (b *sharedInferenceConsumer) settleClosureClaims(ctx context.Context, c *utility.InferenceScopeClosure, claims map[string]sessioncapacity.InferenceBinding, statuses map[string]utility.AttemptStatus, all map[string]sessioncapacity.InferenceBinding) error {
 	for key, held := range claims {
 		status, ok := statuses[key]
 		if !ok || held.SessionID != c.SessionID || held.InstanceID != c.SourceInstanceID || !matchesInferenceProof(held, &status) {
 			return utility.ErrInferenceClosureIncomplete
 		}
-		if err = b.settleClosureClaim(ctx, held, status, all); err != nil {
+		if err := b.settleClosureClaim(ctx, held, status, all); err != nil {
 			return err
 		}
 	}
-	if err = b.verifyInferenceClosureClaimsLocked(ctx, c.SessionID, c.SourceInstanceID); err != nil {
-		return err
-	}
+	return nil
+}
+
+// releaseRetainedClosureAttempts releases retained attempts after the claims
+// settle. An unclaimed retained attempt must never have started or sent.
+func releaseRetainedClosureAttempts(ctx context.Context, client *agentruntime.InferenceClient, claims map[string]sessioncapacity.InferenceBinding, statuses map[string]utility.AttemptStatus) error {
 	for key, status := range statuses {
 		if !status.Retained {
 			continue
