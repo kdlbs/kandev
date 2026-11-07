@@ -291,7 +291,7 @@ func (r *sqliteRepository) UpdateAgent(ctx context.Context, agent *models.Utilit
 	// Startup's legacy repair treats equal timestamps as a never-edited row.
 	// Preserve an explicit disable even on a coarse clock tick; PostgreSQL's
 	// timestamp precision also retains this minimum one-microsecond advance.
-	if !agent.UpdatedAt.After(agent.CreatedAt) {
+	if !agent.UpdatedAt.Truncate(time.Microsecond).After(agent.CreatedAt.Truncate(time.Microsecond)) {
 		agent.UpdatedAt = agent.CreatedAt.Add(time.Microsecond)
 	}
 
