@@ -30,18 +30,24 @@ func (r *Repository) ReserveRunSession(ctx context.Context, session *models.RunS
 		return false, err
 	}
 
+	known := 0
+	if session.AdmittedExecutionGradeKnown {
+		known = 1
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO office_run_sessions (
 			id, workspace_id, agent_profile_id, run_id, attempt, state,
+			admitted_execution_grade, admitted_execution_grade_known,
 			execution_id, execution_profile_id, adapter, model, acp_session_id,
 			created_at, started_at, finished_at, cancel_requested_at, error_message, version
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		WHERE (? = 0 OR NOT EXISTS (SELECT 1 FROM office_run_sessions WHERE run_id = ? AND state IN (?, ?)))
 		ON CONFLICT DO NOTHING
 	`), session.ID, session.WorkspaceID, session.AgentProfileID, session.RunID,
-		session.Attempt, session.State, session.ExecutionID, session.ExecutionProfileID,
+		session.Attempt, session.State, session.AdmittedExecutionGrade, known, session.ExecutionID, session.ExecutionProfileID,
 		session.Adapter, session.Model, session.ACPSessionID, session.CreatedAt,
 		session.StartedAt, session.FinishedAt, session.CancelRequestedAt,
-		session.ErrorMessage, session.Version)
+		session.ErrorMessage, session.Version, known, session.RunID, models.RunSessionStatePreparing, models.RunSessionStateRunning)
 	if err != nil {
 		return false, fmt.Errorf("reserve run session: insert: %w", err)
 	}
@@ -181,10 +187,10 @@ func (r *Repository) BindRunSessionExecution(
 		UPDATE office_run_sessions
 		SET execution_id = ?, execution_profile_id = ?, adapter = ?, model = ?,
 		    acp_session_id = ?, version = version + 1
-		WHERE id = ? AND state = ? AND COALESCE(execution_id, '') = ''
+		WHERE id = ? AND state = ? AND (COALESCE(execution_id, '') = '' OR (execution_id = ? AND execution_profile_id = ''))
 		  AND cancel_requested_at IS NULL
 	`), executionID, executionProfileID, adapter, model, acpSessionID, sessionID,
-		models.RunSessionStatePreparing)
+		models.RunSessionStatePreparing, executionID)
 	if err != nil {
 		return false, fmt.Errorf("bind run session execution: %w", err)
 	}
@@ -279,6 +285,9 @@ func (r *Repository) FinishRunSession(
 	wrote, err := result.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("finish run session: rows affected: %w", err)
+	}
+	if wrote == 1 && r.runSessionCapacityReleased != nil {
+		r.runSessionCapacityReleased()
 	}
 	return wrote == 1, nil
 }

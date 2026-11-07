@@ -34,13 +34,18 @@ type sessionKeyedCeilingReservation struct {
 // population never momentarily drops. Only seam 2's on_turn_start redirect
 // needs this; seam 4 never changes session id mid-resume and simply never
 // calls it.
-func (r *sessionKeyedCeilingReservation) rekeyToSession(ctx context.Context, sessionID string) {
+func (r *sessionKeyedCeilingReservation) rekeyToSession(ctx context.Context, sessionID string) error {
 	if r == nil || r.controller == nil || r.consumed || sessionID == "" || sessionID == r.key {
-		return
+		return nil
 	}
-	if r.controller.rekey(ctx, r.key, sessionID) {
+	moved, err := r.controller.rekeyAdmission(ctx, r.key, sessionID)
+	if err != nil {
+		return err
+	}
+	if moved {
 		r.key = sessionID
 	}
+	return nil
 }
 
 // consume marks the reservation as belonging to a session that is now actually
@@ -72,8 +77,10 @@ func (s *Service) admitOrDeferSessionKeyedLaunch(
 	ctx context.Context, taskID, sessionID string, origin launchOrigin, seam string,
 	kind models.CeilingLaunchKind, payload map[string]interface{}, failureContext string,
 ) (*sessionKeyedCeilingReservation, bool, error) {
+	profileID, _ := payload[metaKeyAgentProfileID].(string)
 	decision := s.sessionCeiling.admit(ctx, admissionRequest{
 		taskID: taskID, sessionID: sessionID, origin: origin, seam: seam,
+		profileID: profileID,
 	})
 	if decision.admitted {
 		return &sessionKeyedCeilingReservation{
@@ -85,7 +92,7 @@ func (s *Service) admitOrDeferSessionKeyedLaunch(
 	payload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, payload)
 
 	if err := s.deferCeilingRefusal(ctx, taskID, sessionID, kind, payload, decision.reasonCode,
-		decision.population, decision.populationKnown, decision.ceiling); err != nil {
+		decision.population, decision.populationKnown, decision.ceiling, origin); err != nil {
 		if errors.Is(err, ErrCeilingLaunchConflict) && isSessionOpenRecoveryContext(ctx) {
 			s.logger.Zap().Debug("session-open recovery left the existing ceiling queue unchanged after capacity refusal",
 				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))

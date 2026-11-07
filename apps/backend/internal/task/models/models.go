@@ -1562,6 +1562,7 @@ func IsAutomationTaskOrigin(origin string) bool {
 
 // Task represents a task in the database
 type Task struct {
+	ExecutionGrade         string `json:"execution_grade"`
 	ID                     string `json:"id"`
 	WorkspaceID            string `json:"workspace_id"`
 	InitialWorkspaceLayout string `json:"initial_workspace_layout,omitempty"`
@@ -2482,48 +2483,53 @@ type SessionBranchInfo struct {
 // TaskSession represents a persistent agent execution session for a task.
 // This replaces the in-memory TaskExecution tracking and survives backend restarts.
 type TaskSession struct {
-	ExecutorActorUserID    string     `json:"-"`
-	ID                     string     `json:"id"`
-	TaskID                 string     `json:"task_id"`
-	QueueIncarnationID     string     `json:"queue_incarnation_id"`
-	Name                   string     `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
-	AgentExecutionID       string     `json:"agent_execution_id"`   // Docker container/agent execution
-	ContainerID            string     `json:"container_id"`         // Docker container ID for cleanup
-	AgentProfileID         string     `json:"agent_profile_id"`     // ID of the agent profile used
-	ExecutionProfileID     string     `json:"execution_profile_id"` // Concrete profile used for this execution
-	RouteGeneration        int64      `json:"route_generation,omitempty"`
-	RouteState             string     `json:"route_state,omitempty"`
-	RouteReason            string     `json:"route_reason,omitempty"`
-	DownstreamACPSessionID string     `json:"downstream_acp_session_id,omitempty"`
-	RouteErrorCode         string     `json:"route_error_code,omitempty"`
-	RouteErrorClass        string     `json:"route_error_class,omitempty"`
-	RouteCatalogueVersion  string     `json:"route_catalogue_version,omitempty"`
-	RouteRetryOrdinal      int64      `json:"route_retry_ordinal,omitempty"`
-	RouteDeadline          *time.Time `json:"route_deadline,omitempty"`
-	RoutePendingOutcome    string     `json:"route_pending_outcome,omitempty"`
-	ExecutorID             string     `json:"executor_id"`
-	ExecutorProfileID      string     `json:"executor_profile_id"`
-	EnvironmentID          string     `json:"environment_id"`
-	RepositoryID           string     `json:"repository_id"`   // Primary repository (for backward compatibility)
-	BaseBranch             string     `json:"base_branch"`     // Primary base branch (for backward compatibility)
-	BaseCommitSHA          string     `json:"base_commit_sha"` // Git commit SHA at session start (for cumulative diff)
-	WorkspacePath          string     `json:"workspace_path"`  // Effective task workspace root; legacy repo-less sessions may use the picked host folder
+	// Set only by a session read that also checked the independent closure
+	// block on the writer. It is never stored or exposed in API payloads.
+	InferenceClosureAbsenceConfirmed bool       `json:"-" db:"-"`
+	ExecutorActorUserID              string     `json:"-"`
+	ID                               string     `json:"id"`
+	TaskID                           string     `json:"task_id"`
+	QueueIncarnationID               string     `json:"queue_incarnation_id"`
+	Name                             string     `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
+	AgentExecutionID                 string     `json:"agent_execution_id"`   // Docker container/agent execution
+	ContainerID                      string     `json:"container_id"`         // Docker container ID for cleanup
+	AgentProfileID                   string     `json:"agent_profile_id"`     // ID of the agent profile used
+	ExecutionProfileID               string     `json:"execution_profile_id"` // Concrete profile used for this execution
+	RouteGeneration                  int64      `json:"route_generation,omitempty"`
+	RouteState                       string     `json:"route_state,omitempty"`
+	RouteReason                      string     `json:"route_reason,omitempty"`
+	DownstreamACPSessionID           string     `json:"downstream_acp_session_id,omitempty"`
+	RouteErrorCode                   string     `json:"route_error_code,omitempty"`
+	RouteErrorClass                  string     `json:"route_error_class,omitempty"`
+	RouteCatalogueVersion            string     `json:"route_catalogue_version,omitempty"`
+	RouteRetryOrdinal                int64      `json:"route_retry_ordinal,omitempty"`
+	RouteDeadline                    *time.Time `json:"route_deadline,omitempty"`
+	RoutePendingOutcome              string     `json:"route_pending_outcome,omitempty"`
+	ExecutorID                       string     `json:"executor_id"`
+	ExecutorProfileID                string     `json:"executor_profile_id"`
+	EnvironmentID                    string     `json:"environment_id"`
+	RepositoryID                     string     `json:"repository_id"`   // Primary repository (for backward compatibility)
+	BaseBranch                       string     `json:"base_branch"`     // Primary base branch (for backward compatibility)
+	BaseCommitSHA                    string     `json:"base_commit_sha"` // Git commit SHA at session start (for cumulative diff)
+	WorkspacePath                    string     `json:"workspace_path"`  // Effective task workspace root; legacy repo-less sessions may use the picked host folder
 	// AgentWorkspacePath is the confirmed native-session working directory.
 	// It can differ from WorkspacePath after a live attachment promotes the
 	// Files root without moving the running agent. Read-only projection of the
 	// current harness generation; empty means unknown.
-	AgentWorkspacePath   string                 `json:"agent_workspace_path,omitempty"`
-	Worktrees            []*TaskEnvironmentRepo `json:"-"` // Environment repository rows for this session's workspace
-	AgentProfileSnapshot map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
-	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
-	EnvironmentSnapshot  map[string]interface{} `json:"environment_snapshot,omitempty"`
-	RepositorySnapshot   map[string]interface{} `json:"repository_snapshot,omitempty"`
-	State                TaskSessionState       `json:"state"`
-	ErrorMessage         string                 `json:"error_message,omitempty"`
-	Metadata             map[string]interface{} `json:"metadata,omitempty"`
-	StartedAt            time.Time              `json:"started_at"`
-	CompletedAt          *time.Time             `json:"completed_at,omitempty"`
-	UpdatedAt            time.Time              `json:"updated_at"`
+	AgentWorkspacePath          string                 `json:"agent_workspace_path,omitempty"`
+	Worktrees                   []*TaskEnvironmentRepo `json:"-"` // Environment repository rows for this session's workspace
+	AgentProfileSnapshot        map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
+	ExecutorSnapshot            map[string]interface{} `json:"executor_snapshot,omitempty"`
+	EnvironmentSnapshot         map[string]interface{} `json:"environment_snapshot,omitempty"`
+	RepositorySnapshot          map[string]interface{} `json:"repository_snapshot,omitempty"`
+	State                       TaskSessionState       `json:"state"`
+	ErrorMessage                string                 `json:"error_message,omitempty"`
+	Metadata                    map[string]interface{} `json:"metadata,omitempty"`
+	StartedAt                   time.Time              `json:"started_at"`
+	CompletedAt                 *time.Time             `json:"completed_at,omitempty"`
+	UpdatedAt                   time.Time              `json:"updated_at"`
+	AdmittedExecutionGrade      string                 `json:"admitted_execution_grade"`
+	AdmittedExecutionGradeKnown bool                   `json:"admitted_execution_grade_known"`
 
 	// Environment reference
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"` // FK to task_environments for shared env
@@ -2610,22 +2616,24 @@ type ActiveSessionRecoveryCandidate struct {
 // TODO: Add v1.TaskSession type to pkg/api/v1/
 func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
-		"id":                   s.ID,
-		"task_id":              s.TaskID,
-		"queue_incarnation_id": s.QueueIncarnationID,
-		"agent_execution_id":   s.AgentExecutionID,
-		"container_id":         s.ContainerID,
-		"agent_profile_id":     s.AgentProfileID,
-		"execution_profile_id": s.ExecutionProfileID,
-		"executor_id":          s.ExecutorID,
-		"executor_profile_id":  s.ExecutorProfileID,
-		"environment_id":       s.EnvironmentID,
-		"repository_id":        s.RepositoryID,
-		"base_branch":          s.BaseBranch,
-		"base_commit_sha":      s.BaseCommitSHA,
-		"state":                string(s.State),
-		"started_at":           s.StartedAt,
-		"updated_at":           s.UpdatedAt,
+		"id":                             s.ID,
+		"task_id":                        s.TaskID,
+		"queue_incarnation_id":           s.QueueIncarnationID,
+		"agent_execution_id":             s.AgentExecutionID,
+		"container_id":                   s.ContainerID,
+		"agent_profile_id":               s.AgentProfileID,
+		"execution_profile_id":           s.ExecutionProfileID,
+		"admitted_execution_grade":       s.AdmittedExecutionGrade,
+		"admitted_execution_grade_known": s.AdmittedExecutionGradeKnown,
+		"executor_id":                    s.ExecutorID,
+		"executor_profile_id":            s.ExecutorProfileID,
+		"environment_id":                 s.EnvironmentID,
+		"repository_id":                  s.RepositoryID,
+		"base_branch":                    s.BaseBranch,
+		"base_commit_sha":                s.BaseCommitSHA,
+		"state":                          string(s.State),
+		"started_at":                     s.StartedAt,
+		"updated_at":                     s.UpdatedAt,
 	}
 	if s.RouteGeneration > 0 {
 		result["route_generation"] = s.RouteGeneration
@@ -2673,7 +2681,7 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		result["completed_at"] = s.CompletedAt
 	}
 	if s.Metadata != nil {
-		result["metadata"] = s.Metadata
+		result["metadata"] = PublicSessionMetadata(s.Metadata)
 	}
 	if s.AgentProfileSnapshot != nil {
 		result["agent_profile_snapshot"] = s.AgentProfileSnapshot
@@ -3757,6 +3765,7 @@ func (t *Task) ToAPI() *v1.Task {
 	}
 
 	result := &v1.Task{
+		ExecutionGrade:         t.ExecutionGrade,
 		ID:                     t.ID,
 		WorkspaceID:            t.WorkspaceID,
 		InitialWorkspaceLayout: t.InitialWorkspaceLayout,

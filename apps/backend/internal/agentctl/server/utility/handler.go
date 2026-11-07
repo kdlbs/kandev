@@ -21,6 +21,9 @@ const (
 
 // Handler provides HTTP handlers for inference operations.
 type Handler struct {
+	attempts             *attemptOwner
+	closureStop          func(context.Context) (*ManagedProcessStopReceipt, error)
+	beginOperation       func(context.Context) (context.Context, func(), error)
 	acpExecutor          inferenceExecutor
 	codexExecutor        inferenceExecutor
 	logger               *zap.Logger
@@ -42,6 +45,14 @@ func (h *Handler) RegisterRoutes(api *gin.RouterGroup) {
 	aux := api.Group("/inference")
 	aux.POST("/prompt", h.handlePrompt)
 	aux.POST("/probe", h.handleProbe)
+	aux.GET("/attempts", h.handleAttempts)
+	aux.POST("/closure", h.handleInferenceClosure)
+	aux.POST("/attempts", h.handlePrepareAttempt)
+	aux.GET("/attempts/:id", h.handleAttempt)
+	aux.POST("/attempts/:id/cancel", h.handleCancelPreparedAttempt)
+	aux.POST("/attempts/:id/admit", h.handleAdmitCapacityAttempt)
+	aux.POST("/attempts/:id/release", h.handleReleaseRetainedAttempt)
+	aux.POST("/preparations/:id/cancel", h.handleCancelPreparation)
 }
 
 // handleProbe handles POST /api/v1/inference/probe
@@ -103,9 +114,13 @@ func (h *Handler) handlePrompt(c *gin.Context) {
 		zap.String("model", req.Model),
 	)
 
-	resp, err := h.promptExecutor(req).Execute(c.Request.Context(), &req)
+	resp, err := h.executePrompt(c.Request.Context(), &req)
 	if err != nil {
 		h.logger.Error("inference prompt failed", zap.Error(err))
+		if resp != nil && resp.Attempt != nil {
+			c.JSON(promptErrorStatus(err), resp)
+			return
+		}
 		c.JSON(http.StatusInternalServerError, PromptResponse{
 			Success: false,
 			Error:   "inference execution failed",

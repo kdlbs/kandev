@@ -3,6 +3,7 @@
 package utility
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -37,6 +38,15 @@ func installACPCommandLifecycle(cmd *exec.Cmd) (acpCommandLifecycleHandle, error
 
 func releaseACPCommandLifecycle(lifecycle acpCommandLifecycleHandle) {
 	_ = lifecycle.job.Close()
+}
+
+func confirmInferenceTermination(ctx context.Context, lifecycle acpCommandLifecycleHandle, _ int) bool {
+	return lifecycle.job.Valid() && lifecycle.job.TerminateAndWait(ctx) == nil
+}
+
+func recoveredInferenceTerminated(_ int) bool {
+	// A missing leader cannot attest its old process tree without the Job handle.
+	return false
 }
 
 func terminateACPProcessGroup(pid int) error {
