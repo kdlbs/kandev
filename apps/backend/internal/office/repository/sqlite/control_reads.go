@@ -142,10 +142,10 @@ func (r *Repository) appendControlHolds(ctx context.Context, out *ControlTaskLis
 }
 
 // appendControlQueuePolicies reads each queued message's current-incarnation
-// session policy, including non-primary sessions. A message whose session or
-// matching queue_session_state row cannot be read leaves the task's policy counts
-// unknown (nil) rather than defaulting to auto-run. A query failure surfaces as an
-// error rather than a fabricated zero.
+// session policy, including non-primary sessions. A valid session without a
+// current policy uses the queue's auto-run default; an unbound legacy policy
+// keeps its stored value. A missing session or incarnation remains unknown.
+// A query failure surfaces as an error rather than a fabricated zero.
 func (r *Repository) appendControlQueuePolicies(ctx context.Context, out *ControlTaskList, wsID string) error {
 	rows := []struct {
 		TaskID      string `db:"task_id"`
@@ -154,12 +154,12 @@ func (r *Repository) appendControlQueuePolicies(ctx context.Context, out *Contro
 		PolicyKnown int    `db:"policy_known"`
 	}{}
 	query := `SELECT q.task_id,
-	 SUM(CASE WHEN p.auto_run=0 THEN 1 ELSE 0 END) AS paused,
-	 SUM(CASE WHEN p.auto_run<>0 THEN 1 ELSE 0 END) AS auto_run,
-	 MIN(CASE WHEN p.session_id IS NULL THEN 0 ELSE 1 END) AS policy_known
+	 SUM(CASE WHEN p.auto_run=0 AND (p.session_incarnation_id='' OR p.session_incarnation_id=s.queue_incarnation_id) THEN 1 ELSE 0 END) AS paused,
+	 SUM(CASE WHEN p.session_id IS NULL OR (p.session_incarnation_id<>'' AND p.session_incarnation_id<>s.queue_incarnation_id) OR p.auto_run<>0 THEN 1 ELSE 0 END) AS auto_run,
+	 MIN(CASE WHEN s.id IS NULL OR COALESCE(s.queue_incarnation_id,'')='' THEN 0 ELSE 1 END) AS policy_known
 	 FROM queued_messages q JOIN tasks t ON t.id=q.task_id
 	 LEFT JOIN task_sessions s ON s.id=q.session_id AND s.task_id=q.task_id
-	 LEFT JOIN queue_session_state p ON p.session_id=s.id AND p.session_incarnation_id=s.queue_incarnation_id
+	 LEFT JOIN queue_session_state p ON p.session_id=s.id
 	 WHERE ` + controlTaskScope + ` GROUP BY q.task_id`
 	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), wsID); err != nil {
 		return err

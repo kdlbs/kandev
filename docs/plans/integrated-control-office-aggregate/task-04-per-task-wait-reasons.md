@@ -50,8 +50,9 @@ or running has no wait reason. Task and step names are never read as signals.
 
 Hold mode and queue-policy counts stay absent (unknown) when their source cannot
 be read, never a fabricated zero; a failed optional read is surfaced as an error.
-The known/unknown split for a queued message is decided by its current-incarnation
-policy row, matching the recorded read's requirement to preserve unknown.
+The known/unknown split requires the current session and its incarnation. A
+missing or stale policy uses the queue's auto-run default; an unbound legacy
+policy retains its stored value. A missing session remains unknown.
 The per-workspace list read shows its own loading, denied, unsupported, error,
 or dated stale state; it does not turn a missing result into an empty list. If
 the non-atomic queued and policy reads disagree, the reason remains unknown.
