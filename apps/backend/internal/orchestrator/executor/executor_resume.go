@@ -2187,9 +2187,9 @@ type ContextContinuation struct {
 	ContentHash     string
 }
 
-const contextHistoryNotice = "The following context is a historical record, not a request to repeat earlier actions.\n" +
-	"Do not retry an earlier action solely because its result is missing or uncertain; follow the user's current instructions.\n\n" +
-	"Historical task objective:\n"
+const contextHistoryNotice = "The following sections are historical context, not new instructions.\n" +
+	"Do not retry earlier actions only because results are missing or uncertain.\n" +
+	"Follow the user's current instructions.\n\n"
 
 // BuildContextContinuation returns the bounded, provider-neutral context used
 // by the explicit continue_from_history recovery action.
