@@ -9,6 +9,7 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
@@ -56,6 +57,15 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 ) (*routingerr.Error, dynamicruntime.LimitSuspension) {
 	if a == nil || a.usage == nil || a.usage.tierLimits == nil {
 		return failure, dynamicruntime.SuspensionBinding
+	}
+	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID == candidate.ID &&
+		agentusage.MatchesSelectedUsage(ctx, candidate.UsagePolicy) && candidate.ModelID != candidate.UsagePolicy.ExpectedModel {
+		candidate.ModelID = candidate.UsagePolicy.ExpectedModel
+		candidate.CatalogFree = false
+		if catalog := a.usage.tierLimits.freeModels; catalog != nil {
+			free, known := catalog.IsFreeModel(ctx, candidate.ModelID)
+			candidate.CatalogFree = known && free
+		}
 	}
 	if !a.usage.tierLimits.matchesSelectedAccount(ctx, candidate) {
 		return failure, dynamicruntime.SuspensionBinding

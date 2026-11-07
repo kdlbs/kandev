@@ -366,7 +366,14 @@ func (s *providerTierLimitService) matchesSelectedAccount(ctx context.Context, c
 	if candidate.UsagePolicy == nil {
 		return !candidate.RequireExecutionUsage
 	}
-	c, err := s.contextFor(ctx, candidate.ID)
+	if candidate.UsagePolicy.ProfileID != candidate.ID {
+		return false
+	}
+	model := ""
+	if candidate.ModelID == candidate.UsagePolicy.ExpectedModel && agentusage.MatchesSelectedUsage(ctx, candidate.UsagePolicy) {
+		model = candidate.ModelID
+	}
+	c, err := s.contextForModel(ctx, candidate.ID, model)
 	return err == nil && tierContextMatchesSelection(c, candidate.UsagePolicy)
 }
 

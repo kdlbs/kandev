@@ -203,7 +203,7 @@ func (e *Engine) selectContext(
 		if _, blocked := e.blockedByLimit(ctx, candidate, sessionID, now); blocked {
 			continue
 		}
-		if !e.candidateSelectable(candidate, sessionID, generation, excludeProfileID, preferredProfileID, now) {
+		if !e.candidateSelectable(ctx, candidate, sessionID, generation, excludeProfileID, preferredProfileID, now) {
 			continue
 		}
 		decision := RouteDecision{
@@ -281,7 +281,7 @@ func (e *Engine) loadStateLocked(ctx context.Context, sessionID string) (RouteSt
 
 const probeLeaseDuration = 30 * time.Second
 
-func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, generation int64, excludeProfileID, preferredProfileID string, now time.Time) bool {
+func (e *Engine) candidateSelectable(ctx context.Context, candidate Candidate, sessionID string, generation int64, excludeProfileID, preferredProfileID string, now time.Time) bool {
 	if !candidate.Enabled || candidate.ID == excludeProfileID {
 		return false
 	}
@@ -298,30 +298,8 @@ func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, gene
 		return false
 	}
 	if e.limits != nil {
-		for _, key := range limitSuspensionKeys(candidate) {
-			if !e.circuits.IsOpen(key, now) {
-				continue
-			}
-			lease, ok := e.circuits.AcquireProbe(key, probeLeaseDuration)
-			if !ok {
-				return false
-			}
-			if otherOpen := otherSuspensionKeyOpen(e.circuits, limitSuspensionKeys(candidate), key, now); otherOpen {
-				// Another narrow scope is still open. Close the expired probe
-				// so the next selection can probe that scope instead of
-				// admitting the candidate through the first key alone.
-				e.circuits.ReleaseProbe(lease, true, circuitBackoff)
-				return false
-			}
-			if candidate.BindingKey != "" && e.circuits.IsOpen(candidate.BindingKey, now) {
-				// The narrow suspension expired, but the credential binding is
-				// still open. Close the exhausted narrow probe and let the
-				// binding probe path decide.
-				e.circuits.ReleaseProbe(lease, true, circuitBackoff)
-				return false
-			}
-			e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
-			return true
+		if selectable, handled := e.selectNarrowCircuit(ctx, candidate, sessionID, generation, now); handled {
+			return selectable
 		}
 	}
 	if candidate.BindingKey == "" || !e.circuits.IsOpen(candidate.BindingKey, now) {
@@ -335,6 +313,31 @@ func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, gene
 	// lease after the concrete launch result is known.
 	e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
 	return true
+}
+
+func (e *Engine) selectNarrowCircuit(ctx context.Context, candidate Candidate, sessionID string, generation int64, now time.Time) (bool, bool) {
+	circuitCandidate := candidate
+	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID == candidate.ID && usage.MatchesSelectedUsage(ctx, candidate.UsagePolicy) {
+		circuitCandidate.ModelID = candidate.UsagePolicy.ExpectedModel
+	}
+	keys := limitSuspensionKeys(circuitCandidate)
+	for _, key := range keys {
+		if !e.circuits.IsOpen(key, now) {
+			continue
+		}
+		lease, ok := e.circuits.AcquireProbe(key, probeLeaseDuration)
+		if !ok {
+			return false, true
+		}
+		if otherSuspensionKeyOpen(e.circuits, keys, key, now) || (candidate.BindingKey != "" && e.circuits.IsOpen(candidate.BindingKey, now)) {
+			// Do not admit through an expired narrow probe while another scope remains open.
+			e.circuits.ReleaseProbe(lease, true, circuitBackoff)
+			return false, true
+		}
+		e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
+		return true, true
+	}
+	return false, false
 }
 
 func probeKey(sessionID string, generation int64, candidateID string) string {
@@ -490,7 +493,7 @@ func (e *Engine) ApplyFailureContext(
 	if err := e.requireCurrentFailureRoute(ctx, sessionID, expectedGeneration, currentCandidateID); err != nil {
 		return RouteDecision{}, err
 	}
-	profile = e.failureProfileForRoute(profile, sessionID, expectedGeneration, currentCandidateID)
+	profile = e.failureProfileForRoute(ctx, profile, sessionID, expectedGeneration, currentCandidateID)
 	scope := SuspensionBinding
 	if candidate, ok := candidateByID(profile, currentCandidateID); ok {
 		failure, scope = e.resolveLimitFailure(ctx, candidate, failure)
@@ -730,7 +733,7 @@ func (e *Engine) firstSelectableOrderedSuccessor(
 		if _, blocked := e.blockedByLimit(ctx, candidate, sessionID, e.now()); blocked {
 			continue
 		}
-		if e.candidateSelectable(candidate, sessionID, generation+1, currentCandidateID, "", e.now()) {
+		if e.candidateSelectable(ctx, candidate, sessionID, generation+1, currentCandidateID, "", e.now()) {
 			return candidate, true, nil
 		}
 	}
@@ -751,7 +754,7 @@ func (e *Engine) firstSelectableUnclassifiedSuccessor(
 			if _, blocked := e.blockedByLimit(ctx, candidate, sessionID, e.now()); blocked {
 				continue
 			}
-			if e.candidateSelectable(candidate, sessionID, generation+1, "", "", e.now()) {
+			if e.candidateSelectable(ctx, candidate, sessionID, generation+1, "", "", e.now()) {
 				return candidate, true
 			}
 		}
