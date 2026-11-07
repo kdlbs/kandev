@@ -29,6 +29,7 @@ type attemptOwner struct {
 	storageUnavailable     bool
 	diagnostics            AttemptDiagnostics
 	expectedOwnerID        string
+	expectedOwnerState     []byte
 	admissionFailureReason string
 }
 
@@ -82,7 +83,9 @@ func (o *attemptOwner) loadRetainedOwner() {
 	o.state = saved
 	o.diagnostics.InitialReason = "retained_owner_loaded"
 	// Only a complete, durably closed predecessor can transfer census trust.
-	o.adoptRetainedClaim(saved)
+	if !o.adoptClosure(saved, data) {
+		o.adoptRetainedClaim(saved)
+	}
 }
 
 func (o *attemptOwner) beginLocked(id, callID, preparationID string) (AttemptStatus, error) {
@@ -115,7 +118,7 @@ func (o *attemptOwner) snapshot() AttemptSnapshot {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.reconcileLocked()
-	result := AttemptSnapshot{OwnerID: o.id, InstanceID: o.cfg.InstanceID,
+	result := AttemptSnapshot{Closure: cloneClosure(o.state.Closure), OwnerID: o.id, InstanceID: o.cfg.InstanceID,
 		Current: o.currentInventoryLocked(), Known: o.state.ContinuityKnown, Attempts: make([]AttemptStatus, 0, len(o.state.Attempts)), Diagnostics: o.diagnosticSnapshot()}
 	for _, a := range o.state.Attempts {
 		if o.historicalSettled(a) {

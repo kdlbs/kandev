@@ -123,6 +123,7 @@ export type ResumeStateSetter = {
 };
 
 export type SessionLike = {
+  metadata?: Record<string, unknown> | null;
   started_at?: string;
   updated_at?: string;
   state?: string;

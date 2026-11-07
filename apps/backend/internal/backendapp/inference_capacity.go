@@ -121,6 +121,9 @@ func (b *sharedInferenceConsumer) waitInferenceCapacity(ctx context.Context, cli
 		if admitted {
 			return nil
 		}
+		if err != nil {
+			return &agentruntime.InferenceCapacityError{Reason: reason, Cause: err}
+		}
 		all, finite := b.capacity.InferenceCapacityPolicy()
 		if !all || !finite {
 			return nil

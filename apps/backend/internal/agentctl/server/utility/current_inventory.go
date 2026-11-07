@@ -31,6 +31,9 @@ func (o *attemptOwner) admitCapacity(id string) (AttemptStatus, error) {
 	if o.storageUnavailable || a == nil || a.Status.OwnerID != o.id {
 		return AttemptStatus{AttemptID: id, State: AttemptUnknown}, errAttemptUnavailable
 	}
+	if o.state.Closure != nil && o.state.Closure.Stage != closureConsumed {
+		return a.Status, errAttemptUnavailable
+	}
 	if a.Consumed || a.Status.Settled || !a.Status.Retained || !a.Status.Known {
 		return a.Status, errAttemptExists
 	}

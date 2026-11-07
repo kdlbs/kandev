@@ -66,6 +66,13 @@ func (s *Service) ReserveInferenceCapacity(ctx context.Context, binding sessionc
 	if s == nil || s.sessionCeiling == nil {
 		return false, ceilingReasonUnknownPopulation, fmt.Errorf("inference capacity owner unavailable")
 	}
+	guard, release := s.acquireCancelInFlightGuard(binding.SessionID)
+	defer release()
+	guard.Lock()
+	defer guard.Unlock()
+	if err := s.checkInferenceClosureBinding(ctx, binding); err != nil {
+		return false, "inference_scope_closure", err
+	}
 	c := s.sessionCeiling
 	c.mu.Lock()
 	defer c.mu.Unlock()
