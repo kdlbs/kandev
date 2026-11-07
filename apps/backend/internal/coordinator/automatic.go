@@ -15,29 +15,26 @@ import (
 )
 
 // raisableClasses is the closed allowlist of classes that may be automatic.
-var raisableClasses = map[Action]bool{ActionCreateTask: true}
+var raisableClasses = map[Action]bool{ActionCreateTask: true, ActionResume: true, ActionStartAgent: true}
 
-// Eligibility thresholds for raising a class to automatic.
+// Eligibility condition names, class-scoped notes and fixed windows. The five
+// gate values themselves are the coordinator's EligibilitySettings.
 const (
-	evidenceWindow       = 30 * 24 * time.Hour
-	reviewMaxAge         = 7 * 24 * time.Hour
-	eligibilityMinRows   = 20
-	eligibilityApproved  = 9 // approved * 10 >= total * 9, a 90% floor in integer math
-	eligibilityUnedited  = 10
-	conditionHistory30d  = "history_30d"
-	conditionVolume      = "volume"
-	conditionUnedited    = "unedited_rate"
-	conditionNoUndo      = "no_undo"
-	conditionReviewed7d  = "reviewed_7d"
-	decisionLogField     = "decision_log"
-	classField           = "class"
-	unavailableNote      = "automatic approval unavailable; a manager will decide"
-	pausedNote           = "Paused; a manager will decide"
-	limitReachedNote     = "automatic limit reached; a manager will decide"
-	raiserLoweredReason  = "raising manager no longer a manager"
-	undoLoweredReason    = "undo of an automatic create"
-	automaticDailyLimit  = 10
-	automaticLimitWindow = 24 * time.Hour
+	conditionHistory30d   = "history_30d"
+	conditionVolume       = "volume"
+	conditionUnedited     = "unedited_rate"
+	conditionNoUndo       = "no_undo"
+	conditionReviewed7d   = "reviewed_7d"
+	decisionLogField      = "decision_log"
+	classField            = "class"
+	unavailableNote       = "automatic approval unavailable; a manager will decide"
+	pausedNote            = "Paused; a manager will decide"
+	limitReachedNote      = "automatic limit reached; a manager will decide"
+	raiserLoweredReason   = "raising manager no longer a manager"
+	undoLoweredReason     = "undo of an automatic create"
+	failureLoweredReason  = "automatic action failed"
+	overrideLoweredReason = "manager overrode an automatic class"
+	automaticLimitWindow  = 24 * time.Hour
 )
 
 // EligibilityCondition is one eligibility condition and its current value.
@@ -121,14 +118,19 @@ func (s *Service) identityResolver() IdentityResolver {
 	return s.automatic.identities
 }
 
-// Eligibility computes the five ordered conditions for class at now.
+// Eligibility computes the five ordered conditions for create_task at now
+// under the coordinator's stored eligibility settings.
 func (s *Service) Eligibility(ctx context.Context, coordinatorID string, now time.Time) (EligibilityResult, error) {
-	return s.eligibilityFor(ctx, coordinatorID, ActionCreateTask, now)
+	c, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
+	if err != nil {
+		return EligibilityResult{}, err
+	}
+	return s.eligibilityFor(ctx, coordinatorID, ActionCreateTask, now, s.policyFor(c).EffectiveEligibility())
 }
 
-func (s *Service) eligibilityFor(ctx context.Context, coordinatorID string, class Action, now time.Time) (EligibilityResult, error) {
+func (s *Service) eligibilityFor(ctx context.Context, coordinatorID string, class Action, now time.Time, cfg EligibilitySettings) (EligibilityResult, error) {
 	log := s.decisionLog()
-	since := now.Add(-evidenceWindow)
+	since := now.Add(-cfg.evidenceWindow())
 	var conds []EligibilityCondition
 
 	earliest, ok, err := log.EarliestDecision(ctx, coordinatorID, string(class))
@@ -157,14 +159,14 @@ func (s *Service) eligibilityFor(ctx context.Context, coordinatorID string, clas
 		percent = approved * 100 / total
 	}
 	conds = append(conds,
-		EligibilityCondition{Name: conditionVolume, Met: total >= eligibilityMinRows, Value: total},
-		EligibilityCondition{Name: conditionUnedited, Met: total > 0 && approved*eligibilityUnedited >= total*eligibilityApproved, Value: percent})
+		EligibilityCondition{Name: conditionVolume, Met: total >= cfg.MinDecisions, Value: total},
+		EligibilityCondition{Name: conditionUnedited, Met: total > 0 && approved*100 >= total*cfg.UneditedFloorPct, Value: percent})
 
-	undone, err := log.UndoneTaskIDs(ctx, coordinatorID, since, now)
+	noUndo, err := s.noUndoCount(ctx, coordinatorID, class, since, now)
 	if err != nil {
 		return EligibilityResult{}, err
 	}
-	conds = append(conds, EligibilityCondition{Name: conditionNoUndo, Met: len(undone) == 0, Value: len(undone)})
+	conds = append(conds, EligibilityCondition{Name: conditionNoUndo, Met: noUndo == 0, Value: noUndo})
 
 	review, err := s.store.NewestClassReview(ctx, coordinatorID, class)
 	if err != nil {
@@ -172,7 +174,7 @@ func (s *Service) eligibilityFor(ctx context.Context, coordinatorID string, clas
 	}
 	reviewed := EligibilityCondition{Name: conditionReviewed7d}
 	if review != nil {
-		reviewed.Met = !review.ReviewedAt.Before(now.Add(-reviewMaxAge))
+		reviewed.Met = !review.ReviewedAt.Before(now.Add(-cfg.reviewMaxAge()))
 		reviewed.Value = review.ReviewedAt.UTC().Format(time.RFC3339)
 	}
 	conds = append(conds, reviewed)
@@ -184,18 +186,30 @@ func (s *Service) eligibilityFor(ctx context.Context, coordinatorID string, clas
 	return res, nil
 }
 
+// noUndoCount is the no_undo value: undone tasks for create_task, and failed
+// or system-lowered automatic actions for the classes that cannot be undone.
+func (s *Service) noUndoCount(ctx context.Context, coordinatorID string, class Action, since, now time.Time) (int, error) {
+	if class == ActionCreateTask {
+		undone, err := s.decisionLog().UndoneTaskIDs(ctx, coordinatorID, since, now)
+		return len(undone), err
+	}
+	return s.store.FailedOrLoweredCount(ctx, coordinatorID, class, since, now)
+}
+
 // checkRaise is the change hook SaveSettings calls inside its locked
-// transaction. Only a raise of a raisable class to automatic is checked; a
-// read error counts as not eligible.
+// transaction. Only a raise of a raisable class to automatic is checked, under
+// the eligibility settings stored before the save; a read error counts as not
+// eligible.
 func (s *Service) checkRaise(ctx context.Context, coordinatorID string, stored, final Policy) error {
 	if !s.phase3 {
 		return nil
 	}
+	cfg := stored.EffectiveEligibility()
 	for _, class := range AllActions {
 		if !raisableClasses[class] || final.Actions[class] != SettingAutomatic || stored.Actions[class] == SettingAutomatic {
 			continue
 		}
-		res, err := s.eligibilityFor(ctx, coordinatorID, class, s.store.now().UTC())
+		res, err := s.eligibilityFor(ctx, coordinatorID, class, s.store.now().UTC(), cfg)
 		if err != nil {
 			s.logger.Warn("coordinator raise refused: decision log unreadable", zap.String("coordinator_id", coordinatorID), zap.Error(err))
 			return &RaiseRefusedError{Class: class, Condition: decisionLogField}
@@ -211,8 +225,9 @@ func (s *Service) checkRaise(ctx context.Context, coordinatorID string, stored, 
 
 // EligibilityView is the eligibility route's result.
 type EligibilityView struct {
-	Result  EligibilityResult
-	Setting Setting
+	Result   EligibilityResult
+	Settings EligibilitySettings
+	Setting  Setting
 	// ChangedBy and ChangedAt describe the newest change to the current value.
 	ChangedBy string
 	ChangedAt *time.Time
@@ -226,25 +241,29 @@ func (s *Service) GetEligibility(ctx context.Context, workspaceID, coordinatorID
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead); err != nil {
 		return nil, err
 	}
-	if _, err := s.store.GetCoordinator(ctx, workspaceID, coordinatorID); err != nil {
+	coord, err := s.store.GetCoordinator(ctx, workspaceID, coordinatorID)
+	if err != nil {
 		return nil, err
 	}
-	if Action(class) != ActionCreateTask {
+	if !raisableClasses[Action(class)] {
 		return nil, &ClassError{Class: class}
 	}
 	setting, err := s.actionSettings().Setting(ctx, coordinatorID, class)
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.eligibilityFor(ctx, coordinatorID, ActionCreateTask, s.store.now().UTC())
+	cfg := s.policyFor(coord).EffectiveEligibility()
+	res, err := s.eligibilityFor(ctx, coordinatorID, Action(class), s.store.now().UTC(), cfg)
 	if err != nil {
 		return nil, &DecisionLogUnavailableError{Err: err}
 	}
-	return &EligibilityView{Result: res, Setting: setting.Value, ChangedBy: setting.ChangedBy, ChangedAt: setting.ChangedAt}, nil
+	return &EligibilityView{Result: res, Settings: cfg, Setting: setting.Value, ChangedBy: setting.ChangedBy, ChangedAt: setting.ChangedAt}, nil
 }
 
-// RecordClassReview stores a manager's review of the last 30 days of class.
-// Every field but the reviewer is computed here.
+// RecordClassReview stores a manager's review of the evidence window of class.
+// The evidence window and the decided-row count are read inside the coordinator
+// lock, so the review and a concurrent settings save are ordered. Every field
+// but the reviewer is computed here.
 func (s *Service) RecordClassReview(ctx context.Context, workspaceID, coordinatorID, class string) (*ClassReview, error) {
 	if !s.phase3 {
 		return nil, ErrNotFound
@@ -255,20 +274,30 @@ func (s *Service) RecordClassReview(ctx context.Context, workspaceID, coordinato
 	if _, err := s.store.GetCoordinator(ctx, workspaceID, coordinatorID); err != nil {
 		return nil, err
 	}
-	if Action(class) != ActionCreateTask {
+	if !raisableClasses[Action(class)] {
 		return nil, &ClassError{Class: class}
 	}
-	now := s.store.now().UTC()
-	rows, err := s.decisionLog().Decisions(ctx, coordinatorID, class, now.Add(-evidenceWindow), now)
+	var review ClassReview
+	err := s.store.withCoordinatorLock(ctx, coordinatorID, func(tx coordinatorExec) error {
+		var raw *string
+		if err := tx.QueryRowContext(ctx, s.store.db.Rebind(`SELECT policy_json FROM coordinators WHERE id = ?`), coordinatorID).Scan(&raw); err != nil {
+			return fmt.Errorf("read coordinator policy: %w", err)
+		}
+		stored, _ := ParsePolicy(raw)
+		window := stored.EffectiveEligibility().evidenceWindow()
+		now := s.store.now().UTC()
+		count, err := s.store.CountDecidedRowsTx(ctx, tx, coordinatorID, Action(class), now.Add(-window), now)
+		if err != nil {
+			return err
+		}
+		review = ClassReview{
+			ID: uuid.NewString(), CoordinatorID: coordinatorID, Class: Action(class), ReviewedBy: decidingUserID(ctx),
+			ReviewedAt: now, WindowStart: now.Add(-window), WindowEnd: now, RowCount: count,
+		}
+		return s.store.InsertClassReviewTx(ctx, tx, review)
+	})
 	if err != nil {
 		return nil, &DecisionLogUnavailableError{Err: err}
-	}
-	review := ClassReview{
-		ID: uuid.NewString(), CoordinatorID: coordinatorID, Class: ActionCreateTask, ReviewedBy: decidingUserID(ctx),
-		ReviewedAt: now, WindowStart: now.Add(-evidenceWindow), WindowEnd: now, RowCount: len(rows),
-	}
-	if err := s.store.InsertClassReview(ctx, review); err != nil {
-		return nil, err
 	}
 	return &review, nil
 }

@@ -35,11 +35,15 @@ func (h *Handlers) proposeKindHandler(kind string) func(context.Context, *ws.Mes
 		if err != nil {
 			return h.proposeKindErrorResponse(msg, kind, err)
 		}
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		result := map[string]interface{}{
 			proposalIDKey:     proposal.ID,
 			stopTaskStatusKey: string(proposal.Status),
 			"deduplicated":    deduplicated,
-		})
+		}
+		if kind == coordinator.ProposalKindResume && !deduplicated {
+			h.applyAutomaticApproval(ctx, proposal, result)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, result)
 	}
 }
 

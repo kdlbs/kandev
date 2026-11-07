@@ -1,7 +1,6 @@
 package coordinator
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -57,7 +56,8 @@ func TestAutomaticRoutes_EligibilityWireShape(t *testing.T) {
 }
 
 func TestAutomaticRoutes_ReviewIgnoresBodyAndAnswers503OnLogError(t *testing.T) {
-	store, c, _, svc, log := automaticFixture(t)
+	store, c, _, svc, _ := automaticFixture(t)
+	seedDecidedRows(t, store, c, ActionCreateTask, 20)
 	router := automaticRouter(t, svc)
 	body := `{"reviewed_by":"someone-else","row_count":999,"window_start":"2000-01-01T00:00:00Z","window_end":"2000-02-01T00:00:00Z"}`
 
@@ -71,7 +71,7 @@ func TestAutomaticRoutes_ReviewIgnoresBodyAndAnswers503OnLogError(t *testing.T) 
 	}
 
 	before := countReviews(t, store, c)
-	log.err = errors.New("boom")
+	mustExec(t, store, `ALTER TABLE coordinator_activity RENAME TO coordinator_activity_gone`)
 	rec = sendJSON(router, http.MethodPost, classPath(c, "create_task", "reviews"), "")
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), decisionLogField) || countReviews(t, store, c) != before {
 		t.Fatalf("log error = %d %s", rec.Code, rec.Body.String())

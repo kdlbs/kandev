@@ -211,6 +211,16 @@ const phase2TablesSQL = `
 		updated_at {{timestamp}} NOT NULL
 	);
 
+	CREATE TABLE IF NOT EXISTS coordinator_eligibility_changes (
+		id TEXT PRIMARY KEY,
+		coordinator_id TEXT NOT NULL,
+		changed_by TEXT,
+		from_json TEXT NOT NULL,
+		to_json TEXT NOT NULL,
+		policy_revision INTEGER NOT NULL,
+		changed_at {{timestamp}} NOT NULL
+	);
+
 	CREATE TABLE IF NOT EXISTS coordinator_class_changes (
 		id TEXT PRIMARY KEY,
 		coordinator_id TEXT NOT NULL,

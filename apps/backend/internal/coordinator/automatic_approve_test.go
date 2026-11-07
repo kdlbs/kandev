@@ -64,6 +64,7 @@ func raisedFixture(t *testing.T) (*Store, *Coordinator, *fakeDecisionTaskService
 	if _, err := svc.SaveSettings(authedContext(testRaiser), c.WorkspaceID, c.ID, []byte(raiseBody())); err != nil {
 		t.Fatalf("raise: %v", err)
 	}
+	mustExec(t, store, `UPDATE coordinator_class_changes SET changed_at = ? WHERE coordinator_id = ? AND to_value = 'automatic'`, automaticNow.Add(-time.Hour), c.ID)
 	return store, c, tasks, svc, az
 }
 
@@ -149,7 +150,7 @@ func TestAutomaticApproval_FailedApprovalIsRecordedAndCounted(t *testing.T) {
 
 func TestAutomaticApproval_EleventhInADayStaysPending(t *testing.T) {
 	store, c, tasks, svc, _ := raisedFixture(t)
-	for i := 0; i < automaticDailyLimit; i++ {
+	for i := 0; i < testDailyLimit; i++ {
 		tasks.createErr = nil
 		if i%3 == 0 {
 			tasks.createErr = errors.New("create failed")
@@ -171,7 +172,7 @@ func TestAutomaticApproval_EleventhInADayStaysPending(t *testing.T) {
 
 func TestAutomaticApproval_LimitWindowRolls(t *testing.T) {
 	store, c, _, svc, _ := raisedFixture(t)
-	for i := 0; i < automaticDailyLimit; i++ {
+	for i := 0; i < testDailyLimit; i++ {
 		proposeAuto(t, store, c, svc)
 	}
 	store.now = func() time.Time { return automaticNow.Add(25 * time.Hour) }
@@ -223,7 +224,7 @@ func TestAutomaticApproval_RaiserCheckErrorDoesNotLower(t *testing.T) {
 func TestAutomaticApproval_LowerBetweenReadAndLockLeavesUnclaimed(t *testing.T) {
 	store, c, tasks, svc, az := raisedFixture(t)
 	az.onCall = func() {
-		if err := svc.LowerClass(context.Background(), c.ID, ActionCreateTask, "manager"); err != nil {
+		if _, err := svc.LowerClass(context.Background(), c.ID, ActionCreateTask, "manager", LowerGuard{}); err != nil {
 			t.Error(err)
 		}
 	}
@@ -412,15 +413,15 @@ func TestAutomaticApproval_IdentityLookupErrorDoesNotLower(t *testing.T) {
 
 func TestAutomaticApproval_DailyLimitIgnoresProjectScope(t *testing.T) {
 	store, c, _, svc, _ := raisedFixture(t)
-	for i := 0; i < automaticDailyLimit; i++ {
+	for i := 0; i < testDailyLimit; i++ {
 		proposeAuto(t, store, c, svc)
 	}
 	mustExec(t, store, `UPDATE coordinators SET project_scope = 'selected', include_no_repository = 0 WHERE id = ?`, c.ID)
 	mustExec(t, store, `INSERT INTO coordinator_watch_projects (coordinator_id, entry_kind, entry_id, workspace_id, created_at) VALUES (?, 'repository', 'elsewhere', ?, ?)`,
 		c.ID, c.WorkspaceID, automaticNow)
 	n, err := store.CountAutomaticDecidedTx(context.Background(), store.db, c.ID, automaticNow.Add(-automaticLimitWindow))
-	if err != nil || n != automaticDailyLimit {
-		t.Fatalf("count after narrowing the scope = %d err = %v, want %d", n, err, automaticDailyLimit)
+	if err != nil || n != testDailyLimit {
+		t.Fatalf("count after narrowing the scope = %d err = %v, want %d", n, err, testDailyLimit)
 	}
 	if _, res := proposeAuto(t, store, c, svc); res == nil || res.Note != limitReachedNote {
 		t.Fatalf("res = %+v", res)

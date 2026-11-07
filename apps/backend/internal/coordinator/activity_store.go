@@ -30,7 +30,12 @@ type ActivityCount struct {
 func (s *Store) ListActivityRows(ctx context.Context, coordinatorID string, class Action, before *ActivityCursor, limit int) ([]ActivityRow, error) {
 	query := `SELECT ` + activityReadColumns + ` FROM coordinator_activity WHERE coordinator_id = ?`
 	args := []any{coordinatorID}
-	if class != "" {
+	switch class {
+	case "":
+	case ActionStartAgent:
+		query += ` AND proposal_id IN (SELECT id FROM coordinator_proposals WHERE coordinator_id = ? AND starts_agent = TRUE)`
+		args = append(args, coordinatorID)
+	default:
 		query += ` AND action_class = ?`
 		args = append(args, string(class))
 	}

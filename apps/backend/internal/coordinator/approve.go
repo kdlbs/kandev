@@ -58,6 +58,14 @@ func decidingUserID(ctx context.Context) string {
 // (docs/specs/coordinator/system-design/proposals.md#approve). edits is the
 // raw request body; an empty map approves the base spec unchanged.
 func (s *Service) ApproveProposal(ctx context.Context, workspaceID, coordinatorID, proposalID string, edits ApproveProposalRequest) (*Proposal, error) {
+	decided, err := s.approveProposal(ctx, workspaceID, coordinatorID, proposalID, edits)
+	if err == nil && decided != nil && approvalOverrode(decided) && !decided.ClaimedAutomatically {
+		decided.LoweredClass = s.lowerOnOverride(ctx, decided)
+	}
+	return decided, err
+}
+
+func (s *Service) approveProposal(ctx context.Context, workspaceID, coordinatorID, proposalID string, edits ApproveProposalRequest) (*Proposal, error) {
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage); err != nil {
 		return nil, err
 	}
@@ -529,7 +537,7 @@ func (s *Service) completeApproval(ctx context.Context, workspaceID, coordinator
 // failApproval runs step 5's failure fence (the same fence completeApproval
 // uses) and its zero-row race handling.
 func (s *Service) failApproval(ctx context.Context, workspaceID, coordinatorID, proposalID, token, errMsg string) (*Proposal, error) {
-	matched, err := s.failProposalStore(ctx, workspaceID, coordinatorID, proposalID, token, errMsg)
+	matched, attempt, err := s.failProposalAttempt(ctx, workspaceID, coordinatorID, proposalID, token, errMsg)
 	if err != nil {
 		return nil, err
 	}
@@ -540,6 +548,7 @@ func (s *Service) failApproval(ctx context.Context, workspaceID, coordinatorID, 
 	s.logger.Info("proposal approval failed",
 		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID),
 		zap.String("workspace_id", workspaceID), zap.String("error", errMsg))
+	s.afterAutomaticFailure(ctx, attempt)
 	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
 }
 

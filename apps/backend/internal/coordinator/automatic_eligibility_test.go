@@ -62,9 +62,14 @@ func decisions(total, approved int) []Decision {
 
 func recordReview(t *testing.T, store *Store, c *Coordinator, at time.Time) {
 	t.Helper()
+	recordClassReviewFor(t, store, c, ActionCreateTask, at)
+}
+
+func recordClassReviewFor(t *testing.T, store *Store, c *Coordinator, class Action, at time.Time) {
+	t.Helper()
 	err := store.InsertClassReview(context.Background(), ClassReview{
-		CoordinatorID: c.ID, Class: ActionCreateTask, ReviewedBy: "mgr-1",
-		ReviewedAt: at, WindowStart: at.Add(-evidenceWindow), WindowEnd: at,
+		CoordinatorID: c.ID, Class: class, ReviewedBy: "mgr-1",
+		ReviewedAt: at, WindowStart: at.Add(-testEvidenceWindow), WindowEnd: at,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +293,7 @@ func TestRaise_LoweringIsNeverChecked(t *testing.T) {
 func TestRaise_OtherClassesRefusedByValidate(t *testing.T) {
 	_, c, _, svc, _ := automaticFixture(t)
 	for _, class := range AllActions {
-		if class == ActionCreateTask {
+		if raisableClasses[class] {
 			continue
 		}
 		_, err := svc.SaveSettings(context.Background(), c.WorkspaceID, c.ID, []byte(policyBody(map[string]string{string(class): "automatic"})))
@@ -324,3 +329,9 @@ func TestValidate_AutomaticOnlyForRaisableClassWithPhase3(t *testing.T) {
 		t.Fatal("move accepted automatic")
 	}
 }
+
+// Defaults of the eligibility settings, as these tests assume them.
+const (
+	testDailyLimit     = 10
+	testEvidenceWindow = 720 * time.Hour
+)

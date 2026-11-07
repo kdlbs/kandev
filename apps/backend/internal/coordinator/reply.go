@@ -173,11 +173,14 @@ func (s *Service) ReplyToProposal(ctx context.Context, workspaceID, coordinatorI
 			s.logger.Warn("reply not delivered", zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID))
 		}
 	}
+	lowered := s.lowerOnOverride(ctx, proposal)
 	current, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
 	if err != nil {
 		s.logger.Warn("re-read proposal after reply failed", zap.String("proposal_id", proposalID), zap.Error(err))
+		returned.LoweredClass = lowered
 		return &returned, nil
 	}
+	current.LoweredClass = lowered
 	return current, nil
 }
 

@@ -479,12 +479,16 @@ func (s *Store) ClaimProposalRawTx(ctx context.Context, exec coordinatorExec, id
 		SET status = ?, claimed_at = ?, claim_token = ?, final_spec_json = ?, decided_by = ?, error = NULL, updated_at = ?, claimed_automatically = ?`
 	args := []any{string(ProposalStatusApproving), now, token, finalJSON, decidedBy, now, autonomyColumn(automaticAt != nil)}
 	if automaticAt != nil {
-		query += `, decided_automatically = 1, automatic_at = ?`
-		args = append(args, automaticAt.UTC())
-	}
-	query += `
+		// An automatic claim takes only a pending proposal no automatic attempt
+		// has touched; a manager's claim also retries a failed one.
+		query += `, decided_automatically = 1, automatic_at = ?
+		WHERE id = ? AND status = ? AND decided_automatically = 0`
+		args = append(args, automaticAt.UTC(), id, string(ProposalStatusPending))
+	} else {
+		query += `
 		WHERE id = ? AND status IN (?, ?)`
-	args = append(args, id, string(ProposalStatusPending), string(ProposalStatusFailed))
+		args = append(args, id, string(ProposalStatusPending), string(ProposalStatusFailed))
+	}
 	res, err := exec.ExecContext(ctx, s.db.Rebind(query), args...)
 	if err != nil {
 		return false, fmt.Errorf("claim proposal: %w", err)

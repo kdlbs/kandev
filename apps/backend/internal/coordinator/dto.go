@@ -130,7 +130,8 @@ func (d *CoordinatorDTO) WithSummary(activeOrders int) *CoordinatorDTO {
 
 // CoordinatorPolicyDTO is the effective permission map.
 type CoordinatorPolicyDTO struct {
-	Actions map[Action]Setting `json:"actions"`
+	Actions     map[Action]Setting  `json:"actions"`
+	Eligibility EligibilitySettings `json:"eligibility"`
 }
 
 // CoordinatorWatchDTO is the watch scope; workflow_ids is [] unless selected.
@@ -149,7 +150,7 @@ func (d *CoordinatorDTO) WithPolicyView(v PolicyView) *CoordinatorDTO {
 		ids = []string{}
 	}
 	d.CoordinatorPhase2 = &CoordinatorPhase2{
-		Policy:         CoordinatorPolicyDTO{Actions: v.Actions},
+		Policy:         CoordinatorPolicyDTO{Actions: v.Actions, Eligibility: v.Eligibility},
 		PolicyRevision: v.PolicyRevision,
 		Watches:        CoordinatorWatchDTO{Scope: v.WatchScope, WorkflowIDs: ids},
 	}
@@ -312,6 +313,9 @@ type ProposalPhase3 struct {
 	InReplyTo        *string    `json:"in_reply_to"`
 	// ChangeStatus is present for improvement proposals only.
 	ChangeStatus *string `json:"change_status,omitempty"`
+	// LoweredClass names the class a manager's decision lowered from
+	// automatic; present on that decision's response only.
+	LoweredClass string `json:"lowered_class,omitempty"`
 }
 
 // ProposalPhase2 holds the proposal wire fields added by phase 2.
@@ -341,7 +345,7 @@ func NewProposalDTOPhases(p *Proposal, phase2, phase3 bool) *ProposalDTO {
 	dto := newProposalDTO(p, phase2)
 	if phase3 {
 		dto.ProposalPhase3 = &ProposalPhase3{
-			ReplyText: p.ReplyText, ReplyDeliveredAt: p.ReplyDeliveredAt, InReplyTo: p.InReplyTo,
+			ReplyText: p.ReplyText, ReplyDeliveredAt: p.ReplyDeliveredAt, InReplyTo: p.InReplyTo, LoweredClass: p.LoweredClass,
 		}
 		if p.Kind == ProposalKindImprovement && p.ChangeStatus != nil {
 			dto.ChangeStatus = p.ChangeStatus
