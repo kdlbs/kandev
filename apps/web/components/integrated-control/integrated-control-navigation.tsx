@@ -3,6 +3,7 @@ import {
   IconActivity,
   IconBuilding,
   IconHistory,
+  IconInbox,
   IconLayoutDashboard,
   IconTopologyStar,
 } from "@tabler/icons-react";
@@ -13,13 +14,22 @@ import {
   CONTROL_VIEW_LABEL_KEYS,
   controlHref,
   controlView,
+  type ControlView,
 } from "@/lib/navigation/integrated-control";
 import { cn } from "@/lib/utils";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { useIntegratedControl } from "./integrated-control-provider";
 import { ControlCoordinatorConversation } from "./integrated-control-conversation-links";
+import { ControlInboxNavCount } from "./control-inbox-nav-count";
 
-const icons = [IconLayoutDashboard, IconActivity, IconBuilding, IconTopologyStar, IconHistory];
+const icons: Record<ControlView, typeof IconActivity> = {
+  overview: IconLayoutDashboard,
+  inbox: IconInbox,
+  activity: IconActivity,
+  workspaces: IconBuilding,
+  providers: IconTopologyStar,
+  history: IconHistory,
+};
 
 export function IntegratedControlNavigation({
   collapsed = false,
@@ -43,8 +53,8 @@ export function IntegratedControlNavigation({
       data-testid="integrated-control-navigation"
     >
       <div className="flex flex-col gap-1">
-        {CONTROL_VIEWS.map((item, index) => {
-          const Icon = icons[index];
+        {CONTROL_VIEWS.map((item) => {
+          const Icon = icons[item];
           const label = t(CONTROL_VIEW_LABEL_KEYS[item]);
           return (
             <Link
@@ -61,7 +71,8 @@ export function IntegratedControlNavigation({
               data-testid={`control-nav-${item}`}
             >
               <Icon className="size-4 shrink-0" aria-hidden />
-              {!collapsed && <span>{label}</span>}
+              {!collapsed && <span className="flex-1">{label}</span>}
+              {item === "inbox" && <ControlInboxNavCount collapsed={collapsed} />}
             </Link>
           );
         })}

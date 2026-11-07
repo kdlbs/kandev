@@ -4,7 +4,10 @@ import Link from "@/components/routing/app-link";
 import { controlHref, type ControlView } from "@/lib/navigation/integrated-control";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { useIntegratedControl } from "./integrated-control-provider";
-import { ControlAggregateOverview } from "./control-aggregate-overview";
+import {
+  ControlAggregateOverview,
+  ControlInboxAttentionFallback,
+} from "./control-aggregate-overview";
 import { ControlGroupedHistory } from "./control-grouped-history";
 import { ControlNativeComparison } from "./control-native-comparison";
 import { ControlProviderCircuits } from "./control-provider-circuits";
@@ -16,6 +19,7 @@ import { ControlCapacityLine } from "./control-capacity-bars";
 import { capacityDashboardCounts } from "./control-capacity-waiting";
 import { useNativeDashboards } from "@/hooks/domains/coordinator/use-control-native";
 import type { SessionCapacityObservation } from "@/lib/types/system";
+import { ControlInbox } from "./control-inbox";
 
 export function IntegratedControlDashboard({ view }: { view: ControlView }) {
   const { t } = useTranslation();
@@ -30,6 +34,7 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
       className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 md:p-6"
       data-testid={`control-dashboard-${view}`}
     >
+      <ControlInboxView view={view} officeEnabled={control.officeEnabled} />
       <ControlCapacityFallback
         view={view}
         officeEnabled={control.officeEnabled}
@@ -146,6 +151,12 @@ function ControlCapacityFallback({
       sharedWaiting={sharedWaiting}
     />
   );
+}
+
+function ControlInboxView({ view, officeEnabled }: { view: ControlView; officeEnabled: boolean }) {
+  if (view === "inbox") return <ControlInbox />;
+  if (view === "overview" && !officeEnabled) return <ControlInboxAttentionFallback />;
+  return null;
 }
 
 function Fact({ label, value }: { label: string; value: number | string }) {

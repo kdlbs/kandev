@@ -11,7 +11,8 @@ import {
   TableRow,
 } from "@kandev/ui/table";
 import Link from "@/components/routing/app-link";
-import { formatNumber } from "@/lib/i18n/formats";
+import { formatNumber, formatRelativeTime } from "@/lib/i18n/formats";
+import { controlHref } from "@/lib/navigation/integrated-control";
 import type { WorkspaceAggregateEntry } from "@/lib/api/domains/office-extended-api";
 import type { ControlAggregateRead } from "@/hooks/domains/coordinator/use-control-aggregate";
 import {
@@ -24,6 +25,8 @@ import {
   type AggregateWorkspaceStatus,
 } from "./control-aggregate-signals";
 import { numberCellClass } from "./control-table";
+import { useControlInbox } from "./control-inbox-provider";
+import { useIntegratedControl } from "./integrated-control-provider";
 
 const LINK_CLASS =
   "inline-flex min-h-7 cursor-pointer items-center underline underline-offset-4 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11";
@@ -47,22 +50,26 @@ export function ControlAggregateOverview({
   controlWorkspaceIds: string[];
 }) {
   const { t } = useTranslation();
+  const inbox = useControlInbox();
   const entries = aggregate.data?.workspaces;
   const totals = useMemo(() => aggregateTotals(entries ?? []), [entries]);
   const attention = useMemo(() => buildAggregateAttention(entries ?? []), [entries]);
   if (!entries) {
     return (
-      <p
-        role={aggregate.error ? "alert" : "status"}
-        className={aggregate.error ? "text-sm text-destructive" : "text-sm text-muted-foreground"}
-        data-testid="control-aggregate-state"
-      >
-        {t(
-          aggregate.error
-            ? "sidebar:integratedControl.aggregate.loadError"
-            : "sidebar:integratedControl.aggregate.loading",
-        )}
-      </p>
+      <div className="space-y-5">
+        {inbox?.enabled && inbox.counts.pending > 0 && <ControlAggregateAttention items={[]} />}
+        <p
+          role={aggregate.error ? "alert" : "status"}
+          className={aggregate.error ? "text-sm text-destructive" : "text-sm text-muted-foreground"}
+          data-testid="control-aggregate-state"
+        >
+          {t(
+            aggregate.error
+              ? "sidebar:integratedControl.aggregate.loadError"
+              : "sidebar:integratedControl.aggregate.loading",
+          )}
+        </p>
+      </div>
     );
   }
   const uncovered = uncoveredWorkspaceIds(controlWorkspaceIds, entries).length;
@@ -157,17 +164,51 @@ const ATTENTION_PATH: Record<AggregateAttentionItem["kind"], string> = {
 
 function ControlAggregateAttention({ items }: { items: AggregateAttentionItem[] }) {
   const { t } = useTranslation();
+  const inbox = useControlInbox();
+  const control = useIntegratedControl();
+  const inboxEntries = inbox?.enabled ? Object.entries(inbox.byWorkspace) : [];
   return (
     <section className="rounded-lg border" data-testid="control-attention-list">
       <h2 className="border-b px-4 py-3 font-medium">
         {t("sidebar:integratedControl.aggregate.attentionTitle")}
       </h2>
-      {items.length === 0 ? (
+      {items.length === 0 && inboxEntries.length === 0 ? (
         <p className="px-4 py-3 text-sm text-muted-foreground">
           {t("sidebar:integratedControl.aggregate.attentionEmpty")}
         </p>
       ) : (
         <ul className="divide-y">
+          {inboxEntries.map(([workspaceId, figures]) => {
+            const name =
+              control?.data?.workspaces.find((workspace) => workspace.id === workspaceId)?.name ??
+              workspaceId;
+            const count = figures.answerable + figures.earlier + figures.recovery;
+            return (
+              <li
+                key={`question:${workspaceId}`}
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm"
+                data-testid="control-attention-item"
+                data-kind="question"
+              >
+                <span className={`rounded border px-2 py-0.5 text-xs ${STATUS_CLASS.blocked}`}>
+                  {t("sidebar:controlSummary.state.question")}
+                </span>
+                <span className="min-w-0 flex-1 break-words">
+                  {name}: {t("sidebar:controlSummary.attention.questionSubject", { count })} ·{" "}
+                  {t("sidebar:controlSummary.attention.reasonQuestion", figures)}
+                  {figures.oldest && (
+                    <>
+                      {" "}
+                      · <time dateTime={figures.oldest}>{formatRelativeTime(figures.oldest)}</time>
+                    </>
+                  )}
+                </span>
+                <Link className={LINK_CLASS} href={controlHref("inbox")}>
+                  {t("sidebar:controlSummary.attention.openInbox")}
+                </Link>
+              </li>
+            );
+          })}
           {items.map((item) => (
             <li
               key={`${item.kind}:${item.workspaceId}`}
@@ -198,6 +239,12 @@ function ControlAggregateAttention({ items }: { items: AggregateAttentionItem[] 
       )}
     </section>
   );
+}
+
+export function ControlInboxAttentionFallback() {
+  const inbox = useControlInbox();
+  if (!inbox?.enabled || inbox.counts.pending === 0) return null;
+  return <ControlAggregateAttention items={[]} />;
 }
 
 type NumericTotal = Exclude<keyof AggregateTotals, "byStatus" | "workspaces" | "agents">;

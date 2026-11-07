@@ -1378,7 +1378,10 @@ There is no shared-prompt deletion tool.
 Use `list_pending_questions_kandev` when an external client needs to discover clarification
 questions an agent is blocked on. All arguments are optional: `workspace_id` scopes the results,
 `created_since` (RFC3339) filters by age, and `cursor`/`limit` (default 50, capped at 200) page
-through results oldest-first.
+through results oldest-first. In a workspace that enables unanswered questions (Settings,
+Workspace), `include_unanswered: true` also lists questions the agent already moved past, each
+bundle then carrying `state` `active` or `unanswered`. Only active bundles can be answered with
+`answer_question_kandev`.
 
 ```json
 {

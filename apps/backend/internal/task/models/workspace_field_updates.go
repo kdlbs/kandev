@@ -18,4 +18,7 @@ type WorkspaceFieldUpdate struct {
 	DynamicFailedRouteAutoRetryEnabled *bool
 	DynamicFailedRouteAutoRetryMax     *int
 	UnitID                             *string
+
+	ClarificationUnansweredInboxEnabled  *bool
+	ClarificationUnansweredRetentionDays *int
 }

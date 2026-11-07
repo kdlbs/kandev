@@ -15,6 +15,7 @@ import {
   type LateClarificationSnapshot,
 } from "@/lib/clarification/late-clarification-message";
 import { generateUUID } from "@/lib/utils";
+import { markClarificationInboxLateAnswer } from "@/lib/api/domains/clarification-inbox-api";
 import { useMessageHandler, type MessageAdmissionOutcome } from "./use-message-handler";
 
 export type { LateClarificationSnapshot } from "@/lib/clarification/late-clarification-message";
@@ -28,6 +29,7 @@ export type LateClarificationState =
 
 type LateAdmissionRecord = {
   clientMessageId: string;
+  boundPendingId?: string | null;
   state: LateClarificationState;
   inFlight: Promise<MessageAdmissionOutcome> | null;
 };
@@ -57,16 +59,25 @@ function lateAdmissionKey(
   return JSON.stringify([taskId, sessionId, pendingId ?? messageIdentity(messages)]);
 }
 
-function sourceIds(message: Message | undefined): {
+function sourceIds(
+  message: Message | undefined,
+  targetSessionId?: string | null,
+): {
   taskId: string | null;
   sessionId: string | null;
 } {
   if (!message) return { taskId: null, sessionId: null };
-  return { taskId: message.task_id ?? null, sessionId: message.session_id ?? null };
+  return {
+    taskId: message.task_id ?? null,
+    sessionId: targetSessionId || (message.session_id ?? null),
+  };
 }
 
-function sourceAdmissionKey(message: Message | undefined): string | null {
-  const { taskId, sessionId } = sourceIds(message);
+function sourceAdmissionKey(
+  message: Message | undefined,
+  targetSessionId?: string | null,
+): string | null {
+  const { taskId, sessionId } = sourceIds(message, targetSessionId);
   if (!message || !taskId || !sessionId) return null;
   return lateAdmissionKey(taskId, sessionId, [message]);
 }
@@ -81,6 +92,20 @@ function recordForKey(key: string): LateAdmissionRecord {
   };
   lateAdmissionRecords.set(key, created);
   return created;
+}
+
+function bindLateAdmission(record: LateAdmissionRecord, pendingId: string | null) {
+  if (
+    record.boundPendingId === pendingId &&
+    record.state.status !== "sent" &&
+    record.state.status !== "queued"
+  )
+    return;
+  const prefix = pendingId ? `late:${pendingId}:` : "";
+  const id = `${prefix}${generateUUID()}`;
+  // Long legacy identifiers can still be sent and closed manually.
+  record.clientMessageId = new TextEncoder().encode(id).length <= 128 ? id : generateUUID();
+  record.boundPendingId = pendingId;
 }
 
 function stateForKey(key: string | null): LateClarificationState {
@@ -119,6 +144,31 @@ function resetRecord(key: string | null) {
 }
 
 type StoreApi = ReturnType<typeof useAppStoreApi>;
+
+function unansweredInboxEnabled(storeApi: StoreApi, workspaceId?: string): boolean {
+  const workspaces = storeApi.getState().workspaces;
+  const active = workspaces?.items.find((item) => item.id === (workspaceId ?? workspaces.activeId));
+  return Boolean(active?.clarification_unanswered_inbox_enabled);
+}
+
+// With the workspace's unanswered inbox on, an admitted late answer closes
+// exactly the question it answered. Best effort: the answer is already
+// delivered, and a question that is not unanswered (still active, expired,
+// already closed) is rejected server-side without side effects.
+async function recordLateAnswer(
+  storeApi: StoreApi,
+  enabled: boolean,
+  pendingId: string | null,
+  admission: { messageId: string; sessionId: string },
+) {
+  if (!enabled || !pendingId) return;
+  try {
+    await markClarificationInboxLateAnswer(pendingId, admission);
+    storeApi.getState().bumpNeedsYouInboxRefreshTick();
+  } catch {
+    // The question stays listed as unanswered; the user can still close it.
+  }
+}
 
 async function hydrateSourceSession({
   storeApi,
@@ -182,11 +232,30 @@ function snapshotAttachments(snapshot: LateClarificationSnapshot) {
   );
 }
 
-export function useLateClarificationMessage(sourceMessage: Message | undefined) {
+function clearInFlightWhenSettled(
+  record: LateAdmissionRecord,
+  delivery: Promise<MessageAdmissionOutcome>,
+) {
+  const clear = () => {
+    if (record.inFlight === delivery) record.inFlight = null;
+  };
+  void delivery.then(clear, clear);
+}
+
+/**
+ * Sends a late answer as an ordinary message. The target defaults to the
+ * question's own session; `targetSessionId` is an explicit alternative the
+ * user chose (the task's current session after the asking one ended).
+ */
+export function useLateClarificationMessage(
+  sourceMessage: Message | undefined,
+  options?: { targetSessionId?: string | null; workspaceId?: string },
+) {
   const { t } = useTranslation();
   const storeApi = useAppStoreApi();
-  const { taskId, sessionId } = sourceIds(sourceMessage);
-  const sourceKey = sourceAdmissionKey(sourceMessage);
+  const workspaceId = options?.workspaceId;
+  const { taskId, sessionId } = sourceIds(sourceMessage, options?.targetSessionId);
+  const sourceKey = sourceAdmissionKey(sourceMessage, options?.targetSessionId);
   const excludedPendingIdRef = useRef<string | null>(null);
 
   const subscribe = useCallback(
@@ -228,14 +297,14 @@ export function useLateClarificationMessage(sourceMessage: Message | undefined) 
       const admissionKey = lateAdmissionKey(taskId, sessionId, snapshot.messages);
       const record = recordForKey(admissionKey);
       if (record.inFlight) return record.inFlight;
-      if (record.state.status === "sent" || record.state.status === "queued") {
-        record.clientMessageId = generateUUID();
-      }
+      bindLateAdmission(record, pendingId);
       const admissionSnapshot: LateClarificationSnapshot = {
         messages: snapshot.messages.slice(),
         answers: snapshot.answers.slice(),
       };
       updateRecordState(admissionKey, { status: "sending", snapshot: admissionSnapshot });
+      // Capture workspace enablement before asynchronous admission.
+      const closeUnanswered = unansweredInboxEnabled(storeApi, workspaceId);
       const delivery = (async () => {
         try {
           await hydrateSourceSession({
@@ -253,6 +322,10 @@ export function useLateClarificationMessage(sourceMessage: Message | undefined) 
             throw new MessageSendError("late-answer-admission-failed", t("task:lateAnswerFailed"));
           }
           updateRecordState(admissionKey, { status: outcome, snapshot: admissionSnapshot });
+          await recordLateAnswer(storeApi, closeUnanswered, pendingId, {
+            messageId: record.clientMessageId,
+            sessionId,
+          });
           return outcome;
         } catch (error) {
           updateRecordState(admissionKey, {
@@ -264,17 +337,10 @@ export function useLateClarificationMessage(sourceMessage: Message | undefined) 
         }
       })();
       record.inFlight = delivery;
-      void delivery.then(
-        () => {
-          if (record.inFlight === delivery) record.inFlight = null;
-        },
-        () => {
-          if (record.inFlight === delivery) record.inFlight = null;
-        },
-      );
+      clearInFlightWhenSettled(record, delivery);
       return delivery;
     },
-    [handleSendMessageWithOutcome, sessionId, storeApi, t, taskId],
+    [handleSendMessageWithOutcome, sessionId, storeApi, t, taskId, workspaceId],
   );
 
   const reset = useCallback(() => resetRecord(sourceKey), [sourceKey]);

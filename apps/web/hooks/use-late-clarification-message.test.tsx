@@ -136,6 +136,7 @@ describe("useLateClarificationMessage", () => {
       await waitFor(() => expect(admissionMock).toHaveBeenCalledTimes(1));
     });
     const firstClientMessageId = admissionMock.mock.calls[0][0].clientMessageId;
+    expect(firstClientMessageId).toMatch(/^late:pending-remount:[0-9a-f-]{36}$/i);
     first.unmount();
     firstDelivery.reject(new Error("transport unavailable"));
     await expect(firstSend).rejects.toThrow("transport unavailable");

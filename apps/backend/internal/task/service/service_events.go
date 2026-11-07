@@ -960,6 +960,9 @@ func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, w
 		"dynamic_midturn_failover_enabled":        workspace.DynamicMidTurnFailoverEnabled,
 		"dynamic_failed_route_auto_retry_enabled": workspace.DynamicFailedRouteAutoRetryEnabled,
 		"dynamic_failed_route_auto_retry_max":     workspace.DynamicFailedRouteAutoRetryMax,
+
+		"clarification_unanswered_inbox_enabled":  workspace.ClarificationUnansweredInboxEnabled,
+		"clarification_unanswered_retention_days": workspace.ClarificationUnansweredRetentionDays,
 		// Placement is reach: moving a workspace between units is what grants
 		// and withdraws access now, so an access-changed event that omitted it
 		// would tell clients something changed without telling them what.

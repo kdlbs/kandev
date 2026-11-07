@@ -28,6 +28,8 @@ export type WorkspaceState = {
     dynamic_midturn_failover_enabled?: boolean;
     dynamic_failed_route_auto_retry_enabled?: boolean;
     dynamic_failed_route_auto_retry_max?: number;
+    clarification_unanswered_inbox_enabled?: boolean;
+    clarification_unanswered_retention_days?: number;
     office_workflow_id?: string | null;
     created_at: string;
     updated_at: string;

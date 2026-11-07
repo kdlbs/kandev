@@ -627,6 +627,8 @@ const infraSchemaDDL = `
 		dynamic_midturn_failover_enabled BOOLEAN NOT NULL DEFAULT FALSE,
 		dynamic_failed_route_auto_retry_enabled BOOLEAN NOT NULL DEFAULT FALSE,
 		dynamic_failed_route_auto_retry_max INTEGER NOT NULL DEFAULT 1 CHECK (dynamic_failed_route_auto_retry_max BETWEEN 1 AND 3),
+		clarification_unanswered_inbox_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		clarification_unanswered_retention_days INTEGER NOT NULL DEFAULT 14 CHECK (clarification_unanswered_retention_days BETWEEN 1 AND 90),
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);

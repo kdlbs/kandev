@@ -47,6 +47,7 @@ import {
   useWorkspaceFailedRouteAutoRetryDraft,
 } from "./workspace-edit-auto-retry-draft";
 import { WorkspaceDynamicRoutingSection } from "@/components/settings/workspaces/workspace-dynamic-routing-card";
+import { WorkspaceUnansweredInboxSettings } from "./workspace-unanswered-inbox-settings";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
@@ -579,6 +580,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         onEnabledChange={setMidTurnFailoverEnabled}
         autoRetry={failedRouteAutoRetryControls(autoRetry, savedState)}
       />
+      <WorkspaceUnansweredInboxSettings workspace={workspace} canManage={canManage} />
       {/*
         Reads the live store item rather than the form's captured snapshot:
         scopes arrive with hydration, which can land after this

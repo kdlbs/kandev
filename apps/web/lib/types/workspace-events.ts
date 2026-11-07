@@ -20,6 +20,9 @@ export type WorkspacePayload = {
   dynamic_midturn_failover_enabled?: boolean;
   dynamic_failed_route_auto_retry_enabled?: boolean;
   dynamic_failed_route_auto_retry_max?: number;
+  /** Unanswered-question inbox settings; absent from older backends. */
+  clarification_unanswered_inbox_enabled?: boolean;
+  clarification_unanswered_retention_days?: number;
   created_at?: string;
   updated_at?: string;
 };

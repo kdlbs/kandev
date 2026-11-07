@@ -424,6 +424,9 @@ var (
 	// ErrWorkspaceFailedRouteAutoRetryMaxInvalid rejects an automatic
 	// failed-route retry limit outside 1-3.
 	ErrWorkspaceFailedRouteAutoRetryMaxInvalid = errors.New("workspace automatic failed-route retry limit must be between 1 and 3")
+	// ErrWorkspaceClarificationRetentionInvalid rejects an unanswered
+	// clarification retention outside the supported day range.
+	ErrWorkspaceClarificationRetentionInvalid = errors.New("workspace unanswered clarification retention must be between 1 and 90 days")
 )
 
 func validateExecutorConfig(config map[string]string) error {

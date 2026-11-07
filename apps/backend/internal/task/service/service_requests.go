@@ -270,6 +270,9 @@ type UpdateWorkspaceRequest struct {
 	// DynamicFailedRouteAutoRetryMax must be 1-3 when present.
 	DynamicFailedRouteAutoRetryEnabled *bool `json:"dynamic_failed_route_auto_retry_enabled,omitempty"`
 	DynamicFailedRouteAutoRetryMax     *int  `json:"dynamic_failed_route_auto_retry_max,omitempty"`
+	// Unanswered-clarification inbox settings; nil keeps the stored value.
+	ClarificationUnansweredInboxEnabled  *bool `json:"clarification_unanswered_inbox_enabled,omitempty"`
+	ClarificationUnansweredRetentionDays *int  `json:"clarification_unanswered_retention_days,omitempty"`
 	// Visibility is "private" or "org". Unknown values normalize to private:
 	// unrecognized input must never widen access.
 	Visibility *string `json:"visibility,omitempty"`

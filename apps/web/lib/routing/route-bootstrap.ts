@@ -81,6 +81,9 @@ export function mapWorkspaceItem(ws: WorkspaceItem): WorkspaceState["items"][num
     dynamic_midturn_failover_enabled: ws.dynamic_midturn_failover_enabled ?? false,
     dynamic_failed_route_auto_retry_enabled: ws.dynamic_failed_route_auto_retry_enabled ?? false,
     dynamic_failed_route_auto_retry_max: ws.dynamic_failed_route_auto_retry_max ?? 1,
+    // Passed through as sent: consumers default an absent value (off, 14 days).
+    clarification_unanswered_inbox_enabled: ws.clarification_unanswered_inbox_enabled,
+    clarification_unanswered_retention_days: ws.clarification_unanswered_retention_days,
     office_workflow_id: ws.office_workflow_id ?? null,
     created_at: ws.created_at,
     updated_at: ws.updated_at,

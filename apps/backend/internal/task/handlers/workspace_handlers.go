@@ -136,6 +136,9 @@ type httpUpdateWorkspaceRequest struct {
 	DynamicFailedRouteAutoRetryMax     *int    `json:"dynamic_failed_route_auto_retry_max,omitempty"`
 	// UnitID moves the workspace to another unit, changing who reaches it.
 	UnitID *string `json:"unit_id,omitempty"`
+
+	ClarificationUnansweredInboxEnabled  *bool `json:"clarification_unanswered_inbox_enabled,omitempty"`
+	ClarificationUnansweredRetentionDays *int  `json:"clarification_unanswered_retention_days,omitempty"`
 }
 
 func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
@@ -157,6 +160,9 @@ func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
 		DynamicFailedRouteAutoRetryEnabled: body.DynamicFailedRouteAutoRetryEnabled,
 		DynamicFailedRouteAutoRetryMax:     body.DynamicFailedRouteAutoRetryMax,
 		UnitID:                             body.UnitID,
+
+		ClarificationUnansweredInboxEnabled:  body.ClarificationUnansweredInboxEnabled,
+		ClarificationUnansweredRetentionDays: body.ClarificationUnansweredRetentionDays,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workspace not updated")
@@ -280,6 +286,9 @@ type wsUpdateWorkspaceRequest struct {
 	DynamicMidTurnFailoverEnabled      *bool   `json:"dynamic_midturn_failover_enabled,omitempty"`
 	DynamicFailedRouteAutoRetryEnabled *bool   `json:"dynamic_failed_route_auto_retry_enabled,omitempty"`
 	DynamicFailedRouteAutoRetryMax     *int    `json:"dynamic_failed_route_auto_retry_max,omitempty"`
+
+	ClarificationUnansweredInboxEnabled  *bool `json:"clarification_unanswered_inbox_enabled,omitempty"`
+	ClarificationUnansweredRetentionDays *int  `json:"clarification_unanswered_retention_days,omitempty"`
 }
 
 func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -303,11 +312,15 @@ func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Messa
 		DynamicMidTurnFailoverEnabled:      req.DynamicMidTurnFailoverEnabled,
 		DynamicFailedRouteAutoRetryEnabled: req.DynamicFailedRouteAutoRetryEnabled,
 		DynamicFailedRouteAutoRetryMax:     req.DynamicFailedRouteAutoRetryMax,
+
+		ClarificationUnansweredInboxEnabled:  req.ClarificationUnansweredInboxEnabled,
+		ClarificationUnansweredRetentionDays: req.ClarificationUnansweredRetentionDays,
 	})
 	if err != nil {
 		h.logger.Error("failed to update workspace", zap.Error(err))
 		if errors.Is(err, service.ErrWorkspaceIdleTimeoutInvalid) ||
-			errors.Is(err, service.ErrWorkspaceFailedRouteAutoRetryMaxInvalid) {
+			errors.Is(err, service.ErrWorkspaceFailedRouteAutoRetryMaxInvalid) ||
+			errors.Is(err, service.ErrWorkspaceClarificationRetentionInvalid) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workspace", nil)

@@ -373,6 +373,8 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	_ = r.migrate.Apply("workspaces.dynamic_midturn_failover_enabled", `ALTER TABLE workspaces ADD COLUMN dynamic_midturn_failover_enabled BOOLEAN NOT NULL DEFAULT FALSE`)
 	_ = r.migrate.Apply("workspaces.dynamic_failed_route_auto_retry_enabled", `ALTER TABLE workspaces ADD COLUMN dynamic_failed_route_auto_retry_enabled BOOLEAN NOT NULL DEFAULT FALSE`)
 	_ = r.migrate.Apply("workspaces.dynamic_failed_route_auto_retry_max", `ALTER TABLE workspaces ADD COLUMN dynamic_failed_route_auto_retry_max INTEGER NOT NULL DEFAULT 1 CHECK (dynamic_failed_route_auto_retry_max BETWEEN 1 AND 3)`)
+	_ = r.migrate.Apply("workspaces.clarification_unanswered_inbox_enabled", `ALTER TABLE workspaces ADD COLUMN clarification_unanswered_inbox_enabled BOOLEAN NOT NULL DEFAULT FALSE`)
+	_ = r.migrate.Apply("workspaces.clarification_unanswered_retention_days", `ALTER TABLE workspaces ADD COLUMN clarification_unanswered_retention_days INTEGER NOT NULL DEFAULT 14 CHECK (clarification_unanswered_retention_days BETWEEN 1 AND 90)`)
 	_ = r.migrate.Apply("executors_running.idle_suspension_state", `ALTER TABLE executors_running ADD COLUMN idle_suspension_state TEXT NOT NULL DEFAULT ''`)
 	_ = r.migrate.Apply("executors_running.idle_suspension_policy_updated_at", `ALTER TABLE executors_running ADD COLUMN idle_suspension_policy_updated_at TIMESTAMP`)
 

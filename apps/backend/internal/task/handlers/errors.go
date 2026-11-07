@@ -309,7 +309,8 @@ func isValidationError(err error) bool {
 	}
 	if errors.Is(err, service.ErrInvalidParent) || errors.Is(err, service.ErrAutoTitleUnsupportedForOffice) ||
 		errors.Is(err, service.ErrWorkspaceIdleTimeoutInvalid) ||
-		errors.Is(err, service.ErrWorkspaceFailedRouteAutoRetryMaxInvalid) {
+		errors.Is(err, service.ErrWorkspaceFailedRouteAutoRetryMaxInvalid) ||
+		errors.Is(err, service.ErrWorkspaceClarificationRetentionInvalid) {
 		return true
 	}
 	if errors.Is(err, service.ErrInvalidWorkflowChange) {

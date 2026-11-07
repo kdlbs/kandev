@@ -309,5 +309,12 @@
   "failedRouteAutoRetryEnabled": "自动重试失败的路由",
   "failedRouteAutoRetryDescription": "当速率限制、配额耗尽或提供方过载使路由等待你的操作时，在提供方限制解除后（至少一分钟后）自动重试。重试将从已保存的任务上下文继续，失败的请求不会重新发送。如果同一提供方以相同原因再次失败或达到次数上限，会话将等待你的操作。关闭时，会话将等待你的操作。",
   "failedRouteAutoRetryMax": "轮次成功前的自动重试次数",
-  "failedRouteAutoRetryMaxRange": "请输入 1 到 3 之间的整数。"
+  "failedRouteAutoRetryMaxRange": "请输入 1 到 3 之间的整数。",
+  "unansweredInboxTitle": "未回答的问题",
+  "unansweredInboxDescription": "让智能体未得到回答就继续工作的问题，继续显示在 Needs-you 收件箱中，并对列出待处理问题的智能体可见。此设置默认关闭。",
+  "unansweredInboxEnabled": "显示未回答的问题",
+  "unansweredInboxEnabledDescription": "回答会作为新消息发送到任务，重复提出的问题会替换较早的副本。这些问题不会阻塞智能体或工作流步骤。",
+  "unansweredRetentionDays": "自动关闭（天）",
+  "unansweredRetentionDescription": "早于此天数的未回答问题会自动关闭。允许范围：1 到 90 天。",
+  "unansweredRetentionInvalid": "请输入 1 到 90 之间的整数。"
 }
