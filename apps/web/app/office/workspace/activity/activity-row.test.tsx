@@ -27,7 +27,7 @@ describe("ActivityRow", () => {
     render(<ActivityRow entry={activity({ runId: "run-1", sessionId: "sess-1" })} />);
 
     const link = screen.getByRole("link", { name: "Run" });
-    expect(link.getAttribute("href")).toBe("/office/agents/agent-1/runs/run-1");
+    expect(link.getAttribute("href")).toBe("/office/agents/agent-1/runs/run-1?workspaceId=ws-1");
   });
 
   it("does not show a run link for non-runtime activity", () => {
@@ -52,7 +52,7 @@ describe("ActivityRow", () => {
     );
 
     const link = screen.getByRole("link", { name: "Run" });
-    expect(link.getAttribute("href")).toBe("/office/agents/agent-7/runs/run-1");
+    expect(link.getAttribute("href")).toBe("/office/agents/agent-7/runs/run-1?workspaceId=ws-1");
   });
 
   it("renders server-resolved actor and task labels while retaining task identifiers", () => {
