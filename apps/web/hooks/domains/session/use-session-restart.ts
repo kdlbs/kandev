@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { resumeSession } from "@/lib/services/session-recovery-service";
 import {
   getSessionRestartStore,
   isSessionRestartPending,
@@ -38,6 +39,31 @@ function restoreRestartSelection(
     if (wasPinned) current.setActiveSession(taskId, sessionId);
     else current.setActiveSessionAuto(taskId, sessionId);
   }
+}
+
+async function restartSession(
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
+  taskId: string,
+  sessionId: string,
+  metadata: Record<string, unknown> | null | undefined,
+  failureMessage: string,
+) {
+  const closure = metadata?.inference_scope_closure;
+  const consumed =
+    typeof closure === "object" &&
+    closure !== null &&
+    "stage" in closure &&
+    closure.stage === "consumed";
+  if (closure != null && !consumed) {
+    await resumeSession(taskId, sessionId, failureMessage, metadata);
+    return;
+  }
+  await client.request("session.stop", { session_id: sessionId }, 15000);
+  await client.request(
+    "session.launch",
+    { task_id: taskId, intent: "resume", session_id: sessionId },
+    30000,
+  );
 }
 
 /**
@@ -80,11 +106,12 @@ export function useSessionRestart(sessionId: string | null | undefined, taskId: 
     try {
       const client = getWebSocketClient();
       if (!client) throw new Error(t("task:sessionRestartConnectionUnavailable"));
-      await client.request("session.stop", { session_id: sessionId }, 15000);
-      await client.request(
-        "session.launch",
-        { task_id: taskId, intent: "resume", session_id: sessionId },
-        30000,
+      await restartSession(
+        client,
+        taskId,
+        sessionId,
+        session.metadata,
+        t("task:failedToResumeSession"),
       );
       updateToast(toastId, { title: t("task:sessionRestartRequested"), variant: "success" });
       return true;
