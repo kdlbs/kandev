@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/kandev/kandev/internal/authz"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/review"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -156,13 +158,25 @@ func (h *Handlers) handleRunTaskReview(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 
-	run, err := h.reviewRunner.Launch(ctx, review.RunRequest{
+	launch := review.RunRequest{
 		TaskID:         req.TaskID,
 		SessionID:      req.SessionID,
 		RepositoryID:   req.RepositoryID,
 		AgentProfileID: req.AgentProfileID,
 		Trigger:        models.ReviewTriggerManual,
-	})
+	}
+	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok {
+		if h.taskSvc == nil || h.taskSvc.AuthorizeTaskScope(ctx, req.TaskID, authz.ScopeTaskWrite) != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task is not writable", nil)
+		}
+		launch.SessionID = ""
+		if req.TaskID == principal.CallerTaskID {
+			launch.SessionID = principal.CallerSessionID
+		}
+		launch.OriginRequired = true
+		launch.Origin = h.mcpReviewOrigin(ctx, req.TaskID, principal)
+	}
+	run, err := h.reviewRunner.Launch(ctx, launch)
 	if err != nil {
 		return reviewLaunchError(msg, err)
 	}
