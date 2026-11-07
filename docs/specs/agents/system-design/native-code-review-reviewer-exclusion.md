@@ -31,6 +31,11 @@ into an unverified self-review. Neither preview nor exclusion consumes a route o
 provider probe. When ordered tiers are disabled, preview observes the legacy
 candidate order and existing circuit state.
 
+A candidate with no explicit model uses the existing same-agent utility
+default. The review keeps that selected default through detached execution and
+fallback. An unavailable or different-agent default cannot prove a distinct
+model and is refused; a default matching the writer is excluded.
+
 ## Workflow input
 
 The built-in YAML loader accepts the existing run_code_review on-enter action

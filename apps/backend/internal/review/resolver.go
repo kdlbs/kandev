@@ -162,18 +162,28 @@ func (r *Resolver) resolveProfile(ctx context.Context, profileID string, require
 	if model == "" && requireModel {
 		// The profile names an agent but no model; borrow the user's default
 		// model only when it belongs to the same agent.
-		model = r.sameAgentDefaultModel(ctx, profile.AgentID)
+		if OriginExclusionActive(ctx) {
+			model, _ = ReviewerEffectiveModel(ctx, profile.AgentID, "")
+		} else {
+			model = r.sameAgentDefaultModel(ctx, profile.AgentID)
+		}
 	}
 	if model == "" && requireModel {
 		return ReviewerIdentity{}, fmt.Errorf("%w: agent profile %q has no model configured",
 			ErrAgentUnavailable, describeProfile(profile, profileID))
+	}
+	route := profile.Route
+	if OriginExclusionActive(ctx) && route != nil && route.Model == "" && route.AgentID == profile.AgentID && model != "" {
+		copy := *route
+		copy.Model = model
+		route = &copy
 	}
 	return ReviewerIdentity{
 		ProfileID: profileID,
 		AgentID:   profile.AgentID,
 		Model:     model,
 		Mode:      profile.Mode,
-		Route:     profile.Route,
+		Route:     route,
 		Source:    SourceAgentProfile,
 	}, nil
 }

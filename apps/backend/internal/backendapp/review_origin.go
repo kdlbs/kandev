@@ -57,10 +57,11 @@ func (r reviewInference) validateReviewExecution(ctx context.Context, id, agent,
 		if err != nil {
 			return fmt.Errorf("%w: read concrete reviewer: %w", review.ErrAgentUnavailable, err)
 		}
-		if !found || actual.CLIPassthrough || actual.AgentID != agent || actual.Model != model {
+		effectiveModel, known := review.ReviewerEffectiveModel(ctx, actual.AgentID, actual.Model)
+		if !found || actual.CLIPassthrough || actual.AgentID != agent || !known || effectiveModel != model {
 			return fmt.Errorf("%w: concrete reviewer changed after selection", review.ErrAgentUnavailable)
 		}
-		agent, model = actual.AgentID, actual.Model
+		agent, model = actual.AgentID, effectiveModel
 	}
 	if !review.ReviewerCandidateAllowed(ctx, id, agent, model) {
 		return fmt.Errorf("%w: %w", review.ErrAgentUnavailable, review.ErrNoDistinctReviewer)

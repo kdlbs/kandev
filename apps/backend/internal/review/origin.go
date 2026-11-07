@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -47,6 +48,9 @@ func OriginFromSession(session *models.TaskSession) *OriginIdentity {
 type originExclusion struct {
 	profileID, executionProfileID string
 	agentID, model                string
+	defaults                      DefaultsLookup
+	defaultOnce                   sync.Once
+	defaultAgent, defaultModel    string
 }
 
 type originExclusionKey struct{}
@@ -62,7 +66,7 @@ func (r *Resolver) originExclusion(ctx context.Context, origin *OriginIdentity, 
 		}
 		return nil, nil
 	}
-	ex := &originExclusion{profileID: origin.ProfileID, executionProfileID: origin.ExecutionProfileID, agentID: origin.AgentID, model: origin.Model}
+	ex := &originExclusion{profileID: origin.ProfileID, executionProfileID: origin.ExecutionProfileID, agentID: origin.AgentID, model: origin.Model, defaults: r.Defaults}
 	if ex.agentID != "" && ex.model != "" {
 		return ex, nil
 	}
@@ -100,7 +104,30 @@ func ReviewerCandidateAllowed(ctx context.Context, profileID, agentID, model str
 	if profileID != "" && (profileID == ex.profileID || profileID == ex.executionProfileID) {
 		return false
 	}
-	return agentID != "" && model != "" && (agentID != ex.agentID || model != ex.model)
+	model, known := ReviewerEffectiveModel(ctx, agentID, model)
+	return agentID != "" && known && (agentID != ex.agentID || model != ex.model)
+}
+
+// ReviewerEffectiveModel applies the existing same-agent default without
+// guessing a model for another provider or for an unreadable setting.
+func ReviewerEffectiveModel(ctx context.Context, agentID, model string) (string, bool) {
+	if model != "" {
+		return model, true
+	}
+	ex, _ := ctx.Value(originExclusionKey{}).(*originExclusion)
+	if ex == nil || ex.defaults == nil || agentID == "" {
+		return "", false
+	}
+	ex.defaultOnce.Do(func() {
+		agent, selected, err := ex.defaults.DefaultUtilitySettings(ctx)
+		if err == nil {
+			ex.defaultAgent, ex.defaultModel = agent, selected
+		}
+	})
+	if ex.defaultAgent != agentID || ex.defaultModel == "" {
+		return "", false
+	}
+	return ex.defaultModel, true
 }
 
 func reviewerIdentityAllowed(ctx context.Context, identity ReviewerIdentity) bool {

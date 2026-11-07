@@ -285,6 +285,13 @@ func (r reviewInference) Run(ctx context.Context, identity review.ReviewerIdenti
 	prepared := reviewPromptRoute(identity)
 	recordedProfileID := prepared.ExecutionProfileID
 	response, err := utilityservice.ExecuteProfilePrompt(ctx, r.profiles, prepared, func(attempt context.Context, id string) (*agentctlutil.PromptResponse, error) {
+		if review.OriginExclusionActive(attempt) && prepared.Model == "" {
+			model, known := review.ReviewerEffectiveModel(attempt, prepared.AgentCLI, prepared.Model)
+			if !known {
+				return nil, fmt.Errorf("%w: reviewer model is unavailable", review.ErrAgentUnavailable)
+			}
+			prepared.Model = model
+		}
 		if err := r.validateReviewExecution(attempt, id, prepared.AgentCLI, prepared.Model); err != nil {
 			return nil, err
 		}
