@@ -17,7 +17,7 @@ import (
 )
 
 // @covers AC-AGENTS-CODEX-NATIVE-001.1
-func TestCodexAppServerProbeDiscoversModelsFromGeneratedManagedCommand(t *testing.T) {
+func TestRuntimeObservationCodexAppServerProbeIncludesBridge(t *testing.T) {
 	workDir := t.TempDir()
 	argsPath := filepath.Join(workDir, "npx-args")
 	writeCodexAppServerFakeNpx(t, filepath.Join(workDir, "npx"), `#!/bin/sh
@@ -40,8 +40,15 @@ done
 
 	command := agents.NewCodexAppServer(true).InferenceConfig().Command.Args()
 	originalCommand := slices.Clone(command)
+	observation := &agents.RuntimeObservationDescriptor{
+		Bridge: agents.RuntimeComponentDescriptor{
+			Name: "Codex", Package: "@openai/codex",
+			Source: agents.RuntimeComponentManaged, Owner: agents.RuntimeComponentOwnerKandev,
+		},
+	}
 	response, err := NewCodexAppServerInferenceExecutor(zap.NewNop()).Probe(context.Background(), &ProbeRequest{
-		InferenceConfig: &InferenceConfigDTO{Command: command, WorkDir: workDir},
+		RuntimeObservation: observation,
+		InferenceConfig:    &InferenceConfigDTO{Command: command, WorkDir: workDir},
 	})
 	if err != nil {
 		t.Fatalf("Probe returned error: %v", err)
@@ -51,6 +58,10 @@ done
 	}
 	if len(response.Models) != 1 || response.Models[0].ID != "gpt-fake" || response.Models[0].Name != "Fake model" {
 		t.Fatalf("models = %#v, want fake model", response.Models)
+	}
+	bridge := runtimeComponentByRole(t, response.RuntimeInfo, agents.RuntimeComponentBridge)
+	if bridge.Name != "Codex" || bridge.Source != agents.RuntimeComponentManaged || bridge.ObservedVersion != "" || response.AgentVersion != "" {
+		t.Fatalf("runtime bridge = %#v", bridge)
 	}
 	if !slices.Equal(command, originalCommand) {
 		t.Fatalf("Probe mutated generated command: got %#v, want %#v", command, originalCommand)
