@@ -33,6 +33,20 @@ func (m *Manager) closureClient(sid, executionID string) (*agentctl.Client, func
 	return client, release, nil
 }
 
+// ProbeInferenceClosure confirms support before any recovery fence is written.
+func (m *Manager) ProbeInferenceClosure(ctx context.Context, sid, executionID string) error {
+	if _, ok := m.inferenceConsumer.(inferenceClosureSettler); !ok {
+		return agentctl.ErrInferenceOwnershipUnsupported
+	}
+	client, release, err := m.closureClient(sid, executionID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	_, err = client.InferenceClosure(ctx, utility.InferenceClosureRequest{OperationID: "probe", Action: "probe"})
+	return err
+}
+
 func (m *Manager) InferenceClosureStep(ctx context.Context, sid, executionID string, req utility.InferenceClosureRequest) (*utility.InferenceClosureResponse, error) {
 	client, release, err := m.closureClient(sid, executionID)
 	if err != nil {

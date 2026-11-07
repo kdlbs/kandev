@@ -50,6 +50,12 @@ func (h *Handler) inferenceClosure(ctx context.Context, req InferenceClosureRequ
 }
 
 func (h *Handler) advanceInferenceClosureOwner(ctx context.Context, owner *InferenceOwner, req InferenceClosureRequest) error {
+	if req.Action == "probe" {
+		if h.closureStop == nil || !h.attempts.snapshot().Known {
+			return ErrInferenceClosureIncomplete
+		}
+		return nil
+	}
 	if req.Action == "prepare" {
 		return h.prepareInferenceClosure(ctx, owner, req)
 	}

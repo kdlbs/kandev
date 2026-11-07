@@ -26,6 +26,9 @@ func (c *Client) InferenceClosure(ctx context.Context, request utility.Inference
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
+		if response.StatusCode == http.StatusNotFound {
+			return nil, ErrInferenceOwnershipUnsupported
+		}
 		return nil, fmt.Errorf("inference closure unavailable (status %d)", response.StatusCode)
 	}
 	var result utility.InferenceClosureResponse
@@ -34,6 +37,12 @@ func (c *Client) InferenceClosure(ctx context.Context, request utility.Inference
 	}
 	if err = c.validateInferenceSnapshot(&result.Snapshot); err != nil {
 		return nil, err
+	}
+	if request.Action == "probe" {
+		if !result.Snapshot.Known || len(result.State) == 0 {
+			return nil, utility.ErrInferenceClosureIncomplete
+		}
+		return &result, nil
 	}
 	closure := result.Snapshot.Closure
 	if closure == nil || closure.OperationID != request.OperationID || len(result.State) == 0 {
