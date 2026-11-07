@@ -77,7 +77,7 @@ func (s *Service) admitOrDeferSeam5WithBinding(
 	relaunchPayload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, relaunchPayload)
 
 	if err := s.deferCeilingRefusal(ctx, taskID, sessionID, models.CeilingLaunchDynamicRelaunch, relaunchPayload, decision.reasonCode,
-		decision.population, decision.populationKnown, decision.ceiling); err != nil {
+		decision.population, decision.populationKnown, decision.ceiling, origin); err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the dynamic relaunch could not be admitted or recorded",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID),
 			zap.String(ceilingFieldReasonCode, ceilingReasonDeferWriteFailed), zap.Error(err))
