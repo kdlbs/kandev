@@ -388,23 +388,9 @@ func (s *Service) preparePromptRequest(ctx context.Context, utilityID string, tm
 	}
 
 	if s.profileResolver != nil {
-		var profileID string
-		switch {
-		case models.UsesDefaultProfile(agent):
-			if defaults != nil {
-				profileID = defaults.ProfileID
-			}
-		case agent.ProfileBindingState == models.ProfileBindingUnconfigured:
-			return nil, ErrProfileUnconfigured
-		case agent.ProfileBindingState == models.ProfileBindingInherit:
-			// inherit with a non-empty profile ID is an inconsistent state that
-			// UpdateAgent prevents; fail closed rather than silently resolving it.
-			return nil, ErrProfileRequired
-		default:
-			profileID = agent.AgentProfileID
-		}
-		if profileID == "" {
-			return nil, ErrProfileRequired
+		profileID, err := utilityProfileID(agent, defaults)
+		if err != nil {
+			return nil, err
 		}
 		profile, err := s.profileResolver.Resolve(ctx, profileID)
 		if err != nil {
@@ -433,6 +419,31 @@ func (s *Service) preparePromptRequest(ctx context.Context, utilityID string, tm
 		AgentCLI:       agentCLI,
 		Model:          model,
 	}, nil
+}
+
+// utilityProfileID selects the profile a utility agent resolves through: the
+// default utility profile, or its own bound profile. Unconfigured and
+// inconsistent bindings fail closed.
+func utilityProfileID(agent *models.UtilityAgent, defaults *DefaultUtilitySettings) (string, error) {
+	var profileID string
+	switch {
+	case models.UsesDefaultProfile(agent):
+		if defaults != nil {
+			profileID = defaults.ProfileID
+		}
+	case agent.ProfileBindingState == models.ProfileBindingUnconfigured:
+		return "", ErrProfileUnconfigured
+	case agent.ProfileBindingState == models.ProfileBindingInherit:
+		// inherit with a non-empty profile ID is an inconsistent state that
+		// UpdateAgent prevents; fail closed rather than silently resolving it.
+		return "", ErrProfileRequired
+	default:
+		profileID = agent.AgentProfileID
+	}
+	if profileID == "" {
+		return "", ErrProfileRequired
+	}
+	return profileID, nil
 }
 
 // PromptRequest contains the prepared request for executing a utility prompt.
