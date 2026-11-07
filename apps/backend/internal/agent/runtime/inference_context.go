@@ -18,3 +18,21 @@ func InferenceIdentityFromContext(ctx context.Context) InferenceIdentity {
 }
 
 func IsInferenceCapacityError(err error) bool { return client.IsInferenceCapacityError(err) }
+
+// Inference transport types retain their native implementation owner while
+// higher-level capacity and host callers depend on the public runtime seam.
+type InferenceClient = client.Client
+type InferenceClientRef = client.InferenceClientRef
+type InferenceConsumer = client.InferenceConsumer
+type InferenceAttemptError = client.InferenceAttemptError
+type InferenceClientOption = client.ClientOption
+
+func WithInferenceStopObserver(ctx context.Context, consumer InferenceConsumer) context.Context {
+	return client.WithInferenceStopObserver(ctx, consumer)
+}
+
+var ErrInferenceOwnershipUnsupported = client.ErrInferenceOwnershipUnsupported
+
+func WithInferenceExecutionID(id string) InferenceClientOption {
+	return client.WithExecutionID(id)
+}
