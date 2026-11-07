@@ -160,13 +160,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		}
 	case streams.EventTypeReasoning:
 		observedOutput = strings.TrimSpace(payload.Data.Text) != ""
-		s.observePromptAttempt(
-			payload.SessionID,
-			eventExecutionID,
-			payload.Data.PromptGeneration,
-			observedOutput,
-			false,
-		)
+		if observedOutput {
+			s.observePromptReasoning(payload.SessionID, eventExecutionID, payload.Data.PromptGeneration)
+		}
 	case agentEventToolCall, agentEventToolUpdate:
 		observedEffect = true
 		s.observePromptAttempt(
@@ -180,7 +176,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	if eventType != agentEventToolCall {
 		s.observeContinuationActivity(ctx, taskID, sessionID, eventExecutionID, continuationActivityEventFrom(payload.Data))
 	}
-	if observedOutput || observedEffect {
+	if (observedOutput && eventType != streams.EventTypeReasoning) || observedEffect {
 		resetEvent := watcher.AgentEventData{
 			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
 			AgentExecutionID: eventExecutionID, PromptGeneration: payload.Data.PromptGeneration,
