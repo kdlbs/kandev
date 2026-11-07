@@ -53,3 +53,17 @@ func ApplySelectedUsage(ctx context.Context, policy *ExecutionUsagePolicy) {
 	policy.ExpectedOrganizationRef = selected.ExpectedOrganizationRef
 	policy.ExpectedModel = selected.ExpectedModel
 }
+
+// MatchesSelectedUsage accepts a model override only from this request's
+// execution-owned preview for the same candidate and account.
+func MatchesSelectedUsage(ctx context.Context, policy *ExecutionUsagePolicy) bool {
+	state, ok := ctx.Value(candidateUsageContextKey{}).(*candidateUsageContext)
+	if !ok || state == nil || state.reader == nil || policy == nil || policy.ProfileID == "" || policy.ExpectedModel == "" || policy.ExpectedProvider == "" || policy.ExpectedAccountRef == "" {
+		return false
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	selected, ok := state.selected[policy.ProfileID]
+	return ok && selected.ExpectedProvider == policy.ExpectedProvider && selected.ExpectedAccountRef == policy.ExpectedAccountRef &&
+		selected.ExpectedOrganizationRef == policy.ExpectedOrganizationRef && selected.ExpectedModel == policy.ExpectedModel
+}

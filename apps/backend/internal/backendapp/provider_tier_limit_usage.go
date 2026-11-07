@@ -40,7 +40,7 @@ func (s *providerTierLimitService) readUsage(ctx context.Context, c tierLimitCon
 func (s *providerTierLimitService) readRequestUsage(ctx context.Context, c tierLimitContext, now time.Time, used *agentusage.LimitUsage) error {
 	ids := s.minuteProfiles(ctx, c)
 	var err error
-	used.RequestsMinute, err = s.readRequestCount(ctx, ids, now.Add(-time.Minute), now)
+	used.RequestsMinute, err = s.readMinuteRequestCount(ctx, c, ids, now.Add(-time.Minute), now)
 	if err != nil {
 		return err
 	}
@@ -57,7 +57,7 @@ func (s *providerTierLimitService) readRequestUsage(ctx context.Context, c tierL
 	used.TokensDay = day.TokensTotal
 	used.Resets["day"] = reset
 	if c.effective.RequestWindowSeconds > 0 {
-		used.RequestsWindow, err = s.readRequestCount(ctx, ids, now.Add(-time.Duration(c.effective.RequestWindowSeconds)*time.Second), now)
+		used.RequestsWindow, err = s.readMinuteRequestCount(ctx, c, ids, now.Add(-time.Duration(c.effective.RequestWindowSeconds)*time.Second), now)
 		if err != nil {
 			return err
 		}
@@ -70,6 +70,13 @@ func (s *providerTierLimitService) readRequestUsage(ctx context.Context, c tierL
 		}
 	}
 	return nil
+}
+
+func (s *providerTierLimitService) readMinuteRequestCount(ctx context.Context, c tierLimitContext, ids []string, start, end time.Time) (float64, error) {
+	if c.modelOverride && c.effective.RequestsPerModel {
+		return s.readModelRequestCount(ctx, c.ids, []string{c.profile.Model}, start, end)
+	}
+	return s.readRequestCount(ctx, ids, start, end)
 }
 
 func (s *providerTierLimitService) minuteProfiles(ctx context.Context, c tierLimitContext) []string {
@@ -103,6 +110,10 @@ func (s *providerTierLimitService) readBudgetUsage(ctx context.Context, c tierLi
 	}
 	if !ok {
 		return 0, time.Time{}, false, nil
+	}
+	if c.modelOverride && budget.Scope != "" {
+		amount, known, err := s.readModelBudgetUsage(ctx, c, budget, start, now)
+		return amount, reset, known, err
 	}
 	ids := s.budgetProfileIDs(ctx, c, budget)
 	if len(ids) == 0 {

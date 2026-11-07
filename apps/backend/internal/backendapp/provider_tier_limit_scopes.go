@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -21,11 +22,22 @@ func (s *providerTierLimitService) readScopeUsage(ctx context.Context, c tierLim
 	used.Scopes = make(map[string]float64, len(c.effective.Scopes))
 	models := s.profileModels(ctx, c.ids)
 	for _, scope := range c.effective.Scopes {
+		if c.modelOverride && !scope.Covers(c.profile.Model) {
+			continue
+		}
 		start, reset, err := agentusage.DailyLimitWindow(now, scope.DailyReset)
 		if err != nil {
 			return err
 		}
 		used.Resets[agentusage.ScopeUsageKey(scope.ID)] = reset
+		if c.modelOverride {
+			count, err := s.readModelRequestCount(ctx, c.ids, scope.Models, start, now)
+			if err != nil {
+				return fmt.Errorf("read overridden model scope: %w", err)
+			}
+			used.Scopes[scope.ID] = count
+			continue
+		}
 		ids := scopeProfileIDs(models, scope)
 		if len(ids) == 0 {
 			used.Scopes[scope.ID] = 0

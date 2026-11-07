@@ -2,12 +2,14 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +40,7 @@ type providerTierLimitService struct {
 }
 
 type tierLimitContext struct {
+	modelOverride       bool
 	profile             *settingsmodels.AgentProfile
 	provider            string
 	key                 string
@@ -63,15 +66,16 @@ func newProviderTierLimitService(usage *usageProviderAdapter, store tierLimitSto
 }
 
 func (s *providerTierLimitService) contextFor(ctx context.Context, id string) (tierLimitContext, error) {
+	return s.contextForModel(ctx, id, "")
+}
+
+func (s *providerTierLimitService) contextForModel(ctx context.Context, id, model string) (tierLimitContext, error) {
 	var c tierLimitContext
-	profile, agentType, ok := s.usage.loadProfile(ctx, id)
-	if !ok {
-		return c, fmt.Errorf("profile unavailable")
+	profile, agentType, bound, overridden, err := s.tierProfileForModel(ctx, id, model)
+	if err != nil {
+		return c, err
 	}
-	bound, ok := s.usage.bindingFor(profile, agentType)
-	if !ok {
-		return c, fmt.Errorf("account unavailable")
-	}
+	c.modelOverride = overridden
 	c.profile = profile
 	c.key = bound.accountKey
 	c.identity = accountIdentityFor(c.key)
@@ -79,12 +83,14 @@ func (s *providerTierLimitService) contextFor(ctx context.Context, id string) (t
 	if c.provider == "" {
 		c.provider = strings.SplitN(c.key, ":", 2)[0]
 	}
-	var err error
 	c.owner, c.learned, err = s.store.LoadAccountTierConfig(ctx, c.key)
 	if err != nil {
 		return c, err
 	}
 	observed := s.usage.ProfileUsage(ctx, id)
+	if overridden {
+		observed.ModelClass = modelClassForOverride(ctx, observed, bound)
+	}
 	c.observed = observed.Usage
 	c.modelClass = observed.ModelClass
 	if s.freeModels != nil {
@@ -99,7 +105,48 @@ func (s *providerTierLimitService) contextFor(ctx context.Context, id string) (t
 	c.defaults = s.defaultLimits(c)
 	c.effective = agentusage.MergeTierLimits(agentusage.MergeTierLimits(c.defaults, c.learned.Tiers[c.tier]), c.owner.Tiers[c.tier])
 	c.ids = s.accountTierProfiles(ctx, c)
+	if overridden && !slices.Contains(c.ids, id) {
+		c.ids = append(c.ids, id)
+	}
 	return c, nil
+}
+
+func (s *providerTierLimitService) tierProfileForModel(ctx context.Context, id, model string) (*settingsmodels.AgentProfile, string, usageBinding, bool, error) {
+	profile, agentType, ok := s.usage.loadProfile(ctx, id)
+	if !ok || profile == nil {
+		return nil, "", usageBinding{}, false, fmt.Errorf("profile unavailable")
+	}
+	original, ok := s.usage.bindingFor(profile, agentType)
+	if !ok {
+		return nil, "", usageBinding{}, false, fmt.Errorf("account unavailable")
+	}
+	overridden := model != "" && model != profile.Model
+	if overridden {
+		copy := *profile
+		copy.Model = model
+		profile = &copy
+	}
+	bound := original
+	if overridden {
+		bound, ok = s.usage.bindingFor(profile, agentType)
+		if !ok || bound.accountKey != original.accountKey {
+			return nil, "", usageBinding{}, false, fmt.Errorf("execution model account binding is unavailable")
+		}
+	}
+	return profile, agentType, bound, overridden, nil
+}
+
+func modelClassForOverride(ctx context.Context, observed profileUsage, bound usageBinding) agentusage.ModelClass {
+	class := agentusage.ModelClassUnknown
+	if observed.Usage != nil && strings.EqualFold(observed.Usage.Plan, "free") {
+		class = agentusage.ModelClassFree
+	}
+	if bound.class != nil {
+		if resolved := bound.class(ctx); resolved != agentusage.ModelClassUnknown {
+			class = resolved
+		}
+	}
+	return class
 }
 
 func (s *providerTierLimitService) effectiveBillingTier(ctx context.Context, p *settingsmodels.AgentProfile, a string, observed profileUsage, owner agentusage.AccountTierConfig) agentusage.BillingTier {
@@ -267,13 +314,21 @@ func (s *providerTierLimitService) CheckCandidate(ctx context.Context, candidate
 	if candidate.RequireExecutionUsage && candidate.UsagePolicy == nil {
 		return agentusage.LimitAdmission{}, fmt.Errorf("execution allowance account is unknown")
 	}
-	return s.check(ctx, candidate.ID, exclude, now, candidate.UsagePolicy)
+	model := ""
+	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID == candidate.ID && agentusage.MatchesSelectedUsage(ctx, candidate.UsagePolicy) {
+		model = candidate.UsagePolicy.ExpectedModel
+	}
+	return s.checkModel(ctx, candidate.ID, exclude, now, candidate.UsagePolicy, model)
 }
 
 func (s *providerTierLimitService) check(ctx context.Context, id, exclude string, now time.Time, selected *agentusage.ExecutionUsagePolicy) (agentusage.LimitAdmission, error) {
+	return s.checkModel(ctx, id, exclude, now, selected, "")
+}
+
+func (s *providerTierLimitService) checkModel(ctx context.Context, id, exclude string, now time.Time, selected *agentusage.ExecutionUsagePolicy, model string) (agentusage.LimitAdmission, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	c, err := s.contextFor(ctx, id)
+	c, err := s.contextForModel(ctx, id, model)
 	if err != nil {
 		return agentusage.LimitAdmission{}, err
 	}
@@ -282,6 +337,11 @@ func (s *providerTierLimitService) check(ctx context.Context, id, exclude string
 	}
 	used, err := s.readUsage(ctx, c, exclude, now)
 	if err != nil {
+		if errors.Is(err, errModelAttributionUnavailable) {
+			if admission := provenAccountLimit(c.effective, used, now); admission.Reason != "" {
+				return admission, nil
+			}
+		}
 		return agentusage.LimitAdmission{}, err
 	}
 	effective := c.effective
