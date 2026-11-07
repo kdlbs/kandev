@@ -135,7 +135,11 @@ never prepared and `auto_start_agent` never runs.
    the task re-entered the step, because the pinned id is no longer current
    (AC-TASKS-WORKFLOW-STAGE-MOVES-002.2).
 
-Cross-step promotions keep their delivered ledger id and are unchanged.
+Cross-step promotions deliver their committed ledger ID in `task.moved`. A
+positive delivered ID must still be the current task entry when the pending
+promotion marker is claimed in the task's write transaction. A stale delivery
+cannot consume a later entry's marker; legacy zero-ID deliveries retain their
+existing handling.
 
 ## Entry prompt before signal advance
 
