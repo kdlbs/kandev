@@ -493,6 +493,9 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 		}
 	}, after)
 	execution.recordDeliveryStreamFailure(startupGeneration, err)
+	if err == nil {
+		execution.installStreamProgress(processor.progress)
+	}
 	if err != nil {
 		attachment.close()
 		monitorCancel()
