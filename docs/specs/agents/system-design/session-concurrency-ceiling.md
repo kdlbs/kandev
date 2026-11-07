@@ -78,14 +78,14 @@ retains stale/conflict feedback rather than claiming an unapplied change.
 
 | Component | Responsibility |
 | --- | --- |
-| `sessionCeilingController` | Counts persisted `STARTING`/`RUNNING` sessions and process-local reservations. It admits, refuses, confirms, and releases launches. |
-| Orchestrator launch seams | Pass the launch origin and complete replay payload to the controller. They consume a reservation only after launch success. |
-| `deferCeilingRefusal` | Merges the ceiling-owned keys into task `deferred_launch` with compare-and-set semantics. |
+| `sessionCeilingController` | Counts persisted `STARTING`/`RUNNING` sessions and process-local reservations; admits, refuses, confirms and releases launches. |
+| Orchestrator launch seams | Pass the launch origin and full replay payload to the controller; consume a reservation only after launch success. |
+| `deferCeilingRefusal` | Merges ceiling-owned keys into task `deferred_launch` by compare-and-set. |
 | Ceiling sweep | Lists tasks with ceiling records, validates eligibility, and dispatches the stored launch kind. |
-| Task repository and service | Store and update the shared deferred record. Prompt edits update both legacy top-level data and the nested ceiling payload. |
+| Task repository and service | Store the shared deferred record. Prompt edits update legacy top-level data and the nested ceiling payload. |
 | Executor callbacks | Confirm or release only when the callback execution still owns the session row. |
-| Message-turn admission | Reserves bounded turns before warm or cold dispatch, independently of caller provenance. |
-| Message capacity wait registry | Tracks active queue-head identities for the existing capacity worker without owning their payload. |
+| Message-turn admission | Reserves bounded turns before warm or cold dispatch, whatever the caller. |
+| Message capacity wait registry | Tracks active queue-head identities for the capacity worker; it does not own their payload. |
 
 ## Data and contracts
 
