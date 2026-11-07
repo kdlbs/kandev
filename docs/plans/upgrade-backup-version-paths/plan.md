@@ -63,7 +63,7 @@ Add regressions in a focused `snapshot_version_test.go` file.
 Task 02 adds black-box version assertions to `scripts/check-make-shells`.
 Use disposable Git repositories with both runtime and SDK tags.
 Filter the root `RUNTIME_VERSION` and backend `VERSION` defaults with
-`git describe --tags --match "v[0-9]*" --always --dirty`.
+`git describe --tags --match "v[0-9]*" --exclude "*/*" --always --dirty`.
 Preserve each Makefile's redirect and fallback logic.
 
 | Boundary | Intended behavior | Evidence |
@@ -106,7 +106,8 @@ It uses temporary data instead of the user's database.
 The design-package handoff is complete. The user authorized implementation
 through a GPT-6 Luna worker at max reasoning, followed by PR creation.
 The primary session coordinates the sequential work orders and publication.
-After publication, wait 15 minutes and run PR fixup. Do not merge the PR.
+The primary session opened [PR 5154](https://github.com/kdlbs/kandev/pull/5154)
+and completed the requested 15-minute hold before PR fixup. Do not merge the PR.
 
 Public documentation does not need changes. This repair restores existing
 upgrade behavior without changing commands, configuration, or recovery steps.
@@ -141,8 +142,8 @@ Implementation verification passed:
   passed after each work order.
 
 The work orders contain exact commands and RED/GREEN evidence.
-PR publication and the requested post-creation hold/fixup remain external
-delivery steps. They do not require changes to the user's database.
+Hosted check results and review dispositions belong to the PR delivery record.
+No implementation or verification step requires changes to the user's database.
 
 ## Risks
 
@@ -151,3 +152,27 @@ delivery steps. They do not require changes to the user's database.
 - Windows reserves characters that Linux accepts. Cover both separator styles.
 - Backup integrity checks still take time on large databases.
 - Git fixtures must not create tags or commits in the working repository.
+
+## PR remediation
+
+After the requested 15-minute hold, review identified three concrete edge cases:
+portable filenames can exceed SQLite's usable component limit, namespaced tags
+can begin with a version-like prefix, and temporary directories can inherit
+a parent Git repository. Each case failed before its correction and passed
+afterward.
+Luna owns the code and targeted checks in the writable delivery checkout.
+The primary session owns integration, review dispositions and publication.
+
+Unique-name retry for same-second collisions remains an optional extension.
+Existing atomic publication deliberately fails without replacing a target.
+This package retains that safety behavior and its documented collision risk.
+
+The filename bound reserves eight bytes for SQLite's `-journal` sidecar.
+An exact 255-byte database name passed path formatting but failed the actual
+provider while SQLite created that sibling. Limit database names to 247 bytes
+and retain the existing private staging flow.
+
+The final persistence suite, changed-file Go lint (zero issues), and shell
+harness passed after remediation. The shell harness also passed with `TMPDIR`
+inside the delivery worktree. Documentation validation, specification lint and
+diff checks passed. The work-order results record each RED/GREEN observation.

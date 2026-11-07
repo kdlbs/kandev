@@ -1,6 +1,8 @@
 package persistence
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -128,4 +130,108 @@ func TestSnapshotPathVersionCompatibility(t *testing.T) {
 			}
 		})
 	}
+}
+
+// @covers AC-PLATFORM-SQLITE-SNAPSHOT-001.3
+func TestSnapshotPathVersionLengthLimit(t *testing.T) {
+	backupDir := t.TempDir()
+	boundaryVersion := strings.Repeat("r", 220)
+	boundaryPath := snapshotPath(backupDir, boundaryVersion)
+	if got := len(filepath.Base(boundaryPath)); got != 247 {
+		t.Fatalf("boundary filename length = %d, want 247", got)
+	}
+	if !strings.Contains(filepath.Base(boundaryPath), boundaryVersion) {
+		t.Fatal("version at the filename limit was truncated")
+	}
+
+	longA := strings.Repeat("r", 224) + "/tail"
+	longB := strings.Repeat("r", 224) + `\tail`
+	pathA := snapshotPath(backupDir, longA)
+	pathB := snapshotPath(backupDir, longB)
+	nameA, nameB := filepath.Base(pathA), filepath.Base(pathB)
+	if len(nameA) > 247 || len(nameB) > 247 {
+		t.Fatalf("oversized filenames exceed 247 bytes: %d, %d", len(nameA), len(nameB))
+	}
+	if nameA == nameB {
+		t.Fatal("distinct original versions produced the same filename")
+	}
+	for _, versionAndName := range []struct{ version, name string }{{longA, nameA}, {longB, nameB}} {
+		digest := sha256.Sum256([]byte(versionAndName.version))
+		wantPrefix := "kandev-" + strings.Repeat("r", 207) + "-" + hex.EncodeToString(digest[:])[:12] + "-"
+		if !strings.HasPrefix(versionAndName.name, wantPrefix) {
+			t.Fatalf("snapshot name = %q, want readable prefix and original-version digest %q", versionAndName.name, wantPrefix)
+		}
+	}
+}
+
+// @covers AC-PLATFORM-SQLITE-SNAPSHOT-001.3, AC-PLATFORM-SQLITE-SNAPSHOT-001.4, AC-PLATFORM-STARTUP-LIFECYCLE-001.7
+func TestProvide_UpgradeFromOversizedVersion(t *testing.T) {
+	version := strings.Repeat("v", 229)
+	dir := seedVersionedUpgradeDB(t, version)
+	if err := provideForTest(t, dir, "vCURRENT"); err != nil {
+		t.Fatalf("Provide: %v", err)
+	}
+
+	backupDir := filepath.Join(dir, "data", "backups")
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatalf("read backups directory: %v", err)
+	}
+	if len(entries) != 1 || entries[0].IsDir() {
+		t.Fatalf("backups entries = %#v, want one direct backup and no staging directories", entries)
+	}
+	backupPath := filepath.Join(backupDir, entries[0].Name())
+	if len(entries[0].Name()) > 255 {
+		t.Fatalf("snapshot filename length = %d, want at most 255 bytes", len(entries[0].Name()))
+	}
+	snapshot, err := sqlx.Open("sqlite3", backupPath)
+	if err != nil {
+		t.Fatalf("open snapshot: %v", err)
+	}
+	t.Cleanup(func() { _ = snapshot.Close() })
+	var title string
+	if err := snapshot.Get(&title, `SELECT title FROM tasks WHERE id = 't1'`); err != nil {
+		t.Fatalf("read seeded snapshot row: %v", err)
+	}
+	if title != "hello" {
+		t.Fatalf("snapshot task title = %q, want %q", title, "hello")
+	}
+	source, err := sqlx.Open("sqlite3", filepath.Join(dir, "data", "kandev.db"))
+	if err != nil {
+		t.Fatalf("open source database: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	gotVersion, err := ReadMetaKey(source, "kandev_version")
+	if err != nil {
+		t.Fatalf("read source version: %v", err)
+	}
+	if gotVersion != version {
+		t.Fatalf("source version changed to %q, want %q", gotVersion, version)
+	}
+}
+
+func seedVersionedUpgradeDB(t *testing.T, version string) string {
+	t.Helper()
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("mkdir data directory: %v", err)
+	}
+	dbPath := filepath.Join(dataDir, "kandev.db")
+	seedV0DB(t, dbPath)
+	database, err := sqlx.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open seeded database: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := ensureMetaTable(database); err != nil {
+		t.Fatalf("ensure metadata table: %v", err)
+	}
+	if err := WriteVersion(database, version); err != nil {
+		t.Fatalf("write stored version: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close seeded database: %v", err)
+	}
+	return dir
 }

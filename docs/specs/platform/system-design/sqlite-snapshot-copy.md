@@ -80,6 +80,13 @@ changing the metadata or skipping the required upgrade backup.
 it joins the component to the backup directory. Preserve ASCII letters,
 digits, dots, underscores, hyphens and plus signs. Replace every other
 character with an underscore. The empty version keeps the `pre-meta` fallback.
+Reserve eight bytes for SQLite's `-journal` sidecar suffix. Bound the database
+filename to 247 ASCII bytes, including its fixed prefix, separator, timestamp
+and extension. Both database and journal components then fit within 255 bytes.
+For an oversized version component, keep
+a readable prefix and append a short SHA-256 digest of the original version.
+The stored value remains unchanged, and atomic no-replace publication still
+protects against any collision.
 The `kandev-` prefix, UTC timestamp and `.db` suffix remain unchanged.
 
 The result remains a direct child of the backup directory on Linux, macOS
@@ -94,7 +101,8 @@ workaround. A publication error still prevents application migrations.
 
 The root `Makefile` and `apps/backend/Makefile` produce version metadata for
 local runtime builds. Their default Git descriptions match only `v[0-9]*`
-tags, with double quotes for POSIX and native Windows shells. SDK tags such
+tags and exclude all namespaced tags with `--exclude "*/*"`. Use double
+quotes for POSIX and native Windows shells. SDK tags such
 as `pluginsdk/v0.1.0` cannot become runtime version defaults. Preserve explicit
 version overrides, commit-hash fallback, the dirty suffix and the existing
 `dev` fallback outside a Git repository. Build filtering cannot repair values

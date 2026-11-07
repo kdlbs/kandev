@@ -27,7 +27,7 @@ Prove tag selection with disposable Git history before changing the defaults.
 
 - Extend the existing `scripts/check-make-shells` verification entrypoint.
 - Probe root `RUNTIME_VERSION` and backend `VERSION` through real Make expansion.
-- Filter default Git descriptions with `--match "v[0-9]*"`.
+- Filter default Git descriptions with `--match "v[0-9]*" --exclude "*/*"`.
 - Preserve existing overrides, fallbacks, and shell compatibility.
 
 ## Out of scope
@@ -39,9 +39,11 @@ metadata remain outside this task. Do not add tags to the working repository.
 
 1. A disposable repository with an older runtime tag and newer SDK tag exposes
    the current bug. After the fix, both Makefiles describe the runtime tag.
+   Cover a namespaced SDK tag that begins with a version-like prefix.
    Assert fixture-derived results rather than duplicating the production command.
 2. SDK-only history falls back to a commit hash. Dirty suffixes, explicit version
    overrides, and the `dev` fallback outside Git remain effective in both Makefiles.
+   Exercise the fallback fixture under a known parent Git worktree.
 3. Existing POSIX, Git Bash, and native Windows recipe simulations pass.
    Use double quotes around the tag pattern and preserve redirect handling.
 
@@ -112,3 +114,27 @@ Avoid application builds or network calls in version-discovery tests.
 Disposable commits use fixture-local identity, signing disabled, and an empty
 fixture-owned hooks directory. All fixture files are removed by the harness
 cleanup trap.
+
+### PR remediation: slash-tag exclusion and Git ceilings
+
+- **RED:** With a newer `v1/pluginsdk/v0.1.0` tag at `HEAD`, both Make defaults
+  returned `v1/pluginsdk/v0.1.0` instead of runtime tag description
+  `v1.2.3-1-g4ea4c60`.
+- **RED:** Running the prior fallback fixture with `TMPDIR` under the delivery
+  worktree made both defaults discover its parent repository and return
+  `v0.99.1-8-g702ec0e691c-dirty` instead of `dev`.
+- **GREEN:** Both Makefiles now exclude slash-containing tags. The fallback
+  fixture sits beneath a tagged disposable repository; its positive control
+  resolves the parent version, while `GIT_CEILING_DIRECTORIES` makes both
+  defaults return `dev`. The final harness passed both with the default temp
+  location and with `TMPDIR` under the delivery worktree. The latter resolved
+  `v1.2.3-1-g3175a99`, used hash fallback `7192175` for SDK-only history,
+  retained `-dirty`, excluded the `v1/` tag, and passed both `dev` fallbacks.
+- The harness uses fixture-local Git identity, disables commit and tag signing,
+  and points hooks to an empty fixture-owned directory. Its cleanup trap removes
+  the temporary repositories. The native `cmd.exe` mkdir probe was skipped
+  because `cmd.exe` is unavailable; shell recipe simulations passed.
+- `python3 scripts/list-docs.py validate` passed: 436 decisions and 1931
+  specifications validated.
+- `python3 scripts/lint-spec-files.py --all` passed.
+- `git diff --check` passed.

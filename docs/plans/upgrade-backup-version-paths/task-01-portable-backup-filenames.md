@@ -45,6 +45,8 @@ validation, backup eligibility, rotation policy, or the user's live database.
 2. Filename cases preserve ordinary versions and the empty-version fallback.
    Both separator styles and reserved characters produce one portable component.
    Include traversal-shaped metadata and the exact reported SDK version.
+   Cover the maximum filename component length and distinguish oversized versions
+   with the same readable prefix without changing source metadata.
 3. Existing publication, cancellation, upgrade eligibility, and failure tests
    continue to pass. A filename collision never replaces an existing backup.
 
@@ -53,7 +55,7 @@ validation, backup eligibility, rotation policy, or the user's live database.
 Run from the repository root. Run the focused regression before production edits.
 
 ```bash
-(cd apps/backend && go test -trimpath -tags fts5 ./internal/persistence -run 'TestSnapshotPathVersionCompatibility|TestProvide_UpgradeFromNamespacedVersion' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/persistence -run 'TestSnapshotPathVersionCompatibility|TestProvide_UpgradeFromNamespacedVersion|TestSnapshotPathVersionLengthLimit|TestProvide_UpgradeFromOversizedVersion' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/persistence)
 bash scripts/lint-go-changed apps/backend/internal/persistence/snapshot.go apps/backend/internal/persistence/snapshot_version_test.go
 python3 scripts/list-docs.py validate
@@ -115,3 +117,19 @@ POSIX permission assertions need the existing Windows-aware test convention.
 Go commands used a temporary cache under `/tmp` because the default Go build
 cache is read-only in this environment. No files under `/root/.kandev` were
 accessed.
+
+### PR remediation: bounded filename components
+
+- **RED:** The 229-character path case produced a 256-byte filename, and the
+  actual provider failed with `file name too long`. A 255-byte final basename
+  also failed during SQLite staging because its `-journal` sibling exceeded the
+  filesystem component limit.
+- **GREEN:** The version component now leaves room for that 8-byte journal
+  suffix, keeping the published basename at or below 247 bytes. A 220-character
+  version reaches the exact 247-byte boundary. Two oversized versions with the
+  same normalized prefix produce distinct names from SHA-256 digests of their
+  original values. The provider regression with a 229-character stored version
+  publishes a readable direct backup and leaves source metadata unchanged.
+- `GOCACHE=/tmp/kandev-go-cache go test -trimpath -tags fts5 ./internal/persistence -run 'TestSnapshotPathVersionLengthLimit|TestProvide_UpgradeFromOversizedVersion|TestSnapshotPathVersionCompatibility|TestProvide_UpgradeFromNamespacedVersion' -count=1` passed.
+- `GOCACHE=/tmp/kandev-go-cache go test -trimpath -tags fts5 ./internal/persistence` passed.
+- `GOCACHE=/tmp/kandev-go-cache bash scripts/lint-go-changed apps/backend/internal/persistence/snapshot.go apps/backend/internal/persistence/snapshot_version_test.go` passed with `0 issues`.
