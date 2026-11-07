@@ -12,6 +12,7 @@ import {
   IconMenu2,
   IconMessageCircle,
   IconTerminal2,
+  IconHierarchy3,
   IconTimeline,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
@@ -64,6 +65,7 @@ type ViewToggleItem = {
 const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
   { value: "kanban", icon: IconLayoutKanban, labelKey: "kanban:kanban" },
   { value: "pipeline", icon: IconTimeline, labelKey: "kanban:pipeline" },
+  { value: "graph", icon: IconHierarchy3, labelKey: "kanban:graph" },
   { value: "threads", icon: IconColumns, labelKey: "kanban:threads" },
   { value: "list", icon: IconList, labelKey: "kanban:list" },
 ];

@@ -59,6 +59,21 @@ vi.mock("@/components/task-create-dialog-dependencies", () => ({
   ),
 }));
 
+vi.mock("@/components/task-create-dialog-relationship-selectors", () => ({
+  TaskCreateParentSelector: () => <button data-testid="task-create-parent-trigger" />,
+  TaskCreateRelatedSelector: () => <button data-testid="task-create-related-trigger" />,
+  useRelationshipConflictHandlers: ({
+    onBlockedByChange,
+    onSelectedParentTaskIdChange,
+  }: {
+    onBlockedByChange: (next: string[]) => void;
+    onSelectedParentTaskIdChange?: (next: string | undefined) => void;
+  }) => ({
+    handleBlockedByChange: onBlockedByChange,
+    handleSelectedParentTaskIdChange: onSelectedParentTaskIdChange,
+  }),
+}));
+
 function renderAdvancedSettings(
   overrides: Partial<React.ComponentProps<typeof TaskCreateAdvancedSettings>> = {},
 ) {
@@ -101,6 +116,16 @@ describe("TaskCreateAdvancedSettings", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByTestId(DEPENDENCY_TRIGGER_TEST_ID).getAttribute("hidden")).toBeNull();
     expect(screen.getByTestId("task-create-priority-select").getAttribute("hidden")).toBeNull();
+  });
+
+  it("keeps parent and related selectors out of edit mode", () => {
+    renderAdvancedSettings({ isCreateMode: false, isEditMode: true });
+
+    fireEvent.click(screen.getByTestId(ADVANCED_SETTINGS_TRIGGER_TEST_ID));
+
+    expect(screen.getByTestId(DEPENDENCY_TRIGGER_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId("task-create-parent-trigger")).toBeNull();
+    expect(screen.queryByTestId("task-create-related-trigger")).toBeNull();
   });
 
   it("labels the dependency setting and provides contextual help", async () => {

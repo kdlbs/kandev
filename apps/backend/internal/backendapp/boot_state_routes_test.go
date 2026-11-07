@@ -16,6 +16,7 @@ import (
 	userdto "github.com/kandev/kandev/internal/user/dto"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func TestMapKanbanStateIncludesWIPAdmissionFields(t *testing.T) {
@@ -170,6 +171,22 @@ func TestMapKanbanTaskStateIncludesPriority(t *testing.T) {
 	})
 	if task["priority"] != "critical" {
 		t.Fatalf("kanban task priority = %#v, want critical", task["priority"])
+	}
+}
+
+func TestBootDependencyProjectionIncludesRelatedTasks(t *testing.T) {
+	related := taskservice.DependencyRef{ID: "peer", Title: "Related peer", State: v1.TaskStateTODO}
+	projection := bootDependencyProjection(taskservice.DependencyView{Related: []taskservice.DependencyRef{related}})
+	if len(projection.Related) != 1 || projection.Related[0] != (taskdto.TaskDependencyRefDTO{
+		ID: related.ID, Title: related.Title, State: related.State,
+	}) {
+		t.Fatalf("boot dependency related = %#v, want the related task reference", projection.Related)
+	}
+
+	task := mapKanbanTaskState(taskdto.TaskDTO{Related: projection.Related})
+	refs, ok := task["related"].([]map[string]any)
+	if !ok || len(refs) != 1 || refs[0]["id"] != related.ID || refs[0]["title"] != related.Title {
+		t.Fatalf("boot task related = %#v, want related task reference", task["related"])
 	}
 }
 

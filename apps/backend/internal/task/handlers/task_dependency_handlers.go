@@ -19,6 +19,7 @@ func dependencyProjection(view service.DependencyView) dto.TaskDependencyProject
 		BlockedReason: view.BlockedReason,
 		DependsOn:     dependencyRefs(view.DependsOn),
 		Blocks:        dependencyRefs(view.Blocks),
+		Related:       dependencyRefs(view.Related),
 	}
 }
 

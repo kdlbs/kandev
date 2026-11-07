@@ -223,6 +223,7 @@ export type BuildCreatePayloadArgs = {
   autopilot?: boolean;
   /** Task IDs this task must wait for. */
   blockedBy?: string[];
+  relatedTaskIds?: string[];
   priority?: TaskPriority;
   /** Task-only replacements for fixed workflow step agent profiles. */
   workflowAgentOverrides?: Record<string, string>;
@@ -307,6 +308,7 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     // records the requested agent start as a start-when-unblocked intent rather
     // than launching now, so a chain runs in order instead of all at once.
     blocked_by: nonEmptyArray(args.blockedBy),
+    related_task_ids: nonEmptyArray(args.relatedTaskIds),
     mcp_server_ids: nonEmptyArray(args.mcpServerIds),
     ...(args.builtinMCPPreferences
       ? { builtin_mcp_preferences: args.builtinMCPPreferences.preferences }

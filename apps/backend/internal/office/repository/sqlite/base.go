@@ -774,6 +774,14 @@ func (r *Repository) createTaskExtensionTables() error {
 		CHECK (task_id != blocker_task_id)
 	);
 
+	CREATE TABLE IF NOT EXISTS task_relations (
+		task_id_low TEXT NOT NULL,
+		task_id_high TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (task_id_low, task_id_high),
+		CHECK (task_id_low < task_id_high)
+	);
+
 	CREATE TABLE IF NOT EXISTS task_comments (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,

@@ -3,11 +3,13 @@
 import {
   IconAlertCircleOff,
   IconArchive,
+  IconHierarchy3,
   IconLoader,
   IconSubtask,
   IconTrash,
   IconUnlink,
 } from "@tabler/icons-react";
+import { useOpenTaskGraph } from "@/hooks/domains/task/use-open-task-graph";
 import { ContextMenuItem, ContextMenuSeparator } from "@kandev/ui/context-menu";
 import { useTranslation } from "react-i18next";
 import { useTaskTurnError } from "@/hooks/use-task-turn-error";
@@ -42,6 +44,28 @@ export function TaskArchiveItem({
     <ContextMenuItem disabled={disabled} onSelect={() => onArchiveTask(taskId)}>
       <IconArchive className="mr-2 h-4 w-4" />
       {t("task:archive")}
+    </ContextMenuItem>
+  );
+}
+
+export function TaskShowInGraphItem({
+  task,
+  disabled,
+}: {
+  task: { id: string; isArchived?: boolean; workflowId?: string };
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  const { showInGraph } = useOpenTaskGraph();
+  if (task.isArchived) return null;
+  return (
+    <ContextMenuItem
+      data-testid="task-context-show-in-graph"
+      disabled={disabled}
+      onSelect={() => showInGraph(task.id, task.workflowId)}
+    >
+      <IconHierarchy3 className="mr-2 h-4 w-4" />
+      {t("task:taskGraphShowInGraph")}
     </ContextMenuItem>
   );
 }

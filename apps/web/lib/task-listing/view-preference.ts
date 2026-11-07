@@ -1,7 +1,7 @@
 export const TASK_LISTING_VIEW_STORAGE_KEY = "kandev.taskListing.view.v1";
 export const TASK_LISTING_VIEW_CHANGE_EVENT = "kandev.taskListing.view.change";
 
-export type TaskListingView = "kanban" | "pipeline" | "list" | "threads";
+export type TaskListingView = "kanban" | "pipeline" | "graph" | "list" | "threads";
 
 /**
  * Views that live on their own route instead of inside the Home board. Home
@@ -9,7 +9,7 @@ export type TaskListingView = "kanban" | "pipeline" | "list" | "threads";
  */
 const ROUTED_TASK_LISTING_VIEWS: TaskListingView[] = ["list", "threads"];
 
-const TASK_LISTING_VIEWS: TaskListingView[] = ["kanban", "pipeline", "list", "threads"];
+const TASK_LISTING_VIEWS: TaskListingView[] = ["kanban", "pipeline", "graph", "list", "threads"];
 
 const DEFAULT_TASK_LISTING_VIEW: TaskListingView = "kanban";
 let transientTaskListingView: TaskListingView | null = null;
@@ -37,7 +37,10 @@ export function getEffectiveTaskListingView(
   preferredView: TaskListingView,
   isMobile: boolean,
 ): TaskListingView {
-  return isMobile && preferredView === "pipeline" ? "kanban" : preferredView;
+  // Pipeline and Graph are desktop and tablet board views; phones get Kanban.
+  return isMobile && (preferredView === "pipeline" || preferredView === "graph")
+    ? "kanban"
+    : preferredView;
 }
 
 /**

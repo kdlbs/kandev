@@ -44,6 +44,7 @@ function baseSettingsPayload(settings: UserSettingsFields): UserSettingsFields {
 
 function taskListingViewFor(mode: string): TaskListingView {
   if (mode === "graph2" || mode === "pipeline") return "pipeline";
+  if (mode === "graph") return "graph";
   if (mode === "list") return "list";
   if (mode === "threads") return "threads";
   return "kanban";

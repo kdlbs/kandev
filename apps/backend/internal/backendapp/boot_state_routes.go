@@ -892,6 +892,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"blockedReason":      nullString(task.BlockedReason),
 		"dependsOn":          dependencyRefStates(task.DependsOn),
 		"blocks":             dependencyRefStates(task.Blocks),
+		"related":            dependencyRefStates(task.Related),
 		"startWhenUnblocked": task.StartWhenUnblocked,
 		// Parked-on-background-work projection, stamped by
 		// EnrichTaskParkedProjection before this mapper runs — omitting it here

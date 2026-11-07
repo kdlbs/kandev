@@ -18,6 +18,7 @@ import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { TaskDependencyChip } from "@/components/task/task-dependency-chip";
+import { TaskGraphButton } from "@/components/task-graph/task-graph-button";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
@@ -409,6 +410,7 @@ export function ChatStatusBar({
         {showTodos && <TodoIndicator todos={todoItems} />}
         {autopilot && <AutopilotChatChip />}
         <TaskDependencyChip taskId={taskId} />
+        <TaskGraphButton taskId={taskId} />
         {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
         {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
         <BackgroundWorkChip

@@ -359,6 +359,8 @@ export type TaskDependencyRef = {
 export type TaskDependencyProjection = {
   blocked?: boolean;
   blocked_reason?: "pending" | "failed" | "unknown";
+  parent_id?: string | null;
+  related?: TaskDependencyRef[];
   depends_on?: TaskDependencyRef[];
   blocks?: TaskDependencyRef[];
 };

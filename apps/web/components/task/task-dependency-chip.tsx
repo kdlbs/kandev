@@ -12,9 +12,16 @@
  * edges, and use a drawer on touch rather than a hover card.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { IconLink, IconLock, IconAlertTriangle, IconCheck, IconClock } from "@tabler/icons-react";
+import {
+  IconLink,
+  IconLock,
+  IconAlertTriangle,
+  IconCheck,
+  IconClock,
+  IconHierarchy3,
+} from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import {
@@ -27,121 +34,14 @@ import {
 } from "@kandev/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { cn } from "@kandev/ui/lib/utils";
-import { useAppStore } from "@/components/state-provider";
 import TaskLink from "@/components/routing/task-link";
+import { useOpenTaskGraph } from "@/hooks/domains/task/use-open-task-graph";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
-import { getTaskDependencies } from "@/lib/api/domains/task-dependencies-api";
+import {
+  useTaskDependencies,
+  type DependencyChipData,
+} from "@/hooks/domains/task/use-task-dependencies";
 import type { TaskDependencyRef } from "@/lib/state/slices/kanban/types";
-
-type DependencyChipData = {
-  blocked: boolean;
-  blockedReason?: string;
-  dependsOn: TaskDependencyRef[];
-  blocks: TaskDependencyRef[];
-};
-
-/**
- * useTaskDependencies reads the derived dependency projection for a task from
- * the store. Returns null when the task is unknown or has no edges in either
- * direction, which is also the chip's "render nothing" signal.
- *
- * The selector returns the task itself — a stable reference — and the derived
- * shape is built in a memo afterwards. Returning a freshly-built object FROM the
- * selector compares unequal under Object.is on every store read, which loops
- * until React bails out and renders nothing at all.
- */
-export function useTaskDependencies(taskId: string | null): DependencyChipData | null {
-  const fromStore = useTaskDependenciesFromStore(taskId);
-  const storeAnswered = fromStore !== undefined;
-  const fetched = useFetchedTaskDependencies(taskId, storeAnswered);
-  // `??` would be wrong here: the store's `null` is a real answer ("this task
-  // has no edges"), and falling through on it would keep showing the previously
-  // fetched task's dependencies after an edge is removed or after switching to
-  // a task the store knows is edge-free. Only `undefined` means "ask the server".
-  return storeAnswered ? fromStore : fetched;
-}
-
-/**
- * Fetches the projection when the store copy has none.
- *
- * `undefined` from the store means "this copy carries no dependency fields" (a
- * lightweight task.updated overwrote them, or landed before hydration); `null`
- * means "read it, there are no edges". Only the former needs a fetch.
- */
-function useFetchedTaskDependencies(
-  taskId: string | null,
-  storeAnswered: boolean,
-): DependencyChipData | null {
-  const [data, setData] = useState<DependencyChipData | null>(null);
-  useEffect(() => {
-    if (!taskId || storeAnswered) {
-      // Drop anything fetched for a previous task/state so it can never be
-      // rendered again once the store can answer.
-      setData(null);
-      return;
-    }
-    let cancelled = false;
-    void getTaskDependencies(taskId)
-      .then((task) => {
-        if (cancelled) return;
-        const dependsOn = (task.depends_on ?? []) as TaskDependencyRef[];
-        const blocks = (task.blocks ?? []) as TaskDependencyRef[];
-        setData(
-          dependsOn.length === 0 && blocks.length === 0
-            ? null
-            : {
-                blocked: task.blocked ?? false,
-                blockedReason: task.blocked_reason,
-                dependsOn,
-                blocks,
-              },
-        );
-      })
-      .catch(() => {
-        // A failed read hides the chip rather than showing a wrong state.
-        if (!cancelled) setData(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [taskId, storeAnswered]);
-  return data;
-}
-
-/**
- * Store fast path. Returns `undefined` when the store copy carries no dependency
- * projection at all, so the caller knows to fetch rather than render nothing.
- */
-function useTaskDependenciesFromStore(
-  taskId: string | null,
-): DependencyChipData | null | undefined {
-  const task = useAppStore((state) => {
-    if (!taskId) return undefined;
-    // Nil-safe on both slices: this renders inside a task panel that can mount
-    // before board hydration completes.
-    const fromBoard = state.kanban?.tasks?.find((candidate) => candidate.id === taskId);
-    if (fromBoard) return fromBoard;
-    for (const snapshot of Object.values(state.kanbanMulti?.snapshots ?? {})) {
-      const hit = snapshot.tasks?.find((candidate) => candidate.id === taskId);
-      if (hit) return hit;
-    }
-    return undefined;
-  });
-  return useMemo(() => {
-    if (!task) return undefined;
-    // No projection on this copy: the caller must ask the server.
-    if (task.dependsOn === undefined && task.blocks === undefined) return undefined;
-    const dependsOn = task.dependsOn ?? [];
-    const blocks = task.blocks ?? [];
-    if (dependsOn.length === 0 && blocks.length === 0) return null;
-    return {
-      blocked: task.blocked ?? false,
-      blockedReason: task.blockedReason,
-      dependsOn,
-      blocks,
-    };
-  }, [task]);
-}
 
 function statusIcon(status?: string) {
   if (status === "resolved")
@@ -188,14 +88,32 @@ function DependencyRow({
   );
 }
 
+function ViewGraphAction({ touchTarget, onClick }: { touchTarget: boolean; onClick: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={onClick}
+      data-testid="task-dependency-view-graph"
+      className={cn("cursor-pointer self-end", touchTarget && "[@media(pointer:coarse)]:min-h-11")}
+    >
+      <IconHierarchy3 className="size-3.5" />
+      {t("task:taskGraphViewGraph")}
+    </Button>
+  );
+}
+
 function DependencyLists({
   data,
   touchTarget,
   onNavigated,
+  onViewGraph,
 }: {
   data: DependencyChipData;
   touchTarget: boolean;
   onNavigated: () => void;
+  onViewGraph: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -232,11 +150,28 @@ function DependencyLists({
           ))}
         </section>
       )}
+      {data.related.length > 0 && (
+        <section>
+          <h4 className="px-2 pb-1 text-[10px] font-semibold uppercase text-muted-foreground">
+            {t("task:taskDependencyRelated")}
+          </h4>
+          {data.related.map((entry) => (
+            <DependencyRow
+              key={entry.id}
+              ref={entry}
+              showStatus={false}
+              touchTarget={touchTarget}
+              onNavigated={onNavigated}
+            />
+          ))}
+        </section>
+      )}
       {data.blockedReason === "failed" && (
         <p className="px-2 text-[11px] text-red-600 dark:text-red-400">
           {t("task:dependencyChainHalted")}
         </p>
       )}
+      <ViewGraphAction touchTarget={touchTarget} onClick={onViewGraph} />
     </div>
   );
 }
@@ -251,6 +186,10 @@ function ChipTriggerContent({ data }: { data: DependencyChipData }) {
           t("task:dependencyCountBlockedBy", { count: data.dependsOn.length })}
         {data.dependsOn.length > 0 && data.blocks.length > 0 && " · "}
         {data.blocks.length > 0 && t("task:dependencyCountBlocks", { count: data.blocks.length })}
+        {data.dependsOn.length === 0 &&
+          data.blocks.length === 0 &&
+          data.related.length > 0 &&
+          t("task:taskDependencyRelatedCount", { count: data.related.length })}
       </span>
     </>
   );
@@ -284,68 +223,101 @@ function triggerTone(data: DependencyChipData): string {
   return data.blockedReason === "failed" ? TRIGGER_TONES.failed : TRIGGER_TONES.waiting;
 }
 
-export function TaskDependencyChip({ taskId }: { taskId: string | null }) {
-  const data = useTaskDependencies(taskId);
-  const usesMobileDrawer = useTouchDrawer();
+type ChipSurfaceProps = {
+  data: DependencyChipData;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  onViewGraph: () => void;
+};
+
+function ChipDrawer({ data, open, setOpen, triggerRef, onViewGraph }: ChipSurfaceProps) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  // No edges in either direction: nothing to say. Same null-when-not-applicable
-  // contract as PRStatusChip.
-  if (!data) return null;
+  return (
+    <Drawer open={open} onOpenChange={setOpen}>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={t("task:dependencyChipLabel")}
+        onClick={() => setOpen(true)}
+        className={cn(TRIGGER_BASE, triggerTone(data))}
+        data-testid="task-dependency-chip"
+      >
+        <ChipTriggerContent data={data} />
+      </button>
+      <DrawerContent data-testid="task-dependency-chip-drawer" className="max-h-[70vh]">
+        <DrawerHeader className="flex flex-row items-center justify-between border-b py-2">
+          <DrawerTitle className="text-sm">{t("task:dependencies")}</DrawerTitle>
+          <DrawerDescription className="sr-only">{t("task:dependencyChipLabel")}</DrawerDescription>
+          <DrawerClose asChild>
+            <Button variant="ghost" size="sm">
+              {t("common:close")}
+            </Button>
+          </DrawerClose>
+        </DrawerHeader>
+        <div className="overflow-y-auto p-2">
+          <DependencyLists
+            data={data}
+            touchTarget
+            onNavigated={() => setOpen(false)}
+            onViewGraph={onViewGraph}
+          />
+        </div>
+      </DrawerContent>
+    </Drawer>
+  );
+}
 
-  const toneClass = triggerTone(data);
-
-  if (usesMobileDrawer) {
-    return (
-      <Drawer open={open} onOpenChange={setOpen}>
-        <button
-          type="button"
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          aria-label={t("task:dependencyChipLabel")}
-          onClick={() => setOpen(true)}
-          className={cn(TRIGGER_BASE, toneClass)}
-          data-testid="task-dependency-chip"
-        >
-          <ChipTriggerContent data={data} />
-        </button>
-        <DrawerContent data-testid="task-dependency-chip-drawer" className="max-h-[70vh]">
-          <DrawerHeader className="flex flex-row items-center justify-between border-b py-2">
-            <DrawerTitle className="text-sm">{t("task:dependencies")}</DrawerTitle>
-            <DrawerDescription className="sr-only">
-              {t("task:dependencyChipLabel")}
-            </DrawerDescription>
-            <DrawerClose asChild>
-              <Button variant="ghost" size="sm">
-                {t("common:close")}
-              </Button>
-            </DrawerClose>
-          </DrawerHeader>
-          <div className="overflow-y-auto p-2">
-            <DependencyLists data={data} touchTarget onNavigated={() => setOpen(false)} />
-          </div>
-        </DrawerContent>
-      </Drawer>
-    );
-  }
-
+function ChipPopover({ data, open, setOpen, triggerRef, onViewGraph }: ChipSurfaceProps) {
+  const { t } = useTranslation();
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
+          ref={triggerRef}
           type="button"
           aria-label={t("task:dependencyChipLabel")}
-          className={cn(TRIGGER_BASE, toneClass)}
+          className={cn(TRIGGER_BASE, triggerTone(data))}
           data-testid="task-dependency-chip"
         >
           <ChipTriggerContent data={data} />
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72 p-2" data-testid="task-dependency-chip-popover">
-        <DependencyLists data={data} touchTarget={false} onNavigated={() => setOpen(false)} />
+        <DependencyLists
+          data={data}
+          touchTarget={false}
+          onNavigated={() => setOpen(false)}
+          onViewGraph={onViewGraph}
+        />
       </PopoverContent>
     </Popover>
   );
+}
+
+export function TaskDependencyChip({ taskId }: { taskId: string | null }) {
+  const data = useTaskDependencies(taskId);
+  const usesMobileDrawer = useTouchDrawer();
+  const { openTab } = useOpenTaskGraph();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  // No edges in either direction: nothing to say. Same null-when-not-applicable
+  // contract as PRStatusChip.
+  if (!data || !taskId) return null;
+
+  const surface: ChipSurfaceProps = {
+    data,
+    open,
+    setOpen,
+    triggerRef,
+    onViewGraph: () => {
+      setOpen(false);
+      openTab(taskId);
+    },
+  };
+  return usesMobileDrawer ? <ChipDrawer {...surface} /> : <ChipPopover {...surface} />;
 }
 
 /** Badge form used where a chip trigger is not appropriate (e.g. compact rows). */

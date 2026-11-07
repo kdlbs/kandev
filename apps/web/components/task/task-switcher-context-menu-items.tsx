@@ -31,6 +31,7 @@ import {
   TaskCreateSubtaskItem,
   TaskDeleteItem,
   TaskDetachItem,
+  TaskShowInGraphItem,
   TaskTurnErrorDismissItem,
 } from "./task-switcher-action-items";
 import {
@@ -342,6 +343,7 @@ function SingleRelationshipsGroup({
 >) {
   return (
     <>
+      <TaskShowInGraphItem task={task} disabled={isDeleting} />
       <TaskCreateSubtaskItem task={task} disabled={isDeleting} onCreateSubtask={onCreateSubtask} />
       {!task.isArchived && (
         <TaskNestContextMenuItems

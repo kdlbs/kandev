@@ -69,6 +69,16 @@ describe("TaskDependencyChip", () => {
     expect(screen.getByTestId(CHIP_TESTID)).toBeTruthy();
   });
 
+  it("shows a related-only summary and a Related section without dependency status", () => {
+    renderChip([task({ id: "a", related: [{ id: "b", title: "Related task" }] })], "a");
+    const chip = screen.getByTestId(CHIP_TESTID);
+    expect(chip.textContent).toContain("1 related task");
+    fireEvent.click(chip);
+    expect(screen.getByText("Related")).toBeTruthy();
+    const entry = screen.getByText("Related task");
+    expect(entry.closest("a")?.getAttribute("href")).toBe("/t/b");
+  });
+
   it("renders both directions with counts", () => {
     renderChip(
       [

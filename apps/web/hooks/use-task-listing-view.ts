@@ -21,6 +21,12 @@ function subscribe(callback: () => void) {
   };
 }
 
+/** Board view each listing view selects (`userSettings.kanbanViewMode`). */
+const BOARD_VIEW_MODES: Partial<Record<TaskListingView, string>> = {
+  pipeline: "graph2",
+  graph: "graph",
+};
+
 export function useTaskListingView() {
   const { isMobile } = useResponsiveBreakpoint();
   const legacyKanbanViewMode = useAppStore((state) => state.userSettings.kanbanViewMode);
@@ -34,7 +40,7 @@ export function useTaskListingView() {
   const effectiveView = getEffectiveTaskListingView(preferredView, isMobile);
 
   useEffect(() => {
-    const kanbanViewMode = effectiveView === "pipeline" ? "graph2" : null;
+    const kanbanViewMode = BOARD_VIEW_MODES[effectiveView] ?? null;
     if (userSettings.kanbanViewMode === kanbanViewMode) return;
     setUserSettings({ ...userSettings, kanbanViewMode });
   }, [effectiveView, setUserSettings, userSettings]);

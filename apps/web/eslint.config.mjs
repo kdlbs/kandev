@@ -124,6 +124,34 @@ const eslintConfig = defineConfig([
     plugins: { "task-links": taskLinksPlugin },
     rules: { "task-links/no-task-link-bypass": "error" },
   },
+  // Task graph renderer boundary (ADR 2026-10-17-task-graph-renderer-boundary):
+  // each graph library has exactly one importing file so it stays swappable.
+  {
+    files: ["**/*.ts", "**/*.tsx"],
+    ignores: [
+      "lib/task-graph/layout.ts",
+      "components/task-graph/xyflow-task-graph-renderer.tsx",
+      "**/*.test.ts",
+      "**/*.test.tsx",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            { name: "@dagrejs/dagre", message: "Only lib/task-graph/layout.ts may import dagre." },
+          ],
+          patterns: [
+            {
+              group: ["@xyflow/*"],
+              message:
+                "Only components/task-graph/xyflow-task-graph-renderer.tsx may import xyflow.",
+            },
+          ],
+        },
+      ],
+    },
+  },
   {
     files: [
       "lib/state/slices/system/types.ts",

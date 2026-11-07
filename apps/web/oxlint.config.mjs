@@ -221,6 +221,36 @@ export default {
       rules: { "task-links/no-task-link-bypass": "error" },
     },
     {
+      // Keep graph libraries behind their renderer and layout adapters in the
+      // lint configuration used by the full web check.
+      files: ["**/*.ts", "**/*.tsx"],
+      excludeFiles: [
+        "lib/task-graph/layout.ts",
+        "components/task-graph/xyflow-task-graph-renderer.tsx",
+        ...testFileExclusions,
+      ],
+      rules: {
+        "no-restricted-imports": [
+          "error",
+          {
+            paths: [
+              {
+                name: "@dagrejs/dagre",
+                message: "Only lib/task-graph/layout.ts may import dagre.",
+              },
+            ],
+            patterns: [
+              {
+                group: ["@xyflow/*"],
+                message:
+                  "Only components/task-graph/xyflow-task-graph-renderer.tsx may import xyflow.",
+              },
+            ],
+          },
+        ],
+      },
+    },
+    {
       // The four migrated System Query owners.
       files: [
         "lib/state/slices/system/types.ts",

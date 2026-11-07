@@ -123,7 +123,11 @@ function reconcileFetchedOverview(
   return true;
 }
 
-export function useWorkflowSnapshot(workflowId: string | null) {
+export function useWorkflowSnapshot(
+  workflowId: string | null,
+  options: { skipIfHydrated?: boolean } = {},
+) {
+  const { skipIfHydrated = true } = options;
   const store = useAppStoreApi();
   const sharedReads = getWorkflowSnapshotReads(store);
   const connectionStatus = useAppStore((state) => state.connection.status);
@@ -140,6 +144,7 @@ export function useWorkflowSnapshot(workflowId: string | null) {
     const requestedGeneration = requestState.workspaceContextGeneration;
     const existing = requestState.kanban;
     if (
+      skipIfHydrated &&
       !skippedInitialHydratedRef.current &&
       existing.workflowId === workflowId &&
       (existing.steps.length > 0 || existing.tasks.length > 0)
@@ -217,5 +222,5 @@ export function useWorkflowSnapshot(workflowId: string | null) {
       controller.abort();
       if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
     };
-  }, [workflowId, store, sharedReads, connectionStatus]);
+  }, [workflowId, store, sharedReads, connectionStatus, skipIfHydrated]);
 }
