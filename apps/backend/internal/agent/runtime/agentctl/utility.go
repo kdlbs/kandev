@@ -36,6 +36,7 @@ func (c *Client) doLongRunningJSON(ctx context.Context, path, label string, in, 
 		return fmt.Errorf("failed to read response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		retainInferenceErrorResponse(out, respBody)
 		return fmt.Errorf("%s failed with status %d: %s", label, resp.StatusCode, truncateBody(respBody))
 	}
 	if err := json.Unmarshal(respBody, out); err != nil {
@@ -47,16 +48,47 @@ func (c *Client) doLongRunningJSON(ctx context.Context, path, label string, in, 
 // InferencePrompt executes a one-shot inference prompt via agentctl.
 // Uses the long-running HTTP client since LLM inference can take several minutes.
 func (c *Client) InferencePrompt(ctx context.Context, req *utility.PromptRequest) (*utility.PromptResponse, error) {
+	if req == nil {
+		return nil, fmt.Errorf("inference prompt request is nil")
+	}
 	if req.InferenceConfig != nil {
 		if err := c.requireLaunchWrapper(ctx, req.InferenceConfig.LaunchWrapper); err != nil {
 			return nil, err
 		}
 	}
+	request := *req
 	var result utility.PromptResponse
-	if err := c.doLongRunningJSON(ctx, "/api/v1/inference/prompt", "utility prompt", req, &result); err != nil {
-		return nil, err
+	if err := c.doLongRunningJSON(ctx, "/api/v1/inference/prompt", "utility prompt", &request, &result); err != nil {
+		failure := &InferenceAttemptError{AttemptID: request.AttemptID, Cause: err}
+		if !c.matchesInferenceErrorAttempt(request.AttemptID, result.Attempt) {
+			return nil, failure
+		}
+		failure.Attempt, failure.AttemptID = result.Attempt, result.Attempt.AttemptID
+		return &result, failure
 	}
 	return &result, nil
+}
+
+// Only complete structured responses can carry an observed owner through an HTTP error.
+func retainInferenceErrorResponse(out any, body []byte) {
+	target, ok := out.(*utility.PromptResponse)
+	if !ok {
+		return
+	}
+	var result utility.PromptResponse
+	if json.Unmarshal(body, &result) == nil {
+		*target = result
+	}
+}
+
+func (c *Client) matchesInferenceErrorAttempt(id string, status *utility.AttemptStatus) bool {
+	if status == nil || status.AttemptID == "" || status.OwnerID == "" || status.InstanceID == "" {
+		return false
+	}
+	if id != "" && status.AttemptID != id {
+		return false
+	}
+	return c.executionID == "" || status.InstanceID == c.executionID
 }
 
 // Probe runs an ACP handshake (initialize + session/new) against the agent
