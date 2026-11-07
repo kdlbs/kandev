@@ -34,6 +34,7 @@ import (
 
 // Server is the HTTP API server for a single agent instance.
 type Server struct {
+	executionUsage   *usage.UsageService
 	cfg              *config.InstanceConfig
 	procMgr          *process.Manager
 	mcpServer        *mcp.Server
@@ -67,7 +68,7 @@ func (s *Server) SetCredentialSource(src InstanceCredentialSource) {
 // NewServer creates a new API server for an agent instance.
 // If mcpServer is provided, MCP routes will be registered.
 // If mcpBackendClient is provided, the agent stream becomes bidirectional for MCP.
-func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *mcp.Server, mcpBackendClient *mcp.ChannelBackendClient, log *logger.Logger) *Server {
+func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *mcp.Server, mcpBackendClient *mcp.ChannelBackendClient, log *logger.Logger, nativeUsage ...*usage.UsageService) *Server {
 	gin.SetMode(gin.ReleaseMode)
 
 	s := &Server{
@@ -88,6 +89,10 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	}
 	if mcpServer != nil {
 		procMgr.SetBuiltinToolCatalog(mcpServer.BuiltinCatalog)
+	}
+	if len(nativeUsage) > 0 {
+		s.executionUsage = nativeUsage[0]
+		procMgr.SetExecutionUsageService(s.executionUsage)
 	}
 	if mcpBackendClient != nil && !cfg.DisableAskQuestion && cfg.SessionID != "" {
 		mcpBackendClient.SetSessionID(cfg.SessionID)
@@ -137,6 +142,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/agent/configure", s.handleAgentConfigure)
 		api.GET("/agent/launch-wrapper", s.handleLaunchWrapper)
 		api.GET("/agent/usage", s.handleExecutionUsage)
+		api.GET("/agent/usage/cached", s.handleExecutionUsage)
 		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
 		api.POST("/agent/background-work/action", s.handleBackgroundWorkAction)
 		api.POST("/start", s.handleStart)
@@ -274,6 +280,7 @@ func (s *Server) setupRoutes() {
 	auxHandler := utility.NewOwnedHandler(s.cfg, s.procMgr, s.logger.Zap())
 	auxHandler.SetInstanceID(s.cfg.InstanceID)
 	auxHandler.SetControlAuthorization(func(c *gin.Context) bool { return c.GetBool(authenticatedControlContextKey) })
+	auxHandler.SetExecutionUsageService(s.executionUsage)
 	auxHandler.RegisterRoutes(api)
 
 	// MCP routes (if MCP server is configured)

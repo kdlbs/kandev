@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -42,6 +43,7 @@ var (
 )
 
 type Candidate struct {
+	UsagePolicy   *usage.ExecutionUsagePolicy `json:"-"`
 	ID            string
 	Enabled       bool
 	BindingKey    string
@@ -58,6 +60,7 @@ type Profile struct {
 }
 
 type RouteState struct {
+	UsagePolicy        *usage.ExecutionUsagePolicy `json:"-"`
 	SessionID          string
 	LogicalProfileID   string
 	ExecutionProfileID string
@@ -112,6 +115,7 @@ func (s *UnclassifiedStreak) valid() bool {
 }
 
 type RouteDecision struct {
+	UsagePolicy        *usage.ExecutionUsagePolicy `json:"-"`
 	SessionID          string
 	LogicalProfileID   string
 	ExecutionProfileID string

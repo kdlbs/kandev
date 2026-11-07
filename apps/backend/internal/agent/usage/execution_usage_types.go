@@ -50,6 +50,7 @@ func usageEnvironmentKey(key string) bool {
 }
 
 const (
+	executionBindingChanged   = "binding_changed"
 	executionSelectionUnknown = "provider_selection_unknown"
 	executionAgentCodex       = "codex-acp"
 	executionAgentClaude      = "claude-acp"

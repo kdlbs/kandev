@@ -12,23 +12,27 @@ func (e *ACPInferenceExecutor) checkExecutionUsage(ctx context.Context, req *Pro
 		return nil
 	}
 	if req.InferenceConfig.ProviderGatewayAuth != nil {
-		return &usage.ExecutionUsageReport{Reason: "provider_selection_unknown", Model: req.Model}
+		return unavailableSelectedUsage(req.UsagePolicy, "provider_selection_unknown", req.Model)
 	}
 	policy := *req.UsagePolicy
-	policy.AgentID = req.AgentID
-	executionID := req.AttemptID
-	if executionID == "" {
-		executionID = req.CallID
-	}
-	input := usage.ExecutionInputFromEnvironment(policy, executionID, req.Model, env)
-	input.WorkDir = req.InferenceConfig.WorkDir
-	input.Command = append(append(append([]string(nil), req.InferenceConfig.CommandPrefix...), req.InferenceConfig.Command...), req.InferenceConfig.CLIFlags...)
+	input := nativeInferenceUsageInput(req, env)
 	if !usage.NativeProviderSelectionKnown(input) {
-		return &usage.ExecutionUsageReport{Reason: "provider_selection_unknown", Model: req.Model}
+		return unavailableSelectedUsage(req.UsagePolicy, "provider_selection_unknown", req.Model)
 	}
 	input, reason, _ := e.executionUsage.BindExecutionUsage(ctx, input)
+	if usage.ExecutionUsageSelectionChanged(policy, input, reason, req.Model, true) {
+		return &usage.ExecutionUsageReport{Reason: "binding_changed", BindingChanged: true, Model: req.Model}
+	}
 	if reason != "ok" {
 		return &usage.ExecutionUsageReport{Reason: reason, Model: req.Model}
 	}
 	return usage.ReadExecutionUsageReport(ctx, e.executionUsage, input)
+}
+
+func unavailableSelectedUsage(policy *usage.ExecutionUsagePolicy, reason, model string) *usage.ExecutionUsageReport {
+	changed := policy != nil && policy.ExpectedAccountRef != ""
+	if changed {
+		reason = "binding_changed"
+	}
+	return &usage.ExecutionUsageReport{Reason: reason, Model: model, BindingChanged: changed}
 }

@@ -10,9 +10,13 @@ import (
 // ExecutionUsagePolicy is backend-resolved metadata, installed only when the
 // native feature is enabled. Credential values never travel in this policy.
 type ExecutionUsagePolicy struct {
-	ProfileID    string `json:"profile_id"`
-	AgentID      string `json:"agent_id"`
-	ExecutorType string `json:"executor_type"`
+	ExpectedProvider        string `json:"expected_provider,omitempty"`
+	ExpectedAccountRef      string `json:"expected_account_ref,omitempty"`
+	ExpectedOrganizationRef string `json:"expected_organization_ref,omitempty"`
+	ExpectedModel           string `json:"expected_model,omitempty"`
+	ProfileID               string `json:"profile_id"`
+	AgentID                 string `json:"agent_id"`
+	ExecutorType            string `json:"executor_type"`
 }
 
 type ObservedUsageWindow struct {
@@ -79,7 +83,7 @@ func ReadExecutionUsageReport(ctx context.Context, service ExecutionUsageReader,
 	var changed *ExecutionUsageBindingError
 	if errors.As(err, &changed) {
 		report.BindingChanged = true
-		report.Reason = "binding_changed"
+		report.Reason = executionBindingChanged
 	}
 	return report
 }

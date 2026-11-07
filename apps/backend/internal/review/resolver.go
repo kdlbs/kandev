@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"strings"
 )
 
@@ -41,6 +42,7 @@ type ReviewerProfile struct {
 // ReviewerRoute is the transient execution identity of one logical review run.
 // Its current candidate persists across prompt batches without another picker.
 type ReviewerRoute struct {
+	UsagePolicy        *usage.ExecutionUsagePolicy `json:"-"`
 	ExecutionProfileID string
 	SessionID          string
 	Generation         int64

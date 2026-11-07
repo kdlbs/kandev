@@ -35,7 +35,7 @@ func (s *UsageService) GetExecutionUsage(ctx context.Context, input ExecutionUsa
 		return &ExecutionUsage{Reason: "account_unknown"}, nil
 	}
 	if input.ExpectedAccountRef != "" && (identity.account != input.ExpectedAccountRef || identity.organization != input.ExpectedOrganizationRef) {
-		return &ExecutionUsage{Reason: "binding_changed"}, nil
+		return &ExecutionUsage{Reason: executionBindingChanged}, nil
 	}
 	// Existing provider IDs form the observation address; it is not a new
 	// credential fingerprint, account ID, quota counter, or authority record.
@@ -50,7 +50,7 @@ func (s *UsageService) GetExecutionUsage(ctx context.Context, input ExecutionUsa
 		return &ExecutionUsage{Reason: "observation_unavailable"}, err
 	}
 	if !executionAccountMatches(current, source.provider, identity) {
-		return &ExecutionUsage{Reason: "binding_changed"}, nil
+		return &ExecutionUsage{Reason: executionBindingChanged}, nil
 	}
 	current, previous := s.cache.SnapshotPair(key)
 	if !executionAccountMatches(current, source.provider, identity) {

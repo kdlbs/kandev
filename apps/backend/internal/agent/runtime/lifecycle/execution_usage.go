@@ -22,6 +22,7 @@ func (m *Manager) configureAgentUsage(ctx context.Context, client *agentctl.Clie
 		return client.ConfigureAgentWithProjectDelivery(ctx, execution.AgentCommand, agentArgs, env, execution.ContinueCommand, execution.ContinueArgs, delivery, execution.LaunchWrapper)
 	}
 	policy := &usage.ExecutionUsagePolicy{ProfileID: execution.AgentProfileID, AgentID: execution.AgentID, ExecutorType: execution.ExecutorType}
+	usage.ApplySelectedUsage(ctx, policy)
 	return client.ConfigureAgentWithUsageAndProjectDelivery(ctx, execution.AgentCommand, agentArgs, env, execution.ContinueCommand, execution.ContinueArgs, policy, delivery, execution.LaunchWrapper)
 }
 

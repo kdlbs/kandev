@@ -1245,10 +1245,17 @@ func startGatewayAndServe(
 	lifecycleMgr.SetProviderUsageLimitsEnabled(cfg.Features.ProviderUsageLimits)
 	if cfg.Features.ProviderUsageLimits {
 		agentSettingsController.SetNativeUsageReader(lifecycleMgr.ReadProfileExecutionUsage)
+		services.DynamicProfileResolver.SetCandidateExecutionUsageReader(lifecycleMgr.PeekCandidateExecutionUsage)
 	}
 	hostUtilityMgr.SetProviderUsageLimitsEnabled(cfg.Features.ProviderUsageLimits)
+	lifecycleMgr.SetPreparedExecutionUsageReader(hostUtilityMgr.PreviewPreparedExecutionUsage)
 	sharedInferenceOwner := wireSharedInferenceCapacity(orchestratorSvc, repos.SystemSettings, log.Zap(), lifecycleMgr, hostUtilityMgr)
-	wireNativeRouteCapacity(services.DynamicProfileResolver, orchestratorSvc, sharedInferenceOwner, repos.Task, repos.Utility)
+	nativeUsageOwner := wireNativeRouteCapacity(services.DynamicProfileResolver, orchestratorSvc, sharedInferenceOwner, repos.Task, repos.Utility)
+	if cfg.Features.ProviderUsageLimits && nativeUsageOwner != nil {
+		nativeUsageOwner.sessionUsage = lifecycleMgr.PreviewInferenceProfileUsage
+		nativeUsageOwner.hostUsage = hostUtilityMgr.PreviewProfileUsage
+		services.DynamicProfileResolver.SetNativeCandidateExecutionUsageReader(nativeUsageOwner.candidateUsage)
+	}
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)

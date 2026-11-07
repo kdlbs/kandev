@@ -44,6 +44,7 @@ func (h *Handler) RegisterRoutes(api *gin.RouterGroup) {
 	aux := api.Group("/inference")
 	aux.POST("/prompt", h.handlePrompt)
 	aux.POST("/probe", h.handleProbe)
+	aux.POST("/usage/preview", h.handleUsagePreview)
 	aux.GET("/attempts", h.handleAttempts)
 	aux.POST("/attempts", h.handlePrepareAttempt)
 	aux.GET("/attempts/:id", h.handleAttempt)

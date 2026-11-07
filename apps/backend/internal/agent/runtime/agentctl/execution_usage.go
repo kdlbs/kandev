@@ -17,8 +17,20 @@ func (c *Client) ConfigureAgentWithUsage(ctx context.Context, command string, ar
 }
 
 func (c *Client) ReadExecutionUsage(ctx context.Context, model string) (*usage.ExecutionUsageReport, error) {
+	return c.readExecutionUsage(ctx, model, false)
+}
+
+func (c *Client) PeekExecutionUsage(ctx context.Context) (*usage.ExecutionUsageReport, error) {
+	return c.readExecutionUsage(ctx, "", true)
+}
+
+func (c *Client) readExecutionUsage(ctx context.Context, model string, cachedOnly bool) (*usage.ExecutionUsageReport, error) {
 	var report usage.ExecutionUsageReport
-	request, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/agent/usage?model="+url.QueryEscape(model), nil)
+	path := "/api/v1/agent/usage?model=" + url.QueryEscape(model)
+	if cachedOnly {
+		path = "/api/v1/agent/usage/cached"
+	}
+	request, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+path, nil)
 	if err != nil {
 		return nil, err
 	}

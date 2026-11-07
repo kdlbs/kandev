@@ -19,6 +19,7 @@ func (m *Manager) executeOwnedInference(ctx context.Context, inst *instance, req
 	if m.providerUsageLimits {
 		copy := *req
 		copy.UsagePolicy = &usage.ExecutionUsagePolicy{ProfileID: profileID, AgentID: req.AgentID, ExecutorType: "standalone"}
+		usage.ApplySelectedUsage(ctx, copy.UsagePolicy)
 		req = &copy
 	}
 	if m.inferenceConsumer == nil {

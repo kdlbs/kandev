@@ -54,7 +54,7 @@ func (s *UsageService) CheckExecutionUsage(ctx context.Context, input ExecutionU
 		return &ExecutionUsage{Reason: "account_unknown"}, nil
 	}
 	result, err := s.GetExecutionUsage(ctx, input)
-	if result != nil && result.Reason == "binding_changed" {
+	if result != nil && result.Reason == executionBindingChanged {
 		return result, &ExecutionUsageBindingError{}
 	}
 	if result != nil && result.SourceKnown {
@@ -129,6 +129,12 @@ func blockingUsageReset(fetchedAt time.Time, window UtilizationWindow, now time.
 	// A new100% observation after a reported reset is still a hard limit,
 	// but its past deadline cannot authorize another retry.
 	return !fetchedAt.Before(window.ResetAt), nil
+}
+
+// ExecutionUsageWindowApplies shares the actual native model-scope contract
+// with readonly ranking; unknown model scopes remain conservative.
+func ExecutionUsageWindowApplies(window UtilizationWindow, model string) bool {
+	return usageWindowMayApply(window, model)
 }
 
 func usageWindowMayApply(window UtilizationWindow, model string) bool {
