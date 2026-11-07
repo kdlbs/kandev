@@ -181,7 +181,7 @@ Mock delivery only; capture synthetic screenshots for the eventual PRs.
 - [ ] [Task 02: Independent template plugin](task-02-template-plugin.md)
 - [ ] [Task 03: Legacy import and rendering parity](task-03-legacy-import.md)
 - [ ] [Task 04: Packaged upgrade and recovery evidence](task-04-compatibility.md)
-- [ ] [Task 05: Operational latest-stable upgrade](task-05-operational-upgrade.md)
+- [x] [Task 05: Operational latest-stable upgrade](task-05-operational-upgrade.md)
 
 ## Verification strategy
 
@@ -195,8 +195,12 @@ actual host and independently published SDK pair, not merged host source alone.
 
 ## Verification results
 
-Design validation is recorded in [validation](validation.md). Product tests,
-packaging, import, upgrade, and rollback have not been run for this extraction.
+Design validation is recorded in [validation](validation.md). Work-order results
+record the implemented host/plugin contract, exact-candidate package/browser
+checks, migration/recovery drills, and the completed 2026-11-07 operational
+upgrade. Task 05 records preserved data/settings and post-restart readback;
+Task 04 retains the broader matrix and published-SDK limitations. An operational
+private build does not establish public SDK support or an upstream merge.
 
 ## Risks
 
