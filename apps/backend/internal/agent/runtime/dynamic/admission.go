@@ -10,7 +10,7 @@ import (
 
 // failureProfileForRoute uses the identity pinned when this generation was
 // selected, rather than a freshly loaded profile or a later account reading.
-func (e *Engine) failureProfileForRoute(profile Profile, sessionID string, generation int64, candidateID string) Profile {
+func (e *Engine) failureProfileForRoute(ctx context.Context, profile Profile, sessionID string, generation int64, candidateID string) Profile {
 	state, ok := e.State(sessionID)
 	if !ok || state.Generation != generation || state.ExecutionProfileID != candidateID || state.LogicalProfileID != profile.ID {
 		return profile
@@ -19,6 +19,11 @@ func (e *Engine) failureProfileForRoute(profile Profile, sessionID string, gener
 	for i := range profile.Candidates {
 		if profile.Candidates[i].ID == candidateID {
 			profile.Candidates[i].UsagePolicy = usage.CloneExecutionUsagePolicy(state.UsagePolicy)
+			policy := profile.Candidates[i].UsagePolicy
+			if policy != nil && policy.ProfileID == candidateID && usage.MatchesSelectedUsage(ctx, policy) && profile.Candidates[i].ModelID != policy.ExpectedModel {
+				profile.Candidates[i].ModelID = policy.ExpectedModel
+				profile.Candidates[i].CatalogFree = false
+			}
 			break
 		}
 	}

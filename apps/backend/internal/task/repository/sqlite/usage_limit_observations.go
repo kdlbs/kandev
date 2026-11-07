@@ -19,6 +19,7 @@ type UsageLimitObservation struct {
 	ActiveTurns        int64     `db:"active_turns"`
 	ID                 string    `db:"id"`
 	ExecutionProfileID string    `db:"execution_profile_id"`
+	ModelID            string    `db:"model_id"`
 	AccountKey         string    `db:"account_key"`
 	Code               string    `db:"code"`
 	ObservedAt         time.Time `db:"observed_at"`
@@ -67,6 +68,7 @@ func (r *Repository) initUsageLimitObservationsSchema() error {
 	for _, column := range []struct{ name, ddl string }{
 		{"tier", `ALTER TABLE usage_limit_observations ADD COLUMN tier TEXT NOT NULL DEFAULT ''`},
 		{"dimension", `ALTER TABLE usage_limit_observations ADD COLUMN dimension TEXT NOT NULL DEFAULT ''`},
+		{"model_id", `ALTER TABLE usage_limit_observations ADD COLUMN model_id TEXT NOT NULL DEFAULT ''`},
 		{"requests_minute", `ALTER TABLE usage_limit_observations ADD COLUMN requests_minute REAL NOT NULL DEFAULT 0`},
 		{"requests_day", `ALTER TABLE usage_limit_observations ADD COLUMN requests_day REAL NOT NULL DEFAULT 0`},
 		{"active_turns", `ALTER TABLE usage_limit_observations ADD COLUMN active_turns BIGINT NOT NULL DEFAULT 0`},
@@ -86,14 +88,14 @@ func (r *Repository) InsertUsageLimitObservation(ctx context.Context, observatio
 		INSERT INTO usage_limit_observations (
 			id, execution_profile_id, account_key, code, observed_at,
 			turns_5h, tokens_5h, turns_day, tokens_day, cost_subcents_day, turns_week, tokens_week,
-			tier,dimension,requests_minute,requests_day,active_turns,window_usage_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			tier,dimension,model_id,requests_minute,requests_day,active_turns,window_usage_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		observation.ID, observation.ExecutionProfileID, observation.AccountKey, observation.Code,
 		observation.ObservedAt.UTC(),
 		observation.Turns5h, observation.Tokens5h, observation.TurnsDay, observation.TokensDay,
 		observation.CostSubcentsDay, observation.TurnsWeek, observation.TokensWeek,
-		observation.Tier, observation.Dimension, observation.RequestsMinute, observation.RequestsDay, observation.ActiveTurns,
+		observation.Tier, observation.Dimension, observation.ModelID, observation.RequestsMinute, observation.RequestsDay, observation.ActiveTurns,
 		observation.WindowUsageJSON,
 	)
 	return err
@@ -109,7 +111,7 @@ func (r *Repository) ListUsageLimitObservationsSince(
 	err := r.ro.SelectContext(ctx, &observations, r.ro.Rebind(`
 		SELECT id, execution_profile_id, account_key, code, observed_at,
 		       turns_5h, tokens_5h, turns_day, tokens_day, cost_subcents_day, turns_week, tokens_week,
-		       tier,dimension,requests_minute,requests_day,active_turns,window_usage_json
+		       tier,dimension,model_id,requests_minute,requests_day,active_turns,window_usage_json
 		  FROM usage_limit_observations
 		 WHERE observed_at >= ?
 		 ORDER BY observed_at DESC

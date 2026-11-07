@@ -599,7 +599,7 @@
   "copilotPluginsLegacyPolicyReason": "This Kandev version cannot verify plugin policy for this runtime. Uncheck plugins and Save to start without them, or update Kandev.",
   "copilotPluginsUnknownReason": "Copilot reported an unknown plugin compatibility reason. Uncheck plugins and Save to start without them.",
   "providerLimitsTitle": "Provider limits",
-  "providerLimitsDescription": "Dynamic routing pauses models that hit a usage limit and uses them again after the reset. Set a monthly reset when the provider does not report one, or block paid models until a time shown on the provider console.",
+  "providerLimitsDescription": "Dynamic routing pauses models that hit a usage limit and uses them again after the reset. Set a monthly reset when the provider does not report one, or block all models until a time shown on the provider console.",
   "providerLimitsLoading": "Loading provider limits",
   "providerLimitsLoadFailed": "Could not load provider limits",
   "providerLimitsEmpty": "No profile uses a provider-qualified model.",

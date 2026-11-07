@@ -9,6 +9,7 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
@@ -56,6 +57,15 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 ) (*routingerr.Error, dynamicruntime.LimitSuspension) {
 	if a == nil || a.usage == nil || a.usage.tierLimits == nil {
 		return failure, dynamicruntime.SuspensionBinding
+	}
+	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID == candidate.ID &&
+		agentusage.MatchesSelectedUsage(ctx, candidate.UsagePolicy) && candidate.ModelID != candidate.UsagePolicy.ExpectedModel {
+		candidate.ModelID = candidate.UsagePolicy.ExpectedModel
+		candidate.CatalogFree = false
+		if catalog := a.usage.tierLimits.freeModels; catalog != nil {
+			free, known := catalog.IsFreeModel(ctx, candidate.ModelID)
+			candidate.CatalogFree = known && free
+		}
 	}
 	if !a.usage.tierLimits.matchesSelectedAccount(ctx, candidate) {
 		return failure, dynamicruntime.SuspensionBinding
@@ -109,7 +119,7 @@ func (a *tierLimitAdapter) monthlyReset(ctx context.Context, candidate dynamicru
 // ObserveLimit records the classified limit and learns an undisclosed
 // allowance. It runs off the routing path.
 func (a *tierLimitAdapter) ObserveLimit(
-	_ context.Context,
+	ctx context.Context,
 	candidate dynamicruntime.Candidate,
 	failure *routingerr.Error,
 	at time.Time,
@@ -120,8 +130,15 @@ func (a *tierLimitAdapter) ObserveLimit(
 	if failure.Code != routingerr.CodeRateLimited && failure.Code != routingerr.CodeQuotaLimited {
 		return
 	}
+	ctx = agentusage.SnapshotCandidateUsage(context.WithoutCancel(ctx), candidate.ID)
+	if candidate.UsagePolicy != nil {
+		policy := *candidate.UsagePolicy
+		candidate.UsagePolicy = &policy
+	}
+	// Keep the request's selected account/model evidence while allowing the
+	// detached observer to finish after the originating request is canceled.
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		observation := &sqliterepo.UsageLimitObservation{
 			ID: uuid.NewString(), ExecutionProfileID: candidate.ID,

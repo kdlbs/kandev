@@ -599,7 +599,7 @@
   "copilotPluginsLegacyPolicyReason": "Esta versão do Kandev não consegue verificar a política de plugins deste runtime. Desmarque os plugins e guarde para iniciar sem eles, ou atualize o Kandev.",
   "copilotPluginsUnknownReason": "O Copilot comunicou um motivo de compatibilidade de plugins desconhecido. Desmarque os plugins e guarde para iniciar sem eles.",
   "providerLimitsTitle": "Limites do fornecedor",
-  "providerLimitsDescription": "O encaminhamento dinâmico pausa os modelos que atingem um limite de utilização e volta a usá-los após a reposição. Defina uma reposição mensal quando o fornecedor não a indicar, ou bloqueie os modelos pagos até uma hora vista na consola do fornecedor.",
+  "providerLimitsDescription": "O encaminhamento dinâmico pausa os modelos que atingem um limite de utilização e volta a usá-los após a reposição. Defina uma reposição mensal quando o fornecedor não a indicar, ou bloqueie todos os modelos até uma hora vista na consola do fornecedor.",
   "providerLimitsLoading": "A carregar limites do fornecedor",
   "providerLimitsLoadFailed": "Não foi possível carregar os limites do fornecedor",
   "providerLimitsEmpty": "Nenhum perfil usa um modelo com prefixo de fornecedor.",

@@ -42,12 +42,12 @@ func (s *providerTierLimitService) resolveFailure(ctx context.Context, candidate
 }
 
 func (s *providerTierLimitService) refreshOpenRouterCounter(ctx context.Context, candidate dynamicruntime.Candidate) (*agentusage.FreeModelCounter, error) {
-	profile, a, ok := s.usage.loadProfile(ctx, candidate.ID)
-	if !ok {
-		return nil, nil
+	model := ""
+	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID == candidate.ID && candidate.ModelID == candidate.UsagePolicy.ExpectedModel && agentusage.MatchesSelectedUsage(ctx, candidate.UsagePolicy) {
+		model = candidate.ModelID
 	}
-	binding, ok := s.usage.bindingFor(profile, a)
-	if !ok {
+	_, _, binding, _, err := s.tierProfileForModel(ctx, candidate.ID, model)
+	if err != nil {
 		return nil, nil
 	}
 	free := candidate.CatalogFree || dynamicruntime.IsFreeModel(candidate.ModelID)
@@ -113,7 +113,14 @@ func (s *providerTierLimitService) enrichObservation(ctx context.Context, candid
 	if candidate.RequireExecutionUsage && candidate.UsagePolicy == nil {
 		return fmt.Errorf("execution allowance account is unknown")
 	}
-	c, err := s.contextFor(ctx, candidate.ID)
+	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID != candidate.ID {
+		return fmt.Errorf("execution allowance profile does not match candidate")
+	}
+	model := ""
+	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID == candidate.ID && agentusage.MatchesSelectedUsage(ctx, candidate.UsagePolicy) {
+		model = candidate.UsagePolicy.ExpectedModel
+	}
+	c, err := s.contextForModel(ctx, candidate.ID, model)
 	if err != nil {
 		return err
 	}
@@ -127,6 +134,7 @@ func (s *providerTierLimitService) enrichObservation(ctx context.Context, candid
 	dimension := classifyLimitDimension(candidate, failure, c.observed)
 	observation.Tier = string(c.tier)
 	observation.Dimension = dimension
+	observation.ModelID = c.profile.Model
 	observation.RequestsMinute = used.RequestsMinute
 	observation.RequestsDay = used.RequestsDay
 	observation.ActiveTurns = used.ActiveTurns

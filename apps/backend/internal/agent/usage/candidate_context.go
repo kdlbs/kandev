@@ -10,9 +10,10 @@ import (
 type CandidateUsageReader func(context.Context, string) *ExecutionUsageReport
 type candidateUsageContextKey struct{}
 type candidateUsageContext struct {
-	reader   CandidateUsageReader
-	mu       sync.Mutex
-	selected map[string]ExecutionUsagePolicy
+	reader     CandidateUsageReader
+	dispatched bool
+	mu         sync.Mutex
+	selected   map[string]ExecutionUsagePolicy
 }
 
 // This request-local projection uses original profile references only. It is
@@ -52,4 +53,36 @@ func ApplySelectedUsage(ctx context.Context, policy *ExecutionUsagePolicy) {
 	policy.ExpectedAccountRef = selected.ExpectedAccountRef
 	policy.ExpectedOrganizationRef = selected.ExpectedOrganizationRef
 	policy.ExpectedModel = selected.ExpectedModel
+}
+
+// SnapshotCandidateUsage preserves one already-observed selection for work
+// that will outlive the request's mutable candidate projection.
+func SnapshotCandidateUsage(ctx context.Context, profileID string) context.Context {
+	state, ok := ctx.Value(candidateUsageContextKey{}).(*candidateUsageContext)
+	if !ok || state == nil || (state.reader == nil && !state.dispatched) {
+		return ctx
+	}
+	state.mu.Lock()
+	selected, found := state.selected[profileID]
+	state.mu.Unlock()
+	copy := &candidateUsageContext{reader: state.reader, dispatched: state.dispatched, selected: make(map[string]ExecutionUsagePolicy)}
+	if found {
+		copy.selected[profileID] = selected
+	}
+	return context.WithValue(ctx, candidateUsageContextKey{}, copy)
+}
+
+// MatchesSelectedUsage accepts a model override only from this request's
+// execution-owned preview or its explicitly dispatched selection for the same
+// candidate and account.
+func MatchesSelectedUsage(ctx context.Context, policy *ExecutionUsagePolicy) bool {
+	state, ok := ctx.Value(candidateUsageContextKey{}).(*candidateUsageContext)
+	if !ok || state == nil || (state.reader == nil && !state.dispatched) || policy == nil || policy.ProfileID == "" || policy.ExpectedModel == "" || policy.ExpectedProvider == "" || policy.ExpectedAccountRef == "" {
+		return false
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	selected, ok := state.selected[policy.ProfileID]
+	return ok && selected.ExpectedProvider == policy.ExpectedProvider && selected.ExpectedAccountRef == policy.ExpectedAccountRef &&
+		selected.ExpectedOrganizationRef == policy.ExpectedOrganizationRef && selected.ExpectedModel == policy.ExpectedModel
 }

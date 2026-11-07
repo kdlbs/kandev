@@ -599,7 +599,7 @@
   "copilotPluginsLegacyPolicyReason": "此 Kandev 版本無法驗證此執行時的外掛程式策略。取消勾選外掛程式並儲存以在不載入它們的情況下啓動，或更新 Kandev。",
   "copilotPluginsUnknownReason": "Copilot 報告了未知的外掛程式兼容性原因。取消勾選外掛程式並儲存以在不載入它們的情況下啓動。",
   "providerLimitsTitle": "提供方額度",
-  "providerLimitsDescription": "動態路由會暫停達到用量上限的模型，並在重置後重新使用。如果提供方未報告每月重置時間，可在此設定；也可以將付費模型暫停到在提供方控制台看到的時間。",
+  "providerLimitsDescription": "動態路由會暫停達到用量上限的模型，並在重置後重新使用。如果提供方未報告每月重置時間，可在此設定；也可以將所有模型暫停到在提供方控制台看到的時間。",
   "providerLimitsLoading": "正在載入提供方額度",
   "providerLimitsLoadFailed": "無法載入提供方額度",
   "providerLimitsEmpty": "沒有設定使用帶提供方前綴的模型。",

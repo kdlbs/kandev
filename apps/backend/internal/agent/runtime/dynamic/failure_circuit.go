@@ -40,7 +40,7 @@ func (e *Engine) RecordFailureCircuit(
 	if err := e.requireCurrentFailureRoute(ctx, sessionID, expectedGeneration, candidateID); err != nil {
 		return false, err
 	}
-	profile = e.failureProfileForRoute(profile, sessionID, expectedGeneration, candidateID)
+	profile = e.failureProfileForRoute(ctx, profile, sessionID, expectedGeneration, candidateID)
 	candidate, _ = candidateByID(profile, candidateID)
 	failure, scope := e.resolveLimitFailure(ctx, candidate, failure)
 	e.openCircuitForFailure(profile, candidateID, failure, scope)
