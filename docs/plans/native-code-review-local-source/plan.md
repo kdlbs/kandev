@@ -47,6 +47,7 @@ bounded untracked-patch formatter so the diff text and hash stay equal.
 ## Work orders
 
 - [x] [Task 01: Task-bound local Git source fallback](task-01-local-source-fallback.md)
+- [ ] [Task 02: Resolve the current task workspace](task-02-canonical-workspace.md)
 
 ## Changed-path coverage
 

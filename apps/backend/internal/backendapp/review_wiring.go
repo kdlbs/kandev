@@ -52,7 +52,7 @@ func buildReviewComponents(p routeParams) reviewComponents {
 	runner := review.NewRunner(review.RunnerDeps{
 		Store:            service,
 		Resolver:         resolver,
-		Changes:          handlers.NewReviewChangeSource(p.lifecycleMgr, reviewSessionReader{repo: p.taskRepo}),
+		Changes:          handlers.NewReviewChangeSource(p.lifecycleMgr, reviewSessionReader{repo: p.taskRepo, workspaces: p.lifecycleMgr}),
 		Inference:        reviewInference{session: p.lifecycleMgr, host: p.hostUtilityMgr, profiles: p.services.DynamicProfileResolver},
 		InferenceContext: reviewInferenceContext(p.taskRepo),
 		Prompts:          review.NewTemplatePromptBuilder(reviewTemplateSource{agents: p.services.Utility, engine: utilitytemplate.NewEngine()}),
@@ -66,7 +66,8 @@ func buildReviewComponents(p routeParams) reviewComponents {
 // reviewSessionReader supplies the base commit and branch a cumulative diff is
 // computed against, mirroring sessionReaderAdapter in gateway.go.
 type reviewSessionReader struct {
-	repo reviewSessionGetter
+	repo       reviewSessionGetter
+	workspaces reviewWorkspaceInspector
 }
 
 type reviewSessionGetter interface {
