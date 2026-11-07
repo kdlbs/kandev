@@ -96,16 +96,6 @@ func (s *Service) ReconcileTaskStatusSummaries(
 	if err := ctx.Err(); err != nil {
 		return summaries, err
 	}
-	quotaWaits, err := s.loadSummaryQuotaWaits(ctx, taskIDs(tasks))
-	if err != nil {
-		if s.logger != nil && !isRequestCancellationError(ctx, err) {
-			s.logger.Warn("failed to load task quota waits for status summary", zap.Error(err))
-		}
-		quotaWaits = nil
-	}
-	if err := ctx.Err(); err != nil {
-		return summaries, err
-	}
 	activityByTask, activityObserved := s.loadSummaryActivity(ctx, taskIDs(tasks))
 	if err := ctx.Err(); err != nil {
 		return summaries, err
@@ -126,6 +116,16 @@ func (s *Service) ReconcileTaskStatusSummaries(
 		ctx, tasks, sessionsByTask, sessionsByTask != nil, pendingBySession, summaries, activityByTask,
 		activityObserved, launchQueueByTask, completionGates, completionGatesLoaded, unread,
 	)
+	if err := ctx.Err(); err != nil {
+		return summaries, err
+	}
+	quotaWaits, err := s.loadSummaryQuotaWaits(ctx, taskIDs(tasks))
+	if err != nil {
+		if s.logger != nil && !isRequestCancellationError(ctx, err) {
+			s.logger.Warn("failed to load task quota waits for status summary", zap.Error(err))
+		}
+		quotaWaits = nil
+	}
 	if err := ctx.Err(); err != nil {
 		return summaries, err
 	}
@@ -153,9 +153,15 @@ func (s *Service) ReconcileTaskStatusSummaries(
 			if task == nil || summaries[task.ID] == nil {
 				continue
 			}
-			copy := *summaries[task.ID]
-			copy.QuotaWait = quotaWaits[task.ID]
-			summaries[task.ID] = &copy
+			repaired, repairErr := s.reconcileSummaryQuotaWait(ctx, task, summaries[task.ID], quotaWaits[task.ID])
+			if repairErr != nil {
+				if repaired != nil {
+					summaries[task.ID] = repaired
+				}
+				s.logSummaryRepairFailure(ctx, task.ID, "quota wait", repairErr)
+				continue
+			}
+			summaries[task.ID] = repaired
 		}
 	}
 	return summaries, reconcileErr

@@ -15,4 +15,6 @@ The quota projection reads the current session's logical profile and route
 generation; historical routes and terminal sessions cannot supply a current
 wait. A failed quota read does not establish an empty observation or block
 updates from other task-status sources. Missing summaries are rebuilt with the
-current wait; existing summary reads receive a fresh response projection.
+current wait; changes to existing summaries use their revisioned update path.
+If another writer wins, the repair reads both the latest summary and route
+before retrying.
