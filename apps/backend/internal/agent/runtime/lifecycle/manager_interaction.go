@@ -7,6 +7,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -339,7 +340,9 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 	executionID := execution.ID
 
 	client, releaseClient := execution.AcquireAgentCtlClient()
-	defer releaseClient()
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(releaseClient) }
+	defer release()
 	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
@@ -351,6 +354,10 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 
 	snapshot := m.captureCancelPromptSnapshot(execution)
 	cancelErr := client.Cancel(ctx)
+	// The lease covers only the cancel RPC. Everything below waits on the
+	// prompt, takes the execution store lock or persists, and escalation
+	// re-pins the client for its own bounded settle call.
+	release()
 	streamDisconnected := errors.Is(cancelErr, agentctlclient.ErrAgentStreamNotConnected)
 	if cancelErr != nil &&
 		!errors.Is(cancelErr, agentctlclient.ErrTurnCancelNotAcknowledged) &&
@@ -399,7 +406,7 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 		m.logger.Warn("agent stream disconnected before cancel; escalating locally",
 			zap.String("execution_id", executionID),
 			zap.Error(cancelErr))
-		return m.escalateStuckCancel(ctx, execution, snapshot.finished, client)
+		return m.escalateStuckCancel(ctx, execution, snapshot.finished)
 	}
 
 	// The agent did not end the in-flight session/prompt RPC after cancel (e.g. it
@@ -409,7 +416,7 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 		m.logger.Warn("agent cancel not acknowledged; escalating immediately",
 			zap.String("execution_id", executionID),
 			zap.Error(cancelErr))
-		return m.escalateStuckCancel(ctx, execution, snapshot.finished, client)
+		return m.escalateStuckCancel(ctx, execution, snapshot.finished)
 	}
 
 	m.logger.Info("agent cancel sent, waiting for turn completion",
@@ -440,16 +447,7 @@ func (m *Manager) escalateStuckCancel(
 	ctx context.Context,
 	execution *AgentExecution,
 	ch <-chan struct{},
-	clients ...*agentctlclient.Client,
 ) error {
-	var client *agentctlclient.Client
-	if len(clients) > 0 {
-		client = clients[0]
-	} else {
-		var release func()
-		client, release = execution.AcquireAgentCtlClient()
-		defer release()
-	}
 	promptGeneration := execution.promptGenerationSnapshot()
 	if promptGeneration != 0 {
 		// The agentctl stream can close after the local cancellation release.
@@ -505,24 +503,38 @@ func (m *Manager) escalateStuckCancel(
 	default:
 	}
 
-	if submissionID := execution.deliverySubmissionIDSnapshot(); submissionID != "" && client != nil {
-		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), durableSubmissionSettlementTimeout)
-		settleErr := client.CancelDeliverySubmission(settleCtx, submissionID)
-		cancel()
-		if settleErr != nil {
+	if submissionID := execution.deliverySubmissionIDSnapshot(); submissionID != "" {
+		attempted, settleErr := settleCancelledSubmission(ctx, execution, submissionID)
+		if attempted && settleErr != nil {
 			m.logger.Warn("failed to settle durable prompt after cancel escalation",
 				zap.String("execution_id", execution.ID),
 				zap.String("submission_id", submissionID),
 				zap.Error(settleErr))
 			return errors.Join(ErrCancelEscalated, settleErr)
 		}
-		execution.clearDeliverySubmissionID(submissionID)
+		if attempted {
+			execution.clearDeliverySubmissionID(submissionID)
+		}
 	}
 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	return ErrCancelEscalated
+}
+
+// settleCancelledSubmission pins the client for the settle request only, so a
+// cancel escalation never holds the lease across its wait or persistence. It
+// reports attempted=false when the execution has no client to settle through.
+func settleCancelledSubmission(ctx context.Context, execution *AgentExecution, submissionID string) (bool, error) {
+	client, release := execution.AcquireAgentCtlClient()
+	defer release()
+	if client == nil {
+		return false, nil
+	}
+	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), durableSubmissionSettlementTimeout)
+	defer cancel()
+	return true, client.CancelDeliverySubmission(settleCtx, submissionID)
 }
 
 // SetSessionMode changes the session mode for a running agent.

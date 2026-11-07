@@ -108,11 +108,15 @@ func (sm *StreamManager) replayRecoveredDelivery(
 	if after > target {
 		return fmt.Errorf("durable recovery cursor %d is ahead of captured high-water %d", after, target)
 	}
+	// The lease covers only the page fetch (see fetchRecoveredReplayPage).
+	// Lifecycle callbacks run unpinned: they take the execution store lock and
+	// may acquire the lease themselves, which would deadlock behind a queued
+	// terminal stop if this goroutine still held a read lease.
 	client, releaseClient := execution.AcquireAgentCtlClient()
+	releaseClient()
 	if client == nil {
 		return errors.New("durable recovery agentctl client is unavailable")
 	}
-	defer releaseClient()
 	if after > 0 && !suppressLifecycleCallbacks {
 		sm.scheduleDurableDeliveryAck(execution, client, agentctl.AgentEvent{DeliveryStreamID: streamID, DeliverySequence: after})
 	}
@@ -152,7 +156,7 @@ func (sm *StreamManager) replayRecoveredDeliveryPage(
 	if remaining < uint64(limit) {
 		limit = int(remaining)
 	}
-	page, stream, err := client.ReplayDelivery(ctx, streamID, after, limit)
+	page, stream, err := fetchRecoveredReplayPage(ctx, execution, client, streamID, after, limit)
 	if err != nil {
 		return after, fmt.Errorf("replay durable delivery after sequence %d: %w", after, err)
 	}
@@ -191,6 +195,25 @@ func (sm *StreamManager) replayRecoveredDeliveryPage(
 		return after, fmt.Errorf("durable replay made no progress after sequence %d", after)
 	}
 	return after, nil
+}
+
+// fetchRecoveredReplayPage pins the replay client for the page request only. A
+// client that was replaced or detached since the replay started fails the
+// replay instead of reading from a different connection.
+func fetchRecoveredReplayPage(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctl.Client,
+	streamID string,
+	after uint64,
+	limit int,
+) ([]journal.Event, journal.Stream, error) {
+	current, release := execution.AcquireAgentCtlClient()
+	defer release()
+	if current != client {
+		return nil, journal.Stream{}, errors.New("durable recovery agentctl client changed during replay")
+	}
+	return client.ReplayDelivery(ctx, streamID, after, limit)
 }
 
 func validateRecoveredReplayStream(

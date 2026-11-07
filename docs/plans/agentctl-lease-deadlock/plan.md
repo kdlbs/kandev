@@ -45,13 +45,19 @@ lease semantics of client replacement or detach.
 - `restoreRecoveredFailedExecution` releases the lease right after
   `GetStatus`, before marking the execution ready.
 
+- Recovered-delivery replay pins the client only for each page fetch, and
+  `cancelAgentExecution` / `escalateStuckCancel` pin it only for their own
+  bounded requests (Task 02), so no lifecycle callback or wait runs under a
+  read lease.
+
 ## Work orders
 
 - [x] [Task 01: Keep agentctl URL reads off the client lease](task-01-agentctl-url-lease.md)
+- [x] [Task 02: Bound the replay and cancel-escalation leases](task-02-replay-cancel-lease.md)
 
 ## Changed-path coverage
 
 The work order owns the lifecycle files above, the new
 `agentctl_url_lease_test.go`, `agentctl_url_persistence_test.go`,
-`agentctl_recovery_lease_test.go`, and the new agentctl client lease requirement
+`agentctl_recovery_lease_test.go`, `agentctl_replay_lease_test.go`, and the new agentctl client lease requirement
 and system design.
