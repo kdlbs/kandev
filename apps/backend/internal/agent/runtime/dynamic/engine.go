@@ -714,7 +714,8 @@ func unclassifiedSuccessorRoute(
 ) (RouteDecision, RouteState) {
 	generation := expectedGeneration + 1
 	decision := RouteDecision{
-		SessionID: state.SessionID, LogicalProfileID: profile.ID,
+		UsagePolicy: usage.CloneExecutionUsagePolicy(successor.UsagePolicy),
+		SessionID:   state.SessionID, LogicalProfileID: profile.ID,
 		ExecutionProfileID: successor.ID, Generation: generation,
 		ProfileVersion: profile.Version, Reason: "policy_skip",
 		Status: routeStatusStarting, ErrorCode: failure.Code,
@@ -723,7 +724,8 @@ func unclassifiedSuccessorRoute(
 		PendingOutcome:   routingpolicy.OutcomeSkip,
 	}
 	nextState := RouteState{
-		SessionID: state.SessionID, LogicalProfileID: profile.ID,
+		UsagePolicy: usage.CloneExecutionUsagePolicy(successor.UsagePolicy),
+		SessionID:   state.SessionID, LogicalProfileID: profile.ID,
 		ExecutionProfileID: successor.ID, Generation: generation,
 		ProfileVersion: profile.Version, Status: routeStatusStarting,
 		UpdatedAt: updatedAt,

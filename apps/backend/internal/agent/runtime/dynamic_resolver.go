@@ -337,7 +337,7 @@ func (r *ProfileExecutionResolver) RouteAfterUnclassifiedFailure(
 	if err := r.ValidateProfile(ctx, profileID); err != nil {
 		return dynamic.RouteDecision{}, err
 	}
-	profile, err := r.loadDynamicProfile(ctx, profileID)
+	profile, err := r.loadSelectionProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return dynamic.RouteDecision{}, err
 	}
@@ -550,7 +550,7 @@ func (r *ProfileExecutionResolver) resolveSkipRouteAction(
 			return ProfileExecution{}, dynamic.ErrRecoveryPending
 		}
 	}
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadSelectionProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return ProfileExecution{}, err
 	}
