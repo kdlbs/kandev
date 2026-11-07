@@ -1,6 +1,6 @@
 ---
 created: 2026-11-07
-status: completed
+status: in_progress
 requirements:
   - REQ-TASKS-WIP-LIMIT-PULL-SYSTEM-001
 system_design:
@@ -14,4 +14,4 @@ A pulled feeder task needs its committed entry identity in the existing
 `task.moved` event so the destination's entry handler can distinguish it from
 the preceding step's route.
 
-- [x] [Task 01: Carry the committed entry identity](task-01-carry-entry-identity.md)
+- [ ] [Task 01: Carry the committed entry identity](task-01-carry-entry-identity.md)
