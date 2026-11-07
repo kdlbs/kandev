@@ -34,6 +34,7 @@ type Config struct {
 	Notifications          NotificationsConfig          `mapstructure:"notifications"`
 	Tasks                  TasksConfig                  `mapstructure:"tasks"`
 	Credentials            CredentialsConfig            `mapstructure:"credentials"`
+	ProviderErrors         ProviderErrorsConfig         `mapstructure:"providerErrors"`
 	Limits                 LimitsConfig                 `mapstructure:"limits"`
 	MessageQueue           MessageQueueConfig           `mapstructure:"messageQueue"`
 	Agentctl               AgentctlConfig               `mapstructure:"agentctl"`
@@ -89,6 +90,13 @@ type DeliveryRetentionConfig struct {
 // CredentialsConfig contains operator-managed credential file settings.
 type CredentialsConfig struct {
 	File string `mapstructure:"file"`
+}
+
+// ProviderErrorsConfig contains operator-managed provider-error settings.
+type ProviderErrorsConfig struct {
+	// CatalogFile is an optional local JSON or YAML rule catalog loaded once
+	// at startup. Empty keeps the built-in rules only.
+	CatalogFile string `mapstructure:"catalogFile"`
 }
 
 // ExecutorsConfig contains executor-related startup settings.
@@ -516,6 +524,7 @@ type OfficeConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
+	ProviderKeywordContext bool `mapstructure:"provider_keyword_context" json:"providerKeywordContext"`
 	// IntegratedControl gates the cross-workspace navigation and existing-conversation surface.
 	IntegratedControl bool `mapstructure:"integrated_control" json:"integratedControl"`
 

@@ -653,7 +653,8 @@ Kandev counts only a current task-session failure that has complete trusted
 evidence and no output or tool activity. Eligible errors are a terminal
 `unknown_provider_error` before output, or a typed agent process-start or
 session-initialization `agent_runtime_error`. A turn that ends normally
-(`end_turn`) with no assistant text, reasoning, or tool activity also counts;
+(`end_turn`) with no assistant answer text, plan content, or tool activity also counts,
+including a turn that contains only reasoning;
 consecutive empty turns match each other. For provider errors, each counted
 failure must have the same code, origin, phase, provider, and complete
 diagnostic. Kandev normalizes whitespace only; case and punctuation remain
@@ -761,6 +762,33 @@ hold remains. A 401 or 403 requires checking authentication, settings access,
 and the current per-boot interlock. Bearer credentials are rejected on this
 settings route. The interlock is an accidental-mutation guard, not an
 authentication credential; see [Scope agent profiles and MCP definitions](security.md#scope-agent-profiles-and-mcp-definitions).
+
+#### Provider keyword and context classification
+
+> [!EXPERIMENTAL]
+> Provider keyword and context classification is disabled in all shipped profiles.
+> Enable `features.providerKeywordContext` under **Settings > System > Feature
+> Toggles** and restart Kandev to use it with dynamic routing.
+
+This classifier recognizes unmatched provider diagnostics using structural
+signals and keyword combinations. Existing typed errors,
+known signatures, candidate policies and output/tool safety checks still take
+precedence. New assistant text remains output unless the existing diagnostic
+correlation accepts it; this toggle does not authorize replay after effects.
+Explicit reset hints control suspension expiry. Model-scoped failures do not
+suspend unrelated models. Account-wide limits require a proven current launch
+credential binding; unknown bindings retain narrower scope.
+
+Operators can add provider-error rules from a local JSON or YAML file with the
+`providerErrors.catalogFile` startup setting (`KANDEV_PROVIDER_ERRORS_CATALOG_FILE`).
+A relative path resolves against the directory of the selected `config.yaml`.
+Kandev reads the file once at startup; restart to apply changes. Built-in rules
+always run first, and catalog rules run in file order before the keyword and
+context classification. Rules that use keyword terms or invocation context, and
+any requested scope, backoff or reset, take effect only while this classifier
+is enabled. An invalid file is ignored as a whole and logged with its reason; Kandev
+keeps the built-in rules. See the catalog format reference in
+`apps/backend/internal/agent/runtime/routingerr/externalcatalog/README.md`.
 
 ### Host probes and executor model catalogs
 

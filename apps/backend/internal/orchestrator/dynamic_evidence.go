@@ -20,7 +20,8 @@ import (
 // durable dynamic continuation package is stored with the route generation
 // separately.
 type promptAttemptEvidence struct {
-	mu sync.Mutex
+	keywordHistory []keywordObservation
+	mu             sync.Mutex
 	// retirementState and retirementGeneration identify the notice lifecycle
 	// observed when this attempt began. Reclaimed entries can be replaced by a
 	// state with the same generation, so the counter alone is not unique.
@@ -30,6 +31,8 @@ type promptAttemptEvidence struct {
 	promptGeneration     uint64
 	evidenceKnown        bool
 	output               bool
+	// Only a normal empty completion may exclude reasoning from output.
+	nonReasoningOutput bool
 	// providerDiagnosticCode records an ACP agent-message diagnostic which is
 	// followed by the matching prompt RPC failure. It is not model output, so it
 	// must not make an otherwise pre-result provider failure unsafe to route.
@@ -92,7 +95,9 @@ func (s *Service) beginPromptAttempt(
 	}
 	state, release := s.acquireTransientRetryNoticeState(sessionID)
 	state.mu.Lock()
+	history := s.previousKeywordHistory(sessionID)
 	evidence := &promptAttemptEvidence{
+		keywordHistory:       history,
 		executionID:          executionID,
 		promptGeneration:     promptGeneration,
 		evidenceKnown:        true,
@@ -291,6 +296,7 @@ func (s *Service) observePromptAttempt(
 		return
 	}
 	evidence.output = evidence.output || output
+	evidence.nonReasoningOutput = evidence.nonReasoningOutput || output
 	evidence.effect = evidence.effect || effect
 	if output {
 		// Any ordinary output makes the turn unsafe to replay. A provider
@@ -331,6 +337,7 @@ func (s *Service) observeProviderDiagnostic(
 		return
 	}
 	evidence.output = true
+	evidence.nonReasoningOutput = true
 	evidence.providerDiagnosticCode = classified.Code
 	evidence.providerDiagnosticText = normalizeDiagnosticText(message)
 }
@@ -722,7 +729,11 @@ func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) w
 		data.DynamicRouteAttempt = true
 	}
 	if lifecycleEvidenceKnown && lifecycleDiagnosticCandidate && !evidence.output && !evidence.effect {
-		s.observeLifecycleProviderDiagnosticLocked(evidence, data.AgentID, lifecycleDiagnosticText)
+		var diagnostic *streams.ProviderError
+		if data.ProviderError != nil && normalizeDiagnosticText(data.ProviderError.Message) == normalizeDiagnosticText(lifecycleDiagnosticText) {
+			diagnostic = data.ProviderError
+		}
+		s.observeLifecycleProviderDiagnosticLocked(evidence, data.AgentID, lifecycleDiagnosticText, diagnostic)
 	}
 	outputObserved := evidence.outputObservedLocked(data)
 	if lifecycleEvidenceKnown {
@@ -742,7 +753,8 @@ func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) w
 // event may arrive after the terminal failure because those events use
 // separate subscriptions, so an absent or unclassifiable diagnostic fails
 // closed as ordinary output.
-func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, providerID, message string) {
+func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, providerID, message string, diagnostic *streams.ProviderError) {
+	evidence.nonReasoningOutput = true
 	message = normalizeDiagnosticText(message)
 	if message == "" {
 		evidence.output = true
@@ -750,11 +762,7 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 		evidence.providerDiagnosticText = ""
 		return
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhasePromptSend,
-		ProviderID: providerID,
-		Stderr:     message,
-	})
+	classified := routingerr.Classify(diagnostic.RoutingInput(routingerr.PhasePromptSend, providerID, message))
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
 		evidence.output = true
 		evidence.providerDiagnosticCode = ""
@@ -775,7 +783,7 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 // itself. Callers must hold e.mu.
 func (e *promptAttemptEvidence) outputObservedLocked(data watcher.AgentEventData) bool {
 	if e.providerDiagnosticCode != "" && e.providerDiagnosticText != "" &&
-		matchingProviderFailureCode(data) == e.providerDiagnosticCode &&
+		providerFailureCodeMatches(data, e.providerDiagnosticCode) &&
 		strings.Contains(normalizeDiagnosticText(matchingProviderFailureMessage(data)), e.providerDiagnosticText) {
 		// Claude ACP emits a human-readable agent_message_chunk immediately
 		// before returning the same provider error from session/prompt. The
@@ -798,11 +806,29 @@ func matchingProviderFailureCode(data watcher.AgentEventData) routingerr.Code {
 	if message == "" {
 		return ""
 	}
+	return routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhasePromptSend, data.AgentID, message)).Code
+}
+
+// providerFailureCodeMatches reports whether the terminal failure classifies to
+// the recorded diagnostic code at either fidelity. A stream chunk is recorded
+// from its text alone, while the terminal failure may carry structured signals
+// that refine the code (Codex usage-limit prose is quota_limited, HTTP 429 is
+// rate_limited). Comparing the text-only classification too keeps recovery
+// independent of whether the chunk or the terminal failure arrives first; the
+// text-containment check in outputObservedLocked still ties the two together.
+func providerFailureCodeMatches(data watcher.AgentEventData, recorded routingerr.Code) bool {
+	message := matchingProviderFailureMessage(data)
+	if message == "" {
+		return false
+	}
+	if matchingProviderFailureCode(data) == recorded {
+		return true
+	}
 	return routingerr.Classify(routingerr.Input{
 		Phase:      routingerr.PhasePromptSend,
 		ProviderID: data.AgentID,
 		Stderr:     message,
-	}).Code
+	}).Code == recorded
 }
 
 func (s *Service) withDynamicAttemptEvidence(data watcher.AgentEventData) watcher.AgentEventData {
