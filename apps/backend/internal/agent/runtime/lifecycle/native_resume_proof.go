@@ -42,7 +42,7 @@ func (m *Manager) nativeResumeDeliveryProof(ctx context.Context, execution *Agen
 	if status.Unresolved {
 		return nil, fmt.Errorf("%w: native resume journal work remains unresolved", ErrDurableAdoptionBlocked)
 	}
-	rows, streams, err := m.nativeResumeProofRows(ctx, execution, status, client, repository)
+	rows, streams, unproven, err := m.nativeResumeProofRows(ctx, execution, status, client, repository)
 	if err != nil {
 		return nil, err
 	}
@@ -54,9 +54,14 @@ func (m *Manager) nativeResumeDeliveryProof(ctx context.Context, execution *Agen
 		return nil, err
 	}
 	for _, row := range rows {
-		proof.Submissions = append(proof.Submissions, models.NativeResumeSubmissionEvidence{ID: row.ID, State: row.State, Outcome: row.Outcome,
+		evidence := models.NativeResumeSubmissionEvidence{ID: row.ID, State: row.State, Outcome: row.Outcome,
 			HarnessGeneration: row.HarnessGeneration, PayloadHash: row.PayloadHash, StreamID: streams[row.ID],
-			TerminalSequence: row.TerminalSequence, TerminalStreamID: row.TerminalStreamID})
+			TerminalSequence: row.TerminalSequence, TerminalStreamID: row.TerminalStreamID}
+		if cursor := unproven[row.ID]; cursor != nil {
+			evidence.UnprovenCompletion = true
+			evidence.Cursor = cursor
+		}
+		proof.Submissions = append(proof.Submissions, evidence)
 	}
 	after, err := client.GetDeliveryStatus(ctx, execution.DeliveryStreamID)
 	if err != nil {
@@ -71,30 +76,30 @@ func (m *Manager) nativeResumeDeliveryProof(ctx context.Context, execution *Agen
 	return proof, nil
 }
 
-func (m *Manager) nativeResumeProofRows(ctx context.Context, execution *AgentExecution, status *agentctl.DeliveryStatus, client *agentctl.Client, repository AgentDeliveryRepository) ([]*models.AgentDeliverySubmission, map[string]string, error) {
+func (m *Manager) nativeResumeProofRows(ctx context.Context, execution *AgentExecution, status *agentctl.DeliveryStatus, client *agentctl.Client, repository AgentDeliveryRepository) ([]*models.AgentDeliverySubmission, map[string]string, map[string]*models.AgentDeliveryCursor, error) {
 	peer, err := client.ListDeliverySubmissions(ctx, execution.SessionID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	rows, err := nativeResumeSQLRows(ctx, execution, status, peer, repository)
+	rows, unproven, err := nativeResumeSQLRows(ctx, execution, status, peer, repository)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	if err := validateNativeResumeSQLRows(execution, status, peer, rows, true); err != nil {
-		return nil, nil, err
+	if err := validateNativeResumeSQLRows(execution, status, peer, rows, unproven, true); err != nil {
+		return nil, nil, nil, err
 	}
-	ids, err := nativeResumeRetirementIDs(execution, status, peer, rows)
+	ids, err := nativeResumeRetirementIDs(execution, status, peer, rows, unproven)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if len(ids) != 0 {
-		return nil, nil, fmt.Errorf("%w: native resume inventory has %d unsettled submissions", ErrDurableAdoptionBlocked, len(ids))
+		return nil, nil, nil, fmt.Errorf("%w: native resume inventory has %d unsettled submissions", ErrDurableAdoptionBlocked, len(ids))
 	}
 	streams := make(map[string]string, len(peer))
 	for _, submission := range peer {
 		streams[submission.ID] = submission.StreamID
 	}
-	return rows, streams, nil
+	return rows, streams, unproven, nil
 }
 
 func nativeResumeProofCursor(ctx context.Context, repository AgentDeliveryRepository, status *agentctl.DeliveryStatus) (*models.AgentDeliveryCursor, error) {

@@ -698,7 +698,7 @@ func durableEventExpectedStreamID(execution *AgentExecution) string {
 }
 
 func canonicalAgentDeliveryEvent(event agentctl.AgentEvent) bool {
-	return event.Type == streams.EventTypeMessageChunk || event.Type == streams.EventTypeReasoning || event.Type == streams.EventTypeShellOutputUpdate || canonicalShellStartEvent(event)
+	return event.Type == streams.EventTypeMessageChunk || event.Type == streams.EventTypeReasoning || event.Type == streams.EventTypeShellOutputUpdate || canonicalShellStartEvent(event) || event.Type == streams.EventTypeContextCompactionObservation
 }
 
 func canonicalMessageType(event agentctl.AgentEvent) string {

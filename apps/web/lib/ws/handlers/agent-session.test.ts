@@ -28,6 +28,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     },
     taskSessions: { items: {} },
     taskSessionsByTask: { itemsByTaskId: {} },
+    contextWindow: { bySessionId: {} },
     setTaskSession: vi.fn(),
     setTaskSessionsForTask: vi.fn(),
     upsertTaskSessionFromEvent: vi.fn(),
@@ -814,6 +815,214 @@ describe("session.state_changed name propagation", () => {
     handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "COMPLETED" }));
     const call = vi.mocked(store.getState().upsertTaskSessionFromEvent).mock.calls.at(-1);
     expect(call?.[1]).not.toHaveProperty("name");
+  });
+});
+
+describe("session.state_changed native compaction metadata", () => {
+  it("patches an existing gauge without inventing a new one", () => {
+    const setContextWindow = vi.fn();
+    const store = makeStore({
+      setContextWindow,
+      contextWindow: {
+        bySessionId: {
+          "s-1": {
+            size: 272_000,
+            used: 12_171,
+            remaining: 259_829,
+            efficiency: 4,
+            compactionCount: 1,
+          },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        metadata: {
+          context_compaction_count: 2,
+          context_compaction_reporting: {
+            source: "copilot_native",
+            availability: "available",
+            coverage: "partial",
+            revision: 2,
+          },
+        },
+      }),
+    );
+
+    expect(setContextWindow).toHaveBeenCalledWith(
+      "s-1",
+      expect.objectContaining({
+        size: 272_000,
+        used: 12_171,
+        compactionCount: 2,
+        compactionReporting: expect.objectContaining({ coverage: "partial", revision: 2 }),
+      }),
+    );
+  });
+
+  it("does not create a zero-token gauge for a count-only update", () => {
+    const setContextWindow = vi.fn();
+    const store = makeStore({
+      setContextWindow,
+      contextWindow: { bySessionId: {} },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        metadata: { context_compaction_count: 1 },
+      }),
+    );
+
+    expect(setContextWindow).not.toHaveBeenCalled();
+  });
+});
+
+describe("session.state_changed context window clears", () => {
+  it("clears an existing gauge on explicit null while retaining the lifetime count", () => {
+    const setContextWindow = vi.fn();
+    const store = makeStore({
+      setContextWindow,
+      contextWindow: {
+        bySessionId: {
+          "s-1": {
+            size: 272_000,
+            used: 9_695,
+            remaining: 262_305,
+            efficiency: 4,
+            compactionCount: 2,
+          },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        metadata: { context_window: null, context_compaction_count: 2 },
+      }),
+    );
+
+    expect(setContextWindow).toHaveBeenCalledWith(
+      "s-1",
+      expect.objectContaining({ size: 0, used: 0, compactionCount: 2 }),
+    );
+  });
+
+  it("clears an existing gauge from a full snapshot null while retaining the count", () => {
+    const setContextWindow = vi.fn();
+    const store = makeStore({
+      setContextWindow,
+      contextWindow: {
+        bySessionId: {
+          "s-1": {
+            size: 272_000,
+            used: 9_695,
+            remaining: 262_305,
+            efficiency: 4,
+            compactionCount: 2,
+          },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        session_metadata: { context_window: null, context_compaction_count: 2 },
+      }),
+    );
+
+    expect(setContextWindow).toHaveBeenCalledWith(
+      "s-1",
+      expect.objectContaining({ size: 0, used: 0, compactionCount: 2 }),
+    );
+  });
+});
+
+describe("session.state_changed retained compaction counts", () => {
+  it("uses the retained session count when the first gauge arrives late", () => {
+    const setContextWindow = vi.fn();
+    const store = makeStore({
+      setContextWindow,
+      contextWindow: { bySessionId: {} },
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "RUNNING",
+            metadata: {
+              context_compaction_count: 5,
+              context_compaction_reporting: {
+                source: "copilot_native",
+                availability: "available",
+                coverage: "observed",
+                revision: 3,
+              },
+            },
+          },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        metadata: {
+          context_window: {
+            size: 272_000,
+            used: 9_695,
+            remaining: 262_305,
+            efficiency: 4,
+            source: "acp",
+          },
+          context_compaction_count: 2,
+        },
+      }),
+    );
+
+    expect(setContextWindow).toHaveBeenCalledWith(
+      "s-1",
+      expect.objectContaining({
+        compactionCount: 5,
+        compactionReporting: expect.objectContaining({ revision: 3 }),
+      }),
+    );
+  });
+
+  it("merges a partial metadata patch into the session row", () => {
+    const upsertTaskSessionFromEvent = vi.fn();
+    const store = makeStore({ upsertTaskSessionFromEvent });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "RUNNING",
+        metadata: { context_compaction_count: 3 },
+      }),
+    );
+
+    const call = upsertTaskSessionFromEvent.mock.calls.at(-1);
+    expect(call?.[1]).toEqual(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ context_compaction_count: 3 }),
+      }),
+    );
   });
 });
 

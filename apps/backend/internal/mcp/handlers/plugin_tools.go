@@ -10,15 +10,22 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/auth/authn"
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/plugins"
+	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/kdlbs/kandev/pluginsdk"
 	"go.uber.org/zap"
+)
+
+const (
+	externalWorkspaceArgumentDescription = "Workspace ID to read. Use list_workspaces_kandev to discover workspace IDs."
+	externalWorkspaceUnavailableMessage  = "workspace is not available"
 )
 
 type pluginToolsListRequest struct {
@@ -38,6 +45,13 @@ type AutomationPluginTools interface {
 // the only plugin surface that supports saved approvals.
 func (h *Handlers) SetAutomationPluginTools(provider AutomationPluginTools) {
 	h.automationPluginTools = provider
+}
+
+// SetPluginToolAuthEnabled reports whether endpoint authentication is
+// enforced. The external workspace scope fails closed when enforcement is on
+// but the request context carries no real identity.
+func (h *Handlers) SetPluginToolAuthEnabled(authEnabled func() bool) {
+	h.pluginToolAuthEnabled = authEnabled
 }
 
 type pluginToolInvocationRequest struct {
@@ -140,14 +154,25 @@ func (h *Handlers) handleListExternalPluginTools(ctx context.Context, msg *ws.Me
 	if h.pluginSvc == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "plugin tools are unavailable", nil)
 	}
-	snapshot, err := h.instancePluginToolSnapshot(func(definition plugintools.Definition) bool {
-		return slices.Contains(definition.Surfaces, string(mcpprofile.SurfaceExternal))
+	snapshot, err := h.filteredPluginToolSnapshot(func(definition plugintools.Definition) bool {
+		return slices.Contains(definition.Surfaces, string(mcpprofile.SurfaceExternal)) &&
+			(definition.IsInstanceRead() || definition.IsWorkspaceRead())
 	})
 	if err != nil {
 		if h.logger != nil {
 			h.logger.Warn("external plugin tool catalog failed", zap.Error(err))
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load plugin tools", nil)
+	}
+	for i := range snapshot.Tools {
+		definition, injectErr := withExternalWorkspaceArgument(snapshot.Tools[i])
+		if injectErr != nil {
+			if h.logger != nil {
+				h.logger.Warn("external plugin tool catalog failed", zap.Error(injectErr))
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load plugin tools", nil)
+		}
+		snapshot.Tools[i] = definition
 	}
 	return ws.NewResponse(msg.ID, msg.Action, snapshot)
 }
@@ -172,8 +197,9 @@ func (h *Handlers) handleListCoordinatorPluginTools(ctx context.Context, msg *ws
 	if !ok {
 		return ws.NewResponse(msg.ID, msg.Action, emptyCoordinatorPluginToolSnapshot(principal.CallerTaskID))
 	}
-	snapshot, err := h.instancePluginToolSnapshot(func(definition plugintools.Definition) bool {
+	snapshot, err := h.filteredPluginToolSnapshot(func(definition plugintools.Definition) bool {
 		return slices.Contains(definition.Surfaces, string(mcpprofile.SurfaceCoordinator)) &&
+			definition.IsInstanceRead() &&
 			binding.AllowsPlugin(definition.PluginID, definition.LocalName, definition.InstallationID, definition.PolicyVersion)
 	})
 	if err != nil {
@@ -186,7 +212,7 @@ func (h *Handlers) handleListCoordinatorPluginTools(ctx context.Context, msg *ws
 	return ws.NewResponse(msg.ID, msg.Action, snapshot)
 }
 
-func (h *Handlers) instancePluginToolSnapshot(eligible func(plugintools.Definition) bool) (plugintools.Snapshot, error) {
+func (h *Handlers) filteredPluginToolSnapshot(eligible func(plugintools.Definition) bool) (plugintools.Snapshot, error) {
 	snapshot, err := h.pluginSvc.AgentToolCatalog()
 	if err != nil {
 		return plugintools.Snapshot{}, err
@@ -194,12 +220,81 @@ func (h *Handlers) instancePluginToolSnapshot(eligible func(plugintools.Definiti
 	filtered := snapshot
 	filtered.Tools = make([]plugintools.Definition, 0, len(snapshot.Tools))
 	for _, definition := range snapshot.Tools {
-		if !definition.IsInstanceRead() || !eligible(definition) {
+		if !eligible(definition) {
 			continue
 		}
 		filtered.Tools = append(filtered.Tools, definition)
 	}
 	return filtered, nil
+}
+
+// withExternalWorkspaceArgument copies one external catalog entry and adds the
+// host-owned workspace argument to workspace reads. The plugin's own catalog
+// keeps the unmodified schema.
+func withExternalWorkspaceArgument(definition plugintools.Definition) (plugintools.Definition, error) {
+	if !definition.IsWorkspaceRead() {
+		return definition, nil
+	}
+	schema, err := addExternalWorkspaceArgument(definition.InputSchema)
+	if err != nil {
+		return definition, fmt.Errorf("plugin tool %q input schema: %w", definition.ExposedName, err)
+	}
+	definition.InputSchema = schema
+	return definition, nil
+}
+
+func addExternalWorkspaceArgument(raw json.RawMessage) (json.RawMessage, error) {
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return nil, err
+	}
+	if document == nil {
+		document = map[string]any{}
+	}
+	properties, _ := document["properties"].(map[string]any)
+	if properties == nil {
+		properties = map[string]any{}
+		document["properties"] = properties
+	}
+	properties[manifest.AgentToolWorkspaceArgument] = map[string]any{
+		"type": "string", "minLength": 1, "description": externalWorkspaceArgumentDescription,
+	}
+	document["required"] = appendRequiredArgument(document["required"], manifest.AgentToolWorkspaceArgument)
+	adjustRootPropertyCount(document, "maxProperties", 1)
+	adjustRootPropertyCount(document, "minProperties", 1)
+	return json.Marshal(document)
+}
+
+// adjustRootPropertyCount widens an object-wide property bound by delta so the
+// injected host argument is accepted alongside the plugin-declared inputs.
+func adjustRootPropertyCount(document map[string]any, field string, delta float64) {
+	value, ok := document[field]
+	if !ok {
+		return
+	}
+	count, ok := value.(float64)
+	if !ok || count < 0 {
+		return
+	}
+	document[field] = count + delta
+}
+
+func appendRequiredArgument(value any, argument string) []string {
+	required := make([]string, 0, 8)
+	switch list := value.(type) {
+	case []any:
+		for _, item := range list {
+			if name, ok := item.(string); ok {
+				required = append(required, name)
+			}
+		}
+	case []string:
+		required = append(required, list...)
+	}
+	if slices.Contains(required, argument) {
+		return required
+	}
+	return append(required, argument)
 }
 
 func emptyCoordinatorPluginToolSnapshot(conversationTaskID string) plugintools.Snapshot {
@@ -356,9 +451,10 @@ func (h *Handlers) handleInvokeAutomationPluginTool(ctx context.Context, msg *ws
 	return pluginToolSuccessResponse(msg, result)
 }
 
-// handleInvokeExternalPluginTool dispatches an instance read that entered
-// through the trusted external MCP endpoint. The invocation deliberately
-// carries no task, session, or workspace identity.
+// handleInvokeExternalPluginTool dispatches an external call that entered
+// through the trusted external MCP endpoint. Instance reads carry no task,
+// session, or workspace identity. Workspace reads carry only the workspace
+// that this handler verified for the authenticated caller.
 func (h *Handlers) handleInvokeExternalPluginTool(ctx context.Context, msg *ws.Message, req pluginToolInvocationRequest) (*ws.Message, error) {
 	if err := h.authorizeExternalPluginToolRequest(ctx); err != nil {
 		h.logPluginToolDenial(ctx, msg.Action, "untrusted_or_forged_transport")
@@ -371,15 +467,111 @@ func (h *Handlers) handleInvokeExternalPluginTool(ctx context.Context, msg *ws.M
 	if h.pluginSvc == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "plugin tools are unavailable", nil)
 	}
-	result, err := h.pluginSvc.InvokeAgentTool(ctx, req.PluginID, req.LocalName, req.Arguments, plugins.AgentToolInvocationContext{
+	definition, found, err := h.lookupPluginToolDefinition(req.PluginID, req.LocalName)
+	if err != nil {
+		if h.logger != nil {
+			h.logger.Warn("external plugin tool catalog failed", zap.Error(err))
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "plugin tools are unavailable", nil)
+	}
+	if !found {
+		h.logPluginToolDenial(ctx, msg.Action, "tool_not_declared")
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "plugin tool is not available", nil)
+	}
+	arguments := req.Arguments
+	invocation := plugins.AgentToolInvocationContext{
 		InvocationID: req.InvocationID,
 		Surface:      string(mcpprofile.SurfaceExternal),
-	})
+	}
+	if definition.InvocationScope == plugintools.InvocationScopeWorkspace {
+		workspaceID, stripped, extractErr := extractExternalWorkspaceArgument(arguments)
+		if extractErr != nil {
+			h.logExternalPluginToolDenial(ctx, msg.Action, "workspace_argument_invalid", req)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest,
+				manifest.AgentToolWorkspaceArgument+" must be a non-empty string", nil)
+		}
+		if authErr := h.authorizeExternalWorkspaceCall(ctx, workspaceID); authErr != nil {
+			h.logExternalPluginToolDenial(ctx, msg.Action, "workspace_unavailable", req)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, externalWorkspaceUnavailableMessage, nil)
+		}
+		arguments = stripped
+		invocation.WorkspaceID = workspaceID
+	}
+	result, err := h.pluginSvc.InvokeAgentTool(ctx, req.PluginID, req.LocalName, arguments, invocation)
 	if err != nil {
 		h.logPluginToolDenial(ctx, msg.Action, "invocation_failed")
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "plugin tool invocation failed", nil)
 	}
 	return pluginToolSuccessResponse(msg, result)
+}
+
+// lookupPluginToolDefinition reads one live descriptor so dispatch follows the
+// catalog's current scope. A missing descriptor fails closed before the RPC.
+func (h *Handlers) lookupPluginToolDefinition(pluginID, localName string) (plugintools.Definition, bool, error) {
+	snapshot, err := h.pluginSvc.AgentToolCatalog()
+	if err != nil {
+		return plugintools.Definition{}, false, err
+	}
+	for _, definition := range snapshot.Tools {
+		if definition.PluginID == pluginID && definition.LocalName == localName {
+			return definition, true, nil
+		}
+	}
+	return plugintools.Definition{}, false, nil
+}
+
+// extractExternalWorkspaceArgument removes the host-owned argument from a copy
+// of the plugin arguments and returns the raw workspace ID.
+func extractExternalWorkspaceArgument(arguments map[string]any) (string, map[string]any, error) {
+	value, ok := arguments[manifest.AgentToolWorkspaceArgument]
+	if !ok {
+		return "", nil, errors.New("workspace argument is absent")
+	}
+	workspaceID, ok := value.(string)
+	if !ok || strings.TrimSpace(workspaceID) == "" {
+		return "", nil, errors.New("workspace argument is not a non-empty string")
+	}
+	stripped := make(map[string]any, len(arguments))
+	for key, item := range arguments {
+		if key == manifest.AgentToolWorkspaceArgument {
+			continue
+		}
+		stripped[key] = item
+	}
+	return workspaceID, stripped, nil
+}
+
+// authorizeExternalWorkspaceCall resolves the workspace and checks the
+// caller's current read permission on every call. With authentication
+// disabled the task service accepts any existing workspace.
+func (h *Handlers) authorizeExternalWorkspaceCall(ctx context.Context, workspaceID string) error {
+	if h.pluginToolAuthEnabled != nil && h.pluginToolAuthEnabled() {
+		identity, ok := authn.IdentityFromContext(ctx)
+		if !ok || identity.Synthetic {
+			return errors.New(externalWorkspaceUnavailableMessage)
+		}
+	}
+	if h.taskSvc == nil {
+		return errors.New(externalWorkspaceUnavailableMessage)
+	}
+	if _, err := h.taskSvc.GetWorkspace(ctx, workspaceID); err != nil {
+		return errors.New(externalWorkspaceUnavailableMessage)
+	}
+	if err := h.taskSvc.AuthorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return errors.New(externalWorkspaceUnavailableMessage)
+	}
+	return nil
+}
+
+func (h *Handlers) logExternalPluginToolDenial(ctx context.Context, action, reason string, req pluginToolInvocationRequest) {
+	if h == nil || h.logger == nil {
+		return
+	}
+	h.logger.Warn("plugin tool request denied",
+		zap.String("action", action),
+		zap.String("reason", reason),
+		zap.String("plugin_id", req.PluginID),
+		zap.String("local_name", req.LocalName))
 }
 
 // handleInvokeCoordinatorPluginTool authorizes one raw coordinator plugin call

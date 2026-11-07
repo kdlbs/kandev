@@ -6,6 +6,7 @@ import { createSessionSlice } from "../session/session-slice";
 import type { SessionCommit, SessionRuntimeSlice } from "./types";
 import type { SessionSlice } from "../session/types";
 import { sessionId as toSessionId, taskId as toTaskId } from "@/lib/types/ids";
+import { userShellScopeKey } from "@/lib/state/user-shell-scope";
 
 function makeStore() {
   return create<SessionRuntimeSlice>()(immer(createSessionRuntimeSlice));
@@ -43,23 +44,54 @@ function commit(sha: string): SessionCommit {
 
 // eslint-disable-next-line max-lines-per-function -- migration cases share one state fixture.
 describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
-  it("setUserShells writes directly under the environmentId key (no session translation)", () => {
+  it("setUserShells writes ordinary rows under the task/environment scope key", () => {
     const store = makeStore();
+    const scope = { environmentId: "env-1", taskId: "task-1" };
 
-    store.getState().setUserShells("env-1", [{ terminalId: "t1" } as never]);
+    store.getState().setUserShells(scope, [{ terminalId: "t1", kind: "ordinary" } as never]);
 
     const state = store.getState();
-    expect(state.userShells.byEnvironmentId["env-1"]).toEqual([{ terminalId: "t1" }]);
-    expect(state.userShells.loaded["env-1"]).toBe(true);
+    expect(state.userShells.byScope[userShellScopeKey(scope)]).toEqual([
+      { terminalId: "t1", kind: "ordinary" },
+    ]);
+    expect(state.userShells.listed[userShellScopeKey(scope)]).toBe(true);
+    expect(state.userShells.byEnvironmentId["env-1"]).toEqual([]);
   });
 
   it("setUserShells with empty environmentId is a no-op", () => {
     const store = makeStore();
 
-    store.getState().setUserShells("", [{ terminalId: "t1" } as never]);
+    store
+      .getState()
+      .setUserShells({ environmentId: "", taskId: "task-1" }, [{ terminalId: "t1" } as never]);
 
     const state = store.getState();
-    expect(state.userShells.byEnvironmentId[""]).toBeUndefined();
+    expect(state.userShells.byScope).toEqual({});
+  });
+
+  it("migrates taskless scope keys from the sessionId fallback to the environment", () => {
+    const store = makeStore();
+    const sessionKey = userShellScopeKey({ environmentId: "sess-1", taskId: null });
+    const envKey = userShellScopeKey({ environmentId: "env-1", taskId: null });
+    store.setState((draft) => {
+      draft.userShells.byScope[sessionKey] = [{ terminalId: "t1" } as never];
+      draft.userShells.dismissedByScope[sessionKey] = { t2: true };
+      draft.userShells.loaded[sessionKey] = true;
+      draft.userShells.listed[sessionKey] = true;
+    });
+
+    store.getState().registerSessionEnvironment("sess-1", "env-1");
+
+    const state = store.getState();
+    expect(state.userShells.byScope[envKey]).toEqual([{ terminalId: "t1" }]);
+    expect(state.userShells.dismissedByScope[envKey]).toEqual({ t2: true });
+    expect(state.userShells.loaded[envKey]).toBe(true);
+    expect(state.userShells.listed[envKey]).toBe(true);
+    expect(state.userShells.byScope[sessionKey]).toBeUndefined();
+
+    // A task-owned scope is never synthesized from taskless data.
+    const taskKey = userShellScopeKey({ environmentId: "env-1", taskId: "task-1" });
+    expect(state.userShells.byScope[taskKey]).toBeUndefined();
   });
 
   it("migrates data from sessionId key to environmentId key", () => {

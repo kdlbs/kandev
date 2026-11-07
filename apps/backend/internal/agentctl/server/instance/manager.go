@@ -398,6 +398,7 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 		TaskID:                     req.TaskID,
 		DisableAskQuestion:         req.DisableAskQuestion,
 		PromptSuggestions:          req.PromptSuggestions,
+		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
 		AssumeMcpSse:               req.AssumeMcpSse,
 		AssumeMcpHttp:              req.AssumeMcpHttp,
 		McpMode:                    req.McpMode,
