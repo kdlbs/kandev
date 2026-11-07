@@ -301,5 +301,12 @@
   "cloneSourceMissing": "원본 워크스페이스를 더 이상 사용할 수 없습니다.",
   "cloneConfigurationUnsupported": "이 워크스페이스에 복제할 수 없는 관리 설정, 사용할 수 없는 기본 구성 또는 워크플로 참조가 있습니다.",
   "cloneFailed": "워크스페이스를 복제할 수 없습니다. 다시 시도하세요.",
-  "workspaceActionsNamed": "{{name}} 작업"
+  "workspaceActionsNamed": "{{name}} 작업",
+  "unansweredInboxTitle": "미답 질문",
+  "unansweredInboxDescription": "에이전트가 답 없이 넘어간 질문을 Needs-you 수신함과 대기 질문을 조회하는 에이전트에게 계속 보여 줍니다. 기본적으로 꺼져 있습니다.",
+  "unansweredInboxEnabled": "미답 질문 표시",
+  "unansweredInboxEnabledDescription": "답은 작업에 새 메시지로 보내고, 같은 질문을 다시 물으면 이전 질문을 대신합니다. 이 질문들은 에이전트나 워크플로 단계를 막지 않습니다.",
+  "unansweredRetentionDays": "자동 닫기 (일)",
+  "unansweredRetentionDescription": "이보다 오래된 미답 질문은 자동으로 닫힙니다. 허용 범위: 1~90일.",
+  "unansweredRetentionInvalid": "1에서 90 사이의 정수를 입력하세요."
 }

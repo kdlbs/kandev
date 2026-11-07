@@ -35,5 +35,14 @@
   "tabLabel": "Precisa de si",
   "failedClauseSome_one": "Esta lista não conta tarefas falhadas. {{count}} tarefa também falhou. Consulte o separador Falhadas.",
   "failedClauseSome_other": "Esta lista não conta tarefas falhadas. {{count}} tarefas também falharam. Consulte o separador Falhadas.",
-  "failedClauseNone": "Esta lista não conta tarefas falhadas. Nenhuma falhou neste espaço de trabalho neste momento; pode consultar o separador Falhadas a qualquer momento."
+  "failedClauseNone": "Esta lista não conta tarefas falhadas. Nenhuma falhou neste espaço de trabalho neste momento; pode consultar o separador Falhadas a qualquer momento.",
+  "unansweredTitle": "Sem resposta (o agente não está à espera)",
+  "unansweredDescription": "Perguntas que um agente deixou para trás antes de alguém responder. Responder envia uma nova mensagem para a tarefa; o agente não está parado à espera destas. Fecham automaticamente depois do período de retenção do espaço de trabalho.",
+  "unansweredLoadFailed": "Não foi possível carregar as perguntas sem resposta. Tente novamente.",
+  "unansweredClose": "Fechar",
+  "unansweredCloseFailed": "Não foi possível fechar esta pergunta. Tente novamente.",
+  "unansweredSendTo": "Enviar resposta para",
+  "unansweredTargetOriginal": "Sessão original",
+  "unansweredTargetTask": "Sessão atual da tarefa",
+  "unansweredSessionEnded": "A sessão que fez esta pergunta terminou."
 }

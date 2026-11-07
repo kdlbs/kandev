@@ -133,6 +133,9 @@ type httpUpdateWorkspaceRequest struct {
 	ACPIdleTimeoutMinutes       *int    `json:"acp_idle_timeout_minutes,omitempty"`
 	// UnitID moves the workspace to another unit, changing who reaches it.
 	UnitID *string `json:"unit_id,omitempty"`
+
+	ClarificationUnansweredInboxEnabled  *bool `json:"clarification_unanswered_inbox_enabled,omitempty"`
+	ClarificationUnansweredRetentionDays *int  `json:"clarification_unanswered_retention_days,omitempty"`
 }
 
 func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
@@ -151,6 +154,9 @@ func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
 		ACPIdleSuspensionEnabled:    body.ACPIdleSuspensionEnabled,
 		ACPIdleTimeoutMinutes:       body.ACPIdleTimeoutMinutes,
 		UnitID:                      body.UnitID,
+
+		ClarificationUnansweredInboxEnabled:  body.ClarificationUnansweredInboxEnabled,
+		ClarificationUnansweredRetentionDays: body.ClarificationUnansweredRetentionDays,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workspace not updated")
@@ -271,6 +277,9 @@ type wsUpdateWorkspaceRequest struct {
 	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
 	ACPIdleSuspensionEnabled    *bool   `json:"acp_idle_suspension_enabled,omitempty"`
 	ACPIdleTimeoutMinutes       *int    `json:"acp_idle_timeout_minutes,omitempty"`
+
+	ClarificationUnansweredInboxEnabled  *bool `json:"clarification_unanswered_inbox_enabled,omitempty"`
+	ClarificationUnansweredRetentionDays *int  `json:"clarification_unanswered_retention_days,omitempty"`
 }
 
 func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -291,10 +300,14 @@ func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Messa
 		DefaultConfigAgentProfileID: req.DefaultConfigAgentProfileID,
 		ACPIdleSuspensionEnabled:    req.ACPIdleSuspensionEnabled,
 		ACPIdleTimeoutMinutes:       req.ACPIdleTimeoutMinutes,
+
+		ClarificationUnansweredInboxEnabled:  req.ClarificationUnansweredInboxEnabled,
+		ClarificationUnansweredRetentionDays: req.ClarificationUnansweredRetentionDays,
 	})
 	if err != nil {
 		h.logger.Error("failed to update workspace", zap.Error(err))
-		if errors.Is(err, service.ErrWorkspaceIdleTimeoutInvalid) {
+		if errors.Is(err, service.ErrWorkspaceIdleTimeoutInvalid) ||
+			errors.Is(err, service.ErrWorkspaceClarificationRetentionInvalid) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workspace", nil)

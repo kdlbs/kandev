@@ -205,7 +205,7 @@ func provideOrchestrator(
 	orchestratorSvc.SetWorkspaceRecoveryErrorReporter(taskSvc)
 	orchestratorSvc.SetWorkspaceRecoveryStatusReader(taskSvc)
 
-	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
+	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log, duplicates: taskRepo}
 	orchestratorSvc.SetMessageCreator(msgCreator)
 	orchestratorSvc.SetTaskTurnErrorRecorder(taskSvc)
 	orchestratorSvc.SetTransientRetryMessageService(taskSvc)

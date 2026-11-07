@@ -41,6 +41,7 @@ import { WorkspacePlacementCard } from "@/components/settings/workspaces/workspa
 import { WorkspaceTeamAccessCard } from "@/components/settings/workspaces/workspace-team-access-card";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { WorkspaceIdlePolicyFormSection } from "./workspace-idle-policy-form-section";
+import { WorkspaceUnansweredInboxSettings } from "./workspace-unanswered-inbox-settings";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
@@ -570,6 +571,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         onEnabledChange={setIdleSuspensionEnabled}
         onTimeoutChange={setIdleTimeoutMinutes}
       />
+      <WorkspaceUnansweredInboxSettings workspace={workspace} canManage={canManage} />
       {/*
         Reads the live store item rather than the form's captured snapshot:
         scopes arrive with hydration, which can land after this

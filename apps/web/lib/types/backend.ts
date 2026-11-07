@@ -291,6 +291,9 @@ export type WorkspacePayload = {
    */
   acp_idle_suspension_enabled?: boolean;
   acp_idle_timeout_minutes?: number;
+  /** Unanswered-question inbox settings; absent from older backends. */
+  clarification_unanswered_inbox_enabled?: boolean;
+  clarification_unanswered_retention_days?: number;
   created_at?: string;
   updated_at?: string;
 };

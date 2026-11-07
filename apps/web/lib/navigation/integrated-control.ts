@@ -1,6 +1,7 @@
 export const INTEGRATED_CONTROL_HREF = "/control";
 export const CONTROL_VIEWS = [
   "overview",
+  "inbox",
   "activity",
   "workspaces",
   "providers",
@@ -9,6 +10,7 @@ export const CONTROL_VIEWS = [
 export type ControlView = (typeof CONTROL_VIEWS)[number];
 export const CONTROL_VIEW_LABEL_KEYS = {
   overview: "sidebar:integratedControl.views.overview",
+  inbox: "sidebar:integratedControl.views.inbox",
   activity: "sidebar:integratedControl.views.activity",
   workspaces: "common:workspaces",
   providers: "sidebar:integratedControl.views.providers",

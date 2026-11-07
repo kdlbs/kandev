@@ -301,5 +301,12 @@
   "cloneSourceMissing": "コピー元のワークスペースは利用できなくなりました。",
   "cloneConfigurationUnsupported": "このワークスペースには、複製できない管理対象の設定、利用できない既定の構成、またはワークフローの参照があります。",
   "cloneFailed": "ワークスペースを複製できませんでした。もう一度お試しください。",
-  "workspaceActionsNamed": "{{name}}の操作"
+  "workspaceActionsNamed": "{{name}}の操作",
+  "unansweredInboxTitle": "未回答の質問",
+  "unansweredInboxDescription": "エージェントが回答なしで先へ進んだ質問を、Needs-you 受信トレイと保留中の質問を一覧するエージェントに表示し続けます。この設定は既定でオフです。",
+  "unansweredInboxEnabled": "未回答の質問を表示",
+  "unansweredInboxEnabledDescription": "回答はタスクへの新しいメッセージとして送信され、同じ質問が再度されると古い方が置き換えられます。これらの質問がエージェントやワークフローのステップを止めることはありません。",
+  "unansweredRetentionDays": "自動で閉じるまでの日数",
+  "unansweredRetentionDescription": "これより古い未回答の質問は自動的に閉じられます。指定できる範囲: 1〜90 日。",
+  "unansweredRetentionInvalid": "1 から 90 までの整数を入力してください。"
 }

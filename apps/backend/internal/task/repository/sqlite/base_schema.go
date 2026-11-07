@@ -614,6 +614,8 @@ const infraSchemaDDL = `
 		default_config_agent_profile_id TEXT DEFAULT '',
 		acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE,
 		acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0),
+		clarification_unanswered_inbox_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		clarification_unanswered_retention_days INTEGER NOT NULL DEFAULT 14 CHECK (clarification_unanswered_retention_days BETWEEN 1 AND 90),
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);

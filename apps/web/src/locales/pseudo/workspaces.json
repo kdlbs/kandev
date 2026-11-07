@@ -301,5 +301,12 @@
   "cloneSourceMissing": "Ţĥē śōũŕćē ŵōŕķśƥàćē ĩś ńō ĺōńĝēŕ àvàĩĺàƀĺē.",
   "cloneConfigurationUnsupported": "Ţĥĩś ŵōŕķśƥàćē ĥàś ḿàńàĝēď śēţţĩńĝś, ũńàvàĩĺàƀĺē ďēƒàũĺţś, ōŕ ŵōŕķƒĺōŵ ŕēƒēŕēńćēś ţĥàţ ćàńńōţ ƀē ćĺōńēď.",
   "cloneFailed": "Ćōũĺď ńōţ ćĺōńē ţĥē ŵōŕķśƥàćē. Ƥĺēàśē ţŕŷ àĝàĩń.",
-  "workspaceActionsNamed": "Àćţĩōńś ƒōŕ {{name}}"
+  "workspaceActionsNamed": "Àćţĩōńś ƒōŕ {{name}}",
+  "unansweredInboxTitle": "Ũńàńśŵēŕēď qũēśţĩōńś",
+  "unansweredInboxDescription": "Ķēēƥ qũēśţĩōńś àń àĝēńţ ḿōvēď ƥàśţ ŵĩţĥōũţ àń àńśŵēŕ vĩśĩƀĺē ĩń ţĥē Ńēēďś-ŷōũ ĩńƀōx àńď ţō àĝēńţś ĺĩśţĩńĝ ƥēńďĩńĝ qũēśţĩōńś. Ţĥĩś śēţţĩńĝ ĩś ōƒƒ ƀŷ ďēƒàũĺţ.",
+  "unansweredInboxEnabled": "Śĥōŵ ũńàńśŵēŕēď qũēśţĩōńś",
+  "unansweredInboxEnabledDescription": "Àńśŵēŕś àŕē śēńţ àś ńēŵ ḿēśśàĝēś ţō ţĥē ţàśķ, àńď à ŕēƥēàţēď qũēśţĩōń ŕēƥĺàćēś ţĥē ōĺďēŕ ćōƥŷ. Ţĥēśē qũēśţĩōńś ńēvēŕ ƀĺōćķ àń àĝēńţ ōŕ à ŵōŕķƒĺōŵ śţēƥ.",
+  "unansweredRetentionDays": "Ćĺōśē àƒţēŕ (ďàŷś)",
+  "unansweredRetentionDescription": "Ũńàńśŵēŕēď qũēśţĩōńś ōĺďēŕ ţĥàń ţĥĩś ćĺōśē àũţōḿàţĩćàĺĺŷ. Àĺĺōŵēď ŕàńĝē: 1 ţō 90 ďàŷś.",
+  "unansweredRetentionInvalid": "Ēńţēŕ à ŵĥōĺē ńũḿƀēŕ ƒŕōḿ 1 ţō 90."
 }

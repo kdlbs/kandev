@@ -323,6 +323,10 @@ export type Workspace = {
   default_config_agent_profile_id?: AgentProfileId | null;
   acp_idle_suspension_enabled: boolean;
   acp_idle_timeout_minutes: number;
+  /** Lists superseded, still-pending questions as unanswered. Off by default. */
+  clarification_unanswered_inbox_enabled?: boolean;
+  /** Days before an unanswered question closes on its own (1 to 90, default 14). */
+  clarification_unanswered_retention_days?: number;
   office_workflow_id?: WorkflowId;
   created_at: string;
   updated_at: string;

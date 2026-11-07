@@ -264,6 +264,9 @@ type UpdateWorkspaceRequest struct {
 	DefaultConfigAgentProfileID *string    `json:"default_config_agent_profile_id,omitempty"`
 	ACPIdleSuspensionEnabled    *bool      `json:"acp_idle_suspension_enabled,omitempty"`
 	ACPIdleTimeoutMinutes       *int       `json:"acp_idle_timeout_minutes,omitempty"`
+	// Unanswered-clarification inbox settings; nil keeps the stored value.
+	ClarificationUnansweredInboxEnabled  *bool `json:"clarification_unanswered_inbox_enabled,omitempty"`
+	ClarificationUnansweredRetentionDays *int  `json:"clarification_unanswered_retention_days,omitempty"`
 	// Visibility is "private" or "org". Unknown values normalize to private:
 	// unrecognized input must never widen access.
 	Visibility *string `json:"visibility,omitempty"`

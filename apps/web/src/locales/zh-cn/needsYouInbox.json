@@ -35,5 +35,14 @@
   "tabLabel": "需要你处理",
   "failedClauseSome_one": "此列表不计入失败的任务。{{count}} 个任务也失败了,请查看失败标签页。",
   "failedClauseSome_other": "此列表不计入失败的任务。{{count}} 个任务也失败了,请查看失败标签页。",
-  "failedClauseNone": "此列表不计入失败的任务。此工作区目前没有失败的任务,您可以随时查看失败标签页。"
+  "failedClauseNone": "此列表不计入失败的任务。此工作区目前没有失败的任务,您可以随时查看失败标签页。",
+  "unansweredTitle": "未回答（智能体未在等待）",
+  "unansweredDescription": "在有人回答之前智能体就已继续工作的问题。回答会作为新消息发送到任务；智能体不会因这些问题而暂停。超过工作区的保留期后会自动关闭。",
+  "unansweredLoadFailed": "无法加载未回答的问题。请重试。",
+  "unansweredClose": "关闭",
+  "unansweredCloseFailed": "无法关闭此问题。请重试。",
+  "unansweredSendTo": "回答发送到",
+  "unansweredTargetOriginal": "原会话",
+  "unansweredTargetTask": "任务的当前会话",
+  "unansweredSessionEnded": "提出此问题的会话已结束。"
 }
