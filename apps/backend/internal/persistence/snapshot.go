@@ -2,6 +2,8 @@ package persistence
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +20,20 @@ import (
 )
 
 const (
+	snapshotFilesystemComponentMaxBytes = 255
+	snapshotSQLiteJournalSuffix         = "-journal"
+	// Reserve room for SQLite's sibling journal within NAME_MAX.
+	snapshotFilenameMaxBytes            = snapshotFilesystemComponentMaxBytes - len(snapshotSQLiteJournalSuffix)
+	snapshotFilenamePrefix              = "kandev-"
+	snapshotFilenameSeparator           = "-"
+	snapshotFilenameTimestampFormat     = "20060102T150405Z"
+	snapshotFilenameSuffix              = ".db"
+	snapshotVersionDigestHexChars       = 12
+	snapshotFilenameFixedBytes          = len(snapshotFilenamePrefix) + len(snapshotFilenameSeparator) + len(snapshotFilenameTimestampFormat) + len(snapshotFilenameSuffix)
+	snapshotVersionComponentMaxBytes    = snapshotFilenameMaxBytes - snapshotFilenameFixedBytes
+	snapshotVersionDigestSuffixMaxBytes = len(snapshotFilenameSeparator) + snapshotVersionDigestHexChars
+	snapshotVersionReadablePrefixBytes  = snapshotVersionComponentMaxBytes - snapshotVersionDigestSuffixMaxBytes
+
 	// bootStagingDirPrefix names the private directory createPreMigrationBackup
 	// reserves before the snapshot copy writes the staged backup into it.
 	bootStagingDirPrefix = ".kandev-backup-"
@@ -36,9 +52,31 @@ func snapshotPath(backupDir, fromVersion string) string {
 	if v == "" {
 		v = "pre-meta"
 	}
-	ts := time.Now().UTC().Format("20060102T150405Z")
-	name := fmt.Sprintf("kandev-%s-%s.db", v, ts)
+	v = snapshotVersionComponent(v)
+	ts := time.Now().UTC().Format(snapshotFilenameTimestampFormat)
+	name := snapshotFilenamePrefix + v + snapshotFilenameSeparator + ts + snapshotFilenameSuffix
 	return filepath.Join(backupDir, name)
+}
+
+// snapshotVersionComponent keeps backup filenames within the portable component limit.
+func snapshotVersionComponent(version string) string {
+	var component strings.Builder
+	component.Grow(len(version))
+	for _, char := range version {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9', strings.ContainsRune("._-+", char):
+			component.WriteRune(char)
+		default:
+			component.WriteByte('_')
+		}
+	}
+	normalized := component.String()
+	if len(normalized) <= snapshotVersionComponentMaxBytes {
+		return normalized
+	}
+	digest := sha256.Sum256([]byte(version))
+	suffix := snapshotFilenameSeparator + hex.EncodeToString(digest[:])[:snapshotVersionDigestHexChars]
+	return normalized[:snapshotVersionReadablePrefixBytes] + suffix
 }
 
 // SnapshotSQLite copies the live database to path using VACUUM INTO,
