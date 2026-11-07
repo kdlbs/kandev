@@ -1,7 +1,7 @@
 ---
 id: "01-carry-entry-identity"
 title: "Carry the committed entry identity"
-status: in_progress
+status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
