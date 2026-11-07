@@ -1929,7 +1929,7 @@ type CredentialsManager interface {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
-	ResourceCircuitKey string
+	ExecutionGrade     string
 	ProfileID          string
 	ProfileName        string
 	AgentID            string
@@ -1937,6 +1937,7 @@ type AgentProfileInfo struct {
 	Model              string // applied through ACP model selection at session start
 	Mode               string // applied via ACP session/set_mode at session start (empty = use agent default)
 	ConfigOptions      map[string]string
+	ResourceCircuitKey string
 	// FallbackModel is the optional single ACP model ID to switch to when
 	// Model is unavailable. Ignored when AutoFallback is enabled.
 	FallbackModel string

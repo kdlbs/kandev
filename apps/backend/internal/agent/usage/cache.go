@@ -32,6 +32,7 @@ const maxStaleUsageAge = 30 * time.Minute
 // being served the stale value while fresh callers share the recent error.
 type cachedEntry struct {
 	usage        *ProviderUsage
+	previous     *ProviderUsage
 	successAt    time.Time
 	err          error
 	errAt        time.Time
@@ -116,6 +117,23 @@ func (c *UsageCache) GetOrFetchWithin(
 	return usage, nil
 }
 
+// Refresh re-reads one account after a classified limit, replacing the cached
+// success so the next admission sees the provider's current counter.
+func (c *UsageCache) Refresh(ctx context.Context, key string, fetch func(context.Context) (*ProviderUsage, error)) (*ProviderUsage, error) {
+	lock := c.keyLock(key)
+	lock.Lock()
+	defer lock.Unlock()
+	usage, err := fetch(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			c.storeFailure(key, err)
+		}
+		return nil, err
+	}
+	c.storeSuccess(key, usage)
+	return usage, nil
+}
+
 func (c *UsageCache) keyLock(key string) *sync.Mutex {
 	c.fetchMu.Lock()
 	defer c.fetchMu.Unlock()
@@ -165,7 +183,11 @@ func (c *UsageCache) lookup(key string, maxAge time.Duration) (*ProviderUsage, b
 func (c *UsageCache) storeSuccess(key string, usage *ProviderUsage) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries[key] = &cachedEntry{usage: usage, successAt: time.Now()}
+	var previous *ProviderUsage
+	if entry := c.entries[key]; entry != nil {
+		previous = cloneProviderUsage(entry.usage)
+	}
+	c.entries[key] = &cachedEntry{usage: usage, previous: previous, successAt: time.Now()}
 }
 
 // storeFailure records the error alongside — not instead of — any previous

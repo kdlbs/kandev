@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"strings"
 	"time"
 
@@ -416,17 +417,7 @@ func (s *Service) preparePromptRequest(ctx context.Context, utilityID string, tm
 	// Use agent-specific values when fully configured. If the model is empty,
 	// treat the default agent/model as an inseparable pair so a default model
 	// from one provider is never sent to another provider's ACP config.
-	agentCLI := agent.AgentID
-	model := agent.Model
-	if defaults != nil {
-		if model == "" {
-			agentCLI = defaults.AgentID
-			model = defaults.Model
-		} else if agentCLI == "" {
-			agentCLI = defaults.AgentID
-		}
-	}
-
+	agentCLI, model := promptAgentAndModel(agent, defaults)
 	return &PromptRequest{
 		UtilityID:      utilityID,
 		ResolvedPrompt: resolvedPrompt,
@@ -435,8 +426,26 @@ func (s *Service) preparePromptRequest(ctx context.Context, utilityID string, tm
 	}, nil
 }
 
+// promptAgentAndModel keeps a blank model paired with the default provider so a
+// default model is never sent to another provider's ACP config.
+func promptAgentAndModel(agent *models.UtilityAgent, defaults *DefaultUtilitySettings) (string, string) {
+	agentCLI := agent.AgentID
+	model := agent.Model
+	if defaults == nil {
+		return agentCLI, model
+	}
+	if model == "" {
+		return defaults.AgentID, defaults.Model
+	}
+	if agentCLI == "" {
+		agentCLI = defaults.AgentID
+	}
+	return agentCLI, model
+}
+
 // PromptRequest contains the prepared request for executing a utility prompt.
 type PromptRequest struct {
+	UsagePolicy        *usage.ExecutionUsagePolicy `json:"-"`
 	CallID             string
 	UtilityID          string
 	ResolvedPrompt     string
@@ -446,6 +455,9 @@ type PromptRequest struct {
 	ExecutionProfileID string
 	RouteSessionID     string
 	RouteGeneration    int64
+	// DeferSelectionCompletion keeps the caller responsible for ending a
+	// selection chain after it has durably accepted the result.
+	DeferSelectionCompletion bool
 }
 
 // CreateCall creates a new call record (for tracking history).

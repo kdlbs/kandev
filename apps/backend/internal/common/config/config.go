@@ -558,8 +558,10 @@ type FeaturesConfig struct {
 	DynamicAgentRouting bool `mapstructure:"dynamic_agent_routing" json:"dynamicAgentRouting"`
 	DynamicProfileTiers bool `mapstructure:"dynamic_profile_tiers" json:"dynamicProfileTiers"`
 
-	// ProviderUsageLimits exposes account-aware provider usage in agent settings.
-	// This first increment is read-only and does not change execution admission.
+	// ProviderUsageLimits exposes account-aware provider usage in agent settings
+	// and gates configured provider allowances, classified limit observations,
+	// and usage-aware candidate eligibility. Off in every embedded profile until
+	// an installation opts in.
 	ProviderUsageLimits bool `mapstructure:"provider_usage_limits" json:"providerUsageLimits"`
 
 	// ClaudeBackgroundPromptHandoff gates the high-risk experiment that lets a

@@ -10,6 +10,7 @@ import (
 )
 
 const runExecutionOwnerMetadataKey = "execution_owner"
+const stopReasonRunRecovery = "office_run_recovery"
 
 // Runtime inventory and executor correlation use the durable owner's session.
 // AgentExecution.SessionID remains exclusively a task-session identity.
@@ -50,6 +51,15 @@ func (m *Manager) StopRunOwnerForRecovery(ctx context.Context, owner ExecutionOw
 	if err := validateRunRecoveryOwner(row, owner); err != nil {
 		return err
 	}
+	if execution, tracked := m.executionStore.Get(row.AgentExecutionID); tracked {
+		if execution.OwnerSnapshot() != owner || execution.TaskID != "" || execution.SessionID != "" {
+			return errors.New("run recovery tracked owner mismatch")
+		}
+		// Tracked owners must use the lifecycle stop path so a successful
+		// runtime stop also persists terminal state and removes its census client.
+		// Failed stops or persistence keep ownership for a subsequent retry.
+		return m.StopAgentWithReason(ctx, row.AgentExecutionID, stopReasonRunRecovery, false)
+	}
 	if row.Status == models.ExecutorRunningStatusStopped {
 		return nil
 	}
@@ -61,7 +71,7 @@ func (m *Manager) StopRunOwnerForRecovery(ctx context.Context, owner ExecutionOw
 		InstanceID: row.AgentExecutionID, SessionID: row.SessionID,
 		StandaloneInstanceID: row.AgentExecutionID, StandalonePort: row.AgentctlPort,
 		ContainerID: row.ContainerID, RuntimeName: row.Runtime, Metadata: row.Metadata,
-		WorkspacePath: row.WorktreePath, StopReason: "office_run_recovery",
+		WorkspacePath: row.WorktreePath, StopReason: stopReasonRunRecovery,
 	}
 	if err := m.stopWorkspaceRuntime(ctx, backend, instance, true); err != nil {
 		return fmt.Errorf("stop predecessor run execution: %w", err)

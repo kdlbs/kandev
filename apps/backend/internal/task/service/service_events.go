@@ -468,6 +468,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		"description":        task.Description,
 		"state":              string(task.State),
 		"priority":           task.Priority,
+		"execution_grade":    task.ExecutionGrade,
 		"position":           task.Position,
 		"wip_admitted":       task.WIPAdmitted,
 		"created_at":         task.CreatedAt.Format(time.RFC3339Nano),

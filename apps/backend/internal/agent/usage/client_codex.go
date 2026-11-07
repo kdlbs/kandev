@@ -85,7 +85,8 @@ func (c *CodexUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, erro
 		return nil, fmt.Errorf("codex usage: no ChatGPT OAuth tokens in %s", c.authPath)
 	}
 
-	body, statusErr, err := c.getUsage(ctx, auth.Tokens)
+	selected := auth.Tokens
+	body, statusErr, err := c.getUsage(ctx, selected)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +95,8 @@ func (c *CodexUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, erro
 		if refreshErr != nil {
 			return nil, fmt.Errorf("codex usage: refresh token: %w", refreshErr)
 		}
-		body, statusErr, err = c.getUsage(ctx, refreshed)
+		selected = refreshed
+		body, statusErr, err = c.getUsage(ctx, selected)
 		if err != nil {
 			return nil, err
 		}
@@ -102,7 +104,11 @@ func (c *CodexUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, erro
 	if statusErr != nil {
 		return nil, statusErr
 	}
-	return parseCodexUsage(body, time.Now())
+	result, err := parseCodexUsage(body, time.Now())
+	if result != nil {
+		result.AccountRef = selected.AccountID
+	}
+	return result, err
 }
 
 // getUsage returns the response body for an OK response and nil otherwise, so

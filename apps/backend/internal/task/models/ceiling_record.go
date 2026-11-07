@@ -78,7 +78,7 @@ func CeilingRecordKeys(deferral CeilingDeferral) map[string]interface{} {
 		CeilingLaunchKindKey:     string(deferral.Kind),
 		CeilingLaunchOriginKey:   deferral.Origin,
 		CeilingReasonCodeKey:     deferral.ReasonCode,
-		CeilingQueuedAtKey:       deferral.QueuedAt.UTC().Format(time.RFC3339),
+		CeilingQueuedAtKey:       deferral.QueuedAt.UTC().Format(time.RFC3339Nano),
 		CeilingLaunchPayloadKey:  deferral.Payload,
 		CeilingValueAtRefusalKey: deferral.Ceiling,
 	}

@@ -3,6 +3,7 @@ package dynamic
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"strings"
 	"sync"
 	"time"
@@ -114,7 +115,7 @@ func (c *Conductor) Launch(ctx context.Context, request ConductorLaunch) (Conduc
 	if c.engine == nil || c.profiles == nil || c.downstream == nil {
 		return ConductorResult{}, errors.New("dynamic conductor is not configured")
 	}
-	profile, err := c.profiles.LoadDynamicProfile(ctx, request.LogicalProfileID)
+	profile, err := c.loadProfile(ctx, request.LogicalProfileID, request.SessionID)
 	if err != nil {
 		return ConductorResult{}, err
 	}
@@ -147,9 +148,12 @@ func (c *Conductor) LaunchSelected(ctx context.Context, request ConductorSelecte
 	if c.engine == nil || c.profiles == nil || c.downstream == nil {
 		return ConductorResult{}, errors.New("dynamic conductor is not configured")
 	}
-	profile, err := c.profiles.LoadDynamicProfile(ctx, request.LogicalProfileID)
+	profile, err := c.loadProfile(ctx, request.LogicalProfileID, request.SessionID)
 	if err != nil {
 		return ConductorResult{}, err
+	}
+	if request.Decision.UsagePolicy == nil {
+		request.Decision.UsagePolicy = selectionUsagePolicy(profile, request.Decision.ExecutionProfileID)
 	}
 	var continuation Continuation
 	if request.PrebuiltContinuation != nil {
@@ -201,7 +205,7 @@ func (c *Conductor) RouteAfterFailure(
 	if c.engine == nil || c.profiles == nil {
 		return RouteDecision{}, errors.New("dynamic conductor is not configured")
 	}
-	profile, err := c.profiles.LoadDynamicProfile(ctx, logicalProfileID)
+	profile, err := c.loadProfile(ctx, logicalProfileID, sessionID)
 	if err != nil {
 		return RouteDecision{}, err
 	}
@@ -229,7 +233,7 @@ func (c *Conductor) RouteAfterUnclassifiedFailure(
 			ctx, sessionID, logicalProfileID, currentExecutionProfileID, expectedGeneration, failure, evidence,
 		)
 	}
-	profile, err := c.profiles.LoadDynamicProfile(ctx, logicalProfileID)
+	profile, err := c.loadProfile(ctx, logicalProfileID, sessionID)
 	if err != nil {
 		return RouteDecision{}, err
 	}
@@ -271,7 +275,7 @@ func (c *Conductor) launchWithFallback(
 			c.engine.ReleaseProbe(current, false)
 			return DownstreamExecution{}, current, ErrExecutionProfileHeld
 		}
-		execution, err := c.downstream.Launch(ctx, DownstreamLaunch{
+		execution, err := c.downstream.Launch(usage.WithSelectedUsagePolicy(ctx, current.UsagePolicy), DownstreamLaunch{
 			ExecutionProfileID: current.ExecutionProfileID,
 			AttemptID:          uuid.NewString(),
 			Decision:           current,
@@ -805,4 +809,24 @@ func boundedTailN(value string, limit int) string {
 		value = value[cut:]
 	}
 	return strings.ToValidUTF8(value, "")
+}
+
+// Optional scoped loader preserves older embeddings and supplies original
+// identity only at real conductor selection/recovery boundaries.
+func (c *Conductor) loadProfile(ctx context.Context, profileID, sessionID string) (Profile, error) {
+	if scoped, ok := c.profiles.(interface {
+		LoadDynamicProfileForSession(context.Context, string, string) (Profile, error)
+	}); ok {
+		return scoped.LoadDynamicProfileForSession(ctx, profileID, sessionID)
+	}
+	return c.profiles.LoadDynamicProfile(ctx, profileID)
+}
+
+func selectionUsagePolicy(profile Profile, candidateID string) *usage.ExecutionUsagePolicy {
+	for _, candidate := range profile.Candidates {
+		if candidate.ID == candidateID {
+			return usage.CloneExecutionUsagePolicy(candidate.UsagePolicy)
+		}
+	}
+	return nil
 }

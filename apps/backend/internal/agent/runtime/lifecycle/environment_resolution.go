@@ -30,6 +30,15 @@ func (m *Manager) resolveStrictEnvironment(
 	agentConfig agents.Agent,
 	profileInfo *AgentProfileInfo,
 ) (map[string]string, error) {
+	resolved, records, err := m.resolveStrictEnvironmentSnapshot(ctx, executionID, req, agentConfig, profileInfo)
+	if err == nil {
+		m.logEnvironmentOverrides(req, records)
+	}
+	return resolved, err
+}
+
+// Shared composition, without launch metrics or payload files.
+func (m *Manager) resolveStrictEnvironmentSnapshot(ctx context.Context, executionID string, req *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo) (map[string]string, []runtimeenv.OverrideRecord, error) {
 	definitions := append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...)
 	requestEnv := req.Env
 	if req.managedGoCachePath != "" {
@@ -54,10 +63,9 @@ func (m *Manager) resolveStrictEnvironment(
 		if errors.As(err, &secretErr) && secretErr.Origin == runtimeenv.OriginAgentProfile && profileInfo != nil && profileInfo.ProfileName != "" {
 			err = fmt.Errorf("agent profile %q: %w", profileInfo.ProfileName, err)
 		}
-		return nil, fmt.Errorf("resolve task environment: %w", err)
+		return nil, nil, fmt.Errorf("resolve task environment: %w", err)
 	}
-	m.logEnvironmentOverrides(req, records)
-	return resolved, nil
+	return resolved, records, nil
 }
 
 // logEnvironmentOverrides emits the AC-23 structured log and the AC-24

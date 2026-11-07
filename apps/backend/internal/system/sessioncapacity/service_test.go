@@ -3,6 +3,7 @@ package sessioncapacity
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -20,10 +21,10 @@ func TestServicePersistsBeforeApplyingAndRetainsRememberedMaximum(t *testing.T) 
 	if err != nil {
 		t.Fatalf("enable: %v", err)
 	}
-	if response.Settings != (Settings{Enabled: true, MaxSessions: DefaultMaxSessions}) {
+	if !reflect.DeepEqual(response.Settings, (Settings{Enabled: true, MaxSessions: DefaultMaxSessions, Policy: PolicyAutomatic, GradeLimits: map[string]int{}})) {
 		t.Fatalf("enabled settings = %+v", response.Settings)
 	}
-	if response.Effective != (Effective{Enabled: true, MaxSessions: DefaultMaxSessions, Source: SourceSetting}) {
+	if !reflect.DeepEqual(response.Effective, (Effective{Enabled: true, MaxSessions: DefaultMaxSessions, Source: SourceSetting, Policy: PolicyAutomatic, GradeLimits: map[string]int{}})) {
 		t.Fatalf("enabled effective = %+v", response.Effective)
 	}
 	if target.Capacity() != DefaultMaxSessions {
@@ -34,7 +35,7 @@ func TestServicePersistsBeforeApplyingAndRetainsRememberedMaximum(t *testing.T) 
 	if err != nil {
 		t.Fatalf("change maximum: %v", err)
 	}
-	if response.Settings != (Settings{Enabled: true, MaxSessions: 9}) || target.Capacity() != 9 {
+	if !reflect.DeepEqual(response.Settings, (Settings{Enabled: true, MaxSessions: 9, Policy: PolicyAutomatic, GradeLimits: map[string]int{}})) || target.Capacity() != 9 {
 		t.Fatalf("changed maximum response=%+v live=%d", response, target.Capacity())
 	}
 
@@ -42,10 +43,10 @@ func TestServicePersistsBeforeApplyingAndRetainsRememberedMaximum(t *testing.T) 
 	if err != nil {
 		t.Fatalf("disable: %v", err)
 	}
-	if response.Settings != (Settings{Enabled: false, MaxSessions: 9}) {
+	if !reflect.DeepEqual(response.Settings, (Settings{Enabled: false, MaxSessions: 9, Policy: PolicyAutomatic, GradeLimits: map[string]int{}})) {
 		t.Fatalf("disabled settings = %+v, want remembered maximum", response.Settings)
 	}
-	if response.Effective != (Effective{Enabled: false, MaxSessions: 0, Source: SourceSetting}) {
+	if !reflect.DeepEqual(response.Effective, (Effective{Enabled: false, MaxSessions: 0, Source: SourceSetting, Policy: PolicyAutomatic, GradeLimits: map[string]int{}})) {
 		t.Fatalf("disabled effective = %+v", response.Effective)
 	}
 	if target.Capacity() != 0 {
@@ -138,7 +139,7 @@ func TestServiceSerializesConcurrentPartialUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get final settings: %v", err)
 	}
-	if response.Settings != (Settings{Enabled: true, MaxSessions: 8}) || target.Capacity() != 8 {
+	if !reflect.DeepEqual(response.Settings, (Settings{Enabled: true, MaxSessions: 8, Policy: PolicyAutomatic, GradeLimits: map[string]int{}})) || target.Capacity() != 8 {
 		t.Fatalf("final response=%+v live=%d", response, target.Capacity())
 	}
 }

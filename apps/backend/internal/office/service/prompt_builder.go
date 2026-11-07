@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -703,12 +702,7 @@ func taskRef(pc *PromptContext) string {
 
 // ParseRunPayload extracts common fields from a run payload JSON.
 func ParseRunPayload(payloadJSON string) map[string]string {
-	result := make(map[string]string)
-	if payloadJSON == "" || payloadJSON == "{}" {
-		return result
-	}
-	_ = json.Unmarshal([]byte(payloadJSON), &result)
-	return result
+	return runsmodels.ParsePayload(payloadJSON)
 }
 
 // continuationSummaryPromptCap is the byte slice of the continuation

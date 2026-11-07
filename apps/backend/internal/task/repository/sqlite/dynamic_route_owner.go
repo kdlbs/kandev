@@ -24,6 +24,8 @@ func (r *Repository) routeOwnerColumns(ctx context.Context, tx *sqlx.Tx, routeID
 	switch parts[1] {
 	case "utility-call":
 		query = `SELECT id FROM utility_agent_calls WHERE id = ?`
+	case "review-run":
+		query = `SELECT id FROM task_review_runs WHERE id = ?`
 	case "office-run-session":
 		query = `SELECT id FROM office_run_sessions WHERE id = ?`
 	default:

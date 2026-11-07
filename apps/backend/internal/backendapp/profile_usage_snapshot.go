@@ -15,11 +15,12 @@ import (
 )
 
 const (
-	snapshotCodexACPAgentID       = "codex-acp"
-	snapshotCodexAppServerAgentID = "codex-app-server"
-	snapshotHostDefault           = "host_default"
-	snapshotWindowsOS             = "windows"
-	snapshotBindingUnknown        = "binding_unknown"
+	snapshotCodexACPAgentID        = "codex-acp"
+	snapshotCodexAppServerAgentID  = "codex-app-server"
+	snapshotHostDefault            = "host_default"
+	snapshotWindowsOS              = "windows"
+	snapshotBindingUnknown         = "binding_unknown"
+	snapshotModelClassSubscription = "subscription"
 )
 
 // profileUsageSnapshot is composed only for the enabled native read surface.
@@ -134,7 +135,7 @@ func (s *profileUsageSnapshot) bindWithProviderSelection(profile *settingsmodels
 		b.entry.Provider = "anthropic"
 		if client.HasSubscriptionCredentials() {
 			b.client, b.key = client, agentusage.CacheKey("anthropic", path)
-			b.entry.ModelClass = "subscription"
+			b.entry.ModelClass = snapshotModelClassSubscription
 		}
 	case snapshotCodexACPAgentID, snapshotCodexAppServerAgentID:
 		path := filepath.Join(s.home, ".codex", "auth.json")
@@ -142,7 +143,7 @@ func (s *profileUsageSnapshot) bindWithProviderSelection(profile *settingsmodels
 		b.entry.Provider = "openai"
 		if client.HasSubscriptionCredentials() {
 			b.client, b.key = client, agentusage.CacheKey("openai", path)
-			b.entry.ModelClass = "subscription"
+			b.entry.ModelClass = snapshotModelClassSubscription
 		}
 	case "opencode-acp":
 		return s.openCodeBinding(b)
@@ -153,7 +154,7 @@ func (s *profileUsageSnapshot) bindWithProviderSelection(profile *settingsmodels
 	if b.client == nil {
 		b.entry.State, b.entry.Reason = "unavailable", "credential_missing"
 	} else {
-		b.entry.Source = "provider_api"
+		b.entry.Source = usageSourceProviderAPI
 	}
 	return b
 }
@@ -167,13 +168,13 @@ func (s *profileUsageSnapshot) openCodeBinding(b snapshotBinding) snapshotBindin
 	model := strings.TrimSpace(b.profile.Model)
 	switch {
 	case strings.HasPrefix(model, "opencode-go/"):
-		b.entry.Provider, b.entry.Plan = "opencode-go", "go"
+		b.entry.Provider, b.entry.Plan = accountPrefixOpenCodeGo, "go"
 		b.entry.BindingScope = snapshotHostDefault
-		b.key = agentusage.CacheKey("opencode-go", path)
+		b.key = agentusage.CacheKey(accountPrefixOpenCodeGo, path)
 		if strings.HasSuffix(model, "-free") {
 			b.entry.State, b.entry.ModelClass = "no_usage_api", "free"
 		} else {
-			b.entry.Source, b.entry.ModelClass = "provider_api", "paid"
+			b.entry.Source, b.entry.ModelClass = usageSourceProviderAPI, "paid"
 			b.client = agentusage.NewOpenCodeGoUsageClient(path)
 		}
 	case strings.HasPrefix(model, "opencode/"):
@@ -210,7 +211,7 @@ func (s *profileUsageSnapshot) read(ctx context.Context, b snapshotBinding, entr
 			continue
 		}
 		converted := dto.AgentProfileUsageWindowDTO{Label: window.Label, UtilizationPct: window.UtilizationPct,
-			Scope: window.Scope, LimitReached: window.LimitReached}
+			Scope: string(window.Scope), LimitReached: window.LimitReached}
 		if window.Observation.ResetAtObserved && !window.ResetAt.IsZero() {
 			resetAt := window.ResetAt
 			converted.ResetAt = &resetAt

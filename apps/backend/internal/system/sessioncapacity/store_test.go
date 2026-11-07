@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 )
@@ -19,11 +20,11 @@ func TestStoreSaveLoadAndRejectsInvalidPersistedRecords(t *testing.T) {
 		t.Fatalf("load absent = %+v, %v; want nil, nil", settings, err)
 	}
 
-	if err := store.Save(ctx, Settings{Enabled: true, MaxSessions: 8}); err != nil {
+	if err := store.Save(ctx, Settings{Enabled: true, MaxSessions: 8, Policy: PolicyAutomatic, GradeLimits: map[string]int{}}); err != nil {
 		t.Fatalf("save settings: %v", err)
 	}
 	settings, err = store.Load(ctx)
-	if err != nil || settings == nil || *settings != (Settings{Enabled: true, MaxSessions: 8}) {
+	if err != nil || settings == nil || !reflect.DeepEqual(*settings, (Settings{Enabled: true, MaxSessions: 8, Policy: PolicyAutomatic, GradeLimits: map[string]int{}})) {
 		t.Fatalf("load saved = %+v, %v", settings, err)
 	}
 
@@ -48,12 +49,12 @@ func TestStoreUpdateWithoutCompareAndSwapUsesFallback(t *testing.T) {
 		if current != nil {
 			t.Fatalf("current = %+v, want absent", current)
 		}
-		return Settings{Enabled: true, MaxSessions: 6}, nil
+		return Settings{Enabled: true, MaxSessions: 6, Policy: PolicyAutomatic, GradeLimits: map[string]int{}}, nil
 	})
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if updated != (Settings{Enabled: true, MaxSessions: 6}) {
+	if !reflect.DeepEqual(updated, (Settings{Enabled: true, MaxSessions: 6, Policy: PolicyAutomatic, GradeLimits: map[string]int{}})) {
 		t.Fatalf("updated = %+v", updated)
 	}
 }
@@ -71,7 +72,7 @@ func TestStoreUpdateUsesCASAndPreservesConcurrentPartialChanges(t *testing.T) {
 		<-start
 		_, err := store.Update(context.Background(), func(current *Settings) (Settings, error) {
 			if current == nil {
-				return Settings{}, fmt.Errorf("expected saved settings")
+				return Settings{Policy: PolicyAutomatic, GradeLimits: map[string]int{}}, fmt.Errorf("expected saved settings")
 			}
 			current.Enabled = true
 			return *current, nil
@@ -82,7 +83,7 @@ func TestStoreUpdateUsesCASAndPreservesConcurrentPartialChanges(t *testing.T) {
 		<-start
 		_, err := store.Update(context.Background(), func(current *Settings) (Settings, error) {
 			if current == nil {
-				return Settings{}, fmt.Errorf("expected saved settings")
+				return Settings{Policy: PolicyAutomatic, GradeLimits: map[string]int{}}, fmt.Errorf("expected saved settings")
 			}
 			current.MaxSessions = 8
 			return *current, nil
@@ -100,7 +101,7 @@ func TestStoreUpdateUsesCASAndPreservesConcurrentPartialChanges(t *testing.T) {
 	if err != nil || settings == nil {
 		t.Fatalf("load concurrent result = %+v, %v", settings, err)
 	}
-	if *settings != (Settings{Enabled: true, MaxSessions: 8}) {
+	if !reflect.DeepEqual(*settings, (Settings{Enabled: true, MaxSessions: 8, Policy: PolicyAutomatic, GradeLimits: map[string]int{}})) {
 		t.Fatalf("concurrent result = %+v, want both fields preserved", *settings)
 	}
 }
@@ -110,7 +111,7 @@ func TestStoreUpdateReturnsInvalidPersistedWithoutTreatingItAsAbsent(t *testing.
 	raw.set([]byte(`{"enabled":true,"max_sessions":0}`), true)
 	_, err := NewStore(raw).Update(context.Background(), func(*Settings) (Settings, error) {
 		t.Fatal("update callback called for invalid persisted record")
-		return Settings{}, nil
+		return Settings{Policy: PolicyAutomatic, GradeLimits: map[string]int{}}, nil
 	})
 	if !errors.Is(err, ErrInvalidPersisted) {
 		t.Fatalf("update error = %v, want ErrInvalidPersisted", err)

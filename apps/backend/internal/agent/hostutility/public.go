@@ -13,7 +13,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
-	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/acpprovider"
@@ -31,19 +30,9 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 	if err != nil {
 		return nil, err
 	}
-	cliFlags, err := cliflags.Resolve(profile.CLIFlags)
+	cliFlags, prefix, _, err := agentctlutil.ProfileInferenceEnvironment(profile.CLIFlags, profile.CommandPrefix, profile.EnvVars)
 	if err != nil {
-		return nil, fmt.Errorf("resolve profile cli flags: %w", err)
-	}
-	var prefix []string
-	if profile.CommandPrefix != "" {
-		if err := cliflags.ValidateCommandPrefix(profile.CommandPrefix); err != nil {
-			return nil, err
-		}
-		prefix, err = cliflags.Tokenise(profile.CommandPrefix)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 	env, err := m.resolveProfileEnvironment(ctx, profile.AgentID, profile.EnvVars)
 	if err != nil {
@@ -100,7 +89,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 			ProviderGatewayAuth: gatewayAuth, AuthPolicy: hostUtilityAuthPolicy(ia), OperatorDefined: cfg.OperatorDefined,
 		},
 	}
-	resp, err := inst.client.InferencePrompt(ctx, req)
+	resp, err := m.executeOwnedInference(ctx, inst, req, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +448,7 @@ func (m *Manager) ExecutePromptWithMCP(
 		},
 		MCPServers: mcpServers,
 	}
-	resp, err := inst.client.InferencePrompt(ctx, req)
+	resp, err := m.executeOwnedInference(ctx, inst, req, "")
 	if err != nil {
 		return nil, err
 	}

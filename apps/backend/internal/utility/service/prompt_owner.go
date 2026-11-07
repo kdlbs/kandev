@@ -3,17 +3,20 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"time"
 
 	"github.com/google/uuid"
+
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/utility/models"
 	"github.com/kandev/kandev/internal/utility/template"
 )
 
-// PreparePromptCall creates the native call owner before durable selection only
-// when ordered tiers are enabled. Legacy callers keep the original preparation.
+// PreparePromptCall creates the durable native call owner before selection when
+// shared native route owners are enabled. Legacy callers keep the original
+// preparation order.
 func (s *Service) PreparePromptCall(ctx context.Context, utilityID string, tmplCtx *template.Context, defaults *DefaultUtilitySettings, sessionless bool) (*PromptRequest, error) {
 	ownerResolver, ok := s.executionResolver.(interface{ NativeRouteOwnersEnabled() bool })
 	if !ok || !ownerResolver.NativeRouteOwnersEnabled() || s.profileResolver == nil {
@@ -38,6 +41,7 @@ func (s *Service) prepareProfilePrompt(ctx context.Context, utilityID, prompt st
 	}
 	defer func() {
 		if err != nil && call != nil {
+			s.ReleaseNativeRoute("native:utility-call:" + call.ID)
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
 			err = errors.Join(err, s.FailCall(cleanupCtx, call.ID, err.Error(), 0))
@@ -72,6 +76,7 @@ func (s *Service) resolvePreparedExecution(ctx context.Context, request *PromptR
 			request.RouteSessionID = details.RouteSessionID
 		}
 		request.RouteGeneration = details.Generation
+		request.UsagePolicy = usage.CloneExecutionUsagePolicy(details.Decision.UsagePolicy)
 	} else if resolver, ok := s.executionResolver.(SessionExecutionProfileResolver); ok {
 		request.RouteSessionID = promptRouteID(request)
 		resolved, concreteID, err = resolver.ResolveExecutionForSession(ctx, request.RouteSessionID, profile.ID)
