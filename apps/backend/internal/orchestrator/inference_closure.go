@@ -21,8 +21,55 @@ type inferenceClosureRuntime interface {
 // StopForRestart uses closure only for configured shared inference, while an
 // interrupted closure is always resumed even if configuration has changed.
 func (s *Service) StopForRestart(ctx context.Context, sid string) (*models.InferenceClosureCheckpoint, bool, error) {
+	if err := s.authorizeSessionControl(ctx, sid); err != nil {
+		return nil, true, err
+	}
 	all, finite := s.InferenceCapacityPolicy()
-	return s.stopInferenceClosureForRestart(ctx, sid, all && finite)
+	retained, err := s.restartHasInferenceClaims(ctx, sid)
+	if err != nil {
+		return nil, true, err
+	}
+	return s.stopInferenceClosureForRestart(ctx, sid, all && finite || retained)
+}
+
+func (s *Service) restartHasInferenceClaims(ctx context.Context, sid string) (bool, error) {
+	if s == nil || s.sessionCeiling == nil {
+		return false, nil
+	}
+	s.sessionCeiling.mu.Lock()
+	store := s.sessionCeiling.inferenceStore
+	s.sessionCeiling.mu.Unlock()
+	if store == nil {
+		return false, nil
+	}
+	bindings, err := store.LoadInferenceBindings(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, binding := range bindings {
+		if binding.SessionID == "" || binding.SessionID == sid {
+			return true, nil
+		}
+	}
+	if len(bindings) == 0 {
+		return false, nil
+	}
+	if s.agentManager == nil {
+		return false, models.ErrInferenceClosureBlocked
+	}
+	execution, err := s.agentManager.GetExecutionIDForSession(ctx, sid)
+	if errors.Is(err, agentruntime.ErrNoExecutionForSession) {
+		return false, nil
+	}
+	if err != nil || execution == "" {
+		return false, models.ErrInferenceClosureBlocked
+	}
+	for _, binding := range bindings {
+		if binding.InstanceID == execution {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Service) stopInferenceClosureForRestart(ctx context.Context, sid string, enabled bool) (*models.InferenceClosureCheckpoint, bool, error) {
@@ -31,7 +78,7 @@ func (s *Service) stopInferenceClosureForRestart(ctx context.Context, sid string
 	}
 	store, ok := s.repo.(inferenceClosureStore)
 	if !ok {
-		return nil, false, nil
+		return s.legacyInferenceRestart(ctx, sid)
 	}
 	raw, err := store.ReadInferenceClosure(ctx, sid)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -58,7 +105,7 @@ func (s *Service) startInferenceClosureForRestart(ctx context.Context, sid strin
 		ProbeInferenceClosure(context.Context, string, string) error
 	})
 	if !ok {
-		return nil, false, nil
+		return s.legacyInferenceRestart(ctx, sid)
 	}
 	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sid)
 	if err != nil || executionID == "" {
@@ -66,12 +113,23 @@ func (s *Service) startInferenceClosureForRestart(ctx context.Context, sid strin
 	}
 	if err = prober.ProbeInferenceClosure(ctx, sid, executionID); err != nil {
 		if errors.Is(err, agentruntime.ErrInferenceOwnershipUnsupported) {
-			return nil, false, nil
+			return s.legacyInferenceRestart(ctx, sid)
 		}
 		return nil, true, err
 	}
 	result, err := s.StopSessionForInferenceClosure(ctx, sid, executionID, uuid.NewString())
 	return result, true, err
+}
+
+func (s *Service) legacyInferenceRestart(ctx context.Context, sid string) (*models.InferenceClosureCheckpoint, bool, error) {
+	retained, err := s.restartHasInferenceClaims(ctx, sid)
+	if err != nil {
+		return nil, true, err
+	}
+	if retained {
+		return nil, true, models.ErrInferenceClosureBlocked
+	}
+	return nil, false, nil
 }
 
 // StopSessionForInferenceClosure holds admission across separate durable stores.
