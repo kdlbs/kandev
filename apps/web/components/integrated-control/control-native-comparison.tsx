@@ -6,7 +6,10 @@ import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { controlHref } from "@/lib/navigation/integrated-control";
 import type { NativeDashboard } from "@/lib/types/control-native";
-import type { ControlWorkspace } from "@/hooks/domains/coordinator/use-integrated-control-data";
+import type {
+  ControlCoordinatorList,
+  ControlWorkspace,
+} from "@/hooks/domains/coordinator/use-integrated-control-data";
 import {
   useNativeDashboards,
   useNativeTasks,
@@ -26,8 +29,13 @@ import { ControlWaitReasons } from "./control-wait-reasons-panel";
 import { ControlCapacityLine } from "./control-capacity-bars";
 import { capacityDashboardCounts } from "./control-capacity-waiting";
 import { useIntegratedControl } from "./integrated-control-provider";
+import { WorkspaceCoordinatorIndicator } from "./control-coordinator-state";
 
-type NativeRow = { workspace: ControlWorkspace } & ControlRead<NativeDashboard>;
+type NativeRow = {
+  workspace: ControlWorkspace;
+  coordinatorEnabled: boolean;
+  coordinatorList: ControlCoordinatorList | undefined;
+} & ControlRead<NativeDashboard>;
 const UNKNOWN_KEY = "common:unknown";
 type CompareKind = "tasks" | "sessions";
 const STAGE_LABELS: Record<TaskStage, string> = {
@@ -156,8 +164,25 @@ function useNativeColumns(kind: CompareKind) {
         accessorFn: (row) => row.data?.queued_messages,
         cell: ({ getValue }) => getValue<number | undefined>() ?? t(UNKNOWN_KEY),
       },
+      {
+        id: "coordinator",
+        size: 144,
+        header: t("sidebar:integratedControl.coordinators"),
+        cell: ({ row }) => (
+          <WorkspaceCoordinatorIndicator
+            enabled={row.original.coordinatorEnabled}
+            list={row.original.coordinatorList}
+          />
+        ),
+      },
     ];
   }, [kind, t]);
+}
+
+function comparisonCellClass(index: number, columnId: string, value: unknown): string {
+  if (index === 0) return "truncate font-medium";
+  if (columnId === "coordinator") return "text-right";
+  return numberCellClass(value);
 }
 
 function NativeComparisonTable({ rows, kind }: { rows: NativeRow[]; kind: CompareKind }) {
@@ -215,9 +240,7 @@ function NativeComparisonTable({ rows, kind }: { rows: NativeRow[]; kind: Compar
                 {row.getVisibleCells().map((cell, index) => (
                   <TableCell
                     key={cell.id}
-                    className={
-                      index === 0 ? "truncate font-medium" : numberCellClass(cell.getValue())
-                    }
+                    className={comparisonCellClass(index, cell.column.id, cell.getValue())}
                   >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </TableCell>
@@ -254,6 +277,8 @@ export function ControlNativeComparison({
   const tasksByWorkspace = new Map((taskRead.data ?? []).map((row) => [row.id, row]));
   const rows: NativeRow[] = workspaces.map((workspace) => ({
     workspace,
+    coordinatorEnabled: control?.coordinatorEnabled ?? false,
+    coordinatorList: control?.data?.byWorkspace[workspace.id],
     ...(read.data?.find((row) => row.id === workspace.id) ?? { status: "loading" as const }),
   }));
   const { wipWaiting, sharedWaiting } = capacityDashboardCounts(
