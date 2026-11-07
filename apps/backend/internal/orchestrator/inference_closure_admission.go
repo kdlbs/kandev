@@ -42,6 +42,11 @@ func (s *Service) legacyWithoutClosureState(ctx context.Context, sessionID, sour
 	if _, ok := s.repo.(inferenceClosureBlockReader); ok {
 		return models.ErrInferenceClosureBlocked
 	}
+	if s.repo == nil {
+		// Without a task repository there is no persisted closure state to
+		// consult; services built without one keep the existing admission.
+		return nil
+	}
 	_, hasCheckpoint := s.repo.(inferenceClosureCheckpointReader)
 	_, hasBlockReader := s.repo.(legacyRecoveryBlockReader)
 	_, hasBlockList := s.repo.(taskrepo.SessionRecoveryBlockListRepository)
