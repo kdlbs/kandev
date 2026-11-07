@@ -12,6 +12,7 @@ import (
 )
 
 type taskFieldMetadataOmittedKey struct{}
+type taskFieldExecutionGradeSuppliedKey struct{}
 
 // UpdateTaskFieldsWithParentAdmission applies only supplied fields to the
 // current row after workspace, step and task-row serialization.
@@ -45,6 +46,7 @@ func (r *Repository) UpdateTaskFieldsWithParentAdmission(ctx context.Context, id
 	}
 	updateCtx := context.WithValue(ctx, admittedTaskParentKey{}, task.ParentID)
 	updateCtx = context.WithValue(updateCtx, taskFieldMetadataOmittedKey{}, update.Metadata == nil)
+	updateCtx = context.WithValue(updateCtx, taskFieldExecutionGradeSuppliedKey{}, update.ExecutionGrade != nil)
 	preservePosition := update.Position == nil
 	entry, marker, err := r.updateTaskTx(updateCtx, tx, task, "", preservePosition, preservePosition, nil)
 	if err != nil {
@@ -84,6 +86,9 @@ func (r *Repository) lockTaskFieldUpdate(ctx context.Context, tx *sql.Tx, id str
 }
 
 func applyTaskFieldUpdate(task *models.Task, update models.TaskFieldUpdate) {
+	if update.ExecutionGrade != nil {
+		task.ExecutionGrade = *update.ExecutionGrade
+	}
 	if update.Description != nil {
 		task.Description = *update.Description
 	}
