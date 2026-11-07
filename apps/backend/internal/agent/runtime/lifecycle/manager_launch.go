@@ -2134,8 +2134,16 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		// Workspace-only executions can be created from a session row that stores
 		// the task assignee. The launch request carries the acting Office identity,
 		// so persist it only after the final agent-launch admission succeeds.
+		profileChanged := false
+		if profileInfo != nil && profileInfo.ProfileID != "" && execution.AgentProfileID != profileInfo.ProfileID {
+			execution.AgentProfileID = profileInfo.ProfileID
+			profileChanged = true
+		}
 		if req.AgentProfileID != "" {
 			execution.OfficeAgentProfileID = req.AgentProfileID
+			profileChanged = true
+		}
+		if profileChanged {
 			m.persistExecutorRunning(context.WithoutCancel(sharedCtx), execution)
 		}
 		m.logger.Info("promoted workspace-only execution to agent execution",
