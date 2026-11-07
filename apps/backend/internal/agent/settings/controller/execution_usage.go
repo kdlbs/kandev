@@ -9,8 +9,20 @@ func (c *Controller) SetNativeUsageReader(reader func(context.Context, string) (
 	c.nativeUsageReader = reader
 }
 
+func (c *Controller) SetCachedNativeUsageReader(reader func(context.Context, string) ([]usage.ProfileExecutionUsage, error)) {
+	c.cachedNativeUsageReader = reader
+}
+
 func (c *Controller) ReadNativeProfileUsage(ctx context.Context, profileID string) ([]usage.ProfileExecutionUsage, error) {
-	if c.nativeUsageReader == nil {
+	return c.readProfileUsage(ctx, profileID, c.nativeUsageReader)
+}
+
+func (c *Controller) ReadCachedNativeProfileUsage(ctx context.Context, profileID string) ([]usage.ProfileExecutionUsage, error) {
+	return c.readProfileUsage(ctx, profileID, c.cachedNativeUsageReader)
+}
+
+func (c *Controller) readProfileUsage(ctx context.Context, profileID string, reader func(context.Context, string) ([]usage.ProfileExecutionUsage, error)) ([]usage.ProfileExecutionUsage, error) {
+	if reader == nil {
 		return nil, ErrAgentFeatureDisabled
 	}
 	exists, err := c.AgentProfileExists(ctx, profileID)
@@ -20,5 +32,5 @@ func (c *Controller) ReadNativeProfileUsage(ctx context.Context, profileID strin
 	if !exists {
 		return nil, ErrAgentNotFound
 	}
-	return c.nativeUsageReader(ctx, profileID)
+	return reader(ctx, profileID)
 }

@@ -29,7 +29,12 @@ func (m *Manager) configureAgentUsage(ctx context.Context, client *agentctl.Clie
 // ReadProfileExecutionUsage observes existing native actors only. Session
 // access is checked before borrowing a client; reads never prepare/start one.
 func (m *Manager) ReadProfileExecutionUsage(ctx context.Context, profileID string) ([]usage.ProfileExecutionUsage, error) {
-	return m.readExecutionUsage(ctx, func(execution *AgentExecution) bool { return execution.AgentProfileID == profileID })
+	return m.readExecutionUsage(ctx, func(execution *AgentExecution) bool { return execution.AgentProfileID == profileID }, false)
+}
+
+// ReadCachedProfileExecutionUsage observes existing measurements without refreshing providers.
+func (m *Manager) ReadCachedProfileExecutionUsage(ctx context.Context, profileID string) ([]usage.ProfileExecutionUsage, error) {
+	return m.readExecutionUsage(ctx, func(execution *AgentExecution) bool { return execution.AgentProfileID == profileID }, true)
 }
 
 // Office keeps its stable identity while the running concrete profile changes.
@@ -40,10 +45,10 @@ func (m *Manager) ReadOfficeProfileExecutionUsage(ctx context.Context, profileID
 			return execution.OfficeAgentProfileID == profileID
 		}
 		return execution.AgentProfileID == profileID
-	})
+	}, false)
 }
 
-func (m *Manager) readExecutionUsage(ctx context.Context, match func(*AgentExecution) bool) ([]usage.ProfileExecutionUsage, error) {
+func (m *Manager) readExecutionUsage(ctx context.Context, match func(*AgentExecution) bool, cachedOnly bool) ([]usage.ProfileExecutionUsage, error) {
 	result := make([]usage.ProfileExecutionUsage, 0)
 	if !m.providerUsageLimits {
 		return result, nil
@@ -64,7 +69,14 @@ func (m *Manager) readExecutionUsage(ctx context.Context, match func(*AgentExecu
 		report := &usage.ExecutionUsageReport{Reason: "execution_unavailable", Model: model}
 		client, release := execution.AcquireAgentCtlClient()
 		if client != nil {
-			if observed, err := client.ReadExecutionUsage(ctx, model); err == nil {
+			var observed *usage.ExecutionUsageReport
+			var err error
+			if cachedOnly {
+				observed, err = client.PeekExecutionUsage(ctx)
+			} else {
+				observed, err = client.ReadExecutionUsage(ctx, model)
+			}
+			if err == nil {
 				report = observed
 			}
 		}

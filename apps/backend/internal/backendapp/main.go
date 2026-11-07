@@ -1247,6 +1247,7 @@ func startGatewayAndServe(
 	lifecycleMgr.SetProviderUsageLimitsEnabled(cfg.Features.ProviderUsageLimits)
 	if cfg.Features.ProviderUsageLimits {
 		agentSettingsController.SetNativeUsageReader(lifecycleMgr.ReadProfileExecutionUsage)
+		agentSettingsController.SetCachedNativeUsageReader(lifecycleMgr.ReadCachedProfileExecutionUsage)
 		services.DynamicProfileResolver.SetCandidateExecutionUsageReader(lifecycleMgr.PeekCandidateExecutionUsage)
 	}
 	hostUtilityMgr.SetProviderUsageLimitsEnabled(cfg.Features.ProviderUsageLimits)
@@ -2958,6 +2959,7 @@ func buildOfficeFeatureServices(
 		skillSvc, routineSvc, approvalSvc,
 		cfgLoader, cfgWriter,
 	)
+	dashboardSvc.SetWorkspaceLister(services.Task)
 	documentSvc := taskservice.NewDocumentService(taskRepo, log)
 	onboardingSvc := officeonboarding.NewOnboardingService(
 		repo, cfgLoader, cfgWriter, log,
