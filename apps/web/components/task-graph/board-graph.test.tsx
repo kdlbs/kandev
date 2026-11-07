@@ -1,9 +1,31 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (sel: (s: unknown) => unknown) => sel({ kanban: { tasks: [] } }),
+const appStore = vi.hoisted(() => ({
+  state: {} as Record<string, unknown>,
+  listeners: new Set<() => void>(),
 }));
+vi.mock("@/components/state-provider", async () => {
+  const { useSyncExternalStore } = await import("react");
+  return {
+    useAppStore: (select: (state: unknown) => unknown) =>
+      useSyncExternalStore(
+        (listener) => {
+          appStore.listeners.add(listener);
+          return () => appStore.listeners.delete(listener);
+        },
+        () => select(appStore.state),
+        () => select(appStore.state),
+      ),
+  };
+});
+vi.mock("@/lib/task-graph/layout", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/task-graph/layout")>();
+  return {
+    ...actual,
+    layoutGroupedTaskGraph: vi.fn(actual.layoutGroupedTaskGraph),
+  };
+});
 vi.mock("./task-graph-canvas", () => ({
   TaskGraphCanvas: (p: {
     model: { nodes: Array<{ id: string; title: string }> };
@@ -34,11 +56,16 @@ vi.mock("./task-graph-canvas", () => ({
 }));
 
 import { BoardGraph } from "./board-graph";
+import { layoutGroupedTaskGraph } from "@/lib/task-graph/layout";
 
 beforeAll(() => {
   Element.prototype.scrollIntoView ??= () => {};
 });
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  appStore.state = { kanban: { tasks: [] }, kanbanMulti: { snapshots: {} } };
+  vi.mocked(layoutGroupedTaskGraph).mockClear();
+});
 afterEach(cleanup);
 
 const tasks = [
@@ -85,5 +112,37 @@ describe("BoardGraph", () => {
       "Step 1 · 3 can run in parallel",
       "Step 2",
     ]);
+  });
+
+  it("recalculates layout when a parent title changes, but skips unrelated store updates", () => {
+    appStore.state = {
+      kanban: { tasks: [{ id: "parent", title: "Original parent" }] },
+      kanbanMulti: { snapshots: {} },
+    };
+    render(
+      <BoardGraph
+        tasks={[{ id: "child", title: "Child", parentTaskId: "parent" }]}
+        focusId={null}
+        onOpen={vi.fn()}
+        onPreview={vi.fn()}
+      />,
+    );
+    expect(layoutGroupedTaskGraph).toHaveBeenCalledOnce();
+
+    act(() => {
+      appStore.state = { ...appStore.state, session: { messageCount: 1 } };
+      for (const listener of appStore.listeners) listener();
+    });
+    expect(layoutGroupedTaskGraph).toHaveBeenCalledOnce();
+
+    act(() => {
+      appStore.state = {
+        ...appStore.state,
+        kanban: { tasks: [{ id: "parent", title: "Renamed parent" }] },
+      };
+      for (const listener of appStore.listeners) listener();
+    });
+    expect(layoutGroupedTaskGraph).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("frame").textContent).toBe("Renamed parent");
   });
 });

@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const env = vi.hoisted(() => ({
@@ -39,8 +39,13 @@ vi.mock("./task-graph-content", () => ({
 }));
 
 import { TaskGraphPanelRequest } from "./task-graph-panel-request";
+import {
+  captureTaskGraphFocusTarget,
+  takePendingTaskGraphFocusTarget,
+} from "@/hooks/domains/task/use-open-task-graph";
 
 beforeEach(() => {
+  takePendingTaskGraphFocusTarget();
   vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
   Object.assign(env, {
     search: "panel=task-graph&sessionId=s1",
@@ -118,6 +123,20 @@ describe("TaskGraphPanelRequest", () => {
     flushFrame();
     expect(await screen.findByTestId("graph-body")).toBeTruthy();
     expect(env.addTaskGraphPanel).not.toHaveBeenCalled();
+  });
+
+  it("returns focus to the phone opener when the sheet closes", async () => {
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    opener.focus();
+    captureTaskGraphFocusTarget();
+
+    render(<TaskGraphPanelRequest taskId="t1" usesDockview={false} />);
+    flushFrame();
+    await screen.findByTestId("graph-body");
+    fireEvent.click(screen.getByTestId("task-graph-close"));
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+    opener.remove();
   });
 
   it("does nothing without the param", () => {

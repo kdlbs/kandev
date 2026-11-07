@@ -32,6 +32,28 @@ export function buildBoardGraph(
 ): { response: TaskGraphResponse; groups: BoardGraphGroup[] } {
   const ids = new Set(tasks.map((t) => t.id));
   const titles = new Map(tasks.map((t) => [t.id, t.title]));
+  const relatedPairs = new Set<string>();
+  const relatedEdges: TaskGraphResponse["edges"] = [];
+  for (const task of tasks) {
+    for (const relation of task.related ?? []) {
+      if (!ids.has(relation.id)) continue;
+      const [from, to] = [task.id, relation.id].sort();
+      const pairKey = JSON.stringify([from, to]);
+      if (relatedPairs.has(pairKey)) continue;
+      relatedPairs.add(pairKey);
+      relatedEdges.push({ from, to, kind: "related" });
+    }
+  }
+  const dependencyEdges = tasks.flatMap((t) =>
+    (t.dependsOn ?? [])
+      .filter((dep) => ids.has(dep.id))
+      .map((dep) => ({
+        from: dep.id,
+        to: t.id,
+        kind: "dependency" as const,
+        status: dep.status ?? "pending",
+      })),
+  );
   const response: TaskGraphResponse = {
     mode: "chain",
     available_modes: ["chain"],
@@ -47,19 +69,7 @@ export function buildBoardGraph(
       blocked: Boolean(t.blocked),
       blocked_reason: t.blockedReason,
     })),
-    edges: tasks.flatMap((t) => [
-      ...(t.dependsOn ?? [])
-        .filter((dep) => ids.has(dep.id))
-        .map((dep) => ({
-          from: dep.id,
-          to: t.id,
-          kind: "dependency" as const,
-          status: dep.status ?? "pending",
-        })),
-      ...(t.related ?? [])
-        .filter((relation) => ids.has(relation.id))
-        .map((relation) => ({ from: relation.id, to: t.id, kind: "related" as const })),
-    ]),
+    edges: [...dependencyEdges, ...relatedEdges],
     truncated: false,
   };
   const groups = new Map<string, BoardGraphGroup>();

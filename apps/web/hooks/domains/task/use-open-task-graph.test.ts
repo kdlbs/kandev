@@ -6,7 +6,7 @@ vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => router,
   useSearchParams: () => new URLSearchParams(router.search),
 }));
-const breakpoint = vi.hoisted(() => ({ isMobile: false }));
+const breakpoint = vi.hoisted(() => ({ isMobile: false, usesDesktopWorkbench: true }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({ useResponsiveBreakpoint: () => breakpoint }));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (sel: (s: unknown) => unknown) =>
@@ -19,10 +19,12 @@ vi.mock("@/lib/task-listing/view-preference", () => ({
   },
 }));
 
-import { useOpenTaskGraph } from "./use-open-task-graph";
+import { takePendingTaskGraphFocusTarget, useOpenTaskGraph } from "./use-open-task-graph";
 
 beforeEach(() => {
   breakpoint.isMobile = false;
+  breakpoint.usesDesktopWorkbench = true;
+  takePendingTaskGraphFocusTarget();
   storedView.value = "";
   router.push.mockReset();
   router.replace.mockReset();
@@ -50,8 +52,36 @@ describe("useOpenTaskGraph", () => {
 
   it("falls back to the task sheet on phones", () => {
     breakpoint.isMobile = true;
+    breakpoint.usesDesktopWorkbench = false;
     renderHook(() => useOpenTaskGraph()).result.current.showInGraph("other");
     expect(storedView.value).toBe("");
     expect(router.push).toHaveBeenCalledWith("/t/other?panel=task-graph");
+  });
+
+  it("captures the active opener for phone sheet focus return", () => {
+    breakpoint.isMobile = true;
+    breakpoint.usesDesktopWorkbench = false;
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    opener.focus();
+
+    renderHook(() => useOpenTaskGraph()).result.current.openTab("other");
+
+    expect(takePendingTaskGraphFocusTarget()).toBe(opener);
+    expect(takePendingTaskGraphFocusTarget()).toBeNull();
+    opener.remove();
+  });
+
+  it("captures the opener for tablet layouts that also use the task sheet", () => {
+    breakpoint.isMobile = false;
+    breakpoint.usesDesktopWorkbench = false;
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    opener.focus();
+
+    renderHook(() => useOpenTaskGraph()).result.current.openTab("other");
+
+    expect(takePendingTaskGraphFocusTarget()).toBe(opener);
+    opener.remove();
   });
 });

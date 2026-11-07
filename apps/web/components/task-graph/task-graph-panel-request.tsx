@@ -3,7 +3,10 @@ import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { linkToTask } from "@/lib/links";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
-import { TASK_GRAPH_PANEL } from "@/hooks/domains/task/use-open-task-graph";
+import {
+  TASK_GRAPH_PANEL,
+  takePendingTaskGraphFocusTarget,
+} from "@/hooks/domains/task/use-open-task-graph";
 import { TaskGraphDialog } from "./task-graph-dialog";
 
 type EnvLookupState = {
@@ -45,6 +48,7 @@ export function TaskGraphPanelRequest({
   const restoring = useDockviewStore((state) => state.isRestoringLayout);
   const layoutEnvId = useDockviewStore((state) => state.currentLayoutEnvId);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const returnFocusTo = useRef<HTMLElement | null>(null);
   // The task + layout env the request was fulfilled in; see the effect below.
   const fulfilled = useRef<{ taskId: string; envId: string | null } | null>(null);
 
@@ -59,6 +63,7 @@ export function TaskGraphPanelRequest({
         useDockviewStore.getState().addTaskGraphPanel();
         fulfilled.current = { taskId, envId: layoutEnvId };
       } else {
+        returnFocusTo.current = takePendingTaskGraphFocusTarget();
         setSheetOpen(true);
       }
       const next = new URLSearchParams(params);
@@ -90,5 +95,12 @@ export function TaskGraphPanelRequest({
   }, [usesDockview, taskId, activeTaskId, api, restoring, layoutEnvId, taskEnvId]);
 
   if (usesDockview) return null;
-  return <TaskGraphDialog taskId={taskId} open={sheetOpen} onOpenChange={setSheetOpen} />;
+  return (
+    <TaskGraphDialog
+      taskId={taskId}
+      open={sheetOpen}
+      onOpenChange={setSheetOpen}
+      returnFocusTo={returnFocusTo}
+    />
+  );
 }

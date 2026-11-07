@@ -118,6 +118,16 @@ describe("TaskCreateAdvancedSettings", () => {
     expect(screen.getByTestId("task-create-priority-select").getAttribute("hidden")).toBeNull();
   });
 
+  it("keeps parent and related selectors out of edit mode", () => {
+    renderAdvancedSettings({ isCreateMode: false, isEditMode: true });
+
+    fireEvent.click(screen.getByTestId(ADVANCED_SETTINGS_TRIGGER_TEST_ID));
+
+    expect(screen.getByTestId(DEPENDENCY_TRIGGER_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId("task-create-parent-trigger")).toBeNull();
+    expect(screen.queryByTestId("task-create-related-trigger")).toBeNull();
+  });
+
   it("labels the dependency setting and provides contextual help", async () => {
     renderAdvancedSettings();
 

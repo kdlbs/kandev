@@ -22,7 +22,82 @@ export type RelationshipSettingsProps = {
   taskId?: string | null;
   contextStepId?: string | null;
   disabled?: boolean;
+  showCreateRelationships?: boolean;
 };
+
+type ParentRelatedRowsProps = Pick<
+  RelationshipSettingsProps,
+  | "showCreateRelationships"
+  | "parentTaskId"
+  | "selectedParentTaskId"
+  | "relatedTaskIds"
+  | "onRelatedTaskIdsChange"
+  | "blockedBy"
+  | "taskId"
+  | "contextStepId"
+  | "disabled"
+> & {
+  onSelectedParentTaskIdChange: (next: string | undefined) => void;
+};
+
+function TaskCreateParentRelatedRows({
+  showCreateRelationships,
+  parentTaskId,
+  selectedParentTaskId,
+  onSelectedParentTaskIdChange,
+  relatedTaskIds,
+  onRelatedTaskIdsChange,
+  blockedBy,
+  taskId,
+  contextStepId,
+  disabled,
+}: ParentRelatedRowsProps) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {showCreateRelationships && !parentTaskId && (
+        <div
+          className="flex min-w-0 items-center gap-3"
+          data-testid="task-create-parent-setting-row"
+        >
+          <span className="min-h-6 shrink-0 text-[11px] text-muted-foreground/70">
+            {t("task:parent")}
+          </span>
+          <div className="min-w-0 flex-1">
+            <TaskCreateParentSelector
+              value={selectedParentTaskId}
+              onChange={onSelectedParentTaskIdChange}
+              excludeTaskId={taskId ?? undefined}
+              contextStepId={contextStepId}
+              disabled={disabled}
+            />
+          </div>
+        </div>
+      )}
+      {showCreateRelationships && (
+        <div
+          className="flex min-w-0 items-center gap-3"
+          data-testid="task-create-related-setting-row"
+        >
+          <span className="min-h-6 shrink-0 text-[11px] text-muted-foreground/70">
+            {t("task:relatedTo")}
+          </span>
+          <div className="min-w-0 flex-1">
+            <TaskCreateRelatedSelector
+              value={relatedTaskIds}
+              onChange={(value) => onRelatedTaskIdsChange?.(value)}
+              blockedBy={blockedBy}
+              parentTaskId={selectedParentTaskId ?? parentTaskId}
+              excludeTaskId={taskId ?? undefined}
+              contextStepId={contextStepId}
+              disabled={disabled}
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 export function TaskCreateRelationshipSettings({
   blockedBy,
@@ -35,6 +110,7 @@ export function TaskCreateRelationshipSettings({
   taskId,
   contextStepId,
   disabled,
+  showCreateRelationships = true,
 }: RelationshipSettingsProps) {
   const { t } = useTranslation();
   const { handleBlockedByChange, handleSelectedParentTaskIdChange } =
@@ -82,44 +158,18 @@ export function TaskCreateRelationshipSettings({
           />
         </div>
       </div>
-      {!parentTaskId && (
-        <div
-          className="flex min-w-0 items-center gap-3"
-          data-testid="task-create-parent-setting-row"
-        >
-          <span className="min-h-6 shrink-0 text-[11px] text-muted-foreground/70">
-            {t("task:parent")}
-          </span>
-          <div className="min-w-0 flex-1">
-            <TaskCreateParentSelector
-              value={selectedParentTaskId}
-              onChange={handleSelectedParentTaskIdChange}
-              excludeTaskId={taskId ?? undefined}
-              contextStepId={contextStepId}
-              disabled={disabled}
-            />
-          </div>
-        </div>
-      )}
-      <div
-        className="flex min-w-0 items-center gap-3"
-        data-testid="task-create-related-setting-row"
-      >
-        <span className="min-h-6 shrink-0 text-[11px] text-muted-foreground/70">
-          {t("task:relatedTo")}
-        </span>
-        <div className="min-w-0 flex-1">
-          <TaskCreateRelatedSelector
-            value={relatedTaskIds}
-            onChange={(value) => onRelatedTaskIdsChange?.(value)}
-            blockedBy={blockedBy}
-            parentTaskId={selectedParentTaskId ?? parentTaskId}
-            excludeTaskId={taskId ?? undefined}
-            contextStepId={contextStepId}
-            disabled={disabled}
-          />
-        </div>
-      </div>
+      <TaskCreateParentRelatedRows
+        showCreateRelationships={showCreateRelationships}
+        parentTaskId={parentTaskId}
+        selectedParentTaskId={selectedParentTaskId}
+        onSelectedParentTaskIdChange={handleSelectedParentTaskIdChange}
+        relatedTaskIds={relatedTaskIds}
+        onRelatedTaskIdsChange={onRelatedTaskIdsChange}
+        blockedBy={blockedBy}
+        taskId={taskId}
+        contextStepId={contextStepId}
+        disabled={disabled}
+      />
     </>
   );
 }

@@ -39,14 +39,15 @@ export function TaskGraphDialog({
       {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
       <DialogContent
         onCloseAutoFocus={(event) => {
-          if (!returnFocusTo?.current) return;
+          const target = returnFocusTo?.current;
+          if (!target?.isConnected) return;
           event.preventDefault();
-          returnFocusTo.current.focus();
+          target.focus();
         }}
         data-testid="task-graph-dialog"
         showCloseButton={false}
         enterConfirms={false}
-        className="flex h-dvh w-full max-w-full flex-col gap-3 overflow-hidden rounded-none p-3 md:h-[min(800px,90vh)] md:w-[min(1200px,95vw)] md:max-w-none md:rounded-lg md:p-4"
+        className="flex h-dvh w-full max-w-full flex-col gap-3 overflow-hidden rounded-none p-3 sm:max-w-none md:h-[min(800px,90vh)] md:w-[min(1200px,95vw)] md:max-w-none md:rounded-lg md:p-4"
       >
         <DialogHeader className="flex-row items-center justify-between gap-2">
           <DialogTitle className="text-sm">{t("task:taskGraphTitle")}</DialogTitle>

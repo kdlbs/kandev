@@ -82,3 +82,33 @@ test("mobile task graph opens full screen with touch-sized controls", async ({
   await expect(dialog).toHaveCount(0);
   await assertNoDocumentHorizontalOverflow(testPage, "after graph navigation");
 });
+
+test("narrow touch layout keeps the graph sheet full width and returns focus", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await testPage.setViewportSize({ width: 700, height: 900 });
+  const base = {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    repository_ids: [seedData.repositoryId],
+  };
+  const parent = await apiClient.createTask(seedData.workspaceId, "Narrow graph parent", base);
+  const child = await apiClient.createTask(seedData.workspaceId, "Narrow graph child", {
+    ...base,
+    parent_id: parent.id,
+  });
+
+  await testPage.goto(`/t/${child.id}`);
+  const button = testPage.getByTestId("task-graph-button").first();
+  await button.focus();
+  await button.tap();
+
+  const dialog = testPage.getByTestId("task-graph-dialog");
+  await expect(dialog).toBeVisible();
+  await expect.poll(async () => Math.round((await dialog.boundingBox())?.width ?? 0)).toBe(700);
+  await dialog.getByTestId("task-graph-close").tap();
+  await expect(dialog).toHaveCount(0);
+  await expect(button).toBeFocused();
+});

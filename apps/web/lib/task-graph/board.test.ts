@@ -57,4 +57,13 @@ describe("buildBoardGraph", () => {
     );
     expect(response.edges).toEqual([{ from: "a", to: "b", kind: "related" }]);
   });
+
+  it("emits one canonical edge for symmetric related references", () => {
+    const { response } = buildBoardGraph(
+      [task("a", { related: [{ id: "b" }] }), task("b", { related: [{ id: "a" }] })],
+      null,
+    );
+
+    expect(response.edges).toEqual([{ from: "a", to: "b", kind: "related" }]);
+  });
 });

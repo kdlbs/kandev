@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
+import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
 import { buildBoardGraph, type BoardGraphTask } from "@/lib/task-graph/board";
 import {
@@ -94,9 +95,27 @@ function useBoardGraphData(
   parallel: boolean,
 ): BoardGraphData {
   const { t } = useTranslation();
-  const store = useAppStore((state) => state as unknown as TitleLookupState);
+  const taskIds = useMemo(() => new Set(tasks.map((task) => task.id)), [tasks]);
+  const parentIds = useMemo(
+    () =>
+      [...new Set(tasks.map((task) => task.parentTaskId))].filter(
+        (id): id is string => typeof id === "string" && !taskIds.has(id),
+      ),
+    [tasks, taskIds],
+  );
+  const parentTitles = useAppStore(
+    useShallow((state) => {
+      const titleState = state as unknown as TitleLookupState;
+      return Object.fromEntries(
+        parentIds.flatMap((id) => {
+          const title = findTitle(titleState, id);
+          return title === undefined ? [] : [[id, title]];
+        }),
+      );
+    }),
+  );
   const grouped = useMemo(() => {
-    const { response, groups } = buildBoardGraph(tasks, focusId, (id) => findTitle(store, id));
+    const { response, groups } = buildBoardGraph(tasks, focusId, (id) => parentTitles[id]);
     const model = buildTaskGraphModel(response);
     if (parallel) return { model, layout: layoutTaskGraph(model), frames: [] as TaskGraphFrame[] };
     const placed = layoutGroupedTaskGraph(model, groups);
@@ -107,7 +126,7 @@ function useBoardGraphData(
         : [];
     });
     return { model, layout: placed.nodes, frames };
-  }, [tasks, focusId, store, t, parallel]);
+  }, [tasks, focusId, parentTitles, t, parallel]);
   const bands = useStepFrames(grouped.model, grouped.layout, parallel);
   return useMemo(() => {
     const frames = parallel ? bands : grouped.frames;
