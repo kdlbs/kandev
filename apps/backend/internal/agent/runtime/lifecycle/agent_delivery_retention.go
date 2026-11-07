@@ -42,6 +42,7 @@ func authenticatedDeliveryReplayCursor(
 			return 0, fmt.Errorf("%w: %s", ErrAgentDeliveryHistoryGap, models.AgentDeliveryHistoryGapDetails(status.StreamID, 1, int64(status.Stream.FirstRetained-1)))
 		}
 		if canReplayFreshBootstrapEvents(ctx, execution, repository, status) ||
+			canReplaySuccessorSetupEvents(ctx, execution, repository, status) ||
 			canReplaySilentRestoreSetup(ctx, execution, repository, status) {
 			return 0, nil
 		}
