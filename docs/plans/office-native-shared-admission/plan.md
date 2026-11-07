@@ -16,6 +16,7 @@ released through the same owner lock and reservation set as task launches, while
 the existing waiter priority and the opt-in-off default are preserved.
 
 - [Office and native-route shared admission](task-01-office-native-admission.md)
+- [Native utility and review route ownership](task-02-native-route-consumers.md)
 
 ## Scope and risks
 

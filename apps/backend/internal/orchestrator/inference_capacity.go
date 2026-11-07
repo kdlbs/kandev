@@ -91,6 +91,7 @@ func (s *Service) reserveInferenceCapacityLocked(ctx context.Context, binding se
 		if !sameInferenceOwner(held, binding) {
 			return false, ceilingReasonUnknownPopulation, fmt.Errorf("inference ownership changed")
 		}
+		c.retirePersistedNativeAliasLocked(held, binding)
 		return true, "", nil
 	}
 	if s.hasExecutionTeardownOwner(binding.SessionID, binding.InstanceID) {

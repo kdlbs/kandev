@@ -131,6 +131,16 @@ func (s *Service) ReleaseNativeRouteCapacity(id string) {
 	}
 }
 
+// Retire only an alias proven to belong to both the persisted child and the
+// caller. A replay must not leave that same child counted twice.
+func (c *sessionCeilingController) retirePersistedNativeAliasLocked(held, binding sessioncapacity.InferenceBinding) {
+	id := nativeBindingRouteID(binding)
+	alias := c.reservations[id]
+	if alias != nil && alias.nativeOwner != nil && alias.nativeOwner.matches(held) && alias.nativeOwner.matches(binding) {
+		delete(c.reservations, id)
+	}
+}
+
 // transferNativeRouteLocked persists the exact child and removes the early
 // alias under the same controller lock. Failed persistence retains the alias.
 func (c *sessionCeilingController) transferNativeRouteLocked(ctx context.Context, binding sessioncapacity.InferenceBinding) (bool, bool, string, error) {
@@ -142,20 +152,25 @@ func (c *sessionCeilingController) transferNativeRouteLocked(ctx context.Context
 	if !held.nativeOwner.matches(binding) {
 		return true, false, ceilingReasonUnknownPopulation, errors.New("native child relationships changed")
 	}
+	// The alias is the slot being transferred, including when the policy
+	// changed after reservation. A refusal restores the original owner.
+	delete(c.reservations, id)
 	if c.policy == sessioncapacity.PolicyAll {
 		req := admissionRequest{grade: held.grade, gradeKnown: held.gradeKnown, seam: nativeRouteCapacitySeam}
 		decision, p, maximum := c.inspectAllAdmissionLocked(ctx, req)
 		if decision.reasonCode != "" {
+			c.reservations[id] = held
 			return true, false, decision.reasonCode, nil
 		}
 		if reason := c.allCapacityLimitReason(p, maximum); reason != "" {
+			c.reservations[id] = held
 			return true, false, reason, nil
 		}
 	}
 	binding.Grade, binding.GradeKnown = held.grade, held.gradeKnown
 	admitted, reason, err := c.persistInferenceBindingLocked(ctx, binding)
-	if admitted {
-		delete(c.reservations, id)
+	if !admitted {
+		c.reservations[id] = held
 	}
 	return true, admitted, reason, err
 }
