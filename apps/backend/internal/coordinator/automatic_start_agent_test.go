@@ -56,6 +56,28 @@ func TestAutomaticStartAgent_HeldByAdmission(t *testing.T) {
 	}
 }
 
+func TestAutomaticStartAgent_HeldByTheCeilingStaysPendingUncountedAndRaised(t *testing.T) {
+	f := newResumeFixture(t)
+	f.raise(t, ActionCreateTask, testRaiser)
+	f.raise(t, ActionStartAgent, testRaiser)
+	f.ledger.sumFn = func(spendCall) (models.UsageSum, error) { return models.UsageSum{CostSubcents: 1000}, nil }
+	p := f.proposeStarting(t)
+	res := f.try(t, p)
+	if res == nil || res.Status != ProposalStatusPending || res.Note != "automatic action held (ceiling_reached); a manager will decide" {
+		t.Fatalf("res = %+v", res)
+	}
+	if got := reload(t, f.store, f.c, p.ID); got.Status != ProposalStatusPending || got.DecidedAutomatically || len(f.tasks.createCalls) != 0 {
+		t.Fatalf("held proposal was touched: %+v", got)
+	}
+	if f.setting(t, ActionStartAgent) != SettingAutomatic || f.setting(t, ActionCreateTask) != SettingAutomatic {
+		t.Fatal("a hold lowered a class")
+	}
+	n, err := f.store.CountAutomaticDecidedTx(context.Background(), f.store.db, f.c.ID, automaticNow.Add(-automaticLimitWindow))
+	if err != nil || n != 0 {
+		t.Fatalf("held attempt counted toward the limit: %d %v", n, err)
+	}
+}
+
 func TestAutomaticStartAgent_PlainCreateIsNotHeldByAdmission(t *testing.T) {
 	f := newResumeFixture(t)
 	f.raise(t, ActionCreateTask, testRaiser)

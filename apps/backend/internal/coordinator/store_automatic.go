@@ -259,8 +259,8 @@ func activityClassFrom(class Action) string {
 
 // FailedOrLoweredCount counts, in [since, before), the failed automatic
 // activity rows of class plus the system lowerings of class that were not a
-// manager override or a lost raiser. Manager lowers (non-null changed_by) are
-// not counted.
+// manager override or a lost raiser. System lowerings always carry a reason;
+// a manager's own change does not, with or without an identity.
 func (s *Store) FailedOrLoweredCount(ctx context.Context, coordinatorID string, class Action, since, before time.Time) (int, error) {
 	var failed int
 	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`SELECT COUNT(*) FROM `+activityClassFrom(class)+
@@ -272,7 +272,7 @@ func (s *Store) FailedOrLoweredCount(ctx context.Context, coordinatorID string, 
 	var lowered int
 	err = s.ro.QueryRowContext(ctx, s.ro.Rebind(`SELECT COUNT(*) FROM coordinator_class_changes
 		WHERE coordinator_id = ? AND class = ? AND to_value = 'requires_approval' AND changed_by IS NULL
-		AND (reason IS NULL OR reason NOT IN (?, ?)) AND changed_at >= ? AND changed_at < ?`),
+		AND reason IS NOT NULL AND reason NOT IN (?, ?) AND changed_at >= ? AND changed_at < ?`),
 		coordinatorID, string(class), overrideLoweredReason, raiserLoweredReason, since.UTC(), before.UTC()).Scan(&lowered)
 	if err != nil {
 		return 0, fmt.Errorf("count system lowerings: %w", err)

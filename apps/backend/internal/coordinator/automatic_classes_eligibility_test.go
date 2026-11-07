@@ -138,6 +138,7 @@ func TestEligibility_SystemLowerCountsAndManagerLowerDoesNot(t *testing.T) {
 		}
 	}
 	ins("mgr-1", "")
+	ins("", "") // a manager's save with auth off: no identity, no reason
 	ins("", overrideLoweredReason)
 	ins("", raiserLoweredReason)
 	if res := eligibilityOf(t, svc, c, ActionResume); !res.Eligible {
