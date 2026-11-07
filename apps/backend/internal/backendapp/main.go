@@ -1375,20 +1375,32 @@ func startGatewayAndServe(
 	// Wire subscription usage provider into the office agents service so the
 	// /agents/:id/utilization endpoint can fetch live utilization data.
 	// The added settings read surface shares this cache but is independently gated.
+	var usageAdapter *usageProviderAdapter
 	if cfg.Features.ProviderUsageLimits || (services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil) {
-		usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
-		if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
-			services.OfficeSvcs.Agents.SetUsageProvider(officeUsageProvider(cfg.Features.ProviderUsageLimits, lifecycleMgr.ReadOfficeProfileExecutionUsage, usageAdapter))
+		usageAdapter = newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
+	}
+	if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
+		services.OfficeSvcs.Agents.SetUsageProvider(officeUsageProvider(cfg.Features.ProviderUsageLimits, lifecycleMgr.ReadOfficeProfileExecutionUsage, usageAdapter))
+	}
+	if cfg.Features.ProviderUsageLimits {
+		tierUsage := newTierUsageSnapshot()
+		allowances := &providerTurnAllowances{profileUsageSnapshot: newProfileUsageSnapshot(usageAdapter), claims: repos.Task}
+		agentSettingsController.SetProfileUsageProvider(&tierUsageRecordingProvider{next: allowances, sink: tierUsage})
+		lifecycleMgr.SetProviderTurnAdmission(allowances)
+		providerLimits := newProviderLimitService(repos.Task, repos.AgentSettings, newDynamicLimitCalendar(usageAdapter, repos.Task))
+		tierLimits := newProviderTierLimitService(usageAdapter, repos.Task)
+		usageAdapter.tierLimits = tierLimits
+		providerLimits.tiers = tierLimits
+		if cfg.Features.DynamicProfileTiers && services.DynamicProfileResolver != nil {
+			services.DynamicProfileResolver.SetCandidateUsageLookup(tierUsage.Lookup)
 		}
-		if cfg.Features.ProviderUsageLimits {
-			tierUsage := newTierUsageSnapshot()
-			allowances := &providerTurnAllowances{profileUsageSnapshot: newProfileUsageSnapshot(usageAdapter), claims: repos.Task}
-			agentSettingsController.SetProfileUsageProvider(&tierUsageRecordingProvider{next: allowances, sink: tierUsage})
-			lifecycleMgr.SetProviderTurnAdmission(allowances)
-			if cfg.Features.DynamicProfileTiers && services.DynamicProfileResolver != nil {
-				services.DynamicProfileResolver.SetCandidateUsageLookup(tierUsage.Lookup)
-			}
+		installTierLimitAdapter(services.DynamicProfileResolver, usageAdapter, providerLimits.calendar, repos.Task)
+		if subscription, err := tierLimits.Subscribe(eventBus); err != nil {
+			log.Warn("provider limit request observation unavailable", zap.Error(err))
+		} else {
+			addCleanup(func() error { return subscription.Unsubscribe() })
 		}
+		agentSettingsController.SetProviderLimitService(providerLimits)
 	}
 
 	if err := repos.RequiredStores.ValidateComplete(); err != nil {

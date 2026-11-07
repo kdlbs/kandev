@@ -195,6 +195,10 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	// profile edits and enablement never release it.
 	api.POST("/agent-profiles/:id/account-block/release", cfg, h.interlock, h.httpReleaseAccountBlock)
 	api.GET("/routing/circuits", h.httpListRoutingCircuits)
+	// Provider limits are org configuration. Reads stay open to any identity;
+	// the mutation uses the same interlock as other settings writes.
+	api.GET("/provider-limits", h.httpListProviderLimits)
+	api.PUT("/provider-limits/:provider", cfg, h.interlock, h.httpUpdateProviderLimit)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {

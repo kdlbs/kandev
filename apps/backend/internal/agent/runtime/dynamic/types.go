@@ -43,10 +43,22 @@ var (
 )
 
 type Candidate struct {
-	UsagePolicy   *usage.ExecutionUsagePolicy `json:"-"`
-	ID            string
-	Enabled       bool
-	BindingKey    string
+	UsagePolicy *usage.ExecutionUsagePolicy `json:"-"`
+	// RequireExecutionUsage distinguishes an unknown execution source from
+	// the legacy path where execution-owned usage is disabled.
+	RequireExecutionUsage bool `json:"-"`
+	ID                    string
+	Enabled               bool
+	BindingKey            string
+	// ModelID is the concrete provider model this candidate launches.
+	ModelID string
+	// SuspendedUntil is an operator-entered provider block.
+	SuspendedUntil time.Time
+	// RemoteExecution marks a candidate that authenticates against a different
+	// account than the backend host.
+	RemoteExecution bool
+	// CatalogFree records that the provider publishes the model at zero cost.
+	CatalogFree   bool
 	Rules         map[string]Action
 	Policies      routingpolicy.Document
 	Usage         CandidateUsage `json:"-"`

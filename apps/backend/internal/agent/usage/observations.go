@@ -36,6 +36,10 @@ func cloneProviderUsage(source *ProviderUsage) *ProviderUsage {
 		return nil
 	}
 	copy := *source
+	if source.FreeModelDailyRequests != nil {
+		counter := *source.FreeModelDailyRequests
+		copy.FreeModelDailyRequests = &counter
+	}
 	copy.Windows = append([]UtilizationWindow(nil), source.Windows...)
 	for index := range copy.Windows {
 		if source.Windows[index].Observation != nil {

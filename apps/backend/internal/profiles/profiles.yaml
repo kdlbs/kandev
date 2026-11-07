@@ -48,7 +48,8 @@ features:
     dev:  "false"
     e2e:  "false"
 
-  # Provider usage snapshots and optional shared native turn allowances.
+  # Provider usage snapshots, configured allowances, and classified limit
+  # observations. Off in every shipped profile until an installation opts in.
   KANDEV_FEATURES_PROVIDER_USAGE_LIMITS:
     prod: "false"
     dev:  "false"

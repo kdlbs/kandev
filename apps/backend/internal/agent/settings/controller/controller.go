@@ -82,6 +82,7 @@ type Controller struct {
 	discovery                   *discovery.Registry
 	agentRegistry               *registry.Registry
 	sessionChecker              SessionChecker
+	providerLimits              ProviderLimitService
 	watcherDeps                 WatcherDependencyChecker
 	routingTierDeps             RoutingTierDependencyChecker
 	automationDeps              AutomationDependencyChecker

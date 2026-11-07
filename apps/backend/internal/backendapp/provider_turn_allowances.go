@@ -62,7 +62,7 @@ func allowanceBindingKnown(b snapshotBinding, home string) bool {
 	if b.key == "" {
 		return false
 	}
-	if b.entry.Provider == "opencode-go" {
+	if b.entry.Provider == accountPrefixOpenCodeGo {
 		return agentusage.NewOpenCodeGoUsageClient(agentusage.OpenCodeAuthPath(home)).HasCredentials()
 	}
 	if b.client == nil {
@@ -243,7 +243,7 @@ func allowanceProviderFamilies(req agentruntime.ProviderTurnRequest, b snapshotB
 		return []string{"openai"}
 	case "opencode-acp":
 		if strings.HasPrefix(req.Model, "opencode-go/") {
-			return []string{"opencode-go"}
+			return []string{accountPrefixOpenCodeGo}
 		}
 		if strings.HasPrefix(req.Model, "opencode/") {
 			return []string{"opencode-zen"}

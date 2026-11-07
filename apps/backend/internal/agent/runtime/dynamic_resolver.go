@@ -47,6 +47,7 @@ type ProfileExecutionResolver struct {
 	dynamic         store.DynamicProfileRepository
 	engine          *dynamic.Engine
 	bindingResolver *dynamic.CredentialBindingResolver
+	providerLimits  ProviderLimitReader
 	enabled         atomic.Bool
 	nativeAdmission *nativeRouteAdmission
 	// candidateUsage reads the last observed provider usage for one concrete
@@ -337,7 +338,7 @@ func (r *ProfileExecutionResolver) RouteAfterUnclassifiedFailure(
 	if err := r.ValidateProfile(ctx, profileID); err != nil {
 		return dynamic.RouteDecision{}, err
 	}
-	profile, err := r.loadDynamicProfile(ctx, profileID)
+	profile, err := r.loadSelectionProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return dynamic.RouteDecision{}, err
 	}
@@ -550,7 +551,7 @@ func (r *ProfileExecutionResolver) resolveSkipRouteAction(
 			return ProfileExecution{}, dynamic.ErrRecoveryPending
 		}
 	}
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadSelectionProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return ProfileExecution{}, err
 	}
@@ -838,25 +839,14 @@ func (r *ProfileExecutionResolver) dynamicProfileFromRoutes(ctx context.Context,
 	for _, route := range routes {
 		candidate := dynamic.Candidate{
 			ID: route.ExecutionProfileID, Enabled: route.Enabled,
-			BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
+			BindingKey:            dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
+			RequireExecutionUsage: r.executionUsageRequired(),
 		}
 		if r.candidateUsage != nil {
 			candidate.Usage = r.candidateUsage(route.ExecutionProfileID)
 		}
-		if route.RulesJSON != "" {
-			var selection struct {
-				Selection json.RawMessage `json:"selection"`
-			}
-			if err := json.Unmarshal([]byte(route.RulesJSON), &selection); err != nil {
-				return dynamic.Profile{}, err
-			}
-			candidate.SelectionJSON = selection.Selection
-			policy, legacyRules, policyErr := decodeDynamicRoutePolicy(route.RulesJSON)
-			if policyErr != nil {
-				return dynamic.Profile{}, fmt.Errorf("decode dynamic route %s: %w", route.ExecutionProfileID, policyErr)
-			}
-			candidate.Policies = policy
-			candidate.Rules = legacyRules
+		if err := applyDynamicCandidatePolicy(&candidate, route); err != nil {
+			return dynamic.Profile{}, err
 		}
 		concrete, profileErr := r.profiles.GetAgentProfile(ctx, route.ExecutionProfileID)
 		switch {
@@ -868,7 +858,10 @@ func (r *ProfileExecutionResolver) dynamicProfileFromRoutes(ctx context.Context,
 			}
 		case concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled:
 			candidate.Enabled = false
-		case r.bindingResolver != nil:
+		default:
+			candidate.ModelID = concrete.Model
+		}
+		if r.bindingResolver != nil && concrete != nil && concrete.DeletedAt == nil && concrete.Enabled {
 			binding := profileCredentialBindingDescriptor(concrete)
 			candidate.BindingKey = dynamic.ResourceKey(
 				dynamic.ScopeCredential,
@@ -877,7 +870,32 @@ func (r *ProfileExecutionResolver) dynamicProfileFromRoutes(ctx context.Context,
 		}
 		profile.Candidates = append(profile.Candidates, candidate)
 	}
+	r.applyResourceLimits(ctx, profile.Candidates)
 	return profile, nil
+}
+
+func (r *ProfileExecutionResolver) executionUsageRequired() bool {
+	return r.candidateUsageReader != nil || r.nativeCandidateUsageReader != nil
+}
+
+func applyDynamicCandidatePolicy(candidate *dynamic.Candidate, route agentsettingsmodels.DynamicAgentRoute) error {
+	if route.RulesJSON == "" {
+		return nil
+	}
+	var selection struct {
+		Selection json.RawMessage `json:"selection"`
+	}
+	if err := json.Unmarshal([]byte(route.RulesJSON), &selection); err != nil {
+		return err
+	}
+	candidate.SelectionJSON = selection.Selection
+	policy, legacyRules, err := decodeDynamicRoutePolicy(route.RulesJSON)
+	if err != nil {
+		return fmt.Errorf("decode dynamic route %s: %w", route.ExecutionProfileID, err)
+	}
+	candidate.Policies = policy
+	candidate.Rules = legacyRules
+	return nil
 }
 
 func decodeDynamicRoutePolicy(raw string) (routingpolicy.Document, map[string]dynamic.Action, error) {
