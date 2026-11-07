@@ -15,6 +15,13 @@ afterEach(() => {
   recovery.requestLocal = false;
 });
 
+vi.mock("./use-composer-prompt-suggestion", () => ({
+  useComposerPromptSuggestion: (_panel: unknown, blocked: boolean) => ({
+    promptSuggestion: blocked ? null : "suggested reply",
+    onPromptSuggestionDismiss: () => {},
+  }),
+}));
+
 function composerArgs(): Parameters<typeof useComposerProps>[0] {
   return {
     panelState: {
@@ -76,6 +83,40 @@ const deliveryIdentity = {
   incarnation_id: "inc-1",
   prompt_generation: 4,
 };
+
+describe("prompt suggestion recovery", () => {
+  it("hides suggestions during delivery recovery and restores them after recovery", () => {
+    const args = composerArgs();
+    const { result, rerender } = renderHook(() => useComposerProps(args));
+    expect(result.current.promptSuggestion).toBe("suggested reply");
+    args.panelState.session = {
+      metadata: {
+        agent_delivery_recovery: {
+          ...deliveryIdentity,
+          phase: "reconnecting",
+          revision: 1,
+          harness_generation: 2,
+        },
+      },
+    } as never;
+    rerender();
+    expect(result.current.uncertainDelivery).toBe(true);
+    expect(result.current.promptSuggestion).toBeNull();
+    args.panelState.session = null;
+    rerender();
+    expect(result.current.promptSuggestion).toBe("suggested reply");
+  });
+
+  it("hides suggestions when a session recovery block requires attention", () => {
+    const args = composerArgs();
+    args.panelState.session = {
+      session_recovery_blocks: [{ id: "block-1", consumer_reference: "agent_delivery" }],
+    } as never;
+    const { result } = renderHook(() => useComposerProps(args));
+    expect(result.current.needsRecovery).toBe(true);
+    expect(result.current.promptSuggestion).toBeNull();
+  });
+});
 
 describe("useComposerProps", () => {
   it("forwards working state independently of queue admission", () => {

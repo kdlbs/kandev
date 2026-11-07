@@ -486,28 +486,29 @@ function SecretsSettingsBody({
               {t("settings:noSecretsYetAddYourFirst")}
             </div>
           )}
-          {items.map((secret) => (
-            <SecretListItemRow
-              key={secret.id}
-              secret={secret}
-              workspaceId={workspaceId}
-              onEdit={actions.startEditing}
-              onDelete={actions.openDelete}
-              onDeleteCancel={actions.closeDelete}
-              onDeleteConfirm={actions.confirmDelete}
-              onCopyMove={actions.openTransfer}
-              isBusy={isBusy}
-              showCreate={showCreate}
-              isEditing={editingId === secret.id}
-              isDeleteConfirming={
-                deleteTarget?.id === secret.id && (state.deleteReferences?.length ?? 0) === 0
-              }
-              isDeleteLoading={deleteTarget?.id === secret.id && state.deleteReferences === null}
-              isDeleteBlocked={
-                deleteTarget?.id === secret.id && Boolean(state.deleteReferences?.length)
-              }
-            />
-          ))}
+          {items
+            .filter((secret) => secret.id !== editingId)
+            .map((secret) => (
+              <SecretListItemRow
+                key={secret.id}
+                secret={secret}
+                workspaceId={workspaceId}
+                onEdit={actions.startEditing}
+                onDelete={actions.openDelete}
+                onDeleteCancel={actions.closeDelete}
+                onDeleteConfirm={actions.confirmDelete}
+                onCopyMove={actions.openTransfer}
+                isBusy={isBusy}
+                showCreate={showCreate}
+                isDeleteConfirming={
+                  deleteTarget?.id === secret.id && (state.deleteReferences?.length ?? 0) === 0
+                }
+                isDeleteLoading={deleteTarget?.id === secret.id && state.deleteReferences === null}
+                isDeleteBlocked={
+                  deleteTarget?.id === secret.id && Boolean(state.deleteReferences?.length)
+                }
+              />
+            ))}
         </div>
       </SettingsGroup>
     </>

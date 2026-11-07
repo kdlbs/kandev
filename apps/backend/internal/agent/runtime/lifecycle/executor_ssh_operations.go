@@ -731,6 +731,8 @@ func buildSSHCreateInstanceRequest(
 		),
 		McpServers:                 req.McpServers,
 		McpMode:                    req.McpMode,
+		PromptSuggestions:          req.PromptSuggestions,
+		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
@@ -745,6 +747,7 @@ func buildSSHCreateInstanceRequest(
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 		Env:                        selectedCheckoutAgentEnv(sshRemoteContributionEnv(req, agentctlBin), req.Metadata),
+		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}
 	if req.DurableJournalOwnerID != "" {
 		// The SSH task directory is the stable remote environment. Keep the
@@ -791,6 +794,9 @@ func createRemoteAgentInstance(
 		},
 	}
 
+	if err := requireSSHBuiltinHelper(ctx, httpClient, controlPort, authToken, req); err != nil {
+		return 0, err
+	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/api/v1/instances", controlPort)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {

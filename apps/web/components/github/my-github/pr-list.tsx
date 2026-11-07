@@ -113,7 +113,7 @@ function PRListBody({ workspaceId, items, presets, onStartTask, prKeyToTasks }: 
   return (
     <>
       {items.map((pr) => {
-        const key = prStatusKey(pr.repo_owner, pr.repo_name, pr.number);
+        const key = prStatusKey(pr.repo_owner, pr.repo_name, pr.number, pr.github_host);
         return (
           <PRRow
             key={key}

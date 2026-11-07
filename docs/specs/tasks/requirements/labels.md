@@ -9,7 +9,10 @@ owners:
 
 ## Overview
 
-This document is the migrated task-system source for the capability. The source detail below remains authoritative while the system is migrated into separate requirement and design records.
+Tasks own label identity and task associations, including when Office exposes
+the controls. The migrated source detail remains authoritative for the broader
+catalog capability. Exact-name task removal is defined below and designed in
+[Task labels system design](../system-design/labels.md).
 
 ## Requirements
 
@@ -20,6 +23,45 @@ This document is the migrated task-system source for the capability. The source 
 #### Acceptance criteria
 
 - **AC-TASKS-LABELS-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+
+### REQ-TASKS-LABELS-002: Exact-name task label removal
+
+**Intent:** A label that can be attached to a task can be removed from that task
+without changing its identity or removing someone else's association.
+
+#### Acceptance criteria
+
+- **AC-TASKS-LABELS-002.1:** When an attached label has a nonempty name containing
+  one or multiple slashes, percent signs, plus signs, or spaces, removal shall
+  identify the exact stored name. It shall not interpret separators, decode a
+  literal escape sequence again, trim stored whitespace, or normalize the name
+  into another label.
+- **AC-TASKS-LABELS-002.2:** When removal succeeds, only the named association on
+  the selected task shall disappear. The workspace catalog entry, its identity
+  and color, other labels on that task, and every other task's associations
+  shall remain unchanged.
+- **AC-TASKS-LABELS-002.3:** When an existing client removes a simple or
+  space-containing name using the existing path-based API, the system shall
+  preserve that API's successful response and removal behavior. An additional
+  removal API shall support the full accepted name without requiring a routing
+  setting or a migration of stored names.
+- **AC-TASKS-LABELS-002.4:** When the additional removal API receives an absent,
+  empty, repeated, or malformed name parameter, it shall reject the request
+  without mutating any association. When a valid exact name or association is
+  absent, removal shall remain an idempotent success.
+- **AC-TASKS-LABELS-002.5:** When removal is requested through either API, the
+  existing caller authorization and workspace ownership rules shall apply to
+  both the addressed workspace and task. A foreign or mismatched workspace/task
+  request shall not mutate labels.
+- **AC-TASKS-LABELS-002.6:** When users remove a slash-containing label through
+  the Office task detail on desktop or phone, the same exact-name action shall
+  persist after reload. Other chips shall remain; a rejected request shall use
+  the existing optimistic rollback and error presentation rather than leaving
+  a false successful removal visible.
+
+## Implementation plans
+
+- [Exact-name task label removal](../../../plans/task-label-name-removal/plan.md)
 
 ## Migrated source detail
 

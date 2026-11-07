@@ -13,11 +13,15 @@ export function exposeBufferReader(container: HTMLDivElement, terminal: Terminal
   const c = container as TerminalContainerWithBuffer;
   c.__xtermReadBuffer = () => {
     const buf = terminal.buffer.active;
-    const lines: string[] = [];
-    for (let i = 0; i <= buf.baseY + buf.cursorY; i++) {
-      lines.push(buf.getLine(i)?.translateToString(true) ?? "");
+    const lastRow = buf.baseY + buf.cursorY;
+    let text = "";
+    for (let i = 0; i <= lastRow; i++) {
+      const line = buf.getLine(i);
+      if (i > 0 && !line?.isWrapped) text += "\n";
+      const continues = i < lastRow && buf.getLine(i + 1)?.isWrapped;
+      text += line?.translateToString(!continues) ?? "";
     }
-    return lines.join("\n");
+    return text;
   };
   c.__xtermReadViewportY = () => terminal.buffer.active.viewportY;
   c.__xtermGetFontFamily = () => terminal.options.fontFamily ?? "";

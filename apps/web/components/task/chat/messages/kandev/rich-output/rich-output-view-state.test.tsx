@@ -1,14 +1,30 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { KandevRendererProps } from "../types";
 import { RichOutputRenderer } from "./rich-output-renderer";
+import type { AppState } from "@/lib/state/store";
 const TOGGLE = "rich-output-file-preview-toggle";
 const EXPANDED = "aria-expanded";
 const owner = {};
-const transport = vi.hoisted(() => ({ read: vi.fn(), client: {}, auth: "user-a" }));
+const transport = vi.hoisted(() => ({
+  read: vi.fn(),
+  client: {},
+  auth: "user-a",
+  defaultExpanded: true,
+}));
 vi.mock("@/components/state-provider", () => ({
   useOptionalAppStoreApi: () => owner,
-  useOptionalAppStore: () => transport.auth,
+  useOptionalAppStore: (
+    selector: (state: Pick<AppState, "auth" | "imagePreviewsExpandedByDefault">) => unknown,
+  ) =>
+    selector({
+      auth: {
+        mode: "disabled",
+        authenticated: true,
+        user: { id: transport.auth, email: "", display_name: "", role: "admin", status: "active" },
+      },
+      imagePreviewsExpandedByDefault: transport.defaultExpanded,
+    }),
 }));
 vi.mock("@/lib/ws/connection", () => ({ getWebSocketClient: () => transport.client }));
 vi.mock("@/lib/ws/workspace-files", () => ({ requestFileContent: transport.read }));
@@ -19,6 +35,7 @@ afterEach(() => {
   cleanup();
   transport.read.mockReset();
   transport.auth = "user-a";
+  transport.defaultExpanded = true;
 });
 
 // @covers AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.3
@@ -49,7 +66,7 @@ it("retains hidden image choices across metadata changes and layout remounts ind
   };
   transport.read.mockResolvedValue({ content: "aW1hZ2U=", is_binary: true });
   const view = render(<Harness {...props} />);
-  expect(await screen.findAllByRole("img")).toHaveLength(2);
+  expect(await screen.findAllByRole("button", { name: "Open shared.png" })).toHaveLength(2);
   fireEvent.click(screen.getAllByTestId(TOGGLE)[0]);
   const renamed = { ...props, args: { ...props.args, title: "Renamed images" } };
   view.rerender(<Harness {...renamed} />);
@@ -64,7 +81,7 @@ it("retains hidden image choices across metadata changes and layout remounts ind
     "false",
     "true",
   ]);
-  expect(await screen.findAllByRole("img")).toHaveLength(1);
+  expect(await screen.findAllByRole("button", { name: "Open shared.png" })).toHaveLength(1);
   expect(transport.read).toHaveBeenCalledTimes(3);
 });
 
@@ -165,3 +182,51 @@ it("retains standalone disclosure on rerender and clears it across authenticatio
   expect(screen.queryByText("Standalone bytes")).toBeNull();
   expect(transport.read).toHaveBeenCalledTimes(1);
 });
+
+// @covers AC-AGENTS-IMAGE-PREVIEW-EXPANSION-001.6
+it.each([1, 2])(
+  "starts version %i images collapsed without reads, but keeps manual opening and enlargement",
+  async (version) => {
+    transport.defaultExpanded = false;
+    transport.read.mockResolvedValue({ content: "aW1hZ2U=", is_binary: true });
+    const props: KandevRendererProps = {
+      sessionId: `default-session-${version}`,
+      messageId: `default-message-${version}`,
+      status: "complete",
+      result: undefined,
+      args:
+        version === 1
+          ? { version: 1, title: "Images", blocks: [{ type: "file", path: "manual.png" }] }
+          : {
+              version: 2,
+              catalog_version: 1,
+              title: "Images",
+              spec: {
+                root: "image",
+                elements: {
+                  image: { type: "FilePreview", props: { path: "manual.png" }, children: [] },
+                },
+              },
+            },
+    };
+    const view = render(<Harness {...props} />);
+    expect(screen.getByTestId(TOGGLE).getAttribute(EXPANDED)).toBe("false");
+    expect(transport.read).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Open manual.png" })).toBeNull();
+    fireEvent.click(screen.getByTestId(TOGGLE));
+    const trigger = await screen.findByRole("button", { name: "Open manual.png" });
+    await act(async () => fireEvent.click(trigger));
+    expect(screen.getByRole("dialog", { name: "Image preview" })).toBeTruthy();
+    expect(transport.read).toHaveBeenCalledTimes(1);
+    view.unmount();
+    const restored = render(<Harness {...props} />);
+    expect(screen.getByTestId(TOGGLE).getAttribute(EXPANDED)).toBe("true");
+    await screen.findByRole("button", { name: "Open manual.png" });
+    fireEvent.click(screen.getByTestId(TOGGLE));
+    restored.unmount();
+    transport.defaultExpanded = true;
+    render(<Harness {...props} />);
+    expect(screen.getByTestId(TOGGLE).getAttribute(EXPANDED)).toBe("false");
+    expect(transport.read).toHaveBeenCalledTimes(2);
+  },
+);

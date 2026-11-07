@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -175,7 +177,7 @@ func seedAgentFailureHandler(
 		// office service into the testharness; the row is enough to
 		// drive HandleAgentFailure → MarkRunFailed +
 		// IncrementAgentConsecutiveFailures.
-		run := &officemodels.Run{
+		run := &runsmodels.Run{
 			ID:             uuid.New().String(),
 			AgentProfileID: req.AgentProfileID,
 			Reason:         "task_assigned",
@@ -306,7 +308,7 @@ func createSeededRun(
 		v := req.IdempotencyKey
 		idemPtr = &v
 	}
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID:               uuid.New().String(),
 		AgentProfileID:   req.AgentProfileID,
 		Reason:           req.Reason,

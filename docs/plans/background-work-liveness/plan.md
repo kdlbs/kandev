@@ -1,5 +1,8 @@
 ---
-spec: docs/specs/platform/requirements/background-work-liveness.md
+requirements:
+  - REQ-PLATFORM-BACKGROUND-WORK-LIVENESS-001
+system_design:
+  - ../../specs/platform/system-design/background-work-liveness.md
 created: 2026-07-21
 status: in_progress
 ---

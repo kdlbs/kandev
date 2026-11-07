@@ -46,7 +46,7 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
 }
 
 function makeStore() {
-  return create<GitHubSlice>()(immer((...a) => createGitHubSlice(...a)));
+  return create<GitHubSlice>()(immer((set, get) => createGitHubSlice(set, get)));
 }
 
 function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {

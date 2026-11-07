@@ -170,11 +170,26 @@ Do not globally cache `fetchJson` or share server-side state across users.
 Capture hydration epochs before requests. Publish optional resources through
 current slice merge actions only while the navigation/auth generation is valid.
 Reuse current loaded workspace/settings resources and their invalidation rules.
+For session rows, reuse the strict RFC3339 freshness predicate from session
+state events. Reject strictly older route rows before merging canonical state.
+Per-task copies and settled-turn boundaries use the accepted canonical rows.
+Equal or unparseable timestamps retain the existing event policy; newer
+restarts remain admissible. Preserve the separate read-cursor epoch guard.
 Do not reset agent-profile versions or overwrite newer WebSocket state during
 late hydration. Full session/model loading must not briefly enable send with a
 fallback model. Transcript, terminals, and other surfaces retain their existing
 local loading and error states. Missing/forbidden task handling remains authoritative.
 No previous task's content becomes interactive under the destination identity.
+
+A successful empty identity read already supplies initial empty membership and
+selection. Its later optional enrichment contributes convenience resources;
+it does not publish those earlier selection or session-list slices again.
+This preserves sessions created, selected, or merely observed before the
+result is applied, including after the enrichment promise resolves. The task
+surface retains its normal same-task session fallback. An unavailable identity
+list that is subsequently recovered remains an authoritative list read. Boot
+hydration and explicit session admission retain their existing contracts.
+
 
 ### Editor and render lifecycle
 

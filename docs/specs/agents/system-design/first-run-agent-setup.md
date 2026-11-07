@@ -49,8 +49,8 @@ remains authoritative for the phone exclusion and completion marker.
   parser reproduction using `/opt/homebrew/bin/opencode` 2.0.20 exits 1 with
   `acp --print-logs --log-level ERROR`; `acp --print-logs --log-level error` and
   `acp --print-logs` both exit 0 with closed stdin. No prompt was sent.
-- The reviewed managed default remains `opencode-ai@1.18.32`. Its
-  [upstream parser](https://github.com/anomalyco/opencode/blob/v1.18.32/packages/opencode/src/index.ts)
+- The reviewed managed default remains `opencode-ai@1.19.5`. Its
+  [upstream parser](https://github.com/anomalyco/opencode/blob/v1.19.5/packages/opencode/src/index.ts)
   accepts uppercase log-level choices. A universal lowercase replacement would
   break that runtime. The reproduction proves argument parsing, not a complete
   authenticated model-list handshake.

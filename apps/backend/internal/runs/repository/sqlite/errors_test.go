@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // TestReadMethodsPropagateDatabaseErrors closes the reader pool and
@@ -17,7 +17,7 @@ import (
 func TestReadMethodsPropagateDatabaseErrors(t *testing.T) {
 	repo, _, reader := newTestRepoWithHandles(t)
 	ctx := context.Background()
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "run-1", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":"t1","comment_id":"cm-1"}`,
 	})
@@ -92,7 +92,7 @@ func TestReadMethodsPropagateDatabaseErrors(t *testing.T) {
 func TestWriteMethodsPropagateDatabaseErrors(t *testing.T) {
 	repo, writer, _ := newTestRepoWithHandles(t)
 	ctx := context.Background()
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "run-1", AgentProfileID: "a1", Reason: "task_assigned",
 	})
 	if err := writer.Close(); err != nil {
@@ -101,7 +101,7 @@ func TestWriteMethodsPropagateDatabaseErrors(t *testing.T) {
 
 	checks := map[string]func() error{
 		"CreateRun": func() error {
-			return repo.CreateRun(ctx, &models.Run{AgentProfileID: "a1", Reason: "r"})
+			return repo.CreateRun(ctx, &runsmodels.Run{AgentProfileID: "a1", Reason: "r"})
 		},
 		"UpdateRunRuntimeSnapshot": func() error {
 			return repo.UpdateRunRuntimeSnapshot(ctx, run.ID, "{}", "{}", "s")

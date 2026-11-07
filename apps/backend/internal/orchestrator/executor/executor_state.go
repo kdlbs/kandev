@@ -68,12 +68,6 @@ func (e *Executor) ActiveCount() int {
 	return len(sessions)
 }
 
-// CanExecute returns true if there's capacity for another execution.
-// Currently always returns true as there is no concurrent execution limit.
-func (e *Executor) CanExecute() bool {
-	return true
-}
-
 // MarkCompletedBySession marks an execution as completed by session ID
 func (e *Executor) MarkCompletedBySession(ctx context.Context, sessionID string, state v1.TaskSessionState) {
 	e.logger.Info("execution completed",

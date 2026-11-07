@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAppStore } from "@/components/state-provider";
 import { fetchRepoBranches } from "@/lib/api/domains/github-api";
 import { listProjectBranches } from "@/lib/api/domains/gitlab-api";
 import { listAzureDevOpsBranches } from "@/lib/api/domains/azure-devops-api";
@@ -171,7 +172,25 @@ function invalidateRegistryCache(refs: Refs, setState: SetState): void {
   setState({});
 }
 
+function useBranchWorkspaceScope(
+  workspaceId: string | null,
+  host: string | undefined,
+  refs: Refs,
+  setState: SetState,
+) {
+  useEffect(() => {
+    refs.workspaceIdRef.current = workspaceId;
+    refs.workspaceEpochRef.current += 1;
+    invalidateRegistryCache(refs, setState);
+  }, [host, refs, setState, workspaceId]);
+}
+
 export function useBranchesByURL(workspaceId: string | null = null): UseBranchesByURLResult {
+  const configuredHost = useAppStore((state) =>
+    workspaceId
+      ? state.githubStatus.byWorkspaceId[workspaceId]?.status?.automation?.github_host
+      : undefined,
+  );
   const registryVersion = usePluginRegistry().getVersion();
   const registryVersionRef = useRef(registryVersion);
   const [state, setState] = useState<Record<string, URLState>>({});
@@ -218,15 +237,7 @@ export function useBranchesByURL(workspaceId: string | null = null): UseBranches
     };
   }, []);
 
-  useEffect(() => {
-    workspaceIdRef.current = workspaceId;
-    workspaceEpochRef.current += 1;
-    for (const controller of abortersRef.current.values()) controller.abort();
-    abortersRef.current.clear();
-    inFlightRef.current.clear();
-    loadedRef.current.clear();
-    setState({});
-  }, [workspaceId]);
+  useBranchWorkspaceScope(workspaceId, configuredHost, refsRef.current, setState);
 
   const ensure = useCallback(
     (rawUrl: string) => {
@@ -244,7 +255,7 @@ export function useBranchesByURL(workspaceId: string | null = null): UseBranches
       // the item number. Using the repo-only parser here used to reject PR URLs
       // outright, leaving the branch picker permanently empty when the user
       // pasted a PR link into the Remote tab.
-      const request = branchRequestForURL(url, workspaceId);
+      const request = branchRequestForURL(url, workspaceId, configuredHost);
       if (!request) {
         loadedRef.current.add(url);
         setState((prev) => ({ ...prev, [url]: { branches: [], loading: false } }));
@@ -257,7 +268,7 @@ export function useBranchesByURL(workspaceId: string | null = null): UseBranches
         .catch((error) => handleFailure(refs, setState, url, requestIdentity, error))
         .finally(() => finalizeRequest(refs, url, requestIdentity));
     },
-    [registryVersion, workspaceId],
+    [configuredHost, registryVersion, workspaceId],
   );
 
   const clear = useCallback((rawUrl: string) => {
@@ -297,22 +308,30 @@ export function useBranchesByURL(workspaceId: string | null = null): UseBranches
 
 type BranchRequest = (signal: AbortSignal) => Promise<{ branches?: Array<{ name: string }> }>;
 
-function branchRequestForURL(rawURL: string, workspaceId: string | null): BranchRequest | null {
+function branchRequestForURL(
+  rawURL: string,
+  workspaceId: string | null,
+  expectedHost?: string,
+): BranchRequest | null {
   if (hasRegisteredRepositoryProviderCandidate(rawURL)) {
-    return registeredProviderBranchRequest(rawURL, workspaceId);
+    return registeredProviderBranchRequest(rawURL, workspaceId, expectedHost);
   }
-  return builtInBranchRequestForURL(rawURL, workspaceId);
+  return builtInBranchRequestForURL(rawURL, workspaceId, expectedHost);
 }
 
 function builtInBranchRequestForURL(
   rawURL: string,
   workspaceId: string | null,
+  expectedHost?: string,
 ): BranchRequest | null {
-  const github = parseGitHubAnyUrl(rawURL);
+  const github = parseGitHubAnyUrl(rawURL, expectedHost);
   if (github) {
     if (!workspaceId) return null;
     return (signal) =>
-      fetchRepoBranches(workspaceId, github.owner, github.repo, { init: { signal } });
+      fetchRepoBranches(workspaceId, github.owner, github.repo, {
+        expectedHost: github.host ?? "github.com",
+        init: { signal },
+      });
   }
   const parsed = parseRemoteURL(rawURL);
   if (!parsed) return null;
@@ -334,12 +353,13 @@ function builtInBranchRequestForURL(
 function registeredProviderBranchRequest(
   url: string,
   workspaceId: string | null,
+  expectedHost?: string,
 ): BranchRequest | null {
   if (!workspaceId) return null;
   return async (signal) => {
     const match = await inspectRegisteredRepositoryURL({ workspaceId, url, signal });
     if (!match) {
-      const fallback = builtInBranchRequestForURL(url, workspaceId);
+      const fallback = builtInBranchRequestForURL(url, workspaceId, expectedHost);
       return fallback ? fallback(signal) : { branches: [] };
     }
     const entries = await match.provider.listBranches({

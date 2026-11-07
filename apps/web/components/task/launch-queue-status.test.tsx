@@ -19,8 +19,9 @@ vi.mock("react-i18next", () => ({
         "task:launchQueueGlobalScopeHelp": "All workspaces",
         "task:launchQueueConfigureCapacity": "Configure global session limit",
         "task:launchQueueOwnershipUnavailable": "Launch ownership is unavailable.",
-        "task:launchQueueReplayError": "The queued launch needs attention.",
-        "task:launchQueueReplayErrorStopped": "The queued launch needs attention.",
+        "task:launchQueueReplayError":
+          "Kandev could not start the queued session. It will retry automatically.",
+        "task:launchQueueReplayErrorStopped": "Kandev could not start the queued session.",
         "task:launchQueueCapacity": `${values.inUse ?? ""} of ${values.limit ?? ""} sessions in use. Checked ${values.checkedAt ?? ""}.`,
         "task:launchQueueCapacityStale": `${values.inUse ?? ""} of ${values.limit ?? ""} sessions in use. Capacity data is stale. Last checked ${values.checkedAt ?? ""}.`,
         "task:launchQueueCapacityDisconnected": `${values.inUse ?? ""} of ${values.limit ?? ""} sessions in use. Capacity connection is unavailable. Last checked ${values.checkedAt ?? ""}.`,
@@ -165,7 +166,7 @@ describe("LaunchQueueStatus retry copy", () => {
   it("does not promise a retry when the queue has stopped retrying", () => {
     render(<LaunchQueueStatus queue={QUEUE_STOPPED_REPLAY} />);
 
-    expect(screen.getByText("The queued launch needs attention.")).toBeTruthy();
+    expect(screen.getByText("Kandev could not start the queued session.")).toBeTruthy();
     expect(screen.getByText("Automatic retry stopped.")).toBeTruthy();
     expect(screen.queryByText(/will retry/)).toBeNull();
     expect(screen.queryByTestId("launch-queue-session-capacity-link")).toBeNull();

@@ -13,11 +13,13 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
-	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+var errRecoveredTaskEnvironmentAbsent = errors.New("task environment identity: durable store answered with no value")
+var errRecoveredAgentIdentityAbsent = errors.New("recovered agent identity is authoritatively absent")
 
 const (
 	containerStateCreated = "created"
@@ -82,8 +84,21 @@ func (s recoveryOutcomeSummary) logFields() []zap.Field {
 	}
 }
 
-// Start starts the lifecycle manager background tasks
+// The startup policy belongs to one call, without mutating manager-wide configuration.
+type deferredStartupRecoveryKey struct{}
+
+// StartDeferredRemoteRecovery adopts local survivors before admitting new local
+// instances. Remote attachment stays behind readiness and its exact owner guard.
+func (m *Manager) StartDeferredRemoteRecovery(ctx context.Context) error {
+	if err := m.PrepareStartupRecovery(ctx); err != nil {
+		return err
+	}
+	return m.Start(context.WithValue(ctx, deferredStartupRecoveryKey{}, true))
+}
+
+// Start starts the lifecycle manager with its call-scoped startup policy.
 func (m *Manager) Start(ctx context.Context) error {
+	deferRemote, _ := ctx.Value(deferredStartupRecoveryKey{}).(bool)
 	if m.executorRegistry == nil {
 		m.logger.Warn("no runtime registry configured")
 		return nil
@@ -92,17 +107,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	runtimeNames := m.executorRegistry.List()
 	m.logger.Info("starting lifecycle manager", zap.Int("runtimes", len(runtimeNames)))
 
-	// Check health of all registered runtimes
-	healthResults := m.executorRegistry.HealthCheckAll(ctx)
-	for name, err := range healthResults {
-		if err != nil {
-			m.logger.Warn("runtime health check failed",
-				zap.String("runtime", string(name)),
-				zap.Error(err))
-		} else {
-			m.logger.Info("runtime is healthy", zap.String("runtime", string(name)))
-		}
-	}
+	m.checkStartupRuntimeHealth(ctx, deferRemote)
 
 	// AC-EXECUTORS-SURVIVAL-003.1: start this pass's re-tracked-session set
 	// empty so a stale entry from an earlier Start() call (tests, or a
@@ -125,38 +130,11 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	records := append([]*models.ExecutorRunning(nil), standaloneRecords...)
 	remoteRecordsForRecovery := make([]*models.ExecutorRunning, 0, len(remoteRecords)+len(pluginRecords))
-	if listErr == nil {
-		pluginTerminalRecords := make([]*models.ExecutorRunning, 0, len(pluginRecords))
-		pluginLiveRecords := make([]*models.ExecutorRunning, 0, len(pluginRecords))
-		for _, record := range pluginRecords {
-			if record == nil || remoteRecoveryOwnerUnsupported(record) {
-				continue
-			}
-			copyRecord := cloneRemoteRecoveryRecord(record)
-			copyRecord.TransientAuthToken = m.revealRuntimeSecret(ctx, copyRecord.Metadata, MetadataKeyAuthTokenSecret)
-			copyRecord.TransientBootstrapNonce = m.revealRuntimeSecret(ctx, copyRecord.Metadata, MetadataKeyBootstrapNonceSecret)
-			if isTerminalExecutorRunningStatus(copyRecord.Status) {
-				pluginTerminalRecords = append(pluginTerminalRecords, copyRecord)
-			} else {
-				pluginLiveRecords = append(pluginLiveRecords, copyRecord)
-			}
-		}
-		eligibleRemote := m.establishRemoteRecoveryCandidates(ctx, append(remoteRecords, pluginLiveRecords...))
-		eligiblePlugin := make([]*models.ExecutorRunning, 0, len(eligibleRemote))
-		eligibleBuiltInRemote := make([]*models.ExecutorRunning, 0, len(eligibleRemote))
-		for _, record := range eligibleRemote {
-			if record.Runtime == agentruntime.RuntimePluginRemote {
-				credentialed := m.revealRemoteRecoveryCredentials(ctx, record)
-				eligiblePlugin = append(eligiblePlugin, credentialed)
-			} else {
-				eligibleBuiltInRemote = append(eligibleBuiltInRemote, m.revealRemoteRecoveryCredentials(ctx, record))
-			}
-		}
-		remoteRecordsForRecovery = append(remoteRecordsForRecovery, pluginTerminalRecords...)
-		remoteRecordsForRecovery = append(remoteRecordsForRecovery, eligiblePlugin...)
-		remoteRecordsForRecovery = append(remoteRecordsForRecovery, eligibleBuiltInRemote...)
+	if listErr == nil && !deferRemote {
+		remoteRecordsForRecovery = m.initialRemoteRecoveryRecords(ctx, pluginRecords, remoteRecords)
 		records = append(records, remoteRecordsForRecovery...)
 	}
+
 	inventoryKnown := listErr == nil && remoteListErr == nil
 	recoveryOutcome := recoveryOutcomeSummary{candidateCountKnown: inventoryKnown}
 	m.runRecoveryErr = errors.Join(listErr, remoteListErr)
@@ -221,6 +199,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	// only backend that reads them, so this narrows nothing else.
 	standaloneRecords = recoverableRecords(standaloneRecords, guardedSessions)
 	records = append(append([]*models.ExecutorRunning(nil), standaloneRecords...), remoteRecordsForRecovery...)
+	progress := newRecoveryProgressLedger(records)
 	if inventoryKnown {
 		recoveryOutcome.candidateCount = len(records)
 		startup.SetTotal(ctx, startup.StepSessionsRecovery, int64(len(records)))
@@ -243,12 +222,12 @@ func (m *Manager) Start(ctx context.Context) error {
 	recoveryCtx, cancelRecovery := context.WithDeadline(ctx, m.recoveryDeadlineDeadline())
 	var recovered []*ExecutorInstance
 	var detailedOutcomes map[string]RecoveryCandidateOutcome
+	var recoveryErr error
 	if listErr == nil {
-		var err error
-		recovered, detailedOutcomes, err = m.executorRegistry.RecoverAllDetailed(recoveryCtx, records)
-		if err != nil {
-			m.runRecoveryErr = err
-			m.logger.Warn("failed to recover executions from some runtimes", zap.Error(err))
+		recovered, detailedOutcomes, recoveryErr = m.executorRegistry.recoverDetailed(recoveryCtx, records, deferRemote)
+		if recoveryErr != nil {
+			m.runRecoveryErr = recoveryErr
+			m.logger.Warn("failed to recover executions from some runtimes", zap.Error(recoveryErr))
 		}
 	}
 
@@ -272,6 +251,12 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 	}
 
+	recoveredSessions := make(map[string]struct{}, len(recovered))
+	for _, instance := range recovered {
+		if instance != nil && instance.SessionID != "" {
+			recoveredSessions[instance.SessionID] = struct{}{}
+		}
+	}
 	var stopWG sync.WaitGroup
 	if len(recovered) > 0 {
 		for _, ri := range recovered {
@@ -279,7 +264,6 @@ func (m *Manager) Start(ctx context.Context) error {
 				if pending := m.pendingRemoteRecoveryForSession(ri.SessionID); pending != nil {
 					if !m.beginRemoteRecovery(pending) {
 						m.discardRemoteRecoveryInstance(ri)
-						startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 						continue
 					}
 					err := m.processRecoveredRemoteInstance(recoveryCtx, pending, ri)
@@ -292,13 +276,13 @@ func (m *Manager) Start(ctx context.Context) error {
 						}
 					} else {
 						recordOutcomes[ri.SessionID] = recoveryOutcomeRetracked
+						progress.advance(ctx, ri.SessionID)
 					}
-					startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 					continue
 				}
 				if isRemoteRecoveryRuntime(ri.RuntimeName) {
 					m.discardRemoteRecoveryInstance(ri)
-					startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+					progress.advance(ctx, ri.SessionID)
 					continue
 				}
 			}
@@ -317,7 +301,8 @@ func (m *Manager) Start(ctx context.Context) error {
 					setCandidateOutcome(ri.SessionID, "canceled")
 				}
 				m.dispatchUnreconstructableStop(&stopWG, ri)
-				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+				// The deadline cut reconstruction short: the candidate has no
+				// conclusive outcome yet, so it must remain incomplete.
 				continue
 			}
 			originalWorkspacePath := getMetadataString(ri.Metadata, MetadataKeyOriginalWorkspacePath)
@@ -361,6 +346,10 @@ func (m *Manager) Start(ctx context.Context) error {
 				// session -- never from a durable/database value, which could be
 				// stale relative to what the instance actually resumed.
 				ACPSessionID: ri.ProviderSessionID,
+				// Native collection state comes from the subscribed instance,
+				// not the current launch request. Peer support alone does not
+				// prove an older retained peer subscribed.
+				CopilotNativeSessionEvents: ri.CopilotNativeSessionEvents,
 			}
 			execution.restoreIdleActivity(ri.Metadata)
 			// AC-EXECUTORS-SURVIVAL-002.14's declared source for task
@@ -377,7 +366,7 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.String("session_id", execution.SessionID))
 				setCandidateOutcome(ri.SessionID, "task_identity")
 				m.dispatchUnreconstructableStop(&stopWG, ri)
-				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+				progress.resolveAfterStop(ri.SessionID)
 				continue
 			}
 			// A recovered instance is resuming a live provider session (its
@@ -396,7 +385,9 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.Error(err))
 				setCandidateOutcome(ri.SessionID, "environment")
 				m.dispatchUnreconstructableStop(&stopWG, ri)
-				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+				if errors.Is(err, errRecoveredTaskEnvironmentAbsent) {
+					progress.resolveAfterStop(ri.SessionID)
+				}
 				continue
 			}
 			// AC-EXECUTORS-SURVIVAL-002.14: Office profile identity is a new key
@@ -423,7 +414,9 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.Error(err))
 				setCandidateOutcome(ri.SessionID, "agent_identity")
 				m.dispatchUnreconstructableStop(&stopWG, ri)
-				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+				if errors.Is(err, errRecoveredAgentIdentityAbsent) {
+					progress.resolveAfterStop(ri.SessionID)
+				}
 				continue
 			}
 			// Durable adoption must establish the authenticated owner, SQL
@@ -431,6 +424,17 @@ func (m *Manager) Start(ctx context.Context) error {
 			// before any stream or prompt admission can observe this execution.
 			// A failed evidence read uses the same guarded stop path as every
 			// other unreconstructable recovery outcome.
+			if err := m.restoreBuiltinExecution(recoveryCtx, execution); err != nil {
+				m.logger.Error("refusing to re-track recovered execution: built-in MCP binding could not be verified",
+					zap.String("instance_id", execution.ID), zap.String("session_id", execution.SessionID), zap.Error(err))
+				setCandidateOutcome(ri.SessionID, "builtin_mcp")
+				m.dispatchUnreconstructableStop(&stopWG, ri)
+				// Only the outer recovery error confirms a persisted refusal.
+				if _, blocked := err.(*BuiltinMCPRecoveryError); blocked {
+					progress.resolveAfterStop(ri.SessionID)
+				}
+				continue
+			}
 			if err := m.restoreRecoveredDelivery(recoveryCtx, execution, ri); err != nil {
 				m.logger.Error("refusing to re-track recovered execution: durable delivery identity could not be reconstructed",
 					zap.String("instance_id", execution.ID),
@@ -438,7 +442,9 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.Error(err))
 				setCandidateOutcome(ri.SessionID, "turn_status")
 				m.dispatchUnreconstructableStop(&stopWG, ri)
-				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+				if recoveredDeliveryFailureIsConclusive(err) {
+					progress.resolveAfterStop(ri.SessionID)
+				}
 				continue
 			}
 			if err := m.restoreRecoveredSessionSettingsSource(recoveryCtx, execution); err != nil {
@@ -448,7 +454,6 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.Error(err))
 				setCandidateOutcome(ri.SessionID, "settings_source")
 				m.dispatchUnreconstructableStop(&stopWG, ri)
-				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
 			}
 			var turnOutcome *agentctl.TurnOutcome
@@ -466,7 +471,7 @@ func (m *Manager) Start(ctx context.Context) error {
 						zap.Error(err))
 					setCandidateOutcome(ri.SessionID, "duplicate")
 					m.dispatchUnreconstructableStop(&stopWG, ri)
-					startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+					progress.resolveAfterStop(ri.SessionID)
 					continue
 				}
 				durableExecutionAdded = true
@@ -482,7 +487,6 @@ func (m *Manager) Start(ctx context.Context) error {
 					m.executionStore.Remove(execution.ID)
 					m.setRuntimeInterest(execution.SessionID, false)
 					m.dispatchUnreconstructableStop(&stopWG, ri)
-					startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 					continue
 				}
 			} else {
@@ -499,7 +503,6 @@ func (m *Manager) Start(ctx context.Context) error {
 						zap.String("session_id", execution.SessionID))
 					setCandidateOutcome(ri.SessionID, "turn_status")
 					m.dispatchUnreconstructableStop(&stopWG, ri)
-					startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 					continue
 				}
 			}
@@ -532,7 +535,7 @@ func (m *Manager) Start(ctx context.Context) error {
 					}
 					execution.EndSessionSpan()
 					initSpan.End()
-					startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+					progress.advance(ctx, execution.SessionID)
 					continue
 				}
 			}
@@ -594,9 +597,46 @@ func (m *Manager) Start(ctx context.Context) error {
 			go m.streamManager.ReconnectAll(execution)
 
 			initSpan.End()
-			startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+			progress.advance(ctx, execution.SessionID)
 		}
 		m.logger.Info("recovered executions", zap.Int("count", len(recovered)))
+	}
+	for _, record := range records {
+		if record == nil || detailedOutcomes[record.SessionID] != RecoveryOutcomeNoMatchingInstance ||
+			!remoteRecoveryNoMatchProvesStopped(record.Runtime) {
+			continue
+		}
+		if _, returned := recoveredSessions[record.SessionID]; returned || ctx.Err() != nil {
+			continue
+		}
+		pending := m.pendingRemoteRecoveryForSession(record.SessionID)
+		if !m.beginRemoteRecovery(pending) {
+			continue
+		}
+		absenceCtx, cancelAbsence := m.remoteAttemptContext(ctx)
+		settled, err := m.settleRemoteRecoveryAbsence(absenceCtx, pending, record, true, detailedOutcomes[record.SessionID])
+		if err != nil {
+			m.logger.Debug("confirmed remote absence remains guarded until its runtime row is repaired",
+				zap.String("session_id", record.SessionID), zap.Error(err))
+		} else if settled {
+			progress.advance(ctx, record.SessionID)
+		}
+		cancelAbsence()
+		m.finishRemoteRecoveryAttempt(pending)
+	}
+	// A standalone backend's own successful enumeration proves no matching
+	// instance for its omitted candidates. Remote backends settle that proof
+	// through the guarded disposition above; without a detailed backend the
+	// omission stays unknown and the candidate remains incomplete.
+	for _, record := range records {
+		if record == nil || detailedOutcomes[record.SessionID] != RecoveryOutcomeNoMatchingInstance ||
+			remoteRecoveryNoMatchProvesStopped(record.Runtime) || ctx.Err() != nil {
+			continue
+		}
+		if _, returned := recoveredSessions[record.SessionID]; returned {
+			continue
+		}
+		progress.advance(ctx, record.SessionID)
 	}
 	cancelRecovery()
 
@@ -608,6 +648,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	// before returning) so Start remains synchronous overall and
 	// ReleaseAllExceptRetained below never races a still-resolving stop.
 	stopWG.Wait()
+	if resolved := progress.settleStops(); resolved > 0 {
+		startup.Advance(ctx, startup.StepSessionsRecovery, int64(resolved))
+	}
 	startup.EndStep(ctx, startup.StepSessionsRecovery)
 
 	for _, rec := range records {
@@ -661,13 +704,18 @@ func (m *Manager) Start(ctx context.Context) error {
 	if m.stopContext != nil {
 		stopRemoteStatus = context.AfterFunc(m.stopContext, cancelRemoteStatus)
 	}
-	m.wg.Add(1)
-	go func() {
-		defer cancelRemoteStatus()
-		defer stopRemoteStatus()
-		m.remoteStatusLoop(remoteStatusCtx)
-	}()
-	m.logger.Info("remote status loop started")
+	startup.AfterReady(ctx, func() {
+		m.wg.Add(1)
+		go func() {
+			defer cancelRemoteStatus()
+			defer stopRemoteStatus()
+			if deferRemote {
+				m.pollRemoteStatuses(remoteStatusCtx)
+			}
+			m.remoteStatusLoop(remoteStatusCtx)
+		}()
+		m.logger.Info("remote status loop started")
+	})
 	// Set up callbacks for passthrough mode (using standalone runtime)
 	if standaloneRT, err := m.executorRegistry.GetBackend(executor.NameStandalone); err == nil {
 		if interactiveRunner := standaloneRT.GetInteractiveRunner(); interactiveRunner != nil {
@@ -717,30 +765,14 @@ func (m *Manager) hydrateRecoveredTaskEnvironmentID(ctx context.Context, executi
 		return fmt.Errorf("task environment identity read failed: %w", err)
 	}
 	if info == nil || info.TaskEnvironmentID == "" {
-		return errors.New("task environment identity: durable store answered with no value")
+		return errRecoveredTaskEnvironmentAbsent
 	}
 	execution.TaskEnvironmentID = info.TaskEnvironmentID
 	return nil
 }
 
-// reDeriveRecoveredAgentIdentity implements AC-EXECUTORS-SURVIVAL-002.14's
-// last reconstruction-table row: agent identity, agent and continuation
-// commands and their arguments, and the history setting are re-derived from
-// the restored agent profile and the agent-type registry -- the same
-// computation an ordinary launch performs, never read from the adopted
-// instance, so a compromised or stale instance cannot tell the backend which
-// command to run for the session's next turn.
-//
-// Re-derivation reflects the profile and registry as they stand at recovery,
-// not as they stood before the restart (AC-EXECUTORS-SURVIVAL-002.3): a
-// profile edited or an agent type removed during the outage takes effect
-// exactly as it would on the session's next ordinary turn.
-//
-// getAgentConfigForExecution and buildFreshAgentCommand are the same
-// primitives an in-session context reset uses (manager_interaction.go's
-// prepareAgentRestart), reused as-is: both already consume nothing but
-// execution fields already restored by this point (AgentProfileID,
-// RuntimeName, metadata), with no launch-request-only dependency.
+// reDeriveRecoveredAgentIdentity derives child commands from the authorized
+// profile and registry. A retained wrapper comes from protected process state.
 func (m *Manager) reDeriveRecoveredAgentIdentity(ctx context.Context, execution *AgentExecution) error {
 	agentConfig, err := m.getAgentConfigForExecution(execution)
 	if err != nil {
@@ -759,6 +791,10 @@ func (m *Manager) reDeriveRecoveredAgentIdentity(ctx context.Context, execution 
 	execution.ContinueCommand = commands.continue_
 	execution.AgentArgs = commands.args
 	execution.ContinueArgs = commands.continueArgs
+	execution.LaunchWrapper, err = recoveredLaunchWrapper(ctx, execution, commands.wrapper)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -833,7 +869,7 @@ func (m *Manager) stopUnreconstructableRecoveredInstance(ctx context.Context, ri
 		m.recoveryGuard.Release(ri.SessionID)
 		return
 	}
-	if err := backend.StopInstance(ctx, ri, true); err != nil {
+	if err := m.stopWorkspaceRuntime(ctx, backend, ri, true); err != nil {
 		m.logger.Warn("failed to stop unreconstructable recovered instance",
 			zap.String("instance_id", ri.InstanceID),
 			zap.String("session_id", ri.SessionID),
@@ -1027,7 +1063,7 @@ func (m *Manager) CleanupStaleExecutionBySessionIDIfCurrent(
 	if sessionID == "" || expectedExecutionID == "" {
 		return nil
 	}
-	_, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
+	_, err := m.doSerializedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
 		execution, exists := m.executionStore.GetBySessionID(sessionID)
 		if !exists || execution == nil || execution.ID != expectedExecutionID {
 			return nil, nil
@@ -1045,6 +1081,12 @@ func (m *Manager) CleanupStaleExecutionBySessionIDIfCurrent(
 }
 
 func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExecution) error {
+	return m.cleanupStaleExecutionWithCheckpoint(ctx, execution, nil)
+}
+
+func (m *Manager) cleanupStaleExecutionWithCheckpoint(
+	ctx context.Context, execution *AgentExecution, checkpoint func(context.Context) error,
+) error {
 	if execution == nil {
 		return nil
 	}
@@ -1060,6 +1102,15 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 		zap.String("session_id", sessionID),
 		zap.String("execution_id", execution.ID))
 
+	// Release remote project-file claims before stopping the helper, which may
+	// make its endpoint unavailable.
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	cleanupErr := m.cleanupProjectMCPFiles(ctx, execution, client)
+	releaseClient()
+	if cleanupErr != nil {
+		return fmt.Errorf("release stale project MCP files %s: %w", execution.ID, cleanupErr)
+	}
+
 	// Stop the runtime instance (workspace tracker, shell, etc.) to prevent leaked
 	// goroutines. Without this, the old agentctl instance keeps running when a new
 	// execution is created for the same session, causing git polling on deleted worktrees.
@@ -1067,6 +1118,11 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 	if !retired {
 		if err := m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false); err != nil {
 			return fmt.Errorf("stop stale runtime %s: %w", execution.ID, err)
+		}
+	}
+	if checkpoint != nil {
+		if err := checkpoint(ctx); err != nil {
+			return fmt.Errorf("checkpoint stopped runtime %s: %w", execution.ID, err)
 		}
 	}
 
@@ -1120,6 +1176,7 @@ func (m *Manager) RemoveExecution(executionID string) {
 	}
 	m.releaseActivity(executionActivityKey(executionID))
 	if execution, ok := m.executionStore.Get(executionID); ok {
+		m.retireRuntimeStorageObservation(execution, nil)
 		m.closeStreamCoalescer(execution)
 		m.cleanupPassthroughMCPConfig(execution)
 		m.setRuntimeInterest(execution.SessionID, false)

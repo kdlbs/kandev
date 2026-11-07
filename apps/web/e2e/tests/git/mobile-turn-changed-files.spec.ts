@@ -5,12 +5,15 @@ import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import {
   assertHistoricalSelectorStyle,
   assertLatestTurnCardInView,
+  assertTurnCardMessageGap,
   enableTurnChangedFiles,
   openFirstTurnChangesDiff,
   readTurnChangeHistory,
   waitForTurnChangeCount,
 } from "./turn-changed-files-helpers";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
+
+test.use({ trace: "retain-on-failure" });
 
 test.describe("mobile historical turn changed files", () => {
   test.describe.configure({ timeout: 120_000 });
@@ -26,6 +29,11 @@ test.describe("mobile historical turn changed files", () => {
     try {
       const { session, sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
       await waitForTurnChangeCount(apiClient, sessionId, 1);
+      // The page can load the summary while capture is still pending. Rehydrate the
+      // finalized history after the backend readiness check before opening the card.
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.waitForChatIdle();
       await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(1);
       await assertLatestTurnCardInView(session);
 
@@ -36,8 +44,9 @@ test.describe("mobile historical turn changed files", () => {
       ).toBeVisible();
       await session.waitForChatIdle();
       await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(2);
+      const firstCard = session.activeChat().getByTestId("turn-changed-files-card").first();
+      await assertTurnCardMessageGap(firstCard);
       if (prCapture.capturing) {
-        const firstCard = session.activeChat().getByTestId("turn-changed-files-card").first();
         await firstCard.scrollIntoViewIfNeeded();
         await waitForFiniteAnimations(firstCard);
         await prCapture.screenshot("turn-changed-files-card-mobile", {
@@ -45,11 +54,18 @@ test.describe("mobile historical turn changed files", () => {
         });
       }
 
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.waitForChatIdle();
+      const reloadedCards = session.activeChat().getByTestId("turn-changed-files-card");
+      await expect(reloadedCards).toHaveCount(2);
+      await assertTurnCardMessageGap(reloadedCards.first());
+
       const git = new GitHelper(seedData.repositoryPath, makeGitEnv(backend.tmpDir));
       git.stageFile("untracked_test.txt");
       git.commit("retain later turn contents");
 
-      const firstCard = await openFirstTurnChangesDiff(session);
+      await openFirstTurnChangesDiff(session);
       const drawer = testPage.getByTestId("mobile-diff-sheet");
       await expect(drawer).toBeVisible();
       if (prCapture.capturing) await waitForFiniteAnimations(drawer);
@@ -107,14 +123,81 @@ test("keeps renamed file paths readable in the phone diff", async ({
   apiClient,
   seedData,
 }) => {
-  const { routeRenamedTurnFile, assertCardTouchTargets, assertTurnFileDisclosure } =
-    await import("./turn-changed-files-qa-helpers");
-  await routeRenamedTurnFile(testPage);
-  const { resetTurnQaFile } = await import("./turn-changed-files-qa-helpers");
-  resetTurnQaFile(seedData.repositoryPath);
-  const { sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
-  await waitForTurnChangeCount(apiClient, sessionId, 1);
-  await assertCardTouchTargets(testPage);
-  await assertTurnFileDisclosure(testPage, true);
-  await testPage.screenshot({ path: test.info().outputPath("renamed-path-phone.png") });
+  const restorePreference = await enableTurnChangedFiles(apiClient);
+  try {
+    const {
+      routeRenamedTurnFile,
+      assertCardResponsiveContainment,
+      assertCardTouchTargets,
+      assertLongFileMetadataWraps,
+      assertTurnFileDisclosure,
+    } = await import("./turn-changed-files-qa-helpers");
+    await routeRenamedTurnFile(testPage);
+    const { resetTurnQaFile } = await import("./turn-changed-files-qa-helpers");
+    resetTurnQaFile(seedData.repositoryPath);
+    const fileTreeLoaded = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/repositories/") &&
+        response.url().includes("/files?") &&
+        response.status() === 200,
+    );
+    const { sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
+    await waitForTurnChangeCount(apiClient, sessionId, 1);
+    await fileTreeLoaded;
+    const card = testPage.getByTestId("turn-changed-files-card");
+    await expect(card).toBeVisible();
+    const expandAll = card.getByRole("button", { name: "Expand all", exact: true });
+    await expect(expandAll).toBeVisible();
+    await expandAll.tap();
+    await expect(card.locator("[data-turn-file-change-id]")).toHaveCount(1);
+    for (const width of [390, 767, 768]) {
+      await testPage.setViewportSize({ width, height: 844 });
+      await assertCardResponsiveContainment(testPage, card);
+      if (width === 390) await assertCardTouchTargets(testPage);
+    }
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await assertLongFileMetadataWraps(testPage);
+    await assertTurnFileDisclosure(testPage, true);
+    await testPage.screenshot({ path: test.info().outputPath("renamed-path-phone.png") });
+  } finally {
+    await restorePreference();
+  }
+});
+
+test("hides an unavailable empty capture after reload", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  const restorePreference = await enableTurnChangedFiles(apiClient);
+  try {
+    const { resetTurnQaFile, routeEmptyUnavailableTurn } =
+      await import("./turn-changed-files-qa-helpers");
+    const { waitForHttp } = await import("../../helpers/causal-waits");
+    resetTurnQaFile(seedData.repositoryPath);
+    const { session, sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
+    await waitForTurnChangeCount(apiClient, sessionId, 1);
+    // Confirm the completed capture is visible before intercepting its persisted reload.
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle();
+    await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(1);
+    await routeEmptyUnavailableTurn(testPage, sessionId);
+    const historyLoaded = waitForHttp(testPage, "GET", /\/turn-changes$/);
+    await testPage.reload();
+    const response = await historyLoaded;
+    expect((await response.json()).change_sets[0].file_count).toBe(0);
+    await session.waitForLoad();
+    await expect(
+      session.chat.getByText("untracked-file-setup complete", { exact: false }),
+    ).toBeVisible();
+    await session.waitForChatIdle();
+    await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(0);
+    await prCapture.screenshot("empty-capture-mobile", {
+      caption: "Completed reply without an empty unavailable change card",
+    });
+  } finally {
+    await restorePreference();
+  }
 });

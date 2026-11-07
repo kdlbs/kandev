@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -279,7 +281,7 @@ type RunSpawner interface {
 	QueueRunWithActor(
 		ctx context.Context,
 		agentInstanceID, reason, payload, idempotencyKey string,
-		actorKind models.ActorKind, actorID string,
+		actorKind runsmodels.ActorKind, actorID string,
 		causingRunID string,
 	) (runsservice.QueueOutcome, error)
 }
@@ -731,7 +733,7 @@ func (a *Actions) SpawnAgentRun(
 		runsservice.ReportKeylessEnqueue(input.Reason, runsservice.KeylessCauseUnresolved, "no_caller_run")
 	}
 	_, err = a.deps.Runs.QueueRunWithActor(ctx, target.ID, input.Reason, string(payload),
-		key, models.ActorKindAgent, runCtx.AgentID, runCtx.RunID)
+		key, runsmodels.ActorKindAgent, runCtx.AgentID, runCtx.RunID)
 	return err
 }
 

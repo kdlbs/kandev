@@ -16,10 +16,13 @@ func TestInterimSettingsInterlockRejectsMissingWrongBearerAndEmptyServerToken(t 
 		serverToken   string
 		requestToken  string
 		authorization string
+		errorCode     string
 	}{
 		{name: "missing token", serverToken: "per-boot-token"},
 		{name: "wrong token", serverToken: "per-boot-token", requestToken: "wrong"},
-		{name: "bearer credential", serverToken: "per-boot-token", requestToken: "per-boot-token", authorization: "Bearer office-jwt"},
+		{name: "bearer credential", serverToken: "per-boot-token", requestToken: "per-boot-token", authorization: "Bearer office-jwt", errorCode: "forbidden"},
+		{name: "bearer with wrong browser token", serverToken: "per-boot-token", requestToken: "wrong", authorization: "bEaReR office-jwt", errorCode: "forbidden"},
+		{name: "bearer with empty server token", authorization: "Bearer office-jwt", errorCode: "forbidden"},
 		{name: "empty server token"},
 	}
 
@@ -47,8 +50,12 @@ func TestInterimSettingsInterlockRejectsMissingWrongBearerAndEmptyServerToken(t 
 			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 				t.Fatalf("decode response body: %v", err)
 			}
-			if body.ErrorCode != InterimSettingsInterlockErrorCode {
-				t.Fatalf("error_code = %q, want %q", body.ErrorCode, InterimSettingsInterlockErrorCode)
+			expectedCode := tc.errorCode
+			if expectedCode == "" {
+				expectedCode = InterimSettingsInterlockErrorCode
+			}
+			if body.ErrorCode != expectedCode {
+				t.Fatalf("error_code = %q, want %q", body.ErrorCode, expectedCode)
 			}
 			if called {
 				t.Fatal("handler was called")

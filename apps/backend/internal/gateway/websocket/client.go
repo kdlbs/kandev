@@ -171,11 +171,28 @@ func (c *Client) ReadPump(_ context.Context) {
 			continue
 		}
 
-		// Process the message in a goroutine to avoid blocking the read pump
-		// This allows concurrent message handling so long-running handlers
-		// (like orchestrator.prompt) don't block other requests (like workspace.tree.get)
-		go c.handleMessage(&msg)
+		if !c.handleSessionMembershipMessage(&msg) {
+			// Independent requests remain concurrent so long-running handlers
+			// do not block other requests.
+			go c.handleMessage(&msg)
+		}
 	}
+}
+
+// Session membership changes follow socket order. Snapshot loading does not
+// hold up subsequent membership changes or independent requests.
+func (c *Client) handleSessionMembershipMessage(msg *ws.Message) bool {
+	switch msg.Action {
+	case ws.ActionSessionSubscribe:
+		if sessionID, joined := c.registerSessionSubscription(msg); joined {
+			go c.sendSessionData(sessionID)
+		}
+	case ws.ActionSessionUnsubscribe:
+		c.handleSessionUnsubscribe(msg)
+	default:
+		return false
+	}
+	return true
 }
 
 // handleMessage processes an incoming message.
@@ -372,23 +389,29 @@ func (c *Client) handleUserSubscribe(msg *ws.Message) {
 }
 
 func (c *Client) handleSessionSubscribe(msg *ws.Message) {
+	if sessionID, joined := c.registerSessionSubscription(msg); joined {
+		c.sendSessionData(sessionID)
+	}
+}
+
+func (c *Client) registerSessionSubscription(msg *ws.Message) (string, bool) {
 	var req SessionSubscribeRequest
 	if err := msg.ParsePayload(&req); err != nil {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-		return
+		return "", false
 	}
 
 	if req.SessionID == "" {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
-		return
+		return "", false
 	}
 	if req.ConsumerKind != "" {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "legacy session stream subscriptions are no longer supported", nil)
-		return
+		return "", false
 	}
 
 	if !c.maySubscribeSession(msg, req.SessionID) {
-		return
+		return "", false
 	}
 
 	newMembership := c.hub.SubscribeToSession(c, req.SessionID)
@@ -400,9 +423,7 @@ func (c *Client) handleSessionSubscribe(msg *ws.Message) {
 
 	// Send initial session data only when this client newly joins. Duplicate
 	// subscribe requests are acknowledgements, not snapshot replay commands.
-	if newMembership {
-		c.sendSessionData(req.SessionID)
-	}
+	return req.SessionID, newMembership
 }
 
 // maySubscribeSession applies the per-user session scoping check, emitting the

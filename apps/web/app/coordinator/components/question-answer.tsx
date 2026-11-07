@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, type RefObject } from "react";
+import { useCallback, useRef, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast/sonner";
 import { ClarificationPanelSection } from "@/components/task/chat/clarification-panel-section";
@@ -26,6 +26,7 @@ export type QuestionAnswerProps = {
  */
 export function QuestionAnswer({ bundle, itemRef, onEngaged, onOutcome }: QuestionAnswerProps) {
   const { t } = useTranslation();
+  const answerAnchorRef = useRef<HTMLDivElement>(null);
   const question = rowPrimaryText(bundle, t("needsYouInbox:questionFromAgent"));
 
   const handleOutcome = useCallback(
@@ -58,6 +59,7 @@ export function QuestionAnswer({ bundle, itemRef, onEngaged, onOutcome }: Questi
 
   return (
     <div
+      ref={answerAnchorRef}
       data-testid="question-answer"
       onKeyDownCapture={engage}
       onInputCapture={engage}
@@ -69,7 +71,8 @@ export function QuestionAnswer({ bundle, itemRef, onEngaged, onOutcome }: Questi
         onResolved={() => {}}
         onOutcome={handleOutcome}
         shortcutScopeRef={itemRef}
-        maxHeightVh={50}
+        initialMaxHeightVh={50}
+        anchorRef={answerAnchorRef}
       />
     </div>
   );

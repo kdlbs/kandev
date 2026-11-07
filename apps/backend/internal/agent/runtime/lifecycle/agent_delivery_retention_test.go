@@ -175,11 +175,11 @@ func TestDeliveryRetentionLostAck(t *testing.T) {
 				DeliveryHarnessGeneration: 2,
 			}
 			if tt.loseBefore || tt.loseAfter {
-				if _, err := reconcileExpiredAgentDeliveryReplay(ctx, execution, event, repository, peer, peer); !errors.Is(err, errRetentionAckResponseLost) {
+				if _, err := reconcileExpiredAgentDeliveryReplay(ctx, execution, event, repository, peer, peer, nil); !errors.Is(err, errRetentionAckResponseLost) {
 					t.Fatalf("first lost-ACK recovery error = %v", err)
 				}
 			}
-			if _, err := reconcileExpiredAgentDeliveryReplay(ctx, execution, event, repository, peer, peer); err != nil {
+			if _, err := reconcileExpiredAgentDeliveryReplay(ctx, execution, event, repository, peer, peer, nil); err != nil {
 				t.Fatalf("recover projected cursor: %v", err)
 			}
 			if peer.ackCalls != tt.wantCalls {

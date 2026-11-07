@@ -42,3 +42,28 @@ describe("parseStartupSnapshot", () => {
     expect(parseStartupSnapshot(value)).toBeNull();
   });
 });
+
+describe("startup timing history", () => {
+  const entry = {
+    id: "database.backup",
+    label_key: "startup.step.database_backup",
+    activation_seq: 1,
+    phase: "backing_up_database",
+    elapsed_ms: 82,
+    completed: true,
+  };
+  it("preserves valid history and remains compatible with older payloads", () => {
+    expect(
+      parseStartupSnapshot({ ...validSnapshot, completed_steps: [entry] })?.completed_steps,
+    ).toEqual([entry]);
+    expect(parseStartupSnapshot(validSnapshot)?.completed_steps).toBeUndefined();
+  });
+  it.each([null, {}, [{ ...entry, elapsed_ms: -1 }], Array(33).fill(entry)])(
+    "ignores malformed optional history without losing status",
+    (history) => {
+      const parsed = parseStartupSnapshot({ ...validSnapshot, completed_steps: history });
+      expect(parsed?.phase).toBe("applying_migrations");
+      expect(parsed?.completed_steps).toBeUndefined();
+    },
+  );
+});

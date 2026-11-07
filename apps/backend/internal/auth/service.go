@@ -230,8 +230,10 @@ func validateEmailPassword(email, password string) error {
 var ErrOrgUnavailable = errors.New("your organization is currently unavailable")
 
 // OrgStatusChecker reports whether an organization may serve requests. Wired
-// from backendapp; nil on instances without organizations.
-type OrgStatusChecker func(ctx context.Context, orgID string) bool
+// from backendapp; nil on instances without organizations. A non-nil error
+// means the organization could not be read, which callers treat as unavailable
+// rather than as a definitive rejection.
+type OrgStatusChecker func(ctx context.Context, orgID string) (bool, error)
 
 // SetOrgStatusChecker installs the suspended-organization gate.
 func (s *Service) SetOrgStatusChecker(check OrgStatusChecker) { s.orgStatus = check }
@@ -239,9 +241,9 @@ func (s *Service) SetOrgStatusChecker(check OrgStatusChecker) { s.orgStatus = ch
 // orgUsable reports whether the identity's organization may serve requests.
 // A suspended org fails every session and token closed, which is what makes
 // suspension a real lever rather than a label.
-func (s *Service) orgUsable(ctx context.Context, orgID string) bool {
+func (s *Service) orgUsable(ctx context.Context, orgID string) (bool, error) {
 	if s.orgStatus == nil || orgID == "" {
-		return true
+		return true, nil
 	}
 	return s.orgStatus(ctx, orgID)
 }

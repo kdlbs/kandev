@@ -7,6 +7,7 @@ import { readdirSync, existsSync } from "node:fs";
 
 const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
 type TestDatabase = {
+  exec(sql: string): void;
   prepare(sql: string): {
     get(...args: unknown[]): unknown;
     all(...args: unknown[]): unknown[];
@@ -21,6 +22,7 @@ export function withDatabase<T>(tmpDir: string, read: (db: TestDatabase) => T): 
   };
   const db = new DatabaseSync(path.join(tmpDir, "kandev.db"));
   try {
+    db.exec("PRAGMA busy_timeout = 5000");
     return read(db);
   } finally {
     db.close();

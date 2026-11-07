@@ -18,6 +18,8 @@ import {
   writeCanvasSource,
 } from "./canvas-fixture";
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe("Plugin-backed canvases in the desktop task workbench", () => {
   test("canvas setup opens the task dialog directly from the empty sidebar", async ({
     testPage,
@@ -305,6 +307,16 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
 
       await fixture.getByTestId("canvas-fixture-move").dispatchEvent("click");
       await expect(fixture.getByTestId("canvas-fixture-move-status")).toHaveText(/moved:/);
+      // The move response precedes its asynchronous session lifecycle updates.
+      await expect
+        .poll(
+          async () => {
+            const metadata = (await apiClient.getTask(seeded.taskId)).metadata ?? {};
+            return Object.hasOwn(metadata, "manual_move_lifecycle_pending");
+          },
+          { timeout: 60_000, message: "Waiting for the canvas task move lifecycle to settle" },
+        )
+        .toBe(false);
 
       await fixture.getByTestId("canvas-fixture-continue").dispatchEvent("click");
       await expect(fixture.getByTestId("canvas-fixture-message-status")).toHaveText("accepted");
@@ -401,7 +413,8 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
 
       await testPage.reload();
       await testPage.goto(`/t/${encodeURIComponent(seeded.taskId)}`);
-      await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible();
+      await new SessionPage(testPage).waitForDockviewReady();
+      await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible({ timeout: 15_000 });
       await expect
         .poll(
           () =>

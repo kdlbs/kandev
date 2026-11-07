@@ -13,11 +13,11 @@ export function isProviderConfigDirty(draft: AgentProfile, savedProfile: AgentPr
   );
 }
 
-function areMcpSelectedServersEqual(left: string[] = [], right: string[] = []): boolean {
+function areStringSetsEqual(left: string[] = [], right: string[] = []): boolean {
   if (left.length !== right.length) return false;
   const sortedLeft = [...left].sort();
   const sortedRight = [...right].sort();
-  return sortedLeft.every((serverId, index) => serverId === sortedRight[index]);
+  return sortedLeft.every((value, index) => value === sortedRight[index]);
 }
 
 /**
@@ -58,7 +58,8 @@ function hasExecutionProfileFieldsChanged(
     (draft.cursorMcpAuthEnabled ?? true) !== (savedProfile.cursorMcpAuthEnabled ?? true),
     (draft.cursorPluginsMcpEnabled ?? true) !== (savedProfile.cursorPluginsMcpEnabled ?? true),
     (draft.mcpSelectionMode ?? "inherit") !== (savedProfile.mcpSelectionMode ?? "inherit"),
-    !areMcpSelectedServersEqual(draft.mcpSelectedServers, savedProfile.mcpSelectedServers),
+    !areStringSetsEqual(draft.mcpSelectedServers, savedProfile.mcpSelectedServers),
+    !areStringSetsEqual(draft.copilotSelectedPlugins, savedProfile.copilotSelectedPlugins),
     (draft.enabled ?? true) !== (savedProfile.enabled ?? true),
     !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []),
     (draft.commandPrefix ?? "") !== (savedProfile.commandPrefix ?? ""),

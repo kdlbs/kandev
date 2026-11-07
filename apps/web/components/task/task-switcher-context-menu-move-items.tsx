@@ -21,7 +21,10 @@ export function TaskMoveItems({
   closeMenu,
   moveTasks,
   onChangeWorkflow,
-}: Omit<TaskContextMenuItemsProps, "onRenameTask" | "onArchiveTask" | "onDeleteTask"> & {
+}: Omit<
+  TaskContextMenuItemsProps,
+  "onRenameTask" | "onArchiveTask" | "onDeleteTask" | "isArchiving"
+> & {
   actingIds: string[];
   actingOnSelection: boolean;
 }) {

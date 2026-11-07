@@ -25,14 +25,14 @@ func (m *Manager) validateNativeResumeSQLHistory(
 	if _, supported := repository.(agentDeliverySubmissionLister); !supported {
 		return fmt.Errorf("%w: %w: SQL submission history is unavailable", ErrDurableAdoptionBlocked, ErrDurableAdoptionEvidenceUnavailable)
 	}
-	active, err := nativeResumeSQLRows(ctx, execution, status, peer, repository)
+	active, unproven, err := nativeResumeSQLRows(ctx, execution, status, peer, repository)
 	if err != nil {
 		return err
 	}
-	return validateNativeResumeSQLRows(execution, status, peer, active, retired)
+	return validateNativeResumeSQLRows(execution, status, peer, active, unproven, retired)
 }
 
-func validateNativeResumeSQLRows(execution *AgentExecution, status *agentctl.DeliveryStatus, peer []journal.Submission, active []*models.AgentDeliverySubmission, retired bool) error {
+func validateNativeResumeSQLRows(execution *AgentExecution, status *agentctl.DeliveryStatus, peer []journal.Submission, active []*models.AgentDeliverySubmission, unproven map[string]*models.AgentDeliveryCursor, retired bool) error {
 	retained := make(map[string]journal.Submission, len(peer))
 	for _, submission := range peer {
 		if _, duplicate := retained[submission.ID]; duplicate {
@@ -42,7 +42,8 @@ func validateNativeResumeSQLRows(execution *AgentExecution, status *agentctl.Del
 	}
 	for _, submission := range active {
 		evidence, found := retained[submission.ID]
-		if !found || (!peerMatchesUnknownHistory(execution, status, evidence, submission) && !peerMatchesTerminalHistory(execution, status, evidence, submission)) || retired && !evidence.Retired {
+		unprovenMatch := unproven[submission.ID] != nil && peerMatchesUnprovenCompletion(execution, status, evidence, submission)
+		if !found || (!peerMatchesUnknownHistory(execution, status, evidence, submission) && !peerMatchesTerminalHistory(execution, status, evidence, submission) && !unprovenMatch) || retired && !evidence.Retired {
 			return fmt.Errorf("%w: native resume peer and SQL submission evidence disagree", ErrDurableAdoptionBlocked)
 		}
 	}

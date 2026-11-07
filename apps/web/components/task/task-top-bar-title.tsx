@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Input } from "@kandev/ui/input";
 import { useTaskActions } from "@/hooks/use-task-actions";
+import { useInlineEditFocus } from "@/hooks/use-inline-edit-focus";
 import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
 
 type TaskTopBarTitleProps = {
@@ -16,7 +17,8 @@ type TaskTopBarTitleProps = {
 export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTitleProps) {
   const { renameTaskById } = useTaskActions();
   const { t } = useTranslation();
-  const [isEditing, setIsEditing] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const isEditing = editingTaskId !== null && editingTaskId === taskId;
   const [draft, setDraft] = useState("");
   const { inputRef, clampChange } = useTaskTitleSelectionRestore(draft);
   const titleRef = useRef<HTMLSpanElement>(null);
@@ -36,7 +38,7 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
   const startEditing = useCallback(() => {
     if (!taskId || isArchived) return;
     setDraft(taskTitle ?? "");
-    setIsEditing(true);
+    setEditingTaskId(taskId);
   }, [taskId, isArchived, taskTitle]);
 
   const handleTitleKeyDown = useCallback(
@@ -52,7 +54,20 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
     [startEditing],
   );
 
-  const handleCancel = useCallback(() => setIsEditing(false), []);
+  const handleCancel = useCallback(() => setEditingTaskId(null), []);
+
+  const { onBlur, cancelPendingBlur } = useInlineEditFocus({
+    active: isEditing,
+    identity: taskId,
+    inputRef,
+    onLeave: handleCancel,
+  });
+  useEffect(() => {
+    setEditingTaskId(null);
+  }, [taskId]);
+  useEffect(() => {
+    if (isEditing) inputRef.current?.select();
+  }, [isEditing, inputRef]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -62,6 +77,7 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
       if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
       if (e.key === "Enter") {
         e.preventDefault();
+        cancelPendingBlur();
         const trimmed = draft.trim();
         if (taskId && !isArchived && trimmed && trimmed !== taskTitle) {
           renameTaskById(taskId, trimmed).catch((err) =>
@@ -69,15 +85,16 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
           );
         }
         restoreFocusRef.current = true;
-        setIsEditing(false);
+        setEditingTaskId(null);
       } else if (e.key === "Escape") {
+        cancelPendingBlur();
         e.preventDefault();
         e.stopPropagation();
         restoreFocusRef.current = true;
-        setIsEditing(false);
+        setEditingTaskId(null);
       }
     },
-    [draft, taskId, isArchived, taskTitle, renameTaskById],
+    [draft, taskId, isArchived, taskTitle, renameTaskById, cancelPendingBlur],
   );
 
   if (isEditing) {
@@ -89,14 +106,38 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
         autoFocus
         value={draft}
         onChange={(e) => setDraft(clampChange(e))}
-        onFocus={(e) => e.target.select()}
-        onBlur={handleCancel}
+        onBlur={onBlur}
         onKeyDown={handleKeyDown}
         className="h-7 w-72 max-w-full text-sm font-medium"
       />
     );
   }
 
+  return (
+    <TaskTitleControl
+      title={taskTitle}
+      canRename={canRename}
+      titleRef={titleRef}
+      onStart={startEditing}
+      onKeyDown={handleTitleKeyDown}
+    />
+  );
+}
+
+function TaskTitleControl({
+  title,
+  canRename,
+  titleRef,
+  onStart,
+  onKeyDown,
+}: {
+  title?: string;
+  canRename: boolean;
+  titleRef: React.RefObject<HTMLSpanElement | null>;
+  onStart: () => void;
+  onKeyDown: (event: React.KeyboardEvent<HTMLSpanElement>) => void;
+}) {
+  const { t } = useTranslation();
   // The surrounding PageTopbar title crumb owns the breadcrumb semantics
   // (aria-current, position in the trail); this renders only the interactive
   // rename control. When renameable it is a real control — focusable, named by
@@ -113,16 +154,16 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
           data-testid="task-topbar-title"
           className="block min-w-0 max-w-full truncate text-sm rounded-sm font-medium outline-none focus-visible:ring-[2px] focus-visible:ring-ring/35"
           role={canRename ? "button" : undefined}
-          aria-disabled={!canRename}
+          aria-disabled={canRename ? undefined : true}
           tabIndex={canRename ? 0 : undefined}
-          onDoubleClick={startEditing}
-          onKeyDown={canRename ? handleTitleKeyDown : undefined}
+          onDoubleClick={onStart}
+          onKeyDown={canRename ? onKeyDown : undefined}
         >
-          {taskTitle ?? t("task:taskDetails")}
+          {title ?? t("task:taskDetails")}
         </span>
       </TooltipTrigger>
       <TooltipContent className="max-w-sm whitespace-normal break-words">
-        <span className="block">{taskTitle ?? t("task:taskDetails")}</span>
+        <span className="block">{title ?? t("task:taskDetails")}</span>
         {canRename && <span className="mt-1 block">{t("task:doubleClickToEditOrPress")}</span>}
       </TooltipContent>
     </Tooltip>

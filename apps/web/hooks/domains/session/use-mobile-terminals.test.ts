@@ -1,15 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useMobileTerminals, __resetAutoCreatedEnvironmentsForTest } from "./use-mobile-terminals";
+import { userShellScopeKey } from "@/lib/state/user-shell-scope";
 
 const SESSION_ID = "sess-1";
 
 const addTerminalMock = vi.fn();
 let mockEnvironmentId: string | null = null;
-let mockShells: Array<{ terminalId: string; label: string; closable: boolean }> = [];
+let mockShells: Array<{
+  terminalId: string;
+  label: string;
+  closable: boolean;
+  state?: string;
+}> = [];
 let mockShellsLoaded = false;
 
 let mockTaskID: string | null = "task-1";
+let mockHasSuccessfulList = true;
+let mockIsLoading = false;
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -17,6 +25,20 @@ vi.mock("@/components/state-provider", () => ({
       environmentIdBySessionId: mockEnvironmentId ? { [SESSION_ID]: mockEnvironmentId } : {},
       tasks: { activeTaskId: mockTaskID },
     }),
+  useAppStoreApi: () => ({
+    getState: () => {
+      const key = userShellScopeKey({
+        environmentId: mockEnvironmentId ?? "",
+        taskId: mockTaskID,
+      });
+      return {
+        userShells: {
+          listed: { [key]: mockHasSuccessfulList },
+          loading: { [key]: mockIsLoading },
+        },
+      };
+    },
+  }),
 }));
 
 vi.mock("./use-terminals", () => ({
@@ -38,8 +60,10 @@ vi.mock("./use-terminals", () => ({
 vi.mock("./use-user-shells", () => ({
   useUserShells: () => ({
     shells: mockShells,
-    isLoading: false,
+    isLoading: mockIsLoading,
     isLoaded: mockShellsLoaded,
+    hasSuccessfulList: mockHasSuccessfulList,
+    scope: null,
     addShell: vi.fn(),
     removeShell: vi.fn(),
   }),
@@ -51,6 +75,8 @@ beforeEach(() => {
   mockEnvironmentId = "env-A";
   mockShells = [];
   mockShellsLoaded = true;
+  mockHasSuccessfulList = true;
+  mockIsLoading = false;
   mockTaskID = "task-1";
 });
 
@@ -74,6 +100,31 @@ describe("useMobileTerminals auto-create", () => {
     renderHook(() => useMobileTerminals(SESSION_ID));
     await new Promise((r) => setTimeout(r, 0));
     expect(addTerminalMock).not.toHaveBeenCalled();
+  });
+
+  it("does not create while a fresh read is pending over a cached success", async () => {
+    mockIsLoading = true;
+    renderHook(() => useMobileTerminals(SESSION_ID));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(addTerminalMock).not.toHaveBeenCalled();
+  });
+
+  it("does not create from a settled but unsuccessful read", async () => {
+    mockShellsLoaded = true;
+    mockHasSuccessfulList = false;
+    renderHook(() => useMobileTerminals(SESSION_ID));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(addTerminalMock).not.toHaveBeenCalled();
+  });
+
+  it("creates a shell when the environment cache only has bottom-panel or parked rows", async () => {
+    addTerminalMock.mockResolvedValue(undefined);
+    mockShells = [
+      { terminalId: "bottom-panel", label: "Terminal", closable: true },
+      { terminalId: "shell-parked", label: "Parked", closable: true, state: "parked" },
+    ];
+    renderHook(() => useMobileTerminals(SESSION_ID));
+    await waitFor(() => expect(addTerminalMock).toHaveBeenCalledTimes(1));
   });
 
   it("multiple instances for the same env trigger only one creation (module-level guard)", async () => {

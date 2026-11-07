@@ -1,9 +1,5 @@
 import { IconUsersGroup } from "@tabler/icons-react";
-import {
-  getTaskStateIcon,
-  shouldUsePermissionTaskIcon,
-  shouldUseQuestionTaskIcon,
-} from "@/lib/ui/state-icons";
+import { getTaskStateIcon, shouldUseQuestionTaskIcon } from "@/lib/ui/state-icons";
 import type { Task } from "@/components/kanban-card";
 
 // Status markers that mask the launch spinner and gate the "resting" no-affordance
@@ -78,7 +74,7 @@ export function renderTaskStatusIcon(
   const flags: StatusMaskFlags = {
     needsMe:
       shouldUseQuestionTaskIcon(task.state, hasPendingClarification) ||
-      shouldUsePermissionTaskIcon(hasPendingPermission),
+      (hasPendingPermission ?? false),
     showInterrupted: !!task.interrupted,
     showAutoStartFailed: !!task.autoStartFailed,
     parkedOnBackgroundWork: !!task.parkedOnBackgroundWork,

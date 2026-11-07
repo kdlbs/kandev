@@ -2,7 +2,11 @@ package requiredstores
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
+	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,12 +16,43 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/common/logger"
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/system/maintenance"
 )
+
+// pingFailureDriver wraps the real SQLite driver so acquisition still succeeds
+// against a real database file while the ping on the acquired connection fails.
+type pingFailureDriver struct{ inner driver.Driver }
+
+func (d pingFailureDriver) Open(name string) (driver.Conn, error) {
+	conn, err := d.inner.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return pingFailureConn{Conn: conn}, nil
+}
+
+type pingFailureConn struct{ driver.Conn }
+
+func (pingFailureConn) Ping(context.Context) error { return context.DeadlineExceeded }
+
+var registerPingFailureDriver sync.Once
+
+func openPingFailureSQLite(t *testing.T) *sqlx.DB {
+	t.Helper()
+	registerPingFailureDriver.Do(func() {
+		sql.Register("requiredstores_ping_failure", pingFailureDriver{inner: &sqlite3.SQLiteDriver{}})
+	})
+	conn, err := sqlx.Open("requiredstores_ping_failure", filepath.Join(t.TempDir(), "probe.db"))
+	if err != nil {
+		t.Fatalf("open ping-failure sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
+}
 
 func newSQLiteHealthFixture(t *testing.T, descriptors []Descriptor) (*sqlx.DB, *db.Pool, *Tracker, *Health) {
 	t.Helper()
@@ -230,8 +265,8 @@ func TestRuntimeHealthProbeFailureLogsBoundedStageAndRecovers(t *testing.T) {
 		stage     string
 		blockedDB string
 	}{
-		{name: "writer ping", stage: "writer_ping", blockedDB: "writer"},
-		{name: "reader ping", stage: "reader_ping", blockedDB: "reader"},
+		{name: "writer acquire", stage: "writer_acquire", blockedDB: "writer"},
+		{name: "reader acquire", stage: "reader_acquire", blockedDB: "reader"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			writer, err := sqlx.Open("sqlite3", ":memory:")
@@ -359,6 +394,63 @@ func TestRuntimeHealthProbeFailureLogsBoundedStageAndRecovers(t *testing.T) {
 			}
 			if !health.Healthy() {
 				t.Fatal("health did not recover after the blocked pool became available")
+			}
+		})
+	}
+}
+
+func openHealthySQLite(t *testing.T) *sqlx.DB {
+	t.Helper()
+	conn, err := sqlx.Open("sqlite3", filepath.Join(t.TempDir(), "healthy.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
+}
+
+// @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.1
+func TestRuntimeHealthProbeReportsAcquiredPingStage(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		stage  string
+		writer func(*testing.T) *sqlx.DB
+		reader func(*testing.T) *sqlx.DB
+	}{
+		{name: "writer", stage: "writer_ping", writer: openPingFailureSQLite, reader: openHealthySQLite},
+		{name: "reader", stage: "reader_ping", writer: openHealthySQLite, reader: openPingFailureSQLite},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pool := db.NewPool(test.writer(t), test.reader(t))
+			t.Cleanup(func() { _ = pool.Close() })
+			tracker, err := NewTracker([]Descriptor{{
+				ID: "probe", OwnerPackage: "owner/probe", RequiredTables: []string{"probe"}, Sweep: startup.StepStoresRepositories,
+			}})
+			if err != nil {
+				t.Fatalf("NewTracker: %v", err)
+			}
+			health := NewHealth(tracker, pool, nil)
+
+			diagnostic, probeErr := health.pingObserved(context.Background())
+			if probeErr == nil {
+				t.Fatal("pingObserved() error = nil with a failing acquired-connection ping")
+			}
+			if diagnostic == nil {
+				t.Fatal("pingObserved() returned no diagnostic")
+			}
+			if diagnostic.stage != test.stage {
+				t.Fatalf("diagnostic stage = %q, want %q", diagnostic.stage, test.stage)
+			}
+			if diagnostic.errorClass != "deadline_exceeded" {
+				t.Fatalf("diagnostic error class = %q, want deadline_exceeded", diagnostic.errorClass)
+			}
+			if diagnostic.elapsed < 0 {
+				t.Fatalf("diagnostic elapsed = %s, want a non-negative duration", diagnostic.elapsed)
+			}
+			for _, field := range diagnostic.logFields() {
+				if field.Key == "error" {
+					t.Fatal("ping diagnostic exposed the raw error")
+				}
 			}
 		})
 	}

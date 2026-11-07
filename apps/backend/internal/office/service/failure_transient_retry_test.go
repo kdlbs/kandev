@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -18,7 +20,7 @@ import (
 // used throughout this file for "a retryable blip".
 const transientMessage = "connection reset by peer"
 
-func safeTransientEvidence(run *models.Run) service.AgentFailureEvidence {
+func safeTransientEvidence(run *runsmodels.Run) service.AgentFailureEvidence {
 	return service.AgentFailureEvidence{
 		RunID:            run.ID,
 		SessionID:        "session-test",

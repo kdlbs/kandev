@@ -323,6 +323,9 @@ var _ interface {
 	InspectDeliveryRecordEvidence(context.Context, runtimeapi.DeliveryRecordEvidenceRequest) (*runtimeapi.DeliveryRecordEvidence, error)
 	ReadDeliveryRecordSubmission(context.Context, runtimeapi.DeliveryRecordSubmissionRequest) (*runtimeapi.DeliveryRecordSubmission, error)
 } = (*lifecycleAdapter)(nil)
+var _ interface {
+	RuntimeStorageObservation(string) (runtimeapi.RuntimeStorageObservation, bool)
+} = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
 func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *logger.Logger) *lifecycleAdapter {
@@ -401,7 +404,9 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		requestedBaseBranch = execution.PrepareResult.RequestedBaseBranch
 		baseBranch = execution.PrepareResult.BaseBranch
 		baseBranchFallbackWarning = execution.PrepareResult.BaseBranchFallbackWarning
-		if worktreePath == "" && execution.PrepareResult.WorktreeID != "" && len(execution.PrepareResult.Worktrees) == 0 {
+		if execution.PrepareResult.WorktreePath != "" {
+			worktreePath = execution.PrepareResult.WorktreePath
+		} else if worktreePath == "" && execution.PrepareResult.WorktreeID != "" && len(execution.PrepareResult.Worktrees) == 0 {
 			worktreePath = execution.PrepareResult.WorkspacePath
 		}
 	}
@@ -411,6 +416,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 			worktrees = append(worktrees, executor.RepoWorktreeResult{
 				TaskRepositoryID:          w.TaskRepositoryID,
 				RepositoryID:              w.RepositoryID,
+				WorkspaceRelativePath:     w.WorkspaceRelativePath,
 				BranchSlug:                w.BranchSlug,
 				WorktreeID:                w.WorktreeID,
 				WorktreeBranch:            w.WorktreeBranch,
@@ -475,6 +481,7 @@ func buildLifecycleLaunchRequest(
 		TurnID:                        req.TurnID,
 		WorkspacePath:                 workspacePath,
 		OriginalWorkspacePath:         req.OriginalWorkspacePath,
+		WorkspaceLayout:               req.WorkspaceLayout,
 		TaskDescription:               req.TaskDescription,
 		Attachments:                   convertToLifecycleAttachments(req.Attachments),
 		Env:                           req.Env,
@@ -527,6 +534,7 @@ func buildLifecycleLaunchRequest(
 		RepoName:                      req.RepoName,
 		BranchSlug:                    req.BranchSlug,
 		BranchIdentitySlug:            req.BranchIdentitySlug,
+		WorkspaceRelativePath:         req.WorkspaceRelativePath,
 	}
 	launchReq.WorkspaceFolders = lifecycleWorkspaceFolders(req.WorkspaceFolders)
 	launchReq.RouteOverride = lifecycleRouteOverride(req.RouteOverride)
@@ -547,7 +555,11 @@ func lifecycleWorkspaceFolders(folders []executor.WorkspaceFolderSpec) []lifecyc
 	}
 	result := make([]lifecycle.WorkspaceFolderSpec, 0, len(folders))
 	for _, f := range folders {
-		result = append(result, lifecycle.WorkspaceFolderSpec{Name: f.Name, LocalPath: f.LocalPath})
+		result = append(result, lifecycle.WorkspaceFolderSpec{
+			Name:                  f.Name,
+			LocalPath:             f.LocalPath,
+			WorkspaceRelativePath: f.WorkspaceRelativePath,
+		})
 	}
 	return result
 }
@@ -604,6 +616,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 			CopyFiles:                  r.CopyFiles,
 			BranchSlug:                 r.BranchSlug,
 			BranchIdentitySlug:         r.BranchIdentitySlug,
+			WorkspaceRelativePath:      r.WorkspaceRelativePath,
 		})
 	}
 	return specs
@@ -1031,6 +1044,10 @@ func (a *lifecycleAdapter) RecoverAgentPromptStream(ctx context.Context, session
 	return a.mgr.RecoverAgentPromptStream(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) RecoverSilentRestoreCandidateStream(ctx context.Context, sessionID, executionID, nativeID string) error {
+	return a.mgr.RecoverSilentRestoreCandidateStream(ctx, sessionID, executionID, nativeID)
+}
+
 func (a *lifecycleAdapter) RecoverAgentPromptStreamWithIdentity(
 	ctx context.Context,
 	identity lifecycle.AgentDeliveryRecoveryIdentity,
@@ -1074,6 +1091,14 @@ func (a *lifecycleAdapter) MarkPassthroughRunning(sessionID string) error {
 	return a.mgr.MarkPassthroughRunning(sessionID)
 }
 
+func (a *lifecycleAdapter) IsLocalPassthroughReadyForResume(sessionID, executionID, attemptID string) bool {
+	return a.mgr.IsLocalPassthroughReadyForResume(sessionID, executionID, attemptID)
+}
+
+func (a *lifecycleAdapter) MarkPassthroughRunningWithContext(ctx context.Context, sessionID string) error {
+	return a.mgr.MarkPassthroughRunningWithContext(ctx, sessionID)
+}
+
 func (a *lifecycleAdapter) PreparePassthroughRunning(sessionID string) (func(), error) {
 	return a.mgr.PreparePassthroughRunning(sessionID)
 }
@@ -1110,6 +1135,13 @@ func (a *lifecycleAdapter) CleanupStaleExecutionBySessionIDIfCurrent(
 func (a *lifecycleAdapter) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
 	_, err := a.mgr.EnsureWorkspaceExecutionForSession(ctx, taskID, sessionID)
 	return err
+}
+
+func (a *lifecycleAdapter) CleanupFailedRestoreIfCurrent(
+	ctx context.Context, sessionID, executionID string, updatedAt time.Time,
+	checkpoint func(context.Context) error,
+) error {
+	return a.mgr.CleanupFailedRestoreIfCurrent(ctx, sessionID, executionID, updatedAt, checkpoint)
 }
 
 func (a *lifecycleAdapter) GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error) {
@@ -1566,6 +1598,20 @@ func (w *orchestratorWrapper) NotifyQueuedUserPrompt(ctx context.Context, taskID
 	w.svc.NotifyQueuedUserPrompt(ctx, taskID, sessionID)
 }
 
+// ReserveMessageTurn reserves a bounded message-turn slot before a direct
+// request is acknowledged.
+func (w *orchestratorWrapper) ReserveMessageTurn(
+	ctx context.Context, taskID, sessionID, incarnationID string,
+) (*orchestrator.MessageTurnReservation, bool) {
+	return w.svc.ReserveMessageTurn(ctx, taskID, sessionID, incarnationID)
+}
+
+// RegisterMessageCapacityWait records a queue head blocked by the session
+// ceiling for the shared capacity sweep.
+func (w *orchestratorWrapper) RegisterMessageCapacityWait(ctx context.Context, taskID, sessionID, entryID string) {
+	w.svc.RegisterMessageCapacityWait(ctx, taskID, sessionID, entryID)
+}
+
 // StepRequiresCompletionSignal forwards to the orchestrator service.
 func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, taskID string) bool {
 	return w.svc.StepRequiresCompletionSignal(ctx, taskID)
@@ -1698,6 +1744,32 @@ func (a *messageCreatorAdapter) CreateUserMessageIdempotent(
 	return err
 }
 
+// SetUserMessageDeliveryStatus marks an exact session-owned user message with
+// the supplied delivery status and reports whether that message exists.
+func (a *messageCreatorAdapter) SetUserMessageDeliveryStatus(
+	ctx context.Context,
+	messageID, agentSessionID, status string,
+) (bool, error) {
+	return a.svc.SetUserMessageDeliveryStatus(ctx, messageID, agentSessionID, status)
+}
+
+// CreateCompletedUserMessageIdempotent records a user message in an
+// already-completed lifecycle-only turn.
+func (a *messageCreatorAdapter) CreateCompletedUserMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID string,
+	metadata map[string]interface{},
+) error {
+	_, err := a.svc.CreateCompletedUserMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		Content:       content,
+		AuthorType:    "user",
+		Metadata:      metadata,
+	})
+	return err
+}
+
 // CreateToolCallMessage creates a message for a tool call
 func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, title, status, agentSessionID, turnID string, normalized *streams.NormalizedPayload) error {
 	metadata := map[string]interface{}{
@@ -1802,8 +1874,18 @@ func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
 	return err
 }
 
+// SessionMessageCreatedAt resolves the persisted message's immutable creation
+// time, including when an idempotent replay returns an existing row.
+func (a *messageCreatorAdapter) SessionMessageCreatedAt(ctx context.Context, messageID string) (time.Time, bool) {
+	message, err := a.svc.GetMessage(ctx, messageID)
+	if err != nil || message == nil || message.CreatedAt.IsZero() {
+		return time.Time{}, false
+	}
+	return message.CreatedAt.UTC(), true
+}
+
 // CreatePermissionRequestMessage creates a message for a permission request
-func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error) {
+func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, messageOptions models.PermissionRequestMessageOptions) (string, error) {
 	metadata := map[string]interface{}{
 		"request_id":     requestID,
 		"pending_id":     pendingID,
@@ -1812,8 +1894,13 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 		"action_type":    actionType,
 		"action_details": actionDetails,
 	}
-	if decision != nil {
-		metadata["permission_decision"] = decision
+	presentation := messageOptions.Presentation
+	if presentation == "" {
+		presentation = models.PermissionPresentationInteractive
+	}
+	metadata[models.PermissionPresentationMetadataKey] = string(presentation)
+	if messageOptions.Decision != nil {
+		metadata["permission_decision"] = messageOptions.Decision
 		metadata["status"] = string(models.PermissionStatusApproved)
 	}
 
@@ -1840,6 +1927,12 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 		return "", err
 	}
 	return msg.ID, nil
+}
+
+// UpdatePermissionPresentation conditionally changes one exact permission
+// transcript row's presentation.
+func (a *messageCreatorAdapter) UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+	return a.svc.UpdatePermissionPresentation(ctx, request)
 }
 
 // UpdatePermissionMessage updates a permission message's status
@@ -1876,8 +1969,25 @@ func clarificationQuestionData(question clarification.Question, options []interf
 		"prompt":  question.Prompt,
 		"options": options,
 	}
+	if len(question.Images) > 0 {
+		data["images"] = question.Images
+	}
 	if question.AllowCustomText != nil {
 		data["allow_custom_text"] = *question.AllowCustomText
+	}
+	return data
+}
+
+func clarificationOptionsData(options []clarification.Option) []interface{} {
+	data := make([]interface{}, len(options))
+	for j, opt := range options {
+		item := map[string]interface{}{
+			"option_id": opt.ID, "label": opt.Label, "description": opt.Description,
+		}
+		if len(opt.Images) > 0 {
+			item["images"] = opt.Images
+		}
+		data[j] = item
 	}
 	return data
 }
@@ -1886,14 +1996,7 @@ func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.C
 	ids := make([]string, 0, len(questions))
 	total := len(questions)
 	for i, question := range questions {
-		options := make([]interface{}, len(question.Options))
-		for j, opt := range question.Options {
-			options[j] = map[string]interface{}{
-				"option_id":   opt.ID,
-				"label":       opt.Label,
-				"description": opt.Description,
-			}
-		}
+		options := clarificationOptionsData(question.Options)
 
 		questionData := clarificationQuestionData(question, options)
 

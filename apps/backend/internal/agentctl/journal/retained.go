@@ -112,7 +112,7 @@ func ReadRetainedReconstructionEvidence(
 	}
 	if request.OriginalRuntime != nil {
 		if err := request.OriginalRuntime.Validate(); err == nil {
-			if terminated, err := processidentity.OwnedSessionTerminated(*request.OriginalRuntime); err == nil {
+			if terminated, err := processidentity.OriginalOwnerTerminated(*request.OriginalRuntime); err == nil {
 				result.ProcessTerminated = &terminated
 			}
 		}
@@ -205,7 +205,7 @@ func VerifyReconstructionSubmission(submission Submission, expected SubmissionSu
 	if !submissionNeedsRecovery(submission) || submission.Retired {
 		return ErrSubmissionState
 	}
-	if len(submission.Payload) == 0 || int64(len(submission.Payload)) > DefaultMaxEventBytes {
+	if len(submission.Payload) == 0 || int64(len(submission.Payload)) > DefaultMaxSubmissionBytes {
 		return ErrStreamFull
 	}
 	if !validReconstructionPayload(submission.Payload, expected.Hash) {
@@ -307,7 +307,7 @@ func ReadRetainedRecovery(ctx context.Context, request RetainedRecoveryRequest) 
 			return nil, err
 		}
 	}
-	terminated, _ := processidentity.OwnedSessionTerminated(request.OriginalRuntime)
+	terminated, _ := processidentity.OriginalOwnerTerminated(request.OriginalRuntime)
 	submission.Payload = nil
 	return &RetainedRecoveryResponse{Descriptor: descriptor, Submission: submission, Events: events, ProcessTerminated: terminated}, nil
 }

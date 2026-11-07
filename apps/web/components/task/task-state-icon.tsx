@@ -13,7 +13,6 @@ import type { ForegroundActivity, TaskSessionState, TaskState } from "@/lib/type
 import {
   InterruptedTaskIcon,
   isTerminalInterruptedState,
-  shouldUsePermissionTaskIcon,
   shouldUseQuestionTaskIcon,
 } from "@/lib/ui/state-icons";
 import { classifyTask } from "./task-classify";
@@ -176,7 +175,7 @@ function TaskStateIconContent({
   accessibleLabel,
   showBackgroundTooltip = false,
 }: TaskStateIconProps) {
-  if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
+  if (hasPendingPermission ?? false) {
     return withAccessibleLabel(
       <IconShieldQuestion
         aria-hidden="true"
@@ -306,7 +305,7 @@ export function getTaskStateIconLabelKey({
   interrupted,
   parkedOnBackgroundWork,
 }: TaskStateIconProps) {
-  if (shouldUsePermissionTaskIcon(hasPendingPermission) || hasPendingClarification) {
+  if ((hasPendingPermission ?? false) || hasPendingClarification) {
     return "common:taskStateWaitingForInput";
   }
   if (foregroundActivity === "generating") return "common:taskStateInProgress";

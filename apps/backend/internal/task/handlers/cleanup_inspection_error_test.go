@@ -32,9 +32,10 @@ func TestHTTPTaskDeletePreflightLogsInspectionFailure(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/delete-preflight",
 		strings.NewReader(`{"task_ids":["private-task-sentinel"],"cascade":false}`))
 	router.ServeHTTP(recorder, withTaskDeleteTestIdentity(request))
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
-	require.JSONEq(t, `{"error":"task delete preflight unavailable"}`, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"workspace_inspection":"unknown"`)
+	require.NotContains(t, recorder.Body.String(), "/private/source/secret")
 	entries := observed.All()
 	require.Len(t, entries, 1)
 	fields := entries[0].ContextMap()

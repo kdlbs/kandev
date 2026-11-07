@@ -22,8 +22,6 @@ describe("phone task-list options", () => {
     render(
       <MobileTasksListOptions
         options={{
-          showArchived: false,
-          onShowArchivedChange: vi.fn(),
           sort: "updated_desc",
           onSortChange: vi.fn(),
           group: "workflow_step",

@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const newSidebarPresentationJSON = `{"sidebar_fast_actions_enabled":false,"sidebar_new_task_style":"simple","show_turn_changed_files":true}`
+const newSidebarPresentationJSON = `{"sidebar_fast_actions_enabled":false,"sidebar_new_task_style":"simple","show_turn_changed_files":false}`
 const sidebarNewTaskStyleCompact = "compact"
 
 // Existing accounts receive legacy defaults; insert paths explicitly seed new defaults.

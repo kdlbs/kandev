@@ -7,7 +7,6 @@ test.describe("System Logs page", () => {
     testPage,
     prCapture,
   }) => {
-    test.setTimeout(45_000);
     await testPage.goto("/settings/system/data-storage?tab=logs");
 
     await expect(testPage.getByTestId("system-page-title")).toHaveText("Data & Logs");
@@ -72,7 +71,7 @@ test.describe("System Logs page", () => {
       "Incidental text already written into a log entry is not automatically redacted. Review the ZIP before sharing.",
     );
     const description = testPage.getByText(
-      "Kandev asks your connected browser tabs for their bounded three-day console history, combines it with retained backend log files, and downloads one ZIP.",
+      "Download a ZIP containing server logs and up to three days of console messages from connected browser tabs.",
     );
     const action = testPage.getByTestId("customize-diagnostic-bundle");
     const [noMessagesBox, incidentalTextBox, descriptionBox, actionBox] = await Promise.all([

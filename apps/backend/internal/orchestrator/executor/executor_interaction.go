@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,16 +50,23 @@ func (e *Executor) StopSessionSynchronously(ctx context.Context, sessionID, reas
 		if !errors.Is(err, models.ErrTaskSessionNotFound) {
 			return ErrExecutionNotFound
 		}
-		return e.stopMissingSessionSynchronously(ctx, sessionID, reason, force, err)
+		err = e.stopMissingSessionSynchronously(ctx, sessionID, reason, force, err)
+		if runtimeapi.IsNotFound(err) {
+			return nil
+		}
+		return err
 	}
 	result, err := e.StopSessionDetailed(ctx, session, reason, force)
 	if err != nil {
+		if runtimeapi.IsNotFound(err) {
+			return nil
+		}
 		return err
 	}
 	if result.ExecutionID == "" {
 		return nil
 	}
-	return e.StopExecution(ctx, result.ExecutionID, reason, force)
+	return e.stopExecutionIfPresent(ctx, result.ExecutionID, reason, force)
 }
 
 func (e *Executor) stopMissingSessionSynchronously(
@@ -70,12 +78,20 @@ func (e *Executor) stopMissingSessionSynchronously(
 	executionID, lookupErr := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	switch {
 	case lookupErr == nil && executionID != "":
-		return e.StopExecution(ctx, executionID, reason, force)
+		return e.stopExecutionIfPresent(ctx, executionID, reason, force)
 	case executionID == "" || errors.Is(lookupErr, lifecycle.ErrNoExecutionForSession):
 		return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, sessionErr)
 	default:
 		return fmt.Errorf("%w: lookup execution for session %q: %w", ErrExecutionNotFound, sessionID, lookupErr)
 	}
+}
+
+func (e *Executor) stopExecutionIfPresent(ctx context.Context, executionID, reason string, force bool) error {
+	err := e.StopExecution(ctx, executionID, reason, force)
+	if runtimeapi.IsNotFound(err) {
+		return nil
+	}
+	return err
 }
 
 // SessionStopResult describes the synchronous, logical portion of a stop. A
@@ -584,7 +600,7 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 // prompt but before waiting for the turn to complete.
 func (e *Executor) PromptWithDispatchCallback(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
 	return e.promptWithAdmissionCallbackAndSubmissionID(
-		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, "", false,
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, "", false, nil,
 		preloadedSession...,
 	)
 }
@@ -601,7 +617,7 @@ func (e *Executor) PromptWithAdmissionCallback(
 	preloadedSession ...*models.TaskSession,
 ) (*PromptResult, error) {
 	return e.promptWithAdmissionCallbackAndSubmissionID(
-		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, "", false,
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, "", false, nil,
 		preloadedSession...,
 	)
 }
@@ -617,10 +633,11 @@ func (e *Executor) PromptWithAdmissionCallbackAndSubmissionID(
 	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
+	markPassthroughRunning func() error,
 	preloadedSession ...*models.TaskSession,
 ) (*PromptResult, error) {
 	return e.promptWithAdmissionCallbackAndSubmissionID(
-		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, submissionID, false,
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, submissionID, false, markPassthroughRunning,
 		preloadedSession...,
 	)
 }
@@ -638,7 +655,7 @@ func (e *Executor) PromptWithDispatchCallbackAndSubmissionID(
 	preloadedSession ...*models.TaskSession,
 ) (*PromptResult, error) {
 	return e.promptWithAdmissionCallbackAndSubmissionID(
-		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, submissionID, false,
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, submissionID, false, nil,
 		preloadedSession...,
 	)
 }
@@ -648,7 +665,7 @@ func (e *Executor) PromptWithDispatchCallbackAndSubmissionID(
 // action, so the caller keeps admission serialized until agentctl accepts it.
 func (e *Executor) SteerWithDispatchCallback(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
 	return e.promptWithAdmissionCallbackAndSubmissionID(
-		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, "", true,
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, "", true, nil,
 		preloadedSession...,
 	)
 }
@@ -764,6 +781,7 @@ func (e *Executor) promptWithAdmissionCallbackAndSubmissionID(
 	onDispatched func(),
 	submissionID string,
 	steer bool,
+	markPassthroughRunning func() error,
 	preloadedSession ...*models.TaskSession,
 ) (*PromptResult, error) {
 	var session *models.TaskSession
@@ -802,7 +820,7 @@ func (e *Executor) promptWithAdmissionCallbackAndSubmissionID(
 	// dispatchOnly is intentionally not forwarded: PTY writes are inherently
 	// fire-and-forget, so the flag has no analogue in passthrough mode.
 	if e.agentManager.IsPassthroughSession(ctx, sessionID) {
-		result, err := e.promptPassthrough(ctx, taskID, session, prompt, attachments, beforeAdmission)
+		result, err := e.promptPassthrough(ctx, taskID, session, prompt, attachments, beforeAdmission, markPassthroughRunning)
 		if err == nil && onDispatched != nil {
 			onDispatched()
 		}
@@ -832,9 +850,9 @@ func (e *Executor) promptWithAdmissionCallbackAndSubmissionID(
 //
 // A WritePassthroughStdin failure (no live PTY, runner unavailable) is returned
 // as an error so Service.handlePromptError can revert session state and surface
-// the failure to the user. A MarkPassthroughRunning failure is non-fatal — the
-// data is already in the PTY; only the AgentRunning event is missed.
-func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session *models.TaskSession, prompt string, attachments []v1.MessageAttachment, beforeAdmission func(context.Context, string, []v1.MessageAttachment) error) (*PromptResult, error) {
+// the failure to the user. An explicit running callback must succeed before
+// any PTY input. Legacy MarkPassthroughRunning failures remain non-fatal.
+func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session *models.TaskSession, prompt string, attachments []v1.MessageAttachment, beforeAdmission func(context.Context, string, []v1.MessageAttachment) error, markRunning func() error) (*PromptResult, error) {
 	sessionID := session.ID
 	promptWithAttachments, err := e.buildPassthroughPromptWithAttachments(ctx, session, prompt, attachments)
 	if err != nil {
@@ -857,10 +875,13 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session
 	// blocked by checkSessionPromptable during the inter-chunk SubmitDelay
 	// window (150ms for Claude). Otherwise a rapid double-send or workflow
 	// event firing in parallel passes the WAITING_FOR_INPUT guard and writes
-	// a second prompt onto the same PTY stdin mid-submit. Mark-error stays
-	// non-fatal — at worst we miss the AgentRunning event but the prompt
-	// still gets through.
-	if err := e.agentManager.MarkPassthroughRunning(sessionID); err != nil {
+	// a second prompt onto the same PTY stdin mid-submit. Guarded publication
+	// must preserve synchronous subscriber ownership before input is written.
+	if markRunning != nil {
+		if err := markRunning(); err != nil {
+			return nil, err
+		}
+	} else if err := e.agentManager.MarkPassthroughRunning(sessionID); err != nil {
 		e.logger.Warn("failed to mark passthrough as running before prompt; concurrent send window is open",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
@@ -1517,11 +1538,12 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		return nil, err
 	}
 	req.McpMode = mcpMode
-	profileContext, err := e.resolveTaskSessionMCPProfile(ctx, task.ID, session, true)
+	profileContext, err := e.PrepareTaskSessionMCPProfile(ctx, task.ID, session, true)
 	if err != nil {
 		return nil, err
 	}
 	req.McpProfile = &profileContext
+	req.TaskDescription = sysprompt.AppendBuiltinBindingGuidance(req.TaskDescription, profileContext.BuiltinPackages)
 
 	repositoryPath, err := e.applyRepositoryToSwitchRequest(ctx, req, session, execConfig)
 	if err != nil {

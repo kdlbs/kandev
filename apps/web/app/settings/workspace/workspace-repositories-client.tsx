@@ -9,15 +9,7 @@ import { WorkspaceRepositorySetsSection } from "./workspace-repository-sets-sect
 import { AddLocalRepositoryDialog } from "./workspace-add-local-repository-dialog";
 import { AddRemoteRepositoryDialog } from "./workspace-add-remote-repository-dialog";
 import { generateUUID } from "@/lib/utils";
-import {
-  createRepositoryAction,
-  createRepositoryScriptAction,
-  deleteRepositoryAction,
-  deleteRepositoryScriptAction,
-  updateRepositoryAction,
-  updateRepositoryScriptAction,
-  validateRepositoryPathAction,
-} from "@/app/actions/workspaces";
+import { deleteRepositoryAction, validateRepositoryPathAction } from "@/app/actions/workspaces";
 import { useRepositoryDiscovery } from "@/hooks/domains/workspace/use-repository-discovery";
 import {
   repositoryId as toRepositoryId,
@@ -36,6 +28,7 @@ import {
   type RepositoryWithScripts,
 } from "@/app/settings/workspace/workspace-repositories-dirty";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
+import { saveRepositoryDraft } from "./workspace-repositories-save";
 import { isValidManualRepository } from "@/app/settings/workspace/workspace-repositories-validation";
 
 type RepositoryItem = RepositoryWithScripts & { __autoOpen?: boolean };
@@ -95,131 +88,7 @@ type RepoHandlerArgs = {
   clearRepositoryScripts: (id: string) => void;
 };
 
-async function saveNewRepository(
-  repo: RepositoryItem,
-  repoId: string,
-  workspace: Workspace | null,
-  setRepositoryItems: React.Dispatch<React.SetStateAction<RepositoryItem[]>>,
-  setSavedRepositoryItems: React.Dispatch<React.SetStateAction<RepositoryWithScripts[]>>,
-) {
-  const created = await createRepositoryAction({
-    workspace_id: workspace?.id ?? repo.workspace_id,
-    // i18n-exempt: persisted repository name, same contract as buildDraftRepo above.
-    name: repo.name.trim() || "New Repository",
-    source_type: repo.source_type || "local",
-    local_path: repo.local_path,
-    provider: repo.provider,
-    provider_repo_id: repo.provider_repo_id,
-    provider_host: repo.provider_host,
-    provider_owner: repo.provider_owner,
-    provider_name: repo.provider_name,
-    default_branch: repo.default_branch,
-    worktree_branch_prefix: repo.worktree_branch_prefix,
-    worktree_branch_template: repo.worktree_branch_template ?? defaultWorktreeBranchTemplate,
-    pull_before_worktree: repo.pull_before_worktree,
-    setup_script: repo.setup_script,
-    cleanup_script: repo.cleanup_script,
-    dev_script: repo.dev_script,
-    copy_files: repo.copy_files,
-    secret_bindings: repo.secret_bindings ?? [],
-  });
-  // Like the repository name above, the seeded script name and command are
-  // PERSISTED and sent to a shell verbatim, so both stay in English.
-  const scripts = await Promise.all(
-    // i18n-exempt: persisted script name, sent to a shell verbatim. See the comment above.
-    repo.scripts.map((script, index) =>
-      createRepositoryScriptAction({
-        repository_id: created.id,
-        name: script.name.trim() || "New Script",
-        command: script.command.trim() || 'echo ""',
-        position: script.position ?? index,
-      }),
-    ),
-  );
-  const nextRepo: RepositoryWithScripts = { ...created, scripts };
-  setRepositoryItems((prev) =>
-    prev.map((item) =>
-      item.id === repoId ? mergeSavedRepositoryDraft(item, repo, nextRepo) : item,
-    ),
-  );
-  setSavedRepositoryItems((prev) => [cloneRepository(nextRepo), ...prev]);
-}
-
-type SaveExistingArgs = {
-  repo: RepositoryItem;
-  repoId: string;
-  savedRepositoriesById: Map<string, RepositoryWithScripts>;
-  clearRepositoryScripts: (id: string) => void;
-  setRepositoryItems: React.Dispatch<React.SetStateAction<RepositoryItem[]>>;
-  setSavedRepositoryItems: React.Dispatch<React.SetStateAction<RepositoryWithScripts[]>>;
-};
-
-async function saveExistingRepository({
-  repo,
-  repoId,
-  savedRepositoriesById,
-  clearRepositoryScripts,
-  setRepositoryItems,
-  setSavedRepositoryItems,
-}: SaveExistingArgs) {
-  const updated = await updateRepositoryAction(repoId, {
-    name: repo.name,
-    source_type: repo.source_type,
-    local_path: repo.local_path,
-    provider: repo.provider,
-    provider_repo_id: repo.provider_repo_id,
-    provider_host: repo.provider_host,
-    provider_owner: repo.provider_owner,
-    provider_name: repo.provider_name,
-    default_branch: repo.default_branch,
-    worktree_branch_prefix: repo.worktree_branch_prefix,
-    worktree_branch_template: repo.worktree_branch_template ?? defaultWorktreeBranchTemplate,
-    pull_before_worktree: repo.pull_before_worktree,
-    setup_script: repo.setup_script,
-    cleanup_script: repo.cleanup_script,
-    dev_script: repo.dev_script,
-    copy_files: repo.copy_files,
-    secret_bindings: repo.secret_bindings ?? [],
-  });
-  const savedScripts = savedRepositoriesById.get(repoId)?.scripts ?? [];
-  const currentScriptIds = new Set(repo.scripts.map((s) => s.id));
-  await Promise.all(
-    savedScripts
-      .filter((s) => !currentScriptIds.has(s.id))
-      .map((s) => deleteRepositoryScriptAction(s.id)),
-  );
-  const nextScripts = await Promise.all(
-    repo.scripts.map((script, index) => {
-      if (script.id.startsWith("temp-script-"))
-        return createRepositoryScriptAction({
-          repository_id: repoId,
-          // i18n-exempt: persisted script name, sent to a shell verbatim.
-          name: script.name.trim() || "New Script",
-          command: script.command.trim() || 'echo ""',
-          position: script.position ?? index,
-        });
-      return updateRepositoryScriptAction(script.id, {
-        name: script.name,
-        command: script.command,
-        position: script.position ?? index,
-      });
-    }),
-  );
-  const nextRepo: RepositoryWithScripts = { ...updated, scripts: nextScripts };
-  setRepositoryItems((prev) =>
-    prev.map((item) =>
-      item.id === repoId ? mergeSavedRepositoryDraft(item, repo, nextRepo) : item,
-    ),
-  );
-  setSavedRepositoryItems((prev) =>
-    prev.some((item) => item.id === repoId)
-      ? prev.map((item) => (item.id === repoId ? cloneRepository(nextRepo) : item))
-      : [...prev, cloneRepository(nextRepo)],
-  );
-  clearRepositoryScripts(repoId);
-}
-
-function useRepositoryHandlers({
+function useRepositorySaveHandlers({
   workspace,
   repositoryItems,
   setRepositoryItems,
@@ -227,6 +96,53 @@ function useRepositoryHandlers({
   savedRepositoriesById,
   clearRepositoryScripts,
 }: RepoHandlerArgs) {
+  const pendingSaves = useRef(new Map<string, Promise<void>>());
+  const handleSaveRepository = (repoId: string): Promise<void> => {
+    const pending = pendingSaves.current.get(repoId);
+    if (pending) return pending;
+    const repo = repositoryItems.find((item) => item.id === repoId);
+    if (!repo) return Promise.resolve();
+    const submitted = cloneRepository(repo);
+    const save = Promise.resolve()
+      .then(() =>
+        saveRepositoryDraft(
+          submitted,
+          savedRepositoriesById.get(repoId),
+          workspace?.id ?? repo.workspace_id,
+          (baseline, draft) => {
+            setRepositoryItems((prev) =>
+              prev.map((item) =>
+                item.id === repoId ? mergeSavedRepositoryDraft(item, submitted, draft) : item,
+              ),
+            );
+            setSavedRepositoryItems((prev) => [
+              ...prev.filter((item) => item.id !== repoId && item.id !== baseline.id),
+              cloneRepository(baseline),
+            ]);
+            clearRepositoryScripts(baseline.id);
+          },
+        ),
+      )
+      .finally(() => {
+        pendingSaves.current.delete(repoId);
+      });
+    pendingSaves.current.set(repoId, save);
+    return save;
+  };
+  const handleDiscardRepository = (repoId: string) => {
+    const saved = savedRepositoriesById.get(repoId);
+    setRepositoryItems((prev) =>
+      saved
+        ? prev.map((item) => (item.id === repoId ? { ...item, ...cloneRepository(saved) } : item))
+        : prev.filter((item) => item.id !== repoId),
+    );
+  };
+  return { handleSaveRepository, handleDiscardRepository };
+}
+
+function useRepositoryHandlers(args: RepoHandlerArgs) {
+  const { repositoryItems, setRepositoryItems, setSavedRepositoryItems } = args;
+  const saveHandlers = useRepositorySaveHandlers(args);
   const handleUpdateRepository = (repoId: string, updates: Partial<Repository>) => {
     setRepositoryItems((prev) =>
       prev.map((repo) => (repo.id === repoId ? { ...repo, ...updates } : repo)),
@@ -275,22 +191,6 @@ function useRepositoryHandlers({
       ),
     );
   };
-  const handleSaveRepository = async (repoId: string) => {
-    const repo = repositoryItems.find((item) => item.id === repoId);
-    if (!repo) return;
-    if (repoId.startsWith("temp-repo-")) {
-      await saveNewRepository(repo, repoId, workspace, setRepositoryItems, setSavedRepositoryItems);
-      return;
-    }
-    await saveExistingRepository({
-      repo,
-      repoId,
-      savedRepositoriesById,
-      clearRepositoryScripts,
-      setRepositoryItems,
-      setSavedRepositoryItems,
-    });
-  };
   const handleDeleteRepository = async (repoId: string) => {
     if (repoId.startsWith("temp-repo-")) {
       setRepositoryItems((prev) => prev.filter((repo) => repo.id !== repoId));
@@ -305,7 +205,7 @@ function useRepositoryHandlers({
     handleAddRepositoryScript,
     handleUpdateRepositoryScript,
     handleDeleteRepositoryScript,
-    handleSaveRepository,
+    ...saveHandlers,
     handleDeleteRepository,
   };
 }
@@ -504,6 +404,7 @@ export function useWorkspaceRepositoriesPage(
     handleUpdateRepositoryScript,
     handleDeleteRepositoryScript,
     handleSaveRepository,
+    handleDiscardRepository,
     handleDeleteRepository,
   } = handlers;
 
@@ -553,6 +454,7 @@ export function useWorkspaceRepositoriesPage(
     handleUpdateRepositoryScript,
     handleDeleteRepositoryScript,
     handleSaveRepository,
+    handleDiscardRepository,
     handleDeleteRepository,
     ...discover,
     handleConfirmLocalRepository,

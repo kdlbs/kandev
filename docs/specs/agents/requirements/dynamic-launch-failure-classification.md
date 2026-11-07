@@ -44,11 +44,18 @@ suspended and the failure explains itself.
   classified `routingerr.Error` shall be returned unchanged.
 - **AC-AGENTS-DYNAMIC-LAUNCH-FAILURE-001.4:** A low-confidence startup
   classification shall stay unclassified, as before.
+- **AC-AGENTS-DYNAMIC-LAUNCH-FAILURE-001.5:** During an initial asynchronous
+  start, a current, execution-bound `model_unavailable` rejection with
+  `requested_not_advertised` and explicit `prompt_not_sent=true` shall apply
+  the logical dynamic profile's declared candidate failure policy. A different
+  configured candidate may be selected without sending the prompt to the
+  rejected agent default. Fixed profiles, resume failures, stale attempts, and
+  unknown prompt delivery shall retain their existing recovery behavior.
 
 ## Out of scope
 
 - Classification rules themselves.
-- Asynchronous startup failures reported through `agent.failed`, which already
-  require startup provenance.
+- Other asynchronous startup failures, which retain their existing startup
+  provenance and recovery requirements.
 - Ceiling admission and route persistence errors, which return before the
   launch and are already unclassified.

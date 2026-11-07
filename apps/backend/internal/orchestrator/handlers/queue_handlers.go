@@ -10,12 +10,16 @@ import (
 	"fmt"
 	"strings"
 
+	"sync"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	builtinintent "github.com/kandev/kandev/internal/mcp/intent"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
@@ -28,8 +32,6 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
-	"sync"
-	"time"
 )
 
 const (
@@ -562,6 +564,7 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 }
 
 type wsQueueMessageRequest struct {
+	BuiltinIntent         builtinintent.Intent             `json:"builtin_intent,omitempty"`
 	SessionID             string                           `json:"session_id"`
 	TaskID                string                           `json:"task_id"`
 	SessionIncarnationID  string                           `json:"session_incarnation_id"`
@@ -576,6 +579,10 @@ type wsQueueMessageRequest struct {
 	PreviewFeedbackRefs   []models.TaskPreviewFeedbackRef  `json:"preview_feedback_refs,omitempty"`
 	RequirePrimarySession bool                             `json:"require_primary_session,omitempty"`
 	UserID                string                           `json:"user_id,omitempty"`
+	// ObservedTurnErrorStamp is the task turn-error stamp the client had
+	// rendered for this session before queueing. Only this new submission can
+	// acknowledge that exact attention; drain, retry, and Send now cannot.
+	ObservedTurnErrorStamp string `json:"observed_turn_error_stamp,omitempty"`
 }
 
 // wsQueueMessage handles ActionMessageQueueAdd, appending a new entry to the session queue.
@@ -584,7 +591,11 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	if err := req.BuiltinIntent.Validate(); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
 	req.ClientQueueID = strings.TrimSpace(req.ClientQueueID)
+	req.ObservedTurnErrorStamp = strings.TrimSpace(req.ObservedTurnErrorStamp)
 
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
@@ -634,6 +645,10 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		req.EntityReferences = references
 	}
 
+	if err := builtinintent.ValidateRequest(ctx, h.queueDrainer, req.TaskID, req.SessionID, req.BuiltinIntent); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+
 	// Default empty user_id to QueuedByUser so the entry has a non-empty owner;
 	// the UpdateMessage handler relies on this so its filter against agent
 	// entries (queued_by="agent") is always meaningful.
@@ -642,13 +657,17 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		queuedBy = messagequeue.QueuedByUser
 	}
 	metadata := orchestrator.NewUserMessageMeta().
+		WithBuiltinIntent(req.BuiltinIntent).
 		WithContextFiles(req.ContextFiles).
 		WithEntityReferences(req.EntityReferences).
 		ToMap()
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	if req.ObservedTurnErrorStamp != "" {
+		metadata[messagequeue.MetadataObservedTurnErrorStamp] = req.ObservedTurnErrorStamp
+	}
 	if identifiedOrdinary {
-		if metadata == nil {
-			metadata = make(map[string]interface{})
-		}
 		metadata[messagequeue.MetadataQueueAdmissionIDs] = []string{req.ClientQueueID}
 	}
 	var snapshot *models.TaskPlanCommentSnapshot
@@ -722,11 +741,18 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		h.publishPlanCommentSnapshot(ctx, snapshot)
 		h.publishPreviewFeedbackSnapshot(ctx, previewSnapshot)
 	}
+	turnErrorAckFailed := false
+	if !replay {
+		turnErrorAckFailed = h.acknowledgeObservedTurnError(ctx, req)
+	}
 	h.publishStatusForIdentity(ctx, identity, queued)
 	if h.queueReadiness != nil {
 		h.queueReadiness.CheckQueueAdmissionReadiness(ctx, identity)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, queued)
+	return ws.NewResponse(msg.ID, msg.Action, queueMessageResponse{
+		QueuedMessage:                  queued,
+		TurnErrorAcknowledgementFailed: turnErrorAckFailed,
+	})
 }
 
 var (
@@ -904,6 +930,39 @@ func (h *QueueHandlers) admitIdentifiedQueuedMessage(
 		req.PlanMode, req.Attachments, metadata, claim,
 	)
 	return queued, err
+}
+
+// acknowledgeObservedTurnError retires the exact task attention the client had
+// rendered when it queued this new prompt. Queue acceptance is the durable
+// boundary; a later drain keeps no new acknowledgement authority.
+func (h *QueueHandlers) acknowledgeObservedTurnError(ctx context.Context, req wsQueueMessageRequest) bool {
+	if req.ObservedTurnErrorStamp == "" {
+		return false
+	}
+	acknowledger, ok := h.accessAuthorizer.(interface {
+		AcknowledgeTaskTurnError(context.Context, string, string, string) error
+	})
+	if !ok {
+		return false
+	}
+	if err := acknowledger.AcknowledgeTaskTurnError(
+		ctx, req.TaskID, req.SessionID, req.ObservedTurnErrorStamp,
+	); err != nil {
+		h.logger.Warn("failed to acknowledge observed task turn error",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+		return true
+	}
+	return false
+}
+
+// queueMessageResponse carries the accepted queue row plus nonfatal
+// acknowledgement feedback. Embedding keeps the existing row shape intact for
+// clients that do not know the new field.
+type queueMessageResponse struct {
+	*messagequeue.QueuedMessage
+	TurnErrorAcknowledgementFailed bool `json:"turn_error_acknowledgement_failed,omitempty"`
 }
 
 func (h *QueueHandlers) lookupIdentifiedQueuedMessage(
@@ -1337,23 +1396,6 @@ func (h *QueueHandlers) updateQueuedMessage(
 	return atomicMutations.UpdateMessageWithMetadataForSessionWithClaim(
 		ctx, identity, req.EntryID, req.Content, req.Attachments, metadataUpdates, queuedBy, *atomicClaim,
 	)
-}
-
-func (h *QueueHandlers) releaseFailedQueueAttachmentClaims(
-	ctx context.Context,
-	releaser QueueAttachmentReleaser,
-	previous *messagequeue.QueuedMessage,
-	sessionID string,
-	attachments []messagequeue.MessageAttachment,
-) {
-	if releaser == nil || previous == nil {
-		return
-	}
-	if err := releaser.ReleaseMessageAttachments(
-		ctx, previous.TaskID, sessionID, queueAttachmentsToV1(attachments),
-	); err != nil {
-		h.logger.Warn("failed to release attachments after queue update failure", zap.Error(err))
-	}
 }
 
 // wsUpdateMessage handles ActionMessageQueueUpdate, replacing a queued entry's content.
@@ -2617,13 +2659,17 @@ func reservedIdentityError(queuedBy string) string {
 
 // authorizeSession denies the request when the caller cannot access the session.
 func (h *QueueHandlers) authorizeSession(ctx context.Context, msg *ws.Message, sessionID string) *ws.Message {
+	if _, ok := h.accessAuthorizer.(queueActionAuthorizer); ok {
+		return h.authorizeQueueIdentity(ctx, msg, "", sessionID, "")
+	}
+
 	if h.accessAuthorizer == nil {
 		return queueAccessDeniedResponse(msg)
 	}
 	if err := h.accessAuthorizer.AuthorizeSessionAccess(ctx, sessionID); err != nil {
 		return queueAccessDeniedResponse(msg)
 	}
-	return nil
+	return h.authorizeQueueAction(ctx, msg, sessionID)
 }
 
 // authorizeTaskSession denies the request when the caller cannot access the task/session pair.
@@ -2632,13 +2678,17 @@ func (h *QueueHandlers) authorizeTaskSession(
 	msg *ws.Message,
 	taskID, sessionID string,
 ) *ws.Message {
+	if _, ok := h.accessAuthorizer.(queueActionAuthorizer); ok {
+		return h.authorizeQueueIdentity(ctx, msg, taskID, sessionID, "")
+	}
+
 	if h.accessAuthorizer == nil {
 		return queueAccessDeniedResponse(msg)
 	}
 	if err := h.accessAuthorizer.AuthorizeTaskSessionAccess(ctx, taskID, sessionID); err != nil {
 		return queueAccessDeniedResponse(msg)
 	}
-	return nil
+	return h.authorizeQueueAction(ctx, msg, sessionID)
 }
 func (h *QueueHandlers) requiresQueueIdentity() bool {
 	_, ok := h.accessAuthorizer.(QueueSessionIdentityAuthorizer)
@@ -2650,6 +2700,16 @@ func (h *QueueHandlers) authorizeQueueIdentity(
 	msg *ws.Message,
 	taskID, sessionID, incarnationID string,
 ) *ws.Message {
+	if authorizer, ok := h.accessAuthorizer.(queueActionAuthorizer); ok {
+		if denied := h.authorizeQueueAction(ctx, msg, sessionID); denied != nil {
+			return denied
+		}
+		if err := authorizer.AuthorizeQueueSessionIdentity(ctx, taskID, sessionID, incarnationID); err != nil {
+			return queueAccessDeniedResponse(msg)
+		}
+		return nil
+	}
+
 	if taskID == "" {
 		return h.authorizeSession(ctx, msg, sessionID)
 	}
@@ -2663,7 +2723,7 @@ func (h *QueueHandlers) authorizeQueueIdentity(
 	if err := authorizer.AuthorizeTaskSessionIncarnationAccess(ctx, taskID, sessionID, incarnationID); err != nil {
 		return queueAccessDeniedResponse(msg)
 	}
-	return nil
+	return h.authorizeQueueAction(ctx, msg, sessionID)
 }
 
 // queueAccessDeniedResponse builds the non-enumerating session-not-found error response.

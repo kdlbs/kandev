@@ -1,5 +1,6 @@
 import { test } from "../../fixtures/test-base";
 import { exerciseDelayedTurnCardScroll } from "./turn-changed-files-scroll-helpers";
+import { enableTurnChangedFiles } from "./turn-changed-files-helpers";
 
 test("follows delayed changed-file content after completion and reload", async ({
   testPage,
@@ -8,5 +9,10 @@ test("follows delayed changed-file content after completion and reload", async (
   prCapture,
 }) => {
   test.setTimeout(120_000);
-  await exerciseDelayedTurnCardScroll(testPage, apiClient, seedData, prCapture);
+  const restorePreference = await enableTurnChangedFiles(apiClient);
+  try {
+    await exerciseDelayedTurnCardScroll(testPage, apiClient, seedData, prCapture);
+  } finally {
+    await restorePreference();
+  }
 });

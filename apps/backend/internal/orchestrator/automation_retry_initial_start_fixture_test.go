@@ -41,7 +41,7 @@ func assertAutomationRetryInitialStart(t *testing.T, restoredWorkspace bool, ter
 	var launches, starts, dispatches atomic.Int32
 	var providerPrompt, sourcePrompt string
 	var providerAttachments []v1.MessageAttachment
-	accepted := make(chan error, 1)
+	processStarted := make(chan error, 1)
 	manager := &mockAgentManager{}
 	manager.getExecutionIDForSessionFunc = func(context.Context, string) (string, error) {
 		if launches.Load() == 0 && !restoredWorkspace {
@@ -65,19 +65,19 @@ func assertAutomationRetryInitialStart(t *testing.T, restoredWorkspace bool, ter
 	manager.startAgentProcessFunc = func(context.Context, string) error {
 		launch, err := base.autoStore.GetRetryLaunch(ctx, "owned-run")
 		if err != nil {
-			accepted <- err
+			processStarted <- err
 			return err
 		}
 		if launch.State != automation.RetryLaunchDispatching || launch.ExecutionID != "owned-execution" {
 			err := errors.New("harness started without the exact durable launch admission")
-			accepted <- err
+			processStarted <- err
 			return err
 		}
 		if durable {
 			stored, err := base.repo.ListAgentDeliverySubmissions(ctx, launch.SessionID)
 			if err != nil || len(stored) != 0 {
 				err = errors.Join(err, errors.New("source intent was hashed before runtime preparation"))
-				accepted <- err
+				processStarted <- err
 				return err
 			}
 		}
@@ -87,7 +87,7 @@ func assertAutomationRetryInitialStart(t *testing.T, restoredWorkspace bool, ter
 		manager.mu.Unlock()
 		if before == nil || onAccepted == nil {
 			err := errors.New("provider acceptance boundaries missing")
-			accepted <- err
+			processStarted <- err
 			return err
 		}
 		if prepared {
@@ -96,12 +96,12 @@ func assertAutomationRetryInitialStart(t *testing.T, restoredWorkspace bool, ter
 		}
 		if revoked {
 			if err := base.autoStore.RevokeRetryAdmissions(ctx, launch.AutomationID, "owned-group"); err != nil {
-				accepted <- err
+				processStarted <- err
 				return err
 			}
 		}
 		if err := before(ctx, providerPrompt, providerAttachments); err != nil {
-			accepted <- err
+			processStarted <- err
 			return err
 		}
 		var admitted *models.AgentDeliverySubmission
@@ -109,7 +109,7 @@ func assertAutomationRetryInitialStart(t *testing.T, restoredWorkspace bool, ter
 			stored, err := base.repo.GetAgentDeliverySubmission(ctx, launch.SubmissionID)
 			if err != nil || stored.State != models.DeliverySubmissionDispatching || stored.DispatchAttemptID != launch.SubmissionID {
 				err = errors.Join(err, errors.New("provider dispatch preceded canonical reserved payload admission"))
-				accepted <- err
+				processStarted <- err
 				return err
 			}
 			admitted = stored
@@ -117,25 +117,28 @@ func assertAutomationRetryInitialStart(t *testing.T, restoredWorkspace bool, ter
 		if durable && prepared {
 			if err := before(ctx, providerPrompt+" changed", providerAttachments); err == nil {
 				err = errors.New("duplicate admission rewrote an immutable payload")
-				accepted <- err
+				processStarted <- err
 				return err
 			}
 			after, err := base.repo.GetAgentDeliverySubmission(ctx, launch.SubmissionID)
 			if err != nil || !bytes.Equal(admitted.Payload, after.Payload) || admitted.PayloadHash != after.PayloadHash {
 				err = errors.Join(err, errors.New("rejected duplicate changed canonical payload evidence"))
-				accepted <- err
+				processStarted <- err
 				return err
 			}
 		}
 		dispatches.Add(1)
 		onAccepted()
-		accepted <- nil
 		return nil
 	}
 	runtime := &retryLaunchAgentManager{mockAgentManager: manager, durable: durable}
 	runtime.configured.Store(!restoredWorkspace)
 	svc := createTestServiceWithScheduler(base.repo, newMockStepGetter(), tasks, runtime)
 	svc.executor.SetOnSessionStateTransition(svc.transitionTaskSessionState)
+	// Provider acceptance can precede the asynchronous RUNNING transition.
+	svc.executor.SetOnAgentProcessStarted(func(context.Context, string, string, string) {
+		processStarted <- nil
+	})
 	turnBus := bus.NewMemoryEventBus(testLogger())
 	if restoredWorkspace {
 		_, err := turnBus.Subscribe(events.TurnStarted, func(ctx context.Context, event *bus.Event) error {
@@ -191,14 +194,14 @@ func assertAutomationRetryInitialStart(t *testing.T, restoredWorkspace bool, ter
 		svc.drainDeferredCeilingLaunches(ctx)
 	}
 	select {
-	case err := <-accepted:
+	case err := <-processStarted:
 		if revoked {
 			require.Error(t, err)
 		} else {
 			require.NoError(t, err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("synthetic acceptance boundary not reached")
+		t.Fatal("synthetic process startup did not complete")
 	}
 	launch, err := base.autoStore.GetRetryLaunch(ctx, run.ID)
 	require.NoError(t, err)
@@ -238,6 +241,7 @@ func assertAutomationRetryInitialStart(t *testing.T, restoredWorkspace bool, ter
 	session, err := base.repo.GetTaskSession(ctx, launch.SessionID)
 	require.NoError(t, err)
 	require.Equal(t, taskID, session.TaskID)
+	require.Equal(t, models.TaskSessionStateRunning, session.State)
 	if queuedStart {
 		require.NotEqual(t, models.TaskSessionStateCancelled, session.State, "queue acceptance uncertainty must retain its owned session")
 		manager.mu.Lock()

@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 // Below `md` there is no sidebar, so `/settings` is the settings list itself —
 // the same tree the nav sheet shows, rendered as a real route rather than an
@@ -162,7 +163,10 @@ async function openIntegrationRows(page: Page, workspaceId: string) {
   for (const label of ["Workspaces", "E2E Workspace", "Integrations"]) {
     const toggle = index.getByRole("button", { name: new RegExp(`^(Expand|Collapse) ${label}$`) });
     await expect(toggle).toBeVisible();
+    await waitForFiniteAnimations(index);
     if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.tap();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await waitForFiniteAnimations(index);
   }
   await expect(
     index.locator(`a[href="/settings/workspaces/${workspaceId}/integrations/gitlab"]`),

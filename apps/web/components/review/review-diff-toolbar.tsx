@@ -248,7 +248,13 @@ function MobileFileMenuItems(props: FileDiffToolbarProps) {
         publishedBranch={publishedBranch}
         baseBranch={baseBranch}
       />
-      <FileActionsMenuItems filePath={filePath} sessionId={sessionId} includeCopyPath={false} />
+      <FileActionsMenuItems
+        filePath={filePath}
+        sessionId={sessionId}
+        repositoryId={repositoryId}
+        repositoryName={repo}
+        includeCopyPath={false}
+      />
       <MobileDiffViewMenuItems
         expandUnchanged={expandUnchanged}
         wordWrap={wordWrap}
@@ -348,8 +354,6 @@ function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
     repo,
   } = props;
   const [globalViewMode, setGlobalViewMode] = useGlobalViewMode();
-  const handleToggleViewMode = () =>
-    setGlobalViewMode(globalViewMode === "split" ? "unified" : "split");
 
   return (
     <div className="flex items-center gap-0.5">
@@ -389,7 +393,7 @@ function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
         globalViewMode={globalViewMode}
         wordWrap={wordWrap}
         onToggleExpandUnchanged={onToggleExpandUnchanged}
-        onToggleViewMode={handleToggleViewMode}
+        onToggleViewMode={() => setGlobalViewMode(globalViewMode === "split" ? "unified" : "split")}
         onToggleWordWrap={onToggleWordWrap}
       />
       {onToggleMarkdownPreview && isMarkdownFile(filePath) && (
@@ -408,6 +412,8 @@ function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
       <FileActionsDropdown
         filePath={filePath}
         sessionId={sessionId}
+        repositoryId={repositoryId}
+        repositoryName={repo}
         size="xs"
         includeCopyPath={false}
       />

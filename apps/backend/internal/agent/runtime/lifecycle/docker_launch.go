@@ -139,6 +139,8 @@ func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string)
 		McpServers:                     req.McpServers,
 		McpProviders:                   req.McpProviders,
 		McpProfile:                     req.McpProfile,
+		PromptSuggestions:              req.PromptSuggestions,
+		CopilotNativeSessionEvents:     req.CopilotNativeSessionEvents,
 		PrepareScript:                  prepareScript,
 		ImageTagOverride:               getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
 		AllowUserNamespaces:            getMetadataString(req.Metadata, MetadataKeyAllowUserNamespaces) == boolStringTrue,
@@ -157,6 +159,7 @@ func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string)
 		DeliveryStreamID:               req.DeliveryStreamID,
 		DeliveryIncarnationID:          req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:      req.DeliveryHarnessGeneration,
+		OpenCodePluginRuntime:          req.OpenCodePluginRuntime,
 	}, nil
 }
 

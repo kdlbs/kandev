@@ -9,7 +9,7 @@ import {
   type NativeNotificationPermission,
 } from "@/lib/desktop/native-notification-client";
 import type { PermissionRefresh } from "./notifications-settings-actions";
-import { SettingsGroup } from "./settings-group";
+import { NotificationPreferenceRow } from "./notification-preference-row";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
 type NotificationPermissionState =
@@ -36,6 +36,24 @@ function permissionActionLabelKey(permission: NotificationPermissionState) {
   return "settings:notificationPermissionEnable";
 }
 
+/**
+ * Warning copy is keyed the same way as the action label so the same value
+ * decides both the warning paragraph and the group frame.
+ */
+function permissionWarningKey(
+  permission: NotificationPermissionState,
+  nativeAvailable: boolean,
+): string | null {
+  if (permission === "denied") {
+    return nativeAvailable
+      ? "settings:notificationsBlockedInOs"
+      : "settings:notificationsBlockedInBrowser";
+  }
+  if (permission === "unsupported") return "settings:notificationsUnsupported";
+  if (permission === "error") return "settings:notificationPermissionCheckFailed";
+  return null;
+}
+
 export function DesktopNotificationsSection({
   notificationPermission,
   onRequestPermission,
@@ -43,80 +61,77 @@ export function DesktopNotificationsSection({
   onTestNotification,
 }: DesktopNotificationsSectionProps) {
   const { t } = useTranslation();
+  const warningKey = permissionWarningKey(
+    notificationPermission,
+    nativeNotifications.isAvailable(),
+  );
+  const warning = warningKey ? t(warningKey) : null;
   return (
-    <SettingsGroup
-      title={t("settings:desktopNotifications")}
-      description={t("settings:desktopNotificationsDescription")}
+    <NotificationPreferenceRow
+      label={t("settings:desktopNotifications")}
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.desktopNotifications}
-      action={
-        <div className="flex items-center gap-2">
-          <Button
-            title={t("settings:enableDesktopNotifications")}
-            variant="default"
-            size="sm"
-            onClick={() => void onRequestPermission()}
-            disabled={
-              notificationPermission === "granted" || notificationPermission === "unsupported"
-            }
-            className={
-              notificationPermission === "granted"
-                ? "bg-emerald-500 text-white hover:bg-emerald-500"
-                : "cursor-pointer"
-            }
-          >
-            {t(permissionActionLabelKey(notificationPermission))}
-          </Button>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t("settings:refreshNotificationPermission")}
-                  className="cursor-pointer"
-                  onClick={() => void onRefreshPermission()}
-                >
-                  <IconRefresh className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("settings:refreshPermissionStatus")}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          <HoverCard>
-            <HoverCardTrigger asChild>
-              <Button
-                title={t("settings:sendTestNotification")}
-                variant="outline"
-                className="cursor-pointer"
-                size="icon"
-                onClick={() => {
-                  void onTestNotification();
-                }}
-              >
-                <IconBell className="h-4 w-4" />
-              </Button>
-            </HoverCardTrigger>
-            <HoverCardContent side="top">
-              {t("settings:notificationsNotShowingHint")}
-            </HoverCardContent>
-          </HoverCard>
-        </div>
+      data-testid="notification-permission-group"
+      footer={
+        warning && (
+          <p data-testid="notification-permission-warning" className="text-xs text-amber-600">
+            {warning}
+          </p>
+        )
       }
     >
-      {notificationPermission === "denied" && (
-        <p className="text-xs text-amber-600">
-          {nativeNotifications.isAvailable()
-            ? t("settings:notificationsBlockedInOs")
-            : t("settings:notificationsBlockedInBrowser")}
-        </p>
-      )}
-      {notificationPermission === "unsupported" && (
-        <p className="text-xs text-amber-600">{t("settings:notificationsUnsupported")}</p>
-      )}
-      {notificationPermission === "error" && (
-        <p className="text-xs text-amber-600">{t("settings:notificationPermissionCheckFailed")}</p>
-      )}
-    </SettingsGroup>
+      <div className="flex min-w-0 flex-wrap items-center gap-2 md:flex-nowrap">
+        <Button
+          title={t("settings:enableDesktopNotifications")}
+          variant="default"
+          size="default"
+          onClick={() => void onRequestPermission()}
+          disabled={
+            notificationPermission === "granted" || notificationPermission === "unsupported"
+          }
+          className={
+            notificationPermission === "granted"
+              ? "bg-emerald-500 text-white hover:bg-emerald-500"
+              : "cursor-pointer"
+          }
+        >
+          {t(permissionActionLabelKey(notificationPermission))}
+        </Button>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={t("settings:refreshNotificationPermission")}
+                className="cursor-pointer"
+                onClick={() => void onRefreshPermission()}
+              >
+                <IconRefresh className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("settings:refreshPermissionStatus")}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <HoverCard>
+          <HoverCardTrigger asChild>
+            <Button
+              title={t("settings:sendTestNotification")}
+              variant="outline"
+              className="cursor-pointer"
+              size="icon"
+              onClick={() => {
+                void onTestNotification();
+              }}
+            >
+              <IconBell className="h-4 w-4" />
+            </Button>
+          </HoverCardTrigger>
+          <HoverCardContent side="top">
+            {t("settings:notificationsNotShowingHint")}
+          </HoverCardContent>
+        </HoverCard>
+      </div>
+    </NotificationPreferenceRow>
   );
 }
 

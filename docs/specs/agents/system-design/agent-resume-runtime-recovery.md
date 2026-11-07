@@ -26,6 +26,8 @@ branch creation. The web client owns error presentation and recovery choices.
 The task environment remains the owner of worktrees. A task session refers to
 that environment and does not acquire its own worktree lifecycle.
 
+[MCP profile continuity](mcp-profile-continuity.md) defines complete tool-profile preparation before a replacement process starts in an existing workspace.
+
 ## Requirement mapping
 
 | Requirement | Design section |

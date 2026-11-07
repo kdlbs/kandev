@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -74,6 +76,7 @@ const createTablesSQL = `
 		continuation_task_id TEXT DEFAULT '',
 		webhook_secret TEXT DEFAULT '',
 		retry_policy TEXT NOT NULL DEFAULT '{}',
+		plugin_tools TEXT NOT NULL DEFAULT '[]',
 		automation_revision BIGINT NOT NULL DEFAULT 0,
 		last_triggered_at DATETIME,
 		created_at DATETIME NOT NULL,
@@ -292,6 +295,7 @@ const (
 	migrateRunDeliveryStatusSQL                 = `ALTER TABLE automation_runs ADD COLUMN delivery_status TEXT NOT NULL DEFAULT ''`
 	migrateRunDeliveryAttemptsSQL               = `ALTER TABLE automation_runs ADD COLUMN managed_delivery_attempts INTEGER NOT NULL DEFAULT 0`
 	migrateRetryPolicySQL                       = `ALTER TABLE automations ADD COLUMN retry_policy TEXT NOT NULL DEFAULT '{}'`
+	migratePluginToolsSQL                       = `ALTER TABLE automations ADD COLUMN plugin_tools TEXT NOT NULL DEFAULT '[]'`
 	migrateRetryAutomationRevisionSQL           = `ALTER TABLE automations ADD COLUMN automation_revision BIGINT NOT NULL DEFAULT 0`
 	migrateTriggerRevisionSQL                   = `ALTER TABLE automation_triggers ADD COLUMN trigger_revision BIGINT NOT NULL DEFAULT 0`
 )
@@ -356,7 +360,7 @@ const automationColumns = `created_by_user_id, id, workspace_id, name, descripti
 	managed_destination_plugin_id, managed_destination_instance_key, managed_destination_revision,
 	resource_revision, repository_mode, prompt, task_title_template,
 	enabled, max_concurrent_runs, continuation_policy, continuation_task_id, webhook_secret,
-	retry_policy, automation_revision, last_triggered_at, created_at, updated_at,
+	retry_policy, plugin_tools, automation_revision, last_triggered_at, created_at, updated_at,
 	execution_mode = 'task' AS legacy_board_card`
 
 func (s *Store) initSchema() error {
@@ -401,6 +405,7 @@ func (s *Store) initSchema() error {
 		{"automation_runs.delivery_status", schemaSQLForDriver(migrateRunDeliveryStatusSQL, s.db.DriverName())},
 		{"automation_runs.managed_delivery_attempts", schemaSQLForDriver(migrateRunDeliveryAttemptsSQL, s.db.DriverName())},
 		{"automations.retry_policy", schemaSQLForDriver(migrateRetryPolicySQL, s.db.DriverName())},
+		{"automations.plugin_tools", schemaSQLForDriver(migratePluginToolsSQL, s.db.DriverName())},
 		{"automations.automation_revision", schemaSQLForDriver(migrateRetryAutomationRevisionSQL, s.db.DriverName())},
 		{"automation_triggers.trigger_revision", schemaSQLForDriver(migrateTriggerRevisionSQL, s.db.DriverName())},
 		{"automation_runs.retry_group_id", schemaSQLForDriver(migrateRunRetryGroupIDSQL, s.db.DriverName())},
@@ -597,7 +602,7 @@ func (s *Store) backfillRepositoryModes() error {
 
 // CreateAutomation persists a new automation and its repository_ids.
 func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
-	a.CreatedByUserID = executorCreatorUserID(ctx)
+	a.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if a.ID == "" {
 		a.ID = uuid.New().String()
 	}
@@ -614,6 +619,11 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 		return fmt.Errorf("encode retry policy: %w", err)
 	}
 	a.RetryPolicyJSON = string(policyJSON)
+	pluginToolsJSON, err := encodePluginTools(a.PluginTools)
+	if err != nil {
+		return err
+	}
+	a.PluginToolsJSON = pluginToolsJSON
 	now := time.Now().UTC()
 	a.CreatedAt = now
 	a.UpdatedAt = now
@@ -666,8 +676,8 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 			managed_destination_instance_key, managed_destination_revision, resource_revision,
 			repository_mode, prompt, task_title_template, execution_mode,
 			enabled, max_concurrent_runs, continuation_policy, continuation_task_id,
-			retry_policy, automation_revision, webhook_secret, last_triggered_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), a.CreatedByUserID,
+			retry_policy, plugin_tools, automation_revision, webhook_secret, last_triggered_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), a.CreatedByUserID,
 		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		string(a.TaskMode), a.ManagedOwnerInstallationID, a.ManagedDestinationInstallationID,
@@ -675,7 +685,7 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 		a.ManagedDestinationInstanceKey, a.ManagedDestinationRevision, a.ResourceRevision, string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
 		a.Enabled, a.MaxConcurrentRuns, a.ContinuationPolicy, a.ContinuationTaskID,
-		a.RetryPolicyJSON, a.AutomationRevision, a.WebhookSecret,
+		a.RetryPolicyJSON, a.PluginToolsJSON, a.AutomationRevision, a.WebhookSecret,
 		a.LastTriggeredAt, a.CreatedAt, a.UpdatedAt)
 	if err != nil {
 		return err
@@ -718,6 +728,7 @@ func (s *Store) GetAutomation(ctx context.Context, id string) (*Automation, erro
 	if err != nil {
 		return nil, err
 	}
+	a.PluginTools = decodePluginTools(a.PluginToolsJSON)
 	hydrateManagedDestination(&a)
 	triggers, err := s.ListTriggers(ctx, id)
 	if err != nil {
@@ -883,6 +894,7 @@ func (s *Store) hydrateAutomations(ctx context.Context, automations []*Automatio
 		if err != nil {
 			return fmt.Errorf("hydrate retry policy: %w", err)
 		}
+		a.PluginTools = decodePluginTools(a.PluginToolsJSON)
 		a.Triggers = triggersByAutomation[a.ID]
 		a.Repositories = repositoriesByAutomation[a.ID]
 		a.RepositoryIDs = repositoryIDs(a.Repositories)
@@ -937,6 +949,11 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 		return fmt.Errorf("encode retry policy: %w", err)
 	}
 	a.RetryPolicyJSON = string(policyJSON)
+	pluginToolsJSON, err := encodePluginTools(a.PluginTools)
+	if err != nil {
+		return err
+	}
+	a.PluginToolsJSON = pluginToolsJSON
 	if a.ContinuationPolicy == "" {
 		a.ContinuationPolicy = ContinuationPolicyNewTask
 	}
@@ -980,7 +997,7 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 			managed_destination_instance_key = ?, managed_destination_revision = ?, resource_revision = resource_revision + 1,
 			repository_mode = ?, prompt = ?, task_title_template = ?,
 			enabled = ?, max_concurrent_runs = ?, continuation_policy = ?,
-			retry_policy = ?, automation_revision = automation_revision + 1, updated_at = ?
+			retry_policy = ?, plugin_tools = ?, automation_revision = automation_revision + 1, updated_at = ?
 		WHERE id = ?`),
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
@@ -989,7 +1006,7 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 		a.ManagedDestinationInstanceKey, a.ManagedDestinationRevision, string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
 		a.Enabled, a.MaxConcurrentRuns, a.ContinuationPolicy,
-		a.RetryPolicyJSON, a.UpdatedAt, id)
+		a.RetryPolicyJSON, a.PluginToolsJSON, a.UpdatedAt, id)
 	if err != nil {
 		return err
 	}
@@ -1034,6 +1051,9 @@ func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
 			a.ManagedOwnerInstallationID = ""
 			a.ManagedDestinationInstallationID = ""
 			a.ManagedDestinationConversationID = ""
+		}
+		if a.TaskMode != TaskModeAutomationRun {
+			a.PluginTools = []plugintools.Selection{}
 		}
 	}
 	if req.ManagedDestination != nil {
@@ -1089,6 +1109,12 @@ func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
 	}
 	if req.RetryPolicy != nil {
 		a.RetryPolicy = *req.RetryPolicy
+	}
+	if req.PluginTools != nil {
+		a.PluginTools = append([]plugintools.Selection(nil), (*req.PluginTools)...)
+		if a.TaskMode != TaskModeAutomationRun {
+			a.PluginTools = []plugintools.Selection{}
+		}
 	}
 }
 
@@ -2060,7 +2086,16 @@ type runSummaryRow struct {
 // earlier run. Runs without a turn binding retain the legacy task-level query.
 // Bound runs are hydrated in one set-based query because these lists are also
 // used by live polling and can contain hundreds of runs.
+const (
+	runSummaryPrefixBytes        = 280
+	historyRunSummaryPrefixBytes = 4096
+)
+
 func (s *Store) hydrateRunSummaries(ctx context.Context, runs []*AutomationRun) error {
+	return s.hydrateRunSummariesWithPrefix(ctx, runs, runSummaryPrefixBytes)
+}
+
+func (s *Store) hydrateRunSummariesWithPrefix(ctx context.Context, runs []*AutomationRun, prefixBytes int) error {
 	turnIDs := make([]string, 0, len(runs))
 	for _, run := range runs {
 		if run.TurnID != "" {
@@ -2077,8 +2112,8 @@ func (s *Store) hydrateRunSummaries(ctx context.Context, runs []*AutomationRun) 
 		args[i] = turnID
 	}
 	var summaries []runSummaryRow
-	err := s.ro.SelectContext(ctx, &summaries, s.ro.Rebind(`
-		SELECT m.turn_id, substr(m.content, 1, 280) AS summary
+	err := s.ro.SelectContext(ctx, &summaries, s.ro.Rebind(fmt.Sprintf(`
+		SELECT m.turn_id, substr(m.content, 1, %d) AS summary
 		FROM task_session_messages m
 		WHERE m.turn_id IN (`+placeholders+`)
 		  AND m.author_type = 'agent' AND m.type = 'message'
@@ -2088,7 +2123,7 @@ func (s *Store) hydrateRunSummaries(ctx context.Context, runs []*AutomationRun) 
 			  AND newer.author_type = 'agent' AND newer.type = 'message'
 				AND (newer.created_at > m.created_at OR
 					(newer.created_at = m.created_at AND newer.id > m.id))
-			)`), args...)
+			)`, prefixBytes)), args...)
 	if db.IsMissingTableError(err) {
 		return nil
 	}
@@ -2150,12 +2185,10 @@ func (s *Store) hydrateRunSummaries(ctx context.Context, runs []*AutomationRun) 
 // than a LEFT JOIN) keeps the query correct even if the "at most one
 // is_primary=1 row per task" invariant is ever violated — a join would fan
 // out and duplicate the run.
-const runTaskStateColumnsSQL = `
-		ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type,
-		-- A run keeps its task_id after the task row is deleted, which reads as a
-		-- transcript that can still be opened. Report no task rather than a link
-		-- that dead-ends; the derived cancelled status below already says why.
-		CASE WHEN t.id IS NULL THEN '' ELSE ar.task_id END AS task_id,
+// runObservedStatusSQL is the shared read-time status projection. It assumes
+// the caller aliases automation_runs as ar and LEFT JOINs tasks as t, and
+// binds runTaskStateArgs() ahead of its own parameters.
+const runObservedStatusSQL = `
 		CASE
 			WHEN ar.retry_state = ? THEN ?
 			WHEN ar.status = ? AND t.id IS NULL THEN ?
@@ -2165,7 +2198,15 @@ const runTaskStateColumnsSQL = `
 				WHERE ts.task_id = ar.task_id AND ts.is_primary = 1 AND ts.state = ?
 			) THEN ?
 			ELSE ar.status
-		END AS status,
+		END AS status`
+
+const runTaskStateColumnsSQL = `
+		ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type,
+		-- A run keeps its task_id after the task row is deleted, which reads as a
+		-- transcript that can still be opened. Report no task rather than a link
+		-- that dead-ends; the derived cancelled status below already says why.
+		CASE WHEN t.id IS NULL THEN '' ELSE ar.task_id END AS task_id,` +
+	runObservedStatusSQL + `,
 		ar.dedup_key, ar.trigger_data, ar.error_message,
 		ar.session_id, ar.turn_id, ar.thread_action, ar.thread_reason, ar.display_title,
 		ar.dedup_reason, ar.repository_reason,

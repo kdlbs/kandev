@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import {
   readSettingsMenuExpandedKeys,
   readSettingsMenuMode,
@@ -18,7 +19,7 @@ export function loadSettingsMenuState(): SettingsMenuState {
   };
 }
 
-type ImmerSet = Parameters<StateCreator<UISlice, [["zustand/immer", never]], [], UISlice>>[0];
+type ImmerSet = Parameters<SliceCreator<UISlice>>[0];
 
 /**
  * Mirrors the theme's preview/commit/restore trio (`components/theme/app-theme`).

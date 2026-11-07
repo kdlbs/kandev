@@ -17,7 +17,7 @@ import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useHoverPopover } from "@/hooks/domains/github/use-hover-popover";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
-import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
+import { PR_CI_DESKTOP_POPOVER_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import { useTaskWorkspaceId } from "@/components/task/task-workspace-context";
@@ -288,10 +288,12 @@ function PRStatusChipHoverCard({ pr, automation, refreshTaskPR, triggerRef }: Si
         side="top"
         align="start"
         sideOffset={8}
-        className={`w-80 p-2.5 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
+        className={`w-80 p-2.5 ${PR_CI_DESKTOP_POPOVER_CLASS}`}
         onMouseEnter={onContentEnter}
         onMouseMove={onContentEnter}
         onMouseLeave={onContentLeave}
+        onFocus={onContentEnter}
+        onBlur={onContentLeave}
         onPointerDownOutside={onPointerDownOutside}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
@@ -376,10 +378,12 @@ function PRStatusChipMultiHoverCard({
         side="top"
         align="start"
         sideOffset={8}
-        className={`w-96 p-2.5 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
+        className={`w-96 p-2.5 ${PR_CI_DESKTOP_POPOVER_CLASS}`}
         onMouseEnter={onContentEnter}
         onMouseMove={onContentEnter}
         onMouseLeave={onContentLeave}
+        onFocus={onContentEnter}
+        onBlur={onContentLeave}
         onPointerDownOutside={onPointerDownOutside}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
@@ -418,6 +422,7 @@ function PRStatusChipMultiDrawer({
         </ChangeRequestStatusChip>
       </DrawerTrigger>
       <ChangeRequestStatusDrawerContent
+        fixedContent
         testId="pr-status-chip-drawer"
         closeTestId="pr-status-chip-drawer-close"
         title={t("github:pullRequestCount", { count: prs.length })}
@@ -454,6 +459,7 @@ function PRStatusChipDrawer({ pr, automation, refreshTaskPR, triggerRef }: Singl
         </ChangeRequestStatusChip>
       </DrawerTrigger>
       <ChangeRequestStatusDrawerContent
+        fixedContent
         testId="pr-status-chip-drawer"
         closeTestId="pr-status-chip-drawer-close"
         title={`${t("github:pr")}${pr.pr_number}`}

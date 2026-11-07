@@ -5,8 +5,19 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/requirements/dialog-content-containment.md"
-design: "../../specs/ui/system-design/dialog-content-containment.md"
+requirements:
+  - REQ-UI-DIALOG-CONTENT-CONTAINMENT-001
+acceptance_criteria:
+  - AC-UI-DIALOG-CONTENT-CONTAINMENT-001.1
+  - AC-UI-DIALOG-CONTENT-CONTAINMENT-001.2
+  - AC-UI-DIALOG-CONTENT-CONTAINMENT-001.3
+  - AC-UI-DIALOG-CONTENT-CONTAINMENT-001.4
+  - AC-UI-DIALOG-CONTENT-CONTAINMENT-001.5
+  - AC-UI-DIALOG-CONTENT-CONTAINMENT-001.6
+  - AC-UI-DIALOG-CONTENT-CONTAINMENT-001.7
+  - AC-UI-DIALOG-CONTENT-CONTAINMENT-001.8
+system_design:
+  - ../../specs/ui/system-design/dialog-content-containment.md
 ---
 
 # Task 05: Contain Create Project Form
@@ -101,3 +112,12 @@ focused results, files changed, cleanup, blockers, and residual risks.
   footer hit testing, cancel behavior, and phone document-overflow safety.
 - A parallel Office rerun hit the E2E harness shared backend port; the affected
   mobile case passed on the required sequential rerun.
+
+## Follow-up correction
+
+The original `overflow: clip` shell also clips the inline repository picker.
+[Issue #4894](https://github.com/kdlbs/kandev/issues/4894) records that defect.
+The [new work order](../office-project-picker-clipping/task-01-unclip-repository-picker.md)
+owns the correction and records its completed RED/GREEN results. This task
+remains a record of the original completed containment work. Its long-chip
+scenarios remain required regression coverage in the follow-up package.

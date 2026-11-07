@@ -111,6 +111,9 @@ func IsKnownSafeGitFlag(arg string) bool {
 	// editor), and "--abort" would let through "--abort-*".
 	exactFlags := []string{
 		"--", // Path separator - everything after this is treated as paths, not flags
+		"--no-index",
+		"--quiet",
+		"--stage",
 		"--rebase",
 		"--abort",
 		"--no-color",
@@ -124,6 +127,7 @@ func IsKnownSafeGitFlag(arg string) bool {
 		"-z",
 		"--untracked-files=no",
 		"--absolute-git-dir",
+		"--git-common-dir",
 		"--show-object-format",
 		"--default=false",
 		"--raw",
@@ -164,6 +168,7 @@ func IsKnownSafeGitFlag(arg string) bool {
 		"--git-path", "--path-format=", "--count", "--merges",
 		"--refs",
 		"--src-prefix=", "--dst-prefix=",
+		"--full-tree", "--stdout", "--batch-check=", "--object-format=", "-t",
 	}
 	for _, safe := range safeFlags {
 		if strings.HasPrefix(arg, safe) {

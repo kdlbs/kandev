@@ -34,7 +34,6 @@ export type SidebarDialogsActions = {
   handleCreateSubtask: (taskId: string, taskTitle: string) => void;
   archivingTask: Target;
   setArchivingTask: (next: Target) => void;
-  archivingTaskId: string | null;
   isArchiving: boolean;
   handleArchiveConfirm: (opts: { cascade: boolean }) => Promise<void> | void;
   deletingTask: Target;
@@ -43,6 +42,8 @@ export type SidebarDialogsActions = {
   handleDeleteConfirm: (opts: {
     cascade: boolean;
     discardWorktreeChanges: boolean;
+    workspaceCleanup?: "delete" | "retain";
+    allowUnverifiedWorkspaceChanges?: boolean;
     confirmationId: string;
   }) => Promise<void> | void;
   detachingTask: DetachTarget;
@@ -99,7 +100,6 @@ export function SidebarDialogs({
     setCreatingSubtask,
     archivingTask,
     setArchivingTask,
-    archivingTaskId,
     isArchiving,
     handleArchiveConfirm,
     deletingTask,
@@ -132,7 +132,7 @@ export function SidebarDialogs({
         taskTitle={archivingTask?.title ?? ""}
         taskId={archivingTask?.id}
         executorType={archivingTask?.executorType}
-        isArchiving={isArchiving && archivingTask?.id === archivingTaskId}
+        isArchiving={isArchiving}
         onConfirm={handleArchiveConfirm}
       />
       <TaskDeleteConfirmDialog

@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"math"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
@@ -10,12 +11,20 @@ import (
 )
 
 // Include only terminal SQL records needed to explain retained unknown journal
-// entries. Completed history outside that inventory is not recovery authority.
-func nativeResumeSQLRows(ctx context.Context, execution *AgentExecution, status *agentctl.DeliveryStatus, peer []journal.Submission, repository AgentDeliveryRepository) ([]*models.AgentDeliverySubmission, error) {
+// entries. Eligible unproven completions are classified separately so they
+// never enter the proven-terminal branch.
+func nativeResumeSQLRows(
+	ctx context.Context,
+	execution *AgentExecution,
+	status *agentctl.DeliveryStatus,
+	peer []journal.Submission,
+	repository AgentDeliveryRepository,
+) ([]*models.AgentDeliverySubmission, map[string]*models.AgentDeliveryCursor, error) {
 	rows, err := activeBackendSubmissions(ctx, repository, execution.SessionID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	unproven := make(map[string]*models.AgentDeliveryCursor)
 	seen := make(map[string]bool, len(rows))
 	for _, row := range rows {
 		seen[row.ID] = true
@@ -24,24 +33,99 @@ func nativeResumeSQLRows(ctx context.Context, execution *AgentExecution, status 
 		if seen[submission.ID] || submission.State != journal.SubmissionInterruptedUnknown {
 			continue
 		}
-		row, err := nativeResumeSubmissionMetadata(ctx, repository, submission.ID)
+		row, cursor, unprovenRow, err := nativeResumeUnlistedRow(ctx, execution, status, submission, repository)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if !peerMatchesTerminalHistory(execution, status, submission, row) {
-			return nil, fmt.Errorf("%w: native resume terminal evidence disagrees", ErrDurableAdoptionBlocked)
-		}
-		cursor, err := repository.GetAgentDeliveryCursor(ctx, submission.StreamID)
-		if err != nil {
-			return nil, err
-		}
-		if !nativeTerminalCursorMatches(cursor, submission, row.TerminalSequence) {
-			return nil, fmt.Errorf("%w: native resume terminal is not projected", ErrDurableAdoptionBlocked)
+		if unprovenRow {
+			unproven[row.ID] = cursor
 		}
 		seen[row.ID] = true
 		rows = append(rows, row)
 	}
-	return rows, nil
+	return rows, unproven, nil
+}
+
+func nativeResumeUnlistedRow(
+	ctx context.Context,
+	execution *AgentExecution,
+	status *agentctl.DeliveryStatus,
+	submission journal.Submission,
+	repository AgentDeliveryRepository,
+) (*models.AgentDeliverySubmission, *models.AgentDeliveryCursor, bool, error) {
+	row, err := nativeResumeSubmissionMetadata(ctx, repository, submission.ID)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	row, err = nativeResumePendingTerminal(ctx, execution, status, submission, row, repository)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if row == nil {
+		return nil, nil, false, fmt.Errorf("%w: native resume submission metadata is unavailable", ErrDurableAdoptionBlocked)
+	}
+	cursor, err := nativeResumeRowCursor(ctx, repository, submission)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if !nativeTerminalCursorMatches(cursor, submission, row.TerminalSequence) {
+		return nil, nil, false, fmt.Errorf("%w: native resume terminal is not projected", ErrDurableAdoptionBlocked)
+	}
+	switch {
+	case peerMatchesTerminalHistory(execution, status, submission, row):
+		return row, cursor, false, nil
+	case peerMatchesUnprovenCompletion(execution, status, submission, row):
+		if status.SubmissionsTruncated {
+			return nil, nil, false, fmt.Errorf("%w: native resume submission inventory is truncated", ErrDurableAdoptionBlocked)
+		}
+		if cursor.ReceivedSequence < cursor.RemoteHighWater {
+			return nil, nil, false, fmt.Errorf("%w: native resume historical stream high-water mark is not received", ErrDurableAdoptionBlocked)
+		}
+		valid, verifyErr := verifyNativeResumeUnprovenCompletion(ctx, repository, execution, status, submission, row)
+		if verifyErr != nil {
+			return nil, nil, false, verifyErr
+		}
+		if !valid {
+			return nil, nil, false, fmt.Errorf("%w: native resume terminal evidence disagrees", ErrDurableAdoptionBlocked)
+		}
+		return row, cursor, true, nil
+	default:
+		return nil, nil, false, fmt.Errorf("%w: native resume terminal evidence disagrees", ErrDurableAdoptionBlocked)
+	}
+}
+
+func nativeResumeRowCursor(ctx context.Context, repository AgentDeliveryRepository, submission journal.Submission) (*models.AgentDeliveryCursor, error) {
+	return repository.GetAgentDeliveryCursor(ctx, submission.StreamID)
+}
+
+type pendingNativeResumeTerminalVerifier interface {
+	VerifyPendingNativeResumeTerminal(context.Context, string, string, models.NativeResumeSubmissionEvidence) (bool, error)
+}
+
+// A projected terminal can outlive an interrupted workflow settlement. Derive
+// only a recovery view; settlement markers and historical records stay intact.
+func nativeResumePendingTerminal(ctx context.Context, execution *AgentExecution, status *agentctl.DeliveryStatus, peer journal.Submission, row *models.AgentDeliverySubmission, repository AgentDeliveryRepository) (*models.AgentDeliverySubmission, error) {
+	if row == nil || row.TerminalStreamID != "" || row.TerminalSequence != 0 || row.TerminalTurnID != "" || row.FullySettledAt != nil || row.PayloadPrunedAt != nil || peer.TerminalSequence > math.MaxInt64 {
+		return row, nil
+	}
+	verifier, ok := repository.(pendingNativeResumeTerminalVerifier)
+	if !ok {
+		return row, nil
+	}
+	derived := *row
+	derived.TerminalStreamID, derived.TerminalSequence = peer.StreamID, int64(peer.TerminalSequence)
+	if !peerMatchesTerminalHistory(execution, status, peer, &derived) {
+		return row, nil
+	}
+	valid, err := verifier.VerifyPendingNativeResumeTerminal(ctx, row.SessionID, row.IncarnationID, models.NativeResumeSubmissionEvidence{
+		ID: row.ID, HarnessGeneration: row.HarnessGeneration, PayloadHash: row.PayloadHash,
+		State: row.State, Outcome: row.Outcome, StreamID: peer.StreamID,
+		TerminalStreamID: derived.TerminalStreamID, TerminalSequence: derived.TerminalSequence,
+	})
+	if err != nil || !valid {
+		return row, err
+	}
+	return &derived, nil
 }
 
 func peerMatchesTerminalHistory(execution *AgentExecution, status *agentctl.DeliveryStatus, peer journal.Submission, row *models.AgentDeliverySubmission) bool {
@@ -78,20 +162,22 @@ func (m *Manager) hasProjectedTerminalRetirement(ctx context.Context, execution 
 	if err != nil {
 		return false, err
 	}
-	rows, err := nativeResumeSQLRows(ctx, execution, status, peer, m.streamManager.deliveryRepository())
+	rows, unproven, err := nativeResumeSQLRows(ctx, execution, status, peer, m.streamManager.deliveryRepository())
 	if err != nil {
 		return false, err
 	}
-	if err := validateNativeResumeSQLRows(execution, status, peer, rows, false); err != nil {
+	if err := validateNativeResumeSQLRows(execution, status, peer, rows, unproven, false); err != nil {
 		return false, err
 	}
-	ids, err := nativeResumeRetirementIDs(execution, status, peer, rows)
+	ids, err := nativeResumeRetirementIDs(execution, status, peer, rows, unproven)
 	if err != nil {
 		return false, err
 	}
 	terminals := make(map[string]bool, len(rows))
 	for _, row := range rows {
-		terminals[row.ID] = nativeResumeTerminalState(row.State)
+		// An unproven completion keeps its historical label but is not
+		// terminal authority; it requires the full dead-owner proof.
+		terminals[row.ID] = nativeResumeTerminalState(row.State) && unproven[row.ID] == nil
 	}
 	for _, id := range ids {
 		if !terminals[id] {

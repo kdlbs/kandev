@@ -31,6 +31,80 @@ func TestLocalAgentPathLaunchd(t *testing.T) {
 	runLocalAgentChild(t, env)
 }
 
+func TestLocalAgentPathLoginShellSeparateTools(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix shell and executable fixtures")
+	}
+	bash, err := resolveServiceShell("/bin/bash")
+	if err != nil {
+		t.Skipf("Bash is unavailable: %v", err)
+	}
+	accountHome := t.TempDir()
+	nodeDir := filepath.Join(accountHome, "node runtime")
+	shimDir := filepath.Join(accountHome, "tool manager shims")
+	for _, dir := range []string{nodeDir, shimDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nodePath := filepath.Join(nodeDir, "node")
+	writeServiceShellFixture(t, nodePath, "#!/bin/sh\nprintf node-from-login\n", 0o755)
+	installAgentShellFixture(t, shimDir)
+	profile := "export PATH=" + shellSingleQuote(shimDir) + ":" + shellSingleQuote(nodeDir) + ":$PATH\n" +
+		"export KANDEV_LOGIN_MARKER='from login shell'\n"
+	if err := os.WriteFile(filepath.Join(accountHome, ".bash_profile"), []byte(profile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resultPath := filepath.Join(accountHome, "service-environment.txt")
+	probePath := filepath.Join(accountHome, "kandev-probe")
+	writeServiceShellFixture(t, probePath, "#!/bin/sh\nprintf '%s\\n' \"$PATH\" \"$KANDEV_LOGIN_MARKER\" > \"$KANDEV_TEST_RESULT\"\n", 0o755)
+	invocation, err := buildServiceShellInvocation(bash, accountHome, probePath, []string{
+		"PATH=/usr/bin:/bin", "KANDEV_TEST_RESULT=" + resultPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(invocation.Path, invocation.Args[1:]...)
+	cmd.Env = invocation.Env
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("login shell probe: %v\n%s", err, output)
+	}
+	captured, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := strings.Split(strings.TrimSuffix(string(captured), "\n"), "\n")
+	if len(values) != 2 || values[1] != "from login shell" || !strings.Contains(values[0], shimDir) || !strings.Contains(values[0], nodeDir) {
+		t.Fatalf("login shell environment = %#v", values)
+	}
+	t.Setenv("HOME", accountHome)
+	t.Setenv("PATH", values[0])
+	t.Setenv("KANDEV_SERVICE_MODE", "")
+	if got, err := exec.LookPath("node"); err != nil || got != nodePath {
+		t.Fatalf("exec.LookPath(node) = (%q, %v), want %q", got, err, nodePath)
+	}
+	if result, err := agents.NewCursorACP().IsInstalled(t.Context()); err != nil || !result.Available {
+		t.Fatalf("Cursor discovery with login PATH = (%+v, %v), want available", result, err)
+	}
+	for _, name := range []string{"agent", "cursor-agent"} {
+		output, err := exec.CommandContext(t.Context(), name).Output()
+		if err != nil || string(output) != "cursor-ok" {
+			t.Fatalf("execute %s from separate shim directory: %q, %v", name, output, err)
+		}
+	}
+	output, err := exec.CommandContext(t.Context(), "node").Output()
+	if err != nil || string(output) != "node-from-login" {
+		t.Fatalf("execute node from separate Node directory: %q, %v", output, err)
+	}
+}
+
+func installAgentShellFixture(t *testing.T, shimDir string) {
+	t.Helper()
+	for _, name := range []string{"agent", "cursor-agent"} {
+		writeServiceShellFixture(t, filepath.Join(shimDir, name), "#!/bin/sh\nprintf cursor-ok\n", 0o755)
+	}
+}
+
 func localAgentEnvironment(t *testing.T, path string) (string, []string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {

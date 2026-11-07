@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -236,4 +237,23 @@ func agentDeliveryDiscoveryAdvanced(previous agentDeliveryRetentionProgress, can
 		(next.lastCompactionAt.Time.Equal(previous.lastCompactionAt.Time) &&
 			(next.lastCompactionStreamID > previous.lastCompactionStreamID ||
 				(next.lastCompactionStreamID == previous.lastCompactionStreamID && next.lastCompactionSequence > previous.lastCompactionSequence)))
+}
+
+func nextAgentDeliveryRetentionProgress(previous agentDeliveryRetentionProgress, candidates []agentDeliveryRetentionCandidate, prompts []agentDeliveryPromptRetentionCandidate, wrapped, promptWrapped bool) agentDeliveryRetentionProgress {
+	progress := previous
+	advanceAgentDeliveryEventRetentionProgress(&progress, candidates, wrapped)
+	if len(prompts) > 0 {
+		progress.lastSubmissionID = prompts[len(prompts)-1].submissionID
+	} else if promptWrapped {
+		progress.lastSubmissionID = ""
+	}
+	return progress
+}
+
+func agentDeliveryDiscoveryVector(p agentDeliveryRetentionProgress) models.AgentDeliveryRetentionDiscovery {
+	return models.AgentDeliveryRetentionDiscovery{
+		CompactionAt: p.lastCompactionAt.Time, CompactionValid: p.lastCompactionAt.Valid,
+		CompactionStreamID: p.lastCompactionStreamID, CompactionSequence: p.lastCompactionSequence,
+		ReceiptStreamID: p.lastStreamID, ReceiptSequence: p.lastSequence, SubmissionID: p.lastSubmissionID,
+	}
 }

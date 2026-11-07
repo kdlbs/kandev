@@ -3,6 +3,7 @@
 // Tool names arrive prefixed by the agent runtime:
 //   - Claude Code:  `mcp__kandev__<tool>_kandev`
 //   - Codex:        `kandev/<tool>_kandev`
+//   - Copilot:      `kandev-<tool>_kandev`
 //   - Bare:         `<tool>_kandev`
 //
 // `extractKandevStem` strips the namespace and the trailing `_kandev` suffix so
@@ -14,7 +15,22 @@
 // JSON-encoded string; we parse that inner JSON so the renderers see plain JS.
 
 const NAMESPACE_SEP = /\/|__|\./;
-const KANDEV_NAMESPACES = ["mcp__kandev__", "mcp.kandev.", "kandev/", "kandev: "] as const;
+// Exact runtime names from internal/mcp/profile/builtin_descriptors.go.
+// Package prefixes precede the shorter historic `kandev-` prefix.
+const KANDEV_SERVER_NAMES = [
+  "kandev-configuration",
+  "kandev-rich-output",
+  "kandev-walkthroughs",
+  "kandev-diagnostics",
+  "kandev",
+] as const;
+const KANDEV_NAMESPACES = KANDEV_SERVER_NAMES.flatMap((server) => [
+  `mcp__${server}__`,
+  `mcp.${server}.`,
+  `${server}/`,
+  `${server}: `,
+  `${server}-`,
+]);
 const KANDEV_SUFFIX = "_kandev";
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

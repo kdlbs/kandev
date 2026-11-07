@@ -38,6 +38,12 @@ The workspace automation connection must have contents-read access to the config
 - an exact named `gh` CLI host/login; or
 - a GitHub App installation with **Contents: read** permission for the repository.
 
+GitHub.com, Enterprise Cloud tenant hosts, and GitHub Enterprise Server are supported.
+The saved sync configuration retains its repository host. Changing the workspace
+connection to a different host pauses that configuration until you save a matching
+repository; files already fetched from the old connection cannot overwrite workflows
+after replacement.
+
 Without a usable workspace automation connection, sync fails. Existing migrated workspaces may temporarily use **Legacy shared**, which alone consults ambient backend `gh`, `GITHUB_TOKEN`, `GH_TOKEN`, or old globally named secrets.
 
 ### GitLab
@@ -50,7 +56,7 @@ Grant only the repository access that this operation needs, protect the backend 
 
 Open **Settings → Workspaces → select a workspace → Workflows → Workflow Sync**, then choose **GitHub** or **GitLab**.
 
-1. Enter the repository. For GitHub, paste a repository link; the field accepts an HTTPS URL with or without a scheme, a `www.github.com` URL, a `.git` suffix, or an SSH form such as `git@github.com:OWNER/REPO.git`. For GitLab, enter the project path directly (e.g. `group/project`, or a nested `group/subgroup/project`) or paste a full project link (any host, including self-managed).
+1. Enter the repository. For GitHub, paste a repository link on the workspace's connected host; the field accepts an HTTPS URL with or without a scheme, a `www.github.com` URL, a `.git` suffix, or an SSH form such as `git@github.com:OWNER/REPO.git`. For GitLab, enter the project path directly (e.g. `group/project`, or a nested `group/subgroup/project`) or paste a full project link (any host, including self-managed).
 2. Set **Branch** and **Directory** directly; these are their own fields, not just derived text. Pasting a `/tree/BRANCH/DIRECTORY` (GitHub) or `/-/tree/BRANCH/DIRECTORY` (GitLab) link still convenience-fills both from the link, but you can always correct either field afterward. This matters because a branch name can itself contain a slash (a common convention, e.g. `features/TICKET-123`). No link parser can always tell where the branch ends and the directory begins, so a wrong guess from a pasted link is fixed directly in these fields rather than by reshaping the link.
 3. Enable **Auto-sync** if the background poller should run. Set an interval of at least 60 seconds; the default is 300 seconds.
 4. Save the configuration, then select **Sync now** for the first immediate reconciliation. Saving alone does not fetch definitions.
@@ -62,6 +68,7 @@ There is at most one sync configuration per workspace.
 | JSON field | Requirement and default |
 |------------|-------------------------|
 | `provider` | `"github"` or `"gitlab"`. Omitted means `"github"`. |
+| `github_host` | GitHub web authority, such as `git.company.example` or `acme.ghe.com`. Omitted means `github.com` for compatibility. Must match the workspace connection. Ignored for GitLab. |
 | `repo_owner` | GitHub only. Required after trimming; cannot contain a slash or space. |
 | `repo_name` | GitHub only. Required after trimming; cannot contain a slash or space. |
 | `project_path` | GitLab only. Required; a namespace path such as `group/project` or `group/subgroup/project` (at least two segments, no empty/`.`/`..` segments, no spaces). |
@@ -72,13 +79,21 @@ There is at most one sync configuration per workspace.
 
 `repo_owner`/`repo_name` and `project_path` are mutually exclusive; the backend rejects a request carrying both, and switching the provider in the dialog clears the other provider's fields automatically.
 
-The status also records `last_synced_at`, `last_ok`, `last_error`, and `last_warnings`. Auto-sync checks due configurations on a 60-second outer ticker and waits one full tick after backend startup. A configured interval is therefore a minimum cadence, not an exact schedule; a due sync can start roughly another minute later.
+The status also records `last_synced_at`, `last_ok`, `last_error`, and `last_warnings`. Recovery state is reported as `consecutive_failures`, `next_attempt_at`, `last_error_class`, `poll_suspended`, and `poll_suspension_reason`. Auto-sync checks due configurations on a 60-second outer ticker and waits one full tick after backend startup. A configured interval is therefore a minimum cadence, not an exact schedule; a due sync can start roughly another minute later.
+
+## Automatic retry and suspension
+
+Auto-sync does not retry a failing provider on every outer poll tick. Transient failures use equal-jitter exponential backoff: the base is the larger of the configured interval and one minute, each consecutive failure doubles it, and the pre-jitter delay stops growing at one hour. A provider `Retry-After` time or exhausted primary-bucket reset can move `next_attempt_at` later, never earlier.
+
+Kandev suspends GitHub automatic polling after a definite credential/access failure or a missing repository, branch, path, or ref. The configuration retains one actionable failure and suspension reason; later skipped ticks make no provider request and do not repeat the warning. A GitHub credential change resumes polling on the next tick. GitLab sync uses bounded circuit retries and its own error classification.
+
+Saving the configuration clears its retry and suspension schedule. **Sync now** also bypasses the automatic schedule for one interactive recovery attempt. A successful attempt clears the failure state; another definite failure suspends polling again with the current reason.
 
 ## Definition directory
 
 Sync reads only immediate files in the configured directory. It does not recurse. Extensions are case-insensitive: `.yml` and `.yaml` use YAML decoding, while `.json` uses JSON decoding; other files and directory entries are ignored. Paths are processed in sorted order.
 
-Every file must use the version 1 or version 2 `kandev_workflow` portable envelope documented in [Workflow Import / Export](workflow-import-export.md). New exports use version 2, which carries explicit completion booleans and supports explicit session targets; version 1 remains accepted for compatibility. A file may contain one or several workflows. The safest authoring loop is to build and test a workflow in a disposable workspace, export it, commit the export, and then configure the target workspace.
+Every file must use a version 1, 2, or 3 `kandev_workflow` portable envelope documented in [Workflow Import / Export](workflow-import-export.md). Version 3 carries profile options; versions 1 and 2 remain supported. A file may contain one or several workflows. The safest authoring loop is to build and test a workflow in a disposable workspace, export it, commit the export, and then configure the target workspace.
 
 ```yaml
 version: 2
@@ -120,6 +135,7 @@ These rules matter when editing definitions:
 - Renaming or moving a workflow definition changes its `(source path, name)` key. Kandev creates the new workflow and treats the old one as removed. If the old workflow still has tasks, both remain and a warning explains why.
 - A removed step is deleted only when it has no tasks. A removed workflow is deleted only when the entire workflow has no tasks.
 - Duplicate step names in either the desired definition or the existing synced workflow make name matching unsafe; Kandev skips that workflow update and warns.
+- A missing or ambiguous profile reference skips the affected workflow and reports a warning. Correct the source descriptor or local profiles and sync again. Other workflows continue. Version 3 can distinguish profiles by configuration options; older files do not constrain those options.
 - Manual workflows are never matched, updated, or removed by sync, even when their name is identical.
 - Synced workflows are read-only in normal workflow mutation paths. Edit the repository and sync again. Every run performs a full reconciliation, so it also repairs drift; the stored content hash is for status/observability, not a skip condition.
 
@@ -153,7 +169,7 @@ The settings UI uses these backend routes. All require a `workspace_id` query pa
 | `GET` | `/api/v1/workflow-sync/config?workspace_id=ID` | `200` with the configuration, or `204 No Content` when absent. |
 | `POST` | `/api/v1/workflow-sync/config?workspace_id=ID` | Validate/upsert the JSON configuration and return it. Does not sync. |
 | `DELETE` | `/api/v1/workflow-sync/config?workspace_id=ID` | Release synced workflows to manual ownership, delete the configuration, and return `{"deleted":true}`. |
-| `POST` | `/api/v1/workflow-sync/sync?workspace_id=ID` | Run immediately and return the current `config` plus `result` or `error`. |
+| `POST` | `/api/v1/workflow-sync/sync?workspace_id=ID` | Run immediately and return the current `config` plus `result` or `error`. A rate failure also returns `error_code` and `rate_limit`. |
 
 Example (GitHub):
 
@@ -193,6 +209,12 @@ curl -fsS -X POST \
 
 Except for “not configured,” a completed force-sync request returns HTTP `200` even when the response contains an `error`; inspect the JSON and `config.last_ok`, not only the HTTP status. A force sync without a configuration returns `404`.
 
+A GitHub rate failure sets `error_code` to `github_rate_limited`. Its
+`rate_limit` object contains `kind`, `resource`, `retry_at`,
+`retry_after_seconds`, and `source`. These details belong to the failed sync
+operation; successful syncs omit them. There is no separate MCP tool for reading
+the coordinator's cached quota or admission state.
+
 ## Stop syncing and clean up
 
 Choose **Remove sync** to stop polling. Kandev first clears sync ownership from all synced workflows in the workspace, making them normal editable workflows, and then removes the configuration. It does not delete those workflows. If releasing any workflow fails, removal fails and the configuration remains so the operation can be retried.
@@ -211,6 +233,7 @@ Deleting an individual repository definition has the different reconciliation be
 - **Completed with warnings:** read every warning. Invalid files freeze their previous workflows; tasks in removed steps or workflows block deletion; duplicate step names block safe matching.
 - **Unexpected duplicate after rename:** restore the original `(file path, workflow name)`, or move/archive tasks from the old workflow before deleting it.
 - **Changes appear to revert:** a synced workflow is repository-owned. Commit the change to its source file; the next reconciliation repairs local drift.
-- **Rate limits or intermittent network failures:** lengthen `interval_seconds`, use **Sync now** after recovery, and inspect the GitHub/GitLab integration status and backend logs.
+- **Rate limits or intermittent network failures:** inspect `last_error_class` and `next_attempt_at` before retrying. Lengthen `interval_seconds` when the normal cadence is too aggressive, or use **Sync now** for one interactive recovery attempt.
+- **GitHub shows full core quota but real calls still fail with 403:** a healthy `GET /rate_limit` result does not rule out a secondary throttle. Kandev keeps primary quota observations separate from a secondary refusal and waits until its locally enforced `retry_at`, unless an accepted GitHub response clears that estimate earlier.
 
 Related guides: [Workflow Tips](workflow-tips.md), [Workflow Import / Export](workflow-import-export.md), [Configuration](configuration.md), and [Operations](operations.md).

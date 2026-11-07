@@ -17,6 +17,31 @@ const selectionCauseCodes = new Set([
   "permission_mode_unconfirmed",
   "permission_mode_mismatch",
 ]);
+const pluginRuntimeReasonKey = "task:sessionBootstrapPluginReasonRuntime";
+const pluginInventoryReasonKey = "task:sessionBootstrapPluginReasonInventory";
+const pluginInstallationReasonKey = "task:sessionBootstrapPluginReasonInstallation";
+const pluginSelectionReasonKey = "task:sessionBootstrapPluginReasonSelection";
+const pluginFailureReasonKeys: Record<string, string> = {
+  cli_unavailable: pluginRuntimeReasonKey,
+  timeout: pluginRuntimeReasonKey,
+  cancelled: pluginRuntimeReasonKey,
+  output_limit: pluginInventoryReasonKey,
+  invalid_inventory: pluginInventoryReasonKey,
+  legacy_errors: pluginInventoryReasonKey,
+  runtime_unsupported: pluginRuntimeReasonKey,
+  plugin_loading_unsupported: pluginRuntimeReasonKey,
+  unsupported_launch_context: pluginRuntimeReasonKey,
+  metadata_unavailable: pluginInstallationReasonKey,
+  ambiguous_identity: pluginInstallationReasonKey,
+  missing_root: pluginInstallationReasonKey,
+  manifest_mismatch: pluginInstallationReasonKey,
+  unsafe_root: pluginInstallationReasonKey,
+  builtin_not_mountable: pluginSelectionReasonKey,
+  external_not_mountable: pluginSelectionReasonKey,
+  unsupported_source: pluginSelectionReasonKey,
+  manual_mount_conflict: pluginSelectionReasonKey,
+  policy_unverified: pluginSelectionReasonKey,
+};
 
 export function causeLabel(code: string | undefined, translate: TFunction): string {
   switch (code) {
@@ -44,6 +69,10 @@ export function causeLabel(code: string | undefined, translate: TFunction): stri
       return translate("task:sessionBootstrapCausePermissionModeUnconfirmed");
     case "permission_mode_mismatch":
       return translate("task:sessionBootstrapCausePermissionModeMismatch");
+    case "delivery_storage":
+      return translate("task:sessionBootstrapCauseDeliveryStorage");
+    case "plugin_preparation_failed":
+      return translate("task:sessionBootstrapPluginFailureTitle");
     default:
       return translate("task:sessionBootstrapCauseUnknown");
   }
@@ -54,6 +83,7 @@ export function operationLabel(operation: string | undefined, translate: TFuncti
   if (operation === "restore_workspace") {
     return translate("task:sessionRecoveryRestoreAttempt");
   }
+  if (operation === "delivery") return translate("task:sessionRecoveryDeliveryAttempt");
   return translate("task:sessionRecoveryResumeAttempt");
 }
 
@@ -146,6 +176,7 @@ export type RecoveryCardModel = {
   freshStartWarning: boolean;
   detailFields: SessionErrorDetailsField[];
   hasTypedSelectionCause: boolean;
+  hasTypedPluginCause: boolean;
   hasTypedCleanupCause: boolean;
   titleKey: string;
   summary: string;
@@ -270,6 +301,18 @@ function causeSummary(
   translate: TFunction,
 ): string {
   if (!cause) return translate("task:sessionBootstrapRecoverySummary");
+  if (cause.code === "plugin_preparation_failed") {
+    const reason = translate(
+      pluginFailureReasonKeys[cause.reason ?? ""] ?? "task:sessionBootstrapPluginReasonUnknown",
+    );
+    if (cause.runtime_version) {
+      return translate("task:sessionBootstrapPluginFailureSummaryWithRuntime", {
+        reason,
+        runtime: cause.runtime_version,
+      });
+    }
+    return translate("task:sessionBootstrapPluginFailureSummary", { reason });
+  }
   const key = isStartupSelectionCause(cause) ? selectionSummaryKey(cause) : null;
   if (key) return translate(key, selectorSummaryOptions(cause, agentDisplayName, translate));
   return causeLabel(cause.code, translate);
@@ -285,6 +328,7 @@ function isStartupSelectionCause(cause: AgentErrorCause): boolean {
 function selectPrimaryCause(causes: AgentErrorCause[]): AgentErrorCause | null {
   return (
     causes.find((cause) => cause.code === "runtime_cleanup_failed") ??
+    causes.find((cause) => cause.code === "plugin_preparation_failed") ??
     causes.find(isStartupSelectionCause) ??
     causes.find((cause) => cause.operation !== "restore_workspace") ??
     causes[0] ??
@@ -307,6 +351,15 @@ function recoveryDetailFields(
       translate("task:sessionErrorDetailOperation"),
       operationLabel(cause.operation, translate),
     );
+    if (cause.code === "plugin_preparation_failed") {
+      appendSelectorDetail(
+        fields,
+        "task:sessionErrorDetailRuntime",
+        cause.runtime_version,
+        translate,
+      );
+      continue;
+    }
     if (cause.code)
       appendDetailField(fields, translate("task:sessionErrorDetailCause"), cause.code);
     if (cause.reason)
@@ -505,12 +558,15 @@ export function buildRecoveryCardModel({
     translate,
   });
   const hasTypedSelectionCause = causes.some(isStartupSelectionCause);
+  const hasTypedPluginCause = causes.some((cause) => cause.code === "plugin_preparation_failed");
   const causeTitleKey =
     primaryCause && isStartupSelectionCause(primaryCause) ? selectionTitleKey(primaryCause) : null;
   const hasTypedCleanupCause = primaryCause?.code === "runtime_cleanup_failed";
-  const titleKey = hasTypedCleanupCause
-    ? "task:sessionRuntimeCleanupFailedTitle"
-    : (causeTitleKey ?? recoveryTitleKey(status.isReadOnly, status.hasRecoveryFailure));
+  let titleKey = causeTitleKey ?? recoveryTitleKey(status.isReadOnly, status.hasRecoveryFailure);
+  if (hasTypedCleanupCause) titleKey = "task:sessionRuntimeCleanupFailedTitle";
+  if (hasTypedPluginCause && primaryCause?.code === "plugin_preparation_failed") {
+    titleKey = "task:sessionBootstrapPluginFailureTitle";
+  }
 
   return {
     causes,
@@ -526,6 +582,7 @@ export function buildRecoveryCardModel({
     freshStartWarning: Boolean(primaryCause && isStartupSelectionCause(primaryCause)),
     detailFields: recoveryDetailFields(error, causes, translate),
     hasTypedSelectionCause,
+    hasTypedPluginCause,
     hasTypedCleanupCause,
     titleKey,
     summary: causeSummary(primaryCause, agentDisplayName, translate),

@@ -277,7 +277,7 @@ type HandoffService struct {
 	sessionCeilingReleaser SessionCeilingReleaser
 	logger                 *logger.Logger
 	parentLock             parentMutex
-	archiveCascadeLock     parentMutex
+	archiveCascadeLock     sync.Map
 	partialArchiveMu       sync.Mutex
 	partialArchiveIDs      map[string]string
 	workspaceGroupLock     parentMutex
@@ -472,7 +472,6 @@ func NewHandoffService(
 		parentLock: parentMutex{
 			locks: make(map[string]*sync.Mutex),
 		},
-		archiveCascadeLock: parentMutex{locks: make(map[string]*sync.Mutex)},
 		partialArchiveIDs:  make(map[string]string),
 		workspaceGroupLock: parentMutex{locks: make(map[string]*sync.Mutex)},
 	}
@@ -876,4 +875,8 @@ func (s *HandoffService) toRelatedByIDs(ctx context.Context, ids []string) []*Re
 		out = append(out, &rt)
 	}
 	return out
+}
+
+type taskResourceRetentionCoordinator interface {
+	PrepareTaskResourceCleanupWithDeleteOptions(context.Context, string, models.TaskResourceCleanupTrigger, string, bool, DeleteTaskOptions) error
 }

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { DialogFormBodyProps, DialogFormState, StepType } from "./task-create-dialog-types";
+import type {
+  DialogFormState,
+  StepType,
+  TaskCreateWorkflowStepsResult,
+} from "./task-create-dialog-types";
 import {
   computeHasAllBranches,
   localRepositoryCreationEnabled,
@@ -107,51 +111,75 @@ describe("resolveWorkflowName", () => {
   });
 });
 
+function selected(
+  status: TaskCreateWorkflowStepsResult["status"],
+  steps: StepType[] = [],
+): TaskCreateWorkflowStepsResult {
+  return { status, steps, retry: () => undefined };
+}
+
 describe("resolveDialogLaunchPreview", () => {
-  it("projects the selected workflow snapshot only for create mode", () => {
+  it("projects successful selected workflow steps only for create mode", () => {
     const steps: StepType[] = [
       {
         id: "step-1",
         title: IN_PROGRESS,
+        workflowId: WORKFLOW_ID,
         position: 0,
         is_start_step: true,
         prompt: "Run {{task_prompt}}",
       },
     ];
-    const snapshots = {
-      [WORKFLOW_ID]: { steps },
-    } as unknown as DialogFormBodyProps["snapshots"];
 
-    expect(resolveDialogLaunchPreview(true, WORKFLOW_ID, null, snapshots, true)).toEqual({
-      stepId: "step-1",
-      stepName: IN_PROGRESS,
-      stepPrompt: "Run {{task_prompt}}",
-    });
-    expect(resolveDialogLaunchPreview(false, WORKFLOW_ID, null, snapshots, true)).toBeNull();
+    expect(resolveDialogLaunchPreview(true, WORKFLOW_ID, selected("success", steps), true)).toEqual(
+      {
+        stepId: "step-1",
+        stepName: IN_PROGRESS,
+        stepPrompt: "Run {{task_prompt}}",
+      },
+    );
+    expect(
+      resolveDialogLaunchPreview(false, WORKFLOW_ID, selected("success", steps), true),
+    ).toBeNull();
   });
 
   it("projects the first positional step for the empty-description plan-mode action", () => {
     const steps: StepType[] = [
-      { id: "backlog", title: "Backlog", position: 0, prompt: "Queue it" },
+      { id: "backlog", title: "Backlog", workflowId: WORKFLOW_ID, position: 0, prompt: "Queue it" },
       {
         id: "auto-start",
         title: IN_PROGRESS,
+        workflowId: WORKFLOW_ID,
         position: 1,
         events: { on_enter: [{ type: "auto_start_agent" }] },
         prompt: "Run {{task_prompt}}",
       },
     ];
-    const snapshots = {
-      [WORKFLOW_ID]: { steps },
-    } as unknown as DialogFormBodyProps["snapshots"];
 
-    expect(resolveDialogLaunchPreview(true, WORKFLOW_ID, null, snapshots, false)).toMatchObject({
+    expect(
+      resolveDialogLaunchPreview(true, WORKFLOW_ID, selected("success", steps), false),
+    ).toMatchObject({
       stepId: "backlog",
       stepName: "Backlog",
     });
-    expect(resolveDialogLaunchPreview(true, WORKFLOW_ID, null, snapshots, true)).toMatchObject({
+    expect(
+      resolveDialogLaunchPreview(true, WORKFLOW_ID, selected("success", steps), true),
+    ).toMatchObject({
       stepId: "auto-start",
       stepName: IN_PROGRESS,
     });
+  });
+
+  it("treats an empty successful result as authoritative and does not preview unresolved states", () => {
+    expect(resolveDialogLaunchPreview(true, WORKFLOW_ID, selected("success"), true)).toBeNull();
+    expect(
+      resolveDialogLaunchPreview(
+        true,
+        WORKFLOW_ID,
+        selected("loading", [{ id: "stale", title: "Stale", position: 0, prompt: "Stale prompt" }]),
+        true,
+      ),
+    ).toBeNull();
+    expect(resolveDialogLaunchPreview(true, WORKFLOW_ID, selected("error"), true)).toBeNull();
   });
 });

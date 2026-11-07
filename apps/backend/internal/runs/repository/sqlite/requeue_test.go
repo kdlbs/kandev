@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // TestRequeueClaimedRun_RequeuesAndClearsClaimedAt proves a claimed run
@@ -16,7 +16,7 @@ func TestRequeueClaimedRun_RequeuesAndClearsClaimedAt(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             "run-requeue-1",
 		AgentProfileID: "a1",
 		Reason:         "task_assigned",
@@ -63,7 +63,7 @@ func TestRequeueClaimedRun_LeavesRetryStateUntouched(t *testing.T) {
 	ctx := context.Background()
 
 	scheduledRetryAt := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second)
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:               "run-requeue-3",
 		AgentProfileID:   "a1",
 		Reason:           "task_assigned",
@@ -108,7 +108,7 @@ func TestRequeueClaimedRun_NoOpWhenNotClaimed(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             "run-requeue-2",
 		AgentProfileID: "a1",
 		Reason:         "task_assigned",

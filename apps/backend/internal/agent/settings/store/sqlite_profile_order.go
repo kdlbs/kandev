@@ -76,6 +76,7 @@ func (r *sqliteRepository) updateAgentProfileWithMembershipLocks(
 	ctx context.Context,
 	profile *models.AgentProfile,
 	enabled *bool,
+	selection *[]string,
 	updateExtra func(*sqlx.Tx) error,
 ) error {
 	for range 3 {
@@ -112,7 +113,7 @@ func (r *sqliteRepository) updateAgentProfileWithMembershipLocks(
 			_ = tx.Rollback()
 			return err
 		}
-		committedEnabled, err := r.updateAgentProfileWithExtra(ctx, tx, profile, enabled, updateExtra)
+		committedEnabled, err := r.updateAgentProfileWithExtra(ctx, tx, profile, enabled, selection, updateExtra)
 		if err != nil {
 			_ = tx.Rollback()
 			return err
@@ -131,9 +132,10 @@ func (r *sqliteRepository) updateAgentProfileWithExtra(
 	tx *sqlx.Tx,
 	profile *models.AgentProfile,
 	enabled *bool,
+	selection *[]string,
 	updateExtra func(*sqlx.Tx) error,
 ) (bool, error) {
-	committedEnabled, err := r.updateAgentProfile(ctx, tx, profile, enabled)
+	committedEnabled, err := r.updateAgentProfile(ctx, tx, profile, enabled, selection)
 	if err == nil && updateExtra != nil {
 		err = updateExtra(tx)
 	}

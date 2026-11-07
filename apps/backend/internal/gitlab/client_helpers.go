@@ -4,8 +4,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/kandev/kandev/internal/common/unidiff"
 )
 
 // rawMR is the JSON shape of a GitLab merge request as returned by the
@@ -511,7 +509,7 @@ func buildIssueSearchQuery(filter, customQuery, milestone string) string {
 		if milestone == "" {
 			return customQuery
 		}
-		return foldMilestoneIntoQuery(customQuery, milestone)
+		return appendQueryParam(customQuery, "milestone", milestone)
 	}
 	values := url.Values{}
 	values.Set("state", gitlabStateOpened)
@@ -543,17 +541,6 @@ func appendQueryParam(customQuery, key, value string) string {
 		return key + "=" + encoded + fragment
 	}
 	return customQuery + "&" + key + "=" + encoded + fragment
-}
-
-// foldMilestoneIntoQuery merges a milestone into an existing, non-empty
-// customQuery string, mirroring appendLabelsToQuery's precedent: a custom
-// query that already names the `milestone` key wins (even if the value is
-// empty), and an unparseable custom query still gets the milestone appended
-// rather than silently dropping the user's filter selection. The only caller,
-// buildIssueSearchQuery, guards both arguments non-empty before calling this,
-// so there is no empty-customQuery case to handle here.
-func foldMilestoneIntoQuery(customQuery, milestone string) string {
-	return appendQueryParam(customQuery, "milestone", milestone)
 }
 
 // filterTokenReviewRequested is the /gitlab page tab value that maps to
@@ -615,19 +602,6 @@ func appendFilter(values url.Values, filter string) {
 			values.Add(k, v)
 		}
 	}
-}
-
-// countDiffLines returns (additions, deletions) for one file's patch from the
-// MR /changes payload. GitLab's REST API carries no per-file line counts, so the
-// patch body has to be counted here.
-//
-// It counts only lines inside a `@@` hunk. The previous "+++"/"---" prefix test
-// was content-blind: GitLab returns `--- a/<path>` / `+++ b/<path>` headers ahead
-// of the first hunk, but so does a removed SQL comment (`-- x` arrives as
-// `--- x`) or an added C increment (`++n;` arrives as `+++n;`), and those were
-// dropped from the totals.
-func countDiffLines(diff string) (int, int) {
-	return unidiff.CountLines(diff)
 }
 
 func diffStatus(newFile, deletedFile, renamedFile bool) string {

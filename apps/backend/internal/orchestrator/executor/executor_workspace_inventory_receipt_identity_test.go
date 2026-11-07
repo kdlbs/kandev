@@ -112,8 +112,10 @@ func TestAttestedWorkspaceInventoryRowsReceiptRejectsIncompletePositiveAttestati
 }
 
 func TestAttestedWorkspaceInventoryRowsReceiptAcceptsMatchingPositiveReceipt(t *testing.T) {
-	row, env, receipt := positiveWorkspaceInventoryReceiptFixture(t)
-	executor, task, session, req, repositories := workspaceInventoryReceiptGateFixture(row, env, receipt)
+	f := newBranchContinuityFixture(t)
+	row, env, receipt := f.row, f.env, f.receipt
+	executor, task, session, req, _ := workspaceInventoryReceiptGateFixture(row, env, receipt)
+	repositories := []*repoInfo{f.info}
 
 	got, err := executor.attestedWorkspaceInventoryRowsReceipt(context.Background(), task, session, req, env, repositories)
 	if err != nil {

@@ -17,10 +17,7 @@ import { GridSpinner } from "@/components/grid-spinner";
 import { ContextMenu, ContextMenuTrigger } from "@kandev/ui/context-menu";
 import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import {
-  useSessionActions,
-  isSessionDeletable as isDeletable,
-} from "@/hooks/domains/session/use-session-actions";
+import { useSessionActions } from "@/hooks/domains/session/use-session-actions";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
 import type { HandoffPreset } from "@/components/task/new-session-dialog";
 import { SessionContextMenuItems, SessionTabDialogs } from "./session-tab-menu";
@@ -36,8 +33,11 @@ import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { SessionTabCloseAction } from "./session-tab-close-action";
 import { clearHiddenSessionPanel, hideSessionPanel } from "./dockview-hidden-session-panels";
 import { useSessionTabDelete } from "./use-session-tab-delete";
-import { MAX_SESSION_NAME_LENGTH, useSessionRenameCommitter } from "./use-session-rename";
-import { countVisibleSessionPanels } from "./session-tab-visibility";
+import { limitSessionName, useSessionRenameCommitter } from "./use-session-rename";
+import {
+  countVisibleSessionPanels,
+  shouldShowSessionTabCloseAction,
+} from "./session-tab-visibility";
 
 function useSessionTabState(sessionId: string | undefined) {
   const isPrimary = useAppStore((state) => {
@@ -100,6 +100,7 @@ function useSessionTabState(sessionId: string | undefined) {
   };
 }
 
+/** Binds captured session actions to the tab's panel lifecycle and visible sibling count. */
 function useSessionTabActions(
   sessionId: string | undefined,
   taskId: string | null,
@@ -135,6 +136,8 @@ function useSessionTabActions(
     setPrimary: handleSetPrimary,
     stop: handleStop,
     resume: handleResume,
+    restart: handleRestart,
+    isRestarting,
     remove: handleDelete,
   } = useSessionActions({ sessionId, taskId, onDeleted });
   const handleCloseOthers = useCallback(() => {
@@ -148,6 +151,8 @@ function useSessionTabActions(
     handleSetPrimary,
     handleStop,
     handleResume,
+    handleRestart,
+    isRestarting,
     handleDelete,
     handleCloseOthers,
     handleHide,
@@ -338,7 +343,7 @@ function SessionTabBody({
         onCommit={onCommitRename}
         onCancel={onCancelRename}
         testId="session-tab-rename-input"
-        maxLength={MAX_SESSION_NAME_LENGTH}
+        limitValue={limitSessionName}
       />
     );
   }
@@ -437,12 +442,11 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
 
   const showMultiSessionBadges = sessionCount > 1;
   const agentTabCloseBehavior = useAppStore((state) => state.userSettings.agentTabCloseBehavior);
-  // Multi-session tab close means delete, not hide-only. Running/starting sessions are
-  // not deletable, so we omit the X rather than reviving hide-only close behavior.
-  const showDeleteOnClose =
-    agentTabCloseBehavior === "hide_panel"
-      ? actions.visibleSessionCount > 1
-      : showMultiSessionBadges && !!sessionState && isDeletable(sessionState);
+  const showDeleteOnClose = shouldShowSessionTabCloseAction(agentTabCloseBehavior, sessionState, {
+    sessionCount,
+    visibleSessionCount: actions.visibleSessionCount,
+    isRestarting: actions.isRestarting,
+  });
   const deleteState = useSessionTabDelete(dialogs.setConfirmDelete, actions.handleDelete);
   const { handleCloseTab, handleMenuDelete: openMenuDelete, isDeletingFromTab } = deleteState;
   const { menuDeleteAnchorRef, menuDeleteFocusBoundaryRef, handleMenuDelete } =

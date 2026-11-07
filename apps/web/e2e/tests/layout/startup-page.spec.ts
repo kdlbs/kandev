@@ -1,3 +1,4 @@
+import { STARTUP_TIMINGS } from "../../helpers/startup-timing-fixture";
 import type { Route } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 
@@ -9,6 +10,7 @@ const STARTING_SNAPSHOT: StartupSnapshot = {
   seq: 1,
   elapsed_ms: 12_000,
   phase_elapsed_ms: 12_000,
+  completed_steps: STARTUP_TIMINGS,
   step: {
     id: "stores.services",
     label_key: "startup.step.stores_services",
@@ -51,6 +53,7 @@ test.describe("Startup page (real render)", () => {
     backend,
     browser,
     request,
+    prCapture,
   }) => {
     const startingHtml = await request
       .post(`${backend.baseUrl}/api/v1/e2e/startup-page-fixture`, { data: STARTING_SNAPSHOT })
@@ -89,6 +92,13 @@ test.describe("Startup page (real render)", () => {
     await expect(page.locator("#startup-step-label")).toHaveText("Service stores");
     await expect(page.locator("#startup-progress")).toHaveText("400 of 1000 messages");
     await expect(page.locator("#startup-eta")).toHaveText("About 30 seconds remaining");
+
+    await expect(page.locator("#startup-timings")).toContainText("82 milliseconds");
+    await expect(page.locator("#startup-timings")).toContainText("Timing incomplete");
+    await prCapture.screenshot("startup-timings-desktop", {
+      page,
+      caption: "Startup page with current housekeeping and completed timing history",
+    });
 
     // A failing response with a malformed snapshot must keep the last valid
     // detail and mark it as stale. The status code remains authoritative when

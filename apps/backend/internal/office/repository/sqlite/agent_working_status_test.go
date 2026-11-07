@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -212,7 +214,7 @@ func TestMarkAgentWorking_SuccessorTakeover(t *testing.T) {
 	ctx := context.Background()
 	agent := workingStatusAgent(t, repo, "agent-successor", "idle")
 
-	runA := &models.Run{ID: "run-a", AgentProfileID: agent.ID, Reason: "test", Payload: "{}"}
+	runA := &runsmodels.Run{ID: "run-a", AgentProfileID: agent.ID, Reason: "test", Payload: "{}"}
 	if err := repo.CreateRun(ctx, runA); err != nil {
 		t.Fatalf("create run A: %v", err)
 	}
@@ -226,12 +228,12 @@ func TestMarkAgentWorking_SuccessorTakeover(t *testing.T) {
 
 	// Run A leaves 'claimed' (finishes) but its own clearAgentWorking has not
 	// run yet — the un-transacted window handleAgentCompleted leaves open.
-	if _, err := repo.FinishRun(ctx, claimedA.ID, string(models.RunStatusFinished), nil); err != nil {
+	if _, err := repo.FinishRun(ctx, claimedA.ID, string(runsmodels.RunStatusFinished), nil); err != nil {
 		t.Fatalf("finish run A: %v", err)
 	}
 
 	// Run B is claimed and launched for the same agent inside that window.
-	runB := &models.Run{ID: "run-b", AgentProfileID: agent.ID, Reason: "test", Payload: "{}"}
+	runB := &runsmodels.Run{ID: "run-b", AgentProfileID: agent.ID, Reason: "test", Payload: "{}"}
 	if err := repo.CreateRun(ctx, runB); err != nil {
 		t.Fatalf("create run B: %v", err)
 	}
@@ -281,7 +283,7 @@ func TestMarkAgentWorking_NoTheftFromLiveOwner(t *testing.T) {
 	ctx := context.Background()
 	agent := workingStatusAgent(t, repo, "agent-live-owner", "idle")
 
-	runA := &models.Run{ID: "run-live-a", AgentProfileID: agent.ID, Reason: "test", Payload: "{}"}
+	runA := &runsmodels.Run{ID: "run-live-a", AgentProfileID: agent.ID, Reason: "test", Payload: "{}"}
 	if err := repo.CreateRun(ctx, runA); err != nil {
 		t.Fatalf("create run A: %v", err)
 	}
