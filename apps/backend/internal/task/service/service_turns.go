@@ -1033,6 +1033,9 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		return nil, err
 	}
 	info.McpMode = mcpMode
+	if err := s.projectInheritedLocalTaskWorkspace(ctx, session, taskEnv, info); err != nil {
+		return nil, err
+	}
 
 	return info, nil
 }

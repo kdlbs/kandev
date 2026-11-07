@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 // TestResolveResumeTaskEnvironment_ReusesInheritedEnvironment is a regression
@@ -395,5 +396,232 @@ func TestPersistTaskEnvironment_GuestMaterializerRunsFinalizePath(t *testing.T) 
 	}
 	if len(repo.finalizeTaskEnvironmentCalls) != 1 {
 		t.Fatalf("elected materializer must finalize, got %d finalize calls", len(repo.finalizeTaskEnvironmentCalls))
+	}
+}
+
+type retainedLocalFixture struct {
+	executor    *Executor
+	repo        *mockRepository
+	task        *v1.Task
+	session     *models.TaskSession
+	request     *LaunchAgentRequest
+	environment *models.TaskEnvironment
+	source      *models.Repository
+}
+
+func newRetainedLocalFixture(t *testing.T, inherited bool, executorType string) *retainedLocalFixture {
+	t.Helper()
+	repo := newMockRepository()
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := &v1.Task{ID: "r3-child", WorkspaceID: "r3-workspace"}
+	session := &models.TaskSession{
+		ID: "r3-session", TaskID: task.ID, TaskEnvironmentID: "r3-environment",
+		ExecutorID:   "r3-local-executor",
+		RepositoryID: "r3-source", QueueIncarnationID: "r3-incarnation",
+		State: models.TaskSessionStateWaitingForInput, AgentProfileID: "profile-123",
+		Metadata: map[string]interface{}{"acp_session_id": "r3-native-history"},
+	}
+	env := &models.TaskEnvironment{
+		ID: session.TaskEnvironmentID, TaskID: task.ID,
+		ExecutorID:   session.ExecutorID,
+		ExecutorType: executorType, Status: models.TaskEnvironmentStatusReady,
+		WorkspacePath: t.TempDir(), OwnershipGeneration: 4,
+	}
+	source := &models.Repository{
+		ID: session.RepositoryID, WorkspaceID: task.WorkspaceID,
+		SourceType: "local", LocalPath: t.TempDir(), DefaultBranch: "main",
+	}
+	session.WorkspacePath = env.WorkspacePath
+	repo.executors[session.ExecutorID] = &models.Executor{
+		ID: session.ExecutorID, Type: models.ExecutorType(executorType), Status: models.ExecutorStatusActive,
+	}
+	repo.repositories[source.ID] = source
+	repo.tasks[task.ID] = &models.Task{ID: task.ID, WorkspaceID: task.WorkspaceID}
+	if inherited {
+		task.ParentID = "r3-parent"
+		task.Metadata = map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}}
+		env.TaskID = task.ParentID
+		repo.tasks[task.ID].ParentID = task.ParentID
+		repo.tasks[task.ID].Metadata = task.Metadata
+		repo.tasks[task.ParentID] = &models.Task{ID: task.ParentID, WorkspaceID: task.WorkspaceID}
+		repo.taskRepositories["r3-link"] = &models.TaskRepository{
+			ID: "r3-link", TaskID: task.ID, RepositoryID: source.ID, BaseBranch: "main",
+		}
+		env.Repos = []*models.TaskEnvironmentRepo{{
+			ID: "r3-historical", TaskEnvironmentID: env.ID, RepositoryID: source.ID,
+			Status: "deleted", CreatedAt: time.Now().UTC(),
+		}}
+		repo.taskEnvironmentRepos[env.ID] = env.Repos
+	}
+	repo.taskEnvironments[env.ID] = env
+	repo.sessions[session.ID] = session
+	request := &LaunchAgentRequest{
+		TaskID: task.ID, ExecutorType: executorType, WorkspaceReuseRequired: true,
+		Attachments: []v1.MessageAttachment{{Type: "file", AttachmentID: "r3-attachment", Name: "history.txt"}},
+	}
+	return &retainedLocalFixture{e, repo, task, session, request, env, source}
+}
+
+// @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.1
+func TestRetainedLocalDetachedResumeKeepsTaskWorkspace(t *testing.T) {
+	for _, executorType := range []string{string(models.ExecutorTypeLocal), "local_pc"} {
+		t.Run(executorType, func(t *testing.T) {
+			f := newRetainedLocalFixture(t, false, executorType)
+			f.request.Branch = "historical-comparison"
+			attachments := append([]v1.MessageAttachment(nil), f.request.Attachments...)
+			id, err := f.executor.applyResumeRepoConfig(context.Background(), f.task, f.session, f.request, f.environment, []*repoInfo(nil))
+			require.NoError(t, err)
+			require.Empty(t, id, "historical detached source must not become a materialization request")
+			require.Empty(t, f.request.RepositoryID)
+			require.Empty(t, f.request.Branch)
+			require.Equal(t, f.environment.WorkspacePath, f.request.WorkspacePath)
+			require.Equal(t, "r3-source", f.session.RepositoryID)
+			require.Equal(t, "r3-native-history", f.session.Metadata["acp_session_id"])
+			require.Equal(t, attachments, f.request.Attachments)
+			require.Equal(t, f.task.ID, f.environment.TaskID)
+			require.Empty(t, f.repo.createTaskEnvironmentCalls)
+		})
+	}
+}
+
+// @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.1
+func TestRetainedLocalInheritedResumeKeepsParentWorkspace(t *testing.T) {
+	for _, executorType := range []string{string(models.ExecutorTypeLocal), "local_pc"} {
+		t.Run(executorType, func(t *testing.T) {
+			f := newRetainedLocalFixture(t, true, executorType)
+			id, env, repositories, err := f.executor.prepareResumeRepositorySettings(context.Background(), f.task, f.session, f.request, ResumeOptions{})
+			require.NoError(t, err)
+			require.Empty(t, id)
+			require.Empty(t, repositories, "historical child source must not derive materialization or MCP repository context")
+			require.Empty(t, f.request.RepositoryID)
+			require.Equal(t, f.environment.ID, env.ID)
+			require.Equal(t, f.environment.WorkspacePath, f.request.WorkspacePath)
+			require.Equal(t, "r3-parent", env.TaskID)
+			require.Equal(t, "deleted", env.Repos[0].Status)
+			require.Equal(t, "r3-source", f.session.RepositoryID)
+			require.Equal(t, "r3-native-history", f.session.Metadata["acp_session_id"])
+			require.Len(t, f.request.Attachments, 1)
+			require.Empty(t, f.repo.createTaskEnvironmentCalls)
+		})
+	}
+}
+
+// @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.1
+func TestRetainedLocalDetachedExceptionRejectsOtherContexts(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(*retainedLocalFixture) []*repoInfo
+	}{
+		{"foreign_owner", func(f *retainedLocalFixture) []*repoInfo { f.environment.TaskID = "foreign"; return nil }},
+		{"session_owner", func(f *retainedLocalFixture) []*repoInfo { f.session.TaskID = "foreign"; return nil }},
+		{"worktree", func(f *retainedLocalFixture) []*repoInfo { f.request.UseWorktree = true; return nil }},
+		{"not_reused", func(f *retainedLocalFixture) []*repoInfo { f.request.WorkspaceReuseRequired = false; return nil }},
+		{"failed_environment", func(f *retainedLocalFixture) []*repoInfo {
+			f.environment.Status = models.TaskEnvironmentStatusFailed
+			return nil
+		}},
+		{"attached_source", func(f *retainedLocalFixture) []*repoInfo {
+			return []*repoInfo{{RepositoryID: f.source.ID, Repository: f.source, RepositoryPath: f.source.LocalPath}}
+		}},
+		{"multiple_sources", func(f *retainedLocalFixture) []*repoInfo {
+			return []*repoInfo{{RepositoryID: f.source.ID, Repository: f.source, RepositoryPath: f.source.LocalPath}, {RepositoryID: "other", Repository: f.source}}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRetainedLocalFixture(t, false, string(models.ExecutorTypeLocal))
+			repositories := tc.change(f)
+			id, err := f.executor.applyResumeRepoConfig(context.Background(), f.task, f.session, f.request, f.environment, repositories)
+			if err == nil {
+				require.Equal(t, f.source.ID, id, "disqualified context must keep normal repository resolution")
+				require.Equal(t, f.source.ID, f.request.RepositoryID)
+			}
+			require.Equal(t, "r3-source", f.session.RepositoryID)
+			require.Equal(t, "r3-native-history", f.session.Metadata["acp_session_id"])
+		})
+	}
+}
+
+// @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.1
+func TestRetainedLocalInheritedExceptionRejectsOtherContexts(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(*retainedLocalFixture)
+	}{
+		{"foreign_parent", func(f *retainedLocalFixture) { f.environment.TaskID = "foreign" }},
+		{"archived_parent", func(f *retainedLocalFixture) { now := time.Now(); f.repo.tasks[f.task.ParentID].ArchivedAt = &now }},
+		{"workspace_mismatch", func(f *retainedLocalFixture) { f.repo.tasks[f.task.ParentID].WorkspaceID = "foreign" }},
+		{"worktree", func(f *retainedLocalFixture) { f.request.UseWorktree = true }},
+		{"multiple_repositories", func(f *retainedLocalFixture) {
+			f.repo.taskRepositories["other-link"] = &models.TaskRepository{ID: "other-link", TaskID: f.task.ID, RepositoryID: f.source.ID, BaseBranch: "main", Position: 1}
+		}},
+		{"parent_attached_source", func(f *retainedLocalFixture) {
+			f.repo.taskRepositories["parent-link"] = &models.TaskRepository{ID: "parent-link", TaskID: f.task.ParentID, RepositoryID: f.source.ID}
+		}},
+		{"active_inventory", func(f *retainedLocalFixture) { f.environment.Repos[0].Status = "ready" }},
+		{"physical_worktree_id", func(f *retainedLocalFixture) { f.environment.Repos[0].WorktreeID = "materialized" }},
+		{"physical_worktree_path", func(f *retainedLocalFixture) { f.environment.Repos[0].WorktreePath = f.source.LocalPath }},
+		{"physical_clone", func(f *retainedLocalFixture) { f.environment.Repos[0].WorktreeSourceClonePath = f.source.LocalPath }},
+		{"physical_common_dir", func(f *retainedLocalFixture) { f.environment.Repos[0].WorktreeSourceCommonDir = f.source.LocalPath }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRetainedLocalFixture(t, true, string(models.ExecutorTypeLocal))
+			tc.change(f)
+			id, _, repositories, err := f.executor.prepareResumeRepositorySettings(context.Background(), f.task, f.session, f.request, ResumeOptions{})
+			if err == nil {
+				require.False(t, id == "" && len(repositories) == 0 && f.request.RepositoryID == "", "disqualified context received the historical-source exception")
+			}
+			require.Equal(t, "r3-source", f.session.RepositoryID)
+			require.Equal(t, "r3-native-history", f.session.Metadata["acp_session_id"])
+		})
+	}
+}
+
+// @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.1
+func TestRetainedLocalBuildResumeRequestKeepsWorkspace(t *testing.T) {
+	for _, inherited := range []bool{false, true} {
+		t.Run(map[bool]string{false: "detached", true: "inherited"}[inherited], func(t *testing.T) {
+			for _, executorType := range []string{string(models.ExecutorTypeLocal), "local_pc"} {
+				t.Run(executorType, func(t *testing.T) {
+					for _, mode := range []struct {
+						name       string
+						startAgent bool
+						native     bool
+					}{
+						{"workspace_only", false, false},
+						{"without_native_conversation", true, false},
+						{"native_conversation", true, true},
+					} {
+						t.Run(mode.name, func(t *testing.T) {
+							f := newRetainedLocalFixture(t, inherited, executorType)
+							if mode.native {
+								f.session.DownstreamACPSessionID = "r3-native-history"
+							} else {
+								delete(f.session.Metadata, "acp_session_id")
+							}
+							raw, _ := newResumeLaunchRequest(f.task, f.session, mode.startAgent, ResumeOptions{})
+							require.Empty(t, raw.WorkspacePath, "production request construction supplies only the original path")
+							req, id, _, env, _, err := f.executor.buildResumeRequest(context.Background(), f.task, f.session, mode.startAgent)
+							require.NoError(t, err)
+							require.Equal(t, f.environment.WorkspacePath, req.WorkspacePath)
+							require.Equal(t, f.session.WorkspacePath, req.OriginalWorkspacePath)
+							require.Equal(t, f.environment.ID, env.ID)
+							require.Equal(t, f.environment.TaskID, env.TaskID)
+							require.Empty(t, id)
+							require.Empty(t, req.RepositoryID)
+							require.Empty(t, req.RepositoryPath)
+							if mode.native {
+								require.Equal(t, "r3-native-history", req.ACPSessionID)
+							} else {
+								require.Empty(t, req.ACPSessionID)
+							}
+							require.Equal(t, "r3-source", f.session.RepositoryID)
+							require.Empty(t, f.repo.createTaskEnvironmentCalls)
+						})
+					}
+				})
+			}
+		})
 	}
 }

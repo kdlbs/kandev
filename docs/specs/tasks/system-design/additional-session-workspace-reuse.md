@@ -80,6 +80,31 @@ The orchestrator persists an effective workspace using this authority order:
 The source repository path is preparation input. It must not overwrite a
 materialized task workspace reported by the lifecycle response.
 
+### Retained LOCAL source preferences
+
+The retained LOCAL resume adapter implements the existing continuity criteria
+002.1 and 002.2. After normal environment ownership resolution, a session with
+no current task repository attachment may retain its exact historical LOCAL
+repository preference without requesting materialization in its owned ready or
+stopped workspace. Only the launch request's repository and branch are cleared;
+the persisted session preference, attachments and workspace inventory remain.
+
+For `inherit_parent`, repository context is omitted only for a validated
+direct-parent environment in the child's workspace. The parent must remain
+unarchived and have no repository attachments. The child must have one exact
+LOCAL source and one matching deleted inventory row with no materialized
+worktree ID/path/source-clone/common-directory fields. Ordinary local and the
+retained `local_pc` spelling use this adapter; Worktree and remote runtimes do
+not. All unmatched cases retain normal repository resolution and inventory
+admission. MCP repository providers are derived after this context selection.
+
+`GetWorkspaceInfoForSession` applies the same inherited projection using its
+existing validated environment owner, generation and executor fields before
+returning a cold workspace binding. No native delivery proof, recovery claim,
+unknown outcome, filesystem operation or runtime policy is changed.
+
+Delivery: [Retained LOCAL resume work order](../../../plans/recovered-workspace-path-persistence/task-02-retain-local-resume-context.md).
+
 ## Comparison base and existing checkout identity
 
 For AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.4, a mutable comparison
@@ -372,3 +397,10 @@ The Files path component is shared by desktop and phone layouts. This repair
 changes backend state normalization, not layout, navigation, scrolling, or
 touch behavior, so the focused desktop recovery scenario plus existing shared
 component coverage provides mobile parity.
+
+The retained LOCAL repository-context exceptions bind the verified environment
+path into the launch request's WorkspacePath before returning. The separate
+OriginalWorkspacePath remains the native conversation's original CWD. This
+explicit request binding also applies when no native conversation is loaded:
+workspace-only and token-less resume cannot rely on the workspace-info provider
+to override the lifecycle scratch-folder fallback.
