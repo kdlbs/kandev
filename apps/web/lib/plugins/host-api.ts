@@ -690,12 +690,19 @@ function invokePluginAction<TResponse>(
   input?: PluginActionInput,
   options?: PluginActionOptions,
 ): Promise<TResponse> {
+  const fields = input ?? {};
   const payload = {
-    ...(input?.workspaceId ? { workspaceId: input.workspaceId } : {}),
-    ...(input?.taskId ? { taskId: input.taskId } : {}),
-    ...(input?.sessionId ? { sessionId: input.sessionId } : {}),
-    ...(input?.repositoryId ? { repositoryId: input.repositoryId } : {}),
-    ...(input && "body" in input ? { body: input.body } : {}),
+    ...(fields.notificationProviderId
+      ? { notificationProviderId: fields.notificationProviderId }
+      : {}),
+    ...(fields.notificationFormatter
+      ? { notificationFormatter: fields.notificationFormatter }
+      : {}),
+    ...(fields.workspaceId ? { workspaceId: fields.workspaceId } : {}),
+    ...(fields.taskId ? { taskId: fields.taskId } : {}),
+    ...(fields.sessionId ? { sessionId: fields.sessionId } : {}),
+    ...(fields.repositoryId ? { repositoryId: fields.repositoryId } : {}),
+    ...("body" in fields ? { body: fields.body } : {}),
   };
   return fetchJson<TResponse>(
     `/api/plugins/${encodeURIComponent(pluginId)}/actions/${encodeURIComponent(key)}`,

@@ -8,6 +8,10 @@ option go_package = "github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1;pl
 
 // Implemented by the PLUGIN. kandev is the client.
 service Plugin {
+  // Optional, side-effect-free notification content extension. The host owns
+  // delivery admission, credentials, and transport; configuration is immutable.
+  rpc FormatNotification(NotificationFormatRequest) returns (NotificationFormatResponse);
+  rpc InspectNotificationConfiguration(NotificationConfigurationRequest) returns (NotificationConfigurationResponse);
   rpc DeliverEvent(Event) returns (EventAck);
   rpc HandleWebhook(WebhookRequest) returns (WebhookResponse);
   // Optional automation adapter extension. Old plugins return Unimplemented.
@@ -40,6 +44,69 @@ service Plugin {
   rpc InspectExecutorEnvironment(InspectExecutorEnvironmentRequest) returns (InspectExecutorEnvironmentResponse);
   rpc ResolveExecutorConnection(ResolveExecutorConnectionRequest) returns (ResolveExecutorConnectionResponse);
   rpc DestroyExecutorEnvironment(DestroyExecutorEnvironmentRequest) returns (DestroyExecutorEnvironmentResponse);
+}
+
+message NotificationTaskContext {
+  string task_id = 1;
+  string title = 2;
+  // Present only after the host verifies the exact task/session relationship.
+  string session_id = 3;
+}
+
+message NotificationInboxContext {
+  string workspace_id = 1;
+  string type = 2;
+  string title = 3;
+}
+
+message NotificationUpdateContext {
+  string kind = 1;
+  string version = 2;
+  string previous_version = 3;
+  string agent_name = 4;
+  string agent_id = 5;
+  string runtime_id = 6;
+  string status = 7;
+  uint32 count = 8;
+  string release_url = 9;
+}
+
+message NotificationFormatRequest {
+  uint32 contract_version = 1;
+  string provider_id = 2;
+  string owner_id = 3;
+  string formatter_key = 4;
+  string configuration_revision = 5;
+  string event_type = 6;
+  string occurrence_id = 7;
+  string default_title = 8;
+  string default_body = 9;
+  NotificationTaskContext task = 10;
+  NotificationInboxContext inbox = 11;
+  NotificationUpdateContext update = 12;
+  // Only the host's owner-authorized synthetic preview path sets these fields.
+  // Configuration is opaque plugin data, never provider credential config.
+  bool preview = 13;
+  bytes preview_configuration = 14;
+  string preview_sample = 15;
+}
+
+message NotificationFormatResponse {
+  bool custom = 1;
+  string title = 2;
+  string body = 3;
+}
+
+message NotificationConfigurationRequest {
+  string provider_id = 1;
+  string owner_id = 2;
+  string formatter_key = 3;
+  string revision = 4;
+}
+
+message NotificationConfigurationResponse {
+  string revision = 1;
+  string digest = 2;
 }
 
 // Implemented by KANDEV (served back over the go-plugin broker).
@@ -1397,6 +1464,8 @@ message VerifiedActionContext {
   string repository_id = 4;
   string session_id = 5;
   string head_branch = 6;
+  // Host-authorized provider identity; never taken from the action body.
+  string notification_provider_id = 7;
 }
 message PluginActionResponse {
   bytes body = 1;

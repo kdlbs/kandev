@@ -1,4 +1,8 @@
 {
+  "notificationFormatterLabel": "通知內容",
+  "notificationFormatterDefault": "使用原始通知內容",
+  "notificationFormatterUnavailable": "格式化程式不可用。通知將使用原始內容。",
+  "notificationFormatterDescription": "為每個提供者選擇可選的格式化程式。格式化不會更改訂閱或傳送目標。",
   "notificationEventPermissionRequested": "代理程式需要權限",
   "notificationEventPermissionRequestedDescription": "當代理程式正在等待您批准某項操作時通知。",
   "notificationEventSessionFailed": "代理程式工作階段失敗",

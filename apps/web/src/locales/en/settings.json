@@ -1,4 +1,8 @@
 {
+  "notificationFormatterLabel": "Notification content",
+  "notificationFormatterDefault": "Use the original notification content",
+  "notificationFormatterUnavailable": "The formatter is unavailable. Notifications use their original content.",
+  "notificationFormatterDescription": "Choose an optional formatter for each provider. Formatting does not change subscriptions or delivery destinations.",
   "notificationEventPermissionRequested": "Agent needs permission",
   "notificationEventPermissionRequestedDescription": "Notify when the agent is waiting for you to approve an action.",
   "notificationEventSessionFailed": "Agent session failed",

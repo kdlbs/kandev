@@ -244,6 +244,40 @@ package can declare both `runtime.type: binary` and `ui.web_apps` when its web
 app needs a managed backend. Use [Authoring a plugin](plugins-authoring.md#build-an-isolated-web-application)
 for a complete authoring path.
 
+## Notification content formatters
+
+This additive extension is under development and is not present in published
+SDK `0.1.0`. A plugin must validate the supporting host/SDK pair before release;
+the SDK-wide minimum host version alone does not prove formatter support.
+
+```yaml
+notification_formatters:
+  - key: text
+    contract_version: 1
+    provider_types: [apprise]
+    management_actions: [content.prepare]
+actions:
+  - key: content.prepare
+    scope: notification_provider
+    max_body_bytes: 131072
+```
+
+The formatter key must be unique, the contract version must be `1`, and
+`runtime.type` must be `binary`. Supported provider types are `apprise`,
+`webhook`, `webpush`, `system`, and `local`. Every management action must be
+declared with `scope: notification_provider` and a body cap of at most 128 KiB;
+every action with that scope must belong to a formatter declaration. The host
+also caps the complete formatter management request at 128 KiB, its response at
+512 KiB, and its lifetime at five seconds.
+
+The host authorizes provider ownership and exact candidate/active installation
+and binding context. The formatter may prepare immutable text configuration but
+cannot select itself, change subscriptions, read receiver credentials, or send
+notifications through this extension. See the
+[browser and Go formatter contract](../plans/plugins/PLUGIN-API.md#notification-content-formatters)
+for the management envelope, owner-isolated editor slot, activation CAS,
+preview, cancellation, and whole-pair fallback rules.
+
 ## Field reference
 
 > **Security:** `capabilities.auth` lets a plugin assert external login identities. Grant it only to trusted plugins whose identity provider verifies email ownership; a spoofed email claim can take over an account.
@@ -280,9 +314,14 @@ for a complete authoring path.
 | `webhooks[].method`                | no                                   | string                                | **Informational only**: kandev does not validate or enforce the inbound HTTP method against this value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `webhooks[].access`                | no                                   | string                                | `public` (default) allows anonymous callers; `authenticated` requires a Kandev identity. Cookie-authenticated browser calls remain subject to Kandev's same-origin policy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `webhooks[].max_body_bytes`        | no                                   | int                                   | Request-body limit for this key. Defaults to 4 MiB. Public webhooks cannot exceed 4 MiB; authenticated webhooks can request up to 16 MiB. Plugins using this field should declare the first supporting `min_kandev_version`.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `notification_formatters[]` | no | object[] | Optional content-only extensions; requires managed binary runtime. See Notification content formatters above. |
+| `notification_formatters[].key` | yes\* | string | Unique formatter key, using the action-key vocabulary. |
+| `notification_formatters[].contract_version` | yes\* | int | Must be `1`. |
+| `notification_formatters[].provider_types` | yes\* | string[] | Nonempty subset of `apprise`, `webhook`, `webpush`, `system`, and `local`. |
+| `notification_formatters[].management_actions` | no | string[] | Explicit action keys with `scope: notification_provider` and body cap at most 128 KiB. |
 | `actions[]`                        | no                                   | object[]                              | Authenticated, manifest-declared browser actions. They are distinct from public webhooks: the host validates the action key, limits the JSON body, authorizes the declared resource, and passes only a verified context to the plugin.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `actions[].key`                    | yes\*                                | string                                | Unique non-empty action key, used at `POST /api/plugins/{id}/actions/{key}`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `actions[].scope`                  | yes\*                                | `workspace` \| `task` \| `repository` | Resource selector the host authorizes. A task-scoped invocation may additionally name one repository attached to that verified task. Use the canonical field name `scope`; `resource_scope` is only a legacy read-compatibility spelling and must not be authored.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `actions[].scope`                  | yes\*                                | `workspace` \| `task` \| `repository` \| `notification_provider` | Resource selector the host authorizes. Notification provider actions require an owning formatter declaration and the exact management context above. A task-scoped invocation may additionally name one repository attached to that verified task. Use the canonical field name `scope`; `resource_scope` is only a legacy read-compatibility spelling and must not be authored. |
 | `actions[].access`                 | no                                   | `authenticated` \| `admin`            | Defaults to `authenticated`. `admin` is enforced before the action envelope is read and requires `min_kandev_version: "0.91.1"` or later so older hosts cannot silently treat it as authenticated.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `actions[].max_body_bytes`         | yes\*                                | int                                   | Maximum size of the decoded untrusted `body`, from 1 through 1,048,576 bytes. The whole HTTP envelope has a slightly larger hard cap.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `repository_providers`             | no                                   | string[]                              | Provider IDs this plugin owns while active. An active provider can register native repository discovery/URL inspection and may supply transient Git credentials. Native first-use task creation requires a workspace-scoped `repositories.inspect` action; Kandev invokes the active owner on the server and validates its descriptor before persistence. Plugin-originated task creation must use the authenticated plugin task-create path so the plugin reauthorizes the descriptor before Host Tasks.Create. Duplicate ownership is rejected.                                                                                                                                |

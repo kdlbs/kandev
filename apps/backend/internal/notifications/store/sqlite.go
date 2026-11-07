@@ -95,7 +95,7 @@ func (r *sqliteRepository) initSchema(ctx context.Context) error {
 	CREATE INDEX IF NOT EXISTS idx_notification_deliveries_session_id ON notification_deliveries(task_session_id);
 	`
 
-	if _, err := r.db.Exec(schema + webPushSchema); err != nil {
+	if _, err := r.db.Exec(schema + webPushSchema + formatterSchema); err != nil {
 		return err
 	}
 	if err := r.migrateDeliveries(); err != nil {
@@ -297,7 +297,7 @@ func (r *sqliteRepository) CreateProvider(ctx context.Context, provider *models.
 
 // UpdateProvider writes the provider back, scoped to provider.UserID.
 func (r *sqliteRepository) UpdateProvider(ctx context.Context, provider *models.Provider) error {
-	return r.updateProvider(ctx, r.db, provider)
+	return r.UpdateProviderWithSubscriptions(ctx, provider, nil)
 }
 
 // GetProvider reads one provider owned by userID. A provider ID belonging to

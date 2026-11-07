@@ -14,6 +14,12 @@ author: "kandev"
 categories: ["tools"]
 repo_url: "https://github.com/kdlbs/kandev-plugin-template"
 
+notification_formatters:
+  - key: fixture-text
+    contract_version: 1
+    provider_types: [apprise]
+    management_actions: [notification.prepare]
+
 runtime:
   type: binary
   executables:
@@ -92,6 +98,9 @@ executor_providers:
       maximum_lifetime_seconds: 28800
 
 actions:
+  - key: notification.prepare
+    scope: notification_provider
+    max_body_bytes: 131072
   - key: "connection-status"
     scope: "workspace"
     max_body_bytes: 4096
