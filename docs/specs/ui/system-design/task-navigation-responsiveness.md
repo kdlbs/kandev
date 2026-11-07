@@ -83,10 +83,10 @@ a replacement. Transport timeouts continue to bound outstanding work.
 
 ## Shared session reads
 
-Successful ordinary and script terminal creation publishes the returned shell
-to the owning environment's domain store immediately. Local terminal tabs and
-optimistic removal use that same shell set; correctness cannot depend on a
-later mounting consumer issuing another list request.
+Creation and optimistic removal publish immediately to the
+[owning result scope](../../tasks/system-design/task-terminal-persistence.md#browser-result-scopes):
+task/environment for ordinary rows, environment for unmanaged rows. Tabs consume
+that scope without another list.
 
 The coordinator owns promises and initialization/invalidation metadata. Existing
 Zustand slices remain the shell and commit result owners. Move the cumulative
@@ -118,8 +118,8 @@ empty-result rules, and explicit shell mutation invalidation.
 Session-scope transitions must prevent an environment-only result arriving late
 from replacing task-scoped shells. Distinct backend inputs may require separate
 requests, but the current scope decides which may publish to a shared slice.
-Shell and commit publication ownership is environment-scoped because those
-slices own one result per environment. Cumulative diffs retain separate
+Shell writers use independent task/environment tuples, including taskless
+reads. Commit writers remain environment-scoped. Cumulative diffs retain separate
 publication ownership for each complete request key: two sessions sharing an
 environment must both receive their own session-specific diff.
 

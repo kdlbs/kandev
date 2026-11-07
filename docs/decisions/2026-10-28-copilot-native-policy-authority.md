@@ -4,6 +4,12 @@
 **Date:** 2026-10-28
 **Area:** backend
 
+## Admission amendment
+
+[Contract admission](2026-11-05-copilot-plugin-contract-admission.md) supersedes
+this decision's restriction on unknown inventory versions. Native policy,
+credential boundaries, and diagnostic honesty remain accepted.
+
 ## Context
 
 Copilot profile plugins already have inventory, directory, executor, and

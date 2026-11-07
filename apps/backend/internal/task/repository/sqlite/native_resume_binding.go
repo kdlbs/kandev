@@ -117,7 +117,7 @@ func (r *Repository) verifyNativeResumeInventoryTx(ctx context.Context, tx *sqlx
 	if !valid {
 		return false, nil
 	}
-	terminalCount, valid, err := r.verifyNativeResumeTerminalsTx(ctx, tx, proof)
+	terminalCount, unprovenCount, valid, err := r.verifyNativeResumeTerminalsTx(ctx, tx, proof)
 	if err != nil || !valid {
 		return false, err
 	}
@@ -141,7 +141,7 @@ func (r *Repository) verifyNativeResumeInventoryTx(ctx context.Context, tx *sqlx
 		}
 		count++
 	}
-	return count+terminalCount == len(retired), rows.Err()
+	return count+terminalCount+unprovenCount == len(retired), rows.Err()
 }
 
 func (r *Repository) verifyNativeResumeCursorTx(ctx context.Context, tx *sqlx.Tx, proof *models.NativeResumeDeliveryEvidence) (bool, error) {
@@ -282,6 +282,13 @@ func nativeResumeSubmissionMap(proof *models.NativeResumeDeliveryEvidence) (map[
 	for _, row := range proof.Submissions {
 		if row.ID == "" || row.PayloadHash == "" || row.StreamID == "" || row.HarnessGeneration <= 0 || row.HarnessGeneration > proof.HarnessGeneration ||
 			(row.HarnessGeneration == proof.HarnessGeneration && row.StreamID != proof.StreamID) {
+			return nil, false
+		}
+		if row.UnprovenCompletion && (row.State != models.DeliverySubmissionCompleted || row.TerminalSequence != 0 ||
+			row.TerminalStreamID != "" || row.Cursor == nil || row.Cursor.StreamID != row.StreamID ||
+			row.Cursor.SessionID != proof.SessionID || row.Cursor.IncarnationID != proof.IncarnationID ||
+			row.Cursor.HarnessGeneration != row.HarnessGeneration ||
+			row.Cursor.ReceivedSequence < row.Cursor.RemoteHighWater) {
 			return nil, false
 		}
 		if _, duplicate := retired[row.ID]; duplicate {

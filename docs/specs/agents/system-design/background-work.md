@@ -220,6 +220,13 @@ snapshots overwriting newer events or dropping rows introduced during a fetch.
 Use the existing session activity-epoch approach as a pattern. Keep completed
 history pageable; do not clear the list when active count becomes zero.
 
+The shared client captures the session list before starting each HTTP read.
+If its snapshot omits a row added or updated during that read, preserve the
+accepted live row. Unchanged omitted rows follow the complete snapshot.
+A store-owned read generation admits only the latest read per session across
+consumers. Clearing or purging a session invalidates its outstanding reads;
+their responses cannot recreate rows or settle a replacement read's loading state.
+
 ## Control routing
 
 Proposed public task-owned API, through existing task/session authorization:

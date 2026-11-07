@@ -28,6 +28,9 @@ type processManager interface {
 	// identity" reconstruction row). Empty before the agent's session/new or
 	// session/load completes.
 	GetSessionID() string
+	// CopilotNativeSessionEventsActive reports the live adapter's actual
+	// vendor subscription state, not the create request.
+	CopilotNativeSessionEventsActive() bool
 }
 
 // Instance represents a single agent instance running as a subprocess.
@@ -196,6 +199,10 @@ type CreateRequest struct {
 	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
 	PromptSuggestions bool `json:"prompt_suggestions,omitempty"`
 
+	// CopilotNativeSessionEvents asks Copilot for its opt-in native compaction
+	// and attributed usage notifications. Older agentctl builds ignore it.
+	CopilotNativeSessionEvents bool `json:"copilot_native_session_events,omitempty"`
+
 	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
 	AssumeMcpSse bool `json:"assume_mcp_sse,omitempty"`
 
@@ -310,6 +317,11 @@ type InstanceInfo struct {
 	// session -- never the database). Distinct from SessionID above, which is
 	// this Kandev task session's identity, not the underlying agent's.
 	ProviderSessionID string `json:"provider_session_id,omitempty"`
+
+	// CopilotNativeSessionEvents reports whether the live adapter actually
+	// subscribed to the vendor's native session-event stream. Recovery uses
+	// this instead of the original create request.
+	CopilotNativeSessionEvents bool `json:"copilot_native_session_events,omitempty"`
 }
 
 // Info returns a safe copy of the instance data for API serialization.
@@ -329,25 +341,28 @@ func (i *Instance) Info() *InstanceInfo {
 
 	var sourceRoots []string
 	var providerSessionID string
+	var copilotNativeSessionEvents bool
 	if i.manager != nil {
 		sourceRoots = i.manager.WorkspaceSourceRoots()
 		providerSessionID = i.manager.GetSessionID()
+		copilotNativeSessionEvents = i.manager.CopilotNativeSessionEventsActive()
 	}
 
 	return &InstanceInfo{
-		ID:                   i.ID,
-		Port:                 i.Port,
-		LeaseGeneration:      i.lease.Generation,
-		ListenerActive:       i.listenerActive.Load(),
-		Status:               i.Status,
-		WorkspacePath:        i.WorkspacePath,
-		AgentCommand:         i.AgentCommand,
-		Env:                  envCopy,
-		CreatedAt:            i.CreatedAt,
-		SessionID:            i.SessionID,
-		TaskID:               i.TaskID,
-		WorkspaceSourceRoots: sourceRoots,
-		ProviderSessionID:    providerSessionID,
+		ID:                         i.ID,
+		Port:                       i.Port,
+		LeaseGeneration:            i.lease.Generation,
+		ListenerActive:             i.listenerActive.Load(),
+		Status:                     i.Status,
+		WorkspacePath:              i.WorkspacePath,
+		AgentCommand:               i.AgentCommand,
+		Env:                        envCopy,
+		CreatedAt:                  i.CreatedAt,
+		SessionID:                  i.SessionID,
+		TaskID:                     i.TaskID,
+		WorkspaceSourceRoots:       sourceRoots,
+		ProviderSessionID:          providerSessionID,
+		CopilotNativeSessionEvents: copilotNativeSessionEvents,
 	}
 }
 

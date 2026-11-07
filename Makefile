@@ -52,7 +52,7 @@ MAGENTA := \033[35m
 VERBOSE ?= 0
 NODE ?= $(shell command -v node $(NULL_REDIR) || echo node)
 RUNTIME_BUNDLE_DIR ?= $(CURDIR)/dist/kandev
-RUNTIME_VERSION ?= $(shell git describe --tags --always --dirty $(NULL_REDIR) || echo dev)
+RUNTIME_VERSION ?= $(shell git describe --tags --match "v[0-9]*" --exclude "*/*" --always --dirty $(NULL_REDIR) || echo dev)
 SERVICE_BUNDLE_DIR ?= $(CURDIR)/dist/kandev
 SERVICE_LAUNCHER = $(SERVICE_BUNDLE_DIR)/bin/kandev
 SERVICE_VERSION ?= $(RUNTIME_VERSION)
@@ -584,6 +584,7 @@ test-scripts:
 	@python3 .github/scripts/announce-discord-release_test.py
 	@python3 .github/scripts/announce-discord-release-workflow-contract_test.py
 	@node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs
+	@node --test scripts/update-agent-runtime-pins.test.mjs .github/scripts/record-agent-runtime-pin-refresh.test.mjs
 	@bash scripts/pr-state.test.sh
 	@bash scripts/pr-await.test.sh
 	@bash scripts/run-quiet.test.sh

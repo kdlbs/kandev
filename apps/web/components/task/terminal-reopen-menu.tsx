@@ -8,7 +8,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@kandev/ui/dropdown-menu";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { UserShellInfo } from "@/lib/state/slices";
 import { resumeUserShell } from "@/lib/api/domains/user-shell-api";
@@ -16,6 +16,13 @@ import { useTerminalDestroy } from "@/hooks/domains/session/use-terminal-destroy
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { markTerminalPanelTerminateClose } from "./dockview-layout-setup";
 import { CloseTerminalConfirmPopover } from "./close-terminal-confirm-popover";
+import {
+  captureUserShellPublicationOwner,
+  isActiveUserShellPublicationOwner,
+  makeUserShellScope,
+  userShellScopeKey,
+  type UserShellScope,
+} from "@/lib/state/user-shell-scope";
 import { useTranslation } from "react-i18next";
 
 const EMPTY_SHELLS: UserShellInfo[] = [];
@@ -46,9 +53,11 @@ export function TerminalReopenMenuItems({
   const { t } = useTranslation();
   const environmentId = useEnvironmentId();
   const taskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
+  const scope = makeUserShellScope(environmentId, taskID);
+  const scopeKey = scope ? userShellScopeKey(scope) : "";
   const shells = useAppStore((s) => {
-    if (!environmentId) return EMPTY_SHELLS;
-    return s.userShells.byEnvironmentId[environmentId] ?? EMPTY_SHELLS;
+    if (!scopeKey) return EMPTY_SHELLS;
+    return s.userShells.byScope[scopeKey] ?? EMPTY_SHELLS;
   });
   const updateUserShell = useAppStore((s) => s.updateUserShell);
   const removeUserShellStore = useAppStore((s) => s.removeUserShell);
@@ -61,14 +70,14 @@ export function TerminalReopenMenuItems({
   const pendingDestroy = ordinary.find((shell) => shell.terminalId === pendingDestroyId) ?? null;
   const destroyTerminal = useDestroyTerminalRow({
     api,
-    environmentId,
+    scope,
     taskID,
     removeUserShellStore,
   });
   const handleClick = useOpenTerminalPanel({
     api,
     addTerminalPanel,
-    environmentId,
+    scope,
     taskID,
     groupId,
     updateUserShell,
@@ -132,31 +141,31 @@ function terminalDisplayName(shell: UserShellInfo | null, fallback: string): str
 
 type DestroyTerminalRowOptions = {
   api: DockviewApi | null;
-  environmentId: string | null;
+  scope: UserShellScope | null;
   taskID: string | null;
-  removeUserShellStore: (environmentId: string, terminalId: string) => void;
+  removeUserShellStore: (scope: UserShellScope, terminalId: string) => void;
 };
 
 function useDestroyTerminalRow({
   api,
-  environmentId,
+  scope,
   taskID,
   removeUserShellStore,
 }: DestroyTerminalRowOptions) {
   const handleDestroyed = useCallback(
     (terminalId: string) => {
-      if (!environmentId) return;
-      removeUserShellStore(environmentId, terminalId);
+      if (!scope) return;
+      removeUserShellStore(scope, terminalId);
       const existing = api ? findExistingTerminalPanel(api, terminalId) : null;
       if (existing) {
         markTerminalPanelTerminateClose(existing.api.id);
         existing.api.close();
       }
     },
-    [api, environmentId, removeUserShellStore],
+    [api, scope, removeUserShellStore],
   );
   return useTerminalDestroy({
-    environmentId,
+    environmentId: scope?.environmentId,
     taskId: taskID,
     onDestroyed: handleDestroyed,
   }).destroyTerminal;
@@ -171,20 +180,21 @@ type OpenTerminalPanelOptions = {
     taskID?: string,
     title?: string,
   ) => void;
-  environmentId: string | null;
+  scope: UserShellScope | null;
   taskID: string | null;
   groupId: string;
-  updateUserShell: (environmentId: string, terminalId: string, patch: { state: "open" }) => void;
+  updateUserShell: (scope: UserShellScope, terminalId: string, patch: { state: "open" }) => void;
 };
 
 function useOpenTerminalPanel({
   api,
   addTerminalPanel,
-  environmentId,
+  scope,
   taskID,
   groupId,
   updateUserShell,
 }: OpenTerminalPanelOptions) {
+  const storeApi = useAppStoreApi();
   return useCallback(
     async (terminalId: string, state: string | undefined, displayName: string | undefined) => {
       if (!api) return;
@@ -193,24 +203,28 @@ function useOpenTerminalPanel({
         existing.api.setActive();
         return;
       }
-      if (state === "parked" && environmentId) {
+      const owner = scope ? captureUserShellPublicationOwner(storeApi.getState(), scope) : null;
+      if (state === "parked" && scope) {
         try {
           await resumeUserShell(terminalId, taskID ?? undefined);
-          updateUserShell(environmentId, terminalId, { state: "open" });
+          updateUserShell(scope, terminalId, { state: "open" });
         } catch (error) {
           console.error("resume terminal:", error);
           return;
         }
       }
+      // The captured cache keeps the resumed row; the panel only opens if the
+      // user is still in that scope and workspace context.
+      if (owner && !isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
       addTerminalPanel(
         terminalId,
         groupId,
-        environmentId ?? undefined,
+        scope?.environmentId ?? undefined,
         taskID ?? undefined,
         displayName,
       );
     },
-    [api, addTerminalPanel, environmentId, taskID, updateUserShell, groupId],
+    [api, addTerminalPanel, scope, taskID, updateUserShell, groupId, storeApi],
   );
 }
 

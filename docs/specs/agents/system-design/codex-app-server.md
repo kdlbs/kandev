@@ -50,7 +50,7 @@ References:
 
 Add `agents.CodexAppServer` with ID `codex-app-server` and display name `Codex app server`.
 Keep `CodexACP` unchanged. Add `agent.ProtocolCodexAppServer` and one factory case in `server/adapter/factory.go`.
-Use the existing managed runtime catalogue for `@openai/codex@0.154.0`, with `app-server` as its command argument.
+Use the existing managed runtime catalogue for `@openai/codex@0.166.0`, with `app-server` as its command argument.
 Generalize the ACP-named managed command helpers where necessary without changing ACP command output.
 Do not silently launch an arbitrary PATH version instead of the effective selected version.
 Discovery, login, and runtime installation must report which binary/version the native session uses.
@@ -94,7 +94,7 @@ Never automatically retry `turn/start` or `thread/fork` after an ambiguous respo
 Admission for server-request handlers is bounded. Each admitted request has one terminal reply owner; user answers, `serverRequest/resolved`, cancellation, and close cannot produce a second reply.
 Resolving a request cancels its handler without blocking ordered notification dispatch. Overload returns an explicit JSON-RPC error.
 Approval options preserve the exact offered provider decisions, including structured values, and only the selected offered value is returned.
-The pinned v0.154.0 server-request method inventory is recorded separately from the CLI-generated v2 schema because that generated schema omits the server-to-client request union.
+The v0.154.0 server-request method inventory captured for this design is recorded separately from the CLI-generated v2 schema because that generated schema omits the server-to-client request union.
 Every inventory entry is classified as supported or deliberately rejected by the adapter and debugger.
 
 Initialize with Kandev client identity, then send `initialized`.
@@ -264,7 +264,7 @@ The [plan previews](../../../plans/codex-app-server/plan.md#ascii-ui-preview) de
 ## Validation and rollout
 
 Start with fake-server protocol tests, then normalized replay fixtures and targeted executor tests.
-Capture real 0.154.0 events in a disposable workdir before marking optional capabilities available.
+Capture real events from the current managed pin in a disposable workdir before marking optional capabilities available.
 Keep actual authentication-dependent checks explicit in results. Mocks do not establish upstream availability.
 Retain the flag until chat, children, accounting, forks, resume, and disabled paths have evidence.
 No automatic ACP migration is part of this plan.
