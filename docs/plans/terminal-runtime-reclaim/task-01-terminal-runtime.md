@@ -28,7 +28,10 @@ expectations for these states.
 
 Focused existing tests and disposable SQLite/fake-manager checks covered the
 classification, preserved token, unknown queue, exact owner and serialized
-prompt admission. Changed-package Go lint passed. Real lifecycle stop/resume,
-runtime adapters, PostgreSQL, and the complete startup recovery path have not
-been verified. Startup guard ownership and asynchronous stop outcomes must be
-preserved before the original restart portion is complete.
+prompt admission. A later check reproduced a no-op cleanup incorrectly marking
+the row stopped. The candidate now requires a confirmed standalone lifecycle
+cleanup before repairing a live runtime row; no-op and stale-owner controls
+passed in temporary tests. Real lifecycle stop/resume, other runtime adapters,
+PostgreSQL, and the complete startup recovery path have not been verified.
+Startup guard ownership and asynchronous stop outcomes must be preserved before
+the original restart portion is complete.

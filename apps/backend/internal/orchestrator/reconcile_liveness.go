@@ -395,17 +395,27 @@ func (s *Service) reclaimIdleSessionAdmitted(ctx context.Context, sessionID stri
 func (s *Service) releaseIdleRuntime(ctx context.Context, running *models.ExecutorRunning, agentRunning bool) error {
 	sessionID := running.SessionID
 	var cleanupErr error
-	if cleaner, ok := s.agentManager.(executionIdentityCleaner); ok {
+	if agentRunning {
+		cleaner, ok := s.agentManager.(interface {
+			CleanupLiveExecutionIfCurrent(context.Context, string, string, time.Time) (bool, error)
+		})
+		if !ok {
+			return nil
+		}
+		confirmed, err := cleaner.CleanupLiveExecutionIfCurrent(ctx, sessionID, running.AgentExecutionID, running.UpdatedAt)
+		if err == nil && !confirmed {
+			return nil
+		}
+		cleanupErr = err
+	} else if cleaner, ok := s.agentManager.(executionIdentityCleaner); ok {
 		cleanupErr = cleaner.CleanupStaleExecutionBySessionIDIfCurrent(
 			ctx,
 			sessionID,
 			running.AgentExecutionID,
 			running.UpdatedAt,
 		)
-	} else if !agentRunning {
-		cleanupErr = s.agentManager.CleanupStaleExecutionBySessionID(ctx, sessionID)
 	} else {
-		return nil
+		cleanupErr = s.agentManager.CleanupStaleExecutionBySessionID(ctx, sessionID)
 	}
 	if cleanupErr != nil {
 		s.logger.Warn("idle reclaim: cleanup failed; row preserved",
