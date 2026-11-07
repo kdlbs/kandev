@@ -1,6 +1,6 @@
 ---
 created: 2026-10-29
-status: done
+status: in_progress
 requirements:
   - REQ-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-001
 system_design:
@@ -37,8 +37,9 @@ changes the working tree reverted, and untracked files) or a committed
 `base..head` range. It enforces the same per-file, per-output, and total byte
 limits as agentctl, including the staged index blob, and rejects a worktree
 path that has a `..` segment, is a UNC path, or is not absolute. The backend
-session reader resolves the session's persisted `Worktrees`/`WorkspacePath`
-and admits only `local`, `worktree`, and `local_pc` executors. The local
+session reader resolves the admitted current task workspace, using persisted
+session paths only for an unbound legacy session when no inspector is wired.
+It admits only local executors. The local
 fallback repeats the existing `session.exec` check before reading disk. An
 explicit repository-qualified comparison target uses its exact validated ref
 and fails closed when that ref is unavailable. Both readers use the shared
@@ -47,10 +48,11 @@ bounded untracked-patch formatter so the diff text and hash stay equal.
 ## Work orders
 
 - [x] [Task 01: Task-bound local Git source fallback](task-01-local-source-fallback.md)
+- [ ] [Task 02: Resolve the current task workspace](task-02-canonical-workspace.md)
 
 ## Changed-path coverage
 
-The work order owns the review collector, the backend session reader, the
+The work orders own the review collector, the backend session reader, the
 `ReviewChangeSource` fallback, the shared untracked formatter, their regression
 tests, the local-source acceptance criteria, and the matching review recovery
 system design note.
