@@ -113,9 +113,7 @@ test.describe("Agent profile deletion", () => {
     const conflictBody = (await (await conflictResponse).json()) as {
       active_sessions: Array<{ workspace_name?: string }>;
     };
-    expect(conflictBody.active_sessions.map((s) => s.workspace_name)).toEqual([
-      "E2E Workspace",
-    ]);
+    expect(conflictBody.active_sessions.map((s) => s.workspace_name)).toEqual(["E2E Workspace"]);
 
     // The conflict dialog should appear with active session info
     const conflictDialog = testPage.getByRole("alertdialog");

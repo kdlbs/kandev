@@ -338,9 +338,7 @@ describe("AgentProfileDeleteConflictDialog workspace groups", () => {
       [{ id: "ws-z", name: "Backend" }],
     );
 
-    const names = screen
-      .getAllByRole("heading", { level: 3 })
-      .map((el) => el.textContent);
+    const names = screen.getAllByRole("heading", { level: 3 }).map((el) => el.textContent);
     expect(names).toEqual(["Backend", "Frontend"]);
   });
 
