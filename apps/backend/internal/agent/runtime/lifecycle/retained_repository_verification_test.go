@@ -17,6 +17,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,6 +29,7 @@ type retainedRepositoryHTTPFixture struct {
 	stops            atomic.Int32
 	cancelOnRead     context.CancelFunc
 	failRescan       bool
+	failStop         bool
 }
 
 func newRetainedRepositoryHTTPFixture(t *testing.T, materializationOK bool) *retainedRepositoryHTTPFixture {
@@ -58,6 +60,10 @@ func newRetainedRepositoryHTTPFixture(t *testing.T, materializationOK bool) *ret
 				return
 			}
 			fixture.stops.Add(1)
+			if fixture.failStop {
+				http.Error(w, "process stop failed", http.StatusInternalServerError)
+				return
+			}
 			_ = fixture.runner.Stop(r.Context(), req)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 		case r.URL.Path == "/api/v1/workspace/rescan":
@@ -137,6 +143,87 @@ func TestLaunchRepositoryReconciliationPreservesUnpublishedCommit(t *testing.T) 
 	require.EqualValues(t, 1, fixture.rescans.Load(), "verified repositories must be added to workspace trackers")
 	require.Equal(t, before, runGitForPreparerTest(t, directory, "show-ref")+runGitForPreparerTest(t, directory, "status", "--porcelain"))
 	require.Eventually(t, func() bool { return len(fixture.runner.List(request.SessionID)) == 0 }, 3*time.Second, 10*time.Millisecond)
+}
+
+func TestVerifyRetainedLaunchWorkspaceAcceptsBranchWhenTagSharesName(t *testing.T) {
+	request, root, directory := retainedRepositoryLaunch(t)
+	runGitForPreparerTest(t, directory, "tag", "feature/retained")
+	fixture := newRetainedRepositoryHTTPFixture(t, false)
+	repositories, err := remoteWorkspaceProjectionFromLaunch(request, false)
+	require.NoError(t, err)
+	instance := &ExecutorInstance{Client: fixture.client, WorkspacePath: root}
+
+	err = verifyRetainedLaunchWorkspace(context.Background(), request.SessionID, instance, repositories)
+
+	require.NoError(t, err, "a matching branch must remain valid when a tag has the same name")
+}
+
+func TestVerifyRetainedLaunchWorkspaceReportsProbeStopFailure(t *testing.T) {
+	request, root, _ := retainedRepositoryLaunch(t)
+	fixture := newRetainedRepositoryHTTPFixture(t, false)
+	fixture.failStop = true
+	repositories, err := remoteWorkspaceProjectionFromLaunch(request, false)
+	require.NoError(t, err)
+	instance := &ExecutorInstance{Client: fixture.client, WorkspacePath: root}
+
+	err = verifyRetainedLaunchWorkspace(context.Background(), request.SessionID, instance, repositories)
+
+	require.ErrorContains(t, err, "stop retained repository verification")
+}
+
+func TestLaunchRepositoryReconciliationPreservesTrackedUncommittedChanges(t *testing.T) {
+	request, root, directory := retainedRepositoryLaunch(t)
+	trackedPath := filepath.Join(directory, "tracked.txt")
+	require.NoError(t, os.WriteFile(trackedPath, []byte("committed\n"), 0600))
+	runGitForPreparerTest(t, directory, "add", "tracked.txt")
+	runGitForPreparerTest(t, directory, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "track file")
+	require.NoError(t, os.WriteFile(trackedPath, []byte("local edit\n"), 0600))
+	fixture := newRetainedRepositoryHTTPFixture(t, false)
+	before := runGitForPreparerTest(t, directory, "show-ref") + runGitForPreparerTest(t, directory, "status", "--porcelain")
+	instance := &ExecutorInstance{RuntimeName: agentruntime.RuntimeRemoteDocker, ReusedWorkspace: true, Client: fixture.client, WorkspacePath: root}
+
+	err := reconcileLaunchWorkspace(context.Background(), NewRemoteDockerExecutor(dialerTestLogger(t)), request, instance)
+
+	require.NoError(t, err)
+	content, err := os.ReadFile(trackedPath)
+	require.NoError(t, err)
+	require.Equal(t, "local edit\n", string(content))
+	require.Equal(t, before, runGitForPreparerTest(t, directory, "show-ref")+runGitForPreparerTest(t, directory, "status", "--porcelain"))
+	require.Zero(t, fixture.materializations.Load())
+}
+
+func TestVerifyRetainedLaunchWorkspaceWaitsForGitAdmission(t *testing.T) {
+	restore := subproc.Git().SetCapForTest(1)
+	t.Cleanup(restore)
+	fixture := newRetainedRepositoryHTTPFixture(t, false)
+	request, root, _ := retainedRepositoryLaunch(t)
+	repositories, err := remoteWorkspaceProjectionFromLaunch(request, false)
+	require.NoError(t, err)
+
+	hold, err := subproc.AcquireGit(context.Background(), subproc.GitLifecycle)
+	require.NoError(t, err)
+	defer hold()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	instance := &ExecutorInstance{Client: fixture.client, WorkspacePath: root}
+	done := make(chan error, 1)
+	go func() {
+		done <- verifyRetainedLaunchWorkspace(ctx, request.SessionID, instance, repositories)
+	}()
+
+	require.Eventually(t, func() bool {
+		return subproc.AdmissionSnapshot().Classes[string(subproc.GitLifecycle)].Waiters == 1
+	}, time.Second, 10*time.Millisecond, "retained Git verification must wait for lifecycle admission")
+	require.Empty(t, fixture.runner.List(request.SessionID), "verification must not start Git before admission")
+
+	hold()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("retained Git verification did not finish after admission")
+	}
 }
 
 func TestLaunchRepositoryReconciliationPreservesWorkspaceWhenRescanFails(t *testing.T) {

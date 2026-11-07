@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 const retainedProbeResultPrefix = "kandev-retained-result-"
@@ -62,19 +64,24 @@ func retainedWorkspaceProbeCommand(root string, repositories []WorkspaceReposito
 				branch = repository.BaseBranch
 			}
 			if branch != "" {
-				checks = append(checks, "branch=$("+git+" symbolic-ref --short HEAD)", `[ "$branch" = `+shellQuote(branch)+" ]")
+				checks = append(checks, "branch=$("+git+" symbolic-ref HEAD)", `[ "$branch" = `+shellQuote("refs/heads/"+branch)+" ]")
 			}
 		}
 	}
 	return strings.Join(checks, "\n")
 }
 
-func verifyRetainedLaunchWorkspace(ctx context.Context, sessionID string, instance *ExecutorInstance, repositories []WorkspaceRepositoryMaterialization) error {
+func verifyRetainedLaunchWorkspace(ctx context.Context, sessionID string, instance *ExecutorInstance, repositories []WorkspaceRepositoryMaterialization) (resultErr error) {
 	if len(repositories) == 0 {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
+	releaseGit, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
+	if err != nil {
+		return fmt.Errorf("admit retained repository verification: %w", err)
+	}
+	defer releaseGit()
 	root := instance.WorkspacePath
 	if root == "" {
 		root = dockerWorkspacePath
@@ -92,7 +99,9 @@ func verifyRetainedLaunchWorkspace(ctx context.Context, sessionID string, instan
 		if id != "" {
 			cleanup, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancelCleanup()
-			_ = instance.Client.StopProcess(cleanup, id)
+			if stopErr := instance.Client.StopProcess(cleanup, id); stopErr != nil {
+				resultErr = errors.Join(resultErr, fmt.Errorf("stop retained repository verification: %w", stopErr))
+			}
 		}
 	}()
 	ticker := time.NewTicker(100 * time.Millisecond)
