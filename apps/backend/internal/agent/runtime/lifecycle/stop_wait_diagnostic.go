@@ -79,7 +79,7 @@ func captureStopWaitSnapshot(log *logger.Logger, executionID string, phase stopW
 	}
 	file, err := os.CreateTemp("", "kandev-stop-wait-*.goroutines")
 	if err != nil {
-		log.Warn("agent event-path snapshot unavailable", zap.String("execution_id", executionID), zap.String("phase", string(phase)), zap.Error(err))
+		log.Warn("stop wait snapshot unavailable", zap.String("execution_id", executionID), zap.String("phase", string(phase)), zap.Error(err))
 		return
 	}
 	writer := &stopWaitLimitedWriter{writer: file, remaining: 8 << 20}
@@ -89,7 +89,7 @@ func captureStopWaitSnapshot(log *logger.Logger, executionID string, phase stopW
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
-	log.Warn("agent event-path goroutine snapshot",
+	log.Warn("stop wait goroutine snapshot",
 		zap.String("execution_id", executionID), zap.String("phase", string(phase)),
 		zap.String("goroutine_snapshot", file.Name()), zap.Bool("snapshot_truncated", writer.remaining == 0), zap.Error(err))
 }
