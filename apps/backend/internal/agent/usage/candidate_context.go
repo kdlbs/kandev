@@ -54,6 +54,23 @@ func ApplySelectedUsage(ctx context.Context, policy *ExecutionUsagePolicy) {
 	policy.ExpectedModel = selected.ExpectedModel
 }
 
+// SnapshotCandidateUsage preserves one already-observed selection for work
+// that will outlive the request's mutable candidate projection.
+func SnapshotCandidateUsage(ctx context.Context, profileID string) context.Context {
+	state, ok := ctx.Value(candidateUsageContextKey{}).(*candidateUsageContext)
+	if !ok || state == nil || state.reader == nil {
+		return ctx
+	}
+	state.mu.Lock()
+	selected, found := state.selected[profileID]
+	state.mu.Unlock()
+	copy := &candidateUsageContext{reader: state.reader, selected: make(map[string]ExecutionUsagePolicy)}
+	if found {
+		copy.selected[profileID] = selected
+	}
+	return context.WithValue(ctx, candidateUsageContextKey{}, copy)
+}
+
 // MatchesSelectedUsage accepts a model override only from this request's
 // execution-owned preview for the same candidate and account.
 func MatchesSelectedUsage(ctx context.Context, policy *ExecutionUsagePolicy) bool {

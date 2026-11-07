@@ -130,10 +130,15 @@ func (a *tierLimitAdapter) ObserveLimit(
 	if failure.Code != routingerr.CodeRateLimited && failure.Code != routingerr.CodeQuotaLimited {
 		return
 	}
+	ctx = agentusage.SnapshotCandidateUsage(context.WithoutCancel(ctx), candidate.ID)
+	if candidate.UsagePolicy != nil {
+		policy := *candidate.UsagePolicy
+		candidate.UsagePolicy = &policy
+	}
 	// Keep the request's selected account/model evidence while allowing the
 	// detached observer to finish after the originating request is canceled.
 	go func() {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		observation := &sqliterepo.UsageLimitObservation{
 			ID: uuid.NewString(), ExecutionProfileID: candidate.ID,
