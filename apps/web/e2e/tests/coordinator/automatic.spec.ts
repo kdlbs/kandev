@@ -87,14 +87,12 @@ test.describe("Coordinator automatic create_task", () => {
 
     // Every log condition is earned, the review is not: Automatic stays off.
     await testPage.goto(settings);
-    await expect(testPage.getByTestId("automatic-condition-volume")).toHaveAttribute(
-      "data-met",
-      "true",
-    );
-    await expect(testPage.getByTestId("automatic-condition-reviewed_7d")).toHaveAttribute(
-      "data-met",
-      "false",
-    );
+    await expect(
+      testPage.getByTestId("may-do-row-create_task").getByTestId("automatic-condition-volume"),
+    ).toHaveAttribute("data-met", "true");
+    await expect(
+      testPage.getByTestId("may-do-row-create_task").getByTestId("automatic-condition-reviewed_7d"),
+    ).toHaveAttribute("data-met", "false");
     await expect(testPage.locator(AUTOMATIC_RADIO)).toBeDisabled();
     await expect(testPage.locator("#may-do-message-automatic")).toBeDisabled();
     await expect(testPage.getByTestId("may-do-automatic-note-message")).toHaveText(
@@ -102,17 +100,21 @@ test.describe("Coordinator automatic create_task", () => {
     );
 
     // Mark as reviewed is offered only after the filtered log was opened.
-    await expect(testPage.getByTestId("automatic-mark-reviewed")).toBeDisabled();
+    await expect(
+      testPage.getByTestId("may-do-row-create_task").getByTestId("automatic-mark-reviewed"),
+    ).toBeDisabled();
     await testPage.getByTestId("may-do-review-create_task").click();
     await expect(testPage).toHaveURL(/\/queue\?class=create_task$/);
     await testPage.goto(settings);
     const reviewed = waitForHttp(testPage, "POST", REVIEW_PATH);
-    await testPage.getByTestId("automatic-mark-reviewed").click();
+    await testPage
+      .getByTestId("may-do-row-create_task")
+      .getByTestId("automatic-mark-reviewed")
+      .click();
     await reviewed;
-    await expect(testPage.getByTestId("automatic-condition-reviewed_7d")).toHaveAttribute(
-      "data-met",
-      "true",
-    );
+    await expect(
+      testPage.getByTestId("may-do-row-create_task").getByTestId("automatic-condition-reviewed_7d"),
+    ).toHaveAttribute("data-met", "true");
 
     // Raise: choose Automatic and save.
     await expect(testPage.locator(AUTOMATIC_RADIO)).toBeEnabled();
@@ -120,9 +122,9 @@ test.describe("Coordinator automatic create_task", () => {
     const saved = waitForHttp(testPage, "PUT", SETTINGS_PATH);
     await testPage.getByRole("button", { name: "Save changes" }).click();
     await saved;
-    await expect(testPage.getByTestId("automatic-raised-record")).toContainText(
-      "Raised to automatic",
-    );
+    await expect(
+      testPage.getByTestId("may-do-row-create_task").getByTestId("automatic-raised-record"),
+    ).toContainText("Raised to automatic");
 
     // The next proposal is approved with no click and logged as automatic.
     await testPage.goto(linkToCoordinatorQueue(seedData.workspaceId, coordinator.id));
@@ -150,10 +152,9 @@ test.describe("Coordinator automatic create_task", () => {
 
     await testPage.goto(settings);
     await expect(testPage.locator(APPROVAL_RADIO)).toBeChecked();
-    await expect(testPage.getByTestId("automatic-condition-no_undo")).toHaveAttribute(
-      "data-met",
-      "false",
-    );
+    await expect(
+      testPage.getByTestId("may-do-row-create_task").getByTestId("automatic-condition-no_undo"),
+    ).toHaveAttribute("data-met", "false");
     await expect(testPage.locator(AUTOMATIC_RADIO)).toBeDisabled();
   });
 });

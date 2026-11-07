@@ -8,7 +8,7 @@ import AppLink from "@/components/routing/app-link";
 import type { ControlAction, ControlSetting } from "@/lib/api/domains/coordinator-api";
 import type { ClassEligibility } from "@/lib/api/domains/coordinator-automatic-api";
 import { linkToCoordinatorActivityClass } from "@/lib/coordinator/links";
-import { CONTROL_ACTIONS } from "@/lib/coordinators/control-draft";
+import { ACTION_LABEL_KEY, CONTROL_ACTIONS } from "@/lib/coordinators/control-draft";
 import {
   useActionSummary,
   type ActionCounts,
@@ -20,17 +20,9 @@ import {
 } from "@/hooks/domains/coordinator/use-class-eligibility";
 import { useReviewOpened } from "@/hooks/domains/coordinator/use-review-opened";
 import { AutomaticEligibility, RaisedRecord } from "./automatic-eligibility";
+import { EligibilitySettingsGroup } from "./eligibility-settings";
 
 type Control = ReturnType<typeof useControlDraft>;
-
-const ACTION_LABEL: Record<ControlAction, string> = {
-  create_task: "coordinator:mayDoCreateTask",
-  start_agent: "coordinator:mayDoStartAgent",
-  message: "coordinator:mayDoMessage",
-  move: "coordinator:mayDoMove",
-  resume: "coordinator:mayDoResume",
-  stop: "coordinator:mayDoStop",
-};
 
 type MayDoSectionProps = {
   workspaceId: string;
@@ -40,7 +32,14 @@ type MayDoSectionProps = {
   phase3?: boolean;
 };
 
-/** The phase 3 raise surface: eligibility of create_task and the review flow. */
+/** The classes the server accepts as automatic. */
+const RAISABLE_ACTIONS: ReadonlySet<ControlAction> = new Set([
+  "create_task",
+  "start_agent",
+  "resume",
+]);
+
+/** The phase 3 raise surface of one class: its eligibility and the review flow. */
 export type MayDoAutomatic = {
   eligibility: ClassEligibility | null;
   status: ClassEligibilityStatus;
@@ -51,14 +50,18 @@ export type MayDoAutomatic = {
   onRetry: () => void;
 };
 
+/** Per-class raise surface; undefined while phase 3 is not effective. */
+export type MayDoAutomaticMap = Partial<Record<ControlAction, MayDoAutomatic>>;
+
 function automaticRadioState(
   action: ControlAction,
   value: ControlSetting,
   canManage: boolean,
-  automatic: MayDoAutomatic | undefined,
+  automaticMap: MayDoAutomaticMap | undefined,
 ): { disabled: boolean; noteKey: string } {
-  if (!automatic) return { disabled: true, noteKey: "coordinator:mayDoAutomaticNote" };
-  if (action !== "create_task") {
+  if (!automaticMap) return { disabled: true, noteKey: "coordinator:mayDoAutomaticNote" };
+  const automatic = automaticMap[action];
+  if (!RAISABLE_ACTIONS.has(action) || !automatic) {
     return { disabled: true, noteKey: "coordinator:mayDoAutomaticCannot" };
   }
   const allowed = canManage && (value === "automatic" || automatic.eligibility?.eligible === true);
@@ -105,7 +108,7 @@ type RowProps = {
   onChange: (value: ControlSetting) => void;
   activity?: MayDoActivity;
   errorMessage?: string;
-  automatic?: MayDoAutomatic;
+  automatic?: MayDoAutomaticMap;
 };
 
 function AutomaticOption({
@@ -149,11 +152,12 @@ function ActionRow({
   const name = `may-do-${action}`;
   const radio = automaticRadioState(action, value, !disabled, automatic);
   const radioValue = value === "automatic" && !automatic ? "denied" : value;
-  const onReviewClick = action === "create_task" ? automatic?.onReviewOpened : undefined;
+  const entry = automatic?.[action];
+  const onReviewClick = entry?.onReviewOpened;
   return (
     <div className="space-y-2 py-3" data-testid={`may-do-row-${action}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-sm font-medium">{t(ACTION_LABEL[action])}</span>
+        <span className="text-sm font-medium">{t(ACTION_LABEL_KEY[action])}</span>
         {activity && (
           <AppLink
             href={linkToCoordinatorActivityClass(
@@ -174,7 +178,7 @@ function ActionRow({
         onValueChange={(next) => onChange(next as ControlSetting)}
         disabled={disabled}
         className="flex flex-wrap gap-4"
-        aria-label={t(ACTION_LABEL[action])}
+        aria-label={t(ACTION_LABEL_KEY[action])}
       >
         <label className="flex cursor-pointer items-center gap-2 text-sm">
           <RadioGroupItem value="denied" id={`${name}-denied`} />
@@ -200,17 +204,17 @@ function ActionRow({
         </p>
       )}
       {activity && <Counts action={action} counts={activity.counts} status={activity.status} />}
-      {action === "create_task" && automatic && (
+      {entry && (
         <>
-          {automatic.eligibility && <RaisedRecord eligibility={automatic.eligibility} />}
+          {entry.eligibility && <RaisedRecord eligibility={entry.eligibility} />}
           <AutomaticEligibility
-            eligibility={automatic.eligibility}
-            status={automatic.status}
+            eligibility={entry.eligibility}
+            status={entry.status}
             canManage={!disabled}
-            reviewOpened={automatic.reviewOpened}
-            reviewFailed={automatic.reviewFailed}
-            onMarkReviewed={automatic.onMarkReviewed}
-            onRetry={automatic.onRetry}
+            reviewOpened={entry.reviewOpened}
+            reviewFailed={entry.reviewFailed}
+            onMarkReviewed={entry.onMarkReviewed}
+            onRetry={entry.onRetry}
           />
         </>
       )}
@@ -226,7 +230,7 @@ export type MayDoRowsProps = {
   rowErrors?: Partial<Record<ControlAction, string>>;
   errorMessage?: string | null;
   freshConversationNote?: boolean;
-  automatic?: MayDoAutomatic;
+  automatic?: MayDoAutomaticMap;
 };
 
 export function MayDoRows({
@@ -273,6 +277,42 @@ export function MayDoRows({
   );
 }
 
+function useAutomaticClass(
+  workspaceId: string,
+  coordinatorId: string,
+  action: ControlAction,
+  phase3: boolean,
+): MayDoAutomatic {
+  const eligibility = useClassEligibility(workspaceId, coordinatorId, action, phase3);
+  const [reviewOpened, markReviewOpened] = useReviewOpened(coordinatorId, action);
+  return {
+    eligibility: eligibility.eligibility,
+    status: eligibility.status,
+    reviewOpened,
+    reviewFailed: eligibility.reviewFailed,
+    onReviewOpened: markReviewOpened,
+    onMarkReviewed: eligibility.markReviewed,
+    onRetry: eligibility.reload,
+  };
+}
+
+function useAutomaticMap(
+  workspaceId: string,
+  coordinatorId: string,
+  phase3: boolean,
+): MayDoAutomaticMap | undefined {
+  const createTask = useAutomaticClass(workspaceId, coordinatorId, "create_task", phase3);
+  const startAgent = useAutomaticClass(workspaceId, coordinatorId, "start_agent", phase3);
+  const resume = useAutomaticClass(workspaceId, coordinatorId, "resume", phase3);
+  return phase3 ? { create_task: createTask, start_agent: startAgent, resume } : undefined;
+}
+
+/** A 400 naming `policy.eligibility` shows above the group, not on an action row. */
+function eligibilityError(control: Control): string | null {
+  const error = control.fieldError;
+  return error?.field?.startsWith("policy.eligibility") ? error.detail : null;
+}
+
 export function MayDoSection({
   workspaceId,
   coordinatorId,
@@ -282,20 +322,8 @@ export function MayDoSection({
 }: MayDoSectionProps) {
   const { t } = useTranslation();
   const summary = useActionSummary(workspaceId, coordinatorId, 30);
-  const eligibility = useClassEligibility(workspaceId, coordinatorId, "create_task", phase3);
-  const [reviewOpened, markReviewOpened] = useReviewOpened(coordinatorId, "create_task");
+  const automatic = useAutomaticMap(workspaceId, coordinatorId, phase3);
   const { draft, status, retry } = control;
-  const automatic: MayDoAutomatic | undefined = phase3
-    ? {
-        eligibility: eligibility.eligibility,
-        status: eligibility.status,
-        reviewOpened,
-        reviewFailed: eligibility.reviewFailed,
-        onReviewOpened: markReviewOpened,
-        onMarkReviewed: eligibility.markReviewed,
-        onRetry: eligibility.reload,
-      }
-    : undefined;
 
   if (status === "loading" || !draft) {
     if (status === "error") {
@@ -329,6 +357,14 @@ export function MayDoSection({
         freshConversationNote
         automatic={automatic}
       />
+      {draft.eligibility && (
+        <EligibilitySettingsGroup
+          eligibility={draft.eligibility}
+          canManage={canManage}
+          serverError={eligibilityError(control)}
+          onChange={control.setEligibility}
+        />
+      )}
     </div>
   );
 }

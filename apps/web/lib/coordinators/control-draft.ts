@@ -1,5 +1,6 @@
 import type {
   ControlAction,
+  EligibilitySettings,
   ControlSetting,
   CoordinatorSettings,
   ProjectEntry,
@@ -16,6 +17,16 @@ export const CONTROL_ACTIONS: readonly ControlAction[] = [
   "stop",
 ];
 
+/** i18n keys of the display label of each action; the wire token is never shown. */
+export const ACTION_LABEL_KEY: Record<ControlAction, string> = {
+  create_task: "coordinator:mayDoCreateTask",
+  start_agent: "coordinator:mayDoStartAgent",
+  message: "coordinator:mayDoMessage",
+  move: "coordinator:mayDoMove",
+  resume: "coordinator:mayDoResume",
+  stop: "coordinator:mayDoStop",
+};
+
 export const MAX_WATCHED_BOARDS = 50;
 
 export type WatchesDraft = { scope: "all" | "selected"; workflowIds: string[] };
@@ -28,8 +39,42 @@ export type ProjectsDraft = {
   includeNoRepository: boolean;
 };
 
+export const ELIGIBILITY_FIELDS = [
+  "evidence_window_hours",
+  "min_decisions",
+  "unedited_floor_percent",
+  "review_max_age_hours",
+  "daily_limit",
+] as const;
+
+export type EligibilityField = (typeof ELIGIBILITY_FIELDS)[number];
+
+/** The server's bounds (internal/coordinator/policy.go), enforced client-side before a save. */
+export const ELIGIBILITY_BOUNDS: Record<EligibilityField, { min: number; max: number }> = {
+  evidence_window_hours: { min: 24, max: 2160 },
+  min_decisions: { min: 3, max: 500 },
+  unedited_floor_percent: { min: 50, max: 100 },
+  review_max_age_hours: { min: 1, max: 720 },
+  daily_limit: { min: 1, max: 100 },
+};
+
+export function isEligibilityValueValid(field: EligibilityField, value: number): boolean {
+  const { min, max } = ELIGIBILITY_BOUNDS[field];
+  return Number.isInteger(value) && value >= min && value <= max;
+}
+
+export function sameEligibility(
+  a: EligibilitySettings | null,
+  b: EligibilitySettings | null,
+): boolean {
+  if (a === null || b === null) return a === b;
+  return ELIGIBILITY_FIELDS.every((field) => a[field] === b[field]);
+}
+
 export type ControlDraft = {
   actions: Record<ControlAction, ControlSetting>;
+  /** Null while phase 3 is not effective: the settings read carries no `policy.eligibility`. */
+  eligibility: EligibilitySettings | null;
   watches: WatchesDraft;
   /** Null while the Projects scope is not offered (the settings read carries no `projects_config`). */
   projects: ProjectsDraft | null;
@@ -39,6 +84,7 @@ export function draftFromSettings(settings: CoordinatorSettings): ControlDraft {
   const config = settings.projects_config;
   return {
     actions: { ...settings.policy.actions },
+    eligibility: settings.policy.eligibility ? { ...settings.policy.eligibility } : null,
     watches: { scope: settings.watches.scope, workflowIds: [...settings.watches.workflow_ids] },
     projects: config
       ? {
@@ -116,8 +162,25 @@ export function sameWatches(a: WatchesDraft, b: WatchesDraft): boolean {
   return a.workflowIds.every((id) => ids.has(id));
 }
 
+export function isEligibilityDirty(draft: ControlDraft, stored: ControlDraft): boolean {
+  return !sameEligibility(draft.eligibility, stored.eligibility);
+}
+
+/** A draft eligibility with a value outside its bounds that the manager edited: it cannot be saved. */
+export function isEligibilityInvalid(draft: ControlDraft, stored: ControlDraft): boolean {
+  const eligibility = draft.eligibility;
+  return (
+    eligibility !== null &&
+    isEligibilityDirty(draft, stored) &&
+    ELIGIBILITY_FIELDS.some((field) => !isEligibilityValueValid(field, eligibility[field]))
+  );
+}
+
 export function isPolicyDirty(draft: ControlDraft, stored: ControlDraft): boolean {
-  return CONTROL_ACTIONS.some((action) => draft.actions[action] !== stored.actions[action]);
+  return (
+    CONTROL_ACTIONS.some((action) => draft.actions[action] !== stored.actions[action]) ||
+    isEligibilityDirty(draft, stored)
+  );
 }
 
 export function isWatchesDirty(draft: ControlDraft, stored: ControlDraft): boolean {
@@ -133,10 +196,18 @@ export function isWatchesInvalid(draft: ControlDraft, stored: ControlDraft): boo
   );
 }
 
-/** The PUT body: only the members that differ from stored; the policy names all six actions. */
+/**
+ * The PUT body: only the members that differ from stored; the policy names all
+ * six actions and carries `eligibility` only when it was edited.
+ */
 export function buildPutRequest(draft: ControlDraft, stored: ControlDraft): PutSettingsRequest {
   const request: PutSettingsRequest = {};
-  if (isPolicyDirty(draft, stored)) request.policy = { actions: { ...draft.actions } };
+  if (isPolicyDirty(draft, stored)) {
+    request.policy = { actions: { ...draft.actions } };
+    if (draft.eligibility && isEligibilityDirty(draft, stored)) {
+      request.policy.eligibility = { ...draft.eligibility };
+    }
+  }
   if (isWatchesDirty(draft, stored)) {
     request.watches =
       draft.watches.scope === "all"
@@ -168,7 +239,10 @@ export function mergeStored(
   const projects = sameProjects(draft.projects, oldStored.projects)
     ? newStored.projects
     : draft.projects;
-  return { actions, watches, projects };
+  const eligibility = sameEligibility(draft.eligibility, oldStored.eligibility)
+    ? newStored.eligibility
+    : draft.eligibility;
+  return { actions, eligibility, watches, projects };
 }
 
 /** After a 200: members edited since the request was sent stay as drafted, the rest take the response. */
@@ -185,7 +259,10 @@ export function settleAfterSave(
   const projects = sameProjects(current.projects, sent.projects)
     ? response.projects
     : current.projects;
-  return { actions, watches, projects };
+  const eligibility = sameEligibility(current.eligibility, sent.eligibility)
+    ? response.eligibility
+    : current.eligibility;
+  return { actions, eligibility, watches, projects };
 }
 
 export type SwitchOffResult =

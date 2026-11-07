@@ -167,6 +167,10 @@ type Proposal struct {
 	DecidedAutomatically bool
 	ClaimedAutomatically bool
 	AutomaticAt          *time.Time
+
+	// LoweredClass is set on the value a manager's decision returns when that
+	// decision lowered a class from automatic; it is never stored.
+	LoweredClass string
 }
 
 // Proposal kinds.

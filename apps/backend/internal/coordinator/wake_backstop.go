@@ -150,7 +150,8 @@ func (b *WakeBackstop) skip(what string, err error) {
 }
 
 // visitSet is the union of the coordinators with autonomy on, with an open or
-// recently finished turn, and with an automatic claim, ordered by id. A query
+// recently finished turn, with an automatic claim, and with a raised class,
+// ordered by id. A query
 // that fails is counted and the others still contribute.
 func (b *WakeBackstop) visitSet(ctx context.Context, now time.Time) []string {
 	store := b.svc.store
@@ -163,6 +164,7 @@ func (b *WakeBackstop) visitSet(ctx context.Context, now time.Time) []string {
 			return store.CoordinatorIDsWithActiveTurns(ctx, now.Add(-recentTurnWindow))
 		}},
 		{"coordinators with automatic claims", func() ([]string, error) { return store.CoordinatorIDsWithAutomaticClaims(ctx) }},
+		{"coordinators with raised classes", func() ([]string, error) { return store.CoordinatorIDsWithRaisedClasses(ctx) }},
 	}
 	seen := map[string]struct{}{}
 	for _, src := range sources {

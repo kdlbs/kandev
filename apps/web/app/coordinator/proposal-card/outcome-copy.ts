@@ -4,6 +4,7 @@ import type {
   KindProposal,
   StoredProposal,
 } from "@/lib/api/domains/coordinator-api";
+import { ACTION_LABEL_KEY } from "@/lib/coordinators/control-draft";
 
 const FAILURE_KEYS: Record<string, string> = {
   outcome_unknown: "coordinator:outcomeUnknown",
@@ -95,4 +96,19 @@ export function policyLineText(
   const action: PolicyAction =
     proposal.kind === undefined || proposal.kind === "create_task" ? "create" : proposal.kind;
   return t(POLICY_KEYS[action]);
+}
+
+type LoweredToastContext = {
+  t: TFunction;
+  toast: (input: { title: string; variant?: "default" | "success" | "error" | "loading" }) => void;
+};
+
+/** Tells the manager which class their decision lowered to requires approval, by display label. */
+export function loweredToast(proposal: StoredProposal, ctx: LoweredToastContext) {
+  const lowered = proposal.lowered_class;
+  if (!lowered) return;
+  ctx.toast({
+    title: ctx.t("coordinator:loweredClassNotice", { class: ctx.t(ACTION_LABEL_KEY[lowered]) }),
+    variant: "default",
+  });
 }

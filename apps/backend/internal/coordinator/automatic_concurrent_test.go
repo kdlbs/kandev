@@ -59,7 +59,7 @@ func seedAutomaticApprovals(t *testing.T, store *Store, c *Coordinator, n int) {
 func runConcurrentTenth(t *testing.T, store *Store) {
 	t.Helper()
 	c, svc := newAutomaticServiceOn(t, store)
-	seedAutomaticApprovals(t, store, c, automaticDailyLimit-1)
+	seedAutomaticApprovals(t, store, c, testDailyLimit-1)
 	first, second := insertKind(t, store, c, ProposalKindCreateTask), insertKind(t, store, c, ProposalKindCreateTask)
 	start := make(chan struct{})
 	results := make([]*AutomaticResult, 2)
@@ -91,7 +91,7 @@ func runConcurrentTenth(t *testing.T, store *Store) {
 		t.Fatalf("approved=%d limited=%d results=%+v %+v", approved, limited, results[0], results[1])
 	}
 	n, err := store.CountAutomaticDecidedTx(context.Background(), store.db, c.ID, automaticNow.Add(-automaticLimitWindow))
-	if err != nil || n != automaticDailyLimit {
+	if err != nil || n != testDailyLimit {
 		t.Fatalf("count = %d err = %v", n, err)
 	}
 }

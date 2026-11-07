@@ -75,9 +75,19 @@ export type CoordinatorSummary = {
 export type ControlAction = "create_task" | "start_agent" | "message" | "move" | "resume" | "stop";
 export type ControlSetting = "denied" | "requires_approval" | "automatic";
 
+// Mirrors internal/coordinator/policy.go's EligibilitySettings.
+export type EligibilitySettings = {
+  evidence_window_hours: number;
+  min_decisions: number;
+  unedited_floor_percent: number;
+  review_max_age_hours: number;
+  daily_limit: number;
+};
+
 // Mirrors GET/PUT .../settings (docs/specs/coordinator/system-design/permissions.md#settings-routes).
 export type CoordinatorSettings = {
-  policy: { actions: Record<ControlAction, ControlSetting> };
+  // `eligibility` is present only while features.coordinatorPhase3 is effective.
+  policy: { actions: Record<ControlAction, ControlSetting>; eligibility?: EligibilitySettings };
   policy_revision: number;
   watches: { scope: "all" | "selected"; workflow_ids: string[] };
   // Resolved scope for the client filter; present while the stored scope is selected.
@@ -87,7 +97,7 @@ export type CoordinatorSettings = {
 };
 
 export type PutSettingsRequest = {
-  policy?: { actions: Record<ControlAction, ControlSetting> };
+  policy?: { actions: Record<ControlAction, ControlSetting>; eligibility?: EligibilitySettings };
   watches?: { scope: "all" | "selected"; workflow_ids?: string[] };
   projects?: Projects.ProjectsRequest;
 };
@@ -151,6 +161,8 @@ type ProposalBase = {
   reply_text?: string | null;
   reply_delivered_at?: string | null;
   in_reply_to?: string | null;
+  // The class the decision lowered to requires_approval; set on a decision response only.
+  lowered_class?: ControlAction;
   // Present on an improvement proposal only, while phase 3 is effective.
   change_status?: PendingChangeStatus | null;
 };

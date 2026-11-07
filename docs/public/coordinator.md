@@ -83,21 +83,33 @@ In the coordinator conversation, an unattended turn opens with a **Woken by N ev
 
 ## Let it create tasks on its own
 
-Under **May do**, a coordinator's **Create a card** permission can be raised from **Requires approval** to **Automatic**. Automatic is available for this permission only; every other action shows **Cannot be raised**. An automatic create makes one ordinary task and never starts an agent.
+Under **May do**, the **Create a card**, **Start an agent** and **Resume a session** permissions can each be raised from **Requires approval** to **Automatic**. Every other action shows **Cannot be raised**. An automatic create makes one ordinary task. A card that starts an agent needs both **Create a card** and **Start an agent** to be automatic.
 
-The **Automatic** option stays off until the coordinator has earned it. The settings list each condition as **Met** or **Not met** with its current value:
+The **Automatic** option stays off until the permission has earned it. The settings list each condition as **Met** or **Not met** with its current value:
 
-- Its first decided card is at least 30 days old.
-- The last 30 days hold at least 20 decided cards.
-- At least 90% of them were approved without edits.
-- No task it created in the last 30 days was undone.
-- You reviewed the last 30 days within the past 7 days.
+- Its first decided card is at least as old as the evidence window.
+- The evidence window holds at least the minimum number of decided cards.
+- At least the unedited percentage of them were approved without edits.
+- No task it created in the evidence window was undone.
+- You reviewed the evidence window within the review freshness period.
 
-Select **Review the last 30 days** to open the log filtered to this coordinator, then **Mark as reviewed**. To raise the permission, choose **Automatic** and save. The settings then show who raised it and when.
+Select **Review the last 30 days** to open the log filtered to this coordinator and class, then **Mark as reviewed**. To raise the permission, choose **Automatic** and save. The settings then show who raised it and when.
 
-Automatic approvals appear in **What it did** with the authorization **Automatic** and the manager who raised the permission. At most 10 are approved in any 24 hours; further proposals wait for you. If an automatic approval fails, the proposal stays for you to approve, edit, or reject.
+Under **Automatic eligibility** you set the five limits that these conditions and the daily cap use:
 
-You can lower the permission back to **Requires approval** at any time. Undoing a task an automatic approval created lowers it for you.
+| Setting | Default | Allowed |
+| --- | --- | --- |
+| Evidence window (hours) | 720 | 24 to 2160 |
+| Minimum decisions | 20 | 3 to 500 |
+| Approved without edits (%) | 90 | 50 to 100 |
+| Review freshness (hours) | 168 | 1 to 720 |
+| Daily limit | 10 | 1 to 100 |
+
+The daily limit is one limit per coordinator across all classes. Changing a limit never lowers a permission that is already automatic.
+
+Automatic approvals appear in **What it did** with the authorization **Automatic** and the manager who raised the permission. Further proposals past the daily limit wait for you. An automatic run that starts an agent also waits for containment and the cost ceiling; it stays pending and the note says it is held. If an automatic approval fails, the proposal stays for you to approve, edit, or reject.
+
+You can lower a permission back to **Requires approval** at any time. Kandev also lowers it for you when an automatic action fails, when you reject, return or edit-and-approve a proposal that needed it, and when you undo a task an automatic approval created. The decision confirms which permission was lowered.
 
 ## Choose the agent for created tasks
 

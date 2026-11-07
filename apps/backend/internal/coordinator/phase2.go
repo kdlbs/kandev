@@ -10,14 +10,18 @@ type ClassSetting struct {
 	Value     Setting
 	ChangedBy string
 	ChangedAt *time.Time
+	// ChangeID is the id of the newest class change to the current value; it
+	// identifies one raise, which ChangedBy alone cannot.
+	ChangeID string
 }
 
 // ActionSettings is the per-class settings surface the automatic path reads.
 type ActionSettings interface {
 	Setting(ctx context.Context, coordinatorID, class string) (ClassSetting, error)
 	// Lower writes the class to requires_approval as a system change and
-	// records reason. It writes nothing when the class is not automatic.
-	Lower(ctx context.Context, coordinatorID, class, reason string) error
+	// records reason. It writes nothing, and reports false, when the class is
+	// not automatic or the guard rejects the newest raise.
+	Lower(ctx context.Context, coordinatorID, class, reason string, guard LowerGuard) (bool, error)
 }
 
 // Decision is one decided log row of a class.
@@ -55,22 +59,19 @@ func (a storeActionSettings) Setting(ctx context.Context, coordinatorID, class s
 		return out, err
 	}
 	at := change.ChangedAt.UTC()
-	out.ChangedBy, out.ChangedAt = change.ChangedBy, &at
+	out.ChangedBy, out.ChangedAt, out.ChangeID = change.ChangedBy, &at, change.ID
 	return out, nil
 }
 
-func (a storeActionSettings) Lower(ctx context.Context, coordinatorID, class, reason string) error {
-	return a.svc.LowerClass(ctx, coordinatorID, Action(class), reason)
+func (a storeActionSettings) Lower(ctx context.Context, coordinatorID, class, reason string, guard LowerGuard) (bool, error) {
+	return a.svc.LowerClass(ctx, coordinatorID, Action(class), reason, guard)
 }
 
 // storeDecisionLog reads the decided rows of coordinator_activity.
 type storeDecisionLog struct{ store *Store }
 
 func (l storeDecisionLog) EarliestDecision(ctx context.Context, coordinatorID, class string) (time.Time, bool, error) {
-	if Action(class) != ActionCreateTask {
-		return time.Time{}, false, nil
-	}
-	at, err := l.store.EarliestDecisionAt(ctx, coordinatorID)
+	at, err := l.store.EarliestDecisionAt(ctx, coordinatorID, Action(class))
 	if err != nil || at == nil {
 		return time.Time{}, false, err
 	}
@@ -78,10 +79,7 @@ func (l storeDecisionLog) EarliestDecision(ctx context.Context, coordinatorID, c
 }
 
 func (l storeDecisionLog) Decisions(ctx context.Context, coordinatorID, class string, since, before time.Time) ([]Decision, error) {
-	if Action(class) != ActionCreateTask {
-		return nil, nil
-	}
-	rows, err := l.store.DecidedRows(ctx, coordinatorID, since, before)
+	rows, err := l.store.DecidedRows(ctx, coordinatorID, Action(class), since, before)
 	if err != nil {
 		return nil, err
 	}

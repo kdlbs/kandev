@@ -39,8 +39,9 @@ func (s *Service) approveApprovingKind(ctx context.Context, proposal *Proposal, 
 	return s.reclaimStaleAndProceed(ctx, proposal.WorkspaceID, proposal.CoordinatorID, proposal.ID, cutoff)
 }
 
-// claimKind validates the edits, re-checks policy, claims and executes.
-func (s *Service) claimKind(ctx context.Context, exec KindExecutor, proposal *Proposal, edits ApproveProposalRequest) (*Proposal, error) {
+// prepareKindApproval validates the edits against the stored spec and
+// re-checks policy. It writes nothing and returns the spec to freeze.
+func (s *Service) prepareKindApproval(ctx context.Context, exec KindExecutor, proposal *Proposal, edits ApproveProposalRequest) (json.RawMessage, error) {
 	base := json.RawMessage(proposal.RawSpec)
 	if proposal.RawFinalSpec != "" {
 		base = json.RawMessage(proposal.RawFinalSpec)
@@ -56,6 +57,15 @@ func (s *Service) claimKind(ctx context.Context, exec KindExecutor, proposal *Pr
 	if err := s.recheckPolicy(ctx, proposal.CoordinatorID, proposal); err != nil {
 		return nil, err
 	}
+	return final, nil
+}
+
+// claimKind validates the edits, re-checks policy, claims and executes.
+func (s *Service) claimKind(ctx context.Context, exec KindExecutor, proposal *Proposal, edits ApproveProposalRequest) (*Proposal, error) {
+	final, err := s.prepareKindApproval(ctx, exec, proposal, edits)
+	if err != nil {
+		return nil, err
+	}
 	decidedBy := decidingUserID(ctx)
 	token := uuid.New().String()
 	matched, err := s.store.ClaimProposalRaw(ctx, proposal.ID, token, string(final), decidedBy, time.Now())
@@ -65,6 +75,12 @@ func (s *Service) claimKind(ctx context.Context, exec KindExecutor, proposal *Pr
 	if !matched {
 		return s.claimRaceResult(ctx, proposal.WorkspaceID, proposal.CoordinatorID, proposal.ID)
 	}
+	return s.runClaimedKind(ctx, exec, proposal, token, final, decidedBy)
+}
+
+// runClaimedKind continues a just-committed kind claim: it publishes the
+// update, builds the Claim and executes.
+func (s *Service) runClaimedKind(ctx context.Context, exec KindExecutor, proposal *Proposal, token string, final json.RawMessage, decidedBy string) (*Proposal, error) {
 	s.publishCoordinatorUpdated(ctx, proposal.WorkspaceID, proposal.CoordinatorID)
 	s.logger.Info("proposal claimed", zap.String("proposal_id", proposal.ID), zap.String("kind", proposal.Kind))
 
@@ -123,6 +139,7 @@ func (s *Service) completeKind(ctx context.Context, exec KindExecutor, proposal 
 		ActionClass: exec.Action(), Outcome: ActivityApproved, Authorization: AuthRequiresApproval,
 		TargetTaskID: optString(target), ProposalID: &proposal.ID, ActorUserID: optString(claim.ApprovedBy), Detail: out.Detail,
 	}
+	s.stampAutomatic(ctx, proposal, &row)
 	matched, err := s.settleDecision(ctx, proposal.CoordinatorID, row, func(tx coordinatorExec) (bool, error) {
 		return s.store.CompleteKindTx(ctx, tx, proposal.ID, claim.Token, target, out.OutcomeJSON, time.Now())
 	})
@@ -146,6 +163,10 @@ func (s *Service) completeKind(ctx context.Context, exec KindExecutor, proposal 
 
 func (s *Service) failKind(ctx context.Context, exec KindExecutor, proposal *Proposal, token, text string) (*Proposal, error) {
 	row := s.failedKindRow(exec, proposal, text, decidingUserID(ctx))
+	if current, err := s.store.GetProposalAnyKind(ctx, proposal.WorkspaceID, proposal.CoordinatorID, proposal.ID); err == nil {
+		row.Edited = kindSpecEdited(current)
+	}
+	attempt := s.stampAutomatic(ctx, proposal, &row)
 	matched, err := s.settleDecision(ctx, proposal.CoordinatorID, row, func(tx coordinatorExec) (bool, error) {
 		return s.store.FailProposalTx(ctx, tx, proposal.ID, token, text, time.Now())
 	})
@@ -157,6 +178,7 @@ func (s *Service) failKind(ctx context.Context, exec KindExecutor, proposal *Pro
 	}
 	s.publishCoordinatorUpdated(ctx, proposal.WorkspaceID, proposal.CoordinatorID)
 	s.logger.Info("proposal approval failed", zap.String("proposal_id", proposal.ID), zap.String("kind", proposal.Kind), zap.String("error", text))
+	s.afterAutomaticFailure(ctx, attempt)
 	return s.store.GetProposal(ctx, proposal.WorkspaceID, proposal.CoordinatorID, proposal.ID, s.phase2)
 }
 
@@ -168,12 +190,20 @@ func (s *Service) failedKindRow(exec KindExecutor, proposal *Proposal, text, act
 	}
 }
 
+// kindSpecEdited reports whether the stored final spec differs from the
+// proposed one.
+func kindSpecEdited(p *Proposal) bool {
+	return p.RawFinalSpec != "" && !sameSpec(json.RawMessage(p.RawFinalSpec), json.RawMessage(p.RawSpec))
+}
+
 // settleStaleKind settles a stale non-create claim failed with outcome_unknown
 // without running Execute: the side effect may already have happened, and the
 // kind is not safe to run twice. The conditional update and its activity row
 // commit together; a claim another path settled first is a conflict.
 func (s *Service) settleStaleKind(ctx context.Context, current *Proposal, exec KindExecutor, cutoff time.Time) (*Proposal, error) {
 	row := s.failedKindRow(exec, current, outcomeUnknownError, "")
+	row.Edited = kindSpecEdited(current)
+	attempt := s.stampAutomatic(ctx, current, &row)
 	matched, err := s.settleDecision(ctx, current.CoordinatorID, row, func(tx coordinatorExec) (bool, error) {
 		return s.store.SettleStaleUnknownTx(ctx, tx, current.ID, cutoff, time.Now())
 	})
@@ -189,6 +219,7 @@ func (s *Service) settleStaleKind(ctx context.Context, current *Proposal, exec K
 	}
 	s.publishCoordinatorUpdated(ctx, current.WorkspaceID, current.CoordinatorID)
 	s.logger.Info("stale claim settled outcome_unknown", zap.String("proposal_id", current.ID), zap.String("kind", current.Kind))
+	s.afterAutomaticFailure(ctx, attempt)
 	return s.store.GetProposalAnyKind(ctx, current.WorkspaceID, current.CoordinatorID, current.ID)
 }
 

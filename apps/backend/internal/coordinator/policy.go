@@ -1,10 +1,12 @@
 package coordinator
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ErrPolicyUnreadable marks a stored policy value ParsePolicy could not trust.
@@ -40,12 +42,93 @@ const (
 // AllActions is the fixed action order; ActionUnknown is not a policy action.
 var AllActions = []Action{ActionCreateTask, ActionStartAgent, ActionMessage, ActionMove, ActionResume, ActionStop}
 
-const policyVersion = 1
+const (
+	policyVersion     = 1
+	eligibilityPrefix = "eligibility."
+)
 
 // Policy is the stored per-coordinator permission map.
 type Policy struct {
 	Version int                `json:"version"`
 	Actions map[Action]Setting `json:"actions"`
+	// Eligibility is the stored eligibility object; nil means the defaults.
+	Eligibility *EligibilitySettings `json:"eligibility,omitempty"`
+}
+
+// EligibilitySettings are the five bounded gates that earn a raise to
+// automatic, stored beside the actions.
+type EligibilitySettings struct {
+	EvidenceWindowHours int `json:"evidence_window_hours"`
+	MinDecisions        int `json:"min_decisions"`
+	UneditedFloorPct    int `json:"unedited_floor_percent"`
+	ReviewMaxAgeHours   int `json:"review_max_age_hours"`
+	DailyLimit          int `json:"daily_limit"`
+}
+
+// eligibilityField is one eligibility setting: its JSON name, bounds and the
+// accessor the bounds check and the parser share.
+type eligibilityField struct {
+	name     string
+	def      int
+	min, max int
+	ptr      func(*EligibilitySettings) *int
+}
+
+// eligibilityFields is the field table; its order is the order errors are
+// reported in.
+var eligibilityFields = []eligibilityField{
+	{"evidence_window_hours", 720, 24, 2160, func(e *EligibilitySettings) *int { return &e.EvidenceWindowHours }},
+	{"min_decisions", 20, 3, 500, func(e *EligibilitySettings) *int { return &e.MinDecisions }},
+	{"unedited_floor_percent", 90, 50, 100, func(e *EligibilitySettings) *int { return &e.UneditedFloorPct }},
+	{"review_max_age_hours", 168, 1, 720, func(e *EligibilitySettings) *int { return &e.ReviewMaxAgeHours }},
+	{"daily_limit", 10, 1, 100, func(e *EligibilitySettings) *int { return &e.DailyLimit }},
+}
+
+// DefaultEligibility holds the values the constant gates used before they
+// became settings.
+func DefaultEligibility() EligibilitySettings {
+	var e EligibilitySettings
+	for _, f := range eligibilityFields {
+		*f.ptr(&e) = f.def
+	}
+	return e
+}
+
+// EffectiveEligibility is the stored object, or the defaults when absent.
+func (p Policy) EffectiveEligibility() EligibilitySettings {
+	if p.Eligibility == nil {
+		return DefaultEligibility()
+	}
+	return *p.Eligibility
+}
+
+func (e EligibilitySettings) evidenceWindow() time.Duration {
+	return time.Duration(e.EvidenceWindowHours) * time.Hour
+}
+
+func (e EligibilitySettings) reviewMaxAge() time.Duration {
+	return time.Duration(e.ReviewMaxAgeHours) * time.Hour
+}
+
+// eligibilityFromStored reads the stored eligibility member. A field that is
+// missing, not an integer or outside its bounds takes its default alone; a
+// member that is not an object takes every default.
+func eligibilityFromStored(raw json.RawMessage) *EligibilitySettings {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	var member map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &member); err != nil || member == nil {
+		return nil
+	}
+	e := DefaultEligibility()
+	for _, f := range eligibilityFields {
+		var n int
+		if v, ok := member[f.name]; ok && json.Unmarshal(v, &n) == nil && n >= f.min && n <= f.max {
+			*f.ptr(&e) = n
+		}
+	}
+	return &e
 }
 
 // PolicyFieldError names the action a Validate failure is about.
@@ -55,6 +138,9 @@ type PolicyFieldError struct {
 }
 
 func (e *PolicyFieldError) Error() string {
+	if strings.HasPrefix(e.Field, eligibilityPrefix) {
+		return fmt.Sprintf("policy.%s is out of bounds", e.Field)
+	}
 	if e.Code != "" {
 		return fmt.Sprintf("policy.actions.%s: %s", e.Field, e.Code)
 	}
@@ -101,8 +187,9 @@ func ParsePolicy(raw *string) (Policy, error) {
 		return unreadablePolicy("empty")
 	}
 	var top struct {
-		Version int             `json:"version"`
-		Actions json.RawMessage `json:"actions"`
+		Version     int             `json:"version"`
+		Actions     json.RawMessage `json:"actions"`
+		Eligibility json.RawMessage `json:"eligibility"`
 	}
 	if err := json.Unmarshal([]byte(*raw), &top); err != nil {
 		return unreadablePolicy("invalid json")
@@ -114,7 +201,7 @@ func ParsePolicy(raw *string) (Policy, error) {
 	if err := json.Unmarshal(top.Actions, &stored); err != nil || stored == nil {
 		return unreadablePolicy("actions is not an object")
 	}
-	p := Policy{Version: policyVersion, Actions: deniedActions()}
+	p := Policy{Version: policyVersion, Actions: deniedActions(), Eligibility: eligibilityFromStored(top.Eligibility)}
 	for _, a := range AllActions {
 		var s Setting
 		if v, ok := stored[string(a)]; ok && json.Unmarshal(v, &s) == nil && validSetting(s) {
@@ -151,6 +238,21 @@ func Validate(p Policy, phase3 bool) error {
 	for a := range p.Actions {
 		if !isPolicyAction(a) {
 			return &PolicyFieldError{Field: string(a)}
+		}
+	}
+	return validateEligibility(p.Eligibility)
+}
+
+// validateEligibility checks the bounds of a present eligibility object. The
+// structural checks (shape, missing, unknown and non-integer fields) belong to
+// the settings parser, which sees the raw body.
+func validateEligibility(e *EligibilitySettings) error {
+	if e == nil {
+		return nil
+	}
+	for _, f := range eligibilityFields {
+		if n := *f.ptr(e); n < f.min || n > f.max {
+			return &PolicyFieldError{Field: eligibilityPrefix + f.name, Code: codeInvalidSetting}
 		}
 	}
 	return nil

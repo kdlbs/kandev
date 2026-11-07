@@ -31,10 +31,9 @@ test.describe("Coordinator automatic create_task on a phone viewport", () => {
     const settings = `${linkToCoordinatorSettings(seedData.workspaceId, coordinator.id)}?section=may-do`;
 
     await testPage.goto(settings);
-    await expect(testPage.getByTestId("automatic-condition-volume")).toHaveAttribute(
-      "data-met",
-      "true",
-    );
+    await expect(
+      testPage.getByTestId("may-do-row-create_task").getByTestId("automatic-condition-volume"),
+    ).toHaveAttribute("data-met", "true");
     const overflow = await testPage.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
       clientWidth: document.documentElement.clientWidth,
@@ -45,7 +44,9 @@ test.describe("Coordinator automatic create_task on a phone viewport", () => {
     await testPage.getByTestId("may-do-review-create_task").click();
     await expect(testPage).toHaveURL(/\/queue\?class=create_task$/);
     await testPage.goto(settings);
-    const mark = testPage.getByTestId("automatic-mark-reviewed");
+    const mark = testPage
+      .getByTestId("may-do-row-create_task")
+      .getByTestId("automatic-mark-reviewed");
     const box = await mark.boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
     const reviewed = waitForHttp(testPage, "POST", REVIEW_PATH);
@@ -56,8 +57,8 @@ test.describe("Coordinator automatic create_task on a phone viewport", () => {
     const saved = waitForHttp(testPage, "PUT", SETTINGS_PATH);
     await testPage.getByRole("button", { name: "Save changes" }).click();
     await saved;
-    await expect(testPage.getByTestId("automatic-raised-record")).toContainText(
-      "Raised to automatic",
-    );
+    await expect(
+      testPage.getByTestId("may-do-row-create_task").getByTestId("automatic-raised-record"),
+    ).toContainText("Raised to automatic");
   });
 });

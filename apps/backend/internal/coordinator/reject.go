@@ -70,6 +70,10 @@ func (s *Service) RejectProposal(ctx context.Context, workspaceID, coordinatorID
 	s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
 	s.logger.Info("proposal rejected",
 		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID), zap.String("workspace_id", workspaceID))
+	lowered := s.lowerOnOverride(ctx, proposal)
 	rejected, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	if rejected != nil {
+		rejected.LoweredClass = lowered
+	}
 	return rejected, err
 }

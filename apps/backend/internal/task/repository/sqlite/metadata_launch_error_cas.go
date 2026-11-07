@@ -353,7 +353,7 @@ func quickChatStartFailureCommitQuery(
 				AND jsonb_extract_path_text(` + base + `, 'quick_chat_start_attempt_id') = ?
 				AND COALESCE(jsonb_extract_path_text(` + base + `, 'agent_start_attempt_id'), '') = ?
 		`, []interface{}{payload, models.TaskSessionStateFailed, errorMessage, now, now,
-				sessionID, taskID, expectedState, quickChatAttemptID, agentAttemptID}
+			sessionID, taskID, expectedState, quickChatAttemptID, agentAttemptID}
 	}
 	base := sqliteMetadataObject
 	return `
@@ -364,7 +364,7 @@ func quickChatStartFailureCommitQuery(
 			AND json_extract(` + base + `, '$.quick_chat_start_attempt_id') = ?
 			AND COALESCE(json_extract(` + base + `, '$.agent_start_attempt_id'), '') = ?
 	`, []interface{}{payload, models.TaskSessionStateFailed, errorMessage, now, now,
-			sessionID, taskID, expectedState, quickChatAttemptID, agentAttemptID}
+		sessionID, taskID, expectedState, quickChatAttemptID, agentAttemptID}
 }
 
 func (r *Repository) commitBootstrapFailureIfCurrentExecution(

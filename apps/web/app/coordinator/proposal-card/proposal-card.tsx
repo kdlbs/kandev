@@ -42,7 +42,7 @@ import {
 } from "./improvement-card";
 import { KindBody } from "./kind-body";
 import { MessageEditForm } from "./message-edit-form";
-import { kindApprovedToast, kindFailureText, policyLineText } from "./outcome-copy";
+import { kindApprovedToast, kindFailureText, policyLineText, loweredToast } from "./outcome-copy";
 import { usePhase2CardContext } from "./phase2-context";
 import { RejectForm } from "./reject-form";
 import { ReplySection } from "./reply-section";
@@ -212,6 +212,7 @@ function applyDecisionOutcome(
     case "decided": {
       setServerError(null);
       setOpenForm(null);
+      loweredToast(outcome.proposal, ctx);
       if (outcome.proposal.status === "failed") return;
       if (outcome.proposal.status === "approved") {
         void toastApproved(outcome.proposal, ctx);

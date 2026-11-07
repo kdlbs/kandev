@@ -244,12 +244,13 @@ func (s *Store) readGoal(ctx context.Context, exec coordinatorExec, query, coord
 
 // PolicyView is the effective, read-only policy of one coordinator.
 type PolicyView struct {
-	CoordinatorID  string             `json:"coordinator_id"`
-	WorkspaceID    string             `json:"workspace_id"`
-	PolicyRevision int                `json:"policy_revision"`
-	Actions        map[Action]Setting `json:"actions"`
-	WatchScope     string             `json:"watch_scope"`
-	WorkflowIDs    []string           `json:"workflow_ids"`
+	CoordinatorID  string              `json:"coordinator_id"`
+	WorkspaceID    string              `json:"workspace_id"`
+	PolicyRevision int                 `json:"policy_revision"`
+	Actions        map[Action]Setting  `json:"actions"`
+	Eligibility    EligibilitySettings `json:"eligibility"`
+	WatchScope     string              `json:"watch_scope"`
+	WorkflowIDs    []string            `json:"workflow_ids"`
 }
 
 // policyFor parses the stored policy. An unreadable policy denies every
@@ -277,7 +278,7 @@ func (s *Service) Policy(ctx context.Context, coordinatorID string) (PolicyView,
 	if !s.phase2 {
 		return PolicyView{
 			CoordinatorID: c.ID, WorkspaceID: c.WorkspaceID,
-			Actions: PhaseOnePolicy().Actions, WatchScope: watchScopeAll, WorkflowIDs: []string{},
+			Actions: PhaseOnePolicy().Actions, Eligibility: DefaultEligibility(), WatchScope: watchScopeAll, WorkflowIDs: []string{},
 		}, nil
 	}
 	set, err := s.store.EffectiveWatchSet(ctx, s.store.ro, c.ID, c.WorkspaceID)
@@ -290,7 +291,7 @@ func (s *Service) Policy(ctx context.Context, coordinatorID string) (PolicyView,
 	}
 	return PolicyView{
 		CoordinatorID: c.ID, WorkspaceID: c.WorkspaceID, PolicyRevision: c.PolicyRevision,
-		Actions: s.policyFor(c).Actions, WatchScope: scope, WorkflowIDs: set.WorkflowIDs,
+		Actions: s.policyFor(c).Actions, Eligibility: s.policyFor(c).EffectiveEligibility(), WatchScope: scope, WorkflowIDs: set.WorkflowIDs,
 	}, nil
 }
 
