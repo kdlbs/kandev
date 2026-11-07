@@ -1080,6 +1080,48 @@ func (m *Manager) CleanupStaleExecutionBySessionIDIfCurrent(
 	return err
 }
 
+// CleanupLiveExecutionIfCurrent reports whether the exact tracked standalone
+// instance was actually passed through successful lifecycle cleanup.
+func (m *Manager) CleanupLiveExecutionIfCurrent(ctx context.Context, sessionID, executionID string, updatedAt time.Time) (bool, error) {
+	if sessionID == "" || executionID == "" || updatedAt.IsZero() {
+		return false, nil
+	}
+	reader, ok := m.runningWriter.(executorRunningReader)
+	if !ok || m.executorRegistry == nil {
+		return false, nil
+	}
+	value, err := m.doSerializedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
+		confirmed, cleanupErr := m.cleanupLiveExecutionLocked(sharedCtx, reader, sessionID, executionID, updatedAt)
+		return confirmed, cleanupErr
+	})
+	if err != nil {
+		return false, err
+	}
+	confirmed, ok := value.(bool)
+	return ok && confirmed, nil
+}
+
+func (m *Manager) cleanupLiveExecutionLocked(ctx context.Context, reader executorRunningReader, sessionID, executionID string, updatedAt time.Time) (bool, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists || execution == nil || execution.ID != executionID || execution.RuntimeName != executor.NameStandalone || execution.standaloneInstanceID == "" {
+		return false, nil
+	}
+	// The existing passthrough stop is best effort and does not report a
+	// missing runner or a failed stop. Do not claim the live owner was
+	// released while a separate interactive process may still be running.
+	if execution.PassthroughProcessID != "" {
+		return false, nil
+	}
+	current, err := reader.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil || current == nil || current.AgentExecutionID != executionID || !current.UpdatedAt.Equal(updatedAt) {
+		return false, err
+	}
+	if err := m.cleanupStaleExecution(ctx, execution); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExecution) error {
 	return m.cleanupStaleExecutionWithCheckpoint(ctx, execution, nil)
 }
