@@ -1,6 +1,9 @@
 package process
 
-import "github.com/kandev/kandev/internal/agentctl/server/utility"
+import (
+	"github.com/kandev/kandev/internal/agentctl/server/utility"
+	"time"
+)
 
 // InferenceOwner returns the authority initialized before cancellable startup.
 func (m *Manager) InferenceOwner() *utility.InferenceOwner { return m.inferenceOwner }
@@ -38,4 +41,14 @@ func (m *Manager) FinalInferenceSnapshot() *utility.AttemptSnapshot {
 	snapshot := *m.finalInferenceSnapshot
 	snapshot.Attempts = append([]utility.AttemptStatus(nil), snapshot.Attempts...)
 	return &snapshot
+}
+
+// FinalManagedStopReceipt attests only this successfully drained manager.
+// Missing historical child coverage remains unknown in the inference snapshot.
+func (m *Manager) FinalManagedStopReceipt() *utility.ManagedProcessStopReceipt {
+	snapshot := m.FinalInferenceSnapshot()
+	if snapshot == nil {
+		return nil
+	}
+	return &utility.ManagedProcessStopReceipt{Version: 1, InstanceID: snapshot.InstanceID, OwnerID: snapshot.OwnerID, ObservedAt: time.Now().UTC(), AdmissionClosed: true, OperationsDrained: true, ManagedProcessesStopped: true, InferenceCensusKnown: snapshot.Known, RecordedChildrenTerminal: utility.RecordedAttemptsTerminal(snapshot), Coverage: utility.ManagedStopCoverage}
 }

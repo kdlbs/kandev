@@ -1880,16 +1880,38 @@ func (m *Manager) Start(ctx context.Context) error {
 	return err
 }
 
+// startOneShotWithUsage binds the execution usage observer and prepares a
+// one-shot adapter, which spawns its own subprocess per prompt. It updates the
+// caller's flow phase and outcome.
+func (m *Manager) startOneShotWithUsage(ctx context.Context, failurePhase, successOutcome *string) (uint64, error) {
+	if err := m.bindExecutionUsage(ctx); err != nil {
+		m.status.Store(StatusError)
+		return 0, err
+	}
+	*failurePhase = "oneshot_admission"
+	*successOutcome = "adapter_ready"
+	if err := m.startOneShot(); err != nil {
+		return 0, err
+	}
+	return m.ProcessGeneration(), nil
+}
+
 // StartWithGeneration starts the agent process and returns the generation
 // created by this call while startup remains serialized against replacement.
-func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
+func (m *Manager) StartWithGeneration(ctx context.Context) (startedGeneration uint64, startErr error) {
+	finishFlow := m.logger.BeginFlow(ctx, logger.ExecutionFlow{Stage: "bootstrap", TaskID: m.cfg.TaskID, SessionID: m.cfg.SessionID, ExecutionID: m.cfg.InstanceID, HarnessGeneration: m.cfg.DeliveryHarnessGeneration})
+	failurePhase := "process_start"
+	successOutcome := "process_started"
+	defer finishProcessFlow(finishFlow, &startErr, &failurePhase, &successOutcome)
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 	release, err := m.admitStart()
 	if err != nil {
+		failurePhase = m.processAdmissionFailureReason(err)
 		return 0, err
 	}
 	defer release()
+	failurePhase = "already_running"
 	if m.passthrough.Live() {
 		return 0, fmt.Errorf("passthrough agent is already running")
 	}
@@ -1897,6 +1919,7 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
 		return 0, fmt.Errorf("agent is already running")
 	}
+	failurePhase = "delivery_journal"
 	if m.cfg.DurableJournalPath != "" && m.deliveryJournalErr != nil {
 		m.status.Store(StatusError)
 		return 0, fmt.Errorf("durable delivery journal unavailable: %w", m.deliveryJournalErr)
@@ -1906,22 +1929,16 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	// never ran teardown, and Start is reachable without an intervening Stop.
 	m.finishPreviousLifecycle(ctx)
 
-	m.logger.Info("starting agent process",
-		zap.String("protocol", string(m.cfg.Protocol)),
-		zap.Strings("args", m.cfg.AgentArgs),
-		zap.String("workdir", m.cfg.WorkDir),
-		zap.Int("mcp_servers", len(m.cfg.McpServers)))
+	m.markProcessStarting()
 
-	m.status.Store(StatusStarting)
-	m.exitCode.Store(-1)
-	m.exitErr.Store(errorWrapper{err: nil})
-
+	failurePhase = "command_validation"
 	if err := config.ValidateCommandArgs(m.cfg.AgentArgs); err != nil {
 		m.status.Store(StatusError)
 		return 0, err
 	}
 
 	// Build adapter config and create protocol adapter
+	failurePhase = "adapter_configuration"
 	if err := m.buildAdapterConfig(); err != nil {
 		m.status.Store(StatusError)
 		return 0, err
@@ -1929,28 +1946,25 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 
 	// One-shot adapters manage their own subprocess per prompt.
 	// Skip process creation — the adapter spawns processes in Prompt().
+	failurePhase = "usage_binding"
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
-		if err := m.bindExecutionUsage(ctx); err != nil {
-			m.status.Store(StatusError)
-			return 0, err
-		}
-		if err := m.startOneShot(); err != nil {
-			return 0, err
-		}
-		return m.ProcessGeneration(), nil
+		return m.startOneShotWithUsage(ctx, &failurePhase, &successOutcome)
 	}
 
 	// Assemble final command (does not start the process yet)
+	failurePhase = "command_assembly"
 	if err := m.buildFinalCommand(); err != nil {
 		m.status.Store(StatusError)
 		m.closeOpenCodePlugin(context.Background())
 		return 0, err
 	}
+	failurePhase = "usage_binding"
 	if err := m.bindExecutionUsage(ctx, m.cmd.Args); err != nil {
 		m.status.Store(StatusError)
 		m.closeOpenCodePlugin(context.Background())
 		return 0, err
 	}
+	failurePhase = "managed_process_start"
 	generation, err := m.startManagedProcess()
 	if err != nil {
 		m.closeOpenCodePlugin(context.Background())
@@ -3047,6 +3061,10 @@ func (m *Manager) Stop(ctx context.Context) error {
 // StopForTeardown permanently closes process admission and drains prior owners
 // before stopping every process owned by the manager.
 func (m *Manager) StopForTeardown(ctx context.Context) error {
+	return m.stopForTeardown(ctx, false)
+}
+
+func (m *Manager) stopForTeardown(ctx context.Context, retainJournal bool) error {
 	m.CloseAdmission()
 	passthroughErr := m.passthrough.StopAll(ctx)
 	passthroughErr = errors.Join(passthroughErr, m.cleanupPassthroughFiles(ctx))
@@ -3060,6 +3078,9 @@ func (m *Manager) StopForTeardown(ctx context.Context) error {
 	stopErr := m.stop(ctx)
 	if passthroughErr == nil && previewErr == nil && stopErr == nil {
 		m.captureFinalInferenceSnapshot()
+	}
+	if retainJournal && passthroughErr == nil && previewErr == nil && stopErr == nil {
+		return nil
 	}
 	return errors.Join(passthroughErr, previewErr, stopErr, m.closeDeliveryJournal())
 }

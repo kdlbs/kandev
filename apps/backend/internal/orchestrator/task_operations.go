@@ -793,6 +793,9 @@ type startCreatedSessionOptions struct {
 	// ceilingEntryBinding is carried by a replay and checked at both the
 	// admission boundary and immediately before runtime dispatch.
 	ceilingEntryBinding *models.CeilingWorkflowEntryBinding
+	// origin overrides the autoStart-derived admission origin, for example
+	// for an agent-requested start. It round-trips through the replay payload.
+	origin launchOrigin
 }
 
 //nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
@@ -808,8 +811,12 @@ func (s *Service) startCreatedSession(
 	if retryLaunchInContext(ctx) == nil && s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
+	origin := options.origin
+	if origin == "" {
+		origin = originFromAutoStart(autoStart)
+	}
 	manualTaskID := ""
-	if !autoStart && retryLaunchInContext(ctx) == nil {
+	if origin == launchOriginManual && retryLaunchInContext(ctx) == nil {
 		manualTaskID = taskID
 	}
 	ctx = models.WithExplicitManualCreation(ctx, manualTaskID)
@@ -817,6 +824,9 @@ func (s *Service) startCreatedSession(
 	if !options.lifecycleLockHeld {
 		releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 		defer releaseLifecycleLock()
+	}
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, false); err != nil {
+		return nil, err
 	}
 	if options.ceilingEntryBinding == nil {
 		options.ceilingEntryBinding = ceilingEntryBindingFromContext(ctx)
@@ -866,7 +876,7 @@ func (s *Service) startCreatedSession(
 
 	startPayload := seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, options)
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, startPayload)
-	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, ceilingClaimedReplayOrigin(ctx, taskID, originFromAutoStart(autoStart)), startPayload)
+	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, ceilingClaimedReplayOrigin(ctx, taskID, origin), startPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -3576,6 +3586,10 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	continuation func(context.Context, *resumeAttempt, *executor.TaskExecution) error,
 	preReserved *sessionKeyedCeilingReservation,
 ) (*executor.TaskExecution, error) {
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, true); err != nil {
+		return nil, err
+	}
+	options = s.inferenceClosureResumeOptions(ctx, sessionID, options)
 	if retryLaunchInContext(ctx) == nil && s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
@@ -3595,6 +3609,9 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
 
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, true); err != nil {
+		return nil, err
+	}
 	admission, err := s.prepareResumeSessionAdmission(ctx, taskID, sessionID, options, continuation != nil, entryBinding)
 	if err != nil {
 		return nil, err
@@ -7028,6 +7045,9 @@ func (promptTaskOptions) failureContext(ctx context.Context) (context.Context, c
 // (clearQueuedDispatchInFlightIfCurrent), which is safe since none of them
 // block on an agent turn.
 func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, origin launchOrigin, options promptTaskOptions) (*PromptResult, error) {
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, false); err != nil {
+		return nil, err
+	}
 	if retryLaunchInContext(ctx) == nil && s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
@@ -9409,7 +9429,13 @@ func (s *Service) claimSessionRunningForPrompt(
 	); promptErr != nil {
 		return nil, "", "", false, nil, nil, promptErr
 	}
-	if !bypassRecoveryBlock {
+	if bypassRecoveryBlock {
+		// A recovery-block bypass never authorizes crossing an inference
+		// closure that was fenced after the earlier prompt preflight.
+		if err := s.checkInferenceClosureAdmission(ctx, sessionID, false); err != nil {
+			return nil, "", "", false, nil, nil, err
+		}
+	} else {
 		if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
 			return nil, "", "", false, nil, nil, err
 		}

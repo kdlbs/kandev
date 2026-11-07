@@ -11,3 +11,13 @@ func (i *Instance) FinalInferenceSnapshot() *utility.AttemptSnapshot {
 	}
 	return nil
 }
+
+// FinalManagedStopReceipt forwards the current manager's bounded stop result.
+func (i *Instance) FinalManagedStopReceipt() *utility.ManagedProcessStopReceipt {
+	if owner, ok := i.manager.(interface {
+		FinalManagedStopReceipt() *utility.ManagedProcessStopReceipt
+	}); ok {
+		return owner.FinalManagedStopReceipt()
+	}
+	return nil
+}

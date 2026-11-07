@@ -211,6 +211,7 @@ launch request
 Explicit launch overrides bypass refusal and write a manual-override audit entry.
 Ordinary messages use bounded turn admission even when their caller has manual
 execution authority. Automatic origins never become manual during replay.
+Agent-requested MCP starts remain automatic through replay.
 Task focus that resumes an
 idle-suspended session is passive inspection, like opening a conversation, so it
 uses the automatic origin. Its deferred record keeps the completed-session
@@ -547,9 +548,11 @@ manual overrides use the existing orchestrator logs and task status messages.
 The stored reason and population snapshot make a refusal diagnosable after a
 restart.
 
-Log applied capacity and its source on initialization and successful changes.
-Reuse existing observation and queue-status projection paths. Never log full
-environment dumps or launch payloads for a settings change.
+Log capacity and source on init and change.
+Reuse observation and queue-status projections. Never log environment dumps
+or launch payloads for a settings change.
+
+[Execution flow diagnostics](execution-flow-diagnostics.md).
 
 ## Related decisions
 

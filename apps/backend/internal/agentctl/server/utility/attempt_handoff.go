@@ -174,7 +174,7 @@ func (o *InferenceOwner) ActivationFailureReason() string {
 }
 
 func (o *attemptOwner) activateLocked() error {
-	if o.storageUnavailable {
+	if o.storageUnavailable || (o.state.Closure != nil && o.state.Closure.Stage != "consumed") {
 		return errAttemptUnavailable
 	}
 	claim := o.state.Ownership
@@ -214,9 +214,17 @@ func (o *attemptOwner) historicalSettled(a *ownedAttempt) bool {
 }
 
 func (o *attemptOwner) writeClaim(data []byte, terminal bool) error {
-	err := o.journal.CompareAndWriteInferenceOwner(context.Background(), o.expectedOwnerID, data, terminal)
+	var err error
+	if o.expectedOwnerState != nil {
+		err = o.journal.CompareAndWriteInferenceOwnerState(context.Background(), o.expectedOwnerState, data, terminal)
+	} else {
+		err = o.journal.CompareAndWriteInferenceOwner(context.Background(), o.expectedOwnerID, data, terminal)
+	}
 	if err == nil {
 		o.expectedOwnerID = o.id
+		if o.expectedOwnerState != nil {
+			o.expectedOwnerState = append([]byte(nil), data...)
+		}
 	}
 	return err
 }

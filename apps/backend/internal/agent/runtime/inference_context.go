@@ -36,3 +36,20 @@ var ErrInferenceOwnershipUnsupported = client.ErrInferenceOwnershipUnsupported
 func WithInferenceExecutionID(id string) InferenceClientOption {
 	return client.WithExecutionID(id)
 }
+
+// Stop observations cross the same public runtime seam as inference ownership.
+type StopObservationCollector = client.StopObservationCollector
+
+func NewStopObservationCollector() *StopObservationCollector {
+	return client.NewStopObservationCollector()
+}
+
+func WithStopObservation(ctx context.Context, collector *StopObservationCollector) context.Context {
+	return client.WithStopObservation(ctx, collector)
+}
+
+// WithInferenceClosureAdoption carries the validated recovery identity through
+// the runtime seam without exposing its transport-owned context key.
+func WithInferenceClosureAdoption(ctx context.Context, operation string) context.Context {
+	return client.WithInferenceClosureAdoption(ctx, operation)
+}

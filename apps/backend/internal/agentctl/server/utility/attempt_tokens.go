@@ -51,6 +51,9 @@ func (o *attemptOwner) consume(id string) (AttemptStatus, error) {
 	if a == nil || a.Status.OwnerID != o.id {
 		return AttemptStatus{AttemptID: id, State: AttemptUnknown, PromptDispatch: PromptPossiblySent}, errAttemptUnavailable
 	}
+	if o.state.Closure != nil && o.state.Closure.Stage != closureConsumed {
+		return a.Status, errAttemptUnavailable
+	}
 	if a.Consumed || a.Status.Settled || (o.capacityRequired && !a.CapacityAdmitted) {
 		return a.Status, errAttemptExists
 	}
