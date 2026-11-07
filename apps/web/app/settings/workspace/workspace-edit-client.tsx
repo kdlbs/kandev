@@ -41,6 +41,7 @@ import { WorkspacePlacementCard } from "@/components/settings/workspaces/workspa
 import { WorkspaceTeamAccessCard } from "@/components/settings/workspaces/workspace-team-access-card";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { WorkspaceIdlePolicyFormSection } from "./workspace-idle-policy-form-section";
+import { WorkspaceRuntimeFootprintSection } from "./workspace-runtime-footprint-section";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
@@ -576,6 +577,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         form mounts, and a snapshot would freeze the owner out of their own
         workspace.
       */}
+      <WorkspaceRuntimeFootprintSection workspaceId={workspace.id} />
       <WorkspacePlacementCard
         workspaceId={workspace.id}
         unitId={workspace.unit_id}

@@ -135,6 +135,7 @@ func (m *ControlServer) setupRoutes() {
 	api := m.router.Group("/api/v1")
 	api.POST("/instances", m.handleCreateInstance)
 	api.GET("/instances", m.handleListInstances)
+	api.GET("/runtime-footprint", m.handleListInstanceFootprints)
 	api.POST("/delivery/retained", m.handleRetainedDelivery)
 	api.POST("/delivery/retained/evidence", m.handleRetainedReconstructionEvidence)
 	api.POST("/delivery/retained/submission", m.handleRetainedReconstructionSubmission)
@@ -228,6 +229,15 @@ func (m *ControlServer) handleCreateInstance(c *gin.Context) {
 func (m *ControlServer) handleListInstances(c *gin.Context) {
 	instances := m.instMgr.ListInstances()
 	c.JSON(http.StatusOK, gin.H{"instances": instances})
+}
+
+func (m *ControlServer) handleListInstanceFootprints(c *gin.Context) {
+	rows, err := m.instMgr.ListInstanceFootprints(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "runtime footprint unavailable"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"footprints": rows})
 }
 
 func (m *ControlServer) handleGetInstance(c *gin.Context) {
