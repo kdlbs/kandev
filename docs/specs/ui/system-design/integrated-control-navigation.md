@@ -244,8 +244,10 @@ its authorization are unchanged without that query.
 The read keeps unknown separate from a measured value: `hold_mode` and the
 per-message pause/auto-run counts stay absent when their source cannot be read,
 and a failed optional read surfaces as an error instead of a known value. The
-known/unknown split for a queued message is decided by its current-incarnation
-policy row, so a missing row is never counted as an auto-run. `control-task-wait.ts`
+known/unknown split requires a current session with a nonempty incarnation. A
+missing or stale policy uses the queue's auto-run default, while an unbound
+legacy policy retains its recorded setting. A missing session remains unknown.
+`control-task-wait.ts`
 derives one reason per stopped task from recorded fields only (hold, approval,
 blocked, paused, queued, queued-unknown, waiting, failed) and never reads a task
 or step name as a signal; the waiting-reasons panel lists those stopped tasks
