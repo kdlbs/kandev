@@ -274,6 +274,7 @@ func parseOpenCodeStderrLine(line string) (openCodeStderrDiagnostic, bool) {
 		ModelID:                    safeOpenCodeField(fields["modelID"]),
 		Message:                    message,
 		DiagnosticIdentityComplete: streams.IsCompleteProviderDiagnostic(rawMessage),
+		DiagnosticSingleLine:       !strings.ContainsAny(line, "\\\r\n\v\f\u0085\u2028\u2029"),
 		RemediationURL:             remediationURL,
 		OccurredAt:                 occurredAt,
 	}

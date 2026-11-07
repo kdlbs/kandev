@@ -24,7 +24,7 @@ the established higher-priority signals and sanitized excerpt contract.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose) |
+| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose), [OpenCode period reset](#opencode-period-reset) |
 | `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002` | [Opt-in unmatched diagnostic prefilter](#opt-in-unmatched-diagnostic-prefilter) |
 
 ## Components and responsibilities
@@ -190,6 +190,22 @@ Both the complete wrapped diagnostic and the inner diagnostic remain bounded.
 The inner message still needs its error envelope and passes quote/negation
 guards. Untyped workspace/executor failures cannot use this path, and OFF and
 already classified failures keep their previous behavior.
+
+## OpenCode period reset
+
+When `Classify` selects the existing OpenCode period usage-limit rule, a
+relative duration on its sole matching line can supply a missing reset time.
+The diagnostic observation time must be known; the duration is added to it.
+The resulting hint is marked inferred under the existing circuit contract. An
+explicit structured or dated reset keeps precedence. For relative durations,
+unrelated lines, multiple matching period lines or reset expressions,
+incomplete or unsupported units, and overflow leave the hint unknown without
+changing the error classification. OpenCode stderr records whether the original
+diagnostic was one line before sanitization; Office post-start handling carries
+its observation time into the classifier only with that evidence. Older peers
+or records containing escapes or line separators leave the relative reset
+unknown. Existing structured reset hints retain precedence. The result
+does not change candidate order or authorize prompt replay.
 
 ## OpenCode admission refusal
 

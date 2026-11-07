@@ -93,6 +93,13 @@ errors does not take its own healthy account out of rotation.
   Only integer delays from 1 through 60 seconds qualify.
   Missing, malformed, zero, negative, and larger delays shall provide no hint.
   Classification shall not establish runtime health or authorize another prompt.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12:** For a classified OpenCode
+  period usage-limit line with a valid relative reset duration and known
+  diagnostic observation time, derive its reset from that observation. An
+  explicit or dated reset retains precedence. Missing observation time,
+  malformed duration, multiple period-limit lines, or a duration on an unrelated
+  line shall not supply a reset. Other classifications and routing policy remain
+  unchanged.
 
 Criterion 001.11 was added by the October 28
 [OpenCode capacity package](../../../plans/opencode-capacity-retry/plan.md).

@@ -135,8 +135,8 @@ type Error struct {
 	ClassifierRule   string
 	ExitCode         *int
 	ResetHint        *time.Time
-	// ResetHintInferred marks a ResetHint derived from a clock-only notice
-	// rather than an explicit, dated provider reset time.
+	// ResetHintInferred marks a ResetHint derived without an explicit, dated
+	// provider reset time, such as from a clock-only notice or relative duration.
 	ResetHintInferred bool
 	RawExcerpt        string
 	RemediationPath   string // path to clean before retry; only set for codes that have a known remediation
@@ -169,20 +169,21 @@ func (e *Error) ShouldShortRetry() bool {
 
 // Input is the raw signal bundle adapters pass to Classify.
 type Input struct {
-	KeywordContext            KeywordContext
-	Phase                     Phase
-	ProviderID                string
-	ExitCode                  *int
-	StructuredErr             error
-	HTTPStatus                int
-	ACPCode                   int // ACP JSON-RPC code, never an HTTP status
-	ErrorKind                 string
-	ProviderCode              string // opaque provider code; unknown namespaces are not inferred
-	ResetHint                 *time.Time
-	OccurredAt                time.Time // observation time for this provider diagnostic
-	Stderr                    string
-	Stdout                    string
-	ManagedRuntimePackageSpec string // trusted exact package from the managed runtime command
+	KeywordContext                 KeywordContext
+	Phase                          Phase
+	ProviderID                     string
+	ExitCode                       *int
+	StructuredErr                  error
+	HTTPStatus                     int
+	ACPCode                        int // ACP JSON-RPC code, never an HTTP status
+	ErrorKind                      string
+	ProviderCode                   string // opaque provider code; unknown namespaces are not inferred
+	ResetHint                      *time.Time
+	OpenCodeRelativeResetUntrusted bool
+	OccurredAt                     time.Time // observation time for this provider diagnostic
+	Stderr                         string
+	Stdout                         string
+	ManagedRuntimePackageSpec      string // trusted exact package from the managed runtime command
 }
 
 const exitCodeBinaryMissing = 127
@@ -212,6 +213,10 @@ func Classify(in Input) *Error {
 		hint := parseResetHintAt(text, observedAt)
 		if hint == nil && e.ClassifierRule == "claude.stderr.session_limit.v1" {
 			hint = parseResetClockHintAt(text, observedAt)
+			e.ResetHintInferred = hint != nil
+		}
+		if hint == nil && e.ClassifierRule == openCodePeriodUsageRule && !in.OpenCodeRelativeResetUntrusted {
+			hint = openCodePeriodResetAt(text, in.OccurredAt)
 			e.ResetHintInferred = hint != nil
 		}
 		if hint != nil {
