@@ -20,6 +20,10 @@ type quickChatLaunchReloadFailureStore struct {
 }
 
 func (r *quickChatLaunchReloadFailureStore) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	// Inference closure presence checks are not launch reloads.
+	if models.InferenceClosurePresenceCheckRequested(ctx) {
+		return r.sessionExecutorStore.GetTaskSession(ctx, id)
+	}
 	r.reads++
 	// Passthrough resolution precedes the mandatory launch reload (no event bus is installed).
 	if r.reads == r.failAt {
