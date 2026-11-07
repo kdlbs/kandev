@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	ceilingReasonNeedsConfiguration = "ceiling_needs_configuration"
-	ceilingReasonGradeLimit         = "ceiling_grade_limit"
-	ceilingReasonTotalLimit         = "ceiling_total_limit"
-	ceilingReasonBothLimits         = "ceiling_both_limits"
+	ceilingReasonNeedsConfiguration = sessioncapacity.WaitingReasonNeedsConfiguration
+	ceilingReasonGradeLimit         = sessioncapacity.WaitingReasonGradeLimit
+	ceilingReasonTotalLimit         = sessioncapacity.WaitingReasonTotalLimit
+	ceilingReasonBothLimits         = sessioncapacity.WaitingReasonBothLimits
 )
 
 type admittedExecutionLister interface {
@@ -36,10 +36,11 @@ func (s *Service) SetExecutionCapacity(effective sessioncapacity.Effective) {
 }
 
 type gradedPopulation struct {
-	counted          map[string]struct{}
-	grades           map[string]int
-	total, grade     int
-	unknown, missing bool
+	inferenceBindings map[string]sessioncapacity.InferenceBinding
+	counted           map[string]struct{}
+	grades            map[string]int
+	total, grade      int
+	unknown, missing  bool
 }
 
 func (c *sessionCeilingController) readGradedPopulationLocked(ctx context.Context, grade string) (gradedPopulation, error) {

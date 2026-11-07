@@ -128,8 +128,9 @@ func (p SettingsPatch) Apply(base Settings) Settings {
 }
 
 type Response struct {
-	Settings  Settings  `json:"settings"`
-	Effective Effective `json:"effective"`
+	Observation *Observation `json:"observation,omitempty"`
+	Settings    Settings     `json:"settings"`
+	Effective   Effective    `json:"effective"`
 }
 
 type Effective struct {

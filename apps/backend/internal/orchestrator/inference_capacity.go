@@ -52,6 +52,7 @@ func (c *sessionCeilingController) appendInferenceGradesLocked(ctx context.Conte
 		c.logPopulationUnknown("inference_bindings", populationReadFailure(err), "", "")
 		return err
 	}
+	p.inferenceBindings = bindings
 	for key, binding := range bindings {
 		if !binding.GradeKnown {
 			c.logPopulationUnknown("inference_bindings", "grade_unknown", "attempt_id", binding.AttemptID)

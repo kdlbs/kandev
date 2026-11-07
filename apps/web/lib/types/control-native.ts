@@ -1,3 +1,9 @@
+export type NativeSharedCapacityWaiting = {
+  known: boolean;
+  grade: number;
+  total: number;
+};
+
 export type NativeDashboard = {
   workspace_id: string;
   generated_at: string;
@@ -16,6 +22,10 @@ export type NativeDashboard = {
   sessions: Record<string, number>;
   /** Unarchived, unfinished tasks whose primary session waits for input. */
   waiting_input_tasks: number;
+  /** Optional on older servers. */
+  wip_waiting_tasks?: number;
+  /** Installation-wide observation; it must not be summed across workspaces. */
+  shared_capacity_waiting?: NativeSharedCapacityWaiting;
   queued_messages: number;
   transitions_24h: number;
   completed_tasks_24h: number;

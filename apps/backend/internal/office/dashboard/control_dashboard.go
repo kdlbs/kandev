@@ -36,6 +36,9 @@ func (h *Handler) controlDashboard(c *gin.Context) bool {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "control projection unavailable"})
 		return true
 	}
+	if metrics != nil {
+		metrics.SharedCapacityWaiting = h.svc.controlCapacityWaiting(ctx)
+	}
 	c.JSON(http.StatusOK, metrics)
 	return true
 }

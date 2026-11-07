@@ -23,6 +23,9 @@ import {
 } from "./control-stages";
 import { numberCellClass } from "./control-table";
 import { ControlWaitReasons } from "./control-wait-reasons-panel";
+import { ControlCapacityLine } from "./control-capacity-bars";
+import { capacityDashboardCounts } from "./control-capacity-waiting";
+import { useIntegratedControl } from "./integrated-control-provider";
 
 type NativeRow = { workspace: ControlWorkspace } & ControlRead<NativeDashboard>;
 const UNKNOWN_KEY = "common:unknown";
@@ -43,6 +46,7 @@ const READ_LABELS: Record<ControlReadStatus, string> = {
 };
 const TASK_FIGURES = [
   { field: "waiting_input_tasks", label: "sidebar:controlSummary.compare.waitingInput" },
+  { field: "wip_waiting_tasks", label: "sidebar:integratedControl.waitingWip" },
   { field: "completed_tasks_24h", label: "sidebar:controlSummary.compare.completed" },
   { field: "transitions_24h", label: "sidebar:controlSummary.compare.moves" },
 ] as const;
@@ -235,6 +239,7 @@ export function ControlNativeComparison({
   revision: object;
 }) {
   const { t } = useTranslation();
+  const control = useIntegratedControl();
   const read = useNativeDashboards(
     workspaces.map((workspace) => workspace.id),
     revision,
@@ -251,8 +256,18 @@ export function ControlNativeComparison({
     workspace,
     ...(read.data?.find((row) => row.id === workspace.id) ?? { status: "loading" as const }),
   }));
+  const { wipWaiting, sharedWaiting } = capacityDashboardCounts(
+    workspaces.map((workspace) => workspace.id),
+    read.data,
+  );
   return (
     <section className="space-y-4" data-testid="control-native-comparison">
+      <ControlCapacityLine
+        observation={control?.data?.capacity}
+        lastConfirmed={control?.data?.lastConfirmedCapacity}
+        wipWaiting={wipWaiting}
+        sharedWaiting={sharedWaiting}
+      />
       <h2 className="text-sm font-semibold">{t("sidebar:controlSummary.compare.title")}</h2>
       <NativeComparisonTable rows={rows} kind="tasks" />
       <NativeComparisonTable rows={rows} kind="sessions" />
