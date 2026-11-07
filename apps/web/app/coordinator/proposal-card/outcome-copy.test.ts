@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { TFunction } from "i18next";
 import type { KindProposal } from "@/lib/api/domains/coordinator-api";
-import { kindApprovedToast, kindFailureText, policyLineText } from "./outcome-copy";
+import { kindApprovedToast, kindFailureText, loweredToast, policyLineText } from "./outcome-copy";
 
 const t = ((key: string, params?: Record<string, unknown>) =>
   params ? `${key}|${JSON.stringify(params)}` : key) as unknown as TFunction;
@@ -97,5 +97,22 @@ describe("policyLineText", () => {
     expect(policyLineText(kindRow("resume"), t)).toBe("coordinator:policyResume");
     expect(policyLineText(kindRow("message"), t)).toBe("coordinator:policyMessage");
     expect(policyLineText(kindRow("move"), t)).toBe("coordinator:policyMove");
+  });
+});
+
+describe("loweredToast", () => {
+  it("names the lowered class by its display label, never the wire token", () => {
+    const toast = vi.fn();
+    loweredToast({ lowered_class: "start_agent" } as never, { t, toast });
+    expect(toast).toHaveBeenCalledTimes(1);
+    const { title } = toast.mock.calls[0][0] as { title: string };
+    expect(title).toContain("coordinator:loweredClassNotice");
+    expect(title).not.toContain('"class":"start_agent"');
+  });
+
+  it("stays silent when nothing was lowered", () => {
+    const toast = vi.fn();
+    loweredToast({} as never, { t, toast });
+    expect(toast).not.toHaveBeenCalled();
   });
 });

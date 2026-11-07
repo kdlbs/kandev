@@ -33,7 +33,7 @@ func (s *Store) ListActivityRows(ctx context.Context, coordinatorID string, clas
 	switch class {
 	case "":
 	case ActionStartAgent:
-		query += ` AND proposal_id IN (SELECT id FROM coordinator_proposals WHERE coordinator_id = ? AND starts_agent = 1)`
+		query += ` AND proposal_id IN (SELECT id FROM coordinator_proposals WHERE coordinator_id = ? AND starts_agent = TRUE)`
 		args = append(args, coordinatorID)
 	default:
 		query += ` AND action_class = ?`

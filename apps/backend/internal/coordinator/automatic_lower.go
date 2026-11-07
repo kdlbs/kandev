@@ -149,7 +149,7 @@ func (s *Service) afterUndo(ctx context.Context, row *ActivityRow) {
 // whether that proposal started an agent.
 func (s *Store) taskCreatedAutomatically(ctx context.Context, coordinatorID, taskID string) (automatic, startsAgent bool, err error) {
 	var n, agents int
-	err = s.db.QueryRowContext(ctx, s.db.Rebind(`SELECT COUNT(*), COALESCE(SUM(starts_agent), 0) FROM coordinator_proposals
+	err = s.db.QueryRowContext(ctx, s.db.Rebind(`SELECT COUNT(*), COALESCE(SUM(CASE WHEN starts_agent THEN 1 ELSE 0 END), 0) FROM coordinator_proposals
 		WHERE coordinator_id = ? AND task_id = ? AND claimed_automatically = 1`), coordinatorID, taskID).Scan(&n, &agents)
 	if err != nil {
 		return false, false, fmt.Errorf("read automatic claim of task: %w", err)

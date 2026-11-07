@@ -262,8 +262,8 @@ func TestValidate_EligibilityBounds(t *testing.T) {
 func conversationMarker(t *testing.T, store *Store, c *Coordinator) string {
 	t.Helper()
 	var marker string
-	if err := store.db.GetContext(context.Background(), &marker, store.db.Rebind(`SELECT COALESCE(conversation_session_id, '') || '|' || COALESCE(updated_at, '') FROM coordinators WHERE id = ?`), c.ID); err != nil {
-		t.Skipf("conversation marker unavailable: %v", err)
+	if err := store.db.GetContext(context.Background(), &marker, store.db.Rebind(`SELECT COALESCE(conversation_task_id, '') || '|' || CAST(config_revision AS TEXT) FROM coordinators WHERE id = ?`), c.ID); err != nil {
+		t.Fatalf("conversation marker unavailable: %v", err)
 	}
 	return marker
 }

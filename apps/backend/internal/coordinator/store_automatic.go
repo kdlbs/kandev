@@ -100,7 +100,7 @@ const decidedOutcomeFilter = `a.outcome IN ('approved', 'rejected', 'returned') 
 // class whose proposal starts an agent; the others are bound to action_class.
 func decidedFrom(class Action) string {
 	if class == ActionStartAgent {
-		return `coordinator_activity a JOIN coordinator_proposals p ON p.id = a.proposal_id AND p.starts_agent = 1
+		return `coordinator_activity a JOIN coordinator_proposals p ON p.id = a.proposal_id AND p.starts_agent = TRUE
 			WHERE a.coordinator_id = ? AND ` + decidedOutcomeFilter
 	}
 	return `coordinator_activity a WHERE a.coordinator_id = ? AND a.action_class = '` + string(class) + `' AND ` + decidedOutcomeFilter
@@ -251,7 +251,7 @@ func (s *Store) NewestClassReview(ctx context.Context, coordinatorID string, cla
 // first argument.
 func activityClassFrom(class Action) string {
 	if class == ActionStartAgent {
-		return `coordinator_activity a JOIN coordinator_proposals p ON p.id = a.proposal_id AND p.starts_agent = 1
+		return `coordinator_activity a JOIN coordinator_proposals p ON p.id = a.proposal_id AND p.starts_agent = TRUE
 			WHERE a.coordinator_id = ?`
 	}
 	return `coordinator_activity a WHERE a.coordinator_id = ? AND a.action_class = '` + string(class) + `'`

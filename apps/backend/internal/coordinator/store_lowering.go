@@ -10,7 +10,7 @@ import (
 // rows: a resume proposal for resume, an agent-starting one for start_agent.
 func classProposalFilter(class Action) string {
 	if class == ActionStartAgent {
-		return `p.starts_agent = 1`
+		return `p.starts_agent = TRUE`
 	}
 	return `p.kind = '` + string(class) + `'`
 }
@@ -31,7 +31,7 @@ func (s *Store) ManagerOverrideAfter(ctx context.Context, coordinatorID string, 
 	return s.existsEvidence(ctx, "manager override", `
 		SELECT COUNT(*) FROM coordinator_activity a JOIN coordinator_proposals p ON p.id = a.proposal_id
 		WHERE a.coordinator_id = ? AND a.created_at > ? AND a."authorization" <> 'automatic'
-		AND (a.outcome IN ('rejected', 'returned') OR (a.edited = 1 AND a.outcome IN ('approved', 'failed')))
+		AND (a.outcome IN ('rejected', 'returned') OR (a.edited = TRUE AND a.outcome IN ('approved', 'failed')))
 		AND `+classProposalFilter(class), coordinatorID, after.UTC())
 }
 
@@ -39,7 +39,7 @@ func (s *Store) ManagerOverrideAfter(ctx context.Context, coordinatorID string, 
 // agent-starting proposals whose current claim is the automatic path's.
 func (s *Store) AutomaticStartAgentTaskIDs(ctx context.Context, coordinatorID string) (map[string]struct{}, error) {
 	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`SELECT task_id FROM coordinator_proposals
-		WHERE coordinator_id = ? AND claimed_automatically = 1 AND starts_agent = 1 AND task_id IS NOT NULL`), coordinatorID)
+		WHERE coordinator_id = ? AND claimed_automatically = 1 AND starts_agent = TRUE AND task_id IS NOT NULL`), coordinatorID)
 	if err != nil {
 		return nil, fmt.Errorf("read automatic agent-starting tasks: %w", err)
 	}
@@ -68,4 +68,16 @@ func (s *Store) existsEvidence(ctx context.Context, what, query string, args ...
 func (s *Store) CoordinatorIDsWithRaisedClasses(ctx context.Context) ([]string, error) {
 	return s.queryIDs(ctx, "coordinators with raised classes", `
 		SELECT DISTINCT coordinator_id FROM coordinator_class_changes WHERE to_value = 'automatic' ORDER BY coordinator_id`)
+}
+
+// ProposalDecidedAt returns the created_at of the newest activity row of the
+// proposal.
+func (s *Store) ProposalDecidedAt(ctx context.Context, proposalID string) (time.Time, error) {
+	var at time.Time
+	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`SELECT created_at FROM coordinator_activity
+		WHERE proposal_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`), proposalID).Scan(&at)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read decision time: %w", err)
+	}
+	return at.UTC(), nil
 }
