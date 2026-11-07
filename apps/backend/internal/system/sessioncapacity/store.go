@@ -48,18 +48,47 @@ func decodeSettings(raw []byte, found bool) (*Settings, error) {
 	if !found {
 		return nil, nil
 	}
+	if _, err := decodeInferenceBindings(raw, true); err != nil {
+		return nil, err
+	}
+	if inferenceOnlySettings(raw) {
+		return nil, nil
+	}
 	var settings Settings
 	if err := json.Unmarshal(raw, &settings); err != nil {
 		return nil, fmt.Errorf("%w: decode JSON: %v", ErrInvalidPersisted, err)
 	}
+	if limits, present, err := storedGradeLimits(raw); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidPersisted, err)
+	} else if present {
+		settings.GradeLimits = limits
+	}
 	if err := Validate(settings); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidPersisted, err)
+	}
+	if settings.Policy == "" {
+		settings.Policy = PolicyAutomatic
+	}
+	if settings.GradeLimits == nil {
+		settings.GradeLimits = map[string]int{}
 	}
 	return &settings, nil
 }
 
 func (s *Store) Save(ctx context.Context, settings Settings) error {
+	if cas, ok := s.raw.(rawCompareAndSwapStore); ok {
+		_, err := s.updateWithCompareAndSwap(ctx, cas, func(*Settings) (Settings, error) { return settings, nil })
+		return err
+	}
 	raw, err := encodeSettings(settings)
+	if err != nil {
+		return err
+	}
+	previous, _, err := s.raw.Get(ctx, SettingsKey)
+	if err != nil {
+		return fmt.Errorf("load session capacity settings: %w", err)
+	}
+	raw, err = preserveInferenceBindings(previous, raw)
 	if err != nil {
 		return err
 	}
@@ -70,6 +99,12 @@ func (s *Store) Save(ctx context.Context, settings Settings) error {
 }
 
 func encodeSettings(settings Settings) ([]byte, error) {
+	if settings.Policy == "" {
+		settings.Policy = PolicyAutomatic
+	}
+	if settings.GradeLimits == nil {
+		settings.GradeLimits = map[string]int{}
+	}
 	if err := Validate(settings); err != nil {
 		return nil, err
 	}
@@ -130,6 +165,10 @@ func (s *Store) updateWithCompareAndSwap(
 			return Settings{}, err
 		}
 		next, err := encodeSettings(updated)
+		if err != nil {
+			return Settings{}, err
+		}
+		next, err = preserveInferenceBindings(raw, next)
 		if err != nil {
 			return Settings{}, err
 		}

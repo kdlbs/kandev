@@ -295,6 +295,27 @@ The [stall detector](../../office/requirements/stall-visibility.md) remains dete
 It does not create, clear, or act on recovery blocks.
 The [budget admission contract](../../office/requirements/budget-admission-integrity.md) remains authoritative for every resumed unattended run.
 
+## Explicit inference-scope closure
+
+The existing awaited Stop and Resume actions accept one inference closure operation ID.
+Closure keeps the session ID and native conversation, allocating only a successor execution ID.
+Session metadata stores the checkpoint; an independent recovery block fences launch, queued dispatch, and inference admission across generations.
+Generic recovery cannot release this block.
+
+The current standalone owner must already have known historical continuity.
+Actual process teardown closes admission, drains operations, and proves managed children terminal while retaining the journal.
+Missing historical scope, another live execution, or unknown claims leave admission blocked.
+The captured binding population is persisted before existing provider settlement, exact binding removal, and retained-attempt acknowledgement.
+Unrelated bindings remain untouched; a missing binding alone never proves settlement.
+
+Journal transitions compare the complete observed owner state.
+SQL transitions compare the complete checkpoint and canonical execution identity.
+The committed receipt permits only its allocated successor with the same session and incarnation.
+A consumed but unadmitted successor can replay only with its exact persisted harness generation.
+The SQL fence is released only after observing the successor's consumed receipt and rechecking related claims.
+Interrupted cross-store transitions replay their durable stage without resending the uncertain prompt.
+An unknown original submission and its history remain unchanged.
+
 ## Failure and recovery
 
 Native failure never clears the prior token.

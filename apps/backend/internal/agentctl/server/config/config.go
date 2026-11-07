@@ -348,6 +348,10 @@ type InstanceConfig struct {
 	// SessionID is the session ID for this agent instance (used in MCP tool calls)
 	SessionID string
 
+	// InferenceOwnerFresh is set only when the instance manager mints a new ID.
+	InferenceOwnerFresh         bool   `json:"-"`
+	InferenceClosureOperationID string `json:"inference_closure_operation_id,omitempty"`
+
 	// TaskID is the task ID for this agent instance (used in MCP plan tool calls)
 	TaskID string
 
@@ -859,6 +863,7 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.DeliveryIncarnationID != "" {
 		cfg.DeliveryIncarnationID = overrides.DeliveryIncarnationID
 	}
+	cfg.InferenceClosureOperationID = overrides.InferenceClosureOperationID
 	if overrides.DeliveryHarnessGeneration > 0 {
 		cfg.DeliveryHarnessGeneration = overrides.DeliveryHarnessGeneration
 	}
@@ -883,40 +888,41 @@ func applyApprovalOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 
 // InstanceOverrides allows overriding default values when creating an instance
 type InstanceOverrides struct {
-	InstanceID                 string
-	Protocol                   agent.Protocol
-	AgentCommand               string
-	WorkDir                    string
-	AutoStart                  *bool
-	Env                        []string
-	AutoApprovePermissions     *bool
-	AgentType                  string
-	McpServers                 []McpServerConfig
-	SessionID                  string
-	TaskID                     string
-	DisableAskQuestion         bool
-	PromptSuggestions          bool
-	CopilotNativeSessionEvents bool
-	AssumeMcpSse               bool
-	AssumeMcpHttp              bool
-	McpMode                    string
-	McpProviders               []string
-	McpProfile                 *mcpprofile.Context
-	NamespacesMCPToolsByServer bool
-	RequiresProcessKill        bool
-	StripEnv                   []string
-	ProviderGatewayAuth        *acpprovider.GatewayAuth
-	AuthPolicy                 *acpcompat.AuthPolicy
-	BaseBranches               map[string]string
-	ComparisonTargets          map[string]models.ComparisonTarget
-	RemoteContributions        map[string]models.RemoteContribution
-	ContributionDestinations   map[string]models.ContributionDestination
-	WorkspaceSourceRoots       []string
-	DurableJournalPath         string
-	DeliveryStreamID           string
-	DeliveryIncarnationID      string
-	DeliveryHarnessGeneration  uint64
-	OpenCodePluginRuntime      *agentctltypes.OpenCodePluginRuntime
+	InferenceClosureOperationID string
+	InstanceID                  string
+	Protocol                    agent.Protocol
+	AgentCommand                string
+	WorkDir                     string
+	AutoStart                   *bool
+	Env                         []string
+	AutoApprovePermissions      *bool
+	AgentType                   string
+	McpServers                  []McpServerConfig
+	SessionID                   string
+	TaskID                      string
+	DisableAskQuestion          bool
+	PromptSuggestions           bool
+	CopilotNativeSessionEvents  bool
+	AssumeMcpSse                bool
+	AssumeMcpHttp               bool
+	McpMode                     string
+	McpProviders                []string
+	McpProfile                  *mcpprofile.Context
+	NamespacesMCPToolsByServer  bool
+	RequiresProcessKill         bool
+	StripEnv                    []string
+	ProviderGatewayAuth         *acpprovider.GatewayAuth
+	AuthPolicy                  *acpcompat.AuthPolicy
+	BaseBranches                map[string]string
+	ComparisonTargets           map[string]models.ComparisonTarget
+	RemoteContributions         map[string]models.RemoteContribution
+	ContributionDestinations    map[string]models.ContributionDestination
+	WorkspaceSourceRoots        []string
+	DurableJournalPath          string
+	DeliveryStreamID            string
+	DeliveryIncarnationID       string
+	DeliveryHarnessGeneration   uint64
+	OpenCodePluginRuntime       *agentctltypes.OpenCodePluginRuntime
 }
 
 func cloneComparisonTargets(values map[string]models.ComparisonTarget) map[string]models.ComparisonTarget {

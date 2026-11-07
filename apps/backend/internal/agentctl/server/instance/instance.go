@@ -149,6 +149,7 @@ type McpServerConfig struct {
 
 // CreateRequest contains the parameters for creating a new agent instance.
 type CreateRequest struct {
+	InferenceClosureOperationID string `json:"inference_closure_operation_id,omitempty"`
 	// ID is an optional identifier for the instance. If empty, one will be generated.
 	ID string `json:"id,omitempty"`
 

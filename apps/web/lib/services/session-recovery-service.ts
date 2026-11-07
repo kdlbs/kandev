@@ -39,6 +39,7 @@ export type SessionRecoveryRequest = {
   failureMessage: string;
   errorStamp?: string | null;
   settingsPolicy?: SessionRecoverySettingsPolicy;
+  sessionMetadata?: Record<string, unknown> | null;
 };
 
 const MANAGED_CLONE_RELOCATION_TIMEOUT_MS = 30 * 60 * 1000;
@@ -314,9 +315,107 @@ function recoveryRequestPayload(options: SessionRecoveryRequest) {
   };
 }
 
+type InferenceClosureResume = {
+  operationId: string;
+  sourceExecutionId: string;
+  candidateExecutionId: string;
+  incarnationId: string;
+  stage: string;
+};
+
+type InferenceClosureIdentity = Record<string, unknown> & {
+  operation_id: string;
+  source_execution_id: string;
+  candidate_execution_id: string;
+  incarnation_id: string;
+};
+
+function hasInferenceClosureIdentity(
+  closure: Record<string, unknown>,
+  sessionId: string,
+): closure is InferenceClosureIdentity {
+  return (
+    closure.version === 1 &&
+    closure.session_id === sessionId &&
+    typeof closure.operation_id === "string" &&
+    !!closure.operation_id &&
+    typeof closure.source_execution_id === "string" &&
+    !!closure.source_execution_id &&
+    typeof closure.candidate_execution_id === "string" &&
+    !!closure.candidate_execution_id &&
+    closure.source_execution_id !== closure.candidate_execution_id &&
+    typeof closure.incarnation_id === "string" &&
+    !!closure.incarnation_id
+  );
+}
+
+function inferenceClosureResume(options: SessionRecoveryRequest): InferenceClosureResume | null {
+  if (options.action !== "resume") return null;
+  const value = options.sessionMetadata?.inference_scope_closure;
+  if (value == null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) throw new Error(options.failureMessage);
+  const closure = value as Record<string, unknown>;
+  if (closure.stage === "consumed") return null;
+  if (
+    !hasInferenceClosureIdentity(closure, options.sessionId) ||
+    typeof closure.stage !== "string" ||
+    !["fenced", "observed", "settled", "committed"].includes(closure.stage)
+  ) {
+    throw new Error(options.failureMessage);
+  }
+  return {
+    operationId: closure.operation_id,
+    sourceExecutionId: closure.source_execution_id,
+    candidateExecutionId: closure.candidate_execution_id,
+    incarnationId: closure.incarnation_id,
+    stage: closure.stage,
+  };
+}
+
+function assertReadyInferenceClosure(
+  value: unknown,
+  closure: InferenceClosureResume,
+  sessionId: string,
+  failureMessage: string,
+): void {
+  if (
+    !isRecord(value) ||
+    value.version !== 1 ||
+    value.operation_id !== closure.operationId ||
+    value.session_id !== sessionId ||
+    value.incarnation_id !== closure.incarnationId ||
+    value.source_execution_id !== closure.sourceExecutionId ||
+    value.candidate_execution_id !== closure.candidateExecutionId ||
+    (value.stage !== "committed" && value.stage !== "consumed") ||
+    value.claims_settled !== true
+  )
+    throw new Error(failureMessage);
+}
+
 function recoveryRequestTimeout(options: SessionRecoveryRequest) {
   if (options.action === "relocate_and_resume") return MANAGED_CLONE_RELOCATION_TIMEOUT_MS;
   return 30_000;
+}
+
+async function prepareInferenceClosure(
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
+  options: SessionRecoveryRequest,
+): Promise<InferenceClosureResume | null> {
+  const closure = inferenceClosureResume(options);
+  if (closure && closure.stage !== "committed") {
+    const stopped = await client.request<unknown>(
+      "session.stop",
+      {
+        session_id: options.sessionId,
+        expected_execution_id: closure.sourceExecutionId,
+        await_terminal: true,
+        inference_closure_operation_id: closure.operationId,
+      },
+      60_000,
+    );
+    assertReadyInferenceClosure(stopped, closure, options.sessionId, options.failureMessage);
+  }
+  return closure;
 }
 
 /** Send one of the explicit session.recover actions. */
@@ -327,9 +426,14 @@ export async function requestSessionRecover(
   validateRecoveryRequest(options);
   const client = getWebSocketClient();
   if (!client) throw new Error(failureMessage);
+
+  const closure = await prepareInferenceClosure(client, options);
   const response = await client.request<unknown>(
     "session.recover",
-    recoveryRequestPayload(options),
+    {
+      ...recoveryRequestPayload(options),
+      ...(closure ? { inference_closure_operation_id: closure.operationId } : {}),
+    },
     recoveryRequestTimeout(options),
   );
   const failure = responseFailure(response, failureMessage);
@@ -348,12 +452,25 @@ export async function resumeSession(
   taskId: string,
   sessionId: string,
   failureMessage: string,
+  sessionMetadata?: Record<string, unknown> | null,
 ): Promise<LaunchSessionResponse> {
   const client = getWebSocketClient();
   if (!client) throw new Error(failureMessage);
+  const closure = await prepareInferenceClosure(client, {
+    taskId,
+    sessionId,
+    action: "resume",
+    failureMessage,
+    sessionMetadata,
+  });
   const response = await client.request<LaunchSessionResponse>(
     "session.recover",
-    { task_id: taskId, session_id: sessionId, action: "resume" },
+    {
+      task_id: taskId,
+      session_id: sessionId,
+      action: "resume",
+      ...(closure ? { inference_closure_operation_id: closure.operationId } : {}),
+    },
     60_000,
   );
   const failure = responseFailure(response, failureMessage);

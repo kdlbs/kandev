@@ -345,6 +345,7 @@ func (e *Executor) stopSession(
 	session *models.TaskSession,
 	reason string,
 	force bool,
+	expectedExecutionIDs ...string,
 ) (SessionStopResult, error) {
 	// Look up the live execution for this session via the lifecycle manager —
 	// the in-memory store is the single source of truth post-refactor.
@@ -357,6 +358,9 @@ func (e *Executor) stopSession(
 	}
 	if executionID == "" {
 		return SessionStopResult{}, fmt.Errorf("%w for session %q", errEmptyExecutionID, session.ID)
+	}
+	if len(expectedExecutionIDs) > 0 && executionID != expectedExecutionIDs[0] {
+		return SessionStopResult{}, fmt.Errorf("awaited stop execution identity changed")
 	}
 
 	e.logStop(session, executionID, reason, force)
