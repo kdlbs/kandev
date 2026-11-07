@@ -214,6 +214,8 @@
   "dynamicPolicyWaitForReset": "等待提供商重置",
   "dynamicPolicyWaitHelp": "等待可信的未来提供商重置或重试时间。等待时间有限制，并且每个候选配置和类别只使用一次。",
   "dynamicProfileDescription": "选择按顺序执行的具体配置，以便在失败时切换。",
+  "dynamicKeepModelWhileRunning": "在轮次之间保持所选模型",
+  "dynamicKeepModelWhileRunningDescription": "用量变化或出现新的可用容量时，不会把进行中的轮次换到其他模型。Kandev 会在下一个用户轮次开始前重新比较。此偏好设置按配置文件保存。",
   "dynamicProfileDisabled": "动态代理路由已禁用。",
   "dynamicProfileSaved": "动态配置已保存。",
   "dynamicProfileSettings": "动态配置设置",

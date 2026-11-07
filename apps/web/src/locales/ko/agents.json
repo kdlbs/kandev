@@ -404,6 +404,8 @@
   "dynamicAgentsDescription": "하나의 논리 프로필을 구체적인 에이전트 프로필의 순서 목록을 통해 라우팅합니다.",
   "dynamicProfileDisabled": "동적 에이전트 라우팅이 비활성화되었습니다.",
   "dynamicProfileDescription": "폴백 실행을 위해 구체적인 프로필의 순서 목록을 선택합니다.",
+  "dynamicKeepModelWhileRunning": "턴 사이에 선택한 모델 유지",
+  "dynamicKeepModelWhileRunningDescription": "사용량 변화나 새로 생긴 여유가 있어도 실행 중인 턴을 다른 모델로 바꾸지 않습니다. Kandev는 다음 사용자 턴 직전에 다시 비교합니다. 이 설정은 프로필별로 저장됩니다.",
   "dynamicProfileSettings": "동적 프로필 설정",
   "dynamicCandidates": "후보",
   "dynamicCandidatesDescription": "후보는 순서대로 실행됩니다. 다음 후보는 구성된 오류 동작이 허용할 때만 사용됩니다.",

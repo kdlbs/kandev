@@ -86,6 +86,35 @@ function DynamicProfileEditorHeader({
   );
 }
 
+function DynamicKeepModelPreference({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="flex min-h-11 items-center justify-between gap-3 rounded-md border p-3"
+      data-testid="dynamic-keep-model-preference"
+    >
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{t("agents:dynamicKeepModelWhileRunning")}</p>
+        <p className="text-xs text-muted-foreground">
+          {t("agents:dynamicKeepModelWhileRunningDescription")}
+        </p>
+      </div>
+      <Switch
+        checked={enabled}
+        onCheckedChange={onChange}
+        data-testid="dynamic-keep-model-toggle"
+        aria-label={t("agents:dynamicKeepModelWhileRunning")}
+      />
+    </div>
+  );
+}
+
 export function DynamicAgentProfileEditor({
   agent,
   profile,
@@ -114,6 +143,10 @@ export function DynamicAgentProfileEditor({
         onChange={state.updateName}
       />
       <DynamicRoutingPolicyHelp />
+      <DynamicKeepModelPreference
+        enabled={state.keepModelWhileRunning}
+        onChange={state.updateKeepModelWhileRunning}
+      />
       <DynamicAgentCandidateList
         candidates={state.candidates}
         concreteProfiles={state.concreteProfiles}

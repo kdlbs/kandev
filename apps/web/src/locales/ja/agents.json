@@ -418,6 +418,8 @@
   "dynamicAgentsDescription": "1 つの論理プロファイルを、順番つきの具体的なエージェントプロファイル一覧へルーティング。",
   "dynamicProfileDisabled": "動的エージェントルーティング無効。",
   "dynamicProfileDescription": "フォールバック実行用に、順番つき具体的プロファイル一覧を選択。",
+  "dynamicKeepModelWhileRunning": "ターン間で選択したモデルを維持",
+  "dynamicKeepModelWhileRunningDescription": "使用量の変化や新たに利用可能になった容量があっても、実行中のターンを別のモデルへ移しません。Kandev は次のユーザーターンの直前に再比較します。この設定はプロファイルごとに保存されます。",
   "dynamicProfileSettings": "動的プロファイル設定",
   "dynamicCandidates": "候補",
   "dynamicCandidatesDescription": "候補は順番に実行。次の候補は、設定済みエラー動作が許可した場合のみ使う。",

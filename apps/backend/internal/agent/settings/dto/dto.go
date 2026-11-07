@@ -77,6 +77,10 @@ type AgentProfileDTO struct {
 type DynamicAgentProfileDTO struct {
 	Version    int64                      `json:"version"`
 	Candidates []DynamicAgentCandidateDTO `json:"candidates"`
+	// KeepModelWhileRunning is the profile-wide continuity preference, not a
+	// selection mode. It is a pointer so an update that omits the field
+	// preserves the saved value while an explicit false is honored.
+	KeepModelWhileRunning *bool `json:"keep_model_while_running,omitempty"`
 }
 
 // DynamicAgentPolicyDTO is the canonical, versioned policy document persisted
