@@ -46,6 +46,7 @@ const READ_LABELS: Record<ControlReadStatus, string> = {
 };
 const TASK_FIGURES = [
   { field: "waiting_input_tasks", label: "sidebar:controlSummary.compare.waitingInput" },
+  { field: "wip_waiting_tasks", label: "sidebar:integratedControl.waitingWip" },
   { field: "completed_tasks_24h", label: "sidebar:controlSummary.compare.completed" },
   { field: "transitions_24h", label: "sidebar:controlSummary.compare.moves" },
 ] as const;
