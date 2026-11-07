@@ -76,6 +76,9 @@ type Store interface {
 
 // RunRequest describes a review pass to start.
 type RunRequest struct {
+	WorktreePath    string `json:"worktree_path,omitempty"`
+	BaseRef         string `json:"base_ref,omitempty"`
+	HeadRef         string `json:"head_ref,omitempty"`
 	Origin          *OriginIdentity
 	OriginRequired  bool
 	originExclusion *originExclusion
@@ -276,7 +279,7 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 	if err != nil {
 		return nil, nil, err
 	}
-	files, err := CollectChanges(ctx, r.changes, sessionID, req.RepositoryID)
+	files, err := r.collectRequestChanges(ctx, req)
 	if err != nil {
 		return nil, nil, err
 	}

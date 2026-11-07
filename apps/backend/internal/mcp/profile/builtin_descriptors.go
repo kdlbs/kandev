@@ -82,6 +82,9 @@ func BuiltinToolActions(name string) []string {
 	if name == "get_code_review_kandev" {
 		return []string{ws.ActionTaskReviewGet}
 	}
+	if name == "set_review_source_kandev" {
+		return []string{ws.ActionTaskReviewSourceSet}
+	}
 	actions := []string{"mcp." + strings.TrimSuffix(name, "_kandev")}
 	switch name {
 	case "ask_user_question_kandev", "ask_parent_question_kandev":
