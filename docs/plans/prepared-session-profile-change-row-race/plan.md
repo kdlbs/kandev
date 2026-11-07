@@ -5,6 +5,7 @@ requirements:
   - REQ-OFFICE-SESSION-IDENTITY-001
   - REQ-OFFICE-ROUTING-001
 system_design:
+  - ../../specs/office/system-design/task-session-identity-01.md
   - ../../specs/office/system-design/routing-02.md
 legacy_specs: []
 ---

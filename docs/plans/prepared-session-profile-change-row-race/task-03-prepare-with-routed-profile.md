@@ -14,6 +14,7 @@ acceptance_criteria:
   - AC-OFFICE-ROUTING-001.2
   - AC-OFFICE-ROUTING-001.3
 system_design:
+  - ../../specs/office/system-design/task-session-identity-01.md
   - ../../specs/office/system-design/routing-02.md
 ---
 
