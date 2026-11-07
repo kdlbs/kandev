@@ -138,9 +138,11 @@ func teamClaudePoolWindows(accounts []teamClaudeAccount) []UtilizationWindow {
 			candidate := UtilizationWindow{
 				Label:          spec.label,
 				UtilizationPct: *utilization * 100,
+				Observation:    &WindowObservation{UtilizationObserved: true},
 			}
 			if resetAt := spec.resetAt(account.Quota); resetAt > 0 {
 				candidate.ResetAt = time.UnixMilli(resetAt).UTC()
+				candidate.Observation.ResetAtObserved = true
 			}
 			if best == nil || candidate.UtilizationPct < best.UtilizationPct {
 				best = &candidate

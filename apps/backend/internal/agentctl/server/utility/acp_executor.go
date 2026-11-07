@@ -20,6 +20,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agent/antigravityruntime"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
@@ -46,12 +47,13 @@ const (
 // It spawns a new agent process, performs the ACP handshake, sends the prompt,
 // collects the response, and tears down the process.
 type ACPInferenceExecutor struct {
-	logger *zap.Logger
+	executionUsage *usage.UsageService
+	logger         *zap.Logger
 }
 
 // NewACPInferenceExecutor creates a new ACP inference executor.
 func NewACPInferenceExecutor(logger *zap.Logger) *ACPInferenceExecutor {
-	return &ACPInferenceExecutor{logger: logger}
+	return &ACPInferenceExecutor{logger: logger, executionUsage: usage.NewUsageService()}
 }
 
 // Execute runs a one-shot prompt using the ACP protocol.
@@ -89,6 +91,9 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	if envErr != nil {
 		return &PromptResponse{Success: false, Error: envErr.Error()}, nil
 	}
+	if report := e.checkExecutionUsage(ctx, req, env); report != nil && (report.Limited || report.BindingChanged) {
+		return &PromptResponse{Error: "native provider usage admission refused", Usage: report}, nil
+	}
 	args, prepareErr := prepareACPLaunch(cfg, resolvedCmd, args, env)
 	if prepareErr != nil {
 		return &PromptResponse{Success: false, Error: prepareErr.Error()}, nil
@@ -118,7 +123,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		return &PromptResponse{Success: false, Error: fmt.Sprintf("stdout pipe: %v", err)}, nil
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startInferenceCommand(ctx, cmd); err != nil {
 		return &PromptResponse{Success: false, Error: utilityStartError(cfg, err)}, nil
 	}
 	lifecycle, err := installACPCommandLifecycle(cmd)
@@ -278,6 +283,7 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	}
 
 	// Send prompt and wait for completion
+	markInferenceDispatch(ctx)
 	_, err = conn.Prompt(ctx, acp.PromptRequest{
 		SessionId: sessionID,
 		Prompt:    []acp.ContentBlock{acp.TextBlock(prompt)},

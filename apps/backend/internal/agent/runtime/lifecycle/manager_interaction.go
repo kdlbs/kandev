@@ -1477,6 +1477,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	if err := m.stopAgentViaBackend(stopCtx, executionID, execution, reason, backendForce, agentStopFailed); err != nil {
 		return fmt.Errorf("stop runtime for execution %q: %w", executionID, err)
 	}
+	if err := m.completeProviderExecution(stopCtx, executionID); err != nil {
+		m.logger.Error("provider turn execution settlement failed", zap.String("execution_id", executionID), zap.Error(err))
+	}
 	if execution.RuntimeName == executor.NameKubernetes && (backendForce || shouldRunExecutorCleanup(reason)) {
 		cleanupCtx, cancelCleanup := kubernetesDurableContext(ctx)
 		err := m.deleteKubernetesRuntimeSecrets(cleanupCtx, execution.MetadataSnapshot())
@@ -1527,8 +1530,11 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		zap.String("execution_id", executionID),
 		zap.String("task_id", execution.TaskID))
 
-	// Publish stopped event
-	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
+	// Office recovery callers settle their own failed or interrupted attempt.
+	// A stopped event would instead finish that run as successfully processed.
+	if reason != stopReasonRunRecovery || execution.Owner.Kind != ExecutionOwnerRun {
+		m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
+	}
 
 	return nil
 }
