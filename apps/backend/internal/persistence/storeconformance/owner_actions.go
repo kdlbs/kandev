@@ -182,6 +182,7 @@ func buildOwnerBehaviors() map[string]ownerBehavior {
 	behaviors["plugin-state"] = ownerBehavior{actions: []apiAction{pluginStateAction()}}
 	behaviors["plugin-instance-state"] = ownerBehavior{actions: []apiAction{pluginInstanceStateAction()}}
 	behaviors["plugin-user-state"] = ownerBehavior{actions: []apiAction{pluginUserStateAction()}}
+	behaviors["plugin-task-change-requests"] = ownerBehavior{actions: []apiAction{pluginTaskChangeRequestAction()}}
 	behaviors["canvas"] = ownerBehavior{actions: []apiAction{canvasAction()}}
 	behaviors["github"] = ownerBehavior{actions: []apiAction{githubAction()}}
 	behaviors["gitlab"] = ownerBehavior{actions: []apiAction{gitlabAction()}}
@@ -332,6 +333,10 @@ func pluginInstanceStateFactory(s testconformance.ScenarioContext) (any, error) 
 
 func pluginUserStateFactory(s testconformance.ScenarioContext) (any, error) {
 	return pluginstate.NewUserStore(ownerPool(s))
+}
+
+func pluginTaskChangeRequestFactory(s testconformance.ScenarioContext) (any, error) {
+	return pluginstate.NewChangeRequestStore(ownerPool(s))
 }
 
 func canvasFactory(s testconformance.ScenarioContext) (any, error) {
@@ -3304,6 +3309,121 @@ func setCoordinatorBoolean(s testconformance.ScenarioContext, id string, _ any, 
 		return nil, err
 	}
 	return store.GetCoordinator(s.Context, workspaceID, id)
+}
+
+type changeRequestBehaviorRecord struct {
+	ID        string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// pluginTaskChangeRequestAction exercises the Host-owned, plugin-reported task
+// change-request ledger with its real report/list/remove API. A row's identity
+// is derived from the harness id so read and remove resolve the same row the
+// report created.
+//
+//nolint:cyclop,gocognit,funlen // This adapter asserts the complete change-request contract.
+func pluginTaskChangeRequestAction() apiAction {
+	const (
+		installationID = "conformance-installation"
+		workspaceID    = "conformance-workspace"
+		providerID     = "forgejo"
+	)
+	repositoryID := func(id string) string { return "conformance-repo-" + id }
+	store := func(s testconformance.ScenarioContext) (*pluginstate.ChangeRequestStore, error) {
+		factory, err := pluginTaskChangeRequestFactory(s)
+		if err != nil {
+			return nil, err
+		}
+		return factory.(*pluginstate.ChangeRequestStore), nil
+	}
+	report := func(s testconformance.ScenarioContext, id, bodyState string) error {
+		ledger, err := store(s)
+		if err != nil {
+			return err
+		}
+		record := pluginstate.ChangeRequestRecord{
+			InstallationID: installationID, WorkspaceID: workspaceID, TaskID: id,
+			ProviderID: providerID, RepositoryID: repositoryID(id), Number: 1,
+			URL: "https://forge.example.test/pulls/1", Title: "conformance", State: bodyState,
+		}
+		if bodyState == pluginstate.ChangeRequestStateMerged {
+			record.MergedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		_, _, err = ledger.ReportChangeRequest(s.Context, record)
+		return err
+	}
+	readEntry := func(s testconformance.ScenarioContext, id string) (*changeRequestBehaviorRecord, error) {
+		ledger, err := store(s)
+		if err != nil {
+			return nil, err
+		}
+		records, err := ledger.ListChangeRequestsByTask(s.Context, installationID, workspaceID, id)
+		if err != nil {
+			return nil, err
+		}
+		want := repositoryID(id)
+		for _, record := range records {
+			if record.RepositoryID != want {
+				continue
+			}
+			created, err := time.Parse(time.RFC3339Nano, record.CreatedAt)
+			if err != nil {
+				return nil, err
+			}
+			updated, err := time.Parse(time.RFC3339Nano, record.UpdatedAt)
+			if err != nil {
+				return nil, err
+			}
+			return &changeRequestBehaviorRecord{ID: id, CreatedAt: created.UTC(), UpdatedAt: updated.UTC()}, nil
+		}
+		return nil, fmt.Errorf("plugin task change request %q not found", id)
+	}
+	action := apiAction{name: "plugin_task_change_requests"}
+	action.create = func(s testconformance.ScenarioContext, id string) (any, error) {
+		if err := report(s, id, pluginstate.ChangeRequestStateOpen); err != nil {
+			return nil, err
+		}
+		return readEntry(s, id)
+	}
+	action.read = func(s testconformance.ScenarioContext, id string) (any, error) {
+		return readEntry(s, id)
+	}
+	action.update = func(s testconformance.ScenarioContext, id string, _ any) error {
+		return report(s, id, pluginstate.ChangeRequestStateMerged)
+	}
+	action.delete = func(s testconformance.ScenarioContext, id string) error {
+		ledger, err := store(s)
+		if err != nil {
+			return err
+		}
+		return ledger.RemoveChangeRequest(s.Context, installationID, workspaceID, providerID, repositoryID(id), 1)
+	}
+	action.conflict = func(s testconformance.ScenarioContext, id string, _ any) error {
+		if err := report(s, id, pluginstate.ChangeRequestStateOpen); err != nil {
+			return err
+		}
+		ledger, err := store(s)
+		if err != nil {
+			return err
+		}
+		records, err := ledger.ListChangeRequestsByTask(s.Context, installationID, workspaceID, id)
+		if err != nil {
+			return err
+		}
+		want := repositoryID(id)
+		count := 0
+		for _, record := range records {
+			if record.RepositoryID == want {
+				count++
+			}
+		}
+		if count != 1 {
+			return fmt.Errorf("re-report created %d rows, want 1", count)
+		}
+		return nil
+	}
+	return action
 }
 
 func reflectValue(record any) reflect.Value {

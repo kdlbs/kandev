@@ -1802,6 +1802,7 @@ func recordPluginStores(ctx context.Context, tracker *requiredstores.Tracker, in
 		"plugin-state",
 		"plugin-instance-state",
 		"plugin-user-state",
+		"plugin-task-change-requests",
 	} {
 		if err := recordRequiredStore(ctx, tracker, id, initErrors[id]); err != nil {
 			failures = append(failures, err)

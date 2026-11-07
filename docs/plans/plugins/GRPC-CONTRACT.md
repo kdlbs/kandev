@@ -405,6 +405,40 @@ prompted, resuming the agent if its process is gone (`"sent"`); a never-started
 one is launched with the prompt as its first turn (`"started"`). A failed
 dispatch deletes the recorded message so no orphan prompt is left.
 
+**Plugin-reported task change requests.** A code-host plugin can report the
+change request it observes with `ReportTaskChangeRequestExact` and remove it
+with `RemoveTaskChangeRequestExact`. Writes require
+`capabilities.api_write: [task_change_requests]`, the workspace grant
+`host.v2.write:task_change_requests`, the current approval revision, and the
+manifest digest. The reported `provider_id` must be one of the plugin's
+manifest-declared `repository_providers`; the task must exist in the same
+workspace and must not be archived. The identity is the owning installation,
+workspace, provider, immutable repository id, and change-request number. The
+first report fixes the task association; another task cannot take over the row
+and must remove and report it instead. State is `open`, `merged`, or `closed`;
+merged and closed are terminal and their timestamps latch, so a stale report
+cannot reopen or unmerge a row. An open report carries no terminal timestamp, a
+merged report carries only `merged_at`, and a closed report carries only
+`closed_at`. To reopen a change request, remove it and report it again. Every
+command carries an idempotency key and returns the normal `HostCommandResult`. A
+disabled installation is denied. The row change and receipt completion commit
+in one transaction. If that transaction cannot be confirmed, the result is
+`UNCERTAIN`; retrying the same idempotency key resolves the recorded uncertain
+receipt without repeating the write. Use a new idempotency key to retry
+intentionally.
+
+The Host owns the `plugin_task_change_requests` ledger. Disable fences new
+writes while keeping the installation's history, so a re-enable can reuse it;
+uninstall deletes the rows, and workspace deletion removes every row for that
+workspace. An in-place upgrade keeps the installation identity
+but advances the approval revision, so a write approved for the old manifest is
+denied. `ListChangeRequestEvidenceExact` returns the calling
+installation's rows with their real provider id alongside any GitHub evidence
+it is already authorized to read. The ledger does not grant merge, comment,
+CI-rerun, automation-trigger, or statistics authority. Exposing these rows to
+other host consumers, including PR statistics, parent or MCP summaries, and a
+provider-neutral merged trigger, remains a separate opt-in contract.
+
 **Pending interactions** (`api_read:interactions` / `api_write:interactions`,
 ADR 0052 — `docs/decisions/0052-plugin-host-interaction-api.md`) are the durable
 record of every agent request still owed a human answer: a tool permission

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kdlbs/kandev/pluginsdk"
 )
@@ -216,5 +217,50 @@ func TestServiceUninstallWithoutAgentConversationsWiredIsNoop(t *testing.T) {
 
 	if err := svc.Uninstall(context.Background(), rec.ID); err != nil {
 		t.Fatalf("Uninstall() unexpected error with no agent-conversation service wired: %v", err)
+	}
+}
+
+func TestServiceUninstallPreservesChangeRequestsWhenManagedDetachFails(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	managed := &managedConversationServiceFake{
+		conversations: map[string]pluginsdk.ManagedAgentConversationDescriptor{
+			"conversation": {InstallationID: "uninstall-preserve", WorkspaceID: "ws-1"},
+		},
+	}
+	svc.SetManagedAgentConversations(managed)
+	rec := installTestPlugin(t, svc, "kandev-plugin-coordinator")
+	managed.conversations["conversation"] = pluginsdk.ManagedAgentConversationDescriptor{
+		InstallationID: rec.InstallationID, WorkspaceID: "ws-1",
+	}
+	ledger := newChangeRequestEvidenceStore(t)
+	svc.SetChangeRequestStore(ledger)
+	if _, _, err := ledger.ReportChangeRequest(context.Background(), state.ChangeRequestRecord{
+		InstallationID: rec.InstallationID, WorkspaceID: "ws-1", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 1, State: state.ChangeRequestStateOpen,
+	}); err != nil {
+		t.Fatalf("seed change request: %v", err)
+	}
+	managed.detachErr = errors.New("managed detach unavailable")
+	err := svc.Uninstall(context.Background(), rec.ID)
+	if err == nil || !strings.Contains(err.Error(), "managed detach unavailable") {
+		t.Fatalf("Uninstall() error = %v, want managed detach failure", err)
+	}
+	rows, err := ledger.ListChangeRequestsByTask(context.Background(), rec.InstallationID, "ws-1", "task-1")
+	if err != nil {
+		t.Fatalf("list after aborted uninstall: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows after aborted uninstall = %d, want 1 preserved", len(rows))
+	}
+	managed.detachErr = nil
+	if err := svc.Uninstall(context.Background(), rec.ID); err != nil {
+		t.Fatalf("retry Uninstall(): %v", err)
+	}
+	rows, err = ledger.ListChangeRequestsByTask(context.Background(), rec.InstallationID, "ws-1", "task-1")
+	if err != nil {
+		t.Fatalf("list after successful uninstall: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("rows after successful uninstall = %d, want 0", len(rows))
 	}
 }

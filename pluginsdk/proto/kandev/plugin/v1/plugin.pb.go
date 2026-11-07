@@ -5941,6 +5941,390 @@ func (x *ResolveTaskDirectiveExactResponse) GetDirective() *TaskDirective {
 	return nil
 }
 
+// ReportTaskChangeRequestExact records one plugin-reported task change
+// request. The host owns the row; the plugin only reports what it observes
+// on its own code host. The provider id must be one of the calling plugin's
+// manifest-declared repository_providers, so a plugin cannot report on
+// another provider's behalf.
+type ReportTaskChangeRequestExactRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	RequestId        string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId      string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId           string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	ProviderId       string                 `protobuf:"bytes,4,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	ProviderHost     string                 `protobuf:"bytes,5,opt,name=provider_host,json=providerHost,proto3" json:"provider_host,omitempty"`
+	RepositoryId     string                 `protobuf:"bytes,6,opt,name=repository_id,json=repositoryId,proto3" json:"repository_id,omitempty"`
+	Number           int64                  `protobuf:"varint,7,opt,name=number,proto3" json:"number,omitempty"`
+	Url              string                 `protobuf:"bytes,8,opt,name=url,proto3" json:"url,omitempty"`
+	Title            string                 `protobuf:"bytes,9,opt,name=title,proto3" json:"title,omitempty"`
+	State            string                 `protobuf:"bytes,10,opt,name=state,proto3" json:"state,omitempty"` // open | merged | closed
+	HeadBranch       string                 `protobuf:"bytes,11,opt,name=head_branch,json=headBranch,proto3" json:"head_branch,omitempty"`
+	BaseBranch       string                 `protobuf:"bytes,12,opt,name=base_branch,json=baseBranch,proto3" json:"base_branch,omitempty"`
+	CreatedAt        string                 `protobuf:"bytes,13,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	MergedAt         string                 `protobuf:"bytes,14,opt,name=merged_at,json=mergedAt,proto3" json:"merged_at,omitempty"`
+	ClosedAt         string                 `protobuf:"bytes,15,opt,name=closed_at,json=closedAt,proto3" json:"closed_at,omitempty"`
+	IdempotencyKey   string                 `protobuf:"bytes,16,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ApprovalRevision uint64                 `protobuf:"varint,17,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest   string                 `protobuf:"bytes,18,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ReportTaskChangeRequestExactRequest) Reset() {
+	*x = ReportTaskChangeRequestExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[64]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportTaskChangeRequestExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportTaskChangeRequestExactRequest) ProtoMessage() {}
+
+func (x *ReportTaskChangeRequestExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[64]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportTaskChangeRequestExactRequest.ProtoReflect.Descriptor instead.
+func (*ReportTaskChangeRequestExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{64}
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetProviderId() string {
+	if x != nil {
+		return x.ProviderId
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetProviderHost() string {
+	if x != nil {
+		return x.ProviderHost
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetRepositoryId() string {
+	if x != nil {
+		return x.RepositoryId
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetNumber() int64 {
+	if x != nil {
+		return x.Number
+	}
+	return 0
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetHeadBranch() string {
+	if x != nil {
+		return x.HeadBranch
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetBaseBranch() string {
+	if x != nil {
+		return x.BaseBranch
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetMergedAt() string {
+	if x != nil {
+		return x.MergedAt
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetClosedAt() string {
+	if x != nil {
+		return x.ClosedAt
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *ReportTaskChangeRequestExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type ReportTaskChangeRequestExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	ChangeRequest *TaskChangeRequest     `protobuf:"bytes,2,opt,name=change_request,json=changeRequest,proto3" json:"change_request,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportTaskChangeRequestExactResponse) Reset() {
+	*x = ReportTaskChangeRequestExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[65]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportTaskChangeRequestExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportTaskChangeRequestExactResponse) ProtoMessage() {}
+
+func (x *ReportTaskChangeRequestExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[65]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportTaskChangeRequestExactResponse.ProtoReflect.Descriptor instead.
+func (*ReportTaskChangeRequestExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{65}
+}
+
+func (x *ReportTaskChangeRequestExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *ReportTaskChangeRequestExactResponse) GetChangeRequest() *TaskChangeRequest {
+	if x != nil {
+		return x.ChangeRequest
+	}
+	return nil
+}
+
+// RemoveTaskChangeRequestExact deletes one plugin-reported task change
+// request owned by the calling installation. Removing a missing row is not
+// an error.
+type RemoveTaskChangeRequestExactRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	RequestId        string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	WorkspaceId      string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	ProviderId       string                 `protobuf:"bytes,3,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	RepositoryId     string                 `protobuf:"bytes,4,opt,name=repository_id,json=repositoryId,proto3" json:"repository_id,omitempty"`
+	Number           int64                  `protobuf:"varint,5,opt,name=number,proto3" json:"number,omitempty"`
+	IdempotencyKey   string                 `protobuf:"bytes,6,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ApprovalRevision uint64                 `protobuf:"varint,7,opt,name=approval_revision,json=approvalRevision,proto3" json:"approval_revision,omitempty"`
+	ManifestDigest   string                 `protobuf:"bytes,8,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *RemoveTaskChangeRequestExactRequest) Reset() {
+	*x = RemoveTaskChangeRequestExactRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[66]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveTaskChangeRequestExactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveTaskChangeRequestExactRequest) ProtoMessage() {}
+
+func (x *RemoveTaskChangeRequestExactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[66]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveTaskChangeRequestExactRequest.ProtoReflect.Descriptor instead.
+func (*RemoveTaskChangeRequestExactRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{66}
+}
+
+func (x *RemoveTaskChangeRequestExactRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *RemoveTaskChangeRequestExactRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *RemoveTaskChangeRequestExactRequest) GetProviderId() string {
+	if x != nil {
+		return x.ProviderId
+	}
+	return ""
+}
+
+func (x *RemoveTaskChangeRequestExactRequest) GetRepositoryId() string {
+	if x != nil {
+		return x.RepositoryId
+	}
+	return ""
+}
+
+func (x *RemoveTaskChangeRequestExactRequest) GetNumber() int64 {
+	if x != nil {
+		return x.Number
+	}
+	return 0
+}
+
+func (x *RemoveTaskChangeRequestExactRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *RemoveTaskChangeRequestExactRequest) GetApprovalRevision() uint64 {
+	if x != nil {
+		return x.ApprovalRevision
+	}
+	return 0
+}
+
+func (x *RemoveTaskChangeRequestExactRequest) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
+type RemoveTaskChangeRequestExactResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *HostCommandResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveTaskChangeRequestExactResponse) Reset() {
+	*x = RemoveTaskChangeRequestExactResponse{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[67]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveTaskChangeRequestExactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveTaskChangeRequestExactResponse) ProtoMessage() {}
+
+func (x *RemoveTaskChangeRequestExactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[67]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveTaskChangeRequestExactResponse.ProtoReflect.Descriptor instead.
+func (*RemoveTaskChangeRequestExactResponse) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{67}
+}
+
+func (x *RemoveTaskChangeRequestExactResponse) GetResult() *HostCommandResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
 type ManagedAgentConversationDescriptor struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	InstallationId     string                 `protobuf:"bytes,1,opt,name=installation_id,json=installationId,proto3" json:"installation_id,omitempty"`
@@ -5964,7 +6348,7 @@ type ManagedAgentConversationDescriptor struct {
 
 func (x *ManagedAgentConversationDescriptor) Reset() {
 	*x = ManagedAgentConversationDescriptor{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[64]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5976,7 +6360,7 @@ func (x *ManagedAgentConversationDescriptor) String() string {
 func (*ManagedAgentConversationDescriptor) ProtoMessage() {}
 
 func (x *ManagedAgentConversationDescriptor) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[64]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5989,7 +6373,7 @@ func (x *ManagedAgentConversationDescriptor) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use ManagedAgentConversationDescriptor.ProtoReflect.Descriptor instead.
 func (*ManagedAgentConversationDescriptor) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{64}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *ManagedAgentConversationDescriptor) GetInstallationId() string {
@@ -6118,7 +6502,7 @@ type ManagedAgentConversationSpec struct {
 
 func (x *ManagedAgentConversationSpec) Reset() {
 	*x = ManagedAgentConversationSpec{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[65]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6130,7 +6514,7 @@ func (x *ManagedAgentConversationSpec) String() string {
 func (*ManagedAgentConversationSpec) ProtoMessage() {}
 
 func (x *ManagedAgentConversationSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[65]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6143,7 +6527,7 @@ func (x *ManagedAgentConversationSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManagedAgentConversationSpec.ProtoReflect.Descriptor instead.
 func (*ManagedAgentConversationSpec) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{65}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *ManagedAgentConversationSpec) GetRequestId() string {
@@ -6246,7 +6630,7 @@ type EnsureManagedAgentConversationExactRequest struct {
 
 func (x *EnsureManagedAgentConversationExactRequest) Reset() {
 	*x = EnsureManagedAgentConversationExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[66]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6258,7 +6642,7 @@ func (x *EnsureManagedAgentConversationExactRequest) String() string {
 func (*EnsureManagedAgentConversationExactRequest) ProtoMessage() {}
 
 func (x *EnsureManagedAgentConversationExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[66]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6271,7 +6655,7 @@ func (x *EnsureManagedAgentConversationExactRequest) ProtoReflect() protoreflect
 
 // Deprecated: Use EnsureManagedAgentConversationExactRequest.ProtoReflect.Descriptor instead.
 func (*EnsureManagedAgentConversationExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{66}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *EnsureManagedAgentConversationExactRequest) GetSpec() *ManagedAgentConversationSpec {
@@ -6291,7 +6675,7 @@ type EnsureManagedAgentConversationExactResponse struct {
 
 func (x *EnsureManagedAgentConversationExactResponse) Reset() {
 	*x = EnsureManagedAgentConversationExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[67]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6303,7 +6687,7 @@ func (x *EnsureManagedAgentConversationExactResponse) String() string {
 func (*EnsureManagedAgentConversationExactResponse) ProtoMessage() {}
 
 func (x *EnsureManagedAgentConversationExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[67]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6316,7 +6700,7 @@ func (x *EnsureManagedAgentConversationExactResponse) ProtoReflect() protoreflec
 
 // Deprecated: Use EnsureManagedAgentConversationExactResponse.ProtoReflect.Descriptor instead.
 func (*EnsureManagedAgentConversationExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{67}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *EnsureManagedAgentConversationExactResponse) GetResult() *HostCommandResult {
@@ -6345,7 +6729,7 @@ type GetManagedAgentConversationStatusExactRequest struct {
 
 func (x *GetManagedAgentConversationStatusExactRequest) Reset() {
 	*x = GetManagedAgentConversationStatusExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[68]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6357,7 +6741,7 @@ func (x *GetManagedAgentConversationStatusExactRequest) String() string {
 func (*GetManagedAgentConversationStatusExactRequest) ProtoMessage() {}
 
 func (x *GetManagedAgentConversationStatusExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[68]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6370,7 +6754,7 @@ func (x *GetManagedAgentConversationStatusExactRequest) ProtoReflect() protorefl
 
 // Deprecated: Use GetManagedAgentConversationStatusExactRequest.ProtoReflect.Descriptor instead.
 func (*GetManagedAgentConversationStatusExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{68}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *GetManagedAgentConversationStatusExactRequest) GetWorkspaceId() string {
@@ -6410,7 +6794,7 @@ type GetManagedAgentConversationStatusExactResponse struct {
 
 func (x *GetManagedAgentConversationStatusExactResponse) Reset() {
 	*x = GetManagedAgentConversationStatusExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[69]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6422,7 +6806,7 @@ func (x *GetManagedAgentConversationStatusExactResponse) String() string {
 func (*GetManagedAgentConversationStatusExactResponse) ProtoMessage() {}
 
 func (x *GetManagedAgentConversationStatusExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[69]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6435,7 +6819,7 @@ func (x *GetManagedAgentConversationStatusExactResponse) ProtoReflect() protoref
 
 // Deprecated: Use GetManagedAgentConversationStatusExactResponse.ProtoReflect.Descriptor instead.
 func (*GetManagedAgentConversationStatusExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{69}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *GetManagedAgentConversationStatusExactResponse) GetConversation() *ManagedAgentConversationDescriptor {
@@ -6456,7 +6840,7 @@ type ListManagedAgentConversationsExactRequest struct {
 
 func (x *ListManagedAgentConversationsExactRequest) Reset() {
 	*x = ListManagedAgentConversationsExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[70]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6468,7 +6852,7 @@ func (x *ListManagedAgentConversationsExactRequest) String() string {
 func (*ListManagedAgentConversationsExactRequest) ProtoMessage() {}
 
 func (x *ListManagedAgentConversationsExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[70]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6481,7 +6865,7 @@ func (x *ListManagedAgentConversationsExactRequest) ProtoReflect() protoreflect.
 
 // Deprecated: Use ListManagedAgentConversationsExactRequest.ProtoReflect.Descriptor instead.
 func (*ListManagedAgentConversationsExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{70}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *ListManagedAgentConversationsExactRequest) GetWorkspaceId() string {
@@ -6514,7 +6898,7 @@ type ListManagedAgentConversationsExactResponse struct {
 
 func (x *ListManagedAgentConversationsExactResponse) Reset() {
 	*x = ListManagedAgentConversationsExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[71]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6526,7 +6910,7 @@ func (x *ListManagedAgentConversationsExactResponse) String() string {
 func (*ListManagedAgentConversationsExactResponse) ProtoMessage() {}
 
 func (x *ListManagedAgentConversationsExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[71]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6539,7 +6923,7 @@ func (x *ListManagedAgentConversationsExactResponse) ProtoReflect() protoreflect
 
 // Deprecated: Use ListManagedAgentConversationsExactResponse.ProtoReflect.Descriptor instead.
 func (*ListManagedAgentConversationsExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{71}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *ListManagedAgentConversationsExactResponse) GetConversations() []*ManagedAgentConversationDescriptor {
@@ -6565,7 +6949,7 @@ type SetManagedAgentConversationPausedExactRequest struct {
 
 func (x *SetManagedAgentConversationPausedExactRequest) Reset() {
 	*x = SetManagedAgentConversationPausedExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[72]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6577,7 +6961,7 @@ func (x *SetManagedAgentConversationPausedExactRequest) String() string {
 func (*SetManagedAgentConversationPausedExactRequest) ProtoMessage() {}
 
 func (x *SetManagedAgentConversationPausedExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[72]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6590,7 +6974,7 @@ func (x *SetManagedAgentConversationPausedExactRequest) ProtoReflect() protorefl
 
 // Deprecated: Use SetManagedAgentConversationPausedExactRequest.ProtoReflect.Descriptor instead.
 func (*SetManagedAgentConversationPausedExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{72}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *SetManagedAgentConversationPausedExactRequest) GetRequestId() string {
@@ -6659,7 +7043,7 @@ type SetManagedAgentConversationPausedExactResponse struct {
 
 func (x *SetManagedAgentConversationPausedExactResponse) Reset() {
 	*x = SetManagedAgentConversationPausedExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[73]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6671,7 +7055,7 @@ func (x *SetManagedAgentConversationPausedExactResponse) String() string {
 func (*SetManagedAgentConversationPausedExactResponse) ProtoMessage() {}
 
 func (x *SetManagedAgentConversationPausedExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[73]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6684,7 +7068,7 @@ func (x *SetManagedAgentConversationPausedExactResponse) ProtoReflect() protoref
 
 // Deprecated: Use SetManagedAgentConversationPausedExactResponse.ProtoReflect.Descriptor instead.
 func (*SetManagedAgentConversationPausedExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{73}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *SetManagedAgentConversationPausedExactResponse) GetResult() *HostCommandResult {
@@ -6716,7 +7100,7 @@ type DeleteManagedAgentConversationExactRequest struct {
 
 func (x *DeleteManagedAgentConversationExactRequest) Reset() {
 	*x = DeleteManagedAgentConversationExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[74]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6728,7 +7112,7 @@ func (x *DeleteManagedAgentConversationExactRequest) String() string {
 func (*DeleteManagedAgentConversationExactRequest) ProtoMessage() {}
 
 func (x *DeleteManagedAgentConversationExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[74]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6741,7 +7125,7 @@ func (x *DeleteManagedAgentConversationExactRequest) ProtoReflect() protoreflect
 
 // Deprecated: Use DeleteManagedAgentConversationExactRequest.ProtoReflect.Descriptor instead.
 func (*DeleteManagedAgentConversationExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{74}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *DeleteManagedAgentConversationExactRequest) GetRequestId() string {
@@ -6802,7 +7186,7 @@ type DeleteManagedAgentConversationExactResponse struct {
 
 func (x *DeleteManagedAgentConversationExactResponse) Reset() {
 	*x = DeleteManagedAgentConversationExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[75]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6814,7 +7198,7 @@ func (x *DeleteManagedAgentConversationExactResponse) String() string {
 func (*DeleteManagedAgentConversationExactResponse) ProtoMessage() {}
 
 func (x *DeleteManagedAgentConversationExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[75]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6827,7 +7211,7 @@ func (x *DeleteManagedAgentConversationExactResponse) ProtoReflect() protoreflec
 
 // Deprecated: Use DeleteManagedAgentConversationExactResponse.ProtoReflect.Descriptor instead.
 func (*DeleteManagedAgentConversationExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{75}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *DeleteManagedAgentConversationExactResponse) GetResult() *HostCommandResult {
@@ -6859,7 +7243,7 @@ type ManagedAgentInputReceipt struct {
 
 func (x *ManagedAgentInputReceipt) Reset() {
 	*x = ManagedAgentInputReceipt{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[76]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6871,7 +7255,7 @@ func (x *ManagedAgentInputReceipt) String() string {
 func (*ManagedAgentInputReceipt) ProtoMessage() {}
 
 func (x *ManagedAgentInputReceipt) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[76]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6884,7 +7268,7 @@ func (x *ManagedAgentInputReceipt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManagedAgentInputReceipt.ProtoReflect.Descriptor instead.
 func (*ManagedAgentInputReceipt) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{76}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *ManagedAgentInputReceipt) GetHostInputId() string {
@@ -7004,7 +7388,7 @@ type EnqueueManagedAgentInputExactRequest struct {
 
 func (x *EnqueueManagedAgentInputExactRequest) Reset() {
 	*x = EnqueueManagedAgentInputExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[77]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7016,7 +7400,7 @@ func (x *EnqueueManagedAgentInputExactRequest) String() string {
 func (*EnqueueManagedAgentInputExactRequest) ProtoMessage() {}
 
 func (x *EnqueueManagedAgentInputExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[77]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7029,7 +7413,7 @@ func (x *EnqueueManagedAgentInputExactRequest) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use EnqueueManagedAgentInputExactRequest.ProtoReflect.Descriptor instead.
 func (*EnqueueManagedAgentInputExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{77}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *EnqueueManagedAgentInputExactRequest) GetRequestId() string {
@@ -7119,7 +7503,7 @@ type EnqueueManagedAgentInputExactResponse struct {
 
 func (x *EnqueueManagedAgentInputExactResponse) Reset() {
 	*x = EnqueueManagedAgentInputExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[78]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7131,7 +7515,7 @@ func (x *EnqueueManagedAgentInputExactResponse) String() string {
 func (*EnqueueManagedAgentInputExactResponse) ProtoMessage() {}
 
 func (x *EnqueueManagedAgentInputExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[78]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7144,7 +7528,7 @@ func (x *EnqueueManagedAgentInputExactResponse) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use EnqueueManagedAgentInputExactResponse.ProtoReflect.Descriptor instead.
 func (*EnqueueManagedAgentInputExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{78}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *EnqueueManagedAgentInputExactResponse) GetResult() *HostCommandResult {
@@ -7174,7 +7558,7 @@ type GetManagedAgentInputExactRequest struct {
 
 func (x *GetManagedAgentInputExactRequest) Reset() {
 	*x = GetManagedAgentInputExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[79]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7186,7 +7570,7 @@ func (x *GetManagedAgentInputExactRequest) String() string {
 func (*GetManagedAgentInputExactRequest) ProtoMessage() {}
 
 func (x *GetManagedAgentInputExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[79]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7199,7 +7583,7 @@ func (x *GetManagedAgentInputExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetManagedAgentInputExactRequest.ProtoReflect.Descriptor instead.
 func (*GetManagedAgentInputExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{79}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *GetManagedAgentInputExactRequest) GetWorkspaceId() string {
@@ -7246,7 +7630,7 @@ type GetManagedAgentInputExactResponse struct {
 
 func (x *GetManagedAgentInputExactResponse) Reset() {
 	*x = GetManagedAgentInputExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[80]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7258,7 +7642,7 @@ func (x *GetManagedAgentInputExactResponse) String() string {
 func (*GetManagedAgentInputExactResponse) ProtoMessage() {}
 
 func (x *GetManagedAgentInputExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[80]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7271,7 +7655,7 @@ func (x *GetManagedAgentInputExactResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use GetManagedAgentInputExactResponse.ProtoReflect.Descriptor instead.
 func (*GetManagedAgentInputExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{80}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *GetManagedAgentInputExactResponse) GetInput() *ManagedAgentInputReceipt {
@@ -7295,7 +7679,7 @@ type ListManagedAgentInputsExactRequest struct {
 
 func (x *ListManagedAgentInputsExactRequest) Reset() {
 	*x = ListManagedAgentInputsExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[81]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7307,7 +7691,7 @@ func (x *ListManagedAgentInputsExactRequest) String() string {
 func (*ListManagedAgentInputsExactRequest) ProtoMessage() {}
 
 func (x *ListManagedAgentInputsExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[81]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7320,7 +7704,7 @@ func (x *ListManagedAgentInputsExactRequest) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use ListManagedAgentInputsExactRequest.ProtoReflect.Descriptor instead.
 func (*ListManagedAgentInputsExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{81}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *ListManagedAgentInputsExactRequest) GetWorkspaceId() string {
@@ -7376,7 +7760,7 @@ type ListManagedAgentInputsExactResponse struct {
 
 func (x *ListManagedAgentInputsExactResponse) Reset() {
 	*x = ListManagedAgentInputsExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[82]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7388,7 +7772,7 @@ func (x *ListManagedAgentInputsExactResponse) String() string {
 func (*ListManagedAgentInputsExactResponse) ProtoMessage() {}
 
 func (x *ListManagedAgentInputsExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[82]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7401,7 +7785,7 @@ func (x *ListManagedAgentInputsExactResponse) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ListManagedAgentInputsExactResponse.ProtoReflect.Descriptor instead.
 func (*ListManagedAgentInputsExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{82}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *ListManagedAgentInputsExactResponse) GetInputs() []*ManagedAgentInputReceipt {
@@ -7444,7 +7828,7 @@ type CancelManagedAgentInputExactRequest struct {
 
 func (x *CancelManagedAgentInputExactRequest) Reset() {
 	*x = CancelManagedAgentInputExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[83]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7456,7 +7840,7 @@ func (x *CancelManagedAgentInputExactRequest) String() string {
 func (*CancelManagedAgentInputExactRequest) ProtoMessage() {}
 
 func (x *CancelManagedAgentInputExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[83]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7469,7 +7853,7 @@ func (x *CancelManagedAgentInputExactRequest) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use CancelManagedAgentInputExactRequest.ProtoReflect.Descriptor instead.
 func (*CancelManagedAgentInputExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{83}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *CancelManagedAgentInputExactRequest) GetRequestId() string {
@@ -7545,7 +7929,7 @@ type CancelManagedAgentInputExactResponse struct {
 
 func (x *CancelManagedAgentInputExactResponse) Reset() {
 	*x = CancelManagedAgentInputExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[84]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7557,7 +7941,7 @@ func (x *CancelManagedAgentInputExactResponse) String() string {
 func (*CancelManagedAgentInputExactResponse) ProtoMessage() {}
 
 func (x *CancelManagedAgentInputExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[84]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7570,7 +7954,7 @@ func (x *CancelManagedAgentInputExactResponse) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use CancelManagedAgentInputExactResponse.ProtoReflect.Descriptor instead.
 func (*CancelManagedAgentInputExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{84}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *CancelManagedAgentInputExactResponse) GetResult() *HostCommandResult {
@@ -7606,7 +7990,7 @@ type DispatchManagedAgentConversationExactRequest struct {
 
 func (x *DispatchManagedAgentConversationExactRequest) Reset() {
 	*x = DispatchManagedAgentConversationExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[85]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7618,7 +8002,7 @@ func (x *DispatchManagedAgentConversationExactRequest) String() string {
 func (*DispatchManagedAgentConversationExactRequest) ProtoMessage() {}
 
 func (x *DispatchManagedAgentConversationExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[85]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7631,7 +8015,7 @@ func (x *DispatchManagedAgentConversationExactRequest) ProtoReflect() protorefle
 
 // Deprecated: Use DispatchManagedAgentConversationExactRequest.ProtoReflect.Descriptor instead.
 func (*DispatchManagedAgentConversationExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{85}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *DispatchManagedAgentConversationExactRequest) GetRequestId() string {
@@ -7722,7 +8106,7 @@ type DispatchManagedAgentConversationExactResponse struct {
 
 func (x *DispatchManagedAgentConversationExactResponse) Reset() {
 	*x = DispatchManagedAgentConversationExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[86]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7734,7 +8118,7 @@ func (x *DispatchManagedAgentConversationExactResponse) String() string {
 func (*DispatchManagedAgentConversationExactResponse) ProtoMessage() {}
 
 func (x *DispatchManagedAgentConversationExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[86]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7747,7 +8131,7 @@ func (x *DispatchManagedAgentConversationExactResponse) ProtoReflect() protorefl
 
 // Deprecated: Use DispatchManagedAgentConversationExactResponse.ProtoReflect.Descriptor instead.
 func (*DispatchManagedAgentConversationExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{86}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *DispatchManagedAgentConversationExactResponse) GetResult() *HostCommandResult {
@@ -7782,7 +8166,7 @@ type ManagedConversationScheduleTrigger struct {
 
 func (x *ManagedConversationScheduleTrigger) Reset() {
 	*x = ManagedConversationScheduleTrigger{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[87]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7794,7 +8178,7 @@ func (x *ManagedConversationScheduleTrigger) String() string {
 func (*ManagedConversationScheduleTrigger) ProtoMessage() {}
 
 func (x *ManagedConversationScheduleTrigger) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[87]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7807,7 +8191,7 @@ func (x *ManagedConversationScheduleTrigger) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use ManagedConversationScheduleTrigger.ProtoReflect.Descriptor instead.
 func (*ManagedConversationScheduleTrigger) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{87}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *ManagedConversationScheduleTrigger) GetType() string {
@@ -7850,7 +8234,7 @@ type ManagedConversationSchedule struct {
 
 func (x *ManagedConversationSchedule) Reset() {
 	*x = ManagedConversationSchedule{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[88]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7862,7 +8246,7 @@ func (x *ManagedConversationSchedule) String() string {
 func (*ManagedConversationSchedule) ProtoMessage() {}
 
 func (x *ManagedConversationSchedule) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[88]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7875,7 +8259,7 @@ func (x *ManagedConversationSchedule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManagedConversationSchedule.ProtoReflect.Descriptor instead.
 func (*ManagedConversationSchedule) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{88}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *ManagedConversationSchedule) GetId() string {
@@ -7966,7 +8350,7 @@ type ListManagedConversationSchedulesExactRequest struct {
 
 func (x *ListManagedConversationSchedulesExactRequest) Reset() {
 	*x = ListManagedConversationSchedulesExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[89]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7978,7 +8362,7 @@ func (x *ListManagedConversationSchedulesExactRequest) String() string {
 func (*ListManagedConversationSchedulesExactRequest) ProtoMessage() {}
 
 func (x *ListManagedConversationSchedulesExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[89]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7991,7 +8375,7 @@ func (x *ListManagedConversationSchedulesExactRequest) ProtoReflect() protorefle
 
 // Deprecated: Use ListManagedConversationSchedulesExactRequest.ProtoReflect.Descriptor instead.
 func (*ListManagedConversationSchedulesExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{89}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *ListManagedConversationSchedulesExactRequest) GetWorkspaceId() string {
@@ -8024,7 +8408,7 @@ type ListManagedConversationSchedulesExactResponse struct {
 
 func (x *ListManagedConversationSchedulesExactResponse) Reset() {
 	*x = ListManagedConversationSchedulesExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[90]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8036,7 +8420,7 @@ func (x *ListManagedConversationSchedulesExactResponse) String() string {
 func (*ListManagedConversationSchedulesExactResponse) ProtoMessage() {}
 
 func (x *ListManagedConversationSchedulesExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[90]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8049,7 +8433,7 @@ func (x *ListManagedConversationSchedulesExactResponse) ProtoReflect() protorefl
 
 // Deprecated: Use ListManagedConversationSchedulesExactResponse.ProtoReflect.Descriptor instead.
 func (*ListManagedConversationSchedulesExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{90}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *ListManagedConversationSchedulesExactResponse) GetSchedules() []*ManagedConversationSchedule {
@@ -8072,7 +8456,7 @@ type CreateManagedConversationScheduleExactRequest struct {
 
 func (x *CreateManagedConversationScheduleExactRequest) Reset() {
 	*x = CreateManagedConversationScheduleExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[91]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8084,7 +8468,7 @@ func (x *CreateManagedConversationScheduleExactRequest) String() string {
 func (*CreateManagedConversationScheduleExactRequest) ProtoMessage() {}
 
 func (x *CreateManagedConversationScheduleExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[91]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8097,7 +8481,7 @@ func (x *CreateManagedConversationScheduleExactRequest) ProtoReflect() protorefl
 
 // Deprecated: Use CreateManagedConversationScheduleExactRequest.ProtoReflect.Descriptor instead.
 func (*CreateManagedConversationScheduleExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{91}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *CreateManagedConversationScheduleExactRequest) GetRequestId() string {
@@ -8150,7 +8534,7 @@ type UpdateManagedConversationScheduleExactRequest struct {
 
 func (x *UpdateManagedConversationScheduleExactRequest) Reset() {
 	*x = UpdateManagedConversationScheduleExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[92]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8162,7 +8546,7 @@ func (x *UpdateManagedConversationScheduleExactRequest) String() string {
 func (*UpdateManagedConversationScheduleExactRequest) ProtoMessage() {}
 
 func (x *UpdateManagedConversationScheduleExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[92]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8175,7 +8559,7 @@ func (x *UpdateManagedConversationScheduleExactRequest) ProtoReflect() protorefl
 
 // Deprecated: Use UpdateManagedConversationScheduleExactRequest.ProtoReflect.Descriptor instead.
 func (*UpdateManagedConversationScheduleExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{92}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *UpdateManagedConversationScheduleExactRequest) GetRequestId() string {
@@ -8243,7 +8627,7 @@ type SetManagedConversationScheduleEnabledExactRequest struct {
 
 func (x *SetManagedConversationScheduleEnabledExactRequest) Reset() {
 	*x = SetManagedConversationScheduleEnabledExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[93]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8255,7 +8639,7 @@ func (x *SetManagedConversationScheduleEnabledExactRequest) String() string {
 func (*SetManagedConversationScheduleEnabledExactRequest) ProtoMessage() {}
 
 func (x *SetManagedConversationScheduleEnabledExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[93]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8268,7 +8652,7 @@ func (x *SetManagedConversationScheduleEnabledExactRequest) ProtoReflect() proto
 
 // Deprecated: Use SetManagedConversationScheduleEnabledExactRequest.ProtoReflect.Descriptor instead.
 func (*SetManagedConversationScheduleEnabledExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{93}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{97}
 }
 
 func (x *SetManagedConversationScheduleEnabledExactRequest) GetRequestId() string {
@@ -8342,7 +8726,7 @@ type DeleteManagedConversationScheduleExactRequest struct {
 
 func (x *DeleteManagedConversationScheduleExactRequest) Reset() {
 	*x = DeleteManagedConversationScheduleExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[94]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8354,7 +8738,7 @@ func (x *DeleteManagedConversationScheduleExactRequest) String() string {
 func (*DeleteManagedConversationScheduleExactRequest) ProtoMessage() {}
 
 func (x *DeleteManagedConversationScheduleExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[94]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8367,7 +8751,7 @@ func (x *DeleteManagedConversationScheduleExactRequest) ProtoReflect() protorefl
 
 // Deprecated: Use DeleteManagedConversationScheduleExactRequest.ProtoReflect.Descriptor instead.
 func (*DeleteManagedConversationScheduleExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{94}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *DeleteManagedConversationScheduleExactRequest) GetRequestId() string {
@@ -8429,7 +8813,7 @@ type ManagedConversationScheduleExactResponse struct {
 
 func (x *ManagedConversationScheduleExactResponse) Reset() {
 	*x = ManagedConversationScheduleExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[95]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[99]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8441,7 +8825,7 @@ func (x *ManagedConversationScheduleExactResponse) String() string {
 func (*ManagedConversationScheduleExactResponse) ProtoMessage() {}
 
 func (x *ManagedConversationScheduleExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[95]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[99]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8454,7 +8838,7 @@ func (x *ManagedConversationScheduleExactResponse) ProtoReflect() protoreflect.M
 
 // Deprecated: Use ManagedConversationScheduleExactResponse.ProtoReflect.Descriptor instead.
 func (*ManagedConversationScheduleExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{95}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{99}
 }
 
 func (x *ManagedConversationScheduleExactResponse) GetResult() *HostCommandResult {
@@ -8488,7 +8872,7 @@ type EnsureTaskRunExactRequest struct {
 
 func (x *EnsureTaskRunExactRequest) Reset() {
 	*x = EnsureTaskRunExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[96]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8500,7 +8884,7 @@ func (x *EnsureTaskRunExactRequest) String() string {
 func (*EnsureTaskRunExactRequest) ProtoMessage() {}
 
 func (x *EnsureTaskRunExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[96]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8513,7 +8897,7 @@ func (x *EnsureTaskRunExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnsureTaskRunExactRequest.ProtoReflect.Descriptor instead.
 func (*EnsureTaskRunExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{96}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{100}
 }
 
 func (x *EnsureTaskRunExactRequest) GetRequestId() string {
@@ -8591,7 +8975,7 @@ type EnsureTaskRunExactResponse struct {
 
 func (x *EnsureTaskRunExactResponse) Reset() {
 	*x = EnsureTaskRunExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[97]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[101]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8603,7 +8987,7 @@ func (x *EnsureTaskRunExactResponse) String() string {
 func (*EnsureTaskRunExactResponse) ProtoMessage() {}
 
 func (x *EnsureTaskRunExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[97]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[101]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8616,7 +9000,7 @@ func (x *EnsureTaskRunExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnsureTaskRunExactResponse.ProtoReflect.Descriptor instead.
 func (*EnsureTaskRunExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{97}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{101}
 }
 
 func (x *EnsureTaskRunExactResponse) GetResult() *HostCommandResult {
@@ -8666,7 +9050,7 @@ type StopTaskRunExactRequest struct {
 
 func (x *StopTaskRunExactRequest) Reset() {
 	*x = StopTaskRunExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[98]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[102]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8678,7 +9062,7 @@ func (x *StopTaskRunExactRequest) String() string {
 func (*StopTaskRunExactRequest) ProtoMessage() {}
 
 func (x *StopTaskRunExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[98]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[102]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8691,7 +9075,7 @@ func (x *StopTaskRunExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopTaskRunExactRequest.ProtoReflect.Descriptor instead.
 func (*StopTaskRunExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{98}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{102}
 }
 
 func (x *StopTaskRunExactRequest) GetRequestId() string {
@@ -8781,7 +9165,7 @@ type StopTaskRunExactResponse struct {
 
 func (x *StopTaskRunExactResponse) Reset() {
 	*x = StopTaskRunExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[99]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[103]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8793,7 +9177,7 @@ func (x *StopTaskRunExactResponse) String() string {
 func (*StopTaskRunExactResponse) ProtoMessage() {}
 
 func (x *StopTaskRunExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[99]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[103]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8806,7 +9190,7 @@ func (x *StopTaskRunExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopTaskRunExactResponse.ProtoReflect.Descriptor instead.
 func (*StopTaskRunExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{99}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{103}
 }
 
 func (x *StopTaskRunExactResponse) GetResult() *HostCommandResult {
@@ -8843,7 +9227,7 @@ type RecoverSessionExactRequest struct {
 
 func (x *RecoverSessionExactRequest) Reset() {
 	*x = RecoverSessionExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[100]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[104]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8855,7 +9239,7 @@ func (x *RecoverSessionExactRequest) String() string {
 func (*RecoverSessionExactRequest) ProtoMessage() {}
 
 func (x *RecoverSessionExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[100]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[104]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8868,7 +9252,7 @@ func (x *RecoverSessionExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecoverSessionExactRequest.ProtoReflect.Descriptor instead.
 func (*RecoverSessionExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{100}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{104}
 }
 
 func (x *RecoverSessionExactRequest) GetRequestId() string {
@@ -8966,7 +9350,7 @@ type RecoverSessionExactResponse struct {
 
 func (x *RecoverSessionExactResponse) Reset() {
 	*x = RecoverSessionExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[101]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[105]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8978,7 +9362,7 @@ func (x *RecoverSessionExactResponse) String() string {
 func (*RecoverSessionExactResponse) ProtoMessage() {}
 
 func (x *RecoverSessionExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[101]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[105]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8991,7 +9375,7 @@ func (x *RecoverSessionExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecoverSessionExactResponse.ProtoReflect.Descriptor instead.
 func (*RecoverSessionExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{101}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{105}
 }
 
 func (x *RecoverSessionExactResponse) GetResult() *HostCommandResult {
@@ -9033,7 +9417,7 @@ type CancelPendingTaskTransitionExactRequest struct {
 
 func (x *CancelPendingTaskTransitionExactRequest) Reset() {
 	*x = CancelPendingTaskTransitionExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[102]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[106]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9045,7 +9429,7 @@ func (x *CancelPendingTaskTransitionExactRequest) String() string {
 func (*CancelPendingTaskTransitionExactRequest) ProtoMessage() {}
 
 func (x *CancelPendingTaskTransitionExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[102]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[106]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9058,7 +9442,7 @@ func (x *CancelPendingTaskTransitionExactRequest) ProtoReflect() protoreflect.Me
 
 // Deprecated: Use CancelPendingTaskTransitionExactRequest.ProtoReflect.Descriptor instead.
 func (*CancelPendingTaskTransitionExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{102}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{106}
 }
 
 func (x *CancelPendingTaskTransitionExactRequest) GetRequestId() string {
@@ -9140,7 +9524,7 @@ type CancelPendingTaskTransitionExactResponse struct {
 
 func (x *CancelPendingTaskTransitionExactResponse) Reset() {
 	*x = CancelPendingTaskTransitionExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[103]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[107]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9152,7 +9536,7 @@ func (x *CancelPendingTaskTransitionExactResponse) String() string {
 func (*CancelPendingTaskTransitionExactResponse) ProtoMessage() {}
 
 func (x *CancelPendingTaskTransitionExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[103]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[107]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9165,7 +9549,7 @@ func (x *CancelPendingTaskTransitionExactResponse) ProtoReflect() protoreflect.M
 
 // Deprecated: Use CancelPendingTaskTransitionExactResponse.ProtoReflect.Descriptor instead.
 func (*CancelPendingTaskTransitionExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{103}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{107}
 }
 
 func (x *CancelPendingTaskTransitionExactResponse) GetResult() *HostCommandResult {
@@ -9186,7 +9570,7 @@ type SessionModeOption struct {
 
 func (x *SessionModeOption) Reset() {
 	*x = SessionModeOption{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[104]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[108]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9198,7 +9582,7 @@ func (x *SessionModeOption) String() string {
 func (*SessionModeOption) ProtoMessage() {}
 
 func (x *SessionModeOption) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[104]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[108]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9211,7 +9595,7 @@ func (x *SessionModeOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionModeOption.ProtoReflect.Descriptor instead.
 func (*SessionModeOption) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{104}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{108}
 }
 
 func (x *SessionModeOption) GetId() string {
@@ -9251,7 +9635,7 @@ type GetSessionModeContextExactRequest struct {
 
 func (x *GetSessionModeContextExactRequest) Reset() {
 	*x = GetSessionModeContextExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[105]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[109]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9263,7 +9647,7 @@ func (x *GetSessionModeContextExactRequest) String() string {
 func (*GetSessionModeContextExactRequest) ProtoMessage() {}
 
 func (x *GetSessionModeContextExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[105]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[109]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9276,7 +9660,7 @@ func (x *GetSessionModeContextExactRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use GetSessionModeContextExactRequest.ProtoReflect.Descriptor instead.
 func (*GetSessionModeContextExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{105}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{109}
 }
 
 func (x *GetSessionModeContextExactRequest) GetRequestId() string {
@@ -9349,7 +9733,7 @@ type GetSessionModeContextExactResponse struct {
 
 func (x *GetSessionModeContextExactResponse) Reset() {
 	*x = GetSessionModeContextExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[106]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[110]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9361,7 +9745,7 @@ func (x *GetSessionModeContextExactResponse) String() string {
 func (*GetSessionModeContextExactResponse) ProtoMessage() {}
 
 func (x *GetSessionModeContextExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[106]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[110]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9374,7 +9758,7 @@ func (x *GetSessionModeContextExactResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use GetSessionModeContextExactResponse.ProtoReflect.Descriptor instead.
 func (*GetSessionModeContextExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{106}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{110}
 }
 
 func (x *GetSessionModeContextExactResponse) GetSessionId() string {
@@ -9439,7 +9823,7 @@ type SetSessionModeExactRequest struct {
 
 func (x *SetSessionModeExactRequest) Reset() {
 	*x = SetSessionModeExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[107]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[111]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9451,7 +9835,7 @@ func (x *SetSessionModeExactRequest) String() string {
 func (*SetSessionModeExactRequest) ProtoMessage() {}
 
 func (x *SetSessionModeExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[107]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[111]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9464,7 +9848,7 @@ func (x *SetSessionModeExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSessionModeExactRequest.ProtoReflect.Descriptor instead.
 func (*SetSessionModeExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{107}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{111}
 }
 
 func (x *SetSessionModeExactRequest) GetRequestId() string {
@@ -9561,7 +9945,7 @@ type SetSessionModeExactResponse struct {
 
 func (x *SetSessionModeExactResponse) Reset() {
 	*x = SetSessionModeExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[108]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[112]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9573,7 +9957,7 @@ func (x *SetSessionModeExactResponse) String() string {
 func (*SetSessionModeExactResponse) ProtoMessage() {}
 
 func (x *SetSessionModeExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[108]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[112]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9586,7 +9970,7 @@ func (x *SetSessionModeExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSessionModeExactResponse.ProtoReflect.Descriptor instead.
 func (*SetSessionModeExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{108}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{112}
 }
 
 func (x *SetSessionModeExactResponse) GetResult() *HostCommandResult {
@@ -9615,7 +9999,7 @@ type HumanInteractionResponseReceipt struct {
 
 func (x *HumanInteractionResponseReceipt) Reset() {
 	*x = HumanInteractionResponseReceipt{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[109]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[113]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9627,7 +10011,7 @@ func (x *HumanInteractionResponseReceipt) String() string {
 func (*HumanInteractionResponseReceipt) ProtoMessage() {}
 
 func (x *HumanInteractionResponseReceipt) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[109]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[113]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9640,7 +10024,7 @@ func (x *HumanInteractionResponseReceipt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HumanInteractionResponseReceipt.ProtoReflect.Descriptor instead.
 func (*HumanInteractionResponseReceipt) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{109}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{113}
 }
 
 func (x *HumanInteractionResponseReceipt) GetId() string {
@@ -9688,7 +10072,7 @@ type RespondPermissionExactRequest struct {
 
 func (x *RespondPermissionExactRequest) Reset() {
 	*x = RespondPermissionExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[110]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[114]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9700,7 +10084,7 @@ func (x *RespondPermissionExactRequest) String() string {
 func (*RespondPermissionExactRequest) ProtoMessage() {}
 
 func (x *RespondPermissionExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[110]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[114]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9713,7 +10097,7 @@ func (x *RespondPermissionExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RespondPermissionExactRequest.ProtoReflect.Descriptor instead.
 func (*RespondPermissionExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{110}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{114}
 }
 
 func (x *RespondPermissionExactRequest) GetRequestId() string {
@@ -9789,7 +10173,7 @@ type RespondPermissionExactResponse struct {
 
 func (x *RespondPermissionExactResponse) Reset() {
 	*x = RespondPermissionExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[111]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[115]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9801,7 +10185,7 @@ func (x *RespondPermissionExactResponse) String() string {
 func (*RespondPermissionExactResponse) ProtoMessage() {}
 
 func (x *RespondPermissionExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[111]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[115]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9814,7 +10198,7 @@ func (x *RespondPermissionExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RespondPermissionExactResponse.ProtoReflect.Descriptor instead.
 func (*RespondPermissionExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{111}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{115}
 }
 
 func (x *RespondPermissionExactResponse) GetResult() *HostCommandResult {
@@ -9847,7 +10231,7 @@ type AnswerClarificationExactRequest struct {
 
 func (x *AnswerClarificationExactRequest) Reset() {
 	*x = AnswerClarificationExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[112]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[116]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9859,7 +10243,7 @@ func (x *AnswerClarificationExactRequest) String() string {
 func (*AnswerClarificationExactRequest) ProtoMessage() {}
 
 func (x *AnswerClarificationExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[112]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[116]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9872,7 +10256,7 @@ func (x *AnswerClarificationExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerClarificationExactRequest.ProtoReflect.Descriptor instead.
 func (*AnswerClarificationExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{112}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{116}
 }
 
 func (x *AnswerClarificationExactRequest) GetRequestId() string {
@@ -9941,7 +10325,7 @@ type AnswerClarificationExactResponse struct {
 
 func (x *AnswerClarificationExactResponse) Reset() {
 	*x = AnswerClarificationExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[113]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[117]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9953,7 +10337,7 @@ func (x *AnswerClarificationExactResponse) String() string {
 func (*AnswerClarificationExactResponse) ProtoMessage() {}
 
 func (x *AnswerClarificationExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[113]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[117]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9966,7 +10350,7 @@ func (x *AnswerClarificationExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerClarificationExactResponse.ProtoReflect.Descriptor instead.
 func (*AnswerClarificationExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{113}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{117}
 }
 
 func (x *AnswerClarificationExactResponse) GetResult() *HostCommandResult {
@@ -9996,7 +10380,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[114]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[118]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10008,7 +10392,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[114]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[118]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10021,7 +10405,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{114}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{118}
 }
 
 func (x *Event) GetEventId() string {
@@ -10067,7 +10451,7 @@ type EventAck struct {
 
 func (x *EventAck) Reset() {
 	*x = EventAck{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[115]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[119]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10079,7 +10463,7 @@ func (x *EventAck) String() string {
 func (*EventAck) ProtoMessage() {}
 
 func (x *EventAck) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[115]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[119]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10092,7 +10476,7 @@ func (x *EventAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventAck.ProtoReflect.Descriptor instead.
 func (*EventAck) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{115}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{119}
 }
 
 type AgentToolRequest struct {
@@ -10107,7 +10491,7 @@ type AgentToolRequest struct {
 
 func (x *AgentToolRequest) Reset() {
 	*x = AgentToolRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[116]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[120]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10119,7 +10503,7 @@ func (x *AgentToolRequest) String() string {
 func (*AgentToolRequest) ProtoMessage() {}
 
 func (x *AgentToolRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[116]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[120]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10132,7 +10516,7 @@ func (x *AgentToolRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentToolRequest.ProtoReflect.Descriptor instead.
 func (*AgentToolRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{116}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{120}
 }
 
 func (x *AgentToolRequest) GetInvocationId() string {
@@ -10181,7 +10565,7 @@ type AgentToolContext struct {
 
 func (x *AgentToolContext) Reset() {
 	*x = AgentToolContext{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[117]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[121]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10193,7 +10577,7 @@ func (x *AgentToolContext) String() string {
 func (*AgentToolContext) ProtoMessage() {}
 
 func (x *AgentToolContext) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[117]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[121]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10206,7 +10590,7 @@ func (x *AgentToolContext) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentToolContext.ProtoReflect.Descriptor instead.
 func (*AgentToolContext) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{117}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{121}
 }
 
 func (x *AgentToolContext) GetTaskId() string {
@@ -10290,7 +10674,7 @@ type AgentToolResponse struct {
 
 func (x *AgentToolResponse) Reset() {
 	*x = AgentToolResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[118]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[122]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10302,7 +10686,7 @@ func (x *AgentToolResponse) String() string {
 func (*AgentToolResponse) ProtoMessage() {}
 
 func (x *AgentToolResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[118]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[122]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10315,7 +10699,7 @@ func (x *AgentToolResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentToolResponse.ProtoReflect.Descriptor instead.
 func (*AgentToolResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{118}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{122}
 }
 
 func (x *AgentToolResponse) GetText() string {
@@ -10353,7 +10737,7 @@ type WebhookRequest struct {
 
 func (x *WebhookRequest) Reset() {
 	*x = WebhookRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[119]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[123]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10365,7 +10749,7 @@ func (x *WebhookRequest) String() string {
 func (*WebhookRequest) ProtoMessage() {}
 
 func (x *WebhookRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[119]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[123]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10378,7 +10762,7 @@ func (x *WebhookRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebhookRequest.ProtoReflect.Descriptor instead.
 func (*WebhookRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{119}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{123}
 }
 
 func (x *WebhookRequest) GetWebhookKey() string {
@@ -10434,7 +10818,7 @@ type WebhookResponse struct {
 
 func (x *WebhookResponse) Reset() {
 	*x = WebhookResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[120]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[124]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10446,7 +10830,7 @@ func (x *WebhookResponse) String() string {
 func (*WebhookResponse) ProtoMessage() {}
 
 func (x *WebhookResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[120]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[124]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10459,7 +10843,7 @@ func (x *WebhookResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebhookResponse.ProtoReflect.Descriptor instead.
 func (*WebhookResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{120}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{124}
 }
 
 func (x *WebhookResponse) GetStatus() int32 {
@@ -10496,7 +10880,7 @@ type PluginActionRequest struct {
 
 func (x *PluginActionRequest) Reset() {
 	*x = PluginActionRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[121]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[125]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10508,7 +10892,7 @@ func (x *PluginActionRequest) String() string {
 func (*PluginActionRequest) ProtoMessage() {}
 
 func (x *PluginActionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[121]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[125]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10521,7 +10905,7 @@ func (x *PluginActionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginActionRequest.ProtoReflect.Descriptor instead.
 func (*PluginActionRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{121}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{125}
 }
 
 func (x *PluginActionRequest) GetActionKey() string {
@@ -10559,7 +10943,7 @@ type VerifiedActionContext struct {
 
 func (x *VerifiedActionContext) Reset() {
 	*x = VerifiedActionContext{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[122]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[126]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10571,7 +10955,7 @@ func (x *VerifiedActionContext) String() string {
 func (*VerifiedActionContext) ProtoMessage() {}
 
 func (x *VerifiedActionContext) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[122]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[126]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10584,7 +10968,7 @@ func (x *VerifiedActionContext) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifiedActionContext.ProtoReflect.Descriptor instead.
 func (*VerifiedActionContext) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{122}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{126}
 }
 
 func (x *VerifiedActionContext) GetActorId() string {
@@ -10641,7 +11025,7 @@ type PluginActionResponse struct {
 
 func (x *PluginActionResponse) Reset() {
 	*x = PluginActionResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[123]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[127]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10653,7 +11037,7 @@ func (x *PluginActionResponse) String() string {
 func (*PluginActionResponse) ProtoMessage() {}
 
 func (x *PluginActionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[123]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[127]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10666,7 +11050,7 @@ func (x *PluginActionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginActionResponse.ProtoReflect.Descriptor instead.
 func (*PluginActionResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{123}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{127}
 }
 
 func (x *PluginActionResponse) GetBody() []byte {
@@ -10702,7 +11086,7 @@ type SearchEntityReferencesRequest struct {
 
 func (x *SearchEntityReferencesRequest) Reset() {
 	*x = SearchEntityReferencesRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[124]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[128]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10714,7 +11098,7 @@ func (x *SearchEntityReferencesRequest) String() string {
 func (*SearchEntityReferencesRequest) ProtoMessage() {}
 
 func (x *SearchEntityReferencesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[124]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[128]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10727,7 +11111,7 @@ func (x *SearchEntityReferencesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchEntityReferencesRequest.ProtoReflect.Descriptor instead.
 func (*SearchEntityReferencesRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{124}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{128}
 }
 
 func (x *SearchEntityReferencesRequest) GetSource() string {
@@ -10767,7 +11151,7 @@ type SearchEntityReferencesResponse struct {
 
 func (x *SearchEntityReferencesResponse) Reset() {
 	*x = SearchEntityReferencesResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[125]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[129]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10779,7 +11163,7 @@ func (x *SearchEntityReferencesResponse) String() string {
 func (*SearchEntityReferencesResponse) ProtoMessage() {}
 
 func (x *SearchEntityReferencesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[125]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[129]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10792,7 +11176,7 @@ func (x *SearchEntityReferencesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchEntityReferencesResponse.ProtoReflect.Descriptor instead.
 func (*SearchEntityReferencesResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{125}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{129}
 }
 
 func (x *SearchEntityReferencesResponse) GetCandidates() []*EntityReferenceCandidate {
@@ -10814,7 +11198,7 @@ type EntityReferenceCandidate struct {
 
 func (x *EntityReferenceCandidate) Reset() {
 	*x = EntityReferenceCandidate{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[126]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[130]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10826,7 +11210,7 @@ func (x *EntityReferenceCandidate) String() string {
 func (*EntityReferenceCandidate) ProtoMessage() {}
 
 func (x *EntityReferenceCandidate) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[126]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[130]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10839,7 +11223,7 @@ func (x *EntityReferenceCandidate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EntityReferenceCandidate.ProtoReflect.Descriptor instead.
 func (*EntityReferenceCandidate) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{126}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{130}
 }
 
 func (x *EntityReferenceCandidate) GetProviderLocalId() string {
@@ -10882,7 +11266,7 @@ type AuthorizeEntityReferenceRequest struct {
 
 func (x *AuthorizeEntityReferenceRequest) Reset() {
 	*x = AuthorizeEntityReferenceRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[127]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[131]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10894,7 +11278,7 @@ func (x *AuthorizeEntityReferenceRequest) String() string {
 func (*AuthorizeEntityReferenceRequest) ProtoMessage() {}
 
 func (x *AuthorizeEntityReferenceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[127]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[131]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10907,7 +11291,7 @@ func (x *AuthorizeEntityReferenceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizeEntityReferenceRequest.ProtoReflect.Descriptor instead.
 func (*AuthorizeEntityReferenceRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{127}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{131}
 }
 
 func (x *AuthorizeEntityReferenceRequest) GetSource() string {
@@ -10948,7 +11332,7 @@ type AuthorizeEntityReferenceResponse struct {
 
 func (x *AuthorizeEntityReferenceResponse) Reset() {
 	*x = AuthorizeEntityReferenceResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[128]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[132]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10960,7 +11344,7 @@ func (x *AuthorizeEntityReferenceResponse) String() string {
 func (*AuthorizeEntityReferenceResponse) ProtoMessage() {}
 
 func (x *AuthorizeEntityReferenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[128]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[132]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10973,7 +11357,7 @@ func (x *AuthorizeEntityReferenceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizeEntityReferenceResponse.ProtoReflect.Descriptor instead.
 func (*AuthorizeEntityReferenceResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{128}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{132}
 }
 
 func (x *AuthorizeEntityReferenceResponse) GetAllowed() bool {
@@ -11005,7 +11389,7 @@ type ResolveGitCredentialRequest struct {
 
 func (x *ResolveGitCredentialRequest) Reset() {
 	*x = ResolveGitCredentialRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[129]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[133]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11017,7 +11401,7 @@ func (x *ResolveGitCredentialRequest) String() string {
 func (*ResolveGitCredentialRequest) ProtoMessage() {}
 
 func (x *ResolveGitCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[129]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[133]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11030,7 +11414,7 @@ func (x *ResolveGitCredentialRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveGitCredentialRequest.ProtoReflect.Descriptor instead.
 func (*ResolveGitCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{129}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{133}
 }
 
 func (x *ResolveGitCredentialRequest) GetProviderId() string {
@@ -11093,7 +11477,7 @@ type ResolveGitCredentialResponse struct {
 
 func (x *ResolveGitCredentialResponse) Reset() {
 	*x = ResolveGitCredentialResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[130]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[134]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11105,7 +11489,7 @@ func (x *ResolveGitCredentialResponse) String() string {
 func (*ResolveGitCredentialResponse) ProtoMessage() {}
 
 func (x *ResolveGitCredentialResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[130]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[134]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11118,7 +11502,7 @@ func (x *ResolveGitCredentialResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveGitCredentialResponse.ProtoReflect.Descriptor instead.
 func (*ResolveGitCredentialResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{130}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{134}
 }
 
 func (x *ResolveGitCredentialResponse) GetUsername() string {
@@ -11157,7 +11541,7 @@ type GitCredentialBindingRequest struct {
 
 func (x *GitCredentialBindingRequest) Reset() {
 	*x = GitCredentialBindingRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[131]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[135]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11169,7 +11553,7 @@ func (x *GitCredentialBindingRequest) String() string {
 func (*GitCredentialBindingRequest) ProtoMessage() {}
 
 func (x *GitCredentialBindingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[131]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[135]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11182,7 +11566,7 @@ func (x *GitCredentialBindingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GitCredentialBindingRequest.ProtoReflect.Descriptor instead.
 func (*GitCredentialBindingRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{131}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{135}
 }
 
 func (x *GitCredentialBindingRequest) GetProviderId() string {
@@ -11243,7 +11627,7 @@ type GitCredentialBindingResponse struct {
 
 func (x *GitCredentialBindingResponse) Reset() {
 	*x = GitCredentialBindingResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[132]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[136]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11255,7 +11639,7 @@ func (x *GitCredentialBindingResponse) String() string {
 func (*GitCredentialBindingResponse) ProtoMessage() {}
 
 func (x *GitCredentialBindingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[132]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[136]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11268,7 +11652,7 @@ func (x *GitCredentialBindingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GitCredentialBindingResponse.ProtoReflect.Descriptor instead.
 func (*GitCredentialBindingResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{132}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{136}
 }
 
 func (x *GitCredentialBindingResponse) GetBinding() string {
@@ -11289,7 +11673,7 @@ type GetStateRequest struct {
 
 func (x *GetStateRequest) Reset() {
 	*x = GetStateRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[133]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[137]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11301,7 +11685,7 @@ func (x *GetStateRequest) String() string {
 func (*GetStateRequest) ProtoMessage() {}
 
 func (x *GetStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[133]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[137]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11314,7 +11698,7 @@ func (x *GetStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStateRequest.ProtoReflect.Descriptor instead.
 func (*GetStateRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{133}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{137}
 }
 
 func (x *GetStateRequest) GetScope() string {
@@ -11348,7 +11732,7 @@ type GetStateResponse struct {
 
 func (x *GetStateResponse) Reset() {
 	*x = GetStateResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[134]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[138]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11360,7 +11744,7 @@ func (x *GetStateResponse) String() string {
 func (*GetStateResponse) ProtoMessage() {}
 
 func (x *GetStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[134]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[138]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11373,7 +11757,7 @@ func (x *GetStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStateResponse.ProtoReflect.Descriptor instead.
 func (*GetStateResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{134}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{138}
 }
 
 func (x *GetStateResponse) GetFound() bool {
@@ -11402,7 +11786,7 @@ type SetStateRequest struct {
 
 func (x *SetStateRequest) Reset() {
 	*x = SetStateRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[135]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[139]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11414,7 +11798,7 @@ func (x *SetStateRequest) String() string {
 func (*SetStateRequest) ProtoMessage() {}
 
 func (x *SetStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[135]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[139]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11427,7 +11811,7 @@ func (x *SetStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetStateRequest.ProtoReflect.Descriptor instead.
 func (*SetStateRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{135}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{139}
 }
 
 func (x *SetStateRequest) GetScope() string {
@@ -11466,7 +11850,7 @@ type SetStateResponse struct {
 
 func (x *SetStateResponse) Reset() {
 	*x = SetStateResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[136]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[140]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11478,7 +11862,7 @@ func (x *SetStateResponse) String() string {
 func (*SetStateResponse) ProtoMessage() {}
 
 func (x *SetStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[136]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[140]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11491,7 +11875,7 @@ func (x *SetStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetStateResponse.ProtoReflect.Descriptor instead.
 func (*SetStateResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{136}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{140}
 }
 
 type DeleteStateRequest struct {
@@ -11505,7 +11889,7 @@ type DeleteStateRequest struct {
 
 func (x *DeleteStateRequest) Reset() {
 	*x = DeleteStateRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[137]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[141]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11517,7 +11901,7 @@ func (x *DeleteStateRequest) String() string {
 func (*DeleteStateRequest) ProtoMessage() {}
 
 func (x *DeleteStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[137]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[141]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11530,7 +11914,7 @@ func (x *DeleteStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteStateRequest.ProtoReflect.Descriptor instead.
 func (*DeleteStateRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{137}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{141}
 }
 
 func (x *DeleteStateRequest) GetScope() string {
@@ -11562,7 +11946,7 @@ type DeleteStateResponse struct {
 
 func (x *DeleteStateResponse) Reset() {
 	*x = DeleteStateResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[138]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[142]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11574,7 +11958,7 @@ func (x *DeleteStateResponse) String() string {
 func (*DeleteStateResponse) ProtoMessage() {}
 
 func (x *DeleteStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[138]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[142]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11587,7 +11971,7 @@ func (x *DeleteStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteStateResponse.ProtoReflect.Descriptor instead.
 func (*DeleteStateResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{138}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{142}
 }
 
 type ListStateRequest struct {
@@ -11600,7 +11984,7 @@ type ListStateRequest struct {
 
 func (x *ListStateRequest) Reset() {
 	*x = ListStateRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[139]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[143]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11612,7 +11996,7 @@ func (x *ListStateRequest) String() string {
 func (*ListStateRequest) ProtoMessage() {}
 
 func (x *ListStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[139]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[143]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11625,7 +12009,7 @@ func (x *ListStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListStateRequest.ProtoReflect.Descriptor instead.
 func (*ListStateRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{139}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{143}
 }
 
 func (x *ListStateRequest) GetScope() string {
@@ -11651,7 +12035,7 @@ type ListStateResponse struct {
 
 func (x *ListStateResponse) Reset() {
 	*x = ListStateResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[140]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[144]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11663,7 +12047,7 @@ func (x *ListStateResponse) String() string {
 func (*ListStateResponse) ProtoMessage() {}
 
 func (x *ListStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[140]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[144]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11676,7 +12060,7 @@ func (x *ListStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListStateResponse.ProtoReflect.Descriptor instead.
 func (*ListStateResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{140}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{144}
 }
 
 func (x *ListStateResponse) GetEntries() []*StateEntry {
@@ -11697,7 +12081,7 @@ type StateEntry struct {
 
 func (x *StateEntry) Reset() {
 	*x = StateEntry{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[141]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[145]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11709,7 +12093,7 @@ func (x *StateEntry) String() string {
 func (*StateEntry) ProtoMessage() {}
 
 func (x *StateEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[141]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[145]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11722,7 +12106,7 @@ func (x *StateEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StateEntry.ProtoReflect.Descriptor instead.
 func (*StateEntry) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{141}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{145}
 }
 
 func (x *StateEntry) GetKey() string {
@@ -11754,7 +12138,7 @@ type GetConfigRequest struct {
 
 func (x *GetConfigRequest) Reset() {
 	*x = GetConfigRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[142]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[146]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11766,7 +12150,7 @@ func (x *GetConfigRequest) String() string {
 func (*GetConfigRequest) ProtoMessage() {}
 
 func (x *GetConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[142]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[146]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11779,7 +12163,7 @@ func (x *GetConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetConfigRequest.ProtoReflect.Descriptor instead.
 func (*GetConfigRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{142}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{146}
 }
 
 type GetConfigResponse struct {
@@ -11791,7 +12175,7 @@ type GetConfigResponse struct {
 
 func (x *GetConfigResponse) Reset() {
 	*x = GetConfigResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[143]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[147]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11803,7 +12187,7 @@ func (x *GetConfigResponse) String() string {
 func (*GetConfigResponse) ProtoMessage() {}
 
 func (x *GetConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[143]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[147]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11816,7 +12200,7 @@ func (x *GetConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetConfigResponse.ProtoReflect.Descriptor instead.
 func (*GetConfigResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{143}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{147}
 }
 
 func (x *GetConfigResponse) GetConfig() *structpb.Struct {
@@ -11835,7 +12219,7 @@ type GetSecretRequest struct {
 
 func (x *GetSecretRequest) Reset() {
 	*x = GetSecretRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[144]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[148]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11847,7 +12231,7 @@ func (x *GetSecretRequest) String() string {
 func (*GetSecretRequest) ProtoMessage() {}
 
 func (x *GetSecretRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[144]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[148]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11860,7 +12244,7 @@ func (x *GetSecretRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSecretRequest.ProtoReflect.Descriptor instead.
 func (*GetSecretRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{144}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{148}
 }
 
 func (x *GetSecretRequest) GetKey() string {
@@ -11880,7 +12264,7 @@ type GetSecretResponse struct {
 
 func (x *GetSecretResponse) Reset() {
 	*x = GetSecretResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[145]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[149]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11892,7 +12276,7 @@ func (x *GetSecretResponse) String() string {
 func (*GetSecretResponse) ProtoMessage() {}
 
 func (x *GetSecretResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[145]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[149]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11905,7 +12289,7 @@ func (x *GetSecretResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSecretResponse.ProtoReflect.Descriptor instead.
 func (*GetSecretResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{145}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{149}
 }
 
 func (x *GetSecretResponse) GetFound() bool {
@@ -11932,7 +12316,7 @@ type SetSecretRequest struct {
 
 func (x *SetSecretRequest) Reset() {
 	*x = SetSecretRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[146]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[150]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11944,7 +12328,7 @@ func (x *SetSecretRequest) String() string {
 func (*SetSecretRequest) ProtoMessage() {}
 
 func (x *SetSecretRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[146]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[150]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11957,7 +12341,7 @@ func (x *SetSecretRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSecretRequest.ProtoReflect.Descriptor instead.
 func (*SetSecretRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{146}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{150}
 }
 
 func (x *SetSecretRequest) GetKey() string {
@@ -11982,7 +12366,7 @@ type SetSecretResponse struct {
 
 func (x *SetSecretResponse) Reset() {
 	*x = SetSecretResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[147]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[151]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11994,7 +12378,7 @@ func (x *SetSecretResponse) String() string {
 func (*SetSecretResponse) ProtoMessage() {}
 
 func (x *SetSecretResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[147]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[151]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12007,7 +12391,7 @@ func (x *SetSecretResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSecretResponse.ProtoReflect.Descriptor instead.
 func (*SetSecretResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{147}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{151}
 }
 
 type DeleteSecretRequest struct {
@@ -12019,7 +12403,7 @@ type DeleteSecretRequest struct {
 
 func (x *DeleteSecretRequest) Reset() {
 	*x = DeleteSecretRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[148]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[152]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12031,7 +12415,7 @@ func (x *DeleteSecretRequest) String() string {
 func (*DeleteSecretRequest) ProtoMessage() {}
 
 func (x *DeleteSecretRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[148]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[152]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12044,7 +12428,7 @@ func (x *DeleteSecretRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSecretRequest.ProtoReflect.Descriptor instead.
 func (*DeleteSecretRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{148}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{152}
 }
 
 func (x *DeleteSecretRequest) GetKey() string {
@@ -12062,7 +12446,7 @@ type DeleteSecretResponse struct {
 
 func (x *DeleteSecretResponse) Reset() {
 	*x = DeleteSecretResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[149]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[153]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12074,7 +12458,7 @@ func (x *DeleteSecretResponse) String() string {
 func (*DeleteSecretResponse) ProtoMessage() {}
 
 func (x *DeleteSecretResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[149]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[153]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12087,7 +12471,7 @@ func (x *DeleteSecretResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSecretResponse.ProtoReflect.Descriptor instead.
 func (*DeleteSecretResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{149}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{153}
 }
 
 type RevealSecretRequest struct {
@@ -12099,7 +12483,7 @@ type RevealSecretRequest struct {
 
 func (x *RevealSecretRequest) Reset() {
 	*x = RevealSecretRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[150]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[154]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12111,7 +12495,7 @@ func (x *RevealSecretRequest) String() string {
 func (*RevealSecretRequest) ProtoMessage() {}
 
 func (x *RevealSecretRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[150]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[154]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12124,7 +12508,7 @@ func (x *RevealSecretRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevealSecretRequest.ProtoReflect.Descriptor instead.
 func (*RevealSecretRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{150}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{154}
 }
 
 func (x *RevealSecretRequest) GetRef() string {
@@ -12143,7 +12527,7 @@ type RevealSecretResponse struct {
 
 func (x *RevealSecretResponse) Reset() {
 	*x = RevealSecretResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[151]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[155]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12155,7 +12539,7 @@ func (x *RevealSecretResponse) String() string {
 func (*RevealSecretResponse) ProtoMessage() {}
 
 func (x *RevealSecretResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[151]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[155]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12168,7 +12552,7 @@ func (x *RevealSecretResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevealSecretResponse.ProtoReflect.Descriptor instead.
 func (*RevealSecretResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{151}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{155}
 }
 
 func (x *RevealSecretResponse) GetValue() string {
@@ -12188,7 +12572,7 @@ type EmitEventRequest struct {
 
 func (x *EmitEventRequest) Reset() {
 	*x = EmitEventRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[152]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[156]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12200,7 +12584,7 @@ func (x *EmitEventRequest) String() string {
 func (*EmitEventRequest) ProtoMessage() {}
 
 func (x *EmitEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[152]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[156]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12213,7 +12597,7 @@ func (x *EmitEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EmitEventRequest.ProtoReflect.Descriptor instead.
 func (*EmitEventRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{152}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{156}
 }
 
 func (x *EmitEventRequest) GetEventName() string {
@@ -12238,7 +12622,7 @@ type EmitEventResponse struct {
 
 func (x *EmitEventResponse) Reset() {
 	*x = EmitEventResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[153]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[157]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12250,7 +12634,7 @@ func (x *EmitEventResponse) String() string {
 func (*EmitEventResponse) ProtoMessage() {}
 
 func (x *EmitEventResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[153]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[157]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12263,7 +12647,7 @@ func (x *EmitEventResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EmitEventResponse.ProtoReflect.Descriptor instead.
 func (*EmitEventResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{153}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{157}
 }
 
 // ── Host data API (ADR 0043) ─────────────────────────────────────────────────
@@ -12279,7 +12663,7 @@ type Page struct {
 
 func (x *Page) Reset() {
 	*x = Page{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[154]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[158]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12291,7 +12675,7 @@ func (x *Page) String() string {
 func (*Page) ProtoMessage() {}
 
 func (x *Page) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[154]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[158]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12304,7 +12688,7 @@ func (x *Page) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Page.ProtoReflect.Descriptor instead.
 func (*Page) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{154}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{158}
 }
 
 func (x *Page) GetLimit() int32 {
@@ -12331,7 +12715,7 @@ type PageInfo struct {
 
 func (x *PageInfo) Reset() {
 	*x = PageInfo{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[155]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[159]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12343,7 +12727,7 @@ func (x *PageInfo) String() string {
 func (*PageInfo) ProtoMessage() {}
 
 func (x *PageInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[155]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[159]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12356,7 +12740,7 @@ func (x *PageInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PageInfo.ProtoReflect.Descriptor instead.
 func (*PageInfo) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{155}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{159}
 }
 
 func (x *PageInfo) GetNextCursor() string {
@@ -12454,7 +12838,7 @@ type Task struct {
 
 func (x *Task) Reset() {
 	*x = Task{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[156]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[160]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12466,7 +12850,7 @@ func (x *Task) String() string {
 func (*Task) ProtoMessage() {}
 
 func (x *Task) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[156]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[160]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12479,7 +12863,7 @@ func (x *Task) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Task.ProtoReflect.Descriptor instead.
 func (*Task) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{156}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{160}
 }
 
 func (x *Task) GetId() string {
@@ -12755,7 +13139,7 @@ type TaskRepository struct {
 
 func (x *TaskRepository) Reset() {
 	*x = TaskRepository{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[157]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[161]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12767,7 +13151,7 @@ func (x *TaskRepository) String() string {
 func (*TaskRepository) ProtoMessage() {}
 
 func (x *TaskRepository) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[157]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[161]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12780,7 +13164,7 @@ func (x *TaskRepository) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskRepository.ProtoReflect.Descriptor instead.
 func (*TaskRepository) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{157}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{161}
 }
 
 func (x *TaskRepository) GetId() string {
@@ -12851,7 +13235,7 @@ type TaskPullRequest struct {
 
 func (x *TaskPullRequest) Reset() {
 	*x = TaskPullRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[158]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[162]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12863,7 +13247,7 @@ func (x *TaskPullRequest) String() string {
 func (*TaskPullRequest) ProtoMessage() {}
 
 func (x *TaskPullRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[158]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[162]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12876,7 +13260,7 @@ func (x *TaskPullRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskPullRequest.ProtoReflect.Descriptor instead.
 func (*TaskPullRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{158}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{162}
 }
 
 func (x *TaskPullRequest) GetNumber() int64 {
@@ -13032,7 +13416,7 @@ type TaskDependencyRef struct {
 
 func (x *TaskDependencyRef) Reset() {
 	*x = TaskDependencyRef{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[159]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[163]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13044,7 +13428,7 @@ func (x *TaskDependencyRef) String() string {
 func (*TaskDependencyRef) ProtoMessage() {}
 
 func (x *TaskDependencyRef) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[159]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[163]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13057,7 +13441,7 @@ func (x *TaskDependencyRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskDependencyRef.ProtoReflect.Descriptor instead.
 func (*TaskDependencyRef) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{159}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{163}
 }
 
 func (x *TaskDependencyRef) GetId() string {
@@ -13104,7 +13488,7 @@ type TaskFilter struct {
 
 func (x *TaskFilter) Reset() {
 	*x = TaskFilter{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[160]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[164]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13116,7 +13500,7 @@ func (x *TaskFilter) String() string {
 func (*TaskFilter) ProtoMessage() {}
 
 func (x *TaskFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[160]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[164]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13129,7 +13513,7 @@ func (x *TaskFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskFilter.ProtoReflect.Descriptor instead.
 func (*TaskFilter) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{160}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{164}
 }
 
 func (x *TaskFilter) GetWorkspaceIds() []string {
@@ -13184,7 +13568,7 @@ type ListTasksRequest struct {
 
 func (x *ListTasksRequest) Reset() {
 	*x = ListTasksRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[161]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[165]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13196,7 +13580,7 @@ func (x *ListTasksRequest) String() string {
 func (*ListTasksRequest) ProtoMessage() {}
 
 func (x *ListTasksRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[161]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[165]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13209,7 +13593,7 @@ func (x *ListTasksRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTasksRequest.ProtoReflect.Descriptor instead.
 func (*ListTasksRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{161}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{165}
 }
 
 func (x *ListTasksRequest) GetFilter() *TaskFilter {
@@ -13236,7 +13620,7 @@ type ListTasksResponse struct {
 
 func (x *ListTasksResponse) Reset() {
 	*x = ListTasksResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[162]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[166]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13248,7 +13632,7 @@ func (x *ListTasksResponse) String() string {
 func (*ListTasksResponse) ProtoMessage() {}
 
 func (x *ListTasksResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[162]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[166]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13261,7 +13645,7 @@ func (x *ListTasksResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTasksResponse.ProtoReflect.Descriptor instead.
 func (*ListTasksResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{162}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{166}
 }
 
 func (x *ListTasksResponse) GetTasks() []*Task {
@@ -13287,7 +13671,7 @@ type GetTaskRequest struct {
 
 func (x *GetTaskRequest) Reset() {
 	*x = GetTaskRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[163]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[167]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13299,7 +13683,7 @@ func (x *GetTaskRequest) String() string {
 func (*GetTaskRequest) ProtoMessage() {}
 
 func (x *GetTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[163]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[167]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13312,7 +13696,7 @@ func (x *GetTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTaskRequest.ProtoReflect.Descriptor instead.
 func (*GetTaskRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{163}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{167}
 }
 
 func (x *GetTaskRequest) GetId() string {
@@ -13331,7 +13715,7 @@ type GetTaskResponse struct {
 
 func (x *GetTaskResponse) Reset() {
 	*x = GetTaskResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[164]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[168]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13343,7 +13727,7 @@ func (x *GetTaskResponse) String() string {
 func (*GetTaskResponse) ProtoMessage() {}
 
 func (x *GetTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[164]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[168]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13356,7 +13740,7 @@ func (x *GetTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTaskResponse.ProtoReflect.Descriptor instead.
 func (*GetTaskResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{164}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{168}
 }
 
 func (x *GetTaskResponse) GetTask() *Task {
@@ -13381,7 +13765,7 @@ type TaskStepTransition struct {
 
 func (x *TaskStepTransition) Reset() {
 	*x = TaskStepTransition{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[165]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[169]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13393,7 +13777,7 @@ func (x *TaskStepTransition) String() string {
 func (*TaskStepTransition) ProtoMessage() {}
 
 func (x *TaskStepTransition) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[165]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[169]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13406,7 +13790,7 @@ func (x *TaskStepTransition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskStepTransition.ProtoReflect.Descriptor instead.
 func (*TaskStepTransition) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{165}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{169}
 }
 
 func (x *TaskStepTransition) GetId() string {
@@ -13468,7 +13852,7 @@ type ListTaskStepTransitionsRequest struct {
 
 func (x *ListTaskStepTransitionsRequest) Reset() {
 	*x = ListTaskStepTransitionsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[166]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[170]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13480,7 +13864,7 @@ func (x *ListTaskStepTransitionsRequest) String() string {
 func (*ListTaskStepTransitionsRequest) ProtoMessage() {}
 
 func (x *ListTaskStepTransitionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[166]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[170]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13493,7 +13877,7 @@ func (x *ListTaskStepTransitionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTaskStepTransitionsRequest.ProtoReflect.Descriptor instead.
 func (*ListTaskStepTransitionsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{166}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{170}
 }
 
 func (x *ListTaskStepTransitionsRequest) GetTaskId() string {
@@ -13520,7 +13904,7 @@ type ListTaskStepTransitionsResponse struct {
 
 func (x *ListTaskStepTransitionsResponse) Reset() {
 	*x = ListTaskStepTransitionsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[167]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[171]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13532,7 +13916,7 @@ func (x *ListTaskStepTransitionsResponse) String() string {
 func (*ListTaskStepTransitionsResponse) ProtoMessage() {}
 
 func (x *ListTaskStepTransitionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[167]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[171]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13545,7 +13929,7 @@ func (x *ListTaskStepTransitionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTaskStepTransitionsResponse.ProtoReflect.Descriptor instead.
 func (*ListTaskStepTransitionsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{167}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{171}
 }
 
 func (x *ListTaskStepTransitionsResponse) GetItems() []*TaskStepTransition {
@@ -13579,7 +13963,7 @@ type Workspace struct {
 
 func (x *Workspace) Reset() {
 	*x = Workspace{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[168]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[172]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13591,7 +13975,7 @@ func (x *Workspace) String() string {
 func (*Workspace) ProtoMessage() {}
 
 func (x *Workspace) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[168]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[172]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13604,7 +13988,7 @@ func (x *Workspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Workspace.ProtoReflect.Descriptor instead.
 func (*Workspace) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{168}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{172}
 }
 
 func (x *Workspace) GetId() string {
@@ -13672,7 +14056,7 @@ type ListWorkspacesRequest struct {
 
 func (x *ListWorkspacesRequest) Reset() {
 	*x = ListWorkspacesRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[169]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[173]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13684,7 +14068,7 @@ func (x *ListWorkspacesRequest) String() string {
 func (*ListWorkspacesRequest) ProtoMessage() {}
 
 func (x *ListWorkspacesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[169]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[173]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13697,7 +14081,7 @@ func (x *ListWorkspacesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspacesRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkspacesRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{169}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{173}
 }
 
 func (x *ListWorkspacesRequest) GetPage() *Page {
@@ -13717,7 +14101,7 @@ type ListWorkspacesResponse struct {
 
 func (x *ListWorkspacesResponse) Reset() {
 	*x = ListWorkspacesResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[170]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[174]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13729,7 +14113,7 @@ func (x *ListWorkspacesResponse) String() string {
 func (*ListWorkspacesResponse) ProtoMessage() {}
 
 func (x *ListWorkspacesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[170]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[174]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13742,7 +14126,7 @@ func (x *ListWorkspacesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspacesResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkspacesResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{170}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{174}
 }
 
 func (x *ListWorkspacesResponse) GetWorkspaces() []*Workspace {
@@ -13774,7 +14158,7 @@ type Workflow struct {
 
 func (x *Workflow) Reset() {
 	*x = Workflow{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[171]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[175]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13786,7 +14170,7 @@ func (x *Workflow) String() string {
 func (*Workflow) ProtoMessage() {}
 
 func (x *Workflow) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[171]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[175]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13799,7 +14183,7 @@ func (x *Workflow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Workflow.ProtoReflect.Descriptor instead.
 func (*Workflow) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{171}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{175}
 }
 
 func (x *Workflow) GetId() string {
@@ -13861,7 +14245,7 @@ type ListWorkflowsRequest struct {
 
 func (x *ListWorkflowsRequest) Reset() {
 	*x = ListWorkflowsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[172]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[176]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13873,7 +14257,7 @@ func (x *ListWorkflowsRequest) String() string {
 func (*ListWorkflowsRequest) ProtoMessage() {}
 
 func (x *ListWorkflowsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[172]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[176]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13886,7 +14270,7 @@ func (x *ListWorkflowsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkflowsRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkflowsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{172}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{176}
 }
 
 func (x *ListWorkflowsRequest) GetWorkspaceId() string {
@@ -13913,7 +14297,7 @@ type ListWorkflowsResponse struct {
 
 func (x *ListWorkflowsResponse) Reset() {
 	*x = ListWorkflowsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[173]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[177]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13925,7 +14309,7 @@ func (x *ListWorkflowsResponse) String() string {
 func (*ListWorkflowsResponse) ProtoMessage() {}
 
 func (x *ListWorkflowsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[173]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[177]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13938,7 +14322,7 @@ func (x *ListWorkflowsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkflowsResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkflowsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{173}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{177}
 }
 
 func (x *ListWorkflowsResponse) GetWorkflows() []*Workflow {
@@ -13967,7 +14351,7 @@ type WorkflowTransitionGroup struct {
 
 func (x *WorkflowTransitionGroup) Reset() {
 	*x = WorkflowTransitionGroup{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[174]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[178]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13979,7 +14363,7 @@ func (x *WorkflowTransitionGroup) String() string {
 func (*WorkflowTransitionGroup) ProtoMessage() {}
 
 func (x *WorkflowTransitionGroup) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[174]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[178]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13992,7 +14376,7 @@ func (x *WorkflowTransitionGroup) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowTransitionGroup.ProtoReflect.Descriptor instead.
 func (*WorkflowTransitionGroup) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{174}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{178}
 }
 
 func (x *WorkflowTransitionGroup) GetKind() string {
@@ -14033,7 +14417,7 @@ type ListWorkflowTransitionGroupsRequest struct {
 
 func (x *ListWorkflowTransitionGroupsRequest) Reset() {
 	*x = ListWorkflowTransitionGroupsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[175]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[179]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14045,7 +14429,7 @@ func (x *ListWorkflowTransitionGroupsRequest) String() string {
 func (*ListWorkflowTransitionGroupsRequest) ProtoMessage() {}
 
 func (x *ListWorkflowTransitionGroupsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[175]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[179]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14058,7 +14442,7 @@ func (x *ListWorkflowTransitionGroupsRequest) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ListWorkflowTransitionGroupsRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkflowTransitionGroupsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{175}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{179}
 }
 
 func (x *ListWorkflowTransitionGroupsRequest) GetWorkflowId() string {
@@ -14085,7 +14469,7 @@ type ListWorkflowTransitionGroupsResponse struct {
 
 func (x *ListWorkflowTransitionGroupsResponse) Reset() {
 	*x = ListWorkflowTransitionGroupsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[176]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[180]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14097,7 +14481,7 @@ func (x *ListWorkflowTransitionGroupsResponse) String() string {
 func (*ListWorkflowTransitionGroupsResponse) ProtoMessage() {}
 
 func (x *ListWorkflowTransitionGroupsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[176]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[180]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14110,7 +14494,7 @@ func (x *ListWorkflowTransitionGroupsResponse) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use ListWorkflowTransitionGroupsResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkflowTransitionGroupsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{176}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{180}
 }
 
 func (x *ListWorkflowTransitionGroupsResponse) GetItems() []*WorkflowTransitionGroup {
@@ -14159,7 +14543,7 @@ type WorkflowStep struct {
 
 func (x *WorkflowStep) Reset() {
 	*x = WorkflowStep{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[177]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[181]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14171,7 +14555,7 @@ func (x *WorkflowStep) String() string {
 func (*WorkflowStep) ProtoMessage() {}
 
 func (x *WorkflowStep) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[177]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[181]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14184,7 +14568,7 @@ func (x *WorkflowStep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkflowStep.ProtoReflect.Descriptor instead.
 func (*WorkflowStep) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{177}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{181}
 }
 
 func (x *WorkflowStep) GetId() string {
@@ -14266,7 +14650,7 @@ type ListWorkflowStepsRequest struct {
 
 func (x *ListWorkflowStepsRequest) Reset() {
 	*x = ListWorkflowStepsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[178]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[182]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14278,7 +14662,7 @@ func (x *ListWorkflowStepsRequest) String() string {
 func (*ListWorkflowStepsRequest) ProtoMessage() {}
 
 func (x *ListWorkflowStepsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[178]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[182]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14291,7 +14675,7 @@ func (x *ListWorkflowStepsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkflowStepsRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkflowStepsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{178}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{182}
 }
 
 func (x *ListWorkflowStepsRequest) GetWorkflowId() string {
@@ -14310,7 +14694,7 @@ type ListWorkflowStepsResponse struct {
 
 func (x *ListWorkflowStepsResponse) Reset() {
 	*x = ListWorkflowStepsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[179]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[183]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14322,7 +14706,7 @@ func (x *ListWorkflowStepsResponse) String() string {
 func (*ListWorkflowStepsResponse) ProtoMessage() {}
 
 func (x *ListWorkflowStepsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[179]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[183]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14335,7 +14719,7 @@ func (x *ListWorkflowStepsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkflowStepsResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkflowStepsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{179}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{183}
 }
 
 func (x *ListWorkflowStepsResponse) GetSteps() []*WorkflowStep {
@@ -14360,7 +14744,7 @@ type AgentProfile struct {
 
 func (x *AgentProfile) Reset() {
 	*x = AgentProfile{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[180]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[184]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14372,7 +14756,7 @@ func (x *AgentProfile) String() string {
 func (*AgentProfile) ProtoMessage() {}
 
 func (x *AgentProfile) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[180]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[184]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14385,7 +14769,7 @@ func (x *AgentProfile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentProfile.ProtoReflect.Descriptor instead.
 func (*AgentProfile) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{180}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{184}
 }
 
 func (x *AgentProfile) GetId() string {
@@ -14439,7 +14823,7 @@ type ListAgentProfilesRequest struct {
 
 func (x *ListAgentProfilesRequest) Reset() {
 	*x = ListAgentProfilesRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[181]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[185]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14451,7 +14835,7 @@ func (x *ListAgentProfilesRequest) String() string {
 func (*ListAgentProfilesRequest) ProtoMessage() {}
 
 func (x *ListAgentProfilesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[181]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[185]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14464,7 +14848,7 @@ func (x *ListAgentProfilesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAgentProfilesRequest.ProtoReflect.Descriptor instead.
 func (*ListAgentProfilesRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{181}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{185}
 }
 
 func (x *ListAgentProfilesRequest) GetPage() *Page {
@@ -14484,7 +14868,7 @@ type ListAgentProfilesResponse struct {
 
 func (x *ListAgentProfilesResponse) Reset() {
 	*x = ListAgentProfilesResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[182]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[186]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14496,7 +14880,7 @@ func (x *ListAgentProfilesResponse) String() string {
 func (*ListAgentProfilesResponse) ProtoMessage() {}
 
 func (x *ListAgentProfilesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[182]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[186]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14509,7 +14893,7 @@ func (x *ListAgentProfilesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAgentProfilesResponse.ProtoReflect.Descriptor instead.
 func (*ListAgentProfilesResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{182}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{186}
 }
 
 func (x *ListAgentProfilesResponse) GetProfiles() []*AgentProfile {
@@ -14537,7 +14921,7 @@ type ExecutorProfile struct {
 
 func (x *ExecutorProfile) Reset() {
 	*x = ExecutorProfile{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[183]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[187]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14549,7 +14933,7 @@ func (x *ExecutorProfile) String() string {
 func (*ExecutorProfile) ProtoMessage() {}
 
 func (x *ExecutorProfile) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[183]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[187]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14562,7 +14946,7 @@ func (x *ExecutorProfile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutorProfile.ProtoReflect.Descriptor instead.
 func (*ExecutorProfile) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{183}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{187}
 }
 
 func (x *ExecutorProfile) GetId() string {
@@ -14595,7 +14979,7 @@ type ListExecutorProfilesRequest struct {
 
 func (x *ListExecutorProfilesRequest) Reset() {
 	*x = ListExecutorProfilesRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[184]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[188]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14607,7 +14991,7 @@ func (x *ListExecutorProfilesRequest) String() string {
 func (*ListExecutorProfilesRequest) ProtoMessage() {}
 
 func (x *ListExecutorProfilesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[184]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[188]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14620,7 +15004,7 @@ func (x *ListExecutorProfilesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListExecutorProfilesRequest.ProtoReflect.Descriptor instead.
 func (*ListExecutorProfilesRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{184}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{188}
 }
 
 func (x *ListExecutorProfilesRequest) GetPage() *Page {
@@ -14640,7 +15024,7 @@ type ListExecutorProfilesResponse struct {
 
 func (x *ListExecutorProfilesResponse) Reset() {
 	*x = ListExecutorProfilesResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[185]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[189]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14652,7 +15036,7 @@ func (x *ListExecutorProfilesResponse) String() string {
 func (*ListExecutorProfilesResponse) ProtoMessage() {}
 
 func (x *ListExecutorProfilesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[185]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[189]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14665,7 +15049,7 @@ func (x *ListExecutorProfilesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListExecutorProfilesResponse.ProtoReflect.Descriptor instead.
 func (*ListExecutorProfilesResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{185}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{189}
 }
 
 func (x *ListExecutorProfilesResponse) GetProfiles() []*ExecutorProfile {
@@ -14706,7 +15090,7 @@ type ExecutorProviderRequestContext struct {
 
 func (x *ExecutorProviderRequestContext) Reset() {
 	*x = ExecutorProviderRequestContext{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[186]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[190]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14718,7 +15102,7 @@ func (x *ExecutorProviderRequestContext) String() string {
 func (*ExecutorProviderRequestContext) ProtoMessage() {}
 
 func (x *ExecutorProviderRequestContext) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[186]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[190]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14731,7 +15115,7 @@ func (x *ExecutorProviderRequestContext) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutorProviderRequestContext.ProtoReflect.Descriptor instead.
 func (*ExecutorProviderRequestContext) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{186}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{190}
 }
 
 func (x *ExecutorProviderRequestContext) GetPluginId() string {
@@ -14845,7 +15229,7 @@ type ExecutorProfileSnapshot struct {
 
 func (x *ExecutorProfileSnapshot) Reset() {
 	*x = ExecutorProfileSnapshot{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[187]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[191]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14857,7 +15241,7 @@ func (x *ExecutorProfileSnapshot) String() string {
 func (*ExecutorProfileSnapshot) ProtoMessage() {}
 
 func (x *ExecutorProfileSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[187]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[191]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14870,7 +15254,7 @@ func (x *ExecutorProfileSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutorProfileSnapshot.ProtoReflect.Descriptor instead.
 func (*ExecutorProfileSnapshot) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{187}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{191}
 }
 
 func (x *ExecutorProfileSnapshot) GetProfileId() string {
@@ -14905,7 +15289,7 @@ type ExecutorProviderFieldError struct {
 
 func (x *ExecutorProviderFieldError) Reset() {
 	*x = ExecutorProviderFieldError{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[188]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[192]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14917,7 +15301,7 @@ func (x *ExecutorProviderFieldError) String() string {
 func (*ExecutorProviderFieldError) ProtoMessage() {}
 
 func (x *ExecutorProviderFieldError) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[188]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[192]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14930,7 +15314,7 @@ func (x *ExecutorProviderFieldError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutorProviderFieldError.ProtoReflect.Descriptor instead.
 func (*ExecutorProviderFieldError) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{188}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{192}
 }
 
 func (x *ExecutorProviderFieldError) GetField() string {
@@ -14966,7 +15350,7 @@ type ExecutorProviderError struct {
 
 func (x *ExecutorProviderError) Reset() {
 	*x = ExecutorProviderError{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[189]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[193]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14978,7 +15362,7 @@ func (x *ExecutorProviderError) String() string {
 func (*ExecutorProviderError) ProtoMessage() {}
 
 func (x *ExecutorProviderError) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[189]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[193]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14991,7 +15375,7 @@ func (x *ExecutorProviderError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutorProviderError.ProtoReflect.Descriptor instead.
 func (*ExecutorProviderError) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{189}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{193}
 }
 
 func (x *ExecutorProviderError) GetCode() string {
@@ -15038,7 +15422,7 @@ type ExecutorProviderCapabilities struct {
 
 func (x *ExecutorProviderCapabilities) Reset() {
 	*x = ExecutorProviderCapabilities{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[190]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[194]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15050,7 +15434,7 @@ func (x *ExecutorProviderCapabilities) String() string {
 func (*ExecutorProviderCapabilities) ProtoMessage() {}
 
 func (x *ExecutorProviderCapabilities) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[190]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[194]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15063,7 +15447,7 @@ func (x *ExecutorProviderCapabilities) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutorProviderCapabilities.ProtoReflect.Descriptor instead.
 func (*ExecutorProviderCapabilities) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{190}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{194}
 }
 
 func (x *ExecutorProviderCapabilities) GetTerminal() bool {
@@ -15137,7 +15521,7 @@ type ExecutorResourceDescriptor struct {
 
 func (x *ExecutorResourceDescriptor) Reset() {
 	*x = ExecutorResourceDescriptor{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[191]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[195]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15149,7 +15533,7 @@ func (x *ExecutorResourceDescriptor) String() string {
 func (*ExecutorResourceDescriptor) ProtoMessage() {}
 
 func (x *ExecutorResourceDescriptor) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[191]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[195]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15162,7 +15546,7 @@ func (x *ExecutorResourceDescriptor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutorResourceDescriptor.ProtoReflect.Descriptor instead.
 func (*ExecutorResourceDescriptor) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{191}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{195}
 }
 
 func (x *ExecutorResourceDescriptor) GetResourceHandle() string {
@@ -15224,7 +15608,7 @@ type ValidateExecutorProfileRequest struct {
 
 func (x *ValidateExecutorProfileRequest) Reset() {
 	*x = ValidateExecutorProfileRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[192]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[196]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15236,7 +15620,7 @@ func (x *ValidateExecutorProfileRequest) String() string {
 func (*ValidateExecutorProfileRequest) ProtoMessage() {}
 
 func (x *ValidateExecutorProfileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[192]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[196]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15249,7 +15633,7 @@ func (x *ValidateExecutorProfileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateExecutorProfileRequest.ProtoReflect.Descriptor instead.
 func (*ValidateExecutorProfileRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{192}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{196}
 }
 
 func (x *ValidateExecutorProfileRequest) GetContext() *ExecutorProviderRequestContext {
@@ -15277,7 +15661,7 @@ type ValidateExecutorProfileResponse struct {
 
 func (x *ValidateExecutorProfileResponse) Reset() {
 	*x = ValidateExecutorProfileResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[193]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[197]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15289,7 +15673,7 @@ func (x *ValidateExecutorProfileResponse) String() string {
 func (*ValidateExecutorProfileResponse) ProtoMessage() {}
 
 func (x *ValidateExecutorProfileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[193]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[197]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15302,7 +15686,7 @@ func (x *ValidateExecutorProfileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateExecutorProfileResponse.ProtoReflect.Descriptor instead.
 func (*ValidateExecutorProfileResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{193}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{197}
 }
 
 func (x *ValidateExecutorProfileResponse) GetFieldErrors() []*ExecutorProviderFieldError {
@@ -15337,7 +15721,7 @@ type ProvisionExecutorEnvironmentRequest struct {
 
 func (x *ProvisionExecutorEnvironmentRequest) Reset() {
 	*x = ProvisionExecutorEnvironmentRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[194]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[198]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15349,7 +15733,7 @@ func (x *ProvisionExecutorEnvironmentRequest) String() string {
 func (*ProvisionExecutorEnvironmentRequest) ProtoMessage() {}
 
 func (x *ProvisionExecutorEnvironmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[194]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[198]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15362,7 +15746,7 @@ func (x *ProvisionExecutorEnvironmentRequest) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ProvisionExecutorEnvironmentRequest.ProtoReflect.Descriptor instead.
 func (*ProvisionExecutorEnvironmentRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{194}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{198}
 }
 
 func (x *ProvisionExecutorEnvironmentRequest) GetContext() *ExecutorProviderRequestContext {
@@ -15396,7 +15780,7 @@ type ProvisionExecutorEnvironmentResponse struct {
 
 func (x *ProvisionExecutorEnvironmentResponse) Reset() {
 	*x = ProvisionExecutorEnvironmentResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[195]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[199]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15408,7 +15792,7 @@ func (x *ProvisionExecutorEnvironmentResponse) String() string {
 func (*ProvisionExecutorEnvironmentResponse) ProtoMessage() {}
 
 func (x *ProvisionExecutorEnvironmentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[195]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[199]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15421,7 +15805,7 @@ func (x *ProvisionExecutorEnvironmentResponse) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use ProvisionExecutorEnvironmentResponse.ProtoReflect.Descriptor instead.
 func (*ProvisionExecutorEnvironmentResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{195}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{199}
 }
 
 func (x *ProvisionExecutorEnvironmentResponse) GetResource() *ExecutorResourceDescriptor {
@@ -15448,7 +15832,7 @@ type RecoverExecutorOperationRequest struct {
 
 func (x *RecoverExecutorOperationRequest) Reset() {
 	*x = RecoverExecutorOperationRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[196]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[200]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15460,7 +15844,7 @@ func (x *RecoverExecutorOperationRequest) String() string {
 func (*RecoverExecutorOperationRequest) ProtoMessage() {}
 
 func (x *RecoverExecutorOperationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[196]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[200]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15473,7 +15857,7 @@ func (x *RecoverExecutorOperationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecoverExecutorOperationRequest.ProtoReflect.Descriptor instead.
 func (*RecoverExecutorOperationRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{196}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{200}
 }
 
 func (x *RecoverExecutorOperationRequest) GetContext() *ExecutorProviderRequestContext {
@@ -15501,7 +15885,7 @@ type RecoverExecutorOperationResponse struct {
 
 func (x *RecoverExecutorOperationResponse) Reset() {
 	*x = RecoverExecutorOperationResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[197]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[201]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15513,7 +15897,7 @@ func (x *RecoverExecutorOperationResponse) String() string {
 func (*RecoverExecutorOperationResponse) ProtoMessage() {}
 
 func (x *RecoverExecutorOperationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[197]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[201]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15526,7 +15910,7 @@ func (x *RecoverExecutorOperationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecoverExecutorOperationResponse.ProtoReflect.Descriptor instead.
 func (*RecoverExecutorOperationResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{197}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{201}
 }
 
 func (x *RecoverExecutorOperationResponse) GetOutcome() string {
@@ -15561,7 +15945,7 @@ type AttachExecutorEnvironmentRequest struct {
 
 func (x *AttachExecutorEnvironmentRequest) Reset() {
 	*x = AttachExecutorEnvironmentRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[198]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[202]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15573,7 +15957,7 @@ func (x *AttachExecutorEnvironmentRequest) String() string {
 func (*AttachExecutorEnvironmentRequest) ProtoMessage() {}
 
 func (x *AttachExecutorEnvironmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[198]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[202]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15586,7 +15970,7 @@ func (x *AttachExecutorEnvironmentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachExecutorEnvironmentRequest.ProtoReflect.Descriptor instead.
 func (*AttachExecutorEnvironmentRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{198}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{202}
 }
 
 func (x *AttachExecutorEnvironmentRequest) GetContext() *ExecutorProviderRequestContext {
@@ -15620,7 +16004,7 @@ type AttachExecutorEnvironmentResponse struct {
 
 func (x *AttachExecutorEnvironmentResponse) Reset() {
 	*x = AttachExecutorEnvironmentResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[199]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[203]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15632,7 +16016,7 @@ func (x *AttachExecutorEnvironmentResponse) String() string {
 func (*AttachExecutorEnvironmentResponse) ProtoMessage() {}
 
 func (x *AttachExecutorEnvironmentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[199]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[203]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15645,7 +16029,7 @@ func (x *AttachExecutorEnvironmentResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use AttachExecutorEnvironmentResponse.ProtoReflect.Descriptor instead.
 func (*AttachExecutorEnvironmentResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{199}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{203}
 }
 
 func (x *AttachExecutorEnvironmentResponse) GetResource() *ExecutorResourceDescriptor {
@@ -15672,7 +16056,7 @@ type InspectExecutorEnvironmentRequest struct {
 
 func (x *InspectExecutorEnvironmentRequest) Reset() {
 	*x = InspectExecutorEnvironmentRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[200]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[204]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15684,7 +16068,7 @@ func (x *InspectExecutorEnvironmentRequest) String() string {
 func (*InspectExecutorEnvironmentRequest) ProtoMessage() {}
 
 func (x *InspectExecutorEnvironmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[200]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[204]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15697,7 +16081,7 @@ func (x *InspectExecutorEnvironmentRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use InspectExecutorEnvironmentRequest.ProtoReflect.Descriptor instead.
 func (*InspectExecutorEnvironmentRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{200}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{204}
 }
 
 func (x *InspectExecutorEnvironmentRequest) GetContext() *ExecutorProviderRequestContext {
@@ -15726,7 +16110,7 @@ type InspectExecutorEnvironmentResponse struct {
 
 func (x *InspectExecutorEnvironmentResponse) Reset() {
 	*x = InspectExecutorEnvironmentResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[201]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[205]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15738,7 +16122,7 @@ func (x *InspectExecutorEnvironmentResponse) String() string {
 func (*InspectExecutorEnvironmentResponse) ProtoMessage() {}
 
 func (x *InspectExecutorEnvironmentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[201]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[205]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15751,7 +16135,7 @@ func (x *InspectExecutorEnvironmentResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use InspectExecutorEnvironmentResponse.ProtoReflect.Descriptor instead.
 func (*InspectExecutorEnvironmentResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{201}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{205}
 }
 
 func (x *InspectExecutorEnvironmentResponse) GetState() string {
@@ -15795,7 +16179,7 @@ type ResolveExecutorConnectionRequest struct {
 
 func (x *ResolveExecutorConnectionRequest) Reset() {
 	*x = ResolveExecutorConnectionRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[202]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[206]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15807,7 +16191,7 @@ func (x *ResolveExecutorConnectionRequest) String() string {
 func (*ResolveExecutorConnectionRequest) ProtoMessage() {}
 
 func (x *ResolveExecutorConnectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[202]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[206]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15820,7 +16204,7 @@ func (x *ResolveExecutorConnectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveExecutorConnectionRequest.ProtoReflect.Descriptor instead.
 func (*ResolveExecutorConnectionRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{202}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{206}
 }
 
 func (x *ResolveExecutorConnectionRequest) GetContext() *ExecutorProviderRequestContext {
@@ -15865,7 +16249,7 @@ type ExecutorConnectionLease struct {
 
 func (x *ExecutorConnectionLease) Reset() {
 	*x = ExecutorConnectionLease{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[203]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[207]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15877,7 +16261,7 @@ func (x *ExecutorConnectionLease) String() string {
 func (*ExecutorConnectionLease) ProtoMessage() {}
 
 func (x *ExecutorConnectionLease) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[203]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[207]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15890,7 +16274,7 @@ func (x *ExecutorConnectionLease) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutorConnectionLease.ProtoReflect.Descriptor instead.
 func (*ExecutorConnectionLease) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{203}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{207}
 }
 
 func (x *ExecutorConnectionLease) GetBaseUrl() string {
@@ -15945,7 +16329,7 @@ type ResolveExecutorConnectionResponse struct {
 
 func (x *ResolveExecutorConnectionResponse) Reset() {
 	*x = ResolveExecutorConnectionResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[204]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[208]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15957,7 +16341,7 @@ func (x *ResolveExecutorConnectionResponse) String() string {
 func (*ResolveExecutorConnectionResponse) ProtoMessage() {}
 
 func (x *ResolveExecutorConnectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[204]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[208]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15970,7 +16354,7 @@ func (x *ResolveExecutorConnectionResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use ResolveExecutorConnectionResponse.ProtoReflect.Descriptor instead.
 func (*ResolveExecutorConnectionResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{204}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{208}
 }
 
 func (x *ResolveExecutorConnectionResponse) GetLease() *ExecutorConnectionLease {
@@ -15999,7 +16383,7 @@ type DestroyExecutorEnvironmentRequest struct {
 
 func (x *DestroyExecutorEnvironmentRequest) Reset() {
 	*x = DestroyExecutorEnvironmentRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[205]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[209]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16011,7 +16395,7 @@ func (x *DestroyExecutorEnvironmentRequest) String() string {
 func (*DestroyExecutorEnvironmentRequest) ProtoMessage() {}
 
 func (x *DestroyExecutorEnvironmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[205]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[209]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16024,7 +16408,7 @@ func (x *DestroyExecutorEnvironmentRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use DestroyExecutorEnvironmentRequest.ProtoReflect.Descriptor instead.
 func (*DestroyExecutorEnvironmentRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{205}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{209}
 }
 
 func (x *DestroyExecutorEnvironmentRequest) GetContext() *ExecutorProviderRequestContext {
@@ -16065,7 +16449,7 @@ type DestroyExecutorEnvironmentResponse struct {
 
 func (x *DestroyExecutorEnvironmentResponse) Reset() {
 	*x = DestroyExecutorEnvironmentResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[206]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[210]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16077,7 +16461,7 @@ func (x *DestroyExecutorEnvironmentResponse) String() string {
 func (*DestroyExecutorEnvironmentResponse) ProtoMessage() {}
 
 func (x *DestroyExecutorEnvironmentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[206]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[210]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16090,7 +16474,7 @@ func (x *DestroyExecutorEnvironmentResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use DestroyExecutorEnvironmentResponse.ProtoReflect.Descriptor instead.
 func (*DestroyExecutorEnvironmentResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{206}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{210}
 }
 
 func (x *DestroyExecutorEnvironmentResponse) GetConfirmedAbsent() bool {
@@ -16118,7 +16502,7 @@ type CheckpointExecutorResourceRequest struct {
 
 func (x *CheckpointExecutorResourceRequest) Reset() {
 	*x = CheckpointExecutorResourceRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[207]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[211]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16130,7 +16514,7 @@ func (x *CheckpointExecutorResourceRequest) String() string {
 func (*CheckpointExecutorResourceRequest) ProtoMessage() {}
 
 func (x *CheckpointExecutorResourceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[207]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[211]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16143,7 +16527,7 @@ func (x *CheckpointExecutorResourceRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use CheckpointExecutorResourceRequest.ProtoReflect.Descriptor instead.
 func (*CheckpointExecutorResourceRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{207}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{211}
 }
 
 func (x *CheckpointExecutorResourceRequest) GetContext() *ExecutorProviderRequestContext {
@@ -16176,7 +16560,7 @@ type CheckpointExecutorResourceResponse struct {
 
 func (x *CheckpointExecutorResourceResponse) Reset() {
 	*x = CheckpointExecutorResourceResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[208]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[212]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16188,7 +16572,7 @@ func (x *CheckpointExecutorResourceResponse) String() string {
 func (*CheckpointExecutorResourceResponse) ProtoMessage() {}
 
 func (x *CheckpointExecutorResourceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[208]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[212]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16201,7 +16585,7 @@ func (x *CheckpointExecutorResourceResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use CheckpointExecutorResourceResponse.ProtoReflect.Descriptor instead.
 func (*CheckpointExecutorResourceResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{208}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{212}
 }
 
 func (x *CheckpointExecutorResourceResponse) GetAccepted() bool {
@@ -16223,7 +16607,7 @@ type ReportExecutorProgressRequest struct {
 
 func (x *ReportExecutorProgressRequest) Reset() {
 	*x = ReportExecutorProgressRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[209]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[213]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16235,7 +16619,7 @@ func (x *ReportExecutorProgressRequest) String() string {
 func (*ReportExecutorProgressRequest) ProtoMessage() {}
 
 func (x *ReportExecutorProgressRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[209]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[213]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16248,7 +16632,7 @@ func (x *ReportExecutorProgressRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportExecutorProgressRequest.ProtoReflect.Descriptor instead.
 func (*ReportExecutorProgressRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{209}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{213}
 }
 
 func (x *ReportExecutorProgressRequest) GetContext() *ExecutorProviderRequestContext {
@@ -16288,7 +16672,7 @@ type ReportExecutorProgressResponse struct {
 
 func (x *ReportExecutorProgressResponse) Reset() {
 	*x = ReportExecutorProgressResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[210]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[214]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16300,7 +16684,7 @@ func (x *ReportExecutorProgressResponse) String() string {
 func (*ReportExecutorProgressResponse) ProtoMessage() {}
 
 func (x *ReportExecutorProgressResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[210]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[214]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16313,7 +16697,7 @@ func (x *ReportExecutorProgressResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportExecutorProgressResponse.ProtoReflect.Descriptor instead.
 func (*ReportExecutorProgressResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{210}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{214}
 }
 
 func (x *ReportExecutorProgressResponse) GetAccepted() bool {
@@ -16334,7 +16718,7 @@ type ReadExecutorRuntimeArtifactRequest struct {
 
 func (x *ReadExecutorRuntimeArtifactRequest) Reset() {
 	*x = ReadExecutorRuntimeArtifactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[211]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[215]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16346,7 +16730,7 @@ func (x *ReadExecutorRuntimeArtifactRequest) String() string {
 func (*ReadExecutorRuntimeArtifactRequest) ProtoMessage() {}
 
 func (x *ReadExecutorRuntimeArtifactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[211]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[215]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16359,7 +16743,7 @@ func (x *ReadExecutorRuntimeArtifactRequest) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use ReadExecutorRuntimeArtifactRequest.ProtoReflect.Descriptor instead.
 func (*ReadExecutorRuntimeArtifactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{211}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{215}
 }
 
 func (x *ReadExecutorRuntimeArtifactRequest) GetContext() *ExecutorProviderRequestContext {
@@ -16398,7 +16782,7 @@ type ExecutorRuntimeArtifactChunk struct {
 
 func (x *ExecutorRuntimeArtifactChunk) Reset() {
 	*x = ExecutorRuntimeArtifactChunk{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[212]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[216]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16410,7 +16794,7 @@ func (x *ExecutorRuntimeArtifactChunk) String() string {
 func (*ExecutorRuntimeArtifactChunk) ProtoMessage() {}
 
 func (x *ExecutorRuntimeArtifactChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[212]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[216]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16423,7 +16807,7 @@ func (x *ExecutorRuntimeArtifactChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutorRuntimeArtifactChunk.ProtoReflect.Descriptor instead.
 func (*ExecutorRuntimeArtifactChunk) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{212}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{216}
 }
 
 func (x *ExecutorRuntimeArtifactChunk) GetArtifactId() string {
@@ -16500,7 +16884,7 @@ type Repository struct {
 
 func (x *Repository) Reset() {
 	*x = Repository{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[213]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[217]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16512,7 +16896,7 @@ func (x *Repository) String() string {
 func (*Repository) ProtoMessage() {}
 
 func (x *Repository) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[213]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[217]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16525,7 +16909,7 @@ func (x *Repository) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Repository.ProtoReflect.Descriptor instead.
 func (*Repository) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{213}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{217}
 }
 
 func (x *Repository) GetId() string {
@@ -16622,7 +17006,7 @@ type ListRepositoriesRequest struct {
 
 func (x *ListRepositoriesRequest) Reset() {
 	*x = ListRepositoriesRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[214]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[218]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16634,7 +17018,7 @@ func (x *ListRepositoriesRequest) String() string {
 func (*ListRepositoriesRequest) ProtoMessage() {}
 
 func (x *ListRepositoriesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[214]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[218]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16647,7 +17031,7 @@ func (x *ListRepositoriesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRepositoriesRequest.ProtoReflect.Descriptor instead.
 func (*ListRepositoriesRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{214}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{218}
 }
 
 func (x *ListRepositoriesRequest) GetWorkspaceId() string {
@@ -16674,7 +17058,7 @@ type ListRepositoriesResponse struct {
 
 func (x *ListRepositoriesResponse) Reset() {
 	*x = ListRepositoriesResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[215]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[219]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16686,7 +17070,7 @@ func (x *ListRepositoriesResponse) String() string {
 func (*ListRepositoriesResponse) ProtoMessage() {}
 
 func (x *ListRepositoriesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[215]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[219]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16699,7 +17083,7 @@ func (x *ListRepositoriesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRepositoriesResponse.ProtoReflect.Descriptor instead.
 func (*ListRepositoriesResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{215}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{219}
 }
 
 func (x *ListRepositoriesResponse) GetRepositories() []*Repository {
@@ -16744,7 +17128,7 @@ type Session struct {
 
 func (x *Session) Reset() {
 	*x = Session{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[216]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[220]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16756,7 +17140,7 @@ func (x *Session) String() string {
 func (*Session) ProtoMessage() {}
 
 func (x *Session) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[216]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[220]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16769,7 +17153,7 @@ func (x *Session) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Session.ProtoReflect.Descriptor instead.
 func (*Session) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{216}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{220}
 }
 
 func (x *Session) GetId() string {
@@ -16853,7 +17237,7 @@ type SessionFilter struct {
 
 func (x *SessionFilter) Reset() {
 	*x = SessionFilter{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[217]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[221]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16865,7 +17249,7 @@ func (x *SessionFilter) String() string {
 func (*SessionFilter) ProtoMessage() {}
 
 func (x *SessionFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[217]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[221]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16878,7 +17262,7 @@ func (x *SessionFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionFilter.ProtoReflect.Descriptor instead.
 func (*SessionFilter) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{217}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{221}
 }
 
 func (x *SessionFilter) GetTaskIds() []string {
@@ -16912,7 +17296,7 @@ type ListSessionsRequest struct {
 
 func (x *ListSessionsRequest) Reset() {
 	*x = ListSessionsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[218]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[222]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16924,7 +17308,7 @@ func (x *ListSessionsRequest) String() string {
 func (*ListSessionsRequest) ProtoMessage() {}
 
 func (x *ListSessionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[218]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[222]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16937,7 +17321,7 @@ func (x *ListSessionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionsRequest.ProtoReflect.Descriptor instead.
 func (*ListSessionsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{218}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{222}
 }
 
 func (x *ListSessionsRequest) GetFilter() *SessionFilter {
@@ -16964,7 +17348,7 @@ type ListSessionsResponse struct {
 
 func (x *ListSessionsResponse) Reset() {
 	*x = ListSessionsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[219]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[223]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16976,7 +17360,7 @@ func (x *ListSessionsResponse) String() string {
 func (*ListSessionsResponse) ProtoMessage() {}
 
 func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[219]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[223]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16989,7 +17373,7 @@ func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionsResponse.ProtoReflect.Descriptor instead.
 func (*ListSessionsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{219}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{223}
 }
 
 func (x *ListSessionsResponse) GetSessions() []*Session {
@@ -17033,7 +17417,7 @@ type SessionCodeStats struct {
 
 func (x *SessionCodeStats) Reset() {
 	*x = SessionCodeStats{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[220]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[224]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17045,7 +17429,7 @@ func (x *SessionCodeStats) String() string {
 func (*SessionCodeStats) ProtoMessage() {}
 
 func (x *SessionCodeStats) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[220]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[224]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17058,7 +17442,7 @@ func (x *SessionCodeStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionCodeStats.ProtoReflect.Descriptor instead.
 func (*SessionCodeStats) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{220}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{224}
 }
 
 func (x *SessionCodeStats) GetSessionId() string {
@@ -17113,7 +17497,7 @@ type ListSessionCodeStatsRequest struct {
 
 func (x *ListSessionCodeStatsRequest) Reset() {
 	*x = ListSessionCodeStatsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[221]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[225]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17125,7 +17509,7 @@ func (x *ListSessionCodeStatsRequest) String() string {
 func (*ListSessionCodeStatsRequest) ProtoMessage() {}
 
 func (x *ListSessionCodeStatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[221]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[225]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17138,7 +17522,7 @@ func (x *ListSessionCodeStatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionCodeStatsRequest.ProtoReflect.Descriptor instead.
 func (*ListSessionCodeStatsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{221}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{225}
 }
 
 func (x *ListSessionCodeStatsRequest) GetFilter() *SessionFilter {
@@ -17165,7 +17549,7 @@ type ListSessionCodeStatsResponse struct {
 
 func (x *ListSessionCodeStatsResponse) Reset() {
 	*x = ListSessionCodeStatsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[222]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[226]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17177,7 +17561,7 @@ func (x *ListSessionCodeStatsResponse) String() string {
 func (*ListSessionCodeStatsResponse) ProtoMessage() {}
 
 func (x *ListSessionCodeStatsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[222]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[226]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17190,7 +17574,7 @@ func (x *ListSessionCodeStatsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionCodeStatsResponse.ProtoReflect.Descriptor instead.
 func (*ListSessionCodeStatsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{222}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{226}
 }
 
 func (x *ListSessionCodeStatsResponse) GetStats() []*SessionCodeStats {
@@ -17229,7 +17613,7 @@ type Message struct {
 
 func (x *Message) Reset() {
 	*x = Message{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[223]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[227]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17241,7 +17625,7 @@ func (x *Message) String() string {
 func (*Message) ProtoMessage() {}
 
 func (x *Message) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[223]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[227]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17254,7 +17638,7 @@ func (x *Message) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Message.ProtoReflect.Descriptor instead.
 func (*Message) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{223}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{227}
 }
 
 func (x *Message) GetId() string {
@@ -17326,7 +17710,7 @@ type MessageFilter struct {
 
 func (x *MessageFilter) Reset() {
 	*x = MessageFilter{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[224]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[228]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17338,7 +17722,7 @@ func (x *MessageFilter) String() string {
 func (*MessageFilter) ProtoMessage() {}
 
 func (x *MessageFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[224]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[228]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17351,7 +17735,7 @@ func (x *MessageFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageFilter.ProtoReflect.Descriptor instead.
 func (*MessageFilter) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{224}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{228}
 }
 
 func (x *MessageFilter) GetSessionIds() []string {
@@ -17399,7 +17783,7 @@ type ListMessagesRequest struct {
 
 func (x *ListMessagesRequest) Reset() {
 	*x = ListMessagesRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[225]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[229]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17411,7 +17795,7 @@ func (x *ListMessagesRequest) String() string {
 func (*ListMessagesRequest) ProtoMessage() {}
 
 func (x *ListMessagesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[225]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[229]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17424,7 +17808,7 @@ func (x *ListMessagesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMessagesRequest.ProtoReflect.Descriptor instead.
 func (*ListMessagesRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{225}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{229}
 }
 
 func (x *ListMessagesRequest) GetFilter() *MessageFilter {
@@ -17451,7 +17835,7 @@ type ListMessagesResponse struct {
 
 func (x *ListMessagesResponse) Reset() {
 	*x = ListMessagesResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[226]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[230]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17463,7 +17847,7 @@ func (x *ListMessagesResponse) String() string {
 func (*ListMessagesResponse) ProtoMessage() {}
 
 func (x *ListMessagesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[226]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[230]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17476,7 +17860,7 @@ func (x *ListMessagesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMessagesResponse.ProtoReflect.Descriptor instead.
 func (*ListMessagesResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{226}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{230}
 }
 
 func (x *ListMessagesResponse) GetMessages() []*Message {
@@ -17517,7 +17901,7 @@ type InteractionOption struct {
 
 func (x *InteractionOption) Reset() {
 	*x = InteractionOption{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[227]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[231]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17529,7 +17913,7 @@ func (x *InteractionOption) String() string {
 func (*InteractionOption) ProtoMessage() {}
 
 func (x *InteractionOption) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[227]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[231]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17542,7 +17926,7 @@ func (x *InteractionOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InteractionOption.ProtoReflect.Descriptor instead.
 func (*InteractionOption) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{227}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{231}
 }
 
 func (x *InteractionOption) GetOptionId() string {
@@ -17585,7 +17969,7 @@ type InteractionQuestion struct {
 
 func (x *InteractionQuestion) Reset() {
 	*x = InteractionQuestion{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[228]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[232]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17597,7 +17981,7 @@ func (x *InteractionQuestion) String() string {
 func (*InteractionQuestion) ProtoMessage() {}
 
 func (x *InteractionQuestion) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[228]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[232]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17610,7 +17994,7 @@ func (x *InteractionQuestion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InteractionQuestion.ProtoReflect.Descriptor instead.
 func (*InteractionQuestion) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{228}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{232}
 }
 
 func (x *InteractionQuestion) GetId() string {
@@ -17670,7 +18054,7 @@ type Interaction struct {
 
 func (x *Interaction) Reset() {
 	*x = Interaction{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[229]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[233]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17682,7 +18066,7 @@ func (x *Interaction) String() string {
 func (*Interaction) ProtoMessage() {}
 
 func (x *Interaction) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[229]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[233]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17695,7 +18079,7 @@ func (x *Interaction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Interaction.ProtoReflect.Descriptor instead.
 func (*Interaction) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{229}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{233}
 }
 
 func (x *Interaction) GetId() string {
@@ -17814,7 +18198,7 @@ type InteractionFilter struct {
 
 func (x *InteractionFilter) Reset() {
 	*x = InteractionFilter{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[230]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[234]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17826,7 +18210,7 @@ func (x *InteractionFilter) String() string {
 func (*InteractionFilter) ProtoMessage() {}
 
 func (x *InteractionFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[230]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[234]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17839,7 +18223,7 @@ func (x *InteractionFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InteractionFilter.ProtoReflect.Descriptor instead.
 func (*InteractionFilter) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{230}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{234}
 }
 
 func (x *InteractionFilter) GetSessionIds() []string {
@@ -17873,7 +18257,7 @@ type ListPendingInteractionsRequest struct {
 
 func (x *ListPendingInteractionsRequest) Reset() {
 	*x = ListPendingInteractionsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[231]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[235]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17885,7 +18269,7 @@ func (x *ListPendingInteractionsRequest) String() string {
 func (*ListPendingInteractionsRequest) ProtoMessage() {}
 
 func (x *ListPendingInteractionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[231]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[235]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17898,7 +18282,7 @@ func (x *ListPendingInteractionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPendingInteractionsRequest.ProtoReflect.Descriptor instead.
 func (*ListPendingInteractionsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{231}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{235}
 }
 
 func (x *ListPendingInteractionsRequest) GetFilter() *InteractionFilter {
@@ -17925,7 +18309,7 @@ type ListPendingInteractionsResponse struct {
 
 func (x *ListPendingInteractionsResponse) Reset() {
 	*x = ListPendingInteractionsResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[232]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[236]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17937,7 +18321,7 @@ func (x *ListPendingInteractionsResponse) String() string {
 func (*ListPendingInteractionsResponse) ProtoMessage() {}
 
 func (x *ListPendingInteractionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[232]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[236]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17950,7 +18334,7 @@ func (x *ListPendingInteractionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPendingInteractionsResponse.ProtoReflect.Descriptor instead.
 func (*ListPendingInteractionsResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{232}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{236}
 }
 
 func (x *ListPendingInteractionsResponse) GetInteractions() []*Interaction {
@@ -17976,7 +18360,7 @@ type GetInteractionRequest struct {
 
 func (x *GetInteractionRequest) Reset() {
 	*x = GetInteractionRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[233]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[237]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17988,7 +18372,7 @@ func (x *GetInteractionRequest) String() string {
 func (*GetInteractionRequest) ProtoMessage() {}
 
 func (x *GetInteractionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[233]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[237]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18001,7 +18385,7 @@ func (x *GetInteractionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetInteractionRequest.ProtoReflect.Descriptor instead.
 func (*GetInteractionRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{233}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{237}
 }
 
 func (x *GetInteractionRequest) GetId() string {
@@ -18020,7 +18404,7 @@ type GetInteractionResponse struct {
 
 func (x *GetInteractionResponse) Reset() {
 	*x = GetInteractionResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[234]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[238]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18032,7 +18416,7 @@ func (x *GetInteractionResponse) String() string {
 func (*GetInteractionResponse) ProtoMessage() {}
 
 func (x *GetInteractionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[234]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[238]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18045,7 +18429,7 @@ func (x *GetInteractionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetInteractionResponse.ProtoReflect.Descriptor instead.
 func (*GetInteractionResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{234}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{238}
 }
 
 func (x *GetInteractionResponse) GetInteraction() *Interaction {
@@ -18072,7 +18456,7 @@ type RespondToPermissionRequest struct {
 
 func (x *RespondToPermissionRequest) Reset() {
 	*x = RespondToPermissionRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[235]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[239]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18084,7 +18468,7 @@ func (x *RespondToPermissionRequest) String() string {
 func (*RespondToPermissionRequest) ProtoMessage() {}
 
 func (x *RespondToPermissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[235]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[239]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18097,7 +18481,7 @@ func (x *RespondToPermissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RespondToPermissionRequest.ProtoReflect.Descriptor instead.
 func (*RespondToPermissionRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{235}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{239}
 }
 
 func (x *RespondToPermissionRequest) GetId() string {
@@ -18130,7 +18514,7 @@ type RespondToPermissionResponse struct {
 
 func (x *RespondToPermissionResponse) Reset() {
 	*x = RespondToPermissionResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[236]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[240]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18142,7 +18526,7 @@ func (x *RespondToPermissionResponse) String() string {
 func (*RespondToPermissionResponse) ProtoMessage() {}
 
 func (x *RespondToPermissionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[236]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[240]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18155,7 +18539,7 @@ func (x *RespondToPermissionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RespondToPermissionResponse.ProtoReflect.Descriptor instead.
 func (*RespondToPermissionResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{236}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{240}
 }
 
 func (x *RespondToPermissionResponse) GetInteraction() *Interaction {
@@ -18176,7 +18560,7 @@ type ClarificationAnswer struct {
 
 func (x *ClarificationAnswer) Reset() {
 	*x = ClarificationAnswer{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[237]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[241]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18188,7 +18572,7 @@ func (x *ClarificationAnswer) String() string {
 func (*ClarificationAnswer) ProtoMessage() {}
 
 func (x *ClarificationAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[237]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[241]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18201,7 +18585,7 @@ func (x *ClarificationAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClarificationAnswer.ProtoReflect.Descriptor instead.
 func (*ClarificationAnswer) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{237}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{241}
 }
 
 func (x *ClarificationAnswer) GetQuestionId() string {
@@ -18237,7 +18621,7 @@ type AnswerClarificationRequest struct {
 
 func (x *AnswerClarificationRequest) Reset() {
 	*x = AnswerClarificationRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[238]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[242]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18249,7 +18633,7 @@ func (x *AnswerClarificationRequest) String() string {
 func (*AnswerClarificationRequest) ProtoMessage() {}
 
 func (x *AnswerClarificationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[238]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[242]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18262,7 +18646,7 @@ func (x *AnswerClarificationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerClarificationRequest.ProtoReflect.Descriptor instead.
 func (*AnswerClarificationRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{238}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{242}
 }
 
 func (x *AnswerClarificationRequest) GetId() string {
@@ -18288,7 +18672,7 @@ type AnswerClarificationResponse struct {
 
 func (x *AnswerClarificationResponse) Reset() {
 	*x = AnswerClarificationResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[239]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[243]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18300,7 +18684,7 @@ func (x *AnswerClarificationResponse) String() string {
 func (*AnswerClarificationResponse) ProtoMessage() {}
 
 func (x *AnswerClarificationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[239]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[243]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18313,7 +18697,7 @@ func (x *AnswerClarificationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerClarificationResponse.ProtoReflect.Descriptor instead.
 func (*AnswerClarificationResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{239}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{243}
 }
 
 func (x *AnswerClarificationResponse) GetInteraction() *Interaction {
@@ -18333,7 +18717,7 @@ type CancelClarificationRequest struct {
 
 func (x *CancelClarificationRequest) Reset() {
 	*x = CancelClarificationRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[240]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[244]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18345,7 +18729,7 @@ func (x *CancelClarificationRequest) String() string {
 func (*CancelClarificationRequest) ProtoMessage() {}
 
 func (x *CancelClarificationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[240]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[244]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18358,7 +18742,7 @@ func (x *CancelClarificationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelClarificationRequest.ProtoReflect.Descriptor instead.
 func (*CancelClarificationRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{240}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{244}
 }
 
 func (x *CancelClarificationRequest) GetId() string {
@@ -18384,7 +18768,7 @@ type CancelClarificationResponse struct {
 
 func (x *CancelClarificationResponse) Reset() {
 	*x = CancelClarificationResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[241]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[245]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18396,7 +18780,7 @@ func (x *CancelClarificationResponse) String() string {
 func (*CancelClarificationResponse) ProtoMessage() {}
 
 func (x *CancelClarificationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[241]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[245]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18409,7 +18793,7 @@ func (x *CancelClarificationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelClarificationResponse.ProtoReflect.Descriptor instead.
 func (*CancelClarificationResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{241}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{245}
 }
 
 func (x *CancelClarificationResponse) GetInteraction() *Interaction {
@@ -18430,7 +18814,7 @@ type InvokeUtilityAgentRequest struct {
 
 func (x *InvokeUtilityAgentRequest) Reset() {
 	*x = InvokeUtilityAgentRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[242]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[246]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18442,7 +18826,7 @@ func (x *InvokeUtilityAgentRequest) String() string {
 func (*InvokeUtilityAgentRequest) ProtoMessage() {}
 
 func (x *InvokeUtilityAgentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[242]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[246]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18455,7 +18839,7 @@ func (x *InvokeUtilityAgentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvokeUtilityAgentRequest.ProtoReflect.Descriptor instead.
 func (*InvokeUtilityAgentRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{242}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{246}
 }
 
 func (x *InvokeUtilityAgentRequest) GetPrompt() string {
@@ -18475,7 +18859,7 @@ type InvokeUtilityAgentWithOptionsRequest struct {
 
 func (x *InvokeUtilityAgentWithOptionsRequest) Reset() {
 	*x = InvokeUtilityAgentWithOptionsRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[243]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[247]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18487,7 +18871,7 @@ func (x *InvokeUtilityAgentWithOptionsRequest) String() string {
 func (*InvokeUtilityAgentWithOptionsRequest) ProtoMessage() {}
 
 func (x *InvokeUtilityAgentWithOptionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[243]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[247]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18500,7 +18884,7 @@ func (x *InvokeUtilityAgentWithOptionsRequest) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use InvokeUtilityAgentWithOptionsRequest.ProtoReflect.Descriptor instead.
 func (*InvokeUtilityAgentWithOptionsRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{243}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{247}
 }
 
 func (x *InvokeUtilityAgentWithOptionsRequest) GetPrompt() string {
@@ -18526,7 +18910,7 @@ type InvokeUtilityAgentResponse struct {
 
 func (x *InvokeUtilityAgentResponse) Reset() {
 	*x = InvokeUtilityAgentResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[244]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[248]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18538,7 +18922,7 @@ func (x *InvokeUtilityAgentResponse) String() string {
 func (*InvokeUtilityAgentResponse) ProtoMessage() {}
 
 func (x *InvokeUtilityAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[244]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[248]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18551,7 +18935,7 @@ func (x *InvokeUtilityAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvokeUtilityAgentResponse.ProtoReflect.Descriptor instead.
 func (*InvokeUtilityAgentResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{244}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{248}
 }
 
 func (x *InvokeUtilityAgentResponse) GetText() string {
@@ -18583,7 +18967,7 @@ type CreateTaskRequest struct {
 
 func (x *CreateTaskRequest) Reset() {
 	*x = CreateTaskRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[245]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[249]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18595,7 +18979,7 @@ func (x *CreateTaskRequest) String() string {
 func (*CreateTaskRequest) ProtoMessage() {}
 
 func (x *CreateTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[245]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[249]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18608,7 +18992,7 @@ func (x *CreateTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTaskRequest.ProtoReflect.Descriptor instead.
 func (*CreateTaskRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{245}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{249}
 }
 
 func (x *CreateTaskRequest) GetWorkspaceId() string {
@@ -18701,7 +19085,7 @@ type PluginTaskRepository struct {
 
 func (x *PluginTaskRepository) Reset() {
 	*x = PluginTaskRepository{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[246]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[250]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18713,7 +19097,7 @@ func (x *PluginTaskRepository) String() string {
 func (*PluginTaskRepository) ProtoMessage() {}
 
 func (x *PluginTaskRepository) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[246]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[250]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18726,7 +19110,7 @@ func (x *PluginTaskRepository) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginTaskRepository.ProtoReflect.Descriptor instead.
 func (*PluginTaskRepository) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{246}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{250}
 }
 
 func (x *PluginTaskRepository) GetRepositoryId() string {
@@ -18785,7 +19169,7 @@ type RemoteRepositoryDescriptor struct {
 
 func (x *RemoteRepositoryDescriptor) Reset() {
 	*x = RemoteRepositoryDescriptor{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[247]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[251]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18797,7 +19181,7 @@ func (x *RemoteRepositoryDescriptor) String() string {
 func (*RemoteRepositoryDescriptor) ProtoMessage() {}
 
 func (x *RemoteRepositoryDescriptor) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[247]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[251]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18810,7 +19194,7 @@ func (x *RemoteRepositoryDescriptor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteRepositoryDescriptor.ProtoReflect.Descriptor instead.
 func (*RemoteRepositoryDescriptor) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{247}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{251}
 }
 
 func (x *RemoteRepositoryDescriptor) GetProviderId() string {
@@ -18902,7 +19286,7 @@ type PluginTaskLaunchOptions struct {
 
 func (x *PluginTaskLaunchOptions) Reset() {
 	*x = PluginTaskLaunchOptions{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[248]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[252]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18914,7 +19298,7 @@ func (x *PluginTaskLaunchOptions) String() string {
 func (*PluginTaskLaunchOptions) ProtoMessage() {}
 
 func (x *PluginTaskLaunchOptions) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[248]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[252]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18927,7 +19311,7 @@ func (x *PluginTaskLaunchOptions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginTaskLaunchOptions.ProtoReflect.Descriptor instead.
 func (*PluginTaskLaunchOptions) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{248}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{252}
 }
 
 func (x *PluginTaskLaunchOptions) GetAgentProfileId() string {
@@ -18967,7 +19351,7 @@ type CreateTaskResponse struct {
 
 func (x *CreateTaskResponse) Reset() {
 	*x = CreateTaskResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[249]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[253]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18979,7 +19363,7 @@ func (x *CreateTaskResponse) String() string {
 func (*CreateTaskResponse) ProtoMessage() {}
 
 func (x *CreateTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[249]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[253]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18992,7 +19376,7 @@ func (x *CreateTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTaskResponse.ProtoReflect.Descriptor instead.
 func (*CreateTaskResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{249}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{253}
 }
 
 func (x *CreateTaskResponse) GetTask() *Task {
@@ -19016,7 +19400,7 @@ type UpdateTaskRequest struct {
 
 func (x *UpdateTaskRequest) Reset() {
 	*x = UpdateTaskRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[250]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[254]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19028,7 +19412,7 @@ func (x *UpdateTaskRequest) String() string {
 func (*UpdateTaskRequest) ProtoMessage() {}
 
 func (x *UpdateTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[250]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[254]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19041,7 +19425,7 @@ func (x *UpdateTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateTaskRequest.ProtoReflect.Descriptor instead.
 func (*UpdateTaskRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{250}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{254}
 }
 
 func (x *UpdateTaskRequest) GetId() string {
@@ -19095,7 +19479,7 @@ type UpdateTaskResponse struct {
 
 func (x *UpdateTaskResponse) Reset() {
 	*x = UpdateTaskResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[251]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[255]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19107,7 +19491,7 @@ func (x *UpdateTaskResponse) String() string {
 func (*UpdateTaskResponse) ProtoMessage() {}
 
 func (x *UpdateTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[251]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[255]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19120,7 +19504,7 @@ func (x *UpdateTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateTaskResponse.ProtoReflect.Descriptor instead.
 func (*UpdateTaskResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{251}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{255}
 }
 
 func (x *UpdateTaskResponse) GetTask() *Task {
@@ -19149,7 +19533,7 @@ type MoveTaskRequest struct {
 
 func (x *MoveTaskRequest) Reset() {
 	*x = MoveTaskRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[252]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[256]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19161,7 +19545,7 @@ func (x *MoveTaskRequest) String() string {
 func (*MoveTaskRequest) ProtoMessage() {}
 
 func (x *MoveTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[252]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[256]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19174,7 +19558,7 @@ func (x *MoveTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MoveTaskRequest.ProtoReflect.Descriptor instead.
 func (*MoveTaskRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{252}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{256}
 }
 
 func (x *MoveTaskRequest) GetTaskId() string {
@@ -19223,7 +19607,7 @@ type MoveTaskResponse struct {
 
 func (x *MoveTaskResponse) Reset() {
 	*x = MoveTaskResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[253]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[257]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19235,7 +19619,7 @@ func (x *MoveTaskResponse) String() string {
 func (*MoveTaskResponse) ProtoMessage() {}
 
 func (x *MoveTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[253]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[257]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19248,7 +19632,7 @@ func (x *MoveTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MoveTaskResponse.ProtoReflect.Descriptor instead.
 func (*MoveTaskResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{253}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{257}
 }
 
 func (x *MoveTaskResponse) GetTask() *Task {
@@ -19296,7 +19680,7 @@ type SendMessageRequest struct {
 
 func (x *SendMessageRequest) Reset() {
 	*x = SendMessageRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[254]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[258]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19308,7 +19692,7 @@ func (x *SendMessageRequest) String() string {
 func (*SendMessageRequest) ProtoMessage() {}
 
 func (x *SendMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[254]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[258]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19321,7 +19705,7 @@ func (x *SendMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendMessageRequest.ProtoReflect.Descriptor instead.
 func (*SendMessageRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{254}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{258}
 }
 
 func (x *SendMessageRequest) GetTaskId() string {
@@ -19355,7 +19739,7 @@ type SendMessageResponse struct {
 
 func (x *SendMessageResponse) Reset() {
 	*x = SendMessageResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[255]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[259]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19367,7 +19751,7 @@ func (x *SendMessageResponse) String() string {
 func (*SendMessageResponse) ProtoMessage() {}
 
 func (x *SendMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[255]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[259]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19380,7 +19764,7 @@ func (x *SendMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendMessageResponse.ProtoReflect.Descriptor instead.
 func (*SendMessageResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{255}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{259}
 }
 
 func (x *SendMessageResponse) GetSessionId() string {
@@ -19406,7 +19790,7 @@ type PreviewPluginOwnedTaskTreeRequest struct {
 
 func (x *PreviewPluginOwnedTaskTreeRequest) Reset() {
 	*x = PreviewPluginOwnedTaskTreeRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[256]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[260]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19418,7 +19802,7 @@ func (x *PreviewPluginOwnedTaskTreeRequest) String() string {
 func (*PreviewPluginOwnedTaskTreeRequest) ProtoMessage() {}
 
 func (x *PreviewPluginOwnedTaskTreeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[256]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[260]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19431,7 +19815,7 @@ func (x *PreviewPluginOwnedTaskTreeRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use PreviewPluginOwnedTaskTreeRequest.ProtoReflect.Descriptor instead.
 func (*PreviewPluginOwnedTaskTreeRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{256}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{260}
 }
 
 func (x *PreviewPluginOwnedTaskTreeRequest) GetRootTaskId() string {
@@ -19450,7 +19834,7 @@ type PreviewPluginOwnedTaskTreeResponse struct {
 
 func (x *PreviewPluginOwnedTaskTreeResponse) Reset() {
 	*x = PreviewPluginOwnedTaskTreeResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[257]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[261]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19462,7 +19846,7 @@ func (x *PreviewPluginOwnedTaskTreeResponse) String() string {
 func (*PreviewPluginOwnedTaskTreeResponse) ProtoMessage() {}
 
 func (x *PreviewPluginOwnedTaskTreeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[257]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[261]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19475,7 +19859,7 @@ func (x *PreviewPluginOwnedTaskTreeResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use PreviewPluginOwnedTaskTreeResponse.ProtoReflect.Descriptor instead.
 func (*PreviewPluginOwnedTaskTreeResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{257}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{261}
 }
 
 func (x *PreviewPluginOwnedTaskTreeResponse) GetTasks() []*Task {
@@ -19494,7 +19878,7 @@ type DeletePluginOwnedTaskTreeRequest struct {
 
 func (x *DeletePluginOwnedTaskTreeRequest) Reset() {
 	*x = DeletePluginOwnedTaskTreeRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[258]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[262]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19506,7 +19890,7 @@ func (x *DeletePluginOwnedTaskTreeRequest) String() string {
 func (*DeletePluginOwnedTaskTreeRequest) ProtoMessage() {}
 
 func (x *DeletePluginOwnedTaskTreeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[258]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[262]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19519,7 +19903,7 @@ func (x *DeletePluginOwnedTaskTreeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePluginOwnedTaskTreeRequest.ProtoReflect.Descriptor instead.
 func (*DeletePluginOwnedTaskTreeRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{258}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{262}
 }
 
 func (x *DeletePluginOwnedTaskTreeRequest) GetRootTaskId() string {
@@ -19538,7 +19922,7 @@ type DeletePluginOwnedTaskTreeResponse struct {
 
 func (x *DeletePluginOwnedTaskTreeResponse) Reset() {
 	*x = DeletePluginOwnedTaskTreeResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[259]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[263]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19550,7 +19934,7 @@ func (x *DeletePluginOwnedTaskTreeResponse) String() string {
 func (*DeletePluginOwnedTaskTreeResponse) ProtoMessage() {}
 
 func (x *DeletePluginOwnedTaskTreeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[259]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[263]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19563,7 +19947,7 @@ func (x *DeletePluginOwnedTaskTreeResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use DeletePluginOwnedTaskTreeResponse.ProtoReflect.Descriptor instead.
 func (*DeletePluginOwnedTaskTreeResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{259}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{263}
 }
 
 func (x *DeletePluginOwnedTaskTreeResponse) GetDeletedTaskIds() []string {
@@ -19584,7 +19968,7 @@ type DeletePluginOwnedTaskTreeProgress struct {
 
 func (x *DeletePluginOwnedTaskTreeProgress) Reset() {
 	*x = DeletePluginOwnedTaskTreeProgress{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[260]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[264]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19596,7 +19980,7 @@ func (x *DeletePluginOwnedTaskTreeProgress) String() string {
 func (*DeletePluginOwnedTaskTreeProgress) ProtoMessage() {}
 
 func (x *DeletePluginOwnedTaskTreeProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[260]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[264]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19609,7 +19993,7 @@ func (x *DeletePluginOwnedTaskTreeProgress) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use DeletePluginOwnedTaskTreeProgress.ProtoReflect.Descriptor instead.
 func (*DeletePluginOwnedTaskTreeProgress) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{260}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{264}
 }
 
 func (x *DeletePluginOwnedTaskTreeProgress) GetDeletedTaskIds() []string {
@@ -19635,7 +20019,7 @@ type AgentConversationDescriptor struct {
 
 func (x *AgentConversationDescriptor) Reset() {
 	*x = AgentConversationDescriptor{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[261]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[265]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19647,7 +20031,7 @@ func (x *AgentConversationDescriptor) String() string {
 func (*AgentConversationDescriptor) ProtoMessage() {}
 
 func (x *AgentConversationDescriptor) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[261]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[265]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19660,7 +20044,7 @@ func (x *AgentConversationDescriptor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentConversationDescriptor.ProtoReflect.Descriptor instead.
 func (*AgentConversationDescriptor) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{261}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{265}
 }
 
 func (x *AgentConversationDescriptor) GetTaskId() string {
@@ -19716,7 +20100,7 @@ type AgentConversationSpec struct {
 
 func (x *AgentConversationSpec) Reset() {
 	*x = AgentConversationSpec{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[262]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[266]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19728,7 +20112,7 @@ func (x *AgentConversationSpec) String() string {
 func (*AgentConversationSpec) ProtoMessage() {}
 
 func (x *AgentConversationSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[262]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[266]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19741,7 +20125,7 @@ func (x *AgentConversationSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentConversationSpec.ProtoReflect.Descriptor instead.
 func (*AgentConversationSpec) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{262}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{266}
 }
 
 func (x *AgentConversationSpec) GetWorkspaceId() string {
@@ -19782,7 +20166,7 @@ type EnsureAgentConversationRequest struct {
 
 func (x *EnsureAgentConversationRequest) Reset() {
 	*x = EnsureAgentConversationRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[263]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[267]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19794,7 +20178,7 @@ func (x *EnsureAgentConversationRequest) String() string {
 func (*EnsureAgentConversationRequest) ProtoMessage() {}
 
 func (x *EnsureAgentConversationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[263]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[267]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19807,7 +20191,7 @@ func (x *EnsureAgentConversationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnsureAgentConversationRequest.ProtoReflect.Descriptor instead.
 func (*EnsureAgentConversationRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{263}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{267}
 }
 
 func (x *EnsureAgentConversationRequest) GetSpec() *AgentConversationSpec {
@@ -19829,7 +20213,7 @@ type EnsureAgentConversationResponse struct {
 
 func (x *EnsureAgentConversationResponse) Reset() {
 	*x = EnsureAgentConversationResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[264]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[268]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19841,7 +20225,7 @@ func (x *EnsureAgentConversationResponse) String() string {
 func (*EnsureAgentConversationResponse) ProtoMessage() {}
 
 func (x *EnsureAgentConversationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[264]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[268]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19854,7 +20238,7 @@ func (x *EnsureAgentConversationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnsureAgentConversationResponse.ProtoReflect.Descriptor instead.
 func (*EnsureAgentConversationResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{264}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{268}
 }
 
 func (x *EnsureAgentConversationResponse) GetConvDescriptor() *AgentConversationDescriptor {
@@ -19887,7 +20271,7 @@ type DispatchAgentConversationRequest struct {
 
 func (x *DispatchAgentConversationRequest) Reset() {
 	*x = DispatchAgentConversationRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[265]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[269]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19899,7 +20283,7 @@ func (x *DispatchAgentConversationRequest) String() string {
 func (*DispatchAgentConversationRequest) ProtoMessage() {}
 
 func (x *DispatchAgentConversationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[265]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[269]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19912,7 +20296,7 @@ func (x *DispatchAgentConversationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DispatchAgentConversationRequest.ProtoReflect.Descriptor instead.
 func (*DispatchAgentConversationRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{265}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{269}
 }
 
 func (x *DispatchAgentConversationRequest) GetWorkspaceId() string {
@@ -19956,7 +20340,7 @@ type DispatchAgentConversationResponse struct {
 
 func (x *DispatchAgentConversationResponse) Reset() {
 	*x = DispatchAgentConversationResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[266]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[270]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19968,7 +20352,7 @@ func (x *DispatchAgentConversationResponse) String() string {
 func (*DispatchAgentConversationResponse) ProtoMessage() {}
 
 func (x *DispatchAgentConversationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[266]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[270]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19981,7 +20365,7 @@ func (x *DispatchAgentConversationResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use DispatchAgentConversationResponse.ProtoReflect.Descriptor instead.
 func (*DispatchAgentConversationResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{266}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{270}
 }
 
 func (x *DispatchAgentConversationResponse) GetSessionId() string {
@@ -20017,7 +20401,7 @@ type DeleteAgentConversationRequest struct {
 
 func (x *DeleteAgentConversationRequest) Reset() {
 	*x = DeleteAgentConversationRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[267]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[271]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20029,7 +20413,7 @@ func (x *DeleteAgentConversationRequest) String() string {
 func (*DeleteAgentConversationRequest) ProtoMessage() {}
 
 func (x *DeleteAgentConversationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[267]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[271]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20042,7 +20426,7 @@ func (x *DeleteAgentConversationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteAgentConversationRequest.ProtoReflect.Descriptor instead.
 func (*DeleteAgentConversationRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{267}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{271}
 }
 
 func (x *DeleteAgentConversationRequest) GetWorkspaceId() string {
@@ -20069,7 +20453,7 @@ type DeleteAgentConversationResponse struct {
 
 func (x *DeleteAgentConversationResponse) Reset() {
 	*x = DeleteAgentConversationResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[268]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[272]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20081,7 +20465,7 @@ func (x *DeleteAgentConversationResponse) String() string {
 func (*DeleteAgentConversationResponse) ProtoMessage() {}
 
 func (x *DeleteAgentConversationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[268]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[272]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20094,7 +20478,7 @@ func (x *DeleteAgentConversationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteAgentConversationResponse.ProtoReflect.Descriptor instead.
 func (*DeleteAgentConversationResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{268}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{272}
 }
 
 func (x *DeleteAgentConversationResponse) GetDeletedCount() int32 {
@@ -20116,7 +20500,7 @@ type AutomationConditionRequest struct {
 
 func (x *AutomationConditionRequest) Reset() {
 	*x = AutomationConditionRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[269]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[273]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20128,7 +20512,7 @@ func (x *AutomationConditionRequest) String() string {
 func (*AutomationConditionRequest) ProtoMessage() {}
 
 func (x *AutomationConditionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[269]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[273]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20141,7 +20525,7 @@ func (x *AutomationConditionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationConditionRequest.ProtoReflect.Descriptor instead.
 func (*AutomationConditionRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{269}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{273}
 }
 
 func (x *AutomationConditionRequest) GetWorkspaceId() string {
@@ -20179,7 +20563,7 @@ type AutomationConditionResponse struct {
 
 func (x *AutomationConditionResponse) Reset() {
 	*x = AutomationConditionResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[270]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[274]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20191,7 +20575,7 @@ func (x *AutomationConditionResponse) String() string {
 func (*AutomationConditionResponse) ProtoMessage() {}
 
 func (x *AutomationConditionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[270]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[274]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20204,7 +20588,7 @@ func (x *AutomationConditionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationConditionResponse.ProtoReflect.Descriptor instead.
 func (*AutomationConditionResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{270}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{274}
 }
 
 func (x *AutomationConditionResponse) GetAvailable() bool {
@@ -20258,7 +20642,7 @@ type AutomationWebhookRequest struct {
 
 func (x *AutomationWebhookRequest) Reset() {
 	*x = AutomationWebhookRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[271]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[275]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20270,7 +20654,7 @@ func (x *AutomationWebhookRequest) String() string {
 func (*AutomationWebhookRequest) ProtoMessage() {}
 
 func (x *AutomationWebhookRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[271]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[275]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20283,7 +20667,7 @@ func (x *AutomationWebhookRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationWebhookRequest.ProtoReflect.Descriptor instead.
 func (*AutomationWebhookRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{271}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{275}
 }
 
 func (x *AutomationWebhookRequest) GetWorkspaceId() string {
@@ -20354,7 +20738,7 @@ type AutomationWebhookResponse struct {
 
 func (x *AutomationWebhookResponse) Reset() {
 	*x = AutomationWebhookResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[272]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[276]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20366,7 +20750,7 @@ func (x *AutomationWebhookResponse) String() string {
 func (*AutomationWebhookResponse) ProtoMessage() {}
 
 func (x *AutomationWebhookResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[272]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[276]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20379,7 +20763,7 @@ func (x *AutomationWebhookResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationWebhookResponse.ProtoReflect.Descriptor instead.
 func (*AutomationWebhookResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{272}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{276}
 }
 
 func (x *AutomationWebhookResponse) GetOutcome() string {
@@ -20416,7 +20800,7 @@ type ExactReadPage struct {
 
 func (x *ExactReadPage) Reset() {
 	*x = ExactReadPage{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[273]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[277]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20428,7 +20812,7 @@ func (x *ExactReadPage) String() string {
 func (*ExactReadPage) ProtoMessage() {}
 
 func (x *ExactReadPage) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[273]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[277]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20441,7 +20825,7 @@ func (x *ExactReadPage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExactReadPage.ProtoReflect.Descriptor instead.
 func (*ExactReadPage) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{273}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{277}
 }
 
 func (x *ExactReadPage) GetLimit() int32 {
@@ -20479,7 +20863,7 @@ type HostReadReceipt struct {
 
 func (x *HostReadReceipt) Reset() {
 	*x = HostReadReceipt{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[274]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[278]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20491,7 +20875,7 @@ func (x *HostReadReceipt) String() string {
 func (*HostReadReceipt) ProtoMessage() {}
 
 func (x *HostReadReceipt) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[274]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[278]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20504,7 +20888,7 @@ func (x *HostReadReceipt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostReadReceipt.ProtoReflect.Descriptor instead.
 func (*HostReadReceipt) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{274}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{278}
 }
 
 func (x *HostReadReceipt) GetInstallationId() string {
@@ -20562,7 +20946,7 @@ type ExactReadPageInfo struct {
 
 func (x *ExactReadPageInfo) Reset() {
 	*x = ExactReadPageInfo{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[275]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[279]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20574,7 +20958,7 @@ func (x *ExactReadPageInfo) String() string {
 func (*ExactReadPageInfo) ProtoMessage() {}
 
 func (x *ExactReadPageInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[275]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[279]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20587,7 +20971,7 @@ func (x *ExactReadPageInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExactReadPageInfo.ProtoReflect.Descriptor instead.
 func (*ExactReadPageInfo) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{275}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{279}
 }
 
 func (x *ExactReadPageInfo) GetNextCursor() string {
@@ -20636,7 +21020,7 @@ type ExactWorkspaceObservation struct {
 
 func (x *ExactWorkspaceObservation) Reset() {
 	*x = ExactWorkspaceObservation{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[276]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[280]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20648,7 +21032,7 @@ func (x *ExactWorkspaceObservation) String() string {
 func (*ExactWorkspaceObservation) ProtoMessage() {}
 
 func (x *ExactWorkspaceObservation) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[276]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[280]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20661,7 +21045,7 @@ func (x *ExactWorkspaceObservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExactWorkspaceObservation.ProtoReflect.Descriptor instead.
 func (*ExactWorkspaceObservation) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{276}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{280}
 }
 
 func (x *ExactWorkspaceObservation) GetWorkspace() *Workspace {
@@ -20696,7 +21080,7 @@ type ExactWorkflowObservation struct {
 
 func (x *ExactWorkflowObservation) Reset() {
 	*x = ExactWorkflowObservation{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[277]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[281]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20708,7 +21092,7 @@ func (x *ExactWorkflowObservation) String() string {
 func (*ExactWorkflowObservation) ProtoMessage() {}
 
 func (x *ExactWorkflowObservation) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[277]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[281]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20721,7 +21105,7 @@ func (x *ExactWorkflowObservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExactWorkflowObservation.ProtoReflect.Descriptor instead.
 func (*ExactWorkflowObservation) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{277}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{281}
 }
 
 func (x *ExactWorkflowObservation) GetWorkflow() *Workflow {
@@ -20756,7 +21140,7 @@ type ExactWorkflowStepObservation struct {
 
 func (x *ExactWorkflowStepObservation) Reset() {
 	*x = ExactWorkflowStepObservation{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[278]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[282]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20768,7 +21152,7 @@ func (x *ExactWorkflowStepObservation) String() string {
 func (*ExactWorkflowStepObservation) ProtoMessage() {}
 
 func (x *ExactWorkflowStepObservation) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[278]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[282]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20781,7 +21165,7 @@ func (x *ExactWorkflowStepObservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExactWorkflowStepObservation.ProtoReflect.Descriptor instead.
 func (*ExactWorkflowStepObservation) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{278}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{282}
 }
 
 func (x *ExactWorkflowStepObservation) GetStep() *WorkflowStep {
@@ -20822,7 +21206,7 @@ type ExactTaskObservation struct {
 
 func (x *ExactTaskObservation) Reset() {
 	*x = ExactTaskObservation{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[279]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[283]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20834,7 +21218,7 @@ func (x *ExactTaskObservation) String() string {
 func (*ExactTaskObservation) ProtoMessage() {}
 
 func (x *ExactTaskObservation) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[279]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[283]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20847,7 +21231,7 @@ func (x *ExactTaskObservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExactTaskObservation.ProtoReflect.Descriptor instead.
 func (*ExactTaskObservation) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{279}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{283}
 }
 
 func (x *ExactTaskObservation) GetTask() *Task {
@@ -20928,7 +21312,7 @@ type ExactSessionObservation struct {
 
 func (x *ExactSessionObservation) Reset() {
 	*x = ExactSessionObservation{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[280]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[284]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20940,7 +21324,7 @@ func (x *ExactSessionObservation) String() string {
 func (*ExactSessionObservation) ProtoMessage() {}
 
 func (x *ExactSessionObservation) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[280]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[284]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20953,7 +21337,7 @@ func (x *ExactSessionObservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExactSessionObservation.ProtoReflect.Descriptor instead.
 func (*ExactSessionObservation) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{280}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{284}
 }
 
 func (x *ExactSessionObservation) GetSession() *Session {
@@ -21002,7 +21386,7 @@ type ExactInteractionObservation struct {
 
 func (x *ExactInteractionObservation) Reset() {
 	*x = ExactInteractionObservation{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[281]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[285]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21014,7 +21398,7 @@ func (x *ExactInteractionObservation) String() string {
 func (*ExactInteractionObservation) ProtoMessage() {}
 
 func (x *ExactInteractionObservation) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[281]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[285]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21027,7 +21411,7 @@ func (x *ExactInteractionObservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExactInteractionObservation.ProtoReflect.Descriptor instead.
 func (*ExactInteractionObservation) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{281}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{285}
 }
 
 func (x *ExactInteractionObservation) GetInteraction() *Interaction {
@@ -21063,7 +21447,7 @@ type ExactMessageObservation struct {
 
 func (x *ExactMessageObservation) Reset() {
 	*x = ExactMessageObservation{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[282]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[286]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21075,7 +21459,7 @@ func (x *ExactMessageObservation) String() string {
 func (*ExactMessageObservation) ProtoMessage() {}
 
 func (x *ExactMessageObservation) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[282]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[286]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21088,7 +21472,7 @@ func (x *ExactMessageObservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExactMessageObservation.ProtoReflect.Descriptor instead.
 func (*ExactMessageObservation) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{282}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{286}
 }
 
 func (x *ExactMessageObservation) GetMessage() *Message {
@@ -21134,7 +21518,7 @@ type TaskRelation struct {
 
 func (x *TaskRelation) Reset() {
 	*x = TaskRelation{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[283]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[287]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21146,7 +21530,7 @@ func (x *TaskRelation) String() string {
 func (*TaskRelation) ProtoMessage() {}
 
 func (x *TaskRelation) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[283]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[287]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21159,7 +21543,7 @@ func (x *TaskRelation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskRelation.ProtoReflect.Descriptor instead.
 func (*TaskRelation) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{283}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{287}
 }
 
 func (x *TaskRelation) GetWorkspaceId() string {
@@ -21227,7 +21611,7 @@ type TaskInboxItem struct {
 
 func (x *TaskInboxItem) Reset() {
 	*x = TaskInboxItem{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[284]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[288]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21239,7 +21623,7 @@ func (x *TaskInboxItem) String() string {
 func (*TaskInboxItem) ProtoMessage() {}
 
 func (x *TaskInboxItem) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[284]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[288]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21252,7 +21636,7 @@ func (x *TaskInboxItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskInboxItem.ProtoReflect.Descriptor instead.
 func (*TaskInboxItem) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{284}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{288}
 }
 
 func (x *TaskInboxItem) GetId() string {
@@ -21311,6 +21695,171 @@ func (x *TaskInboxItem) GetResourceVersion() string {
 	return ""
 }
 
+// TaskChangeRequest is one Host-owned, plugin-reported task change request.
+type TaskChangeRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId     string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	TaskId          string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	ProviderId      string                 `protobuf:"bytes,4,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	ProviderHost    string                 `protobuf:"bytes,5,opt,name=provider_host,json=providerHost,proto3" json:"provider_host,omitempty"`
+	RepositoryId    string                 `protobuf:"bytes,6,opt,name=repository_id,json=repositoryId,proto3" json:"repository_id,omitempty"`
+	Number          int64                  `protobuf:"varint,7,opt,name=number,proto3" json:"number,omitempty"`
+	Url             string                 `protobuf:"bytes,8,opt,name=url,proto3" json:"url,omitempty"`
+	Title           string                 `protobuf:"bytes,9,opt,name=title,proto3" json:"title,omitempty"`
+	State           string                 `protobuf:"bytes,10,opt,name=state,proto3" json:"state,omitempty"` // open | merged | closed
+	HeadBranch      string                 `protobuf:"bytes,11,opt,name=head_branch,json=headBranch,proto3" json:"head_branch,omitempty"`
+	BaseBranch      string                 `protobuf:"bytes,12,opt,name=base_branch,json=baseBranch,proto3" json:"base_branch,omitempty"`
+	CreatedAt       string                 `protobuf:"bytes,13,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	MergedAt        *string                `protobuf:"bytes,14,opt,name=merged_at,json=mergedAt,proto3,oneof" json:"merged_at,omitempty"`
+	ClosedAt        *string                `protobuf:"bytes,15,opt,name=closed_at,json=closedAt,proto3,oneof" json:"closed_at,omitempty"`
+	ResourceVersion string                 `protobuf:"bytes,16,opt,name=resource_version,json=resourceVersion,proto3" json:"resource_version,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *TaskChangeRequest) Reset() {
+	*x = TaskChangeRequest{}
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[289]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskChangeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskChangeRequest) ProtoMessage() {}
+
+func (x *TaskChangeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[289]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskChangeRequest.ProtoReflect.Descriptor instead.
+func (*TaskChangeRequest) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{289}
+}
+
+func (x *TaskChangeRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *TaskChangeRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *TaskChangeRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskChangeRequest) GetProviderId() string {
+	if x != nil {
+		return x.ProviderId
+	}
+	return ""
+}
+
+func (x *TaskChangeRequest) GetProviderHost() string {
+	if x != nil {
+		return x.ProviderHost
+	}
+	return ""
+}
+
+func (x *TaskChangeRequest) GetRepositoryId() string {
+	if x != nil {
+		return x.RepositoryId
+	}
+	return ""
+}
+
+func (x *TaskChangeRequest) GetNumber() int64 {
+	if x != nil {
+		return x.Number
+	}
+	return 0
+}
+
+func (x *TaskChangeRequest) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *TaskChangeRequest) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *TaskChangeRequest) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *TaskChangeRequest) GetHeadBranch() string {
+	if x != nil {
+		return x.HeadBranch
+	}
+	return ""
+}
+
+func (x *TaskChangeRequest) GetBaseBranch() string {
+	if x != nil {
+		return x.BaseBranch
+	}
+	return ""
+}
+
+func (x *TaskChangeRequest) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
+}
+
+func (x *TaskChangeRequest) GetMergedAt() string {
+	if x != nil && x.MergedAt != nil {
+		return *x.MergedAt
+	}
+	return ""
+}
+
+func (x *TaskChangeRequest) GetClosedAt() string {
+	if x != nil && x.ClosedAt != nil {
+		return *x.ClosedAt
+	}
+	return ""
+}
+
+func (x *TaskChangeRequest) GetResourceVersion() string {
+	if x != nil {
+		return x.ResourceVersion
+	}
+	return ""
+}
+
 type TaskDirective struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -21327,7 +21876,7 @@ type TaskDirective struct {
 
 func (x *TaskDirective) Reset() {
 	*x = TaskDirective{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[285]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[290]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21339,7 +21888,7 @@ func (x *TaskDirective) String() string {
 func (*TaskDirective) ProtoMessage() {}
 
 func (x *TaskDirective) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[285]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[290]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21352,7 +21901,7 @@ func (x *TaskDirective) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskDirective.ProtoReflect.Descriptor instead.
 func (*TaskDirective) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{285}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{290}
 }
 
 func (x *TaskDirective) GetId() string {
@@ -21429,7 +21978,7 @@ type PendingTaskTransition struct {
 
 func (x *PendingTaskTransition) Reset() {
 	*x = PendingTaskTransition{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[286]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[291]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21441,7 +21990,7 @@ func (x *PendingTaskTransition) String() string {
 func (*PendingTaskTransition) ProtoMessage() {}
 
 func (x *PendingTaskTransition) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[286]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[291]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21454,7 +22003,7 @@ func (x *PendingTaskTransition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PendingTaskTransition.ProtoReflect.Descriptor instead.
 func (*PendingTaskTransition) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{286}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{291}
 }
 
 func (x *PendingTaskTransition) GetId() string {
@@ -21554,7 +22103,7 @@ type ChangeRequestEvidence struct {
 
 func (x *ChangeRequestEvidence) Reset() {
 	*x = ChangeRequestEvidence{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[287]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[292]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21566,7 +22115,7 @@ func (x *ChangeRequestEvidence) String() string {
 func (*ChangeRequestEvidence) ProtoMessage() {}
 
 func (x *ChangeRequestEvidence) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[287]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[292]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21579,7 +22128,7 @@ func (x *ChangeRequestEvidence) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChangeRequestEvidence.ProtoReflect.Descriptor instead.
 func (*ChangeRequestEvidence) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{287}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{292}
 }
 
 func (x *ChangeRequestEvidence) GetTaskId() string {
@@ -21745,7 +22294,7 @@ type TaskUsageObservation struct {
 
 func (x *TaskUsageObservation) Reset() {
 	*x = TaskUsageObservation{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[288]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[293]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21757,7 +22306,7 @@ func (x *TaskUsageObservation) String() string {
 func (*TaskUsageObservation) ProtoMessage() {}
 
 func (x *TaskUsageObservation) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[288]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[293]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21770,7 +22319,7 @@ func (x *TaskUsageObservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskUsageObservation.ProtoReflect.Descriptor instead.
 func (*TaskUsageObservation) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{288}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{293}
 }
 
 func (x *TaskUsageObservation) GetTaskId() string {
@@ -21938,7 +22487,7 @@ type ListWorkspacesExactRequest struct {
 
 func (x *ListWorkspacesExactRequest) Reset() {
 	*x = ListWorkspacesExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[289]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[294]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21950,7 +22499,7 @@ func (x *ListWorkspacesExactRequest) String() string {
 func (*ListWorkspacesExactRequest) ProtoMessage() {}
 
 func (x *ListWorkspacesExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[289]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[294]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21963,7 +22512,7 @@ func (x *ListWorkspacesExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspacesExactRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkspacesExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{289}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{294}
 }
 
 func (x *ListWorkspacesExactRequest) GetRequestId() string {
@@ -21997,7 +22546,7 @@ type ListWorkspacesExactResponse struct {
 
 func (x *ListWorkspacesExactResponse) Reset() {
 	*x = ListWorkspacesExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[290]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[295]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22009,7 +22558,7 @@ func (x *ListWorkspacesExactResponse) String() string {
 func (*ListWorkspacesExactResponse) ProtoMessage() {}
 
 func (x *ListWorkspacesExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[290]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[295]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22022,7 +22571,7 @@ func (x *ListWorkspacesExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspacesExactResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkspacesExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{290}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{295}
 }
 
 func (x *ListWorkspacesExactResponse) GetItems() []*ExactWorkspaceObservation {
@@ -22050,7 +22599,7 @@ type ListWorkflowsExactRequest struct {
 
 func (x *ListWorkflowsExactRequest) Reset() {
 	*x = ListWorkflowsExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[291]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[296]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22062,7 +22611,7 @@ func (x *ListWorkflowsExactRequest) String() string {
 func (*ListWorkflowsExactRequest) ProtoMessage() {}
 
 func (x *ListWorkflowsExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[291]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[296]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22075,7 +22624,7 @@ func (x *ListWorkflowsExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkflowsExactRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkflowsExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{291}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{296}
 }
 
 func (x *ListWorkflowsExactRequest) GetRequestId() string {
@@ -22109,7 +22658,7 @@ type ListWorkflowsExactResponse struct {
 
 func (x *ListWorkflowsExactResponse) Reset() {
 	*x = ListWorkflowsExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[292]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[297]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22121,7 +22670,7 @@ func (x *ListWorkflowsExactResponse) String() string {
 func (*ListWorkflowsExactResponse) ProtoMessage() {}
 
 func (x *ListWorkflowsExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[292]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[297]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22134,7 +22683,7 @@ func (x *ListWorkflowsExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkflowsExactResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkflowsExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{292}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{297}
 }
 
 func (x *ListWorkflowsExactResponse) GetItems() []*ExactWorkflowObservation {
@@ -22163,7 +22712,7 @@ type ListWorkflowStepsExactRequest struct {
 
 func (x *ListWorkflowStepsExactRequest) Reset() {
 	*x = ListWorkflowStepsExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[293]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[298]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22175,7 +22724,7 @@ func (x *ListWorkflowStepsExactRequest) String() string {
 func (*ListWorkflowStepsExactRequest) ProtoMessage() {}
 
 func (x *ListWorkflowStepsExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[293]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[298]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22188,7 +22737,7 @@ func (x *ListWorkflowStepsExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkflowStepsExactRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkflowStepsExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{293}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{298}
 }
 
 func (x *ListWorkflowStepsExactRequest) GetRequestId() string {
@@ -22229,7 +22778,7 @@ type ListWorkflowStepsExactResponse struct {
 
 func (x *ListWorkflowStepsExactResponse) Reset() {
 	*x = ListWorkflowStepsExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[294]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[299]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22241,7 +22790,7 @@ func (x *ListWorkflowStepsExactResponse) String() string {
 func (*ListWorkflowStepsExactResponse) ProtoMessage() {}
 
 func (x *ListWorkflowStepsExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[294]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[299]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22254,7 +22803,7 @@ func (x *ListWorkflowStepsExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkflowStepsExactResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkflowStepsExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{294}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{299}
 }
 
 func (x *ListWorkflowStepsExactResponse) GetItems() []*ExactWorkflowStepObservation {
@@ -22283,7 +22832,7 @@ type ListTasksExactRequest struct {
 
 func (x *ListTasksExactRequest) Reset() {
 	*x = ListTasksExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[295]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[300]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22295,7 +22844,7 @@ func (x *ListTasksExactRequest) String() string {
 func (*ListTasksExactRequest) ProtoMessage() {}
 
 func (x *ListTasksExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[295]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[300]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22308,7 +22857,7 @@ func (x *ListTasksExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTasksExactRequest.ProtoReflect.Descriptor instead.
 func (*ListTasksExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{295}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{300}
 }
 
 func (x *ListTasksExactRequest) GetRequestId() string {
@@ -22349,7 +22898,7 @@ type ListTasksExactResponse struct {
 
 func (x *ListTasksExactResponse) Reset() {
 	*x = ListTasksExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[296]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[301]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22361,7 +22910,7 @@ func (x *ListTasksExactResponse) String() string {
 func (*ListTasksExactResponse) ProtoMessage() {}
 
 func (x *ListTasksExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[296]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[301]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22374,7 +22923,7 @@ func (x *ListTasksExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTasksExactResponse.ProtoReflect.Descriptor instead.
 func (*ListTasksExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{296}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{301}
 }
 
 func (x *ListTasksExactResponse) GetItems() []*ExactTaskObservation {
@@ -22402,7 +22951,7 @@ type GetTaskExactRequest struct {
 
 func (x *GetTaskExactRequest) Reset() {
 	*x = GetTaskExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[297]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[302]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22414,7 +22963,7 @@ func (x *GetTaskExactRequest) String() string {
 func (*GetTaskExactRequest) ProtoMessage() {}
 
 func (x *GetTaskExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[297]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[302]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22427,7 +22976,7 @@ func (x *GetTaskExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTaskExactRequest.ProtoReflect.Descriptor instead.
 func (*GetTaskExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{297}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{302}
 }
 
 func (x *GetTaskExactRequest) GetRequestId() string {
@@ -22461,7 +23010,7 @@ type GetTaskExactResponse struct {
 
 func (x *GetTaskExactResponse) Reset() {
 	*x = GetTaskExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[298]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[303]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22473,7 +23022,7 @@ func (x *GetTaskExactResponse) String() string {
 func (*GetTaskExactResponse) ProtoMessage() {}
 
 func (x *GetTaskExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[298]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[303]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22486,7 +23035,7 @@ func (x *GetTaskExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTaskExactResponse.ProtoReflect.Descriptor instead.
 func (*GetTaskExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{298}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{303}
 }
 
 func (x *GetTaskExactResponse) GetItem() *ExactTaskObservation {
@@ -22515,7 +23064,7 @@ type ListSessionsExactRequest struct {
 
 func (x *ListSessionsExactRequest) Reset() {
 	*x = ListSessionsExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[299]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[304]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22527,7 +23076,7 @@ func (x *ListSessionsExactRequest) String() string {
 func (*ListSessionsExactRequest) ProtoMessage() {}
 
 func (x *ListSessionsExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[299]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[304]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22540,7 +23089,7 @@ func (x *ListSessionsExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionsExactRequest.ProtoReflect.Descriptor instead.
 func (*ListSessionsExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{299}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{304}
 }
 
 func (x *ListSessionsExactRequest) GetRequestId() string {
@@ -22581,7 +23130,7 @@ type ListSessionsExactResponse struct {
 
 func (x *ListSessionsExactResponse) Reset() {
 	*x = ListSessionsExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[300]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[305]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22593,7 +23142,7 @@ func (x *ListSessionsExactResponse) String() string {
 func (*ListSessionsExactResponse) ProtoMessage() {}
 
 func (x *ListSessionsExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[300]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[305]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22606,7 +23155,7 @@ func (x *ListSessionsExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionsExactResponse.ProtoReflect.Descriptor instead.
 func (*ListSessionsExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{300}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{305}
 }
 
 func (x *ListSessionsExactResponse) GetItems() []*ExactSessionObservation {
@@ -22635,7 +23184,7 @@ type ListPendingInteractionsExactRequest struct {
 
 func (x *ListPendingInteractionsExactRequest) Reset() {
 	*x = ListPendingInteractionsExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[301]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[306]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22647,7 +23196,7 @@ func (x *ListPendingInteractionsExactRequest) String() string {
 func (*ListPendingInteractionsExactRequest) ProtoMessage() {}
 
 func (x *ListPendingInteractionsExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[301]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[306]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22660,7 +23209,7 @@ func (x *ListPendingInteractionsExactRequest) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use ListPendingInteractionsExactRequest.ProtoReflect.Descriptor instead.
 func (*ListPendingInteractionsExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{301}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{306}
 }
 
 func (x *ListPendingInteractionsExactRequest) GetRequestId() string {
@@ -22701,7 +23250,7 @@ type ListPendingInteractionsExactResponse struct {
 
 func (x *ListPendingInteractionsExactResponse) Reset() {
 	*x = ListPendingInteractionsExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[302]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[307]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22713,7 +23262,7 @@ func (x *ListPendingInteractionsExactResponse) String() string {
 func (*ListPendingInteractionsExactResponse) ProtoMessage() {}
 
 func (x *ListPendingInteractionsExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[302]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[307]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22726,7 +23275,7 @@ func (x *ListPendingInteractionsExactResponse) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use ListPendingInteractionsExactResponse.ProtoReflect.Descriptor instead.
 func (*ListPendingInteractionsExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{302}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{307}
 }
 
 func (x *ListPendingInteractionsExactResponse) GetItems() []*ExactInteractionObservation {
@@ -22754,7 +23303,7 @@ type GetInteractionExactRequest struct {
 
 func (x *GetInteractionExactRequest) Reset() {
 	*x = GetInteractionExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[303]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[308]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22766,7 +23315,7 @@ func (x *GetInteractionExactRequest) String() string {
 func (*GetInteractionExactRequest) ProtoMessage() {}
 
 func (x *GetInteractionExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[303]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[308]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22779,7 +23328,7 @@ func (x *GetInteractionExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetInteractionExactRequest.ProtoReflect.Descriptor instead.
 func (*GetInteractionExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{303}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{308}
 }
 
 func (x *GetInteractionExactRequest) GetRequestId() string {
@@ -22813,7 +23362,7 @@ type GetInteractionExactResponse struct {
 
 func (x *GetInteractionExactResponse) Reset() {
 	*x = GetInteractionExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[304]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[309]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22825,7 +23374,7 @@ func (x *GetInteractionExactResponse) String() string {
 func (*GetInteractionExactResponse) ProtoMessage() {}
 
 func (x *GetInteractionExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[304]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[309]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22838,7 +23387,7 @@ func (x *GetInteractionExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetInteractionExactResponse.ProtoReflect.Descriptor instead.
 func (*GetInteractionExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{304}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{309}
 }
 
 func (x *GetInteractionExactResponse) GetItem() *ExactInteractionObservation {
@@ -22867,7 +23416,7 @@ type ListSanitizedMessagesExactRequest struct {
 
 func (x *ListSanitizedMessagesExactRequest) Reset() {
 	*x = ListSanitizedMessagesExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[305]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[310]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22879,7 +23428,7 @@ func (x *ListSanitizedMessagesExactRequest) String() string {
 func (*ListSanitizedMessagesExactRequest) ProtoMessage() {}
 
 func (x *ListSanitizedMessagesExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[305]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[310]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22892,7 +23441,7 @@ func (x *ListSanitizedMessagesExactRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use ListSanitizedMessagesExactRequest.ProtoReflect.Descriptor instead.
 func (*ListSanitizedMessagesExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{305}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{310}
 }
 
 func (x *ListSanitizedMessagesExactRequest) GetRequestId() string {
@@ -22933,7 +23482,7 @@ type ListSanitizedMessagesExactResponse struct {
 
 func (x *ListSanitizedMessagesExactResponse) Reset() {
 	*x = ListSanitizedMessagesExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[306]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[311]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22945,7 +23494,7 @@ func (x *ListSanitizedMessagesExactResponse) String() string {
 func (*ListSanitizedMessagesExactResponse) ProtoMessage() {}
 
 func (x *ListSanitizedMessagesExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[306]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[311]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22958,7 +23507,7 @@ func (x *ListSanitizedMessagesExactResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use ListSanitizedMessagesExactResponse.ProtoReflect.Descriptor instead.
 func (*ListSanitizedMessagesExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{306}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{311}
 }
 
 func (x *ListSanitizedMessagesExactResponse) GetItems() []*ExactMessageObservation {
@@ -22988,7 +23537,7 @@ type ListTaskInboxExactRequest struct {
 
 func (x *ListTaskInboxExactRequest) Reset() {
 	*x = ListTaskInboxExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[307]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[312]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23000,7 +23549,7 @@ func (x *ListTaskInboxExactRequest) String() string {
 func (*ListTaskInboxExactRequest) ProtoMessage() {}
 
 func (x *ListTaskInboxExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[307]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[312]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23013,7 +23562,7 @@ func (x *ListTaskInboxExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTaskInboxExactRequest.ProtoReflect.Descriptor instead.
 func (*ListTaskInboxExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{307}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{312}
 }
 
 func (x *ListTaskInboxExactRequest) GetRequestId() string {
@@ -23061,7 +23610,7 @@ type ListTaskInboxExactResponse struct {
 
 func (x *ListTaskInboxExactResponse) Reset() {
 	*x = ListTaskInboxExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[308]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[313]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23073,7 +23622,7 @@ func (x *ListTaskInboxExactResponse) String() string {
 func (*ListTaskInboxExactResponse) ProtoMessage() {}
 
 func (x *ListTaskInboxExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[308]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[313]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23086,7 +23635,7 @@ func (x *ListTaskInboxExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTaskInboxExactResponse.ProtoReflect.Descriptor instead.
 func (*ListTaskInboxExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{308}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{313}
 }
 
 func (x *ListTaskInboxExactResponse) GetItems() []*TaskInboxItem {
@@ -23114,7 +23663,7 @@ type GetTaskDirectiveExactRequest struct {
 
 func (x *GetTaskDirectiveExactRequest) Reset() {
 	*x = GetTaskDirectiveExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[309]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[314]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23126,7 +23675,7 @@ func (x *GetTaskDirectiveExactRequest) String() string {
 func (*GetTaskDirectiveExactRequest) ProtoMessage() {}
 
 func (x *GetTaskDirectiveExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[309]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[314]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23139,7 +23688,7 @@ func (x *GetTaskDirectiveExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTaskDirectiveExactRequest.ProtoReflect.Descriptor instead.
 func (*GetTaskDirectiveExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{309}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{314}
 }
 
 func (x *GetTaskDirectiveExactRequest) GetRequestId() string {
@@ -23173,7 +23722,7 @@ type GetTaskDirectiveExactResponse struct {
 
 func (x *GetTaskDirectiveExactResponse) Reset() {
 	*x = GetTaskDirectiveExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[310]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[315]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23185,7 +23734,7 @@ func (x *GetTaskDirectiveExactResponse) String() string {
 func (*GetTaskDirectiveExactResponse) ProtoMessage() {}
 
 func (x *GetTaskDirectiveExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[310]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[315]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23198,7 +23747,7 @@ func (x *GetTaskDirectiveExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTaskDirectiveExactResponse.ProtoReflect.Descriptor instead.
 func (*GetTaskDirectiveExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{310}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{315}
 }
 
 func (x *GetTaskDirectiveExactResponse) GetItem() *TaskDirective {
@@ -23227,7 +23776,7 @@ type ListTaskDirectivesExactRequest struct {
 
 func (x *ListTaskDirectivesExactRequest) Reset() {
 	*x = ListTaskDirectivesExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[311]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[316]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23239,7 +23788,7 @@ func (x *ListTaskDirectivesExactRequest) String() string {
 func (*ListTaskDirectivesExactRequest) ProtoMessage() {}
 
 func (x *ListTaskDirectivesExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[311]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[316]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23252,7 +23801,7 @@ func (x *ListTaskDirectivesExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTaskDirectivesExactRequest.ProtoReflect.Descriptor instead.
 func (*ListTaskDirectivesExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{311}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{316}
 }
 
 func (x *ListTaskDirectivesExactRequest) GetRequestId() string {
@@ -23293,7 +23842,7 @@ type ListTaskDirectivesExactResponse struct {
 
 func (x *ListTaskDirectivesExactResponse) Reset() {
 	*x = ListTaskDirectivesExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[312]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[317]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23305,7 +23854,7 @@ func (x *ListTaskDirectivesExactResponse) String() string {
 func (*ListTaskDirectivesExactResponse) ProtoMessage() {}
 
 func (x *ListTaskDirectivesExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[312]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[317]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23318,7 +23867,7 @@ func (x *ListTaskDirectivesExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTaskDirectivesExactResponse.ProtoReflect.Descriptor instead.
 func (*ListTaskDirectivesExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{312}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{317}
 }
 
 func (x *ListTaskDirectivesExactResponse) GetItems() []*TaskDirective {
@@ -23347,7 +23896,7 @@ type GetTaskRelationsExactRequest struct {
 
 func (x *GetTaskRelationsExactRequest) Reset() {
 	*x = GetTaskRelationsExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[313]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[318]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23359,7 +23908,7 @@ func (x *GetTaskRelationsExactRequest) String() string {
 func (*GetTaskRelationsExactRequest) ProtoMessage() {}
 
 func (x *GetTaskRelationsExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[313]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[318]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23372,7 +23921,7 @@ func (x *GetTaskRelationsExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTaskRelationsExactRequest.ProtoReflect.Descriptor instead.
 func (*GetTaskRelationsExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{313}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{318}
 }
 
 func (x *GetTaskRelationsExactRequest) GetRequestId() string {
@@ -23413,7 +23962,7 @@ type GetTaskRelationsExactResponse struct {
 
 func (x *GetTaskRelationsExactResponse) Reset() {
 	*x = GetTaskRelationsExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[314]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[319]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23425,7 +23974,7 @@ func (x *GetTaskRelationsExactResponse) String() string {
 func (*GetTaskRelationsExactResponse) ProtoMessage() {}
 
 func (x *GetTaskRelationsExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[314]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[319]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23438,7 +23987,7 @@ func (x *GetTaskRelationsExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTaskRelationsExactResponse.ProtoReflect.Descriptor instead.
 func (*GetTaskRelationsExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{314}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{319}
 }
 
 func (x *GetTaskRelationsExactResponse) GetItems() []*TaskRelation {
@@ -23467,7 +24016,7 @@ type ListTaskRelationsExactRequest struct {
 
 func (x *ListTaskRelationsExactRequest) Reset() {
 	*x = ListTaskRelationsExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[315]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[320]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23479,7 +24028,7 @@ func (x *ListTaskRelationsExactRequest) String() string {
 func (*ListTaskRelationsExactRequest) ProtoMessage() {}
 
 func (x *ListTaskRelationsExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[315]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[320]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23492,7 +24041,7 @@ func (x *ListTaskRelationsExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTaskRelationsExactRequest.ProtoReflect.Descriptor instead.
 func (*ListTaskRelationsExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{315}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{320}
 }
 
 func (x *ListTaskRelationsExactRequest) GetRequestId() string {
@@ -23533,7 +24082,7 @@ type ListTaskRelationsExactResponse struct {
 
 func (x *ListTaskRelationsExactResponse) Reset() {
 	*x = ListTaskRelationsExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[316]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[321]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23545,7 +24094,7 @@ func (x *ListTaskRelationsExactResponse) String() string {
 func (*ListTaskRelationsExactResponse) ProtoMessage() {}
 
 func (x *ListTaskRelationsExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[316]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[321]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23558,7 +24107,7 @@ func (x *ListTaskRelationsExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTaskRelationsExactResponse.ProtoReflect.Descriptor instead.
 func (*ListTaskRelationsExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{316}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{321}
 }
 
 func (x *ListTaskRelationsExactResponse) GetItems() []*TaskRelation {
@@ -23587,7 +24136,7 @@ type ListPendingTaskTransitionsExactRequest struct {
 
 func (x *ListPendingTaskTransitionsExactRequest) Reset() {
 	*x = ListPendingTaskTransitionsExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[317]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[322]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23599,7 +24148,7 @@ func (x *ListPendingTaskTransitionsExactRequest) String() string {
 func (*ListPendingTaskTransitionsExactRequest) ProtoMessage() {}
 
 func (x *ListPendingTaskTransitionsExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[317]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[322]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23612,7 +24161,7 @@ func (x *ListPendingTaskTransitionsExactRequest) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use ListPendingTaskTransitionsExactRequest.ProtoReflect.Descriptor instead.
 func (*ListPendingTaskTransitionsExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{317}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{322}
 }
 
 func (x *ListPendingTaskTransitionsExactRequest) GetRequestId() string {
@@ -23653,7 +24202,7 @@ type ListPendingTaskTransitionsExactResponse struct {
 
 func (x *ListPendingTaskTransitionsExactResponse) Reset() {
 	*x = ListPendingTaskTransitionsExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[318]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[323]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23665,7 +24214,7 @@ func (x *ListPendingTaskTransitionsExactResponse) String() string {
 func (*ListPendingTaskTransitionsExactResponse) ProtoMessage() {}
 
 func (x *ListPendingTaskTransitionsExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[318]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[323]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23678,7 +24227,7 @@ func (x *ListPendingTaskTransitionsExactResponse) ProtoReflect() protoreflect.Me
 
 // Deprecated: Use ListPendingTaskTransitionsExactResponse.ProtoReflect.Descriptor instead.
 func (*ListPendingTaskTransitionsExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{318}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{323}
 }
 
 func (x *ListPendingTaskTransitionsExactResponse) GetItems() []*PendingTaskTransition {
@@ -23707,7 +24256,7 @@ type ListChangeRequestEvidenceExactRequest struct {
 
 func (x *ListChangeRequestEvidenceExactRequest) Reset() {
 	*x = ListChangeRequestEvidenceExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[319]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[324]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23719,7 +24268,7 @@ func (x *ListChangeRequestEvidenceExactRequest) String() string {
 func (*ListChangeRequestEvidenceExactRequest) ProtoMessage() {}
 
 func (x *ListChangeRequestEvidenceExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[319]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[324]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23732,7 +24281,7 @@ func (x *ListChangeRequestEvidenceExactRequest) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use ListChangeRequestEvidenceExactRequest.ProtoReflect.Descriptor instead.
 func (*ListChangeRequestEvidenceExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{319}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{324}
 }
 
 func (x *ListChangeRequestEvidenceExactRequest) GetRequestId() string {
@@ -23773,7 +24322,7 @@ type ListChangeRequestEvidenceExactResponse struct {
 
 func (x *ListChangeRequestEvidenceExactResponse) Reset() {
 	*x = ListChangeRequestEvidenceExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[320]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[325]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23785,7 +24334,7 @@ func (x *ListChangeRequestEvidenceExactResponse) String() string {
 func (*ListChangeRequestEvidenceExactResponse) ProtoMessage() {}
 
 func (x *ListChangeRequestEvidenceExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[320]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[325]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23798,7 +24347,7 @@ func (x *ListChangeRequestEvidenceExactResponse) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use ListChangeRequestEvidenceExactResponse.ProtoReflect.Descriptor instead.
 func (*ListChangeRequestEvidenceExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{320}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{325}
 }
 
 func (x *ListChangeRequestEvidenceExactResponse) GetItems() []*ChangeRequestEvidence {
@@ -23827,7 +24376,7 @@ type ListTaskUsageExactRequest struct {
 
 func (x *ListTaskUsageExactRequest) Reset() {
 	*x = ListTaskUsageExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[321]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[326]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23839,7 +24388,7 @@ func (x *ListTaskUsageExactRequest) String() string {
 func (*ListTaskUsageExactRequest) ProtoMessage() {}
 
 func (x *ListTaskUsageExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[321]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[326]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23852,7 +24401,7 @@ func (x *ListTaskUsageExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTaskUsageExactRequest.ProtoReflect.Descriptor instead.
 func (*ListTaskUsageExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{321}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{326}
 }
 
 func (x *ListTaskUsageExactRequest) GetRequestId() string {
@@ -23893,7 +24442,7 @@ type ListTaskUsageExactResponse struct {
 
 func (x *ListTaskUsageExactResponse) Reset() {
 	*x = ListTaskUsageExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[322]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[327]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23905,7 +24454,7 @@ func (x *ListTaskUsageExactResponse) String() string {
 func (*ListTaskUsageExactResponse) ProtoMessage() {}
 
 func (x *ListTaskUsageExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[322]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[327]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23918,7 +24467,7 @@ func (x *ListTaskUsageExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTaskUsageExactResponse.ProtoReflect.Descriptor instead.
 func (*ListTaskUsageExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{322}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{327}
 }
 
 func (x *ListTaskUsageExactResponse) GetItems() []*TaskUsageObservation {
@@ -23949,7 +24498,7 @@ type AutomationDefinitionFilter struct {
 
 func (x *AutomationDefinitionFilter) Reset() {
 	*x = AutomationDefinitionFilter{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[323]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[328]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23961,7 +24510,7 @@ func (x *AutomationDefinitionFilter) String() string {
 func (*AutomationDefinitionFilter) ProtoMessage() {}
 
 func (x *AutomationDefinitionFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[323]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[328]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23974,7 +24523,7 @@ func (x *AutomationDefinitionFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationDefinitionFilter.ProtoReflect.Descriptor instead.
 func (*AutomationDefinitionFilter) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{323}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{328}
 }
 
 func (x *AutomationDefinitionFilter) GetAutomationId() string {
@@ -24012,7 +24561,7 @@ type AutomationTriggerObservation struct {
 
 func (x *AutomationTriggerObservation) Reset() {
 	*x = AutomationTriggerObservation{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[324]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[329]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24024,7 +24573,7 @@ func (x *AutomationTriggerObservation) String() string {
 func (*AutomationTriggerObservation) ProtoMessage() {}
 
 func (x *AutomationTriggerObservation) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[324]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[329]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24037,7 +24586,7 @@ func (x *AutomationTriggerObservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationTriggerObservation.ProtoReflect.Descriptor instead.
 func (*AutomationTriggerObservation) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{324}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{329}
 }
 
 func (x *AutomationTriggerObservation) GetId() string {
@@ -24099,7 +24648,7 @@ type AutomationDefinitionObservation struct {
 
 func (x *AutomationDefinitionObservation) Reset() {
 	*x = AutomationDefinitionObservation{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[325]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[330]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24111,7 +24660,7 @@ func (x *AutomationDefinitionObservation) String() string {
 func (*AutomationDefinitionObservation) ProtoMessage() {}
 
 func (x *AutomationDefinitionObservation) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[325]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[330]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24124,7 +24673,7 @@ func (x *AutomationDefinitionObservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationDefinitionObservation.ProtoReflect.Descriptor instead.
 func (*AutomationDefinitionObservation) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{325}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{330}
 }
 
 func (x *AutomationDefinitionObservation) GetId() string {
@@ -24202,7 +24751,7 @@ type ListAutomationDefinitionsExactRequest struct {
 
 func (x *ListAutomationDefinitionsExactRequest) Reset() {
 	*x = ListAutomationDefinitionsExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[326]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[331]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24214,7 +24763,7 @@ func (x *ListAutomationDefinitionsExactRequest) String() string {
 func (*ListAutomationDefinitionsExactRequest) ProtoMessage() {}
 
 func (x *ListAutomationDefinitionsExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[326]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[331]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24227,7 +24776,7 @@ func (x *ListAutomationDefinitionsExactRequest) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use ListAutomationDefinitionsExactRequest.ProtoReflect.Descriptor instead.
 func (*ListAutomationDefinitionsExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{326}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{331}
 }
 
 func (x *ListAutomationDefinitionsExactRequest) GetRequestId() string {
@@ -24268,7 +24817,7 @@ type ListAutomationDefinitionsExactResponse struct {
 
 func (x *ListAutomationDefinitionsExactResponse) Reset() {
 	*x = ListAutomationDefinitionsExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[327]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[332]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24280,7 +24829,7 @@ func (x *ListAutomationDefinitionsExactResponse) String() string {
 func (*ListAutomationDefinitionsExactResponse) ProtoMessage() {}
 
 func (x *ListAutomationDefinitionsExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[327]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[332]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24293,7 +24842,7 @@ func (x *ListAutomationDefinitionsExactResponse) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use ListAutomationDefinitionsExactResponse.ProtoReflect.Descriptor instead.
 func (*ListAutomationDefinitionsExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{327}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{332}
 }
 
 func (x *ListAutomationDefinitionsExactResponse) GetItems() []*AutomationDefinitionObservation {
@@ -24321,7 +24870,7 @@ type AutomationRunFilter struct {
 
 func (x *AutomationRunFilter) Reset() {
 	*x = AutomationRunFilter{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[328]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[333]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24333,7 +24882,7 @@ func (x *AutomationRunFilter) String() string {
 func (*AutomationRunFilter) ProtoMessage() {}
 
 func (x *AutomationRunFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[328]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[333]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24346,7 +24895,7 @@ func (x *AutomationRunFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationRunFilter.ProtoReflect.Descriptor instead.
 func (*AutomationRunFilter) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{328}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{333}
 }
 
 func (x *AutomationRunFilter) GetAutomationId() string {
@@ -24402,7 +24951,7 @@ type AutomationRunObservation struct {
 
 func (x *AutomationRunObservation) Reset() {
 	*x = AutomationRunObservation{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[329]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[334]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24414,7 +24963,7 @@ func (x *AutomationRunObservation) String() string {
 func (*AutomationRunObservation) ProtoMessage() {}
 
 func (x *AutomationRunObservation) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[329]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[334]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24427,7 +24976,7 @@ func (x *AutomationRunObservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AutomationRunObservation.ProtoReflect.Descriptor instead.
 func (*AutomationRunObservation) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{329}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{334}
 }
 
 func (x *AutomationRunObservation) GetId() string {
@@ -24610,7 +25159,7 @@ type ListAutomationRunsExactRequest struct {
 
 func (x *ListAutomationRunsExactRequest) Reset() {
 	*x = ListAutomationRunsExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[330]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[335]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24622,7 +25171,7 @@ func (x *ListAutomationRunsExactRequest) String() string {
 func (*ListAutomationRunsExactRequest) ProtoMessage() {}
 
 func (x *ListAutomationRunsExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[330]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[335]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24635,7 +25184,7 @@ func (x *ListAutomationRunsExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAutomationRunsExactRequest.ProtoReflect.Descriptor instead.
 func (*ListAutomationRunsExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{330}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{335}
 }
 
 func (x *ListAutomationRunsExactRequest) GetRequestId() string {
@@ -24676,7 +25225,7 @@ type ListAutomationRunsExactResponse struct {
 
 func (x *ListAutomationRunsExactResponse) Reset() {
 	*x = ListAutomationRunsExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[331]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[336]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24688,7 +25237,7 @@ func (x *ListAutomationRunsExactResponse) String() string {
 func (*ListAutomationRunsExactResponse) ProtoMessage() {}
 
 func (x *ListAutomationRunsExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[331]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[336]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24701,7 +25250,7 @@ func (x *ListAutomationRunsExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAutomationRunsExactResponse.ProtoReflect.Descriptor instead.
 func (*ListAutomationRunsExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{331}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{336}
 }
 
 func (x *ListAutomationRunsExactResponse) GetItems() []*AutomationRunObservation {
@@ -24729,7 +25278,7 @@ type GetAutomationRunExactRequest struct {
 
 func (x *GetAutomationRunExactRequest) Reset() {
 	*x = GetAutomationRunExactRequest{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[332]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[337]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24741,7 +25290,7 @@ func (x *GetAutomationRunExactRequest) String() string {
 func (*GetAutomationRunExactRequest) ProtoMessage() {}
 
 func (x *GetAutomationRunExactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[332]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[337]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24754,7 +25303,7 @@ func (x *GetAutomationRunExactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAutomationRunExactRequest.ProtoReflect.Descriptor instead.
 func (*GetAutomationRunExactRequest) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{332}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{337}
 }
 
 func (x *GetAutomationRunExactRequest) GetRequestId() string {
@@ -24788,7 +25337,7 @@ type GetAutomationRunExactResponse struct {
 
 func (x *GetAutomationRunExactResponse) Reset() {
 	*x = GetAutomationRunExactResponse{}
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[333]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[338]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24800,7 +25349,7 @@ func (x *GetAutomationRunExactResponse) String() string {
 func (*GetAutomationRunExactResponse) ProtoMessage() {}
 
 func (x *GetAutomationRunExactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[333]
+	mi := &file_kandev_plugin_v1_plugin_proto_msgTypes[338]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24813,7 +25362,7 @@ func (x *GetAutomationRunExactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAutomationRunExactResponse.ProtoReflect.Descriptor instead.
 func (*GetAutomationRunExactResponse) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{333}
+	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{338}
 }
 
 func (x *GetAutomationRunExactResponse) GetItem() *AutomationRunObservation {
@@ -25407,7 +25956,48 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x0fmanifest_digest\x18\t \x01(\tR\x0emanifestDigest\"\x9f\x01\n" +
 	"!ResolveTaskDirectiveExactResponse\x12;\n" +
 	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12=\n" +
-	"\tdirective\x18\x02 \x01(\v2\x1f.kandev.plugin.v1.TaskDirectiveR\tdirective\"\xc8\x04\n" +
+	"\tdirective\x18\x02 \x01(\v2\x1f.kandev.plugin.v1.TaskDirectiveR\tdirective\"\xdb\x04\n" +
+	"#ReportTaskChangeRequestExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x1f\n" +
+	"\vprovider_id\x18\x04 \x01(\tR\n" +
+	"providerId\x12#\n" +
+	"\rprovider_host\x18\x05 \x01(\tR\fproviderHost\x12#\n" +
+	"\rrepository_id\x18\x06 \x01(\tR\frepositoryId\x12\x16\n" +
+	"\x06number\x18\a \x01(\x03R\x06number\x12\x10\n" +
+	"\x03url\x18\b \x01(\tR\x03url\x12\x14\n" +
+	"\x05title\x18\t \x01(\tR\x05title\x12\x14\n" +
+	"\x05state\x18\n" +
+	" \x01(\tR\x05state\x12\x1f\n" +
+	"\vhead_branch\x18\v \x01(\tR\n" +
+	"headBranch\x12\x1f\n" +
+	"\vbase_branch\x18\f \x01(\tR\n" +
+	"baseBranch\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\r \x01(\tR\tcreatedAt\x12\x1b\n" +
+	"\tmerged_at\x18\x0e \x01(\tR\bmergedAt\x12\x1b\n" +
+	"\tclosed_at\x18\x0f \x01(\tR\bclosedAt\x12'\n" +
+	"\x0fidempotency_key\x18\x10 \x01(\tR\x0eidempotencyKey\x12+\n" +
+	"\x11approval_revision\x18\x11 \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\x12 \x01(\tR\x0emanifestDigest\"\xaf\x01\n" +
+	"$ReportTaskChangeRequestExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\x12J\n" +
+	"\x0echange_request\x18\x02 \x01(\v2#.kandev.plugin.v1.TaskChangeRequestR\rchangeRequest\"\xc4\x02\n" +
+	"#RemoveTaskChangeRequestExactRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1f\n" +
+	"\vprovider_id\x18\x03 \x01(\tR\n" +
+	"providerId\x12#\n" +
+	"\rrepository_id\x18\x04 \x01(\tR\frepositoryId\x12\x16\n" +
+	"\x06number\x18\x05 \x01(\x03R\x06number\x12'\n" +
+	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\x12+\n" +
+	"\x11approval_revision\x18\a \x01(\x04R\x10approvalRevision\x12'\n" +
+	"\x0fmanifest_digest\x18\b \x01(\tR\x0emanifestDigest\"c\n" +
+	"$RemoveTaskChangeRequestExactResponse\x12;\n" +
+	"\x06result\x18\x01 \x01(\v2#.kandev.plugin.v1.HostCommandResultR\x06result\"\xc8\x04\n" +
 	"\"ManagedAgentConversationDescriptor\x12'\n" +
 	"\x0finstallation_id\x18\x01 \x01(\tR\x0einstallationId\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1d\n" +
@@ -26772,7 +27362,33 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x05state\x18\x06 \x01(\tR\x05state\x12\x1d\n" +
 	"\n" +
 	"created_at\x18\a \x01(\tR\tcreatedAt\x12)\n" +
-	"\x10resource_version\x18\b \x01(\tR\x0fresourceVersion\"\xa9\x02\n" +
+	"\x10resource_version\x18\b \x01(\tR\x0fresourceVersion\"\x8c\x04\n" +
+	"\x11TaskChangeRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x1f\n" +
+	"\vprovider_id\x18\x04 \x01(\tR\n" +
+	"providerId\x12#\n" +
+	"\rprovider_host\x18\x05 \x01(\tR\fproviderHost\x12#\n" +
+	"\rrepository_id\x18\x06 \x01(\tR\frepositoryId\x12\x16\n" +
+	"\x06number\x18\a \x01(\x03R\x06number\x12\x10\n" +
+	"\x03url\x18\b \x01(\tR\x03url\x12\x14\n" +
+	"\x05title\x18\t \x01(\tR\x05title\x12\x14\n" +
+	"\x05state\x18\n" +
+	" \x01(\tR\x05state\x12\x1f\n" +
+	"\vhead_branch\x18\v \x01(\tR\n" +
+	"headBranch\x12\x1f\n" +
+	"\vbase_branch\x18\f \x01(\tR\n" +
+	"baseBranch\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\r \x01(\tR\tcreatedAt\x12 \n" +
+	"\tmerged_at\x18\x0e \x01(\tH\x00R\bmergedAt\x88\x01\x01\x12 \n" +
+	"\tclosed_at\x18\x0f \x01(\tH\x01R\bclosedAt\x88\x01\x01\x12)\n" +
+	"\x10resource_version\x18\x10 \x01(\tR\x0fresourceVersionB\f\n" +
+	"\n" +
+	"_merged_atB\f\n" +
+	"\n" +
+	"_closed_at\"\xa9\x02\n" +
 	"\rTaskDirective\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
@@ -27153,7 +27769,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x19AttachExecutorEnvironment\x122.kandev.plugin.v1.AttachExecutorEnvironmentRequest\x1a3.kandev.plugin.v1.AttachExecutorEnvironmentResponse\x12\x87\x01\n" +
 	"\x1aInspectExecutorEnvironment\x123.kandev.plugin.v1.InspectExecutorEnvironmentRequest\x1a4.kandev.plugin.v1.InspectExecutorEnvironmentResponse\x12\x84\x01\n" +
 	"\x19ResolveExecutorConnection\x122.kandev.plugin.v1.ResolveExecutorConnectionRequest\x1a3.kandev.plugin.v1.ResolveExecutorConnectionResponse\x12\x87\x01\n" +
-	"\x1aDestroyExecutorEnvironment\x123.kandev.plugin.v1.DestroyExecutorEnvironmentRequest\x1a4.kandev.plugin.v1.DestroyExecutorEnvironmentResponse2\xaaf\n" +
+	"\x1aDestroyExecutorEnvironment\x123.kandev.plugin.v1.DestroyExecutorEnvironmentRequest\x1a4.kandev.plugin.v1.DestroyExecutorEnvironmentResponse2\xcah\n" +
 	"\x04Host\x12u\n" +
 	"\x14GetCapabilityContext\x12-.kandev.plugin.v1.GetCapabilityContextRequest\x1a..kandev.plugin.v1.GetCapabilityContextResponse\x12f\n" +
 	"\x0fUpdateTaskExact\x12(.kandev.plugin.v1.UpdateTaskExactRequest\x1a).kandev.plugin.v1.UpdateTaskExactResponse\x12f\n" +
@@ -27166,7 +27782,9 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x17RemoveTaskRelationExact\x120.kandev.plugin.v1.RemoveTaskRelationExactRequest\x1a1.kandev.plugin.v1.RemoveTaskRelationExactResponse\x12u\n" +
 	"\x14SendTaskMessageExact\x12-.kandev.plugin.v1.SendTaskMessageExactRequest\x1a..kandev.plugin.v1.SendTaskMessageExactResponse\x12~\n" +
 	"\x17IssueTaskDirectiveExact\x120.kandev.plugin.v1.IssueTaskDirectiveExactRequest\x1a1.kandev.plugin.v1.IssueTaskDirectiveExactResponse\x12\x84\x01\n" +
-	"\x19ResolveTaskDirectiveExact\x122.kandev.plugin.v1.ResolveTaskDirectiveExactRequest\x1a3.kandev.plugin.v1.ResolveTaskDirectiveExactResponse\x12\x8f\x01\n" +
+	"\x19ResolveTaskDirectiveExact\x122.kandev.plugin.v1.ResolveTaskDirectiveExactRequest\x1a3.kandev.plugin.v1.ResolveTaskDirectiveExactResponse\x12\x8d\x01\n" +
+	"\x1cReportTaskChangeRequestExact\x125.kandev.plugin.v1.ReportTaskChangeRequestExactRequest\x1a6.kandev.plugin.v1.ReportTaskChangeRequestExactResponse\x12\x8d\x01\n" +
+	"\x1cRemoveTaskChangeRequestExact\x125.kandev.plugin.v1.RemoveTaskChangeRequestExactRequest\x1a6.kandev.plugin.v1.RemoveTaskChangeRequestExactResponse\x12\x8f\x01\n" +
 	"\x1fAcquireTaskManagementClaimExact\x128.kandev.plugin.v1.AcquireTaskManagementClaimExactRequest\x1a2.kandev.plugin.v1.TaskManagementClaimExactResponse\x12\x8f\x01\n" +
 	"\x1fReleaseTaskManagementClaimExact\x128.kandev.plugin.v1.ReleaseTaskManagementClaimExactRequest\x1a2.kandev.plugin.v1.TaskManagementClaimExactResponse\x12\x91\x01\n" +
 	" TransferTaskManagementClaimExact\x129.kandev.plugin.v1.TransferTaskManagementClaimExactRequest\x1a2.kandev.plugin.v1.TaskManagementClaimExactResponse\x12\x8c\x01\n" +
@@ -27277,7 +27895,7 @@ func file_kandev_plugin_v1_plugin_proto_rawDescGZIP() []byte {
 }
 
 var file_kandev_plugin_v1_plugin_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_kandev_plugin_v1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 343)
+var file_kandev_plugin_v1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 348)
 var file_kandev_plugin_v1_plugin_proto_goTypes = []any{
 	(HostCommandStatus)(0),                                    // 0: kandev.plugin.v1.HostCommandStatus
 	(ManagedAgentInputOrigin)(0),                              // 1: kandev.plugin.v1.ManagedAgentInputOrigin
@@ -27347,307 +27965,312 @@ var file_kandev_plugin_v1_plugin_proto_goTypes = []any{
 	(*IssueTaskDirectiveExactResponse)(nil),                   // 65: kandev.plugin.v1.IssueTaskDirectiveExactResponse
 	(*ResolveTaskDirectiveExactRequest)(nil),                  // 66: kandev.plugin.v1.ResolveTaskDirectiveExactRequest
 	(*ResolveTaskDirectiveExactResponse)(nil),                 // 67: kandev.plugin.v1.ResolveTaskDirectiveExactResponse
-	(*ManagedAgentConversationDescriptor)(nil),                // 68: kandev.plugin.v1.ManagedAgentConversationDescriptor
-	(*ManagedAgentConversationSpec)(nil),                      // 69: kandev.plugin.v1.ManagedAgentConversationSpec
-	(*EnsureManagedAgentConversationExactRequest)(nil),        // 70: kandev.plugin.v1.EnsureManagedAgentConversationExactRequest
-	(*EnsureManagedAgentConversationExactResponse)(nil),       // 71: kandev.plugin.v1.EnsureManagedAgentConversationExactResponse
-	(*GetManagedAgentConversationStatusExactRequest)(nil),     // 72: kandev.plugin.v1.GetManagedAgentConversationStatusExactRequest
-	(*GetManagedAgentConversationStatusExactResponse)(nil),    // 73: kandev.plugin.v1.GetManagedAgentConversationStatusExactResponse
-	(*ListManagedAgentConversationsExactRequest)(nil),         // 74: kandev.plugin.v1.ListManagedAgentConversationsExactRequest
-	(*ListManagedAgentConversationsExactResponse)(nil),        // 75: kandev.plugin.v1.ListManagedAgentConversationsExactResponse
-	(*SetManagedAgentConversationPausedExactRequest)(nil),     // 76: kandev.plugin.v1.SetManagedAgentConversationPausedExactRequest
-	(*SetManagedAgentConversationPausedExactResponse)(nil),    // 77: kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse
-	(*DeleteManagedAgentConversationExactRequest)(nil),        // 78: kandev.plugin.v1.DeleteManagedAgentConversationExactRequest
-	(*DeleteManagedAgentConversationExactResponse)(nil),       // 79: kandev.plugin.v1.DeleteManagedAgentConversationExactResponse
-	(*ManagedAgentInputReceipt)(nil),                          // 80: kandev.plugin.v1.ManagedAgentInputReceipt
-	(*EnqueueManagedAgentInputExactRequest)(nil),              // 81: kandev.plugin.v1.EnqueueManagedAgentInputExactRequest
-	(*EnqueueManagedAgentInputExactResponse)(nil),             // 82: kandev.plugin.v1.EnqueueManagedAgentInputExactResponse
-	(*GetManagedAgentInputExactRequest)(nil),                  // 83: kandev.plugin.v1.GetManagedAgentInputExactRequest
-	(*GetManagedAgentInputExactResponse)(nil),                 // 84: kandev.plugin.v1.GetManagedAgentInputExactResponse
-	(*ListManagedAgentInputsExactRequest)(nil),                // 85: kandev.plugin.v1.ListManagedAgentInputsExactRequest
-	(*ListManagedAgentInputsExactResponse)(nil),               // 86: kandev.plugin.v1.ListManagedAgentInputsExactResponse
-	(*CancelManagedAgentInputExactRequest)(nil),               // 87: kandev.plugin.v1.CancelManagedAgentInputExactRequest
-	(*CancelManagedAgentInputExactResponse)(nil),              // 88: kandev.plugin.v1.CancelManagedAgentInputExactResponse
-	(*DispatchManagedAgentConversationExactRequest)(nil),      // 89: kandev.plugin.v1.DispatchManagedAgentConversationExactRequest
-	(*DispatchManagedAgentConversationExactResponse)(nil),     // 90: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse
-	(*ManagedConversationScheduleTrigger)(nil),                // 91: kandev.plugin.v1.ManagedConversationScheduleTrigger
-	(*ManagedConversationSchedule)(nil),                       // 92: kandev.plugin.v1.ManagedConversationSchedule
-	(*ListManagedConversationSchedulesExactRequest)(nil),      // 93: kandev.plugin.v1.ListManagedConversationSchedulesExactRequest
-	(*ListManagedConversationSchedulesExactResponse)(nil),     // 94: kandev.plugin.v1.ListManagedConversationSchedulesExactResponse
-	(*CreateManagedConversationScheduleExactRequest)(nil),     // 95: kandev.plugin.v1.CreateManagedConversationScheduleExactRequest
-	(*UpdateManagedConversationScheduleExactRequest)(nil),     // 96: kandev.plugin.v1.UpdateManagedConversationScheduleExactRequest
-	(*SetManagedConversationScheduleEnabledExactRequest)(nil), // 97: kandev.plugin.v1.SetManagedConversationScheduleEnabledExactRequest
-	(*DeleteManagedConversationScheduleExactRequest)(nil),     // 98: kandev.plugin.v1.DeleteManagedConversationScheduleExactRequest
-	(*ManagedConversationScheduleExactResponse)(nil),          // 99: kandev.plugin.v1.ManagedConversationScheduleExactResponse
-	(*EnsureTaskRunExactRequest)(nil),                         // 100: kandev.plugin.v1.EnsureTaskRunExactRequest
-	(*EnsureTaskRunExactResponse)(nil),                        // 101: kandev.plugin.v1.EnsureTaskRunExactResponse
-	(*StopTaskRunExactRequest)(nil),                           // 102: kandev.plugin.v1.StopTaskRunExactRequest
-	(*StopTaskRunExactResponse)(nil),                          // 103: kandev.plugin.v1.StopTaskRunExactResponse
-	(*RecoverSessionExactRequest)(nil),                        // 104: kandev.plugin.v1.RecoverSessionExactRequest
-	(*RecoverSessionExactResponse)(nil),                       // 105: kandev.plugin.v1.RecoverSessionExactResponse
-	(*CancelPendingTaskTransitionExactRequest)(nil),           // 106: kandev.plugin.v1.CancelPendingTaskTransitionExactRequest
-	(*CancelPendingTaskTransitionExactResponse)(nil),          // 107: kandev.plugin.v1.CancelPendingTaskTransitionExactResponse
-	(*SessionModeOption)(nil),                                 // 108: kandev.plugin.v1.SessionModeOption
-	(*GetSessionModeContextExactRequest)(nil),                 // 109: kandev.plugin.v1.GetSessionModeContextExactRequest
-	(*GetSessionModeContextExactResponse)(nil),                // 110: kandev.plugin.v1.GetSessionModeContextExactResponse
-	(*SetSessionModeExactRequest)(nil),                        // 111: kandev.plugin.v1.SetSessionModeExactRequest
-	(*SetSessionModeExactResponse)(nil),                       // 112: kandev.plugin.v1.SetSessionModeExactResponse
-	(*HumanInteractionResponseReceipt)(nil),                   // 113: kandev.plugin.v1.HumanInteractionResponseReceipt
-	(*RespondPermissionExactRequest)(nil),                     // 114: kandev.plugin.v1.RespondPermissionExactRequest
-	(*RespondPermissionExactResponse)(nil),                    // 115: kandev.plugin.v1.RespondPermissionExactResponse
-	(*AnswerClarificationExactRequest)(nil),                   // 116: kandev.plugin.v1.AnswerClarificationExactRequest
-	(*AnswerClarificationExactResponse)(nil),                  // 117: kandev.plugin.v1.AnswerClarificationExactResponse
-	(*Event)(nil),                                             // 118: kandev.plugin.v1.Event
-	(*EventAck)(nil),                                          // 119: kandev.plugin.v1.EventAck
-	(*AgentToolRequest)(nil),                                  // 120: kandev.plugin.v1.AgentToolRequest
-	(*AgentToolContext)(nil),                                  // 121: kandev.plugin.v1.AgentToolContext
-	(*AgentToolResponse)(nil),                                 // 122: kandev.plugin.v1.AgentToolResponse
-	(*WebhookRequest)(nil),                                    // 123: kandev.plugin.v1.WebhookRequest
-	(*WebhookResponse)(nil),                                   // 124: kandev.plugin.v1.WebhookResponse
-	(*PluginActionRequest)(nil),                               // 125: kandev.plugin.v1.PluginActionRequest
-	(*VerifiedActionContext)(nil),                             // 126: kandev.plugin.v1.VerifiedActionContext
-	(*PluginActionResponse)(nil),                              // 127: kandev.plugin.v1.PluginActionResponse
-	(*SearchEntityReferencesRequest)(nil),                     // 128: kandev.plugin.v1.SearchEntityReferencesRequest
-	(*SearchEntityReferencesResponse)(nil),                    // 129: kandev.plugin.v1.SearchEntityReferencesResponse
-	(*EntityReferenceCandidate)(nil),                          // 130: kandev.plugin.v1.EntityReferenceCandidate
-	(*AuthorizeEntityReferenceRequest)(nil),                   // 131: kandev.plugin.v1.AuthorizeEntityReferenceRequest
-	(*AuthorizeEntityReferenceResponse)(nil),                  // 132: kandev.plugin.v1.AuthorizeEntityReferenceResponse
-	(*ResolveGitCredentialRequest)(nil),                       // 133: kandev.plugin.v1.ResolveGitCredentialRequest
-	(*ResolveGitCredentialResponse)(nil),                      // 134: kandev.plugin.v1.ResolveGitCredentialResponse
-	(*GitCredentialBindingRequest)(nil),                       // 135: kandev.plugin.v1.GitCredentialBindingRequest
-	(*GitCredentialBindingResponse)(nil),                      // 136: kandev.plugin.v1.GitCredentialBindingResponse
-	(*GetStateRequest)(nil),                                   // 137: kandev.plugin.v1.GetStateRequest
-	(*GetStateResponse)(nil),                                  // 138: kandev.plugin.v1.GetStateResponse
-	(*SetStateRequest)(nil),                                   // 139: kandev.plugin.v1.SetStateRequest
-	(*SetStateResponse)(nil),                                  // 140: kandev.plugin.v1.SetStateResponse
-	(*DeleteStateRequest)(nil),                                // 141: kandev.plugin.v1.DeleteStateRequest
-	(*DeleteStateResponse)(nil),                               // 142: kandev.plugin.v1.DeleteStateResponse
-	(*ListStateRequest)(nil),                                  // 143: kandev.plugin.v1.ListStateRequest
-	(*ListStateResponse)(nil),                                 // 144: kandev.plugin.v1.ListStateResponse
-	(*StateEntry)(nil),                                        // 145: kandev.plugin.v1.StateEntry
-	(*GetConfigRequest)(nil),                                  // 146: kandev.plugin.v1.GetConfigRequest
-	(*GetConfigResponse)(nil),                                 // 147: kandev.plugin.v1.GetConfigResponse
-	(*GetSecretRequest)(nil),                                  // 148: kandev.plugin.v1.GetSecretRequest
-	(*GetSecretResponse)(nil),                                 // 149: kandev.plugin.v1.GetSecretResponse
-	(*SetSecretRequest)(nil),                                  // 150: kandev.plugin.v1.SetSecretRequest
-	(*SetSecretResponse)(nil),                                 // 151: kandev.plugin.v1.SetSecretResponse
-	(*DeleteSecretRequest)(nil),                               // 152: kandev.plugin.v1.DeleteSecretRequest
-	(*DeleteSecretResponse)(nil),                              // 153: kandev.plugin.v1.DeleteSecretResponse
-	(*RevealSecretRequest)(nil),                               // 154: kandev.plugin.v1.RevealSecretRequest
-	(*RevealSecretResponse)(nil),                              // 155: kandev.plugin.v1.RevealSecretResponse
-	(*EmitEventRequest)(nil),                                  // 156: kandev.plugin.v1.EmitEventRequest
-	(*EmitEventResponse)(nil),                                 // 157: kandev.plugin.v1.EmitEventResponse
-	(*Page)(nil),                                              // 158: kandev.plugin.v1.Page
-	(*PageInfo)(nil),                                          // 159: kandev.plugin.v1.PageInfo
-	(*Task)(nil),                                              // 160: kandev.plugin.v1.Task
-	(*TaskRepository)(nil),                                    // 161: kandev.plugin.v1.TaskRepository
-	(*TaskPullRequest)(nil),                                   // 162: kandev.plugin.v1.TaskPullRequest
-	(*TaskDependencyRef)(nil),                                 // 163: kandev.plugin.v1.TaskDependencyRef
-	(*TaskFilter)(nil),                                        // 164: kandev.plugin.v1.TaskFilter
-	(*ListTasksRequest)(nil),                                  // 165: kandev.plugin.v1.ListTasksRequest
-	(*ListTasksResponse)(nil),                                 // 166: kandev.plugin.v1.ListTasksResponse
-	(*GetTaskRequest)(nil),                                    // 167: kandev.plugin.v1.GetTaskRequest
-	(*GetTaskResponse)(nil),                                   // 168: kandev.plugin.v1.GetTaskResponse
-	(*TaskStepTransition)(nil),                                // 169: kandev.plugin.v1.TaskStepTransition
-	(*ListTaskStepTransitionsRequest)(nil),                    // 170: kandev.plugin.v1.ListTaskStepTransitionsRequest
-	(*ListTaskStepTransitionsResponse)(nil),                   // 171: kandev.plugin.v1.ListTaskStepTransitionsResponse
-	(*Workspace)(nil),                                         // 172: kandev.plugin.v1.Workspace
-	(*ListWorkspacesRequest)(nil),                             // 173: kandev.plugin.v1.ListWorkspacesRequest
-	(*ListWorkspacesResponse)(nil),                            // 174: kandev.plugin.v1.ListWorkspacesResponse
-	(*Workflow)(nil),                                          // 175: kandev.plugin.v1.Workflow
-	(*ListWorkflowsRequest)(nil),                              // 176: kandev.plugin.v1.ListWorkflowsRequest
-	(*ListWorkflowsResponse)(nil),                             // 177: kandev.plugin.v1.ListWorkflowsResponse
-	(*WorkflowTransitionGroup)(nil),                           // 178: kandev.plugin.v1.WorkflowTransitionGroup
-	(*ListWorkflowTransitionGroupsRequest)(nil),               // 179: kandev.plugin.v1.ListWorkflowTransitionGroupsRequest
-	(*ListWorkflowTransitionGroupsResponse)(nil),              // 180: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse
-	(*WorkflowStep)(nil),                                      // 181: kandev.plugin.v1.WorkflowStep
-	(*ListWorkflowStepsRequest)(nil),                          // 182: kandev.plugin.v1.ListWorkflowStepsRequest
-	(*ListWorkflowStepsResponse)(nil),                         // 183: kandev.plugin.v1.ListWorkflowStepsResponse
-	(*AgentProfile)(nil),                                      // 184: kandev.plugin.v1.AgentProfile
-	(*ListAgentProfilesRequest)(nil),                          // 185: kandev.plugin.v1.ListAgentProfilesRequest
-	(*ListAgentProfilesResponse)(nil),                         // 186: kandev.plugin.v1.ListAgentProfilesResponse
-	(*ExecutorProfile)(nil),                                   // 187: kandev.plugin.v1.ExecutorProfile
-	(*ListExecutorProfilesRequest)(nil),                       // 188: kandev.plugin.v1.ListExecutorProfilesRequest
-	(*ListExecutorProfilesResponse)(nil),                      // 189: kandev.plugin.v1.ListExecutorProfilesResponse
-	(*ExecutorProviderRequestContext)(nil),                    // 190: kandev.plugin.v1.ExecutorProviderRequestContext
-	(*ExecutorProfileSnapshot)(nil),                           // 191: kandev.plugin.v1.ExecutorProfileSnapshot
-	(*ExecutorProviderFieldError)(nil),                        // 192: kandev.plugin.v1.ExecutorProviderFieldError
-	(*ExecutorProviderError)(nil),                             // 193: kandev.plugin.v1.ExecutorProviderError
-	(*ExecutorProviderCapabilities)(nil),                      // 194: kandev.plugin.v1.ExecutorProviderCapabilities
-	(*ExecutorResourceDescriptor)(nil),                        // 195: kandev.plugin.v1.ExecutorResourceDescriptor
-	(*ValidateExecutorProfileRequest)(nil),                    // 196: kandev.plugin.v1.ValidateExecutorProfileRequest
-	(*ValidateExecutorProfileResponse)(nil),                   // 197: kandev.plugin.v1.ValidateExecutorProfileResponse
-	(*ProvisionExecutorEnvironmentRequest)(nil),               // 198: kandev.plugin.v1.ProvisionExecutorEnvironmentRequest
-	(*ProvisionExecutorEnvironmentResponse)(nil),              // 199: kandev.plugin.v1.ProvisionExecutorEnvironmentResponse
-	(*RecoverExecutorOperationRequest)(nil),                   // 200: kandev.plugin.v1.RecoverExecutorOperationRequest
-	(*RecoverExecutorOperationResponse)(nil),                  // 201: kandev.plugin.v1.RecoverExecutorOperationResponse
-	(*AttachExecutorEnvironmentRequest)(nil),                  // 202: kandev.plugin.v1.AttachExecutorEnvironmentRequest
-	(*AttachExecutorEnvironmentResponse)(nil),                 // 203: kandev.plugin.v1.AttachExecutorEnvironmentResponse
-	(*InspectExecutorEnvironmentRequest)(nil),                 // 204: kandev.plugin.v1.InspectExecutorEnvironmentRequest
-	(*InspectExecutorEnvironmentResponse)(nil),                // 205: kandev.plugin.v1.InspectExecutorEnvironmentResponse
-	(*ResolveExecutorConnectionRequest)(nil),                  // 206: kandev.plugin.v1.ResolveExecutorConnectionRequest
-	(*ExecutorConnectionLease)(nil),                           // 207: kandev.plugin.v1.ExecutorConnectionLease
-	(*ResolveExecutorConnectionResponse)(nil),                 // 208: kandev.plugin.v1.ResolveExecutorConnectionResponse
-	(*DestroyExecutorEnvironmentRequest)(nil),                 // 209: kandev.plugin.v1.DestroyExecutorEnvironmentRequest
-	(*DestroyExecutorEnvironmentResponse)(nil),                // 210: kandev.plugin.v1.DestroyExecutorEnvironmentResponse
-	(*CheckpointExecutorResourceRequest)(nil),                 // 211: kandev.plugin.v1.CheckpointExecutorResourceRequest
-	(*CheckpointExecutorResourceResponse)(nil),                // 212: kandev.plugin.v1.CheckpointExecutorResourceResponse
-	(*ReportExecutorProgressRequest)(nil),                     // 213: kandev.plugin.v1.ReportExecutorProgressRequest
-	(*ReportExecutorProgressResponse)(nil),                    // 214: kandev.plugin.v1.ReportExecutorProgressResponse
-	(*ReadExecutorRuntimeArtifactRequest)(nil),                // 215: kandev.plugin.v1.ReadExecutorRuntimeArtifactRequest
-	(*ExecutorRuntimeArtifactChunk)(nil),                      // 216: kandev.plugin.v1.ExecutorRuntimeArtifactChunk
-	(*Repository)(nil),                                        // 217: kandev.plugin.v1.Repository
-	(*ListRepositoriesRequest)(nil),                           // 218: kandev.plugin.v1.ListRepositoriesRequest
-	(*ListRepositoriesResponse)(nil),                          // 219: kandev.plugin.v1.ListRepositoriesResponse
-	(*Session)(nil),                                           // 220: kandev.plugin.v1.Session
-	(*SessionFilter)(nil),                                     // 221: kandev.plugin.v1.SessionFilter
-	(*ListSessionsRequest)(nil),                               // 222: kandev.plugin.v1.ListSessionsRequest
-	(*ListSessionsResponse)(nil),                              // 223: kandev.plugin.v1.ListSessionsResponse
-	(*SessionCodeStats)(nil),                                  // 224: kandev.plugin.v1.SessionCodeStats
-	(*ListSessionCodeStatsRequest)(nil),                       // 225: kandev.plugin.v1.ListSessionCodeStatsRequest
-	(*ListSessionCodeStatsResponse)(nil),                      // 226: kandev.plugin.v1.ListSessionCodeStatsResponse
-	(*Message)(nil),                                           // 227: kandev.plugin.v1.Message
-	(*MessageFilter)(nil),                                     // 228: kandev.plugin.v1.MessageFilter
-	(*ListMessagesRequest)(nil),                               // 229: kandev.plugin.v1.ListMessagesRequest
-	(*ListMessagesResponse)(nil),                              // 230: kandev.plugin.v1.ListMessagesResponse
-	(*InteractionOption)(nil),                                 // 231: kandev.plugin.v1.InteractionOption
-	(*InteractionQuestion)(nil),                               // 232: kandev.plugin.v1.InteractionQuestion
-	(*Interaction)(nil),                                       // 233: kandev.plugin.v1.Interaction
-	(*InteractionFilter)(nil),                                 // 234: kandev.plugin.v1.InteractionFilter
-	(*ListPendingInteractionsRequest)(nil),                    // 235: kandev.plugin.v1.ListPendingInteractionsRequest
-	(*ListPendingInteractionsResponse)(nil),                   // 236: kandev.plugin.v1.ListPendingInteractionsResponse
-	(*GetInteractionRequest)(nil),                             // 237: kandev.plugin.v1.GetInteractionRequest
-	(*GetInteractionResponse)(nil),                            // 238: kandev.plugin.v1.GetInteractionResponse
-	(*RespondToPermissionRequest)(nil),                        // 239: kandev.plugin.v1.RespondToPermissionRequest
-	(*RespondToPermissionResponse)(nil),                       // 240: kandev.plugin.v1.RespondToPermissionResponse
-	(*ClarificationAnswer)(nil),                               // 241: kandev.plugin.v1.ClarificationAnswer
-	(*AnswerClarificationRequest)(nil),                        // 242: kandev.plugin.v1.AnswerClarificationRequest
-	(*AnswerClarificationResponse)(nil),                       // 243: kandev.plugin.v1.AnswerClarificationResponse
-	(*CancelClarificationRequest)(nil),                        // 244: kandev.plugin.v1.CancelClarificationRequest
-	(*CancelClarificationResponse)(nil),                       // 245: kandev.plugin.v1.CancelClarificationResponse
-	(*InvokeUtilityAgentRequest)(nil),                         // 246: kandev.plugin.v1.InvokeUtilityAgentRequest
-	(*InvokeUtilityAgentWithOptionsRequest)(nil),              // 247: kandev.plugin.v1.InvokeUtilityAgentWithOptionsRequest
-	(*InvokeUtilityAgentResponse)(nil),                        // 248: kandev.plugin.v1.InvokeUtilityAgentResponse
-	(*CreateTaskRequest)(nil),                                 // 249: kandev.plugin.v1.CreateTaskRequest
-	(*PluginTaskRepository)(nil),                              // 250: kandev.plugin.v1.PluginTaskRepository
-	(*RemoteRepositoryDescriptor)(nil),                        // 251: kandev.plugin.v1.RemoteRepositoryDescriptor
-	(*PluginTaskLaunchOptions)(nil),                           // 252: kandev.plugin.v1.PluginTaskLaunchOptions
-	(*CreateTaskResponse)(nil),                                // 253: kandev.plugin.v1.CreateTaskResponse
-	(*UpdateTaskRequest)(nil),                                 // 254: kandev.plugin.v1.UpdateTaskRequest
-	(*UpdateTaskResponse)(nil),                                // 255: kandev.plugin.v1.UpdateTaskResponse
-	(*MoveTaskRequest)(nil),                                   // 256: kandev.plugin.v1.MoveTaskRequest
-	(*MoveTaskResponse)(nil),                                  // 257: kandev.plugin.v1.MoveTaskResponse
-	(*SendMessageRequest)(nil),                                // 258: kandev.plugin.v1.SendMessageRequest
-	(*SendMessageResponse)(nil),                               // 259: kandev.plugin.v1.SendMessageResponse
-	(*PreviewPluginOwnedTaskTreeRequest)(nil),                 // 260: kandev.plugin.v1.PreviewPluginOwnedTaskTreeRequest
-	(*PreviewPluginOwnedTaskTreeResponse)(nil),                // 261: kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse
-	(*DeletePluginOwnedTaskTreeRequest)(nil),                  // 262: kandev.plugin.v1.DeletePluginOwnedTaskTreeRequest
-	(*DeletePluginOwnedTaskTreeResponse)(nil),                 // 263: kandev.plugin.v1.DeletePluginOwnedTaskTreeResponse
-	(*DeletePluginOwnedTaskTreeProgress)(nil),                 // 264: kandev.plugin.v1.DeletePluginOwnedTaskTreeProgress
-	(*AgentConversationDescriptor)(nil),                       // 265: kandev.plugin.v1.AgentConversationDescriptor
-	(*AgentConversationSpec)(nil),                             // 266: kandev.plugin.v1.AgentConversationSpec
-	(*EnsureAgentConversationRequest)(nil),                    // 267: kandev.plugin.v1.EnsureAgentConversationRequest
-	(*EnsureAgentConversationResponse)(nil),                   // 268: kandev.plugin.v1.EnsureAgentConversationResponse
-	(*DispatchAgentConversationRequest)(nil),                  // 269: kandev.plugin.v1.DispatchAgentConversationRequest
-	(*DispatchAgentConversationResponse)(nil),                 // 270: kandev.plugin.v1.DispatchAgentConversationResponse
-	(*DeleteAgentConversationRequest)(nil),                    // 271: kandev.plugin.v1.DeleteAgentConversationRequest
-	(*DeleteAgentConversationResponse)(nil),                   // 272: kandev.plugin.v1.DeleteAgentConversationResponse
-	(*AutomationConditionRequest)(nil),                        // 273: kandev.plugin.v1.AutomationConditionRequest
-	(*AutomationConditionResponse)(nil),                       // 274: kandev.plugin.v1.AutomationConditionResponse
-	(*AutomationWebhookRequest)(nil),                          // 275: kandev.plugin.v1.AutomationWebhookRequest
-	(*AutomationWebhookResponse)(nil),                         // 276: kandev.plugin.v1.AutomationWebhookResponse
-	(*ExactReadPage)(nil),                                     // 277: kandev.plugin.v1.ExactReadPage
-	(*HostReadReceipt)(nil),                                   // 278: kandev.plugin.v1.HostReadReceipt
-	(*ExactReadPageInfo)(nil),                                 // 279: kandev.plugin.v1.ExactReadPageInfo
-	(*ExactWorkspaceObservation)(nil),                         // 280: kandev.plugin.v1.ExactWorkspaceObservation
-	(*ExactWorkflowObservation)(nil),                          // 281: kandev.plugin.v1.ExactWorkflowObservation
-	(*ExactWorkflowStepObservation)(nil),                      // 282: kandev.plugin.v1.ExactWorkflowStepObservation
-	(*ExactTaskObservation)(nil),                              // 283: kandev.plugin.v1.ExactTaskObservation
-	(*ExactSessionObservation)(nil),                           // 284: kandev.plugin.v1.ExactSessionObservation
-	(*ExactInteractionObservation)(nil),                       // 285: kandev.plugin.v1.ExactInteractionObservation
-	(*ExactMessageObservation)(nil),                           // 286: kandev.plugin.v1.ExactMessageObservation
-	(*TaskRelation)(nil),                                      // 287: kandev.plugin.v1.TaskRelation
-	(*TaskInboxItem)(nil),                                     // 288: kandev.plugin.v1.TaskInboxItem
-	(*TaskDirective)(nil),                                     // 289: kandev.plugin.v1.TaskDirective
-	(*PendingTaskTransition)(nil),                             // 290: kandev.plugin.v1.PendingTaskTransition
-	(*ChangeRequestEvidence)(nil),                             // 291: kandev.plugin.v1.ChangeRequestEvidence
-	(*TaskUsageObservation)(nil),                              // 292: kandev.plugin.v1.TaskUsageObservation
-	(*ListWorkspacesExactRequest)(nil),                        // 293: kandev.plugin.v1.ListWorkspacesExactRequest
-	(*ListWorkspacesExactResponse)(nil),                       // 294: kandev.plugin.v1.ListWorkspacesExactResponse
-	(*ListWorkflowsExactRequest)(nil),                         // 295: kandev.plugin.v1.ListWorkflowsExactRequest
-	(*ListWorkflowsExactResponse)(nil),                        // 296: kandev.plugin.v1.ListWorkflowsExactResponse
-	(*ListWorkflowStepsExactRequest)(nil),                     // 297: kandev.plugin.v1.ListWorkflowStepsExactRequest
-	(*ListWorkflowStepsExactResponse)(nil),                    // 298: kandev.plugin.v1.ListWorkflowStepsExactResponse
-	(*ListTasksExactRequest)(nil),                             // 299: kandev.plugin.v1.ListTasksExactRequest
-	(*ListTasksExactResponse)(nil),                            // 300: kandev.plugin.v1.ListTasksExactResponse
-	(*GetTaskExactRequest)(nil),                               // 301: kandev.plugin.v1.GetTaskExactRequest
-	(*GetTaskExactResponse)(nil),                              // 302: kandev.plugin.v1.GetTaskExactResponse
-	(*ListSessionsExactRequest)(nil),                          // 303: kandev.plugin.v1.ListSessionsExactRequest
-	(*ListSessionsExactResponse)(nil),                         // 304: kandev.plugin.v1.ListSessionsExactResponse
-	(*ListPendingInteractionsExactRequest)(nil),               // 305: kandev.plugin.v1.ListPendingInteractionsExactRequest
-	(*ListPendingInteractionsExactResponse)(nil),              // 306: kandev.plugin.v1.ListPendingInteractionsExactResponse
-	(*GetInteractionExactRequest)(nil),                        // 307: kandev.plugin.v1.GetInteractionExactRequest
-	(*GetInteractionExactResponse)(nil),                       // 308: kandev.plugin.v1.GetInteractionExactResponse
-	(*ListSanitizedMessagesExactRequest)(nil),                 // 309: kandev.plugin.v1.ListSanitizedMessagesExactRequest
-	(*ListSanitizedMessagesExactResponse)(nil),                // 310: kandev.plugin.v1.ListSanitizedMessagesExactResponse
-	(*ListTaskInboxExactRequest)(nil),                         // 311: kandev.plugin.v1.ListTaskInboxExactRequest
-	(*ListTaskInboxExactResponse)(nil),                        // 312: kandev.plugin.v1.ListTaskInboxExactResponse
-	(*GetTaskDirectiveExactRequest)(nil),                      // 313: kandev.plugin.v1.GetTaskDirectiveExactRequest
-	(*GetTaskDirectiveExactResponse)(nil),                     // 314: kandev.plugin.v1.GetTaskDirectiveExactResponse
-	(*ListTaskDirectivesExactRequest)(nil),                    // 315: kandev.plugin.v1.ListTaskDirectivesExactRequest
-	(*ListTaskDirectivesExactResponse)(nil),                   // 316: kandev.plugin.v1.ListTaskDirectivesExactResponse
-	(*GetTaskRelationsExactRequest)(nil),                      // 317: kandev.plugin.v1.GetTaskRelationsExactRequest
-	(*GetTaskRelationsExactResponse)(nil),                     // 318: kandev.plugin.v1.GetTaskRelationsExactResponse
-	(*ListTaskRelationsExactRequest)(nil),                     // 319: kandev.plugin.v1.ListTaskRelationsExactRequest
-	(*ListTaskRelationsExactResponse)(nil),                    // 320: kandev.plugin.v1.ListTaskRelationsExactResponse
-	(*ListPendingTaskTransitionsExactRequest)(nil),            // 321: kandev.plugin.v1.ListPendingTaskTransitionsExactRequest
-	(*ListPendingTaskTransitionsExactResponse)(nil),           // 322: kandev.plugin.v1.ListPendingTaskTransitionsExactResponse
-	(*ListChangeRequestEvidenceExactRequest)(nil),             // 323: kandev.plugin.v1.ListChangeRequestEvidenceExactRequest
-	(*ListChangeRequestEvidenceExactResponse)(nil),            // 324: kandev.plugin.v1.ListChangeRequestEvidenceExactResponse
-	(*ListTaskUsageExactRequest)(nil),                         // 325: kandev.plugin.v1.ListTaskUsageExactRequest
-	(*ListTaskUsageExactResponse)(nil),                        // 326: kandev.plugin.v1.ListTaskUsageExactResponse
-	(*AutomationDefinitionFilter)(nil),                        // 327: kandev.plugin.v1.AutomationDefinitionFilter
-	(*AutomationTriggerObservation)(nil),                      // 328: kandev.plugin.v1.AutomationTriggerObservation
-	(*AutomationDefinitionObservation)(nil),                   // 329: kandev.plugin.v1.AutomationDefinitionObservation
-	(*ListAutomationDefinitionsExactRequest)(nil),             // 330: kandev.plugin.v1.ListAutomationDefinitionsExactRequest
-	(*ListAutomationDefinitionsExactResponse)(nil),            // 331: kandev.plugin.v1.ListAutomationDefinitionsExactResponse
-	(*AutomationRunFilter)(nil),                               // 332: kandev.plugin.v1.AutomationRunFilter
-	(*AutomationRunObservation)(nil),                          // 333: kandev.plugin.v1.AutomationRunObservation
-	(*ListAutomationRunsExactRequest)(nil),                    // 334: kandev.plugin.v1.ListAutomationRunsExactRequest
-	(*ListAutomationRunsExactResponse)(nil),                   // 335: kandev.plugin.v1.ListAutomationRunsExactResponse
-	(*GetAutomationRunExactRequest)(nil),                      // 336: kandev.plugin.v1.GetAutomationRunExactRequest
-	(*GetAutomationRunExactResponse)(nil),                     // 337: kandev.plugin.v1.GetAutomationRunExactResponse
-	nil,                                                       // 338: kandev.plugin.v1.HostCapabilityContext.LimitsEntry
-	nil,                                                       // 339: kandev.plugin.v1.WebhookRequest.HeadersEntry
-	nil,                                                       // 340: kandev.plugin.v1.WebhookResponse.HeadersEntry
-	nil,                                                       // 341: kandev.plugin.v1.PluginActionResponse.HeadersEntry
-	nil,                                                       // 342: kandev.plugin.v1.ExecutorProfileSnapshot.ConfigEntry
-	nil,                                                       // 343: kandev.plugin.v1.ExecutorProfileSnapshot.SecretValuesEntry
-	nil,                                                       // 344: kandev.plugin.v1.ExecutorConnectionLease.HttpHeadersEntry
-	nil,                                                       // 345: kandev.plugin.v1.ExecutorConnectionLease.WebsocketHeadersEntry
-	nil,                                                       // 346: kandev.plugin.v1.AutomationWebhookRequest.HeadersEntry
-	(*structpb.Struct)(nil),                                   // 347: google.protobuf.Struct
+	(*ReportTaskChangeRequestExactRequest)(nil),               // 68: kandev.plugin.v1.ReportTaskChangeRequestExactRequest
+	(*ReportTaskChangeRequestExactResponse)(nil),              // 69: kandev.plugin.v1.ReportTaskChangeRequestExactResponse
+	(*RemoveTaskChangeRequestExactRequest)(nil),               // 70: kandev.plugin.v1.RemoveTaskChangeRequestExactRequest
+	(*RemoveTaskChangeRequestExactResponse)(nil),              // 71: kandev.plugin.v1.RemoveTaskChangeRequestExactResponse
+	(*ManagedAgentConversationDescriptor)(nil),                // 72: kandev.plugin.v1.ManagedAgentConversationDescriptor
+	(*ManagedAgentConversationSpec)(nil),                      // 73: kandev.plugin.v1.ManagedAgentConversationSpec
+	(*EnsureManagedAgentConversationExactRequest)(nil),        // 74: kandev.plugin.v1.EnsureManagedAgentConversationExactRequest
+	(*EnsureManagedAgentConversationExactResponse)(nil),       // 75: kandev.plugin.v1.EnsureManagedAgentConversationExactResponse
+	(*GetManagedAgentConversationStatusExactRequest)(nil),     // 76: kandev.plugin.v1.GetManagedAgentConversationStatusExactRequest
+	(*GetManagedAgentConversationStatusExactResponse)(nil),    // 77: kandev.plugin.v1.GetManagedAgentConversationStatusExactResponse
+	(*ListManagedAgentConversationsExactRequest)(nil),         // 78: kandev.plugin.v1.ListManagedAgentConversationsExactRequest
+	(*ListManagedAgentConversationsExactResponse)(nil),        // 79: kandev.plugin.v1.ListManagedAgentConversationsExactResponse
+	(*SetManagedAgentConversationPausedExactRequest)(nil),     // 80: kandev.plugin.v1.SetManagedAgentConversationPausedExactRequest
+	(*SetManagedAgentConversationPausedExactResponse)(nil),    // 81: kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse
+	(*DeleteManagedAgentConversationExactRequest)(nil),        // 82: kandev.plugin.v1.DeleteManagedAgentConversationExactRequest
+	(*DeleteManagedAgentConversationExactResponse)(nil),       // 83: kandev.plugin.v1.DeleteManagedAgentConversationExactResponse
+	(*ManagedAgentInputReceipt)(nil),                          // 84: kandev.plugin.v1.ManagedAgentInputReceipt
+	(*EnqueueManagedAgentInputExactRequest)(nil),              // 85: kandev.plugin.v1.EnqueueManagedAgentInputExactRequest
+	(*EnqueueManagedAgentInputExactResponse)(nil),             // 86: kandev.plugin.v1.EnqueueManagedAgentInputExactResponse
+	(*GetManagedAgentInputExactRequest)(nil),                  // 87: kandev.plugin.v1.GetManagedAgentInputExactRequest
+	(*GetManagedAgentInputExactResponse)(nil),                 // 88: kandev.plugin.v1.GetManagedAgentInputExactResponse
+	(*ListManagedAgentInputsExactRequest)(nil),                // 89: kandev.plugin.v1.ListManagedAgentInputsExactRequest
+	(*ListManagedAgentInputsExactResponse)(nil),               // 90: kandev.plugin.v1.ListManagedAgentInputsExactResponse
+	(*CancelManagedAgentInputExactRequest)(nil),               // 91: kandev.plugin.v1.CancelManagedAgentInputExactRequest
+	(*CancelManagedAgentInputExactResponse)(nil),              // 92: kandev.plugin.v1.CancelManagedAgentInputExactResponse
+	(*DispatchManagedAgentConversationExactRequest)(nil),      // 93: kandev.plugin.v1.DispatchManagedAgentConversationExactRequest
+	(*DispatchManagedAgentConversationExactResponse)(nil),     // 94: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse
+	(*ManagedConversationScheduleTrigger)(nil),                // 95: kandev.plugin.v1.ManagedConversationScheduleTrigger
+	(*ManagedConversationSchedule)(nil),                       // 96: kandev.plugin.v1.ManagedConversationSchedule
+	(*ListManagedConversationSchedulesExactRequest)(nil),      // 97: kandev.plugin.v1.ListManagedConversationSchedulesExactRequest
+	(*ListManagedConversationSchedulesExactResponse)(nil),     // 98: kandev.plugin.v1.ListManagedConversationSchedulesExactResponse
+	(*CreateManagedConversationScheduleExactRequest)(nil),     // 99: kandev.plugin.v1.CreateManagedConversationScheduleExactRequest
+	(*UpdateManagedConversationScheduleExactRequest)(nil),     // 100: kandev.plugin.v1.UpdateManagedConversationScheduleExactRequest
+	(*SetManagedConversationScheduleEnabledExactRequest)(nil), // 101: kandev.plugin.v1.SetManagedConversationScheduleEnabledExactRequest
+	(*DeleteManagedConversationScheduleExactRequest)(nil),     // 102: kandev.plugin.v1.DeleteManagedConversationScheduleExactRequest
+	(*ManagedConversationScheduleExactResponse)(nil),          // 103: kandev.plugin.v1.ManagedConversationScheduleExactResponse
+	(*EnsureTaskRunExactRequest)(nil),                         // 104: kandev.plugin.v1.EnsureTaskRunExactRequest
+	(*EnsureTaskRunExactResponse)(nil),                        // 105: kandev.plugin.v1.EnsureTaskRunExactResponse
+	(*StopTaskRunExactRequest)(nil),                           // 106: kandev.plugin.v1.StopTaskRunExactRequest
+	(*StopTaskRunExactResponse)(nil),                          // 107: kandev.plugin.v1.StopTaskRunExactResponse
+	(*RecoverSessionExactRequest)(nil),                        // 108: kandev.plugin.v1.RecoverSessionExactRequest
+	(*RecoverSessionExactResponse)(nil),                       // 109: kandev.plugin.v1.RecoverSessionExactResponse
+	(*CancelPendingTaskTransitionExactRequest)(nil),           // 110: kandev.plugin.v1.CancelPendingTaskTransitionExactRequest
+	(*CancelPendingTaskTransitionExactResponse)(nil),          // 111: kandev.plugin.v1.CancelPendingTaskTransitionExactResponse
+	(*SessionModeOption)(nil),                                 // 112: kandev.plugin.v1.SessionModeOption
+	(*GetSessionModeContextExactRequest)(nil),                 // 113: kandev.plugin.v1.GetSessionModeContextExactRequest
+	(*GetSessionModeContextExactResponse)(nil),                // 114: kandev.plugin.v1.GetSessionModeContextExactResponse
+	(*SetSessionModeExactRequest)(nil),                        // 115: kandev.plugin.v1.SetSessionModeExactRequest
+	(*SetSessionModeExactResponse)(nil),                       // 116: kandev.plugin.v1.SetSessionModeExactResponse
+	(*HumanInteractionResponseReceipt)(nil),                   // 117: kandev.plugin.v1.HumanInteractionResponseReceipt
+	(*RespondPermissionExactRequest)(nil),                     // 118: kandev.plugin.v1.RespondPermissionExactRequest
+	(*RespondPermissionExactResponse)(nil),                    // 119: kandev.plugin.v1.RespondPermissionExactResponse
+	(*AnswerClarificationExactRequest)(nil),                   // 120: kandev.plugin.v1.AnswerClarificationExactRequest
+	(*AnswerClarificationExactResponse)(nil),                  // 121: kandev.plugin.v1.AnswerClarificationExactResponse
+	(*Event)(nil),                                             // 122: kandev.plugin.v1.Event
+	(*EventAck)(nil),                                          // 123: kandev.plugin.v1.EventAck
+	(*AgentToolRequest)(nil),                                  // 124: kandev.plugin.v1.AgentToolRequest
+	(*AgentToolContext)(nil),                                  // 125: kandev.plugin.v1.AgentToolContext
+	(*AgentToolResponse)(nil),                                 // 126: kandev.plugin.v1.AgentToolResponse
+	(*WebhookRequest)(nil),                                    // 127: kandev.plugin.v1.WebhookRequest
+	(*WebhookResponse)(nil),                                   // 128: kandev.plugin.v1.WebhookResponse
+	(*PluginActionRequest)(nil),                               // 129: kandev.plugin.v1.PluginActionRequest
+	(*VerifiedActionContext)(nil),                             // 130: kandev.plugin.v1.VerifiedActionContext
+	(*PluginActionResponse)(nil),                              // 131: kandev.plugin.v1.PluginActionResponse
+	(*SearchEntityReferencesRequest)(nil),                     // 132: kandev.plugin.v1.SearchEntityReferencesRequest
+	(*SearchEntityReferencesResponse)(nil),                    // 133: kandev.plugin.v1.SearchEntityReferencesResponse
+	(*EntityReferenceCandidate)(nil),                          // 134: kandev.plugin.v1.EntityReferenceCandidate
+	(*AuthorizeEntityReferenceRequest)(nil),                   // 135: kandev.plugin.v1.AuthorizeEntityReferenceRequest
+	(*AuthorizeEntityReferenceResponse)(nil),                  // 136: kandev.plugin.v1.AuthorizeEntityReferenceResponse
+	(*ResolveGitCredentialRequest)(nil),                       // 137: kandev.plugin.v1.ResolveGitCredentialRequest
+	(*ResolveGitCredentialResponse)(nil),                      // 138: kandev.plugin.v1.ResolveGitCredentialResponse
+	(*GitCredentialBindingRequest)(nil),                       // 139: kandev.plugin.v1.GitCredentialBindingRequest
+	(*GitCredentialBindingResponse)(nil),                      // 140: kandev.plugin.v1.GitCredentialBindingResponse
+	(*GetStateRequest)(nil),                                   // 141: kandev.plugin.v1.GetStateRequest
+	(*GetStateResponse)(nil),                                  // 142: kandev.plugin.v1.GetStateResponse
+	(*SetStateRequest)(nil),                                   // 143: kandev.plugin.v1.SetStateRequest
+	(*SetStateResponse)(nil),                                  // 144: kandev.plugin.v1.SetStateResponse
+	(*DeleteStateRequest)(nil),                                // 145: kandev.plugin.v1.DeleteStateRequest
+	(*DeleteStateResponse)(nil),                               // 146: kandev.plugin.v1.DeleteStateResponse
+	(*ListStateRequest)(nil),                                  // 147: kandev.plugin.v1.ListStateRequest
+	(*ListStateResponse)(nil),                                 // 148: kandev.plugin.v1.ListStateResponse
+	(*StateEntry)(nil),                                        // 149: kandev.plugin.v1.StateEntry
+	(*GetConfigRequest)(nil),                                  // 150: kandev.plugin.v1.GetConfigRequest
+	(*GetConfigResponse)(nil),                                 // 151: kandev.plugin.v1.GetConfigResponse
+	(*GetSecretRequest)(nil),                                  // 152: kandev.plugin.v1.GetSecretRequest
+	(*GetSecretResponse)(nil),                                 // 153: kandev.plugin.v1.GetSecretResponse
+	(*SetSecretRequest)(nil),                                  // 154: kandev.plugin.v1.SetSecretRequest
+	(*SetSecretResponse)(nil),                                 // 155: kandev.plugin.v1.SetSecretResponse
+	(*DeleteSecretRequest)(nil),                               // 156: kandev.plugin.v1.DeleteSecretRequest
+	(*DeleteSecretResponse)(nil),                              // 157: kandev.plugin.v1.DeleteSecretResponse
+	(*RevealSecretRequest)(nil),                               // 158: kandev.plugin.v1.RevealSecretRequest
+	(*RevealSecretResponse)(nil),                              // 159: kandev.plugin.v1.RevealSecretResponse
+	(*EmitEventRequest)(nil),                                  // 160: kandev.plugin.v1.EmitEventRequest
+	(*EmitEventResponse)(nil),                                 // 161: kandev.plugin.v1.EmitEventResponse
+	(*Page)(nil),                                              // 162: kandev.plugin.v1.Page
+	(*PageInfo)(nil),                                          // 163: kandev.plugin.v1.PageInfo
+	(*Task)(nil),                                              // 164: kandev.plugin.v1.Task
+	(*TaskRepository)(nil),                                    // 165: kandev.plugin.v1.TaskRepository
+	(*TaskPullRequest)(nil),                                   // 166: kandev.plugin.v1.TaskPullRequest
+	(*TaskDependencyRef)(nil),                                 // 167: kandev.plugin.v1.TaskDependencyRef
+	(*TaskFilter)(nil),                                        // 168: kandev.plugin.v1.TaskFilter
+	(*ListTasksRequest)(nil),                                  // 169: kandev.plugin.v1.ListTasksRequest
+	(*ListTasksResponse)(nil),                                 // 170: kandev.plugin.v1.ListTasksResponse
+	(*GetTaskRequest)(nil),                                    // 171: kandev.plugin.v1.GetTaskRequest
+	(*GetTaskResponse)(nil),                                   // 172: kandev.plugin.v1.GetTaskResponse
+	(*TaskStepTransition)(nil),                                // 173: kandev.plugin.v1.TaskStepTransition
+	(*ListTaskStepTransitionsRequest)(nil),                    // 174: kandev.plugin.v1.ListTaskStepTransitionsRequest
+	(*ListTaskStepTransitionsResponse)(nil),                   // 175: kandev.plugin.v1.ListTaskStepTransitionsResponse
+	(*Workspace)(nil),                                         // 176: kandev.plugin.v1.Workspace
+	(*ListWorkspacesRequest)(nil),                             // 177: kandev.plugin.v1.ListWorkspacesRequest
+	(*ListWorkspacesResponse)(nil),                            // 178: kandev.plugin.v1.ListWorkspacesResponse
+	(*Workflow)(nil),                                          // 179: kandev.plugin.v1.Workflow
+	(*ListWorkflowsRequest)(nil),                              // 180: kandev.plugin.v1.ListWorkflowsRequest
+	(*ListWorkflowsResponse)(nil),                             // 181: kandev.plugin.v1.ListWorkflowsResponse
+	(*WorkflowTransitionGroup)(nil),                           // 182: kandev.plugin.v1.WorkflowTransitionGroup
+	(*ListWorkflowTransitionGroupsRequest)(nil),               // 183: kandev.plugin.v1.ListWorkflowTransitionGroupsRequest
+	(*ListWorkflowTransitionGroupsResponse)(nil),              // 184: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse
+	(*WorkflowStep)(nil),                                      // 185: kandev.plugin.v1.WorkflowStep
+	(*ListWorkflowStepsRequest)(nil),                          // 186: kandev.plugin.v1.ListWorkflowStepsRequest
+	(*ListWorkflowStepsResponse)(nil),                         // 187: kandev.plugin.v1.ListWorkflowStepsResponse
+	(*AgentProfile)(nil),                                      // 188: kandev.plugin.v1.AgentProfile
+	(*ListAgentProfilesRequest)(nil),                          // 189: kandev.plugin.v1.ListAgentProfilesRequest
+	(*ListAgentProfilesResponse)(nil),                         // 190: kandev.plugin.v1.ListAgentProfilesResponse
+	(*ExecutorProfile)(nil),                                   // 191: kandev.plugin.v1.ExecutorProfile
+	(*ListExecutorProfilesRequest)(nil),                       // 192: kandev.plugin.v1.ListExecutorProfilesRequest
+	(*ListExecutorProfilesResponse)(nil),                      // 193: kandev.plugin.v1.ListExecutorProfilesResponse
+	(*ExecutorProviderRequestContext)(nil),                    // 194: kandev.plugin.v1.ExecutorProviderRequestContext
+	(*ExecutorProfileSnapshot)(nil),                           // 195: kandev.plugin.v1.ExecutorProfileSnapshot
+	(*ExecutorProviderFieldError)(nil),                        // 196: kandev.plugin.v1.ExecutorProviderFieldError
+	(*ExecutorProviderError)(nil),                             // 197: kandev.plugin.v1.ExecutorProviderError
+	(*ExecutorProviderCapabilities)(nil),                      // 198: kandev.plugin.v1.ExecutorProviderCapabilities
+	(*ExecutorResourceDescriptor)(nil),                        // 199: kandev.plugin.v1.ExecutorResourceDescriptor
+	(*ValidateExecutorProfileRequest)(nil),                    // 200: kandev.plugin.v1.ValidateExecutorProfileRequest
+	(*ValidateExecutorProfileResponse)(nil),                   // 201: kandev.plugin.v1.ValidateExecutorProfileResponse
+	(*ProvisionExecutorEnvironmentRequest)(nil),               // 202: kandev.plugin.v1.ProvisionExecutorEnvironmentRequest
+	(*ProvisionExecutorEnvironmentResponse)(nil),              // 203: kandev.plugin.v1.ProvisionExecutorEnvironmentResponse
+	(*RecoverExecutorOperationRequest)(nil),                   // 204: kandev.plugin.v1.RecoverExecutorOperationRequest
+	(*RecoverExecutorOperationResponse)(nil),                  // 205: kandev.plugin.v1.RecoverExecutorOperationResponse
+	(*AttachExecutorEnvironmentRequest)(nil),                  // 206: kandev.plugin.v1.AttachExecutorEnvironmentRequest
+	(*AttachExecutorEnvironmentResponse)(nil),                 // 207: kandev.plugin.v1.AttachExecutorEnvironmentResponse
+	(*InspectExecutorEnvironmentRequest)(nil),                 // 208: kandev.plugin.v1.InspectExecutorEnvironmentRequest
+	(*InspectExecutorEnvironmentResponse)(nil),                // 209: kandev.plugin.v1.InspectExecutorEnvironmentResponse
+	(*ResolveExecutorConnectionRequest)(nil),                  // 210: kandev.plugin.v1.ResolveExecutorConnectionRequest
+	(*ExecutorConnectionLease)(nil),                           // 211: kandev.plugin.v1.ExecutorConnectionLease
+	(*ResolveExecutorConnectionResponse)(nil),                 // 212: kandev.plugin.v1.ResolveExecutorConnectionResponse
+	(*DestroyExecutorEnvironmentRequest)(nil),                 // 213: kandev.plugin.v1.DestroyExecutorEnvironmentRequest
+	(*DestroyExecutorEnvironmentResponse)(nil),                // 214: kandev.plugin.v1.DestroyExecutorEnvironmentResponse
+	(*CheckpointExecutorResourceRequest)(nil),                 // 215: kandev.plugin.v1.CheckpointExecutorResourceRequest
+	(*CheckpointExecutorResourceResponse)(nil),                // 216: kandev.plugin.v1.CheckpointExecutorResourceResponse
+	(*ReportExecutorProgressRequest)(nil),                     // 217: kandev.plugin.v1.ReportExecutorProgressRequest
+	(*ReportExecutorProgressResponse)(nil),                    // 218: kandev.plugin.v1.ReportExecutorProgressResponse
+	(*ReadExecutorRuntimeArtifactRequest)(nil),                // 219: kandev.plugin.v1.ReadExecutorRuntimeArtifactRequest
+	(*ExecutorRuntimeArtifactChunk)(nil),                      // 220: kandev.plugin.v1.ExecutorRuntimeArtifactChunk
+	(*Repository)(nil),                                        // 221: kandev.plugin.v1.Repository
+	(*ListRepositoriesRequest)(nil),                           // 222: kandev.plugin.v1.ListRepositoriesRequest
+	(*ListRepositoriesResponse)(nil),                          // 223: kandev.plugin.v1.ListRepositoriesResponse
+	(*Session)(nil),                                           // 224: kandev.plugin.v1.Session
+	(*SessionFilter)(nil),                                     // 225: kandev.plugin.v1.SessionFilter
+	(*ListSessionsRequest)(nil),                               // 226: kandev.plugin.v1.ListSessionsRequest
+	(*ListSessionsResponse)(nil),                              // 227: kandev.plugin.v1.ListSessionsResponse
+	(*SessionCodeStats)(nil),                                  // 228: kandev.plugin.v1.SessionCodeStats
+	(*ListSessionCodeStatsRequest)(nil),                       // 229: kandev.plugin.v1.ListSessionCodeStatsRequest
+	(*ListSessionCodeStatsResponse)(nil),                      // 230: kandev.plugin.v1.ListSessionCodeStatsResponse
+	(*Message)(nil),                                           // 231: kandev.plugin.v1.Message
+	(*MessageFilter)(nil),                                     // 232: kandev.plugin.v1.MessageFilter
+	(*ListMessagesRequest)(nil),                               // 233: kandev.plugin.v1.ListMessagesRequest
+	(*ListMessagesResponse)(nil),                              // 234: kandev.plugin.v1.ListMessagesResponse
+	(*InteractionOption)(nil),                                 // 235: kandev.plugin.v1.InteractionOption
+	(*InteractionQuestion)(nil),                               // 236: kandev.plugin.v1.InteractionQuestion
+	(*Interaction)(nil),                                       // 237: kandev.plugin.v1.Interaction
+	(*InteractionFilter)(nil),                                 // 238: kandev.plugin.v1.InteractionFilter
+	(*ListPendingInteractionsRequest)(nil),                    // 239: kandev.plugin.v1.ListPendingInteractionsRequest
+	(*ListPendingInteractionsResponse)(nil),                   // 240: kandev.plugin.v1.ListPendingInteractionsResponse
+	(*GetInteractionRequest)(nil),                             // 241: kandev.plugin.v1.GetInteractionRequest
+	(*GetInteractionResponse)(nil),                            // 242: kandev.plugin.v1.GetInteractionResponse
+	(*RespondToPermissionRequest)(nil),                        // 243: kandev.plugin.v1.RespondToPermissionRequest
+	(*RespondToPermissionResponse)(nil),                       // 244: kandev.plugin.v1.RespondToPermissionResponse
+	(*ClarificationAnswer)(nil),                               // 245: kandev.plugin.v1.ClarificationAnswer
+	(*AnswerClarificationRequest)(nil),                        // 246: kandev.plugin.v1.AnswerClarificationRequest
+	(*AnswerClarificationResponse)(nil),                       // 247: kandev.plugin.v1.AnswerClarificationResponse
+	(*CancelClarificationRequest)(nil),                        // 248: kandev.plugin.v1.CancelClarificationRequest
+	(*CancelClarificationResponse)(nil),                       // 249: kandev.plugin.v1.CancelClarificationResponse
+	(*InvokeUtilityAgentRequest)(nil),                         // 250: kandev.plugin.v1.InvokeUtilityAgentRequest
+	(*InvokeUtilityAgentWithOptionsRequest)(nil),              // 251: kandev.plugin.v1.InvokeUtilityAgentWithOptionsRequest
+	(*InvokeUtilityAgentResponse)(nil),                        // 252: kandev.plugin.v1.InvokeUtilityAgentResponse
+	(*CreateTaskRequest)(nil),                                 // 253: kandev.plugin.v1.CreateTaskRequest
+	(*PluginTaskRepository)(nil),                              // 254: kandev.plugin.v1.PluginTaskRepository
+	(*RemoteRepositoryDescriptor)(nil),                        // 255: kandev.plugin.v1.RemoteRepositoryDescriptor
+	(*PluginTaskLaunchOptions)(nil),                           // 256: kandev.plugin.v1.PluginTaskLaunchOptions
+	(*CreateTaskResponse)(nil),                                // 257: kandev.plugin.v1.CreateTaskResponse
+	(*UpdateTaskRequest)(nil),                                 // 258: kandev.plugin.v1.UpdateTaskRequest
+	(*UpdateTaskResponse)(nil),                                // 259: kandev.plugin.v1.UpdateTaskResponse
+	(*MoveTaskRequest)(nil),                                   // 260: kandev.plugin.v1.MoveTaskRequest
+	(*MoveTaskResponse)(nil),                                  // 261: kandev.plugin.v1.MoveTaskResponse
+	(*SendMessageRequest)(nil),                                // 262: kandev.plugin.v1.SendMessageRequest
+	(*SendMessageResponse)(nil),                               // 263: kandev.plugin.v1.SendMessageResponse
+	(*PreviewPluginOwnedTaskTreeRequest)(nil),                 // 264: kandev.plugin.v1.PreviewPluginOwnedTaskTreeRequest
+	(*PreviewPluginOwnedTaskTreeResponse)(nil),                // 265: kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse
+	(*DeletePluginOwnedTaskTreeRequest)(nil),                  // 266: kandev.plugin.v1.DeletePluginOwnedTaskTreeRequest
+	(*DeletePluginOwnedTaskTreeResponse)(nil),                 // 267: kandev.plugin.v1.DeletePluginOwnedTaskTreeResponse
+	(*DeletePluginOwnedTaskTreeProgress)(nil),                 // 268: kandev.plugin.v1.DeletePluginOwnedTaskTreeProgress
+	(*AgentConversationDescriptor)(nil),                       // 269: kandev.plugin.v1.AgentConversationDescriptor
+	(*AgentConversationSpec)(nil),                             // 270: kandev.plugin.v1.AgentConversationSpec
+	(*EnsureAgentConversationRequest)(nil),                    // 271: kandev.plugin.v1.EnsureAgentConversationRequest
+	(*EnsureAgentConversationResponse)(nil),                   // 272: kandev.plugin.v1.EnsureAgentConversationResponse
+	(*DispatchAgentConversationRequest)(nil),                  // 273: kandev.plugin.v1.DispatchAgentConversationRequest
+	(*DispatchAgentConversationResponse)(nil),                 // 274: kandev.plugin.v1.DispatchAgentConversationResponse
+	(*DeleteAgentConversationRequest)(nil),                    // 275: kandev.plugin.v1.DeleteAgentConversationRequest
+	(*DeleteAgentConversationResponse)(nil),                   // 276: kandev.plugin.v1.DeleteAgentConversationResponse
+	(*AutomationConditionRequest)(nil),                        // 277: kandev.plugin.v1.AutomationConditionRequest
+	(*AutomationConditionResponse)(nil),                       // 278: kandev.plugin.v1.AutomationConditionResponse
+	(*AutomationWebhookRequest)(nil),                          // 279: kandev.plugin.v1.AutomationWebhookRequest
+	(*AutomationWebhookResponse)(nil),                         // 280: kandev.plugin.v1.AutomationWebhookResponse
+	(*ExactReadPage)(nil),                                     // 281: kandev.plugin.v1.ExactReadPage
+	(*HostReadReceipt)(nil),                                   // 282: kandev.plugin.v1.HostReadReceipt
+	(*ExactReadPageInfo)(nil),                                 // 283: kandev.plugin.v1.ExactReadPageInfo
+	(*ExactWorkspaceObservation)(nil),                         // 284: kandev.plugin.v1.ExactWorkspaceObservation
+	(*ExactWorkflowObservation)(nil),                          // 285: kandev.plugin.v1.ExactWorkflowObservation
+	(*ExactWorkflowStepObservation)(nil),                      // 286: kandev.plugin.v1.ExactWorkflowStepObservation
+	(*ExactTaskObservation)(nil),                              // 287: kandev.plugin.v1.ExactTaskObservation
+	(*ExactSessionObservation)(nil),                           // 288: kandev.plugin.v1.ExactSessionObservation
+	(*ExactInteractionObservation)(nil),                       // 289: kandev.plugin.v1.ExactInteractionObservation
+	(*ExactMessageObservation)(nil),                           // 290: kandev.plugin.v1.ExactMessageObservation
+	(*TaskRelation)(nil),                                      // 291: kandev.plugin.v1.TaskRelation
+	(*TaskInboxItem)(nil),                                     // 292: kandev.plugin.v1.TaskInboxItem
+	(*TaskChangeRequest)(nil),                                 // 293: kandev.plugin.v1.TaskChangeRequest
+	(*TaskDirective)(nil),                                     // 294: kandev.plugin.v1.TaskDirective
+	(*PendingTaskTransition)(nil),                             // 295: kandev.plugin.v1.PendingTaskTransition
+	(*ChangeRequestEvidence)(nil),                             // 296: kandev.plugin.v1.ChangeRequestEvidence
+	(*TaskUsageObservation)(nil),                              // 297: kandev.plugin.v1.TaskUsageObservation
+	(*ListWorkspacesExactRequest)(nil),                        // 298: kandev.plugin.v1.ListWorkspacesExactRequest
+	(*ListWorkspacesExactResponse)(nil),                       // 299: kandev.plugin.v1.ListWorkspacesExactResponse
+	(*ListWorkflowsExactRequest)(nil),                         // 300: kandev.plugin.v1.ListWorkflowsExactRequest
+	(*ListWorkflowsExactResponse)(nil),                        // 301: kandev.plugin.v1.ListWorkflowsExactResponse
+	(*ListWorkflowStepsExactRequest)(nil),                     // 302: kandev.plugin.v1.ListWorkflowStepsExactRequest
+	(*ListWorkflowStepsExactResponse)(nil),                    // 303: kandev.plugin.v1.ListWorkflowStepsExactResponse
+	(*ListTasksExactRequest)(nil),                             // 304: kandev.plugin.v1.ListTasksExactRequest
+	(*ListTasksExactResponse)(nil),                            // 305: kandev.plugin.v1.ListTasksExactResponse
+	(*GetTaskExactRequest)(nil),                               // 306: kandev.plugin.v1.GetTaskExactRequest
+	(*GetTaskExactResponse)(nil),                              // 307: kandev.plugin.v1.GetTaskExactResponse
+	(*ListSessionsExactRequest)(nil),                          // 308: kandev.plugin.v1.ListSessionsExactRequest
+	(*ListSessionsExactResponse)(nil),                         // 309: kandev.plugin.v1.ListSessionsExactResponse
+	(*ListPendingInteractionsExactRequest)(nil),               // 310: kandev.plugin.v1.ListPendingInteractionsExactRequest
+	(*ListPendingInteractionsExactResponse)(nil),              // 311: kandev.plugin.v1.ListPendingInteractionsExactResponse
+	(*GetInteractionExactRequest)(nil),                        // 312: kandev.plugin.v1.GetInteractionExactRequest
+	(*GetInteractionExactResponse)(nil),                       // 313: kandev.plugin.v1.GetInteractionExactResponse
+	(*ListSanitizedMessagesExactRequest)(nil),                 // 314: kandev.plugin.v1.ListSanitizedMessagesExactRequest
+	(*ListSanitizedMessagesExactResponse)(nil),                // 315: kandev.plugin.v1.ListSanitizedMessagesExactResponse
+	(*ListTaskInboxExactRequest)(nil),                         // 316: kandev.plugin.v1.ListTaskInboxExactRequest
+	(*ListTaskInboxExactResponse)(nil),                        // 317: kandev.plugin.v1.ListTaskInboxExactResponse
+	(*GetTaskDirectiveExactRequest)(nil),                      // 318: kandev.plugin.v1.GetTaskDirectiveExactRequest
+	(*GetTaskDirectiveExactResponse)(nil),                     // 319: kandev.plugin.v1.GetTaskDirectiveExactResponse
+	(*ListTaskDirectivesExactRequest)(nil),                    // 320: kandev.plugin.v1.ListTaskDirectivesExactRequest
+	(*ListTaskDirectivesExactResponse)(nil),                   // 321: kandev.plugin.v1.ListTaskDirectivesExactResponse
+	(*GetTaskRelationsExactRequest)(nil),                      // 322: kandev.plugin.v1.GetTaskRelationsExactRequest
+	(*GetTaskRelationsExactResponse)(nil),                     // 323: kandev.plugin.v1.GetTaskRelationsExactResponse
+	(*ListTaskRelationsExactRequest)(nil),                     // 324: kandev.plugin.v1.ListTaskRelationsExactRequest
+	(*ListTaskRelationsExactResponse)(nil),                    // 325: kandev.plugin.v1.ListTaskRelationsExactResponse
+	(*ListPendingTaskTransitionsExactRequest)(nil),            // 326: kandev.plugin.v1.ListPendingTaskTransitionsExactRequest
+	(*ListPendingTaskTransitionsExactResponse)(nil),           // 327: kandev.plugin.v1.ListPendingTaskTransitionsExactResponse
+	(*ListChangeRequestEvidenceExactRequest)(nil),             // 328: kandev.plugin.v1.ListChangeRequestEvidenceExactRequest
+	(*ListChangeRequestEvidenceExactResponse)(nil),            // 329: kandev.plugin.v1.ListChangeRequestEvidenceExactResponse
+	(*ListTaskUsageExactRequest)(nil),                         // 330: kandev.plugin.v1.ListTaskUsageExactRequest
+	(*ListTaskUsageExactResponse)(nil),                        // 331: kandev.plugin.v1.ListTaskUsageExactResponse
+	(*AutomationDefinitionFilter)(nil),                        // 332: kandev.plugin.v1.AutomationDefinitionFilter
+	(*AutomationTriggerObservation)(nil),                      // 333: kandev.plugin.v1.AutomationTriggerObservation
+	(*AutomationDefinitionObservation)(nil),                   // 334: kandev.plugin.v1.AutomationDefinitionObservation
+	(*ListAutomationDefinitionsExactRequest)(nil),             // 335: kandev.plugin.v1.ListAutomationDefinitionsExactRequest
+	(*ListAutomationDefinitionsExactResponse)(nil),            // 336: kandev.plugin.v1.ListAutomationDefinitionsExactResponse
+	(*AutomationRunFilter)(nil),                               // 337: kandev.plugin.v1.AutomationRunFilter
+	(*AutomationRunObservation)(nil),                          // 338: kandev.plugin.v1.AutomationRunObservation
+	(*ListAutomationRunsExactRequest)(nil),                    // 339: kandev.plugin.v1.ListAutomationRunsExactRequest
+	(*ListAutomationRunsExactResponse)(nil),                   // 340: kandev.plugin.v1.ListAutomationRunsExactResponse
+	(*GetAutomationRunExactRequest)(nil),                      // 341: kandev.plugin.v1.GetAutomationRunExactRequest
+	(*GetAutomationRunExactResponse)(nil),                     // 342: kandev.plugin.v1.GetAutomationRunExactResponse
+	nil,                                                       // 343: kandev.plugin.v1.HostCapabilityContext.LimitsEntry
+	nil,                                                       // 344: kandev.plugin.v1.WebhookRequest.HeadersEntry
+	nil,                                                       // 345: kandev.plugin.v1.WebhookResponse.HeadersEntry
+	nil,                                                       // 346: kandev.plugin.v1.PluginActionResponse.HeadersEntry
+	nil,                                                       // 347: kandev.plugin.v1.ExecutorProfileSnapshot.ConfigEntry
+	nil,                                                       // 348: kandev.plugin.v1.ExecutorProfileSnapshot.SecretValuesEntry
+	nil,                                                       // 349: kandev.plugin.v1.ExecutorConnectionLease.HttpHeadersEntry
+	nil,                                                       // 350: kandev.plugin.v1.ExecutorConnectionLease.WebsocketHeadersEntry
+	nil,                                                       // 351: kandev.plugin.v1.AutomationWebhookRequest.HeadersEntry
+	(*structpb.Struct)(nil),                                   // 352: google.protobuf.Struct
 }
 var file_kandev_plugin_v1_plugin_proto_depIdxs = []int32{
 	4,   // 0: kandev.plugin.v1.HostCapabilityContext.operations:type_name -> kandev.plugin.v1.HostOperationSupport
-	338, // 1: kandev.plugin.v1.HostCapabilityContext.limits:type_name -> kandev.plugin.v1.HostCapabilityContext.LimitsEntry
+	343, // 1: kandev.plugin.v1.HostCapabilityContext.limits:type_name -> kandev.plugin.v1.HostCapabilityContext.LimitsEntry
 	5,   // 2: kandev.plugin.v1.GetCapabilityContextResponse.context:type_name -> kandev.plugin.v1.HostCapabilityContext
 	0,   // 3: kandev.plugin.v1.HostCommandReceipt.status:type_name -> kandev.plugin.v1.HostCommandStatus
 	0,   // 4: kandev.plugin.v1.HostCommandResult.status:type_name -> kandev.plugin.v1.HostCommandStatus
 	8,   // 5: kandev.plugin.v1.HostCommandResult.receipt:type_name -> kandev.plugin.v1.HostCommandReceipt
 	9,   // 6: kandev.plugin.v1.UpdateTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	160, // 7: kandev.plugin.v1.UpdateTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
-	249, // 8: kandev.plugin.v1.CreateTaskExactRequest.task:type_name -> kandev.plugin.v1.CreateTaskRequest
+	164, // 7: kandev.plugin.v1.UpdateTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	253, // 8: kandev.plugin.v1.CreateTaskExactRequest.task:type_name -> kandev.plugin.v1.CreateTaskRequest
 	9,   // 9: kandev.plugin.v1.CreateTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	160, // 10: kandev.plugin.v1.CreateTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	164, // 10: kandev.plugin.v1.CreateTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
 	9,   // 11: kandev.plugin.v1.SetTaskLabelsExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	160, // 12: kandev.plugin.v1.SetTaskLabelsExactResponse.task:type_name -> kandev.plugin.v1.Task
+	164, // 12: kandev.plugin.v1.SetTaskLabelsExactResponse.task:type_name -> kandev.plugin.v1.Task
 	9,   // 13: kandev.plugin.v1.AssignTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	160, // 14: kandev.plugin.v1.AssignTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	164, // 14: kandev.plugin.v1.AssignTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
 	9,   // 15: kandev.plugin.v1.MoveTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	160, // 16: kandev.plugin.v1.MoveTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	164, // 16: kandev.plugin.v1.MoveTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
 	9,   // 17: kandev.plugin.v1.ArchiveTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	160, // 18: kandev.plugin.v1.ArchiveTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	164, // 18: kandev.plugin.v1.ArchiveTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
 	9,   // 19: kandev.plugin.v1.AddTaskRelationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
 	9,   // 20: kandev.plugin.v1.RemoveTaskRelationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
 	9,   // 21: kandev.plugin.v1.SendTaskMessageExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
@@ -27681,496 +28304,503 @@ var file_kandev_plugin_v1_plugin_proto_depIdxs = []int32{
 	56,  // 49: kandev.plugin.v1.ExactSourceIssueCapabilities.transitions:type_name -> kandev.plugin.v1.SourceIssueTransition
 	9,   // 50: kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
 	57,  // 51: kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse.item:type_name -> kandev.plugin.v1.ExactSourceIssueCapabilities
-	278, // 52: kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	282, // 52: kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
 	0,   // 53: kandev.plugin.v1.SourceIssueWritebackReceipt.status:type_name -> kandev.plugin.v1.HostCommandStatus
 	9,   // 54: kandev.plugin.v1.SourceIssueWritebackExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
 	60,  // 55: kandev.plugin.v1.SourceIssueWritebackExactResponse.receipt:type_name -> kandev.plugin.v1.SourceIssueWritebackReceipt
 	9,   // 56: kandev.plugin.v1.IssueTaskDirectiveExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	289, // 57: kandev.plugin.v1.IssueTaskDirectiveExactResponse.directive:type_name -> kandev.plugin.v1.TaskDirective
+	294, // 57: kandev.plugin.v1.IssueTaskDirectiveExactResponse.directive:type_name -> kandev.plugin.v1.TaskDirective
 	9,   // 58: kandev.plugin.v1.ResolveTaskDirectiveExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	289, // 59: kandev.plugin.v1.ResolveTaskDirectiveExactResponse.directive:type_name -> kandev.plugin.v1.TaskDirective
-	69,  // 60: kandev.plugin.v1.EnsureManagedAgentConversationExactRequest.spec:type_name -> kandev.plugin.v1.ManagedAgentConversationSpec
-	9,   // 61: kandev.plugin.v1.EnsureManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	68,  // 62: kandev.plugin.v1.EnsureManagedAgentConversationExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
-	68,  // 63: kandev.plugin.v1.GetManagedAgentConversationStatusExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
-	68,  // 64: kandev.plugin.v1.ListManagedAgentConversationsExactResponse.conversations:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
-	9,   // 65: kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	68,  // 66: kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
-	9,   // 67: kandev.plugin.v1.DeleteManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	1,   // 68: kandev.plugin.v1.ManagedAgentInputReceipt.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
-	2,   // 69: kandev.plugin.v1.ManagedAgentInputReceipt.state:type_name -> kandev.plugin.v1.ManagedAgentInputState
-	1,   // 70: kandev.plugin.v1.EnqueueManagedAgentInputExactRequest.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
-	9,   // 71: kandev.plugin.v1.EnqueueManagedAgentInputExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	80,  // 72: kandev.plugin.v1.EnqueueManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
-	80,  // 73: kandev.plugin.v1.GetManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
-	80,  // 74: kandev.plugin.v1.ListManagedAgentInputsExactResponse.inputs:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
-	9,   // 75: kandev.plugin.v1.CancelManagedAgentInputExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	80,  // 76: kandev.plugin.v1.CancelManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
-	1,   // 77: kandev.plugin.v1.DispatchManagedAgentConversationExactRequest.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
-	9,   // 78: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	3,   // 79: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.dispatch_status:type_name -> kandev.plugin.v1.ManagedAgentDispatchStatus
-	68,  // 80: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
-	91,  // 81: kandev.plugin.v1.ManagedConversationSchedule.triggers:type_name -> kandev.plugin.v1.ManagedConversationScheduleTrigger
-	92,  // 82: kandev.plugin.v1.ListManagedConversationSchedulesExactResponse.schedules:type_name -> kandev.plugin.v1.ManagedConversationSchedule
-	92,  // 83: kandev.plugin.v1.CreateManagedConversationScheduleExactRequest.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
-	92,  // 84: kandev.plugin.v1.UpdateManagedConversationScheduleExactRequest.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
-	9,   // 85: kandev.plugin.v1.ManagedConversationScheduleExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	92,  // 86: kandev.plugin.v1.ManagedConversationScheduleExactResponse.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
-	9,   // 87: kandev.plugin.v1.EnsureTaskRunExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	9,   // 88: kandev.plugin.v1.StopTaskRunExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	9,   // 89: kandev.plugin.v1.RecoverSessionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	9,   // 90: kandev.plugin.v1.CancelPendingTaskTransitionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	108, // 91: kandev.plugin.v1.GetSessionModeContextExactResponse.available_modes:type_name -> kandev.plugin.v1.SessionModeOption
-	9,   // 92: kandev.plugin.v1.SetSessionModeExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	9,   // 93: kandev.plugin.v1.RespondPermissionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	233, // 94: kandev.plugin.v1.RespondPermissionExactResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	241, // 95: kandev.plugin.v1.AnswerClarificationExactRequest.answers:type_name -> kandev.plugin.v1.ClarificationAnswer
-	9,   // 96: kandev.plugin.v1.AnswerClarificationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	233, // 97: kandev.plugin.v1.AnswerClarificationExactResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	347, // 98: kandev.plugin.v1.Event.payload:type_name -> google.protobuf.Struct
-	347, // 99: kandev.plugin.v1.AgentToolRequest.arguments:type_name -> google.protobuf.Struct
-	121, // 100: kandev.plugin.v1.AgentToolRequest.context:type_name -> kandev.plugin.v1.AgentToolContext
-	347, // 101: kandev.plugin.v1.AgentToolResponse.structured_content:type_name -> google.protobuf.Struct
-	339, // 102: kandev.plugin.v1.WebhookRequest.headers:type_name -> kandev.plugin.v1.WebhookRequest.HeadersEntry
-	340, // 103: kandev.plugin.v1.WebhookResponse.headers:type_name -> kandev.plugin.v1.WebhookResponse.HeadersEntry
-	126, // 104: kandev.plugin.v1.PluginActionRequest.context:type_name -> kandev.plugin.v1.VerifiedActionContext
-	341, // 105: kandev.plugin.v1.PluginActionResponse.headers:type_name -> kandev.plugin.v1.PluginActionResponse.HeadersEntry
-	130, // 106: kandev.plugin.v1.SearchEntityReferencesResponse.candidates:type_name -> kandev.plugin.v1.EntityReferenceCandidate
-	347, // 107: kandev.plugin.v1.EntityReferenceCandidate.attributes:type_name -> google.protobuf.Struct
-	347, // 108: kandev.plugin.v1.AuthorizeEntityReferenceRequest.reference:type_name -> google.protobuf.Struct
-	347, // 109: kandev.plugin.v1.GetStateResponse.value:type_name -> google.protobuf.Struct
-	347, // 110: kandev.plugin.v1.SetStateRequest.value:type_name -> google.protobuf.Struct
-	145, // 111: kandev.plugin.v1.ListStateResponse.entries:type_name -> kandev.plugin.v1.StateEntry
-	347, // 112: kandev.plugin.v1.StateEntry.value:type_name -> google.protobuf.Struct
-	347, // 113: kandev.plugin.v1.GetConfigResponse.config:type_name -> google.protobuf.Struct
-	347, // 114: kandev.plugin.v1.EmitEventRequest.payload:type_name -> google.protobuf.Struct
-	161, // 115: kandev.plugin.v1.Task.repositories:type_name -> kandev.plugin.v1.TaskRepository
-	347, // 116: kandev.plugin.v1.Task.metadata:type_name -> google.protobuf.Struct
-	162, // 117: kandev.plugin.v1.Task.pull_requests:type_name -> kandev.plugin.v1.TaskPullRequest
-	163, // 118: kandev.plugin.v1.Task.depends_on:type_name -> kandev.plugin.v1.TaskDependencyRef
-	163, // 119: kandev.plugin.v1.Task.blocks:type_name -> kandev.plugin.v1.TaskDependencyRef
-	164, // 120: kandev.plugin.v1.ListTasksRequest.filter:type_name -> kandev.plugin.v1.TaskFilter
-	158, // 121: kandev.plugin.v1.ListTasksRequest.page:type_name -> kandev.plugin.v1.Page
-	160, // 122: kandev.plugin.v1.ListTasksResponse.tasks:type_name -> kandev.plugin.v1.Task
-	159, // 123: kandev.plugin.v1.ListTasksResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	160, // 124: kandev.plugin.v1.GetTaskResponse.task:type_name -> kandev.plugin.v1.Task
-	158, // 125: kandev.plugin.v1.ListTaskStepTransitionsRequest.page:type_name -> kandev.plugin.v1.Page
-	169, // 126: kandev.plugin.v1.ListTaskStepTransitionsResponse.items:type_name -> kandev.plugin.v1.TaskStepTransition
-	159, // 127: kandev.plugin.v1.ListTaskStepTransitionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	158, // 128: kandev.plugin.v1.ListWorkspacesRequest.page:type_name -> kandev.plugin.v1.Page
-	172, // 129: kandev.plugin.v1.ListWorkspacesResponse.workspaces:type_name -> kandev.plugin.v1.Workspace
-	159, // 130: kandev.plugin.v1.ListWorkspacesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	158, // 131: kandev.plugin.v1.ListWorkflowsRequest.page:type_name -> kandev.plugin.v1.Page
-	175, // 132: kandev.plugin.v1.ListWorkflowsResponse.workflows:type_name -> kandev.plugin.v1.Workflow
-	159, // 133: kandev.plugin.v1.ListWorkflowsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	158, // 134: kandev.plugin.v1.ListWorkflowTransitionGroupsRequest.page:type_name -> kandev.plugin.v1.Page
-	178, // 135: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse.items:type_name -> kandev.plugin.v1.WorkflowTransitionGroup
-	159, // 136: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	181, // 137: kandev.plugin.v1.ListWorkflowStepsResponse.steps:type_name -> kandev.plugin.v1.WorkflowStep
-	158, // 138: kandev.plugin.v1.ListAgentProfilesRequest.page:type_name -> kandev.plugin.v1.Page
-	184, // 139: kandev.plugin.v1.ListAgentProfilesResponse.profiles:type_name -> kandev.plugin.v1.AgentProfile
-	159, // 140: kandev.plugin.v1.ListAgentProfilesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	158, // 141: kandev.plugin.v1.ListExecutorProfilesRequest.page:type_name -> kandev.plugin.v1.Page
-	187, // 142: kandev.plugin.v1.ListExecutorProfilesResponse.profiles:type_name -> kandev.plugin.v1.ExecutorProfile
-	159, // 143: kandev.plugin.v1.ListExecutorProfilesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	342, // 144: kandev.plugin.v1.ExecutorProfileSnapshot.config:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot.ConfigEntry
-	343, // 145: kandev.plugin.v1.ExecutorProfileSnapshot.secret_values:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot.SecretValuesEntry
-	192, // 146: kandev.plugin.v1.ExecutorProviderError.fields:type_name -> kandev.plugin.v1.ExecutorProviderFieldError
-	194, // 147: kandev.plugin.v1.ExecutorResourceDescriptor.capabilities:type_name -> kandev.plugin.v1.ExecutorProviderCapabilities
-	190, // 148: kandev.plugin.v1.ValidateExecutorProfileRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	191, // 149: kandev.plugin.v1.ValidateExecutorProfileRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
-	192, // 150: kandev.plugin.v1.ValidateExecutorProfileResponse.field_errors:type_name -> kandev.plugin.v1.ExecutorProviderFieldError
-	194, // 151: kandev.plugin.v1.ValidateExecutorProfileResponse.capabilities:type_name -> kandev.plugin.v1.ExecutorProviderCapabilities
-	193, // 152: kandev.plugin.v1.ValidateExecutorProfileResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
-	190, // 153: kandev.plugin.v1.ProvisionExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	191, // 154: kandev.plugin.v1.ProvisionExecutorEnvironmentRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
-	195, // 155: kandev.plugin.v1.ProvisionExecutorEnvironmentResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	193, // 156: kandev.plugin.v1.ProvisionExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
-	190, // 157: kandev.plugin.v1.RecoverExecutorOperationRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	191, // 158: kandev.plugin.v1.RecoverExecutorOperationRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
-	195, // 159: kandev.plugin.v1.RecoverExecutorOperationResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	193, // 160: kandev.plugin.v1.RecoverExecutorOperationResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
-	190, // 161: kandev.plugin.v1.AttachExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	195, // 162: kandev.plugin.v1.AttachExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	195, // 163: kandev.plugin.v1.AttachExecutorEnvironmentResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	193, // 164: kandev.plugin.v1.AttachExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
-	190, // 165: kandev.plugin.v1.InspectExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	195, // 166: kandev.plugin.v1.InspectExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	193, // 167: kandev.plugin.v1.InspectExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
-	190, // 168: kandev.plugin.v1.ResolveExecutorConnectionRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	195, // 169: kandev.plugin.v1.ResolveExecutorConnectionRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	344, // 170: kandev.plugin.v1.ExecutorConnectionLease.http_headers:type_name -> kandev.plugin.v1.ExecutorConnectionLease.HttpHeadersEntry
-	345, // 171: kandev.plugin.v1.ExecutorConnectionLease.websocket_headers:type_name -> kandev.plugin.v1.ExecutorConnectionLease.WebsocketHeadersEntry
-	207, // 172: kandev.plugin.v1.ResolveExecutorConnectionResponse.lease:type_name -> kandev.plugin.v1.ExecutorConnectionLease
-	193, // 173: kandev.plugin.v1.ResolveExecutorConnectionResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
-	190, // 174: kandev.plugin.v1.DestroyExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	195, // 175: kandev.plugin.v1.DestroyExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	193, // 176: kandev.plugin.v1.DestroyExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
-	190, // 177: kandev.plugin.v1.CheckpointExecutorResourceRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	195, // 178: kandev.plugin.v1.CheckpointExecutorResourceRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	190, // 179: kandev.plugin.v1.ReportExecutorProgressRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	190, // 180: kandev.plugin.v1.ReadExecutorRuntimeArtifactRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	158, // 181: kandev.plugin.v1.ListRepositoriesRequest.page:type_name -> kandev.plugin.v1.Page
-	217, // 182: kandev.plugin.v1.ListRepositoriesResponse.repositories:type_name -> kandev.plugin.v1.Repository
-	159, // 183: kandev.plugin.v1.ListRepositoriesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	221, // 184: kandev.plugin.v1.ListSessionsRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
-	158, // 185: kandev.plugin.v1.ListSessionsRequest.page:type_name -> kandev.plugin.v1.Page
-	220, // 186: kandev.plugin.v1.ListSessionsResponse.sessions:type_name -> kandev.plugin.v1.Session
-	159, // 187: kandev.plugin.v1.ListSessionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	221, // 188: kandev.plugin.v1.ListSessionCodeStatsRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
-	158, // 189: kandev.plugin.v1.ListSessionCodeStatsRequest.page:type_name -> kandev.plugin.v1.Page
-	224, // 190: kandev.plugin.v1.ListSessionCodeStatsResponse.stats:type_name -> kandev.plugin.v1.SessionCodeStats
-	159, // 191: kandev.plugin.v1.ListSessionCodeStatsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	228, // 192: kandev.plugin.v1.ListMessagesRequest.filter:type_name -> kandev.plugin.v1.MessageFilter
-	158, // 193: kandev.plugin.v1.ListMessagesRequest.page:type_name -> kandev.plugin.v1.Page
-	227, // 194: kandev.plugin.v1.ListMessagesResponse.messages:type_name -> kandev.plugin.v1.Message
-	159, // 195: kandev.plugin.v1.ListMessagesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	231, // 196: kandev.plugin.v1.InteractionQuestion.options:type_name -> kandev.plugin.v1.InteractionOption
-	231, // 197: kandev.plugin.v1.Interaction.options:type_name -> kandev.plugin.v1.InteractionOption
-	232, // 198: kandev.plugin.v1.Interaction.questions:type_name -> kandev.plugin.v1.InteractionQuestion
-	234, // 199: kandev.plugin.v1.ListPendingInteractionsRequest.filter:type_name -> kandev.plugin.v1.InteractionFilter
-	158, // 200: kandev.plugin.v1.ListPendingInteractionsRequest.page:type_name -> kandev.plugin.v1.Page
-	233, // 201: kandev.plugin.v1.ListPendingInteractionsResponse.interactions:type_name -> kandev.plugin.v1.Interaction
-	159, // 202: kandev.plugin.v1.ListPendingInteractionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	233, // 203: kandev.plugin.v1.GetInteractionResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	233, // 204: kandev.plugin.v1.RespondToPermissionResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	241, // 205: kandev.plugin.v1.AnswerClarificationRequest.answers:type_name -> kandev.plugin.v1.ClarificationAnswer
-	233, // 206: kandev.plugin.v1.AnswerClarificationResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	233, // 207: kandev.plugin.v1.CancelClarificationResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	250, // 208: kandev.plugin.v1.CreateTaskRequest.repositories:type_name -> kandev.plugin.v1.PluginTaskRepository
-	252, // 209: kandev.plugin.v1.CreateTaskRequest.launch:type_name -> kandev.plugin.v1.PluginTaskLaunchOptions
-	347, // 210: kandev.plugin.v1.CreateTaskRequest.metadata:type_name -> google.protobuf.Struct
-	251, // 211: kandev.plugin.v1.PluginTaskRepository.remote:type_name -> kandev.plugin.v1.RemoteRepositoryDescriptor
-	160, // 212: kandev.plugin.v1.CreateTaskResponse.task:type_name -> kandev.plugin.v1.Task
-	160, // 213: kandev.plugin.v1.UpdateTaskResponse.task:type_name -> kandev.plugin.v1.Task
-	160, // 214: kandev.plugin.v1.MoveTaskResponse.task:type_name -> kandev.plugin.v1.Task
-	160, // 215: kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse.tasks:type_name -> kandev.plugin.v1.Task
-	266, // 216: kandev.plugin.v1.EnsureAgentConversationRequest.spec:type_name -> kandev.plugin.v1.AgentConversationSpec
-	265, // 217: kandev.plugin.v1.EnsureAgentConversationResponse.conv_descriptor:type_name -> kandev.plugin.v1.AgentConversationDescriptor
-	265, // 218: kandev.plugin.v1.DispatchAgentConversationResponse.conv_descriptor:type_name -> kandev.plugin.v1.AgentConversationDescriptor
-	346, // 219: kandev.plugin.v1.AutomationWebhookRequest.headers:type_name -> kandev.plugin.v1.AutomationWebhookRequest.HeadersEntry
-	278, // 220: kandev.plugin.v1.ExactReadPageInfo.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
-	172, // 221: kandev.plugin.v1.ExactWorkspaceObservation.workspace:type_name -> kandev.plugin.v1.Workspace
-	175, // 222: kandev.plugin.v1.ExactWorkflowObservation.workflow:type_name -> kandev.plugin.v1.Workflow
-	181, // 223: kandev.plugin.v1.ExactWorkflowStepObservation.step:type_name -> kandev.plugin.v1.WorkflowStep
-	160, // 224: kandev.plugin.v1.ExactTaskObservation.task:type_name -> kandev.plugin.v1.Task
-	220, // 225: kandev.plugin.v1.ExactSessionObservation.session:type_name -> kandev.plugin.v1.Session
-	233, // 226: kandev.plugin.v1.ExactInteractionObservation.interaction:type_name -> kandev.plugin.v1.Interaction
-	227, // 227: kandev.plugin.v1.ExactMessageObservation.message:type_name -> kandev.plugin.v1.Message
-	277, // 228: kandev.plugin.v1.ListWorkspacesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	280, // 229: kandev.plugin.v1.ListWorkspacesExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkspaceObservation
-	279, // 230: kandev.plugin.v1.ListWorkspacesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	277, // 231: kandev.plugin.v1.ListWorkflowsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	281, // 232: kandev.plugin.v1.ListWorkflowsExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkflowObservation
-	279, // 233: kandev.plugin.v1.ListWorkflowsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	277, // 234: kandev.plugin.v1.ListWorkflowStepsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	282, // 235: kandev.plugin.v1.ListWorkflowStepsExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkflowStepObservation
-	279, // 236: kandev.plugin.v1.ListWorkflowStepsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	164, // 237: kandev.plugin.v1.ListTasksExactRequest.filter:type_name -> kandev.plugin.v1.TaskFilter
-	277, // 238: kandev.plugin.v1.ListTasksExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	283, // 239: kandev.plugin.v1.ListTasksExactResponse.items:type_name -> kandev.plugin.v1.ExactTaskObservation
-	279, // 240: kandev.plugin.v1.ListTasksExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	283, // 241: kandev.plugin.v1.GetTaskExactResponse.item:type_name -> kandev.plugin.v1.ExactTaskObservation
-	278, // 242: kandev.plugin.v1.GetTaskExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
-	221, // 243: kandev.plugin.v1.ListSessionsExactRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
-	277, // 244: kandev.plugin.v1.ListSessionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	284, // 245: kandev.plugin.v1.ListSessionsExactResponse.items:type_name -> kandev.plugin.v1.ExactSessionObservation
-	279, // 246: kandev.plugin.v1.ListSessionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	234, // 247: kandev.plugin.v1.ListPendingInteractionsExactRequest.filter:type_name -> kandev.plugin.v1.InteractionFilter
-	277, // 248: kandev.plugin.v1.ListPendingInteractionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	285, // 249: kandev.plugin.v1.ListPendingInteractionsExactResponse.items:type_name -> kandev.plugin.v1.ExactInteractionObservation
-	279, // 250: kandev.plugin.v1.ListPendingInteractionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	285, // 251: kandev.plugin.v1.GetInteractionExactResponse.item:type_name -> kandev.plugin.v1.ExactInteractionObservation
-	278, // 252: kandev.plugin.v1.GetInteractionExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
-	228, // 253: kandev.plugin.v1.ListSanitizedMessagesExactRequest.filter:type_name -> kandev.plugin.v1.MessageFilter
-	277, // 254: kandev.plugin.v1.ListSanitizedMessagesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	286, // 255: kandev.plugin.v1.ListSanitizedMessagesExactResponse.items:type_name -> kandev.plugin.v1.ExactMessageObservation
-	279, // 256: kandev.plugin.v1.ListSanitizedMessagesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	277, // 257: kandev.plugin.v1.ListTaskInboxExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	288, // 258: kandev.plugin.v1.ListTaskInboxExactResponse.items:type_name -> kandev.plugin.v1.TaskInboxItem
-	279, // 259: kandev.plugin.v1.ListTaskInboxExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	289, // 260: kandev.plugin.v1.GetTaskDirectiveExactResponse.item:type_name -> kandev.plugin.v1.TaskDirective
-	278, // 261: kandev.plugin.v1.GetTaskDirectiveExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
-	277, // 262: kandev.plugin.v1.ListTaskDirectivesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	289, // 263: kandev.plugin.v1.ListTaskDirectivesExactResponse.items:type_name -> kandev.plugin.v1.TaskDirective
-	279, // 264: kandev.plugin.v1.ListTaskDirectivesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	277, // 265: kandev.plugin.v1.GetTaskRelationsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	287, // 266: kandev.plugin.v1.GetTaskRelationsExactResponse.items:type_name -> kandev.plugin.v1.TaskRelation
-	279, // 267: kandev.plugin.v1.GetTaskRelationsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	277, // 268: kandev.plugin.v1.ListTaskRelationsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	287, // 269: kandev.plugin.v1.ListTaskRelationsExactResponse.items:type_name -> kandev.plugin.v1.TaskRelation
-	279, // 270: kandev.plugin.v1.ListTaskRelationsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	277, // 271: kandev.plugin.v1.ListPendingTaskTransitionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	290, // 272: kandev.plugin.v1.ListPendingTaskTransitionsExactResponse.items:type_name -> kandev.plugin.v1.PendingTaskTransition
-	279, // 273: kandev.plugin.v1.ListPendingTaskTransitionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	277, // 274: kandev.plugin.v1.ListChangeRequestEvidenceExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	291, // 275: kandev.plugin.v1.ListChangeRequestEvidenceExactResponse.items:type_name -> kandev.plugin.v1.ChangeRequestEvidence
-	279, // 276: kandev.plugin.v1.ListChangeRequestEvidenceExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	277, // 277: kandev.plugin.v1.ListTaskUsageExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	292, // 278: kandev.plugin.v1.ListTaskUsageExactResponse.items:type_name -> kandev.plugin.v1.TaskUsageObservation
-	279, // 279: kandev.plugin.v1.ListTaskUsageExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	328, // 280: kandev.plugin.v1.AutomationDefinitionObservation.triggers:type_name -> kandev.plugin.v1.AutomationTriggerObservation
-	327, // 281: kandev.plugin.v1.ListAutomationDefinitionsExactRequest.filter:type_name -> kandev.plugin.v1.AutomationDefinitionFilter
-	277, // 282: kandev.plugin.v1.ListAutomationDefinitionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	329, // 283: kandev.plugin.v1.ListAutomationDefinitionsExactResponse.items:type_name -> kandev.plugin.v1.AutomationDefinitionObservation
-	279, // 284: kandev.plugin.v1.ListAutomationDefinitionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	332, // 285: kandev.plugin.v1.ListAutomationRunsExactRequest.filter:type_name -> kandev.plugin.v1.AutomationRunFilter
-	277, // 286: kandev.plugin.v1.ListAutomationRunsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	333, // 287: kandev.plugin.v1.ListAutomationRunsExactResponse.items:type_name -> kandev.plugin.v1.AutomationRunObservation
-	279, // 288: kandev.plugin.v1.ListAutomationRunsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	333, // 289: kandev.plugin.v1.GetAutomationRunExactResponse.item:type_name -> kandev.plugin.v1.AutomationRunObservation
-	278, // 290: kandev.plugin.v1.GetAutomationRunExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
-	118, // 291: kandev.plugin.v1.Plugin.DeliverEvent:input_type -> kandev.plugin.v1.Event
-	123, // 292: kandev.plugin.v1.Plugin.HandleWebhook:input_type -> kandev.plugin.v1.WebhookRequest
-	273, // 293: kandev.plugin.v1.Plugin.DescribeAutomationCondition:input_type -> kandev.plugin.v1.AutomationConditionRequest
-	275, // 294: kandev.plugin.v1.Plugin.VerifyAutomationWebhook:input_type -> kandev.plugin.v1.AutomationWebhookRequest
-	125, // 295: kandev.plugin.v1.Plugin.HandleAction:input_type -> kandev.plugin.v1.PluginActionRequest
-	128, // 296: kandev.plugin.v1.Plugin.SearchEntityReferences:input_type -> kandev.plugin.v1.SearchEntityReferencesRequest
-	131, // 297: kandev.plugin.v1.Plugin.AuthorizeEntityReference:input_type -> kandev.plugin.v1.AuthorizeEntityReferenceRequest
-	133, // 298: kandev.plugin.v1.Plugin.ResolveGitCredential:input_type -> kandev.plugin.v1.ResolveGitCredentialRequest
-	135, // 299: kandev.plugin.v1.Plugin.GetGitCredentialBinding:input_type -> kandev.plugin.v1.GitCredentialBindingRequest
-	120, // 300: kandev.plugin.v1.Plugin.InvokeAgentTool:input_type -> kandev.plugin.v1.AgentToolRequest
-	196, // 301: kandev.plugin.v1.Plugin.ValidateExecutorProfile:input_type -> kandev.plugin.v1.ValidateExecutorProfileRequest
-	198, // 302: kandev.plugin.v1.Plugin.ProvisionExecutorEnvironment:input_type -> kandev.plugin.v1.ProvisionExecutorEnvironmentRequest
-	200, // 303: kandev.plugin.v1.Plugin.RecoverExecutorOperation:input_type -> kandev.plugin.v1.RecoverExecutorOperationRequest
-	202, // 304: kandev.plugin.v1.Plugin.AttachExecutorEnvironment:input_type -> kandev.plugin.v1.AttachExecutorEnvironmentRequest
-	204, // 305: kandev.plugin.v1.Plugin.InspectExecutorEnvironment:input_type -> kandev.plugin.v1.InspectExecutorEnvironmentRequest
-	206, // 306: kandev.plugin.v1.Plugin.ResolveExecutorConnection:input_type -> kandev.plugin.v1.ResolveExecutorConnectionRequest
-	209, // 307: kandev.plugin.v1.Plugin.DestroyExecutorEnvironment:input_type -> kandev.plugin.v1.DestroyExecutorEnvironmentRequest
-	6,   // 308: kandev.plugin.v1.Host.GetCapabilityContext:input_type -> kandev.plugin.v1.GetCapabilityContextRequest
-	10,  // 309: kandev.plugin.v1.Host.UpdateTaskExact:input_type -> kandev.plugin.v1.UpdateTaskExactRequest
-	12,  // 310: kandev.plugin.v1.Host.CreateTaskExact:input_type -> kandev.plugin.v1.CreateTaskExactRequest
-	14,  // 311: kandev.plugin.v1.Host.SetTaskLabelsExact:input_type -> kandev.plugin.v1.SetTaskLabelsExactRequest
-	16,  // 312: kandev.plugin.v1.Host.AssignTaskExact:input_type -> kandev.plugin.v1.AssignTaskExactRequest
-	18,  // 313: kandev.plugin.v1.Host.MoveTaskExact:input_type -> kandev.plugin.v1.MoveTaskExactRequest
-	20,  // 314: kandev.plugin.v1.Host.ArchiveTaskExact:input_type -> kandev.plugin.v1.ArchiveTaskExactRequest
-	22,  // 315: kandev.plugin.v1.Host.AddTaskRelationExact:input_type -> kandev.plugin.v1.AddTaskRelationExactRequest
-	24,  // 316: kandev.plugin.v1.Host.RemoveTaskRelationExact:input_type -> kandev.plugin.v1.RemoveTaskRelationExactRequest
-	26,  // 317: kandev.plugin.v1.Host.SendTaskMessageExact:input_type -> kandev.plugin.v1.SendTaskMessageExactRequest
-	64,  // 318: kandev.plugin.v1.Host.IssueTaskDirectiveExact:input_type -> kandev.plugin.v1.IssueTaskDirectiveExactRequest
-	66,  // 319: kandev.plugin.v1.Host.ResolveTaskDirectiveExact:input_type -> kandev.plugin.v1.ResolveTaskDirectiveExactRequest
-	29,  // 320: kandev.plugin.v1.Host.AcquireTaskManagementClaimExact:input_type -> kandev.plugin.v1.AcquireTaskManagementClaimExactRequest
-	30,  // 321: kandev.plugin.v1.Host.ReleaseTaskManagementClaimExact:input_type -> kandev.plugin.v1.ReleaseTaskManagementClaimExactRequest
-	31,  // 322: kandev.plugin.v1.Host.TransferTaskManagementClaimExact:input_type -> kandev.plugin.v1.TransferTaskManagementClaimExactRequest
-	39,  // 323: kandev.plugin.v1.Host.SetTaskCompletionCriteriaExact:input_type -> kandev.plugin.v1.SetTaskCompletionCriteriaExactRequest
-	40,  // 324: kandev.plugin.v1.Host.VerifyTaskCompletionCriterionExact:input_type -> kandev.plugin.v1.VerifyTaskCompletionCriterionExactRequest
-	42,  // 325: kandev.plugin.v1.Host.ApplyWorkspaceAdministrationExact:input_type -> kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest
-	58,  // 326: kandev.plugin.v1.Host.GetSourceIssueCapabilitiesExact:input_type -> kandev.plugin.v1.GetSourceIssueCapabilitiesExactRequest
-	61,  // 327: kandev.plugin.v1.Host.CommentSourceIssueExact:input_type -> kandev.plugin.v1.CommentSourceIssueExactRequest
-	62,  // 328: kandev.plugin.v1.Host.TransitionSourceIssueExact:input_type -> kandev.plugin.v1.TransitionSourceIssueExactRequest
-	70,  // 329: kandev.plugin.v1.Host.EnsureManagedAgentConversationExact:input_type -> kandev.plugin.v1.EnsureManagedAgentConversationExactRequest
-	72,  // 330: kandev.plugin.v1.Host.GetManagedAgentConversationStatusExact:input_type -> kandev.plugin.v1.GetManagedAgentConversationStatusExactRequest
-	74,  // 331: kandev.plugin.v1.Host.ListManagedAgentConversationsExact:input_type -> kandev.plugin.v1.ListManagedAgentConversationsExactRequest
-	76,  // 332: kandev.plugin.v1.Host.SetManagedAgentConversationPausedExact:input_type -> kandev.plugin.v1.SetManagedAgentConversationPausedExactRequest
-	78,  // 333: kandev.plugin.v1.Host.DeleteManagedAgentConversationExact:input_type -> kandev.plugin.v1.DeleteManagedAgentConversationExactRequest
-	81,  // 334: kandev.plugin.v1.Host.EnqueueManagedAgentInputExact:input_type -> kandev.plugin.v1.EnqueueManagedAgentInputExactRequest
-	83,  // 335: kandev.plugin.v1.Host.GetManagedAgentInputExact:input_type -> kandev.plugin.v1.GetManagedAgentInputExactRequest
-	85,  // 336: kandev.plugin.v1.Host.ListManagedAgentInputsExact:input_type -> kandev.plugin.v1.ListManagedAgentInputsExactRequest
-	87,  // 337: kandev.plugin.v1.Host.CancelManagedAgentInputExact:input_type -> kandev.plugin.v1.CancelManagedAgentInputExactRequest
-	89,  // 338: kandev.plugin.v1.Host.DispatchManagedAgentConversationExact:input_type -> kandev.plugin.v1.DispatchManagedAgentConversationExactRequest
-	93,  // 339: kandev.plugin.v1.Host.ListManagedConversationSchedulesExact:input_type -> kandev.plugin.v1.ListManagedConversationSchedulesExactRequest
-	95,  // 340: kandev.plugin.v1.Host.CreateManagedConversationScheduleExact:input_type -> kandev.plugin.v1.CreateManagedConversationScheduleExactRequest
-	96,  // 341: kandev.plugin.v1.Host.UpdateManagedConversationScheduleExact:input_type -> kandev.plugin.v1.UpdateManagedConversationScheduleExactRequest
-	97,  // 342: kandev.plugin.v1.Host.SetManagedConversationScheduleEnabledExact:input_type -> kandev.plugin.v1.SetManagedConversationScheduleEnabledExactRequest
-	98,  // 343: kandev.plugin.v1.Host.DeleteManagedConversationScheduleExact:input_type -> kandev.plugin.v1.DeleteManagedConversationScheduleExactRequest
-	100, // 344: kandev.plugin.v1.Host.EnsureTaskRunExact:input_type -> kandev.plugin.v1.EnsureTaskRunExactRequest
-	102, // 345: kandev.plugin.v1.Host.StopTaskRunExact:input_type -> kandev.plugin.v1.StopTaskRunExactRequest
-	104, // 346: kandev.plugin.v1.Host.RecoverSessionExact:input_type -> kandev.plugin.v1.RecoverSessionExactRequest
-	106, // 347: kandev.plugin.v1.Host.CancelPendingTaskTransitionExact:input_type -> kandev.plugin.v1.CancelPendingTaskTransitionExactRequest
-	109, // 348: kandev.plugin.v1.Host.GetSessionModeContextExact:input_type -> kandev.plugin.v1.GetSessionModeContextExactRequest
-	111, // 349: kandev.plugin.v1.Host.SetSessionModeExact:input_type -> kandev.plugin.v1.SetSessionModeExactRequest
-	114, // 350: kandev.plugin.v1.Host.RespondPermissionExact:input_type -> kandev.plugin.v1.RespondPermissionExactRequest
-	116, // 351: kandev.plugin.v1.Host.AnswerClarificationExact:input_type -> kandev.plugin.v1.AnswerClarificationExactRequest
-	293, // 352: kandev.plugin.v1.Host.ListWorkspacesExact:input_type -> kandev.plugin.v1.ListWorkspacesExactRequest
-	295, // 353: kandev.plugin.v1.Host.ListWorkflowsExact:input_type -> kandev.plugin.v1.ListWorkflowsExactRequest
-	297, // 354: kandev.plugin.v1.Host.ListWorkflowStepsExact:input_type -> kandev.plugin.v1.ListWorkflowStepsExactRequest
-	299, // 355: kandev.plugin.v1.Host.ListTasksExact:input_type -> kandev.plugin.v1.ListTasksExactRequest
-	301, // 356: kandev.plugin.v1.Host.GetTaskExact:input_type -> kandev.plugin.v1.GetTaskExactRequest
-	303, // 357: kandev.plugin.v1.Host.ListSessionsExact:input_type -> kandev.plugin.v1.ListSessionsExactRequest
-	305, // 358: kandev.plugin.v1.Host.ListPendingInteractionsExact:input_type -> kandev.plugin.v1.ListPendingInteractionsExactRequest
-	307, // 359: kandev.plugin.v1.Host.GetInteractionExact:input_type -> kandev.plugin.v1.GetInteractionExactRequest
-	309, // 360: kandev.plugin.v1.Host.ListSanitizedMessagesExact:input_type -> kandev.plugin.v1.ListSanitizedMessagesExactRequest
-	311, // 361: kandev.plugin.v1.Host.ListTaskInboxExact:input_type -> kandev.plugin.v1.ListTaskInboxExactRequest
-	313, // 362: kandev.plugin.v1.Host.GetTaskDirectiveExact:input_type -> kandev.plugin.v1.GetTaskDirectiveExactRequest
-	315, // 363: kandev.plugin.v1.Host.ListTaskDirectivesExact:input_type -> kandev.plugin.v1.ListTaskDirectivesExactRequest
-	317, // 364: kandev.plugin.v1.Host.GetTaskRelationsExact:input_type -> kandev.plugin.v1.GetTaskRelationsExactRequest
-	319, // 365: kandev.plugin.v1.Host.ListTaskRelationsExact:input_type -> kandev.plugin.v1.ListTaskRelationsExactRequest
-	321, // 366: kandev.plugin.v1.Host.ListPendingTaskTransitionsExact:input_type -> kandev.plugin.v1.ListPendingTaskTransitionsExactRequest
-	323, // 367: kandev.plugin.v1.Host.ListChangeRequestEvidenceExact:input_type -> kandev.plugin.v1.ListChangeRequestEvidenceExactRequest
-	325, // 368: kandev.plugin.v1.Host.ListTaskUsageExact:input_type -> kandev.plugin.v1.ListTaskUsageExactRequest
-	330, // 369: kandev.plugin.v1.Host.ListAutomationDefinitionsExact:input_type -> kandev.plugin.v1.ListAutomationDefinitionsExactRequest
-	334, // 370: kandev.plugin.v1.Host.ListAutomationRunsExact:input_type -> kandev.plugin.v1.ListAutomationRunsExactRequest
-	336, // 371: kandev.plugin.v1.Host.GetAutomationRunExact:input_type -> kandev.plugin.v1.GetAutomationRunExactRequest
-	137, // 372: kandev.plugin.v1.Host.GetState:input_type -> kandev.plugin.v1.GetStateRequest
-	139, // 373: kandev.plugin.v1.Host.SetState:input_type -> kandev.plugin.v1.SetStateRequest
-	141, // 374: kandev.plugin.v1.Host.DeleteState:input_type -> kandev.plugin.v1.DeleteStateRequest
-	143, // 375: kandev.plugin.v1.Host.ListState:input_type -> kandev.plugin.v1.ListStateRequest
-	154, // 376: kandev.plugin.v1.Host.RevealSecret:input_type -> kandev.plugin.v1.RevealSecretRequest
-	156, // 377: kandev.plugin.v1.Host.EmitEvent:input_type -> kandev.plugin.v1.EmitEventRequest
-	148, // 378: kandev.plugin.v1.Host.GetSecret:input_type -> kandev.plugin.v1.GetSecretRequest
-	150, // 379: kandev.plugin.v1.Host.SetSecret:input_type -> kandev.plugin.v1.SetSecretRequest
-	152, // 380: kandev.plugin.v1.Host.DeleteSecret:input_type -> kandev.plugin.v1.DeleteSecretRequest
-	146, // 381: kandev.plugin.v1.Host.GetConfig:input_type -> kandev.plugin.v1.GetConfigRequest
-	165, // 382: kandev.plugin.v1.Host.ListTasks:input_type -> kandev.plugin.v1.ListTasksRequest
-	167, // 383: kandev.plugin.v1.Host.GetTask:input_type -> kandev.plugin.v1.GetTaskRequest
-	170, // 384: kandev.plugin.v1.Host.ListTaskStepTransitions:input_type -> kandev.plugin.v1.ListTaskStepTransitionsRequest
-	173, // 385: kandev.plugin.v1.Host.ListWorkspaces:input_type -> kandev.plugin.v1.ListWorkspacesRequest
-	176, // 386: kandev.plugin.v1.Host.ListWorkflows:input_type -> kandev.plugin.v1.ListWorkflowsRequest
-	182, // 387: kandev.plugin.v1.Host.ListWorkflowSteps:input_type -> kandev.plugin.v1.ListWorkflowStepsRequest
-	179, // 388: kandev.plugin.v1.Host.ListWorkflowTransitionGroups:input_type -> kandev.plugin.v1.ListWorkflowTransitionGroupsRequest
-	185, // 389: kandev.plugin.v1.Host.ListAgentProfiles:input_type -> kandev.plugin.v1.ListAgentProfilesRequest
-	188, // 390: kandev.plugin.v1.Host.ListExecutorProfiles:input_type -> kandev.plugin.v1.ListExecutorProfilesRequest
-	211, // 391: kandev.plugin.v1.Host.CheckpointExecutorResource:input_type -> kandev.plugin.v1.CheckpointExecutorResourceRequest
-	213, // 392: kandev.plugin.v1.Host.ReportExecutorProgress:input_type -> kandev.plugin.v1.ReportExecutorProgressRequest
-	215, // 393: kandev.plugin.v1.Host.ReadExecutorRuntimeArtifact:input_type -> kandev.plugin.v1.ReadExecutorRuntimeArtifactRequest
-	218, // 394: kandev.plugin.v1.Host.ListRepositories:input_type -> kandev.plugin.v1.ListRepositoriesRequest
-	222, // 395: kandev.plugin.v1.Host.ListSessions:input_type -> kandev.plugin.v1.ListSessionsRequest
-	225, // 396: kandev.plugin.v1.Host.ListSessionCodeStats:input_type -> kandev.plugin.v1.ListSessionCodeStatsRequest
-	229, // 397: kandev.plugin.v1.Host.ListMessages:input_type -> kandev.plugin.v1.ListMessagesRequest
-	235, // 398: kandev.plugin.v1.Host.ListPendingInteractions:input_type -> kandev.plugin.v1.ListPendingInteractionsRequest
-	237, // 399: kandev.plugin.v1.Host.GetInteraction:input_type -> kandev.plugin.v1.GetInteractionRequest
-	246, // 400: kandev.plugin.v1.Host.InvokeUtilityAgent:input_type -> kandev.plugin.v1.InvokeUtilityAgentRequest
-	247, // 401: kandev.plugin.v1.Host.InvokeUtilityAgentWithOptions:input_type -> kandev.plugin.v1.InvokeUtilityAgentWithOptionsRequest
-	249, // 402: kandev.plugin.v1.Host.CreateTask:input_type -> kandev.plugin.v1.CreateTaskRequest
-	254, // 403: kandev.plugin.v1.Host.UpdateTask:input_type -> kandev.plugin.v1.UpdateTaskRequest
-	256, // 404: kandev.plugin.v1.Host.MoveTask:input_type -> kandev.plugin.v1.MoveTaskRequest
-	258, // 405: kandev.plugin.v1.Host.SendMessage:input_type -> kandev.plugin.v1.SendMessageRequest
-	260, // 406: kandev.plugin.v1.Host.PreviewPluginOwnedTaskTree:input_type -> kandev.plugin.v1.PreviewPluginOwnedTaskTreeRequest
-	262, // 407: kandev.plugin.v1.Host.DeletePluginOwnedTaskTree:input_type -> kandev.plugin.v1.DeletePluginOwnedTaskTreeRequest
-	267, // 408: kandev.plugin.v1.Host.EnsureAgentConversation:input_type -> kandev.plugin.v1.EnsureAgentConversationRequest
-	269, // 409: kandev.plugin.v1.Host.DispatchAgentConversation:input_type -> kandev.plugin.v1.DispatchAgentConversationRequest
-	271, // 410: kandev.plugin.v1.Host.DeleteAgentConversation:input_type -> kandev.plugin.v1.DeleteAgentConversationRequest
-	239, // 411: kandev.plugin.v1.Host.RespondToPermission:input_type -> kandev.plugin.v1.RespondToPermissionRequest
-	242, // 412: kandev.plugin.v1.Host.AnswerClarification:input_type -> kandev.plugin.v1.AnswerClarificationRequest
-	244, // 413: kandev.plugin.v1.Host.CancelClarification:input_type -> kandev.plugin.v1.CancelClarificationRequest
-	119, // 414: kandev.plugin.v1.Plugin.DeliverEvent:output_type -> kandev.plugin.v1.EventAck
-	124, // 415: kandev.plugin.v1.Plugin.HandleWebhook:output_type -> kandev.plugin.v1.WebhookResponse
-	274, // 416: kandev.plugin.v1.Plugin.DescribeAutomationCondition:output_type -> kandev.plugin.v1.AutomationConditionResponse
-	276, // 417: kandev.plugin.v1.Plugin.VerifyAutomationWebhook:output_type -> kandev.plugin.v1.AutomationWebhookResponse
-	127, // 418: kandev.plugin.v1.Plugin.HandleAction:output_type -> kandev.plugin.v1.PluginActionResponse
-	129, // 419: kandev.plugin.v1.Plugin.SearchEntityReferences:output_type -> kandev.plugin.v1.SearchEntityReferencesResponse
-	132, // 420: kandev.plugin.v1.Plugin.AuthorizeEntityReference:output_type -> kandev.plugin.v1.AuthorizeEntityReferenceResponse
-	134, // 421: kandev.plugin.v1.Plugin.ResolveGitCredential:output_type -> kandev.plugin.v1.ResolveGitCredentialResponse
-	136, // 422: kandev.plugin.v1.Plugin.GetGitCredentialBinding:output_type -> kandev.plugin.v1.GitCredentialBindingResponse
-	122, // 423: kandev.plugin.v1.Plugin.InvokeAgentTool:output_type -> kandev.plugin.v1.AgentToolResponse
-	197, // 424: kandev.plugin.v1.Plugin.ValidateExecutorProfile:output_type -> kandev.plugin.v1.ValidateExecutorProfileResponse
-	199, // 425: kandev.plugin.v1.Plugin.ProvisionExecutorEnvironment:output_type -> kandev.plugin.v1.ProvisionExecutorEnvironmentResponse
-	201, // 426: kandev.plugin.v1.Plugin.RecoverExecutorOperation:output_type -> kandev.plugin.v1.RecoverExecutorOperationResponse
-	203, // 427: kandev.plugin.v1.Plugin.AttachExecutorEnvironment:output_type -> kandev.plugin.v1.AttachExecutorEnvironmentResponse
-	205, // 428: kandev.plugin.v1.Plugin.InspectExecutorEnvironment:output_type -> kandev.plugin.v1.InspectExecutorEnvironmentResponse
-	208, // 429: kandev.plugin.v1.Plugin.ResolveExecutorConnection:output_type -> kandev.plugin.v1.ResolveExecutorConnectionResponse
-	210, // 430: kandev.plugin.v1.Plugin.DestroyExecutorEnvironment:output_type -> kandev.plugin.v1.DestroyExecutorEnvironmentResponse
-	7,   // 431: kandev.plugin.v1.Host.GetCapabilityContext:output_type -> kandev.plugin.v1.GetCapabilityContextResponse
-	11,  // 432: kandev.plugin.v1.Host.UpdateTaskExact:output_type -> kandev.plugin.v1.UpdateTaskExactResponse
-	13,  // 433: kandev.plugin.v1.Host.CreateTaskExact:output_type -> kandev.plugin.v1.CreateTaskExactResponse
-	15,  // 434: kandev.plugin.v1.Host.SetTaskLabelsExact:output_type -> kandev.plugin.v1.SetTaskLabelsExactResponse
-	17,  // 435: kandev.plugin.v1.Host.AssignTaskExact:output_type -> kandev.plugin.v1.AssignTaskExactResponse
-	19,  // 436: kandev.plugin.v1.Host.MoveTaskExact:output_type -> kandev.plugin.v1.MoveTaskExactResponse
-	21,  // 437: kandev.plugin.v1.Host.ArchiveTaskExact:output_type -> kandev.plugin.v1.ArchiveTaskExactResponse
-	23,  // 438: kandev.plugin.v1.Host.AddTaskRelationExact:output_type -> kandev.plugin.v1.AddTaskRelationExactResponse
-	25,  // 439: kandev.plugin.v1.Host.RemoveTaskRelationExact:output_type -> kandev.plugin.v1.RemoveTaskRelationExactResponse
-	27,  // 440: kandev.plugin.v1.Host.SendTaskMessageExact:output_type -> kandev.plugin.v1.SendTaskMessageExactResponse
-	65,  // 441: kandev.plugin.v1.Host.IssueTaskDirectiveExact:output_type -> kandev.plugin.v1.IssueTaskDirectiveExactResponse
-	67,  // 442: kandev.plugin.v1.Host.ResolveTaskDirectiveExact:output_type -> kandev.plugin.v1.ResolveTaskDirectiveExactResponse
-	32,  // 443: kandev.plugin.v1.Host.AcquireTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
-	32,  // 444: kandev.plugin.v1.Host.ReleaseTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
-	32,  // 445: kandev.plugin.v1.Host.TransferTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
-	41,  // 446: kandev.plugin.v1.Host.SetTaskCompletionCriteriaExact:output_type -> kandev.plugin.v1.TaskCompletionGateExactResponse
-	41,  // 447: kandev.plugin.v1.Host.VerifyTaskCompletionCriterionExact:output_type -> kandev.plugin.v1.TaskCompletionGateExactResponse
-	55,  // 448: kandev.plugin.v1.Host.ApplyWorkspaceAdministrationExact:output_type -> kandev.plugin.v1.WorkspaceAdministrationExactResponse
-	59,  // 449: kandev.plugin.v1.Host.GetSourceIssueCapabilitiesExact:output_type -> kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse
-	63,  // 450: kandev.plugin.v1.Host.CommentSourceIssueExact:output_type -> kandev.plugin.v1.SourceIssueWritebackExactResponse
-	63,  // 451: kandev.plugin.v1.Host.TransitionSourceIssueExact:output_type -> kandev.plugin.v1.SourceIssueWritebackExactResponse
-	71,  // 452: kandev.plugin.v1.Host.EnsureManagedAgentConversationExact:output_type -> kandev.plugin.v1.EnsureManagedAgentConversationExactResponse
-	73,  // 453: kandev.plugin.v1.Host.GetManagedAgentConversationStatusExact:output_type -> kandev.plugin.v1.GetManagedAgentConversationStatusExactResponse
-	75,  // 454: kandev.plugin.v1.Host.ListManagedAgentConversationsExact:output_type -> kandev.plugin.v1.ListManagedAgentConversationsExactResponse
-	77,  // 455: kandev.plugin.v1.Host.SetManagedAgentConversationPausedExact:output_type -> kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse
-	79,  // 456: kandev.plugin.v1.Host.DeleteManagedAgentConversationExact:output_type -> kandev.plugin.v1.DeleteManagedAgentConversationExactResponse
-	82,  // 457: kandev.plugin.v1.Host.EnqueueManagedAgentInputExact:output_type -> kandev.plugin.v1.EnqueueManagedAgentInputExactResponse
-	84,  // 458: kandev.plugin.v1.Host.GetManagedAgentInputExact:output_type -> kandev.plugin.v1.GetManagedAgentInputExactResponse
-	86,  // 459: kandev.plugin.v1.Host.ListManagedAgentInputsExact:output_type -> kandev.plugin.v1.ListManagedAgentInputsExactResponse
-	88,  // 460: kandev.plugin.v1.Host.CancelManagedAgentInputExact:output_type -> kandev.plugin.v1.CancelManagedAgentInputExactResponse
-	90,  // 461: kandev.plugin.v1.Host.DispatchManagedAgentConversationExact:output_type -> kandev.plugin.v1.DispatchManagedAgentConversationExactResponse
-	94,  // 462: kandev.plugin.v1.Host.ListManagedConversationSchedulesExact:output_type -> kandev.plugin.v1.ListManagedConversationSchedulesExactResponse
-	99,  // 463: kandev.plugin.v1.Host.CreateManagedConversationScheduleExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
-	99,  // 464: kandev.plugin.v1.Host.UpdateManagedConversationScheduleExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
-	99,  // 465: kandev.plugin.v1.Host.SetManagedConversationScheduleEnabledExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
-	9,   // 466: kandev.plugin.v1.Host.DeleteManagedConversationScheduleExact:output_type -> kandev.plugin.v1.HostCommandResult
-	101, // 467: kandev.plugin.v1.Host.EnsureTaskRunExact:output_type -> kandev.plugin.v1.EnsureTaskRunExactResponse
-	103, // 468: kandev.plugin.v1.Host.StopTaskRunExact:output_type -> kandev.plugin.v1.StopTaskRunExactResponse
-	105, // 469: kandev.plugin.v1.Host.RecoverSessionExact:output_type -> kandev.plugin.v1.RecoverSessionExactResponse
-	107, // 470: kandev.plugin.v1.Host.CancelPendingTaskTransitionExact:output_type -> kandev.plugin.v1.CancelPendingTaskTransitionExactResponse
-	110, // 471: kandev.plugin.v1.Host.GetSessionModeContextExact:output_type -> kandev.plugin.v1.GetSessionModeContextExactResponse
-	112, // 472: kandev.plugin.v1.Host.SetSessionModeExact:output_type -> kandev.plugin.v1.SetSessionModeExactResponse
-	115, // 473: kandev.plugin.v1.Host.RespondPermissionExact:output_type -> kandev.plugin.v1.RespondPermissionExactResponse
-	117, // 474: kandev.plugin.v1.Host.AnswerClarificationExact:output_type -> kandev.plugin.v1.AnswerClarificationExactResponse
-	294, // 475: kandev.plugin.v1.Host.ListWorkspacesExact:output_type -> kandev.plugin.v1.ListWorkspacesExactResponse
-	296, // 476: kandev.plugin.v1.Host.ListWorkflowsExact:output_type -> kandev.plugin.v1.ListWorkflowsExactResponse
-	298, // 477: kandev.plugin.v1.Host.ListWorkflowStepsExact:output_type -> kandev.plugin.v1.ListWorkflowStepsExactResponse
-	300, // 478: kandev.plugin.v1.Host.ListTasksExact:output_type -> kandev.plugin.v1.ListTasksExactResponse
-	302, // 479: kandev.plugin.v1.Host.GetTaskExact:output_type -> kandev.plugin.v1.GetTaskExactResponse
-	304, // 480: kandev.plugin.v1.Host.ListSessionsExact:output_type -> kandev.plugin.v1.ListSessionsExactResponse
-	306, // 481: kandev.plugin.v1.Host.ListPendingInteractionsExact:output_type -> kandev.plugin.v1.ListPendingInteractionsExactResponse
-	308, // 482: kandev.plugin.v1.Host.GetInteractionExact:output_type -> kandev.plugin.v1.GetInteractionExactResponse
-	310, // 483: kandev.plugin.v1.Host.ListSanitizedMessagesExact:output_type -> kandev.plugin.v1.ListSanitizedMessagesExactResponse
-	312, // 484: kandev.plugin.v1.Host.ListTaskInboxExact:output_type -> kandev.plugin.v1.ListTaskInboxExactResponse
-	314, // 485: kandev.plugin.v1.Host.GetTaskDirectiveExact:output_type -> kandev.plugin.v1.GetTaskDirectiveExactResponse
-	316, // 486: kandev.plugin.v1.Host.ListTaskDirectivesExact:output_type -> kandev.plugin.v1.ListTaskDirectivesExactResponse
-	318, // 487: kandev.plugin.v1.Host.GetTaskRelationsExact:output_type -> kandev.plugin.v1.GetTaskRelationsExactResponse
-	320, // 488: kandev.plugin.v1.Host.ListTaskRelationsExact:output_type -> kandev.plugin.v1.ListTaskRelationsExactResponse
-	322, // 489: kandev.plugin.v1.Host.ListPendingTaskTransitionsExact:output_type -> kandev.plugin.v1.ListPendingTaskTransitionsExactResponse
-	324, // 490: kandev.plugin.v1.Host.ListChangeRequestEvidenceExact:output_type -> kandev.plugin.v1.ListChangeRequestEvidenceExactResponse
-	326, // 491: kandev.plugin.v1.Host.ListTaskUsageExact:output_type -> kandev.plugin.v1.ListTaskUsageExactResponse
-	331, // 492: kandev.plugin.v1.Host.ListAutomationDefinitionsExact:output_type -> kandev.plugin.v1.ListAutomationDefinitionsExactResponse
-	335, // 493: kandev.plugin.v1.Host.ListAutomationRunsExact:output_type -> kandev.plugin.v1.ListAutomationRunsExactResponse
-	337, // 494: kandev.plugin.v1.Host.GetAutomationRunExact:output_type -> kandev.plugin.v1.GetAutomationRunExactResponse
-	138, // 495: kandev.plugin.v1.Host.GetState:output_type -> kandev.plugin.v1.GetStateResponse
-	140, // 496: kandev.plugin.v1.Host.SetState:output_type -> kandev.plugin.v1.SetStateResponse
-	142, // 497: kandev.plugin.v1.Host.DeleteState:output_type -> kandev.plugin.v1.DeleteStateResponse
-	144, // 498: kandev.plugin.v1.Host.ListState:output_type -> kandev.plugin.v1.ListStateResponse
-	155, // 499: kandev.plugin.v1.Host.RevealSecret:output_type -> kandev.plugin.v1.RevealSecretResponse
-	157, // 500: kandev.plugin.v1.Host.EmitEvent:output_type -> kandev.plugin.v1.EmitEventResponse
-	149, // 501: kandev.plugin.v1.Host.GetSecret:output_type -> kandev.plugin.v1.GetSecretResponse
-	151, // 502: kandev.plugin.v1.Host.SetSecret:output_type -> kandev.plugin.v1.SetSecretResponse
-	153, // 503: kandev.plugin.v1.Host.DeleteSecret:output_type -> kandev.plugin.v1.DeleteSecretResponse
-	147, // 504: kandev.plugin.v1.Host.GetConfig:output_type -> kandev.plugin.v1.GetConfigResponse
-	166, // 505: kandev.plugin.v1.Host.ListTasks:output_type -> kandev.plugin.v1.ListTasksResponse
-	168, // 506: kandev.plugin.v1.Host.GetTask:output_type -> kandev.plugin.v1.GetTaskResponse
-	171, // 507: kandev.plugin.v1.Host.ListTaskStepTransitions:output_type -> kandev.plugin.v1.ListTaskStepTransitionsResponse
-	174, // 508: kandev.plugin.v1.Host.ListWorkspaces:output_type -> kandev.plugin.v1.ListWorkspacesResponse
-	177, // 509: kandev.plugin.v1.Host.ListWorkflows:output_type -> kandev.plugin.v1.ListWorkflowsResponse
-	183, // 510: kandev.plugin.v1.Host.ListWorkflowSteps:output_type -> kandev.plugin.v1.ListWorkflowStepsResponse
-	180, // 511: kandev.plugin.v1.Host.ListWorkflowTransitionGroups:output_type -> kandev.plugin.v1.ListWorkflowTransitionGroupsResponse
-	186, // 512: kandev.plugin.v1.Host.ListAgentProfiles:output_type -> kandev.plugin.v1.ListAgentProfilesResponse
-	189, // 513: kandev.plugin.v1.Host.ListExecutorProfiles:output_type -> kandev.plugin.v1.ListExecutorProfilesResponse
-	212, // 514: kandev.plugin.v1.Host.CheckpointExecutorResource:output_type -> kandev.plugin.v1.CheckpointExecutorResourceResponse
-	214, // 515: kandev.plugin.v1.Host.ReportExecutorProgress:output_type -> kandev.plugin.v1.ReportExecutorProgressResponse
-	216, // 516: kandev.plugin.v1.Host.ReadExecutorRuntimeArtifact:output_type -> kandev.plugin.v1.ExecutorRuntimeArtifactChunk
-	219, // 517: kandev.plugin.v1.Host.ListRepositories:output_type -> kandev.plugin.v1.ListRepositoriesResponse
-	223, // 518: kandev.plugin.v1.Host.ListSessions:output_type -> kandev.plugin.v1.ListSessionsResponse
-	226, // 519: kandev.plugin.v1.Host.ListSessionCodeStats:output_type -> kandev.plugin.v1.ListSessionCodeStatsResponse
-	230, // 520: kandev.plugin.v1.Host.ListMessages:output_type -> kandev.plugin.v1.ListMessagesResponse
-	236, // 521: kandev.plugin.v1.Host.ListPendingInteractions:output_type -> kandev.plugin.v1.ListPendingInteractionsResponse
-	238, // 522: kandev.plugin.v1.Host.GetInteraction:output_type -> kandev.plugin.v1.GetInteractionResponse
-	248, // 523: kandev.plugin.v1.Host.InvokeUtilityAgent:output_type -> kandev.plugin.v1.InvokeUtilityAgentResponse
-	248, // 524: kandev.plugin.v1.Host.InvokeUtilityAgentWithOptions:output_type -> kandev.plugin.v1.InvokeUtilityAgentResponse
-	253, // 525: kandev.plugin.v1.Host.CreateTask:output_type -> kandev.plugin.v1.CreateTaskResponse
-	255, // 526: kandev.plugin.v1.Host.UpdateTask:output_type -> kandev.plugin.v1.UpdateTaskResponse
-	257, // 527: kandev.plugin.v1.Host.MoveTask:output_type -> kandev.plugin.v1.MoveTaskResponse
-	259, // 528: kandev.plugin.v1.Host.SendMessage:output_type -> kandev.plugin.v1.SendMessageResponse
-	261, // 529: kandev.plugin.v1.Host.PreviewPluginOwnedTaskTree:output_type -> kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse
-	263, // 530: kandev.plugin.v1.Host.DeletePluginOwnedTaskTree:output_type -> kandev.plugin.v1.DeletePluginOwnedTaskTreeResponse
-	268, // 531: kandev.plugin.v1.Host.EnsureAgentConversation:output_type -> kandev.plugin.v1.EnsureAgentConversationResponse
-	270, // 532: kandev.plugin.v1.Host.DispatchAgentConversation:output_type -> kandev.plugin.v1.DispatchAgentConversationResponse
-	272, // 533: kandev.plugin.v1.Host.DeleteAgentConversation:output_type -> kandev.plugin.v1.DeleteAgentConversationResponse
-	240, // 534: kandev.plugin.v1.Host.RespondToPermission:output_type -> kandev.plugin.v1.RespondToPermissionResponse
-	243, // 535: kandev.plugin.v1.Host.AnswerClarification:output_type -> kandev.plugin.v1.AnswerClarificationResponse
-	245, // 536: kandev.plugin.v1.Host.CancelClarification:output_type -> kandev.plugin.v1.CancelClarificationResponse
-	414, // [414:537] is the sub-list for method output_type
-	291, // [291:414] is the sub-list for method input_type
-	291, // [291:291] is the sub-list for extension type_name
-	291, // [291:291] is the sub-list for extension extendee
-	0,   // [0:291] is the sub-list for field type_name
+	294, // 59: kandev.plugin.v1.ResolveTaskDirectiveExactResponse.directive:type_name -> kandev.plugin.v1.TaskDirective
+	9,   // 60: kandev.plugin.v1.ReportTaskChangeRequestExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	293, // 61: kandev.plugin.v1.ReportTaskChangeRequestExactResponse.change_request:type_name -> kandev.plugin.v1.TaskChangeRequest
+	9,   // 62: kandev.plugin.v1.RemoveTaskChangeRequestExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	73,  // 63: kandev.plugin.v1.EnsureManagedAgentConversationExactRequest.spec:type_name -> kandev.plugin.v1.ManagedAgentConversationSpec
+	9,   // 64: kandev.plugin.v1.EnsureManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	72,  // 65: kandev.plugin.v1.EnsureManagedAgentConversationExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	72,  // 66: kandev.plugin.v1.GetManagedAgentConversationStatusExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	72,  // 67: kandev.plugin.v1.ListManagedAgentConversationsExactResponse.conversations:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	9,   // 68: kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	72,  // 69: kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	9,   // 70: kandev.plugin.v1.DeleteManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	1,   // 71: kandev.plugin.v1.ManagedAgentInputReceipt.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
+	2,   // 72: kandev.plugin.v1.ManagedAgentInputReceipt.state:type_name -> kandev.plugin.v1.ManagedAgentInputState
+	1,   // 73: kandev.plugin.v1.EnqueueManagedAgentInputExactRequest.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
+	9,   // 74: kandev.plugin.v1.EnqueueManagedAgentInputExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	84,  // 75: kandev.plugin.v1.EnqueueManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
+	84,  // 76: kandev.plugin.v1.GetManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
+	84,  // 77: kandev.plugin.v1.ListManagedAgentInputsExactResponse.inputs:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
+	9,   // 78: kandev.plugin.v1.CancelManagedAgentInputExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	84,  // 79: kandev.plugin.v1.CancelManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
+	1,   // 80: kandev.plugin.v1.DispatchManagedAgentConversationExactRequest.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
+	9,   // 81: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	3,   // 82: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.dispatch_status:type_name -> kandev.plugin.v1.ManagedAgentDispatchStatus
+	72,  // 83: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	95,  // 84: kandev.plugin.v1.ManagedConversationSchedule.triggers:type_name -> kandev.plugin.v1.ManagedConversationScheduleTrigger
+	96,  // 85: kandev.plugin.v1.ListManagedConversationSchedulesExactResponse.schedules:type_name -> kandev.plugin.v1.ManagedConversationSchedule
+	96,  // 86: kandev.plugin.v1.CreateManagedConversationScheduleExactRequest.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
+	96,  // 87: kandev.plugin.v1.UpdateManagedConversationScheduleExactRequest.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
+	9,   // 88: kandev.plugin.v1.ManagedConversationScheduleExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	96,  // 89: kandev.plugin.v1.ManagedConversationScheduleExactResponse.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
+	9,   // 90: kandev.plugin.v1.EnsureTaskRunExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	9,   // 91: kandev.plugin.v1.StopTaskRunExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	9,   // 92: kandev.plugin.v1.RecoverSessionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	9,   // 93: kandev.plugin.v1.CancelPendingTaskTransitionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	112, // 94: kandev.plugin.v1.GetSessionModeContextExactResponse.available_modes:type_name -> kandev.plugin.v1.SessionModeOption
+	9,   // 95: kandev.plugin.v1.SetSessionModeExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	9,   // 96: kandev.plugin.v1.RespondPermissionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	237, // 97: kandev.plugin.v1.RespondPermissionExactResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	245, // 98: kandev.plugin.v1.AnswerClarificationExactRequest.answers:type_name -> kandev.plugin.v1.ClarificationAnswer
+	9,   // 99: kandev.plugin.v1.AnswerClarificationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	237, // 100: kandev.plugin.v1.AnswerClarificationExactResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	352, // 101: kandev.plugin.v1.Event.payload:type_name -> google.protobuf.Struct
+	352, // 102: kandev.plugin.v1.AgentToolRequest.arguments:type_name -> google.protobuf.Struct
+	125, // 103: kandev.plugin.v1.AgentToolRequest.context:type_name -> kandev.plugin.v1.AgentToolContext
+	352, // 104: kandev.plugin.v1.AgentToolResponse.structured_content:type_name -> google.protobuf.Struct
+	344, // 105: kandev.plugin.v1.WebhookRequest.headers:type_name -> kandev.plugin.v1.WebhookRequest.HeadersEntry
+	345, // 106: kandev.plugin.v1.WebhookResponse.headers:type_name -> kandev.plugin.v1.WebhookResponse.HeadersEntry
+	130, // 107: kandev.plugin.v1.PluginActionRequest.context:type_name -> kandev.plugin.v1.VerifiedActionContext
+	346, // 108: kandev.plugin.v1.PluginActionResponse.headers:type_name -> kandev.plugin.v1.PluginActionResponse.HeadersEntry
+	134, // 109: kandev.plugin.v1.SearchEntityReferencesResponse.candidates:type_name -> kandev.plugin.v1.EntityReferenceCandidate
+	352, // 110: kandev.plugin.v1.EntityReferenceCandidate.attributes:type_name -> google.protobuf.Struct
+	352, // 111: kandev.plugin.v1.AuthorizeEntityReferenceRequest.reference:type_name -> google.protobuf.Struct
+	352, // 112: kandev.plugin.v1.GetStateResponse.value:type_name -> google.protobuf.Struct
+	352, // 113: kandev.plugin.v1.SetStateRequest.value:type_name -> google.protobuf.Struct
+	149, // 114: kandev.plugin.v1.ListStateResponse.entries:type_name -> kandev.plugin.v1.StateEntry
+	352, // 115: kandev.plugin.v1.StateEntry.value:type_name -> google.protobuf.Struct
+	352, // 116: kandev.plugin.v1.GetConfigResponse.config:type_name -> google.protobuf.Struct
+	352, // 117: kandev.plugin.v1.EmitEventRequest.payload:type_name -> google.protobuf.Struct
+	165, // 118: kandev.plugin.v1.Task.repositories:type_name -> kandev.plugin.v1.TaskRepository
+	352, // 119: kandev.plugin.v1.Task.metadata:type_name -> google.protobuf.Struct
+	166, // 120: kandev.plugin.v1.Task.pull_requests:type_name -> kandev.plugin.v1.TaskPullRequest
+	167, // 121: kandev.plugin.v1.Task.depends_on:type_name -> kandev.plugin.v1.TaskDependencyRef
+	167, // 122: kandev.plugin.v1.Task.blocks:type_name -> kandev.plugin.v1.TaskDependencyRef
+	168, // 123: kandev.plugin.v1.ListTasksRequest.filter:type_name -> kandev.plugin.v1.TaskFilter
+	162, // 124: kandev.plugin.v1.ListTasksRequest.page:type_name -> kandev.plugin.v1.Page
+	164, // 125: kandev.plugin.v1.ListTasksResponse.tasks:type_name -> kandev.plugin.v1.Task
+	163, // 126: kandev.plugin.v1.ListTasksResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	164, // 127: kandev.plugin.v1.GetTaskResponse.task:type_name -> kandev.plugin.v1.Task
+	162, // 128: kandev.plugin.v1.ListTaskStepTransitionsRequest.page:type_name -> kandev.plugin.v1.Page
+	173, // 129: kandev.plugin.v1.ListTaskStepTransitionsResponse.items:type_name -> kandev.plugin.v1.TaskStepTransition
+	163, // 130: kandev.plugin.v1.ListTaskStepTransitionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	162, // 131: kandev.plugin.v1.ListWorkspacesRequest.page:type_name -> kandev.plugin.v1.Page
+	176, // 132: kandev.plugin.v1.ListWorkspacesResponse.workspaces:type_name -> kandev.plugin.v1.Workspace
+	163, // 133: kandev.plugin.v1.ListWorkspacesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	162, // 134: kandev.plugin.v1.ListWorkflowsRequest.page:type_name -> kandev.plugin.v1.Page
+	179, // 135: kandev.plugin.v1.ListWorkflowsResponse.workflows:type_name -> kandev.plugin.v1.Workflow
+	163, // 136: kandev.plugin.v1.ListWorkflowsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	162, // 137: kandev.plugin.v1.ListWorkflowTransitionGroupsRequest.page:type_name -> kandev.plugin.v1.Page
+	182, // 138: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse.items:type_name -> kandev.plugin.v1.WorkflowTransitionGroup
+	163, // 139: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	185, // 140: kandev.plugin.v1.ListWorkflowStepsResponse.steps:type_name -> kandev.plugin.v1.WorkflowStep
+	162, // 141: kandev.plugin.v1.ListAgentProfilesRequest.page:type_name -> kandev.plugin.v1.Page
+	188, // 142: kandev.plugin.v1.ListAgentProfilesResponse.profiles:type_name -> kandev.plugin.v1.AgentProfile
+	163, // 143: kandev.plugin.v1.ListAgentProfilesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	162, // 144: kandev.plugin.v1.ListExecutorProfilesRequest.page:type_name -> kandev.plugin.v1.Page
+	191, // 145: kandev.plugin.v1.ListExecutorProfilesResponse.profiles:type_name -> kandev.plugin.v1.ExecutorProfile
+	163, // 146: kandev.plugin.v1.ListExecutorProfilesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	347, // 147: kandev.plugin.v1.ExecutorProfileSnapshot.config:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot.ConfigEntry
+	348, // 148: kandev.plugin.v1.ExecutorProfileSnapshot.secret_values:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot.SecretValuesEntry
+	196, // 149: kandev.plugin.v1.ExecutorProviderError.fields:type_name -> kandev.plugin.v1.ExecutorProviderFieldError
+	198, // 150: kandev.plugin.v1.ExecutorResourceDescriptor.capabilities:type_name -> kandev.plugin.v1.ExecutorProviderCapabilities
+	194, // 151: kandev.plugin.v1.ValidateExecutorProfileRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	195, // 152: kandev.plugin.v1.ValidateExecutorProfileRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
+	196, // 153: kandev.plugin.v1.ValidateExecutorProfileResponse.field_errors:type_name -> kandev.plugin.v1.ExecutorProviderFieldError
+	198, // 154: kandev.plugin.v1.ValidateExecutorProfileResponse.capabilities:type_name -> kandev.plugin.v1.ExecutorProviderCapabilities
+	197, // 155: kandev.plugin.v1.ValidateExecutorProfileResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	194, // 156: kandev.plugin.v1.ProvisionExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	195, // 157: kandev.plugin.v1.ProvisionExecutorEnvironmentRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
+	199, // 158: kandev.plugin.v1.ProvisionExecutorEnvironmentResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	197, // 159: kandev.plugin.v1.ProvisionExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	194, // 160: kandev.plugin.v1.RecoverExecutorOperationRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	195, // 161: kandev.plugin.v1.RecoverExecutorOperationRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
+	199, // 162: kandev.plugin.v1.RecoverExecutorOperationResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	197, // 163: kandev.plugin.v1.RecoverExecutorOperationResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	194, // 164: kandev.plugin.v1.AttachExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	199, // 165: kandev.plugin.v1.AttachExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	199, // 166: kandev.plugin.v1.AttachExecutorEnvironmentResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	197, // 167: kandev.plugin.v1.AttachExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	194, // 168: kandev.plugin.v1.InspectExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	199, // 169: kandev.plugin.v1.InspectExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	197, // 170: kandev.plugin.v1.InspectExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	194, // 171: kandev.plugin.v1.ResolveExecutorConnectionRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	199, // 172: kandev.plugin.v1.ResolveExecutorConnectionRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	349, // 173: kandev.plugin.v1.ExecutorConnectionLease.http_headers:type_name -> kandev.plugin.v1.ExecutorConnectionLease.HttpHeadersEntry
+	350, // 174: kandev.plugin.v1.ExecutorConnectionLease.websocket_headers:type_name -> kandev.plugin.v1.ExecutorConnectionLease.WebsocketHeadersEntry
+	211, // 175: kandev.plugin.v1.ResolveExecutorConnectionResponse.lease:type_name -> kandev.plugin.v1.ExecutorConnectionLease
+	197, // 176: kandev.plugin.v1.ResolveExecutorConnectionResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	194, // 177: kandev.plugin.v1.DestroyExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	199, // 178: kandev.plugin.v1.DestroyExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	197, // 179: kandev.plugin.v1.DestroyExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	194, // 180: kandev.plugin.v1.CheckpointExecutorResourceRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	199, // 181: kandev.plugin.v1.CheckpointExecutorResourceRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	194, // 182: kandev.plugin.v1.ReportExecutorProgressRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	194, // 183: kandev.plugin.v1.ReadExecutorRuntimeArtifactRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	162, // 184: kandev.plugin.v1.ListRepositoriesRequest.page:type_name -> kandev.plugin.v1.Page
+	221, // 185: kandev.plugin.v1.ListRepositoriesResponse.repositories:type_name -> kandev.plugin.v1.Repository
+	163, // 186: kandev.plugin.v1.ListRepositoriesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	225, // 187: kandev.plugin.v1.ListSessionsRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
+	162, // 188: kandev.plugin.v1.ListSessionsRequest.page:type_name -> kandev.plugin.v1.Page
+	224, // 189: kandev.plugin.v1.ListSessionsResponse.sessions:type_name -> kandev.plugin.v1.Session
+	163, // 190: kandev.plugin.v1.ListSessionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	225, // 191: kandev.plugin.v1.ListSessionCodeStatsRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
+	162, // 192: kandev.plugin.v1.ListSessionCodeStatsRequest.page:type_name -> kandev.plugin.v1.Page
+	228, // 193: kandev.plugin.v1.ListSessionCodeStatsResponse.stats:type_name -> kandev.plugin.v1.SessionCodeStats
+	163, // 194: kandev.plugin.v1.ListSessionCodeStatsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	232, // 195: kandev.plugin.v1.ListMessagesRequest.filter:type_name -> kandev.plugin.v1.MessageFilter
+	162, // 196: kandev.plugin.v1.ListMessagesRequest.page:type_name -> kandev.plugin.v1.Page
+	231, // 197: kandev.plugin.v1.ListMessagesResponse.messages:type_name -> kandev.plugin.v1.Message
+	163, // 198: kandev.plugin.v1.ListMessagesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	235, // 199: kandev.plugin.v1.InteractionQuestion.options:type_name -> kandev.plugin.v1.InteractionOption
+	235, // 200: kandev.plugin.v1.Interaction.options:type_name -> kandev.plugin.v1.InteractionOption
+	236, // 201: kandev.plugin.v1.Interaction.questions:type_name -> kandev.plugin.v1.InteractionQuestion
+	238, // 202: kandev.plugin.v1.ListPendingInteractionsRequest.filter:type_name -> kandev.plugin.v1.InteractionFilter
+	162, // 203: kandev.plugin.v1.ListPendingInteractionsRequest.page:type_name -> kandev.plugin.v1.Page
+	237, // 204: kandev.plugin.v1.ListPendingInteractionsResponse.interactions:type_name -> kandev.plugin.v1.Interaction
+	163, // 205: kandev.plugin.v1.ListPendingInteractionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	237, // 206: kandev.plugin.v1.GetInteractionResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	237, // 207: kandev.plugin.v1.RespondToPermissionResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	245, // 208: kandev.plugin.v1.AnswerClarificationRequest.answers:type_name -> kandev.plugin.v1.ClarificationAnswer
+	237, // 209: kandev.plugin.v1.AnswerClarificationResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	237, // 210: kandev.plugin.v1.CancelClarificationResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	254, // 211: kandev.plugin.v1.CreateTaskRequest.repositories:type_name -> kandev.plugin.v1.PluginTaskRepository
+	256, // 212: kandev.plugin.v1.CreateTaskRequest.launch:type_name -> kandev.plugin.v1.PluginTaskLaunchOptions
+	352, // 213: kandev.plugin.v1.CreateTaskRequest.metadata:type_name -> google.protobuf.Struct
+	255, // 214: kandev.plugin.v1.PluginTaskRepository.remote:type_name -> kandev.plugin.v1.RemoteRepositoryDescriptor
+	164, // 215: kandev.plugin.v1.CreateTaskResponse.task:type_name -> kandev.plugin.v1.Task
+	164, // 216: kandev.plugin.v1.UpdateTaskResponse.task:type_name -> kandev.plugin.v1.Task
+	164, // 217: kandev.plugin.v1.MoveTaskResponse.task:type_name -> kandev.plugin.v1.Task
+	164, // 218: kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse.tasks:type_name -> kandev.plugin.v1.Task
+	270, // 219: kandev.plugin.v1.EnsureAgentConversationRequest.spec:type_name -> kandev.plugin.v1.AgentConversationSpec
+	269, // 220: kandev.plugin.v1.EnsureAgentConversationResponse.conv_descriptor:type_name -> kandev.plugin.v1.AgentConversationDescriptor
+	269, // 221: kandev.plugin.v1.DispatchAgentConversationResponse.conv_descriptor:type_name -> kandev.plugin.v1.AgentConversationDescriptor
+	351, // 222: kandev.plugin.v1.AutomationWebhookRequest.headers:type_name -> kandev.plugin.v1.AutomationWebhookRequest.HeadersEntry
+	282, // 223: kandev.plugin.v1.ExactReadPageInfo.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	176, // 224: kandev.plugin.v1.ExactWorkspaceObservation.workspace:type_name -> kandev.plugin.v1.Workspace
+	179, // 225: kandev.plugin.v1.ExactWorkflowObservation.workflow:type_name -> kandev.plugin.v1.Workflow
+	185, // 226: kandev.plugin.v1.ExactWorkflowStepObservation.step:type_name -> kandev.plugin.v1.WorkflowStep
+	164, // 227: kandev.plugin.v1.ExactTaskObservation.task:type_name -> kandev.plugin.v1.Task
+	224, // 228: kandev.plugin.v1.ExactSessionObservation.session:type_name -> kandev.plugin.v1.Session
+	237, // 229: kandev.plugin.v1.ExactInteractionObservation.interaction:type_name -> kandev.plugin.v1.Interaction
+	231, // 230: kandev.plugin.v1.ExactMessageObservation.message:type_name -> kandev.plugin.v1.Message
+	281, // 231: kandev.plugin.v1.ListWorkspacesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	284, // 232: kandev.plugin.v1.ListWorkspacesExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkspaceObservation
+	283, // 233: kandev.plugin.v1.ListWorkspacesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 234: kandev.plugin.v1.ListWorkflowsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	285, // 235: kandev.plugin.v1.ListWorkflowsExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkflowObservation
+	283, // 236: kandev.plugin.v1.ListWorkflowsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 237: kandev.plugin.v1.ListWorkflowStepsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	286, // 238: kandev.plugin.v1.ListWorkflowStepsExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkflowStepObservation
+	283, // 239: kandev.plugin.v1.ListWorkflowStepsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	168, // 240: kandev.plugin.v1.ListTasksExactRequest.filter:type_name -> kandev.plugin.v1.TaskFilter
+	281, // 241: kandev.plugin.v1.ListTasksExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	287, // 242: kandev.plugin.v1.ListTasksExactResponse.items:type_name -> kandev.plugin.v1.ExactTaskObservation
+	283, // 243: kandev.plugin.v1.ListTasksExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	287, // 244: kandev.plugin.v1.GetTaskExactResponse.item:type_name -> kandev.plugin.v1.ExactTaskObservation
+	282, // 245: kandev.plugin.v1.GetTaskExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	225, // 246: kandev.plugin.v1.ListSessionsExactRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
+	281, // 247: kandev.plugin.v1.ListSessionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	288, // 248: kandev.plugin.v1.ListSessionsExactResponse.items:type_name -> kandev.plugin.v1.ExactSessionObservation
+	283, // 249: kandev.plugin.v1.ListSessionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	238, // 250: kandev.plugin.v1.ListPendingInteractionsExactRequest.filter:type_name -> kandev.plugin.v1.InteractionFilter
+	281, // 251: kandev.plugin.v1.ListPendingInteractionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	289, // 252: kandev.plugin.v1.ListPendingInteractionsExactResponse.items:type_name -> kandev.plugin.v1.ExactInteractionObservation
+	283, // 253: kandev.plugin.v1.ListPendingInteractionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	289, // 254: kandev.plugin.v1.GetInteractionExactResponse.item:type_name -> kandev.plugin.v1.ExactInteractionObservation
+	282, // 255: kandev.plugin.v1.GetInteractionExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	232, // 256: kandev.plugin.v1.ListSanitizedMessagesExactRequest.filter:type_name -> kandev.plugin.v1.MessageFilter
+	281, // 257: kandev.plugin.v1.ListSanitizedMessagesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	290, // 258: kandev.plugin.v1.ListSanitizedMessagesExactResponse.items:type_name -> kandev.plugin.v1.ExactMessageObservation
+	283, // 259: kandev.plugin.v1.ListSanitizedMessagesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 260: kandev.plugin.v1.ListTaskInboxExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	292, // 261: kandev.plugin.v1.ListTaskInboxExactResponse.items:type_name -> kandev.plugin.v1.TaskInboxItem
+	283, // 262: kandev.plugin.v1.ListTaskInboxExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	294, // 263: kandev.plugin.v1.GetTaskDirectiveExactResponse.item:type_name -> kandev.plugin.v1.TaskDirective
+	282, // 264: kandev.plugin.v1.GetTaskDirectiveExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	281, // 265: kandev.plugin.v1.ListTaskDirectivesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	294, // 266: kandev.plugin.v1.ListTaskDirectivesExactResponse.items:type_name -> kandev.plugin.v1.TaskDirective
+	283, // 267: kandev.plugin.v1.ListTaskDirectivesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 268: kandev.plugin.v1.GetTaskRelationsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	291, // 269: kandev.plugin.v1.GetTaskRelationsExactResponse.items:type_name -> kandev.plugin.v1.TaskRelation
+	283, // 270: kandev.plugin.v1.GetTaskRelationsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 271: kandev.plugin.v1.ListTaskRelationsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	291, // 272: kandev.plugin.v1.ListTaskRelationsExactResponse.items:type_name -> kandev.plugin.v1.TaskRelation
+	283, // 273: kandev.plugin.v1.ListTaskRelationsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 274: kandev.plugin.v1.ListPendingTaskTransitionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	295, // 275: kandev.plugin.v1.ListPendingTaskTransitionsExactResponse.items:type_name -> kandev.plugin.v1.PendingTaskTransition
+	283, // 276: kandev.plugin.v1.ListPendingTaskTransitionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 277: kandev.plugin.v1.ListChangeRequestEvidenceExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	296, // 278: kandev.plugin.v1.ListChangeRequestEvidenceExactResponse.items:type_name -> kandev.plugin.v1.ChangeRequestEvidence
+	283, // 279: kandev.plugin.v1.ListChangeRequestEvidenceExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	281, // 280: kandev.plugin.v1.ListTaskUsageExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	297, // 281: kandev.plugin.v1.ListTaskUsageExactResponse.items:type_name -> kandev.plugin.v1.TaskUsageObservation
+	283, // 282: kandev.plugin.v1.ListTaskUsageExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	333, // 283: kandev.plugin.v1.AutomationDefinitionObservation.triggers:type_name -> kandev.plugin.v1.AutomationTriggerObservation
+	332, // 284: kandev.plugin.v1.ListAutomationDefinitionsExactRequest.filter:type_name -> kandev.plugin.v1.AutomationDefinitionFilter
+	281, // 285: kandev.plugin.v1.ListAutomationDefinitionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	334, // 286: kandev.plugin.v1.ListAutomationDefinitionsExactResponse.items:type_name -> kandev.plugin.v1.AutomationDefinitionObservation
+	283, // 287: kandev.plugin.v1.ListAutomationDefinitionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	337, // 288: kandev.plugin.v1.ListAutomationRunsExactRequest.filter:type_name -> kandev.plugin.v1.AutomationRunFilter
+	281, // 289: kandev.plugin.v1.ListAutomationRunsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	338, // 290: kandev.plugin.v1.ListAutomationRunsExactResponse.items:type_name -> kandev.plugin.v1.AutomationRunObservation
+	283, // 291: kandev.plugin.v1.ListAutomationRunsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	338, // 292: kandev.plugin.v1.GetAutomationRunExactResponse.item:type_name -> kandev.plugin.v1.AutomationRunObservation
+	282, // 293: kandev.plugin.v1.GetAutomationRunExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	122, // 294: kandev.plugin.v1.Plugin.DeliverEvent:input_type -> kandev.plugin.v1.Event
+	127, // 295: kandev.plugin.v1.Plugin.HandleWebhook:input_type -> kandev.plugin.v1.WebhookRequest
+	277, // 296: kandev.plugin.v1.Plugin.DescribeAutomationCondition:input_type -> kandev.plugin.v1.AutomationConditionRequest
+	279, // 297: kandev.plugin.v1.Plugin.VerifyAutomationWebhook:input_type -> kandev.plugin.v1.AutomationWebhookRequest
+	129, // 298: kandev.plugin.v1.Plugin.HandleAction:input_type -> kandev.plugin.v1.PluginActionRequest
+	132, // 299: kandev.plugin.v1.Plugin.SearchEntityReferences:input_type -> kandev.plugin.v1.SearchEntityReferencesRequest
+	135, // 300: kandev.plugin.v1.Plugin.AuthorizeEntityReference:input_type -> kandev.plugin.v1.AuthorizeEntityReferenceRequest
+	137, // 301: kandev.plugin.v1.Plugin.ResolveGitCredential:input_type -> kandev.plugin.v1.ResolveGitCredentialRequest
+	139, // 302: kandev.plugin.v1.Plugin.GetGitCredentialBinding:input_type -> kandev.plugin.v1.GitCredentialBindingRequest
+	124, // 303: kandev.plugin.v1.Plugin.InvokeAgentTool:input_type -> kandev.plugin.v1.AgentToolRequest
+	200, // 304: kandev.plugin.v1.Plugin.ValidateExecutorProfile:input_type -> kandev.plugin.v1.ValidateExecutorProfileRequest
+	202, // 305: kandev.plugin.v1.Plugin.ProvisionExecutorEnvironment:input_type -> kandev.plugin.v1.ProvisionExecutorEnvironmentRequest
+	204, // 306: kandev.plugin.v1.Plugin.RecoverExecutorOperation:input_type -> kandev.plugin.v1.RecoverExecutorOperationRequest
+	206, // 307: kandev.plugin.v1.Plugin.AttachExecutorEnvironment:input_type -> kandev.plugin.v1.AttachExecutorEnvironmentRequest
+	208, // 308: kandev.plugin.v1.Plugin.InspectExecutorEnvironment:input_type -> kandev.plugin.v1.InspectExecutorEnvironmentRequest
+	210, // 309: kandev.plugin.v1.Plugin.ResolveExecutorConnection:input_type -> kandev.plugin.v1.ResolveExecutorConnectionRequest
+	213, // 310: kandev.plugin.v1.Plugin.DestroyExecutorEnvironment:input_type -> kandev.plugin.v1.DestroyExecutorEnvironmentRequest
+	6,   // 311: kandev.plugin.v1.Host.GetCapabilityContext:input_type -> kandev.plugin.v1.GetCapabilityContextRequest
+	10,  // 312: kandev.plugin.v1.Host.UpdateTaskExact:input_type -> kandev.plugin.v1.UpdateTaskExactRequest
+	12,  // 313: kandev.plugin.v1.Host.CreateTaskExact:input_type -> kandev.plugin.v1.CreateTaskExactRequest
+	14,  // 314: kandev.plugin.v1.Host.SetTaskLabelsExact:input_type -> kandev.plugin.v1.SetTaskLabelsExactRequest
+	16,  // 315: kandev.plugin.v1.Host.AssignTaskExact:input_type -> kandev.plugin.v1.AssignTaskExactRequest
+	18,  // 316: kandev.plugin.v1.Host.MoveTaskExact:input_type -> kandev.plugin.v1.MoveTaskExactRequest
+	20,  // 317: kandev.plugin.v1.Host.ArchiveTaskExact:input_type -> kandev.plugin.v1.ArchiveTaskExactRequest
+	22,  // 318: kandev.plugin.v1.Host.AddTaskRelationExact:input_type -> kandev.plugin.v1.AddTaskRelationExactRequest
+	24,  // 319: kandev.plugin.v1.Host.RemoveTaskRelationExact:input_type -> kandev.plugin.v1.RemoveTaskRelationExactRequest
+	26,  // 320: kandev.plugin.v1.Host.SendTaskMessageExact:input_type -> kandev.plugin.v1.SendTaskMessageExactRequest
+	64,  // 321: kandev.plugin.v1.Host.IssueTaskDirectiveExact:input_type -> kandev.plugin.v1.IssueTaskDirectiveExactRequest
+	66,  // 322: kandev.plugin.v1.Host.ResolveTaskDirectiveExact:input_type -> kandev.plugin.v1.ResolveTaskDirectiveExactRequest
+	68,  // 323: kandev.plugin.v1.Host.ReportTaskChangeRequestExact:input_type -> kandev.plugin.v1.ReportTaskChangeRequestExactRequest
+	70,  // 324: kandev.plugin.v1.Host.RemoveTaskChangeRequestExact:input_type -> kandev.plugin.v1.RemoveTaskChangeRequestExactRequest
+	29,  // 325: kandev.plugin.v1.Host.AcquireTaskManagementClaimExact:input_type -> kandev.plugin.v1.AcquireTaskManagementClaimExactRequest
+	30,  // 326: kandev.plugin.v1.Host.ReleaseTaskManagementClaimExact:input_type -> kandev.plugin.v1.ReleaseTaskManagementClaimExactRequest
+	31,  // 327: kandev.plugin.v1.Host.TransferTaskManagementClaimExact:input_type -> kandev.plugin.v1.TransferTaskManagementClaimExactRequest
+	39,  // 328: kandev.plugin.v1.Host.SetTaskCompletionCriteriaExact:input_type -> kandev.plugin.v1.SetTaskCompletionCriteriaExactRequest
+	40,  // 329: kandev.plugin.v1.Host.VerifyTaskCompletionCriterionExact:input_type -> kandev.plugin.v1.VerifyTaskCompletionCriterionExactRequest
+	42,  // 330: kandev.plugin.v1.Host.ApplyWorkspaceAdministrationExact:input_type -> kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest
+	58,  // 331: kandev.plugin.v1.Host.GetSourceIssueCapabilitiesExact:input_type -> kandev.plugin.v1.GetSourceIssueCapabilitiesExactRequest
+	61,  // 332: kandev.plugin.v1.Host.CommentSourceIssueExact:input_type -> kandev.plugin.v1.CommentSourceIssueExactRequest
+	62,  // 333: kandev.plugin.v1.Host.TransitionSourceIssueExact:input_type -> kandev.plugin.v1.TransitionSourceIssueExactRequest
+	74,  // 334: kandev.plugin.v1.Host.EnsureManagedAgentConversationExact:input_type -> kandev.plugin.v1.EnsureManagedAgentConversationExactRequest
+	76,  // 335: kandev.plugin.v1.Host.GetManagedAgentConversationStatusExact:input_type -> kandev.plugin.v1.GetManagedAgentConversationStatusExactRequest
+	78,  // 336: kandev.plugin.v1.Host.ListManagedAgentConversationsExact:input_type -> kandev.plugin.v1.ListManagedAgentConversationsExactRequest
+	80,  // 337: kandev.plugin.v1.Host.SetManagedAgentConversationPausedExact:input_type -> kandev.plugin.v1.SetManagedAgentConversationPausedExactRequest
+	82,  // 338: kandev.plugin.v1.Host.DeleteManagedAgentConversationExact:input_type -> kandev.plugin.v1.DeleteManagedAgentConversationExactRequest
+	85,  // 339: kandev.plugin.v1.Host.EnqueueManagedAgentInputExact:input_type -> kandev.plugin.v1.EnqueueManagedAgentInputExactRequest
+	87,  // 340: kandev.plugin.v1.Host.GetManagedAgentInputExact:input_type -> kandev.plugin.v1.GetManagedAgentInputExactRequest
+	89,  // 341: kandev.plugin.v1.Host.ListManagedAgentInputsExact:input_type -> kandev.plugin.v1.ListManagedAgentInputsExactRequest
+	91,  // 342: kandev.plugin.v1.Host.CancelManagedAgentInputExact:input_type -> kandev.plugin.v1.CancelManagedAgentInputExactRequest
+	93,  // 343: kandev.plugin.v1.Host.DispatchManagedAgentConversationExact:input_type -> kandev.plugin.v1.DispatchManagedAgentConversationExactRequest
+	97,  // 344: kandev.plugin.v1.Host.ListManagedConversationSchedulesExact:input_type -> kandev.plugin.v1.ListManagedConversationSchedulesExactRequest
+	99,  // 345: kandev.plugin.v1.Host.CreateManagedConversationScheduleExact:input_type -> kandev.plugin.v1.CreateManagedConversationScheduleExactRequest
+	100, // 346: kandev.plugin.v1.Host.UpdateManagedConversationScheduleExact:input_type -> kandev.plugin.v1.UpdateManagedConversationScheduleExactRequest
+	101, // 347: kandev.plugin.v1.Host.SetManagedConversationScheduleEnabledExact:input_type -> kandev.plugin.v1.SetManagedConversationScheduleEnabledExactRequest
+	102, // 348: kandev.plugin.v1.Host.DeleteManagedConversationScheduleExact:input_type -> kandev.plugin.v1.DeleteManagedConversationScheduleExactRequest
+	104, // 349: kandev.plugin.v1.Host.EnsureTaskRunExact:input_type -> kandev.plugin.v1.EnsureTaskRunExactRequest
+	106, // 350: kandev.plugin.v1.Host.StopTaskRunExact:input_type -> kandev.plugin.v1.StopTaskRunExactRequest
+	108, // 351: kandev.plugin.v1.Host.RecoverSessionExact:input_type -> kandev.plugin.v1.RecoverSessionExactRequest
+	110, // 352: kandev.plugin.v1.Host.CancelPendingTaskTransitionExact:input_type -> kandev.plugin.v1.CancelPendingTaskTransitionExactRequest
+	113, // 353: kandev.plugin.v1.Host.GetSessionModeContextExact:input_type -> kandev.plugin.v1.GetSessionModeContextExactRequest
+	115, // 354: kandev.plugin.v1.Host.SetSessionModeExact:input_type -> kandev.plugin.v1.SetSessionModeExactRequest
+	118, // 355: kandev.plugin.v1.Host.RespondPermissionExact:input_type -> kandev.plugin.v1.RespondPermissionExactRequest
+	120, // 356: kandev.plugin.v1.Host.AnswerClarificationExact:input_type -> kandev.plugin.v1.AnswerClarificationExactRequest
+	298, // 357: kandev.plugin.v1.Host.ListWorkspacesExact:input_type -> kandev.plugin.v1.ListWorkspacesExactRequest
+	300, // 358: kandev.plugin.v1.Host.ListWorkflowsExact:input_type -> kandev.plugin.v1.ListWorkflowsExactRequest
+	302, // 359: kandev.plugin.v1.Host.ListWorkflowStepsExact:input_type -> kandev.plugin.v1.ListWorkflowStepsExactRequest
+	304, // 360: kandev.plugin.v1.Host.ListTasksExact:input_type -> kandev.plugin.v1.ListTasksExactRequest
+	306, // 361: kandev.plugin.v1.Host.GetTaskExact:input_type -> kandev.plugin.v1.GetTaskExactRequest
+	308, // 362: kandev.plugin.v1.Host.ListSessionsExact:input_type -> kandev.plugin.v1.ListSessionsExactRequest
+	310, // 363: kandev.plugin.v1.Host.ListPendingInteractionsExact:input_type -> kandev.plugin.v1.ListPendingInteractionsExactRequest
+	312, // 364: kandev.plugin.v1.Host.GetInteractionExact:input_type -> kandev.plugin.v1.GetInteractionExactRequest
+	314, // 365: kandev.plugin.v1.Host.ListSanitizedMessagesExact:input_type -> kandev.plugin.v1.ListSanitizedMessagesExactRequest
+	316, // 366: kandev.plugin.v1.Host.ListTaskInboxExact:input_type -> kandev.plugin.v1.ListTaskInboxExactRequest
+	318, // 367: kandev.plugin.v1.Host.GetTaskDirectiveExact:input_type -> kandev.plugin.v1.GetTaskDirectiveExactRequest
+	320, // 368: kandev.plugin.v1.Host.ListTaskDirectivesExact:input_type -> kandev.plugin.v1.ListTaskDirectivesExactRequest
+	322, // 369: kandev.plugin.v1.Host.GetTaskRelationsExact:input_type -> kandev.plugin.v1.GetTaskRelationsExactRequest
+	324, // 370: kandev.plugin.v1.Host.ListTaskRelationsExact:input_type -> kandev.plugin.v1.ListTaskRelationsExactRequest
+	326, // 371: kandev.plugin.v1.Host.ListPendingTaskTransitionsExact:input_type -> kandev.plugin.v1.ListPendingTaskTransitionsExactRequest
+	328, // 372: kandev.plugin.v1.Host.ListChangeRequestEvidenceExact:input_type -> kandev.plugin.v1.ListChangeRequestEvidenceExactRequest
+	330, // 373: kandev.plugin.v1.Host.ListTaskUsageExact:input_type -> kandev.plugin.v1.ListTaskUsageExactRequest
+	335, // 374: kandev.plugin.v1.Host.ListAutomationDefinitionsExact:input_type -> kandev.plugin.v1.ListAutomationDefinitionsExactRequest
+	339, // 375: kandev.plugin.v1.Host.ListAutomationRunsExact:input_type -> kandev.plugin.v1.ListAutomationRunsExactRequest
+	341, // 376: kandev.plugin.v1.Host.GetAutomationRunExact:input_type -> kandev.plugin.v1.GetAutomationRunExactRequest
+	141, // 377: kandev.plugin.v1.Host.GetState:input_type -> kandev.plugin.v1.GetStateRequest
+	143, // 378: kandev.plugin.v1.Host.SetState:input_type -> kandev.plugin.v1.SetStateRequest
+	145, // 379: kandev.plugin.v1.Host.DeleteState:input_type -> kandev.plugin.v1.DeleteStateRequest
+	147, // 380: kandev.plugin.v1.Host.ListState:input_type -> kandev.plugin.v1.ListStateRequest
+	158, // 381: kandev.plugin.v1.Host.RevealSecret:input_type -> kandev.plugin.v1.RevealSecretRequest
+	160, // 382: kandev.plugin.v1.Host.EmitEvent:input_type -> kandev.plugin.v1.EmitEventRequest
+	152, // 383: kandev.plugin.v1.Host.GetSecret:input_type -> kandev.plugin.v1.GetSecretRequest
+	154, // 384: kandev.plugin.v1.Host.SetSecret:input_type -> kandev.plugin.v1.SetSecretRequest
+	156, // 385: kandev.plugin.v1.Host.DeleteSecret:input_type -> kandev.plugin.v1.DeleteSecretRequest
+	150, // 386: kandev.plugin.v1.Host.GetConfig:input_type -> kandev.plugin.v1.GetConfigRequest
+	169, // 387: kandev.plugin.v1.Host.ListTasks:input_type -> kandev.plugin.v1.ListTasksRequest
+	171, // 388: kandev.plugin.v1.Host.GetTask:input_type -> kandev.plugin.v1.GetTaskRequest
+	174, // 389: kandev.plugin.v1.Host.ListTaskStepTransitions:input_type -> kandev.plugin.v1.ListTaskStepTransitionsRequest
+	177, // 390: kandev.plugin.v1.Host.ListWorkspaces:input_type -> kandev.plugin.v1.ListWorkspacesRequest
+	180, // 391: kandev.plugin.v1.Host.ListWorkflows:input_type -> kandev.plugin.v1.ListWorkflowsRequest
+	186, // 392: kandev.plugin.v1.Host.ListWorkflowSteps:input_type -> kandev.plugin.v1.ListWorkflowStepsRequest
+	183, // 393: kandev.plugin.v1.Host.ListWorkflowTransitionGroups:input_type -> kandev.plugin.v1.ListWorkflowTransitionGroupsRequest
+	189, // 394: kandev.plugin.v1.Host.ListAgentProfiles:input_type -> kandev.plugin.v1.ListAgentProfilesRequest
+	192, // 395: kandev.plugin.v1.Host.ListExecutorProfiles:input_type -> kandev.plugin.v1.ListExecutorProfilesRequest
+	215, // 396: kandev.plugin.v1.Host.CheckpointExecutorResource:input_type -> kandev.plugin.v1.CheckpointExecutorResourceRequest
+	217, // 397: kandev.plugin.v1.Host.ReportExecutorProgress:input_type -> kandev.plugin.v1.ReportExecutorProgressRequest
+	219, // 398: kandev.plugin.v1.Host.ReadExecutorRuntimeArtifact:input_type -> kandev.plugin.v1.ReadExecutorRuntimeArtifactRequest
+	222, // 399: kandev.plugin.v1.Host.ListRepositories:input_type -> kandev.plugin.v1.ListRepositoriesRequest
+	226, // 400: kandev.plugin.v1.Host.ListSessions:input_type -> kandev.plugin.v1.ListSessionsRequest
+	229, // 401: kandev.plugin.v1.Host.ListSessionCodeStats:input_type -> kandev.plugin.v1.ListSessionCodeStatsRequest
+	233, // 402: kandev.plugin.v1.Host.ListMessages:input_type -> kandev.plugin.v1.ListMessagesRequest
+	239, // 403: kandev.plugin.v1.Host.ListPendingInteractions:input_type -> kandev.plugin.v1.ListPendingInteractionsRequest
+	241, // 404: kandev.plugin.v1.Host.GetInteraction:input_type -> kandev.plugin.v1.GetInteractionRequest
+	250, // 405: kandev.plugin.v1.Host.InvokeUtilityAgent:input_type -> kandev.plugin.v1.InvokeUtilityAgentRequest
+	251, // 406: kandev.plugin.v1.Host.InvokeUtilityAgentWithOptions:input_type -> kandev.plugin.v1.InvokeUtilityAgentWithOptionsRequest
+	253, // 407: kandev.plugin.v1.Host.CreateTask:input_type -> kandev.plugin.v1.CreateTaskRequest
+	258, // 408: kandev.plugin.v1.Host.UpdateTask:input_type -> kandev.plugin.v1.UpdateTaskRequest
+	260, // 409: kandev.plugin.v1.Host.MoveTask:input_type -> kandev.plugin.v1.MoveTaskRequest
+	262, // 410: kandev.plugin.v1.Host.SendMessage:input_type -> kandev.plugin.v1.SendMessageRequest
+	264, // 411: kandev.plugin.v1.Host.PreviewPluginOwnedTaskTree:input_type -> kandev.plugin.v1.PreviewPluginOwnedTaskTreeRequest
+	266, // 412: kandev.plugin.v1.Host.DeletePluginOwnedTaskTree:input_type -> kandev.plugin.v1.DeletePluginOwnedTaskTreeRequest
+	271, // 413: kandev.plugin.v1.Host.EnsureAgentConversation:input_type -> kandev.plugin.v1.EnsureAgentConversationRequest
+	273, // 414: kandev.plugin.v1.Host.DispatchAgentConversation:input_type -> kandev.plugin.v1.DispatchAgentConversationRequest
+	275, // 415: kandev.plugin.v1.Host.DeleteAgentConversation:input_type -> kandev.plugin.v1.DeleteAgentConversationRequest
+	243, // 416: kandev.plugin.v1.Host.RespondToPermission:input_type -> kandev.plugin.v1.RespondToPermissionRequest
+	246, // 417: kandev.plugin.v1.Host.AnswerClarification:input_type -> kandev.plugin.v1.AnswerClarificationRequest
+	248, // 418: kandev.plugin.v1.Host.CancelClarification:input_type -> kandev.plugin.v1.CancelClarificationRequest
+	123, // 419: kandev.plugin.v1.Plugin.DeliverEvent:output_type -> kandev.plugin.v1.EventAck
+	128, // 420: kandev.plugin.v1.Plugin.HandleWebhook:output_type -> kandev.plugin.v1.WebhookResponse
+	278, // 421: kandev.plugin.v1.Plugin.DescribeAutomationCondition:output_type -> kandev.plugin.v1.AutomationConditionResponse
+	280, // 422: kandev.plugin.v1.Plugin.VerifyAutomationWebhook:output_type -> kandev.plugin.v1.AutomationWebhookResponse
+	131, // 423: kandev.plugin.v1.Plugin.HandleAction:output_type -> kandev.plugin.v1.PluginActionResponse
+	133, // 424: kandev.plugin.v1.Plugin.SearchEntityReferences:output_type -> kandev.plugin.v1.SearchEntityReferencesResponse
+	136, // 425: kandev.plugin.v1.Plugin.AuthorizeEntityReference:output_type -> kandev.plugin.v1.AuthorizeEntityReferenceResponse
+	138, // 426: kandev.plugin.v1.Plugin.ResolveGitCredential:output_type -> kandev.plugin.v1.ResolveGitCredentialResponse
+	140, // 427: kandev.plugin.v1.Plugin.GetGitCredentialBinding:output_type -> kandev.plugin.v1.GitCredentialBindingResponse
+	126, // 428: kandev.plugin.v1.Plugin.InvokeAgentTool:output_type -> kandev.plugin.v1.AgentToolResponse
+	201, // 429: kandev.plugin.v1.Plugin.ValidateExecutorProfile:output_type -> kandev.plugin.v1.ValidateExecutorProfileResponse
+	203, // 430: kandev.plugin.v1.Plugin.ProvisionExecutorEnvironment:output_type -> kandev.plugin.v1.ProvisionExecutorEnvironmentResponse
+	205, // 431: kandev.plugin.v1.Plugin.RecoverExecutorOperation:output_type -> kandev.plugin.v1.RecoverExecutorOperationResponse
+	207, // 432: kandev.plugin.v1.Plugin.AttachExecutorEnvironment:output_type -> kandev.plugin.v1.AttachExecutorEnvironmentResponse
+	209, // 433: kandev.plugin.v1.Plugin.InspectExecutorEnvironment:output_type -> kandev.plugin.v1.InspectExecutorEnvironmentResponse
+	212, // 434: kandev.plugin.v1.Plugin.ResolveExecutorConnection:output_type -> kandev.plugin.v1.ResolveExecutorConnectionResponse
+	214, // 435: kandev.plugin.v1.Plugin.DestroyExecutorEnvironment:output_type -> kandev.plugin.v1.DestroyExecutorEnvironmentResponse
+	7,   // 436: kandev.plugin.v1.Host.GetCapabilityContext:output_type -> kandev.plugin.v1.GetCapabilityContextResponse
+	11,  // 437: kandev.plugin.v1.Host.UpdateTaskExact:output_type -> kandev.plugin.v1.UpdateTaskExactResponse
+	13,  // 438: kandev.plugin.v1.Host.CreateTaskExact:output_type -> kandev.plugin.v1.CreateTaskExactResponse
+	15,  // 439: kandev.plugin.v1.Host.SetTaskLabelsExact:output_type -> kandev.plugin.v1.SetTaskLabelsExactResponse
+	17,  // 440: kandev.plugin.v1.Host.AssignTaskExact:output_type -> kandev.plugin.v1.AssignTaskExactResponse
+	19,  // 441: kandev.plugin.v1.Host.MoveTaskExact:output_type -> kandev.plugin.v1.MoveTaskExactResponse
+	21,  // 442: kandev.plugin.v1.Host.ArchiveTaskExact:output_type -> kandev.plugin.v1.ArchiveTaskExactResponse
+	23,  // 443: kandev.plugin.v1.Host.AddTaskRelationExact:output_type -> kandev.plugin.v1.AddTaskRelationExactResponse
+	25,  // 444: kandev.plugin.v1.Host.RemoveTaskRelationExact:output_type -> kandev.plugin.v1.RemoveTaskRelationExactResponse
+	27,  // 445: kandev.plugin.v1.Host.SendTaskMessageExact:output_type -> kandev.plugin.v1.SendTaskMessageExactResponse
+	65,  // 446: kandev.plugin.v1.Host.IssueTaskDirectiveExact:output_type -> kandev.plugin.v1.IssueTaskDirectiveExactResponse
+	67,  // 447: kandev.plugin.v1.Host.ResolveTaskDirectiveExact:output_type -> kandev.plugin.v1.ResolveTaskDirectiveExactResponse
+	69,  // 448: kandev.plugin.v1.Host.ReportTaskChangeRequestExact:output_type -> kandev.plugin.v1.ReportTaskChangeRequestExactResponse
+	71,  // 449: kandev.plugin.v1.Host.RemoveTaskChangeRequestExact:output_type -> kandev.plugin.v1.RemoveTaskChangeRequestExactResponse
+	32,  // 450: kandev.plugin.v1.Host.AcquireTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
+	32,  // 451: kandev.plugin.v1.Host.ReleaseTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
+	32,  // 452: kandev.plugin.v1.Host.TransferTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
+	41,  // 453: kandev.plugin.v1.Host.SetTaskCompletionCriteriaExact:output_type -> kandev.plugin.v1.TaskCompletionGateExactResponse
+	41,  // 454: kandev.plugin.v1.Host.VerifyTaskCompletionCriterionExact:output_type -> kandev.plugin.v1.TaskCompletionGateExactResponse
+	55,  // 455: kandev.plugin.v1.Host.ApplyWorkspaceAdministrationExact:output_type -> kandev.plugin.v1.WorkspaceAdministrationExactResponse
+	59,  // 456: kandev.plugin.v1.Host.GetSourceIssueCapabilitiesExact:output_type -> kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse
+	63,  // 457: kandev.plugin.v1.Host.CommentSourceIssueExact:output_type -> kandev.plugin.v1.SourceIssueWritebackExactResponse
+	63,  // 458: kandev.plugin.v1.Host.TransitionSourceIssueExact:output_type -> kandev.plugin.v1.SourceIssueWritebackExactResponse
+	75,  // 459: kandev.plugin.v1.Host.EnsureManagedAgentConversationExact:output_type -> kandev.plugin.v1.EnsureManagedAgentConversationExactResponse
+	77,  // 460: kandev.plugin.v1.Host.GetManagedAgentConversationStatusExact:output_type -> kandev.plugin.v1.GetManagedAgentConversationStatusExactResponse
+	79,  // 461: kandev.plugin.v1.Host.ListManagedAgentConversationsExact:output_type -> kandev.plugin.v1.ListManagedAgentConversationsExactResponse
+	81,  // 462: kandev.plugin.v1.Host.SetManagedAgentConversationPausedExact:output_type -> kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse
+	83,  // 463: kandev.plugin.v1.Host.DeleteManagedAgentConversationExact:output_type -> kandev.plugin.v1.DeleteManagedAgentConversationExactResponse
+	86,  // 464: kandev.plugin.v1.Host.EnqueueManagedAgentInputExact:output_type -> kandev.plugin.v1.EnqueueManagedAgentInputExactResponse
+	88,  // 465: kandev.plugin.v1.Host.GetManagedAgentInputExact:output_type -> kandev.plugin.v1.GetManagedAgentInputExactResponse
+	90,  // 466: kandev.plugin.v1.Host.ListManagedAgentInputsExact:output_type -> kandev.plugin.v1.ListManagedAgentInputsExactResponse
+	92,  // 467: kandev.plugin.v1.Host.CancelManagedAgentInputExact:output_type -> kandev.plugin.v1.CancelManagedAgentInputExactResponse
+	94,  // 468: kandev.plugin.v1.Host.DispatchManagedAgentConversationExact:output_type -> kandev.plugin.v1.DispatchManagedAgentConversationExactResponse
+	98,  // 469: kandev.plugin.v1.Host.ListManagedConversationSchedulesExact:output_type -> kandev.plugin.v1.ListManagedConversationSchedulesExactResponse
+	103, // 470: kandev.plugin.v1.Host.CreateManagedConversationScheduleExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
+	103, // 471: kandev.plugin.v1.Host.UpdateManagedConversationScheduleExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
+	103, // 472: kandev.plugin.v1.Host.SetManagedConversationScheduleEnabledExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
+	9,   // 473: kandev.plugin.v1.Host.DeleteManagedConversationScheduleExact:output_type -> kandev.plugin.v1.HostCommandResult
+	105, // 474: kandev.plugin.v1.Host.EnsureTaskRunExact:output_type -> kandev.plugin.v1.EnsureTaskRunExactResponse
+	107, // 475: kandev.plugin.v1.Host.StopTaskRunExact:output_type -> kandev.plugin.v1.StopTaskRunExactResponse
+	109, // 476: kandev.plugin.v1.Host.RecoverSessionExact:output_type -> kandev.plugin.v1.RecoverSessionExactResponse
+	111, // 477: kandev.plugin.v1.Host.CancelPendingTaskTransitionExact:output_type -> kandev.plugin.v1.CancelPendingTaskTransitionExactResponse
+	114, // 478: kandev.plugin.v1.Host.GetSessionModeContextExact:output_type -> kandev.plugin.v1.GetSessionModeContextExactResponse
+	116, // 479: kandev.plugin.v1.Host.SetSessionModeExact:output_type -> kandev.plugin.v1.SetSessionModeExactResponse
+	119, // 480: kandev.plugin.v1.Host.RespondPermissionExact:output_type -> kandev.plugin.v1.RespondPermissionExactResponse
+	121, // 481: kandev.plugin.v1.Host.AnswerClarificationExact:output_type -> kandev.plugin.v1.AnswerClarificationExactResponse
+	299, // 482: kandev.plugin.v1.Host.ListWorkspacesExact:output_type -> kandev.plugin.v1.ListWorkspacesExactResponse
+	301, // 483: kandev.plugin.v1.Host.ListWorkflowsExact:output_type -> kandev.plugin.v1.ListWorkflowsExactResponse
+	303, // 484: kandev.plugin.v1.Host.ListWorkflowStepsExact:output_type -> kandev.plugin.v1.ListWorkflowStepsExactResponse
+	305, // 485: kandev.plugin.v1.Host.ListTasksExact:output_type -> kandev.plugin.v1.ListTasksExactResponse
+	307, // 486: kandev.plugin.v1.Host.GetTaskExact:output_type -> kandev.plugin.v1.GetTaskExactResponse
+	309, // 487: kandev.plugin.v1.Host.ListSessionsExact:output_type -> kandev.plugin.v1.ListSessionsExactResponse
+	311, // 488: kandev.plugin.v1.Host.ListPendingInteractionsExact:output_type -> kandev.plugin.v1.ListPendingInteractionsExactResponse
+	313, // 489: kandev.plugin.v1.Host.GetInteractionExact:output_type -> kandev.plugin.v1.GetInteractionExactResponse
+	315, // 490: kandev.plugin.v1.Host.ListSanitizedMessagesExact:output_type -> kandev.plugin.v1.ListSanitizedMessagesExactResponse
+	317, // 491: kandev.plugin.v1.Host.ListTaskInboxExact:output_type -> kandev.plugin.v1.ListTaskInboxExactResponse
+	319, // 492: kandev.plugin.v1.Host.GetTaskDirectiveExact:output_type -> kandev.plugin.v1.GetTaskDirectiveExactResponse
+	321, // 493: kandev.plugin.v1.Host.ListTaskDirectivesExact:output_type -> kandev.plugin.v1.ListTaskDirectivesExactResponse
+	323, // 494: kandev.plugin.v1.Host.GetTaskRelationsExact:output_type -> kandev.plugin.v1.GetTaskRelationsExactResponse
+	325, // 495: kandev.plugin.v1.Host.ListTaskRelationsExact:output_type -> kandev.plugin.v1.ListTaskRelationsExactResponse
+	327, // 496: kandev.plugin.v1.Host.ListPendingTaskTransitionsExact:output_type -> kandev.plugin.v1.ListPendingTaskTransitionsExactResponse
+	329, // 497: kandev.plugin.v1.Host.ListChangeRequestEvidenceExact:output_type -> kandev.plugin.v1.ListChangeRequestEvidenceExactResponse
+	331, // 498: kandev.plugin.v1.Host.ListTaskUsageExact:output_type -> kandev.plugin.v1.ListTaskUsageExactResponse
+	336, // 499: kandev.plugin.v1.Host.ListAutomationDefinitionsExact:output_type -> kandev.plugin.v1.ListAutomationDefinitionsExactResponse
+	340, // 500: kandev.plugin.v1.Host.ListAutomationRunsExact:output_type -> kandev.plugin.v1.ListAutomationRunsExactResponse
+	342, // 501: kandev.plugin.v1.Host.GetAutomationRunExact:output_type -> kandev.plugin.v1.GetAutomationRunExactResponse
+	142, // 502: kandev.plugin.v1.Host.GetState:output_type -> kandev.plugin.v1.GetStateResponse
+	144, // 503: kandev.plugin.v1.Host.SetState:output_type -> kandev.plugin.v1.SetStateResponse
+	146, // 504: kandev.plugin.v1.Host.DeleteState:output_type -> kandev.plugin.v1.DeleteStateResponse
+	148, // 505: kandev.plugin.v1.Host.ListState:output_type -> kandev.plugin.v1.ListStateResponse
+	159, // 506: kandev.plugin.v1.Host.RevealSecret:output_type -> kandev.plugin.v1.RevealSecretResponse
+	161, // 507: kandev.plugin.v1.Host.EmitEvent:output_type -> kandev.plugin.v1.EmitEventResponse
+	153, // 508: kandev.plugin.v1.Host.GetSecret:output_type -> kandev.plugin.v1.GetSecretResponse
+	155, // 509: kandev.plugin.v1.Host.SetSecret:output_type -> kandev.plugin.v1.SetSecretResponse
+	157, // 510: kandev.plugin.v1.Host.DeleteSecret:output_type -> kandev.plugin.v1.DeleteSecretResponse
+	151, // 511: kandev.plugin.v1.Host.GetConfig:output_type -> kandev.plugin.v1.GetConfigResponse
+	170, // 512: kandev.plugin.v1.Host.ListTasks:output_type -> kandev.plugin.v1.ListTasksResponse
+	172, // 513: kandev.plugin.v1.Host.GetTask:output_type -> kandev.plugin.v1.GetTaskResponse
+	175, // 514: kandev.plugin.v1.Host.ListTaskStepTransitions:output_type -> kandev.plugin.v1.ListTaskStepTransitionsResponse
+	178, // 515: kandev.plugin.v1.Host.ListWorkspaces:output_type -> kandev.plugin.v1.ListWorkspacesResponse
+	181, // 516: kandev.plugin.v1.Host.ListWorkflows:output_type -> kandev.plugin.v1.ListWorkflowsResponse
+	187, // 517: kandev.plugin.v1.Host.ListWorkflowSteps:output_type -> kandev.plugin.v1.ListWorkflowStepsResponse
+	184, // 518: kandev.plugin.v1.Host.ListWorkflowTransitionGroups:output_type -> kandev.plugin.v1.ListWorkflowTransitionGroupsResponse
+	190, // 519: kandev.plugin.v1.Host.ListAgentProfiles:output_type -> kandev.plugin.v1.ListAgentProfilesResponse
+	193, // 520: kandev.plugin.v1.Host.ListExecutorProfiles:output_type -> kandev.plugin.v1.ListExecutorProfilesResponse
+	216, // 521: kandev.plugin.v1.Host.CheckpointExecutorResource:output_type -> kandev.plugin.v1.CheckpointExecutorResourceResponse
+	218, // 522: kandev.plugin.v1.Host.ReportExecutorProgress:output_type -> kandev.plugin.v1.ReportExecutorProgressResponse
+	220, // 523: kandev.plugin.v1.Host.ReadExecutorRuntimeArtifact:output_type -> kandev.plugin.v1.ExecutorRuntimeArtifactChunk
+	223, // 524: kandev.plugin.v1.Host.ListRepositories:output_type -> kandev.plugin.v1.ListRepositoriesResponse
+	227, // 525: kandev.plugin.v1.Host.ListSessions:output_type -> kandev.plugin.v1.ListSessionsResponse
+	230, // 526: kandev.plugin.v1.Host.ListSessionCodeStats:output_type -> kandev.plugin.v1.ListSessionCodeStatsResponse
+	234, // 527: kandev.plugin.v1.Host.ListMessages:output_type -> kandev.plugin.v1.ListMessagesResponse
+	240, // 528: kandev.plugin.v1.Host.ListPendingInteractions:output_type -> kandev.plugin.v1.ListPendingInteractionsResponse
+	242, // 529: kandev.plugin.v1.Host.GetInteraction:output_type -> kandev.plugin.v1.GetInteractionResponse
+	252, // 530: kandev.plugin.v1.Host.InvokeUtilityAgent:output_type -> kandev.plugin.v1.InvokeUtilityAgentResponse
+	252, // 531: kandev.plugin.v1.Host.InvokeUtilityAgentWithOptions:output_type -> kandev.plugin.v1.InvokeUtilityAgentResponse
+	257, // 532: kandev.plugin.v1.Host.CreateTask:output_type -> kandev.plugin.v1.CreateTaskResponse
+	259, // 533: kandev.plugin.v1.Host.UpdateTask:output_type -> kandev.plugin.v1.UpdateTaskResponse
+	261, // 534: kandev.plugin.v1.Host.MoveTask:output_type -> kandev.plugin.v1.MoveTaskResponse
+	263, // 535: kandev.plugin.v1.Host.SendMessage:output_type -> kandev.plugin.v1.SendMessageResponse
+	265, // 536: kandev.plugin.v1.Host.PreviewPluginOwnedTaskTree:output_type -> kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse
+	267, // 537: kandev.plugin.v1.Host.DeletePluginOwnedTaskTree:output_type -> kandev.plugin.v1.DeletePluginOwnedTaskTreeResponse
+	272, // 538: kandev.plugin.v1.Host.EnsureAgentConversation:output_type -> kandev.plugin.v1.EnsureAgentConversationResponse
+	274, // 539: kandev.plugin.v1.Host.DispatchAgentConversation:output_type -> kandev.plugin.v1.DispatchAgentConversationResponse
+	276, // 540: kandev.plugin.v1.Host.DeleteAgentConversation:output_type -> kandev.plugin.v1.DeleteAgentConversationResponse
+	244, // 541: kandev.plugin.v1.Host.RespondToPermission:output_type -> kandev.plugin.v1.RespondToPermissionResponse
+	247, // 542: kandev.plugin.v1.Host.AnswerClarification:output_type -> kandev.plugin.v1.AnswerClarificationResponse
+	249, // 543: kandev.plugin.v1.Host.CancelClarification:output_type -> kandev.plugin.v1.CancelClarificationResponse
+	419, // [419:544] is the sub-list for method output_type
+	294, // [294:419] is the sub-list for method input_type
+	294, // [294:294] is the sub-list for extension type_name
+	294, // [294:294] is the sub-list for extension extendee
+	0,   // [0:294] is the sub-list for field type_name
 }
 
 func init() { file_kandev_plugin_v1_plugin_proto_init() }
@@ -28194,38 +28824,39 @@ func file_kandev_plugin_v1_plugin_proto_init() {
 	file_kandev_plugin_v1_plugin_proto_msgTypes[42].OneofWrappers = []any{}
 	file_kandev_plugin_v1_plugin_proto_msgTypes[49].OneofWrappers = []any{}
 	file_kandev_plugin_v1_plugin_proto_msgTypes[50].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[156].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[158].OneofWrappers = []any{}
 	file_kandev_plugin_v1_plugin_proto_msgTypes[160].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[165].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[168].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[171].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[174].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[213].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[216].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[224].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[245].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[246].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[247].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[248].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[162].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[164].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[169].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[172].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[175].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[178].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[217].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[220].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[228].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[249].OneofWrappers = []any{}
 	file_kandev_plugin_v1_plugin_proto_msgTypes[250].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[251].OneofWrappers = []any{}
 	file_kandev_plugin_v1_plugin_proto_msgTypes[252].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[253].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[279].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[285].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[287].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[288].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[323].OneofWrappers = []any{}
-	file_kandev_plugin_v1_plugin_proto_msgTypes[324].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[254].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[256].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[257].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[283].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[289].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[290].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[292].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[293].OneofWrappers = []any{}
 	file_kandev_plugin_v1_plugin_proto_msgTypes[328].OneofWrappers = []any{}
 	file_kandev_plugin_v1_plugin_proto_msgTypes[329].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[333].OneofWrappers = []any{}
+	file_kandev_plugin_v1_plugin_proto_msgTypes[334].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kandev_plugin_v1_plugin_proto_rawDesc), len(file_kandev_plugin_v1_plugin_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   343,
+			NumMessages:   348,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
