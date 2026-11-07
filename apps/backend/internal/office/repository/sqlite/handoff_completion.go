@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -95,6 +96,10 @@ func (r *Repository) EnsureHandoffCompletionOutbox(
 	}
 
 	if comment != nil {
+		if err := reuseHandoffCompletionAnchorTx(ctx, tx, item.CompletionKey, comment); err != nil {
+			return err
+		}
+		item.CommentID = comment.ID
 		if err := ensureHandoffCompletionCommentTx(ctx, tx, comment); err != nil {
 			return err
 		}
@@ -139,6 +144,31 @@ func getHandoffCompletionOutboxTx(
 		return nil, fmt.Errorf("read handoff completion outbox receipt: %w", err)
 	}
 	return &item, nil
+}
+
+// reuseHandoffCompletionAnchorTx retains historical UUID report identities.
+// Resolve the anchor in the same transaction that stores the durable receipt;
+// the existing body and nonempty author remain owned by the stored comment.
+func reuseHandoffCompletionAnchorTx(
+	ctx context.Context, tx *sqlx.Tx, completionKey string, comment *models.TaskComment,
+) error {
+	if comment.Source != "handoff" {
+		return nil
+	}
+	var comments []models.TaskComment
+	if err := tx.SelectContext(ctx, &comments, tx.Rebind(`
+  SELECT * FROM task_comments WHERE task_id = ? AND source = ? ORDER BY created_at, id
+ `), comment.TaskID, comment.Source); err != nil {
+		return fmt.Errorf("find historical handoff completion comment: %w", err)
+	}
+	anchor := "<!-- handoff-completion:" + completionKey + " -->"
+	for _, existing := range comments {
+		if strings.Contains(existing.Body, anchor) {
+			comment.ID = existing.ID
+			return nil
+		}
+	}
+	return nil
 }
 
 func ensureHandoffCompletionCommentTx(ctx context.Context, tx *sqlx.Tx, comment *models.TaskComment) error {
