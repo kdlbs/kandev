@@ -299,5 +299,16 @@
   "controlRestore.recordedRetryAt": "已記錄的重試時間",
   "controlRestore.retryElapsed": "已記錄的重試時間已過，恢復情況尚未確認。",
   "controlRestore.lastFailureAt": "已記錄的最後失敗時間",
-  "controlRefresh.retainedAt": "重新整理失敗 · 顯示 {{time}} 的值"
+  "controlRefresh.retainedAt": "重新整理失敗 · 顯示 {{time}} 的值",
+  "controlInspection.usageUnknown": "此執行的用量來源未確認，未觀測值不等於零。",
+  "controlInspection.usageDisabled": "已存執行用量功能已關閉，未請求用量。",
+  "controlInspection.accountUnknown": "無法確認此執行的帳戶來源。",
+  "controlRestore.windowsUnknown": "保存的观测不含用量时段，因此用量和周期尚未确认。",
+  "controlRestore.limit.not-limited": "保存的观测显示无限制",
+  "controlRestore.limit.limited": "保存的观测显示有限制",
+  "controlRestore.limit.expired": "保存的解除时间已过。当前阻断状态尚未确认。",
+  "controlRestore.limit.unknown": "阻断状态尚未确认",
+  "controlRefresh.unattributedScope": "這些快取報告未標明供應商帳戶，不能用於確認目前模型選擇或執行准入狀態。",
+  "controlRefresh.unattributedTitle_one": "來源未確認的執行報告（{{count}}）",
+  "controlRefresh.unattributedTitle_other": "來源未確認的執行報告（{{count}}）"
 }

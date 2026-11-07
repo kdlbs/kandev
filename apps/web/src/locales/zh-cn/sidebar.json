@@ -299,5 +299,16 @@
   "controlCircuits.until": "下次尝试：{{time}}",
   "controlCircuits.failures_one": "连续失败 {{count}} 次",
   "controlCircuits.failures_other": "连续失败 {{count}} 次",
-  "controlCircuits.lastRecorded": "最后记录：{{time}}"
+  "controlCircuits.lastRecorded": "最后记录：{{time}}",
+  "controlInspection.usageUnknown": "此执行的用量来源未确认，未观测值不等于零。",
+  "controlInspection.usageDisabled": "已存执行用量功能已关闭，未请求用量。",
+  "controlInspection.accountUnknown": "无法确认此执行的账户来源。",
+  "controlRestore.windowsUnknown": "保存的观测不含用量时段，因此用量和周期尚未确认。",
+  "controlRestore.limit.not-limited": "保存的观测显示无限制",
+  "controlRestore.limit.limited": "保存的观测显示有限制",
+  "controlRestore.limit.expired": "保存的解除时间已过。当前阻断状态尚未确认。",
+  "controlRestore.limit.unknown": "阻断状态尚未确认",
+  "controlRefresh.unattributedScope": "这些缓存报告未标明供应商账户，不能用于确认当前模型选择或运行准入状态。",
+  "controlRefresh.unattributedTitle_one": "来源未确认的执行报告（{{count}}）",
+  "controlRefresh.unattributedTitle_other": "来源未确认的执行报告（{{count}}）"
 }

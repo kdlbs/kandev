@@ -597,5 +597,10 @@
   "copilotRuntimeProfilesNone": "プラグインを選択している保存済みプロファイルはありません。",
   "copilotPluginsLaunchContextReason": "この起動コンテキストではプロファイルプラグインを読み込めません。検証済みの設定ディレクトリを持つローカルまたは worktree エグゼキューターを使用してください。",
   "copilotPluginsLegacyPolicyReason": "この Kandev バージョンではこのランタイムのプラグインポリシーを検証できません。プラグインのチェックを外して保存すると、プラグインなしで起動できます。または Kandev を更新してください。",
-  "copilotPluginsUnknownReason": "Copilot から不明なプラグイン互換性の理由が報告されました。プラグインのチェックを外して保存すると、プラグインなしで起動できます。"
+  "copilotPluginsUnknownReason": "Copilot から不明なプラグイン互換性の理由が報告されました。プラグインのチェックを外して保存すると、プラグインなしで起動できます。",
+  "nativeUsage.account": "アカウント",
+  "nativeUsage.organization": "組織",
+  "nativeUsage.observedAt": "観測時刻",
+  "nativeUsage.reset": "リセット",
+  "nativeUsage.bindingChanged": "実行アカウントが変わりました。続行する前に対象のアカウントで開始してください。"
 }

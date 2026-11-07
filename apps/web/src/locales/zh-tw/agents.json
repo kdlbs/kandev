@@ -597,5 +597,10 @@
   "copilotRuntimeProfilesNone": "沒有已儲存的設定檔選擇外掛。",
   "copilotPluginsLaunchContextReason": "此啟動上下文無法載入設定檔外掛。請使用具有已驗證設定目錄的本地或 worktree 執行器。",
   "copilotPluginsLegacyPolicyReason": "此 Kandev 版本無法驗證此執行時的外掛策略。取消勾選外掛並儲存以在不載入它們的情況下啟動，或更新 Kandev。",
-  "copilotPluginsUnknownReason": "Copilot 報告了未知的外掛相容性原因。取消勾選外掛並儲存以在不載入它們的情況下啟動。"
+  "copilotPluginsUnknownReason": "Copilot 報告了未知的外掛相容性原因。取消勾選外掛並儲存以在不載入它們的情況下啟動。",
+  "nativeUsage.account": "帳戶",
+  "nativeUsage.organization": "組織",
+  "nativeUsage.observedAt": "觀測時間",
+  "nativeUsage.reset": "重設",
+  "nativeUsage.bindingChanged": "執行帳戶已變更。請使用預期帳戶啟動後再繼續。"
 }

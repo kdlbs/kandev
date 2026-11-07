@@ -597,5 +597,10 @@
   "copilotRuntimeProfilesNone": "没有已保存的配置文件选择插件。",
   "copilotPluginsLaunchContextReason": "此启动上下文无法加载配置文件插件。请使用具有已验证配置目录的本地或 worktree 执行器。",
   "copilotPluginsLegacyPolicyReason": "此 Kandev 版本无法验证此运行时的插件策略。取消勾选插件并保存以在不加载它们的情况下启动，或更新 Kandev。",
-  "copilotPluginsUnknownReason": "Copilot 报告了未知的插件兼容性原因。取消勾选插件并保存以在不加载它们的情况下启动。"
+  "copilotPluginsUnknownReason": "Copilot 报告了未知的插件兼容性原因。取消勾选插件并保存以在不加载它们的情况下启动。",
+  "nativeUsage.account": "账户",
+  "nativeUsage.organization": "组织",
+  "nativeUsage.observedAt": "观测时间",
+  "nativeUsage.reset": "重置",
+  "nativeUsage.bindingChanged": "执行账户已更改。请使用预期账户启动后再继续。"
 }

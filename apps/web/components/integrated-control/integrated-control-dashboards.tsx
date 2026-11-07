@@ -10,6 +10,8 @@ import { ControlNativeComparison } from "./control-native-comparison";
 import { ControlProviderCircuits } from "./control-provider-circuits";
 import { ControlModelBlocks } from "./control-model-blocks";
 import { ControlModelActivity } from "./control-model-activity";
+import { ControlCachedUsage } from "./control-cached-usage";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 
 export function IntegratedControlDashboard({ view }: { view: ControlView }) {
   const { t } = useTranslation();
@@ -24,13 +26,7 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
       className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 md:p-6"
       data-testid={`control-dashboard-${view}`}
     >
-      {view === "providers" && workspaces.length > 0 && (
-        <>
-          <ControlModelActivity />
-          <ControlModelBlocks />
-          <ControlProviderCircuits />
-        </>
-      )}
+      {view === "providers" && workspaces.length > 0 && <ProviderDashboards />}
       {view === "overview" && (
         <div className="grid gap-3 sm:grid-cols-3">
           <Fact label={t("sidebar:integratedControl.workspaces")} value={workspaces.length} />
@@ -84,6 +80,29 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
         </p>
       )}
     </div>
+  );
+}
+
+function ProviderDashboards() {
+  const { t } = useTranslation();
+  const limitsEnabled = useFeature("providerUsageLimits");
+  return (
+    <>
+      <ControlModelActivity />
+      {limitsEnabled ? (
+        <ControlCachedUsage />
+      ) : (
+        <p
+          role="status"
+          className="rounded-md border p-3 text-sm"
+          data-testid="control-usage-unavailable"
+        >
+          {t("sidebar:controlInspection.usageDisabled")}
+        </p>
+      )}
+      <ControlModelBlocks />
+      <ControlProviderCircuits />
+    </>
   );
 }
 

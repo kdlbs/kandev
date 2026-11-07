@@ -299,5 +299,16 @@
   "controlRestore.recordedRetryAt": "기록된 재시도 시각",
   "controlRestore.retryElapsed": "기록된 재시도 시각이 지났습니다. 복구 여부는 미확인입니다.",
   "controlRestore.lastFailureAt": "기록된 마지막 실패 시각",
-  "controlRefresh.retainedAt": "갱신 실패 · {{time}} 값 표시"
+  "controlRefresh.retainedAt": "갱신 실패 · {{time}} 값 표시",
+  "controlInspection.usageUnknown": "이 실행의 사용량 출처는 미확인입니다. 관측되지 않은 값은 0이 아닙니다.",
+  "controlInspection.usageDisabled": "저장 실행 사용량 기능이 꺼져 있습니다. 사용량을 조회하지 않았습니다.",
+  "controlInspection.accountUnknown": "이 실행의 계정 출처를 확인할 수 없습니다.",
+  "controlRestore.windowsUnknown": "저장된 관측에 사용 구간이 없어 사용량과 기간은 미확인입니다.",
+  "controlRestore.limit.not-limited": "저장된 관측에서 제한 없음",
+  "controlRestore.limit.limited": "저장된 관측에서 제한됨",
+  "controlRestore.limit.expired": "저장된 해제 시각이 지났습니다. 현재 차단 상태는 미확인입니다.",
+  "controlRestore.limit.unknown": "차단 상태 미확인",
+  "controlRefresh.unattributedScope": "이 캐시 보고에는 공급자 계정 출처가 없습니다. 현재 모델 선택이나 실행 허용 상태를 확인하는 정보가 아닙니다.",
+  "controlRefresh.unattributedTitle_one": "출처 미확인 실행 보고 ({{count}}건)",
+  "controlRefresh.unattributedTitle_other": "출처 미확인 실행 보고 ({{count}}건)"
 }

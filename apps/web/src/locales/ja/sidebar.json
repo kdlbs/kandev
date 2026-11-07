@@ -299,5 +299,16 @@
   "controlCircuits.until": "次回試行: {{time}}",
   "controlCircuits.failures_one": "連続失敗 {{count}} 回",
   "controlCircuits.failures_other": "連続失敗 {{count}} 回",
-  "controlCircuits.lastRecorded": "最終記録: {{time}}"
+  "controlCircuits.lastRecorded": "最終記録: {{time}}",
+  "controlInspection.usageUnknown": "この実行の使用量ソースは未確認です。未観測の値はゼロではありません。",
+  "controlInspection.usageDisabled": "保存済み実行使用量は無効です。使用量の取得は行っていません。",
+  "controlInspection.accountUnknown": "この実行のアカウントの出所を確認できません。",
+  "controlRestore.windowsUnknown": "保存された観測に利用枠がないため、使用量と期間は未確認です。",
+  "controlRestore.limit.not-limited": "保存された観測では制限なし",
+  "controlRestore.limit.limited": "保存された観測では制限あり",
+  "controlRestore.limit.expired": "保存された解除時刻を過ぎています。現在のブロック状態は未確認です。",
+  "controlRestore.limit.unknown": "ブロック状態は未確認",
+  "controlRefresh.unattributedScope": "このキャッシュ報告ではプロバイダーのアカウントを特定できません。現在のモデル選択や実行許可状態を確認する情報ではありません。",
+  "controlRefresh.unattributedTitle_one": "出典未確認の実行報告（{{count}}件）",
+  "controlRefresh.unattributedTitle_other": "出典未確認の実行報告（{{count}}件）"
 }

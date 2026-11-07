@@ -299,5 +299,16 @@
   "controlRestore.recordedRetryAt": "Ŕēćōŕďēď ŕēţŕŷ ţĩḿē",
   "controlRestore.retryElapsed": "Ţĥē ŕēćōŕďēď ŕēţŕŷ ţĩḿē ĥàś ƥàśśēď. Ŕēćōvēŕŷ ĥàś ńōţ ƀēēń ćōńƒĩŕḿēď.",
   "controlRestore.lastFailureAt": "Ŕēćōŕďēď ĺàśţ ƒàĩĺũŕē",
-  "controlRefresh.retainedAt": "Ŕēƒŕēśĥ ƒàĩĺēď · śĥōŵĩńĝ vàĺũēś ƒŕōḿ {{time}}"
+  "controlRefresh.retainedAt": "Ŕēƒŕēśĥ ƒàĩĺēď · śĥōŵĩńĝ vàĺũēś ƒŕōḿ {{time}}",
+  "controlInspection.usageUnknown": "Ţĥē ēxēćũţĩōń ũśàĝē śōũŕćē ĩś ũńćōńƒĩŕḿēď. Ũńōƀśēŕvēď vàĺũēś àŕē ńōţ źēŕō.",
+  "controlInspection.usageDisabled": "Śţōŕēď ēxēćũţĩōń ũśàĝē ĩś ďĩśàƀĺēď. Ńō ũśàĝē ŵàś ŕēqũēśţēď.",
+  "controlInspection.accountUnknown": "Ţĥē àććōũńţ śōũŕćē ƒōŕ ţĥĩś ēxēćũţĩōń ćōũĺď ńōţ ƀē ćōńƒĩŕḿēď.",
+  "controlRestore.windowsUnknown": "Ũśàĝē ŵĩńďōŵś àńď ţĥēĩŕ ƥēŕĩōďś àŕē ũńćōńƒĩŕḿēď ƀēćàũśē ţĥē śàvēď ōƀśēŕvàţĩōń ćōńţàĩńś ńōńē.",
+  "controlRestore.limit.not-limited": "Ńō ĺĩḿĩţ ĩń ţĥē śàvēď ōƀśēŕvàţĩōń",
+  "controlRestore.limit.limited": "Ĺĩḿĩţēď ĩń ţĥē śàvēď ōƀśēŕvàţĩōń",
+  "controlRestore.limit.expired": "Ţĥē śàvēď ŕēśēţ ţĩḿē ĥàś ƥàśśēď. Ćũŕŕēńţ ƀĺōćķ śţàţē ĩś ũńćōńƒĩŕḿēď.",
+  "controlRestore.limit.unknown": "Ɓĺōćķ śţàţē ũńćōńƒĩŕḿēď",
+  "controlRefresh.unattributedScope": "Ţĥēśē ćàćĥēď ŕēƥōŕţś ďō ńōţ ĩďēńţĩƒŷ à ƥŕōvĩďēŕ àććōũńţ. Ţĥēŷ ďō ńōţ ćōńƒĩŕḿ ţĥē ćũŕŕēńţ ḿōďēĺ śēĺēćţĩōń ōŕ àďḿĩśśĩōń śţàţē.",
+  "controlRefresh.unattributedTitle_one": "Ũńàţţŕĩƀũţēď ēxēćũţĩōń ŕēƥōŕţ ({{count}})",
+  "controlRefresh.unattributedTitle_other": "Ũńàţţŕĩƀũţēď ēxēćũţĩōń ŕēƥōŕţś ({{count}})"
 }
