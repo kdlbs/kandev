@@ -72,10 +72,12 @@ func (o *InferenceOwner) BeginInferenceClosure(ctx context.Context, operation, c
 		return nil, ErrInferenceClosureIncomplete
 	}
 	if c := a.state.Closure; c != nil {
-		if c.OperationID != operation || c.CandidateInstanceID != candidate || c.SourceOwnerID != expectedOwner {
+		if c.OperationID == operation && c.CandidateInstanceID == candidate && c.SourceOwnerID == expectedOwner {
+			return json.Marshal(a.state)
+		}
+		if c.OperationID == operation || c.Stage != closureConsumed || c.SuccessorOwnerID != prior.OwnerID || c.CandidateInstanceID != prior.InstanceID {
 			return nil, ErrInferenceClosureIncomplete
 		}
-		return json.Marshal(a.state)
 	}
 	next := a.state
 	next.Closure = &InferenceScopeClosure{Version: 1, OperationID: operation, SessionID: prior.SessionID,
