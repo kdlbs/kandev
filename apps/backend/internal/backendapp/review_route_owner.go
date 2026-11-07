@@ -8,6 +8,7 @@ import (
 
 type nativeReviewExecutionResolver interface {
 	NativeRouteOwnersEnabled() bool
+	PreviewExecutionDetails(context.Context, string) (agentruntime.ProfileExecution, error)
 }
 
 func (l reviewProfileLookup) NativeRouteOwnersEnabled() bool {
@@ -15,11 +16,12 @@ func (l reviewProfileLookup) NativeRouteOwnersEnabled() bool {
 	return ok && native.NativeRouteOwnersEnabled()
 }
 
-// resolveReviewerExecution resolves the concrete execution for a real run. The
-// caller never passes an empty runID while native owners are enabled: the
-// durable run must exist before the first selection.
 func (l reviewProfileLookup) resolveReviewerExecution(ctx context.Context, profileID, runID string) (agentruntime.ProfileExecution, error) {
-	if l.NativeRouteOwnersEnabled() && runID != "" {
+	ctx = reviewExecutionContext(ctx)
+	if native, ok := l.execution.(nativeReviewExecutionResolver); ok && native.NativeRouteOwnersEnabled() {
+		if runID == "" {
+			return native.PreviewExecutionDetails(ctx, profileID)
+		}
 		return l.execution.ResolveExecutionDetails(ctx, "native:review-run:"+runID, profileID)
 	}
 	return l.execution.ResolveExecutionDetails(ctx, "", profileID)

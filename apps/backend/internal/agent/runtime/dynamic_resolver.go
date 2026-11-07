@@ -172,6 +172,9 @@ func (r *ProfileExecutionResolver) ResolveExecutionDetails(ctx context.Context, 
 	if err != nil {
 		return ProfileExecution{}, fmt.Errorf("resolve profile family %s: %w", profileID, err)
 	}
+	if agent.Name != agents.DynamicAgentID && !executionCandidateAllowed(ctx, profile, agent.Name) {
+		return ProfileExecution{}, ErrExecutionCandidateExcluded
+	}
 	if err := r.admitNativeRoute(ctx, sessionID, profileID); err != nil {
 		return ProfileExecution{}, err
 	}
@@ -876,6 +879,9 @@ func (r *ProfileExecutionResolver) dynamicProfileFromRoutes(ctx context.Context,
 			)
 		}
 		profile.Candidates = append(profile.Candidates, candidate)
+	}
+	if err := r.filterExecutionCandidates(ctx, &profile); err != nil {
+		return dynamic.Profile{}, err
 	}
 	return profile, nil
 }

@@ -45,6 +45,9 @@ type runReviewerAttributor interface {
 func (r *Runner) bindRunReviewer(ctx context.Context, run *models.TaskReviewRun, identity ReviewerIdentity) (*models.TaskReviewRun, ReviewerIdentity, error) {
 	runID := run.ID
 	resolved, bound, err := r.resolver.resolveForRun(ctx, runID, identity)
+	if err == nil && !reviewerIdentityAllowed(ctx, resolved) {
+		err = fmt.Errorf("%w: %w", ErrAgentUnavailable, ErrNoDistinctReviewer)
+	}
 	if err == nil && !bound {
 		return run, identity, nil
 	}

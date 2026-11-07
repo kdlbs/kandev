@@ -76,12 +76,15 @@ type Store interface {
 
 // RunRequest describes a review pass to start.
 type RunRequest struct {
-	TaskID         string
-	SessionID      string
-	RepositoryID   string
-	AgentProfileID string
-	Trigger        models.ReviewRunTrigger
-	WorkflowStepID string
+	Origin          *OriginIdentity
+	OriginRequired  bool
+	originExclusion *originExclusion
+	TaskID          string
+	SessionID       string
+	RepositoryID    string
+	AgentProfileID  string
+	Trigger         models.ReviewRunTrigger
+	WorkflowStepID  string
 	// EntryID is the step-transition ledger row identifier of the step entry
 	// that requested this run, when triggered by the run_code_review
 	// step-entry action. Empty for manual/MCP-triggered runs.
@@ -256,11 +259,20 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 		return nil, nil, err
 	}
 	req.SessionID = sessionID
+	ctx, err = r.prepareOriginContext(ctx, &req)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// Resolve the reviewer and read the diff before creating a run row: both
 	// "no capable agent" and "nothing to review" are conditions the user should
 	// see immediately, and neither deserves a failed run in the history.
-	identity, err := r.resolver.Resolve(ctx, req.AgentProfileID)
+	var identity ReviewerIdentity
+	if OriginExclusionActive(ctx) {
+		identity, err = r.resolver.resolveDistinct(ctx, req.AgentProfileID)
+	} else {
+		identity, err = r.resolver.Resolve(ctx, req.AgentProfileID)
+	}
 	if err != nil {
 		return nil, nil, err
 	}

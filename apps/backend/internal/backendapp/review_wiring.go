@@ -45,8 +45,13 @@ func buildReviewComponents(p routeParams) reviewComponents {
 	// auth disabled) are unaffected.
 	service.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
 
+	var execution reviewExecutionResolver
+	if p.services.DynamicProfileResolver != nil {
+		execution = p.services.DynamicProfileResolver
+	}
+	profileLookup := reviewProfileLookup{profiles: p.agentSettingsRepo, execution: execution}
 	resolver := review.NewResolver(
-		reviewProfileLookup{profiles: p.agentSettingsRepo, execution: p.services.DynamicProfileResolver},
+		profileLookup,
 		reviewUtilityLookup{agents: p.services.Utility},
 		reviewDefaultsLookup{settings: p.services.User},
 	)
@@ -54,7 +59,7 @@ func buildReviewComponents(p routeParams) reviewComponents {
 		Store:            service,
 		Resolver:         resolver,
 		Changes:          handlers.NewReviewChangeSource(p.lifecycleMgr, reviewSessionReader{repo: p.taskRepo}),
-		Inference:        reviewInference{session: p.lifecycleMgr, host: p.hostUtilityMgr, profiles: p.services.DynamicProfileResolver, runs: service},
+		Inference:        reviewInference{session: p.lifecycleMgr, host: p.hostUtilityMgr, profiles: execution, runs: service, originProfiles: profileLookup},
 		InferenceContext: reviewInferenceContext(p.taskRepo),
 		Prompts:          review.NewTemplatePromptBuilder(reviewTemplateSource{agents: p.services.Utility, engine: utilitytemplate.NewEngine()}),
 		TaskContext:      reviewTaskContext{tasks: p.taskSvc},
@@ -136,9 +141,12 @@ func (l reviewProfileLookup) reviewerProfile(ctx context.Context, profileID, run
 		return review.ReviewerProfile{}, false, nil
 	}
 	var route *review.ReviewerRoute
-	if l.execution != nil && (runID != "" || !l.NativeRouteOwnersEnabled()) {
+	if l.execution != nil && (runID != "" || !l.NativeRouteOwnersEnabled() || review.OriginExclusionActive(ctx)) {
 		execution, err := l.resolveReviewerExecution(ctx, profileID, runID)
 		if err != nil {
+			if errors.Is(err, agentruntime.ErrExecutionCandidateExcluded) {
+				return review.ReviewerProfile{}, false, fmt.Errorf("%w: %w", review.ErrNoDistinctReviewer, err)
+			}
 			return review.ReviewerProfile{}, false, err
 		}
 		profile = execution.Profile
@@ -257,10 +265,11 @@ func (s reviewTemplateSource) ResolveTemplate(_ context.Context, template string
 // when that session has no live execution — a review must still work on a task
 // whose agent is not currently running.
 type reviewInference struct {
-	session  sessionInferenceRunner
-	host     *hostutility.Manager
-	profiles reviewExecutionResolver
-	runs     reviewCandidateWriter
+	session        sessionInferenceRunner
+	host           *hostutility.Manager
+	profiles       reviewExecutionResolver
+	runs           reviewCandidateWriter
+	originProfiles reviewOriginProfileLookup
 }
 
 type sessionInferenceRunner interface {
@@ -272,9 +281,13 @@ type sessionProfileInferenceRunner interface {
 }
 
 func (r reviewInference) Run(ctx context.Context, identity review.ReviewerIdentity, sessionID, prompt string) (*review.PromptResult, error) {
+	ctx = reviewExecutionContext(ctx)
 	prepared := reviewPromptRoute(identity)
 	recordedProfileID := prepared.ExecutionProfileID
 	response, err := utilityservice.ExecuteProfilePrompt(ctx, r.profiles, prepared, func(attempt context.Context, id string) (*agentctlutil.PromptResponse, error) {
+		if err := r.validateReviewExecution(attempt, id, prepared.AgentCLI, prepared.Model); err != nil {
+			return nil, err
+		}
 		if id != recordedProfileID {
 			if err := r.recordNativeReviewCandidate(attempt, prepared); err != nil {
 				return nil, err
@@ -323,6 +336,9 @@ func (r reviewInference) runConcrete(ctx context.Context, identity review.Review
 	}
 	if r.host == nil {
 		return nil, fmt.Errorf("no inference executor is configured")
+	}
+	if err := r.validateReviewExecution(ctx, identity.ProfileID, identity.AgentID, identity.Model); err != nil {
+		return nil, err
 	}
 	var result *hostutility.PromptResult
 	var err error
