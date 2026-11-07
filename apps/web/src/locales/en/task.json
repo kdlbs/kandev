@@ -3177,7 +3177,7 @@
   "questionReviewZoomOut": "Zoom out",
   "questionReviewZoomStatus": "Zoom {{level}}",
   "questionReviewStage": "Image stage",
-  "questionReviewStageHelp": "Drag to pan. Hold Ctrl or Command and scroll to zoom, or pinch on a touch screen. Keys: plus and minus zoom, 0 fits, 1 shows actual size, arrow keys pan, Shift with an arrow key moves one pixel. In annotate mode, N adds a region; arrow keys move the selected region, Alt with an arrow key resizes it, and Delete removes it.",
+  "questionReviewStageHelp": "Drag to pan. Hold Ctrl or Command and scroll to zoom, or pinch on a touch screen. Keys: plus and minus zoom, 0 fits, 1 shows actual size, arrow keys pan, Shift with an arrow key moves one pixel. In annotate mode, N adds a region; arrow keys move the selected region, Alt with an arrow key resizes it, Enter edits its comment, and Delete removes it.",
   "questionReviewImageSize": "{{width}} × {{height}} px",
   "questionReviewResize": "Resize the image and question areas",
   "questionReviewCompareModes": "Comparison mode",
@@ -3205,11 +3205,12 @@
   "questionReviewRegionLimit": "Each answer accepts at most {{max}} regions.",
   "questionReviewRegions_one": "Regions ({{count}} of {{max}})",
   "questionReviewRegions_other": "Regions ({{count}} of {{max}})",
-  "questionReviewRegionsHint": "To mark an area, select Annotate and drag on the image, or press N with the image focused.",
-  "questionReviewRegionSelect": "Select region {{number}}",
+  "questionReviewRegionsHint": "To mark an area, select Annotate and drag on the image, or press N with the image focused. A comment box opens next to the region.",
   "questionReviewRegionDelete": "Delete region {{number}}",
-  "questionReviewRegionComment": "Comment for region {{number}}",
-  "questionReviewRegionCount": "{{length}}/{{max}}",
   "questionReviewRegionNeedsComment": "Add a comment to each region before you submit.",
-  "questionReviewRegionHistory": "Region {{number}} on {{image}}: {{comment}}"
+  "questionReviewRegionHistory": "Region {{number}} on {{image}}: {{comment}}",
+  "questionReviewRegionEdit": "Edit region {{number}}",
+  "questionReviewRegionNoComment": "No comment yet.",
+  "questionReviewRegionPreview": "Region {{number}} on {{image}}",
+  "questionReviewRegionTooLong": "Keep the comment to {{max}} characters or fewer."
 }

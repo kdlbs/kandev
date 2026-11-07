@@ -3175,7 +3175,7 @@
   "questionReviewZoomOut": "縮小",
   "questionReviewZoomStatus": "ズーム {{level}}",
   "questionReviewStage": "画像エリア",
-  "questionReviewStageHelp": "ドラッグで移動します。Ctrl または Command を押しながらスクロールするか、タッチ画面でピンチするとズームします。キー：プラスとマイナスでズーム、0 で全体表示、1 で実寸表示、矢印キーで移動、Shift と矢印キーで 1 ピクセル移動します。注釈モードでは、N で領域を追加し、矢印キーで選択した領域を移動、Alt と矢印キーでサイズを変更、Delete で削除します。",
+  "questionReviewStageHelp": "ドラッグで移動します。Ctrl または Command を押しながらスクロールするか、タッチ画面でピンチするとズームします。キー：プラスとマイナスでズーム、0 で全体表示、1 で実寸表示、矢印キーで移動、Shift と矢印キーで 1 ピクセル移動します。注釈モードでは、N で領域を追加し、矢印キーで選択した領域を移動、Alt と矢印キーでサイズを変更、Enter でコメントを編集、Delete で削除します。",
   "questionReviewImageSize": "{{width}} × {{height}} ピクセル",
   "questionReviewResize": "画像エリアと質問エリアのサイズを変更",
   "questionReviewCompareModes": "比較モード",
@@ -3203,11 +3203,12 @@
   "questionReviewRegionLimit": "1 つの回答に追加できる領域は最大 {{max}} 個です。",
   "questionReviewRegions_one": "領域（{{count}}/{{max}}）",
   "questionReviewRegions_other": "領域（{{count}}/{{max}}）",
-  "questionReviewRegionsHint": "領域を指定するには、［注釈］を選んで画像上をドラッグするか、画像にフォーカスがある状態で N を押します。",
-  "questionReviewRegionSelect": "領域 {{number}} を選択",
+  "questionReviewRegionsHint": "領域を指定するには、［注釈］を選んで画像上をドラッグするか、画像にフォーカスがある状態で N を押します。領域の横にコメント欄が開きます。",
   "questionReviewRegionDelete": "領域 {{number}} を削除",
-  "questionReviewRegionComment": "領域 {{number}} へのコメント",
-  "questionReviewRegionCount": "{{length}}/{{max}}",
   "questionReviewRegionNeedsComment": "送信する前に、すべての領域にコメントを追加してください。",
-  "questionReviewRegionHistory": "{{image}} の領域 {{number}}：{{comment}}"
+  "questionReviewRegionHistory": "{{image}} の領域 {{number}}：{{comment}}",
+  "questionReviewRegionEdit": "領域 {{number}} を編集",
+  "questionReviewRegionNoComment": "まだコメントがありません。",
+  "questionReviewRegionPreview": "{{image}} の領域 {{number}}",
+  "questionReviewRegionTooLong": "コメントは {{max}} 文字以内にしてください。"
 }

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
@@ -168,4 +168,32 @@ export async function expectNoHorizontalOverflow(page: Page) {
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
     ),
   ).toBe(true);
+}
+
+/** The compact panel's first two thumbnails sit on one row. */
+export async function expectThumbnailsShareRow(overlay: Locator) {
+  const images = overlay.getByTestId("question-images-row").first().getByRole("img");
+  await expect(images.nth(1)).toBeVisible();
+  const first = (await images.nth(0).boundingBox())!;
+  const second = (await images.nth(1).boundingBox())!;
+  expect(Math.abs(first.y - second.y)).toBeLessThan(2);
+  expect(second.x).toBeGreaterThan(first.x + first.width - 1);
+}
+
+/** Drags with real touch events from the center of `target` to `toX` on the same row. */
+export async function touchDrag(page: Page, target: Locator, toX: number) {
+  const box = (await target.boundingBox())!;
+  const y = box.y + box.height / 2;
+  const fromX = box.x + box.width / 2;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: fromX, y }],
+  });
+  for (let step = 1; step <= 10; step++) {
+    const x = fromX + ((toX - fromX) * step) / 10;
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y }] });
+  }
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
 }

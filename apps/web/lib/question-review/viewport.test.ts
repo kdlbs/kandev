@@ -6,6 +6,7 @@ import {
   clampView,
   fitView,
   formatZoom,
+  minScaleFor,
   nextZoomStep,
   panBy,
   zoomAt,
@@ -84,5 +85,23 @@ describe("actualSizeView", () => {
     expect(view.scale).toBe(1);
     expect(view.x).toBe(400);
     expect(view.y).toBe(150);
+  });
+});
+
+describe("fit below the manual zoom range", () => {
+  // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-004.1
+  it("always contains the image, even below 25%", () => {
+    const view = fitView({ width: 366, height: 87 }, { width: 640, height: 400 });
+    expect(view.scale).toBeCloseTo(87 / 400);
+    expect(400 * view.scale).toBeLessThanOrEqual(87);
+  });
+
+  it("does not zoom out past the smaller of Fit and 25%", () => {
+    expect(minScaleFor(0.1)).toBe(0.1);
+    expect(minScaleFor(0.5)).toBe(MIN_SCALE);
+    expect(nextZoomStep(0.25, -1, 0.1)).toBe(0.1);
+    expect(nextZoomStep(0.1, -1, 0.1)).toBe(0.1);
+    expect(nextZoomStep(0.1, 1, 0.1)).toBe(0.25);
+    expect(zoomAt({ scale: 0.2, x: 0, y: 0 }, 0.01, { x: 0, y: 0 }, 0.1).scale).toBe(0.1);
   });
 });

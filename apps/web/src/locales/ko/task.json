@@ -3175,7 +3175,7 @@
   "questionReviewZoomOut": "축소",
   "questionReviewZoomStatus": "확대/축소 {{level}}",
   "questionReviewStage": "이미지 영역",
-  "questionReviewStageHelp": "드래그하여 이동합니다. Ctrl 또는 Command를 누른 채 스크롤하거나 터치 화면에서 손가락을 오므리면 확대/축소합니다. 키: 더하기와 빼기로 확대/축소, 0은 화면에 맞추기, 1은 실제 크기, 화살표 키로 이동, Shift와 화살표 키로 1픽셀 이동합니다. 주석 모드에서는 N으로 영역을 추가하고, 화살표 키로 선택한 영역을 이동하며, Alt와 화살표 키로 크기를 조정하고, Delete로 삭제합니다.",
+  "questionReviewStageHelp": "드래그하여 이동합니다. Ctrl 또는 Command를 누른 채 스크롤하거나 터치 화면에서 손가락을 오므리면 확대/축소합니다. 키: 더하기와 빼기로 확대/축소, 0은 화면에 맞추기, 1은 실제 크기, 화살표 키로 이동, Shift와 화살표 키로 1픽셀 이동합니다. 주석 모드에서는 N으로 영역을 추가하고, 화살표 키로 선택한 영역을 이동하며, Alt와 화살표 키로 크기를 조정하고, Enter로 의견을 편집하며, Delete로 삭제합니다.",
   "questionReviewImageSize": "{{width}} × {{height}}픽셀",
   "questionReviewResize": "이미지 영역과 질문 영역의 크기 조정",
   "questionReviewCompareModes": "비교 모드",
@@ -3203,11 +3203,12 @@
   "questionReviewRegionLimit": "답변 하나에 영역을 최대 {{max}}개까지 추가할 수 있습니다.",
   "questionReviewRegions_one": "영역({{count}}/{{max}})",
   "questionReviewRegions_other": "영역({{count}}/{{max}})",
-  "questionReviewRegionsHint": "영역을 표시하려면 주석을 선택하고 이미지 위를 드래그하거나, 이미지에 포커스가 있을 때 N을 누르세요.",
-  "questionReviewRegionSelect": "영역 {{number}} 선택",
+  "questionReviewRegionsHint": "영역을 표시하려면 주석을 선택하고 이미지 위를 드래그하거나, 이미지에 포커스가 있을 때 N을 누르세요. 영역 옆에 의견 상자가 열립니다.",
   "questionReviewRegionDelete": "영역 {{number}} 삭제",
-  "questionReviewRegionComment": "영역 {{number}}에 대한 의견",
-  "questionReviewRegionCount": "{{length}}/{{max}}",
   "questionReviewRegionNeedsComment": "제출하기 전에 모든 영역에 의견을 추가하세요.",
-  "questionReviewRegionHistory": "{{image}}의 영역 {{number}}: {{comment}}"
+  "questionReviewRegionHistory": "{{image}}의 영역 {{number}}: {{comment}}",
+  "questionReviewRegionEdit": "영역 {{number}} 편집",
+  "questionReviewRegionNoComment": "아직 의견이 없습니다.",
+  "questionReviewRegionPreview": "{{image}}의 영역 {{number}}",
+  "questionReviewRegionTooLong": "의견은 {{max}}자 이하로 작성하세요."
 }

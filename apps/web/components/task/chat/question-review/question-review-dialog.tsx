@@ -55,6 +55,7 @@ export function QuestionReviewDialog(props: Props) {
       sessionId={props.sessionId}
       segment={segment}
       annotations={annotations}
+      popoverContainer={review.scopeRef}
     />
   ) : null;
   const form = (
@@ -70,6 +71,10 @@ export function QuestionReviewDialog(props: Props) {
         enterConfirms={false}
         data-testid="question-review-dialog"
         overlayClassName="data-open:animate-none data-closed:animate-none"
+        onEscapeKeyDown={(event) => {
+          // Escape closes an open region comment first, not the whole view.
+          if (annotations.commenting) event.preventDefault();
+        }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           review.triggerRef.current?.focus();
@@ -84,7 +89,7 @@ export function QuestionReviewDialog(props: Props) {
         <div
           ref={review.scopeRef}
           tabIndex={-1}
-          className="flex min-h-0 flex-1 flex-col outline-none"
+          className="relative flex min-h-0 flex-1 flex-col outline-none"
         >
           <ReviewHeader {...props} />
           {isMobile ? (

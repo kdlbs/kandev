@@ -3175,7 +3175,7 @@
   "questionReviewZoomOut": "缩小",
   "questionReviewZoomStatus": "缩放 {{level}}",
   "questionReviewStage": "图像区",
-  "questionReviewStageHelp": "拖动可平移。按住 Ctrl 或 Command 并滚动可缩放，在触摸屏上可双指缩放。按键：加号和减号缩放，0 适应窗口，1 显示实际大小，方向键平移，Shift 加方向键移动一个像素。在标注模式下，按 N 添加区域；方向键移动所选区域，Alt 加方向键调整其大小，Delete 删除区域。",
+  "questionReviewStageHelp": "拖动可平移。按住 Ctrl 或 Command 并滚动可缩放，在触摸屏上可双指缩放。按键：加号和减号缩放，0 适应窗口，1 显示实际大小，方向键平移，Shift 加方向键移动一个像素。在标注模式下，按 N 添加区域；方向键移动所选区域，Alt 加方向键调整其大小，Enter 编辑评论，Delete 删除区域。",
   "questionReviewImageSize": "{{width}} × {{height}} 像素",
   "questionReviewResize": "调整图像区和问题区的大小",
   "questionReviewCompareModes": "对比模式",
@@ -3203,11 +3203,12 @@
   "questionReviewRegionLimit": "每个回答最多可包含 {{max}} 个区域。",
   "questionReviewRegions_one": "区域（{{count}}/{{max}}）",
   "questionReviewRegions_other": "区域（{{count}}/{{max}}）",
-  "questionReviewRegionsHint": "要标记区域，请选择“标注”并在图像上拖动，或在图像获得焦点时按 N。",
-  "questionReviewRegionSelect": "选择区域 {{number}}",
+  "questionReviewRegionsHint": "要标记区域，请选择“标注”并在图像上拖动，或在图像获得焦点时按 N。区域旁会打开评论框。",
   "questionReviewRegionDelete": "删除区域 {{number}}",
-  "questionReviewRegionComment": "区域 {{number}} 的评论",
-  "questionReviewRegionCount": "{{length}}/{{max}}",
   "questionReviewRegionNeedsComment": "提交前请为每个区域添加评论。",
-  "questionReviewRegionHistory": "{{image}} 上的区域 {{number}}：{{comment}}"
+  "questionReviewRegionHistory": "{{image}} 上的区域 {{number}}：{{comment}}",
+  "questionReviewRegionEdit": "编辑区域 {{number}}",
+  "questionReviewRegionNoComment": "尚无评论。",
+  "questionReviewRegionPreview": "{{image}} 上的区域 {{number}}",
+  "questionReviewRegionTooLong": "评论不能超过 {{max}} 个字符。"
 }

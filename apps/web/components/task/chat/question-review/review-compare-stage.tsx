@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type Dispatch } from "react";
+import { useEffect, useRef, type Dispatch, type RefObject } from "react";
 import type { CompareAction } from "@/lib/question-review/compare";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -12,7 +12,7 @@ import { ReviewCanvas, ReviewImage } from "./review-canvas";
 import { CompareLayers, WipeHandle, type LoadedReviewImage } from "./review-compare-layers";
 import { ReviewCompareStatus } from "./review-compare-status";
 import { ReviewCompareToolbar } from "./review-compare-toolbar";
-import { ReviewZoomControls } from "./review-zoom-controls";
+import { ReviewZoomControls, reviewToolbarRow } from "./review-zoom-controls";
 import { ImageState, stopStageKeys, useStageImages } from "./review-stage-shared";
 import { useReviewCompare } from "./use-review-compare";
 import { useReviewDiff } from "./use-review-diff";
@@ -25,6 +25,7 @@ type Props = {
   sessionId: string;
   segment: ReviewSegment;
   annotations: ReviewAnnotationController;
+  popoverContainer: RefObject<HTMLElement | null>;
 };
 
 const EMPTY_SIZE: Size = { width: 0, height: 0 };
@@ -68,7 +69,13 @@ function firstPending(
 
 /** Compares a baseline (A) with a candidate (B) on bytes already loaded for the segment. */
 // eslint-disable-next-line max-lines-per-function -- composes the stage's images, view, comparison, and regions.
-export function ReviewCompareStage({ pendingId, sessionId, segment, annotations }: Props) {
+export function ReviewCompareStage({
+  pendingId,
+  sessionId,
+  segment,
+  annotations,
+  popoverContainer,
+}: Props) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const { states, retry, sizes, setSize } = useStageImages(pendingId, sessionId, segment);
@@ -90,7 +97,9 @@ export function ReviewCompareStage({ pendingId, sessionId, segment, annotations 
   const shown = state.showB ? b : a;
   const regions = useStageAnnotations({
     controller: annotations,
-    questionId: segment.questionId,
+    segment,
+    stageRef,
+    popoverContainer,
     imageId: toggle ? shown?.id : undefined,
     image: (shown && sizes[shown.id]) || EMPTY_SIZE,
     view: viewport.view,
@@ -162,7 +171,7 @@ export function ReviewCompareStage({ pendingId, sessionId, segment, annotations 
       onKeyDown={stopStageKeys}
     >
       <ReviewCompareToolbar compare={compare} images={segment.images} />
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <div className={reviewToolbarRow}>
         <ReviewZoomControls
           scale={viewport.view.scale}
           onZoom={viewport.zoomStep}
@@ -185,6 +194,7 @@ export function ReviewCompareStage({ pendingId, sessionId, segment, annotations 
           canvas("both")
         )}
       </div>
+      {regions.popover}
     </section>
   );
 }

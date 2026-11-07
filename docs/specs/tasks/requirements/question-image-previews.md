@@ -90,7 +90,8 @@ not yet describe a released version.
 #### Acceptance criteria
 
 - **AC-TASKS-QUESTION-IMAGES-003.1:** Thumbnails shall preserve the full image aspect
-  ratio without cropping. Thumbnail height shall not exceed 128px on desktop or
+  ratio without cropping. A question's thumbnails shall flow side by side and wrap
+  to a new row only when the width runs out. Thumbnail height shall not exceed 128px on desktop or
   96px below the 768px phone breakpoint, at the standard root font size. A short
   prompt with one image shall remain visible on entry in the standard desktop and
   phone test viewports. Larger bundles and long content can require panel scrolling.

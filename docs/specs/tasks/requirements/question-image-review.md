@@ -80,9 +80,10 @@ so that small questions stay quick and visual questions stay reviewable.
   split with a pointer or keyboard, and each part shall keep a usable minimum height.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-002.3:** Below the 768px phone breakpoint, the
   review view shall use the full dynamic viewport height with safe-area clearance.
-  The stage shall stay fixed above a separately scrolling form. Controls shall
-  measure at least 44px in both dimensions, and the document shall not overflow
-  horizontally.
+  The stage shall stay fixed above a separately scrolling form. Stage toolbars
+  shall scroll horizontally instead of wrapping, so they do not take the stage's
+  height. Controls shall measure at least 44px in both dimensions, and the
+  document shall not overflow horizontally.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-002.4:** While the review view is open, the
   form shall keep the existing option and submit shortcuts when focus is in the
   form. Stage shortcuts shall apply only when focus is in the stage, and shall not
@@ -118,6 +119,8 @@ so that small questions stay quick and visual questions stay reviewable.
 
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-004.1:** The stage shall offer Fit, Actual size
   (100%), and zoom steps from 25% to 800%, with the current zoom level visible.
+  Fit shall be the default and shall always contain the whole image, even when
+  that needs less than 25%. Zooming out shall stop at the smaller of Fit and 25%.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-004.2:** The operator can pan and zoom with mouse
   drag and modified wheel input, with touch drag and pinch, and with documented
   keyboard keys while the stage has focus. Zooming with a pointer shall keep the
@@ -139,7 +142,9 @@ so that small questions stay quick and visual questions stay reviewable.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-005.2:** Toggle shall show A or B in the same
   place. A visible control and a stage keyboard shortcut shall flip between them.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-005.3:** Wipe shall show A and B divided by a
-  slider that the operator can move by pointer, touch, or keyboard.
+  slider that the operator can move by pointer, touch, or keyboard. A drag shall
+  reach 0% and 100% without the pointer reaching the screen edge, the handle
+  shall stay fully visible, and a toolbar slider shall set the same position.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-005.4:** Side by side shall show A and B with
   synchronized zoom and pan. Below the phone breakpoint, the images shall stack vertically.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-005.5:** Onion skin shall show B over A with an
@@ -189,7 +194,11 @@ so that small questions stay quick and visual questions stay reviewable.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-007.1:** In the single-image and Toggle views,
   the operator can draw a rectangle on the shown image, comment on it, edit its
   comment and bounds, and delete it. Each question shall accept at most eight
-  regions, and regions shall be numbered in creation order.
+  regions, and regions shall be numbered in creation order. Finishing a region
+  shall open a comment popover next to it (a bottom drawer on touch screens), the
+  same comment control chat uses for selected text. Cancelling the comment of a
+  new region shall discard the region; selecting an existing region shall reopen
+  the popover to edit or delete it.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-007.2:** Each region shall record the image ID,
   an integer pixel rectangle within the image, the image width and height observed
   when it was drawn, and a comment of 1 to 500 characters.
@@ -208,8 +217,9 @@ so that small questions stay quick and visual questions stay reviewable.
   answer and appear in answered question history with their number, image
   description, and comment.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-007.7:** Keyboard and touch users shall be able
-  to create, adjust, and delete regions. Regions shall be listed in the form as text
-  so screen-reader users can review and edit them.
+  to create, adjust, and delete regions. Regions shall be listed in the form as
+  read-only text with Edit and Delete controls, so screen-reader users can review
+  and change them.
 
 ### REQ-TASKS-QUESTION-IMAGE-REVIEW-008: Compatibility
 

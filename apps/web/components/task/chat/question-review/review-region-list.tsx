@@ -1,10 +1,9 @@
 "use client";
 
 import { Button } from "@kandev/ui/button";
-import { Textarea } from "@kandev/ui/textarea";
 import { useTranslation } from "react-i18next";
 import type { ReviewSegment } from "@/lib/question-review/segments";
-import { MAX_REGIONS, MAX_REGION_COMMENT, regionCommentReady } from "@/lib/question-review/regions";
+import { MAX_REGIONS, regionCommentReady } from "@/lib/question-review/regions";
 import { cn } from "@/lib/utils";
 import { useReviewImageLabel } from "./review-image-picker";
 import { reviewControlSize } from "./review-zoom-controls";
@@ -12,7 +11,10 @@ import type { ReviewAnnotationController } from "./use-review-annotations";
 
 type Props = { segment: ReviewSegment; controller: ReviewAnnotationController };
 
-/** Text list of the active question's regions, so every region can be reviewed and edited. */
+/**
+ * Read-only list of the active question's regions, so keyboard and screen-reader
+ * users can review every region. Edit opens the same comment popover.
+ */
 export function ReviewRegionList({ segment, controller }: Props) {
   const { t } = useTranslation();
   const imageLabel = useReviewImageLabel();
@@ -58,11 +60,10 @@ export function ReviewRegionList({ segment, controller }: Props) {
                   type="button"
                   variant="outline"
                   className={reviewControlSize}
-                  aria-pressed={index === selectedIndex}
-                  data-testid="question-review-region-select"
-                  onClick={() => controller.setSelected({ questionId: segment.questionId, index })}
+                  data-testid="question-review-region-edit"
+                  onClick={() => controller.editComment(segment.questionId, index)}
                 >
-                  {t("task:questionReviewRegionSelect", { number: index + 1 })}
+                  {t("task:questionReviewRegionEdit", { number: index + 1 })}
                 </Button>
                 <Button
                   type="button"
@@ -74,22 +75,11 @@ export function ReviewRegionList({ segment, controller }: Props) {
                   {t("task:questionReviewRegionDelete", { number: index + 1 })}
                 </Button>
               </div>
-              <Textarea
-                value={region.comment}
-                rows={2}
-                aria-label={t("task:questionReviewRegionComment", { number: index + 1 })}
-                aria-invalid={!ready}
-                data-testid="question-review-region-comment"
-                className="min-h-12 text-xs"
-                onChange={(event) =>
-                  controller.update(segment.questionId, index, { comment: event.target.value })
-                }
-              />
-              <p className="text-right text-[11px] text-muted-foreground tabular-nums">
-                {t("task:questionReviewRegionCount", {
-                  length: Array.from(region.comment.trim()).length,
-                  max: MAX_REGION_COMMENT,
-                })}
+              <p
+                className={cn("break-words text-xs", !ready && "text-muted-foreground italic")}
+                data-testid="question-review-region-text"
+              >
+                {ready ? region.comment : t("task:questionReviewRegionNoComment")}
               </p>
             </li>
           );

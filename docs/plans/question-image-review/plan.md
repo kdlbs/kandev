@@ -43,6 +43,7 @@ committed and was lost with its worktree. This package recreates it.
 | 2 | [03 Comparison modes](task-03-compare-modes.md) | 02 | Toggle, Wipe, Side by side, Onion skin, and Difference. |
 | 3 | [04 Annotation contract](task-04-annotation-contract.md) | none technically; scheduled after 03 | Answers carry validated regions to persistence and the agent. |
 | 4 | [05 Annotation interface](task-05-annotation-interface.md) | 03, 04 | Draw, edit, list, submit, and view regions in history. |
+| 5 | [06 Test feedback](task-06-test-feedback.md) | 05 | Wipe reach, Fit on phones, region comment popover, wrapping thumbnails. |
 
 Wave 1 work orders touch separate files and can run in either order. Work
 order 04 is backend-only and could start early, but the user asked for

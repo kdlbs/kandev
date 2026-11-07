@@ -40,6 +40,10 @@ vi.mock("@kandev/ui/tooltip", () => ({
 }));
 
 const fetchMock = vi.fn();
+const REGION_INPUT = "question-review-region-input";
+const REGION_POPOVER = "question-review-region-popover";
+const REGION_ITEM = "question-review-region-item";
+const REGION_TEXT = "question-review-region-text";
 const ZOOM_LEVEL = "question-review-zoom-level";
 const SUBMIT = "question-review-submit";
 const IMAGE = "question-review-image";
@@ -421,63 +425,91 @@ function respondBody() {
   return JSON.parse(String((init as RequestInit).body));
 }
 
+function drawRegionByKeyboard(dialog: HTMLElement) {
+  fireEvent.click(within(dialog).getByTestId(ANNOTATE));
+  fireEvent.keyDown(within(dialog).getByTestId(STAGE), { key: "n" });
+}
+
+function commentRegion(dialog: HTMLElement, text: string) {
+  fireEvent.change(within(dialog).getByTestId(REGION_INPUT), {
+    target: { value: text },
+  });
+  fireEvent.click(within(dialog).getByTestId("question-review-region-add"));
+}
+
 describe("question image review regions", () => {
   // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-007.1
   // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-007.7
-  it("adds, moves, and deletes a region by keyboard", async () => {
+  it("opens a comment popover for a new region and moves, edits, and deletes it", async () => {
     const dialog = await openAnnotatable();
-    fireEvent.click(within(dialog).getByTestId(ANNOTATE));
-    const stage = within(dialog).getByTestId(STAGE);
-    fireEvent.keyDown(stage, { key: "n" });
-    const items = within(dialog).getAllByTestId("question-review-region-item");
+    drawRegionByKeyboard(dialog);
+    const input = within(dialog).getByTestId(REGION_INPUT);
+    expect(document.activeElement).toBe(input);
+    commentRegion(dialog, "Spacing is off");
+    expect(within(dialog).queryByTestId(REGION_POPOVER)).toBeNull();
+    const items = within(dialog).getAllByTestId(REGION_ITEM);
     expect(items).toHaveLength(1);
     expect(items[0].textContent).toContain("Image 1: Before");
-    const outline = within(dialog).getByTestId("question-review-region");
-    const left = outline.style.left;
+    expect(within(dialog).getByTestId(REGION_TEXT).textContent).toBe("Spacing is off");
+    const stage = within(dialog).getByTestId(STAGE);
+    const left = within(dialog).getByTestId("question-review-region").style.left;
     fireEvent.keyDown(stage, { key: "ArrowRight", shiftKey: true });
     expect(within(dialog).getByTestId("question-review-region").style.left).not.toBe(left);
+    fireEvent.click(within(dialog).getByTestId("question-review-region-edit"));
+    const editInput = within(dialog).getByTestId(REGION_INPUT);
+    expect((editInput as HTMLTextAreaElement).value).toBe("Spacing is off");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(within(dialog).getAllByTestId(REGION_ITEM)).toHaveLength(1);
     fireEvent.keyDown(stage, { key: "Delete" });
-    expect(within(dialog).queryAllByTestId("question-review-region-item")).toHaveLength(0);
+    expect(within(dialog).queryAllByTestId(REGION_ITEM)).toHaveLength(0);
+  });
+
+  it("discards a new region when its comment is cancelled, without closing the view", async () => {
+    const dialog = await openAnnotatable();
+    drawRegionByKeyboard(dialog);
+    expect(within(dialog).getByTestId(REGION_POPOVER)).toBeTruthy();
+    fireEvent.keyDown(within(dialog).getByTestId(REGION_INPUT), {
+      key: "Escape",
+    });
+    await waitFor(() => expect(within(dialog).queryByTestId(REGION_POPOVER)).toBeNull());
+    expect(within(dialog).queryAllByTestId(REGION_ITEM)).toHaveLength(0);
+    expect(screen.getByTestId(REVIEW_DIALOG)).toBeTruthy();
   });
 
   it("allows annotating only in the single-image view and Toggle", async () => {
     const dialog = await openAnnotatable();
     pickMode(dialog, "Wipe");
     expect(within(dialog).getByTestId(ANNOTATE)).toHaveProperty("disabled", true);
+    expect(within(dialog).getByTestId("question-review-wipe-slider")).toBeTruthy();
     pickMode(dialog, "Toggle");
     expect(within(dialog).getByTestId(ANNOTATE)).toHaveProperty("disabled", false);
   });
 
   // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-007.3
   // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-007.5
-  it("requires a comment, keeps regions across close, and submits them with the answer", async () => {
+  it("keeps regions across close and submits them with the answer", async () => {
     const dialog = await openAnnotatable();
     fireEvent.click(within(dialog).getByTestId("question-review-flip"));
-    fireEvent.click(within(dialog).getByTestId(ANNOTATE));
-    fireEvent.keyDown(within(dialog).getByTestId(STAGE), { key: "n" });
+    drawRegionByKeyboard(dialog);
+    commentRegion(dialog, "Label contrast too low");
     fireEvent.click(within(dialog).getAllByTestId(OPTION)[1]);
-    const submit = within(dialog).getByTestId(SUBMIT);
-    expect(submit).toHaveProperty("disabled", true);
-    expect(within(dialog).getByTestId("question-review-region-error")).toBeTruthy();
     fireEvent.click(within(dialog).getByTestId(CLOSE));
     await waitFor(() => expect(screen.queryByTestId(REVIEW_DIALOG)).toBeNull());
     const reopened = openReview();
-    fireEvent.change(within(reopened).getByTestId("question-review-region-comment"), {
-      target: { value: "  Label contrast too low " },
-    });
-    expect(within(reopened).getByTestId(SUBMIT)).toHaveProperty("disabled", false);
+    expect(within(reopened).getByTestId(REGION_TEXT).textContent).toBe("Label contrast too low");
     await act(async () => {
       fireEvent.click(within(reopened).getByTestId(SUBMIT));
     });
     await waitFor(() => expect(respondCalls()).toHaveLength(1));
     const [answer] = respondBody().answers;
     expect(answer.selected_options).toEqual(["q1_o2"]);
-    expect(answer.annotations).toHaveLength(1);
-    expect(answer.annotations[0]).toMatchObject({
-      image_id: "after",
-      image_width: 160,
-      image_height: 100,
-      comment: "  Label contrast too low ",
-    });
+    expect(answer.annotations).toEqual([
+      expect.objectContaining({
+        image_id: "after",
+        image_width: 160,
+        image_height: 100,
+        comment: "Label contrast too low",
+      }),
+    ]);
   });
 });

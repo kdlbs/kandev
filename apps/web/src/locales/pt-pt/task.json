@@ -3175,7 +3175,7 @@
   "questionReviewZoomOut": "Reduzir",
   "questionReviewZoomStatus": "Ampliação {{level}}",
   "questionReviewStage": "Área de imagem",
-  "questionReviewStageHelp": "Arraste para deslocar. Mantenha Ctrl ou Command premido e use a roda do rato para fazer zoom, ou junte os dedos num ecrã tátil. Teclas: mais e menos fazem zoom, 0 ajusta, 1 mostra o tamanho real, as setas deslocam e Shift com uma seta move um píxel. No modo de anotação, N adiciona uma região; as setas movem a região selecionada, Alt com uma seta redimensiona-a e Delete remove-a.",
+  "questionReviewStageHelp": "Arraste para deslocar. Mantenha Ctrl ou Command premido e use a roda do rato para fazer zoom, ou junte os dedos num ecrã tátil. Teclas: mais e menos fazem zoom, 0 ajusta, 1 mostra o tamanho real, as setas deslocam e Shift com uma seta move um píxel. No modo de anotação, N adiciona uma região; as setas movem a região selecionada, Alt com uma seta redimensiona-a, Enter edita o comentário e Delete remove-a.",
   "questionReviewImageSize": "{{width}} × {{height}} píxeis",
   "questionReviewResize": "Redimensionar as áreas da imagem e da pergunta",
   "questionReviewCompareModes": "Modo de comparação",
@@ -3203,11 +3203,12 @@
   "questionReviewRegionLimit": "Cada resposta aceita no máximo {{max}} regiões.",
   "questionReviewRegions_one": "Regiões ({{count}} de {{max}})",
   "questionReviewRegions_other": "Regiões ({{count}} de {{max}})",
-  "questionReviewRegionsHint": "Para marcar uma área, selecione Anotar e arraste sobre a imagem, ou prima N com a imagem em foco.",
-  "questionReviewRegionSelect": "Selecionar região {{number}}",
+  "questionReviewRegionsHint": "Para marcar uma área, selecione Anotar e arraste sobre a imagem, ou prima N com a imagem em foco. Abre-se uma caixa de comentário junto à região.",
   "questionReviewRegionDelete": "Eliminar região {{number}}",
-  "questionReviewRegionComment": "Comentário da região {{number}}",
-  "questionReviewRegionCount": "{{length}}/{{max}}",
   "questionReviewRegionNeedsComment": "Adicione um comentário a cada região antes de enviar.",
-  "questionReviewRegionHistory": "Região {{number}} em {{image}}: {{comment}}"
+  "questionReviewRegionHistory": "Região {{number}} em {{image}}: {{comment}}",
+  "questionReviewRegionEdit": "Editar região {{number}}",
+  "questionReviewRegionNoComment": "Ainda sem comentário.",
+  "questionReviewRegionPreview": "Região {{number}} em {{image}}",
+  "questionReviewRegionTooLong": "Limite o comentário a {{max}} caracteres."
 }

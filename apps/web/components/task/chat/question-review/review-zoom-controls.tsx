@@ -5,6 +5,10 @@ import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { formatZoom } from "@/lib/question-review/viewport";
 
+/** Toolbar row: wraps on desktop, one horizontally scrolling line on phones. */
+export const reviewToolbarRow =
+  "flex flex-wrap items-center gap-x-3 gap-y-1.5 max-md:flex-nowrap max-md:overflow-x-auto max-md:overscroll-x-contain max-md:pb-1 [&>*]:shrink-0";
+
 export const reviewControlSize = "h-7 cursor-pointer [@media(pointer:coarse)]:h-12 max-md:h-12";
 const iconControlSize =
   "h-7 w-7 cursor-pointer [@media(pointer:coarse)]:h-12 [@media(pointer:coarse)]:w-12 max-md:h-12 max-md:w-12";

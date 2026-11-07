@@ -88,6 +88,10 @@ export function useRegionDrawing(args: Args) {
     const region =
       selected?.questionId === questionId ? controller.list(questionId)[selected.index] : undefined;
     if (!selected || !region || region.image_id !== args.imageId) return false;
+    if (event.key === "Enter") {
+      controller.editComment(questionId, selected.index);
+      return true;
+    }
     if (event.key === "Delete" || event.key === "Backspace") {
       controller.remove(questionId, selected.index);
       return true;

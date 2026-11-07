@@ -3,6 +3,7 @@ import {
   actualSizeView,
   clampView,
   fitView,
+  minScaleFor,
   nextZoomStep,
   panBy,
   zoomAt,
@@ -51,9 +52,11 @@ export function useReviewViewport(
 ) {
   const stage = useElementSize(stageRef);
   const [manual, setManual] = useState<ReviewView | null>(null);
-  const view = manual ? clampView(manual, stage, image) : fitView(stage, image);
-  const latest = useRef({ view, stage, image });
-  latest.current = { view, stage, image };
+  const fit = fitView(stage, image);
+  const minScale = minScaleFor(fit.scale);
+  const view = manual ? clampView(manual, stage, image) : fit;
+  const latest = useRef({ view, stage, image, minScale });
+  latest.current = { view, stage, image, minScale };
   const pointers = useRef(new Map<number, Point>());
 
   const apply = useCallback((next: (current: ReviewView) => ReviewView) => {
@@ -65,17 +68,20 @@ export function useReviewViewport(
     [],
   );
   const zoomStep = useCallback(
-    (direction: 1 | -1) => apply((v) => zoomAt(v, nextZoomStep(v.scale, direction), center())),
+    (direction: 1 | -1) => {
+      const min = latest.current.minScale;
+      apply((v) => zoomAt(v, nextZoomStep(v.scale, direction, min), center(), min));
+    },
     [apply, center],
   );
-  const fit = useCallback(() => setManual(null), []);
+  const fitToStage = useCallback(() => setManual(null), []);
   const actual = useCallback(() => {
     const { view: v, stage: s, image: i } = latest.current;
     setManual(actualSizeView(s, i, v));
   }, []);
   const pan = useCallback((dx: number, dy: number) => apply((v) => panBy(v, dx, dy)), [apply]);
 
-  useWheelZoom(areaRef ?? stageRef, apply);
+  useWheelZoom(areaRef ?? stageRef, apply, latest);
 
   const handleKey = useCallback(
     (event: { key: string; shiftKey: boolean }): boolean => {
@@ -86,7 +92,7 @@ export function useReviewViewport(
         "+": () => zoomStep(1),
         "=": () => zoomStep(1),
         "-": () => zoomStep(-1),
-        "0": fit,
+        "0": fitToStage,
         "1": actual,
         ArrowLeft: () => pan(stepX, 0),
         ArrowRight: () => pan(-stepX, 0),
@@ -97,14 +103,16 @@ export function useReviewViewport(
       action?.();
       return Boolean(action);
     },
-    [actual, fit, pan, zoomStep],
+    [actual, fitToStage, pan, zoomStep],
   );
 
   const panEnabledRef = useRef(panEnabled);
   panEnabledRef.current = panEnabled;
-  const pointerHandlers = usePointerPanZoom(pointers, apply, panEnabledRef);
+  const minScaleRef = useRef(minScale);
+  minScaleRef.current = minScale;
+  const pointerHandlers = usePointerPanZoom(pointers, apply, panEnabledRef, minScaleRef);
 
-  return { view, stage, zoomStep, fit, actual, handleKey, pointerHandlers };
+  return { view, stage, zoomStep, fit: fitToStage, actual, handleKey, pointerHandlers };
 }
 
 /** Focal points are measured in the pane under the pointer, so Side by side panes agree. */
@@ -116,6 +124,7 @@ function paneOf(target: EventTarget | null, fallback: HTMLElement): HTMLElement 
 function useWheelZoom(
   areaRef: RefObject<HTMLElement | null>,
   apply: (next: (current: ReviewView) => ReviewView) => void,
+  latest: RefObject<{ minScale: number }>,
 ) {
   useEffect(() => {
     const element = areaRef.current;
@@ -124,14 +133,15 @@ function useWheelZoom(
       event.preventDefault();
       if (event.ctrlKey || event.metaKey) {
         const focal = pointIn(paneOf(event.target, element), event);
-        apply((v) => zoomAt(v, v.scale * Math.exp(-event.deltaY * WHEEL_ZOOM_RATE), focal));
+        const factor = Math.exp(-event.deltaY * WHEEL_ZOOM_RATE);
+        apply((v) => zoomAt(v, v.scale * factor, focal, latest.current.minScale));
         return;
       }
       apply((v) => panBy(v, -event.deltaX, -event.deltaY));
     };
     element.addEventListener("wheel", onWheel, { passive: false });
     return () => element.removeEventListener("wheel", onWheel);
-  }, [apply, areaRef]);
+  }, [apply, areaRef, latest]);
 }
 
 /** One pointer pans (unless drawing has taken it); two pointers pinch-zoom. */
@@ -139,6 +149,7 @@ function usePointerPanZoom(
   pointers: RefObject<Map<number, Point>>,
   apply: (next: (current: ReviewView) => ReviewView) => void,
   panEnabled: RefObject<boolean>,
+  minScale: RefObject<number>,
 ) {
   const onPointerDown = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
@@ -166,9 +177,9 @@ function usePointerPanZoom(
       if (before <= 0) return;
       const ratio = distance(next, anchor) / before;
       const focal = { x: (next.x + anchor.x) / 2, y: (next.y + anchor.y) / 2 };
-      apply((v) => zoomAt(v, v.scale * ratio, focal));
+      apply((v) => zoomAt(v, v.scale * ratio, focal, minScale.current));
     },
-    [apply, panEnabled, pointers],
+    [apply, minScale, panEnabled, pointers],
   );
   const onPointerEnd = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {

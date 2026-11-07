@@ -3175,7 +3175,7 @@
   "questionReviewZoomOut": "Źōōḿ ōũţ",
   "questionReviewZoomStatus": "Źōōḿ {{level}}",
   "questionReviewStage": "Ĩḿàĝē śţàĝē",
-  "questionReviewStageHelp": "Ďŕàĝ ţō ƥàń. Ĥōĺď Ćţŕĺ ōŕ Ćōḿḿàńď àńď śćŕōĺĺ ţō źōōḿ, ōŕ ƥĩńćĥ ōń à ţōũćĥ śćŕēēń. Ķēŷś: ƥĺũś àńď ḿĩńũś źōōḿ, 0 ƒĩţś, 1 śĥōŵś àćţũàĺ śĩźē, àŕŕōŵ ķēŷś ƥàń, Śĥĩƒţ ŵĩţĥ àń àŕŕōŵ ķēŷ ḿōvēś ōńē ƥĩxēĺ. Ĩń àńńōţàţē ḿōďē, Ń àďďś à ŕēĝĩōń; àŕŕōŵ ķēŷś ḿōvē ţĥē śēĺēćţēď ŕēĝĩōń, Àĺţ ŵĩţĥ àń àŕŕōŵ ķēŷ ŕēśĩźēś ĩţ, àńď Ďēĺēţē ŕēḿōvēś ĩţ.",
+  "questionReviewStageHelp": "Ďŕàĝ ţō ƥàń. Ĥōĺď Ćţŕĺ ōŕ Ćōḿḿàńď àńď śćŕōĺĺ ţō źōōḿ, ōŕ ƥĩńćĥ ōń à ţōũćĥ śćŕēēń. Ķēŷś: ƥĺũś àńď ḿĩńũś źōōḿ, 0 ƒĩţś, 1 śĥōŵś àćţũàĺ śĩźē, àŕŕōŵ ķēŷś ƥàń, Śĥĩƒţ ŵĩţĥ àń àŕŕōŵ ķēŷ ḿōvēś ōńē ƥĩxēĺ. Ĩń àńńōţàţē ḿōďē, Ń àďďś à ŕēĝĩōń; àŕŕōŵ ķēŷś ḿōvē ţĥē śēĺēćţēď ŕēĝĩōń, Àĺţ ŵĩţĥ àń àŕŕōŵ ķēŷ ŕēśĩźēś ĩţ, Ēńţēŕ ēďĩţś ĩţś ćōḿḿēńţ, àńď Ďēĺēţē ŕēḿōvēś ĩţ.",
   "questionReviewImageSize": "{{width}} × {{height}} ƥx",
   "questionReviewResize": "Ŕēśĩźē ţĥē ĩḿàĝē àńď qũēśţĩōń àŕēàś",
   "questionReviewCompareModes": "Ćōḿƥàŕĩśōń ḿōďē",
@@ -3203,11 +3203,12 @@
   "questionReviewRegionLimit": "Ēàćĥ àńśŵēŕ àććēƥţś àţ ḿōśţ {{max}} ŕēĝĩōńś.",
   "questionReviewRegions_one": "Ŕēĝĩōńś ({{count}} ōƒ {{max}})",
   "questionReviewRegions_other": "Ŕēĝĩōńś ({{count}} ōƒ {{max}})",
-  "questionReviewRegionsHint": "Ţō ḿàŕķ àń àŕēà, śēĺēćţ Àńńōţàţē àńď ďŕàĝ ōń ţĥē ĩḿàĝē, ōŕ ƥŕēśś Ń ŵĩţĥ ţĥē ĩḿàĝē ƒōćũśēď.",
-  "questionReviewRegionSelect": "Śēĺēćţ ŕēĝĩōń {{number}}",
+  "questionReviewRegionsHint": "Ţō ḿàŕķ àń àŕēà, śēĺēćţ Àńńōţàţē àńď ďŕàĝ ōń ţĥē ĩḿàĝē, ōŕ ƥŕēśś Ń ŵĩţĥ ţĥē ĩḿàĝē ƒōćũśēď. À ćōḿḿēńţ ƀōx ōƥēńś ńēxţ ţō ţĥē ŕēĝĩōń.",
   "questionReviewRegionDelete": "Ďēĺēţē ŕēĝĩōń {{number}}",
-  "questionReviewRegionComment": "Ćōḿḿēńţ ƒōŕ ŕēĝĩōń {{number}}",
-  "questionReviewRegionCount": "{{length}}/{{max}}",
   "questionReviewRegionNeedsComment": "Àďď à ćōḿḿēńţ ţō ēàćĥ ŕēĝĩōń ƀēƒōŕē ŷōũ śũƀḿĩţ.",
-  "questionReviewRegionHistory": "Ŕēĝĩōń {{number}} ōń {{image}}: {{comment}}"
+  "questionReviewRegionHistory": "Ŕēĝĩōń {{number}} ōń {{image}}: {{comment}}",
+  "questionReviewRegionEdit": "Ēďĩţ ŕēĝĩōń {{number}}",
+  "questionReviewRegionNoComment": "Ńō ćōḿḿēńţ ŷēţ.",
+  "questionReviewRegionPreview": "Ŕēĝĩōń {{number}} ōń {{image}}",
+  "questionReviewRegionTooLong": "Ķēēƥ ţĥē ćōḿḿēńţ ţō {{max}} ćĥàŕàćţēŕś ōŕ ƒēŵēŕ."
 }

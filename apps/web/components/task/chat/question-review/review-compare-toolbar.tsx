@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
 import { COMPARE_MODES, MAX_TOLERANCE, type CompareMode } from "@/lib/question-review/compare";
 import type { ReviewImage } from "@/lib/question-review/segments";
 import { ReviewImagePicker } from "./review-image-picker";
-import { reviewControlSize } from "./review-zoom-controls";
+import { reviewControlSize, reviewToolbarRow } from "./review-zoom-controls";
 import type { ReviewCompare } from "./use-review-compare";
 
 const MODE_LABEL_KEYS: Record<CompareMode, string> = {
@@ -33,10 +33,7 @@ export function ReviewCompareToolbar({ compare, images }: Props) {
   const modeLabel = useCompareModeLabel();
   const { state, dispatch } = compare;
   return (
-    <div
-      className="flex flex-wrap items-center gap-x-3 gap-y-1.5"
-      data-testid="question-review-compare"
-    >
+    <div className={reviewToolbarRow} data-testid="question-review-compare">
       <ToggleGroup
         type="single"
         variant="outline"
@@ -45,7 +42,7 @@ export function ReviewCompareToolbar({ compare, images }: Props) {
         value={state.mode}
         onValueChange={(mode) => mode && dispatch({ type: "mode", mode: mode as CompareMode })}
         data-testid="question-review-modes"
-        className="flex-wrap"
+        className="flex-wrap max-md:flex-nowrap"
       >
         {COMPARE_MODES.map((mode) => (
           <ToggleGroupItem key={mode} value={mode} className={toggleItemSize}>
@@ -97,6 +94,18 @@ function ModeControls({ compare }: { compare: ReviewCompare }) {
       >
         {t("task:questionReviewFlip")}
       </Button>
+    );
+  }
+  if (state.mode === "wipe") {
+    return (
+      <LabelledSlider
+        label={t("task:questionReviewWipe")}
+        value={Math.round(state.wipe * 100)}
+        max={100}
+        valueText={t("task:questionReviewPercent", { value: Math.round(state.wipe * 100) })}
+        onChange={(value) => dispatch({ type: "wipe", value: value / 100 })}
+        testId="question-review-wipe-slider"
+      />
     );
   }
   if (state.mode === "onion") {

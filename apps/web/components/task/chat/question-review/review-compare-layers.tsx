@@ -4,6 +4,7 @@ import { useEffect, useRef, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import type { CompareState } from "@/lib/question-review/compare";
 import type { ReviewView, Size } from "@/lib/question-review/viewport";
+import { wipeFromPointer } from "@/lib/question-review/wipe";
 import { ReviewImage } from "./review-canvas";
 import type { ReviewDiffResult, ReviewDiffState } from "./use-review-diff";
 
@@ -94,16 +95,18 @@ function DiffMask({ result, scale }: { result: ReviewDiffResult; scale: number }
   );
 }
 
-/** Draggable and keyboard-operable divider for Wipe, in stage coordinates. */
+/**
+ * Draggable and keyboard-operable divider for Wipe, in stage coordinates. The
+ * line reaches the stage edges; the handle stays fully inside the stage.
+ */
 export function WipeHandle({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const { t } = useTranslation();
-  const ref = useRef<HTMLDivElement>(null);
   const percent = Math.round(value * 100);
-  const moveTo = (clientX: number) => {
-    const stage = ref.current?.parentElement;
+  const moveTo = (element: HTMLElement, clientX: number) => {
+    const stage = element.parentElement;
     if (!stage) return;
     const rect = stage.getBoundingClientRect();
-    if (rect.width > 0) onChange((clientX - rect.left) / rect.width);
+    onChange(wipeFromPointer(clientX, { left: rect.left, width: rect.width }));
   };
   const onKeyDown = (event: React.KeyboardEvent) => {
     const steps: Record<string, number> = { ArrowLeft: -0.05, ArrowRight: 0.05 };
@@ -115,8 +118,12 @@ export function WipeHandle({ value, onChange }: { value: number; onChange: (v: n
     onChange(next);
   };
   return (
-    <div ref={ref} className="absolute inset-y-0 w-0" style={{ left: `${percent}%` }}>
-      <div className="absolute inset-y-0 -left-px w-0.5 bg-primary" aria-hidden="true" />
+    <>
+      <div
+        className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-primary"
+        style={{ left: `${value * 100}%` }}
+        aria-hidden="true"
+      />
       <div
         role="slider"
         tabIndex={0}
@@ -126,7 +133,8 @@ export function WipeHandle({ value, onChange }: { value: number; onChange: (v: n
         aria-valuenow={percent}
         aria-valuetext={t("task:questionReviewPercent", { value: percent })}
         data-testid="question-review-wipe-handle"
-        className="absolute top-1/2 h-12 w-6 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none rounded-md border border-background bg-primary focus-visible:outline-2 focus-visible:outline-ring max-md:w-11 [@media(pointer:coarse)]:w-11"
+        className="absolute top-1/2 h-12 w-6 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none rounded-md border border-background bg-primary [--wipe-half:12px] focus-visible:outline-2 focus-visible:outline-ring max-md:w-11 max-md:[--wipe-half:22px] [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:[--wipe-half:22px]"
+        style={{ left: `clamp(var(--wipe-half), ${value * 100}%, calc(100% - var(--wipe-half)))` }}
         onKeyDown={onKeyDown}
         onPointerDown={(event) => {
           event.stopPropagation();
@@ -135,9 +143,9 @@ export function WipeHandle({ value, onChange }: { value: number; onChange: (v: n
         onPointerMove={(event) => {
           if (!event.currentTarget.hasPointerCapture?.(event.pointerId)) return;
           event.stopPropagation();
-          moveTo(event.clientX);
+          moveTo(event.currentTarget, event.clientX);
         }}
       />
-    </div>
+    </>
   );
 }

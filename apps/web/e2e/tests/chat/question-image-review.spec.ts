@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import {
   CHANGED_PIXELS,
+  expectThumbnailsShareRow,
   REVIEW_IMAGE_SIZE,
   expectNoHorizontalOverflow,
   openReviewQuestions,
@@ -25,6 +26,7 @@ test("reviews images in a large view that shares the answer form", async ({
     reviewScript(),
   );
   const overlay = session.clarificationOverlay();
+  await expectThumbnailsShareRow(overlay);
   const requested = recordImageRequests(testPage);
   const open = overlay.getByTestId("question-review-open");
   await open.click();
@@ -196,11 +198,20 @@ test("marks a region on an image and delivers it with the answer", async ({
   await testPage.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.6, { steps: 4 });
   await testPage.mouse.up();
   await expect(dialog.getByTestId("question-review-region")).toHaveCount(1);
+  const popover = dialog.getByTestId("question-review-region-popover");
+  await expect(popover).toBeVisible();
+  const region = (await dialog.getByTestId("question-review-region").boundingBox())!;
+  const popoverBox = (await popover.boundingBox())!;
+  expect(Math.abs(popoverBox.y - (region.y + region.height))).toBeLessThan(260);
+  await expect(dialog.getByTestId("question-review-region-input")).toBeFocused();
+  await dialog.getByTestId("question-review-region-input").fill("Label contrast too low");
+  await dialog.getByTestId("question-review-region-add").click();
+  await expect(popover).toHaveCount(0);
   const item = dialog.getByTestId("question-review-region-item");
   await expect(item).toContainText(reviewImages.after.alt);
-  await expect(dialog.getByTestId("question-review-region-error")).toBeVisible();
-  await item.getByTestId("question-review-region-comment").fill("Label contrast too low");
-  await expect(dialog.getByTestId("question-review-region-error")).toHaveCount(0);
+  await expect(item.getByTestId("question-review-region-text")).toHaveText(
+    "Label contrast too low",
+  );
   await prCapture.screenshot("desktop-question-review-region", {
     caption: "A marked region with its comment",
   });

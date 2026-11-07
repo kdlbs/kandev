@@ -129,8 +129,9 @@ Remember the split per overlay instance in component state only.
 Phone: content is `h-dvh w-screen` with safe-area padding. The header holds Close,
 "Review N of M", and the segment strip as a horizontally scrolling row inside its
 own container. The stage is fixed at `min(55dvh, 60%)`. The form scrolls below it.
-Controls use 48px nominal targets. The compare toolbar wraps onto several rows;
-its mode, image, and zoom controls keep the same order as on desktop. No
+Controls use 48px nominal targets. Each stage toolbar row (`reviewToolbarRow`)
+wraps on desktop but is one horizontally scrolling line on phones, so the toolbar
+does not take the stage's height; controls keep the desktop order. No
 width-dependent layout renders choices beside the stage.
 
 All dimensions use rem or viewport units. The page body never scrolls
@@ -193,9 +194,11 @@ using `url`. The blob is released with the URL. No global cache is added.
 `useReviewViewport` in `question-review/use-review-viewport.ts` owns
 `{ mode: "fit" | "manual"; scale: number; x: number; y: number }`, where `x` and
 `y` are the image-pixel coordinates at the stage's top-left corner. `fit`
-derives its scale from the stage size and the larger of A and B. Zoom steps are
-0.25, 0.5, 1, 2, 4, and 8. Wheel input with Ctrl or Meta and pinch input change
-scale continuously within 0.25 to 8 and keep the focal image point fixed. Plain
+derives its scale from the stage size and the larger of A and B, with no lower
+bound, so the whole image always shows (for example in stacked phone panes).
+Zoom steps are 0.25, 0.5, 1, 2, 4, and 8. Wheel input with Ctrl or Meta and pinch
+input change scale continuously and keep the focal image point fixed. Every zoom
+path stops at `minScaleFor(fit)`, the smaller of the Fit scale and 0.25, and at 8. Plain
 wheel input pans. Pointer drag pans through pointer capture. The stage sets
 `touch-action: none` only on the canvas so the form keeps native scrolling.
 
@@ -215,7 +218,7 @@ stage shows it alone and hides comparison controls.
 | Mode | Rendering |
 | --- | --- |
 | Toggle | One visible layer. Flip changes which layer is visible without remounting it. An `aria-live="polite"` status announces "Showing A: <alt>". |
-| Wipe | B above A, clipped by `clip-path: inset(0 0 0 <wipe * stage width>)`. The divider is a `role="slider"` with value text, operable by drag and keys. |
+| Wipe | B above A, clipped at the divider in image pixels. The divider is a `role="slider"` with value text, operable by drag and keys. `wipeFromPointer` maps the drag over the stage minus 24px at each side, so 0% and 100% are reached away from the screen edge. CSS `clamp()` keeps the handle inside the stage while the line reaches the edges. A toolbar slider sets the same value. |
 | Side by side | Two stage panes, each with the same transform, split horizontally on desktop and vertically on phones. |
 | Onion skin | B above A with CSS `opacity`. The opacity control uses `@kandev/ui/slider`. |
 | Difference | A worker-generated mask over A. The toolbar shows the changed count and percentage and a tolerance slider from 0 to 64. |
@@ -344,11 +347,20 @@ in image coordinates through `useReviewViewport`, rounded to integers and clampe
 to the image bounds. Each region renders as an outlined rectangle with its number.
 Regions drawn on other images are hidden but stay listed.
 
-Below the choices, the form shows a "Regions" list: number, image description,
-a comment `Textarea` with a character counter, Select, and Delete. Selecting a
-list item highlights its rectangle and focuses it on the stage. Adding the ninth
-region is disabled with a localized reason. The submit path blocks submission while
-any region comment is empty and shows a field error.
+Finishing a region (pointer up, or `n`) opens `RegionCommentPopover`, which reuses
+the chat's `PlanSelectionPopover`: a floating popover anchored below the region on
+fine pointers and the same bottom drawer on touch. It renders into the review
+dialog (`portalContainer`) so the modal does not make it inert. While it is open,
+the dialog's `onEscapeKeyDown` calls `preventDefault()`, so Escape closes only the
+popover and the carousel shortcut ignores it. `useReviewAnnotations` tracks
+`commenting` (question, index, new or existing). Cancelling a new region discards
+it; saving sets its comment. Enter on a selected region, or Edit in the list,
+reopens the popover with Delete.
+
+Below the choices, the form shows a read-only "Regions" list: number, image
+description, comment text, Edit, and Delete. Adding a ninth region does nothing,
+and the Annotate control explains the limit. Submission stays blocked while a new
+region is waiting for its comment.
 
 History: `AnswerSummary` lists `metadata.response.annotations` as
 "Region N on <image alt>: <comment>", rendered as plain text, below the selection.

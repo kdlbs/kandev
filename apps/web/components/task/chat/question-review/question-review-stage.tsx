@@ -1,13 +1,13 @@
 "use client";
 
-import { useRef, type ReactNode } from "react";
+import { useRef, type ReactNode, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import type { ReviewSegment } from "@/lib/question-review/segments";
 import type { Size } from "@/lib/question-review/viewport";
 import { ReviewCanvas, ReviewImage } from "./review-canvas";
 import { ReviewCompareStage } from "./review-compare-stage";
 import { ImageState, stopStageKeys, useStageImages } from "./review-stage-shared";
-import { ReviewZoomControls } from "./review-zoom-controls";
+import { ReviewZoomControls, reviewToolbarRow } from "./review-zoom-controls";
 import type { ReviewAnnotationController } from "./use-review-annotations";
 import { stageAnnotating, useStageAnnotations } from "./use-stage-annotations";
 import { useReviewViewport } from "./use-review-viewport";
@@ -17,6 +17,7 @@ type Props = {
   sessionId: string;
   segment: ReviewSegment;
   annotations: ReviewAnnotationController;
+  popoverContainer: RefObject<HTMLElement | null>;
 };
 
 const EMPTY_SIZE: Size = { width: 0, height: 0 };
@@ -26,7 +27,7 @@ export function QuestionReviewStage(props: Props) {
   return <SingleImageStage {...props} />;
 }
 
-function SingleImageStage({ pendingId, sessionId, segment, annotations }: Props) {
+function SingleImageStage({ pendingId, sessionId, segment, annotations, popoverContainer }: Props) {
   const { t } = useTranslation();
   const { states, retry, sizes, setSize } = useStageImages(pendingId, sessionId, segment);
   const selected = segment.images[0];
@@ -41,7 +42,9 @@ function SingleImageStage({ pendingId, sessionId, segment, annotations }: Props)
   const loadedState = selected ? states[selected.id] : undefined;
   const regions = useStageAnnotations({
     controller: annotations,
-    questionId: segment.questionId,
+    segment,
+    stageRef,
+    popoverContainer,
     imageId: loadedState?.kind === "loaded" ? selected?.id : undefined,
     image: imageSize,
     view: viewport.view,
@@ -58,7 +61,7 @@ function SingleImageStage({ pendingId, sessionId, segment, annotations }: Props)
       aria-label={t("task:questionReviewStage")}
       onKeyDown={stopStageKeys}
     >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <div className={reviewToolbarRow}>
         <ReviewZoomControls
           scale={viewport.view.scale}
           onZoom={viewport.zoomStep}
@@ -94,6 +97,7 @@ function SingleImageStage({ pendingId, sessionId, segment, annotations }: Props)
         )}
         {regions.overlay}
       </ReviewCanvas>
+      {regions.popover}
     </section>
   );
 }

@@ -9,8 +9,13 @@ export const ZOOM_STEPS = [0.25, 0.5, 1, 2, 4, 8] as const;
 
 const EPSILON = 1e-6;
 
-export function clampScale(scale: number): number {
-  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
+/** Zooming out stops at Fit when Fit is below the 25% manual minimum. */
+export function minScaleFor(fitScale: number): number {
+  return fitScale > 0 ? Math.min(MIN_SCALE, fitScale) : MIN_SCALE;
+}
+
+export function clampScale(scale: number, minScale = MIN_SCALE): number {
+  return Math.min(MAX_SCALE, Math.max(minScale, scale));
 }
 
 function hasSize(size: Size): boolean {
@@ -28,13 +33,14 @@ function centered(stage: Size, image: Size, scale: number): ReviewView {
 
 export function fitView(stage: Size, image: Size): ReviewView {
   if (!hasSize(stage) || !hasSize(image)) return { scale: 1, x: 0, y: 0 };
-  const scale = clampScale(Math.min(stage.width / image.width, stage.height / image.height));
+  const scale = Math.min(MAX_SCALE, stage.width / image.width, stage.height / image.height);
   return centered(stage, image, scale);
 }
 
-export function nextZoomStep(scale: number, direction: 1 | -1): number {
+export function nextZoomStep(scale: number, direction: 1 | -1, minScale = MIN_SCALE): number {
   if (direction > 0) return ZOOM_STEPS.find((step) => step > scale + EPSILON) ?? MAX_SCALE;
-  return [...ZOOM_STEPS].reverse().find((step) => step < scale - EPSILON) ?? MIN_SCALE;
+  const lower = [...ZOOM_STEPS].reverse().find((step) => step < scale - EPSILON);
+  return lower === undefined || lower < minScale ? minScale : lower;
 }
 
 export function formatZoom(scale: number): string {
@@ -42,8 +48,13 @@ export function formatZoom(scale: number): string {
 }
 
 /** Changes the scale while keeping the image point under `focal` (stage pixels) fixed. */
-export function zoomAt(view: ReviewView, scale: number, focal: Point): ReviewView {
-  const next = clampScale(scale);
+export function zoomAt(
+  view: ReviewView,
+  scale: number,
+  focal: Point,
+  minScale = MIN_SCALE,
+): ReviewView {
+  const next = clampScale(scale, minScale);
   const imageX = view.x + focal.x / view.scale;
   const imageY = view.y + focal.y / view.scale;
   return { scale: next, x: imageX - focal.x / next, y: imageY - focal.y / next };
