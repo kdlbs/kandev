@@ -231,9 +231,12 @@ export interface MessageQueueSettingsResponse {
   effective: MessageQueueEffectiveSettings;
 }
 
+export type SessionCapacityPolicy = "automatic" | "all";
 export interface SessionCapacitySettingsValue {
   enabled: boolean;
   max_sessions: number;
+  policy?: SessionCapacityPolicy;
+  grade_limits?: Record<string, number>;
 }
 
 /** Partial PATCH payload: omitted fields are left unchanged server-side. */
@@ -242,6 +245,8 @@ export type SessionCapacitySettingsPatch = Partial<SessionCapacitySettingsValue>
 export type SessionCapacitySettingsSource = "default" | "setting" | "environment";
 
 export interface SessionCapacityEffectiveSettings {
+  policy?: SessionCapacityPolicy;
+  grade_limits?: Record<string, number>;
   enabled: boolean;
   max_sessions: number;
   source: SessionCapacitySettingsSource;
