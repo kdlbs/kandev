@@ -567,6 +567,38 @@ At task startup, the selected executor must confirm the requested mode before
 the first prompt. If it cannot, startup fails. Leaving the mode unset uses the
 agent's default.
 
+### View provider usage
+
+Enable **Provider usage and limits** in **Settings > System > Feature Toggles**
+and restart Kandev to show usage beside profiles on **Settings > Agents**. The
+toggle is off by default. Select **Refresh** for another reading; this view does
+not poll in the background.
+
+Profiles sharing a supported local account show the same account usage. The
+view labels a default local account or local proxy explicitly; it does not
+measure a different account selected by a remote executor. Missing credentials,
+unsupported bindings and unavailable readings remain unknown. Free OpenCode
+models and services without a usage API do not inherit a paid usage window.
+A measured zero is shown as zero. A reading alone does not enforce a limit.
+
+The same feature also applies explicitly configured shared **Kandev-turn**
+allowances to task and Office prompts. No allowance is configured by default.
+The current settings API is
+`GET/PATCH /api/v1/agent-profiles/:id/turn-allowance`; editing requires native
+organization configuration permission. Optional settings are
+`concurrent_turns`, `turns_per_window` with `window_seconds`, `reset_anchor` and
+`block_until`. Omitted fields keep saved values, null removes an override, and
+zero disables that numeric dimension. Profiles using the same supported local
+credential share the allowance. Unknown potentially matching credential
+bindings stop configured admission; unrelated known provider families retain
+their own behavior.
+
+One Kandev turn can contain multiple provider requests. These allowances are
+not provider HTTP-request, token or USD budgets. Separate utility/review
+inference children, model/group limits, remote accounts and a native allowance
+editor remain subsequent work. Disabling the feature retains saved settings
+and admitted claims.
+
 ### Use an OpenAI-compatible provider
 
 Open the **Provider** section in a profile that supports this feature. Select
@@ -603,6 +635,46 @@ and list dynamic profiles. The card is hidden, and dynamic profiles cannot be
 selected for new work, when dynamic routing is disabled. A new profile starts
 with its name and candidates; enable or disable it later from the profile
 editor.
+
+**Candidate tiers and selection preview.**
+
+Enable **Dynamic profile tiers** in **Settings > System > Feature Toggles** and
+restart Kandev, with dynamic routing enabled. The independent toggle is off by
+default. In the dynamic profile editor, select **=** between adjacent candidates
+to join or split their tier. Move and remove controls retain candidate identity
+and saved selection metadata.
+
+Each tier head offers saved order, configured cost, random, round-robin or a
+provider-usage mode, plus same-tier-next or next-tier failure direction.
+Configure each candidate's cost class separately: free sorts before subscription,
+then metered, then unknown; equal classes keep saved row order. This is
+configured classification, not an estimate of provider prices or a change to
+billing identity. Random chooses among eligible candidates in that tier. Tier
+order always takes precedence. Existing failure policies still decide retries,
+waits and whether to continue; fallback does not return to an earlier tier or an
+already tried candidate in the same failure chain. A verified successful turn
+ends that chain. Turning tiers off restores flat routing while retaining the
+saved groups.
+
+Round-robin rotates committed task and session choices within a tier after the
+last choice. Utility and taskless Office calls advance the same native history;
+review-run ownership stays with the existing review lane.
+
+The provider-usage modes use only the last reading observed through **Provider
+usage and limits**. They never fetch usage during selection or preview. Headroom
+ranks measured remaining capacity, pace divides it by the measured burn until
+the proved reset, and consumption rate ranks the slower burner. Without a
+comparable reading the candidate stays unknown; unknown ranks above a measured
+exhausted window and below measured remaining capacity. A rate needs two
+comparable readings of the same provider, account and window with an unchanged
+reset. With **Provider usage and limits** off, saved usage modes are not
+executed as order.
+
+Use **Preview new selection** to inspect the current saved or unsaved draft.
+Preview does not save, claim a runtime slot or start an agent. Its random result
+is a sample, not a reservation of the next choice; active sessions are unchanged.
+Keep-model reevaluation remains a later increment. Unsupported modes are not
+silently executed as saved order.
 
 Each candidate has a policy for two shared provider-error classes:
 

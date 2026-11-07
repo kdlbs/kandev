@@ -763,6 +763,7 @@ func (s *Service) startCreatedSessionWithComposedPromptAndLifecycleOwnership(
 
 type startCreatedSessionOptions struct {
 	lifecycleLockHeld              bool
+	preserveDynamicRoute           bool
 	onQuickChatStartAttemptClaimed func(string)
 	refuseIfAgentRunning           bool
 	initialCreatePrompt            bool
@@ -1144,7 +1145,8 @@ func (s *Service) startCreatedSession(
 			s.bindInitialCreatePromptPassthroughExecution(ctx, sessionID, initialTurnID, executionID)
 		}
 	}
-	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
+	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions,
+		dynamicLaunchOwnsNewTurn(ctx, initialTurnCreated, options.preserveDynamicRoute || options.ceilingEntryBinding != nil))
 	if err != nil {
 		if errors.Is(err, ErrSessionRecoveryRequired) {
 			return nil, err
@@ -2168,7 +2170,8 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err := s.configureRetryInitialLaunch(ctx, sessionID, initialTurnID, &launchOptions); err != nil {
 		return nil, failPreparedLaunch(err)
 	}
-	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
+	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions,
+		dynamicLaunchOwnsNewTurn(ctx, initialTurnCreated, opts.ceilingEntryBinding != nil))
 	if err != nil {
 		if initialTurnCreated {
 			s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
@@ -2531,8 +2534,12 @@ func (s *Service) resolveDynamicLaunchExecution(
 		}
 		return resolved.ExecutionProfileID, nil
 	}
+	previousExecutionProfileID := session.ExecutionProfileID
+	expectedState, expectedUpdatedAt := session.State, session.UpdatedAt
 	applyResolvedExecution(session, resolved)
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := s.persistDynamicRouteProjection(
+		ctx, session, previousExecutionProfileID, expectedState, expectedUpdatedAt,
+	); err != nil {
 		return "", fmt.Errorf("persist dynamic route attribution: %w", err)
 	}
 	return resolved.ExecutionProfileID, nil
@@ -4887,7 +4894,7 @@ func (s *Service) startAgentOnPreparedWorkspace(
 		AgentProfileID: session.AgentProfileID,
 		ExecutorID:     session.ExecutorID,
 		StartAgent:     true,
-	}); err != nil {
+	}, false); err != nil {
 		if execution != nil && resumeAttempt != nil {
 			resumeAttempt.setExecutionID(execution.AgentExecutionID)
 		}

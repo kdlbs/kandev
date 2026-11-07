@@ -369,15 +369,22 @@ func (l *officeRunSessionLauncher) AdmitExecution(ctx context.Context, owner run
 
 // resolveTasklessDynamicExecution selects a concrete candidate for a taskless
 // Office run whose agent is bound to a dynamic execution profile. The resolver
-// uses an isolated utility route because task-route persistence requires a
-// task_sessions row; Office persists the concrete choice on its run-session.
+// uses the actual run-session owner when ordered tiers are enabled, keeping
+// task generation and Office run-session attribution separate.
 func (l *officeRunSessionLauncher) resolveTasklessDynamicExecution(
-	ctx context.Context, agent *models.AgentInstance, _ string,
+	ctx context.Context, agent *models.AgentInstance, runSessionID string,
 ) (runtimeapi.ProfileExecution, error) {
 	if l.resolver == nil {
 		return runtimeapi.ProfileExecution{}, errors.New("dynamic execution resolver is not configured")
 	}
-	return l.resolver.ResolveExecutionDetails(ctx, "", agent.ID)
+	routeID := ""
+	if l.resolver.NativeRouteOwnersEnabled() {
+		if runSessionID == "" {
+			return runtimeapi.ProfileExecution{}, errors.New("office route requires a run session owner")
+		}
+		routeID = "native:office-run-session:" + runSessionID
+	}
+	return l.resolver.ResolveExecutionDetails(ctx, routeID, agent.ID)
 }
 
 func cloneStringMap(input map[string]string) map[string]string {

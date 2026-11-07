@@ -75,6 +75,7 @@ var (
 type Controller struct {
 	repo                        store.Repository
 	accountBlockReleaser        AccountBlockReleaser
+	profileUsage                ProfileUsageProvider
 	routingCircuitReader        RoutingCircuitReader
 	discovery                   *discovery.Registry
 	agentRegistry               *registry.Registry
@@ -115,6 +116,8 @@ type Controller struct {
 	runtimeAutoUpdateMu         sync.Mutex
 	runtimeUpdatePassMu         sync.Mutex
 	dynamicAgentRoutingEnabled  bool
+	dynamicProfileTiersEnabled  bool
+	dynamicTierPreviewer        DynamicTierPreviewer
 
 	hostCLIMu         sync.Mutex
 	hostCLIRunner     hostcli.Runner

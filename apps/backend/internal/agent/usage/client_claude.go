@@ -62,8 +62,8 @@ type claudeOAuthToken struct {
 }
 
 type claudeUsageWindow struct {
-	Utilization float64 `json:"utilization"`
-	ResetsAt    string  `json:"resets_at,omitempty"`
+	Utilization *float64 `json:"utilization"`
+	ResetsAt    string   `json:"resets_at,omitempty"`
 }
 
 type claudeLimitScope struct {
@@ -74,7 +74,7 @@ type claudeLimitScope struct {
 
 type claudeLimit struct {
 	Kind     string            `json:"kind"`
-	Percent  float64           `json:"percent"`
+	Percent  *float64          `json:"percent"`
 	ResetsAt string            `json:"resets_at"`
 	Scope    *claudeLimitScope `json:"scope"`
 }
@@ -153,15 +153,23 @@ func claudeWindows(raw claudeUsageResponse, now time.Time) []UtilizationWindow {
 	if raw.FiveHour != nil {
 		windows = append(windows, UtilizationWindow{
 			Label:          claudeLabel5Hour,
-			UtilizationPct: raw.FiveHour.Utilization,
+			UtilizationPct: legacyUtilization(raw.FiveHour.Utilization),
 			ResetAt:        parseResetAt(raw.FiveHour.ResetsAt, now, 5*time.Hour),
+			Observation: &WindowObservation{
+				UtilizationObserved: utilizationObserved(raw.FiveHour.Utilization),
+				ResetAtObserved:     reportedClaudeReset(raw.FiveHour.ResetsAt),
+			},
 		})
 	}
 	if raw.SevenDay != nil {
 		windows = append(windows, UtilizationWindow{
 			Label:          claudeLabel7Day,
-			UtilizationPct: raw.SevenDay.Utilization,
+			UtilizationPct: legacyUtilization(raw.SevenDay.Utilization),
 			ResetAt:        parseResetAt(raw.SevenDay.ResetsAt, now, 7*24*time.Hour),
+			Observation: &WindowObservation{
+				UtilizationObserved: utilizationObserved(raw.SevenDay.Utilization),
+				ResetAtObserved:     reportedClaudeReset(raw.SevenDay.ResetsAt),
+			},
 		})
 	}
 	return windows
@@ -180,11 +188,20 @@ func claudeLimitWindows(limits []claudeLimit) []UtilizationWindow {
 		}
 		windows = append(windows, UtilizationWindow{
 			Label:          label,
-			UtilizationPct: l.Percent,
+			UtilizationPct: legacyUtilization(l.Percent),
 			ResetAt:        resetAt,
+			Observation: &WindowObservation{
+				UtilizationObserved: utilizationObserved(l.Percent),
+				ResetAtObserved:     !resetAt.IsZero(),
+			},
 		})
 	}
 	return windows
+}
+
+func reportedClaudeReset(raw string) bool {
+	reset, err := time.Parse(time.RFC3339, raw)
+	return err == nil && !reset.IsZero()
 }
 
 func claudeLimitLabel(l claudeLimit) string {

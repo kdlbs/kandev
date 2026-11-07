@@ -610,7 +610,7 @@ func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 		return
 	}
 	storage, _ := agentctl.StorageDiagnosticFromError(failure.Err)
-	settled := m.handleErrorEvent(execution, agentctl.AgentEvent{
+	settled := m.handlePromptErrorEvent(execution, agentctl.AgentEvent{
 		Type: toolStatusError,
 		// Preserve the ACP prompt failure. Dynamic profiles classify this exact
 		// provider diagnostic to decide whether a safe pre-result retry or
@@ -621,7 +621,7 @@ func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 		SessionID:        failure.SessionID,
 		PromptGeneration: failure.PromptGeneration,
 		TurnID:           failure.TurnID,
-	})
+	}, false)
 	if !settled {
 		m.logger.Debug("ignoring superseded initial prompt delivery failure",
 			zap.String("execution_id", failure.ExecutionID),
