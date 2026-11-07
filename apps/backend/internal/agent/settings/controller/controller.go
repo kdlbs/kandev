@@ -75,6 +75,7 @@ var (
 
 type Controller struct {
 	nativeUsageReader           func(context.Context, string) ([]usage.ProfileExecutionUsage, error)
+	cachedNativeUsageReader     func(context.Context, string) ([]usage.ProfileExecutionUsage, error)
 	repo                        store.Repository
 	accountBlockReleaser        AccountBlockReleaser
 	profileUsage                ProfileUsageProvider
