@@ -10,6 +10,7 @@ import {
 } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
+import { resolveWaitReason } from "@/lib/ui/waiting-reason";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
@@ -151,6 +152,120 @@ function MoveButton({
   );
 }
 
+/**
+ * The node's status icon, with the same wait-reason resolution every other task
+ * surface uses so a parked task reads identically in the graph and in the list.
+ */
+function renderStepNodeStatusIcon(
+  task: Graph2StepNodeProps["task"],
+  pendingInput: ReturnType<typeof useTaskPendingInput>,
+) {
+  return getTaskStateIcon(task.state, "h-3 w-3", {
+    hasPendingClarification: pendingInput.clarification,
+    foregroundActivity: task.foregroundActivity,
+    hasPendingPermission: pendingInput.permission,
+    interrupted: task.interrupted,
+    autoStartFailed: task.autoStartFailed,
+    workspaceOrphaned: task.workspaceOrphaned,
+    waitReason: resolveWaitReason({
+      primarySessionState: task.primarySessionState,
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: task.statusSummary?.launch_queue,
+      quotaWait: task.statusSummary?.quota_wait,
+    }),
+    launchQueue: task.statusSummary?.launch_queue,
+    quotaWait: task.statusSummary?.quota_wait,
+  });
+}
+
+function Graph2StepNodeContent({
+  step,
+  task,
+  running,
+  showMoveControls,
+  hasPrev,
+  hasNext,
+  prevStepId,
+  nextStepId,
+  prevStepTitle,
+  nextStepTitle,
+  prevStepHidden,
+  nextStepHidden,
+  isMoving,
+  onMoveTask,
+  onOpenTask,
+  pendingInput,
+  t,
+}: {
+  step: Graph2StepNodeProps["step"];
+  task: Graph2StepNodeProps["task"];
+  running: boolean;
+  showMoveControls: boolean;
+  hasPrev: boolean;
+  hasNext: boolean;
+  prevStepId?: string;
+  nextStepId?: string;
+  prevStepTitle?: string;
+  nextStepTitle?: string;
+  prevStepHidden?: boolean;
+  nextStepHidden?: boolean;
+  isMoving?: boolean;
+  onMoveTask: Graph2StepNodeProps["onMoveTask"];
+  onOpenTask?: Graph2StepNodeProps["onOpenTask"];
+  pendingInput: ReturnType<typeof useTaskPendingInput>;
+  t: ReturnType<typeof useTranslation>["t"];
+}) {
+  return (
+    <div className="relative shrink-0">
+      {showMoveControls && hasPrev && prevStepId && (
+        <MoveButton
+          direction="left"
+          isMoving={isMoving}
+          label={t("kanban:moveToStep", { step: prevStepTitle ?? prevStepId })}
+          showTooltip={prevStepHidden}
+          onClick={(e) => {
+            e.stopPropagation();
+            onMoveTask(task, prevStepId);
+          }}
+        />
+      )}
+
+      {/* onOpenTask is not yet threaded through PipelineStepNodes, so this
+          onClick is inert today; an unhandled right-click still bubbles to
+          the row's own context menu, same as the title. */}
+      <button
+        type="button"
+        title={step.title}
+        onClick={() => onOpenTask?.(task)}
+        className={cn(
+          NODE_CLASS,
+          "cursor-pointer transition-colors bg-background hover:bg-accent/30",
+          running ? "border-1 border-accent/50 node-border-running" : "border-1 border-accent/50",
+        )}
+      >
+        <div className="flex items-center gap-1.5 w-full">
+          <div className="shrink-0">{renderStepNodeStatusIcon(task, pendingInput)}</div>
+          <span className="text-[11px] font-medium text-foreground truncate">{step.title}</span>
+        </div>
+      </button>
+
+      {showMoveControls && hasNext && nextStepId && (
+        <MoveButton
+          direction="right"
+          isMoving={isMoving}
+          label={t("kanban:moveToStep", { step: nextStepTitle ?? nextStepId })}
+          showTooltip={nextStepHidden}
+          onClick={(e) => {
+            e.stopPropagation();
+            onMoveTask(task, nextStepId);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 export function Graph2StepNode({
   step,
   phase,
@@ -188,7 +303,6 @@ export function Graph2StepNode({
 
   return (
     <div
-      className="relative shrink-0"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onFocusCapture={() => setIsFocused(true)}
@@ -198,59 +312,25 @@ export function Graph2StepNode({
         }
       }}
     >
-      {showMoveControls && hasPrev && prevStepId && (
-        <MoveButton
-          direction="left"
-          isMoving={isMoving}
-          label={t("kanban:moveToStep", { step: prevStepTitle ?? prevStepId })}
-          showTooltip={prevStepHidden}
-          onClick={(e) => {
-            e.stopPropagation();
-            onMoveTask(task, prevStepId);
-          }}
-        />
-      )}
-
-      {/* onOpenTask is not yet threaded through PipelineStepNodes, so this
-          onClick is inert today; an unhandled right-click still bubbles to
-          the row's own context menu, same as the title. */}
-      <button
-        type="button"
-        title={step.title}
-        onClick={() => onOpenTask?.(task)}
-        className={cn(
-          NODE_CLASS,
-          "cursor-pointer transition-colors bg-background hover:bg-accent/30",
-          running ? "border-1 border-accent/50 node-border-running" : "border-1 border-accent/50",
-        )}
-      >
-        <div className="flex items-center gap-1.5 w-full">
-          <div className="shrink-0">
-            {getTaskStateIcon(task.state, "h-3 w-3", {
-              hasPendingClarification: pendingInput.clarification,
-              foregroundActivity: task.foregroundActivity,
-              hasPendingPermission: pendingInput.permission,
-              interrupted: task.interrupted,
-              autoStartFailed: task.autoStartFailed,
-              workspaceOrphaned: task.workspaceOrphaned,
-            })}
-          </div>
-          <span className="text-[11px] font-medium text-foreground truncate">{step.title}</span>
-        </div>
-      </button>
-
-      {showMoveControls && hasNext && nextStepId && (
-        <MoveButton
-          direction="right"
-          isMoving={isMoving}
-          label={t("kanban:moveToStep", { step: nextStepTitle ?? nextStepId })}
-          showTooltip={nextStepHidden}
-          onClick={(e) => {
-            e.stopPropagation();
-            onMoveTask(task, nextStepId);
-          }}
-        />
-      )}
+      <Graph2StepNodeContent
+        step={step}
+        task={task}
+        running={running}
+        showMoveControls={showMoveControls}
+        hasPrev={hasPrev}
+        hasNext={hasNext}
+        prevStepId={prevStepId}
+        nextStepId={nextStepId}
+        prevStepTitle={prevStepTitle}
+        nextStepTitle={nextStepTitle}
+        prevStepHidden={prevStepHidden}
+        nextStepHidden={nextStepHidden}
+        isMoving={isMoving}
+        onMoveTask={onMoveTask}
+        onOpenTask={onOpenTask}
+        pendingInput={pendingInput}
+        t={t}
+      />
     </div>
   );
 }

@@ -10,11 +10,20 @@ import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import type { ForegroundActivity, TaskSessionState, TaskState } from "@/lib/types/http";
+import type {
+  TaskStatusSummaryLaunchQueue,
+  TaskStatusSummaryQuotaWait,
+} from "@/lib/types/task-status-summary";
 import {
   InterruptedTaskIcon,
   isTerminalInterruptedState,
   shouldUseQuestionTaskIcon,
 } from "@/lib/ui/state-icons";
+import {
+  WaitingReasonTaskIcon,
+  waitReasonLabelKey,
+  type TaskWaitReason,
+} from "@/lib/ui/waiting-reason";
 import { classifyTask } from "./task-classify";
 
 export type TaskStateIconProps = {
@@ -33,6 +42,12 @@ export type TaskStateIconProps = {
    * foregroundActivity (AC-34).
    */
   parkedOnBackgroundWork?: boolean;
+  /** Why the task is waiting rather than working (lib/ui/waiting-reason). */
+  waitReason?: TaskWaitReason | null;
+  /** The launch-queue projection behind a `session_ceiling` wait, for its tooltip. */
+  launchQueue?: TaskStatusSummaryLaunchQueue | null;
+  /** The limit-wait projection behind a `quota` wait, for its tooltip. */
+  quotaWait?: TaskStatusSummaryQuotaWait | null;
   /** True while an accepted archive or delete request is still in flight. */
   isPendingRemoval?: boolean;
   accessibleLabel?: string;
@@ -59,7 +74,7 @@ function withAccessibleLabel(node: ReactNode, label?: string) {
   );
 }
 
-function BackgroundWorkTaskIcon({ showTooltip }: { showTooltip: boolean }) {
+function BackgroundWorkTaskIcon({ showTooltip = true }: { showTooltip?: boolean }) {
   const { t } = useTranslation();
   const spinner = (
     <CompositorSpin
@@ -163,15 +178,12 @@ export function TaskStateIcon(props: TaskStateIconProps) {
   return <TaskStateIconContent {...props} />;
 }
 
-function TaskStateIconContent({
-  sessionState,
-  state,
+function resolveActiveTaskIcon({
   foregroundActivity,
   hasPendingClarification,
   hasPendingPermission,
-  isOnLastWorkflowStep,
-  interrupted,
   parkedOnBackgroundWork,
+  state,
   accessibleLabel,
   showBackgroundTooltip = false,
 }: TaskStateIconProps) {
@@ -223,6 +235,42 @@ function TaskStateIconContent({
         className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500"
       />,
       accessibleLabel,
+    );
+  }
+  return null;
+}
+
+function TaskStateIconContent({
+  sessionState,
+  state,
+  foregroundActivity,
+  hasPendingClarification,
+  hasPendingPermission,
+  isOnLastWorkflowStep,
+  interrupted,
+  parkedOnBackgroundWork,
+  waitReason,
+  launchQueue,
+  quotaWait,
+  accessibleLabel,
+  showBackgroundTooltip = false,
+}: TaskStateIconProps) {
+  const activeIcon = resolveActiveTaskIcon({
+    foregroundActivity,
+    hasPendingClarification,
+    hasPendingPermission,
+    parkedOnBackgroundWork,
+    state,
+    accessibleLabel,
+    showBackgroundTooltip,
+  });
+  if (activeIcon) return activeIcon;
+  // A wait reason outranks preparing/in-progress and the finished-turn icon:
+  // REVIEW plus a queued admission is not a finished turn, and IN_PROGRESS
+  // plus a WIP overflow is not progress.
+  if (waitReason) {
+    return (
+      <WaitingReasonTaskIcon reason={waitReason} launchQueue={launchQueue} quotaWait={quotaWait} />
     );
   }
   return (
@@ -292,7 +340,28 @@ function getReviewLabelKey(state?: TaskState, isOnLastWorkflowStep?: boolean) {
   if (isOnLastWorkflowStep) return "common:taskStateCompleted";
   if (state === "FAILED") return "common:taskStateFailed";
   if (state === "CANCELLED") return "common:taskStateCancelled";
-  return "common:taskStateReview";
+  // A settled turn on a task that is still in flight: the workflow column says
+  // REVIEW, but the next instruction has not arrived. Distinct from
+  // `common:taskStateReview`, which stays the task-state label shared with the
+  // state chips and filters.
+  return "task:turnFinishedAwaitingInstruction";
+}
+
+function activeTaskStateIconLabel({
+  state,
+  foregroundActivity,
+  hasPendingClarification,
+  hasPendingPermission,
+  parkedOnBackgroundWork,
+}: TaskStateIconProps) {
+  if ((hasPendingPermission ?? false) || hasPendingClarification) {
+    return "common:taskStateWaitingForInput";
+  }
+  if (foregroundActivity === "generating") return "common:taskStateInProgress";
+  if (foregroundActivity === "background") return BACKGROUND_WORK_RUNNING_LABEL_KEY;
+  if (parkedOnBackgroundWork) return BACKGROUND_WORK_RUNNING_LABEL_KEY;
+  if (shouldUseQuestionTaskIcon(state)) return "common:taskStateWaitingForInput";
+  return undefined;
 }
 
 export function getTaskStateIconLabelKey({
@@ -304,14 +373,17 @@ export function getTaskStateIconLabelKey({
   isOnLastWorkflowStep,
   interrupted,
   parkedOnBackgroundWork,
+  waitReason,
 }: TaskStateIconProps) {
-  if ((hasPendingPermission ?? false) || hasPendingClarification) {
-    return "common:taskStateWaitingForInput";
-  }
-  if (foregroundActivity === "generating") return "common:taskStateInProgress";
-  if (foregroundActivity === "background") return BACKGROUND_WORK_RUNNING_LABEL_KEY;
-  if (parkedOnBackgroundWork) return BACKGROUND_WORK_RUNNING_LABEL_KEY;
-  if (shouldUseQuestionTaskIcon(state)) return "common:taskStateWaitingForInput";
+  const active = activeTaskStateIconLabel({
+    state,
+    foregroundActivity,
+    hasPendingClarification,
+    hasPendingPermission,
+    parkedOnBackgroundWork,
+  });
+  if (active) return active;
+  if (waitReason) return waitReasonLabelKey(waitReason);
   if (computeIsPreparing(state, sessionState)) return "common:taskStateScheduling";
   if (computeIsInProgress(state, sessionState)) {
     return "common:taskStateInProgress";
