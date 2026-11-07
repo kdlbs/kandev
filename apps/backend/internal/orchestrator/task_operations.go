@@ -407,8 +407,9 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 			workflowStepID = dbTask.WorkflowStepID
 		}
 	}
+	preservePreparedOfficeProfile := false
 	if dbTaskErr == nil {
-		agentProfileID = s.officeLaunchProfileForPrepare(ctx, dbTask, agentProfileID)
+		agentProfileID, preservePreparedOfficeProfile = s.officeLaunchProfileForPrepare(ctx, dbTask, agentProfileID)
 	}
 	if s.profileExecutionResolver != nil {
 		if err := s.profileExecutionResolver.ValidateProfile(ctx, agentProfileID); err != nil {
@@ -463,7 +464,9 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 				}
 			}()
 			if s.profileExecutionResolver != nil {
-				route, routeErr := s.resolvePreparedSessionDynamicRoute(bgCtx, sessionID, launchProfileID)
+				route, routeErr := s.resolvePreparedSessionDynamicRoute(
+					bgCtx, sessionID, launchProfileID, preservePreparedOfficeProfile,
+				)
 				if routeErr != nil {
 					launchSession := route.session
 					switch {
@@ -524,6 +527,7 @@ type preparedSessionDynamicRoute struct {
 func (s *Service) resolvePreparedSessionDynamicRoute(
 	ctx context.Context,
 	sessionID, launchProfileID string,
+	preservePreparedOfficeProfile bool,
 ) (preparedSessionDynamicRoute, error) {
 	route := preparedSessionDynamicRoute{launchProfileID: launchProfileID}
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
@@ -542,7 +546,8 @@ func (s *Service) resolvePreparedSessionDynamicRoute(
 	// A non-dynamic profile resolves to itself. An Office session's owner is
 	// its agent identity, so only a concrete dynamic choice may replace the
 	// prepared execution profile.
-	if resolved.ExecutionProfileID == "" || resolved.ExecutionProfileID == resolved.LogicalProfileID {
+	if resolved.ExecutionProfileID == "" ||
+		(resolved.ExecutionProfileID == resolved.LogicalProfileID && preservePreparedOfficeProfile) {
 		return route, nil
 	}
 	route.launchProfileID = resolved.ExecutionProfileID

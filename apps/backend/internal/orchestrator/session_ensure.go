@@ -499,10 +499,12 @@ func (s *Service) SetOfficeLaunchProfilePreview(fn OfficeLaunchProfilePreviewFun
 // the execution profile Office routing would launch its agent with, so a later
 // run reuses the prepared runtime. Without a routed candidate the agent ID is
 // kept, matching the scheduler's non-routed launch.
-func (s *Service) officeLaunchProfileForPrepare(ctx context.Context, task *models.Task, agentProfileID string) string {
+func (s *Service) officeLaunchProfileForPrepare(
+	ctx context.Context, task *models.Task, agentProfileID string,
+) (string, bool) {
 	if s.officeLaunchProfilePreview == nil || !task.IsOfficeOwnedAndAssigned() ||
-		agentProfileID != task.AssigneeAgentProfileID {
-		return agentProfileID
+		agentProfileID != task.AssigneeAgentProfileID || codexForkSourceSessionFromContext(ctx) != "" {
+		return agentProfileID, false
 	}
 	routed, err := s.officeLaunchProfilePreview(ctx, task.WorkspaceID, agentProfileID)
 	if err != nil {
@@ -510,10 +512,10 @@ func (s *Service) officeLaunchProfileForPrepare(ctx context.Context, task *model
 			zap.String("task_id", task.ID),
 			zap.String("agent_profile_id", agentProfileID),
 			zap.Error(err))
-		return agentProfileID
+		return agentProfileID, false
 	}
 	if routed == "" {
-		return agentProfileID
+		return agentProfileID, false
 	}
-	return routed
+	return routed, true
 }

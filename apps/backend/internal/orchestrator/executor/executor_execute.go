@@ -2091,9 +2091,11 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if running != nil && running.ExecutionProfileID != "" &&
 			running.ExecutionProfileID != agentProfileID {
 			if running.AgentExecutionID != "" {
-				// The replacement launch owns this stop, so its stopped event
-				// must not end the session the launch is about to reuse.
-				e.registerStopOwner(sessionID, running.AgentExecutionID, true)
+				// Do not stop the old runtime unless the replacement owns the
+				// exact teardown and can preserve the incoming turn.
+				if !e.registerReplacementStopOwner(sessionID, running.AgentExecutionID) {
+					return nil, fmt.Errorf("%w: replacement stop ownership is unavailable", ErrExecutionAlreadyRunning)
+				}
 				if err := e.agentManager.StopAgentWithReason(
 					ctx, running.AgentExecutionID, "execution profile changed", true,
 				); err != nil && !errors.Is(err, lifecycle.ErrExecutionNotFound) {

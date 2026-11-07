@@ -128,6 +128,25 @@ func TestPrepareTaskSession_OfficeTaskUsesRoutedProfile(t *testing.T) {
 	assert.Equal(t, "profile-routed", launchedProfile(t, launched))
 }
 
+func TestResolvePreparedSessionDynamicRouteUsesLatestProfileForNonOfficeSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-current-profile", "session-current-profile", "step1")
+	session, err := repo.GetTaskSession(ctx, "session-current-profile")
+	require.NoError(t, err)
+	session.AgentProfileID = "profile-current"
+	session.ExecutionProfileID = "profile-current"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	svc.profileExecutionResolver = agentruntime.NewProfileExecutionResolver(staticProfileStore{}, nil, false)
+
+	route, err := svc.resolvePreparedSessionDynamicRoute(ctx, session.ID, "profile-captured-before-start", false)
+	require.NoError(t, err)
+	assert.Equal(t, "profile-current", route.launchProfileID,
+		"ordinary sessions must use the profile loaded from their current session")
+}
+
 func TestEnsureSession_OfficeTaskKeepsAgentProfileWithoutRoutedCandidate(t *testing.T) {
 	for name, preview := range map[string]OfficeLaunchProfilePreviewFunc{
 		"no candidate": func(context.Context, string, string) (string, error) { return "", nil },
