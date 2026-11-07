@@ -38,6 +38,11 @@ function workspaceMode(metadata: Record<string, unknown> | null | undefined): un
 }
 
 test.describe("agentctl kandev task create relations", () => {
+  // Request testPage so the Office workspace reset runs before every scenario.
+  test.beforeEach(async ({ testPage }) => {
+    void testPage;
+  });
+
   async function coordinatorEnv(
     apiClient: ApiClient,
     backendUrl: string,

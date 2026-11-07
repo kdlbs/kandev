@@ -33,7 +33,14 @@
 | `requirements/automation-retries.md` + `system-design/automation-retries.md` | draft | Durable retry policy, attempt scheduling, safe recovery, and paged run history |
 | `requirements/agent-task-relations.md` + `system-design/agent-task-relations.md` | shipped | Runtime `task create` accepts `blocked_by` (read-relation scoped, ancestors allowed) and an explicit `workspace_mode`; omitted fields behave as before |
 
-The eight rows above are the only entries reflecting the newer `requirements/` + `system-design/` split; the other 15 predate that migration and this table has not been reconciled with the full current Office spec set. `docs/specs/office/README.md` no longer carries a tracked specification map (see ADR `2026-09-07-on-demand-document-catalogs`) — run `python3 scripts/list-docs.py specs --system office --format paths` for the authoritative, current list of anything not covered here.
+The eight rows above are the only entries in this table reflecting the newer
+`requirements/` + `system-design/` split; the other 16 entries in this table
+predate this migration. The separately listed tier-routing specification above
+is outside this table, which has not been reconciled with the full current
+Office spec set. `docs/specs/office/README.md` no longer carries a tracked
+specification map (see ADR `2026-09-07-on-demand-document-catalogs`) — run
+`python3 scripts/list-docs.py specs --system office --format paths` for the
+authoritative, current list of anything not covered here.
 
 The active Office tier-selection contract is in `docs/specs/office/requirements/office-agent-tier-routing.md`. The deprecated `routing.md` specification is historical and does not override that contract.
 

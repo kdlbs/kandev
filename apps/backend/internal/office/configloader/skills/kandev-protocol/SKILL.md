@@ -158,9 +158,9 @@ $KANDEV_CLI kandev task create --title "Integrate batches" \
 ```
 
 A blocker must be your own task, a task in your run's scope, or a task you can
-read (your parent, children, siblings, or your own blockers). Anything else is
-refused. Blockers can only be declared on the task you are creating, not added
-to an existing task.
+read (your ancestors, descendants, siblings, or your own blockers). Anything
+else is refused. Blockers can only be declared on the task you are creating,
+not added to an existing task.
 
 Do not block a child on its parent if the parent's agent will wait for that
 child to finish (`task_children_completed`) before completing: neither will

@@ -111,8 +111,12 @@ Sequential, last.
 - Added `apps/web/e2e/tests/office/agentctl-task-relations.spec.ts`: fan-in join
   edges, out-of-scope blocker refusal (no ID leaked), explicit `new_workspace` vs
   omitted mode, and the still-refused flags failing with their existing
-  message before any request. No fixture changes were
-  needed (`getTaskDependencies`, `getTask`, `seedRun`, `mintRuntimeToken` exist).
+  message before any request. No fixture implementation change was needed
+  (`getTaskDependencies`, `getTask`, `seedRun`, `mintRuntimeToken` exist).
 - `pnpm --dir apps/web e2e:run --host --shards 1 --project chromium
   tests/office/agentctl-task-relations.spec.ts`: 4 passed.
 - ESLint on the spec and `apps/web` typecheck passed.
+- Maintainer fixup: the suite's `beforeEach` now requests `testPage`, which runs
+  the existing Office workspace reset before each scenario.
+- Post-fixup verification from `apps/web`: `pnpm e2e:run --host --shards 1
+  --project chromium tests/office/agentctl-task-relations.spec.ts`: 4 passed.

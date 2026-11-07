@@ -123,11 +123,22 @@ Sequential after 01.
 - `kandev-protocol` documents both flags, the blocker scope rule, a fan-in example,
   a `new_workspace` child example, and the parent/child stall to avoid.
   `kandev-escalation` now says the CLI cannot add a blocker to an existing task.
-  `kandev-task-ops/references/tasks.md` and `office-context.md` do not document
-  `task create`, so they were unchanged.
+  `kandev-task-ops/references/tasks.md` points agents to `kandev-protocol/SKILL.md`
+  for `task create` options, blocker scope, and workspace modes. `office-context.md`
+  does not document `task create`, so it remains unchanged.
 - `system_sync_test.go` contract tests updated to the new supported flag set.
 - Specs `agents-02.md` and `agents-03.md` and public
   `docs/public/automation-and-mcp.md` updated. Public docs validators passed.
+
+- Maintainer fixup: corrected the blocker-scope wording to include ancestors,
+  corrected the count of pre-split entries, and clarified that tier-routing is
+  listed outside the Office table. `kandev-task-ops/references/tasks.md` now
+  points to the protocol skill for task-create options.
+- Post-fixup validation passed: `python3 scripts/lint-harness-files.test.py`,
+  `python3 .github/scripts/lint-harness-files.py --all`,
+  `python3 scripts/lint-spec-files.test.py`,
+  `python3 scripts/lint-spec-files.py --all`, and the targeted
+  `pre-commit run harness-lint` for the changed harness files.
 - Verification: `go test ./cmd/agentctl/...` (also under `-race`) and
   `go test ./internal/office/skills/...` passed; the removed-flag grep printed
   nothing; `list-docs.py validate` and `lint-spec-files.py --all` passed.
