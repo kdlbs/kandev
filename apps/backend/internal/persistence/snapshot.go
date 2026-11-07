@@ -36,9 +36,24 @@ func snapshotPath(backupDir, fromVersion string) string {
 	if v == "" {
 		v = "pre-meta"
 	}
+	v = snapshotVersionComponent(v)
 	ts := time.Now().UTC().Format("20060102T150405Z")
 	name := fmt.Sprintf("kandev-%s-%s.db", v, ts)
 	return filepath.Join(backupDir, name)
+}
+
+func snapshotVersionComponent(version string) string {
+	var component strings.Builder
+	component.Grow(len(version))
+	for _, char := range version {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9', strings.ContainsRune("._-+", char):
+			component.WriteRune(char)
+		default:
+			component.WriteByte('_')
+		}
+	}
+	return component.String()
 }
 
 // SnapshotSQLite copies the live database to path using VACUUM INTO,

@@ -69,6 +69,41 @@ rotation. Copy success alone cannot release startup's migration/readiness gate.
 No new schema, settings, runtime flag or backup format is needed. Existing startup
 phase reporting continues; do not invent percentages or ETA from file size.
 
+## Stored version compatibility
+
+The stored `kandev_meta.kandev_version` value is opaque version metadata.
+Historical local builds can contain namespaced Git descriptions such as
+`pluginsdk/v0.1.0-16-gbe9d2485554`. Persistence must accept these values without
+changing the metadata or skipping the required upgrade backup.
+
+`snapshotPath` formats the version as one portable filename component before
+it joins the component to the backup directory. Preserve ASCII letters,
+digits, dots, underscores, hyphens and plus signs. Replace every other
+character with an underscore. The empty version keeps the `pre-meta` fallback.
+The `kandev-` prefix, UTC timestamp and `.db` suffix remain unchanged.
+
+The result remains a direct child of the backup directory on Linux, macOS
+and Windows. A separator or traversal-shaped version cannot create a nested
+path. Backup discovery and pruning continue to use their existing filename
+shape. Normalization can produce identical version components, so the existing
+atomic no-replace installation remains mandatory.
+
+Keep the existing private staging, integrity check and atomic installation in
+`createPreMigrationBackup`. Do not create version-derived directories as a
+workaround. A publication error still prevents application migrations.
+
+The root `Makefile` and `apps/backend/Makefile` produce version metadata for
+local runtime builds. Their default Git descriptions match only `v[0-9]*`
+tags, with double quotes for POSIX and native Windows shells. SDK tags such
+as `pluginsdk/v0.1.0` cannot become runtime version defaults. Preserve explicit
+version overrides, commit-hash fallback, the dirty suffix and the existing
+`dev` fallback outside a Git repository. Build filtering cannot repair values
+already stored in a user's database, so persistence normalization is required.
+
+This repair implements AC-PLATFORM-SQLITE-SNAPSHOT-001.3,
+AC-PLATFORM-SQLITE-SNAPSHOT-001.4 and AC-PLATFORM-STARTUP-LIFECYCLE-001.7.
+The pending work package owns regression and implementation evidence.
+
 ## Compatibility and requirement mapping
 
 | Boundary | Behavior and evidence |
@@ -83,3 +118,5 @@ phase reporting continues; do not invent percentages or ETA from file size.
 ## Implementation plans
 
 [Database maintenance throughput](../../../plans/database-maintenance-throughput/plan.md).
+
+[Stored version compatibility repair](../../../plans/upgrade-backup-version-paths/plan.md).
