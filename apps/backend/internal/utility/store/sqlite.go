@@ -288,6 +288,12 @@ func (r *sqliteRepository) UpdateAgent(ctx context.Context, agent *models.Utilit
 	agent.Description = strings.TrimSpace(agent.Description)
 	agent.Prompt = strings.TrimSpace(agent.Prompt)
 	agent.UpdatedAt = time.Now().UTC()
+	// Startup's legacy repair treats equal timestamps as a never-edited row.
+	// Preserve an explicit disable even on a coarse clock tick; PostgreSQL's
+	// timestamp precision also retains this minimum one-microsecond advance.
+	if !agent.UpdatedAt.After(agent.CreatedAt) {
+		agent.UpdatedAt = agent.CreatedAt.Add(time.Microsecond)
+	}
 
 	enabledInt := 0
 	if agent.Enabled {
