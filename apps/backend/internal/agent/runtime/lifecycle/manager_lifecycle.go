@@ -1106,6 +1106,12 @@ func (m *Manager) cleanupLiveExecutionLocked(ctx context.Context, reader executo
 	if !exists || execution == nil || execution.ID != executionID || execution.RuntimeName != executor.NameStandalone || execution.standaloneInstanceID == "" {
 		return false, nil
 	}
+	// The existing passthrough stop is best effort and does not report a
+	// missing runner or a failed stop. Do not claim the live owner was
+	// released while a separate interactive process may still be running.
+	if execution.PassthroughProcessID != "" {
+		return false, nil
+	}
 	current, err := reader.GetExecutorRunningBySessionID(ctx, sessionID)
 	if err != nil || current == nil || current.AgentExecutionID != executionID || !current.UpdatedAt.Equal(updatedAt) {
 		return false, err
