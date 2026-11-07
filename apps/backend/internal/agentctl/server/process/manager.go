@@ -307,7 +307,9 @@ type Manager struct {
 	userInputRequestHandler adapter.UserInputRequestHandler
 
 	// Agent event notifications (protocol-agnostic)
-	updatesCh chan adapter.AgentEvent
+	updatesCh        chan adapter.AgentEvent
+	adapterStageSeen atomic.Uint64
+	adapterStageAt   atomic.Int64
 
 	// Pending permission requests waiting for user response
 	pendingPermissions       map[string]*PendingPermission
@@ -2666,6 +2668,9 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 		} else {
 			select {
 			case update, ok = <-updatesCh:
+				if ok {
+					m.recordAdapterStage()
+				}
 			case <-stopCh:
 				m.drainDeliveryUpdates(updatesCh)
 				return
@@ -2730,6 +2735,7 @@ func (m *Manager) drainDeliveryUpdates(updates <-chan adapter.AgentEvent) {
 			if !ok {
 				return
 			}
+			m.recordAdapterStage()
 			update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
 			persisted, err := m.persistDeliveryEvent(update)
 			if err != nil {

@@ -33,6 +33,7 @@ type streamEventProcessor struct {
 	delivery          AgentDeliveryRepository
 	startupGeneration uint64
 	attempt           *deliveryStartupAttempt
+	progress          *streamProjectionProgress
 	events            chan agentctl.AgentEvent
 	done              chan struct{}
 
@@ -67,6 +68,7 @@ func newStreamEventProcessor(
 		delivery:          delivery,
 		startupGeneration: startupGeneration,
 		attempt:           attempt,
+		progress:          &streamProjectionProgress{sequence: execution.streamProgressSequence.Add(1)},
 		events:            make(chan agentctl.AgentEvent, streamProjectionQueueSize),
 		done:              make(chan struct{}),
 	}
@@ -77,6 +79,7 @@ func newStreamEventProcessor(
 func (p *streamEventProcessor) enqueue(event agentctl.AgentEvent) bool {
 	select {
 	case p.events <- event:
+		p.progress.enqueued.Add(1)
 		return true
 	case <-p.ctx.Done():
 		return false
@@ -142,6 +145,7 @@ func (p *streamEventProcessor) handleEvent(batch *streamEventBatch, event agentc
 	}
 	if prepared.duplicate {
 		p.manager.scheduleDurableDeliveryAck(p.execution, p.client, prepared.event)
+		p.progress.completed(1)
 		return nil
 	}
 	if !p.batchable(prepared) {
@@ -149,13 +153,21 @@ func (p *streamEventProcessor) handleEvent(batch *streamEventBatch, event agentc
 			return err
 		}
 		if prepared.receiptDeferred {
-			return p.manager.replayPreparedAgentEventsWithReceipt(
+			err := p.manager.replayPreparedAgentEventsWithReceipt(
 				p.ctx, p.execution, []preparedAgentEvent{prepared}, p.delivery, p.client, p.startupGeneration, p.attempt,
 			)
+			if err == nil {
+				p.progress.completed(1)
+			}
+			return err
 		}
-		return p.manager.processPreparedAgentEvent(
+		err := p.manager.processPreparedAgentEvent(
 			p.ctx, p.execution, p.client, p.delivery, prepared, p.startupGeneration,
 		)
+		if err == nil {
+			p.progress.completed(1)
+		}
+		return err
 	}
 	if p.mustFlushBefore(batch, prepared) {
 		if err := p.flushBatch(batch); err != nil {
@@ -187,9 +199,13 @@ func (p *streamEventProcessor) flushBatch(batch *streamEventBatch) error {
 	if len(batch.items) == 0 {
 		return nil
 	}
+	count := len(batch.items)
 	err := p.manager.commitPreparedAgentEvents(
 		p.ctx, p.execution, batch.items, p.delivery, p.client, p.startupGeneration, p.attempt,
 	)
+	if err == nil {
+		p.progress.completed(uint64(count))
+	}
 	batch.items = nil
 	batch.bytes = 0
 	if batch.timer != nil && !batch.timer.Stop() {

@@ -44,6 +44,8 @@ type AgentExecution struct {
 	InterruptedStreamID          string
 	InterruptedHarnessGeneration uint64
 	successorGenerationOwner     atomic.Pointer[successorGenerationOwner]
+	streamProgressSequence       atomic.Uint64
+	streamProgress               atomic.Pointer[streamProjectionProgress]
 
 	ID string
 	// CausingRunID is the trusted Office run that initiated this task-owned
