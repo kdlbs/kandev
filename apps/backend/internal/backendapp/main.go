@@ -710,6 +710,7 @@ func startAgentInfrastructure(
 		return false
 	}
 	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
+	lifecycleMgr.SetProviderTurnSettlement(repos.Task)
 	if services.DynamicProfileResolver != nil {
 		lifecycleMgr.SetResourceCircuitKeyResolver(services.DynamicProfileResolver.ResourceCircuitKeyForProfile)
 	}
@@ -846,6 +847,7 @@ func startAgentInfrastructure(
 		repos.Task,
 		repos.AgentSettings,
 		services.DynamicProfileResolver,
+		orchestratorSvc.PersistDynamicCandidateSwitch,
 		orchestratorSvc.LaunchDynamicRouteAction,
 	))
 	orchestratorSvc.SetProfileExecutionResolver(services.DynamicProfileResolver)
@@ -879,6 +881,9 @@ func startAgentInfrastructure(
 	if services.DynamicProfileResolver != nil {
 		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
 		agentSettingsController.SetRoutingCircuitReader(newRoutingCircuitReader(services.DynamicProfileResolver))
+		if cfg.Features.DynamicProfileTiers {
+			agentSettingsController.SetDynamicTierPreviewer(services.DynamicProfileResolver)
+		}
 	}
 	// An enabled automation is a standing instruction to launch against a
 	// profile. Nothing is running, so it never reaches the active-session list,
@@ -1354,6 +1359,25 @@ func startGatewayAndServe(
 		return false
 	}
 
+	// Wire subscription usage provider into the office agents service so the
+	// /agents/:id/utilization endpoint can fetch live utilization data.
+	// The added settings read surface shares this cache but is independently gated.
+	if cfg.Features.ProviderUsageLimits || (services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil) {
+		usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
+		if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
+			services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
+		}
+		if cfg.Features.ProviderUsageLimits {
+			tierUsage := newTierUsageSnapshot()
+			allowances := &providerTurnAllowances{profileUsageSnapshot: newProfileUsageSnapshot(usageAdapter), claims: repos.Task}
+			agentSettingsController.SetProfileUsageProvider(&tierUsageRecordingProvider{next: allowances, sink: tierUsage})
+			lifecycleMgr.SetProviderTurnAdmission(allowances)
+			if cfg.Features.DynamicProfileTiers && services.DynamicProfileResolver != nil {
+				services.DynamicProfileResolver.SetCandidateUsageLookup(tierUsage.Lookup)
+			}
+		}
+	}
+
 	if err := repos.RequiredStores.ValidateComplete(); err != nil {
 		log.Error("Required-store bootstrap is incomplete", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
@@ -1541,14 +1565,6 @@ func startGatewayAndServe(
 			)
 		})
 		return restoreQuiesceErr
-	}
-
-	// Wire subscription usage provider into the office agents service so the
-	// /agents/:id/utilization endpoint can fetch live utilization data.
-	// Skipped when the Office feature flag is off (services.OfficeSvcs is nil).
-	if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
-		usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
-		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
 	}
 
 	startup.AfterReady(ctx, func() { services.Task.StartAutoArchiveLoop(ctx) })

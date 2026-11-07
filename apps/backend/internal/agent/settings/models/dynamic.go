@@ -10,6 +10,10 @@ type DynamicAgentProfile struct {
 	Version   int64     `json:"version"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// KeepModelWhileRunning is the profile-wide continuity preference. It binds
+	// a healthy selection across turns and is not a selection mode. A nil value
+	// reads and writes as the documented default, true.
+	KeepModelWhileRunning *bool `json:"keep_model_while_running,omitempty"`
 }
 
 // DynamicAgentRoute is one ordered concrete candidate in a dynamic profile.

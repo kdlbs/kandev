@@ -301,5 +301,13 @@
   "cloneSourceMissing": "コピー元のワークスペースは利用できなくなりました。",
   "cloneConfigurationUnsupported": "このワークスペースには、複製できない管理対象の設定、利用できない既定の構成、またはワークフローの参照があります。",
   "cloneFailed": "ワークスペースを複製できませんでした。もう一度お試しください。",
-  "workspaceActionsNamed": "{{name}}の操作"
+  "workspaceActionsNamed": "{{name}}の操作",
+  "dynamicRoutingPolicyTitle": "動的ルーティング",
+  "dynamicRoutingPolicyDescription": "ターンの途中でプロバイダーが失敗したときに、このワークスペースの動的エージェントプロファイルをどのように回復するかを選択します。この設定は既定でオフです。",
+  "midTurnFailoverEnabled": "プロバイダーの上限に達したら次の候補を試す",
+  "midTurnFailoverDescription": "すでに出力があったターンがレート制限、クォータ切れ、プロバイダーの過負荷で停止した場合、次の候補に一度だけ切り替え、保存されたタスクのコンテキストから続行します。失敗したリクエストは再送信しません。オフの場合、セッションはユーザーの操作を待ちます。",
+  "failedRouteAutoRetryEnabled": "失敗したルートを自動で再試行",
+  "failedRouteAutoRetryDescription": "レート制限、クォータ切れ、プロバイダーの過負荷でルートがユーザーの操作待ちになった場合、プロバイダーの制限が解除された後（1 分以上経過後）に自動で再試行します。再試行は保存されたタスクのコンテキストから続行し、失敗したリクエストは再送信しません。同じプロバイダーが同じ理由で再び失敗した場合や回数の上限に達した場合、セッションはユーザーの操作を待ちます。オフの場合、セッションはユーザーの操作を待ちます。",
+  "failedRouteAutoRetryMax": "ターンが成功するまでの自動再試行回数",
+  "failedRouteAutoRetryMaxRange": "1 から 3 までの整数を入力してください。"
 }

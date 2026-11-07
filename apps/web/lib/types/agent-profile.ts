@@ -57,10 +57,20 @@ export type DynamicUnclassifiedPolicy = {
 };
 
 export type DynamicAgentPolicy = {
+  selection?: DynamicAgentSelection;
   version: number;
   transient: DynamicErrorPolicy;
   hard: DynamicErrorPolicy;
   unclassified: DynamicUnclassifiedPolicy;
+};
+
+// The tier editor changes adjacency only. Other selection fields remain opaque
+// so a partial editor cannot erase model/usage or future policy metadata.
+export type DynamicAgentSelection = {
+  [key: string]: unknown;
+  join_previous?: boolean;
+  tier?: { [key: string]: unknown; mode?: string; on_failure?: string };
+  model?: unknown;
 };
 
 export type DynamicAgentCandidate = {
@@ -75,6 +85,11 @@ export type DynamicAgentCandidate = {
 export type DynamicAgentProfile = {
   version: number;
   candidates: DynamicAgentCandidate[];
+  /**
+   * Keep the chosen candidate across turns. Absent/true on legacy payloads;
+   * only an explicit false asks for a fresh comparison before a new user turn.
+   */
+  keepModelWhileRunning?: boolean;
 };
 
 export type UtilizationWindow = {
@@ -273,6 +288,7 @@ export type AgentProfilePayload = {
   updated_at: string;
   dynamic?: {
     version: number;
+    keep_model_while_running?: boolean;
     candidates: Array<{
       position: number;
       execution_profile_id: string;

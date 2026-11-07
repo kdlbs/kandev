@@ -218,11 +218,22 @@ function normalizeDynamicPolicy(
   const source = objectValue(raw);
   if (!source) return legacyRulesToPolicy(legacyRules);
   return {
+    ...(objectValue(source.selection) ? { selection: objectValue(source.selection)! } : {}),
     version: numberValue(source.version, 1),
     transient: normalizeDynamicErrorPolicy(source.transient),
     hard: normalizeDynamicErrorPolicy(source.hard),
     unclassified: normalizeDynamicUnclassifiedPolicy(source.unclassified),
   };
+}
+
+function normalizeKeepModel(document: Record<string, unknown>): {
+  keepModelWhileRunning?: boolean;
+} {
+  const snake = document.keep_model_while_running;
+  if (typeof snake === "boolean") return { keepModelWhileRunning: snake };
+  const camel = document.keepModelWhileRunning;
+  if (typeof camel === "boolean") return { keepModelWhileRunning: camel };
+  return {};
 }
 
 function pickDynamic(raw: RawProfile): DynamicAgentProfile | undefined {
@@ -233,6 +244,7 @@ function pickDynamic(raw: RawProfile): DynamicAgentProfile | undefined {
   const candidates = Array.isArray(document.candidates) ? document.candidates : [];
   return {
     version,
+    ...normalizeKeepModel(document),
     candidates: candidates.flatMap((candidate) => {
       if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
       const item = candidate as Record<string, unknown>;
@@ -395,6 +407,9 @@ export function toAgentProfilePayload(
   if (profile.dynamic) {
     payload.dynamic = {
       version: profile.dynamic.version,
+      ...(typeof profile.dynamic.keepModelWhileRunning === "boolean"
+        ? { keep_model_while_running: profile.dynamic.keepModelWhileRunning }
+        : {}),
       candidates: profile.dynamic.candidates.map((candidate) => {
         const policy = candidate.policies ?? legacyRulesToPolicy(candidate.rules ?? {});
         return {
@@ -402,6 +417,7 @@ export function toAgentProfilePayload(
           execution_profile_id: candidate.executionProfileId,
           enabled: candidate.enabled,
           policies: {
+            ...(policy.selection ? { selection: policy.selection } : {}),
             version: policy.version,
             transient: {
               retry: {

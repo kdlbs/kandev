@@ -248,6 +248,9 @@ func (c *Controller) createDynamicProfile(
 	if !c.dynamicAgentRoutingEnabled {
 		return nil, ErrDynamicAgentRoutingDisabled
 	}
+	if err := c.prepareTierSelections(nil, req.Dynamic); err != nil {
+		return nil, err
+	}
 	dynamicRepo, err := c.dynamicProfileRepository()
 	if err != nil {
 		return nil, err
@@ -276,7 +279,12 @@ func (c *Controller) createDynamicProfile(
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 		return nil, err
 	}
-	dynamic := &models.DynamicAgentProfile{ProfileID: profile.ID, Version: 1}
+	keepModel := keepModelWhileRunning(req.Dynamic)
+	dynamic := &models.DynamicAgentProfile{
+		ProfileID:             profile.ID,
+		Version:               1,
+		KeepModelWhileRunning: &keepModel,
+	}
 	if err := dynamicRepo.CreateDynamicAgentProfile(ctx, dynamic, routes); err != nil {
 		if cleanupErr := c.repo.DeleteAgentProfile(ctx, profile.ID); cleanupErr != nil {
 			return nil, fmt.Errorf("%w; cleanup dynamic profile parent: %v", err, cleanupErr)
@@ -392,6 +400,32 @@ const (
 	dynamicRouteActionStop      = "stop"
 )
 
+// keepModelWhileRunning resolves the profile-wide continuity preference. It is
+// not a selection mode: an omitted value keeps the documented default of on, so
+// a create request never has to opt in.
+func keepModelWhileRunning(profile *dto.DynamicAgentProfileDTO) bool {
+	if profile == nil || profile.KeepModelWhileRunning == nil {
+		return true
+	}
+	return *profile.KeepModelWhileRunning
+}
+
+// resolveKeepModelWhileRunning honors an explicit update and otherwise
+// preserves the value already stored for the profile.
+func resolveKeepModelWhileRunning(
+	stored *models.DynamicAgentProfile,
+	request *dto.DynamicAgentProfileDTO,
+) *bool {
+	keep := true
+	if stored != nil && stored.KeepModelWhileRunning != nil {
+		keep = *stored.KeepModelWhileRunning
+	}
+	if request != nil && request.KeepModelWhileRunning != nil {
+		keep = *request.KeepModelWhileRunning
+	}
+	return &keep
+}
+
 func validateDynamicAgentProfile(profile *dto.DynamicAgentProfileDTO) error {
 	if profile == nil || len(profile.Candidates) == 0 {
 		return ErrDynamicProfileCandidatesRequired
@@ -404,6 +438,9 @@ func validateDynamicAgentProfile(profile *dto.DynamicAgentProfileDTO) error {
 			return fmt.Errorf("%w: candidate %d has no execution profile", ErrDynamicProfileCandidate, position)
 		}
 		if err := normalizeDynamicCandidatePolicy(&profile.Candidates[position]); err != nil {
+			return err
+		}
+		if err := validateTierSelection(profile.Candidates[position].Policies.Selection, position); err != nil {
 			return err
 		}
 	}
@@ -438,9 +475,14 @@ func dynamicProfileDTO(profile *models.DynamicAgentProfile, routes []models.Dyna
 	if profile == nil {
 		return nil, nil
 	}
+	keepModel := true
+	if profile.KeepModelWhileRunning != nil {
+		keepModel = *profile.KeepModelWhileRunning
+	}
 	result := &dto.DynamicAgentProfileDTO{
-		Version:    profile.Version,
-		Candidates: make([]dto.DynamicAgentCandidateDTO, 0, len(routes)),
+		Version:               profile.Version,
+		Candidates:            make([]dto.DynamicAgentCandidateDTO, 0, len(routes)),
+		KeepModelWhileRunning: &keepModel,
 	}
 	for _, route := range routes {
 		policy, err := decodeDynamicPolicyDocument(route.RulesJSON, route.Position)
@@ -539,6 +581,17 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		if req.Dynamic.Version <= 0 {
 			return nil, fmt.Errorf("dynamic profile version is required")
 		}
+		dynamicRepo, err = c.dynamicProfileRepository()
+		if err != nil {
+			return nil, err
+		}
+		existingDynamic, storedRoutes, loadErr := dynamicRepo.GetDynamicAgentProfile(ctx, profile.ID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if err := c.prepareTierSelections(storedRoutes, req.Dynamic); err != nil {
+			return nil, err
+		}
 		dynamicRoutes, err = c.validateDynamicCandidates(ctx, profile.ID, req.Dynamic)
 		if err != nil {
 			return nil, err
@@ -547,7 +600,10 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		if err != nil {
 			return nil, err
 		}
-		dynamic = &models.DynamicAgentProfile{ProfileID: profile.ID}
+		dynamic = &models.DynamicAgentProfile{
+			ProfileID:             profile.ID,
+			KeepModelWhileRunning: resolveKeepModelWhileRunning(existingDynamic, req.Dynamic),
+		}
 	}
 	if req.Name != nil {
 		profile.Name = *req.Name

@@ -21,7 +21,10 @@ import (
 
 var ErrDynamicRoutingDisabled = errors.New("dynamic agent routing is disabled")
 
-const dynamicRouteStatusRetrying = "retrying"
+const (
+	dynamicRouteStatusRetrying = "retrying"
+	dynamicRouteStatusWaiting  = "waiting"
+)
 
 // ProfileExecution is the caller-facing result of resolving a logical
 // profile. Concrete callers receive the same ID for both fields. Dynamic
@@ -48,6 +51,11 @@ type ProfileExecutionResolver struct {
 	engine          *dynamic.Engine
 	bindingResolver *dynamic.CredentialBindingResolver
 	enabled         atomic.Bool
+	// candidateUsage reads the last observed provider usage for one concrete
+	// profile. It never fetches; an absent observation leaves the candidate
+	// unknown, which the engine ranks below measured capacity but above a
+	// measured exhausted allowance.
+	candidateUsage func(string) dynamic.CandidateUsage
 }
 
 func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engine, enabled bool) *ProfileExecutionResolver {
@@ -62,11 +70,63 @@ func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engi
 
 func (r *ProfileExecutionResolver) SetEnabled(enabled bool) { r.enabled.Store(enabled) }
 
+// SetCandidateUsageLookup supplies the last observed provider usage per
+// concrete profile. The resolver only reads it while composing candidates, so
+// the lookup must not perform provider I/O.
+func (r *ProfileExecutionResolver) SetCandidateUsageLookup(lookup func(string) dynamic.CandidateUsage) {
+	r.candidateUsage = lookup
+}
+
 // Enabled reports the effective dynamic-agent-routing flag value this
 // resolver was constructed or last set with. Callers outside this package
 // use it to gate durable recovery and manual route-action launch paths that
 // do not otherwise pass through a selection method.
 func (r *ProfileExecutionResolver) Enabled() bool { return r.enabled.Load() }
+
+// NativeRouteOwnersEnabled gates durable non-task routes with the same ordered
+// tier flag as the shared selection engine.
+func (r *ProfileExecutionResolver) NativeRouteOwnersEnabled() bool {
+	return r != nil && r.enabled.Load() && r.engine.OrderedTiersEnabled()
+}
+
+// KeepModelWhileRunning reports the profile-wide continuity preference. A load
+// failure answers true, the documented default, because failing open toward
+// stickiness keeps an admitted turn on its current candidate rather than
+// silently moving work when the preference could not be read.
+func (r *ProfileExecutionResolver) KeepModelWhileRunning(
+	ctx context.Context,
+	logicalProfileID string,
+) bool {
+	if r == nil || !r.Enabled() {
+		return true
+	}
+	profile, err := r.loadDynamicProfile(ctx, logicalProfileID)
+	if err != nil {
+		return true
+	}
+	return profile.KeepModelWhileRunning
+}
+
+// ReevaluateForNewTurn runs one fresh capacity comparison for a session whose
+// profile does not keep its chosen model. The incumbent is not preferred, so the
+// tier ranking decides which candidate a new user turn should use. The caller
+// invokes it at the idle boundary before launching, so an admitted turn is never
+// interrupted.
+func (r *ProfileExecutionResolver) ReevaluateForNewTurn(
+	ctx context.Context,
+	sessionID string,
+	logicalProfileID string,
+	expectedGeneration int64,
+) (dynamic.RouteDecision, error) {
+	if r == nil || r.engine == nil {
+		return dynamic.RouteDecision{}, errors.New("dynamic routing is not configured")
+	}
+	profile, err := r.loadDynamicProfile(ctx, logicalProfileID)
+	if err != nil {
+		return dynamic.RouteDecision{}, err
+	}
+	return r.engine.SelectContext(ctx, sessionID, profile, expectedGeneration, "")
+}
 
 // SetCredentialBindingResolver supplies the installation-scoped fingerprint
 // used to share provider health between concrete profiles that prove the same
@@ -161,6 +221,9 @@ func (r *ProfileExecutionResolver) ResolveExecutionDetails(ctx context.Context, 
 	// context belongs to an already-routed task session. Reusing that session
 	// would consume or fence the task's durable generation.
 	routeSessionID := "utility:" + uuid.NewString()
+	if r.NativeRouteOwnersEnabled() && strings.HasPrefix(sessionID, "native:") {
+		routeSessionID = sessionID
+	}
 	decision, err := r.Resolve(ctx, routeSessionID, profileID, 0, "")
 	if err != nil {
 		return ProfileExecution{}, err
@@ -441,6 +504,24 @@ func (r *ProfileExecutionResolver) ResolveWithPreference(
 	return r.resolve(ctx, sessionID, profileID, expectedGeneration, excludeProfileID, preferredProfileID)
 }
 
+const (
+	// RouteActionAutoTryNext is the unattended Try next the orchestrator
+	// submits after an opted-in mid-turn provider-capacity failure. It
+	// selects exactly like try_next and records its own route reason.
+	RouteActionAutoTryNext = "auto_try_next"
+	// RouteReasonAutoProviderFailover is the route reason of that selection.
+	RouteReasonAutoProviderFailover = "auto_provider_failover"
+	// RouteActionAutoRetry is the unattended Retry the orchestrator submits
+	// for an opted-in failed route. It resumes or reselects exactly like
+	// retry and records its own route reason.
+	RouteActionAutoRetry = "auto_retry"
+	// RouteReasonAutoFailedRouteRetry is the route reason of that retry.
+	RouteReasonAutoFailedRouteRetry = "auto_failed_route_retry"
+	// routeReasonManualRetry is the route reason of a person's Retry that
+	// reselects a route left waiting without an eligible candidate.
+	routeReasonManualRetry = "manual_retry"
+)
+
 // ResolveRouteAction applies a manual route action to the durable route
 // state. Retry resumes the current generation, even when its policy deadline
 // has not elapsed; try-next claims a new generation and excludes the current
@@ -478,9 +559,17 @@ func (r *ProfileExecutionResolver) ResolveRouteAction(
 
 	switch action {
 	case "retry":
-		return r.resolveRetryRouteAction(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration)
+		return r.resolveRetryRouteAction(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration, "")
+	case RouteActionAutoRetry:
+		return r.resolveRetryRouteAction(
+			ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration, RouteReasonAutoFailedRouteRetry,
+		)
 	case "try_next", "skip":
-		return r.resolveSkipRouteAction(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration)
+		return r.resolveSkipRouteAction(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration, "manual_skip")
+	case RouteActionAutoTryNext:
+		return r.resolveSkipRouteAction(
+			ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration, RouteReasonAutoProviderFailover,
+		)
 	case "cancel_wait", "stop":
 		return r.resolveCancelRouteAction(ctx, sessionID, profileID, expectedGeneration, action)
 	default:
@@ -513,10 +602,16 @@ func (r *ProfileExecutionResolver) MarkRouteActionRequired(
 	return r.engine.MarkActionRequired(ctx, sessionID, expectedGeneration, reason)
 }
 
+// resolveRetryRouteAction resumes the current generation's candidate. A
+// route left waiting because no candidate was eligible has no candidate to
+// resume, so Retry reselects in candidate order, exactly as the next launch
+// would. A non-empty reason replaces the recorded route reason (the
+// automatic retry); a person's Retry keeps the engine's reasons.
 func (r *ProfileExecutionResolver) resolveRetryRouteAction(
 	ctx context.Context,
 	sessionID, profileID, currentExecutionProfileID string,
 	expectedGeneration int64,
+	reason string,
 ) (ProfileExecution, error) {
 	state, exists, err := r.engine.LoadState(ctx, sessionID)
 	if err != nil {
@@ -525,37 +620,84 @@ func (r *ProfileExecutionResolver) resolveRetryRouteAction(
 	if exists && state.Generation != expectedGeneration {
 		return ProfileExecution{}, dynamic.ErrStaleGeneration
 	}
-	if exists {
-		if state.Status == dynamicRouteStatusRetrying {
-			// A retry can survive a process restart without its in-memory owner.
-			// Reclaim it only when this process does not own the launch.
-			if r.engine.OwnsRetryClaim(sessionID, expectedGeneration) {
-				return ProfileExecution{}, dynamic.ErrRecoveryPending
-			}
-			reclaimed, reclaimErr := r.engine.ReclaimRetrying(ctx, sessionID, expectedGeneration)
-			if reclaimErr != nil {
-				return ProfileExecution{}, reclaimErr
-			}
-			if reclaimed {
-				return r.resolve(ctx, sessionID, profileID, expectedGeneration, "", currentExecutionProfileID)
-			}
+	if !exists {
+		return r.resolveWithReason(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration, reason)
+	}
+	switch {
+	case state.Status == dynamicRouteStatusRetrying:
+		// A retry can survive a process restart without its in-memory owner.
+		// Reclaim it only when this process does not own the launch.
+		if r.engine.OwnsRetryClaim(sessionID, expectedGeneration) {
 			return ProfileExecution{}, dynamic.ErrRecoveryPending
 		}
-		decision, resumeErr := r.engine.ResumePendingNow(ctx, sessionID, expectedGeneration)
-		if resumeErr == nil {
-			return r.executionFromDecisionWithRecovery(ctx, profileID, sessionID, decision)
+		reclaimed, reclaimErr := r.engine.ReclaimRetrying(ctx, sessionID, expectedGeneration)
+		if reclaimErr != nil {
+			return ProfileExecution{}, reclaimErr
 		}
-		if !errors.Is(resumeErr, dynamic.ErrRouteStateNotFound) {
-			return ProfileExecution{}, resumeErr
+		if reclaimed {
+			return r.resolveWithReason(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration, reason)
 		}
+		return ProfileExecution{}, dynamic.ErrRecoveryPending
+	case state.Status == dynamicRouteStatusWaiting && state.ExecutionProfileID == "":
+		return r.reselectWaitingRoute(ctx, sessionID, profileID, expectedGeneration, reason)
 	}
-	return r.resolve(ctx, sessionID, profileID, expectedGeneration, "", currentExecutionProfileID)
+	decision, resumeErr := r.engine.ResumePendingNow(ctx, sessionID, expectedGeneration)
+	if resumeErr == nil {
+		if reason != "" {
+			decision.Reason = reason
+		}
+		return r.executionFromDecisionWithRecovery(ctx, profileID, sessionID, decision)
+	}
+	if !errors.Is(resumeErr, dynamic.ErrRouteStateNotFound) {
+		return ProfileExecution{}, resumeErr
+	}
+	return r.resolveWithReason(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration, reason)
+}
+
+// reselectWaitingRoute claims the next generation of a route that is waiting
+// without an eligible candidate, in candidate order and without excluding any
+// candidate. A candidate whose circuit is still open stays ineligible, so the
+// route can come back to waiting.
+func (r *ProfileExecutionResolver) reselectWaitingRoute(
+	ctx context.Context,
+	sessionID, profileID string,
+	expectedGeneration int64,
+	reason string,
+) (ProfileExecution, error) {
+	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	if err != nil {
+		return ProfileExecution{}, err
+	}
+	if reason == "" {
+		reason = routeReasonManualRetry
+	}
+	decision, err := r.engine.SelectContextWithReason(ctx, sessionID, profileConfig, expectedGeneration, "", reason)
+	if err != nil {
+		return ProfileExecution{}, err
+	}
+	return r.executionFromDecision(ctx, profileID, sessionID, decision)
+}
+
+// resolveWithReason retries the current candidate through the ordinary
+// resolution and, for the automatic retry, records its route reason.
+func (r *ProfileExecutionResolver) resolveWithReason(
+	ctx context.Context,
+	sessionID, profileID, currentExecutionProfileID string,
+	expectedGeneration int64,
+	reason string,
+) (ProfileExecution, error) {
+	execution, err := r.resolve(ctx, sessionID, profileID, expectedGeneration, "", currentExecutionProfileID)
+	if err == nil && reason != "" {
+		execution.Decision.Reason = reason
+	}
+	return execution, err
 }
 
 func (r *ProfileExecutionResolver) resolveSkipRouteAction(
 	ctx context.Context,
 	sessionID, profileID, currentExecutionProfileID string,
 	expectedGeneration int64,
+	reason string,
 ) (ProfileExecution, error) {
 	if state, exists, err := r.engine.LoadState(ctx, sessionID); err != nil {
 		return ProfileExecution{}, err
@@ -585,7 +727,7 @@ func (r *ProfileExecutionResolver) resolveSkipRouteAction(
 		}
 	}
 	decision, err := r.engine.SelectContextWithReason(
-		ctx, sessionID, profileConfig, expectedGeneration, currentExecutionProfileID, "manual_skip",
+		ctx, sessionID, profileConfig, expectedGeneration, currentExecutionProfileID, reason,
 	)
 	if err != nil {
 		return ProfileExecution{}, err
@@ -829,6 +971,15 @@ func (r *ProfileExecutionResolver) agentNameForProfile(
 	return agent.Name, nil
 }
 
+// keepModelWhileRunning resolves the stored continuity preference. An absent
+// value keeps the documented default of on.
+func keepModelWhileRunning(value *bool) bool {
+	if value == nil {
+		return true
+	}
+	return *value
+}
+
 func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profileID string) (dynamic.Profile, error) {
 	if !r.enabled.Load() {
 		return dynamic.Profile{}, ErrDynamicRoutingDisabled
@@ -844,8 +995,17 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 	if err != nil {
 		return dynamic.Profile{}, fmt.Errorf("load dynamic profile %s: %w", profileID, err)
 	}
+	profile, err := r.dynamicProfileFromRoutes(ctx, profileID, config.Version, routes)
+	if err != nil {
+		return dynamic.Profile{}, err
+	}
+	profile.KeepModelWhileRunning = keepModelWhileRunning(config.KeepModelWhileRunning)
+	return profile, nil
+}
+
+func (r *ProfileExecutionResolver) dynamicProfileFromRoutes(ctx context.Context, profileID string, version int64, routes []agentsettingsmodels.DynamicAgentRoute) (dynamic.Profile, error) {
 	profile := dynamic.Profile{
-		ID: profileID, Version: config.Version,
+		ID: profileID, Version: version,
 		Candidates: make([]dynamic.Candidate, 0, len(routes)),
 	}
 	for _, route := range routes {
@@ -853,7 +1013,17 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 			ID: route.ExecutionProfileID, Enabled: route.Enabled,
 			BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
 		}
+		if r.candidateUsage != nil {
+			candidate.Usage = r.candidateUsage(route.ExecutionProfileID)
+		}
 		if route.RulesJSON != "" {
+			var selection struct {
+				Selection json.RawMessage `json:"selection"`
+			}
+			if err := json.Unmarshal([]byte(route.RulesJSON), &selection); err != nil {
+				return dynamic.Profile{}, err
+			}
+			candidate.SelectionJSON = selection.Selection
 			policy, legacyRules, policyErr := decodeDynamicRoutePolicy(route.RulesJSON)
 			if policyErr != nil {
 				return dynamic.Profile{}, fmt.Errorf("decode dynamic route %s: %w", route.ExecutionProfileID, policyErr)

@@ -32,7 +32,9 @@ type DynamicAgentProfileEditorStateProps = {
 
 export type DynamicAgentProfileEditorState = {
   name: string;
+  dynamicVersion: number;
   profileEnabled: boolean;
+  keepModelWhileRunning: boolean;
   standalone: boolean;
   hasExternalConflict: boolean;
   routingEnabled: boolean;
@@ -41,9 +43,11 @@ export type DynamicAgentProfileEditorState = {
   availableProfileOptions: ReturnType<typeof toAgentProfileOption>[];
   updateName: (name: string) => void;
   updateProfileEnabled: (enabled: boolean) => void;
+  updateKeepModelWhileRunning: (enabled: boolean) => void;
   addCandidate: (executionProfileId: string) => void;
   moveCandidate: (index: number, direction: -1 | 1) => void;
   removeCandidate: (index: number) => void;
+  toggleJoin: (index: number) => void;
   updateCandidate: (index: number, patch: Partial<DynamicAgentCandidate>) => void;
   updateCandidatePolicy: (
     index: number,
@@ -59,17 +63,20 @@ export function dynamicProfilePayload(
   enabled: boolean,
   version: number,
   candidates: DynamicAgentCandidate[],
+  keepModelWhileRunning = true,
 ) {
   return {
     name: name.trim(),
     enabled,
     dynamic: {
       version,
+      keep_model_while_running: keepModelWhileRunning,
       candidates: candidates.map((candidate, position) => ({
         position,
         execution_profile_id: candidate.executionProfileId,
         enabled: candidate.enabled,
         policies: {
+          ...(candidate.policies.selection ? { selection: candidate.policies.selection } : {}),
           version: candidate.policies.version,
           transient: {
             retry: {
@@ -172,6 +179,7 @@ export function useDynamicAgentProfileEditorState({
         dynamic: {
           version: draft.dynamicVersion,
           candidates: draft.candidates,
+          keepModelWhileRunning: draft.keepModelWhileRunning,
         },
       };
       const payload = dynamicProfilePayload(
@@ -179,6 +187,7 @@ export function useDynamicAgentProfileEditorState({
         draft.profileEnabled,
         draft.dynamicVersion,
         draft.candidates,
+        draft.keepModelWhileRunning,
       );
       if (onDraftChange) {
         onDraftChange(draftPayload);
@@ -215,11 +224,17 @@ export function useDynamicAgentProfileEditorState({
     }
   };
 
-  const draftRevision = dynamicDraftRevision(draft.name, draft.candidates, draft.profileEnabled);
+  const draftRevision = dynamicDraftRevision(
+    draft.name,
+    draft.candidates,
+    draft.profileEnabled,
+    draft.keepModelWhileRunning,
+  );
   const savedRevision = dynamicDraftRevision(
     draft.savedProfile.name,
     draft.savedProfile.dynamic?.candidates ?? [],
     draft.savedProfile.enabled !== false,
+    draft.savedProfile.dynamic?.keepModelWhileRunning !== false,
   );
   const policiesValid = draft.candidates.every(
     (candidate) =>
@@ -253,6 +268,7 @@ export function useDynamicAgentProfileEditorState({
   return {
     name: draft.name,
     profileEnabled: draft.profileEnabled,
+    keepModelWhileRunning: draft.keepModelWhileRunning,
     standalone,
     hasExternalConflict: draft.hasExternalConflict,
     routingEnabled,
@@ -261,12 +277,15 @@ export function useDynamicAgentProfileEditorState({
     availableProfileOptions,
     updateName: draft.updateName,
     updateProfileEnabled: draft.updateProfileEnabled,
+    updateKeepModelWhileRunning: draft.updateKeepModelWhileRunning,
     addCandidate: draft.addCandidate,
     moveCandidate: draft.moveCandidate,
     removeCandidate: draft.removeCandidate,
+    toggleJoin: draft.toggleJoin,
     updateCandidate: draft.updateCandidate,
     updateCandidatePolicy: draft.updateCandidatePolicy,
     candidates: draft.candidates,
+    dynamicVersion: draft.dynamicVersion,
     discardDraft: draft.reset,
   };
 }
