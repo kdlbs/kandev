@@ -43,6 +43,7 @@ func ExecuteProfilePrompt(ctx context.Context, resolver ExecutionFailureResolver
 			return response, executeErr
 		}
 		if response != nil && (response.Success || strings.TrimSpace(response.Response) != "") {
+			completeProfileSelection(ctx, resolver, route, response, executeErr)
 			return response, executeErr
 		}
 		failure := profilePromptFailure(executeErr, response, route.AgentCLI)
@@ -75,14 +76,9 @@ func profileFallbackAllowed(resolver ExecutionFailureResolver, route *PromptRequ
 
 func profilePromptFailure(err error, response *agentctlutil.PromptResponse, provider string) *routingerr.Error {
 	if errors.Is(err, context.DeadlineExceeded) {
-		// A live parent does not prove the child stopped: an HTTP transport
-		// deadline can return while its provider operation remains active.
-		// Preserve the original cause without authorizing another invocation.
-		return &routingerr.Error{Code: routingerr.CodeUnknownProvider, Class: routingerr.ClassUnclassified,
-			CatalogueVersion: routingerr.CatalogueVersion, Confidence: routingerr.ConfLow,
-			Phase: routingerr.PhasePromptSend, ClassifierRule: "utility.unconfirmed_request_deadline",
-			RawExcerpt: routingerr.Sanitize(err.Error())}
+		return deadlineRoutingFailure(err)
 	}
+
 	message := ""
 	if response != nil {
 		message = response.Error

@@ -71,6 +71,11 @@ func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, er
 		}
 		s.warnInvalidEnvironment(resolution)
 		updated := patch.Apply(resolution.Settings)
+		if updated.Enabled && updated.Policy == PolicyAll {
+			if _, ok := s.target.(interface{ SetExecutionCapacity(Effective) }); !ok {
+				return Settings{}, ErrTargetUnavailable
+			}
+		}
 		if validateErr := Validate(updated); validateErr != nil {
 			return Settings{}, validateErr
 		}
@@ -83,7 +88,11 @@ func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, er
 	if err != nil {
 		return Response{}, err
 	}
-	s.target.SetSessionCapacity(resolution.Effective.MaxSessions)
+	if target, ok := s.target.(interface{ SetExecutionCapacity(Effective) }); ok {
+		target.SetExecutionCapacity(resolution.Effective)
+	} else {
+		s.target.SetSessionCapacity(resolution.Effective.MaxSessions)
+	}
 	return resolution.Response, nil
 }
 
