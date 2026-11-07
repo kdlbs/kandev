@@ -2234,6 +2234,9 @@ func (m *mockSessionLauncher) ProcessOnTurnStart(context.Context, string, string
 func (m *mockSessionLauncher) QueueUserPrompt(context.Context, string, string, string, string, bool, []v1.MessageAttachment, map[string]interface{}, bool) error {
 	return nil
 }
+func (m *mockSessionLauncher) QueueUserPromptWithReceipt(context.Context, string, string, string, string, bool, []v1.MessageAttachment, map[string]interface{}, bool) (string, error) {
+	return "", nil
+}
 func (m *mockSessionLauncher) GetMessageQueue() *messagequeue.Service { return nil }
 
 func (m *mockSessionLauncher) CheckQueueAdmissionReadiness(context.Context, messagequeue.QueueSessionIdentity) {

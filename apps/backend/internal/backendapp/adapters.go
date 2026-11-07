@@ -1590,6 +1590,11 @@ func (w *orchestratorWrapper) QueueUserPrompt(ctx context.Context, taskID, sessi
 	return w.svc.QueueUserPrompt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
 }
 
+// QueueUserPromptWithReceipt forwards the accepted workflow queue identity.
+func (w *orchestratorWrapper) QueueUserPromptWithReceipt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) (string, error) {
+	return w.svc.QueueUserPromptWithReceipt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
+}
+
 func (w *orchestratorWrapper) MaxQueuedPromptsPerSession() int {
 	return w.svc.MaxQueuedPromptsPerSession()
 }
