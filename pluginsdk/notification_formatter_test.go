@@ -22,10 +22,10 @@ func (*notificationFormatterFixture) InspectNotificationConfiguration(_ context.
 }
 
 func TestNotificationFormatterTransport(t *testing.T) {
-	client, server := hcplugin.TestPluginGRPCConn(t, false, map[string]hcplugin.Plugin{
+	client, _ := hcplugin.TestPluginGRPCConn(t, false, map[string]hcplugin.Plugin{
 		PluginMapKey: &GRPCPlugin{Impl: &notificationFormatterFixture{}},
 	})
-	t.Cleanup(server.Stop)
+	// Client.Close owns the server's gRPC shutdown.
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	raw, err := client.Dispense(PluginMapKey)
 	require.NoError(t, err)
