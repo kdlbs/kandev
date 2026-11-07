@@ -76,6 +76,7 @@ type CompareAndSwapMCPSelectionStateRepository interface {
 // Associations remain present when a definition is disabled so re-enabling it
 // restores the user's choices.
 type SelectionImpact struct {
+	Automation  int `json:"automation"`
 	Profile     int `json:"profile"`
 	Repository  int `json:"repository"`
 	Task        int `json:"task"`
@@ -83,7 +84,7 @@ type SelectionImpact struct {
 }
 
 func (i SelectionImpact) Total() int {
-	return i.Profile + i.Repository + i.Task + i.TaskSession
+	return i.Profile + i.Repository + i.Task + i.TaskSession + i.Automation
 }
 
 // MCPSelectionImpactError is returned by a guarded delete before any rows are
@@ -129,6 +130,7 @@ type SelectionOwnerValidator func(context.Context, SelectionScope, string, strin
 // SelectionService validates workspace ownership and atomically replaces
 // scope selections. It deliberately has no resolver or runtime side effects.
 type SelectionService struct {
+	automationUsage   func(context.Context, string) (map[string]int, error)
 	usageOwnerReader  UsageOwnerReader
 	usageCursor       usageCursorCodec
 	repo              SelectionRepository
@@ -304,13 +306,36 @@ func atomicSessionMCPSelectionRepository(repo SelectionRepository) AtomicSession
 }
 
 func (s *SelectionService) SelectionImpact(ctx context.Context, workspaceID, definitionID string) (SelectionImpact, error) {
+	impacts, err := s.SelectionImpacts(ctx, workspaceID, []string{definitionID})
+	return impacts[definitionID], err
+}
+
+// SelectionImpacts reads automation reference counts once for the catalog response.
+func (s *SelectionService) SelectionImpacts(ctx context.Context, workspaceID string, definitionIDs []string) (map[string]SelectionImpact, error) {
 	if err := s.authorize(ctx, workspaceID); err != nil {
-		return SelectionImpact{}, err
+		return nil, err
 	}
-	if strings.TrimSpace(definitionID) == "" {
-		return SelectionImpact{}, ErrMCPInvalidSelection
+	var counts map[string]int
+	if s.automationUsage != nil {
+		var err error
+		counts, err = s.automationUsage(ctx, workspaceID)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return s.repo.SelectionImpact(ctx, workspaceID, definitionID)
+	impacts := make(map[string]SelectionImpact, len(definitionIDs))
+	for _, id := range definitionIDs {
+		if strings.TrimSpace(id) == "" {
+			return nil, ErrMCPInvalidSelection
+		}
+		impact, err := s.repo.SelectionImpact(ctx, workspaceID, id)
+		if err != nil {
+			return nil, err
+		}
+		impact.Automation = counts[id]
+		impacts[id] = impact
+	}
+	return impacts, nil
 }
 
 func (s *SelectionService) DeleteDefinitionSelections(ctx context.Context, workspaceID, definitionID string) error {

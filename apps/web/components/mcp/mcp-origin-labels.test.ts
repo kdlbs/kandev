@@ -24,6 +24,7 @@ const context: MCPOriginContext = {
     { id: "task-b", title: "Private task", workspaceId: OTHER_WORKSPACE, workflowId: "flow-b" },
   ],
   workflows: [{ id: "flow-a", workspaceId: WORKSPACE }],
+  automations: [{ id: "automation-a", name: "Daily report", workspace_id: WORKSPACE }],
   sessions: {
     "session-a": { name: "Research agent", task_id: "task-a" },
     "session-b": { name: "Private session", task_id: "task-b" },
@@ -38,6 +39,7 @@ function origin(scope: MCPSelectionOrigin["scope"], owner_id: string): MCPSelect
 describe("readable inherited MCP origins", () => {
   // @covers AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-003.8
   it.each([
+    ["automation", "automation-a", "Automation", "Automation: Daily report"],
     ["profile", "profile-a", "Profile", "Profile: Team agent"],
     ["profile", "same-name-profile", "Profile", "Profile: Team agent"],
     ["profile", "global-profile", "Profile", "Profile: Global agent"],

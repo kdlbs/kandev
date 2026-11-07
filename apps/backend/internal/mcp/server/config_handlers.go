@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	p "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -182,6 +183,7 @@ func (s *Server) registerConfigAgentTools() {
 
 // --- MCP config tools ---
 
+// registerConfigMcpTools keeps legacy MCP configuration writes unavailable to private automations.
 func (s *Server) registerConfigMcpTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_agent_profiles_kandev",
@@ -207,6 +209,9 @@ func (s *Server) registerConfigMcpTools() {
 		),
 		s.wrapHandler("get_mcp_config_kandev", s.getMcpConfigHandler()),
 	)
+	if s.profile.Surface == p.SurfaceAutomation {
+		return
+	}
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_mcp_config_kandev",
 			mcp.WithDescription("Update MCP server configuration for an agent profile. Pass the full servers map."),

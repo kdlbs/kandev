@@ -373,5 +373,22 @@
   "pluginToolsRead": "読み取り",
   "pluginToolsWrite": "書き込み",
   "pluginToolsClearedHint": "保存するとプラグインツールへのアクセスが削除されます。",
-  "pluginToolsUnavailable": "プラグインを利用できません"
+  "pluginToolsUnavailable": "プラグインを利用できません",
+  "mcpAccess": "MCP アクセス",
+  "mcpNextStart": "変更はエージェントプロセスの次回起動時に適用されます。再利用するプロセスは現在のツールを保持します。",
+  "mcpNewTasks": "新しく作成するタスクに適用されます。既存のタスクは独自の選択を保持します。",
+  "mcpBuiltinPackages": "組み込みパッケージ",
+  "mcpRequired": "必須",
+  "mcpBlocked": "ワークスペースのポリシーによりブロックされています",
+  "mcpConfigurationAuthority": "設定は、権限のあるワークフロー、プロファイル、プロンプト、実行環境、自動化を変更できます。ネイティブツールは MCP アクセス権を変更できません。サードパーティーサーバーは独自の権限を使用します。",
+  "mcpWorkspaceServers": "ワークスペースの MCP サーバー",
+  "mcpSearch": "MCP サーバーを検索",
+  "mcpInherited": "{{name}}（継承）",
+  "mcpNoServers": "追加の MCP サーバーが見つかりません。",
+  "mcpUnavailable": "{{name}}（利用不可）",
+  "mcpOptionsFailed": "MCP の選択肢を読み込めませんでした。保存済みの選択は変更されません。",
+  "mcpDesired": "希望するパッケージ",
+  "mcpCurrentProcess": "現在のプロセス",
+  "mcpUnknown": "不明",
+  "mcpObserved": "観測された接続"
 }

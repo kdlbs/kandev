@@ -4,9 +4,12 @@ export type BuiltinMCPPackage =
   | "rich-output"
   | "walkthroughs"
   | "diagnostics";
-export type BuiltinMCPSurface = "kanban-task" | "office-task" | "configuration";
+export type BuiltinMCPSurface = "kanban-task" | "office-task" | "configuration" | "automation";
 export type BuiltinMCPManifest = {
-  version: 1;
+  version: 1 | 2;
+  automation_id?: string;
+  automation_revision?: number;
+  automation_definition_ids?: string[];
   catalog_version: 1;
   workspace_id: string;
   task_id: string;
@@ -14,7 +17,7 @@ export type BuiltinMCPManifest = {
   workspace_revision: number;
   task_revision: number;
   packages: BuiltinMCPPackage[];
-  origins: Partial<Record<BuiltinMCPPackage, "required" | "task" | "workspace">>;
+  origins: Partial<Record<BuiltinMCPPackage, "required" | "task" | "workspace" | "automation">>;
 };
 
 export type BuiltinMCPAcceptedBinding = {

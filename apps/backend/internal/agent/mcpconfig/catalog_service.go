@@ -52,9 +52,10 @@ func (e *MCPRevisionConflictError) Unwrap() error { return ErrMCPRevisionConflic
 
 // CatalogService validates and persists MCP definitions without materializing them.
 type CatalogService struct {
-	repo          CatalogRepository
-	authorizer    WorkspaceAuthorizer
-	selectionRepo SelectionRepository
+	automationUsage func(context.Context, string) (map[string]int, error)
+	repo            CatalogRepository
+	authorizer      WorkspaceAuthorizer
+	selectionRepo   SelectionRepository
 }
 
 func NewCatalogService(repo CatalogRepository) *CatalogService {
@@ -143,6 +144,8 @@ func (s *CatalogService) Update(ctx context.Context, input UpdateDefinitionInput
 	return cloneDefinition(candidate), nil
 }
 
+// Delete requires the current revision and explicit confirmation of all selection impacts.
+// Automation references remain stored so later resolutions can report missing definitions.
 func (s *CatalogService) Delete(ctx context.Context, workspaceID, id string, expectedRevision int64, confirm bool) error {
 	if err := s.authorize(ctx, workspaceID); err != nil {
 		return err
@@ -154,14 +157,22 @@ func (s *CatalogService) Delete(ctx context.Context, workspaceID, id string, exp
 	if current.Revision != expectedRevision {
 		return revisionConflict(current)
 	}
+	var impact SelectionImpact
 	if s.selectionRepo != nil {
-		impact, impactErr := s.selectionRepo.SelectionImpact(ctx, workspaceID, id)
-		if impactErr != nil {
-			return impactErr
+		impact, err = s.selectionRepo.SelectionImpact(ctx, workspaceID, id)
+		if err != nil {
+			return err
 		}
-		if impact.Total() > 0 && !confirm {
-			return &MCPSelectionImpactError{Impact: impact}
+	}
+	if s.automationUsage != nil {
+		counts, countErr := s.automationUsage(ctx, workspaceID)
+		if countErr != nil {
+			return countErr
 		}
+		impact.Automation = counts[id]
+	}
+	if impact.Total() > 0 && !confirm {
+		return &MCPSelectionImpactError{Impact: impact}
 	}
 	if !confirm {
 		return ErrMCPDeleteConfirmation

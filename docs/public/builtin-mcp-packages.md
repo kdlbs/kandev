@@ -1,6 +1,6 @@
 ---
 title: Built-in MCP packages
-description: Choose Kandev's native tool packages for a workspace or task and check what a session actually received.
+description: Choose Kandev's native tool packages for a workspace, task, or automation and check what a session actually received.
 ---
 
 # Choose built-in MCP packages
@@ -32,11 +32,13 @@ and resources. Each operation still needs its normal permissions.
 
 | Package | Native server name | Regular-task default | Other eligible contexts |
 | --- | --- | --- | --- |
-| Core | `kandev` | Required | Required in Office tasks and configuration chats |
-| Configuration | `kandev-configuration` | Off; explicit human selection | Required in configuration chats |
-| Rich Output | `kandev-rich-output` | On | On by default in Office tasks |
-| Walkthroughs | `kandev-walkthroughs` | On | Regular tasks only |
-| Diagnostics | `kandev-diagnostics` | On | Regular tasks only |
+| Core | `kandev` | Required | Required in Office tasks, configuration chats, and private automations |
+| Configuration | `kandev-configuration` | Off; explicit human selection | Required in configuration chats; explicit selection in private automations |
+| Rich Output | `kandev-rich-output` | On | On by default in Office tasks; explicit selection in private automations |
+| Walkthroughs | `kandev-walkthroughs` | On | Explicit selection in private automations |
+| Diagnostics | `kandev-diagnostics` | On | Explicit selection in private automations |
+
+Private automations can select every optional package, including Configuration, in their native automation editor. Core remains required. Their choices apply at the next process start, while normal-task templates apply to newly created tasks. See [Choose MCP access](automation-and-mcp.md#choose-mcp-access).
 
 Core supplies shared discovery, lifecycle, plans, questions, and coordination
 tools. Regular tasks can discover visible executors without enabling Configuration.
@@ -100,8 +102,7 @@ requests retain their Walkthrough requirement and do not bypass it on delivery.
 Kandev injects native packages separately from workspace MCP definitions. The
 native names are reserved: an external definition cannot replace them. If an old
 external entry uses one of these names, rename that entry before starting again.
-Hidden automation, coordinator, managed-conversation, and external MCP surfaces
-retain their separate contracts.
+Coordinator, managed-conversation, and external MCP surfaces retain their existing catalogs and authority.
 
 See [Agents and profiles](agents-and-profiles.md) for external server selection,
 and [Automation and MCP](automation-and-mcp.md) for tools and session evidence.

@@ -39,7 +39,7 @@ func TestBuiltinIntentAdmissionDoesNotFreezeTitleOwnership(t *testing.T) {
 }
 
 func TestBuiltinSessionViewSeparatesDesiredAndAcceptedPackages(t *testing.T) {
-	for _, state := range []string{"accepted", "unknown", "retired", "created"} {
+	for _, state := range []string{"accepted", "unknown", "retired", "created", "desired-error"} {
 		t.Run(state, func(t *testing.T) {
 			ctx := context.Background()
 			repo := setupTestRepo(t)
@@ -54,6 +54,9 @@ func TestBuiltinSessionViewSeparatesDesiredAndAcceptedPackages(t *testing.T) {
 			require.NoError(t, repo.UpdateTask(ctx, task))
 			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isAgentRunning: true})
 			svc.executor.SetBuiltinPolicyReader(builtinPromptReader{})
+			if state == "desired-error" {
+				svc.executor.SetBuiltinPolicyReader(unavailableBuiltinReader{})
+			}
 			reader, ok := any(svc).(interface {
 				ReadBuiltinSessionMCP(context.Context, string) (*mcpconfig.BuiltinSessionView, error)
 			})
@@ -67,7 +70,7 @@ func TestBuiltinSessionViewSeparatesDesiredAndAcceptedPackages(t *testing.T) {
 				require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{TaskID: "task", SessionID: "session", AgentExecutionID: "execution", Runtime: "standalone", Status: models.ExecutorRunningStatusRunning, Metadata: map[string]interface{}{p.BuiltinBindingMetadataKey: encoded}}))
 			}
 			history := streams.MCPAttachmentHistory{Version: 1, Current: streams.MCPAttachmentAttempt{AttemptID: "attempt", TaskID: "task", SessionID: "session", ExecutionID: "execution", StartedAt: time.Now().UTC(), BuiltinPackages: manifest}}
-			if state == "accepted" || state == "retired" {
+			if state == "accepted" || state == "retired" || state == "desired-error" {
 				history.BuiltinBinding = &streams.BuiltinMCPAcceptedBinding{Manifest: manifest, SessionID: "session", ExecutionID: "execution", AttemptID: "attempt", AcceptedAt: time.Now().UTC()}
 				if state == "retired" {
 					history.BuiltinBinding.ExecutionID = "old"
@@ -78,8 +81,12 @@ func TestBuiltinSessionViewSeparatesDesiredAndAcceptedPackages(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "task", view.TaskID)
 			require.Equal(t, "ws1", view.WorkspaceID)
-			require.NotContains(t, view.Desired.Packages, p.PackageWalkthroughs)
-			if state == "accepted" {
+			if state == "desired-error" {
+				require.Nil(t, view.Desired)
+			} else {
+				require.NotContains(t, view.Desired.Packages, p.PackageWalkthroughs)
+			}
+			if state == "accepted" || state == "desired-error" {
 				require.Equal(t, "accepted", view.BindingState)
 				require.Equal(t, "available", view.WalkthroughAvailability)
 				require.Equal(t, "execution", view.Bound.ExecutionID)
@@ -114,4 +121,10 @@ func TestBuiltinSessionViewRequiresSessionAndTaskAccess(t *testing.T) {
 		require.ErrorIs(t, err, denied)
 		require.Nil(t, view)
 	}
+}
+
+type unavailableBuiltinReader struct{}
+
+func (unavailableBuiltinReader) GetBuiltinPolicySnapshot(context.Context, string, string) (*mcpconfig.BuiltinPolicySnapshot, error) {
+	return nil, errors.New("desired configuration unavailable")
 }

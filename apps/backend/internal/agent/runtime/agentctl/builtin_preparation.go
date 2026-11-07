@@ -28,10 +28,20 @@ func (c *Client) VerifyBuiltinMCP(ctx context.Context, profile p.Context) error 
 	return c.checkBuiltinMCP(ctx, http.MethodGet, nil, profile)
 }
 
+// checkBuiltinMCP requires helper support and confirmation of the exact admitted package binding.
 func (c *Client) checkBuiltinMCP(ctx context.Context, method string, body io.Reader, profile p.Context) error {
 	expected, err := p.MarshalBuiltinBinding(profile)
 	if err != nil {
 		return err
+	}
+	if profile.Surface == p.SurfaceAutomation {
+		identity, identityErr := (&ControlClient{baseURL: c.baseURL, httpClient: c.httpClient}).GetIdentity(ctx)
+		if identityErr != nil {
+			return fmt.Errorf("check automation MCP helper support: %w", identityErr)
+		}
+		if err := ValidateBuiltinHelper(&profile, profile.BuiltinPackages.TaskID, identity); err != nil {
+			return err
+		}
 	}
 	request, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/api/v1/mcp/builtin-binding", body)
 	if err != nil {

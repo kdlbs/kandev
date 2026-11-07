@@ -373,5 +373,22 @@
   "pluginToolsRead": "Leitura",
   "pluginToolsWrite": "Escrita",
   "pluginToolsClearedHint": "Guarde para remover o acesso às ferramentas de plugins.",
-  "pluginToolsUnavailable": "Plugin indisponível"
+  "pluginToolsUnavailable": "Plugin indisponível",
+  "mcpAccess": "Acesso MCP",
+  "mcpNextStart": "As alterações aplicam-se no próximo arranque do processo do agente. Um processo reutilizado mantém as ferramentas atuais.",
+  "mcpNewTasks": "Aplica-se a novas tarefas. As tarefas existentes mantêm as suas escolhas.",
+  "mcpBuiltinPackages": "Pacotes integrados",
+  "mcpRequired": "Obrigatório",
+  "mcpBlocked": "Bloqueado pela política do espaço de trabalho",
+  "mcpConfigurationAuthority": "A Configuração pode alterar fluxos de trabalho, perfis, instruções, executores e automatizações autorizados. As ferramentas nativas não podem alterar permissões de acesso MCP. Os servidores de terceiros usam as suas próprias permissões.",
+  "mcpWorkspaceServers": "Servidores MCP do espaço de trabalho",
+  "mcpSearch": "Pesquisar servidores MCP",
+  "mcpInherited": "{{name}} (herdado)",
+  "mcpNoServers": "Não foram encontrados servidores MCP adicionais.",
+  "mcpUnavailable": "{{name}} (indisponível)",
+  "mcpOptionsFailed": "Não foi possível carregar as opções MCP. As escolhas guardadas mantêm-se.",
+  "mcpDesired": "Pacotes pretendidos",
+  "mcpCurrentProcess": "Processo atual",
+  "mcpUnknown": "Desconhecido",
+  "mcpObserved": "Ligações observadas"
 }

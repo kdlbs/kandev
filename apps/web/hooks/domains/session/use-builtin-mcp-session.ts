@@ -4,11 +4,15 @@ import { getBuiltinMCPSession } from "@/lib/api/domains/builtin-mcp-api";
 import type { BuiltinMCPSessionView } from "@/lib/types/builtin-mcp";
 import { getBackendConfig } from "@/lib/config";
 
+/**
+ * Load and refresh MCP evidence only for the current workspace, task, and session owner.
+ */
 export function useBuiltinMCPSession(
   taskId: string | null,
   sessionId: string | null,
   workspaceId: string,
   enabled: boolean,
+  refreshKey?: object,
 ) {
   const history = useAppStore((state) =>
     sessionId ? state.sessionMcpStatus.bySessionId[sessionId] : undefined,
@@ -50,7 +54,7 @@ export function useBuiltinMCPSession(
     } catch (error) {
       if (live()) setLoaded({ key, error });
     }
-  }, [enabled, key, taskId, sessionId, workspaceId]);
+  }, [enabled, key, taskId, sessionId, workspaceId, refreshKey]);
   useEffect(() => {
     void refresh();
     return () => {

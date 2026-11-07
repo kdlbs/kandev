@@ -15,6 +15,8 @@ type BuiltinPolicyReader interface {
 
 func (e *Executor) SetBuiltinPolicyReader(reader BuiltinPolicyReader) { e.builtinPolicyReader = reader }
 
+// PrepareTaskSessionMCPProfile reuses an admitted launch profile or resolves packages for the
+// matching task session.
 func (e *Executor) PrepareTaskSessionMCPProfile(ctx context.Context, taskID string, session *models.TaskSession, title bool) (p.Context, error) {
 	if session != nil {
 		if prepared := preparedMCPLaunchProfile(ctx, taskID, session.ID); prepared != nil {
@@ -26,7 +28,9 @@ func (e *Executor) PrepareTaskSessionMCPProfile(ctx context.Context, taskID stri
 		return profile, err
 	}
 	switch profile.Surface {
-	case p.SurfaceExternal, p.SurfaceAutomation, p.SurfaceCoordinator, p.SurfaceManagedConversation:
+	case p.SurfaceAutomation:
+		return e.prepareAutomationMCPProfile(ctx, taskID, session, profile)
+	case p.SurfaceExternal, p.SurfaceCoordinator, p.SurfaceManagedConversation:
 		return profile, nil
 	}
 	if session == nil || session.TaskID != taskID || session.ID == "" {
@@ -81,4 +85,42 @@ func (e *Executor) prepareExistingWorkspaceBuiltin(ctx context.Context, executio
 		return fmt.Errorf("agent manager cannot prepare built-in MCP packages")
 	}
 	return preparer.PrepareBuiltinWorkspace(ctx, executionID, *profile)
+}
+
+// AutomationMCPReader resolves the durable automation/task relationship at fresh start.
+type AutomationMCPReader interface {
+	GetAutomationMCPBinding(context.Context, string, string) (*p.BuiltinManifest, error)
+}
+
+// prepareAutomationMCPProfile validates the durable automation grant against the launch workspace,
+// task, and surface.
+func (e *Executor) prepareAutomationMCPProfile(ctx context.Context, taskID string, session *models.TaskSession, profile p.Context) (p.Context, error) {
+	reader, ok := e.builtinPolicyReader.(AutomationMCPReader)
+	if !ok {
+		return profile, nil
+	}
+	if session == nil || session.TaskID != taskID || session.ID == "" {
+		return p.Context{}, fmt.Errorf("automation MCP preparation requires a matching session")
+	}
+	task, err := e.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return p.Context{}, err
+	}
+	if task == nil {
+		return p.Context{}, fmt.Errorf("automation task unavailable")
+	}
+	manifest, err := reader.GetAutomationMCPBinding(ctx, task.WorkspaceID, taskID)
+	if err != nil {
+		return p.Context{}, err
+	}
+	if manifest != nil {
+		if err := manifest.Validate(); err != nil {
+			return p.Context{}, err
+		}
+		if manifest.TaskID != taskID || manifest.WorkspaceID != task.WorkspaceID || manifest.Surface != profile.Surface {
+			return p.Context{}, fmt.Errorf("automation MCP binding owner mismatch")
+		}
+	}
+	profile.BuiltinPackages = manifest.Clone()
+	return profile, nil
 }
