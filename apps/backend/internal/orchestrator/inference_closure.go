@@ -18,9 +18,11 @@ type inferenceClosureRuntime interface {
 	VerifyInferenceClosureClaims(context.Context, string, string) error
 }
 
+var errRestartInferenceClaimsChanged = errors.New("restart inference claims changed")
+
 // StopForRestart uses closure only for configured shared inference, while an
 // interrupted closure is always resumed even if configuration has changed.
-func (s *Service) StopForRestart(ctx context.Context, sid string) (*models.InferenceClosureCheckpoint, bool, error) {
+func (s *Service) StopForRestart(ctx context.Context, sid, reason string) (*models.InferenceClosureCheckpoint, bool, error) {
 	if err := s.authorizeSessionControl(ctx, sid); err != nil {
 		return nil, true, err
 	}
@@ -29,7 +31,75 @@ func (s *Service) StopForRestart(ctx context.Context, sid string) (*models.Infer
 	if err != nil {
 		return nil, true, err
 	}
-	return s.stopInferenceClosureForRestart(ctx, sid, all && finite || retained)
+	result, handled, err := s.stopInferenceClosureForRestart(ctx, sid, all && finite || retained)
+	if err != nil || handled {
+		return result, handled, err
+	}
+	result, handled, err = s.stopLegacyRestartWithFence(ctx, sid, reason)
+	if errors.Is(err, errRestartInferenceClaimsChanged) {
+		return s.stopInferenceClosureForRestart(ctx, sid, true)
+	}
+	return result, handled, err
+}
+
+// stopLegacyRestartWithFence serializes the final claim check with admission.
+// The exact teardown owner remains visible until the awaited stop completes.
+func (s *Service) stopLegacyRestartWithFence(ctx context.Context, sid, reason string) (*models.InferenceClosureCheckpoint, bool, error) {
+	releaseLifecycle, locked := s.acquireSessionLifecycleLockWithContext(ctx, sid)
+	if !locked {
+		return nil, true, ctx.Err()
+	}
+	defer func() {
+		if releaseLifecycle != nil {
+			releaseLifecycle()
+		}
+	}()
+	guard, err := s.lockCancelInFlightGuardWithContext(ctx, sid)
+	if err != nil {
+		return nil, true, err
+	}
+	retained, err := s.restartHasInferenceClaims(ctx, sid)
+	if err == nil && !retained {
+		err = s.checkInferenceClosureAdmission(ctx, sid, false)
+	}
+	if err != nil || retained {
+		guard.release()
+		if err == nil {
+			err = errRestartInferenceClaimsChanged
+		}
+		return nil, true, err
+	}
+	if s.agentManager == nil {
+		guard.release()
+		return nil, true, models.ErrInferenceClosureBlocked
+	}
+	execution, err := s.agentManager.GetExecutionIDForSession(ctx, sid)
+	if errors.Is(err, agentruntime.ErrNoExecutionForSession) {
+		guard.release()
+		releaseLifecycle()
+		releaseLifecycle = nil
+		return nil, true, s.StopSession(ctx, sid, reason, false)
+	}
+	if err != nil || execution == "" {
+		guard.release()
+		return nil, true, models.ErrInferenceClosureBlocked
+	}
+	claim, owned := s.claimExecutionTeardownWithToken(sid, execution, executionTeardownIntentGraceful)
+	guard.release()
+	releaseLifecycle()
+	releaseLifecycle = nil
+	return nil, true, s.awaitLegacyRestartStop(ctx, sid, execution, reason, claim, owned)
+}
+
+func (s *Service) awaitLegacyRestartStop(ctx context.Context, sid, execution, reason string, claim executionTeardownClaim, owned bool) error {
+	stop, err := s.StopSessionAwaited(ctx, sid, execution, reason)
+	if err != nil && owned && (stop == nil || !stop.Accepted) {
+		if cleanup, lockErr := s.lockCancelInFlightGuardWithContext(context.WithoutCancel(ctx), sid); lockErr == nil {
+			s.executionTeardownClaims.CompareAndDelete(terminalExecutionKey(sid, execution), claim)
+			cleanup.release()
+		}
+	}
+	return err
 }
 
 func (s *Service) restartHasInferenceClaims(ctx context.Context, sid string) (bool, error) {

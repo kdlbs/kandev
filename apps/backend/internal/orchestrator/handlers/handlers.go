@@ -779,16 +779,7 @@ func (h *Handlers) wsStopSession(ctx context.Context, msg *ws.Message) (*ws.Mess
 		reason = "stopped via API"
 	}
 	if req.CloseInferenceForRestart {
-		if req.Force || req.AwaitTerminal || req.InferenceClosureOperationID != "" {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid restart stop options", nil)
-		}
-		result, handled, err := h.service.StopForRestart(ctx, req.SessionID)
-		if err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), map[string]any{"closure": result.PublicStatus()})
-		}
-		if handled {
-			return ws.NewResponse(msg.ID, msg.Action, result.PublicStatus())
-		}
+		return h.wsStopForRestart(ctx, msg, req, reason)
 	}
 	if req.InferenceClosureOperationID != "" {
 		if req.Force || !req.AwaitTerminal || req.ExpectedExecutionID == "" {
@@ -815,6 +806,23 @@ func (h *Handlers) wsStopSession(ctx context.Context, msg *ws.Message) (*ws.Mess
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to stop session: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
+}
+
+func (h *Handlers) wsStopForRestart(ctx context.Context, msg *ws.Message, req *wsSessionActionRequest, reason string) (*ws.Message, error) {
+	if req.Force || req.AwaitTerminal || req.InferenceClosureOperationID != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid restart stop options", nil)
+	}
+	result, handled, err := h.service.StopForRestart(ctx, req.SessionID, reason)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), map[string]any{"closure": result.PublicStatus()})
+	}
+	if !handled {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "restart stop was not handled", nil)
+	}
+	if result == nil {
+		return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
+	}
+	return ws.NewResponse(msg.ID, msg.Action, result.PublicStatus())
 }
 
 // wsDeleteSession deletes a session.
