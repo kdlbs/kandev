@@ -70,6 +70,10 @@ func (s *Service) ReserveInferenceCapacity(ctx context.Context, binding sessionc
 	defer release()
 	guard.Lock()
 	defer guard.Unlock()
+	return s.reserveInferenceCapacityLocked(ctx, binding)
+}
+
+func (s *Service) reserveInferenceCapacityLocked(ctx context.Context, binding sessioncapacity.InferenceBinding) (bool, string, error) {
 	if err := s.checkInferenceClosureBinding(ctx, binding); err != nil {
 		return false, "inference_scope_closure", err
 	}
@@ -88,6 +92,9 @@ func (s *Service) ReserveInferenceCapacity(ctx context.Context, binding sessionc
 			return false, ceilingReasonUnknownPopulation, fmt.Errorf("inference ownership changed")
 		}
 		return true, "", nil
+	}
+	if s.hasExecutionTeardownOwner(binding.SessionID, binding.InstanceID) {
+		return false, "execution_stopping", fmt.Errorf("inference execution is stopping")
 	}
 	if retainedNativeChild(binding, active) {
 		return false, ceilingReasonUnknownPopulation, fmt.Errorf("retained native inference owner is still active")
