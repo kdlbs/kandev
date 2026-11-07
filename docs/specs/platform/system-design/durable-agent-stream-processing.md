@@ -381,6 +381,11 @@ Retained process-exit errors retain the process-manager fencing defined above.
 `receiveResumedBootstrapCheckpoint` remains the separate generation-one recovery
 path for a committed native identity. It cannot receive an uncommitted successor
 event against predecessor authority. Predecessor history remains untouched.
+Replayed terminal events retain their original prompt-attempt identity. A terminal
+event whose submission does not match the execution's current or expected initial
+prompt is still received, projected, settled, and acknowledged, but it cannot
+complete the live prompt; prompt generation alone is not a sufficient attempt
+identity.
 These rules extend existing fresh-start recovery and durable ownership contracts.
 They add no journal mutation, schema, protocol, or recovery action.
 

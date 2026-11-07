@@ -215,7 +215,23 @@ registered-journal recovery sequence admitted each retained successor event only
 after its execution-fenced successor commit, acknowledged ordered replay, kept
 the projected predecessor stream unchanged, and never dispatched an instruction.
 
-The design amendment and both new package files remain unstaged and uncommitted.
+### Fixup remediation
+
+CodeRabbit review identified a retained-terminal prompt-attempt collision:
+a replayed error from the failed attempt could share the retry's prompt
+generation and fail its live prompt. `deliverySubmissionIdentityMismatch` now
+fences terminal events by their original submission identity. A stale terminal
+event is still received, projected, settled, and acknowledged, but it cannot
+complete the live prompt. The retained-status resume-token finding is already
+addressed by the orchestrator's stale ACP-session guard in `storeResumeToken`,
+which drops a status event whose ACP session ID differs from the live execution's
+current native session.
+
+Fixup verification:
+
+- `(cd apps/backend && go test -trimpath -count=1 ./internal/agent/runtime/lifecycle)`: `ok` (161.9s).
+- `(cd apps/backend && go test -trimpath -race -count=1 ./internal/agent/runtime/lifecycle -run 'Test(DeliveryPreflight|ResumedDeliveryCheckpoint|FreshStart|BootstrapReplay|SilentRestore|DeliveryRetention|RecoveredTerminal|ClaimPromptCompletion)')`: `ok` (12.8s).
+- `bash scripts/lint-go-changed <the fixup Go files>`: 0 issues.
 
 ## Risks
 

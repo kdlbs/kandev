@@ -187,3 +187,16 @@ Completed on 2026-11-07.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.test.py`,
   `python3 scripts/lint-spec-files.py --all`, `git diff --check`, and the
   `validateCoverage` preflight all passed. Exact command results are in the plan.
+
+Fixup follow-up:
+
+- CodeRabbit identified a retained-terminal prompt-attempt collision. The
+  submission-identity fence now prevents a replayed terminal event from
+  completing the live prompt while preserving receipt, projection, settlement,
+  and ACK. `TestRecoveredTerminalSubmissionDoesNotCompleteLivePrompt`,
+  `TestRecoveredTerminalSubmissionMatchingLivePromptCompletes`, and
+  `TestClaimPromptCompletionRejectsSupersededSubmission` cover the behavior.
+- The retained-status resume-token finding was already addressed by the
+  orchestrator's stale ACP-session guard in `storeResumeToken`.
+- The full lifecycle package and targeted race suites passed again; lint
+  reported 0 issues. Exact results are in the plan.

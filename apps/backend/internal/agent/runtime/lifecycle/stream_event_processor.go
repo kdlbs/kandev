@@ -256,7 +256,7 @@ func (sm *StreamManager) processPreparedAgentEvent(
 		if !prepared.skipAcknowledgement {
 			sm.scheduleDurableDeliveryAck(execution, client, prepared.event)
 		}
-		if !prepared.skipCallback {
+		if !prepared.skipCallback && !prepared.staleTerminal {
 			sm.notifyAgentEvent(execution, prepared.event, startupGeneration)
 		}
 		return nil
