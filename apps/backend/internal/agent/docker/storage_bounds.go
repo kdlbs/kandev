@@ -1,6 +1,8 @@
 package docker
 
 import (
+	"path"
+
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 )
@@ -13,7 +15,7 @@ func applyContainerStorageBounds(hc *container.HostConfig, mounts []mount.Mount)
 		Config: map[string]string{"max-size": "100m", "max-file": "3"},
 	}
 	for _, m := range mounts {
-		if m.Target == "/tmp" {
+		if path.Clean(m.Target) == "/tmp" {
 			return
 		}
 	}

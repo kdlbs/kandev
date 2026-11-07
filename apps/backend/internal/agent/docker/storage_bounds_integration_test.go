@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
-	"strings"
 	"testing"
 	"time"
 
@@ -51,8 +49,8 @@ func TestContainerStorageBoundsOnLocalDaemon(t *testing.T) {
 	if err := c.StartContainer(ctx, id); err != nil {
 		t.Fatal(err)
 	}
-	output, err := exec.CommandContext(ctx, "docker", "wait", id).CombinedOutput()
-	if err != nil || strings.TrimSpace(string(output)) != "0" {
-		t.Fatalf("scratch probe failed: %s %v", output, err)
+	exitCode, err := c.WaitContainer(ctx, id)
+	if err != nil || exitCode != 0 {
+		t.Fatalf("scratch probe failed: exit code %d: %v", exitCode, err)
 	}
 }

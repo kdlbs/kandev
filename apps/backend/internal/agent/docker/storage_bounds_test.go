@@ -17,12 +17,30 @@ func TestNewContainerHasRotatingLogsAndBoundedTemporaryScratch(t *testing.T) {
 }
 
 func TestExplicitTemporaryMountIsNotShadowed(t *testing.T) {
-	mounts := []mount.Mount{{Type: mount.TypeBind, Source: "/host/task-tmp", Target: "/tmp"}}
-	cfg := buildHostConfig(ContainerConfig{}, mounts, nil)
-	if _, ok := cfg.Tmpfs["/tmp"]; ok {
-		t.Fatal("explicit task storage mount shadowed by temporary scratch")
+	cases := []struct {
+		target    string
+		wantTmpfs bool
+	}{
+		{target: "/tmp"},
+		{target: "/tmp/"},
+		{target: "//tmp"},
+		{target: "/var/../tmp"},
+		{target: "/var/tmp", wantTmpfs: true},
+		{target: "/tmp/cache", wantTmpfs: true},
+		{target: "/tmp-other", wantTmpfs: true},
 	}
-	if len(cfg.Mounts) != 1 || cfg.Mounts[0].Source != "/host/task-tmp" {
-		t.Fatal("explicit mount changed")
+	for _, tc := range cases {
+		t.Run(tc.target, func(t *testing.T) {
+			original := mount.Mount{Type: mount.TypeBind, Source: "/host/task-tmp", Target: tc.target, ReadOnly: true}
+			cfg := buildHostConfig(ContainerConfig{}, []mount.Mount{original}, nil)
+			if _, ok := cfg.Tmpfs["/tmp"]; ok != tc.wantTmpfs {
+				t.Fatalf("default tmpfs present = %v, want %v", ok, tc.wantTmpfs)
+			}
+			if len(cfg.Mounts) != 1 || cfg.Mounts[0].Type != original.Type ||
+				cfg.Mounts[0].Source != original.Source || cfg.Mounts[0].Target != original.Target ||
+				cfg.Mounts[0].ReadOnly != original.ReadOnly {
+				t.Fatalf("explicit mount changed: %#v", cfg.Mounts)
+			}
+		})
 	}
 }

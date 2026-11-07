@@ -61,10 +61,23 @@ New containers created by the Docker client use rotating `json-file` logs with
 including a remote Docker daemon. Existing containers keep their storage
 configuration when Kandev reconnects to them.
 
+This per-container choice overrides the daemon's default logging driver and
+rotation limits. Collectors that require another driver do not receive these
+containers' output through that driver.
+
 The default `/tmp` is a 2 GiB tmpfs with mode 1777, `nosuid`, and `nodev`. An
-explicit task mount at `/tmp` keeps its own storage policy. Tmpfs uses host
-memory and swap while allocated, and its contents disappear when the container
-is removed. Write required outputs and evidence to persistent task storage.
+explicit task mount at `/tmp`, including an equivalent path such as `/tmp/`,
+keeps its own storage policy. The tmpfs hides files that the image supplies
+under `/tmp`.
+
+Tmpfs uses host memory and swap. Its use counts against the container's memory
+limit. The 2 GiB capacity does not increase that limit, so temporary writes can
+cause an out-of-memory termination before the tmpfs is full.
+
+Tmpfs contents disappear when the container stops, including before a restart
+of that same container. A session stop that leaves the container running does
+not clear its tmpfs. Write required outputs and evidence to persistent task
+storage.
 
 These limits do not bound the writable layer, workspaces, other bind mounts, or
 evidence archives; those still need their own retention and cleanup.
