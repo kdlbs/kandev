@@ -2669,8 +2669,7 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			select {
 			case update, ok = <-updatesCh:
 				if ok {
-					m.adapterStageAt.Store(time.Now().UnixNano())
-					m.adapterStageSeen.Add(1)
+					m.recordAdapterStage()
 				}
 			case <-stopCh:
 				m.drainDeliveryUpdates(updatesCh)
@@ -2736,6 +2735,7 @@ func (m *Manager) drainDeliveryUpdates(updates <-chan adapter.AgentEvent) {
 			if !ok {
 				return
 			}
+			m.recordAdapterStage()
 			update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
 			persisted, err := m.persistDeliveryEvent(update)
 			if err != nil {
