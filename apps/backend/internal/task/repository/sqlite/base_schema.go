@@ -41,6 +41,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initStepTransitionsSchema,
 		r.initStepEntriesSchema,
 		r.initTaskUsageEventsSchema,
+		r.initUsageLimitObservationsSchema,
 		r.initAttachmentsSchema,
 		r.initPreviewFeedbackSchema,
 		r.initTaskResourceCleanupSchema,
@@ -56,6 +57,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.ensureDefaultWorkspace,
 		r.ensureDefaultExecutorsAndEnvironments,
 		func() error { return r.runMigrations(ctx) },
+		r.initProviderTurnAllowancesSchema,
 		r.initWorkspaceCollaborationSchema,
 		r.hideBuiltinWorkflows,
 		r.healBuiltinWorkflowStepFlags,
@@ -359,6 +361,14 @@ func (r *Repository) initDynamicRoutingSchema() error {
 			code TEXT NOT NULL DEFAULT '',
 			probe_until TIMESTAMP,
 			failure_count INTEGER NOT NULL DEFAULT 0,
+			updated_at TIMESTAMP NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS dynamic_provider_limits (
+			provider TEXT PRIMARY KEY,
+			monthly_reset_at TIMESTAMP,
+			monthly_reset_timezone TEXT NOT NULL DEFAULT '',
+			block_until TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL
 		);
 
@@ -736,6 +746,7 @@ func (r *Repository) initTaskSchema() error {
 		description TEXT DEFAULT '',
 		state TEXT DEFAULT 'TODO',
 		priority INTEGER DEFAULT 0,
+		execution_grade TEXT NOT NULL DEFAULT '',
 		position INTEGER DEFAULT 0,
 		wip_admitted INTEGER NOT NULL DEFAULT 1,
 		queued_for_step_id TEXT NOT NULL DEFAULT '',
@@ -1409,6 +1420,8 @@ const sessionWorktreeSchemaDDL = `
 		container_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT,
 		execution_profile_id TEXT NOT NULL DEFAULT '',
+		admitted_execution_grade TEXT NOT NULL DEFAULT '',
+		admitted_execution_grade_known INTEGER NOT NULL DEFAULT 0,
 		route_generation INTEGER NOT NULL DEFAULT 0,
 		route_state TEXT NOT NULL DEFAULT '',
 		route_reason TEXT NOT NULL DEFAULT '',

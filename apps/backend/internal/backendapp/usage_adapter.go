@@ -15,6 +15,7 @@ import (
 //  2. Looking up the agent type from the registry to get its billing type.
 //  3. Delegating to the UsageService with the appropriate client registered.
 type usageProviderAdapter struct {
+	tierLimits    *providerTierLimitService
 	svc           *agentusage.UsageService
 	settingsStore settingsstore.Repository
 	agentRegistry *agentregistry.Registry

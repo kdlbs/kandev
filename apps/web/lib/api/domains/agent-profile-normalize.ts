@@ -218,6 +218,7 @@ function normalizeDynamicPolicy(
   const source = objectValue(raw);
   if (!source) return legacyRulesToPolicy(legacyRules);
   return {
+    ...(objectValue(source.selection) ? { selection: objectValue(source.selection)! } : {}),
     version: numberValue(source.version, 1),
     transient: normalizeDynamicErrorPolicy(source.transient),
     hard: normalizeDynamicErrorPolicy(source.hard),
@@ -402,6 +403,7 @@ export function toAgentProfilePayload(
           execution_profile_id: candidate.executionProfileId,
           enabled: candidate.enabled,
           policies: {
+            ...(policy.selection ? { selection: policy.selection } : {}),
             version: policy.version,
             transient: {
               retry: {

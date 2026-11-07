@@ -62,6 +62,17 @@ func (s *UsageService) GetUsage(ctx context.Context, profileID string) (*Provide
 	return s.cache.GetOrFetch(ctx, reg.cacheKey, reg.client.FetchUsage)
 }
 
+// RefreshUsage re-reads a registered account after a classified model limit.
+func (s *UsageService) RefreshUsage(ctx context.Context, profileID string) (*ProviderUsage, error) {
+	s.mu.RLock()
+	reg, ok := s.clients[profileID]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, nil
+	}
+	return s.cache.Refresh(ctx, reg.cacheKey, reg.client.FetchUsage)
+}
+
 // IsPotentiallyRateLimited returns true when any utilization window is at or
 // above the configured threshold (default 90%). resetAt is the earliest reset
 // time among windows that breached the threshold; zero if not limited.

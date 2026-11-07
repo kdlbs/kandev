@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"sync"
 	"time"
 
@@ -59,19 +60,26 @@ func WithEngineLogger(log *zap.Logger) EngineOption {
 }
 
 type Engine struct {
-	mu          sync.Mutex
-	now         func() time.Time
-	circuits    *CircuitRegistry
-	states      map[string]RouteState
-	persistence Persistence
-	loader      StateLoader
-	probes      map[string]ProbeLease
-	logger      *zap.Logger
+	mu            sync.Mutex
+	now           func() time.Time
+	circuits      *CircuitRegistry
+	states        map[string]RouteState
+	persistence   Persistence
+	loader        StateLoader
+	probes        map[string]ProbeLease
+	logger        *zap.Logger
+	limits        LimitChecker
+	limitObserver LimitObserver
+	limitFailure  LimitFailureResolver
 	// retryClaims identifies retry launches owned by this process. A durable
 	// "retrying" state can survive a restart without its in-memory owner, so
 	// manual recovery may reclaim it only when this map does not contain the
 	// same generation.
-	retryClaims map[string]int64
+	retryClaims        map[string]int64
+	orderedTiers       bool
+	tierPick           func(int) int
+	tierPreviewPick    func(int) int
+	tierUsageAvailable bool
 }
 
 func NewEngine(options ...EngineOption) *Engine {
@@ -178,11 +186,28 @@ func (e *Engine) selectContext(
 	}
 	generation := currentGeneration + 1
 	now := e.now()
-	for _, candidate := range profile.Candidates {
-		if !e.candidateSelectable(candidate, sessionID, generation, excludeProfileID, preferredProfileID, now) {
+	plan, err := e.prepareOrderedPlan(ctx, state, profile, generation, excludeProfileID, preferredProfileID, reason)
+	if err != nil {
+		return RouteDecision{}, err
+	}
+	for candidate, err := range plan.rows {
+		if err != nil {
+			return RouteDecision{}, err
+		}
+		if !candidate.Enabled || candidate.ID == excludeProfileID {
+			continue
+		}
+		if preferredProfileID != "" && candidate.ID != preferredProfileID {
+			continue
+		}
+		if _, blocked := e.blockedByLimit(ctx, candidate, sessionID, now); blocked {
+			continue
+		}
+		if !e.candidateSelectable(ctx, candidate, sessionID, generation, excludeProfileID, preferredProfileID, now) {
 			continue
 		}
 		decision := RouteDecision{
+			UsagePolicy:        usage.CloneExecutionUsagePolicy(candidate.UsagePolicy),
 			SessionID:          sessionID,
 			LogicalProfileID:   profile.ID,
 			ExecutionProfileID: candidate.ID,
@@ -192,6 +217,7 @@ func (e *Engine) selectContext(
 			Status:             routeStatusStarting,
 		}
 		nextState := RouteState{
+			UsagePolicy:        usage.CloneExecutionUsagePolicy(candidate.UsagePolicy),
 			SessionID:          sessionID,
 			LogicalProfileID:   profile.ID,
 			ExecutionProfileID: candidate.ID,
@@ -205,11 +231,13 @@ func (e *Engine) selectContext(
 			state.ProfileVersion == profile.Version {
 			nextState.PolicyStateJSON = carryUnclassifiedStreak(state.PolicyStateJSON, profile.ID, candidate.ID, profile.Version, candidate.Policies.Unclassified)
 		}
+		nextState.PolicyStateJSON = e.orderedPolicyState(nextState.PolicyStateJSON, plan.chain.withCandidate(candidate.ID))
 		if err := e.claimAndPersist(ctx, expectedGeneration, decision, nextState); err != nil {
 			delete(e.states, sessionID)
 			return RouteDecision{}, err
 		}
 		e.states[sessionID] = nextState
+		e.logTierSelection(profile, sessionID, generation, reason, candidate.ID, plan.observe, now)
 		return decision, nil
 	}
 	nextState := RouteState{
@@ -218,15 +246,20 @@ func (e *Engine) selectContext(
 		Generation:       generation,
 		ProfileVersion:   profile.Version,
 		Status:           "waiting",
+		PolicyStateJSON:  e.orderedPolicyState("", plan.chain),
 		UpdatedAt:        now,
 	}
+	return e.persistNoEligibleDecision(ctx, expectedGeneration, nextState)
+}
+
+func (e *Engine) persistNoEligibleDecision(ctx context.Context, expectedGeneration int64, nextState RouteState) (RouteDecision, error) {
 	if err := e.persistNoEligible(ctx, expectedGeneration, nextState); err != nil {
-		delete(e.states, sessionID)
+		delete(e.states, nextState.SessionID)
 		return RouteDecision{}, err
 	}
-	e.states[sessionID] = nextState
+	e.states[nextState.SessionID] = nextState
 	return RouteDecision{}, &NoEligibleCandidateError{
-		SessionID: sessionID, LogicalProfile: profile.ID, Generation: generation,
+		SessionID: nextState.SessionID, LogicalProfile: nextState.LogicalProfileID, Generation: nextState.Generation,
 	}
 }
 
@@ -248,8 +281,14 @@ func (e *Engine) loadStateLocked(ctx context.Context, sessionID string) (RouteSt
 
 const probeLeaseDuration = 30 * time.Second
 
-func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, generation int64, excludeProfileID, preferredProfileID string, now time.Time) bool {
+func (e *Engine) candidateSelectable(ctx context.Context, candidate Candidate, sessionID string, generation int64, excludeProfileID, preferredProfileID string, now time.Time) bool {
 	if !candidate.Enabled || candidate.ID == excludeProfileID {
+		return false
+	}
+	if e.orderedTiers && normalizedCandidateUsage(candidate.Usage, now).Limited {
+		return false
+	}
+	if candidate.SuspendedUntil.After(now) {
 		return false
 	}
 	if preferredProfileID != "" && candidate.ID != preferredProfileID {
@@ -257,6 +296,11 @@ func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, gene
 	}
 	if e.circuits.IsHeld(accountBlockKey(candidate.ID)) {
 		return false
+	}
+	if e.limits != nil {
+		if selectable, handled := e.selectNarrowCircuit(ctx, candidate, sessionID, generation, now); handled {
+			return selectable
+		}
 	}
 	if candidate.BindingKey == "" || !e.circuits.IsOpen(candidate.BindingKey, now) {
 		return true
@@ -269,6 +313,31 @@ func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, gene
 	// lease after the concrete launch result is known.
 	e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
 	return true
+}
+
+func (e *Engine) selectNarrowCircuit(ctx context.Context, candidate Candidate, sessionID string, generation int64, now time.Time) (bool, bool) {
+	circuitCandidate := candidate
+	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID == candidate.ID && usage.MatchesSelectedUsage(ctx, candidate.UsagePolicy) {
+		circuitCandidate.ModelID = candidate.UsagePolicy.ExpectedModel
+	}
+	keys := limitSuspensionKeys(circuitCandidate)
+	for _, key := range keys {
+		if !e.circuits.IsOpen(key, now) {
+			continue
+		}
+		lease, ok := e.circuits.AcquireProbe(key, probeLeaseDuration)
+		if !ok {
+			return false, true
+		}
+		if otherSuspensionKeyOpen(e.circuits, keys, key, now) || (candidate.BindingKey != "" && e.circuits.IsOpen(candidate.BindingKey, now)) {
+			// Do not admit through an expired narrow probe while another scope remains open.
+			e.circuits.ReleaseProbe(lease, true, circuitBackoff)
+			return false, true
+		}
+		e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
+		return true, true
+	}
+	return false, false
 }
 
 func probeKey(sessionID string, generation int64, candidateID string) string {
@@ -424,7 +493,13 @@ func (e *Engine) ApplyFailureContext(
 	if err := e.requireCurrentFailureRoute(ctx, sessionID, expectedGeneration, currentCandidateID); err != nil {
 		return RouteDecision{}, err
 	}
-	e.openCircuitForFailure(profile, currentCandidateID, failure)
+	profile = e.failureProfileForRoute(ctx, profile, sessionID, expectedGeneration, currentCandidateID)
+	scope := SuspensionBinding
+	if candidate, ok := candidateByID(profile, currentCandidateID); ok {
+		failure, scope = e.resolveLimitFailure(ctx, candidate, failure)
+	}
+	e.openCircuitForFailure(profile, currentCandidateID, failure, scope)
+	e.observeLimitFailure(ctx, profile, currentCandidateID, failure)
 	e.releaseProbeForFailure(sessionID, expectedGeneration, currentCandidateID)
 	if candidate, ok := candidateByID(profile, currentCandidateID); ok && candidate.Policies.Version != 0 {
 		return e.applyPolicyFailure(ctx, sessionID, profile, expectedGeneration, currentCandidateID, candidate, failure)
@@ -612,11 +687,29 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 	evidence UnclassifiedFailureEvidence,
 	policyState PolicyState,
 ) (RouteDecision, error) {
-	successor, found := e.firstSelectableUnclassifiedSuccessor(profile, currentCandidateID, state.SessionID, expectedGeneration)
+	var plan orderedPlan
+	var successor Candidate
+	var found bool
+	if e.orderedTiers {
+		var err error
+		plan, err = e.prepareOrderedPlan(ctx, state, profile, expectedGeneration+1, currentCandidateID, "", "policy_skip")
+		if err != nil {
+			return RouteDecision{}, err
+		}
+		successor, found, err = e.firstSelectableOrderedSuccessor(ctx, plan, currentCandidateID, state.SessionID, expectedGeneration)
+		if err != nil {
+			return RouteDecision{}, err
+		}
+	} else {
+		successor, found = e.firstSelectableUnclassifiedSuccessor(ctx, profile, currentCandidateID, state.SessionID, expectedGeneration)
+	}
 	if !found {
 		return e.persistUnclassifiedManual(ctx, state, state.PolicyStateJSON, policyState, failure, "unclassified_candidates_exhausted")
 	}
 	decision, nextState := unclassifiedSuccessorRoute(state, profile, successor, expectedGeneration, failure, e.now())
+	if e.orderedTiers {
+		nextState.PolicyStateJSON = e.orderedPolicyState(nextState.PolicyStateJSON, plan.chain.withCandidate(successor.ID))
+	}
 	if persistedDecision, err := e.recordUnclassifiedSuccessor(
 		ctx, expectedGeneration, decision, nextState, evidence, &policyState, state, failure,
 	); err != nil {
@@ -627,7 +720,28 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 	return decision, nil
 }
 
+func (e *Engine) firstSelectableOrderedSuccessor(
+	ctx context.Context,
+	plan orderedPlan,
+	currentCandidateID, sessionID string,
+	generation int64,
+) (Candidate, bool, error) {
+	for candidate, err := range plan.rows {
+		if err != nil {
+			return Candidate{}, false, err
+		}
+		if _, blocked := e.blockedByLimit(ctx, candidate, sessionID, e.now()); blocked {
+			continue
+		}
+		if e.candidateSelectable(ctx, candidate, sessionID, generation+1, currentCandidateID, "", e.now()) {
+			return candidate, true, nil
+		}
+	}
+	return Candidate{}, false, nil
+}
+
 func (e *Engine) firstSelectableUnclassifiedSuccessor(
+	ctx context.Context,
 	profile Profile,
 	currentCandidateID, sessionID string,
 	generation int64,
@@ -637,7 +751,10 @@ func (e *Engine) firstSelectableUnclassifiedSuccessor(
 			continue
 		}
 		for _, candidate := range profile.Candidates[index+1:] {
-			if e.candidateSelectable(candidate, sessionID, generation+1, "", "", e.now()) {
+			if _, blocked := e.blockedByLimit(ctx, candidate, sessionID, e.now()); blocked {
+				continue
+			}
+			if e.candidateSelectable(ctx, candidate, sessionID, generation+1, "", "", e.now()) {
 				return candidate, true
 			}
 		}
@@ -656,7 +773,8 @@ func unclassifiedSuccessorRoute(
 ) (RouteDecision, RouteState) {
 	generation := expectedGeneration + 1
 	decision := RouteDecision{
-		SessionID: state.SessionID, LogicalProfileID: profile.ID,
+		UsagePolicy: usage.CloneExecutionUsagePolicy(successor.UsagePolicy),
+		SessionID:   state.SessionID, LogicalProfileID: profile.ID,
 		ExecutionProfileID: successor.ID, Generation: generation,
 		ProfileVersion: profile.Version, Reason: "policy_skip",
 		Status: routeStatusStarting, ErrorCode: failure.Code,
@@ -665,7 +783,8 @@ func unclassifiedSuccessorRoute(
 		PendingOutcome:   routingpolicy.OutcomeSkip,
 	}
 	nextState := RouteState{
-		SessionID: state.SessionID, LogicalProfileID: profile.ID,
+		UsagePolicy: usage.CloneExecutionUsagePolicy(successor.UsagePolicy),
+		SessionID:   state.SessionID, LogicalProfileID: profile.ID,
 		ExecutionProfileID: successor.ID, Generation: generation,
 		ProfileVersion: profile.Version, Status: routeStatusStarting,
 		UpdatedAt: updatedAt,
@@ -1371,7 +1490,7 @@ func (e *Engine) releaseProbeForFailure(sessionID string, generation int64, cand
 	e.ReleaseProbe(RouteDecision{SessionID: sessionID, Generation: generation, ExecutionProfileID: candidateID}, false)
 }
 
-func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, failure *routingerr.Error) {
+func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, failure *routingerr.Error, scope LimitSuspension) {
 	if failure == nil || e.circuits == nil {
 		return
 	}
@@ -1390,12 +1509,67 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 		if candidate.ID != candidateID || candidate.BindingKey == "" {
 			continue
 		}
+		until := e.now().Add(circuitBackoff)
+		longReset := failure.ResetHint != nil && failure.ResetHint.After(until)
+		if e.limits != nil && failure.ResetHint != nil && candidate.ModelID != "" &&
+			(scope != SuspensionBinding || longReset) &&
+			e.openNarrowCircuit(candidate, scope, *failure.ResetHint, failure.Code) {
+			return
+		}
 		e.circuits.OpenFailure(candidate.BindingKey, FailureOpen{
 			Code: failure.Code, Now: e.now(),
 			ResetHint: failure.ResetHint, ResetHintInferred: failure.ResetHintInferred,
 		})
 		return
 	}
+}
+
+// openNarrowCircuit opens a provider- or model-scoped long suspension when the
+// limit feature created the reset hint. It returns false for the upstream
+// binding-wide scope.
+func (e *Engine) openNarrowCircuit(candidate Candidate, scope LimitSuspension, until time.Time, code routingerr.Code) bool {
+	switch scope {
+	case SuspensionProvider:
+		key := ResourceKey(ScopeProvider, candidate.BindingKey+"|"+ProviderOf(candidate.ModelID))
+		if key == "" {
+			return false
+		}
+		e.circuits.Open(key, until, code)
+		return true
+	case SuspensionModel:
+		key := ResourceKey(ScopeModel, candidate.BindingKey+"|"+candidate.ModelID)
+		if key == "" {
+			return false
+		}
+		e.circuits.Open(key, until, code)
+		return true
+	}
+	return false
+}
+
+// otherSuspensionKeyOpen reports whether a narrow key other than the probed one
+// is still open.
+func otherSuspensionKeyOpen(registry *CircuitRegistry, keys []string, probed string, now time.Time) bool {
+	for _, key := range keys {
+		if key != probed && registry.IsOpen(key, now) {
+			return true
+		}
+	}
+	return false
+}
+
+// limitSuspensionKeys returns the narrow circuit keys a limit-created long
+// reset may have opened. They are only consulted when provider limits are on.
+func limitSuspensionKeys(candidate Candidate) []string {
+	if candidate.ModelID == "" {
+		return nil
+	}
+	keys := make([]string, 0, 2)
+	if provider := ProviderOf(candidate.ModelID); provider != "" {
+		keys = append(keys, ResourceKey(ScopeProvider, candidate.BindingKey+"|"+provider))
+	}
+	keys = append(keys, ResourceKey(ScopeModel, candidate.BindingKey+"|"+candidate.ModelID))
+	return keys
 }
 
 func qualifiesForCircuit(code routingerr.Code) bool {

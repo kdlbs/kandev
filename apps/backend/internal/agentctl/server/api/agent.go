@@ -1295,7 +1295,7 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	// the user cancels, or agentctl shuts down.
 	go func() {
 		prompt := func(promptCtx context.Context) error {
-			return promptOrSteer(promptCtx, adapter, req)
+			return s.promptWithUsageSelection(promptCtx, adapter, req)
 		}
 		var err error
 		if durableDelivery {
