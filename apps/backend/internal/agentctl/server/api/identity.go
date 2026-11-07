@@ -27,6 +27,7 @@ var SurvivalCapabilities = []string{
 	// retained-process adoption.
 	acpcompat.CopilotNativeCompactionCapability,
 	agentctltypes.ProjectMCPDeliveryCapability,
+	agentctltypes.ManagedRuntimePrivatePreparationCapability,
 }
 
 // handleIdentity reports this launch's opaque identity and capability

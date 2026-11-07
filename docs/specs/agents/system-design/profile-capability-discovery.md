@@ -2,7 +2,7 @@
 status: current
 system: agents
 created: 2026-09-29
-updated: 2026-11-03
+updated: 2026-11-07
 requirements:
   - REQ-AGENTS-PROFILE-DISCOVERY-001
   - REQ-AGENTS-PROFILE-DISCOVERY-002
@@ -135,7 +135,9 @@ Cleanup terminates the owned process tree on success, timeout, cancellation, and
 
 The proposed [missing bundled Codex dependency extension](managed-npm-runtime-recovery.md#missing-bundled-codex-dependency)
 qualifies the no-install rule only for an independently verified incomplete
-managed runtime. Its retry must preserve this document's launch context,
+managed runtime. The proposed [incomplete-cache extension](managed-npm-cache-recovery.md)
+adds verified missing execution metadata and executable links. Both use the
+same private-preparation owner. Their retry must preserve this document's launch context,
 single-flight and late-result guards, and profile-only publication. Both
 baseline discovery and dependent model-option resolution use that same bounded
 recovery helper. It does not run a general runtime update or select another

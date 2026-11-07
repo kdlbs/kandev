@@ -26,9 +26,9 @@ system_design:
 
 ## Summary
 
-Add the executor-local evidence and private prepared-runtime primitive with
-opt-in start/probe wire contracts. Ordinary starts remain unchanged until
-later work orders enable the directive.
+Add Codex-specific evidence and validation to the common private runtime owner
+from the [cache-recovery package](../managed-npm-cache-recovery/plan.md).
+Extend its opt-in wire contract with the dependency condition.
 
 ## In scope
 
@@ -36,7 +36,7 @@ later work orders enable the directive.
   confirmation for the exact registered package and execution host.
 - A typed condition separate from top-level process-exit evidence; support
   initialize RPC errors while the bridge remains alive.
-- Private npm project/cache ownership, exact bridge installation with optional
+- Reuse common private npm project/cache ownership; add exact bridge installation with optional
   dependencies, bounded executable validation, sanitized failure reporting,
   cancellation, and lifetime through real subprocess cleanup.
 - Optional start/probe directives, authenticated authority, capability
@@ -86,7 +86,9 @@ changes and preserve their meaningful RED output.
 
 ## Dependencies
 
-None. Read backend and agentctl scoped guidance before implementation.
+[Cache-recovery Task 01](../managed-npm-cache-recovery/task-01-private-cache-preparation.md)
+supplies common preparation ownership and capability negotiation.
+Read backend and agentctl scoped guidance before implementation.
 
 ## Risks
 

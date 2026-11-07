@@ -91,3 +91,32 @@ func TestReadStderrProjectsUnclassifiedNpmCodesBeforeProviderSanitizer(t *testin
 		t.Fatalf("retained stderr = %#v, want one bounded unknown npm-code marker", got)
 	}
 }
+
+func TestReadStderrRetainsRawManagedNpmEvidenceWithoutExposingPath(t *testing.T) {
+	path := "/home/user/.npm/_npx/0123456789abcdef/package.json"
+	raw := "npm error code ENOENT\nnpm error syscall open\nnpm error path " + path + "\n"
+	m := &Manager{
+		stderr: io.NopCloser(strings.NewReader(raw)),
+		logger: newTestLogger(t),
+	}
+	m.wg.Add(1)
+	m.readStderr(make(chan stderrReadResult, 1))
+
+	diagnostic, complete := m.managedNPMRawDiagnosticSnapshot()
+	if !complete || diagnostic != strings.TrimSuffix(raw, "\n") {
+		t.Fatalf("raw npm diagnostic = (%q, %v), want bounded exact diagnostic", diagnostic, complete)
+	}
+	for _, line := range m.GetRecentStderr() {
+		if strings.Contains(line, path) || strings.Contains(line, "ENOENT") {
+			t.Fatalf("public stderr retained raw cache evidence: %q", line)
+		}
+	}
+}
+
+func TestManagedNpmRawDiagnosticOverflowFailsClosed(t *testing.T) {
+	m := &Manager{}
+	m.appendManagedNPMRawDiagnostic("npm error path " + strings.Repeat("x", maxManagedNPMRawDiagnosticBytes))
+	if diagnostic, complete := m.managedNPMRawDiagnosticSnapshot(); complete || diagnostic != "" {
+		t.Fatalf("overflowed raw diagnostic = (%q, %v), want empty and incomplete", diagnostic, complete)
+	}
+}

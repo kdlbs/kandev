@@ -84,8 +84,18 @@ func (m *Manager) recordAcceptedMCPSetupOperation(ctx context.Context, execution
 }
 
 func (m *Manager) configureAndStartAgentWithMCP(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, operation *preparedMCPOperation) (string, error) {
+	return m.configureAndStartAgentWithMCPPreparation(ctx, execution, agentConfig, operation, nil)
+}
+
+func (m *Manager) configureAndStartAgentWithMCPPreparation(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+	operation *preparedMCPOperation,
+	preparation *types.ManagedRuntimePreparationDirective,
+) (string, error) {
 	if rt := agentConfig.Runtime(); rt == nil || rt.ProjectMCPStrategy == nil {
-		return m.configureAndStartAgent(ctx, execution)
+		return m.configureAndStartAgentWithPreparation(ctx, execution, preparation)
 	}
 	var profile *AgentProfileInfo
 	if execution.AgentProfileID != "" && m.profileResolver != nil {
@@ -98,5 +108,5 @@ func (m *Manager) configureAndStartAgentWithMCP(ctx context.Context, execution *
 	if err := m.materializeRuntimeProjectMCPWithPreparation(ctx, execution, agentConfig, profile, execution.ExecutorType, nil, operation); err != nil {
 		return "", err
 	}
-	return m.configureAndStartAgent(ctx, execution)
+	return m.configureAndStartAgentWithPreparation(ctx, execution, preparation)
 }

@@ -21,4 +21,5 @@ type ManagedStartupEvidence struct {
 	NPMDiagnosticPresent  bool                          `json:"npm_diagnostic_present"`
 	NPMDiagnosticComplete bool                          `json:"npm_diagnostic_complete"`
 	UnclassifiedNPMCode   bool                          `json:"unclassified_npm_code"`
+	CacheEvidence         *ManagedRuntimeCacheEvidence  `json:"cache_evidence,omitempty"`
 }

@@ -26,15 +26,27 @@ type Handler struct {
 	logger               *zap.Logger
 	authenticatedControl func(*gin.Context) bool
 	instanceID           string
+	preparation          *managedRuntimePreparationState
 }
 
 // NewHandler creates a new inference handler.
 func NewHandler(_ string, logger *zap.Logger) *Handler {
+	preparation := newManagedRuntimePreparationState()
 	return &Handler{
-		acpExecutor:   NewACPInferenceExecutor(logger),
-		codexExecutor: NewCodexAppServerInferenceExecutor(logger),
+		acpExecutor:   NewACPInferenceExecutor(logger, preparation),
+		codexExecutor: NewCodexAppServerInferenceExecutor(logger, preparation),
 		logger:        logger,
+		preparation:   preparation,
 	}
+}
+
+// Close retires attempt evidence and retries cleanup for any owner retained
+// after a prior filesystem cleanup failure.
+func (h *Handler) Close() error {
+	if h == nil || h.preparation == nil {
+		return nil
+	}
+	return h.preparation.close()
 }
 
 // RegisterRoutes registers the inference routes on the given router group.
@@ -56,6 +68,10 @@ func (h *Handler) handleProbe(c *gin.Context) {
 	}
 
 	if !h.admitWrapper(c, req.InferenceConfig) {
+		return
+	}
+	if req.Preparation != nil && (h.authenticatedControl == nil || !h.authenticatedControl(c)) {
+		c.AbortWithStatusJSON(http.StatusForbidden, ProbeResponse{Success: false, Error: "authenticated control is required for managed runtime preparation"})
 		return
 	}
 
@@ -147,6 +163,7 @@ func probeFailureCodeClass(code ProbeFailureCode) string {
 	switch code {
 	case ProbeFailureManagedRuntimeNPMResolution,
 		ProbeFailureManagedRuntimeNPMPolicy,
+		ProbeFailureManagedRuntimeCacheIncomplete,
 		ProbeFailureUnsupportedContext,
 		ProbeFailureAuthenticationRequired:
 		return string(code)

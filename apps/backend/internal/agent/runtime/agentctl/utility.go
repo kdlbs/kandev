@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/agentctl/types"
 )
 
 // doLongRunningJSON posts a JSON body to the given path on the long-running
@@ -64,6 +65,11 @@ func (c *Client) InferencePrompt(ctx context.Context, req *utility.PromptRequest
 func (c *Client) Probe(ctx context.Context, req *utility.ProbeRequest) (*utility.ProbeResponse, error) {
 	if req.InferenceConfig != nil {
 		if err := c.requireLaunchWrapper(ctx, req.InferenceConfig.LaunchWrapper); err != nil {
+			return nil, err
+		}
+	}
+	if req.Preparation != nil {
+		if err := c.RequireCapability(ctx, types.ManagedRuntimePrivatePreparationCapability); err != nil {
 			return nil, err
 		}
 	}

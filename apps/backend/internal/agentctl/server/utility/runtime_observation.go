@@ -300,6 +300,9 @@ func resolveNPMCacheRoot(
 	workDir string,
 	logger *zap.Logger,
 ) (string, error) {
+	if cacheRoot, found, err := managedNPMCacheArgument(preparedArgs); found || err != nil {
+		return cacheRoot, err
+	}
 	npm, ok := resolveSiblingNPMExecutable(launchedExecutable, env, workDir)
 	if !ok {
 		return "", errors.New("npm executable beside launched npx is unavailable")
@@ -324,6 +327,37 @@ func resolveNPMCacheRoot(
 		return "", errors.New("npm cache root is not absolute")
 	}
 	return filepath.Clean(cacheRoot), nil
+}
+
+func managedNPMCacheArgument(args []string) (string, bool, error) {
+	cacheRoot := ""
+	for index := 1; index < len(args); index++ {
+		if args[index] == "--" || managedruntime.ValidateExactPackageSpec(args[index]) == nil {
+			break
+		}
+		value := ""
+		switch {
+		case args[index] == "--cache":
+			if index+1 >= len(args) {
+				return "", true, errors.New("npm cache argument has no path")
+			}
+			index++
+			value = args[index]
+		case strings.HasPrefix(args[index], "--cache="):
+			value = strings.TrimPrefix(args[index], "--cache=")
+		default:
+			continue
+		}
+		if !filepath.IsAbs(value) || strings.ContainsAny(value, "\x00\r\n") {
+			return "", true, errors.New("npm cache argument is not an absolute path")
+		}
+		value = filepath.Clean(value)
+		if cacheRoot != "" && cacheRoot != value {
+			return "", true, errors.New("npm cache arguments disagree")
+		}
+		cacheRoot = value
+	}
+	return cacheRoot, cacheRoot != "", nil
 }
 
 func resolveSiblingNPMExecutable(launchedExecutable string, env []string, workDir string) (string, bool) {
