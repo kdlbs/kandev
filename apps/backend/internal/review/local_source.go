@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,25 @@ type Source struct {
 	WorktreePath string `json:"worktree_path"`
 	BaseRef      string `json:"base_ref"`
 	HeadRef      string `json:"head_ref,omitempty"`
+}
+
+const SourceMetadataKey = "review_source"
+
+// SourceFromMetadata accepts typed and JSON-decoded source metadata.
+func SourceFromMetadata(metadata map[string]any) (*Source, error) {
+	value := metadata[SourceMetadataKey]
+	if value == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid review source", ErrWorkspaceUnavailable)
+	}
+	var source Source
+	if err := json.Unmarshal(b, &source); err != nil {
+		return nil, fmt.Errorf("%w: invalid review source", ErrWorkspaceUnavailable)
+	}
+	return &source, nil
 }
 
 // ValidateSource verifies an existing local worktree and resolvable commit refs.

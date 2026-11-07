@@ -128,12 +128,12 @@ func (r *Resolver) Resolve(ctx context.Context, agentProfileID string) (Reviewer
 var errDeferToDefaults = errors.New("defer to default utility settings")
 
 func (r *Resolver) resolveFromProfile(ctx context.Context, profileID string) (ReviewerIdentity, error) {
-	// With durable native owners the durable run row must exist before any
-	// selection or concrete model validation. This pre-run read therefore does
-	// not borrow a default model; bindRunReviewer validates the concrete model
-	// after the run is created.
-	if lookup, ok := r.Profiles.(runProfileLookup); ok && lookup.NativeRouteOwnersEnabled() {
-		return r.resolveProfile(ctx, profileID, false)
+	// Existing runs without a writer-exclusion request retain native selection
+	// after the durable run row exists.
+	if !OriginExclusionActive(ctx) {
+		if lookup, ok := r.Profiles.(runProfileLookup); ok && lookup.NativeRouteOwnersEnabled() {
+			return r.resolveProfile(ctx, profileID, false)
+		}
 	}
 	return r.resolveProfile(ctx, profileID, true)
 }
@@ -162,18 +162,28 @@ func (r *Resolver) resolveProfile(ctx context.Context, profileID string, require
 	if model == "" && requireModel {
 		// The profile names an agent but no model; borrow the user's default
 		// model only when it belongs to the same agent.
-		model = r.sameAgentDefaultModel(ctx, profile.AgentID)
+		if OriginExclusionActive(ctx) {
+			model, _ = ReviewerEffectiveModel(ctx, profile.AgentID, "")
+		} else {
+			model = r.sameAgentDefaultModel(ctx, profile.AgentID)
+		}
 	}
 	if model == "" && requireModel {
 		return ReviewerIdentity{}, fmt.Errorf("%w: agent profile %q has no model configured",
 			ErrAgentUnavailable, describeProfile(profile, profileID))
+	}
+	route := profile.Route
+	if OriginExclusionActive(ctx) && route != nil && route.Model == "" && route.AgentID == profile.AgentID && model != "" {
+		copy := *route
+		copy.Model = model
+		route = &copy
 	}
 	return ReviewerIdentity{
 		ProfileID: profileID,
 		AgentID:   profile.AgentID,
 		Model:     model,
 		Mode:      profile.Mode,
-		Route:     profile.Route,
+		Route:     route,
 		Source:    SourceAgentProfile,
 	}, nil
 }
