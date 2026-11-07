@@ -711,6 +711,23 @@ func (s *Service) validateCeilingEntryWithDestinationState(
 			return ceilingEntryUnavailable, "workflow entry route is unavailable", nil
 		}
 		if payloadStepID != "" && route.DestinationStepID != payloadStepID {
+			// Only the sessionless seam-1 start can legitimately see a route
+			// that lags by one entry: it is queued before the destination route
+			// is materialized. Session-bearing records keep the payload-session
+			// comparison below, so a stale session is never accepted here.
+			if deferral.Kind == models.CeilingLaunchStart && sessionIDFromCeilingPayload(deferral) == "" {
+				currentEntry, currentEntryErr := s.unboundSessionlessStartMatchesLaggedRoute(
+					ctx, task, deferral.Payload, payloadStepID, route)
+				if currentEntryErr != nil {
+					return ceilingEntryUnavailable, currentEntryErr.Error(), currentEntryErr
+				}
+				if currentEntry {
+					// The route still belongs to the immediately previous entry,
+					// so this record's launch replaces it. Validate the
+					// destination without retargeting the older route.
+					return s.validateCeilingDestination(ctx, task, deferral, models.CeilingWorkflowEntryBinding{}, checkDestinationState), "", nil
+				}
+			}
 			return ceilingEntrySuperseded, ceilingEntryDetailStepChanged, nil
 		}
 		if payloadSessionID := sessionIDFromCeilingPayload(deferral); payloadSessionID != "" &&
@@ -779,6 +796,113 @@ func (s *Service) validateCeilingEntryWithDestinationState(
 		}
 	}
 	return s.validateCeilingDestination(ctx, task, deferral, binding, checkDestinationState), "", nil
+}
+
+// workflowEntryTransitionLister reads the step-transition ledger around the
+// task's current entry. It is reached through a type assertion on s.repo, like
+// the other narrow capabilities of the ceiling replay path.
+type workflowEntryTransitionLister interface {
+	ListTaskStepTransitions(ctx context.Context, taskID string, beforeID int64, limit int) ([]models.StepTransition, error)
+}
+
+// errWorkflowEntryTransitionLedgerUnavailable reports a repository that cannot
+// read the step-transition ledger, so a lagging route cannot be proven.
+var errWorkflowEntryTransitionLedgerUnavailable = errors.New("workflow entry transition ledger is unavailable")
+
+// unboundSessionlessStartMatchesLaggedRoute reports whether a sessionless start
+// record names the task's current workflow entry while the committed route
+// belongs to exactly the immediately previous entry. Entry admission defers the
+// start before the destination route is materialized, so that route lags by one
+// ledger row; any other divergence (an older entry, a foreign entry identity, a
+// different destination step) is not lag and stays superseded.
+func (s *Service) unboundSessionlessStartMatchesLaggedRoute(
+	ctx context.Context,
+	task *models.Task,
+	payload map[string]interface{},
+	payloadStepID string,
+	route models.WorkflowSessionRoute,
+) (bool, error) {
+	currentEntry, err := s.unboundStartTargetsCurrentEntry(ctx, task, payload, payloadStepID)
+	if err != nil || !currentEntry {
+		return false, err
+	}
+	return s.routeNamesImmediatelyPreviousEntry(ctx, task, route, int64Field(payload, "workflow_entry_id"))
+}
+
+// unboundStartTargetsCurrentEntry requires the payload step to be the task's
+// current step and the payload entry id to be the task's latest ledger entry.
+func (s *Service) unboundStartTargetsCurrentEntry(
+	ctx context.Context,
+	task *models.Task,
+	payload map[string]interface{},
+	payloadStepID string,
+) (bool, error) {
+	if task == nil || payloadStepID == "" || task.WorkflowStepID != payloadStepID {
+		return false, nil
+	}
+	entryID := int64Field(payload, "workflow_entry_id")
+	if entryID <= 0 {
+		return false, nil
+	}
+	currentEntryIdentity, err := s.readWorkflowEntryIdentity(ctx, task.ID)
+	if err != nil {
+		return false, err
+	}
+	if currentEntryIdentity == legacyWorkflowEntryIdentity ||
+		currentEntryIdentity != workflowEntryIdentityForID(entryID) {
+		return false, nil
+	}
+	if s.workflowStepGetter == nil {
+		return true, nil
+	}
+	step, stepErr := s.workflowStepGetter.GetStep(ctx, payloadStepID)
+	if stepErr != nil && !errors.Is(stepErr, wfmodels.ErrWorkflowStepNotFound) {
+		return false, stepErr
+	}
+	if step == nil || (step.WorkflowID != "" && task.WorkflowID != "" && step.WorkflowID != task.WorkflowID) {
+		return false, nil
+	}
+	return true, nil
+}
+
+// routeNamesImmediatelyPreviousEntry reports whether the committed route names
+// the ledger row immediately before entryID, both by entry identity and by its
+// destination step (the step the task just left).
+func (s *Service) routeNamesImmediatelyPreviousEntry(
+	ctx context.Context,
+	task *models.Task,
+	route models.WorkflowSessionRoute,
+	entryID int64,
+) (bool, error) {
+	if task == nil || entryID <= 0 {
+		return false, nil
+	}
+	lister, ok := s.repo.(workflowEntryTransitionLister)
+	if !ok {
+		// Without the ledger the one-entry lag cannot be distinguished from a
+		// superseded route. Report read uncertainty so the sweep retains the
+		// record for a later pass instead of silently dropping it.
+		return false, errWorkflowEntryTransitionLedgerUnavailable
+	}
+	previous, err := lister.ListTaskStepTransitions(ctx, task.ID, entryID, 1)
+	if err != nil {
+		return false, err
+	}
+	if len(previous) != 1 || previous[0].ID <= 0 {
+		return false, nil
+	}
+	if route.EntryIdentity != workflowEntryIdentityForID(previous[0].ID) {
+		return false, nil
+	}
+	previousStepID := previous[0].ToWorkflowStepID
+	if previousStepID == nil || *previousStepID != route.DestinationStepID {
+		return false, nil
+	}
+	if previous[0].ToWorkflowID != nil && task.WorkflowID != "" &&
+		*previous[0].ToWorkflowID != task.WorkflowID {
+		return false, nil
+	}
+	return true, nil
 }
 
 func (s *Service) validateUnroutedWorkflowEntry(

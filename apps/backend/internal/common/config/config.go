@@ -556,6 +556,11 @@ type FeaturesConfig struct {
 	// routing, and the shared route health service. It is disabled in every
 	// embedded profile until the complete feature is ready.
 	DynamicAgentRouting bool `mapstructure:"dynamic_agent_routing" json:"dynamicAgentRouting"`
+	DynamicProfileTiers bool `mapstructure:"dynamic_profile_tiers" json:"dynamicProfileTiers"`
+
+	// ProviderUsageLimits exposes account-aware provider usage in agent settings.
+	// This first increment is read-only and does not change execution admission.
+	ProviderUsageLimits bool `mapstructure:"provider_usage_limits" json:"providerUsageLimits"`
 
 	// ClaudeBackgroundPromptHandoff gates the high-risk experiment that lets a
 	// claude-acp session accept a successor prompt after an adapter-attested

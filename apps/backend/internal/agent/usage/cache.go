@@ -32,6 +32,7 @@ const maxStaleUsageAge = 30 * time.Minute
 // being served the stale value while fresh callers share the recent error.
 type cachedEntry struct {
 	usage        *ProviderUsage
+	previous     *ProviderUsage
 	successAt    time.Time
 	err          error
 	errAt        time.Time
@@ -165,7 +166,11 @@ func (c *UsageCache) lookup(key string, maxAge time.Duration) (*ProviderUsage, b
 func (c *UsageCache) storeSuccess(key string, usage *ProviderUsage) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries[key] = &cachedEntry{usage: usage, successAt: time.Now()}
+	var previous *ProviderUsage
+	if entry := c.entries[key]; entry != nil {
+		previous = cloneProviderUsage(entry.usage)
+	}
+	c.entries[key] = &cachedEntry{usage: usage, previous: previous, successAt: time.Now()}
 }
 
 // storeFailure records the error alongside — not instead of — any previous

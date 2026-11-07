@@ -3245,7 +3245,7 @@ func (m *Manager) configureAndStartAgentWithPreparedArgs(
 			return "", err
 		}
 	}
-	if err := client.ConfigureAgentWithProjectDelivery(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, execution.LaunchWrapper); err != nil {
+	if err := m.configureAgentUsage(ctx, client, execution, agentArgs, configureEnv, delivery); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 

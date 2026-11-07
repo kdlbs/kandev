@@ -124,6 +124,7 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
+	executionUsage           nativeExecutionUsage
 	processManagerID         string
 	questionImageWorkDir     string
 	questionImageOnce        sync.Once
@@ -180,6 +181,11 @@ type Manager struct {
 	// dedicated route. Ordinary status reads it without filesystem I/O.
 	runtimeStorageCacheMu sync.RWMutex
 	runtimeStorageCache   *streams.RuntimeStorageSnapshot
+
+	inferenceSnapshotMu    sync.RWMutex
+	inferenceSnapshotter   func() utility.AttemptSnapshot
+	finalInferenceSnapshot *utility.AttemptSnapshot
+	inferenceOwner         *utility.InferenceOwner
 
 	// Process state
 	cmd                *exec.Cmd
@@ -394,6 +400,12 @@ func (m *Manager) admitStart() (func(), error) {
 		m.admissionMu.Unlock()
 		return nil, ErrManagerStopping
 	}
+	if m.inferenceOwner != nil {
+		if err := m.inferenceOwner.Activate(); err != nil {
+			m.admissionMu.Unlock()
+			return nil, err
+		}
+	}
 	if m.admissionCount == 0 {
 		m.admissionDrained = make(chan struct{})
 	}
@@ -507,8 +519,11 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		workspaceSourceRoots:       canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
 		trackerGitEnv:              append([]string(nil), cfg.AgentEnv...),
 	}
+	m.deliveryJournal, m.inferenceOwner, m.deliveryJournalErr = utility.OpenInferenceOwner(cfg)
+	if m.inferenceOwner != nil {
+		m.SetInferenceSnapshotter(m.inferenceOwner.FinalSnapshot)
+	}
 	if cfg.DurableJournalPath != "" {
-		m.deliveryJournal, m.deliveryJournalErr = journal.Open(journal.Config{Path: cfg.DurableJournalPath})
 		if m.deliveryJournalErr == nil {
 			m.deliveryLimit = m.deliveryJournal.MaxEventBytes()
 			sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
@@ -517,6 +532,9 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		if m.deliveryJournalErr != nil {
 			logDeliveryJournalOpenFailure(m.logger, cfg.InstanceID, cfg.SessionID, cfg.DurableJournalPath, m.deliveryJournalErr)
 		}
+	}
+	if m.deliveryJournalErr != nil && m.inferenceOwner != nil {
+		m.inferenceOwner.Unavailable(m.deliveryJournalErr)
 	}
 	// Build the root plus any immediate sibling repositories and recursively
 	// declared initialized submodules. The root remains a real empty-named
@@ -1912,6 +1930,7 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	// One-shot adapters manage their own subprocess per prompt.
 	// Skip process creation — the adapter spawns processes in Prompt().
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
+		m.bindExecutionUsage(ctx)
 		if err := m.startOneShot(); err != nil {
 			return 0, err
 		}
@@ -1924,6 +1943,7 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 		m.closeOpenCodePlugin(context.Background())
 		return 0, err
 	}
+	m.bindExecutionUsage(ctx, m.cmd.Args)
 	generation, err := m.startManagedProcess()
 	if err != nil {
 		m.closeOpenCodePlugin(context.Background())
@@ -3031,6 +3051,9 @@ func (m *Manager) StopForTeardown(ctx context.Context) error {
 		return errors.Join(previewErr, fmt.Errorf("wait for process admission to drain: %w", err), m.closeDeliveryJournal())
 	}
 	stopErr := m.stop(ctx)
+	if passthroughErr == nil && previewErr == nil && stopErr == nil {
+		m.captureFinalInferenceSnapshot()
+	}
 	return errors.Join(passthroughErr, previewErr, stopErr, m.closeDeliveryJournal())
 }
 

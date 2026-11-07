@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -73,8 +74,10 @@ var (
 )
 
 type Controller struct {
+	nativeUsageReader           func(context.Context, string) ([]usage.ProfileExecutionUsage, error)
 	repo                        store.Repository
 	accountBlockReleaser        AccountBlockReleaser
+	profileUsage                ProfileUsageProvider
 	routingCircuitReader        RoutingCircuitReader
 	discovery                   *discovery.Registry
 	agentRegistry               *registry.Registry
@@ -115,6 +118,8 @@ type Controller struct {
 	runtimeAutoUpdateMu         sync.Mutex
 	runtimeUpdatePassMu         sync.Mutex
 	dynamicAgentRoutingEnabled  bool
+	dynamicProfileTiersEnabled  bool
+	dynamicTierPreviewer        DynamicTierPreviewer
 
 	hostCLIMu         sync.Mutex
 	hostCLIRunner     hostcli.Runner
