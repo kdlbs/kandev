@@ -46,3 +46,17 @@ func repoIDLess(a, b string) bool {
 	}
 	return a < b
 }
+
+// ParseChangeKey is the inverse of ChangeKey.String. The host never contains
+// a separator; the repository ID and number are the last two parts.
+func ParseChangeKey(s string) (ChangeKey, bool) {
+	parts := strings.Split(s, "|")
+	if len(parts) != 4 {
+		return ChangeKey{}, false
+	}
+	n, err := strconv.Atoi(parts[3])
+	if err != nil || n <= 0 || parts[0] == "" || parts[2] == "" {
+		return ChangeKey{}, false
+	}
+	return ChangeKey{Provider: parts[0], Host: parts[1], RepoID: parts[2], Number: n}, true
+}

@@ -35,3 +35,16 @@ func TestChangeKeyHostNormalized(t *testing.T) {
 		t.Fatalf("%q != %q", a.String(), b.String())
 	}
 }
+
+func TestParseChangeKeyRoundTrip(t *testing.T) {
+	k := ChangeKey{Provider: "gitlab", Host: "GitLab.Example.com.", RepoID: "r9", Number: 12}
+	got, ok := ParseChangeKey(k.String())
+	if !ok || got.String() != k.String() {
+		t.Fatalf("round trip = %+v %v", got, ok)
+	}
+	for _, bad := range []string{"", "a|b|c", "github|h|r|0", "github|h||3", "github|h|r|x", "a|b|c|d|1"} {
+		if _, ok := ParseChangeKey(bad); ok {
+			t.Fatalf("%q parsed", bad)
+		}
+	}
+}

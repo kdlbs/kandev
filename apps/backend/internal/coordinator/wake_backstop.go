@@ -248,6 +248,9 @@ func (b *WakeBackstop) visit(ctx context.Context, coordinatorID string) {
 	if !b.recordWakes(ctx, c) {
 		return
 	}
+	if err := b.svc.ObserveOpenChanges(ctx, c.WorkspaceID); err != nil {
+		b.skip("observe open changes", err)
+	}
 	b.recordMergeWakes(ctx, c)
 	b.runDuty(ctx, "deliver", hooks.Deliver, coordinatorID)
 }

@@ -115,3 +115,11 @@ func (o *ChangeObserver) failure(k string) ReadResult {
 	snap := g.snap
 	return ReadResult{LastGood: &snap, LastGoodAt: g.startedAt}
 }
+
+// Forget drops every retained successful read, so the next read goes to the
+// provider.
+func (o *ChangeObserver) Forget() {
+	o.mu.Lock()
+	o.good = map[string]observed{}
+	o.mu.Unlock()
+}

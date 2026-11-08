@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"sort"
 	"testing"
 
 	"github.com/kandev/kandev/internal/coordinator/mergestate"
@@ -11,6 +12,15 @@ type fakeChangeLinks struct{ byChange map[string][]string }
 
 func (f fakeChangeLinks) TasksLinkedToChange(_ context.Context, _, changeKey string) ([]string, error) {
 	return f.byChange[changeKey], nil
+}
+
+func (f fakeChangeLinks) OpenChanges(context.Context, string) ([]string, error) {
+	keys := make([]string, 0, len(f.byChange))
+	for k := range f.byChange {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys, nil
 }
 
 func (e *wakeEnv) openEpisode(t *testing.T, changeKey string, p mergestate.Pipeline) {
@@ -89,5 +99,17 @@ func TestBackstopMergeWakesOffWithFlagOff(t *testing.T) {
 	e.pass(t)
 	if got := pendingWakeKinds(t, e.store, e.fix.c.ID); len(got) != 0 {
 		t.Fatalf("merge wake derived with the flag off: %v", got)
+	}
+}
+
+func TestBackstopObservesOpenChangesAndWakes(t *testing.T) {
+	e, r := newObserveEnv(t)
+	r.snap = mergestate.Snapshot{Key: testKey, HeadSHA: "h1", Pipeline: mergestate.PipelineGreen, Conflict: mergestate.ConflictClear}
+	e.pass(t)
+	r.snap.Pipeline = mergestate.PipelineRed
+	e.svc.observer().Forget()
+	e.pass(t)
+	if got := pendingWakeKinds(t, e.store, e.fix.c.ID); len(got) != 1 || got[0] != "change_red" {
+		t.Fatalf("wakes = %v", got)
 	}
 }

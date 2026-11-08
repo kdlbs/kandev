@@ -13,6 +13,9 @@ type ChangeLinks interface {
 	// TasksLinkedToChange returns the IDs of the workspace's tasks linked to
 	// the change key (provider|host|repository ID|number).
 	TasksLinkedToChange(ctx context.Context, workspaceID, changeKey string) ([]string, error)
+	// OpenChanges returns the change keys of the workspace's open changes that
+	// are linked to a live task, sorted ascending.
+	OpenChanges(ctx context.Context, workspaceID string) ([]string, error)
 }
 
 // SetChangeLinks wires the change-to-task link reader; nil until then, and the
@@ -61,6 +64,38 @@ func (s *Service) ObserveChange(ctx context.Context, workspaceID string, key mer
 		return res, err
 	}
 	return res, nil
+}
+
+// maxObservedPerPass bounds the provider reads one backstop pass starts for a
+// coordinator; the rest wait for the next pass.
+const maxObservedPerPass = 100
+
+// ObserveOpenChanges reads every open change of the workspace (up to
+// maxObservedPerPass) through ObserveChange. A failed read of one change does
+// not stop the others; the first error is returned.
+func (s *Service) ObserveOpenChanges(ctx context.Context, workspaceID string) error {
+	links := s.changeLinkReader()
+	if !s.merge || links == nil || s.observer() == nil {
+		return nil
+	}
+	keys, err := links.OpenChanges(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("list open changes: %w", err)
+	}
+	if len(keys) > maxObservedPerPass {
+		keys = keys[:maxObservedPerPass]
+	}
+	var first error
+	for _, k := range keys {
+		key, ok := mergestate.ParseChangeKey(k)
+		if !ok || ctx.Err() != nil {
+			continue
+		}
+		if _, err := s.ObserveChange(ctx, workspaceID, key, false); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 // wakeTargets returns the (coordinator, task) pairs a wake for the change is
