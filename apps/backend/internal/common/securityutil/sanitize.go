@@ -362,6 +362,9 @@ func redactLocalPaths(s string) string {
 		masked.WriteString(prefix + strconv.Itoa(len(dates)) + "x")
 		dates = append(dates, s[start:end])
 		last = end
+		// A masked date's own slashes are not path separators, so they must not
+		// mark the rest of the token as a path: "1/2/2025-3/4/2025" is two dates.
+		scanned = end
 	}
 	masked.WriteString(s[last:])
 	redacted := redactLocalPathsMasked(masked.String())
