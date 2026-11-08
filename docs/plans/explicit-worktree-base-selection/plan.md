@@ -257,8 +257,9 @@ Three existing worktree controls also passed:
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/worktree -run '^(TestCreateWorktree_BaseBranchFallback_RecoversWhenRequestedMissing|TestCreateWorktree_BaseBranchFallback_NotUsedWhenBaseExists|TestCreateWorktree_PullEnabledUsesLocalOnlyBase)$' -count=1 -v)
 ```
 
-These results establish the defect and current compatibility controls.
-They do not substitute for the pending implementation or integration checks.
+These design-stage results established the defect and the existing
+compatibility controls. They do not substitute for the implementation and
+integration checks recorded above, which are now complete.
 
 ## Risks
 

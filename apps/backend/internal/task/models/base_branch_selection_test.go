@@ -123,8 +123,16 @@ func TestBaseBranchSelectionPolicy(t *testing.T) {
 			metadata: map[string]interface{}{BaseBranchSelectionMetadataKey: BaseBranchSelection{
 				Version: 1, Source: BaseBranchSelectionSourceRepositoryDefault,
 			}},
-			baseBranch: "trunk",
+			baseBranch: "",
 			want:       BaseBranchFallbackPolicyRepositoryDefault,
+		},
+		{
+			name: "deferred binding against a resolved base stays strict",
+			metadata: map[string]interface{}{BaseBranchSelectionMetadataKey: BaseBranchSelection{
+				Version: 1, Source: BaseBranchSelectionSourceRepositoryDefault,
+			}},
+			baseBranch: "trunk",
+			want:       BaseBranchFallbackPolicyStrict,
 		},
 		{
 			name: "stale branch binding stays strict",
@@ -185,5 +193,27 @@ func TestBaseBranchSelectionUnsetAttachmentBaseKeepsDefaultIntent(t *testing.T) 
 		ManualBaseBranchOverrideMetadataKey: true,
 	}, ""); got != BaseBranchFallbackPolicyStrict {
 		t.Fatalf("manual override policy = %q, want strict", got)
+	}
+	if got := ResolveAttachmentBaseBranchFallbackPolicy(map[string]interface{}{
+		TaskRepositoryPRNumberMetadataKey: 42,
+	}, ""); got != BaseBranchFallbackPolicyStrict {
+		t.Fatalf("legacy PR-linked policy = %q, want strict", got)
+	}
+	if got := ResolveAttachmentBaseBranchFallbackPolicy(map[string]interface{}{
+		TaskRepositoryPRNumberMetadataKey: float64(42),
+	}, ""); got != BaseBranchFallbackPolicyStrict {
+		t.Fatalf("rehydrated PR-linked policy = %q, want strict", got)
+	}
+	if got := ResolveAttachmentBaseBranchFallbackPolicy(map[string]interface{}{
+		BaseBranchSelectionMetadataKey: map[string]interface{}{"version": 1, "branch": "main", "source": "guessed"},
+	}, ""); got != BaseBranchFallbackPolicyStrict {
+		t.Fatalf("malformed selection policy = %q, want strict", got)
+	}
+	if got := ResolveAttachmentBaseBranchFallbackPolicy(map[string]interface{}{
+		BaseBranchSelectionMetadataKey: BaseBranchSelection{
+			Version: 1, Branch: "main", Source: BaseBranchSelectionSourceRepositoryDefault,
+		},
+	}, ""); got != BaseBranchFallbackPolicyStrict {
+		t.Fatalf("stale bound record policy = %q, want strict", got)
 	}
 }

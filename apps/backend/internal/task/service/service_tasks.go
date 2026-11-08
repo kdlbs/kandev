@@ -1299,7 +1299,8 @@ func buildBaseBranchSelection(
 		models.BaseBranchSelectionSourceRepositoryDefault:
 	default:
 		source = models.BaseBranchSelectionSourceExplicit
-		if policy == nil && strings.TrimSpace(repoInput.BaseBranch) == "" &&
+		if repoInput.BaseBranchSelectionSource == "" && policy == nil &&
+			strings.TrimSpace(repoInput.BaseBranch) == "" &&
 			repoInput.RemoteContribution == nil && resolvePRNumber(repoInput) == 0 {
 			source = models.BaseBranchSelectionSourceRepositoryDefault
 		}
@@ -1368,7 +1369,7 @@ func buildTaskRepositoryMetadata(repoInput TaskRepositoryInput) (map[string]inte
 		return nil, err
 	}
 	if prNum := resolvePRNumber(repoInput); prNum > 0 {
-		metadata["pr_number"] = prNum
+		metadata[models.TaskRepositoryPRNumberMetadataKey] = prNum
 	}
 	if repoInput.RemoteContribution != nil {
 		if err := models.PutRemoteContribution(metadata, repoInput.RemoteContribution); err != nil {

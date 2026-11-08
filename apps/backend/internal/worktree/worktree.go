@@ -391,11 +391,11 @@ func (r *CreateRequest) Validate() error {
 		}
 	}
 	if r.BaseBranch == "" {
-		// Defence-in-depth: prefer the explicit FallbackBaseBranch (typically
-		// the repository's default_branch carried by the caller) over an
-		// outright rejection. The manager's branchExists check still verifies
-		// the resulting ref before any git work runs.
-		if r.FallbackBaseBranch == "" {
+		// Default filling is only authorized for an inherited or automatic
+		// selection. A strict request must name its base; adopting the
+		// configured fallback would satisfy the unresolved selection with
+		// another branch.
+		if !r.BaseBranchFallbackPolicy.PermitsRepositoryDefaultSubstitution() || r.FallbackBaseBranch == "" {
 			return ErrInvalidBaseBranch
 		}
 		r.BaseBranch = r.FallbackBaseBranch

@@ -127,6 +127,17 @@ func TestBaseBranchSelection_Producers(t *testing.T) {
 		requireSelection(t, loadOnlySelectionRow(t, svc, child.Task.ID).Metadata, "feature/parent", models.BaseBranchSelectionSourceInherited)
 	})
 
+	t.Run("unknown source with omitted base stays strict", func(t *testing.T) {
+		task := createSelectionTask(t, svc, workflowID, TaskRepositoryInput{
+			RepositoryID: "repo-selection-a", BaseBranchSelectionSource: "guessed",
+		})
+		row := loadOnlySelectionRow(t, svc, task.ID)
+		requireSelection(t, row.Metadata, "", models.BaseBranchSelectionSourceExplicit)
+		if policy := models.ResolveAttachmentBaseBranchFallbackPolicy(row.Metadata, row.BaseBranch); policy.PermitsRepositoryDefaultSubstitution() {
+			t.Fatalf("unknown omitted-base policy = %q, want strict", policy)
+		}
+	})
+
 	t.Run("PR-linked omitted base stays strict", func(t *testing.T) {
 		task := createSelectionTask(t, svc, workflowID, TaskRepositoryInput{
 			RepositoryID: "repo-selection-a", PRNumber: 42, CheckoutBranch: "feature/head",

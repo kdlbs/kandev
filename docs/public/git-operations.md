@@ -196,10 +196,14 @@ permission, including when you select the same branch again.
 
 With **Always pull before creating a new worktree** disabled, a missing explicit
 base stops preparation without a remote-default lookup or extra fetch. Refresh a
-usable local copy, restore the branch remotely, or select an available base, then
-retry the same task. Kandev keeps the original attachment selection for the retry.
+usable local copy, fetch a remotely restored branch into the registered
+repository, or select an available base, then retry the same task. Kandev keeps
+the original attachment selection for the retry.
 If one attachment in a multi-repository task cannot resolve its base, preparation
-stops for the whole task and removes only the checkouts created by that attempt.
+stops for the whole task and rolls back only the checkouts created by that
+attempt. Earlier attachments may already have created their checkouts and run
+repository setup scripts; rollback is best effort and cannot undo effects
+outside those checkouts.
 
 ### Branch names in executor scripts
 

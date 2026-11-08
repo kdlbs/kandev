@@ -14,6 +14,10 @@ const (
 	// metadata JSON so no schema migration is required.
 	BaseBranchSelectionMetadataKey = "base_branch_selection"
 	BaseBranchSelectionVersion     = 1
+
+	// TaskRepositoryPRNumberMetadataKey marks an attachment as PR-linked.
+	// A deferred PR base must stay strict even without a selection record.
+	TaskRepositoryPRNumberMetadataKey = "pr_number"
 )
 
 // BaseBranchSelectionSource identifies who selected an attachment's base
@@ -134,7 +138,7 @@ func ResolveBaseBranchFallbackPolicy(
 	default:
 		return BaseBranchFallbackPolicyStrict
 	}
-	if selection.Branch != "" && selection.Branch != effectiveBaseBranch {
+	if selection.Branch != effectiveBaseBranch {
 		return BaseBranchFallbackPolicyStrict
 	}
 	return BaseBranchFallbackPolicyRepositoryDefault
@@ -153,9 +157,40 @@ func ResolveAttachmentBaseBranchFallbackPolicy(
 	if HasManualBaseBranchOverride(metadata) {
 		return BaseBranchFallbackPolicyStrict
 	}
-	if selection, ok, err := LoadBaseBranchSelection(metadata); err == nil && ok &&
-		selection.Source == BaseBranchSelectionSourceExplicit {
+	if taskRepositoryHasPRNumber(metadata) {
+		return BaseBranchFallbackPolicyStrict
+	}
+	selection, ok, err := LoadBaseBranchSelection(metadata)
+	if err != nil {
+		return BaseBranchFallbackPolicyStrict
+	}
+	if !ok {
+		return BaseBranchFallbackPolicyRepositoryDefault
+	}
+	if selection.Source == BaseBranchSelectionSourceExplicit || selection.Branch != "" {
 		return BaseBranchFallbackPolicyStrict
 	}
 	return BaseBranchFallbackPolicyRepositoryDefault
+}
+
+// taskRepositoryHasPRNumber reports whether the attachment is PR-linked.
+// Values arrive as int in typed maps and float64 after JSON rehydration.
+func taskRepositoryHasPRNumber(metadata map[string]interface{}) bool {
+	if metadata == nil {
+		return false
+	}
+	switch value := metadata[TaskRepositoryPRNumberMetadataKey].(type) {
+	case int:
+		return value > 0
+	case int32:
+		return value > 0
+	case int64:
+		return value > 0
+	case float32:
+		return value > 0
+	case float64:
+		return value > 0
+	default:
+		return false
+	}
 }

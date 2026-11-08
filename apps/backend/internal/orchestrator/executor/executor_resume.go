@@ -260,7 +260,10 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		info.WorktreeBranchTemplate = tr.BranchPolicyBranchTemplate
 	}
 	info.PullBeforeWorktree = repo.PullBeforeWorktree
-	if info.BaseBranch == "" && repo.DefaultBranch != "" {
+	if info.BaseBranch == "" && repo.DefaultBranch != "" && info.PRNumber == 0 {
+		// A PR-linked attachment may defer its base until the provider target
+		// resolves. Falling back to the repository default here would launch on
+		// the wrong integration target if that lookup failed.
 		info.BaseBranch = repo.DefaultBranch
 	}
 	if info.IntegrationRef == "" {
