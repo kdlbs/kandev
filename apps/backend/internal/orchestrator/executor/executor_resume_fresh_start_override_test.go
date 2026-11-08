@@ -8,6 +8,52 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+func TestRegisterResumeInitialPromptCallbacks(t *testing.T) {
+	manager := &resumePromptCallbackManager{mockAgentManager: &mockAgentManager{}}
+	exec := newTestExecutor(t, manager, newMockRepository())
+	var before, dispatched, failed bool
+	options := ResumeOptions{
+		BeforeInitialPromptDispatch: func(context.Context) error {
+			before = true
+			return nil
+		},
+		OnInitialPromptDispatched: func() { dispatched = true },
+		OnInitialPromptFailed:     func() { failed = true },
+	}
+	if err := exec.registerResumeInitialPromptCallbacks("execution", options); err != nil {
+		t.Fatalf("registerResumeInitialPromptCallbacks returned error: %v", err)
+	}
+	if manager.beforeAdmission == nil || manager.onDispatched == nil || manager.onFailure == nil {
+		t.Fatal("resume initial prompt callbacks were not registered")
+	}
+	if err := manager.beforeAdmission(context.Background(), "prompt", nil); err != nil {
+		t.Fatalf("before admission returned error: %v", err)
+	}
+	manager.onDispatched()
+	manager.onFailure()
+	if !before || !dispatched || !failed {
+		t.Fatalf("callbacks were not invoked: before=%v dispatched=%v failed=%v", before, dispatched, failed)
+	}
+}
+
+type resumePromptCallbackManager struct {
+	*mockAgentManager
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error
+	onDispatched    func()
+	onFailure       func()
+}
+
+func (m *resumePromptCallbackManager) RegisterInitialPromptAdmissionCallbacks(
+	_ string,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
+	onDispatched, onFailure func(),
+) error {
+	m.beforeAdmission = beforeAdmission
+	m.onDispatched = onDispatched
+	m.onFailure = onFailure
+	return nil
+}
+
 func TestBuildResumeRequestWithOptions_FreshStartPromptOverride(t *testing.T) {
 	task := &v1.Task{ID: "task-override", Description: "plain task description"}
 	session := &models.TaskSession{ID: "session-override"}

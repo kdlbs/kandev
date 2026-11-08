@@ -405,6 +405,7 @@ Resolve the applicable step and workflow metadata from their current trusted sou
 Keep each resolved template and its saved-prompt expansion together for this attempt.
 If an applicable step or required workflow metadata is unavailable, return an error before token reset or provider dispatch.
 Provider-identity and preserved-queue reads are eligibility evidence; their read failures also stop recovery before reset.
+Saved-prompt resolution failures are required context failures on this recovery path, not warning-only fallbacks.
 Existing warning-and-fallback helpers cannot silently omit required instructions on this recovery path.
 
 Reuse `buildWorkflowPromptWithContextOptions` and the existing first-launch composition rules.
@@ -434,6 +435,8 @@ Retain the existing behavior for those other fresh-start cases.
 Apply the override in `newResumeLaunchRequest` before existing prompt-suppression rules.
 The executor continues to own those rules. A suppressed or promptless launch must remain promptless.
 This handoff transports composed content without moving workflow lookups into the executor.
+Carry the prepared binding into the legacy initial-prompt admission callback.
+Validate it immediately before provider admission and keep the dispatch fence until acceptance or failure, so a move cannot send superseded instructions.
 
 An empty fallback cannot create new input merely because a step has a template.
 An automatic workflow queue entry already owns its composed prompt. This helper must not compose a second copy.

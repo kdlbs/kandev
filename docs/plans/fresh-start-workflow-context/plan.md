@@ -189,6 +189,7 @@ Implementation on 2026-11-08:
 - Go lint: passed for the changed backend files.
 - Public recovery guidance: updated for current workflow and step instructions.
 - Review follow-up: step-only plan mode, workflow-entry supersession, and one-shot provider/queue read failures are covered by the new regressions.
+- PR fixup follow-up: saved-prompt read failures fail closed, unfenced routes stop recovery, legacy initial-prompt admission keeps the entry fence, and dynamic retries cache the raw receipt. A persisted-transcript regression covers row, turn, attachment, and failure retention.
 - Specification, public documentation, link, and whitespace checks: passed.
 
 Investigation commands:

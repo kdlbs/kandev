@@ -125,7 +125,7 @@ After implementation, run this block from the repository root:
 
 ```bash
 (cd apps/backend && go test -race -tags fts5 ./internal/orchestrator ./internal/orchestrator/executor -run '^Test(FreshStartWorkflowContext|FreshStartSubmission|FreshStartReplay|FreshStartPendingReceipt|FreshStartRecovery|WorkflowAsyncStartFailure|RecoverSession_Office|ApplyRunningRecordToResumeRequest|BuildResumeRequestWithOptions|ResumeSession_ArchiveCancelled|ResumeSession_OrphanCancelled|ResumeSession_UserCancelled)' -count=1)
-bash scripts/lint-go-changed apps/backend/internal/orchestrator/initial_recovery_prompt.go apps/backend/internal/orchestrator/initial_submission_recovery.go apps/backend/internal/orchestrator/messagequeue/service.go apps/backend/internal/orchestrator/session_launch.go apps/backend/internal/orchestrator/task_operations.go apps/backend/internal/orchestrator/executor/executor_resume.go apps/backend/internal/orchestrator/fresh_start_workflow_context_test.go apps/backend/internal/orchestrator/executor/executor_resume_fresh_start_override_test.go
+bash scripts/lint-go-changed apps/backend/internal/orchestrator/initial_recovery_prompt.go apps/backend/internal/orchestrator/initial_submission_recovery.go apps/backend/internal/orchestrator/messagequeue/service.go apps/backend/internal/orchestrator/session_launch.go apps/backend/internal/orchestrator/task_operations.go apps/backend/internal/orchestrator/executor/executor_resume.go apps/backend/internal/orchestrator/fresh_start_workflow_context_test.go apps/backend/internal/orchestrator/fresh_start_workflow_fixture_test.go apps/backend/internal/orchestrator/executor/executor_resume_fresh_start_override_test.go apps/backend/internal/prompts/service/expansion.go
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 python3 scripts/list-docs.py validate
@@ -175,6 +175,7 @@ The real backend recovery action supplies end-to-end evidence for the shared des
 - `apps/backend/internal/orchestrator/task_operations.go`
 - `apps/backend/internal/orchestrator/executor/executor_resume.go`
 - `apps/backend/internal/orchestrator/fresh_start_workflow_context_test.go` (new)
+- `apps/backend/internal/orchestrator/fresh_start_workflow_fixture_test.go` (new test support)
 - `apps/backend/internal/orchestrator/executor/executor_resume_fresh_start_override_test.go` (new)
 - `docs/public/sessions-and-review.md`
 - This work order and its sibling plan for execution status and results.
@@ -225,3 +226,13 @@ before dispatch. Provider-identity and preserved-queue read failures now stop
 recovery before reset instead of silently dropping composition. The added
 regressions cover step-only plan mode, leave-and-return supersession, and
 one-shot identity or queue read failures.
+
+PR fixup closed the remaining review findings. Saved-prompt resolution now uses
+an error-returning expansion path and stops both receipt and legacy recovery
+before reset. A workflow step that cannot produce a valid entry binding fails
+closed instead of running unfenced, and the legacy launch carries the entry
+binding into initial-prompt admission while holding the dispatch fence through
+acceptance or failure. Dynamic fallback retries now cache the raw receipt rather
+than the composed prompt so workflow instructions are not applied twice. A
+persisted-transcript regression covers the original user row, turn, attachment,
+and failure history without adding another user message.

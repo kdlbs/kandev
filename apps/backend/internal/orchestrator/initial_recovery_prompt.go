@@ -162,10 +162,16 @@ func (s *Service) composeFreshStartWorkflowPrompt(
 	if step == nil {
 		return nil, errors.New("workflow step instructions are unavailable for fresh recovery")
 	}
+	workflowPrompt := ""
 	if step.WorkflowID != "" {
-		if _, err := s.getWorkflowMeta(ctx, step.WorkflowID); err != nil {
+		meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
+		if err != nil {
 			return nil, fmt.Errorf("load workflow instructions for fresh recovery: %w", err)
 		}
+		workflowPrompt = meta.Prompt
+	}
+	if err := s.validateFreshStartPromptReferences(ctx, workflowPrompt, step, content, session.IsPassthrough); err != nil {
+		return nil, err
 	}
 	binding, err := s.initialRecoveryWorkflowBinding(ctx, task, step, session.ID)
 	if err != nil {
@@ -181,6 +187,39 @@ func (s *Service) composeFreshStartWorkflowPrompt(
 		planMode:         step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode),
 		binding:          binding,
 	}, nil
+}
+
+// validateFreshStartPromptReferences checks the saved-prompt references that
+// the first-launch composer will expand. Recovery must stop before reset when a
+// required saved prompt cannot be read.
+func (s *Service) validateFreshStartPromptReferences(
+	ctx context.Context,
+	workflowPrompt string,
+	step *wfmodels.WorkflowStep,
+	content string,
+	isPassthrough bool,
+) error {
+	if step == nil || isPassthrough {
+		return nil
+	}
+	parts := make([]string, 0, 3)
+	if strings.TrimSpace(workflowPrompt) != "" {
+		parts = append(parts, workflowPrompt)
+	}
+	if step.Prompt != "" {
+		parts = append(parts, step.Prompt)
+	}
+	if step.Prompt == "" || strings.Contains(step.Prompt, "{{task_prompt}}") {
+		parts = append(parts, content)
+	}
+	candidate := strings.Join(parts, "\n\n")
+	if !strings.Contains(candidate, "@") {
+		return nil
+	}
+	if _, _, err := s.expandPromptReferencesWithContextStrict(ctx, candidate, false); err != nil {
+		return fmt.Errorf("resolve saved prompt instructions for fresh recovery: %w", err)
+	}
+	return nil
 }
 
 // initialRecoveryWorkflowBinding captures the workflow entry that authorized
@@ -207,7 +246,7 @@ func (s *Service) initialRecoveryWorkflowBinding(
 		return nil, fmt.Errorf("load workflow entry identity for fresh recovery: %w", err)
 	}
 	if !bound || !binding.Valid() {
-		return nil, nil
+		return nil, fmt.Errorf("%w: workflow entry binding is unavailable", ErrCeilingLaunchSuperseded)
 	}
 	if binding.DestinationSessionID != "" && binding.DestinationSessionID != sessionID {
 		return nil, fmt.Errorf("%w: workflow destination session changed", ErrCeilingLaunchSuperseded)

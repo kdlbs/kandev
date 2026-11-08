@@ -1128,6 +1128,9 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		StartAgentSynchronously: req.DeferRecoveryResolution &&
 			(req.ForceContextContinuation || req.RecoveryAction == recoveryActionResume),
 	}
+	if resumeOptions.InitialPromptOverride != nil {
+		s.installLegacyRecoveryPromptGuard(ctx, req.TaskID, &resumeOptions)
+	}
 	var execution *executor.TaskExecution
 	var err error
 	if req.InitialPromptSubmission != nil {
@@ -1179,6 +1182,25 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		s.clearWorkflowParkingForSession(ctx, req.SessionID, parkingStamp)
 	}
 	return executionToLaunchResponse(req.TaskID, execution), nil
+}
+
+// installLegacyRecoveryPromptGuard binds a text-only fresh-start launch to the
+// workflow entry captured before reset. The resume dispatch fence remains held
+// until the executor reports prompt acceptance or failure.
+func (s *Service) installLegacyRecoveryPromptGuard(
+	ctx context.Context,
+	taskID string,
+	options *executor.ResumeOptions,
+) {
+	binding := ceilingEntryBindingFromContext(ctx)
+	if binding == nil {
+		return
+	}
+	options.BeforeInitialPromptDispatch = func(dispatchCtx context.Context) error {
+		guardCtx := withCeilingEntryBinding(dispatchCtx, binding)
+		guardCtx = withCeilingEntryKind(guardCtx, models.CeilingLaunchResume)
+		return s.validateClaimedCeilingBinding(guardCtx, taskID, binding)
+	}
 }
 
 func (s *Service) sessionOpenRecoveryWaitingResponse(

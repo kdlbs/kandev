@@ -550,6 +550,9 @@ func (s *Service) replayInitialPromptSubmission(
 		firstLaunchPromptContext:        true,
 		preserveInitialSubmissionReplay: true,
 		disableDispatchRetry:            true,
+		// The cached retry prompt must stay raw so a later dynamic fallback
+		// composes the current workflow instructions exactly once.
+		retryPrompt: &submission.Content,
 		beforeProviderAdmission: func() error {
 			if err := s.validateResumeAttempt(attempt); err != nil {
 				return err
