@@ -40,6 +40,7 @@ func (s *Service) SessionCapacityObservation(ctx context.Context) sessioncapacit
 func (c *sessionCeilingController) capacityWaitingObservationLocked(ctx context.Context, population gradedPopulation, known bool) sessioncapacity.WaitingObservation {
 	requests, err := c.observedCapacityRequestsLocked(ctx, population)
 	if err != nil {
+		c.logPopulationUnknown("capacity_waiters", populationReadFailure(err), "", "")
 		return sessioncapacity.WaitingObservation{}
 	}
 	counts := map[string]int{ceilingReasonTotalLimit: 0, ceilingReasonGradeLimit: 0,
