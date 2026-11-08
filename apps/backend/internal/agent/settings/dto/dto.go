@@ -146,6 +146,11 @@ type ProfileEnvVarDTO struct {
 	Key      string `json:"key"`
 	Value    string `json:"value,omitempty"`
 	SecretID string `json:"secret_id,omitempty"`
+	// Shared reports whether the secret's owner lets every authorized starter
+	// of the agent profile use it for this binding. On writes, true shares the
+	// caller's own global secret, false revokes, and omission keeps the grant
+	// of an unchanged binding. The grantor's identity is never exposed.
+	Shared *bool `json:"shared,omitempty"`
 }
 
 type TUIConfigDTO struct {

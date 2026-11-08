@@ -950,6 +950,25 @@ Profile environment rules are:
 
 Kandev resolves secret references at process launch and cold resume. A deleted, missing, or unreadable secret blocks launch before the agent starts. The error identifies the environment key and its source.
 
+### Sharing a profile secret with other starters
+
+With authentication on, a Global secret resolves only for the user who owns it. Because agent profiles are shared, a profile bound to one person's Global secret fails for every other starter with a `BLOCKED_PROFILE_SECRET` error that names the profile, the key, and the reason. The secret's owner can opt in to shared use for one binding:
+
+- Set `"shared": true` on that environment entry through the agent-profile API (`POST /api/v1/agents/{agentId}/profiles` or `PATCH /api/v1/agent-profiles/{profileId}`). The web profile editor does not show this control yet. A save from the editor omits the field and keeps an existing share as long as the key and secret stay the same.
+- Only the user who owns the selected Global secret can set `shared: true`. Other users, signed-out or synthetic identities, literal values, and Workspace secrets are rejected.
+- `"shared": false` from the owner removes the share. Changing the key or the secret removes it, and so does duplicating the profile. Nested agent creation and executor profiles reject shares.
+- Responses show only `shared: true`. They never show who shared the secret.
+
+At launch, Kandev tries the starter's own secret first. It uses the share only when all of these are true:
+
+- the starter is a signed-in user or that user's agent token;
+- the user who shared it is still active and in the same organization;
+- that user still owns a Global secret with this exact binding.
+
+Otherwise the launch fails closed before the agent starts. The error explains which condition failed, and it never contains a secret value or ID. With authentication disabled, Global secrets are install-global and sharing is not needed.
+
+Sharing discloses the value. It enters the agent environment of every task that any authorized starter launches with that profile, and anyone who can edit the profile controls that process. Share only a credential that is meant for team use. Model, discovery, GitHub bridge, and coordinator checks do not use shares. The [shared profile secrets specification](../specs/agents/requirements/shared-profile-secrets.md) lists the full contract and exclusions.
+
 Secret deletion is blocked while an agent profile, executor profile, or repository environment references the secret. When you select Delete, Kandev checks first. If the secret is in use, a dialog lists the affected resources and does not offer a delete action. Remove or replace those references before deleting the secret.
 
 If a reference is already broken, open the named profile and select the replacement secret for the affected key, save, and retry. For a visible repository reference, open that repository's environment settings and replace the binding. A redacted `repository` reference means the repository is in a workspace that you cannot access; a workspace user with edit permission must locate and replace the binding in that workspace's repository settings. If no such user exists, ask a workspace owner or administrator to grant access or repair the binding. Creating a secret with the same name does not repair the reference because each secret has a separate ID.

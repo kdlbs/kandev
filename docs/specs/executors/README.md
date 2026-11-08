@@ -51,6 +51,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Remote Docker container inputs](requirements/remote-docker-container-inputs.md)
 - [Docker container network selection](requirements/docker-container-networks.md)
 - [Task MCP executor discovery](requirements/task-mcp-discovery.md)
+- [Prepared launch actor](requirements/prepared-launch-actor.md)
 
 ### System design
 
@@ -73,6 +74,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [SSH Session Transport Liveness](system-design/ssh-transport-liveness.md)
 - [SSH Host Reachability](system-design/ssh-reachability.md)
 - [SSH Host Reachability Surfaces](system-design/ssh-reachability-surfaces.md)
+- [Prepared launch actor](system-design/prepared-launch-actor.md)
 - [Remote Docker Executor](system-design/remote-docker-executor.md)
 - [Remote Docker container inputs](system-design/remote-docker-container-inputs.md)
 - [Docker container network selection](system-design/docker-container-networks.md)

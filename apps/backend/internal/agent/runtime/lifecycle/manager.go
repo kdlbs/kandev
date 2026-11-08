@@ -279,6 +279,10 @@ type Manager struct {
 	// Used to persist tokens across backend restarts for remote executor recovery.
 	secretStore secrets.SecretStore
 
+	// sharedSecretGrantor checks the account that shared an agent-profile
+	// secret binding before another user's start may resolve it.
+	sharedSecretGrantor SharedProfileSecretGrantorResolver
+
 	// runningWriter persists the executors_running row in lockstep with executionStore.
 	// See SetExecutorRunningWriter and persistence.go. The lifecycle manager is the
 	// only component allowed to write the lifecycle-owned columns of this table.

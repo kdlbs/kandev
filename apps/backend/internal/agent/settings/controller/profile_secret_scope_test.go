@@ -39,7 +39,7 @@ func TestValidateGlobalSecretRefsRejectsWorkspaceSecret(t *testing.T) {
 
 	err := controller.validateGlobalSecretRefs(context.Background(), []dto.ProfileEnvVarDTO{{
 		Key: "TOKEN", SecretID: "secret-1",
-	}})
+	}}, nil)
 	if err == nil {
 		t.Fatal("workspace secret accepted in shared profile")
 	}
@@ -52,7 +52,7 @@ func TestValidateGlobalSecretRefsAcceptsGlobalSecret(t *testing.T) {
 
 	if err := controller.validateGlobalSecretRefs(context.Background(), []dto.ProfileEnvVarDTO{{
 		Key: "TOKEN", SecretID: "secret-1",
-	}}); err != nil {
+	}}, nil); err != nil {
 		t.Fatalf("global secret rejected: %v", err)
 	}
 }
@@ -64,7 +64,7 @@ func TestValidateGlobalSecretRefsRejectsBackendOwnedIDThroughUserVisibleStore(t 
 
 	err := controller.validateGlobalSecretRefs(context.Background(), []dto.ProfileEnvVarDTO{{
 		Key: "TOKEN", SecretID: "github:user:workspace:user:access",
-	}})
+	}}, nil)
 	if err == nil {
 		t.Fatal("backend-owned secret ID accepted in shared profile")
 	}

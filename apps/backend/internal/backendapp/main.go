@@ -753,6 +753,7 @@ func startAgentInfrastructure(
 	// CheckEnvironmentAccess / CheckTaskEnvironmentAccess in a route guard.
 	wireLifecycleAccessCheckers(lifecycleMgr, services.Task)
 	wireExecutorAdmission(services.Auth, services.Task, lifecycleMgr)
+	wireSharedProfileSecretGrantor(services.Auth, lifecycleMgr)
 	if services.GitHub != nil {
 		services.GitHub.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
 	}

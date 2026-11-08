@@ -3064,6 +3064,10 @@ type ProfileEnvVar struct {
 	Key      string `json:"key"`
 	Value    string `json:"value,omitempty"`
 	SecretID string `json:"secret_id,omitempty"`
+	// SharedByUserID records the owner of SecretID who allowed every
+	// authorized starter of the agent profile to use the secret for this
+	// binding. Only agent profiles honor it; executor profiles reject it.
+	SharedByUserID string `json:"shared_by_user_id,omitempty"`
 }
 
 // ExecutorProfile represents a named configuration preset for an executor.

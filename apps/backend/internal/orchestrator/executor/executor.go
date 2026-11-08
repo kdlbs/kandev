@@ -796,6 +796,11 @@ type LaunchOptions struct {
 	// selected session already has an active agent. Other internal launch paths
 	// retain their existing workspace reuse behavior.
 	RefuseIfAgentRunning bool
+	// RequireExecutorActor refuses the launch when admission establishes no
+	// identity to launch as. Internal starts that act for the session's
+	// durable executor actor set it so a missing actor never becomes an
+	// unscoped launch.
+	RequireExecutorActor bool
 	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, McpModeAutomation, McpModeCoordinator, or McpModeManagedConversation
 	McpProfile           *mcpprofile.Context
 	Attachments          []v1.MessageAttachment

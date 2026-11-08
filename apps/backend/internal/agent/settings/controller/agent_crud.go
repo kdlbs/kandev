@@ -277,6 +277,9 @@ func validateCreateProfileRequest(p CreateAgentProfileRequest) error {
 	if err := validateProfileEnvVarDTOs(p.EnvVars); err != nil {
 		return err
 	}
+	if err := rejectProfileSecretShares(p.EnvVars); err != nil {
+		return err
+	}
 	return validateCommandPrefix(p.CommandPrefix)
 }
 

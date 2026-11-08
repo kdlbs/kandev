@@ -79,8 +79,9 @@ func (m *Manager) ExecutorProfileEnvForSession(ctx context.Context, sessionID, t
 		return nil, nil
 	}
 	// ExecutorProfile.EnvVars and agent-profile env vars are the same type, so
-	// the secret-revealing resolver is shared.
-	resolved, err := m.resolveAgentProfileEnvVars(ctx, profile.EnvVars)
+	// the secret-revealing resolver is shared. Executor profiles never honor
+	// agent-profile secret shares.
+	resolved, err := m.resolveAgentProfileEnvVars(ctx, withoutSecretShares(profile.EnvVars))
 	if err != nil {
 		m.logger.Warn("failed to resolve executor profile environment for terminal",
 			zap.String("session_id", sessionID),

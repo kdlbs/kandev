@@ -48,13 +48,9 @@ func (m *Manager) resolveStrictEnvironment(
 		})
 	}
 
-	resolved, records, err := runtimeenv.Resolve(ctx, definitions, m.resolveEnvironmentDefinition)
+	resolved, records, err := runtimeenv.Resolve(ctx, definitions, m.environmentRevealer(profileInfo))
 	if err != nil {
-		var secretErr *runtimeenv.SecretError
-		if errors.As(err, &secretErr) && secretErr.Origin == runtimeenv.OriginAgentProfile && profileInfo != nil && profileInfo.ProfileName != "" {
-			err = fmt.Errorf("agent profile %q: %w", profileInfo.ProfileName, err)
-		}
-		return nil, fmt.Errorf("resolve task environment: %w", err)
+		return nil, fmt.Errorf("resolve task environment: %w", agentProfileSecretError(err, profileInfo))
 	}
 	m.logEnvironmentOverrides(req, records)
 	return resolved, nil
@@ -87,6 +83,22 @@ func (m *Manager) logEnvironmentOverrides(req *LaunchRequest, records []runtimee
 			zap.String("session_id", req.SessionID),
 		)
 	}
+}
+
+// agentProfileSecretError names the agent profile and the actionable reason
+// for an agent-profile secret failure.
+func agentProfileSecretError(err error, profileInfo *AgentProfileInfo) error {
+	var secretErr *runtimeenv.SecretError
+	if !errors.As(err, &secretErr) || secretErr.Origin != runtimeenv.OriginAgentProfile {
+		return err
+	}
+	if hint := sharedProfileSecretHint(err); hint != "" {
+		err = fmt.Errorf("%w (%s)", err, hint)
+	}
+	if profileInfo != nil && profileInfo.ProfileName != "" {
+		err = fmt.Errorf("agent profile %q: %w", profileInfo.ProfileName, err)
+	}
+	return err
 }
 
 func appendAgentProfileDefinitions(definitions *[]runtimeenv.Definition, profileInfo *AgentProfileInfo) {
