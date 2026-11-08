@@ -58,6 +58,14 @@ never create one. If the child has not registered the event, for example the
 `taskkill /T` request. Grace deadlines, second-signal handling, and forced tree
 cleanup are unchanged. Other platforms keep their existing signals.
 
+After the child exits within grace, the launcher still runs `taskkill /F /T`
+for remaining descendants. The child is already reaped at that point, and
+`taskkill` reports the missing PID in the system language, which the English
+"not found" match cannot recognize. When forced cleanup fails, the launcher
+opens the PID with `SYNCHRONIZE`: an invalid PID or a signaled handle is a
+confirmed exit and is reported as already gone, so a cooperative stop stays
+graceful. A live or inaccessible process remains a failure.
+
 ## Implementation plans
 
 - [Windows cooperative shutdown fix](../../../plans/windows-cooperative-shutdown/plan.md)
