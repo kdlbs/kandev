@@ -77,6 +77,7 @@ test.describe("Dynamic Agents settings card", () => {
 
       const candidateRow = testPage.getByTestId("dynamic-profile-candidates").locator("li");
       await expect(candidateRow).toContainText(candidate.name);
+      await candidateRow.getByTestId("dynamic-candidate-policy-summary").click();
       await expect(testPage.getByTestId("dynamic-policy-transient")).toBeVisible();
       await expect(testPage.getByTestId("dynamic-policy-hard")).toBeVisible();
       const help = testPage
