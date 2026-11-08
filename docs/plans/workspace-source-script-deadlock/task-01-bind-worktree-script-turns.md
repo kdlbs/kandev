@@ -181,3 +181,16 @@ The review remediation command
 
 also passed and exercises the new observed-turn-completion-with-successor case
 through the real service and SQLite repository.
+
+Review fixup on 2026-11-08 moved the idle attachment and legacy add-branch
+lock-boundary scenarios into a bounded subprocess: the parent kills and waits
+for a hung child, so a regressed task-mutex deadlock cannot leave an attachment
+goroutine running during fixture teardown. The remediation also asserts that a
+lookup failure persists no turns and that compensation removes both the physical
+worktree directory and its Git registration.
+
+```bash
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/backendapp -run 'TestWorktreeScriptMessageAdapter|TestWorkspaceSourceScripts|TestBootMessageAdapter' -count=1 -timeout=300s)
+```
+
+The remediation run passed.

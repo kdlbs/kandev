@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,12 +17,42 @@ import (
 )
 
 const (
-	scriptTurnMarker        = "issue5151-setup-ok"
-	scriptTurnCleanupMarker = "issue5151-cleanup-ok"
-	scriptTurnRepoID        = "repo-script-added"
-	scriptTurnRepoName      = "script-added"
-	scriptTurnHandlerBudget = 30 * time.Second
+	scriptTurnMarker         = "issue5151-setup-ok"
+	scriptTurnCleanupMarker  = "issue5151-cleanup-ok"
+	scriptTurnRepoID         = "repo-script-added"
+	scriptTurnRepoName       = "script-added"
+	scriptTurnHandlerBudget  = 30 * time.Second
+	scriptTurnSubprocessEnv  = "KANDEV_BACKENDAPP_SCRIPT_TURN_SUBPROCESS"
+	scriptTurnSubprocessWait = 2 * time.Minute
 )
+
+// runScriptTurnSubprocess re-runs one test in a child process so a regressed
+// task-gate deadlock cannot leave its attachment goroutine running while the
+// parent fixture tears down. A hung child is killed and surfaced as a failure.
+func runScriptTurnSubprocess(t *testing.T, testName string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), scriptTurnSubprocessWait)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^"+testName+"$", "-test.count=1")
+	cmd.Env = append(os.Environ(), scriptTurnSubprocessEnv+"=1")
+	cmd.WaitDelay = 10 * time.Second
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("%s subprocess did not terminate within %s; output:\n%s", testName, scriptTurnSubprocessWait, scriptTurnOutputTail(out))
+	}
+	if err != nil {
+		t.Fatalf("%s subprocess failed: %v\n%s", testName, err, scriptTurnOutputTail(out))
+	}
+	t.Logf("%s passed in an isolated subprocess", testName)
+}
+
+func scriptTurnOutputTail(out []byte) string {
+	const limit = 8000
+	if len(out) <= limit {
+		return string(out)
+	}
+	return "... (truncated)\n" + string(out[len(out)-limit:])
+}
 
 type scriptTurnScenario struct {
 	ctx          context.Context
@@ -244,6 +275,10 @@ func (s *scriptTurnScenario) requireMarker(t *testing.T, worktreePath, marker st
 // and AC-TASKS-ATTACH-WORKSPACE-SOURCES-001.5: an idle Worktree attachment with a
 // setup script must complete materialization without opening a conversational turn.
 func TestWorkspaceSourceScripts_AttachIdle(t *testing.T) {
+	if os.Getenv(scriptTurnSubprocessEnv) != "1" {
+		runScriptTurnSubprocess(t, "TestWorkspaceSourceScripts_AttachIdle")
+		return
+	}
 	scenario := newScriptTurnScenario(t)
 	scenario.addScriptRepository(t, "echo "+scriptTurnMarker+" > setup-marker.txt && echo "+scriptTurnMarker, "")
 
@@ -322,6 +357,10 @@ func TestWorkspaceSourceScripts_SetupFailure(t *testing.T) {
 // TestWorkspaceSourceScripts_AddBranch covers AC-TASKS-ATTACH-WORKSPACE-SOURCES-001.6
 // for both the idle legacy path and a path that owns an existing conversational turn.
 func TestWorkspaceSourceScripts_AddBranch(t *testing.T) {
+	if os.Getenv(scriptTurnSubprocessEnv) != "1" {
+		runScriptTurnSubprocess(t, "TestWorkspaceSourceScripts_AddBranch")
+		return
+	}
 	addBranch := func(t *testing.T, scenario *scriptTurnScenario) *taskservice.AddBranchToTaskResult {
 		t.Helper()
 		result, err := awaitScriptTurn(t, "legacy add branch", func() (*taskservice.AddBranchToTaskResult, error) {
@@ -396,7 +435,10 @@ func (r *failingInventoryListRepo) ListTaskEnvironmentRepos(context.Context, str
 // message finishes without another turn-creation attempt.
 func TestWorkspaceSourceScripts_Compensation(t *testing.T) {
 	scenario := newScriptTurnScenario(t)
-	scenario.addScriptRepository(t, "echo "+scriptTurnMarker, "echo "+scriptTurnCleanupMarker)
+	recordPath := filepath.Join(t.TempDir(), "created-worktree.txt")
+	scenario.addScriptRepository(t,
+		`pwd -P > "`+recordPath+`" && echo `+scriptTurnMarker,
+		"echo "+scriptTurnCleanupMarker)
 	scenario.materializer.repo = &failingInventoryListRepo{
 		workspaceSourceMaterializerRepo: scenario.repo,
 		err:                             errors.New("inventory unavailable"),
@@ -405,6 +447,21 @@ func TestWorkspaceSourceScripts_Compensation(t *testing.T) {
 	_, attachErr := scenario.attach(t)
 	if !errors.Is(attachErr, taskservice.ErrWorkspaceSourceMaterialize) {
 		t.Fatalf("AttachWorkspaceSources error = %v, want materialization failure", attachErr)
+	}
+	recorded, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("setup script did not record its worktree: %v", err)
+	}
+	createdWorktree := strings.TrimSpace(string(recorded))
+	if createdWorktree == "" {
+		t.Fatal("setup script recorded an empty worktree path")
+	}
+	if _, statErr := os.Stat(createdWorktree); !os.IsNotExist(statErr) {
+		t.Fatalf("compensation left worktree directory %s: %v", createdWorktree, statErr)
+	}
+	registrations := runGit(t, scenario.addedPath, "worktree", "list", "--porcelain")
+	if strings.Contains(registrations, createdWorktree) {
+		t.Fatalf("compensation left Git worktree registration for %s", createdWorktree)
 	}
 	repositories, err := scenario.repo.ListTaskRepositories(scenario.ctx, "task-1")
 	if err != nil {

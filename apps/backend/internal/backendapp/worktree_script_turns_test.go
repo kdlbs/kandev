@@ -350,4 +350,11 @@ func TestWorktreeScriptMessageAdapter_ActiveTurnLookupFailure(t *testing.T) {
 	if len(messages) != 0 {
 		t.Fatalf("lookup failure persisted %d messages", len(messages))
 	}
+	turns, listErr := repo.ListTurnsBySession(ctx, "session-script")
+	if listErr != nil {
+		t.Fatalf("ListTurnsBySession: %v", listErr)
+	}
+	if len(turns) != 0 {
+		t.Fatalf("lookup failure persisted %d turns", len(turns))
+	}
 }
