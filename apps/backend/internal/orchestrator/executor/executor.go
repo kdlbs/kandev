@@ -225,6 +225,18 @@ type sharedGroupWorkspaceBindingTaskSessionCreator interface {
 	CreateTaskSessionWithSharedGroupWorkspaceBinding(context.Context, *models.TaskSession, *models.TaskEnvironment, string) error
 }
 
+type inheritedTaskEnvironmentTransitionClaimer interface {
+	ClaimInheritedTaskEnvironmentTransition(
+		context.Context,
+		string,
+		string,
+		string,
+		string,
+		string,
+		string,
+	) (*models.TaskEnvironment, bool, bool, error)
+}
+
 type primarySessionTaskStateStore interface {
 	UpdateTaskStateIfPrimarySessionState(
 		context.Context,

@@ -811,6 +811,86 @@ func TestCreateTaskSessionWithSharedGroupWorkspaceBindingElectsOneMaterializer(t
 	}
 }
 
+func TestCreateTaskSessionWithSharedGroupWorkspaceBindingDefersEligibleExecutorTransition(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-group-transition")
+	for _, taskID := range []string{"task-group-owner", "task-group-child", "task-group-sibling"} {
+		if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "workspace-group-transition", Title: taskID}); err != nil {
+			t.Fatalf("create task %s: %v", taskID, err)
+		}
+	}
+	seedSharedWorkspaceGroup(t, repo, "group-transition", "task-group-owner", "task-group-child", "task-group-sibling")
+
+	owner := &models.TaskSession{ID: "session-group-owner", TaskID: "task-group-owner"}
+	if err := repo.CreateTaskSession(ctx, owner); err != nil {
+		t.Fatalf("create group owner session: %v", err)
+	}
+	foreign := &models.TaskEnvironment{
+		ID:                       "environment-group-owner",
+		TaskID:                   owner.TaskID,
+		ExecutorType:             string(models.ExecutorTypeLocal),
+		Status:                   models.TaskEnvironmentStatusCreating,
+		MaterializationSessionID: owner.ID,
+	}
+	if err := repo.CreateTaskEnvironment(ctx, foreign); err != nil {
+		t.Fatalf("create foreign materialization: %v", err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		UPDATE task_workspace_groups SET materialized_environment_id = ? WHERE id = ?
+	`), foreign.ID, "group-transition"); err != nil {
+		t.Fatalf("bind group environment: %v", err)
+	}
+	sibling := &models.TaskSession{
+		ID: "session-group-sibling", TaskID: "task-group-sibling",
+		TaskEnvironmentID: foreign.ID, WorkspacePath: "/group/workspace",
+	}
+	if err := repo.CreateTaskSession(ctx, sibling); err != nil {
+		t.Fatalf("create sibling group session: %v", err)
+	}
+
+	child := &models.TaskSession{ID: "session-group-child", TaskID: "task-group-child"}
+	err := repo.CreateTaskSessionWithSharedGroupWorkspaceBinding(ctx, child, &models.TaskEnvironment{
+		TaskID: child.TaskID, ExecutorType: string(models.ExecutorTypeLocalDocker),
+	}, "group-transition")
+	if err != nil {
+		t.Fatalf("create inherited child session before its executor transition: %v", err)
+	}
+	if child.TaskEnvironmentID != foreign.ID {
+		t.Fatalf("child session environment = %q, want inherited %q until launch claims its own environment", child.TaskEnvironmentID, foreign.ID)
+	}
+	var pointer string
+	if err := repo.db.Get(&pointer, `SELECT materialized_environment_id FROM task_workspace_groups WHERE id = 'group-transition'`); err != nil {
+		t.Fatal(err)
+	}
+	if pointer != foreign.ID {
+		t.Fatalf("group pointer = %q, want unchanged inherited environment %q", pointer, foreign.ID)
+	}
+	if environment, err := repo.GetTaskEnvironmentByTaskID(ctx, child.TaskID); err != nil || environment != nil {
+		t.Fatalf("child task environment before launch claim = %+v, %v, want none", environment, err)
+	}
+	childEnvironment, handled, rebound, err := repo.ClaimInheritedTaskEnvironmentTransition(
+		ctx, child.TaskID, child.ID, foreign.ID,
+		string(models.ExecutorTypeLocalDocker), "docker-child", "profile-child",
+	)
+	if err != nil || !handled || !rebound || childEnvironment == nil {
+		t.Fatalf("claim detached group-member environment = %+v, handled %v rebound %v error %v", childEnvironment, handled, rebound, err)
+	}
+	if err := repo.db.Get(&pointer, `SELECT materialized_environment_id FROM task_workspace_groups WHERE id = 'group-transition'`); err != nil {
+		t.Fatal(err)
+	}
+	if pointer != foreign.ID {
+		t.Fatalf("group pointer after child detach = %q, want unchanged inherited environment %q", pointer, foreign.ID)
+	}
+	siblingAfter, err := repo.GetTaskSession(ctx, sibling.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if siblingAfter.TaskEnvironmentID != foreign.ID || siblingAfter.WorkspacePath != sibling.WorkspacePath {
+		t.Fatalf("other group member binding after detach = env %q path %q, want original group environment and path", siblingAfter.TaskEnvironmentID, siblingAfter.WorkspacePath)
+	}
+}
+
 // @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.2
 func TestCreateTaskSessionWithWorkspaceBindingTakesOverAbandonedCreatingClaim(t *testing.T) {
 	repo := newRepoForEntityTests(t)

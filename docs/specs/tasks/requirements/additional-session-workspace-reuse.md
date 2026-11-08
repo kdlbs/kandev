@@ -99,6 +99,18 @@ starting in a stale workspace retained by the previous executor.
   session already bound to the inherited environment shall keep the typed
   executor-mismatch refusal, and Kubernetes shall keep its unsupported-reuse
   refusal.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.6:** After an eligible
+  detachment, the task-owned environment shall become canonical for that task.
+  Later sessions of that task shall use it instead of rebinding to the parent
+  or group environment.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.7:** Detaching one member
+  from a shared group shall leave the group's environment and materialized
+  environment reference unchanged. Other active members shall continue to use
+  that group environment.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.8:** When sessions of one
+  task concurrently launch after an eligible detachment, they shall converge on
+  one canonical task environment and shall not create multiple physical
+  workspaces for the same repository slots.
 
 ### REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004: Concurrent Session Workspace Visibility
 

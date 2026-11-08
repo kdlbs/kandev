@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"maps"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -19,5 +20,14 @@ func (e *Executor) AdmitInheritedEnvironment(ctx context.Context, task *v1.Task,
 		metadata["executor_profile_id"] = executorProfileID
 	}
 	cfg := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	if env != nil && env.TaskID == task.ID {
+		if env.ExecutorType == "" {
+			return fmt.Errorf("%w: canonical task environment executor could not be verified", models.ErrWorkspaceReuseUnsafe)
+		}
+		if cfg.ExecutorType != "" && env.ExecutorType != cfg.ExecutorType {
+			return fmt.Errorf("%w: canonical task environment uses executor %q; selected executor is %q",
+				models.ErrWorkspaceExecutorMismatch, env.ExecutorType, cfg.ExecutorType)
+		}
+	}
 	return rejectInheritedEnvironmentExecutorMismatch(task, env, cfg.ExecutorType, true)
 }

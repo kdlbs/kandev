@@ -138,14 +138,56 @@ to an environment owned by another task. When a new launch, handoff admission,
 or propagation selects a non-Kubernetes executor type different from that
 environment's type, `rejectInheritedEnvironmentExecutorMismatch` admits the
 transition, and `launchPreparedSession` detaches the session from the
-inherited environment so `persistTaskEnvironment` elects a fresh environment
-owned by the child on the selected executor
-(`AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5`). Refusing would strand an
-auto-started child whose step selected a different executor than its parent.
-Resume of a session already bound to the inherited environment cannot detach,
-so it passes `allowExecutorTransition=false` and keeps the typed
-`workspace_reuse_unsafe` refusal. Kubernetes keeps its refusals regardless of
-the flag.
+inherited environment so the child can materialize its own environment on the
+selected executor (`AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5`). Refusing
+would strand an auto-started child whose step selected a different executor
+than its parent.
+
+The child environment becomes the task's canonical environment after the
+transition. Inherited-environment propagation checks for this task-owned
+environment before resolving the parent or group. Later sessions of the child
+therefore attach to the child environment. The transition does not rewrite the
+parent environment or `task_workspace_groups.materialized_environment_id`.
+Other active group members continue to resolve the group's environment.
+
+The task environment row is the durable materialization claim. Before creating
+executor resources, a repository transaction binds the launching session to the
+child row and elects that session through `materialization_session_id`. A
+concurrent session that loses the task claim does not allocate executor
+resources. It waits for or attaches to the elected environment through the
+existing bounded `workspace_preparing` path. The claim uses the existing
+task-environment identity and uniqueness boundary; an in-process mutex is not
+the election authority. Cancellation and launch failure use the existing
+materialization-owner release and re-election rules. A former owner cannot
+publish after another session takes its claim.
+
+For `shared_group`, the transactional session binder may claim the child's
+task-owned environment when the selected non-Kubernetes executor differs from
+the group environment. It leaves the group's environment reference unchanged.
+For `inherit_parent`, launch classification makes the same task-owned claim
+before it waits for or recovers the inherited environment. A creating or failed
+foreign environment does not block an eligible transition and is never
+re-elected by the child. Same-executor attachment, unknown or unsafe ownership,
+resume of a session still bound to the foreign environment, and Kubernetes
+retain their existing bounded wait or typed refusal.
+
+A prepared session may already have a runtime for the inherited workspace. The
+transition retires that session-scoped runtime before the new executor launch;
+it does not remove or mutate the inherited task's environment. Start requests
+apply the existing active-agent admission before the durable environment claim.
+Workspace-only requests check the in-memory agent and the already-loaded
+`executors_running` status before a claim that would rebind the session, while
+same-executor workspace-only requests keep their existing behavior. An active
+agent refusal leaves the session binding and environment inventory unchanged.
+The runtime inventory persists the execution's
+`task_environment_id`. Retirement compares that durable identity with the
+selected child environment after admission and executor-mismatch checks. It
+uses the lifecycle's identity-aware cleanup seam, so a retry can recognize an
+old runtime after the environment claim has already committed. Unknown runtime
+identity fails closed. A stale inventory row cannot forward its prior
+environment handles to the child launch. A live-execution row alone cannot
+authorize reuse across executor types. A workspace-only launch must still
+finalize the child environment before it reports success.
 
 ## Launch admission
 
@@ -381,6 +423,26 @@ Executor-transition coverage adds:
   inventory, or the canonical repository.
 - Prove current task projections do not select cached changes from the rejected
   workspace.
+- Race two different session IDs for one inherited child with a barrier around
+  lifecycle allocation and real repository binding. Prove one child claim and
+  one physical workspace, both sessions resolve the winning environment, and
+  the inherited and group environments remain unchanged.
+- Race two same-executor session IDs around workspace materialization. Prove
+  the losing session waits for READY and attaches to the winning environment;
+  it may start its own session runtime, but it cannot perform a second full
+  workspace preparation.
+- Prove a later child session keeps the child-owned environment, while another
+  group member still binds to the group's original environment.
+- Prove a prepared session retires its prior inherited runtime and a
+  workspace-only transition persists the child environment before success.
+  Cover cleanup failure followed by retry, executor refusal followed by retry,
+  active-agent refusal before retirement, and unknown runtime identity.
+- Run PostgreSQL-gated multi-connection tests for sorted task-row and advisory
+  lock ordering, source rechecks after lock waits, successor claim takeover,
+  and rejection of a former owner's stale finalizer.
+- Prove a known different non-Kubernetes executor can detach while the
+  inherited environment is creating or failed, without waiting for or
+  re-electing that foreign environment.
 
 The Files path component is shared by desktop and phone layouts. This repair
 changes backend state normalization, not layout, navigation, scrolling, or

@@ -852,6 +852,11 @@ func (r *Repository) createTaskSessionWithSharedGroupWorkspaceBinding(
 	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
 		return err
 	}
+	if bound, err := r.bindExistingTaskWorkspaceForSessionTx(ctx, tx, session, candidate.ExecutorType, route); err != nil {
+		return err
+	} else if bound {
+		return nil
+	}
 
 	if candidate.ID == "" {
 		candidate.ID = uuid.New().String()
@@ -934,6 +939,22 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 	if err != nil {
 		return fmt.Errorf("load shared workspace environment: %w", err)
 	}
+	if eligibleSharedGroupExecutorTransition(session.TaskID, ownerID, executorType, requestedExecutorType) {
+		if err := r.validateSharedGroupTransitionOwnerTx(ctx, tx, ownerID); err != nil {
+			return err
+		}
+		session.TaskEnvironmentID = environmentID
+		if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
+			return err
+		}
+		if err := r.createTaskSession(ctx, tx, session); err != nil {
+			return err
+		}
+		if err := r.persistWorkflowSessionRouteTx(ctx, tx, session.TaskID, session.ID, route); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	if err := validateSharedWorkspaceExecutor(session.TaskID, ownerID, executorType, requestedExecutorType); err != nil {
 		return err
 	}
@@ -978,10 +999,165 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 	return tx.Commit()
 }
 
+func (r *Repository) bindExistingTaskWorkspaceForSessionTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	session *models.TaskSession,
+	requestedExecutorType string,
+	route *models.WorkflowSessionRoute,
+) (bool, error) {
+	workspace, err := r.loadCanonicalTaskWorkspaceForSessionTx(ctx, tx, session.TaskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if workspace.ExecutorType != "" && requestedExecutorType != "" && workspace.ExecutorType != requestedExecutorType {
+		return false, fmt.Errorf("%w: canonical task environment uses executor %q; selected executor is %q",
+			models.ErrWorkspaceExecutorMismatch, workspace.ExecutorType, requestedExecutorType)
+	}
+	if err := r.prepareCanonicalTaskWorkspaceForSessionTx(ctx, tx, workspace, session.ID); err != nil {
+		return false, err
+	}
+	session.TaskEnvironmentID = workspace.ID
+	if err := r.persistCanonicalTaskWorkspaceSessionTx(ctx, tx, session, route); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+type canonicalTaskWorkspace struct {
+	ID             string
+	ExecutorType   string
+	Status         string
+	MaterializerID string
+	ClaimUpdatedAt sql.NullTime
+}
+
+func (r *Repository) loadCanonicalTaskWorkspaceForSessionTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+) (*canonicalTaskWorkspace, error) {
+	workspace := &canonicalTaskWorkspace{}
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT id, executor_type, status, COALESCE(materialization_session_id, ''), updated_at
+		FROM task_environments WHERE task_id = ?
+	`), taskID).Scan(&workspace.ID, &workspace.ExecutorType, &workspace.Status, &workspace.MaterializerID, &workspace.ClaimUpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.lockTaskEnvironmentMaterializationTx(ctx, tx, workspace.ID); err != nil {
+		return nil, err
+	}
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT executor_type, status, COALESCE(materialization_session_id, ''), updated_at
+		FROM task_environments WHERE id = ?
+	`), workspace.ID).Scan(&workspace.ExecutorType, &workspace.Status, &workspace.MaterializerID, &workspace.ClaimUpdatedAt); err != nil {
+		return nil, fmt.Errorf("reload canonical task workspace: %w", err)
+	}
+	return workspace, nil
+}
+
+func (r *Repository) prepareCanonicalTaskWorkspaceForSessionTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	workspace *canonicalTaskWorkspace,
+	sessionID string,
+) error {
+	switch models.TaskEnvironmentStatus(workspace.Status) {
+	case models.TaskEnvironmentStatusCreating:
+		if workspace.MaterializerID == sessionID {
+			return nil
+		}
+		return r.takeOverCanonicalTaskWorkspaceClaimTx(ctx, tx, workspace, sessionID)
+	case models.TaskEnvironmentStatusFailed:
+		return r.reelectFailedWorkspaceMaterializationTx(ctx, tx, workspace.ID, sessionID)
+	case models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
+		return nil
+	default:
+		return fmt.Errorf("%w: canonical task workspace is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+}
+
+func (r *Repository) takeOverCanonicalTaskWorkspaceClaimTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	workspace *canonicalTaskWorkspace,
+	sessionID string,
+) error {
+	outcome, err := r.settleWorkspaceMaterializationClaim(
+		ctx, tx, workspace.ID, workspace.MaterializerID, workspace.ClaimUpdatedAt.Time, sessionID,
+	)
+	if err != nil {
+		return err
+	}
+	switch outcome {
+	case materializationClaimFailed:
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("persist abandoned task workspace failure: %w", err)
+		}
+		return fmt.Errorf("%w: abandoned task workspace materialization had physical resources", models.ErrWorkspaceReuseUnsafe)
+	case materializationClaimTakenOver:
+		return nil
+	default:
+		return &models.WorkspacePreparingError{EnvironmentID: workspace.ID, Reason: "retry after the task workspace launch completes"}
+	}
+}
+
+func (r *Repository) persistCanonicalTaskWorkspaceSessionTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	session *models.TaskSession,
+	route *models.WorkflowSessionRoute,
+) error {
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, session.TaskEnvironmentID); err != nil {
+		return err
+	}
+	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := r.persistWorkflowSessionRouteTx(ctx, tx, session.TaskID, session.ID, route); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func eligibleSharedGroupExecutorTransition(taskID, ownerID, currentExecutorType, requestedExecutorType string) bool {
+	return taskID != "" && ownerID != "" && ownerID != taskID && currentExecutorType != "" &&
+		requestedExecutorType != "" && currentExecutorType != string(models.ExecutorTypeKubernetes) &&
+		requestedExecutorType != string(models.ExecutorTypeKubernetes) &&
+		currentExecutorType != requestedExecutorType
+}
+
+func (r *Repository) validateSharedGroupTransitionOwnerTx(ctx context.Context, tx *sqlx.Tx, ownerID string) error {
+	var archivedAt sql.NullTime
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT archived_at FROM tasks WHERE id = ?`), ownerID).Scan(&archivedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: shared workspace owner %s could not be verified", models.ErrWorkspaceReuseUnsafe, ownerID)
+		}
+		return fmt.Errorf("load shared workspace owner: %w", err)
+	}
+	if archivedAt.Valid {
+		return fmt.Errorf("%w: shared workspace owner %s is archived", models.ErrWorkspaceReuseUnsafe, ownerID)
+	}
+	return nil
+}
+
 // The elected environment can change after preflight. Ownership and executor
 // compatibility must hold before binding or electing a replacement materializer.
 func validateSharedWorkspaceExecutor(taskID, ownerID, executorType, requestedExecutorType string) error {
-	if executorType != "" && executorType != requestedExecutorType {
+	if ownerID == "" || executorType == "" {
+		return fmt.Errorf("%w: shared workspace owner or executor could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	if executorType != requestedExecutorType {
 		return fmt.Errorf("%w: shared workspace executor does not match the selected executor", models.ErrWorkspaceReuseUnsafe)
 	}
 	if requestedExecutorType == string(models.ExecutorTypeKubernetes) && ownerID != taskID {

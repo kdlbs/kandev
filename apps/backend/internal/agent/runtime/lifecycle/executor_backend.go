@@ -217,6 +217,7 @@ const (
 	MetadataKeyContributionDestinations = "contribution_destinations"
 	MetadataKeyComparisonTargets        = "comparison_targets"
 	MetadataKeyExecutorType             = "executor_type"
+	MetadataKeyTaskEnvironmentID        = "task_environment_id"
 	MetadataKeyIsRemote                 = "is_remote"
 	MetadataKeyRemoteAuthHome           = "remote_auth_target_home"
 	MetadataKeyAgentConfigBundles       = "agent_config_bundles"
@@ -425,8 +426,9 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyKubernetesInventoryState:         true,
 
 	// Executor type marker
-	MetadataKeyExecutorType: true,
-	MetadataKeyIsRemote:     true,
+	MetadataKeyExecutorType:      true,
+	MetadataKeyTaskEnvironmentID: true,
+	MetadataKeyIsRemote:          true,
 
 	// Executor profile / auth config
 	MetadataKeyCleanupScript:            true,
@@ -500,6 +502,7 @@ var sessionScopedMetadataKeys = map[string]bool{
 	MetadataKeySSHRuntimeAPILocalURL:            true,
 	MetadataKeySSHRuntimeAPIRemotePort:          true,
 	MetadataKeyRemoteDockerAgentctlInstanceID:   true,
+	MetadataKeyTaskEnvironmentID:                true,
 	MetadataKeyKubernetesAuthMode:               true,
 	MetadataKeyKubernetesKubeconfigPath:         true,
 	MetadataKeyKubernetesKubeContext:            true,

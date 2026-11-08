@@ -777,6 +777,10 @@ func executorRunningMatchesEnvironment(running *models.ExecutorRunning, env *mod
 }
 
 func applyExecutorRunningMetadata(req *LaunchAgentRequest, running *models.ExecutorRunning) {
+	runtimeEnvironmentID, _ := running.Metadata[lifecycle.MetadataKeyTaskEnvironmentID].(string)
+	if req.TaskEnvironmentID != "" && runtimeEnvironmentID != "" && runtimeEnvironmentID != req.TaskEnvironmentID {
+		return
+	}
 	// A workspace can be shared across task sessions, but native execution
 	// identity is valid only for the exact non-empty session that created it.
 	requestIsKubernetes := models.ExecutorType(req.ExecutorType) == models.ExecutorTypeKubernetes
