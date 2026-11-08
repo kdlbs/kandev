@@ -447,6 +447,7 @@ type promptTurnState struct {
 	quotaNoticeClassified        string
 	quotaNoticeClass             *routingerr.Error
 	quotaNoticeOwnerAmbiguous    bool
+	quotaNoticeDelivered         bool
 	codexSystemError             bool
 	codexCapacity                bool
 	codexUsageLimit              *streams.ProviderError

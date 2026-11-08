@@ -834,15 +834,15 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 		}
 		event.Text = text
 		classified := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: text})
-		if role == acpAssistantRole {
-			a.observeUsageLimitNotice(sessionID, promptGeneration, text)
-		}
+		// A usage-limit notice can arrive in fragments; a fragment that
+		// continues the recognized notice is part of the diagnostic, not output.
+		noticeFragment := role == acpAssistantRole && a.observeUsageLimitNotice(sessionID, promptGeneration, text)
 		// Only an assistant chunk may carry the diagnostic-candidate marker: the
 		// downstream clearing rule only reads an unmarked assistant/thought
 		// chunk, so a marked user chunk would never be cleared by the ordinary-
 		// output path.
 		event.ProviderDiagnosticCandidate = role == acpAssistantRole &&
-			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
+			(noticeFragment || (classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed))
 		return event
 	}
 
