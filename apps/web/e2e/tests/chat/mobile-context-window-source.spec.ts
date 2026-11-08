@@ -80,9 +80,11 @@ test("context source help is reachable by touch without overflow", async ({
   await expect(contextUsage).toBeVisible();
   const compactionHelp = testPage.locator(`[id="${compactionHelpId}"]`);
   await expect(compactionHelp).toHaveCSS("opacity", "1");
+  await expect(compactionHelp).toContainText("Kandev infers this count from context usage drops");
   await expect(compactionHelp).toContainText(
-    "Copilot ACP usage is excluded because it can mix parent and subagent contexts",
+    "Missing samples or provider resets can affect accuracy",
   );
+  await expect(compactionHelp).not.toContainText("Copilot");
   await compactionHelpButton.tap();
   await expect(compactionHelp).toHaveCSS("opacity", "0");
   const hasHorizontalOverflow = await testPage.evaluate(() => {

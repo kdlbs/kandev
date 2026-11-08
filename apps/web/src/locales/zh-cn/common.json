@@ -126,7 +126,7 @@
   "confirm": "确认",
   "contents": "内容",
   "contentSearchNeedsAnActiveTask": "内容搜索需要处于活动状态的任务会话。",
-  "contextCompactionCountHelp": "Kandev 根据上下文用量下降推断此计数。Copilot ACP 的用量会被排除，因为它可能混合主代理与子代理上下文。样本缺失或提供商重置会影响准确性。",
+  "contextCompactionCountHelp": "Kandev 根据上下文用量下降推断此计数。样本缺失或提供商重置会影响准确性。",
   "contextCompactionStatusPartial": "部分",
   "contextCompactionStatusUnavailable": "不可用",
   "contextCompactionCountHelpNative": "新增次数来自 Copilot 父级压缩成功事件。总数仍包含历史估算值。提供商丢弃或省略的事件可能缺失，因此这不是完整历史。",
