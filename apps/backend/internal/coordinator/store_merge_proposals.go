@@ -87,7 +87,7 @@ func scanMergeProposal(row interface{ Scan(...any) error }) (*MergeProposal, err
 // workspace.
 func (s *Store) insertMergeRowTx(ctx context.Context, tx coordinatorExec, m MergeProposal) error {
 	if dialect.IsPostgres(s.db.DriverName()) {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(?, 0))`, "coordinator_merge_open|"+m.WorkspaceID+"|"+m.ChangeKey); err != nil {
+		if _, err := tx.ExecContext(ctx, s.db.Rebind(`SELECT pg_advisory_xact_lock(hashtextextended(?, 0))`), "coordinator_merge_open|"+m.WorkspaceID+"|"+m.ChangeKey); err != nil {
 			return fmt.Errorf("lock merge change: %w", err)
 		}
 	}

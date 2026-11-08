@@ -18,10 +18,10 @@ const mergeConditionsSQL = `
 		workspace_id TEXT NOT NULL,
 		change_key TEXT NOT NULL,
 		kind TEXT NOT NULL,
-		active INTEGER NOT NULL,
+		active {{boolean}} NOT NULL,
 		generation INTEGER NOT NULL,
 		head_sha TEXT NOT NULL DEFAULT '',
-		baseline INTEGER NOT NULL DEFAULT 0,
+		baseline {{boolean}} NOT NULL DEFAULT FALSE,
 		last_observed_at {{timestamp}} NOT NULL,
 		PRIMARY KEY (workspace_id, change_key, kind)
 	);
@@ -145,17 +145,15 @@ func coordinatorIDsOf(targets []WakeTarget) []string {
 
 func (s *Store) readConditionTx(ctx context.Context, tx coordinatorExec, workspaceID, changeKey string, kind mergestate.Kind) (*mergestate.Row, error) {
 	var row mergestate.Row
-	var active, baseline int
 	err := tx.QueryRowContext(ctx, s.db.Rebind(`SELECT active, generation, head_sha, baseline, last_observed_at
 		FROM coordinator_change_conditions WHERE workspace_id = ? AND change_key = ? AND kind = ?`),
-		workspaceID, changeKey, string(kind)).Scan(&active, &row.Generation, &row.HeadSHA, &baseline, &row.ObservedAt)
+		workspaceID, changeKey, string(kind)).Scan(&row.Active, &row.Generation, &row.HeadSHA, &row.Baseline, &row.ObservedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read change condition: %w", err)
 	}
-	row.Active, row.Baseline = active == 1, baseline == 1
 	return &row, nil
 }
 
@@ -166,18 +164,11 @@ func (s *Store) writeConditionTx(ctx context.Context, tx coordinatorExec, worksp
 		ON CONFLICT (workspace_id, change_key, kind) DO UPDATE SET
 			active = excluded.active, generation = excluded.generation, head_sha = excluded.head_sha,
 			baseline = excluded.baseline, last_observed_at = excluded.last_observed_at`),
-		workspaceID, changeKey, string(kind), boolInt(row.Active), row.Generation, row.HeadSHA, boolInt(row.Baseline), row.ObservedAt.UTC())
+		workspaceID, changeKey, string(kind), row.Active, row.Generation, row.HeadSHA, row.Baseline, row.ObservedAt.UTC())
 	if err != nil {
 		return fmt.Errorf("write change condition: %w", err)
 	}
 	return nil
-}
-
-func boolInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 // OpenEpisode is an active, non-baseline condition row.
@@ -193,7 +184,7 @@ type OpenEpisode struct {
 // baselines, ordered by kind.
 func (s *Store) OpenChangeEpisodes(ctx context.Context, workspaceID, changeKey string) ([]OpenEpisode, error) {
 	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`SELECT change_key, kind, generation, head_sha, last_observed_at
-		FROM coordinator_change_conditions WHERE workspace_id = ? AND change_key = ? AND active = 1 AND baseline = 0
+		FROM coordinator_change_conditions WHERE workspace_id = ? AND change_key = ? AND active = TRUE AND baseline = FALSE
 		ORDER BY kind`), workspaceID, changeKey)
 	if err != nil {
 		return nil, fmt.Errorf("list open change episodes: %w", err)
@@ -223,7 +214,7 @@ func (s *Store) ChangeEpisodeOpen(ctx context.Context, workspaceID string, kind 
 	var stored int
 	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`SELECT generation, head_sha, last_observed_at
 		FROM coordinator_change_conditions
-		WHERE workspace_id = ? AND change_key = ? AND kind = ? AND active = 1 AND baseline = 0`),
+		WHERE workspace_id = ? AND change_key = ? AND kind = ? AND active = TRUE AND baseline = FALSE`),
 		workspaceID, changeKey, string(kind)[len("change_"):]).Scan(&stored, &e.HeadSHA, &e.ObservedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OpenEpisode{}, false, nil
@@ -290,7 +281,7 @@ func (s *Store) changeHead(ctx context.Context, workspaceID, changeKey string, k
 // ordered by change key then kind.
 func (s *Store) ListOpenEpisodes(ctx context.Context, workspaceID string) ([]OpenEpisode, error) {
 	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`SELECT change_key, kind, generation, head_sha, last_observed_at
-		FROM coordinator_change_conditions WHERE workspace_id = ? AND active = 1 AND baseline = 0
+		FROM coordinator_change_conditions WHERE workspace_id = ? AND active = TRUE AND baseline = FALSE
 		ORDER BY change_key, kind`), workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("list open episodes: %w", err)
