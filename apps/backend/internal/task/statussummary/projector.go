@@ -565,7 +565,10 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		if loadErr != nil {
 			return fmt.Errorf("load quota wait for task status summary %q: %w", taskID, loadErr)
 		}
-		quotaWaitChanged = !state.quotaWaitObserved || !equalQuotaWait(state.quotaWait, nextWait)
+		// Compare with the persisted summary too: a restored observation can
+		// already match the new read while the stored row still differs.
+		quotaWaitChanged = state.current == nil || !state.quotaWaitObserved ||
+			!equalQuotaWait(state.quotaWait, nextWait) || !equalQuotaWait(state.current.QuotaWait, nextWait)
 		state.quotaWait = cloneQuotaWait(nextWait)
 		state.quotaWaitObserved = true
 	}

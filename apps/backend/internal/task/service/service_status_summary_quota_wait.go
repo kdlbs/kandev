@@ -20,6 +20,21 @@ func (s *Service) reconcileSummaryQuotaWait(ctx context.Context, task *models.Ta
 		if equalSummaryQuotaWait(current.QuotaWait, wait) {
 			return current, nil
 		}
+		if attempt == 0 {
+			// The batch read can predate a writer that created or cleared
+			// this summary; confirm the wait before replacing the stored one.
+			waits, err := s.loadSummaryQuotaWaits(ctx, []string{task.ID})
+			if err != nil {
+				return current, err
+			}
+			if waits == nil {
+				return current, nil
+			}
+			wait = waits[task.ID]
+			if equalSummaryQuotaWait(current.QuotaWait, wait) {
+				return current, nil
+			}
+		}
 		next := *current
 		next.QuotaWait = wait
 		next.Revision++
