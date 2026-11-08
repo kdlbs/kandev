@@ -54,6 +54,19 @@ With the phase 3.1 features on, a coordinator's settings have a **Learning** sec
 
 Reports are kept for 400 days. The review never runs a tool other than reading the coordinator's turn history.
 
+## Keep notes for the coordinator
+
+With the phase 3.5 features on (`features.coordinatorPhase35`, together with the coordinator and phase 2, 3 and 3.1 features), a coordinator's settings have a **Notes** section. Notes are short advisory facts that the coordinator reads at the start of every turn. They guide its proposals and never override a rule, a permission or an approval.
+
+- Managers add, edit, revert and delete notes. The coordinator cannot write them. Readers see the section read-only.
+- A note has a type (User, Feedback, Project or Reference), up to 500 characters of text, and one to ten citations. Each citation names a turn, a task, a pull request or a file at a commit. A note whose text looks like a credential is refused.
+- Citations are checked against the board and the repository's local clone. Nothing is fetched from the network. A note whose citation no longer resolves shows as **Stale** and is left out of what the coordinator reads; a note that could not be checked shows as **Unavailable**.
+- Each note keeps every version, with who changed it. **Revert** saves an earlier version as a new one. A note expires 30 days after it was last delivered or used; an expired note cannot be edited or reverted, only deleted.
+- Each coordinator keeps at most 100 notes. The coordinator sees at most the 38 oldest valid notes on a turn, and the set is fixed for that turn.
+- If someone else changed a note while you were editing, your draft is kept and you choose when to load the latest version. If the note expired or was deleted, your draft is kept read-only, and you can start a new note from it.
+- Turn on **Show deleted notes** to list deleted notes.
+- A proposal can cite up to five of the notes the coordinator was shown on that turn. A note page lists the open proposals and tasks that cite it, and every proposal that ever did.
+
 ## Clear a hold
 
 A hold with events waiting also appears as an item on **Needs you**, with an **Open settings** link for managers. The common reasons and what clears them:

@@ -8,6 +8,8 @@ import { useCoordinatorPhase3Effective } from "@/hooks/domains/settings/use-coor
 import { useCoordinatorPhase31Effective } from "@/hooks/domains/settings/use-coordinator-phase31-effective";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { LearningSection } from "@/components/coordinators/learning/learning-section";
+import { NotesSection } from "@/components/coordinators/notes/notes-section";
+import { useCoordinatorNotesEffective } from "@/hooks/domains/settings/use-coordinator-notes-effective";
 import type { ControlDraft } from "@/lib/coordinators/control-draft";
 import type { WatchSet } from "@/lib/coordinator/watch-filter";
 import { WatchesNoneNotice } from "@/app/coordinator/components/watches-none-notice";
@@ -82,11 +84,12 @@ function watchSetFromStored(stored: ControlDraft): WatchSet {
   };
 }
 
-function sectionSlugs(phase3: boolean, phase31: boolean, merge: boolean): string[] {
+function sectionSlugs(phase3: boolean, phase31: boolean, merge: boolean, notes: boolean): string[] {
   return [
     ...BASE_SLUGS,
     ...(phase3 ? ["autonomy"] : []),
     ...(phase31 ? ["learning"] : []),
+    ...(notes ? ["notes"] : []),
     ...(merge ? ["merge"] : []),
   ];
 }
@@ -127,6 +130,18 @@ function learningEntry(
   };
 }
 
+function notesEntry(
+  t: ReturnType<typeof useTranslation>["t"],
+  props: { workspaceId: string; coordinatorId: string; canManage: boolean },
+): CoordinatorSectionEntry {
+  return {
+    slug: "notes",
+    label: t("coordinator:sectionNotes"),
+    help: t("coordinator:sectionNotesHelp"),
+    render: () => <NotesSection {...props} />,
+  };
+}
+
 /** The phase-2 coordinator page body: Identity holds the phase-1 fields unchanged. */
 export function CoordinatorSections({
   workspaceId,
@@ -140,7 +155,8 @@ export function CoordinatorSections({
   const phase3 = useCoordinatorPhase3Effective();
   const phase31 = useCoordinatorPhase31Effective();
   const merge = useFeature("coordinatorMerge") && phase3;
-  const { selectSection } = useCoordinatorSection(sectionSlugs(phase3, phase31, merge));
+  const notes = useCoordinatorNotesEffective();
+  const { selectSection } = useCoordinatorSection(sectionSlugs(phase3, phase31, merge, notes));
   const stored = control.stored;
   const entries: CoordinatorSectionEntry[] = [
     {
@@ -202,6 +218,7 @@ export function CoordinatorSections({
   const target = { workspaceId, coordinatorId, canManage };
   if (phase3) entries.push(autonomyEntry(t, { ...target, onContextApplied }));
   if (phase31) entries.push(learningEntry(t, target));
+  if (notes) entries.push(notesEntry(t, target));
   if (merge) entries.push(mergeEntry(t, target));
   return (
     <>
