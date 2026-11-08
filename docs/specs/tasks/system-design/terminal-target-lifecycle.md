@@ -39,8 +39,9 @@ persistence schema, environment identity, or recovery-block policy changes.
 
 For a managed ordinary terminal, the gateway reads its persisted task owner
 before selecting an execution. Lifecycle validates access to that task and
-environment, resolves the task's current primary session, and rechecks the
-binding after obtaining its workspace execution. Reading the owner does not
+environment, resolves the task's current primary session, restores or creates
+that session's own workspace execution (never a sibling task's execution that
+serves the same environment), and rechecks the binding afterwards. Reading the owner does not
 consume a one-shot shell command. Unmanaged terminal routing is unchanged.
 
 ## Browser state

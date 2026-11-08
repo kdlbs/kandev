@@ -117,7 +117,7 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 	// Use ensureWorkspaceExecutionLocked (not EnsureWorkspaceExecutionForSession)
 	// to avoid recursing into the same singleflight slot we already hold.
 	value, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
-		return m.ensureWorkspaceExecutionLocked(sharedCtx, "", sessionID)
+		return m.ensureWorkspaceExecutionLocked(sharedCtx, "", sessionID, true)
 	})
 	if err != nil {
 		return nil, err
@@ -230,6 +230,14 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 // sessionID-keyed singleflight bucket so they cannot race past their
 // individual check-then-act guards and create duplicate executions.
 func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
+	return m.ensureWorkspaceExecutionForSession(ctx, taskID, sessionID, true)
+}
+
+// ensureWorkspaceExecutionForSession implements EnsureWorkspaceExecutionForSession.
+// reuseEnvironment lets a session without its own execution borrow any
+// execution already serving its task environment. Callers that need the
+// session's own controller pass false.
+func (m *Manager) ensureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string, reuseEnvironment bool) (*AgentExecution, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
@@ -248,7 +256,7 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 	}
 
 	value, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
-		return m.ensureWorkspaceExecutionLocked(sharedCtx, taskID, sessionID)
+		return m.ensureWorkspaceExecutionLocked(sharedCtx, taskID, sessionID, reuseEnvironment)
 	})
 	if err != nil {
 		return nil, err
@@ -327,7 +335,9 @@ func awaitCoalescedResult(
 // ensureWorkspaceExecutionLocked is the body of EnsureWorkspaceExecutionForSession
 // run inside the sessionID-keyed singleflight bucket. Callers other than
 // EnsureWorkspaceExecutionForSession must already hold the singleflight slot.
-func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
+// reuseEnvironment allows returning another session's execution that already
+// serves the same task environment.
+func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, sessionID string, reuseEnvironment bool) (*AgentExecution, error) {
 	// Double-check after acquiring the slot — a peer in the same group may have
 	// finished while we were waiting.
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
@@ -337,39 +347,17 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 		return execution, nil
 	}
 
-	if m.workspaceInfoProvider == nil {
-		return nil, fmt.Errorf("workspace info provider not configured")
-	}
-
-	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, taskID, sessionID)
+	info, taskID, err := m.resolveSessionWorkspaceInfo(ctx, taskID, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get workspace info for session %s: %w", sessionID, err)
-	}
-	if info == nil {
-		return nil, fmt.Errorf("session %s not found", sessionID)
-	}
-
-	// Resolve taskID from provider when caller doesn't have it (e.g., GetOrEnsureExecution)
-	if taskID == "" {
-		taskID = info.TaskID
-	} else if info.TaskID == "" || info.TaskID != taskID {
-		return nil, fmt.Errorf("session %s is not owned by task %s", sessionID, taskID)
+		return nil, err
 	}
 	if err := m.ensureWorkspaceSessionAdmitted(ctx, taskID, info); err != nil {
 		return nil, err
 	}
 
-	if info.TaskEnvironmentID != "" {
-		if execution, exists := m.executionStore.GetByTaskEnvironmentID(info.TaskEnvironmentID); exists {
-			if err := m.ensureWorkspaceSessionAdmitted(ctx, taskID, info); err != nil {
-				return nil, err
-			}
-			m.logger.Info("reusing existing execution for task environment",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.String("task_environment_id", info.TaskEnvironmentID),
-				zap.String("execution_id", execution.ID))
-			return execution, nil
+	if reuseEnvironment {
+		if execution, err := m.reuseTaskEnvironmentExecution(ctx, taskID, info); execution != nil || err != nil {
+			return execution, err
 		}
 	}
 
@@ -394,6 +382,57 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 		return nil, err
 	}
 
+	m.connectWorkspaceStreamWhenReady(ctx, execution)
+
+	return execution, nil
+}
+
+// resolveSessionWorkspaceInfo reads a session's workspace info and resolves its task
+// when the caller does not have it (e.g., GetOrEnsureExecution).
+func (m *Manager) resolveSessionWorkspaceInfo(ctx context.Context, taskID, sessionID string) (*WorkspaceInfo, string, error) {
+	if m.workspaceInfoProvider == nil {
+		return nil, "", fmt.Errorf("workspace info provider not configured")
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, taskID, sessionID)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get workspace info for session %s: %w", sessionID, err)
+	}
+	if info == nil {
+		return nil, "", fmt.Errorf("session %s not found", sessionID)
+	}
+	if taskID == "" {
+		return info, info.TaskID, nil
+	}
+	if info.TaskID == "" || info.TaskID != taskID {
+		return nil, "", fmt.Errorf("session %s is not owned by task %s", sessionID, taskID)
+	}
+	return info, taskID, nil
+}
+
+// reuseTaskEnvironmentExecution returns an execution that already serves the
+// session's task environment, or nil when none exists.
+func (m *Manager) reuseTaskEnvironmentExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
+	if info.TaskEnvironmentID == "" {
+		return nil, nil
+	}
+	execution, exists := m.executionStore.GetByTaskEnvironmentID(info.TaskEnvironmentID)
+	if !exists {
+		return nil, nil
+	}
+	if err := m.ensureWorkspaceSessionAdmitted(ctx, taskID, info); err != nil {
+		return nil, err
+	}
+	m.logger.Info("reusing existing execution for task environment",
+		zap.String("task_id", taskID),
+		zap.String("session_id", info.SessionID),
+		zap.String("task_environment_id", info.TaskEnvironmentID),
+		zap.String("execution_id", execution.ID))
+	return execution, nil
+}
+
+// connectWorkspaceStreamWhenReady connects a workspace-only execution's stream
+// once agentctl is ready.
+func (m *Manager) connectWorkspaceStreamWhenReady(ctx context.Context, execution *AgentExecution) {
 	// For workspace-only executions (no agent), wait for agentctl to be ready
 	// then connect the workspace stream so process output can be received.
 	// Note: AgentctlReady/Error events are already handled by waitForAgentctlReady
@@ -421,8 +460,6 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 			m.streamManager.ConnectWorkspaceStream(execution, nil)
 		}
 	}()
-
-	return execution, nil
 }
 
 // validateWorkspaceInfoForExecution is the cold-start defense behind the
