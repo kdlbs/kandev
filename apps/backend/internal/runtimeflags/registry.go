@@ -408,6 +408,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorMerge",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_MERGE",
+			Kind:        KindFeature,
+			Label:       "Coordinator merge stewardship",
+			Description: "Lets a coordinator watch linked pull requests and merge requests, wake on red pipelines, conflicts and unresolved threads, and propose or automatically execute guarded merges per repository policy. Requires Workspace coordinators, Coordinator control and Coordinator autonomy.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "A merge changes a protected branch and cannot be undone from Kandev. Conditions the provider does not enforce can change between the last check and acceptance. " +
+				"Repository policy defaults to denied; automatic merging is an explicit manager choice per repository.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorMerge },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorMerge = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

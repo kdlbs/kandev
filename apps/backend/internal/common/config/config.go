@@ -613,6 +613,11 @@ type FeaturesConfig struct {
 	// CoordinatorPhase2 and CoordinatorPhase3.
 	CoordinatorAnswer bool `mapstructure:"coordinator_answer" json:"coordinatorAnswer"`
 
+	// CoordinatorMerge gates merge stewardship: change wakes, repository merge
+	// policy and guarded merge proposals. It only takes effect together with
+	// Coordinator, CoordinatorPhase2 and CoordinatorPhase3.
+	CoordinatorMerge bool `mapstructure:"coordinator_merge" json:"coordinatorMerge"`
+
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol
 	// adapter and profile catalogue are composed at startup.
