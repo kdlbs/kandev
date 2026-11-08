@@ -4556,6 +4556,12 @@ func sessionSettingsEventIsStale(
 		identity.ExecutionProfileID != session.ExecutionProfileID {
 		return true
 	}
+	// Settings reported by an execution whose permission-mode rejection reset
+	// the runtime settings must not restore the discarded observations.
+	if rejected, _ := session.Metadata[rejectedRuntimeSettingsExecution].(string); rejected != "" &&
+		rejected == identity.ExecutionID {
+		return true
+	}
 	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
 	if !ok {
 		return false
