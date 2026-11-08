@@ -5,7 +5,7 @@ requirements:
   - REQ-TASKS-PROMPT-ATTACHMENTS-001
   - REQ-TASKS-PROMPT-ATTACHMENTS-002
 created: 2026-09-01
-updated: 2026-10-20
+updated: 2026-11-08
 owners:
   - Kandev team
 ---
@@ -25,6 +25,7 @@ It cannot claim staged files or infer task ownership.
 | Requirement                        | Design sections                                                               |
 | ---------------------------------- | ----------------------------------------------------------------------------- |
 | `REQ-TASKS-PROMPT-ATTACHMENTS-001` | Claim admission, materialization and delivery, failure and recovery, security |
+| `REQ-TASKS-PROMPT-ATTACHMENTS-002` | Initial submission recovery, including workflow context, owned dispatch, and transcript reconciliation |
 
 ## Components and responsibilities
 
@@ -384,6 +385,67 @@ Fresh recovery after ordinary conversation work keeps its existing prompt
 policy. Ordinary resume prompt content, read-only restore, Office scheduling,
 dynamic route changes, and unrelated new-session launches remain otherwise
 outside this extension.
+
+### Workflow context during initial recovery
+
+This clarification maps criteria 002.9 through 002.11.
+Delivery belongs to the [workflow recovery package](../../../plans/fresh-start-workflow-context/plan.md).
+Tasks owns this correction because it owns submission composition and workflow instructions.
+Provider startup, native conversation replacement, and delivery generations retain their existing owners.
+
+Initial recovery has two input sources: a validated pending receipt and the existing legacy text fallback.
+The receipt supplies raw submission content and descriptors.
+The fallback supplies the task description only where the existing recovery path already sends it.
+A stored first message, its hidden blocks, and `prompt_reference_context` metadata cannot replace either source.
+Recovery does not introduce another preview compatibility exception or infer acceptance from transcript presence.
+
+Use one focused composition helper in `orchestrator/initial_recovery_prompt.go`.
+Capture authorized task/session policy before recovery clears provider identity.
+Resolve the applicable step and workflow metadata from their current trusted sources.
+Keep each resolved template and its saved-prompt expansion together for this attempt.
+If an applicable step or required workflow metadata is unavailable, return an error before token reset or provider dispatch.
+Provider-identity and preserved-queue reads are eligibility evidence; their read failures also stop recovery before reset.
+Existing warning-and-fallback helpers cannot silently omit required instructions on this recovery path.
+
+Reuse `buildWorkflowPromptWithContextOptions` and the existing first-launch composition rules.
+Preserve workflow-level instructions, step placeholders, replacement templates, and the effective plan-mode decision.
+Derive that decision from the stored request mode and the current step's `enable_plan_mode` action, then apply the existing mode transform once.
+Keep the receipt's raw plan-mode value unchanged for provenance and transcript matching.
+Do not invoke workflow entry actions, `ProcessOnTurnStart`, context reset, profile switching, or task movement to rebuild a prompt.
+Compose raw workflow content before the ordinary configuration and plan-mode transforms.
+Each transform runs once.
+Retain the exact generated reference context through `wrapCreatedSessionPrompt` so canonicalization preserves trusted saved-prompt instructions.
+Current MCP packages, completion signals, questions, autopilot, and title ownership retain their existing policy sources.
+Capture the workflow entry binding (workflow, destination step, route operation, and transition identity) with the policy snapshot.
+Carry it through the existing launch and prompt admission fences for both receipt and legacy recovery.
+A move or re-entry to the same step supersedes the prepared snapshot, and recovery must not dispatch its old instructions.
+
+For receipt replay, keep promptless startup, readiness, the initial-prompt hold, and receipt compare-and-set transitions unchanged.
+Carry the prepared workflow content and its reference context through `replayInitialPromptSubmission` and the existing first-launch wrapping seam.
+Keep receipt content, transcript matching, attachments, and acceptance callbacks separate from the effective dispatch prompt.
+Do not write the composed prompt back into `initial_prompt_submission`.
+
+For legacy text fallback, use a narrow internal prompt override through `LaunchSessionRequest` and `executor.ResumeOptions`.
+The internal name is `InitialPromptOverride`, with an optional string value and no public JSON field.
+Set it only for explicit, non-Office fresh recovery of an eligible bootstrap failure without an owned receipt.
+Capture eligibility before token reset. A cleared token cannot prove that the original launch never accepted work.
+Accepted or uncertain receipts and prior provider-conversation evidence cannot select this initial-workflow fallback.
+Retain the existing behavior for those other fresh-start cases.
+Apply the override in `newResumeLaunchRequest` before existing prompt-suppression rules.
+The executor continues to own those rules. A suppressed or promptless launch must remain promptless.
+This handoff transports composed content without moving workflow lookups into the executor.
+
+An empty fallback cannot create new input merely because a step has a template.
+An automatic workflow queue entry already owns its composed prompt. This helper must not compose a second copy.
+The queue remains authoritative for input preserved by automatic startup recovery.
+Receipt replay retains its established priority over unrelated queued work.
+Ordinary resume, workspace restoration, continuation from history, accepted-work provenance, and Office scheduler admission retain their existing behavior.
+The correction adds no schema, receipt version, public request field, or runtime flag.
+
+Service regressions enter through `RecoverSession(..., "fresh_start")` with real persisted task/session state.
+They capture launch input and post-readiness provider input, then compare them with the first-launch composition.
+Cover receipt and legacy sources, saved prompts, template forms, modes, unavailable policy, and existing recovery exclusions.
+The same backend action serves desktop and phone. This correction changes no rendered interface.
 
 ### Delivery, persistence, and presentation
 

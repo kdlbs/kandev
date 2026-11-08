@@ -1052,6 +1052,12 @@ type ResumeOptions struct {
 	// NoInitialPrompt keeps the task description out of a fresh recovery boot;
 	// the owning continuation delivers the captured submission after readiness.
 	NoInitialPrompt bool
+	// InitialPromptOverride replaces the task-description fallback for an
+	// eligible text-only fresh-start recovery. The orchestrator supplies
+	// already-composed content; the executor performs no workflow lookups.
+	// Existing NoInitialPrompt and continuation suppression still take
+	// precedence.
+	InitialPromptOverride *string
 	// SuppressInitialMessageBackfill is used only by silent restart restore,
 	// which must preserve the transcript exactly until an ordinary prompt arrives.
 	SuppressInitialMessageBackfill bool
@@ -2148,6 +2154,9 @@ func newResumeLaunchRequest(
 		ReplaceNativeConversation:    options.RecoveryAction == RecoveryActionFreshStart,
 		RecoveryAction:               options.RecoveryAction,
 		SuppressBootStatusMessage:    options.SuppressInitialMessageBackfill,
+	}
+	if options.InitialPromptOverride != nil {
+		req.TaskDescription = *options.InitialPromptOverride
 	}
 	if options.ForceContextContinuation {
 		if options.DeferInitialPrompt {

@@ -7134,6 +7134,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if options.firstLaunchPromptContext {
 		effectivePrompt, err = s.wrapInitialSubmissionReplayPrompt(
 			resumePromptCtx, taskID, sessionID, effectivePrompt, attachments, session,
+			options.promptReferenceContext,
 		)
 		if err != nil {
 			s.rollbackForegroundDispatchOnFailure(resumePromptCtx, taskID, sessionID, foregroundDispatch)
