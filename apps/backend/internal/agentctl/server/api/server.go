@@ -3,7 +3,9 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	"io"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -278,6 +280,12 @@ func (s *Server) setupRoutes() {
 
 	// Utility agent routes
 	auxHandler := utility.NewOwnedHandler(s.cfg, s.procMgr, s.logger.Zap())
+	if err := s.procMgr.RegisterInstanceCleanupHook(auxHandler.Close); err != nil {
+		s.logger.Error("failed to register utility cleanup hook", zap.Error(err))
+		if closeErr := auxHandler.Close(); closeErr != nil {
+			s.logger.Error("failed to close utility resources", zap.Error(closeErr))
+		}
+	}
 	auxHandler.SetInstanceID(s.cfg.InstanceID)
 	auxHandler.SetControlAuthorization(func(c *gin.Context) bool { return c.GetBool(authenticatedControlContextKey) })
 	auxHandler.SetExecutionUsageService(s.executionUsage)
@@ -481,7 +489,7 @@ func (s *Server) handleInfo(c *gin.Context) {
 
 // Start request/response
 type StartRequest struct {
-	// Future: could add options like custom command, env overrides
+	Preparation *agentctltypes.ManagedRuntimePreparationDirective `json:"preparation,omitempty"`
 }
 
 type StartResponse struct {
@@ -493,7 +501,24 @@ type StartResponse struct {
 }
 
 func (s *Server) handleStart(c *gin.Context) {
-	processGeneration, err := s.procMgr.StartWithGeneration(c.Request.Context())
+	var req StartRequest
+	if c.Request.Body != nil {
+		if err := json.NewDecoder(io.LimitReader(c.Request.Body, 16<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, StartResponse{Success: false, Error: "invalid start request"})
+			return
+		}
+	}
+	var processGeneration uint64
+	var err error
+	if req.Preparation != nil {
+		if !c.GetBool(authenticatedControlContextKey) {
+			c.AbortWithStatusJSON(http.StatusForbidden, StartResponse{Success: false, Error: "authenticated control is required for managed runtime preparation"})
+			return
+		}
+		processGeneration, err = s.procMgr.StartWithManagedRuntimePreparation(c.Request.Context(), *req.Preparation)
+	} else {
+		processGeneration, err = s.procMgr.StartWithGeneration(c.Request.Context())
+	}
 	if err != nil {
 		s.logger.Error("failed to start agent", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, StartResponse{

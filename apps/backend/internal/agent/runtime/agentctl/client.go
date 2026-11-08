@@ -933,19 +933,50 @@ func (c *Client) StreamCanvasSource(ctx context.Context, root string) (io.ReadCl
 
 // Start starts the agent process and returns the full command that was executed.
 func (c *Client) Start(ctx context.Context) (string, error) {
+	return c.start(ctx, nil)
+}
+
+// StartWithManagedRuntimePreparation sends a generation-bound private
+// preparation directive only after the agentctl advertises support for it.
+func (c *Client) StartWithManagedRuntimePreparation(
+	ctx context.Context,
+	directive types.ManagedRuntimePreparationDirective,
+) (string, error) {
+	if err := c.RequireCapability(ctx, types.ManagedRuntimePrivatePreparationCapability); err != nil {
+		return "", err
+	}
+	return c.start(ctx, &directive)
+}
+
+func (c *Client) start(ctx context.Context, preparation *types.ManagedRuntimePreparationDirective) (string, error) {
 	c.mu.Lock()
 	c.processGeneration = 0
 	c.mu.Unlock()
 	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/start", c.executionID)
 	defer span.End()
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/start", nil)
+	var body io.Reader
+	if preparation != nil {
+		encoded, err := json.Marshal(struct {
+			Preparation *types.ManagedRuntimePreparationDirective `json:"preparation"`
+		}{Preparation: preparation})
+		if err != nil {
+			tracing.TraceHTTPResponse(span, 0, err)
+			return "", fmt.Errorf("encode managed runtime preparation directive: %w", err)
+		}
+		body = bytes.NewReader(encoded)
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/start", body)
 	if err != nil {
 		tracing.TraceHTTPResponse(span, 0, err)
 		return "", err
 	}
 
-	resp, err := c.httpClient.Do(req)
+	httpClient := c.httpClient
+	if preparation != nil {
+		httpClient = c.longRunningHTTPClient
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		tracing.TraceHTTPResponse(span, 0, err)
 		return "", err
