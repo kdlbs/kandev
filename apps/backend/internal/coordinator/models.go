@@ -27,6 +27,9 @@ const (
 // ActionProposeAnswer is mcpcontract.ActionProposeAnswer, re-exported.
 const ActionProposeAnswer = mcpcontract.ActionProposeAnswer
 
+// ActionProposeMerge is mcpcontract.ActionProposeMerge, re-exported.
+const ActionProposeMerge = mcpcontract.ActionProposeMerge
+
 // ActionProposeImprovement is mcpcontract.ActionProposeImprovement, re-exported.
 const ActionProposeImprovement = mcpcontract.ActionProposeImprovement
 

@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"sort"
+	"time"
 
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -59,7 +60,7 @@ func (s *Service) stampToolPolicy(metadata map[string]interface{}, c *Coordinato
 		WorkspaceID:        c.WorkspaceID,
 		ConversationTaskID: conversationTaskID,
 		PolicyRevision:     c.PolicyRevision,
-		ToolNames:          ToolNamesPhase31(s.policyFor(c), true, s.phase3, s.phase31),
+		ToolNames:          s.bindingToolNames(c),
 		PluginTools:        pluginTools,
 	}
 	// The empty-id form is stamped before the task exists, so it cannot pass
@@ -96,3 +97,28 @@ func (s *Service) bindConversationTask(ctx context.Context, task *taskmodels.Tas
 	})
 	return err
 }
+
+// bindingToolNames is the conversation's tool list: the policy tools, plus the
+// merge tool while the merge flag is effective and some repository is not
+// denied. A policy read that fails leaves the merge tool out.
+func (s *Service) bindingToolNames(c *Coordinator) []string {
+	names := ToolNamesPhase31(s.policyFor(c), true, s.phase3, s.phase31)
+	if !s.merge {
+		return names
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), mergeToolReadBound)
+	defer cancel()
+	policies, err := s.store.loadRepoPolicies(ctx, s.store.ro, c.ID)
+	if err != nil {
+		s.logger.Warn("merge tool listing: policies unreadable", zap.String("coordinator_id", c.ID), zap.Error(err))
+		return names
+	}
+	for _, row := range policies {
+		if row.Policy == RepoRequiresApproval || row.Policy == RepoAutomatic {
+			return append(names, mergeTool)
+		}
+	}
+	return names
+}
+
+const mergeToolReadBound = 5 * time.Second

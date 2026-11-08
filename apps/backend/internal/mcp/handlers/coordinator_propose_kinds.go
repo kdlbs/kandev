@@ -132,3 +132,31 @@ const proposalIDKey = "proposal_id"
 
 // refusalCodeKey is the error-details key carrying a refusal code.
 const refusalCodeKey = "code"
+
+// handleProposeMerge backs coordinator.propose_merge. A refused creation is a
+// normal answer with a null proposal, not an error.
+func (h *Handlers) handleProposeMerge(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok || !principal.IsCoordinator() {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "coordinator principal is required", nil)
+	}
+	if h.coordinatorSvc == nil {
+		response, _, err := coordinatorUnknownAction(msg)
+		return response, err
+	}
+	res, err := h.coordinatorSvc.ProposeMerge(ctx, principal.CoordinatorID, msg.Payload)
+	if err != nil {
+		return h.proposeKindErrorResponse(msg, coordinator.ProposalKindMerge, err)
+	}
+	out := map[string]interface{}{proposalIDKey: res.ProposalID, stopTaskStatusKey: res.Status, "deduplicated": res.Deduplicated}
+	if res.Reason != "" {
+		out["reason"] = res.Reason
+	}
+	if res.CreationCode != "" {
+		out["creation_code"] = res.CreationCode
+	}
+	if res.OwningCoordinatorID != "" {
+		out["owning_coordinator_id"] = res.OwningCoordinatorID
+	}
+	return ws.NewResponse(msg.ID, msg.Action, out)
+}

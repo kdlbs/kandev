@@ -25,6 +25,11 @@ const improvementTool = "propose_improvement_kandev"
 // phase 3 is effective and the policy allows the class.
 const answerTool = "propose_answer_kandev"
 
+// mergeTool is the merge propose tool. It is listed only while the merge flag
+// is effective and some repository's policy is not denied; it is not a policy
+// action tool.
+const mergeTool = "propose_merge_kandev"
+
 var proposeTool = map[Action]string{
 	ActionCreateTask: "propose_task_kandev",
 	ActionMessage:    "propose_message_kandev",
@@ -95,6 +100,7 @@ var actionTools = map[string]string{
 	mcpcontract.ActionProposeMessage: "propose_message_kandev",
 	mcpcontract.ActionProposeMove:    "propose_move_kandev",
 	mcpcontract.ActionProposeAnswer:  answerTool,
+	mcpcontract.ActionProposeMerge:   mergeTool,
 
 	mcpcontract.ActionProposeImprovement: improvementTool,
 	mcpcontract.ActionListTurns:          turnsTool,

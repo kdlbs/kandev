@@ -86,6 +86,7 @@ func (s *Server) coordinatorToolCatalog() map[string]func() {
 		"propose_message_kandev":           s.registerProposeMessageTool,
 		"propose_move_kandev":              s.registerProposeMoveTool,
 		"propose_answer_kandev":            s.registerProposeAnswerTool,
+		"propose_merge_kandev":             s.registerProposeMergeTool,
 		"propose_improvement_kandev":       s.registerProposeImprovementTool,
 		"get_coordinator_item_kandev":      s.registerGetCoordinatorItemTool,
 		"list_coordinator_activity_kandev": s.registerListCoordinatorActivityTool,
@@ -359,6 +360,33 @@ func (s *Server) proposeAnswerHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionProposeAnswer, payload, &result); err != nil {
+			return mcp.NewToolResultError(answerErrorText(err)), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) registerProposeMergeTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("propose_merge_kandev",
+			mcp.WithDescription("Propose merging the pull request or merge request linked to a task on a board you watch, at the head commit you looked at. Nothing is merged until a manager approves it, or until the repository is set to automatic and every condition holds. task_id is the task, change is optional and names which linked change when the task has several (provider|host|repository|number), expected_head_sha is the head you reviewed. A call that cannot create a proposal returns proposal_id null, status \"refused\" and a creation_code (change_unknown, policy_denied, predecessor, method, unavailable or head_mismatch). A call for a change that already has an open proposal returns that proposal with deduplicated true."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task whose linked change should be merged")),
+			mcp.WithString("change", mcp.Description("Which linked change, when the task has several")),
+			mcp.WithString("expected_head_sha", mcp.Required(), mcp.Description("The head commit SHA you reviewed")),
+		),
+		s.wrapHandler("propose_merge_kandev", s.proposeMergeHandler()),
+	)
+}
+
+func (s *Server) proposeMergeHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := req.GetArguments()
+		if payload == nil {
+			payload = map[string]interface{}{}
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionProposeMerge, payload, &result); err != nil {
 			return mcp.NewToolResultError(answerErrorText(err)), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

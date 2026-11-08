@@ -94,3 +94,10 @@ func TestProposeAnswerActionIsOnTheCoordinatorSurfaceAndPrincipalOnly(t *testing
 	require.True(t, principalOnly)
 	require.True(t, isCoordinatorProposeAction(coordinator.ActionProposeAnswer))
 }
+
+func TestHandleProposeMergeRequiresCoordinatorPrincipal(t *testing.T) {
+	h := &Handlers{logger: testLogger(t).WithFields()}
+	resp, err := h.handleProposeMerge(t.Context(), makeWSMessage(t, coordinator.ActionProposeMerge, map[string]interface{}{}))
+	require.NoError(t, err)
+	require.Equal(t, ws.ErrorCodeForbidden, decodeErrorPayload(t, resp).Code)
+}
