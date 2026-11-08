@@ -1058,6 +1058,20 @@ type ResumeOptions struct {
 	// NoInitialPrompt keeps the task description out of a fresh recovery boot;
 	// the owning continuation delivers the captured submission after readiness.
 	NoInitialPrompt bool
+	// InitialPromptOverride replaces the task-description fallback for an
+	// eligible text-only fresh-start recovery. The orchestrator supplies
+	// already-composed content; the executor performs no workflow lookups.
+	// Existing NoInitialPrompt and continuation suppression still take
+	// precedence.
+	InitialPromptOverride *string
+	// BeforeInitialPromptDispatch validates legacy recovery prompt ownership
+	// immediately before provider admission. It runs only when the lifecycle
+	// is about to send the prepared initial prompt.
+	BeforeInitialPromptDispatch func(context.Context) error
+	// OnInitialPromptDispatched and OnInitialPromptFailed release the dispatch
+	// fence installed by BeforeInitialPromptDispatch.
+	OnInitialPromptDispatched func()
+	OnInitialPromptFailed     func()
 	// SuppressInitialMessageBackfill is used only by silent restart restore,
 	// which must preserve the transcript exactly until an ordinary prompt arrives.
 	SuppressInitialMessageBackfill bool
@@ -1566,6 +1580,19 @@ func (e *Executor) resumeSession(
 		WorkspaceInventoryRecoveryReceipt: req.WorkspaceInventoryRecoveryReceipt,
 	}
 
+	if startAgent {
+		if err := e.registerResumeInitialPromptCallbacks(resp.AgentExecutionID, options); err != nil {
+			e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
+			rollbackErr := e.rollbackResumeStateAfterFailure(
+				launchCtx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
+				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+			)
+			if rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
+			return execution, err
+		}
+	}
 	if startAgent {
 		if options.StartAgentSynchronously && options.RequiredNativeConversationID == "" {
 			if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
@@ -2115,6 +2142,48 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
 }
 
+// registerResumeInitialPromptCallbacks carries a prepared recovery binding into
+// lifecycle prompt admission so a workflow move cannot send superseded
+// instructions from the initial resume prompt.
+func (e *Executor) registerResumeInitialPromptCallbacks(executionID string, options ResumeOptions) error {
+	if options.BeforeInitialPromptDispatch == nil &&
+		options.OnInitialPromptDispatched == nil && options.OnInitialPromptFailed == nil {
+		return nil
+	}
+	registrar, ok := e.agentManager.(interface {
+		RegisterInitialPromptAdmissionCallbacks(
+			string,
+			func(context.Context, string, []v1.MessageAttachment) error,
+			func(), func(),
+		) error
+	})
+	if !ok {
+		return errors.New("agent manager cannot fence fresh recovery prompt admission")
+	}
+	if err := registrar.RegisterInitialPromptAdmissionCallbacks(
+		executionID,
+		func(ctx context.Context, _ string, _ []v1.MessageAttachment) error {
+			if options.BeforeInitialPromptDispatch != nil {
+				return options.BeforeInitialPromptDispatch(ctx)
+			}
+			return nil
+		},
+		func() {
+			if options.OnInitialPromptDispatched != nil {
+				options.OnInitialPromptDispatched()
+			}
+		},
+		func() {
+			if options.OnInitialPromptFailed != nil {
+				options.OnInitialPromptFailed()
+			}
+		},
+	); err != nil {
+		return fmt.Errorf("register fresh recovery prompt admission callbacks: %w", err)
+	}
+	return nil
+}
+
 func newResumeLaunchRequest(
 	task *v1.Task,
 	session *models.TaskSession,
@@ -2154,6 +2223,9 @@ func newResumeLaunchRequest(
 		ReplaceNativeConversation:    options.RecoveryAction == RecoveryActionFreshStart,
 		RecoveryAction:               options.RecoveryAction,
 		SuppressBootStatusMessage:    options.SuppressInitialMessageBackfill,
+	}
+	if options.InitialPromptOverride != nil {
+		req.TaskDescription = *options.InitialPromptOverride
 	}
 	if options.ForceContextContinuation {
 		if options.DeferInitialPrompt {

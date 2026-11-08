@@ -3432,6 +3432,33 @@ func (s *Service) expandPromptReferencesWithContext(
 	return s.promptExpander.AppendReferenceExpansionsWithContext(ctx, prompt, zapLogger)
 }
 
+type strictPromptReferenceExpander interface {
+	AppendReferenceExpansionsWithContextStrict(
+		context.Context, string, *zap.Logger,
+	) (string, string, error)
+}
+
+// expandPromptReferencesWithContextStrict is used by recovery paths that must
+// stop before reset or dispatch when a saved prompt cannot be read.
+func (s *Service) expandPromptReferencesWithContextStrict(
+	ctx context.Context,
+	prompt string,
+	isPassthrough bool,
+) (string, string, error) {
+	if s.promptExpander == nil || isPassthrough {
+		return prompt, "", nil
+	}
+	var zapLogger *zap.Logger
+	if s.logger != nil {
+		zapLogger = s.logger.Zap()
+	}
+	if strict, ok := s.promptExpander.(strictPromptReferenceExpander); ok {
+		return strict.AppendReferenceExpansionsWithContextStrict(ctx, prompt, zapLogger)
+	}
+	expanded, referenceContext := s.promptExpander.AppendReferenceExpansionsWithContext(ctx, prompt, zapLogger)
+	return expanded, referenceContext, nil
+}
+
 func (s *Service) appendTitlePromptReferencesToTrustedContext(
 	ctx context.Context,
 	title string,
@@ -3647,8 +3674,23 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	if err != nil {
 		return nil, err
 	}
+	if options.BeforeInitialPromptDispatch != nil {
+		releaseOnce := sync.Once{}
+		release := func() { releaseOnce.Do(releaseCeilingDispatch) }
+		options.OnInitialPromptDispatched = release
+		options.OnInitialPromptFailed = release
+		releaseCeilingDispatch = release
+	}
+	releaseDispatchOnReturn := true
+	defer func() {
+		if releaseDispatchOnReturn {
+			releaseCeilingDispatch()
+		}
+	}()
 	execution, err := s.executor.ResumeSessionWithOptions(dispatchCtx, session, true, options)
-	releaseCeilingDispatch()
+	if options.BeforeInitialPromptDispatch == nil || err != nil || execution == nil {
+		releaseCeilingDispatch()
+	}
 	if execution != nil {
 		attempt.setExecutionID(execution.AgentExecutionID)
 	}
@@ -3773,6 +3815,11 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 		return execution, decorateResumeFailure(continuationErr)
 	}
 
+	if options.BeforeInitialPromptDispatch != nil && execution != nil {
+		// The executor registered provider-admission callbacks that release the
+		// workflow-entry dispatch fence after the initial prompt settles.
+		releaseDispatchOnReturn = false
+	}
 	return execution, nil
 }
 
@@ -6873,6 +6920,10 @@ type promptTaskOptions struct {
 	// (e.g. appending a claimed step handoff) is not silently recomposed from
 	// the destination step's own template.
 	promptAlreadyComposed bool
+	// retryPrompt overrides the prompt cached for dynamic fallback retries.
+	// A fresh-start receipt uses the raw submission so a later fallback
+	// composes workflow instructions exactly once.
+	retryPrompt *string
 	// fallbackUsesEffectivePrompt upgrades an already-composed recovery prompt
 	// with the session's effective plan/config transforms before fresh launch.
 	fallbackUsesEffectivePrompt bool
@@ -7143,6 +7194,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if options.firstLaunchPromptContext {
 		effectivePrompt, err = s.wrapInitialSubmissionReplayPrompt(
 			resumePromptCtx, taskID, sessionID, effectivePrompt, attachments, session,
+			options.promptReferenceContext,
 		)
 		if err != nil {
 			s.rollbackForegroundDispatchOnFailure(resumePromptCtx, taskID, sessionID, foregroundDispatch)
@@ -7573,7 +7625,11 @@ func (s *Service) prepareModelSwitchGuard(
 	resumeAttempt *resumeAttempt,
 ) (*lockedCancelInFlightGuard, error) {
 	if !options.internalContinuation {
-		s.rememberTurnPromptWithAccepted(sessionID, prompt, model, planMode, attachments, options.onAccepted)
+		retryPrompt := prompt
+		if options.retryPrompt != nil {
+			retryPrompt = *options.retryPrompt
+		}
+		s.rememberTurnPromptWithAccepted(sessionID, retryPrompt, model, planMode, attachments, options.onAccepted)
 	}
 	requiresModelSwitch := modelSwitchRequired(session, model)
 	return s.acquireModelSwitchGuard(ctx, taskID, sessionID, foregroundDispatch, requiresModelSwitch, resumeAttempt)
