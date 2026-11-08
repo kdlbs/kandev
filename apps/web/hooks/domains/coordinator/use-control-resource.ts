@@ -81,3 +81,31 @@ export function controlReadFailure(error: unknown): ControlReadStatus {
   }
   return "error";
 }
+
+/**
+ * How a failed control read is explained: `unavailable` for a temporarily
+ * unavailable store (503 or persistence_unavailable), `disconnected` when the
+ * server could not be reached, `denied` for a read the caller may not make,
+ * `unsupported` for a projection this server does not serve (not retried),
+ * and `error` for anything else.
+ */
+export type ControlFailureKind =
+  | "unavailable"
+  | "disconnected"
+  | "denied"
+  | "unsupported"
+  | "error";
+
+export function controlFailureKind(error: unknown): ControlFailureKind {
+  if (error instanceof ApiError) {
+    const code =
+      error.body && typeof error.body === "object"
+        ? (error.body as { code?: unknown }).code
+        : undefined;
+    if (error.status === 503 || code === "persistence_unavailable") return "unavailable";
+  }
+  if (error instanceof TypeError) return "disconnected";
+  const status = controlReadFailure(error);
+  if (status === "unsupported") return "unsupported";
+  return status === "error" ? "error" : "denied";
+}

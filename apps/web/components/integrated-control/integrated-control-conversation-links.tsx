@@ -8,8 +8,42 @@ import { useOpenControlConversation } from "@/hooks/domains/coordinator/use-open
 import { useIntegratedControl } from "./integrated-control-provider";
 import { openFailureMessages } from "./control-open-failure";
 
-const ROW_CLASS =
-  "flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted max-md:min-h-11 [@media(pointer:coarse)]:min-h-11";
+function ConversationLink({
+  workspaceId,
+  coordinatorId,
+  taskId,
+  current,
+  label,
+  view,
+  onNavigate,
+}: {
+  workspaceId: string;
+  coordinatorId?: string;
+  taskId: string;
+  current?: boolean;
+  label: string;
+  view: ControlView;
+  onNavigate?: () => void;
+}) {
+  const query = useSearchParams();
+  const selected =
+    query.get("workspace") === workspaceId &&
+    (query.get("coordinator") ?? undefined) === coordinatorId &&
+    (query.get("task") === taskId || (!query.has("task") && current));
+  return (
+    <Link
+      href={controlHref(view, workspaceId, coordinatorId, current ? undefined : taskId)}
+      onNavigated={onNavigate}
+      aria-current={selected ? "page" : undefined}
+      title={label}
+      className="flex min-h-7 cursor-pointer min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted aria-[current=page]:bg-accent [@media(pointer:coarse)]:min-h-11"
+      data-testid={`control-conversation-${current ? coordinatorId : taskId}`}
+    >
+      <IconMessage className="size-3.5 shrink-0" aria-hidden />
+      <span className="truncate">{label}</span>
+    </Link>
+  );
+}
 
 /**
  * One "Coordinator conversation" entry. With a conversation it links to it;
@@ -35,29 +69,22 @@ export function ControlCoordinatorConversation({
   const { t } = useTranslation();
   const control = useIntegratedControl();
   const router = useRouter();
-  const query = useSearchParams();
   const opener = useOpenControlConversation(workspaceId, coordinator.id, control?.refresh);
-  const href = controlHref(view, workspaceId, coordinator.id);
   const label = named
     ? t("sidebar:integratedControl.coordinatorConversationNamed", { name: coordinator.name })
     : t("sidebar:integratedControl.coordinatorConversation");
-  if (coordinator.conversation_task_id) {
-    const selected =
-      query.get("workspace") === workspaceId && query.get("coordinator") === coordinator.id;
+  if (coordinator.conversation_task_id)
     return (
-      <Link
-        href={href}
-        onNavigated={onNavigate}
-        aria-current={selected ? "page" : undefined}
-        title={label}
-        className={`${ROW_CLASS} aria-[current=page]:bg-accent`}
-        data-testid={`control-conversation-${coordinator.id}`}
-      >
-        <IconMessage className="size-3.5 shrink-0" aria-hidden />
-        <span className="truncate">{label}</span>
-      </Link>
+      <ConversationLink
+        workspaceId={workspaceId}
+        coordinatorId={coordinator.id}
+        taskId={coordinator.conversation_task_id}
+        current
+        view={view}
+        onNavigate={onNavigate}
+        label={label}
+      />
     );
-  }
   if (!canManage) return null;
   return (
     <>
@@ -67,10 +94,10 @@ export function ControlCoordinatorConversation({
         title={label}
         onClick={async () => {
           if (!(await opener.open())) return;
-          router.push(href);
+          router.push(controlHref(view, workspaceId, coordinator.id));
           onNavigate?.();
         }}
-        className={`${ROW_CLASS} text-muted-foreground disabled:cursor-wait`}
+        className="flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted disabled:cursor-wait [@media(pointer:coarse)]:min-h-11"
         data-testid={`control-open-conversation-${coordinator.id}`}
       >
         <IconPlus className="size-3.5 shrink-0" aria-hidden />
@@ -82,5 +109,40 @@ export function ControlCoordinatorConversation({
         </p>
       ))}
     </>
+  );
+}
+
+/** A workspace's independent conversations, folded to one line with their count. */
+export function ControlIndependentConversations({
+  workspaceId,
+  view,
+  onNavigate,
+}: {
+  workspaceId: string;
+  view: ControlView;
+  onNavigate?: () => void;
+}) {
+  const { t } = useTranslation();
+  const control = useIntegratedControl();
+  const collection = control?.data?.conversationsByWorkspace[workspaceId]?.independent;
+  if (!collection?.items.length) return null;
+  return (
+    <details className="min-w-0" data-testid="control-independent-conversations">
+      <summary className="cursor-pointer truncate px-2 py-1.5 text-xs text-muted-foreground [@media(pointer:coarse)]:min-h-11">
+        {t("sidebar:integratedControl.independentConversationCount", {
+          count: collection.items.length,
+        })}
+      </summary>
+      {collection.items.map((item) => (
+        <ConversationLink
+          key={item.task_id}
+          workspaceId={workspaceId}
+          taskId={item.task_id}
+          view={view}
+          onNavigate={onNavigate}
+          label={item.name || t("sidebar:integratedControl.unnamedConversation")}
+        />
+      ))}
+    </details>
   );
 }

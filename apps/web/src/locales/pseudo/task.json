@@ -3103,5 +3103,13 @@
   "contextCompactionTokenCounts": "{{preTokens}} ţōķēńś → {{postTokens}} ţōķēńś",
   "contextCompactionTrigger": "Ţŕĩĝĝēŕ: {{trigger}}",
   "contextCompactionDuration": "Ďũŕàţĩōń: {{duration}}",
-  "deliveryMessageNotDelivered": "Ńōţ ďēĺĩvēŕēď. Śēńď ĩţ àĝàĩń."
+  "deliveryMessageNotDelivered": "Ńōţ ďēĺĩvēŕēď. Śēńď ĩţ àĝàĩń.",
+  "launchQueueRefusalTotal": "[!! Ŀåšţ ŵåîţ: öṽéŕåļļ éxéçûţîöñ ļîɱîţ !!]",
+  "launchQueueRefusalGrade": "[!! Ŀåšţ ŵåîţ: éẋéçûţîöñ ĝŕåðé ļîɱîţ !!]",
+  "launchQueueRefusalBoth": "[!! Ŀåšţ ŵåîţ: öṽéŕåļļ åñð ĝŕåðé ļîɱîţš !!]",
+  "launchQueueRefusalConfiguration": "[!! Ŀåšţ ŵåîţ: ĝŕåðé çöñƒîĝûŕåţîöñ ŕéqûîŕéð !!]",
+  "launchQueueRefusalUnknown": "[!! Ŀåšţ ŵåîţ: îñṽéñţöŕý ûñṽéŕîƒîéð !!]",
+  "launchQueueCauseGrade": "{{grade}} ĝŕàďē ĺĩḿĩţ {{inUse}}/{{limit}} · śţàŕţś ŵĥēń à śĺōţ ƒŕēēś ũƥ",
+  "launchQueueCauseGradeUnmeasured": "Ēxēćũţĩōń ĝŕàďē ĺĩḿĩţ ŕēàćĥēď · śţàŕţś ŵĥēń à śĺōţ ƒŕēēś ũƥ",
+  "launchQueueCauseTotal": "Ōvēŕàĺĺ ĺĩḿĩţ {{inUse}}/{{limit}} · śţàŕţś ŵĥēń à śĺōţ ƒŕēēś ũƥ"
 }

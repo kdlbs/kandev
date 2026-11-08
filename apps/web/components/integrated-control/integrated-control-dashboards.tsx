@@ -10,18 +10,26 @@ import {
 } from "./control-aggregate-overview";
 import { ControlGroupedHistory } from "./control-grouped-history";
 import { ControlNativeComparison } from "./control-native-comparison";
-import { ControlProviderCircuits } from "./control-provider-circuits";
-import { ControlModelBlocks } from "./control-model-blocks";
-import { ControlModelActivity } from "./control-model-activity";
-import { ControlCachedUsage } from "./control-cached-usage";
-import { useFeature } from "@/hooks/domains/features/use-feature";
+import { ControlProviderUsage } from "./control-provider-usage";
+import { ControlOverview } from "./control-overview";
+import { ControlHistory } from "./control-history";
+import { ControlWorkspaces } from "./control-workspaces";
+import { ControlBlockerChips } from "./control-blocker-chips";
+import { ControlTaskBoard } from "./control-task-board";
+import { useControlSignals } from "./use-control-signals";
 import { ControlCapacityLine } from "./control-capacity-bars";
 import { capacityDashboardCounts } from "./control-capacity-waiting";
 import { useNativeDashboards } from "@/hooks/domains/coordinator/use-control-native";
 import type { SessionCapacityObservation } from "@/lib/types/system";
 import { ControlInbox } from "./control-inbox";
 
-export function IntegratedControlDashboard({ view }: { view: ControlView }) {
+export function IntegratedControlDashboard({
+  view,
+  workspaceId,
+}: {
+  view: ControlView;
+  workspaceId?: string;
+}) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
   if (!control?.data) return null;
@@ -43,7 +51,11 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
         workspaces={workspaces}
         revision={control.data}
       />
-      {view === "providers" && workspaces.length > 0 && <ProviderDashboards />}
+      <ControlSignalView
+        view={view}
+        workspaceId={workspaceId}
+        hasWorkspaces={workspaces.length > 0}
+      />
       {view === "overview" && (
         <div className="grid gap-3 sm:grid-cols-3">
           <Fact label={t("sidebar:integratedControl.workspaces")} value={workspaces.length} />
@@ -77,6 +89,7 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
       )}
       <WorkspaceOrCoordinatorFacts
         view={view}
+        workspaceId={workspaceId}
         workspaces={workspaces}
         byWorkspace={byWorkspace}
         rows={rows}
@@ -100,25 +113,32 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
   );
 }
 
-function ProviderDashboards() {
-  const { t } = useTranslation();
-  const limitsEnabled = useFeature("providerUsageLimits");
+/** The recorded-signal section each view adds above its existing dashboards. */
+function ControlSignalView({
+  view,
+  workspaceId,
+  hasWorkspaces,
+}: {
+  view: ControlView;
+  workspaceId?: string;
+  hasWorkspaces: boolean;
+}) {
+  if (view === "activity") return <ControlActivityBoard />;
+  if (view === "providers")
+    return hasWorkspaces ? <ControlProviderUsage workspaceId={workspaceId} /> : null;
+  if (view === "overview") return <ControlOverview />;
+  if (view === "history") return <ControlHistory workspaceId={workspaceId} />;
+  if (view === "workspaces" && workspaceId) return <ControlWorkspaces workspaceId={workspaceId} />;
+  return null;
+}
+
+/** Stopped-work chips and the ranked task board, from the shared signal reads. */
+function ControlActivityBoard() {
+  const signals = useControlSignals();
   return (
     <>
-      <ControlModelActivity />
-      {limitsEnabled ? (
-        <ControlCachedUsage />
-      ) : (
-        <p
-          role="status"
-          className="rounded-md border p-3 text-sm"
-          data-testid="control-usage-unavailable"
-        >
-          {t("sidebar:controlInspection.usageDisabled")}
-        </p>
-      )}
-      <ControlModelBlocks />
-      <ControlProviderCircuits />
+      <ControlBlockerChips />
+      <ControlTaskBoard signals={signals} />
     </>
   );
 }
@@ -178,22 +198,32 @@ type FactByWorkspace = NonNullable<
 
 function WorkspaceOrCoordinatorFacts({
   view,
+  workspaceId,
   workspaces,
   byWorkspace,
   rows,
 }: {
   view: ControlView;
+  workspaceId?: string;
   workspaces: FactWorkspaces;
   byWorkspace: FactByWorkspace;
   rows: FactRows;
 }) {
   const { t } = useTranslation();
+  if (workspaceId) return null;
   if (view === "workspaces" || view === "overview") {
     return (
       <div className="grid gap-3">
         {workspaces.map((workspace) => (
           <section key={workspace.id} className="rounded-lg border p-4">
-            <h2 className="font-medium">{workspace.name}</h2>
+            <h2 className="font-medium">
+              <Link
+                className="inline-flex min-h-7 cursor-pointer items-center underline-offset-4 hover:underline max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+                href={controlHref("workspaces", workspace.id)}
+              >
+                {workspace.name}
+              </Link>
+            </h2>
             {workspace.description && (
               <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
                 {workspace.description}

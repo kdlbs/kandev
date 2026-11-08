@@ -54,6 +54,8 @@ export type TaskStatusSummaryTurnError = {
 };
 
 export type TaskStatusSummaryLaunchQueue = {
+  /** Last actual admission refusal; independent of the latest population sample. */
+  capacity_reason?: string;
   session_id?: string;
   agent_profile_id?: string;
   workflow_step_id?: string;

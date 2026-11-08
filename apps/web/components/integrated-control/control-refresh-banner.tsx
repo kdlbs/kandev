@@ -7,6 +7,7 @@ const FAILURE_KEYS = {
   disconnected: "sidebar:controlRefresh.bannerDisconnected",
   error: "sidebar:controlRefresh.bannerError",
   denied: "sidebar:controlRefresh.bannerDenied",
+  unsupported: "sidebar:controlRefresh.bannerUnsupported",
 } as const;
 
 /** The header's read time: fixed-width digits, never replaced by a refreshing label. */
@@ -25,6 +26,16 @@ export function ControlLastRefresh() {
 }
 
 type Control = NonNullable<ReturnType<typeof useIntegratedControl>>;
+
+/** Whether any workspace's coordinator, conversation or task list failed to read. */
+export function hasPartialControlData(data: NonNullable<Control["data"]>) {
+  return (
+    Object.values(data.byWorkspace).some((list) => list.error) ||
+    Object.values(data.conversationsByWorkspace).some(
+      (list) => list.independent.error || list.tasks?.error,
+    )
+  );
+}
 type Translate = ReturnType<typeof useTranslation>["t"];
 
 /** What the banner says, most important first; empty when nothing failed. */
@@ -44,8 +55,7 @@ function bannerParts(control: Control, t: Translate): string[] {
   }
   if (aggregate.error && aggregate.data)
     return [t("sidebar:integratedControl.aggregate.staleError")];
-  if (data && Object.values(data.byWorkspace).some((list) => list.error))
-    return [t("sidebar:integratedControl.partialData")];
+  if (data && hasPartialControlData(data)) return [t("sidebar:integratedControl.partialData")];
   return [];
 }
 

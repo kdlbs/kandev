@@ -106,7 +106,11 @@ describe("Integrated control authorized read lifetime", () => {
     expect(result.current.data?.byWorkspace.beta.items).toEqual([]);
     api.coordinators.mockResolvedValueOnce({ coordinators: [] });
     await act(async () => result.current.refresh());
-    expect(result.current.data?.byWorkspace.beta).toEqual({ items: [], error: false });
+    expect(result.current.data?.byWorkspace.beta).toEqual({
+      items: [],
+      error: false,
+      receivedAt: expect.any(String),
+    });
   });
   it("invalidates pending reads and removes listeners on unmount", async () => {
     const pending = Promise.withResolvers<{ coordinators: (typeof coordinator)[] }>();

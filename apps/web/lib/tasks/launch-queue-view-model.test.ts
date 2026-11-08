@@ -1,6 +1,6 @@
 /* eslint-disable sonarjs/no-duplicate-string -- Repeated wire fixtures assert identity across freshness states. */
 import { describe, expect, it } from "vitest";
-import { buildLaunchQueueViewModel } from "./launch-queue-view-model";
+import { buildLaunchQueueViewModel, launchQueueCapacityCause } from "./launch-queue-view-model";
 
 const queuedAt = "2026-09-16T20:15:44Z";
 
@@ -98,5 +98,57 @@ describe("buildLaunchQueueViewModel", () => {
         retrying: true,
       }),
     ).toBeNull();
+  });
+});
+
+describe("launchQueueCapacityCause", () => {
+  const queue = (capacityReason: string, gradeInUse?: Record<string, number>) =>
+    buildLaunchQueueViewModel(
+      {
+        queued_at: queuedAt,
+        reason: "session_capacity",
+        retrying: true,
+        capacity_reason: capacityReason,
+        capacity: {
+          policy: "all",
+          in_use: 13,
+          limit: 14,
+          observed_at: queuedAt,
+          ...(gradeInUse
+            ? { grade_in_use: gradeInUse, grade_limits: { control: 4, dev: 10 } }
+            : {}),
+        },
+      },
+      { now: Date.parse(queuedAt) },
+    )!;
+
+  it("names the one full grade and its usage for a grade refusal", () => {
+    expect(launchQueueCapacityCause(queue("ceiling_grade_limit", { control: 4, dev: 9 }))).toEqual({
+      key: "task:launchQueueCauseGrade",
+      values: { grade: "control", inUse: 4, limit: 4 },
+    });
+  });
+
+  it("prefers the narrower grade limit when both limits refused", () => {
+    expect(
+      launchQueueCapacityCause(queue("ceiling_both_limits", { control: 4, dev: 9 }))?.key,
+    ).toBe("task:launchQueueCauseGrade");
+  });
+
+  it("says the grade limit without numbers when the payload has no grade usage", () => {
+    expect(launchQueueCapacityCause(queue("ceiling_grade_limit"))).toEqual({
+      key: "task:launchQueueCauseGradeUnmeasured",
+    });
+    expect(launchQueueCapacityCause(queue("ceiling_grade_limit", { control: 4, dev: 10 }))).toEqual(
+      { key: "task:launchQueueCauseGradeUnmeasured" },
+    );
+  });
+
+  it("names the overall limit for a total refusal and nothing for other reasons", () => {
+    expect(launchQueueCapacityCause(queue("ceiling_total_limit"))).toEqual({
+      key: "task:launchQueueCauseTotal",
+      values: { inUse: 13, limit: 14 },
+    });
+    expect(launchQueueCapacityCause(queue("ceiling_needs_configuration"))).toBeNull();
   });
 });

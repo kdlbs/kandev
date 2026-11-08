@@ -1,11 +1,11 @@
-import type { NativeDashboard } from "@/lib/types/control-native";
+import type { NativeDashboard, NativeTask } from "@/lib/types/control-native";
 
 /** Workflow nature is display-only: it grants no admission or execution. */
 export const TASK_STAGES = ["work", "review", "held", "completed", "unknown"] as const;
 export type TaskStage = (typeof TASK_STAGES)[number];
 export type TaskStageCounts = Record<TaskStage, number>;
 
-export function taskStage(task: { state: string; stage_type: string }): TaskStage | null {
+export function taskStage(task: Pick<NativeTask, "state" | "stage_type">): TaskStage | null {
   const state = task.state?.toUpperCase();
   if (state === "COMPLETED") return "completed";
   if (state === "CANCELLED" || state === "FAILED") return null;
@@ -18,6 +18,18 @@ export function taskStage(task: { state: string; stage_type: string }): TaskStag
 
 export function emptyStageCounts(): TaskStageCounts {
   return { work: 0, review: 0, held: 0, completed: 0, unknown: 0 };
+}
+
+/** Counts only the loaded rows; the task board retains its sample boundary. */
+export function stageCounts(
+  tasks: ReadonlyArray<Pick<NativeTask, "state" | "stage_type">>,
+): TaskStageCounts {
+  const counts = emptyStageCounts();
+  for (const task of tasks) {
+    const stage = taskStage(task);
+    if (stage) counts[stage] += 1;
+  }
+  return counts;
 }
 
 /** A state histogram cannot establish a workflow stage or readiness. */
@@ -58,4 +70,15 @@ export function workflowStepCounts(data: NativeDashboard | undefined, stage: Tas
     });
   }
   return [...steps.values()];
+}
+
+export function sumStageCounts(rows: ReadonlyArray<TaskStageCounts>): TaskStageCounts {
+  return rows.reduce((total, row) => {
+    for (const stage of TASK_STAGES) total[stage] += row[stage];
+    return total;
+  }, emptyStageCounts());
+}
+
+export function taskStageTotal(counts: TaskStageCounts): number {
+  return TASK_STAGES.reduce((sum, stage) => sum + counts[stage], 0);
 }

@@ -100,6 +100,7 @@ func equalLaunchQueue(left, right *LaunchQueueSummary) bool {
 		left.WorkflowStepID != right.WorkflowStepID ||
 		!left.QueuedAt.Equal(right.QueuedAt) ||
 		left.Reason != right.Reason ||
+		left.CapacityReason != right.CapacityReason ||
 		left.Retrying != right.Retrying {
 		return false
 	}

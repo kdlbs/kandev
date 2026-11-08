@@ -8,6 +8,7 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import { isIntegratedControlPath } from "@/lib/navigation/integrated-control";
 import { usePathname } from "@/lib/routing/client-router";
+import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
 
 type ControlContext = ReturnType<typeof useIntegratedControlData> & {
   active: boolean;
@@ -31,7 +32,12 @@ export function IntegratedControlProvider({ children }: { children: ReactNode })
   const active = enabled && authenticated && isIntegratedControlPath(pathname);
   const reads = useIntegratedControlData(active, coordinatorEnabled);
   const aggregate = useControlAggregate(active && officeEnabled);
-  const [selectedSessions, setSelectedSessions] = useState<Record<string, string>>({});
+  const identity = useAppStore(stateReadScopeIdentity);
+  const [selection, setSelection] = useState<{ identity: string; byTask: Record<string, string> }>({
+    identity,
+    byTask: {},
+  });
+  const selectedSessions = selection.identity === identity ? selection.byTask : {};
   return (
     <Context.Provider
       value={{
@@ -45,7 +51,13 @@ export function IntegratedControlProvider({ children }: { children: ReactNode })
         aggregate,
         selectedSessions,
         selectSession: (taskId, sessionId) =>
-          setSelectedSessions((previous) => ({ ...previous, [taskId]: sessionId })),
+          setSelection((previous) => ({
+            identity,
+            byTask: {
+              ...(previous.identity === identity ? previous.byTask : {}),
+              [taskId]: sessionId,
+            },
+          })),
       }}
     >
       {children}

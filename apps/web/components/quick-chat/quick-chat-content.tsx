@@ -33,6 +33,7 @@ import type { QuickChatInitialPrompt } from "@/lib/state/slices/ui/types";
 type QuickChatContentProps = {
   sessionId: string;
   loadSettings?: boolean;
+  readOnly?: boolean;
   minimalToolbar?: boolean;
   placeholderOverride?: string;
   initialPrompt?: QuickChatInitialPrompt;
@@ -231,6 +232,7 @@ export const QuickChatContent = memo(function QuickChatContent({
   hideStartupRows,
   activityDisplay = false,
   loadSettings,
+  readOnly = false,
 }: QuickChatContentProps) {
   const [clarificationKey, setClarificationKey] = useState(0);
   const {
@@ -254,13 +256,16 @@ export const QuickChatContent = memo(function QuickChatContent({
     taskId,
     initialPrompt,
     initialDraft,
-    blocked: isQuickChatComposerBlocked(startupPending, panelState),
+    blocked: readOnly || isQuickChatComposerBlocked(startupPending, panelState),
     handleSubmit,
     onInitialPromptAttempted,
     chatInputRef,
   });
 
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
+  if (readOnly) {
+    return <QuickChatMessageSurface items={items} panelState={panelState} taskId={taskId} />;
+  }
   return (
     <div
       ref={shortcutScopeRef}

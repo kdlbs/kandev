@@ -1,9 +1,38 @@
+export type NativeCoverage = {
+  state: "known" | "unavailable";
+  reason?: string;
+  total: number | null;
+  returned: number;
+  truncated: boolean;
+};
+export type NativeEvent = {
+  id: string;
+  kind: string;
+  task_id?: string;
+  session_id?: string;
+  title?: string;
+  state?: string;
+  provider?: string;
+  repository?: string;
+  number?: number;
+  occurred_at: string;
+};
+export type NativeHistory = {
+  workspace_id: string;
+  generated_at: string;
+  since: string;
+  coverage: string;
+  truncated: boolean;
+  sources: Record<string, NativeCoverage>;
+  events: NativeEvent[];
+};
 export type NativeSharedCapacityWaiting = {
   known: boolean;
+  /** Waiters refused by a grade limit, including both-limit refusals. */
   grade: number;
+  /** Every shared-capacity refusal. */
   total: number;
 };
-
 export type NativeDashboard = {
   workspace_id: string;
   generated_at: string;
@@ -22,9 +51,12 @@ export type NativeDashboard = {
   sessions: Record<string, number>;
   /** Unarchived, unfinished tasks whose primary session waits for input. */
   waiting_input_tasks: number;
-  /** Optional on older servers. */
+  /** Unarchived tasks queued until a WIP-limited destination step admits them; optional on older servers. */
   wip_waiting_tasks?: number;
-  /** Installation-wide observation; it must not be summed across workspaces. */
+  /**
+   * Installation-wide shared-capacity waiters. Identical across workspace
+   * responses: read it once, never sum it.
+   */
   shared_capacity_waiting?: NativeSharedCapacityWaiting;
   queued_messages: number;
   transitions_24h: number;
@@ -32,8 +64,6 @@ export type NativeDashboard = {
   /** Null when either recorded merge source is unavailable; absent on older servers. */
   merged_change_requests_24h?: number | null;
 };
-
-/** One recorded task row of the per-task control projection. */
 export type NativeTask = {
   task_id: string;
   workspace_id: string;
