@@ -71,6 +71,7 @@ type repoInfo struct {
 	RepositoryID               string
 	RepositoryPath             string
 	BaseBranch                 string
+	BaseBranchFallbackPolicy   models.BaseBranchFallbackPolicy
 	IntegrationRef             string
 	CheckoutBranch             string
 	PRNumber                   int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
@@ -179,16 +180,17 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		return nil, err
 	}
 	info := &repoInfo{
-		CheckoutOptions:         options,
-		TaskRepositoryID:        tr.ID,
-		TaskRepositoryUpdatedAt: tr.UpdatedAt,
-		RepositoryID:            tr.RepositoryID,
-		BaseBranch:              tr.BaseBranch,
-		IntegrationRef:          tr.BranchPolicyPullRequestTarget,
-		CheckoutBranch:          tr.CheckoutBranch,
-		PRNumber:                prNumberFromMetadata(tr.Metadata),
-		Position:                tr.Position,
-		WorkspaceRelativePath:   tr.WorkspaceRelativePath,
+		CheckoutOptions:          options,
+		TaskRepositoryID:         tr.ID,
+		TaskRepositoryUpdatedAt:  tr.UpdatedAt,
+		RepositoryID:             tr.RepositoryID,
+		BaseBranch:               tr.BaseBranch,
+		BaseBranchFallbackPolicy: models.ResolveAttachmentBaseBranchFallbackPolicy(tr.Metadata, tr.BaseBranch),
+		IntegrationRef:           tr.BranchPolicyPullRequestTarget,
+		CheckoutBranch:           tr.CheckoutBranch,
+		PRNumber:                 prNumberFromMetadata(tr.Metadata),
+		Position:                 tr.Position,
+		WorkspaceRelativePath:    tr.WorkspaceRelativePath,
 	}
 	if binding, found, err := models.LoadRemoteContribution(tr.Metadata); err != nil {
 		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
@@ -205,6 +207,7 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		}
 		info.RemoteContribution = &binding
 		info.BaseBranch = binding.BaseBranch
+		info.BaseBranchFallbackPolicy = models.BaseBranchFallbackPolicyStrict
 		info.CheckoutBranch = binding.HeadBranch
 	}
 	if destination, found, err := models.LoadContributionDestination(tr.Metadata); err != nil {
@@ -2680,6 +2683,7 @@ func (e *Executor) applyResumeRepoConfig(
 		}
 	}
 
+	applyResumeAttachmentFallbackPolicy(req, repositoryID, baseBranch, allRepos)
 	repositoryPath := repository.LocalPath
 	applyResumeRepoBasics(req, repository, repositoryPath, shouldUseWorktree(req.ExecutorType))
 	for _, info := range allRepos {
@@ -2711,6 +2715,34 @@ func (e *Executor) resumeRepoSet(ctx context.Context, taskID string, resolved ..
 		return resolved[0], nil
 	}
 	return e.resolveAllRepoInfo(ctx, taskID)
+}
+
+// applyResumeAttachmentFallbackPolicy copies the exact attachment's derived
+// repository-default policy onto a resume request. A session repository that
+// has no matching attachment, multiple same-repository attachments, or a
+// session branch that differs from the attachment base is ambiguous and stays
+// strict: the session's legacy base snapshot is not provenance.
+func applyResumeAttachmentFallbackPolicy(
+	req *LaunchAgentRequest, repositoryID, baseBranch string, repos []*repoInfo,
+) {
+	req.BaseBranchFallbackPolicy = models.BaseBranchFallbackPolicyStrict
+	var match *repoInfo
+	for _, info := range repos {
+		if info == nil || info.RepositoryID != repositoryID {
+			continue
+		}
+		if match != nil {
+			return
+		}
+		match = info
+	}
+	if match == nil || strings.TrimSpace(match.BaseBranch) != strings.TrimSpace(baseBranch) {
+		return
+	}
+	req.BaseBranchFallbackPolicy = match.BaseBranchFallbackPolicy
+	if match.Repository != nil && match.Repository.DefaultBranch != "" {
+		req.DefaultBranch = match.Repository.DefaultBranch
+	}
 }
 
 // resolveResumeRepoIDAndBranch picks the primary repositoryID and baseBranch
@@ -2782,6 +2814,9 @@ func applyResumeRepoBasics(req *LaunchAgentRequest, repository *models.Repositor
 	if repositoryPath != "" {
 		req.RepositoryURL = repositoryPath
 		req.RepositoryPath = repositoryPath
+	}
+	if repository != nil && repository.DefaultBranch != "" {
+		req.DefaultBranch = repository.DefaultBranch
 	}
 	if useWorktree {
 		req.RepoName = repository.Name

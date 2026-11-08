@@ -227,9 +227,17 @@ type CreateRequest struct {
 
 	// FallbackBaseBranch is an optional branch to retry with when BaseBranch
 	// does not exist in the repository. Typically populated with the
-	// repository's default_branch by the caller. When empty, a missing
-	// BaseBranch returns ErrInvalidBaseBranch as before.
+	// repository's default_branch by the caller. It is only a candidate:
+	// BaseBranchFallbackPolicy decides whether it may be used. When empty, a
+	// missing BaseBranch returns ErrInvalidBaseBranch as before.
 	FallbackBaseBranch string
+
+	// BaseBranchFallbackPolicy controls whether an unresolved BaseBranch may
+	// be replaced with FallbackBaseBranch or a discovered repository default.
+	// Its zero value is strict: the selected base resolves exactly or
+	// preparation fails. Only server-authored inherited or automatic-default
+	// selections may opt into repository-default recovery.
+	BaseBranchFallbackPolicy models.BaseBranchFallbackPolicy
 
 	// CheckoutBranch is a branch to fetch from origin and check out directly in the
 	// worktree. If the branch is already checked out in another worktree, a unique

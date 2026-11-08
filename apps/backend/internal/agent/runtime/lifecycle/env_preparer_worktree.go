@@ -81,14 +81,22 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	steps, ok := p.validateWorktreeRequest(req, stepIdx, totalSteps, onProgress, steps)
 	if !ok {
 		msg := steps[len(steps)-1].Error
-		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: msg, Error: errors.New(msg), Duration: time.Since(start)}, nil
+		return &EnvPrepareResult{
+			Success: false, Steps: steps, ErrorMessage: msg, Error: errors.New(msg), Duration: time.Since(start),
+		}, nil
 	}
 	stepIdx++
 
 	// Steps 2 (and optional sync): Create worktree (with optional pre-sync).
 	wt, _, steps, stepIdx, err := p.createWorktreeWithSync(ctx, req, stepIdx, totalSteps, onProgress, steps)
 	if err != nil {
-		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: err.Error(), Error: err, Duration: time.Since(start)}, nil
+		cause := err
+		if errors.Is(err, worktree.ErrInvalidBaseBranch) {
+			cause = repositoryPreparationError(req, err)
+		}
+		return &EnvPrepareResult{
+			Success: false, Steps: steps, ErrorMessage: cause.Error(), Error: cause, Duration: time.Since(start),
+		}, nil
 	}
 	if req.WorkspaceReuseRequired {
 		workspacePath, err := p.effectiveWorkspacePath(req, wt.Path)
@@ -175,6 +183,17 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		BaseBranch:                wt.BaseBranch,
 		BaseBranchFallbackWarning: wt.BaseBranchFallbackWarning,
 	}, nil
+}
+
+// repositoryPreparationError names the failing attachment through the existing
+// preparation-error envelope even on the single-repository path.
+func repositoryPreparationError(req *EnvPrepareRequest, cause error) error {
+	return &RepositoryPreparationError{
+		RepositoryID:     req.RepositoryID,
+		TaskRepositoryID: req.TaskRepositoryID,
+		RepositoryName:   req.RepoName,
+		Cause:            cause,
+	}
 }
 
 func (p *WorktreePreparer) effectiveWorkspacePath(req *EnvPrepareRequest, worktreePath string) (string, error) {
@@ -322,6 +341,7 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		RepositoryID:               req.RepositoryID,
 		RepositoryPath:             req.RepositoryPath,
 		BaseBranch:                 req.BaseBranch,
+		BaseBranchFallbackPolicy:   req.BaseBranchFallbackPolicy,
 		IntegrationRef:             req.IntegrationRef,
 		FallbackBaseBranch:         req.DefaultBranch,
 		CheckoutBranch:             req.CheckoutBranch,
@@ -487,7 +507,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 
 	stepIdx := 0
 	worktrees := make([]RepoWorktreeResult, 0, len(specs))
-	createdIDs := make([]string, 0, len(specs))
+	createdByAttempt := make([]*worktree.Worktree, 0, len(specs))
 
 	for _, spec := range specs {
 		wt, createdByRequest, newSteps, nextIdx, err := p.prepareOneRepo(ctx, req, spec, stepIdx, totalSteps, onProgress, steps)
@@ -495,7 +515,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 		stepIdx = nextIdx
 		if err != nil {
 			if createdByRequest && wt != nil {
-				createdIDs = append(createdIDs, wt.ID)
+				createdByAttempt = append(createdByAttempt, wt)
 			}
 			err = &RepositoryPreparationError{
 				RepositoryID:     spec.RepositoryID,
@@ -503,7 +523,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 				RepositoryName:   spec.RepoName,
 				Cause:            err,
 			}
-			p.rollbackWorktrees(ctx, createdIDs)
+			p.rollbackWorktrees(ctx, createdByAttempt)
 			return &EnvPrepareResult{
 				Success:      false,
 				Steps:        steps,
@@ -513,7 +533,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 			}, nil
 		}
 		if createdByRequest {
-			createdIDs = append(createdIDs, wt.ID)
+			createdByAttempt = append(createdByAttempt, wt)
 		}
 		worktrees = append(worktrees, RepoWorktreeResult{
 			TaskRepositoryID:          spec.TaskRepositoryID,
@@ -621,6 +641,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.RepositoryPath = spec.RepositoryPath
 	subReq.RepoName = spec.RepoName
 	subReq.BaseBranch = spec.BaseBranch
+	subReq.BaseBranchFallbackPolicy = spec.BaseBranchFallbackPolicy
 	subReq.IntegrationRef = spec.IntegrationRef
 	subReq.DefaultBranch = spec.DefaultBranch
 	subReq.CheckoutBranch = spec.CheckoutBranch
@@ -693,12 +714,15 @@ func repoBranchIdentitySlug(spec RepoPrepareSpec) string {
 }
 
 // rollbackWorktrees removes any worktrees created during a failed multi-repo
-// preparation. Best effort: failures are logged and do not interrupt teardown.
-func (p *WorktreePreparer) rollbackWorktrees(ctx context.Context, ids []string) {
-	for _, id := range ids {
-		if err := p.worktreeMgr.RemoveByID(ctx, id, false); err != nil {
+// preparation. Initial materialization can create a checkout before its
+// environment transaction persists inventory, so rollback addresses the
+// worktree record itself rather than assuming a store row exists. Best
+// effort: failures are logged and do not interrupt teardown.
+func (p *WorktreePreparer) rollbackWorktrees(ctx context.Context, created []*worktree.Worktree) {
+	for _, wt := range created {
+		if err := p.worktreeMgr.RollbackCreatedPreparation(ctx, wt); err != nil {
 			p.logger.Warn("rollback: failed to remove worktree",
-				zap.String("worktree_id", id), zap.Error(err))
+				zap.String("worktree_id", wt.ID), zap.String("path", wt.Path), zap.Error(err))
 		}
 	}
 }

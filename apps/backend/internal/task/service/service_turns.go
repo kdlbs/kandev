@@ -1256,7 +1256,11 @@ func (s *Service) workspaceRepositorySpec(
 		RepositorySubpath: projection.repoName, RepositorySubpathKnown: projection.repoName != "",
 		CloneRelocation:       cloneRelocation,
 		WorkspaceRelativePath: taskRepository.WorkspaceRelativePath,
-		BaseBranch:            taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
+		BaseBranch:            taskRepository.BaseBranch,
+		BaseBranchFallbackPolicy: models.ResolveAttachmentBaseBranchFallbackPolicy(
+			taskRepository.Metadata, taskRepository.BaseBranch,
+		),
+		DefaultBranch:  repository.DefaultBranch,
 		CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
 	}

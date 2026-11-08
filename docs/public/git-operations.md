@@ -173,7 +173,7 @@ feature/{title}-{suffix}
 ```
 
 `{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When registering a repository, an omitted `pull_before_worktree` defaults to `true`: Kandev attempts to refresh and verify the base branch before creating or recreating the worktree. Later repository settings saves preserve the current default branch and refresh choice when those fields are omitted, including when another save changes them before a rename finishes. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. When a usable local base exists, authentication, network, timeout, missing-ref, divergent-ref, and uncertain-ancestry errors produce a credential-safe warning and Kandev creates the worktree from that local base. The warning states that remote changes may be missing. When no usable local base exists, Kandev must materialize the requested branch from the remote; a failed refresh or missing remote ref stops task preparation with a repository-specific launch error. Explicit remote-only refs and remote executors keep this strict materialization behavior.
-Without an explicit cross-repository target, Kandev uses the current base branch for a numbered GitHub PR. If Git proves that the requested base branch was deleted, Kandev can use a configured fallback branch, often the repository default, only after it refreshes and verifies that fallback. Kandev shows a warning with both branch names. Other PR refresh errors stop preparation.
+Without an explicit cross-repository target, Kandev uses the current base branch for a numbered GitHub PR. If Git proves that the requested base branch was deleted, Kandev can use a configured fallback branch, often the repository default, only for an inherited or automatically selected base. It refreshes and verifies that fallback first, and shows a warning with both branch names. An explicit or manually changed PR base remains strict. Other PR refresh errors stop preparation.
 
 An explicit fork target has no default fallback. Kandev stops preparation if it cannot fetch or verify that target. Kandev does not create a worktree from an unverified local or remote-tracking branch.
 
@@ -181,6 +181,25 @@ If the repository is intentionally offline, open its workspace repository settin
 **Always pull before creating a new worktree**. This skips the refresh attempt for host worktrees,
 but it is not required for a normal local-only base. Keep the setting enabled when remote freshness
 is important for later task launches.
+
+### Selected base branches
+
+When a task selects a base branch, Kandev uses that branch or stops preparation.
+It does not replace an explicit selection with the repository default, even when
+the explicit selection names the current default. A failed attempt creates no
+worktree and starts no agent. The error names the requested ref and repository.
+
+Recovery to the repository default remains available only for a base that Kandev
+selected automatically, such as an inherited subtask base or an omitted base
+resolved from repository settings. A manual base selection removes that recovery
+permission, including when you select the same branch again.
+
+With **Always pull before creating a new worktree** disabled, a missing explicit
+base stops preparation without a remote-default lookup or extra fetch. Refresh a
+usable local copy, restore the branch remotely, or select an available base, then
+retry the same task. Kandev keeps the original attachment selection for the retry.
+If one attachment in a multi-repository task cannot resolve its base, preparation
+stops for the whole task and removes only the checkouts created by that attempt.
 
 ### Branch names in executor scripts
 
