@@ -248,6 +248,7 @@ func (b *WakeBackstop) visit(ctx context.Context, coordinatorID string) {
 	if !b.recordWakes(ctx, c) {
 		return
 	}
+	b.recordMergeWakes(ctx, c)
 	b.runDuty(ctx, "deliver", hooks.Deliver, coordinatorID)
 }
 

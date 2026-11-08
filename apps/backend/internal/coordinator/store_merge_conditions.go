@@ -282,3 +282,26 @@ func (s *Store) changeHead(ctx context.Context, workspaceID, changeKey string, k
 	}
 	return head
 }
+
+// ListOpenEpisodes lists every active, non-baseline episode in the workspace,
+// ordered by change key then kind.
+func (s *Store) ListOpenEpisodes(ctx context.Context, workspaceID string) ([]OpenEpisode, error) {
+	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`SELECT change_key, kind, generation, head_sha, last_observed_at
+		FROM coordinator_change_conditions WHERE workspace_id = ? AND active = 1 AND baseline = 0
+		ORDER BY change_key, kind`), workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list open episodes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := []OpenEpisode{}
+	for rows.Next() {
+		var e OpenEpisode
+		var kind string
+		if err := rows.Scan(&e.ChangeKey, &kind, &e.Generation, &e.HeadSHA, &e.ObservedAt); err != nil {
+			return nil, fmt.Errorf("scan open episode: %w", err)
+		}
+		e.Kind = mergestate.Kind(kind)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

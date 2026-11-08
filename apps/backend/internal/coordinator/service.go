@@ -181,7 +181,9 @@ type Service struct {
 	wakeSources   WakeSources
 	// projects reads sets, repositories and task repositories for the project
 	// scope; guarded by wakeMu.
-	projects     ProjectReader
+	projects ProjectReader
+	// changeLinks resolves the tasks linked to a change; nil disables merge wakes.
+	changeLinks  ChangeLinks
 	recorderSubs []bus.Subscription
 	// recorderStopped latches once StopWakeRecorder ran: later hook and event
 	// entries are refused. wakeInFlight counts handlers and hooks in flight.
