@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/sshlaunch"
 )
 
 // InternalAgentctlStartupConfigEnv carries the resolved agentctl-owned startup
@@ -50,6 +52,12 @@ type AgentctlStartupConfig struct {
 	// PromptCancelJoinTimeout is the managed ACP cancellation acknowledgement bound.
 	// Zero preserves agentctl's built-in default for non-E2E launches.
 	PromptCancelJoinTimeout time.Duration `json:"promptCancelJoinTimeout"`
+	// SSHLaunch binds a managed SSH launch attempt to an owner and a fresh
+	// launch generation. The controller echoes it back with its own captured
+	// process identity during the handshake. Nil for every non-SSH launch and
+	// for a backend that predates the field, which keeps legacy launches
+	// working without proof.
+	SSHLaunch *sshlaunch.Binding `json:"sshLaunch,omitempty"`
 }
 
 // ManagedAgentctlStartupConfig returns the agentctl settings resolved by the
@@ -120,6 +128,11 @@ func (c AgentctlStartupConfig) Validate() error {
 	}
 	if c.DetachedEventLimit != 0 && (c.DetachedEventLimit < 1 || c.DetachedEventLimit > 10000) {
 		return fmt.Errorf("agentctl detached event limit must be zero (unset) or between 1 and 10000")
+	}
+	if c.SSHLaunch != nil {
+		if err := c.SSHLaunch.Validate(); err != nil {
+			return fmt.Errorf("agentctl SSH launch binding: %w", err)
+		}
 	}
 	return nil
 }

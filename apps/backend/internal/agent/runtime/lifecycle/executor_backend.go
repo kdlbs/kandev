@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/sshlaunch"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	agenttypes "github.com/kandev/kandev/pkg/agent"
@@ -349,6 +350,11 @@ const (
 	// task-supplied metadata can never enable it, because that would let a
 	// task arm a destructive remote operation its profile never approved.
 	MetadataKeySSHReclaimTaskDir = "ssh_reclaim_task_dir"
+	// MetadataKeySSHLaunchReceipt carries the immutable launch proof a managed
+	// SSH controller self-reported during its authenticated handshake. It is
+	// the only durable evidence that survives session-directory loss, so it
+	// must be cleared by every replacement/reset path rather than merged.
+	MetadataKeySSHLaunchReceipt = sshlaunch.MetadataKey
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -388,6 +394,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHIdentityFile:         true,
 	MetadataKeySSHShell:                true,
 	MetadataKeySSHReclaimTaskDir:       true,
+	MetadataKeySSHLaunchReceipt:        true,
 
 	// Remote Docker adopted agentctl identity.
 	MetadataKeyRemoteDockerAgentctlInstanceID: true,
@@ -492,6 +499,7 @@ var sessionScopedMetadataKeys = map[string]bool{
 	MetadataKeyOriginalWorkspacePath: true,
 
 	MetadataKeySSHRemoteSessionDir:              true,
+	MetadataKeySSHLaunchReceipt:                 true,
 	MetadataKeySSHRemoteAgentctlPort:            true,
 	MetadataKeySSHRemoteAgentctlPID:             true,
 	MetadataKeySSHAgentctlInstanceID:            true,
