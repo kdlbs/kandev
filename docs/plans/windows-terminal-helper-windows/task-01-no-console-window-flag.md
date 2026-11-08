@@ -48,6 +48,9 @@ leader-exit reap and invalid-PID refusal checks passed.
 Linux amd64 CGO-disabled compilation of the four caller packages passed. The
 normal commit hooks remain required before publication. Temporary overlays do
 not become permanent test cases or public probe APIs.
+The console-present and console-absent choice (acceptance 1) is kept as a
+package-internal test in `internal/common/winproc/console_windows_test.go`,
+which swaps the unexported probe; it adds no public probe API.
 
 Commands from apps/backend:
 
