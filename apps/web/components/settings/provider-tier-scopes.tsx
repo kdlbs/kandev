@@ -116,18 +116,25 @@ function ScopeValueInput({
 }) {
   const { t } = useTranslation();
   return (
-    <Input
-      id={id}
-      className={settingsControlClassName("w-full")}
-      type="number"
-      min={0}
-      step="any"
-      value={override?.requests_per_day ?? ""}
-      placeholder={scope.requests_per_day?.toString() ?? t(UNKNOWN)}
-      onChange={(event) =>
-        onValue(event.target.value === "" ? undefined : Number(event.target.value))
-      }
-    />
+    <>
+      <Input
+        id={id}
+        className={settingsControlClassName("w-full")}
+        type="number"
+        min={0}
+        step="any"
+        value={override?.requests_per_day ?? ""}
+        placeholder={scope.requests_per_day?.toString() ?? t(UNKNOWN)}
+        onChange={(event) =>
+          onValue(event.target.value === "" ? undefined : Number(event.target.value))
+        }
+      />
+      {scope.requests_per_day !== undefined && (
+        <span className="text-xs text-muted-foreground">
+          {t("agents:providerTierEffective")}: {scope.requests_per_day}
+        </span>
+      )}
+    </>
   );
 }
 

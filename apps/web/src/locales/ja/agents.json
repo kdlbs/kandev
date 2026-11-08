@@ -649,6 +649,7 @@
   "providerTierRequestWindow": "短い期間のリクエスト",
   "providerTierRequestWindowSeconds": "短い期間 (秒)",
   "providerTierUnknown": "不明",
+  "providerTierEffective": "実効値",
   "providerTierSources": "既定値: {{defaults}}。学習値: {{learned}}。上書き: {{override}}。",
   "providerLimitProvenance": "既定値の出典: {{provenance}}。",
   "providerLimitProvenancePublished": "公開値",
