@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agent/usage"
 )
 
 // Failed-route automatic retry is the durable bookkeeping behind the
@@ -131,7 +132,7 @@ func (e *Engine) ScheduleFailedRouteRetry(
 		return PendingFailedRouteRetry{}, false, ErrFailedRouteRetryDeclined
 	}
 	now := e.now()
-	due, recoverable := e.failedRouteRetryDueLocked(profile, state, now.Add(minDelay))
+	due, recoverable := e.failedRouteRetryDueLocked(ctx, profile, state, now.Add(minDelay))
 	if !recoverable {
 		return PendingFailedRouteRetry{}, false, ErrFailedRouteRetryDeclined
 	}
@@ -153,8 +154,10 @@ func (e *Engine) ScheduleFailedRouteRetry(
 // the route can find a usable candidate. An action_required route retries its
 // own candidate; a waiting route reselects from every enabled candidate. A
 // candidate held until its owner releases it never recovers by waiting, so a
-// route whose usable candidates are all held is not recoverable.
-func (e *Engine) failedRouteRetryDueLocked(profile Profile, state RouteState, notBefore time.Time) (time.Time, bool) {
+// route whose usable candidates are all held is not recoverable. A candidate
+// is usable only once its binding and every provider- or model-scoped limit
+// suspension selection would check have closed.
+func (e *Engine) failedRouteRetryDueLocked(ctx context.Context, profile Profile, state RouteState, notBefore time.Time) (time.Time, bool) {
 	var earliest time.Time
 	usable := false
 	for _, candidate := range profile.Candidates {
@@ -167,7 +170,7 @@ func (e *Engine) failedRouteRetryDueLocked(profile Profile, state RouteState, no
 		if candidate.BindingKey != "" && e.circuits.IsHeld(candidate.BindingKey) {
 			continue
 		}
-		until, open := e.circuits.OpenUntil(candidate.BindingKey)
+		until, open := e.candidateOpenUntil(ctx, candidate)
 		if !open {
 			// A closed candidate is usable now; the minimum delay decides.
 			return notBefore, true
@@ -274,4 +277,24 @@ func (e *Engine) FailedRouteRetryChainFor(ctx context.Context, sessionID string)
 		return FailedRouteRetryChain{}, nil
 	}
 	return *policyState.FailedRouteRetry, nil
+}
+
+// candidateOpenUntil returns the latest expiry among the candidate's binding
+// circuit and, with provider limits on, the narrow suspensions that
+// selectNarrowCircuit consults for it.
+func (e *Engine) candidateOpenUntil(ctx context.Context, candidate Candidate) (time.Time, bool) {
+	until, open := e.circuits.OpenUntil(candidate.BindingKey)
+	if e.limits == nil {
+		return until, open
+	}
+	circuitCandidate := candidate
+	if candidate.UsagePolicy != nil && candidate.UsagePolicy.ProfileID == candidate.ID && usage.MatchesSelectedUsage(ctx, candidate.UsagePolicy) {
+		circuitCandidate.ModelID = candidate.UsagePolicy.ExpectedModel
+	}
+	for _, key := range limitSuspensionKeys(circuitCandidate) {
+		if keyUntil, keyOpen := e.circuits.OpenUntil(key); keyOpen && (!open || keyUntil.After(until)) {
+			until, open = keyUntil, true
+		}
+	}
+	return until, open
 }

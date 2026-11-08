@@ -2,10 +2,12 @@ package backendapp
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 )
 
@@ -25,13 +27,26 @@ func newTierUsageSnapshot() *tierUsageSnapshot {
 
 type profileUsageLister interface {
 	ListProfileUsage(context.Context) ([]dto.AgentProfileUsageDTO, error)
+	agentsettingscontroller.ProfileTurnAllowanceProvider
 }
 
 // tierUsageRecordingProvider records every completed read so tier selection can
 // reuse the same account grouping and window provenance without another call.
+// It forwards the turn-allowance surface so wrapping does not hide it from the
+// settings controller.
 type tierUsageRecordingProvider struct {
 	next profileUsageLister
 	sink *tierUsageSnapshot
+}
+
+var _ agentsettingscontroller.ProfileTurnAllowanceProvider = (*tierUsageRecordingProvider)(nil)
+
+func (p *tierUsageRecordingProvider) GetProfileTurnAllowance(ctx context.Context, id string) (*dto.ProfileTurnAllowanceDTO, error) {
+	return p.next.GetProfileTurnAllowance(ctx, id)
+}
+
+func (p *tierUsageRecordingProvider) PatchProfileTurnAllowance(ctx context.Context, id string, patch json.RawMessage) (*dto.ProfileTurnAllowanceDTO, error) {
+	return p.next.PatchProfileTurnAllowance(ctx, id, patch)
 }
 
 func (p *tierUsageRecordingProvider) ListProfileUsage(ctx context.Context) ([]dto.AgentProfileUsageDTO, error) {
