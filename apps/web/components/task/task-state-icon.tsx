@@ -178,12 +178,28 @@ export function TaskStateIcon(props: TaskStateIconProps) {
   return <TaskStateIconContent {...props} />;
 }
 
+/**
+ * The wait reason a task surface shows. An interrupted task, or one whose
+ * interruption is terminal, keeps its interruption affordance instead.
+ */
+function visibleTaskWaitReason(
+  waitReason: TaskStateIconProps["waitReason"],
+  state: TaskStateIconProps["state"],
+  interrupted: TaskStateIconProps["interrupted"],
+) {
+  return waitReason && !interrupted && !isTerminalInterruptedState(state) ? waitReason : null;
+}
+
 function resolveActiveTaskIcon({
   foregroundActivity,
   hasPendingClarification,
   hasPendingPermission,
   parkedOnBackgroundWork,
   state,
+  interrupted,
+  waitReason,
+  launchQueue,
+  quotaWait,
   accessibleLabel,
   showBackgroundTooltip = false,
 }: TaskStateIconProps) {
@@ -227,6 +243,14 @@ function resolveActiveTaskIcon({
       showBackgroundTooltip ? undefined : accessibleLabel,
     );
   }
+  // A recorded wait outranks the coarse WAITING_FOR_INPUT state, which alone
+  // does not establish that a question needs an answer.
+  const visibleWait = visibleTaskWaitReason(waitReason, state, interrupted);
+  if (visibleWait) {
+    return (
+      <WaitingReasonTaskIcon reason={visibleWait} launchQueue={launchQueue} quotaWait={quotaWait} />
+    );
+  }
   if (shouldUseQuestionTaskIcon(state)) {
     return withAccessibleLabel(
       <IconMessageQuestion
@@ -261,18 +285,17 @@ function TaskStateIconContent({
     hasPendingPermission,
     parkedOnBackgroundWork,
     state,
+    // A visible wait reason outranks preparing/in-progress and the
+    // finished-turn icon: REVIEW plus a queued admission is not a finished
+    // turn, and IN_PROGRESS plus a WIP overflow is not progress.
+    interrupted,
+    waitReason,
+    launchQueue,
+    quotaWait,
     accessibleLabel,
     showBackgroundTooltip,
   });
   if (activeIcon) return activeIcon;
-  // A wait reason outranks preparing/in-progress and the finished-turn icon:
-  // REVIEW plus a queued admission is not a finished turn, and IN_PROGRESS
-  // plus a WIP overflow is not progress.
-  if (waitReason) {
-    return (
-      <WaitingReasonTaskIcon reason={waitReason} launchQueue={launchQueue} quotaWait={quotaWait} />
-    );
-  }
   return (
     <TaskSessionStateIcon
       sessionState={sessionState}
@@ -353,6 +376,8 @@ function activeTaskStateIconLabel({
   hasPendingClarification,
   hasPendingPermission,
   parkedOnBackgroundWork,
+  interrupted,
+  waitReason,
 }: TaskStateIconProps) {
   if ((hasPendingPermission ?? false) || hasPendingClarification) {
     return "common:taskStateWaitingForInput";
@@ -360,6 +385,8 @@ function activeTaskStateIconLabel({
   if (foregroundActivity === "generating") return "common:taskStateInProgress";
   if (foregroundActivity === "background") return BACKGROUND_WORK_RUNNING_LABEL_KEY;
   if (parkedOnBackgroundWork) return BACKGROUND_WORK_RUNNING_LABEL_KEY;
+  const visibleWait = visibleTaskWaitReason(waitReason, state, interrupted);
+  if (visibleWait) return waitReasonLabelKey(visibleWait);
   if (shouldUseQuestionTaskIcon(state)) return "common:taskStateWaitingForInput";
   return undefined;
 }
@@ -381,9 +408,10 @@ export function getTaskStateIconLabelKey({
     hasPendingClarification,
     hasPendingPermission,
     parkedOnBackgroundWork,
+    interrupted,
+    waitReason,
   });
   if (active) return active;
-  if (waitReason) return waitReasonLabelKey(waitReason);
   if (computeIsPreparing(state, sessionState)) return "common:taskStateScheduling";
   if (computeIsInProgress(state, sessionState)) {
     return "common:taskStateInProgress";

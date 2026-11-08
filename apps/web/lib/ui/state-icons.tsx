@@ -444,6 +444,7 @@ function getPendingOrActiveTaskIcon(
     | "foregroundActivity"
     | "hasPendingPermission"
     | "parkedOnBackgroundWork"
+    | "waitReason"
   >,
 ): IconConfig | undefined {
   const {
@@ -451,6 +452,7 @@ function getPendingOrActiveTaskIcon(
     foregroundActivity,
     hasPendingPermission,
     parkedOnBackgroundWork,
+    waitReason,
   } = options;
   if (hasPendingPermission ?? false) {
     return PENDING_PERMISSION_ICON;
@@ -464,7 +466,9 @@ function getPendingOrActiveTaskIcon(
   // remaining life is a positively-sampled background process. Pending-input
   // and any live foregroundActivity (above) still outrank it (AC-34).
   if (parkedOnBackgroundWork) return TASK_PARKED_ICON;
-  if (isWaitingForInputState(state)) return TASK_STATE_ICONS.WAITING_FOR_INPUT;
+  // A recorded wait outranks the coarse WAITING_FOR_INPUT state, which alone
+  // does not establish that a question needs an answer.
+  if (isWaitingForInputState(state) && !waitReason) return TASK_STATE_ICONS.WAITING_FOR_INPUT;
   return undefined;
 }
 
@@ -484,6 +488,7 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
     foregroundActivity,
     hasPendingPermission,
     parkedOnBackgroundWork,
+    waitReason,
   });
   if (pendingOrActive) return pendingOrActive;
   const markerOverride = getMarkerIconOverride(
@@ -495,7 +500,8 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
   if (markerOverride) return markerOverride;
   // A wait reason outranks the coarse state: REVIEW plus a queued admission is
   // not a finished turn, and IN_PROGRESS plus a WIP overflow is not progress.
-  if (waitReason) {
+  // A terminal task keeps its terminal icon.
+  if (waitReason && !TERMINAL_TASK_STATES.has(state)) {
     return {
       Icon: waitReasonGlyph(waitReason),
       className: waitReasonClass(waitReason),

@@ -518,8 +518,10 @@ func isCompletionGateRefreshEvent(eventType string) bool {
 // durable route row rather than trusting the event to carry the new deadline.
 func isQuotaWaitRefreshEvent(eventType string) bool {
 	switch eventType {
+	// A removed session can no longer own the current quota wait, so its
+	// removal re-reads the wait like a session state change does.
 	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged,
-		events.TaskSessionStateChanged:
+		events.TaskSessionStateChanged, events.SessionRemoved:
 		return true
 	default:
 		return false

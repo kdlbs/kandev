@@ -9,7 +9,7 @@ import {
   IconHelpCircle,
 } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
-import { getTaskStateIcon } from "@/lib/ui/state-icons";
+import { getTaskStateIcon, isTaskInFlight } from "@/lib/ui/state-icons";
 import { resolveWaitReason } from "@/lib/ui/waiting-reason";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
@@ -159,6 +159,7 @@ function MoveButton({
 function renderStepNodeStatusIcon(
   task: Graph2StepNodeProps["task"],
   pendingInput: ReturnType<typeof useTaskPendingInput>,
+  waitReason: ReturnType<typeof resolveWaitReason>,
 ) {
   return getTaskStateIcon(task.state, "h-3 w-3", {
     hasPendingClarification: pendingInput.clarification,
@@ -167,13 +168,18 @@ function renderStepNodeStatusIcon(
     interrupted: task.interrupted,
     autoStartFailed: task.autoStartFailed,
     workspaceOrphaned: task.workspaceOrphaned,
-    waitReason: resolveWaitReason({
-      primarySessionState: task.primarySessionState,
-      wipAdmitted: task.wipAdmitted,
-      queuedForStepId: task.queuedForStepId,
-      launchQueue: task.statusSummary?.launch_queue,
-      quotaWait: task.statusSummary?.quota_wait,
-    }),
+    parkedOnBackgroundWork: task.parkedOnBackgroundWork,
+    waitReason,
+    launchQueue: task.statusSummary?.launch_queue,
+    quotaWait: task.statusSummary?.quota_wait,
+  });
+}
+
+function stepNodeWaitReason(task: Graph2StepNodeProps["task"]) {
+  return resolveWaitReason({
+    primarySessionState: task.primarySessionState,
+    wipAdmitted: task.wipAdmitted,
+    queuedForStepId: task.queuedForStepId,
     launchQueue: task.statusSummary?.launch_queue,
     quotaWait: task.statusSummary?.quota_wait,
   });
@@ -183,6 +189,7 @@ function Graph2StepNodeContent({
   step,
   task,
   running,
+  waitReason,
   showMoveControls,
   hasPrev,
   hasNext,
@@ -201,6 +208,7 @@ function Graph2StepNodeContent({
   step: Graph2StepNodeProps["step"];
   task: Graph2StepNodeProps["task"];
   running: boolean;
+  waitReason: ReturnType<typeof resolveWaitReason>;
   showMoveControls: boolean;
   hasPrev: boolean;
   hasNext: boolean;
@@ -245,7 +253,7 @@ function Graph2StepNodeContent({
         )}
       >
         <div className="flex items-center gap-1.5 w-full">
-          <div className="shrink-0">{renderStepNodeStatusIcon(task, pendingInput)}</div>
+          <div className="shrink-0">{renderStepNodeStatusIcon(task, pendingInput, waitReason)}</div>
           <span className="text-[11px] font-medium text-foreground truncate">{step.title}</span>
         </div>
       </button>
@@ -296,8 +304,11 @@ export function Graph2StepNode({
   if (phase === "past") return <PastNode step={step} />;
   if (phase === "future") return <FutureNode step={step} />;
 
-  // Current phase
-  const running = isRunningState(task.state);
+  // Current phase. A task parked on a wait is not progressing, so it keeps the
+  // running border only while it still has live foreground work.
+  const waitReason = stepNodeWaitReason(task);
+  const running =
+    isRunningState(task.state) && (!waitReason || isTaskInFlight(task.foregroundActivity));
 
   const showMoveControls = isHovered || isFocused;
 
@@ -316,6 +327,7 @@ export function Graph2StepNode({
         step={step}
         task={task}
         running={running}
+        waitReason={waitReason}
         showMoveControls={showMoveControls}
         hasPrev={hasPrev}
         hasNext={hasNext}
