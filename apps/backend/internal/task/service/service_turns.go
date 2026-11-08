@@ -1256,7 +1256,11 @@ func (s *Service) workspaceRepositorySpec(
 		RepositorySubpath: projection.repoName, RepositorySubpathKnown: projection.repoName != "",
 		CloneRelocation:       cloneRelocation,
 		WorkspaceRelativePath: taskRepository.WorkspaceRelativePath,
-		BaseBranch:            taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
+		BaseBranch:            taskRepository.BaseBranch,
+		BaseBranchFallbackPolicy: models.ResolveAttachmentBaseBranchFallbackPolicy(
+			taskRepository.Metadata, taskRepository.BaseBranch,
+		),
+		DefaultBranch:  repository.DefaultBranch,
 		CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
 	}
@@ -1349,7 +1353,7 @@ func taskRepositoryPRNumber(metadata map[string]interface{}) int {
 	if metadata == nil {
 		return 0
 	}
-	switch number := metadata["pr_number"].(type) {
+	switch number := metadata[models.TaskRepositoryPRNumberMetadataKey].(type) {
 	case float64:
 		if number > 0 {
 			return int(number)
