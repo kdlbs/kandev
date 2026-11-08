@@ -1,5 +1,5 @@
 ---
-created: 2026-11-06
+created: 2026-11-08
 status: completed
 requirements:
   - REQ-AGENTS-RUNTIME-UPDATES-001
@@ -20,14 +20,7 @@ one grouped review change and does not activate a runtime.
 
 | Package | Previous | Proposed |
 | --- | --- | --- |
-| `@agentclientprotocol/claude-agent-acp` | `0.81.2` | `0.100.0` |
-| `@agentclientprotocol/codex-acp` | `2.2.2` | `2.5.0` |
-| `@bex-co/muse-code-acp` | `0.7.0` | `0.11.0` |
-| `@github/copilot` | `1.0.103` | `1.0.105` |
-| `@google/gemini-cli` | `0.61.0` | `0.67.0` |
-| `@openai/codex` | `0.154.0` | `0.166.0` |
-| `@opencode/cli` | `2.0.18` | `2.2.5` |
-| `opencode-ai` | `1.18.32` | `1.19.5` |
+| `@github/copilot` | `1.0.105` | `1.0.106` |
 
 ## Validation
 
