@@ -1,0 +1,53 @@
+package coordinator
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+// registerMergeRoutes mounts the merge stewardship routes.
+func registerMergeRoutes(workspace *gin.RouterGroup, h *Handlers) {
+	workspace.GET("/coordinators/:cid/tasks/:tid/dependencies", h.httpGetDependencies)
+	workspace.PUT("/coordinators/:cid/tasks/:tid/dependencies", h.httpPutDependencies)
+}
+
+// httpGetDependencies backs GET .../coordinators/:cid/tasks/:tid/dependencies.
+func (h *Handlers) httpGetDependencies(c *gin.Context) {
+	set, err := h.service.GetDependencies(c.Request.Context(), c.Param("id"), c.Param("cid"), c.Param("tid"))
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, set)
+}
+
+// httpPutDependencies backs PUT .../coordinators/:cid/tasks/:tid/dependencies.
+// The body is {"dependency_revision": n, "refs": [{"task": id} | {"change": key}]}.
+func (h *Handlers) httpPutDependencies(c *gin.Context) {
+	raw, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxSettingsBodyBytes))
+	if err != nil {
+		h.respondError(c, bodyErr("", "request body is unreadable or too large"))
+		return
+	}
+	var body struct {
+		Revision *int     `json:"dependency_revision"`
+		Refs     []DepRef `json:"refs"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		h.respondError(c, bodyErr("", "body must be a JSON object"))
+		return
+	}
+	expected := 0
+	if body.Revision != nil {
+		expected = *body.Revision
+	}
+	set, err := h.service.SaveDependencies(c.Request.Context(), c.Param("id"), c.Param("cid"), c.Param("tid"), body.Revision != nil, expected, body.Refs)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, set)
+}

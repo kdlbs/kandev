@@ -72,6 +72,9 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 		workspace.POST("/coordinators/:cid/activity/:rid/undo", h.httpUndoActivity)
 		workspace.GET("/coordinators/:cid/settings", h.httpGetSettings)
 		workspace.PUT("/coordinators/:cid/settings", h.httpPutSettings)
+		if svc.merge {
+			registerMergeRoutes(workspace, h)
+		}
 	}
 }
 

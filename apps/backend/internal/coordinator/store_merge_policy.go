@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -18,6 +19,14 @@ const mergePolicySQL = `
 		automatic_since_revision INTEGER NOT NULL DEFAULT 0,
 		updated_at {{timestamp}} NOT NULL,
 		PRIMARY KEY (coordinator_id, repository_id)
+	);
+	CREATE TABLE IF NOT EXISTS coordinator_merge_deps (
+		coordinator_id TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		revision INTEGER NOT NULL,
+		refs_json TEXT NOT NULL,
+		updated_at {{timestamp}} NOT NULL,
+		PRIMARY KEY (coordinator_id, task_id)
 	);
 	CREATE TABLE IF NOT EXISTS coordinator_merge_audit (
 		id TEXT PRIMARY KEY,
@@ -112,4 +121,42 @@ func (s *Store) liveRepositories(ctx context.Context, q coordinatorExec, workspa
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// loadDepSets reads every dependency set of the coordinator, keyed by card.
+func (s *Store) loadDepSets(ctx context.Context, q coordinatorExec, coordinatorID string) (map[string]DepSet, error) {
+	rows, err := q.QueryContext(ctx, s.db.Rebind(`SELECT task_id, revision, refs_json FROM coordinator_merge_deps WHERE coordinator_id = ?`), coordinatorID)
+	if err != nil {
+		return nil, fmt.Errorf("load dependency sets: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]DepSet{}
+	for rows.Next() {
+		var task, raw string
+		var set DepSet
+		if err := rows.Scan(&task, &set.Revision, &raw); err != nil {
+			return nil, fmt.Errorf("scan dependency set: %w", err)
+		}
+		if err := json.Unmarshal([]byte(raw), &set.Refs); err != nil {
+			return nil, fmt.Errorf("decode dependency set: %w", err)
+		}
+		out[task] = set
+	}
+	return out, rows.Err()
+}
+
+// writeDepSet replaces a card's set at the given revision in the caller's
+// transaction.
+func (s *Store) writeDepSet(ctx context.Context, tx coordinatorExec, coordinatorID, taskID string, set DepSet) error {
+	raw, err := json.Marshal(set.Refs)
+	if err != nil {
+		return fmt.Errorf("encode dependency set: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(`INSERT INTO coordinator_merge_deps (coordinator_id, task_id, revision, refs_json, updated_at)
+		VALUES (?, ?, ?, ?, ?) ON CONFLICT (coordinator_id, task_id) DO UPDATE SET
+		revision = excluded.revision, refs_json = excluded.refs_json, updated_at = excluded.updated_at`),
+		coordinatorID, taskID, set.Revision, string(raw), s.now().UTC()); err != nil {
+		return fmt.Errorf("write dependency set: %w", err)
+	}
+	return nil
 }
