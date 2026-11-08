@@ -74,6 +74,7 @@ inferred from the aggregate.
 - **AC-UI-INTEGRATED-CONTROL-003.3:** The five display groups are work, review, held, completed and unknown. Raw workflow-step names/counts remain available through initially collapsed numeric disclosures with pointer and Enter access; no readiness or classification is guessed from names.
 - **AC-UI-INTEGRATED-CONTROL-003.4:** Dashboard-only reads follow the existing authorized snapshot revision without a new timer. Identity/resource changes and denied reads clear old observations; unsupported, loading and failed reads remain distinct from a measured zero. Transient failures may retain the same authorized, dated snapshot.
 - **AC-UI-INTEGRATED-CONTROL-003.5:** Both tables retain original workspace navigation, localized units, right-aligned numbers and independent horizontal scrolling. This slice introduces no execution, recovery, capacity, provider, conversation, task-list, history or ledger actions.
+- **AC-UI-INTEGRATED-CONTROL-003.6:** The Native control read counts change requests merged in the anchored 24-hour window across built-in GitHub pull requests and plugin-reported change requests, counting one merge reported by both sources once. When either source is unavailable or unreadable the count is unknown, not zero. Recorded control history lists those merge events, at most 50 per source family, while the count still includes every merge in the window.
 
 ### REQ-UI-INTEGRATED-CONTROL-004: Recorded waiting reasons
 
