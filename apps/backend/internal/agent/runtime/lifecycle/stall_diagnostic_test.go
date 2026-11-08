@@ -8,6 +8,8 @@ import (
 	"testing/synctest"
 	"time"
 	"unicode/utf8"
+
+	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 )
 
 // @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.15
@@ -68,4 +70,19 @@ func TestStallDiagnosticBoundsAndExcludesPrivatePayloads(t *testing.T) {
 			t.Fatal("malformed UTF-8 must be omitted")
 		}
 	})
+}
+
+func TestStreamStageCountsAreUnknownWithoutFreshHeartbeat(t *testing.T) {
+	stages := captureStreamStages(&AgentExecution{})
+	if stages.AdapterSeenCount != -1 || stages.WriterSentCount != -1 {
+		t.Fatalf("counts without a heartbeat = %d/%d, want -1/-1", stages.AdapterSeenCount, stages.WriterSentCount)
+	}
+	fresh := client.UpdateStreamStageSnapshot{HeartbeatAgeMillis: 10}
+	stale := client.UpdateStreamStageSnapshot{HeartbeatAgeMillis: 30_001}
+	if got := upstreamStageCount(fresh, 7); got != 7 {
+		t.Fatalf("fresh heartbeat count = %d, want 7", got)
+	}
+	if got := upstreamStageCount(stale, 7); got != -1 {
+		t.Fatalf("stale heartbeat count = %d, want -1", got)
+	}
 }

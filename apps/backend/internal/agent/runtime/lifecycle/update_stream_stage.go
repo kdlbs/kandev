@@ -1,9 +1,11 @@
 package lifecycle
 
 import (
-	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"math"
 	"sync/atomic"
 	"time"
+
+	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 )
 
 // streamProjectionProgress tracks the second, durable projection queue, whose
@@ -44,17 +46,31 @@ func tryUpdateStreamStageSnapshot(execution *AgentExecution) (client.UpdateStrea
 	return streamClient.UpdateStreamStage()
 }
 
+func freshUpstreamHeartbeat(snapshot client.UpdateStreamStageSnapshot) bool {
+	return snapshot.HeartbeatAgeMillis >= 0 && snapshot.HeartbeatAgeMillis <= 30_000
+}
+
 func upstreamStageAge(snapshot client.UpdateStreamStageSnapshot, ageAtHeartbeat int64) int64 {
-	if snapshot.HeartbeatAgeMillis < 0 || snapshot.HeartbeatAgeMillis > 30_000 || ageAtHeartbeat < 0 {
+	if !freshUpstreamHeartbeat(snapshot) || ageAtHeartbeat < 0 {
 		return -1
 	}
 	return snapshot.HeartbeatAgeMillis + ageAtHeartbeat
 }
 
+// upstreamStageCount reports a heartbeat counter, or -1 without a fresh heartbeat.
+func upstreamStageCount(snapshot client.UpdateStreamStageSnapshot, count uint64) int64 {
+	if !freshUpstreamHeartbeat(snapshot) {
+		return -1
+	}
+	return int64(min(count, uint64(math.MaxInt64)))
+}
+
 type streamStageDiagnostic struct {
 	Available                bool   `json:"available"`
 	Connected                bool   `json:"connected"`
+	AdapterSeenCount         int64  `json:"adapter_seen_count"`
 	AdapterAgeMillis         int64  `json:"adapter_age_ms"`
+	WriterSentCount          int64  `json:"writer_sent_count"`
 	WriterAgeMillis          int64  `json:"writer_age_ms"`
 	ReadAgeMillis            int64  `json:"read_age_ms"`
 	EnqueueAgeMillis         int64  `json:"projection_enqueue_age_ms"`
@@ -71,10 +87,13 @@ type streamStageDiagnostic struct {
 func captureStreamStages(execution *AgentExecution) *streamStageDiagnostic {
 	snapshot, available := tryUpdateStreamStageSnapshot(execution)
 	adapterAge, writerAge := int64(-1), int64(-1)
+	adapterSeen, writerSent := int64(-1), int64(-1)
 	readAge, handledAge, heartbeatAge := int64(-1), int64(-1), int64(-1)
 	if available {
 		adapterAge = upstreamStageAge(snapshot, snapshot.AgentctlStage.AdapterAgeMillis)
 		writerAge = upstreamStageAge(snapshot, snapshot.AgentctlStage.WriterAgeMillis)
+		adapterSeen = upstreamStageCount(snapshot, snapshot.AgentctlStage.AdapterSeen)
+		writerSent = upstreamStageCount(snapshot, snapshot.AgentctlStage.WriterSent)
 		readAge, handledAge, heartbeatAge = snapshot.LastReadAgeMillis, snapshot.LastHandledAgeMillis, snapshot.HeartbeatAgeMillis
 	}
 	projectionPending, projectionDone := uint64(0), uint64(0)
@@ -91,7 +110,8 @@ func captureStreamStages(execution *AgentExecution) *streamStageDiagnostic {
 	}
 	return &streamStageDiagnostic{
 		Available: available, Connected: available && snapshot.Connected,
-		AdapterAgeMillis: adapterAge, WriterAgeMillis: writerAge, ReadAgeMillis: readAge,
+		AdapterSeenCount: adapterSeen, AdapterAgeMillis: adapterAge,
+		WriterSentCount: writerSent, WriterAgeMillis: writerAge, ReadAgeMillis: readAge,
 		EnqueueAgeMillis: handledAge, HeartbeatAgeMillis: heartbeatAge,
 		ReadCount: snapshot.ReadCount, EnqueueCount: snapshot.HandledCount, ReaderPendingCount: snapshot.Pending,
 		ProjectionAvailable: projectionAvailable, ProjectionAgeMillis: projectionAge,
