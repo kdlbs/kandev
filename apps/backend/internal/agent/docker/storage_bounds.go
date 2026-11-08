@@ -19,5 +19,5 @@ func applyContainerStorageBounds(hc *container.HostConfig, mounts []mount.Mount)
 			return
 		}
 	}
-	hc.Tmpfs = map[string]string{"/tmp": "rw,nosuid,nodev,size=2147483648,mode=1777"}
+	hc.Tmpfs = map[string]string{"/tmp": "rw,exec,nosuid,nodev,size=2147483648,mode=1777"}
 }

@@ -11,7 +11,7 @@ func TestNewContainerHasRotatingLogsAndBoundedTemporaryScratch(t *testing.T) {
 	if cfg.LogConfig.Type != "json-file" || cfg.LogConfig.Config["max-size"] != "100m" || cfg.LogConfig.Config["max-file"] != "3" {
 		t.Fatalf("new container logs have no expected rotation budget: %#v", cfg.LogConfig)
 	}
-	if cfg.Tmpfs["/tmp"] != "rw,nosuid,nodev,size=2147483648,mode=1777" {
+	if cfg.Tmpfs["/tmp"] != "rw,exec,nosuid,nodev,size=2147483648,mode=1777" {
 		t.Fatalf("new container temporary scratch is not bounded: %#v", cfg.Tmpfs)
 	}
 }

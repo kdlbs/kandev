@@ -11,7 +11,9 @@ The Docker client's shared `buildHostConfig` is used by normal and interactive
 container creation. Set `LogConfig` to `json-file` with `max-size=100m` and
 `max-file=3`. This overrides the daemon's default logging driver and rotation
 limits for these containers. Set `/tmp` to a 2 GiB tmpfs unless the caller
-explicitly mounts storage at that target. Compare mount targets with POSIX
+explicitly mounts storage at that target. Keep `/tmp` executable so agents and
+package managers can run temporary launchers there, while retaining `nosuid`
+and `nodev`. Compare mount targets with POSIX
 path normalization, without changing the caller's mount values.
 Preserve the caller's mounts, resource limits,
 networking and security options.

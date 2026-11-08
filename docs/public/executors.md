@@ -65,10 +65,11 @@ This per-container choice overrides the daemon's default logging driver and
 rotation limits. Collectors that require another driver do not receive these
 containers' output through that driver.
 
-The default `/tmp` is a 2 GiB tmpfs with mode 1777, `nosuid`, and `nodev`. An
-explicit task mount at `/tmp`, including an equivalent path such as `/tmp/`,
-keeps its own storage policy. The tmpfs hides files that the image supplies
-under `/tmp`.
+The default `/tmp` is a 2 GiB executable tmpfs with mode 1777, `nosuid`, and
+`nodev`. Agents and package managers can run temporary launchers from this
+directory. An explicit task mount at `/tmp`, including an equivalent path such
+as `/tmp/`, keeps its own storage policy. The tmpfs hides files that the image
+supplies under `/tmp`.
 
 Tmpfs uses host memory and swap. Its use counts against the container's memory
 limit. The 2 GiB capacity does not increase that limit, so temporary writes can

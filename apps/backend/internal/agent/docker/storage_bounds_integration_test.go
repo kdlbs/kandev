@@ -28,7 +28,22 @@ func TestContainerStorageBoundsOnLocalDaemon(t *testing.T) {
 	t.Cleanup(func() { _ = c.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	id, err := c.CreateContainer(ctx, ContainerConfig{Name: fmt.Sprintf("executor-storage-canary-%d", time.Now().UnixNano()), Image: image, Entrypoint: []string{"/bin/sh"}, Cmd: []string{"-c", "test $(stat -f -c %T /tmp) = tmpfs && test $(df -k /tmp | tail -1 | awk '{print $2}') = 2097152 && dd if=/dev/zero of=/tmp/probe bs=1048576 count=4 >/dev/null 2>&1 && echo bounded-scratch-ok"}, NetworkMode: "none"})
+	id, err := c.CreateContainer(ctx, ContainerConfig{
+		Name:       fmt.Sprintf("executor-storage-canary-%d", time.Now().UnixNano()),
+		Image:      image,
+		Entrypoint: []string{"/bin/sh"},
+		Cmd: []string{"-c", `
+set -eu
+test "$(stat -f -c %T /tmp)" = tmpfs
+test "$(df -k /tmp | tail -1 | awk '{print $2}')" = 2097152
+printf '%s\n' '#!/bin/sh' 'echo executable-scratch-ok' > /tmp/exec-probe
+chmod +x /tmp/exec-probe
+test "$(/tmp/exec-probe)" = executable-scratch-ok
+dd if=/dev/zero of=/tmp/probe bs=1048576 count=4 >/dev/null 2>&1
+echo bounded-scratch-ok
+`},
+		NetworkMode: "none",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

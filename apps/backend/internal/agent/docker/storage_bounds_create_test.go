@@ -76,7 +76,7 @@ func assertCreatedStorageBounds(t *testing.T, got *container.HostConfig, cfg Con
 	}, got.LogConfig)
 	require.Equal(t, cfg.Memory, got.Memory)
 	if len(cfg.Mounts) == 0 {
-		require.Equal(t, "rw,nosuid,nodev,size=2147483648,mode=1777", got.Tmpfs["/tmp"])
+		require.Equal(t, "rw,exec,nosuid,nodev,size=2147483648,mode=1777", got.Tmpfs["/tmp"])
 		return
 	}
 	require.NotContains(t, got.Tmpfs, "/tmp")

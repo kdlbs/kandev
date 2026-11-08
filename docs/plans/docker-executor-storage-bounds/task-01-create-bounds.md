@@ -65,6 +65,9 @@ canary against current upstream main.
 
 - Equivalent `/tmp` mount targets suppress the default tmpfs. Other mount
   targets keep the default. The caller's mount values remain unchanged.
+- The default tmpfs includes `exec`, because Docker adds `noexec` unless the
+  mount options explicitly allow execution. The canary checks a script from
+  `/tmp` as well as its capacity and write behavior.
 - Request-level tests cover normal and interactive creation, default scratch,
   explicit mounts, rotating logs, and preservation of the memory limit.
 - The real-daemon canary uses `WaitContainer` on the client that creates its
@@ -78,5 +81,7 @@ log budget, checks the scratch capacity, and writes a small scratch probe.
 Cleanup removes only that container and its anonymous volumes. The canary
 does not download an image or recreate an existing executor.
 
-Builds, tests, linters, and validation hooks were not run during the review,
-as the user requested. The commands above remain pending for these changes.
+The review-time changes were not verified in the previous workflow step. The
+container shard CI failures showed that the tmpfs mount did not allow launcher
+execution. Targeted Go tests and the updated Docker canary cover that behavior;
+run the normal PR checks after the fix is pushed.
