@@ -240,6 +240,15 @@ The [sign-in launch repair](../../../plans/antigravity-sign-in-launch/plan.md) r
 The dedicated instance has no task, injected task MCP, or inference prompt.
 It is separate from task instances and from concurrent capability probes.
 
+Open the updates stream before ACP initialization. `Client.StreamUpdates` connects
+the WebSocket synchronously, starts its reader goroutine, and returns `nil` on
+setup success. Call it directly and initialize on success. A setup error ends the
+attempt through existing cleanup; the return does not signal reader termination.
+Later failures use existing pending-request and context cancellation paths.
+Do not poll connection state or treat successful setup as stream closure.
+The [stream-startup repair](../../../plans/antigravity-login-stream/plan.md)
+records the regression and its connection-boundary verification.
+
 Proposed operator endpoints beside the existing capabilities handler:
 
 - `POST /api/v1/antigravity-acp/login`: start or return the active attempt.
