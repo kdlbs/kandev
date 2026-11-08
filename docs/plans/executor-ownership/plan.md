@@ -199,6 +199,7 @@ work order, and record exact results there after implementation.
 - [x] [Task 04: Attribute autonomous execution](task-04-autonomous-attribution.md)
 - [x] [Task 05: Complete ownership UI and documentation](task-05-ownership-ui.md)
 - [ ] [Task 06: Resolve retained local executor aliases](task-06-retained-local-alias.md). Permanent regression coverage is present; execution remains pending.
+- [ ] [Task 07: Run executor admission on workflow cold resume](task-07-cold-resume-admission.md). Implemented and under review in [#5176](https://github.com/kdlbs/kandev/pull/5176).
 
 ## Verification results
 
