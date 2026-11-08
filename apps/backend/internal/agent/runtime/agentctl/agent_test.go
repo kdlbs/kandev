@@ -357,6 +357,29 @@ func TestCleanupPendingRequests_ScopesToRetiredStream(t *testing.T) {
 	}
 }
 
+func TestRegisterPendingRequestRejectsDisconnectedStream(t *testing.T) {
+	retiredConn := &websocket.Conn{}
+	c := &Client{
+		agentStreamConn:     retiredConn,
+		pendingRequests:     make(map[string]chan *ws.Message),
+		pendingRequestConns: make(map[string]*websocket.Conn),
+	}
+
+	c.mu.Lock()
+	c.agentStreamConn = nil
+	c.mu.Unlock()
+	c.cleanupPendingRequests(retiredConn)
+
+	if c.registerPendingRequest("late", make(chan *ws.Message, 1), retiredConn) {
+		t.Fatal("request was registered after its stream disconnected")
+	}
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	if len(c.pendingRequests) != 0 || len(c.pendingRequestConns) != 0 {
+		t.Fatalf("late request was retained: %d requests, %d connections", len(c.pendingRequests), len(c.pendingRequestConns))
+	}
+}
+
 // --- Tests for the 7 migrated methods ---
 
 func TestInitialize_Success(t *testing.T) {
