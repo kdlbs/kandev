@@ -3103,5 +3103,13 @@
   "contextCompactionTokenCounts": "{{preTokens}} → {{postTokens}} 個 token",
   "contextCompactionTrigger": "觸發方式：{{trigger}}",
   "contextCompactionDuration": "耗時：{{duration}}",
-  "deliveryMessageNotDelivered": "未送達。請再次傳送。"
+  "deliveryMessageNotDelivered": "未送達。請再次傳送。",
+  "launchQueueRefusalTotal": "最近等候原因：執行總數已達上限。",
+  "launchQueueRefusalGrade": "最近等候原因：執行等級已達上限。",
+  "launchQueueRefusalBoth": "最近等候原因：執行總數和等級均已達上限。",
+  "launchQueueRefusalConfiguration": "最近等候原因：需要設定執行等級。",
+  "launchQueueRefusalUnknown": "最近等候原因：無法確認執行清單。",
+  "launchQueueCauseGrade": "{{grade}} 等級上限 {{inUse}}/{{limit}} · 有空位時開始",
+  "launchQueueCauseGradeUnmeasured": "已達執行等級上限 · 有空位時開始",
+  "launchQueueCauseTotal": "總上限 {{inUse}}/{{limit}} · 有空位時開始"
 }

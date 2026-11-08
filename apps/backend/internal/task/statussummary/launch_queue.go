@@ -80,6 +80,7 @@ func launchQueueSummaryFromTask(
 			queue.WorkflowStepID = route.DestinationStepID
 		}
 	}
+	queue.CapacityReason = launchQueueCapacityReason(deferral.ReasonCode)
 	queue.Capacity = launchQueueCapacity(deferral, observation, queuedAt)
 	return queue
 }
@@ -185,5 +186,17 @@ func launchQueueInt64Field(payload map[string]interface{}, key string) int64 {
 		return int64(value)
 	default:
 		return 0
+	}
+}
+
+// Preserve the last actual admission refusal; current counts do not establish
+// which gate refused this original queue owner. Legacy/future codes stay generic.
+func launchQueueCapacityReason(reason string) string {
+	switch reason {
+	case "ceiling_total_limit", "ceiling_grade_limit", "ceiling_both_limits",
+		"ceiling_needs_configuration", "ceiling_unknown_population":
+		return reason
+	default:
+		return ""
 	}
 }

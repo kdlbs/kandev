@@ -3103,5 +3103,13 @@
   "contextCompactionTokenCounts": "{{preTokens}} → {{postTokens}} トークン",
   "contextCompactionTrigger": "実行条件：{{trigger}}",
   "contextCompactionDuration": "所要時間：{{duration}}",
-  "deliveryMessageNotDelivered": "未配信です。もう一度送信してください。"
+  "deliveryMessageNotDelivered": "未配信です。もう一度送信してください。",
+  "launchQueueRefusalTotal": "直近の待機理由: 全体の実行上限。",
+  "launchQueueRefusalGrade": "直近の待機理由: 実行等級の上限。",
+  "launchQueueRefusalBoth": "直近の待機理由: 全体と等級の実行上限。",
+  "launchQueueRefusalConfiguration": "直近の待機理由: 実行等級の設定が必要です。",
+  "launchQueueRefusalUnknown": "直近の待機理由: 実行一覧を確認できませんでした。",
+  "launchQueueCauseGrade": "{{grade}} 等級の上限 {{inUse}}/{{limit}} · 空きが出たら開始",
+  "launchQueueCauseGradeUnmeasured": "実行等級の上限に到達 · 空きが出たら開始",
+  "launchQueueCauseTotal": "全体の上限 {{inUse}}/{{limit}} · 空きが出たら開始"
 }

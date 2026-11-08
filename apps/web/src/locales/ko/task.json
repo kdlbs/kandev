@@ -3103,5 +3103,13 @@
   "contextCompactionTokenCounts": "{{preTokens}} → {{postTokens}} 토큰",
   "contextCompactionTrigger": "실행 조건: {{trigger}}",
   "contextCompactionDuration": "소요 시간: {{duration}}",
-  "deliveryMessageNotDelivered": "전달되지 않았습니다. 다시 보내세요."
+  "deliveryMessageNotDelivered": "전달되지 않았습니다. 다시 보내세요.",
+  "launchQueueRefusalTotal": "최근 대기 사유: 전체 실행 한도에 도달했습니다.",
+  "launchQueueRefusalGrade": "최근 대기 사유: 실행 등급 한도에 도달했습니다.",
+  "launchQueueRefusalBoth": "최근 대기 사유: 전체 및 등급 한도에 도달했습니다.",
+  "launchQueueRefusalConfiguration": "최근 대기 사유: 실행 등급 설정이 필요합니다.",
+  "launchQueueRefusalUnknown": "최근 대기 사유: 실행 목록을 확인하지 못했습니다.",
+  "launchQueueCauseGrade": "{{grade}} 등급 한도 {{inUse}}/{{limit}} · 자리가 나면 시작",
+  "launchQueueCauseGradeUnmeasured": "실행 등급 한도 도달 · 자리가 나면 시작",
+  "launchQueueCauseTotal": "전체 한도 {{inUse}}/{{limit}} · 자리가 나면 시작"
 }

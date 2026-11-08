@@ -3103,5 +3103,13 @@
   "contextCompactionTokenCounts": "{{preTokens}} tokens antes → {{postTokens}} tokens depois",
   "contextCompactionTrigger": "Origem: {{trigger}}",
   "contextCompactionDuration": "Duração: {{duration}}",
-  "deliveryMessageNotDelivered": "Não entregue. Envie novamente."
+  "deliveryMessageNotDelivered": "Não entregue. Envie novamente.",
+  "launchQueueRefusalTotal": "Último motivo de espera: limite global de execuções.",
+  "launchQueueRefusalGrade": "Último motivo de espera: limite da categoria de execução.",
+  "launchQueueRefusalBoth": "Último motivo de espera: limites global e da categoria.",
+  "launchQueueRefusalConfiguration": "Último motivo de espera: é necessário configurar a categoria de execução.",
+  "launchQueueRefusalUnknown": "Último motivo de espera: não foi possível verificar o inventário de execuções.",
+  "launchQueueCauseGrade": "Limite do grau {{grade}} {{inUse}}/{{limit}} · começa quando houver vaga",
+  "launchQueueCauseGradeUnmeasured": "Limite do grau de execução atingido · começa quando houver vaga",
+  "launchQueueCauseTotal": "Limite global {{inUse}}/{{limit}} · começa quando houver vaga"
 }

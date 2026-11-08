@@ -171,4 +171,27 @@ describe("LaunchQueueStatus retry copy", () => {
     expect(screen.queryByText(/will retry/)).toBeNull();
     expect(screen.queryByTestId("launch-queue-session-capacity-link")).toBeNull();
   });
+
+  it("names the full grade that holds the launch when the payload carries its usage", () => {
+    render(
+      <LaunchQueueStatus
+        queue={{
+          ...QUEUE_WITH_CAPACITY,
+          capacity_reason: "ceiling_grade_limit",
+          capacity: {
+            ...QUEUE_WITH_CAPACITY.capacity!,
+            policy: "all",
+            in_use: 13,
+            limit: 14,
+            grade_in_use: { control: 4, dev: 9 },
+            grade_limits: { control: 4, dev: 10 },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByTestId("launch-queue-capacity-cause").textContent).toBe(
+      "task:launchQueueCauseGrade",
+    );
+    expect(screen.queryByText("task:launchQueueRefusalGrade")).toBeNull();
+  });
 });
