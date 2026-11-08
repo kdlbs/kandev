@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { useOptionalAppStore } from "@/components/state-provider";
 import type { DynamicAgentCandidate, DynamicAgentSelection } from "@/lib/types/agent-profile";
 import { settingsControlClassName } from "./settings-control";
 
@@ -34,24 +35,28 @@ export function withCandidateCost(
   const prior = candidate.policies.selection;
   const model = modelOptions(prior?.model);
   if (!model) return candidate;
-  const next = { ...model };
-  if (cost) next.cost = cost;
-  else delete next.cost;
+  // The server merges omitted fields from the saved selection, so Unknown is
+  // sent as an explicit null to clear a saved cost.
+  const next = { ...model, cost: cost || null };
   const selection: DynamicAgentSelection = { ...prior, model: next };
   return { ...candidate, policies: { ...candidate.policies, selection } };
 }
+
+const USAGE_TIER_MODES = ["headroom", "pace", "consumption_rate"];
 
 function SelectionField({
   label,
   value,
   options,
   disabled,
+  unavailable = [],
   onChange,
 }: {
   label: string;
   value: string;
   options: Array<[string, string]>;
   disabled?: boolean;
+  unavailable?: string[];
   onChange: (value: string) => void;
 }) {
   const { t } = useTranslation();
@@ -66,7 +71,7 @@ function SelectionField({
         onChange={(event) => onChange(event.target.value)}
       >
         {options.map(([key, text]) => (
-          <option key={key} value={key}>
+          <option key={key} value={key} disabled={unavailable.includes(key)}>
             {text}
           </option>
         ))}
@@ -88,6 +93,10 @@ function TierHeadFields({
   const { t } = useTranslation();
   const selection = candidate.policies.selection;
   const mode = selection?.tier?.mode ?? "order";
+  const usageAvailable = useOptionalAppStore(
+    (state) => state.features?.providerUsageLimits ?? false,
+    false,
+  );
   return (
     <>
       <SelectionField
@@ -102,6 +111,7 @@ function TierHeadFields({
           ["pace", t("agents:tierModePace")],
           ["consumption_rate", t("agents:tierModeConsumptionRate")],
         ]}
+        unavailable={usageAvailable ? [] : USAGE_TIER_MODES}
         onChange={(value) => onChange(withTierSelection(candidate, "mode", value))}
       />
       <SelectionField
@@ -118,9 +128,14 @@ function TierHeadFields({
           {t("agents:tierRoundRobinDescription")}
         </p>
       )}
-      {["headroom", "pace", "consumption_rate"].includes(mode) && (
+      {usageAvailable && USAGE_TIER_MODES.includes(mode) && (
         <p className="text-xs text-muted-foreground sm:col-span-2">
           {t("agents:tierUsageUnknownHint")}
+        </p>
+      )}
+      {!usageAvailable && (
+        <p className="text-xs text-muted-foreground sm:col-span-2">
+          {t("agents:tierUsageModesUnavailable")}
         </p>
       )}
     </>
