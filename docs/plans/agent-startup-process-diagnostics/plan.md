@@ -280,13 +280,16 @@ Review remediation (November 8):
 - `exit_code` decoding in both agentctl evidence and `LastAgentError` uses a pointer target, so explicit JSON null and missing values stay nil while numeric zero survives.
 - Malformed supplied npm code or safety flags now invalidate npm diagnostic completeness at the wire boundary while preserving bounded exit status and recognized reason. The real retry-classification path rejects malformed present, unclassified, and npm-code witnesses; valid empty evidence keeps its single retry.
 - Managed-runtime retry failures with a final `process_exited` cause now render the process title, summary, prerequisite, and exit-code details instead of generic managed-runtime copy.
-- Explicit branch, guard, and distinct manual recovery refusals now keep their own visible explanation and suppress the earlier process prerequisite; the process cause remains in technical details and history.
+- Explicit branch, guard, inspection-busy, and distinct manual recovery refusals now keep their own visible explanation and suppress the earlier process prerequisite; the process cause remains in technical details and history.
+- Managed-runtime retries keep their existing title and attempt metadata for unknown exits while technical details retain the final child cause/status; a recognized mise refusal still selects the mise explanation.
+- A confirmed mise refusal blocks automatic replacement even when transient npm output is present. The mise trust command remains copyable through an i18next interpolation value.
 
 Remediation verification:
 
 - `go test -trimpath -race -tags fts5` passed for startupdiag, agentctl types, process, API, agentctl client, launcher, lifecycle, and task models.
 - Full non-race suites passed for every changed backend package.
-- Frontend typecheck, lint, i18n checks, and 152 focused Vitest tests passed.
+- Frontend typecheck, lint, i18n checks, and 164 focused Vitest tests passed.
+- Targeted managed-runtime exhaustion, cleanup recovery, and mobile touch E2E regressions passed.
 - Both desktop and phone Playwright specs passed again.
 
 ## Risks
