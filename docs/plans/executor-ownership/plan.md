@@ -199,7 +199,7 @@ work order, and record exact results there after implementation.
 - [x] [Task 04: Attribute autonomous execution](task-04-autonomous-attribution.md)
 - [x] [Task 05: Complete ownership UI and documentation](task-05-ownership-ui.md)
 - [ ] [Task 06: Resolve retained local executor aliases](task-06-retained-local-alias.md). Permanent regression coverage is present; execution remains pending.
-- [ ] [Task 07: Allow edits past unresolvable retained executor bindings](task-07-retained-binding-edits.md). Contributor validation is recorded; review is pending.
+- [ ] [Task 07: Allow edits past unresolvable retained executor bindings](task-07-retained-binding-edits.md). Contributor validation and maintainer review corrections are recorded; maintainer checks are pending.
 
 ## Verification results
 

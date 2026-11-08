@@ -133,6 +133,11 @@ If a selected profile becomes unavailable, choose an accessible replacement
 before starting. Ownership changes apply to subsequent operations and do not
 terminate work already admitted.
 
+A deleted executor or profile can remain in a task's saved selection. These
+unavailable selections do not prevent task or workflow edits. The edit does not
+restore the deleted resource or authorize a launch. A live private selection
+still requires access, and new selections must exist and be accessible.
+
 The HTTP and MCP profile APIs accept `owner_user_id`. Omit it on creation for a
 shared resource. On update, omission preserves ownership; `null` or an empty
 string clears it. Invalid users and conflicting parent/profile owners are

@@ -33,12 +33,14 @@ still returned.
 - Every retained binding that still resolves keeps the strict ownership check.
   A collaborator is still refused when the task names an owner's live private
   profile, executor, active-session executor, or environment executor.
-- `executor_profile_id` and `executor_id` values newly written by an update are
-  always checked. Resubmitting the unchanged stale values is allowed.
+- `executor_profile_id` and `executor_id` metadata values supplied at task
+  creation or newly written by an update are always checked. Resubmitting the
+  unchanged stale values during an update is allowed.
 - Repository read errors fail closed and are not reported as a denial.
 - `AuthorizeWorkflowExecutorMutation` wraps executor eligibility refusals in
-  `models.ErrExecutorMutationDenied`, which step handlers report as
-  `403 executor mutation denied`. The body names no executor or profile.
+  `models.ErrExecutorMutationDenied`. Step handlers and workflow HTTP updates
+  report `403 executor mutation denied`. Workflow WebSocket updates report
+  `FORBIDDEN` with the same message. The response names no executor or profile.
 - Retained metadata, session, and environment rows are not rewritten, and no
   deleted or retired resource is revived.
 
@@ -67,6 +69,10 @@ still returned.
 - `apps/backend/internal/task/service/executor_mutation.go`
 - `apps/backend/internal/task/service/service_tasks.go`
 - `apps/backend/internal/task/service/executor_mutation_retained_test.go`
+- `apps/backend/internal/task/service/executor_mutation_creation_test.go`
+- `apps/backend/internal/task/handlers/errors.go`
+- `apps/backend/internal/task/handlers/workflow_handlers.go`
+- `apps/backend/internal/task/handlers/workflow_executor_mutation_test.go`
 - `apps/backend/internal/workflow/handlers/handlers.go`
 - `apps/backend/internal/workflow/handlers/executor_mutation_denial_test.go`
 - The ownership system design paragraph on retained bindings.
@@ -108,3 +114,26 @@ Results on the contributor branch:
 
 There is no end-to-end HTTP test that combines stale bindings with a step edit.
 Nothing was validated against a live deployment.
+
+## Maintainer review corrections (2026-11-08)
+
+- Task creation now uses the same selection check as task updates. The check
+  runs after the external-ID lookup and before task allocation or persistence.
+  New regression cases cover foreign and missing metadata selections, plus
+  successful owner and shared-profile selections.
+- Workflow HTTP and WebSocket updates now report the existing denial marker
+  through their forbidden response channels. New route and service tests cover
+  denial, safe response content, unchanged stored workflow, and successful owner
+  updates. Direct private-profile lookups and task error mapping stay unchanged.
+- The missing workspace-default diagnosis remains outside this correction.
+  The repository has no dedicated missing-default error contract to reuse here.
+- Tests, builds, linters, documentation validators, and commit hooks were not
+  run, as requested for this review. The new regression tests remain unexecuted.
+
+Targeted checks for a later validation step:
+
+```bash
+cd apps/backend
+go test -trimpath -race -count=1 ./internal/task/service/ ./internal/task/handlers/ ./internal/workflow/... \
+  -run 'TestRetainedExecutor|TestExecutorMetadataSelection|TestHTTPWorkflowExecutorMutation|TestWSWorkflowExecutorMutation|TestStepMutationExecutor|TestExecutorOwnership|ExecutorMutation'
+```

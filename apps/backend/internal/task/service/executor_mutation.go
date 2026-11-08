@@ -71,9 +71,8 @@ func (s *Service) authorizeTaskExecutorMutation(ctx context.Context, task *model
 	return nil
 }
 
-// authorizeTaskExecutorSelection checks executor bindings newly written by a
-// task update, so an edit cannot point the next launch at compute the caller
-// cannot use or at a binding that does not resolve.
+// authorizeTaskExecutorSelection checks newly supplied executor bindings at
+// task creation and update, before they can become retained launch selections.
 func (s *Service) authorizeTaskExecutorSelection(ctx context.Context, task *models.Task, metadata map[string]interface{}) error {
 	if metadata == nil {
 		return nil
