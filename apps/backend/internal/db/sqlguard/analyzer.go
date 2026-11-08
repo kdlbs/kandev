@@ -59,6 +59,7 @@ var (
 	sqliteCatalogPattern  = regexp.MustCompile(`(?i)\b(?:sqlite_master|sqlite_schema|pragma(?:_[a-z0-9_]+)?)\b`)
 	conflictPattern       = regexp.MustCompile(`(?i)\bINSERT\s+OR\s+IGNORE\b`)
 	booleanIntegerPattern = regexp.MustCompile(`(?is)\bBOOLEAN\b.{0,100}?\bDEFAULT\s+[01]\b`)
+	booleanTypePattern    = regexp.MustCompile(`(?i)\bBOOLEAN\b`)
 	// These names are the boolean columns used by the built-in SQL schemas.
 	// The list is deliberately explicit: fields such as status, priority, and
 	// is_ephemeral are integer state values, not SQL BOOLEAN columns.
@@ -68,6 +69,38 @@ var (
 	pragmaPattern            = regexp.MustCompile(`(?i)\bpragma(?:_[a-z0-9_]+)?\b`)
 	sqlPattern               = regexp.MustCompile(`(?i)\b(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|WITH)\b`)
 )
+
+// hasBooleanIntegerDefault reports an integer default inside a BOOLEAN
+// column's own definition. A boolean's default belongs to its column, not a
+// following integer column, so the scan stops at the column's closing comma,
+// semicolon or parenthesis; nested CHECK/DEFAULT expressions stay inside it.
+func hasBooleanIntegerDefault(value string) bool {
+	for _, at := range booleanTypePattern.FindAllStringIndex(value, -1) {
+		end, depth := len(value), 0
+	scan:
+		for i := at[1]; i < len(value); i++ {
+			switch value[i] {
+			case '(':
+				depth++
+			case ')':
+				if depth == 0 {
+					end = i
+					break scan
+				}
+				depth--
+			case ',', ';':
+				if depth == 0 {
+					end = i
+					break scan
+				}
+			}
+		}
+		if booleanIntegerPattern.MatchString(value[at[0]:end]) {
+			return true
+		}
+	}
+	return false
+}
 
 type analysisResult struct {
 	findings []Finding
@@ -145,7 +178,7 @@ func analyzeSQLLiteral(
 	}{
 		{RuleSQLiteCatalog, sqlText && sqliteCatalogPattern.MatchString(value), "SQLite catalog or PRAGMA syntax must stay behind a dialect boundary"},
 		{RuleConflictSyntax, sqlText && conflictPattern.MatchString(value), "use portable conflict syntax"},
-		{RuleBooleanInteger, sqlText && (booleanIntegerPattern.MatchString(value) || booleanComparisonPattern.MatchString(value)), "use a boolean value or a dialect-rendered boolean default"},
+		{RuleBooleanInteger, sqlText && (hasBooleanIntegerDefault(value) || booleanComparisonPattern.MatchString(value)), "use a boolean value or a dialect-rendered boolean default"},
 		{RuleSQLiteDateFunction, sqlText && sqliteDatePattern.MatchString(value), "use an internal/db/dialect date helper"},
 		{RuleDateTimeType, sqlText && datetimeTypePattern.MatchString(value), "use a dialect-rendered timestamp type"},
 	}
