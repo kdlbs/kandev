@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/coordinator/mergestate"
 )
 
@@ -87,6 +88,17 @@ func unreadView(key mergestate.ChangeKey) ChangeView {
 	v := viewOf(key, mergestate.Snapshot{Pipeline: mergestate.PipelineUnavailable, UnresolvedThreads: -1, Behind: -1}, time.Time{}, true)
 	v.State = ""
 	return v
+}
+
+// ChangeViewsAs is ChangeViews for a workspace reader of an existing coordinator.
+func (s *Service) ChangeViewsAs(ctx context.Context, workspaceID, coordinatorID, taskID string, retry bool) ([]ChangeView, error) {
+	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead); err != nil {
+		return nil, err
+	}
+	if _, err := s.store.GetCoordinator(ctx, workspaceID, coordinatorID); err != nil {
+		return nil, err
+	}
+	return s.ChangeViews(ctx, workspaceID, taskID, retry)
 }
 
 // ChangeViews returns the task's linked changes ordered by provider, host,

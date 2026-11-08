@@ -15,7 +15,7 @@ var ErrUnknownProposalKind = errors.New("coordinator: unknown proposal kind")
 
 func knownProposalKind(kind string) bool {
 	switch kind {
-	case ProposalKindCreateTask, ProposalKindMessage, ProposalKindMove, ProposalKindResume, ProposalKindImprovement, ProposalKindAnswer:
+	case ProposalKindCreateTask, ProposalKindMessage, ProposalKindMove, ProposalKindResume, ProposalKindImprovement, ProposalKindAnswer, ProposalKindMerge:
 		return true
 	}
 	return false

@@ -12,6 +12,7 @@ import (
 func registerMergeRoutes(workspace *gin.RouterGroup, h *Handlers) {
 	workspace.GET("/coordinators/:cid/tasks/:tid/dependencies", h.httpGetDependencies)
 	workspace.PUT("/coordinators/:cid/tasks/:tid/dependencies", h.httpPutDependencies)
+	workspace.GET("/coordinators/:cid/tasks/:tid/changes", h.httpGetChanges)
 	workspace.POST("/coordinators/:cid/merge/protection/refresh", h.httpRefreshProtection)
 	workspace.POST("/coordinators/:cid/proposals/:pid/merge/check", h.httpCheckMerge)
 	workspace.POST("/coordinators/:cid/proposals/:pid/merge/release", h.httpReleaseMerge)
@@ -49,6 +50,20 @@ func (h *Handlers) httpRefreshProtection(c *gin.Context) {
 		obs = []ProtectionObservation{}
 	}
 	c.JSON(http.StatusOK, gin.H{"protection": obs})
+}
+
+// httpGetChanges backs GET .../coordinators/:cid/tasks/:tid/changes[?retry=1]:
+// the task's linked changes with their live reading.
+func (h *Handlers) httpGetChanges(c *gin.Context) {
+	views, err := h.service.ChangeViewsAs(c.Request.Context(), c.Param("id"), c.Param("cid"), c.Param("tid"), c.Query("retry") == "1")
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	if views == nil {
+		views = []ChangeView{}
+	}
+	c.JSON(http.StatusOK, gin.H{"changes": views})
 }
 
 // httpGetDependencies backs GET .../coordinators/:cid/tasks/:tid/dependencies.

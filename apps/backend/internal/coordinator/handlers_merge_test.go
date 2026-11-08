@@ -51,3 +51,24 @@ func TestHTTPSettingsMergeConflictIs409(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestHTTPGetChangesReturnsEmptyListWithoutLinks(t *testing.T) {
+	h, _, c := settingsHandlers(t)
+	h.service.merge = true
+	params := append(workspaceParams(c.ID), gin.Param{Key: "tid", Value: "t1"})
+	rec := runHandler(h.httpGetChanges, http.MethodGet, "/x?retry=1", "", params)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Changes []ChangeView `json:"changes"`
+	}
+	decodeBody(t, rec, &got)
+	if got.Changes == nil || len(got.Changes) != 0 {
+		t.Fatalf("changes = %#v", got.Changes)
+	}
+	params = append(workspaceParams("missing"), gin.Param{Key: "tid", Value: "t1"})
+	if rec = runHandler(h.httpGetChanges, http.MethodGet, "/x", "", params); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown coordinator: status = %d", rec.Code)
+	}
+}

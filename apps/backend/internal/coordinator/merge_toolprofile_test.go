@@ -38,3 +38,24 @@ func TestMergeToolMapsBackToItsAction(t *testing.T) {
 		t.Fatalf("the merge tool exercises no policy action, got %q", got)
 	}
 }
+
+func TestFlagOffHidesAndBlocks(t *testing.T) {
+	e := newMergeExec(t)
+	id := *e.propose(t, "h1").ProposalID
+	e.svc.merge = false
+	if slices.Contains(e.svc.bindingToolNames(e.fix.c), mergeTool) {
+		t.Fatal("the merge tool is listed with the flag off")
+	}
+	if _, err := e.svc.ProposeMerge(e.ctx, e.fix.c.ID, []byte(`{"task_id":"tm","expected_head_sha":"h1"}`)); err == nil {
+		t.Fatal("a merge proposal was created with the flag off")
+	}
+	if _, err := e.svc.CheckMergeNow(e.ctx, e.fix.c.WorkspaceID, e.fix.c.ID, id); err == nil {
+		t.Fatal("check now ran with the flag off")
+	}
+	if _, d := e.svc.OpenMergeDetail(e.ctx, &Proposal{ID: id, Kind: ProposalKindMerge}); d != nil {
+		t.Fatal("detail shown with the flag off")
+	}
+	if st, _ := e.status(t, id); st != "pending" {
+		t.Fatalf("data not preserved: status = %s", st)
+	}
+}
