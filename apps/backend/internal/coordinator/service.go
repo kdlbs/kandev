@@ -191,6 +191,8 @@ type Service struct {
 	changeLinks ChangeLinks
 	// changeObserver reads changes through the provider integrations.
 	changeObserver *ChangeObserver
+	// merger is the provider seam of the merge kind; nil refuses every merge.
+	merger ChangeMerger
 	// principals validates execution principals; nil reads every principal as invalid.
 	principals PrincipalValidator
 	// protection reads provider branch protection; nil records unknown.

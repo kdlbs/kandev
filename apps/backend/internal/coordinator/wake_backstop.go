@@ -165,6 +165,12 @@ func (b *WakeBackstop) visitSet(ctx context.Context, now time.Time) []string {
 		}},
 		{"coordinators with automatic claims", func() ([]string, error) { return store.CoordinatorIDsWithAutomaticClaims(ctx) }},
 		{"coordinators with raised classes", func() ([]string, error) { return store.CoordinatorIDsWithRaisedClasses(ctx) }},
+		{"coordinators with merge work", func() ([]string, error) {
+			if !b.svc.merge {
+				return nil, nil
+			}
+			return store.CoordinatorIDsWithMergeWork(ctx)
+		}},
 	}
 	seen := map[string]struct{}{}
 	for _, src := range sources {
@@ -242,6 +248,7 @@ func (b *WakeBackstop) visit(ctx context.Context, coordinatorID string) {
 	b.runDuty(ctx, "dream", hooks.Dream, coordinatorID)
 	b.runDuty(ctx, "turn duties", hooks.TurnDuties, coordinatorID)
 	b.runDuty(ctx, "lowering", hooks.Lowering, coordinatorID)
+	b.runDuty(ctx, "merge", b.svc.RunMergeDuties, coordinatorID)
 	if !c.AutonomyEnabled {
 		return
 	}

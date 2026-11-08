@@ -27,7 +27,7 @@ func (s *Service) approveKindResult(ctx context.Context, exec KindExecutor, prop
 // re-runs Execute on a claim that has gone stale (see settleStaleKind).
 func (s *Service) approveKind(ctx context.Context, exec KindExecutor, proposal *Proposal, edits ApproveProposalRequest) (*Proposal, error) {
 	switch proposal.Status {
-	case ProposalStatusApproved, ProposalStatusRejected, ProposalStatusReturned:
+	case ProposalStatusApproved, ProposalStatusRejected, ProposalStatusReturned, ProposalStatusUncertain:
 		return nil, &ProposalConflictError{Proposal: proposal}
 	case ProposalStatusApproving:
 		return s.approveApprovingKind(ctx, exec, proposal, edits)
@@ -159,6 +159,8 @@ func (s *Service) executeKind(ctx context.Context, exec KindExecutor, proposal *
 	var failure *execFailure
 	var refused *execRefusal
 	switch {
+	case errors.Is(err, errKindSettled):
+		return s.store.GetProposalAnyKind(sctx, proposal.WorkspaceID, proposal.CoordinatorID, proposal.ID)
 	case errors.Is(err, errSettleFenced):
 		return s.fencedResult(sctx, proposal)
 	case err == nil:

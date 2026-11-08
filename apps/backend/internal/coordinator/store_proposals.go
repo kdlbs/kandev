@@ -23,7 +23,7 @@ var ErrCoordinatorProposalCapReached = errors.New("coordinator: open proposal ca
 
 // openProposalStatuses are the statuses counted against maxOpenProposals and
 // reported as a coordinator's open_proposals count (decision 9).
-var openProposalStatuses = []ProposalStatus{ProposalStatusPending, ProposalStatusApproving, ProposalStatusFailed}
+var openProposalStatuses = []ProposalStatus{ProposalStatusPending, ProposalStatusApproving, ProposalStatusFailed, ProposalStatusUncertain}
 
 const proposalColumns = `id, coordinator_id, workspace_id, status, spec_json, final_spec_json, claimed_at, claim_token, task_id, error, reject_reason, decided_by, created_at, updated_at, kind, target_task_id, standing_order_ids, starts_agent, outcome_json, reply_text, reply_delivered_at, reply_delivery_claimed_at, in_reply_to, decided_automatically, claimed_automatically, automatic_at, ` + changeStatusColumn
 

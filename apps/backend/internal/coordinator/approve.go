@@ -346,6 +346,9 @@ func (s *Service) reclaimStaleAndProceed(ctx context.Context, workspaceID, coord
 			s.logger.Error("unknown_kind", zap.String("proposal_id", proposalID), zap.String("kind", row.Kind))
 			return nil, fmt.Errorf("%w: %q", ErrUnknownProposalKind, row.Kind)
 		}
+		if settler, ok := exec.(staleSettler); ok {
+			return settler.SettleStale(ctx, row, cutoff)
+		}
 		if exec.ReRunsOnStaleClaim() {
 			return nil, fmt.Errorf("coordinator: kind %q cannot re-run on a stale claim", row.Kind)
 		}
@@ -612,7 +615,7 @@ func kindAction(kind string) Action {
 // policy now denies. It reads only the proposal and the policy, so it runs
 // before any kind's own checks, and only with phase 2 on.
 func (s *Service) recheckPolicy(ctx context.Context, coordinatorID string, proposal *Proposal) error {
-	if !s.phase2 || proposal.Kind == ProposalKindImprovement {
+	if !s.phase2 || proposal.Kind == ProposalKindImprovement || proposal.Kind == ProposalKindMerge {
 		return nil
 	}
 	if proposal.Kind == ProposalKindAnswer {

@@ -178,7 +178,7 @@ func TestCatalogCoordinatorListsPhase3Tables(t *testing.T) {
 	want := []string{
 		"coordinator_wakes", "coordinator_unattended_turns", "coordinator_unattended_denials",
 		"coordinator_class_changes", "coordinator_class_reviews", "coordinator_pending_changes", "coordinator_eligibility_changes",
-		"coordinator_change_conditions", "coordinator_merge_repos", "coordinator_merge_audit",
+		"coordinator_change_conditions", "coordinator_merge_repos", "coordinator_merge_audit", "coordinator_merge_proposals", "coordinator_merge_dispatches",
 	}
 	for _, d := range Catalog() {
 		if d.ID != "coordinator" {

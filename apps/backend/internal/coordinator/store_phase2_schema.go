@@ -246,8 +246,6 @@ const phase2IndexesSQL = `
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_coordinator_goals_active ON coordinator_goals(coordinator_id) WHERE status = 'active';
 	CREATE INDEX IF NOT EXISTS idx_coordinator_goals_workspace ON coordinator_goals(workspace_id);
 	CREATE INDEX IF NOT EXISTS idx_coordinator_goals_history ON coordinator_goals(coordinator_id, created_at, id);
-	CREATE UNIQUE INDEX IF NOT EXISTS coordinator_proposals_open_target ON coordinator_proposals(coordinator_id, kind, target_task_id)
-		WHERE kind <> 'create_task' AND status IN ('pending','approving','failed');
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_coordinator_wakes_episode ON coordinator_wakes(coordinator_id, task_id, kind, episode_key);
 	CREATE INDEX IF NOT EXISTS idx_coordinator_wakes_status ON coordinator_wakes(coordinator_id, status, created_at, id);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_coordinator_unattended_turns_open ON coordinator_unattended_turns(coordinator_id) WHERE outcome IS NULL;
