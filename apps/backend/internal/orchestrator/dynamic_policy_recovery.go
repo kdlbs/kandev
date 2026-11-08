@@ -182,7 +182,7 @@ func (s *Service) armDynamicRecoveryTimer(
 }
 
 func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string, generation int64) {
-	s.removeDynamicPolicyRecoveryTimer(sessionID)
+	s.removeDynamicPolicyRecoveryTimer(sessionID, generation)
 	if !s.dynamicPolicyRecoveryActive(ctx) {
 		return
 	}
@@ -203,7 +203,7 @@ func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string
 		}
 	}()
 	state, ok := loadDueDynamicPolicyState(ctx, loader, sessionID, generation)
-	if !ok {
+	if !ok || !s.dynamicPolicyRecoverySessionCurrent(ctx, sessionID, generation, state) {
 		return
 	}
 	if s.rescheduleEarlyDynamicPolicyRecovery(sessionID, generation, state.PolicyStateJSON) {
@@ -224,10 +224,30 @@ func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string
 	}
 }
 
-func (s *Service) removeDynamicPolicyRecoveryTimer(sessionID string) {
+// removeDynamicPolicyRecoveryTimer forgets the timer that is now running. A
+// stale timer for an older route generation leaves a newer generation's armed
+// timer in place, so stopDynamicPolicyRecovery can still cancel it.
+func (s *Service) removeDynamicPolicyRecoveryTimer(sessionID string, generation int64) {
 	s.dynamicRecoveryMu.Lock()
-	delete(s.dynamicRecoveryTimers, sessionID)
+	if current := s.dynamicRecoveryTimers[sessionID]; current != nil && current.generation == generation {
+		delete(s.dynamicRecoveryTimers, sessionID)
+	}
 	s.dynamicRecoveryMu.Unlock()
+}
+
+// dynamicPolicyRecoverySessionCurrent reports whether the session still owns
+// the due route: it is not terminal, it still uses the route's logical
+// profile, and its projected route generation is the timer's generation. A
+// terminal or reassigned session leaves the durable route untouched.
+func (s *Service) dynamicPolicyRecoverySessionCurrent(
+	ctx context.Context,
+	sessionID string,
+	generation int64,
+	state *dynamicruntime.RouteState,
+) bool {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	return err == nil && session != nil && !isTerminalSessionState(session.State) &&
+		session.AgentProfileID == state.LogicalProfileID && session.RouteGeneration == generation
 }
 
 func (s *Service) dynamicPolicyRecoveryActive(ctx context.Context) bool {
