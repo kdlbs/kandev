@@ -563,12 +563,11 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		(!state.quotaWaitObserved || isQuotaWaitRefreshEvent(event.Type)) {
 		nextWait, loadErr := p.loadQuotaWait(ctx, taskID)
 		if loadErr != nil {
-			p.logger.Warn("failed to refresh task quota wait", zap.String("task_id", taskID), zap.Error(loadErr))
-		} else {
-			quotaWaitChanged = !state.quotaWaitObserved || !equalQuotaWait(state.quotaWait, nextWait)
-			state.quotaWait = cloneQuotaWait(nextWait)
-			state.quotaWaitObserved = true
+			return fmt.Errorf("load quota wait for task status summary %q: %w", taskID, loadErr)
 		}
+		quotaWaitChanged = !state.quotaWaitObserved || !equalQuotaWait(state.quotaWait, nextWait)
+		state.quotaWait = cloneQuotaWait(nextWait)
+		state.quotaWaitObserved = true
 	}
 
 	if event.Type == events.MessageQueueStatusChanged {
