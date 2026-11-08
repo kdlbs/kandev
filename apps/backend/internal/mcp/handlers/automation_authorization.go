@@ -26,6 +26,7 @@ func (d *guardedMCPDispatcher) RegisterFunc(action string, handler ws.HandlerFun
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "tool is not available in this execution", nil)
 		}
 		ctx = d.handlers.withCoordinatorCaller(ctx)
+		ctx = d.handlers.withProposalNotes(ctx, msg)
 		guarded, replacement, err := d.handlers.authorizeAutomationRequest(ctx, msg)
 		if guarded != nil {
 			d.handlers.recordCoordinatorCall(ctx, msg, false)

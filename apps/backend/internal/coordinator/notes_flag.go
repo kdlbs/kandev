@@ -4,7 +4,7 @@ package coordinator
 // condition (coordinator, phase 2, phase 3, phase 3.1 and the notes flag),
 // never the raw flag.
 func WithNotes(on bool) ServiceOption {
-	return func(s *Service) { s.notes = on }
+	return func(s *Service) { s.notes, s.store.notesOn = on, on }
 }
 
 // NotesEnabled reports whether agent-tier notes are effective.

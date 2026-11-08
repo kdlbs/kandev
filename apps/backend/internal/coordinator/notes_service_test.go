@@ -46,6 +46,10 @@ func newNotesFixture(t *testing.T) *notesFixture {
 		now: time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)}
 	f.svc = NewService(store, NewValidator(nil, nil), &fakeWorkspaceAuthorizer{}, newTestLogger(t), WithPhase2(true), WithNotes(true))
 	f.svc.SetNoteResolver(f.check)
+	if _, err := store.db.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, title TEXT, state TEXT,
+		archived_at TIMESTAMP, created_at TIMESTAMP, updated_at TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
 	store.now = func() time.Time { f.now = f.now.Add(time.Second); return f.now }
 	return f
 }

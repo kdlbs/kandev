@@ -30,6 +30,8 @@ type Store struct {
 	// now is the injectable clock. Overridden only by tests (decision 7's
 	// deterministic-order test needs a strictly increasing fake clock).
 	now func() time.Time
+	// notesOn mirrors the effective notes flag for proposal note_ids.
+	notesOn bool
 
 	// projects reads the project scope's membership for counts made inside the
 	// store; nil until the Service wires it.

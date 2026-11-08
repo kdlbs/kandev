@@ -48,6 +48,9 @@ func (h *Handlers) proposeKindHandler(kind string) func(context.Context, *ws.Mes
 }
 
 func (h *Handlers) proposeKindErrorResponse(msg *ws.Message, kind string, err error) (*ws.Message, error) {
+	if response, ok := proposalNotesErrorResponse(msg, err); ok {
+		return response, nil
+	}
 	if errors.Is(err, coordinator.ErrNotFound) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "coordinator not found", nil)
 	}

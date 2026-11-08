@@ -110,6 +110,9 @@ func (h *Handlers) applyAutomaticApproval(ctx context.Context, proposal *coordin
 // error with no field (AC-COORDINATOR-PROPOSALS-001.4); anything else is
 // logged and returned as an internal error.
 func (h *Handlers) proposeTaskErrorResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	if response, ok := proposalNotesErrorResponse(msg, err); ok {
+		return response, nil
+	}
 	if errors.Is(err, coordinator.ErrNotFound) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "coordinator not found", nil)
 	}

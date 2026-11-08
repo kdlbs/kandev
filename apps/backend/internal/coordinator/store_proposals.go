@@ -191,6 +191,10 @@ func (s *Store) insertProposalBody(ctx context.Context, exec coordinatorExec, p 
 	if _, err := lockedCoordinatorRow(ctx, exec, s.db.Rebind, p.WorkspaceID, p.CoordinatorID, false); err != nil {
 		return err
 	}
+	links, err := s.checkProposalNotes(ctx, exec, p.CoordinatorID)
+	if err != nil {
+		return err
+	}
 	if pre != nil {
 		done, err := pre(ctx, exec)
 		if err != nil {
@@ -244,6 +248,9 @@ func (s *Store) insertProposalBody(ctx context.Context, exec coordinatorExec, p 
 		nullableString(p.InReplyTo), s.ledgerTurnID(ctx))
 	if err != nil {
 		return fmt.Errorf("insert proposal: %w", err)
+	}
+	if err := s.insertNoteLinks(ctx, exec, p.ID, links); err != nil {
+		return err
 	}
 	if inTx != nil {
 		return inTx(ctx, exec, p)

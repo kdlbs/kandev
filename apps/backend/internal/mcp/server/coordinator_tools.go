@@ -107,6 +107,7 @@ func (s *Server) registerProposeTaskTool() {
 			mcp.WithString("source_task_id", mcp.Description("Optional existing task this proposal originated from")),
 			mcp.WithString("in_reply_to", mcp.Description("Optional id of a returned proposal of yours that this one revises after the manager's reply")),
 			standingOrderIDsOption(),
+			noteIDsOption(),
 		),
 		s.wrapHandler("propose_task_kandev", s.proposeTaskHandler()),
 	)
@@ -141,6 +142,7 @@ func (s *Server) proposeTaskHandler() server.ToolHandlerFunc {
 			"in_reply_to":               req.GetString("in_reply_to", ""),
 			standingOrderIDsArg:         req.GetStringSlice(standingOrderIDsArg, nil),
 		}
+		withNoteIDs(payload, req)
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionProposeTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -262,6 +264,24 @@ func (s *Server) listCoordinatorTurnsHandler() server.ToolHandlerFunc {
 
 const standingOrderIDsArg = "standing_order_ids"
 
+const noteIDsArg = "note_ids"
+
+// noteIDsOption declares the optional note citation list every proposal tool
+// accepts. The value is forwarded untouched; the coordinator service judges it.
+func noteIDsOption() mcp.ToolOption {
+	return mcp.WithArray(noteIDsArg,
+		mcp.Description("Optional ids of the notes from this turn's coordinator notes index that this proposal relies on, at most 5, no duplicates."),
+		mcp.Items(map[string]any{typeKey: stringType}))
+}
+
+// withNoteIDs copies the call's raw note_ids into a forwarded payload.
+func withNoteIDs(payload map[string]interface{}, req mcp.CallToolRequest) map[string]interface{} {
+	if v, ok := req.GetArguments()[noteIDsArg]; ok {
+		payload[noteIDsArg] = v
+	}
+	return payload
+}
+
 func standingOrderIDsOption() mcp.ToolOption {
 	return mcp.WithArray(standingOrderIDsArg,
 		mcp.Description("Optional ids of the standing orders that shaped this proposal, at most 5, no duplicates. Each must be one of your active standing orders."),
@@ -275,6 +295,7 @@ func (s *Server) registerProposeResumeTool() {
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task whose session would be resumed")),
 			mcp.WithString("rationale", mcp.Description("Why the session should be resumed, at most 10,000 characters")),
 			standingOrderIDsOption(),
+			noteIDsOption(),
 		),
 		s.wrapHandler("propose_resume_kandev", s.proposeKindHandler(mcpcontract.ActionProposeResume, "task_id", "rationale")),
 	)
@@ -288,6 +309,7 @@ func (s *Server) registerProposeMessageTool() {
 			mcp.WithString("text", mcp.Required(), mcp.Description("The message, 1 to 4,000 characters after trimming")),
 			mcp.WithString("rationale", mcp.Description("Why the message should be sent, at most 10,000 characters")),
 			standingOrderIDsOption(),
+			noteIDsOption(),
 		),
 		s.wrapHandler("propose_message_kandev", s.proposeKindHandler(mcpcontract.ActionProposeMessage, "task_id", "text", "rationale")),
 	)
@@ -301,6 +323,7 @@ func (s *Server) registerProposeMoveTool() {
 			mcp.WithString(mcpcontract.FieldStepID, mcp.Required(), mcp.Description("The destination step in the task's current workflow")),
 			mcp.WithString("rationale", mcp.Description("Why the task should move, at most 10,000 characters")),
 			standingOrderIDsOption(),
+			noteIDsOption(),
 		),
 		s.wrapHandler("propose_move_kandev", s.proposeKindHandler(mcpcontract.ActionProposeMove, "task_id", mcpcontract.FieldStepID, "rationale")),
 	)
@@ -315,6 +338,7 @@ func (s *Server) proposeKindHandler(action string, fields ...string) server.Tool
 		for _, name := range fields {
 			payload[name] = req.GetString(name, "")
 		}
+		withNoteIDs(payload, req)
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -344,6 +368,7 @@ func (s *Server) registerProposeAnswerTool() {
 			mcp.WithBoolean("needs_decision", mcp.Required(), mcp.Description("True when the answer is a judgement call for the manager")),
 			mcp.WithString("rationale", mcp.Description("Why this answer, at most 10,000 characters")),
 			standingOrderIDsOption(),
+			noteIDsOption(),
 		),
 		s.wrapHandler("propose_answer_kandev", s.proposeAnswerHandler()),
 	)
@@ -374,6 +399,7 @@ func (s *Server) registerProposeMergeTool() {
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task whose linked change should be merged")),
 			mcp.WithString("change", mcp.Description("Which linked change, when the task has several")),
 			mcp.WithString("expected_head_sha", mcp.Required(), mcp.Description("The head commit SHA you reviewed")),
+			noteIDsOption(),
 		),
 		s.wrapHandler("propose_merge_kandev", s.proposeMergeHandler()),
 	)
@@ -425,6 +451,7 @@ func (s *Server) registerProposeImprovementTool() {
 						mcpKeyTaskID: map[string]any{typeKey: stringType},
 					},
 				})),
+			noteIDsOption(),
 		),
 		s.wrapHandler("propose_improvement_kandev", s.proposeImprovementHandler()),
 	)
@@ -440,6 +467,7 @@ func (s *Server) proposeImprovementHandler() server.ToolHandlerFunc {
 			improvementContextArg:     req.GetString(improvementContextArg, ""),
 			mcpcontract.FieldEvidence: req.GetArguments()[mcpcontract.FieldEvidence],
 		}
+		withNoteIDs(payload, req)
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionProposeImprovement, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
