@@ -1040,7 +1040,10 @@ type ExecutionStopOwnerRegistrationFunc func(sessionID, agentExecutionID string,
 
 // ExecutionReplacementStopOwnerRegistrationFunc requires an exact-execution
 // teardown claim before a profile replacement stops the old execution.
-type ExecutionReplacementStopOwnerRegistrationFunc func(sessionID, agentExecutionID string) bool
+type ExecutionReplacementStopOwnerRegistrationFunc func(
+	ctx context.Context,
+	sessionID, agentExecutionID string,
+) bool
 
 // TaskReviewStateReconcileFunc is called when runtime work stopped and the
 // parent task should move to REVIEW only if no session is still STARTING/RUNNING.

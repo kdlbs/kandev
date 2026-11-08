@@ -71,7 +71,7 @@ func TestLaunchPreparedSession_ProfileChangeToleratesRowClearedByStop(t *testing
 			return &LaunchAgentResponse{AgentExecutionID: "exec-new", Status: v1.AgentStatusStarting}, nil
 		},
 	}, repo)
-	exec.SetOnExecutionReplacementStopOwnerRegistration(func(string, string) bool { return true })
+	exec.SetOnExecutionReplacementStopOwnerRegistration(func(context.Context, string, string) bool { return true })
 
 	if err := launchWithProfile(exec, session, "profile-new"); err != nil {
 		t.Fatalf("LaunchPreparedSession() error = %v, want nil", err)
@@ -95,7 +95,7 @@ func TestLaunchPreparedSession_ProfileChangePropagatesOtherDeleteErrors(t *testi
 			return &LaunchAgentResponse{AgentExecutionID: "exec-new", Status: v1.AgentStatusStarting}, nil
 		},
 	}, repo)
-	exec.SetOnExecutionReplacementStopOwnerRegistration(func(string, string) bool { return true })
+	exec.SetOnExecutionReplacementStopOwnerRegistration(func(context.Context, string, string) bool { return true })
 
 	err := launchWithProfile(exec, session, "profile-new")
 	if !errors.Is(err, deleteErr) || !strings.Contains(err.Error(), "clear previous execution profile") {

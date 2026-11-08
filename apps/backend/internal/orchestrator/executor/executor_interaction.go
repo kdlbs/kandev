@@ -215,9 +215,9 @@ func (e *Executor) registerStopOwner(sessionID, executionID string, force bool) 
 	}
 }
 
-func (e *Executor) registerReplacementStopOwner(sessionID, executionID string) bool {
+func (e *Executor) registerReplacementStopOwner(ctx context.Context, sessionID, executionID string) bool {
 	return e.onExecutionReplacementStopOwnerRegistration != nil &&
-		e.onExecutionReplacementStopOwnerRegistration(sessionID, executionID)
+		e.onExecutionReplacementStopOwnerRegistration(ctx, sessionID, executionID)
 }
 
 // registryRecoveredSession keeps the database row paired with the exact

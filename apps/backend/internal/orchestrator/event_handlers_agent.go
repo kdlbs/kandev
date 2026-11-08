@@ -3432,19 +3432,30 @@ func (s *Service) RegisterExecutionStopOwner(sessionID, executionID string, forc
 
 // RegisterExecutionReplacementStopOwner claims a profile-replacement stop
 // without allowing the old execution's event to complete the incoming turn.
-func (s *Service) RegisterExecutionReplacementStopOwner(sessionID, executionID string) bool {
+func (s *Service) RegisterExecutionReplacementStopOwner(
+	ctx context.Context,
+	sessionID, executionID string,
+) bool {
 	if sessionID == "" || executionID == "" {
 		return false
 	}
-	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	if !lock.TryLock() {
+	if cancelInFlightGuardHeldForSession(ctx, sessionID) ||
+		executionReplacementStopOwnerGuardHeldForSession(ctx, sessionID) {
+		return s.registerExecutionReplacementStopOwnerLocked(sessionID, executionID)
+	}
+	guard, release := s.acquireCancelInFlightGuard(sessionID)
+	if !guard.TryLock() {
 		release()
 		return false
 	}
 	defer func() {
-		lock.Unlock()
+		guard.Unlock()
 		release()
 	}()
+	return s.registerExecutionReplacementStopOwnerLocked(sessionID, executionID)
+}
+
+func (s *Service) registerExecutionReplacementStopOwnerLocked(sessionID, executionID string) bool {
 	if s.isCancelInFlight(sessionID) {
 		return false
 	}

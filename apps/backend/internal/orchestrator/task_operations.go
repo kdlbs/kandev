@@ -10543,6 +10543,10 @@ type lockedCancelInFlightGuard struct {
 type cancelInFlightGuardHeldContextKey struct{}
 type cancelInFlightGuardSessionContextKey struct{}
 
+// This marker preserves replacement-owner claim access when a resume attempt
+// clears the broader session-guard marker from its lifecycle context.
+type executionReplacementStopOwnerGuardSessionContextKey struct{}
+
 func withCancelInFlightGuardHeld(ctx context.Context) context.Context {
 	return context.WithValue(ctx, cancelInFlightGuardHeldContextKey{}, true)
 }
@@ -10565,6 +10569,18 @@ func cancelInFlightGuardHeldForSession(ctx context.Context, sessionID string) bo
 		return false
 	}
 	owner, _ := ctx.Value(cancelInFlightGuardSessionContextKey{}).(string)
+	return owner == sessionID
+}
+
+func withExecutionReplacementStopOwnerGuardHeldForSession(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, executionReplacementStopOwnerGuardSessionContextKey{}, sessionID)
+}
+
+func executionReplacementStopOwnerGuardHeldForSession(ctx context.Context, sessionID string) bool {
+	if ctx == nil || sessionID == "" {
+		return false
+	}
+	owner, _ := ctx.Value(executionReplacementStopOwnerGuardSessionContextKey{}).(string)
 	return owner == sessionID
 }
 
