@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-10-08
-updated: 2026-10-28
+updated: 2026-11-08
 owners:
   - kandev
 ---
@@ -94,13 +94,27 @@ errors does not take its own healthy account out of rotation.
   Missing, malformed, zero, negative, and larger delays shall provide no hint.
   Classification shall not establish runtime health or authorize another prompt.
 
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12:** For `opencode-acp`, an
+  opening diagnostic line with one of the established `AI_APICallError:`,
+  `Error:`, `Internal error:`, or `API Error:` labels followed by `free usage
+  limit reached` shall classify as a quota limit. Match this form only at the
+  start of a diagnostic line. Matching shall be case-insensitive and shall
+  accept flexible whitespace within multiword labels and the phrase, and after
+  the label's colon. Quoted prose, unknown labels, and other providers shall
+  not match. Existing structured status and earlier account-limit rules shall
+  keep precedence. Do not infer a reset hint when the diagnostic gives no
+  reset time.
+
 Criterion 001.11 was added by the October 28
 [OpenCode capacity package](../../../plans/opencode-capacity-retry/plan.md).
+
+Criterion 001.12 is described in the
+[provider error signature plan](../../../plans/provider-error-signatures/plan.md).
 
 ## Out of scope
 
 - Changing rule order, confidence levels, or classification flags beyond the
-  narrow additions in criteria 001.6, 001.8, 001.9, 001.10, and 001.11.
+  narrow additions in criteria 001.6, 001.8, 001.9, 001.10, 001.11, and 001.12.
 - Changing unrelated provider-neutral rules or any runtime-environment rules.
 - Changing how classified failures suspend candidates or select a successor.
 
