@@ -199,7 +199,7 @@ func persistDynamicRouteSelection(
 	session.DownstreamACPSessionID = ""
 	var changed bool
 	var err error
-	if orchestrator.DynamicCandidateRuntimeResetRequired(previousExecutionProfileID, session.ExecutionProfileID) {
+	if orchestrator.DynamicCandidateSelectionResetRequired(session, previousExecutionProfileID) {
 		// The previous provider's model and mode must not reach the new candidate.
 		if persistCandidateSwitch == nil {
 			return false, errors.New("dynamic candidate switch persister unavailable")
