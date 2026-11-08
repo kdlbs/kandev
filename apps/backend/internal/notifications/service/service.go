@@ -699,6 +699,7 @@ func (s *Service) validateEvents(events []string) error {
 		EventTaskSessionFailed:             {},
 		EventOfficeInboxItem:               {},
 		EventSystemUpdateAvailable:         {},
+		EventTaskChildStallUndeliverable:   {},
 	}
 	for _, event := range events {
 		if _, ok := allowed[event]; !ok {

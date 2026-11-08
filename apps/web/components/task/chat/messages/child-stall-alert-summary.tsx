@@ -23,11 +23,16 @@ const CAUSE_KEYS: Record<string, string> = {
 
 const TURN_REFERENCE_LENGTH = 8;
 
+// Metadata is untyped at runtime: a descriptor needs a non-empty child id, and
+// every optional field it renders must be a string when present.
 function isDescriptor(value: unknown): value is ChildStallAlertDescriptor {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { child_task_id?: unknown }).child_task_id === "string"
+  if (typeof value !== "object" || value === null) return false;
+  const descriptor = value as Record<string, unknown>;
+  if (typeof descriptor.child_task_id !== "string" || descriptor.child_task_id.length === 0) {
+    return false;
+  }
+  return ["child_task_title", "turn_id", "step_name", "cause"].every(
+    (key) => descriptor[key] === undefined || typeof descriptor[key] === "string",
   );
 }
 
@@ -49,7 +54,7 @@ function ChildStallAlertRow({ alert }: { alert: ChildStallAlertDescriptor }) {
     <li className="flex min-w-0 flex-col gap-1" data-testid="child-stall-alert">
       <Link
         href={linkToTask(alert.child_task_id)}
-        className="inline-flex min-w-0 max-w-full items-center gap-1.5 self-start rounded-full bg-purple-500/20 px-2.5 py-1 font-medium text-purple-300 hover:bg-purple-500/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [@media(pointer:coarse)]:min-h-11"
+        className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 self-start rounded-full bg-purple-500/20 px-2.5 py-1 font-medium text-purple-300 hover:bg-purple-500/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [@media(pointer:coarse)]:min-h-11"
         data-testid="child-stall-alert-link"
       >
         <IconSubtask className="shrink-0" size={14} aria-hidden="true" />
