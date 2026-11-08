@@ -8,7 +8,8 @@ startup setting (`KANDEV_PROVIDER_ERRORS_CATALOG_FILE`). Requirement and design:
 ## Behavior
 
 - No configured path: no file I/O, built-in rules only. A relative path
-  resolves against the directory of the selected config file.
+  resolves against the directory of the selected config file, or against the
+  process working directory when no config file is selected.
 - A configured file is read once, decoded, validated, and compiled into an
   immutable ordered rule set. Any error rejects the whole file; built-in rules
   stay in effect and no rule from the file is applied.
@@ -45,11 +46,11 @@ is different: at least `minTerms` distinct terms must match.
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `pattern` | Go RE2 regexp | Matched against the sanitized diagnostic. |
-| `terms` | list of strings | Normalized (lowercase, collapsed spaces) evidence terms, matched with the classifier's keyword normalization. |
+| `terms` | list of strings | Evidence terms, matched with the classifier's keyword normalization (case, separators and word endings). A term with no letters or digits, or two terms that normalize to the same words, are rejected. |
 | `minTerms` | integer | Required with `terms`. Distinct terms that must match; at least 2 when `pattern` is absent. |
 | `providers` | list of strings | Provider ids. |
 | `phases` | list of strings | Classifier phases: `process_start`, `session_init`, `prompt_send`, `streaming`, and the other values the classifier accepts. |
-| `httpStatus` | list of integers | Structured HTTP status, 100-599. |
+| `httpStatus` | list of integers | Structured HTTP status, 100-599. A status the built-in classifier already maps (for example 429 or 503) is classified before the catalog runs, so only an unmapped status (for example 404) reaches a catalog rule. |
 | `context` | mapping | Typed invocation evidence, below. |
 
 `context` fields: `tiers`, `accounts`, `models`, `paths` (lists of exact

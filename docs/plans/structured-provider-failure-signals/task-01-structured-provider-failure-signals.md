@@ -27,8 +27,10 @@ classifier from every consumer that classifies a provider diagnostic.
 - `routingerr.Input` gains `ACPCode`, `ErrorKind`, and `ProviderCode`;
   `Classify` returns an already normalized `*routingerr.Error` unchanged.
 - `routingerr/structured.go` maps HTTP error statuses, ACP `-32000`, OpenCode
-  `ProviderAuthError`, and Claude ACP error kinds; anything else stays on the
-  text catalogue.
+  `ProviderAuthError`, and Claude ACP error kinds. An unmapped valid HTTP error
+  status stays unknown even when a built-in text rule matches; only the opt-in
+  operator catalog and keyword prefilter may refine it. Other unrecognized
+  structured signals stay on the text catalogue.
 - `streams.ProviderError` gains `HTTPStatus` and `ProviderCode` and a
   `RoutingInput` helper.
 - The ACP projection reads only the scalar `statusCode` and `errorCode` keys

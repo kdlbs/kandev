@@ -9,11 +9,12 @@ import (
 
 const externalCatalogRulePrefix = "external_catalog."
 
-// catalogMayRefineUnknownHTTP leaves known structured and built-in rules in
-// control while allowing an explicitly configured catalog to refine an HTTP
-// status for which the built-in classifier has no specific mapping.
-func catalogMayRefineUnknownHTTP(in Input, excerpt, rawText string) bool {
-	if externalCatalog.Load() == nil || in.HTTPStatus < 400 || in.HTTPStatus > 599 ||
+// unknownHTTPMayBeRefined leaves known structured and built-in rules in
+// control while allowing a later opt-in stage (an explicitly configured
+// catalog, then the keyword prefilter's structural status rules) to refine an
+// HTTP status for which the built-in classifier has no specific mapping.
+func unknownHTTPMayBeRefined(in Input, excerpt, rawText string) bool {
+	if in.HTTPStatus < 400 || in.HTTPStatus > 599 ||
 		(in.ExitCode != nil && *in.ExitCode == exitCodeBinaryMissing) {
 		return false
 	}
@@ -63,6 +64,7 @@ func ExternalCatalogVocabulary() externalcatalog.Vocabulary {
 			string(PhasePromptSend), string(PhaseStreaming), string(PhaseToolExecution),
 			string(PhaseShutdown),
 		},
+		TermKey: externalCatalogTermKey,
 	}
 	for _, code := range externalCatalogCodes {
 		vocab.Codes = append(vocab.Codes, string(code))
@@ -112,6 +114,16 @@ func classifyExternalCatalog(in Input, excerpt string) *Error {
 		applyKeywordReset(in, result)
 	}
 	return result
+}
+
+// externalCatalogTermKey is the form externalCatalogTermMatcher compares a
+// term by: separator-normalized words, each reduced to its stem.
+func externalCatalogTermKey(term string) string {
+	words := strings.Fields(normalizeKeywords(term))
+	for i, word := range words {
+		words[i] = keywordStem(word)
+	}
+	return strings.Join(words, " ")
 }
 
 // externalCatalogTermMatcher reuses the keyword classifier's diagnostic

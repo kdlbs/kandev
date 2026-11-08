@@ -81,4 +81,9 @@ type Vocabulary struct {
 	Codes       []string
 	Confidences []string
 	Phases      []string
+	// TermKey returns the form the classifier matches a term by. Terms are
+	// validated in that form, so a term with no matchable word, or two terms
+	// that match the same evidence, are rejected. Nil keeps lowercase and
+	// whitespace normalization only.
+	TermKey func(term string) string
 }

@@ -241,9 +241,12 @@ func classify(in Input) *Error {
 		return e
 	}
 	if e := classifyStructured(in, excerpt); e != nil {
-		if e.Code == CodeUnknownProvider && catalogMayRefineUnknownHTTP(in, excerpt, rawText) {
+		if e.Code == CodeUnknownProvider && unknownHTTPMayBeRefined(in, excerpt, rawText) {
 			if catalogResult := classifyExternalCatalog(in, excerpt); catalogResult != nil {
 				return applyInvariants(catalogResult)
+			}
+			if keywordResult := classifyUnmappedHTTPKeyword(in, excerpt); keywordResult != nil {
+				return applyInvariants(keywordResult)
 			}
 		}
 		e.ResetHint = in.ResetHint

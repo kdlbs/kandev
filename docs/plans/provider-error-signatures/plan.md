@@ -59,7 +59,7 @@ does not reopen task 01's completed prose-safety change.
 
 ## Opt-in keyword/context follow-up
 
-[Task 02](task-02-keyword-context.md) implements requirement 002 as a separate
+[Task 02, keyword context](task-02-keyword-context.md) implements requirement 002 as a separate
 default-off unmatched diagnostic classifier on the current base. Existing typed
 and known rules retain priority. It includes trusted context and existing
 consumer/circuit integration; it does not import the pending literal catalog.
@@ -68,17 +68,18 @@ delta review. No permanent suite, external loader or operator activation is adde
 
 ## Bounded catalogue follow-up
 
-Add only the remaining OpenCode signatures: unlabelled `free usage limit
+[Task 02, provider catalogue follow-up](task-02-provider-catalogue-followup.md)
+adds only the remaining OpenCode signatures: unlabelled `free usage limit
 reached`, raw-text daily reasons `free-models-per-day` and `limit_rpd/<model>`,
 and the generic Zen retry-later rate-limit wording. Add the shared labeled JSON
 `error_type=provider_unavailable` opening signature. Keep provider-specific
 scope, line-opening evidence, sanitized excerpts, typed/normalized precedence,
 and existing credit/payment/quota ordering. Do not duplicate the already
 submitted shared catalogue or context-length work. The original-source reproduction and focused candidate race result are recorded
-in task 02; hosted CI and combined unmerged-source validation remain separate.
+in the [provider catalogue follow-up](task-02-provider-catalogue-followup.md); hosted CI and combined unmerged-source validation remain separate.
 
 ## Operator rule catalog follow-up
 
 [Task 03](task-03-operator-rule-catalog.md) implements requirement 003 on top of
-the keyword/context [task 02](task-02-keyword-context.md): a startup-loaded local JSON/YAML catalog evaluated after built-in rules
+the [keyword context task 02](task-02-keyword-context.md): a startup-loaded local JSON/YAML catalog evaluated after built-in rules
 and before the keyword/context fallback. Unset keeps the built-in behavior.

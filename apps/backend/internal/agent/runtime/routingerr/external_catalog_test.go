@@ -1,6 +1,7 @@
 package routingerr
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -42,6 +43,27 @@ func parseExternalCatalogForTest(t *testing.T) *externalcatalog.Catalog {
 	return catalog
 }
 
+// Terms are validated in the form the classifier matches them by, so a term
+// with no matchable word or two spellings of one term cannot satisfy minTerms.
+func TestExternalCatalog_TermsValidatedInMatchedForm(t *testing.T) {
+	doc := func(terms string) []byte {
+		return []byte(`{"version":1,"rules":[{"id":"a","match":{"terms":` + terms +
+			`,"minTerms":2},"result":{"code":"quota_limited","confidence":"high"}}]}`)
+	}
+	for _, terms := range []string{
+		`["credit-balance","credit balance"]`, `["!!!","???"]`, `["busy","busy!"]`, `["limit","limits"]`,
+	} {
+		_, err := externalcatalog.Parse(doc(terms), externalcatalog.FormatJSON, ExternalCatalogVocabulary())
+		var loadErr *externalcatalog.LoadError
+		if !errors.As(err, &loadErr) || loadErr.Reason != externalcatalog.ReasonInvalidValue || loadErr.Field != "match.terms" {
+			t.Fatalf("terms %s: err = %v, want invalid match.terms", terms, err)
+		}
+	}
+	if _, err := externalcatalog.Parse(doc(`["shard","saturated"]`), externalcatalog.FormatJSON, ExternalCatalogVocabulary()); err != nil {
+		t.Fatalf("distinct terms rejected: %v", err)
+	}
+}
+
 func TestExternalCatalog_UnsetKeepsBuiltInResult(t *testing.T) {
 	SetExternalCatalog(nil)
 	in := Input{Phase: PhaseStreaming, ProviderID: "example-gateway", Stderr: "Error: credit balance exhausted"}
@@ -66,6 +88,13 @@ func TestExternalCatalog_ExamplesClassifyThroughClassify(t *testing.T) {
 			}
 			if got.Class != ClassHard || !got.FallbackAllowed || got.Keyword != nil {
 				t.Fatalf("invariants or disabled keyword decision wrong: %+v", got)
+			}
+			got = Classify(Input{Phase: PhaseStreaming, ProviderID: "example-gateway",
+				Stderr:         "Error: shard capacity exhausted, try again later",
+				KeywordContext: KeywordContext{Enabled: true, Diagnostic: true, ModelID: "m", OtherPaths: 1}})
+			if got.ClassifierRule != externalCatalogRulePrefix+"example.capacity.terms" || got.Code != CodeModelCapacity ||
+				got.Keyword == nil || got.Keyword.Scope != externalcatalog.ScopeModel || got.Keyword.Backoff != 10*time.Minute {
+				t.Fatalf("capacity example = %s/%s keyword %+v", got.Code, got.ClassifierRule, got.Keyword)
 			}
 		})
 	}

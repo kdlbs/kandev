@@ -15,7 +15,6 @@
         "terms": ["capacity", "try again later"],
         "minTerms": 2,
         "phases": ["prompt_send", "streaming"],
-        "httpStatus": [503],
         "context": { "minOtherPaths": 1 }
       },
       "result": {
