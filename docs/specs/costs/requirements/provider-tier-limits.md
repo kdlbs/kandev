@@ -22,6 +22,7 @@ Free inference, flat-fee subscriptions, and pay-as-you-go inference have separat
 - **AC-COSTS-TIER-LIMITS-001.4:** Classified errors shall record requests, turns, tokens, and cost in the account/tier windows. Unknown limits shall learn with a small admission reserve. Owner overrides take priority. Existing Claude/Codex, Go, and DevPass windows and recovery behavior shall remain available through the subscription layer.
 - **AC-COSTS-TIER-LIMITS-001.5:** OpenRouter free rate errors shall refresh the same account's key endpoint: positive daily remaining means a minute block; zero means the daily reset. Unavailable evidence preserves lane 8's existing ladder.
 - **AC-COSTS-TIER-LIMITS-001.6:** UI/docs shall distinguish provider measurements and local request estimates. Credentials shall remain inside existing resolution paths and never enter responses.
+- **AC-COSTS-TIER-LIMITS-001.7:** A classified quota failure on a non-free OpenCode Go model whose host binding resolver proves the Go account shall skip sibling non-free Go models on the same credential binding under the existing backoff, including when no reset is reported. Known free Go models and other providers on that binding shall remain selectable, no reset shall be assigned, and an override or unproved binding keeps the binding-wide behavior.
 
 ### REQ-COSTS-TIER-LIMITS-002: Account, model, and shared-group scopes
 
@@ -30,6 +31,7 @@ Free inference, flat-fee subscriptions, and pay-as-you-go inference have separat
 - **AC-COSTS-TIER-LIMITS-002.3:** At a new turn, dynamic routing shall skip or defer a candidate whose applicable scope is exhausted until that scope resets, under REQ-COSTS-TIER-LIMITS-001.2's order, interruption, and model-choice constraints.
 - **AC-COSTS-TIER-LIMITS-002.4:** A classified per-model daily error shall replace the learned value of the scope that covers the model with the requests counted in that scope so far. An account-wide daily error keeps REQ-COSTS-TIER-LIMITS-001.4 learning, because the provider key counter already measures that allowance. Owner values are never replaced. Learning shall use naturally occurring errors only.
 - **AC-COSTS-TIER-LIMITS-002.5:** Classified per-model daily errors from two or more ungrouped models of one account within the same minute shall propose a provisional learned group. The settings card shall mark it provisional; an owner value of zero disables it.
+- **AC-COSTS-TIER-LIMITS-002.7:** An explicit Free usage-limit signature on a free OpenCode Zen candidate shall be a model daily cause: it feeds the existing model/group learner and its short backoff covers only that model, so Go on the same credential binding stays selectable. It shall not create an account-wide allowance, classify another provider, or treat a paid model as free.
 - **AC-COSTS-TIER-LIMITS-002.6:** The existing provider-limit card shall show and edit scopes in each account row with their source and provenance, on desktop and phone, with the existing save path, permissions, and locale catalogs.
 
 ## Exclusions

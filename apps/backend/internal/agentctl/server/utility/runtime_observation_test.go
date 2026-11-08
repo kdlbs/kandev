@@ -11,6 +11,8 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"go.uber.org/zap"
 )
 
@@ -624,5 +626,77 @@ func writeRuntimeObservationExecutable(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(contents), 0o700); err != nil {
 		t.Fatalf("write executable: %v", err)
+	}
+}
+
+func TestRetainedHandoffRejectsIdentityMismatch(t *testing.T) {
+	j, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "owner.bbolt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	prior := &inferenceOwnership{OwnerID: "old", InstanceID: "instance", SessionID: "session-old", IncarnationID: "incarnation", HarnessGeneration: 1, Revision: 1, Phase: ownerClosed}
+	o := &attemptOwner{cfg: &config.InstanceConfig{InstanceID: "instance", SessionID: "session-new", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1}, id: "new", journal: j, state: inferenceOwnerState{Ownership: prior, ContinuityKnown: true}}
+	o.adoptRetainedClaim(o.state)
+	if !o.storageUnavailable || o.admissionFailureReason != "retained_claim_identity_mismatch" {
+		t.Fatalf("identity mismatch adopted: storage=%v reason=%q", o.storageUnavailable, o.admissionFailureReason)
+	}
+}
+
+func TestRetainedHandoffRejectsActiveEmptyClaim(t *testing.T) {
+	j, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "owner.bbolt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	prior := &inferenceOwnership{OwnerID: "old", InstanceID: "instance", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, Revision: 1, Phase: ownerActive}
+	o := &attemptOwner{cfg: &config.InstanceConfig{InstanceID: "instance", SessionID: "session", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1}, id: "new", journal: j, state: inferenceOwnerState{Ownership: prior, ContinuityKnown: false}}
+	o.adoptRetainedClaim(o.state)
+	if !o.storageUnavailable || o.admissionFailureReason != "retained_claim_active" {
+		t.Fatalf("active empty claim adopted: storage=%v reason=%q", o.storageUnavailable, o.admissionFailureReason)
+	}
+}
+
+func TestRetainedHandoffAlwaysDropsHistoricalContinuity(t *testing.T) {
+	j, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "owner.bbolt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	prior := &inferenceOwnership{OwnerID: "old", InstanceID: "instance", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, Revision: 1, Phase: ownerClosed}
+	o := &attemptOwner{cfg: &config.InstanceConfig{InstanceID: "instance", SessionID: "session", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1}, id: "new", journal: j, state: inferenceOwnerState{Ownership: prior, ContinuityKnown: true}}
+	o.adoptRetainedClaim(o.state)
+	if o.storageUnavailable || o.state.ContinuityKnown || o.state.Ownership == nil || o.state.Ownership.OwnerID != "new" {
+		t.Fatalf("successor continuity/adoption wrong: storage=%v continuity=%v ownership=%+v", o.storageUnavailable, o.state.ContinuityKnown, o.state.Ownership)
+	}
+}
+
+func TestSettleAbandonedPredecessorAttemptsLeavesStartingUnknown(t *testing.T) {
+	attempts := map[string]*ownedAttempt{
+		"prepared": {Status: AttemptStatus{AttemptID: "prepared", OwnerID: "old", State: AttemptPrepared}},
+		"starting": {Status: AttemptStatus{AttemptID: "starting", OwnerID: "old", State: AttemptStarting}},
+	}
+	settleAbandonedPredecessorAttempts(attempts, "new")
+	prepared := attempts["prepared"].Status
+	if !prepared.Settled || prepared.State != AttemptNotStarted {
+		t.Fatalf("unsent preparation not settled: %+v", prepared)
+	}
+	starting := attempts["starting"].Status
+	if starting.Settled {
+		t.Fatalf("starting child without PID was settled: %+v", starting)
+	}
+}
+
+func TestRetainedHandoffRejectsDifferentInstance(t *testing.T) {
+	j, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "owner.bbolt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	prior := &inferenceOwnership{OwnerID: "old", InstanceID: "instance-a", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, Revision: 1, Phase: ownerClosed}
+	o := &attemptOwner{cfg: &config.InstanceConfig{InstanceID: "instance-b", SessionID: "session", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1}, id: "new", journal: j, state: inferenceOwnerState{Ownership: prior, ContinuityKnown: true}}
+	o.adoptRetainedClaim(o.state)
+	if !o.storageUnavailable || o.admissionFailureReason != "retained_claim_identity_mismatch" {
+		t.Fatalf("different instance adopted: storage=%v reason=%q", o.storageUnavailable, o.admissionFailureReason)
 	}
 }

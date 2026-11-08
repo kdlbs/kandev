@@ -1022,6 +1022,13 @@ daily counter are provider measurements. The OpenRouter key endpoint is read
 once after a free rate error: positive daily remaining gives a minute block,
 zero gives the daily reset, and unavailable evidence keeps the existing ladder.
 
+When provider usage limits are enabled, an OpenCode Go subscription quota on a
+paid Go model skips the other paid Go models of the same Go account, even when
+no reset time is reported. Known free Go models and OpenCode Zen on the same
+credentials stay available, and no reset time is guessed. A Zen Free usage-limit
+notice on a free Zen model pauses only that model and counts toward its daily
+model or group allowance.
+
 On a classified limit error, Kandev records requests, turns, tokens, and cost in
 the account's five-hour, daily, weekly, and monthly windows. Unknown allowances
 learn from these observations, with a 5% admission reserve on learned values.
