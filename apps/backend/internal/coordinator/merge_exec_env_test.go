@@ -28,6 +28,9 @@ type fakeMerger struct {
 	calls      []mergeCall
 	reads      int
 	onMerge    func()
+	pages      [][]string
+	pagesErr   error
+	pageCalls  int
 }
 
 func (f *fakeMerger) ReadLive(context.Context, string, mergestate.ChangeKey) (mergestate.Snapshot, error) {
@@ -54,8 +57,14 @@ func (f *fakeMerger) Merge(_ context.Context, _ string, key mergestate.ChangeKey
 	return res, err
 }
 
-func (f *fakeMerger) CommitMessages(context.Context, string, mergestate.ChangeKey, string, int) ([]string, bool, error) {
-	return nil, false, nil
+func (f *fakeMerger) CommitMessages(_ context.Context, _ string, _ mergestate.ChangeKey, _ string, page int) ([]string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pageCalls++
+	if f.pagesErr != nil || page > len(f.pages) {
+		return nil, false, f.pagesErr
+	}
+	return f.pages[page-1], page < len(f.pages), nil
 }
 
 func (f *fakeMerger) mergeCalls() int {

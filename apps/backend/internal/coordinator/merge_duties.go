@@ -13,8 +13,10 @@ func (s *Store) CoordinatorIDsWithMergeWork(ctx context.Context) ([]string, erro
 	rows, err := s.ro.QueryContext(ctx, s.db.Rebind(`SELECT DISTINCT m.coordinator_id FROM coordinator_merge_proposals m
 		JOIN coordinator_proposals p ON p.id = m.proposal_id
 		LEFT JOIN coordinator_merge_dispatches d ON d.proposal_id = m.proposal_id AND d.lowering = ?
-		WHERE p.status IN (`+mergeOpenStatuses+`) OR d.proposal_id IS NOT NULL
-		ORDER BY m.coordinator_id`), loweringPending)
+		LEFT JOIN coordinator_merge_dispatches w ON w.proposal_id = m.proposal_id AND w.outcome = ? AND w.automatic = 1
+			AND w.revert_done = 0 AND w.settled_at > ?
+		WHERE p.status IN (`+mergeOpenStatuses+`) OR d.proposal_id IS NOT NULL OR w.proposal_id IS NOT NULL
+		ORDER BY m.coordinator_id`), loweringPending, dispatchMerged, s.now().UTC().Add(-revertWindow))
 	if err != nil {
 		return nil, fmt.Errorf("list coordinators with merge work: %w", err)
 	}
@@ -43,6 +45,7 @@ func (s *Service) RunMergeDuties(ctx context.Context, coordinatorID string) erro
 		return err
 	}
 	s.retryPendingLowerings(ctx)
+	s.scanReverts(ctx, c)
 	open, err := s.store.listOpenMerges(ctx, s.store.ro, coordinatorID)
 	if err != nil {
 		return err
@@ -60,6 +63,10 @@ func (s *Service) dutyOne(ctx context.Context, c *Coordinator, m *MergeProposal)
 	p, err := s.store.GetProposalAnyKind(ctx, c.WorkspaceID, c.ID, m.ProposalID)
 	if err != nil {
 		s.logger.Warn("merge: proposal unreadable", zap.String("proposal_id", m.ProposalID), zap.Error(err))
+		return
+	}
+	if p.Status == ProposalStatusUncertain {
+		s.reconcileMerge(ctx, c, p, m, false)
 		return
 	}
 	if p.Status != ProposalStatusPending {

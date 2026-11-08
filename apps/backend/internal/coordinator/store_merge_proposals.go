@@ -42,7 +42,9 @@ const mergeProposalsSQL = `
 		merge_commit TEXT NOT NULL DEFAULT '',
 		lowering TEXT NOT NULL DEFAULT '',
 		dispatched_at {{timestamp}} NOT NULL,
-		settled_at {{timestamp}}
+		settled_at {{timestamp}},
+		revert_checked_at {{timestamp}},
+		revert_done INTEGER NOT NULL DEFAULT 0
 	);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_coordinator_merge_dispatch_unsettled
 		ON coordinator_merge_dispatches(workspace_id, change_key, head_sha) WHERE settled_at IS NULL;
@@ -310,4 +312,40 @@ func (s *Store) transitionMergeTx(ctx context.Context, tx coordinatorExec, t mer
 		return false, fmt.Errorf("transition merge proposal: %w", err)
 	}
 	return matchedRow(res)
+}
+
+// revertWatches lists the coordinator's automatic merges still inside the
+// revert window whose last check is older than the interval.
+func (s *Store) revertWatches(ctx context.Context, q coordinatorExec, coordinatorID string, since, checkedBefore time.Time) ([]*MergeDispatch, error) {
+	rows, err := q.QueryContext(ctx, s.db.Rebind(`SELECT `+prefixed("d.", dispatchColumns)+`
+		FROM coordinator_merge_dispatches d JOIN coordinator_merge_proposals m ON m.proposal_id = d.proposal_id
+		WHERE m.coordinator_id = ? AND d.outcome = ? AND d.automatic = 1 AND d.revert_done = 0 AND d.settled_at > ?
+		AND (d.revert_checked_at IS NULL OR d.revert_checked_at < ?) ORDER BY d.settled_at, d.proposal_id`),
+		coordinatorID, dispatchMerged, since.UTC(), checkedBefore.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("list revert watches: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*MergeDispatch
+	for rows.Next() {
+		d, err := scanDispatch(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// touchRevertWatch records a revert check; done closes the watch.
+func (s *Store) touchRevertWatch(ctx context.Context, q coordinatorExec, proposalID string, now time.Time, done bool) error {
+	flag := 0
+	if done {
+		flag = 1
+	}
+	if _, err := q.ExecContext(ctx, s.db.Rebind(`UPDATE coordinator_merge_dispatches SET revert_checked_at = ?, revert_done = ?
+		WHERE proposal_id = ?`), now.UTC(), flag, proposalID); err != nil {
+		return fmt.Errorf("touch revert watch: %w", err)
+	}
+	return nil
 }
