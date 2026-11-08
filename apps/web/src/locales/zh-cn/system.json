@@ -818,5 +818,8 @@
   "toolPayload.historyRefsDeleted_one": "已删除 {{count}} 个检查点引用",
   "toolPayload.historyRefsDeleted_other": "已删除 {{count}} 个检查点引用",
   "toolPayload.historyRetry_one": "{{count}} 个检查点清理等待重试",
-  "toolPayload.historyRetry_other": "{{count}} 个检查点清理等待重试"
+  "toolPayload.historyRetry_other": "{{count}} 个检查点清理等待重试",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.label": "移交已结束主会话的队列",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.description": "任务的主会话失败、取消或完成时，将其排队消息移交给新的主会话。",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.riskDescription": "排队消息可能会被投递到与最初目标不同的会话。若要让每条排队消息保留在原会话中，请保持关闭。"
 }

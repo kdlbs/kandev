@@ -818,5 +818,8 @@
   "toolPayload.historyRefsDeleted_one": "{{count}} 件のチェックポイント参照を削除しました",
   "toolPayload.historyRefsDeleted_other": "{{count}} 件のチェックポイント参照を削除しました",
   "toolPayload.historyRetry_one": "{{count}} 件のチェックポイントクリーンアップが再試行待ちです",
-  "toolPayload.historyRetry_other": "{{count}} 件のチェックポイントクリーンアップが再試行待ちです"
+  "toolPayload.historyRetry_other": "{{count}} 件のチェックポイントクリーンアップが再試行待ちです",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.label": "終了したプライマリセッションのキューを引き継ぐ",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.description": "タスクのプライマリセッションが失敗、キャンセル、または完了したとき、待機中のメッセージを新しいプライマリセッションへ移します。",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.riskDescription": "キュー内のメッセージが、登録先とは異なるセッションへ配信される場合があります。各メッセージを元のセッションに残すには、無効のままにしてください。"
 }

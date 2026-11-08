@@ -818,5 +818,8 @@
   "toolPayload.historyRefsDeleted_one": "Removed {{count}} checkpoint ref",
   "toolPayload.historyRefsDeleted_other": "Removed {{count}} checkpoint refs",
   "toolPayload.historyRetry_one": "{{count}} checkpoint cleanup is waiting to retry",
-  "toolPayload.historyRetry_other": "{{count}} checkpoint cleanups are waiting to retry"
+  "toolPayload.historyRetry_other": "{{count}} checkpoint cleanups are waiting to retry",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.label": "Hand off queues of finished primary sessions",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.description": "When a task's primary session fails, is cancelled or completes, moves its queued messages to the session that becomes primary.",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.riskDescription": "Queued messages can be delivered to a different session than the one they were queued for. Leave it off to keep every queued message on its original session."
 }

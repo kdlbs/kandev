@@ -818,5 +818,8 @@
   "toolPayload.historyRefsDeleted_one": "Ŕēḿōvēď {{count}} ćĥēćķƥōĩńţ ŕēƒ",
   "toolPayload.historyRefsDeleted_other": "Ŕēḿōvēď {{count}} ćĥēćķƥōĩńţ ŕēƒś",
   "toolPayload.historyRetry_one": "{{count}} ćĥēćķƥōĩńţ ćĺēàńũƥ ĩś ŵàĩţĩńĝ ţō ŕēţŕŷ",
-  "toolPayload.historyRetry_other": "{{count}} ćĥēćķƥōĩńţ ćĺēàńũƥś àŕē ŵàĩţĩńĝ ţō ŕēţŕŷ"
+  "toolPayload.historyRetry_other": "{{count}} ćĥēćķƥōĩńţ ćĺēàńũƥś àŕē ŵàĩţĩńĝ ţō ŕēţŕŷ",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.label": "Ĥàńď ōƒƒ qũēũēś ōƒ ƒĩńĩśĥēď ƥŕĩḿàŕŷ śēśśĩōńś",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.description": "Ŵĥēń à ţàśķ'ś ƥŕĩḿàŕŷ śēśśĩōń ƒàĩĺś, ĩś ćàńćēĺĺēď ōŕ ćōḿƥĺēţēś, ḿōvēś ĩţś qũēũēď ḿēśśàĝēś ţō ţĥē śēśśĩōń ţĥàţ ƀēćōḿēś ƥŕĩḿàŕŷ.",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.riskDescription": "Qũēũēď ḿēśśàĝēś ćàń ƀē ďēĺĩvēŕēď ţō à ďĩƒƒēŕēńţ śēśśĩōń ţĥàń ţĥē ōńē ţĥēŷ ŵēŕē qũēũēď ƒōŕ. Ĺēàvē ĩţ ōƒƒ ţō ķēēƥ ēvēŕŷ qũēũēď ḿēśśàĝē ōń ĩţś ōŕĩĝĩńàĺ śēśśĩōń."
 }
