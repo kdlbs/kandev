@@ -56,6 +56,7 @@ func TestProposeAnswerToolSchemaMatchesTheAnswerKind(t *testing.T) {
 	raw, err := json.Marshal(s.mcpServer.ListTools()["propose_answer_kandev"].Tool.InputSchema)
 	assert.NoError(t, err)
 	var schema struct {
+		Required   []string `json:"required"`
 		Properties map[string]struct {
 			Type  string   `json:"type"`
 			Enum  []string `json:"enum"`
@@ -66,6 +67,16 @@ func TestProposeAnswerToolSchemaMatchesTheAnswerKind(t *testing.T) {
 		} `json:"properties"`
 	}
 	assert.NoError(t, json.Unmarshal(raw, &schema))
+
+	for _, name := range []string{"task_id", "target", "pending_id", "draft", "confidence", "needs_decision"} {
+		assert.Contains(t, schema.Required, name)
+	}
+	assert.NotContains(t, schema.Required, "sources")
+	assert.NotContains(t, schema.Required, "rationale")
+
+	desc := s.mcpServer.ListTools()["propose_answer_kandev"].Tool.Description
+	assert.NotContains(t, desc, "replaces the open one")
+	assert.Contains(t, desc, "unchanged")
 
 	confidence := schema.Properties["confidence"]
 	assert.Equal(t, "string", confidence.Type)

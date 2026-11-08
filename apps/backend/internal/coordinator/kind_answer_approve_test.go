@@ -392,6 +392,18 @@ func TestApproveAnswerTwoApproversDeliverOnce(t *testing.T) {
 	if fx.delivery.resolveCount() != 1 {
 		t.Fatalf("deliveries = %d, want exactly 1 (errs %v)", fx.delivery.resolveCount(), results)
 	}
+	var winners, conflicts int
+	for _, err := range results {
+		switch {
+		case err == nil:
+			winners++
+		case isConflict(err):
+			conflicts++
+		}
+	}
+	if winners != 1 || conflicts != 1 {
+		t.Fatalf("want one winner and one conflict, got winners=%d conflicts=%d (errs %v)", winners, conflicts, results)
+	}
 	if fx.reload(t, p.ID).Status != ProposalStatusApproved {
 		t.Fatal("the proposal must end approved")
 	}

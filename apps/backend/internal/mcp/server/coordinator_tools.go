@@ -326,7 +326,7 @@ func (s *Server) proposeKindHandler(action string, fields ...string) server.Tool
 func (s *Server) registerProposeAnswerTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("propose_answer_kandev",
-			mcp.WithDescription("Propose an answer to the pending question or permission request of a task on a board you watch, for a manager to approve, edit or reject. Nothing is delivered until a manager approves. target is \"clarification\" or \"permission\"; pending_id is the pending item's id from get_coordinator_item_kandev. draft is {answers: [{question_id, option_ids, custom_text}]} for a clarification, or {option_id} for a permission. sources lists the links or references you relied on as {ref, label} objects, confidence is one of low, med or high, needs_decision flags a judgement call, rationale says why. A repeat call with the same draft returns the open proposal with deduplicated true; a different draft replaces the open one."),
+			mcp.WithDescription("Propose an answer to the pending question or permission request of a task on a board you watch, for a manager to approve, edit or reject. Nothing is delivered until a manager approves. target is \"clarification\" or \"permission\"; pending_id is the pending item's id from get_coordinator_item_kandev. draft is {answers: [{question_id, option_ids, custom_text}]} for a clarification, or {option_id} for a permission. sources lists the links or references you relied on as {ref, label} objects, confidence is one of low, med or high, needs_decision flags a judgement call, rationale says why. A call for a target and pending_id that already has an open proposal returns that proposal unchanged with deduplicated true, whatever draft it carries; a proposal is replaced only once its target is no longer current."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task holding the pending item")),
 			mcp.WithString("target", mcp.Required(), mcp.Description("clarification or permission")),
 			mcp.WithString("pending_id", mcp.Required(), mcp.Description("The pending clarification bundle or permission request id")),
@@ -339,8 +339,8 @@ func (s *Server) registerProposeAnswerTool() {
 				},
 				reqKey: []string{"ref"},
 			})),
-			mcp.WithString("confidence", mcp.Description("How sure you are: low, med or high"), mcp.Enum("low", "med", "high")),
-			mcp.WithBoolean("needs_decision", mcp.Description("True when the answer is a judgement call for the manager")),
+			mcp.WithString("confidence", mcp.Required(), mcp.Description("How sure you are: low, med or high"), mcp.Enum("low", "med", "high")),
+			mcp.WithBoolean("needs_decision", mcp.Required(), mcp.Description("True when the answer is a judgement call for the manager")),
 			mcp.WithString("rationale", mcp.Description("Why this answer, at most 10,000 characters")),
 			standingOrderIDsOption(),
 		),

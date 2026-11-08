@@ -133,7 +133,7 @@ func (k *answerKind) deliverClarification(ctx context.Context, claim Claim, spec
 		out[i] = delivered{QuestionID: e.QuestionID, OptionIDs: append([]string{}, e.OptionIDs...)}
 	}
 	raw, _ := json.Marshal(map[string]any{sessionIDKey: set.Clarification.SessionID, "pending_id": spec.PendingID, "answers": out})
-	return Outcome{TaskID: spec.TaskID, OutcomeJSON: string(raw), Detail: clarificationDetail(spec, draft)}, nil
+	return Outcome{TaskID: spec.TaskID, OutcomeJSON: string(raw), Detail: clarificationDetail(set.Clarification, draft)}, nil
 }
 
 func (k *answerKind) clarificationFailure(ctx context.Context, claim Claim, taskID string, won bool, err error) error {
@@ -169,7 +169,7 @@ func (k *answerKind) deliverPermission(ctx context.Context, claim Claim, spec an
 		return Outcome{}, failWith(outcomeUnknownError)
 	}
 	raw, _ := json.Marshal(map[string]any{sessionIDKey: p.SessionID, "pending_id": p.PendingID, "option_id": draft.OptionID})
-	return Outcome{TaskID: spec.TaskID, OutcomeJSON: string(raw), Detail: permissionDetail(spec, draft)}, nil
+	return Outcome{TaskID: spec.TaskID, OutcomeJSON: string(raw), Detail: permissionDetail(p, draft)}, nil
 }
 
 // sessionIDKey names the session in a delivery payload.
