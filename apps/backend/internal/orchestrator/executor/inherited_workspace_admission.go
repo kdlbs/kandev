@@ -19,5 +19,5 @@ func (e *Executor) AdmitInheritedEnvironment(ctx context.Context, task *v1.Task,
 		metadata["executor_profile_id"] = executorProfileID
 	}
 	cfg := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
-	return rejectInheritedEnvironmentExecutorMismatch(task, env, cfg.ExecutorType)
+	return rejectInheritedEnvironmentExecutorMismatch(task, env, cfg.ExecutorType, true)
 }

@@ -7,7 +7,7 @@ requirements:
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004
 created: 2026-08-30
-updated: 2026-10-22
+updated: 2026-11-08
 owners:
   - kandev
 ---
@@ -132,6 +132,20 @@ cleared before response values are applied.
 
 The transition does not create a second task and does not silently repair,
 delete, move, or rewrite the old workspace.
+
+An inherited workspace policy (`inherit_parent`, `shared_group`) binds a child
+to an environment owned by another task. When a new launch, handoff admission,
+or propagation selects a non-Kubernetes executor type different from that
+environment's type, `rejectInheritedEnvironmentExecutorMismatch` admits the
+transition, and `launchPreparedSession` detaches the session from the
+inherited environment so `persistTaskEnvironment` elects a fresh environment
+owned by the child on the selected executor
+(`AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5`). Refusing would strand an
+auto-started child whose step selected a different executor than its parent.
+Resume of a session already bound to the inherited environment cannot detach,
+so it passes `allowExecutorTransition=false` and keeps the typed
+`workspace_reuse_unsafe` refusal. Kubernetes keeps its refusals regardless of
+the flag.
 
 ## Launch admission
 

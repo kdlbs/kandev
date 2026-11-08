@@ -2,7 +2,6 @@ package executor
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -98,7 +97,13 @@ func TestLaunchPreparedSession_DetachesInheritedEnvironmentOnExecutorMismatch(t 
 	}
 }
 
-func TestLaunchPreparedSession_RejectsInheritedEnvironmentExecutorMismatch(t *testing.T) {
+// An inherit_parent child whose inherited environment lives on a different
+// executor than the one the launch selected cannot attach to it. Rejecting the
+// launch strands the child, so it detaches and materializes a fresh environment
+// on the selected executor, leaving the inherited environment untouched. The
+// Kubernetes unsupported-reuse refusal is covered separately.
+// @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5
+func TestLaunchPreparedSession_DetachesInheritedPolicyEnvironmentOnExecutorMismatch(t *testing.T) {
 	repo := newMockRepository()
 	repo.tasks["task-parent"] = &models.Task{ID: "task-parent"}
 	parent := &models.TaskEnvironment{
@@ -109,6 +114,11 @@ func TestLaunchPreparedSession_RejectsInheritedEnvironmentExecutorMismatch(t *te
 		WorkspacePath: "/parent/workspace",
 	}
 	repo.taskEnvironments[parent.ID] = parent
+	repo.executors[models.ExecutorIDLocalDocker] = &models.Executor{
+		ID:     models.ExecutorIDLocalDocker,
+		Type:   models.ExecutorTypeLocalDocker,
+		Status: models.ExecutorStatusActive,
+	}
 	session := &models.TaskSession{
 		ID:                "session-child",
 		TaskID:            "task-child",
@@ -121,11 +131,14 @@ func TestLaunchPreparedSession_RejectsInheritedEnvironmentExecutorMismatch(t *te
 	}
 	repo.sessions[session.ID] = session
 
-	launched := false
+	var launchedExecutorType, launchedTaskEnvironmentID string
+	var launchedWorkspaceReuseRequired bool
 	exec := newTestExecutor(t, &mockAgentManager{
-		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
-			launched = true
-			return nil, nil
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			launchedExecutorType = req.ExecutorType
+			launchedTaskEnvironmentID = req.TaskEnvironmentID
+			launchedWorkspaceReuseRequired = req.WorkspaceReuseRequired
+			return &LaunchAgentResponse{AgentExecutionID: "exec-child", Status: v1.AgentStatusStarting}, nil
 		},
 	}, repo)
 	task := &v1.Task{
@@ -138,19 +151,25 @@ func TestLaunchPreparedSession_RejectsInheritedEnvironmentExecutorMismatch(t *te
 
 	_, err := exec.LaunchPreparedSession(context.Background(), task, session.ID,
 		LaunchOptions{AgentProfileID: session.AgentProfileID, ExecutorID: models.ExecutorIDLocalDocker, Prompt: "test"})
-	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
-		t.Fatalf("LaunchPreparedSession() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession() error = %v, want nil after detaching inherited policy environment", err)
 	}
-	if launched {
-		t.Fatal("LaunchAgent was called for an inherited environment on a different executor")
+	if launchedExecutorType != string(models.ExecutorTypeLocalDocker) {
+		t.Fatalf("launched executor type = %q, want %q", launchedExecutorType, models.ExecutorTypeLocalDocker)
 	}
-	if len(repo.createTaskEnvironmentCalls) != 0 {
-		t.Fatalf("created %d task environments, want none", len(repo.createTaskEnvironmentCalls))
+	if launchedTaskEnvironmentID == "" || launchedTaskEnvironmentID == parent.ID {
+		t.Fatalf("launched task environment ID = %q, want a fresh child environment", launchedTaskEnvironmentID)
+	}
+	if launchedWorkspaceReuseRequired {
+		t.Fatal("detached child launch must not require reuse of the inherited environment")
+	}
+	if len(repo.createTaskEnvironmentCalls) != 1 {
+		t.Fatalf("created %d task environments, want 1 fresh environment for the detached child", len(repo.createTaskEnvironmentCalls))
+	}
+	if created := repo.createTaskEnvironmentCalls[0]; created.TaskID != session.TaskID || created.ExecutorType != string(models.ExecutorTypeLocalDocker) {
+		t.Fatalf("created environment = %+v, want a fresh local_docker environment owned by the child", created)
 	}
 	if got := repo.taskEnvironments[parent.ID]; got.TaskID != parent.TaskID || got.ExecutorType != parent.ExecutorType || got.WorkspacePath != parent.WorkspacePath {
-		t.Fatalf("parent environment changed after rejected launch: %+v", got)
-	}
-	if got := repo.sessions[session.ID]; got.TaskEnvironmentID != parent.ID || got.WorkspacePath != parent.WorkspacePath {
-		t.Fatalf("child session changed after rejected launch: %+v", got)
+		t.Fatalf("parent environment changed after detached launch: %+v", got)
 	}
 }
