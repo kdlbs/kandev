@@ -154,7 +154,7 @@ func TestPATMergeHeadFailuresAndMismatch(t *testing.T) {
 				}
 			}))
 			t.Cleanup(server.Close)
-			_, err := NewPATClient(server.URL, "token").MergeMR(t.Context(), "group/project", 17, false, "")
+			_, err := NewPATClient(server.URL, "token").MergeMR(t.Context(), "group/project", 17, false, "", "")
 			if err == nil {
 				t.Fatal("expected failure")
 			}
@@ -223,12 +223,12 @@ func TestGLabAndAutomationMergeUseScopedHead(t *testing.T) {
 				svc := NewService(DefaultHost, NewNoopClient(DefaultHost), AuthMethodNone, nil, newTestLogger(t))
 				svc.SetStore(store)
 				svc.SetWorkspaceSecretStore(&configTestSecrets{values: map[string]string{SecretKeyForWorkspace("selected"): "chosen-token"}})
-				if _, err := svc.MergeMRForAutomation(t.Context(), "selected", server.URL, "group/target", 17); err != nil {
+				if _, err := svc.MergeMRForAutomation(t.Context(), "selected", server.URL, "group/target", 17, "", ""); err != nil {
 					t.Fatal(err)
 				}
 			} else {
 				client := &GLabClient{PATClient: NewPATClient(server.URL, "chosen-token")}
-				if _, err := client.MergeMR(t.Context(), "group/target", 17, true, "combined"); err != nil {
+				if _, err := client.MergeMR(t.Context(), "group/target", 17, true, "combined", ""); err != nil {
 					t.Fatal(err)
 				}
 			}

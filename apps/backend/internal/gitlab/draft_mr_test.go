@@ -203,7 +203,7 @@ func TestPATMergeMRRefusesDraftWithoutWrite(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			rs, client := newReadyServer(t, func(int) (int, string) { return 200, body })
-			_, err := client.MergeMR(t.Context(), "g/p", 7, false, "")
+			_, err := client.MergeMR(t.Context(), "g/p", 7, false, "", "")
 			if !errors.Is(err, ErrMRIsDraft) {
 				t.Fatalf("err = %v, want ErrMRIsDraft", err)
 			}
@@ -227,7 +227,7 @@ func TestPATMergeMRWrapsRefusalStatusesOnWriteOnly(t *testing.T) {
 			_, _ = w.Write([]byte(`{"message":"secret provider text"}`))
 		}))
 		client := NewPATClient(srv.URL, "tok")
-		_, err := client.MergeMR(t.Context(), "g/p", 7, false, "")
+		_, err := client.MergeMR(t.Context(), "g/p", 7, false, "", "")
 		srv.Close()
 		if !errors.As(err, &refused) || refused.Status != status {
 			t.Fatalf("status %d: err = %v, want MergeRefusedError", status, err)
@@ -243,7 +243,7 @@ func TestPATMergeMRWrapsRefusalStatusesOnWriteOnly(t *testing.T) {
 	// A failed head read with the same status is not a refusal.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(405) }))
 	defer srv.Close()
-	_, err := NewPATClient(srv.URL, "tok").MergeMR(t.Context(), "g/p", 7, false, "")
+	_, err := NewPATClient(srv.URL, "tok").MergeMR(t.Context(), "g/p", 7, false, "", "")
 	var refused *MergeRefusedError
 	if errors.As(err, &refused) {
 		t.Fatalf("head read failure must not be a MergeRefusedError: %v", err)
@@ -445,7 +445,7 @@ func TestMarkReadyRoutePublishesPersistedDiscussionCount(t *testing.T) {
 func TestMockClientMarkMRReady(t *testing.T) {
 	mock := NewMockClient("https://gitlab.example")
 	mock.SeedMR("g/p", &MR{IID: 7, Title: "Draft: add thing", State: mrStateOpen, Draft: true, DetailedMergeStatus: "draft_status"})
-	if _, err := mock.MergeMR(t.Context(), "g/p", 7, false, ""); !errors.Is(err, ErrMRIsDraft) {
+	if _, err := mock.MergeMR(t.Context(), "g/p", 7, false, "", ""); !errors.Is(err, ErrMRIsDraft) {
 		t.Fatalf("mock merge of draft = %v, want ErrMRIsDraft", err)
 	}
 	mr, err := mock.MarkMRReady(t.Context(), "g/p", 7)
@@ -474,7 +474,7 @@ func TestMockClientMarkMRReady(t *testing.T) {
 	if _, err := mock.MarkMRReady(t.Context(), "g/p", 99); err == nil {
 		t.Fatal("unknown MR must fail")
 	}
-	if _, err := mock.MergeMR(t.Context(), "g/p", 7, false, ""); err != nil {
+	if _, err := mock.MergeMR(t.Context(), "g/p", 7, false, "", ""); err != nil {
 		t.Fatalf("merge after Mark as ready = %v", err)
 	}
 }

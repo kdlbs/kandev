@@ -22,6 +22,8 @@ type rawMR struct {
 	DetailedMergeStatus         string `json:"detailed_merge_status"`
 	BlockingDiscussionsResolved bool   `json:"blocking_discussions_resolved"`
 	HasConflicts                bool   `json:"has_conflicts"`
+	MergeCommitSHA              string `json:"merge_commit_sha"`
+	SquashCommitSHA             string `json:"squash_commit_sha"`
 	SourceBranch                string `json:"source_branch"`
 	TargetBranch                string `json:"target_branch"`
 	SHA                         string `json:"sha"`
@@ -179,6 +181,7 @@ func convertRawMR(raw *rawMR) *MR {
 		DetailedMergeStatus:         raw.DetailedMergeStatus,
 		BlockingDiscussionsResolved: raw.BlockingDiscussionsResolved,
 		HasConflicts:                raw.HasConflicts,
+		MergeCommitSHA:              firstNonEmpty(raw.MergeCommitSHA, raw.SquashCommitSHA),
 		Reviewers:                   convertReviewers(raw.Reviewers),
 		Assignees:                   convertReviewers(raw.Assignees),
 		Labels:                      append([]string(nil), raw.Labels...),
@@ -206,6 +209,15 @@ func convertRawMR(raw *rawMR) *MR {
 	}
 	mr.TargetDefaultBranch = raw.TargetProject.DefaultBranch
 	return mr
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func convertRawMRSlice(raw []rawMR) []*MR {

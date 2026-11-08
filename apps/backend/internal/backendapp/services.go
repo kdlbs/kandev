@@ -135,6 +135,7 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 	}
 
 	services := assembleServices(managedRuntimeSelections, core, providers, integrations)
+	wireCoordinatorMergeProviders(services.Coordinator, services.Task, services.GitHub, services.GitLab)
 	if services.Plugins != nil {
 		services.Plugins.SetSourceIssueController(pluginSourceIssueController{
 			tasks: services.Task, jira: services.Jira, linear: services.Linear,

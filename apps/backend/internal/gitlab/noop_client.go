@@ -143,7 +143,7 @@ func (c *NoopClient) GetIssueState(context.Context, string, int) (string, error)
 	return "", ErrNoClient
 }
 
-func (c *NoopClient) MergeMR(context.Context, string, int, bool, string) (*MR, error) {
+func (c *NoopClient) MergeMR(context.Context, string, int, bool, string, string) (*MR, error) {
 	return nil, ErrNoClient
 }
 

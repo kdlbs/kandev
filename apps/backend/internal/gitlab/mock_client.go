@@ -2,7 +2,9 @@ package gitlab
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -635,7 +637,7 @@ func (c *MockClient) GetIssueState(_ context.Context, projectPath string, iid in
 }
 
 // MergeMR marks the seeded MR as merged.
-func (c *MockClient) MergeMR(_ context.Context, projectPath string, iid int, _ bool, _ string) (*MR, error) {
+func (c *MockClient) MergeMR(_ context.Context, projectPath string, iid int, _ bool, _, expectedSHA string) (*MR, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	mr, ok := c.mrs[mockMRKey{Project: projectPath, IID: iid}]
@@ -644,6 +646,9 @@ func (c *MockClient) MergeMR(_ context.Context, projectPath string, iid int, _ b
 	}
 	if isDraftMR(mr.Draft, mr.DetailedMergeStatus) {
 		return nil, ErrMRIsDraft
+	}
+	if expectedSHA != "" && mr.HeadSHA != expectedSHA {
+		return nil, &MergeRefusedError{Status: http.StatusConflict, Err: errors.New("mock: SHA does not match HEAD of source branch")}
 	}
 	mr.State = gitlabStateMerged
 	now := time.Now().UTC()
