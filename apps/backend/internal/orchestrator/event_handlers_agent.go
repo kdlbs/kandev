@@ -4275,7 +4275,13 @@ func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentE
 	if modelID := routingerr.Sanitize(data.ProviderError.ModelID); modelID != "" {
 		meta["model_id"] = modelID
 	}
-	if resetAt := data.ProviderError.ResetAt; resetAt != nil && !resetAt.IsZero() {
+	resetAt := data.ProviderError.ResetAt
+	if (resetAt == nil || resetAt.IsZero()) && !classified.ResetHintInferred {
+		// A reset the diagnostic states in text is parsed by the classifier;
+		// only an inferred estimate stays off the card.
+		resetAt = classified.ResetHint
+	}
+	if resetAt != nil && !resetAt.IsZero() {
 		meta["reset_at"] = resetAt.UTC().Format(time.RFC3339)
 	}
 	if details := routingerr.Sanitize(data.ProviderError.Message); details != "" {
