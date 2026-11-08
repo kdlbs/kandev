@@ -87,6 +87,45 @@ func TestAcceptedManualPromptReportsAcknowledgementFailure(t *testing.T) {
 		"the client needs nonfatal feedback when the badge could not be retired")
 }
 
+func TestDismissAndContinueAcceptedManualPromptWithStaleStampLeavesNewerAttention(t *testing.T) {
+	h, repo := newTurnErrorMessageHarness(t)
+	task := repo.tasks["t1"]
+	task.Metadata[models.MetaKeyLastTurnError] = models.TaskTurnError{
+		StampValue: "failure-2", SessionID: "s1", MessageID: "failure-2",
+		OccurredAt: time.Now().UTC(), Message: "A newer failure",
+	}
+	req, err := ws.NewRequest("req-stale-turn-error", ws.ActionMessageAdd, map[string]any{
+		"task_id": "t1", "session_id": "s1", "content": "continue",
+		"observed_turn_error_stamp": "failure-1",
+	})
+	require.NoError(t, err)
+	resp, err := h.wsAddMessage(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.Len(t, repo.messages, 1, "the prompt is still accepted")
+	require.Empty(t, repo.acknowledgedTurnError,
+		"a stale observation must not clear the newer attention")
+}
+
+func TestDismissAndContinueReplayedContinuationDoesNotAcknowledgeAgain(t *testing.T) {
+	h, repo := newTurnErrorMessageHarness(t)
+	repo.idempotentMessage = &models.Message{
+		ID: "continue-failure-1", TaskID: "t1", TaskSessionID: "s1",
+		AuthorType: models.MessageAuthorUser, Content: "continue",
+	}
+	req, err := ws.NewRequest("req-replayed-turn-error", ws.ActionMessageAdd, map[string]any{
+		"task_id": "t1", "session_id": "s1", "client_message_id": "continue-failure-1",
+		"content": "continue", "observed_turn_error_stamp": "failure-1",
+	})
+	require.NoError(t, err)
+	resp, err := h.wsAddMessage(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.Empty(t, repo.messages, "the replay resolves the existing message instead of inserting another")
+	require.Empty(t, repo.acknowledgedTurnError,
+		"a replay must not sample or acknowledge attention again")
+}
+
 func TestAddMessageFingerprintIncludesObservedTurnErrorStamp(t *testing.T) {
 	base := wsAddMessageRequest{TaskID: "t1", TaskSessionID: "s1", Content: "hello"}
 	observed := base

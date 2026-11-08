@@ -31,6 +31,7 @@ import (
 var attendedForTest = map[string]bool{
 	"task_assigned":               true,
 	"task_comment":                true,
+	"handoff_completed":           true,
 	"task_review_requested":       true,
 	"task_changes_requested":      true,
 	"task_blockers_resolved":      true,

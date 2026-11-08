@@ -298,6 +298,14 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case streams.EventTypeUsageObservation:
 		s.publishNativeUsageObservation(ctx, payload)
 
+	case streams.EventTypeContextCompactionObservation:
+		if payload != nil && payload.Data != nil {
+			s.publishCommittedContextCompaction(
+				ctx, payload.TaskID, payload.SessionID,
+				payload.Data.CanonicalProjection, payload.Data.Data,
+			)
+		}
+
 	case "plan":
 		s.handleSessionTodosEvent(ctx, payload)
 
@@ -589,7 +597,7 @@ func (s *Service) handleSessionStatusEvent(ctx context.Context, payload *lifecyc
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	if sessionID != "" && payload.Data.ACPSessionID != "" {
-		s.storeResumeToken(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
+		s.storeResumeTokenFromAgentEvent(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
 	}
 	if sessionID == "" || s.messageCreator == nil {
 		return
@@ -1187,7 +1195,30 @@ func (s *Service) resolveToolUpdateOwnership(payload *lifecycle.AgentStreamEvent
 		)
 		return toolOwnershipBackground
 	}
+	if terminalBackgroundWorkToolUpdate(payload) {
+		s.recordToolOwnership(
+			payload.SessionID,
+			payload.Data.ToolCallID,
+			payload.ExecutionID,
+			toolOwnershipBackground,
+		)
+		return toolOwnershipBackground
+	}
 	return s.toolOwnership(payload.SessionID, payload.Data.ToolCallID, payload.ExecutionID)
+}
+
+// terminalBackgroundWorkToolUpdate reports whether a tool update carries a
+// typed terminal workload observation for its own call. The launch tool's
+// earlier terminal result clears ownership, so the later job-end frame needs
+// this explicit evidence to reach the registration that still holds the turn
+// open. The source-call check keeps a mismatched observation from retiring a
+// different job.
+func terminalBackgroundWorkToolUpdate(payload *lifecycle.AgentStreamEventPayload) bool {
+	observation := payload.Data.BackgroundWork
+	if observation == nil || !observation.State.IsTerminal() || payload.Data.ToolCallID == "" {
+		return false
+	}
+	return observation.SourceCallID == "" || observation.SourceCallID == payload.Data.ToolCallID
 }
 
 func backgroundWorkID(payload *streams.NormalizedPayload) string {
@@ -3431,7 +3462,7 @@ func (s *Service) storeCompleteEventResumeToken(ctx context.Context, payload *li
 			lastMsgUUID = uuid
 		}
 	}
-	s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
+	s.storeResumeTokenFromAgentEvent(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
 }
 
 func (s *Service) resolveCompleteEventTurnID(

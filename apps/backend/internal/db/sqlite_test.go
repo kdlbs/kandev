@@ -48,7 +48,7 @@ func TestSQLiteWriterUsesNormalWithBarrier(t *testing.T) {
 		value TEXT NOT NULL DEFAULT ''
 	)`)
 	require.NoError(t, err)
-	barrier := internaldb.NewDurabilityBarrier(writer)
+	barrier := internaldb.NewDurabilityBarrier(writer, nil)
 	var before, after string
 	require.NoError(t, writer.QueryRowContext(ctx, `SELECT COALESCE((SELECT value FROM kandev_meta WHERE key = 'durability_barrier'), '')`).Scan(&before))
 	require.NoError(t, barrier.Await(ctx))

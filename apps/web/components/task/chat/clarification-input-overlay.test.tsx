@@ -50,6 +50,7 @@ const TESTID_OPTION = "clarification-option";
 const TESTID_STEP = "clarification-step";
 const TESTID_SKIP = "clarification-skip";
 const TESTID_INPUT = "clarification-input";
+const TESTID_SIZE_TOGGLE = "clarification-panel-size-toggle";
 const TESTID_SUBMIT_ERROR = "clarification-submit-error";
 const TESTID_RETRY = "clarification-retry";
 const DATA_SELECTED = "data-selected";
@@ -60,6 +61,7 @@ function clarMessage(opts: {
   index: number;
   total: number;
   pendingId?: string;
+  attachments?: Array<Record<string, unknown>>;
 }): Message {
   return {
     id: opts.id,
@@ -75,6 +77,7 @@ function clarMessage(opts: {
       question_index: opts.index,
       question_total: opts.total,
       status: "pending",
+      ...(opts.attachments ? { attachments: opts.attachments } : {}),
       question: {
         id: opts.questionId,
         title: "",
@@ -105,6 +108,9 @@ function renderOverlay(
         custom_text?: string;
       }[];
     }) => Promise<"sent" | "queued">;
+    onToggleSize: () => void;
+    sizeExpanded: boolean;
+    canExpandPanel: boolean;
   }> = {},
 ) {
   const scopeRef = createRef<HTMLDivElement>();
@@ -120,6 +126,9 @@ function renderOverlay(
         mode={overrides.mode}
         onLateAnswer={overrides.onLateAnswer}
         initialAnswers={overrides.initialAnswers}
+        onToggleSize={overrides.onToggleSize}
+        sizeExpanded={overrides.sizeExpanded}
+        canExpandPanel={overrides.canExpandPanel}
         shortcutScopeRef={scopeRef}
       />
     </div>,
@@ -260,7 +269,7 @@ describe("ClarificationInputOverlay — Escape guard predicate (F1 regression)",
     expect(onDismiss).not.toHaveBeenCalled();
   });
 
-  it("does not claim Escape while submitting", () => {
+  it("does not claim Escape while submitting", async () => {
     // Never resolves, so submitState stays "submitting" for the rest of the
     // test instead of racing a real fetch's microtask resolution.
     fetchMock.mockImplementationOnce(() => new Promise(() => {}));
@@ -268,6 +277,7 @@ describe("ClarificationInputOverlay — Escape guard predicate (F1 regression)",
     const { composerRef, getGuard } = renderOverlayWithGuard(messages);
 
     fireEvent.click(screen.getByTestId("clarification-option"));
+    await submitSingleOverlayAnswer();
 
     expect(getGuard()?.test(fakeEscape(composerRef.current!))).toBe(false);
   });
@@ -280,6 +290,7 @@ describe("ClarificationInputOverlay — Escape guard predicate (F1 regression)",
     const { composerRef, onDismiss, getGuard } = renderOverlayWithGuard(messages);
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
     await vi.waitFor(() => screen.getByTestId("clarification-expired"));
 
     expect(getGuard()?.test(fakeEscape(composerRef.current!))).not.toBe(true);
@@ -429,6 +440,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     ]);
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => screen.getByTestId(TESTID_SUBMIT_ERROR));
     expect(onResolved).not.toHaveBeenCalled();
@@ -465,6 +477,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     ]);
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
     await vi.waitFor(() => expect(screen.getByTestId(TESTID_SUBMIT_ERROR)).toBeTruthy());
 
     expect(screen.getByTestId(TESTID_RETRY)).toBeTruthy();
@@ -497,6 +510,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     ]);
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => screen.getByTestId("clarification-expired"));
     expect(onResolved).not.toHaveBeenCalled();
@@ -517,6 +531,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     );
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => expect(onLateAnswer).toHaveBeenCalledTimes(1));
     expect(onLateAnswer.mock.calls[0][0].answers).toEqual([
@@ -555,6 +570,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     });
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
     await vi.waitFor(() => expect(screen.getByTestId(TESTID_SUBMIT_ERROR)).toBeTruthy());
     expect(screen.getByTestId(TESTID_OPTION).getAttribute(DATA_SELECTED)).toBe("true");
 
@@ -578,6 +594,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     ]);
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
     await vi.waitFor(() => screen.getByTestId(TESTID_SUBMIT_ERROR));
 
     rerender(
@@ -600,6 +617,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
 
     fetchMock.mockClear();
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url] = fetchMock.mock.calls[0];
@@ -623,6 +641,7 @@ describe("ClarificationInputOverlay — outcome lifetime", () => {
     );
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     unmount();
 
@@ -684,6 +703,52 @@ describe("ClarificationInputOverlay — bundle-local state", () => {
   });
 });
 
+describe("ClarificationInputOverlay — shared size control", () => {
+  const messages = [
+    clarMessage({ id: "m-size-1", questionId: "q1", index: 0, total: 2 }),
+    clarMessage({ id: "m-size-2", questionId: "q2", index: 1, total: 2 }),
+  ];
+
+  it("renders one action-specific size toggle and forwards its action", () => {
+    const onToggleSize = vi.fn();
+    renderOverlay(messages, { onToggleSize, sizeExpanded: false, canExpandPanel: true });
+
+    const toggle = screen.getByTestId(TESTID_SIZE_TOGGLE);
+    expect(screen.getAllByTestId(TESTID_SIZE_TOGGLE)).toHaveLength(1);
+    expect(toggle.getAttribute("aria-label")).toBe("Expand");
+    expect(toggle.getAttribute("aria-disabled")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(onToggleSize).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shows Restore as the next action while expanded and keeps it enabled without headroom", () => {
+    const onToggleSize = vi.fn();
+    renderOverlay(messages, { onToggleSize, sizeExpanded: true, canExpandPanel: false });
+
+    const toggle = screen.getByTestId(TESTID_SIZE_TOGGLE) as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-label")).toBe("Restore");
+    expect(toggle.getAttribute("aria-disabled")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(onToggleSize).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Expand visible but disabled when the host has no usable headroom", () => {
+    const onToggleSize = vi.fn();
+    renderOverlay(messages, { onToggleSize, sizeExpanded: false, canExpandPanel: false });
+
+    const toggle = screen.getByTestId(TESTID_SIZE_TOGGLE) as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-label")).toBe("Expand");
+    expect(toggle.getAttribute("aria-disabled")).toBe("true");
+    expect(toggle.disabled).toBe(false);
+
+    fireEvent.click(toggle);
+    expect(onToggleSize).not.toHaveBeenCalled();
+  });
+});
+
 describe("ClarificationInputOverlay — lightweight Markdown", () => {
   it("renders question fields without changing the selected option payload", async () => {
     fetchMock.mockResolvedValueOnce(
@@ -738,6 +803,7 @@ describe("ClarificationInputOverlay — lightweight Markdown", () => {
     expect(fetchMock).not.toHaveBeenCalled();
 
     fireEvent.click(optionLabel.querySelector("code")!);
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [, init] = fetchMock.mock.calls[0];
@@ -751,6 +817,12 @@ describe("ClarificationInputOverlay — lightweight Markdown", () => {
 // AC .39: onOutcome is an additive, optional prop. Omitting it (as the task
 // session and Quick Chat hosts both do) must leave every existing behavior
 // -- including onResolved -- byte-identical to before this prop existed.
+async function submitSingleOverlayAnswer() {
+  const button = await screen.findByTestId("clarification-custom-submit");
+  await vi.waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(button);
+}
+
 describe("ClarificationInputOverlay — onOutcome (AC .39)", () => {
   it("does not change onResolved or submit behavior when onOutcome is omitted", async () => {
     const { onResolved } = renderOverlay([
@@ -758,6 +830,7 @@ describe("ClarificationInputOverlay — onOutcome (AC .39)", () => {
     ]);
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -776,6 +849,7 @@ describe("ClarificationInputOverlay — onOutcome (AC .39)", () => {
     });
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() =>
       expect(onOutcome).toHaveBeenCalledWith({
@@ -806,6 +880,7 @@ describe("ClarificationInputOverlay — onOutcome (AC .39)", () => {
     });
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() =>
       expect(onOutcome).toHaveBeenCalledWith({
@@ -829,6 +904,7 @@ describe("ClarificationInputOverlay — onOutcome (AC .39)", () => {
     });
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => expect(onOutcome).toHaveBeenCalledWith({ kind: "no_longer_active" }));
   });
@@ -841,8 +917,57 @@ describe("ClarificationInputOverlay — onOutcome (AC .39)", () => {
     });
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => expect(onOutcome).toHaveBeenCalledWith({ kind: "submission_failed" }));
+  });
+});
+
+describe("ClarificationInputOverlay — explicit single-question submission", () => {
+  it("keeps a choice pending until Send and sends its restored files with the answer", async () => {
+    const attachment = {
+      attachment_id: "att-restored",
+      type: "image",
+      name: "evidence.png",
+      mime_type: "image/png",
+      size_bytes: 3,
+      delivery_mode: "path",
+    };
+    const messages = [
+      clarMessage({
+        id: "m1",
+        questionId: "q1",
+        index: 0,
+        total: 1,
+        attachments: [attachment],
+      }),
+    ];
+    renderOverlay(messages);
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, claimed: true, status: "answered" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId(TESTID_OPTION).getAttribute(DATA_SELECTED)).toBe("true");
+
+    await submitSingleOverlayAnswer();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init.body))).toEqual({
+      answers: [
+        {
+          question_id: "q1",
+          selected_options: ["o1"],
+          attachments: [attachment],
+        },
+      ],
+      rejected: false,
+    });
   });
 });
 

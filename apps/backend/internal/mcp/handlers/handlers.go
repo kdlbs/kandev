@@ -364,6 +364,10 @@ type Handlers struct {
 	reviewRunner       ReviewRunner
 	pluginSvc          *plugins.Service
 	canvasAuthoringSvc CanvasAuthoringService
+	// pluginToolAuthEnabled reports whether endpoint authentication is
+	// enforced; external workspace scope fails closed when it cannot resolve a
+	// real caller identity.
+	pluginToolAuthEnabled func() bool
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation            TaskPRAutomationService
@@ -394,6 +398,12 @@ type Handlers struct {
 	// registered and a coordinator principal's propose call 404s via the
 	// guard's nil-service check.
 	coordinatorSvc *coordinator.Service
+	// coordinatorPhase2ForTest overrides the phase-2 gate in focused handler
+	// tests that do not construct the full coordinator service.
+	coordinatorPhase2ForTest func() bool
+	// coordinatorConversationForTest overrides the live conversation lookup in
+	// focused handler tests that do not construct the full coordinator service.
+	coordinatorConversationForTest func(context.Context, string) (string, bool, error)
 	// coordinatorTurns reads the turn ledger; nil while phase 3.1 is off.
 	coordinatorTurns CoordinatorTurnReader
 }
@@ -551,6 +561,13 @@ func (h *Handlers) SetCanvasAuthoringService(svc CanvasAuthoringService) {
 // disabled so neither action is registered either.
 func (h *Handlers) SetCoordinatorService(svc *coordinator.Service) {
 	h.coordinatorSvc = svc
+}
+
+func (h *Handlers) coordinatorPhase2Enabled() bool {
+	if h.coordinatorPhase2ForTest != nil {
+		return h.coordinatorPhase2ForTest()
+	}
+	return h.coordinatorSvc != nil && h.coordinatorSvc.Phase2()
 }
 
 // RegisterHandlers registers all MCP handlers with the dispatcher.

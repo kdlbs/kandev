@@ -296,6 +296,30 @@ an incomplete inventory. Recovery records and snapshots remain beside the
 original checkout for inspection and can contain ignored files, including
 sensitive data.
 
+### Inspect cleanup identity conflicts
+
+A worktree cleanup can refuse to remove a checkout when Git still registers a
+different branch or commit at that path. The cleanup job records the exact
+worktree, stage, reason, recorded-versus-current comparison, and a read-only
+inspection action. Use that evidence to inspect the recorded registration or
+compare the recorded commit with the current branch before you change anything.
+The diagnostic does not authorize deletion and does not expose paths, commit
+IDs, branch names, repository contents, or raw Git output.
+
+A confirmed identity conflict reports `cleanup_condition=reconciliation_required`
+while cleanup follows its effective retry policy. Cascade cleanup without
+unverified-change consent keeps its capped retry schedule across restart;
+cascade cleanup that allows unverified changes becomes `failed` after eight
+attempts and is not retried automatically. Each attempt checks the original
+immutable snapshot against current Git state again. An independent healthy
+worktree can still be removed in the same batch.
+
+Do not force-delete a checkout, reset a branch, or edit the cleanup snapshot to
+make a conflict pass. Use the inspection action first. If the evidence shows an
+inventory defect, follow the explicit repair procedure below. Keep the original
+checkout and its files until a verified repair or an authorized cleanup removes
+them.
+
 ### Repair inconsistent worktree inventory
 
 Use the source maintenance utility when healthy Git checkouts disagree with

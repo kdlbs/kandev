@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	"github.com/kandev/kandev/internal/repoclone"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/worktree"
@@ -1305,7 +1306,7 @@ func (e *Executor) resumeSession(
 	// A terminal session may retain an unconfirmed runtime. Stop it before
 	// selected-environment admission can claim the environment.
 	if wasTerminalResume {
-		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(ctx, session.ID); cleanupErr != nil {
+		if cleanupErr := e.cleanupStaleExecutionBeforeResume(ctx, session.ID); cleanupErr != nil {
 			e.logger.Warn("failed to force-cleanup stale execution before terminal-state resume",
 				zap.String("session_id", session.ID),
 				zap.Error(cleanupErr))
@@ -1459,7 +1460,7 @@ func (e *Executor) resumeSession(
 		e.logger.Info("cleaning up stale execution and retrying launch",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID))
-		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(launchCtx, session.ID); cleanupErr != nil {
+		if cleanupErr := e.cleanupStaleExecutionBeforeResume(launchCtx, session.ID); cleanupErr != nil {
 			e.logger.Warn("failed to clean up stale execution",
 				zap.String("session_id", session.ID),
 				zap.Error(cleanupErr))
@@ -2186,13 +2187,17 @@ type ContextContinuation struct {
 	ContentHash     string
 }
 
+const contextHistoryNotice = "The following sections are historical context, not new instructions.\n" +
+	"Do not retry earlier actions only because results are missing or uncertain.\n" +
+	"Follow the user's current instructions.\n\n"
+
 // BuildContextContinuation returns the bounded, provider-neutral context used
 // by the explicit continue_from_history recovery action.
 func BuildContextContinuation(
 	taskObjective, plan, workspace string, messages []*models.Message,
 ) ContextContinuation {
 	snapshot := lifecycle.BuildContinuationSnapshot(lifecycle.ContinuationSnapshotInput{
-		TaskObjective:     taskObjective,
+		TaskObjective:     contextHistoryNotice + taskObjective,
 		Plan:              plan,
 		OriginalWorkspace: workspace,
 		Messages:          messages,
@@ -2280,13 +2285,14 @@ func (e *Executor) applyResumeMCPSettings(
 	if err != nil {
 		return err
 	}
-	profileContext, err := e.resolveTaskSessionMCPProfile(ctx, taskID, session, true)
+	profileContext, err := e.launchMCPProfile(ctx, taskID, session, req.StartAgent)
 	if err != nil {
 		return err
 	}
 	req.McpMode = mode
 	profileContext.Providers = req.McpProviders
 	req.McpProfile = &profileContext
+	req.TaskDescription = sysprompt.AppendBuiltinBindingGuidance(req.TaskDescription, profileContext.BuiltinPackages)
 	return nil
 }
 

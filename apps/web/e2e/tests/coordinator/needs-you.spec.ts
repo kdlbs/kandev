@@ -72,10 +72,14 @@ test.describe("Coordinator Needs you and Queue", () => {
     await expect(container).toBeVisible();
     const hostMax = Number(await container.getAttribute("data-host-max-height"));
     expect(hostMax).toBeGreaterThan(Math.round((await testPage.evaluate(() => innerHeight)) * 0.5));
-    await expect(answerPanel.getByTestId("clarification-panel-expand")).toBeEnabled();
-    await answerPanel.getByTestId("clarification-panel-expand").click();
+    const sizeToggle = answerPanel.getByTestId("clarification-panel-size-toggle");
+    await expect(sizeToggle).toHaveCount(1);
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
+    await expect(sizeToggle).toBeEnabled();
+    await sizeToggle.click();
     await expect(container).toHaveCSS("height", `${hostMax}px`);
-    await answerPanel.getByTestId("clarification-panel-reset").click();
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Restore");
+    await sizeToggle.click();
     await expect.poll(() => container.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
 
     const askAboutThis = card.getByRole("button", { name: "Ask about this" });

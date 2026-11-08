@@ -844,7 +844,7 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 		return
 	}
 	queuePromotionToken := queuePromotionLifecycleToken(task)
-	if data.QueuePromotion && !s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending) {
+	if data.QueuePromotion && !s.claimMovedPromotion(ctx, task, data.StepTransitionID) {
 		return
 	}
 
@@ -895,6 +895,33 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 		return
 	}
 	s.handleTaskMovedWithBarrier(ctx, data, manualBarrier, queuePromotionToken)
+}
+
+func (s *Service) claimMovedPromotion(ctx context.Context, task *models.Task, entryID int64) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	if entryID < 0 {
+		return false
+	}
+	if _, ok := task.Metadata[models.MetaKeyQueuePromotionPending]; !ok {
+		return false
+	}
+	claimer, ok := s.repo.(interface {
+		ClaimQueuePromotionEntry(context.Context, string, int64) (bool, error)
+	})
+	if !ok {
+		if entryID == 0 {
+			return s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending)
+		}
+		s.logger.Warn("task.moved: repository cannot claim a specific promotion entry", zap.String("task_id", task.ID))
+		return false
+	}
+	claimed, err := claimer.ClaimQueuePromotionEntry(ctx, task.ID, entryID)
+	if err != nil {
+		s.logger.Warn("task.moved: failed to claim promotion entry", zap.String("task_id", task.ID), zap.Error(err))
+	}
+	return err == nil && claimed
 }
 
 // workflowMovePendingOptions decodes the one-shot entry options carried on a
@@ -6304,11 +6331,19 @@ func (s *Service) prepareAutoStartStepPrompt(
 	state.stepName = state.origin.StepName
 	state.takenMsg, state.prompt, state.attachments, state.references, state.queuedHandoff =
 		s.takeAndMergeHandoffMessage(ctx, state.sessionID, state.prompt)
+	if state.takenMsg != nil {
+		var intentErr error
+		state.ctx, intentErr = s.prepareQueuedBuiltinIntent(state.ctx, state.takenMsg)
+		if intentErr != nil {
+			s.requeueAutoStartStepMessage(state)
+			return nil, false, intentErr
+		}
+	}
 	state.initialCreatePromptPassthrough = state.takenMsg != nil &&
 		initialCreatePromptPassthroughQueued(state.takenMsg.Metadata)
-	state.queueCtx = ctx
+	state.queueCtx = state.ctx
 	if state.initialCreatePromptPassthrough {
-		state.queueCtx = withInitialCreatePromptPassthroughQueue(ctx)
+		state.queueCtx = withInitialCreatePromptPassthroughQueue(state.ctx)
 	}
 	state.agentPrompt = AppendEntityReferenceContext(state.prompt, state.references)
 	state.effectiveAgentPrompt = s.effectivePromptForSession(state.sessionID, state.agentPrompt, planMode, session)
@@ -6355,6 +6390,10 @@ func (s *Service) composeAutoStartStepPrompts(
 		if contextErr != nil {
 			return "", "", contextErr
 		}
+		state.ctx, contextErr = s.prepareBuiltinPromptContext(state.ctx, state.taskID, state.session)
+		if contextErr != nil {
+			return "", "", contextErr
+		}
 	}
 	var pullRequestTargetContext string
 	if needsRuntimeContext {
@@ -6389,16 +6428,19 @@ func (s *Service) injectAutoStartRuntimeContext(
 	requiresSignal := state.step != nil && state.step.AutoAdvanceRequiresSignal
 	referenceContext := EntityReferenceContext(state.references)
 	if isOfficeTask {
-		return sysprompt.InjectOfficeContextWithOptions(
+		return sysprompt.InjectOfficeContextWithPackages(
 				state.taskID, state.sessionID, recordedPrompt, requiresSignal,
+				preparedBuiltinPackages(state.ctx, state.taskID, state.sessionID),
 				referenceContext, pullRequestTargetContext, state.promptReferenceContext,
 			),
-			sysprompt.InjectOfficeContextWithOptions(
+			sysprompt.InjectOfficeContextWithPackages(
 				state.taskID, state.sessionID, dispatchPrompt, requiresSignal,
+				preparedBuiltinPackages(state.ctx, state.taskID, state.sessionID),
 				referenceContext, pullRequestTargetContext, state.promptReferenceContext,
 			)
 	}
 	options := sysprompt.KandevContextOptions{
+		BuiltinPackages:                preparedBuiltinPackages(state.ctx, state.taskID, state.sessionID),
 		RequiresCompletionSignal:       requiresSignal,
 		IncludeCoordinatorTaskControls: !configMode,
 		IncludeTaskTitleTool:           !configMode && titleOwner,
@@ -7000,6 +7042,9 @@ func (s *Service) persistAutoStartPromptWithAdmission(
 		return nil, fmt.Errorf("message queue is not configured")
 	}
 	meta := workflowMessageMetadata(planMode, origin, references)
+	if err := retainBuiltinIntent(ctx, taskID, sessionID, meta); err != nil {
+		return nil, err
+	}
 	if initialCreatePromptPassthroughQueueFromContext(ctx) {
 		meta[metaKeyInitialCreatePromptPassthrough] = true
 	}
@@ -7196,11 +7241,15 @@ func (s *Service) resetAgentContextWithError(
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
 	resetGuard := s.lockCancelInFlightGuard(sessionID)
+	keepResetBlocked := s.isSessionResetInProgress(sessionID)
 	s.setSessionResetInProgress(sessionID, true)
 	defer func() {
 		// Publish the end of reset while the same guard is still held. A prompt
-		// that acquires the guard after this point observes a settled marker.
-		s.setSessionResetInProgress(sessionID, false)
+		// that acquires the guard after this point observes a settled marker. A
+		// refused identity commit keeps the marker set until a later reset repairs it.
+		if !keepResetBlocked {
+			s.setSessionResetInProgress(sessionID, false)
+		}
 		resetGuard.release()
 	}()
 
@@ -7261,25 +7310,35 @@ func (s *Service) resetAgentContextWithError(
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
 			zap.Error(resetErr))
-		s.reconcileFailedContextReset(ctx, taskID, session, executionID, previousACPSessionID)
+		reconciled, reconcileErr := s.reconcileFailedContextReset(ctx, taskID, session, executionID, previousACPSessionID)
+		if reconcileErr != nil {
+			s.logger.Error("failed to reconcile partial context reset",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("agent_execution_id", executionID),
+				zap.Error(reconcileErr))
+			if liveACPSessionID := s.currentACPSessionID(sessionID); liveACPSessionID != "" && liveACPSessionID != previousACPSessionID {
+				keepResetBlocked = true
+			}
+			resetErr = errors.Join(resetErr, fmt.Errorf("reconcile partial context reset: %w", reconcileErr))
+		} else if reconciled {
+			keepResetBlocked = false
+		}
 		return settleFailure(executionID, fmt.Errorf("provider context reset: %w", resetErr))
 	}
 
-	// Clear the old resume token only after the provider reset succeeds. This
-	// keeps a valid recovery token when the runtime reset fails. A fresh ACP
-	// session event can race this clear, so persist the lifecycle manager's
-	// current session ID again below after the clear.
-	if err := s.clearResumeToken(ctx, sessionID); err != nil {
-		s.logger.Error("failed to clear resume token after context reset",
+	if err := s.replaceResetResumeToken(ctx, taskID, session, executionID, previousACPSessionID); err != nil {
+		s.logger.Error("failed to replace resume token after context reset",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
 			zap.Error(err))
-		return settleFailure(executionID, fmt.Errorf("clear resume token after context reset: %w", err))
+		if liveACPSessionID := s.currentACPSessionID(sessionID); liveACPSessionID != "" && liveACPSessionID != previousACPSessionID {
+			keepResetBlocked = true
+		}
+		return settleFailure(executionID, err)
 	}
-	if acpSessionID := s.currentACPSessionID(sessionID); acpSessionID != "" {
-		s.storeResumeToken(ctx, taskID, sessionID, executionID, acpSessionID, "")
-	}
+	keepResetBlocked = false
 
 	// Clear the remaining persisted state (ACP session metadata, context window)
 	// after the provider reset succeeds. The token is handled explicitly above.
@@ -7408,27 +7467,31 @@ func (s *Service) reconcileFailedContextReset(
 	session *models.TaskSession,
 	executionID string,
 	previousACPSessionID string,
-) {
+) (bool, error) {
 	liveACPSessionID := s.currentACPSessionID(session.ID)
 	if liveACPSessionID == "" || liveACPSessionID == previousACPSessionID {
-		return
+		return false, nil
 	}
 
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
 	if err != nil {
-		s.logger.Warn("failed to inspect execution after partial context reset",
-			zap.String("task_id", taskID),
-			zap.String("session_id", session.ID),
-			zap.String("agent_execution_id", executionID),
-			zap.Error(err))
-		return
+		return false, fmt.Errorf("inspect execution after partial context reset: %w", err)
 	}
-	if running.AgentExecutionID != executionID {
-		return
+	if running == nil || running.AgentExecutionID != executionID {
+		return false, fmt.Errorf("execution changed during partial context reset")
 	}
 
-	s.storeResumeToken(ctx, taskID, session.ID, executionID, liveACPSessionID, "")
+	rebound, err := s.rebindResetNativeSession(
+		ctx, taskID, session, executionID, previousACPSessionID, liveACPSessionID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("rebind resume identity after partial context reset: %w", err)
+	}
+	if !rebound && !s.storeResumeToken(ctx, taskID, session.ID, executionID, liveACPSessionID, "") {
+		return false, errResetNativeRebindRefused
+	}
 	s.clearPersistedResetState(ctx, session.ID, session)
+	return true, nil
 }
 
 // clearPersistedResetState clears the durable, DB-backed session state that a
@@ -8205,7 +8268,7 @@ func (s *Service) applyGuardedTransitionLifecycle(
 	casAttempted := false
 	casApplied := false
 	var commitErr error
-	lifecycleApplied := s.applyEngineTransitionWithCommitMode(
+	lifecycleApplied := s.applyEngineTransitionWithCommitResultMode(
 		ctx,
 		taskID,
 		session,
@@ -8213,28 +8276,33 @@ func (s *Service) applyGuardedTransitionLifecycle(
 		trigger,
 		task.Description,
 		transitionLifecycleGuardedDecision,
-		func(commitCtx context.Context) (bool, error) {
+		func(commitCtx context.Context) (workflowTransitionCommitResult, error) {
 			casAttempted = true
 			transitionCtx := commitCtx
 			if !steptelemetry.HasTrigger(transitionCtx) {
 				transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
 			}
-			committedTask, oldWorkflowID, applied, err := s.workflowStore.applyTransitionIfAtStepRaw(
+			committedTask, oldWorkflowID, applied, wipLimit, err := s.workflowStore.applyTransitionIfAtStepRaw(
 				transitionCtx, taskID, fromStepID, toStepID,
 			)
 			if err != nil {
 				commitErr = err
-				return false, err
+				return workflowTransitionCommitResult{}, err
 			}
 			if !applied {
-				return false, nil
+				return workflowTransitionCommitResult{}, nil
 			}
 			casApplied = true
 			// The raw CAS commit intentionally has no side effects. The shared
 			// lifecycle helper performs the remaining task-level work below.
 			s.publishTaskUpdated(ctx, committedTask, oldWorkflowID)
 			s.workflowStore.pullNextTaskOnVacate(ctx, fromStepID, taskID)
-			return true, nil
+			return workflowTransitionCommitResult{
+				Applied:        true,
+				AdmissionKnown: true,
+				WIPAdmitted:    committedTask.QueuedForStepID != toStepID || committedTask.WIPAdmitted,
+				WIPLimit:       wipLimit,
+			}, nil
 		},
 	)
 	if commitErr != nil {
@@ -8288,11 +8356,9 @@ func (s *Service) applyEngineTransitionWithMode(
 	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
 	mode transitionLifecycleMode,
 ) bool {
-	return s.applyEngineTransitionWithCommitMode(ctx, taskID, session, result, trigger, taskDescription, mode,
-		func(commitCtx context.Context) (bool, error) {
-			return s.workflowStore.applyTransitionReportingApplied(
-				commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger,
-			)
+	return s.applyEngineTransitionWithCommitResultMode(ctx, taskID, session, result, trigger, taskDescription, mode,
+		func(commitCtx context.Context) (workflowTransitionCommitResult, error) {
+			return s.workflowStore.applyTransitionReportingApplied(commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger)
 		})
 }
 
@@ -8343,16 +8409,28 @@ func (s *Service) recoverCompletedTurnAfterWorkflowPreflightFailure(
 	s.setSessionWaitingForInput(ctx, taskID, currentSession.ID, currentSession)
 }
 
-// applyEngineTransitionWithCommitMode applies the shared lifecycle around a
-// transition commit. The default path commits through ApplyTransition. The
-// quorum decision path supplies a CAS commit so lifecycle hooks cannot be
-// bypassed by the engine's guarded-transition re-evaluation.
-//
-//nolint:cyclop,gocognit,funlen // this coordinates independent transition lifecycle stages.
+// applyEngineTransitionWithCommitMode adapts bool-only commit callbacks to the
+// shared transition lifecycle.
 func (s *Service) applyEngineTransitionWithCommitMode(
 	ctx context.Context, taskID string, session *models.TaskSession,
 	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
 	mode transitionLifecycleMode, commit func(context.Context) (bool, error),
+) bool {
+	return s.applyEngineTransitionWithCommitResultMode(ctx, taskID, session, result, trigger, taskDescription, mode,
+		func(commitCtx context.Context) (workflowTransitionCommitResult, error) {
+			applied, err := commit(commitCtx)
+			return workflowTransitionCommitResult{Applied: applied}, err
+		})
+}
+
+// applyEngineTransitionWithCommitResultMode gates destination lifecycle work
+// with the admission decision returned by the committed transition.
+//
+//nolint:cyclop,gocognit,funlen // this coordinates independent transition lifecycle stages.
+func (s *Service) applyEngineTransitionWithCommitResultMode(
+	ctx context.Context, taskID string, session *models.TaskSession,
+	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
+	mode transitionLifecycleMode, commit func(context.Context) (workflowTransitionCommitResult, error),
 ) bool {
 	ctx = withWorkflowMetaCache(ctx)
 	sessionLifecycle := mode != transitionLifecycleGuardedDecision
@@ -8428,7 +8506,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 			consumedSignal = signal
 		}
 	}
-	applied, err := commit(applyCtx)
+	commitResult, err := commit(applyCtx)
 	if err != nil {
 		recordWorkflowTransitionError(ctx, err)
 		s.logger.Error("failed to apply engine transition",
@@ -8438,7 +8516,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		settleFailedTransitionSession()
 		return false
 	}
-	if !applied {
+	if !commitResult.Applied {
 		recordWorkflowTransitionError(ctx, errors.New("workflow transition commit was not applied"))
 		return false
 	}
@@ -8478,21 +8556,15 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		}
 	}
 
-	queuedTask, queuedErr := s.repo.GetTask(ctx, taskID)
-	if queuedErr == nil && queuedTask != nil && queuedTask.QueuedForStepID == result.ToStepID && !queuedTask.WIPAdmitted {
-		// The source transition is committed, but destination state and
-		// on_enter behavior wait for the queue promotion event.
-		if sessionLifecycle {
-			if mode == transitionLifecycleOnTurnStart {
-				if err := s.prepareWorkflowTurnStartSessionState(ctx, taskID, session.ID); err != nil {
-					s.reportWorkflowTurnStartPreparationError(ctx, taskID, session.ID, err)
-					return false
-				}
-			} else {
-				s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
-			}
-		}
+	commitResult, admissionKnown := s.workflowTransitionAdmissionResult(
+		ctx, taskID, session.ID, result, targetStep, commitResult,
+	)
+	if !admissionKnown {
+		settleFailedTransitionSession()
 		return true
+	}
+	if !commitResult.WIPAdmitted {
+		return s.deferWorkflowTransitionEntry(ctx, taskID, session, result, mode, sessionLifecycle, commitResult.WIPLimit)
 	}
 
 	if terminalTarget {
@@ -8565,6 +8637,72 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// asynchronously after that guard is released. Clear the synchronous
 	// ownership marker so profile-switch parking acquires its own guard.
 	s.launchProcessOnEnter(withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep, taskDescription, transitionID, fromStep)
+	return true
+}
+
+func (s *Service) workflowTransitionAdmissionResult(
+	ctx context.Context,
+	taskID, sessionID string,
+	result engine.HandleResult,
+	targetStep *wfmodels.WorkflowStep,
+	commitResult workflowTransitionCommitResult,
+) (workflowTransitionCommitResult, bool) {
+	if commitResult.AdmissionKnown {
+		return commitResult, true
+	}
+	queuedTask, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to reload task after committed workflow transition",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("from_step_id", result.FromStepID),
+			zap.String("to_step_id", result.ToStepID),
+			zap.Error(err))
+		return workflowTransitionCommitResult{}, false
+	}
+	if queuedTask == nil {
+		s.logger.Warn("task reload returned no task after committed workflow transition",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("from_step_id", result.FromStepID),
+			zap.String("to_step_id", result.ToStepID))
+		return workflowTransitionCommitResult{}, false
+	}
+	commitResult.AdmissionKnown = true
+	commitResult.WIPAdmitted = queuedTask.QueuedForStepID != result.ToStepID || queuedTask.WIPAdmitted
+	if targetStep != nil {
+		commitResult.WIPLimit = targetStep.WIPLimit
+	}
+	return commitResult, true
+}
+
+func (s *Service) deferWorkflowTransitionEntry(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	result engine.HandleResult,
+	mode transitionLifecycleMode,
+	sessionLifecycle bool,
+	wipLimit int,
+) bool {
+	if !sessionLifecycle {
+		return true
+	}
+	s.logger.Info("workflow on_enter deferred until destination step admits the task",
+		zap.String("task_id", taskID),
+		zap.String("session_id", session.ID),
+		zap.String("from_step_id", result.FromStepID),
+		zap.String("to_step_id", result.ToStepID),
+		zap.Int("wip_limit", wipLimit),
+		zap.String("reason", "wip_limit_reached"))
+	if mode != transitionLifecycleOnTurnStart {
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return true
+	}
+	if err := s.prepareWorkflowTurnStartSessionState(ctx, taskID, session.ID); err != nil {
+		s.reportWorkflowTurnStartPreparationError(ctx, taskID, session.ID, err)
+		return false
+	}
 	return true
 }
 

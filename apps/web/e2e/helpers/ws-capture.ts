@@ -196,6 +196,48 @@ export function attachMessageAddCapture(page: Page): { frames: MessageAddFrame[]
   return { frames };
 }
 
+export type SessionStatusRequestFrame = {
+  taskId: string;
+  sessionId: string;
+};
+
+/**
+ * Collect the subject of every outgoing `task.session.status` request.
+ *
+ * The request carries both the task and the session it is asking about, so a
+ * task/session pair that does not belong together proves the page combined the
+ * rendered task with another task's session. Attach before navigation: the
+ * capture sees every gateway socket opened afterwards.
+ */
+export function attachSessionStatusRequestCapture(page: Page): {
+  frames: SessionStatusRequestFrame[];
+} {
+  const frames: SessionStatusRequestFrame[] = [];
+  page.on("websocket", (ws) => {
+    if (new URL(ws.url()).pathname !== "/ws") return;
+    ws.on("framesent", (event) => {
+      const payload = event.payload;
+      if (typeof payload !== "string" || !payload.includes('"task.session.status"')) return;
+      try {
+        const msg = JSON.parse(payload) as ParsedFrame;
+        const taskId = msg.payload?.task_id;
+        const sessionId = msg.payload?.session_id;
+        if (
+          msg.type === "request" &&
+          msg.action === "task.session.status" &&
+          typeof taskId === "string" &&
+          typeof sessionId === "string"
+        ) {
+          frames.push({ taskId, sessionId });
+        }
+      } catch {
+        /* non-JSON string frames — ignore */
+      }
+    });
+  });
+  return { frames };
+}
+
 /** Keep the real gateway connection live while allowing tests to deliver server notifications. */
 export async function routeGatewayNotifications(page: Page) {
   const sockets: WebSocketRoute[] = [];

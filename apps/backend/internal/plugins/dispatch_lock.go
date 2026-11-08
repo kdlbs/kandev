@@ -16,6 +16,8 @@ type contextRWMutex struct {
 	// changed is closed and replaced on every state transition. Waiters capture
 	// it under mu and then block on it, so no transition can be missed.
 	changed chan struct{}
+	// onReadAdmission is a test-only seam invoked after a reader is admitted.
+	onReadAdmission func()
 }
 
 func newContextRWMutex() *contextRWMutex {
@@ -32,7 +34,11 @@ func (m *contextRWMutex) RLockContext(ctx context.Context) (func(), error) {
 		m.mu.Lock()
 		if !m.writer && m.waitingWriters == 0 {
 			m.readers++
+			hook := m.onReadAdmission
 			m.mu.Unlock()
+			if hook != nil {
+				hook()
+			}
 			return m.RUnlock, nil
 		}
 		changed := m.changed
@@ -56,7 +62,11 @@ func (m *contextRWMutex) RLock() {
 		m.mu.Lock()
 	}
 	m.readers++
+	hook := m.onReadAdmission
 	m.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 }
 
 // TryRLock acquires a read lease only when no writer holds or awaits it.

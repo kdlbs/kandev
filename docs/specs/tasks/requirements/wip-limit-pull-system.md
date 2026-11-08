@@ -47,3 +47,7 @@ integrations, and workflow transitions without exceeding configured WIP capacity
   readable after a tap on phone and coarse-pointer devices, with a dismissible
   drawer and a touch target of at least 44 pixels. Desktop focus and hover shall
   expose the same guidance without changing the selected feeder or draft.
+- **AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.11:** When an engine transition queues
+  a session-lifecycle task at a full WIP-limited destination, the backend shall
+  log the deferred entry with the task, session, source and destination steps,
+  limit, and `wip_limit_reached` reason. Entry remains deferred until admission.

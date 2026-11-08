@@ -236,10 +236,21 @@ func TestSSHExecutorCloseSSHClientFallsBackToTheRealClose(t *testing.T) {
 	exec.closeClient = nil
 	server := newFakeSSHServer(t, nil)
 	client := server.dial(t)
+	closed := make(chan struct{})
+	go func() {
+		_ = client.Wait()
+		close(closed)
+	}()
+	t.Cleanup(func() {
+		_ = client.Close()
+		<-closed
+	})
 	if err := exec.closeSSHClient(client); err != nil {
 		t.Fatalf("closeSSHClient: %v", err)
 	}
-	if _, err := client.NewSession(); err == nil {
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
 		t.Fatal("client must actually be closed when no closeClient seam is set")
 	}
 }

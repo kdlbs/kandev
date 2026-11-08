@@ -2867,6 +2867,56 @@ func (s *Service) AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowCla
 	return nil
 }
 
+// CanReleaseSendNowClaim reports whether an unrestorable claim still owns its
+// sources and can be released. It does not mutate the queue, so a status write
+// that follows it can retry while the claim remains available.
+func (s *Service) CanReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error) {
+	if claim == nil {
+		return false, nil
+	}
+	sessionID, err := sendNowClaimSessionID(claim)
+	if err != nil {
+		return false, err
+	}
+	var canRelease bool
+	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var releaseErr error
+		canRelease, releaseErr = s.repo.CanReleaseSendNowClaim(admittedCtx, claim)
+		return releaseErr
+	}); err != nil {
+		return false, err
+	}
+	return canRelease, nil
+}
+
+// ReleaseSendNowClaim removes an unrestorable claim and any source rows it
+// still owns. A false settled result means a successor owns a surviving source,
+// so the message must not be marked not delivered.
+func (s *Service) ReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error) {
+	if claim == nil {
+		return false, nil
+	}
+	sessionID, err := sendNowClaimSessionID(claim)
+	if err != nil {
+		return false, err
+	}
+	var settled bool
+	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var releaseErr error
+		settled, releaseErr = s.repo.ReleaseSendNowClaim(admittedCtx, claim)
+		return releaseErr
+	}); err != nil {
+		return false, err
+	}
+	if settled {
+		s.logger.Info("released unrestorable send-now queue claim",
+			zap.String("session_id", sessionID),
+			zap.String("claim_id", claim.ClaimID),
+			zap.Int("source_count", len(claim.Sources)))
+	}
+	return settled, nil
+}
+
 type pendingSendNowClaimRepository interface {
 	ListPendingSendNowClaims(context.Context) ([]PendingSendNowClaim, error)
 	MarkPendingSendNowClaimAccepted(context.Context, *SendNowClaim) error

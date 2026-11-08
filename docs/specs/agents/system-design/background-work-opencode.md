@@ -265,12 +265,13 @@ job as complete. It also must not move a task into or out of a workflow column.
 
 Reuse BackgroundWorkChip in chat-status-bar.tsx, useBackgroundWork, and the
 existing normalized list/output subscriptions. No OpenCode branches belong in
-React. The summary distinguishes running, waiting, and unknown counts.
+React. The shared design owns running-only summaries and Active/History tabs.
 
 Desktop uses the compact chip, its summary popover, and named central detail
 tabs. Phone uses the existing chip drawer with a focused list and a full-height
-detail surface. Back returns to the selected job; dismissal returns focus to
-the chip. Keep one scroll owner and respect keyboard and safe-area clearance.
+detail surface. Back restores the originating list; dismissal returns focus
+to the invoker, or the composer when its chip disappears. Keep one scroll owner
+and respect keyboard and safe-area clearance.
 Phone action targets are at least 44px.
 
 For observation-only OpenCode, hide unsupported Stop, Interrupt, and stdin
@@ -278,10 +279,11 @@ controls. The command banner is not live command output. Show unavailable output
 when the producer has no output capability. When final output arrives, show its
 retained result with failure or exit status.
 
-When the active count reaches zero, retain a history entry near the composer.
-Do not change the preserved behavior for an empty session that never had jobs.
-Reuse the shared viewer for completed history. Localize every new status,
-accessibility name, count, and unavailable-state message in all catalogs.
+When the running count reaches zero, hide the composer chip. Keep history
+reachable through the independent panel entry defined by the
+[shared UX design](background-work.md#shared-client-and-responsive-ui).
+Unknown launches remain unknown in History, without implying completion.
+Localize status, accessibility names, counts, and unavailable-state messages.
 
 ## Recovery, security, and observability
 

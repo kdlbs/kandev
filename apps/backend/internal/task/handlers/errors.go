@@ -37,6 +37,9 @@ const (
 const errorDetailKeyErrorCode = "error_code"
 
 func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string) {
+	if handleBuiltinCreationHTTPError(c, err) {
+		return
+	}
 	if isClientDisconnect(err) {
 		abortClientDisconnect(c)
 		return

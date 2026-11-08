@@ -4762,6 +4762,8 @@ type mockMessageCreator struct {
 	lastAgentPlanContent      string
 	userMessageErr            error
 	idempotentUserMessages    map[string]struct{}
+	userMessageStatuses       map[string]string
+	userMessageStatusFn       func(messageID, sessionID, status string) (bool, error)
 	permissionClaimFn         func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
 	permissionFinishFn        func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
 	permissionAuditFn         func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
@@ -4815,6 +4817,46 @@ func (m *mockMessageCreator) CreateUserMessageIdempotent(
 	}
 	m.idempotentUserMessages[messageID] = struct{}{}
 	m.userMessages = append(m.userMessages, mockUserMessage{taskID, content, sessionID, turnID, metadata})
+	return nil
+}
+
+func (m *mockMessageCreator) SetUserMessageDeliveryStatus(
+	_ context.Context,
+	messageID, sessionID, status string,
+) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.userMessageStatusFn != nil {
+		return m.userMessageStatusFn(messageID, sessionID, status)
+	}
+	if _, exists := m.idempotentUserMessages[messageID]; !exists {
+		return false, nil
+	}
+	if m.userMessageStatuses == nil {
+		m.userMessageStatuses = make(map[string]string)
+	}
+	m.userMessageStatuses[messageID] = status
+	return true, nil
+}
+
+func (m *mockMessageCreator) CreateCompletedUserMessageIdempotent(
+	_ context.Context,
+	messageID, taskID, content, sessionID string,
+	metadata map[string]interface{},
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.userMessageErr != nil {
+		return m.userMessageErr
+	}
+	if m.idempotentUserMessages == nil {
+		m.idempotentUserMessages = make(map[string]struct{})
+	}
+	if _, exists := m.idempotentUserMessages[messageID]; exists {
+		return nil
+	}
+	m.idempotentUserMessages[messageID] = struct{}{}
+	m.userMessages = append(m.userMessages, mockUserMessage{taskID, content, sessionID, "", metadata})
 	return nil
 }
 

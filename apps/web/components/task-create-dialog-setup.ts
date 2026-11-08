@@ -257,6 +257,7 @@ function useSubmitHandlersWiring({
     blockedBy: fs.blockedBy,
     editDependencies,
     mcpServerIds: fs.mcpServerIds,
+    builtinMCPPreferences: fs.builtinMCPPreferences,
     mcpServerIdsDirty: fs.mcpServerIdsDirty,
     saveTaskMCPSelections:
       !isSessionMode && taskId && workspaceId

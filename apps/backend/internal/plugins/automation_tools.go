@@ -79,6 +79,7 @@ func automationOptionTools(record *store.Record) ([]plugintools.OptionTool, erro
 		tools = append(tools, plugintools.OptionTool{
 			LocalName:       tool.Name,
 			Description:     tool.Description,
+			InvocationScope: tool.NormalizedInvocationScope(),
 			InputSchema:     input,
 			OutputSchema:    output,
 			ReadOnlyHint:    boolValue(tool.Annotations.ReadOnlyHint, false),

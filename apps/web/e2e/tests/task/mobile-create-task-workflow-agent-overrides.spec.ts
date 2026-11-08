@@ -222,10 +222,8 @@ test.describe("mobile: task-specific workflow agent overrides", () => {
       await expect
         .poll(() => apiClient.getTask(runtimeTask.id).then((task) => task.primary_session_id))
         .toBe(replacementSessionId);
-      // Reuse must follow the bound session and its current model, not its profile default.
-      await apiClient.setSessionModel(replacementSessionId, "mock-smart");
       await waitForWorkflowMoveLifecycle(apiClient, runtimeTask.id);
-      // Confirm the replacement runtime model before parking its session.
+      // Finish the initial launch before changing the bound session's model.
       await expect
         .poll(async () => {
           const { session } = await apiClient.getTaskSession(replacementSessionId);
@@ -233,6 +231,8 @@ test.describe("mobile: task-specific workflow agent overrides", () => {
           return { state: session.state, model: runtime?.model };
         })
         .toEqual({ state: "WAITING_FOR_INPUT", model: "mock-slow" });
+      // Reuse must follow the bound session and its current model, not its profile default.
+      await apiClient.setSessionModel(replacementSessionId, "mock-smart");
       await apiClient.moveTask(runtimeTask.id, fixture.workflow.id, fixture.reviewStep.id);
       await waitForWorkflowStep(apiClient, runtimeTask.id, fixture.reviewStep.id);
       await expect

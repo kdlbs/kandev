@@ -18,6 +18,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
+	builtinintent "github.com/kandev/kandev/internal/mcp/intent"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -271,8 +273,8 @@ func (h *MessageHandlers) injectMessageContext(
 		content, h.taskPullRequestTargets(ctx, task),
 	)
 	if task.IsFromOffice {
-		return sysprompt.InjectOfficeContextWithOptions(
-			req.TaskID, req.TaskSessionID, content, requiresSignal,
+		return sysprompt.InjectOfficeContextWithPackages(
+			req.TaskID, req.TaskSessionID, content, requiresSignal, req.builtinPackages,
 			referenceContext, trustedPromptContext, pullRequestTargetContext,
 		)
 	}
@@ -283,6 +285,7 @@ func (h *MessageHandlers) injectMessageContext(
 		return content
 	}
 	return sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, content, sysprompt.KandevContextOptions{
+		BuiltinPackages:                req.builtinPackages,
 		RequiresCompletionSignal:       requiresSignal,
 		IncludeCoordinatorTaskControls: !configMode,
 		IncludeTaskTitleTool:           !configMode && titleOwner,
@@ -623,6 +626,7 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 // WS handlers
 
 type wsAddMessageRequest struct {
+	BuiltinIntent         builtinintent.Intent            `json:"builtin_intent,omitempty"`
 	TaskID                string                          `json:"task_id"`
 	TaskSessionID         string                          `json:"session_id"`
 	MessageID             string                          `json:"message_id,omitempty"`
@@ -645,6 +649,7 @@ type wsAddMessageRequest struct {
 	// These fields are server-owned and are carried only from message admission
 	// to the created-session dispatch. They are intentionally not JSON fields.
 	canvasGuidanceResolved          bool
+	builtinPackages                 *mcpprofile.BuiltinManifest
 	includeCanvasGuidance           bool
 	initialTaskBriefSelected        bool
 	promptReferencesPrepared        bool
@@ -653,6 +658,7 @@ type wsAddMessageRequest struct {
 }
 
 type addMessageReplayIdentity struct {
+	BuiltinIntent          builtinintent.Intent            `json:"builtin_intent,omitempty"`
 	TaskID                 string                          `json:"task_id"`
 	TaskSessionID          string                          `json:"session_id"`
 	Content                string                          `json:"content"`
@@ -671,7 +677,7 @@ type addMessageReplayIdentity struct {
 
 func addMessageRequestFingerprint(req wsAddMessageRequest) (string, error) {
 	return plancomments.Fingerprint(addMessageReplayIdentity{
-		TaskID: req.TaskID, TaskSessionID: req.TaskSessionID, Content: req.Content,
+		BuiltinIntent: req.BuiltinIntent, TaskID: req.TaskID, TaskSessionID: req.TaskSessionID, Content: req.Content,
 		AuthorID: req.AuthorID, Model: req.Model, PlanMode: req.PlanMode,
 		HasReviewComments: req.HasReviewComments, Attachments: req.Attachments,
 		ContextFiles: req.ContextFiles, EntityReferences: req.EntityReferences,
@@ -686,6 +692,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	var req wsAddMessageRequest
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if err := req.BuiltinIntent.Validate(); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 	req.Content = strings.TrimSpace(req.Content)
 	req.MessageID = strings.TrimSpace(req.MessageID)
@@ -877,8 +886,14 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	isCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
 	startCreatedSession := isCreatedSession || wasCreatedSession
 
+	ctx, err = builtinintent.PrepareRequest(ctx, h.orchestrator, req.TaskID, req.TaskSessionID, req.BuiltinIntent)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+
 	// Build metadata with attachments, plan mode, review comments, and context files
 	meta := orchestrator.NewUserMessageMeta().
+		WithBuiltinIntent(req.BuiltinIntent).
 		WithPlanMode(req.PlanMode).
 		WithReviewComments(req.HasReviewComments).
 		WithAttachments(req.Attachments).
@@ -940,6 +955,16 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	if wsErr != nil {
 		return wsErr, nil
 	}
+	if (startCreatedSession || titleOwner || initialTaskBriefEligible) && hasMessageContent {
+		ctx, err = h.prepareBuiltinMessageContext(ctx, req.TaskID, req.TaskSessionID)
+		if err != nil {
+			h.logger.Warn("failed to prepare built-in MCP prompt", zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to prepare built-in MCP tools", nil)
+		}
+		if profile := executor.PreparedMCPProfile(ctx, req.TaskID, req.TaskSessionID); profile != nil {
+			req.builtinPackages = profile.BuiltinPackages
+		}
+	}
 	if (startCreatedSession || titleOwner) && hasMessageContent {
 		// The first prompt on a new or eager Quick Chat session is the kanban
 		// "type in chat to start the agent" path. Wrap with the Kandev MCP
@@ -969,8 +994,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		req.canvasGuidanceResolved = canvasGuidanceResolved
 		req.includeCanvasGuidance = includeCanvasGuidance
 	}
+	initialBriefRequest := req
 	initialTaskBrief := h.prepareInitialTaskBriefCandidate(
-		ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
+		ctx, initialBriefRequest, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
 		initialTaskBriefEligible,
 	)
 	// Reserve the new turn before the request is acknowledged. A refusal turns
@@ -1098,14 +1124,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				Attachments: queuedMessageAttachments(req.Attachments), Metadata: queueMetadata,
 				QueuedBy: messagequeue.QueuedByUser,
 			}
-			created, createErr := h.service.CreateQueuedMessageIdempotent(
+			return h.service.CreateQueuedMessageIdempotent(
 				messageCtx, req.ClientMessageID, createRequest, queued, queuedCoordinator.MaxQueuedPromptsPerSession(),
 			)
-			if createErr == nil && (createRequest.InitialTaskBrief == nil ||
-				createRequest.InitialTaskBrief.Selected || (created != nil && created.PromptIndex == 1)) {
-				queuedCoordinator.NotifyQueuedUserPrompt(messageCtx, req.TaskID, req.TaskSessionID)
-			}
-			return created, createErr
 		}
 		if req.ClientMessageID != "" {
 			return h.service.CreateMessageIdempotent(messageCtx, req.ClientMessageID, createRequest)
@@ -1153,7 +1174,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		task = freshTask
 		initialTaskBrief = h.prepareInitialTaskBriefCandidate(
-			admissionCtx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
+			admissionCtx, initialBriefRequest, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
 			initialTaskBriefEligible,
 		)
 		createRequest.InitialTaskBrief = initialTaskBrief
@@ -1170,6 +1191,11 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		h.logger.Error("failed to create message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
+	}
+	// Queue notification must run outside the session admission gate.
+	if atomicQueuedTaskFeedback && (createRequest.InitialTaskBrief == nil ||
+		createRequest.InitialTaskBrief.Selected || message.PromptIndex == 1) {
+		queuedCoordinator.NotifyQueuedUserPrompt(ctx, req.TaskID, req.TaskSessionID)
 	}
 	req.Content = message.Content
 	req.deliverySubmissionID = message.ID

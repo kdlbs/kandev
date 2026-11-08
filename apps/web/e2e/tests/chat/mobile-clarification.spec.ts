@@ -64,6 +64,7 @@ test.describe("Mobile clarification multiline answer", () => {
       caption: "Mobile clarification offers only the choices allowed by Codex",
     });
     await session.clarificationOption("Fast").tap();
+    await session.submitClarification();
 
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText("You answered");
@@ -228,6 +229,7 @@ test.describe("Mobile clarification multiline answer", () => {
 
     try {
       await session.clarificationOption("PostgreSQL").tap();
+      await session.submitClarification();
       await expect(status).toBeVisible();
       await expect(status).toHaveAttribute("aria-label", "Submitting…");
       await expect(session.clarificationSkip()).toBeDisabled();
@@ -305,6 +307,7 @@ test.describe("Mobile clarification multiline answer", () => {
     });
 
     await session.clarificationOption("PostgreSQL").tap();
+    await session.submitClarification();
     const retry = testPage.getByTestId("clarification-retry");
     await expect(retry).toBeVisible();
     await expect(session.clarificationSkip()).toBeEnabled();
@@ -577,6 +580,7 @@ test.describe("Mobile clarification multiline answer", () => {
     ).resolves.toBe(true);
 
     await option.locator("code").tap();
+    await session.submitClarification();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(
       session
@@ -631,6 +635,7 @@ test.describe("Mobile clarification multiline answer", () => {
     const option = session.clarificationOption("PostgreSQL");
     await option.scrollIntoViewIfNeeded();
     await option.tap();
+    await session.submitClarification();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
@@ -756,26 +761,28 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(container).toBeVisible({ timeout: 30_000 });
     await input.fill("Phone draft remains here.");
     const phoneHost = Number(await container.getAttribute("data-host-max-height"));
-    const [expand, reset] = [
-      container.getByTestId("clarification-panel-expand"),
-      container.getByTestId("clarification-panel-reset"),
-    ];
-    const [expandBox, resetBox] = await Promise.all([expand.boundingBox(), reset.boundingBox()]);
-    if (!expandBox || !resetBox) throw new Error("mobile resize controls are not measurable");
-    expect(expandBox.height).toBeGreaterThanOrEqual(44);
-    expect(resetBox.height).toBeGreaterThanOrEqual(44);
-    await expect(expand).toBeEnabled();
-    await expand.tap();
+    const sizeToggle = container.getByTestId("clarification-panel-size-toggle");
+    await expect(sizeToggle).toHaveCount(1);
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
+    const phoneBox = await sizeToggle.boundingBox();
+    if (!phoneBox) throw new Error("mobile size control is not measurable");
+    expect(phoneBox.height).toBeGreaterThanOrEqual(44);
+    expect(phoneBox.width).toBeGreaterThanOrEqual(44);
+    await expect(sizeToggle).toBeEnabled();
+    await sizeToggle.tap();
     await expect(container).toHaveCSS("height", `${phoneHost}px`);
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Restore");
 
     await testPage.setViewportSize({ width: 900, height: 900 });
     await expect.poll(() => container.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
     await expect(input).toHaveValue("Phone draft remains here.");
     await input.fill("Desktop draft remains here.");
     const desktopHost = Number(await container.getAttribute("data-host-max-height"));
-    await expect(container.getByTestId("clarification-panel-expand")).toBeEnabled();
-    await container.getByTestId("clarification-panel-expand").click();
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
+    await expect(sizeToggle).toBeEnabled();
+    await sizeToggle.click();
     await expect(container).toHaveCSS("height", `${desktopHost}px`);
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Restore");
 
     await testPage.setViewportSize({ width: 393, height: 852 });
     await expect
@@ -788,14 +795,23 @@ test.describe("Mobile clarification multiline answer", () => {
       )
       .toBe(true);
     await expect(input).toHaveValue("Desktop draft remains here.");
-    await reset.tap();
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Restore");
+    await sizeToggle.tap();
     await expect.poll(() => container.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
 
     await testPage.setViewportSize({ width: 900, height: 900 });
     await expect(container).toHaveCSS("height", `${desktopHost}px`);
     await expect(input).toHaveValue("Desktop draft remains here.");
     await testPage.setViewportSize({ width: 393, height: 500 });
-    await expect(container.getByTestId("clarification-panel-reset")).toBeDisabled();
+    await expect(sizeToggle).toBeVisible();
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
+    await expect(sizeToggle).toHaveAttribute("aria-disabled", "true");
+    const constrainedBox = await sizeToggle.boundingBox();
+    expect(constrainedBox).not.toBeNull();
+    expect(constrainedBox!.height).toBeGreaterThanOrEqual(44);
+    expect(constrainedBox!.width).toBeGreaterThanOrEqual(44);
+    await expect(sizeToggle).toHaveCount(1);
     await expect(
       testPage.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,

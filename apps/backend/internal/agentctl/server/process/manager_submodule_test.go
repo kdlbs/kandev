@@ -8,7 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 func TestManager_DiscoversNestedSubmoduleScopesWithStableAnchors(t *testing.T) {
@@ -140,5 +145,31 @@ func TestManager_SubmoduleDiscoveryStopsAtDepthLimit(t *testing.T) {
 	)
 	if got != nil {
 		t.Fatalf("depth-limited discovery returned %v trackers, want none", len(got))
+	}
+}
+
+// @covers AC-PLATFORM-DIAGNOSTIC-SIGNAL-003.3
+func TestSubmoduleDiagnosticSafeClassification(t *testing.T) {
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("NewFromZap: %v", err)
+	}
+	workDir := t.TempDir()
+	mgr := NewManager(&config.InstanceConfig{WorkDir: workDir}, log)
+	t.Cleanup(mgr.stopWorkspaceTrackers)
+
+	mgr.discoverSubmoduleTrackers(context.Background(), mgr.GetWorkspaceTracker(), nil, workDir, 0)
+
+	entries := logs.FilterMessage("could not discover submodules").All()
+	if len(entries) == 0 {
+		t.Fatal("submodule discovery failure was not logged")
+	}
+	fields := entries[len(entries)-1].ContextMap()
+	if fields["operation"] != "submodule_discovery" {
+		t.Fatalf("operation = %v, want submodule_discovery", fields["operation"])
+	}
+	if fields["error_class"] != "repository_context_unavailable" {
+		t.Fatalf("error_class = %v, want repository_context_unavailable", fields["error_class"])
 	}
 }

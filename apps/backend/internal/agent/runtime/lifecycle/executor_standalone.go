@@ -296,6 +296,7 @@ func buildStandaloneCreateInstanceRequest(
 		AssumeMcpHttp:              assumeMcpHttp,
 		McpMode:                    req.McpMode,
 		PromptSuggestions:          req.PromptSuggestions,
+		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
@@ -887,28 +888,42 @@ func (r *StandaloneExecutor) buildRecoveredInstancesWithLease(
 		}
 
 		recovered = append(recovered, &ExecutorInstance{
-			InstanceID:             inst.ID,
-			TaskID:                 taskID,
-			SessionID:              sessionID,
-			AgentProfileID:         agentProfileID,
-			RuntimeName:            r.Name(),
-			Client:                 client,
-			StandaloneInstanceID:   inst.ID,
-			StandalonePort:         inst.Port,
-			WorkspacePath:          workspacePath,
-			Metadata:               metadata,
-			Env:                    inst.Env,
-			WorkspaceSourceRoots:   inst.WorkspaceSourceRoots,
-			ProviderSessionID:      inst.ProviderSessionID,
-			DeliveryStatus:         deliveryStatus,
-			DeliveryLegacyEvidence: legacyEvidence,
-			DeliveryRecoveryError:  deliveryErr,
+			InstanceID:                 inst.ID,
+			TaskID:                     taskID,
+			SessionID:                  sessionID,
+			AgentProfileID:             agentProfileID,
+			RuntimeName:                r.Name(),
+			Client:                     client,
+			StandaloneInstanceID:       inst.ID,
+			StandalonePort:             inst.Port,
+			WorkspacePath:              workspacePath,
+			Metadata:                   metadata,
+			Env:                        inst.Env,
+			WorkspaceSourceRoots:       inst.WorkspaceSourceRoots,
+			ProviderSessionID:          inst.ProviderSessionID,
+			CopilotNativeSessionEvents: inst.CopilotNativeSessionEvents,
+			DeliveryStatus:             deliveryStatus,
+			DeliveryLegacyEvidence:     legacyEvidence,
+			DeliveryRecoveryError:      deliveryErr,
 		})
 	}
 	return recovered
 }
 
 const durableDeliveryCapabilityName = "agent-delivery.v1"
+
+// SupportsCopilotNativeSessionEvents reports whether this runtime can collect
+// Copilot native events. A fresh standalone launch uses the same agentctl build,
+// while an adopted retained peer must advertise the optional capability.
+func (r *StandaloneExecutor) SupportsCopilotNativeSessionEvents() bool {
+	if r == nil {
+		return false
+	}
+	if !r.peerCapabilitiesSet {
+		return true
+	}
+	return r.peerHasCapability(acpcompat.CopilotNativeCompactionCapability)
+}
 
 func (r *StandaloneExecutor) peerHasCapability(name string) bool {
 	for _, capability := range r.peerCapabilities {

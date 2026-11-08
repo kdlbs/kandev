@@ -187,9 +187,51 @@ function readAgentErrorCause(record: Record<string, unknown>): AgentErrorCause {
     ...(boundedString(record.code, 64) ? { code: boundedString(record.code, 64) } : {}),
     ...(boundedString(record.detail, 1024) ? { detail: boundedString(record.detail, 1024) } : {}),
   };
+  if (cause.code === "plugin_preparation_failed") return readPluginPreparationCause(cause, record);
+  if (cause.code === "process_exited") return readProcessExitCause(cause, record);
   readCleanupPromptEvidence(cause, record);
   const storage = readStorageCauseValue(record.storage);
   if (storage) cause.storage = storage;
+  return readSelectionCause(cause, record);
+}
+
+function readPluginPreparationCause(
+  cause: AgentErrorCause,
+  record: Record<string, unknown>,
+): AgentErrorCause {
+  // i18n-exempt: mirrors the safe persisted backend detail; the UI renders localized guidance.
+  cause.detail = "The selected Copilot plugins could not be prepared.";
+  const reason = typeof record.reason === "string" ? record.reason : "";
+  if (!isKnownPluginPreparationReason(reason)) return cause;
+  cause.reason = reason;
+  const runtimeVersion = safeAgentErrorRuntimeVersion(record.runtime_version);
+  if (runtimeVersion) cause.runtime_version = runtimeVersion;
+  return cause;
+}
+
+function readProcessExitCause(
+  cause: AgentErrorCause,
+  record: Record<string, unknown>,
+): AgentErrorCause {
+  // i18n-exempt: mirrors the safe persisted backend detail; the UI renders localized guidance.
+  cause.detail = "The agent exited before startup completed.";
+  cause.reason =
+    record.reason === "mise_config_untrusted" ? "mise_config_untrusted" : "unclassified";
+  const exitCode = readProcessExitCode(record.exit_code);
+  if (exitCode !== undefined) cause.exit_code = exitCode;
+  return cause;
+}
+
+function readProcessExitCode(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value)) return undefined;
+  if (value < 0 || value > 4294967295) return undefined;
+  return value;
+}
+
+function readSelectionCause(
+  cause: AgentErrorCause,
+  record: Record<string, unknown>,
+): AgentErrorCause {
   const reason = typeof record.reason === "string" ? record.reason : "";
   if (!isKnownSelectionReason(cause.code, reason)) return cause;
   cause.reason = reason;
@@ -210,6 +252,38 @@ function readAgentErrorCause(record: Record<string, unknown>): AgentErrorCause {
     cause.prompt_not_sent = record.prompt_not_sent;
   }
   return cause;
+}
+
+function isKnownPluginPreparationReason(reason: string): boolean {
+  return [
+    "cli_unavailable",
+    "timeout",
+    "cancelled",
+    "output_limit",
+    "invalid_inventory",
+    "legacy_errors",
+    "runtime_unsupported",
+    "plugin_loading_unsupported",
+    "unsupported_launch_context",
+    "metadata_unavailable",
+    "ambiguous_identity",
+    "missing_root",
+    "manifest_mismatch",
+    "unsafe_root",
+    "builtin_not_mountable",
+    "external_not_mountable",
+    "unsupported_source",
+    "manual_mount_conflict",
+    "policy_unverified",
+  ].includes(reason);
+}
+
+function safeAgentErrorRuntimeVersion(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 256) return undefined;
+  if (new TextEncoder().encode(value).length > 256) return undefined;
+  const stableSemver =
+    /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
+  return stableSemver.test(value) ? value : undefined;
 }
 
 function readStorageCauseValue(value: unknown): AgentErrorCause["storage"] | undefined {

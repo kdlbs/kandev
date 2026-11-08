@@ -19,6 +19,9 @@ This document is the migrated task-system source for the capability. The source 
 #### Acceptance criteria
 
 - **AC-TASKS-MULTI-BRANCH-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+- **AC-TASKS-MULTI-BRANCH-001.2:** Live commit updates shall preserve separate repository histories in desktop and phone Changes views, including commits with identical parent SHAs. An amendment shall replace only a commit in its own repository scope. Both histories shall remain available without a page reload or linked pull request.
+
+Live commit identity is defined by the [multi-branch live commit design](../system-design/multi-branch-live-commits.md).
 
 ## Migrated source detail
 

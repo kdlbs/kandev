@@ -250,7 +250,7 @@ func (i *LegacyImporter) prepareDefinitions(
 		} else if err != nil && !errors.Is(err, ErrMCPServerDefinitionNotFound) {
 			return nil, err
 		}
-		definition, err := newDefinition(input)
+		definition, err := newDefinition(input, true)
 		if err != nil {
 			return nil, err
 		}
@@ -275,7 +275,7 @@ func (i *LegacyImporter) persistDefinitions(ctx context.Context, workspaceID str
 		if err != nil && !errors.Is(err, ErrMCPServerDefinitionNotFound) {
 			return err
 		}
-		if _, err := i.catalog.Create(ctx, input); err != nil {
+		if _, err := i.catalog.createDefinition(ctx, input, true); err != nil {
 			if errors.Is(err, ErrMCPRuntimeNameConflict) {
 				if existing, getErr := i.catalog.Get(ctx, workspaceID, input.ID); getErr == nil && existing != nil {
 					continue

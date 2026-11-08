@@ -355,7 +355,7 @@ describe("ClarificationCustomInput rune limit", () => {
     const { getByTestId } = render(
       <ClarificationCustomInput {...makeProps({ draft: overLimitDraft })} />,
     );
-    expect(getByTestId(ROW_TESTID).className).toContain("flex-wrap");
+    expect(getByTestId(ROW_TESTID).className).toContain("flex-nowrap");
     expect(getByTestId(INPUT_TESTID).className).toContain("min-w-0");
     expect(getByTestId("clarification-input-rune-counter").parentElement?.className).toContain(
       "w-full",
@@ -367,5 +367,54 @@ describe("ClarificationCustomInput rune limit", () => {
       <ClarificationCustomInput {...makeProps({ draft: "short answer" })} />,
     );
     expect(queryByTestId("clarification-input-rune-counter")).toBeNull();
+  });
+});
+
+describe("ClarificationCustomInput clipboard images", () => {
+  function clipboard(files: File[], text = "", items: Array<{ kind: string; type: string }> = []) {
+    return {
+      files,
+      items,
+      getData: (type: string) => (type === "text/plain" ? text : ""),
+    };
+  }
+
+  it("attaches readable image files without inserting clipboard text", () => {
+    const onPasteFiles = vi.fn();
+    const { getByTestId } = renderInPanel({ onPasteFiles });
+    const image = new File([new Uint8Array([1])], "pasted.png", { type: "image/png" });
+
+    const notPrevented = fireEvent.paste(getByTestId(INPUT_TESTID), {
+      clipboardData: clipboard([image]),
+    });
+
+    expect(onPasteFiles).toHaveBeenCalledWith([image], undefined);
+    expect(notPrevented).toBe(false);
+  });
+
+  it("keeps native text insertion when the clipboard also contains text", () => {
+    const onPasteFiles = vi.fn();
+    const { getByTestId } = renderInPanel({ onPasteFiles });
+    const image = new File([new Uint8Array([1])], "pasted.png", { type: "image/png" });
+
+    const notPrevented = fireEvent.paste(getByTestId(INPUT_TESTID), {
+      clipboardData: clipboard([image], "caption text"),
+    });
+
+    expect(onPasteFiles).toHaveBeenCalledWith([image], undefined);
+    expect(notPrevented).toBe(true);
+  });
+
+  it("reports unreadable image content without touching the draft", () => {
+    const onPasteFiles = vi.fn();
+    const onChange = vi.fn();
+    const { getByTestId } = renderInPanel({ onPasteFiles, onChange });
+
+    fireEvent.paste(getByTestId(INPUT_TESTID), {
+      clipboardData: clipboard([], "", [{ kind: "string", type: "image/png" }]),
+    });
+
+    expect(onPasteFiles).toHaveBeenCalledWith([], "unreadable-image");
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

@@ -628,7 +628,7 @@ jobs:
           KANDEV_GITLAB_HOST: https://gitlab.ambient-ci.invalid
           GITLAB_HOST: https://gitlab.ambient-ci.invalid
           GITLAB_TOKEN: glpat-ambient-ci-not-a-real-token
-        run: go test -race ./internal/gitlab/... ./internal/agentctl/server/process/...
+        run: go test -race -timeout 25m ./internal/gitlab/... ./internal/agentctl/server/process/...
 
       - name: Run GitHub-facing package under a poisoned ambient environment
         env:

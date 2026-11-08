@@ -116,7 +116,7 @@ test.describe("Mobile chat model selector", () => {
     const { task } = await seedAndOpenTask(testPage, apiClient, seedData);
     const trigger = testPage
       .getByTestId("mobile-chat-toolbar-left-actions")
-      .getByRole("button", { name: "Session model settings" });
+      .getByTestId("model-config-trigger");
     await expect(trigger).toContainText("Mock Fast");
     await trigger.tap();
     const effort = testPage.getByTestId("config-option-trigger-effort");
@@ -162,7 +162,7 @@ test.describe("Mobile chat model selector", () => {
 
     await expect(leftActions.getByTestId("session-mode-selector")).toBeVisible();
 
-    const trigger = leftActions.getByRole("button", { name: "Session model settings" });
+    const trigger = leftActions.getByTestId("model-config-trigger");
     await expect(trigger).toHaveText("Mock Fast", { timeout: 15_000 });
 
     await expect(trigger.getByTestId("model-provider-icon")).toBeVisible();
@@ -278,7 +278,7 @@ test.describe("Mobile chat model selector", () => {
 
     const trigger = testPage
       .getByTestId("mobile-chat-toolbar-left-actions")
-      .getByRole("button", { name: "Session model settings" });
+      .getByTestId("model-config-trigger");
     await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
 
     const seeded = await seedStaleRuntimeConfigWithoutSettlement(testPage, sessionId);

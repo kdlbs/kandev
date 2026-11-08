@@ -1,6 +1,6 @@
 ---
 created: 2026-10-15
-status: done
+status: in_progress
 requirements:
   - REQ-EXECUTORS-OWNERSHIP-001
   - REQ-EXECUTORS-OWNERSHIP-002
@@ -13,6 +13,9 @@ legacy_specs: []
 ---
 
 # Implementation plan: Per-user executor ownership
+
+The retained `local` admission compatibility follow-up is recorded in
+[task 06](task-06-retained-local-alias.md).
 
 ## Overview
 
@@ -195,6 +198,7 @@ work order, and record exact results there after implementation.
 - [x] [Task 03: Guard interactive compute admission](task-03-interactive-admission.md)
 - [x] [Task 04: Attribute autonomous execution](task-04-autonomous-attribution.md)
 - [x] [Task 05: Complete ownership UI and documentation](task-05-ownership-ui.md)
+- [ ] [Task 06: Resolve retained local executor aliases](task-06-retained-local-alias.md). Permanent regression coverage is present; execution remains pending.
 
 ## Verification results
 

@@ -76,12 +76,12 @@ export async function searchWorkspaceFiles(
   sessionId: string,
   query: string,
   limit: number = 20,
+  signal?: AbortSignal,
 ): Promise<FileSearchResponse> {
-  return client.request<FileSearchResponse>("workspace.files.search", {
-    session_id: sessionId,
-    query,
-    limit,
-  });
+  const payload = { session_id: sessionId, query, limit };
+  return signal
+    ? client.request<FileSearchResponse>("workspace.files.search", payload, undefined, signal)
+    : client.request<FileSearchResponse>("workspace.files.search", payload);
 }
 
 /** Search text content across every repository in the active task workspace. */

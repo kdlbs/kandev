@@ -23,6 +23,12 @@ import {
   type AnswerDraftAuth,
   type RetainedAnswerDraft,
 } from "@/lib/clarification/answer-draft-cache";
+import {
+  emptyClarificationPanelSizes,
+  isEmptyClarificationPanelSizes,
+  type ClarificationPanelSize,
+  type ClarificationPanelSizes,
+} from "@/hooks/use-resizable-clarification-overlay";
 
 export type ClarificationDraftQuestion = {
   id: string;
@@ -37,11 +43,10 @@ export type ClarificationDraftOptions = {
   mode?: "active" | "late";
 };
 
-type ClarificationPanelSize = { desktop: number | null; phone: number | null };
-const EMPTY_PANEL_SIZE: ClarificationPanelSize = { desktop: null, phone: null };
+type ClarificationPanelSizeCache = Map<string, ClarificationPanelSizes>;
 const MAX_CACHED_CLARIFICATION_SIZES = 8;
 const EMPTY_AUTH: AnswerDraftAuth = { mode: "disabled", authenticated: true, user: null };
-const ResizeContext = createContext<Map<string, ClarificationPanelSize> | null>(null);
+const ResizeContext = createContext<ClarificationPanelSizeCache | null>(null);
 const DraftContext = createContext<DraftContextValue | null>(null);
 
 type DraftContextValue = {
@@ -67,10 +72,10 @@ export function ClarificationDraftProvider({
   const auth = useOptionalAppStore((state) => state.auth, EMPTY_AUTH);
   const [sizes, setSizes] = useState(() => ({
     taskId,
-    cache: new Map<string, ClarificationPanelSize>(),
+    cache: new Map<string, ClarificationPanelSizes>(),
   }));
   if (sizes.taskId !== taskId) {
-    setSizes({ taskId, cache: new Map<string, ClarificationPanelSize>() });
+    setSizes({ taskId, cache: new Map<string, ClarificationPanelSizes>() });
   }
   const owner = store ?? pageOwner;
   const generation = store ? answerDraftGeneration(store) : 0;
@@ -88,33 +93,33 @@ export function ClarificationDraftProvider({
 
 export function useClarificationResizeState(bundleKey: string | null) {
   const cache = useContext(ResizeContext);
-  const [sizes, setSizes] = useState<ClarificationPanelSize>(
-    () => (bundleKey ? cache?.get(bundleKey) : undefined) ?? EMPTY_PANEL_SIZE,
+  const [sizes, setSizes] = useState<ClarificationPanelSizes>(
+    () => (bundleKey ? cache?.get(bundleKey) : undefined) ?? emptyClarificationPanelSizes(),
   );
   const lastBundleKey = useRef(bundleKey);
 
   useLayoutEffect(() => {
     if (lastBundleKey.current !== bundleKey) {
       lastBundleKey.current = bundleKey;
-      setSizes((bundleKey ? cache?.get(bundleKey) : undefined) ?? EMPTY_PANEL_SIZE);
+      setSizes((bundleKey ? cache?.get(bundleKey) : undefined) ?? emptyClarificationPanelSizes());
       return;
     }
     if (!cache || !bundleKey) return;
     cache.delete(bundleKey);
-    if (sizes.desktop === null && sizes.phone === null) return;
+    if (isEmptyClarificationPanelSizes(sizes)) return;
     cache.set(bundleKey, sizes);
     while (cache.size > MAX_CACHED_CLARIFICATION_SIZES) {
       cache.delete(cache.keys().next().value!);
     }
   }, [bundleKey, cache, sizes]);
 
-  const setDesktopHeight: Dispatch<SetStateAction<number | null>> = useCallback((value) => {
+  const setDesktopSize: Dispatch<SetStateAction<ClarificationPanelSize>> = useCallback((value) => {
     setSizes((current) => ({
       ...current,
       desktop: typeof value === "function" ? value(current.desktop) : value,
     }));
   }, []);
-  const setPhoneHeight: Dispatch<SetStateAction<number | null>> = useCallback((value) => {
+  const setPhoneSize: Dispatch<SetStateAction<ClarificationPanelSize>> = useCallback((value) => {
     setSizes((current) => ({
       ...current,
       phone: typeof value === "function" ? value(current.phone) : value,
@@ -122,10 +127,10 @@ export function useClarificationResizeState(bundleKey: string | null) {
   }, []);
 
   return {
-    desktopHeight: sizes.desktop,
-    phoneHeight: sizes.phone,
-    setDesktopHeight,
-    setPhoneHeight,
+    desktop: sizes.desktop,
+    phone: sizes.phone,
+    setDesktopSize,
+    setPhoneSize,
   };
 }
 

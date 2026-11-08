@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,14 +26,15 @@ const agentToolOutcomeSuccess = "success"
 const agentToolOutcomeToolError = "tool_error"
 
 type AgentToolInvocationContext struct {
-	InvocationID                string
-	TaskID                      string
-	SessionID                   string
-	WorkspaceID                 string
-	Surface                     string
-	ExecutionID                 string
-	ManagedToolPolicy           *mcpprofile.ManagedToolPolicy
-	AutomationToolAuthorization *plugintools.AutomationAuthorization
+	InvocationID                 string
+	TaskID                       string
+	SessionID                    string
+	WorkspaceID                  string
+	Surface                      string
+	ExecutionID                  string
+	ManagedToolPolicy            *mcpprofile.ManagedToolPolicy
+	AutomationToolAuthorization  *plugintools.AutomationAuthorization
+	CoordinatorToolAuthorization *plugintools.CoordinatorToolAuthorization
 }
 
 // AgentToolCatalog returns the current tool snapshot of active plugins whose
@@ -164,6 +166,9 @@ func buildAgentToolDefinitions(records []*store.Record) ([]plugintools.Definitio
 				ExposedName:       exposed,
 				Description:       tool.Description,
 				Surfaces:          append([]string(nil), tool.Surfaces...),
+				InvocationScope:   tool.NormalizedInvocationScope(),
+				InstallationID:    record.InstallationID,
+				PolicyVersion:     record.AgentToolPolicyVersion,
 				InputSchema:       input,
 				OutputSchema:      output,
 				ReadOnlyHint:      boolValue(tool.Annotations.ReadOnlyHint, false),
@@ -205,12 +210,79 @@ func boolValue(value *bool, fallback bool) bool {
 	return *value
 }
 
+// CoordinatorPluginBindings returns the exact instance-read references a new
+// phase-2 coordinator conversation may bind. Only active, configured plugins
+// that explicitly declare the coordinator surface are eligible.
+func (s *Service) CoordinatorPluginBindings() ([]mcpprofile.CoordinatorPluginTool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	records := s.configReadyAgentToolRecords()
+	references := make([]mcpprofile.CoordinatorPluginTool, 0)
+	for _, record := range records {
+		for _, tool := range record.AgentTools {
+			if !tool.IsInstanceRead() || !containsString(tool.Surfaces, manifest.AgentToolSurfaceCoordinator) {
+				continue
+			}
+			if record.InstallationID == "" || record.AgentToolPolicyVersion == "" {
+				continue
+			}
+			references = append(references, mcpprofile.CoordinatorPluginTool{
+				PluginID:       record.ID,
+				LocalName:      tool.Name,
+				InstallationID: record.InstallationID,
+				PolicyVersion:  record.AgentToolPolicyVersion,
+			})
+		}
+	}
+	sort.Slice(references, func(i, j int) bool {
+		if references[i].PluginID == references[j].PluginID {
+			return references[i].LocalName < references[j].LocalName
+		}
+		return references[i].PluginID < references[j].PluginID
+	})
+	return references, nil
+}
+
+// ValidateCoordinatorPluginTool revalidates one bound reference against the
+// live installation, policy version, declaration, and required config before
+// a coordinator invocation or discovery snapshot is allowed.
+func (s *Service) ValidateCoordinatorPluginTool(pluginID, localName, installationID, policyVersion string) error {
+	record, err := s.Get(pluginID)
+	if err != nil {
+		return fmt.Errorf("plugins: coordinator plugin tool installation is unavailable")
+	}
+	if record.Status != StatusActive {
+		return fmt.Errorf("plugins: coordinator plugin tool installation is not active")
+	}
+	if !s.requiredConfigSet(record) {
+		return fmt.Errorf("plugins: coordinator plugin tool installation is not configured")
+	}
+	if record.InstallationID != installationID || record.AgentToolPolicyVersion != policyVersion {
+		return fmt.Errorf("plugins: coordinator plugin tool installation or policy version is stale")
+	}
+	declaration, err := findAgentTool(record.AgentTools, localName, manifest.AgentToolSurfaceCoordinator)
+	if err != nil {
+		return err
+	}
+	if !declaration.IsInstanceRead() {
+		return fmt.Errorf("plugins: coordinator plugin tool is not an instance read")
+	}
+	return nil
+}
+
 // InvokeAgentTool validates the declaration and arguments, then forwards one
 // bounded call to the plugin's gRPC subprocess. It deliberately does not
 // retry because tools may have side effects.
 func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName string, arguments map[string]any, invocation AgentToolInvocationContext) (result *pluginsdk.AgentToolResult, err error) {
+	if invocation.Surface != "" && !supportedAgentToolSurface(invocation.Surface) {
+		return nil, fmt.Errorf("plugins: agent tool surface %q is unsupported", invocation.Surface)
+	}
 	if invocation.ManagedToolPolicy != nil || invocation.Surface == manifest.AgentToolSurfaceManaged {
 		return s.invokeManagedAgentTool(ctx, pluginID, localName, arguments, invocation)
+	}
+	if invocation.CoordinatorToolAuthorization != nil || invocation.Surface == manifest.AgentToolSurfaceCoordinator {
+		return s.invokeCoordinatorAgentTool(ctx, pluginID, localName, arguments, invocation)
 	}
 	if invocation.AutomationToolAuthorization != nil || invocation.Surface == manifest.AgentToolSurfaceAutomation {
 		return s.invokeAutomationAgentTool(ctx, pluginID, localName, arguments, invocation)
@@ -241,14 +313,91 @@ func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName strin
 		if record.Status != StatusActive {
 			return fmt.Errorf("plugins: plugin %q is not active", pluginID)
 		}
+		if !s.requiredConfigSet(record) {
+			return fmt.Errorf("plugins: plugin %q configuration is not ready", pluginID)
+		}
 		return nil
 	})
 }
 
+// invokeCoordinatorAgentTool dispatches one exact instance-read reference and
+// rechecks the pinned installation and policy version against the record inside
+// the same dispatch lease as the RPC, closing the handler-to-dispatch gap.
+func (s *Service) invokeCoordinatorAgentTool(
+	ctx context.Context,
+	pluginID, localName string,
+	arguments map[string]any,
+	invocation AgentToolInvocationContext,
+) (result *pluginsdk.AgentToolResult, err error) {
+	authorization := invocation.CoordinatorToolAuthorization
+	started := time.Now()
+	defer func() {
+		if s.log == nil {
+			return
+		}
+		outcome := agentToolOutcomeSuccess
+		if err != nil {
+			outcome = agentToolOutcomeError
+		} else if result != nil && result.IsError {
+			outcome = agentToolOutcomeToolError
+		}
+		s.log.Info("coordinator plugin agent tool invocation",
+			zap.String("invocation_id", invocation.InvocationID),
+			zap.String("plugin_id", pluginID),
+			zap.String("local_name", localName),
+			zap.String("coordinator_id", coordinatorID(authorization)),
+			zap.String("workspace_id", invocation.WorkspaceID),
+			zap.String("task_id", invocation.TaskID),
+			zap.String("session_id", invocation.SessionID),
+			zap.Duration("duration", time.Since(started)),
+			zap.String("outcome", outcome))
+	}()
+	if err := validateCoordinatorInvocation(authorization, invocation, pluginID, localName); err != nil {
+		return nil, err
+	}
+	return s.invokeDeclaredAgentTool(ctx, pluginID, localName, arguments, invocation, manifest.AgentToolSurfaceCoordinator, func(record *store.Record) error {
+		if record.Status != StatusActive {
+			return fmt.Errorf("plugins: coordinator plugin tool installation is not active")
+		}
+		if record.InstallationID != authorization.InstallationID ||
+			record.AgentToolPolicyVersion != authorization.PolicyVersion {
+			return fmt.Errorf("plugins: coordinator plugin tool installation or policy version is stale")
+		}
+		if !s.requiredConfigSet(record) {
+			return fmt.Errorf("plugins: coordinator plugin tool installation is not configured")
+		}
+		return nil
+	})
+}
+
+func validateCoordinatorInvocation(
+	authorization *plugintools.CoordinatorToolAuthorization,
+	invocation AgentToolInvocationContext,
+	pluginID, localName string,
+) error {
+	if invocation.Surface != manifest.AgentToolSurfaceCoordinator || authorization == nil ||
+		authorization.Validate() != nil ||
+		authorization.WorkspaceID != invocation.WorkspaceID ||
+		authorization.ConversationTaskID != invocation.TaskID ||
+		authorization.PluginID != pluginID || authorization.LocalName != localName ||
+		invocation.TaskID == "" || invocation.SessionID == "" || invocation.WorkspaceID == "" ||
+		invocation.InvocationID == "" {
+		return fmt.Errorf("plugins: coordinator agent tool authorization denied the invocation")
+	}
+	return nil
+}
+
+func coordinatorID(authorization *plugintools.CoordinatorToolAuthorization) string {
+	if authorization == nil {
+		return ""
+	}
+	return authorization.CoordinatorID
+}
+
 // invokeDeclaredAgentTool owns the shared dispatch lease and bounded call for
-// the ordinary and automation surfaces. The caller supplies the surface-
-// specific record checks; argument validation, remote dispatch, and result
-// validation stay in one place.
+// the ordinary, automation, and coordinator surfaces. The caller supplies the
+// surface-specific record checks; argument validation, remote dispatch, and
+// result validation stay in one place.
 func (s *Service) invokeDeclaredAgentTool(
 	ctx context.Context,
 	pluginID, localName string,
@@ -258,8 +407,11 @@ func (s *Service) invokeDeclaredAgentTool(
 	validateRecord func(*store.Record) error,
 ) (*pluginsdk.AgentToolResult, error) {
 	dispatchLock := s.dispatchLocks.lockFor(pluginID)
-	dispatchLock.RLock()
-	defer dispatchLock.RUnlock()
+	release, err := dispatchLock.RLockContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	record, err := s.Get(pluginID)
 	if err != nil {
@@ -270,6 +422,9 @@ func (s *Service) invokeDeclaredAgentTool(
 	}
 	declaration, err := findAgentTool(record.AgentTools, localName, surface)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateDispatchSurfaceDeclaration(*declaration, invocation); err != nil {
 		return nil, err
 	}
 	arguments, err = validateAgentToolArguments(pluginID, localName, declaration, arguments)
@@ -411,6 +566,56 @@ func findAgentTool(tools []manifest.AgentTool, localName, surface string) (*mani
 	return nil, fmt.Errorf("plugins: agent tool %q is not declared", localName)
 }
 
+// validateDispatchSurfaceDeclaration re-checks the eligibility that manifest
+// validation promises for context-bound surfaces at dispatch time. The caller
+// owns the workspace authorization decision; this gate only requires the
+// invocation context to match the descriptor scope.
+func validateDispatchSurfaceDeclaration(tool manifest.AgentTool, invocation AgentToolInvocationContext) error {
+	switch invocation.Surface {
+	case manifest.AgentToolSurfaceCoordinator:
+		return validateCoordinatorDispatchDeclaration(tool)
+	case manifest.AgentToolSurfaceExternal:
+		return validateExternalDispatchDeclaration(tool, invocation.WorkspaceID)
+	default:
+		return nil
+	}
+}
+
+func validateCoordinatorDispatchDeclaration(tool manifest.AgentTool) error {
+	if tool.NormalizedInvocationScope() != manifest.AgentToolInvocationScopeInstance {
+		return fmt.Errorf("plugins: agent tool %q requires instance invocation scope on surface %q",
+			tool.Name, manifest.AgentToolSurfaceCoordinator)
+	}
+	if tool.Annotations.ReadOnlyHint == nil || !*tool.Annotations.ReadOnlyHint {
+		return fmt.Errorf("plugins: agent tool %q requires a true read-only hint on surface %q",
+			tool.Name, manifest.AgentToolSurfaceCoordinator)
+	}
+	return nil
+}
+
+func validateExternalDispatchDeclaration(tool manifest.AgentTool, workspaceID string) error {
+	switch tool.NormalizedInvocationScope() {
+	case manifest.AgentToolInvocationScopeInstance:
+		if workspaceID != "" {
+			return fmt.Errorf("plugins: agent tool %q does not accept a workspace on surface %q",
+				tool.Name, manifest.AgentToolSurfaceExternal)
+		}
+	case manifest.AgentToolInvocationScopeWorkspace:
+		if workspaceID == "" {
+			return fmt.Errorf("plugins: agent tool %q requires a verified workspace on surface %q",
+				tool.Name, manifest.AgentToolSurfaceExternal)
+		}
+	default:
+		return fmt.Errorf("plugins: agent tool %q requires instance or workspace invocation scope on surface %q",
+			tool.Name, manifest.AgentToolSurfaceExternal)
+	}
+	if tool.Annotations.ReadOnlyHint == nil || !*tool.Annotations.ReadOnlyHint {
+		return fmt.Errorf("plugins: agent tool %q requires a true read-only hint on surface %q",
+			tool.Name, manifest.AgentToolSurfaceExternal)
+	}
+	return nil
+}
+
 func validateAgentToolArguments(pluginID, localName string, declaration *manifest.AgentTool, arguments map[string]any) (map[string]any, error) {
 	if arguments == nil {
 		arguments = map[string]any{}
@@ -445,6 +650,9 @@ func invokeRemoteAgentTool(ctx context.Context, remote interface {
 	if authorization := invocation.AutomationToolAuthorization; authorization != nil {
 		toolContext.InstallationID = authorization.InstallationID
 		toolContext.AgentToolNames = append([]string(nil), authorization.ToolNames...)
+	}
+	if authorization := invocation.CoordinatorToolAuthorization; authorization != nil {
+		toolContext.InstallationID = authorization.InstallationID
 	}
 	return remote.InvokeAgentTool(callCtx, &pluginsdk.AgentToolRequest{
 		InvocationID: invocation.InvocationID,
@@ -493,4 +701,15 @@ func containsString(values []string, wanted string) bool {
 		}
 	}
 	return false
+}
+
+func supportedAgentToolSurface(surface string) bool {
+	switch surface {
+	case manifest.AgentToolSurfaceKanban, manifest.AgentToolSurfaceOffice,
+		manifest.AgentToolSurfaceManaged, manifest.AgentToolSurfaceAutomation,
+		manifest.AgentToolSurfaceCoordinator, manifest.AgentToolSurfaceExternal:
+		return true
+	default:
+		return false
+	}
 }

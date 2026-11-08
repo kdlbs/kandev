@@ -51,6 +51,7 @@ import { useSyncTodoPanel } from "./dockview-todo-panel-sync";
 import {
   useCompactDockviewDefault,
   useDockviewUnmountCleanup,
+  useOwnedDockviewSessionId,
 } from "./dockview-desktop-layout-hooks";
 import { renderPanel } from "./dockview-panel-content";
 import { PreviewController } from "./preview-controller";
@@ -304,6 +305,7 @@ export function useEnvSwitchCleanup(
 // ---------------------------------------------------------------------------
 
 type DockviewDesktopLayoutProps = {
+  taskId?: string | null;
   workspaceId: string | null;
   workflowId: string | null;
   sessionId?: string | null;
@@ -441,6 +443,7 @@ function useDockviewSidebarSizeSync(
 }
 
 export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
+  taskId = null,
   workspaceId,
   sessionId,
   repository,
@@ -456,8 +459,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   const ownedApiRef = useRef<DockviewReadyEvent["api"] | null>(null);
   const appStore = useAppStoreApi();
 
-  const effectiveSessionId =
-    useAppStore((state) => state.tasks.activeSessionId) ?? sessionId ?? null;
+  const effectiveSessionId = useOwnedDockviewSessionId(taskId, sessionId);
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const effectiveEnvId = useAppStore((state) =>
     effectiveSessionId ? (state.environmentIdBySessionId[effectiveSessionId] ?? null) : null,

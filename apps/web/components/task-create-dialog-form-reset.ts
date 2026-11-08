@@ -1,3 +1,4 @@
+import type { BuiltinMCPCreateDraft } from "@/lib/types/builtin-mcp";
 import type { InitialWorkspaceLayout, LocalRepository, TaskPriority } from "@/lib/types/http";
 import type {
   StepType,
@@ -34,6 +35,7 @@ export type FormResetters = {
   setCurrentLocalBranch: (value: string) => void;
   setBlockedBy: (value: string[]) => void;
   setMcpServerIds: (value: string[]) => void;
+  setBuiltinMCPPreferences: (value: BuiltinMCPCreateDraft | undefined) => void;
   setMcpServerIdsDirty: (value: boolean) => void;
 };
 

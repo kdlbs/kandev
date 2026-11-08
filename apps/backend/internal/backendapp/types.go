@@ -141,6 +141,9 @@ type Services struct {
 	// registry, event delivery, health monitoring). Always constructed
 	// (non-nil) when initialization succeeds.
 	Plugins *plugins.Service
+	// PluginToolCatalog fans lifecycle catalog changes out to agentctl
+	// executions and in-process MCP servers. Nil until main starts plugins.
+	PluginToolCatalog *pluginToolCatalogFanout
 	// AgentConversations is the managed workspace agent conversation
 	// service behind the agent_conversation Host capability. Nil when the
 	// plugins service itself is unavailable.

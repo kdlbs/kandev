@@ -287,10 +287,10 @@ func run(cfg *config.Config, log *logger.Logger) {
 	}()
 
 	// Monitor parent liveness via inherited pipe (standalone mode only).
-	// Returns a channel that closes when the parent dies.
+	// Returns a channel that closes when the parent-liveness pipe closes.
 	parentDied := monitorParentLiveness(log)
 
-	// Wait for shutdown signal (OS signal, parent death, or an authenticated
+	// Wait for shutdown signal (OS signal, parent-liveness closure, or an authenticated
 	// ownership-shutdown operation from an adopting/owning backend).
 	waitForShutdown(log, parentDied, controlServer.ShutdownRequested(), func(ctx context.Context) {
 		// Flush pending traces before stopping instances
@@ -310,8 +310,8 @@ func run(cfg *config.Config, log *logger.Logger) {
 	})
 }
 
-// waitForShutdown waits for a shutdown trigger (OS signal, parent death, or
-// an ownership-shutdown operation) and runs the cleanup function. parentDied
+// waitForShutdown waits for a shutdown trigger (OS signal, parent-liveness
+// closure, or an ownership-shutdown operation) and runs the cleanup function. parentDied
 // may be nil when no parent monitor is active. ownershipShutdown may be nil
 // in tests that don't exercise a control server.
 func waitForShutdown(log *logger.Logger, parentDied <-chan struct{}, ownershipShutdown <-chan struct{}, cleanup func(ctx context.Context)) {
@@ -325,7 +325,7 @@ func waitForShutdown(log *logger.Logger, parentDied <-chan struct{}, ownershipSh
 	case sig := <-sigCh:
 		log.Info("received signal", zap.String("signal", sig.String()))
 	case <-parentDied:
-		log.Warn("parent process died, initiating shutdown")
+		log.Warn("parent liveness pipe closed, initiating shutdown")
 	case <-ownershipShutdown:
 		log.Warn("ownership-shutdown operation invoked, initiating shutdown")
 	}
@@ -343,8 +343,8 @@ func waitForShutdown(log *logger.Logger, parentDied <-chan struct{}, ownershipSh
 // monitorParentLiveness watches a pipe inherited from the parent process.
 // The parent (kandev backend) passes the read-end of a pipe via ExtraFiles
 // and sets KANDEV_PARENT_PIPE_FD to the FD number. A goroutine blocks on
-// reading the pipe. When the parent dies — even via SIGKILL — the kernel
-// closes the write-end, the read returns, and the returned channel is closed.
+// reading the pipe. When the writer closes, including from an abrupt parent
+// exit, the read returns and the returned channel is closed.
 // Returns nil when the env var is absent (Docker, manual start, remote executors).
 func monitorParentLiveness(log *logger.Logger) <-chan struct{} {
 	fdStr := os.Getenv("KANDEV_PARENT_PIPE_FD")

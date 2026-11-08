@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"net/url"
 	"strings"
 	"time"
@@ -98,10 +99,14 @@ func (s *CatalogService) Get(ctx context.Context, workspaceID, id string) (*MCPS
 }
 
 func (s *CatalogService) Create(ctx context.Context, input CreateDefinitionInput) (*MCPServerDefinition, error) {
+	return s.createDefinition(ctx, input, false)
+}
+
+func (s *CatalogService) createDefinition(ctx context.Context, input CreateDefinitionInput, preserveLegacyCollision bool) (*MCPServerDefinition, error) {
 	if err := s.authorize(ctx, input.WorkspaceID); err != nil {
 		return nil, err
 	}
-	definition, err := newDefinition(input)
+	definition, err := newDefinition(input, preserveLegacyCollision)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +131,7 @@ func (s *CatalogService) Update(ctx context.Context, input UpdateDefinitionInput
 		return nil, revisionConflict(current)
 	}
 	candidate := applyDefinitionUpdate(current, input)
-	if err := validateDefinition(candidate); err != nil {
+	if err := validateDefinition(candidate, false); err != nil {
 		return nil, err
 	}
 	if err := s.ensureRuntimeNameAvailable(ctx, candidate.WorkspaceID, candidate.NormalizedRuntimeName, candidate.ID); err != nil {
@@ -198,7 +203,7 @@ func (s *CatalogService) ensureRuntimeNameAvailable(ctx context.Context, workspa
 	return nil
 }
 
-func newDefinition(input CreateDefinitionInput) (*MCPServerDefinition, error) {
+func newDefinition(input CreateDefinitionInput, preserveLegacyCollision bool) (*MCPServerDefinition, error) {
 	runtimeName := strings.TrimSpace(input.RuntimeName)
 	normalized := normalizeRuntimeName(runtimeName)
 	enabled := true
@@ -231,7 +236,7 @@ func newDefinition(input CreateDefinitionInput) (*MCPServerDefinition, error) {
 	if definition.ID == "" {
 		definition.ID = uuid.New().String()
 	}
-	if err := validateDefinition(definition); err != nil {
+	if err := validateDefinition(definition, preserveLegacyCollision); err != nil {
 		return nil, err
 	}
 	return definition, nil
@@ -275,11 +280,11 @@ func applyDefinitionUpdate(current *MCPServerDefinition, input UpdateDefinitionI
 	return updated
 }
 
-func validateDefinition(definition *MCPServerDefinition) error {
+func validateDefinition(definition *MCPServerDefinition, preserveLegacyCollision bool) error {
 	if definition == nil || strings.TrimSpace(definition.WorkspaceID) == "" || definition.ID == "" {
 		return ErrMCPInvalidDefinition
 	}
-	if err := validateNames(definition); err != nil {
+	if err := validateNames(definition, preserveLegacyCollision); err != nil {
 		return err
 	}
 	if err := validateTransport(definition); err != nil {
@@ -291,7 +296,7 @@ func validateDefinition(definition *MCPServerDefinition) error {
 	return validateSecretBindings(definition.SecretBindings)
 }
 
-func validateNames(definition *MCPServerDefinition) error {
+func validateNames(definition *MCPServerDefinition, preserveLegacyCollision bool) error {
 	if definition.RuntimeName == "" || len([]rune(definition.RuntimeName)) > 128 {
 		return fmt.Errorf("%w: runtime name is required and must be at most 128 characters", ErrMCPInvalidDefinition)
 	}
@@ -299,6 +304,9 @@ func validateNames(definition *MCPServerDefinition) error {
 		return fmt.Errorf("%w: runtime name must not contain whitespace", ErrMCPInvalidDefinition)
 	}
 	if definition.NormalizedRuntimeName == codexKandevServerName || strings.HasPrefix(definition.NormalizedRuntimeName, codexKandevServerName+".") {
+		return ErrMCPRuntimeNameReserved
+	}
+	if !preserveLegacyCollision && mcpprofile.ReservedBuiltinRuntimeName(definition.RuntimeName) {
 		return ErrMCPRuntimeNameReserved
 	}
 	if definition.DisplayName == "" || len([]rune(definition.DisplayName)) > 200 {

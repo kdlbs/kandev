@@ -518,6 +518,7 @@ func configOptionsFromProbe(options []agentctlutil.ProbeConfigOption) []ConfigOp
 			CurrentValue: option.CurrentValue,
 			Category:     option.Category,
 			Options:      choices,
+			Catalog:      option.Catalog,
 		})
 	}
 	return out

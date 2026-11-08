@@ -738,6 +738,8 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 		AdditionalSkillSlugs: additionalSkillSlugs,
 		EntryOptions:         entryOptions,
 		WorkflowEntryID:      int64Field(payload, "workflow_entry_id"),
+		// Older records carry no policy key; its absent value stays false.
+		PreserveWorkflowSourceBinding: boolField(payload, "preserve_workflow_source_binding"),
 		// Origin must round-trip rather than be re-derived from auto_start:
 		// an AC-13d caller (Office-routed launch) passes autoStart=false with
 		// an explicit automatic Origin override, and re-deriving from

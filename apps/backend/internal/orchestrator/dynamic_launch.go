@@ -116,7 +116,16 @@ func (d *dynamicTaskDownstream) Launch(
 		}
 	}
 	d.service.flushPendingDynamicStreakReset(ctx, d.sessionID, nil)
-	d.service.beginDynamicAttempt(d.sessionID)
+	startupEvidence := d.service.beginDynamicAttempt(d.sessionID)
+	previousAdmission := options.OnExecutionAdmitted
+	options.OnExecutionAdmitted = func(executionID string) {
+		if startupEvidence != nil {
+			d.service.bindDynamicAttemptExecution(d.sessionID, executionID, startupEvidence)
+		}
+		if previousAdmission != nil {
+			previousAdmission(executionID)
+		}
+	}
 	taskID := ""
 	if d.task != nil {
 		taskID = d.task.ID
@@ -132,8 +141,11 @@ func (d *dynamicTaskDownstream) Launch(
 	if err != nil {
 		return dynamicruntime.DownstreamExecution{}, classifyDynamicLaunchFailure(err, launch.ExecutionProfileID)
 	}
-	d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID)
-	d.service.bindPromptAttemptToExecution(dispatchCtx, d.sessionID, execution.AgentExecutionID)
+	if startupEvidence != nil {
+		d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID, startupEvidence)
+		generation := d.service.promptGenerationForSession(dispatchCtx, d.sessionID)
+		d.service.bindPromptAttemptIfCurrent(d.sessionID, execution.AgentExecutionID, generation, startupEvidence)
+	}
 	d.execution = execution
 	acpSessionID := ""
 	if session, sessionErr := d.service.repo.GetTaskSession(ctx, d.sessionID); sessionErr == nil && session != nil {
@@ -986,6 +998,10 @@ func (s *Service) prepareDynamicFailureEvidence(
 	if unclassified {
 		return s.prepareUnclassifiedFailureEvidence(ctx, data, session, classified, startupEvidence)
 	}
+	if classified != nil && classified.Code == routingerr.CodeModelUnavailable &&
+		classified.Phase == routingerr.PhaseSessionInit && startupEvidence != nil {
+		return *startupEvidence, classifiedStartupModelFailureSafe(classified, startupEvidence)
+	}
 	if !s.clearStreakAfterCurrentClassifiedFailure(ctx, data, session) {
 		return dynamicruntime.UnclassifiedFailureEvidence{}, false
 	}
@@ -1233,7 +1249,13 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 	}
 	ctx = withUnclassifiedFallbackLaunchClaim(ctx, claim)
 	ctx = withCancelInFlightGuardHeldForSession(ctx, data.SessionID)
-	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, executionProfileID, launchOriginAutomatic) {
+	// Resume-attempt contexts clear general guard ownership, but this worker
+	// keeps the session guard until its synchronous replacement claim completes.
+	ctx = withExecutionReplacementStopOwnerGuardHeldForSession(ctx, data.SessionID)
+	outcome, launchErr := s.relaunchDynamicTaskAfterFailureOutcomeWithBinding(
+		ctx, data, executionProfileID, launchOriginAutomatic, ceilingEntryBindingFromContext(ctx),
+	)
+	switch outcome {
 	case dynamicRelaunchSucceeded:
 		return
 	case dynamicRelaunchDeferred:
@@ -1259,7 +1281,8 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID),
-		zap.String("execution_profile_id", executionProfileID))
+		zap.String("execution_profile_id", executionProfileID),
+		zap.Error(launchErr))
 	s.settleDetachedDynamicSuccessorFailure(context.WithoutCancel(ctx), data, executionProfileID)
 }
 

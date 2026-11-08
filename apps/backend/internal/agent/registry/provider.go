@@ -62,6 +62,19 @@ func Provide(log *logger.Logger, codexAppServerEnabled ...bool) (*Registry, func
 			}
 			configureMockAgent(reg, agents.CopilotACPAgentID, log)
 		}
+		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
+			strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_DEVIN"), "true") {
+			// Browser coverage needs a disposable Devin settings identity. The
+			// mock ACP peer supplies deterministic modes and capability
+			// snapshots without a native install or account.
+			devin := agents.NewMockAgentWithID(agents.DevinACPAgentID, "Devin", "Devin")
+			// Keep the disposable identity out of the default-profile seed.
+			devin.SetDisplayOrder(1001)
+			if err := reg.Register(devin); err != nil {
+				return nil, nil, err
+			}
+			configureMockAgent(reg, agents.DevinACPAgentID, log)
+		}
 		configureMockAgent(reg, "mock-agent", log)
 		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
 			strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_AUGGIE"), "true") {

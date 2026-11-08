@@ -12,10 +12,23 @@ import (
 )
 
 const (
-	SurfaceKanban     = "kanban-task"
-	SurfaceOffice     = "office-task"
-	SurfaceManaged    = "managed-conversation"
-	SurfaceAutomation = "automation"
+	SurfaceKanban      = "kanban-task"
+	SurfaceOffice      = "office-task"
+	SurfaceManaged     = "managed-conversation"
+	SurfaceAutomation  = "automation"
+	SurfaceCoordinator = "coordinator"
+	SurfaceExternal    = "external"
+)
+
+const (
+	// InvocationScopeTask is the default scope: the call needs the task
+	// identity bound to its execution.
+	InvocationScopeTask = "task"
+	// InvocationScopeInstance marks a read that does not require task identity.
+	InvocationScopeInstance = "instance"
+	// InvocationScopeWorkspace marks a read that requires a host-verified
+	// workspace on the external surface.
+	InvocationScopeWorkspace = "workspace"
 )
 
 const maxExposedNameLength = 64
@@ -36,6 +49,7 @@ type Selection struct {
 type OptionTool struct {
 	LocalName       string          `json:"local_name"`
 	Description     string          `json:"description"`
+	InvocationScope string          `json:"invocation_scope,omitempty"`
 	InputSchema     json.RawMessage `json:"input_schema"`
 	OutputSchema    json.RawMessage `json:"output_schema,omitempty"`
 	ReadOnlyHint    bool            `json:"read_only_hint"`
@@ -63,6 +77,28 @@ type AutomationAuthorization struct {
 	InstallationID string   `json:"installation_id"`
 	PolicyVersion  string   `json:"policy_version"`
 	ToolNames      []string `json:"tool_names"`
+}
+
+// CoordinatorToolAuthorization is the backend-owned exact reference attached
+// to one coordinator plugin invocation. The plugin service compares it against
+// the actual record inside the same dispatch lease that covers the RPC.
+type CoordinatorToolAuthorization struct {
+	CoordinatorID      string `json:"coordinator_id"`
+	WorkspaceID        string `json:"workspace_id"`
+	ConversationTaskID string `json:"conversation_task_id"`
+	PluginID           string `json:"plugin_id"`
+	LocalName          string `json:"local_name"`
+	InstallationID     string `json:"installation_id"`
+	PolicyVersion      string `json:"policy_version"`
+}
+
+// Validate rejects incomplete coordinator invocation authority.
+func (a CoordinatorToolAuthorization) Validate() error {
+	if a.CoordinatorID == "" || a.WorkspaceID == "" || a.ConversationTaskID == "" ||
+		a.PluginID == "" || a.LocalName == "" || a.InstallationID == "" || a.PolicyVersion == "" {
+		return fmt.Errorf("coordinator plugin tool authorization is incomplete")
+	}
+	return nil
 }
 
 // NormalizeSelection sorts and deduplicates plugin entries and tool names so
@@ -107,9 +143,52 @@ func uniqueSorted(values []string) []string {
 	return out
 }
 
-// ProjectNonAutomation removes automation surface tags from a snapshot so an
-// older retained agentctl that does not know the automation surface can still
-// accept the catalog. Tools declared only for automation are omitted.
+// ProjectLegacySafe removes every surface an older retained agentctl does not
+// know so it can still accept the catalog. Tools declared only for a newer
+// context are omitted; a mixed tool keeps its legacy surfaces.
+//
+// Older agentctl builds also reject an unknown invocation scope and discard the
+// whole catalog. A workspace read dispatches identically to a task read on the
+// surviving task surfaces, so project that scope to task; the plugin service
+// still re-checks the real manifest declaration at dispatch time.
+func ProjectLegacySafe(snapshot Snapshot) Snapshot {
+	projected := Snapshot{Generation: snapshot.Generation, Revision: snapshot.Revision}
+	projected.Tools = make([]Definition, 0, len(snapshot.Tools))
+	for _, definition := range snapshot.Tools {
+		surfaces := slices.DeleteFunc(slices.Clone(definition.Surfaces), func(surface string) bool {
+			return surface == SurfaceAutomation || surface == SurfaceCoordinator || surface == SurfaceExternal
+		})
+		if len(surfaces) == 0 {
+			continue
+		}
+		definition.Surfaces = surfaces
+		if definition.InvocationScope == InvocationScopeWorkspace {
+			definition.InvocationScope = InvocationScopeTask
+		}
+		projected.Tools = append(projected.Tools, definition)
+	}
+	return projected
+}
+
+// ProjectCoordinatorOnly keeps the descriptors a coordinator agentctl can
+// register. A live coordinator execution receives this projection so a catalog
+// refresh replaces its tools immediately; older task executions receive
+// ProjectLegacySafe instead.
+func ProjectCoordinatorOnly(snapshot Snapshot) Snapshot {
+	projected := Snapshot{Generation: snapshot.Generation, Revision: snapshot.Revision}
+	projected.Tools = make([]Definition, 0, len(snapshot.Tools))
+	for _, definition := range snapshot.Tools {
+		if !slices.Contains(definition.Surfaces, SurfaceCoordinator) {
+			continue
+		}
+		definition.Surfaces = []string{SurfaceCoordinator}
+		projected.Tools = append(projected.Tools, definition)
+	}
+	return projected
+}
+
+// ProjectNonAutomation is the earlier legacy projection kept for callers that
+// predate the coordinator and external contexts.
 func ProjectNonAutomation(snapshot Snapshot) Snapshot {
 	projected := Snapshot{Generation: snapshot.Generation, Revision: snapshot.Revision}
 	projected.Tools = make([]Definition, 0, len(snapshot.Tools))
@@ -182,12 +261,27 @@ type Definition struct {
 	ExposedName       string          `json:"exposed_name"`
 	Description       string          `json:"description"`
 	Surfaces          []string        `json:"surfaces"`
+	InvocationScope   string          `json:"invocation_scope,omitempty"`
+	InstallationID    string          `json:"installation_id,omitempty"`
+	PolicyVersion     string          `json:"policy_version,omitempty"`
 	InputSchema       json.RawMessage `json:"input_schema"`
 	OutputSchema      json.RawMessage `json:"output_schema,omitempty"`
 	ReadOnlyHint      bool            `json:"read_only_hint"`
 	DestructiveHint   bool            `json:"destructive_hint"`
 	IdempotentHint    bool            `json:"idempotent_hint"`
 	OpenWorldHint     bool            `json:"open_world_hint"`
+}
+
+// IsInstanceRead reports whether the descriptor is explicitly eligible for the
+// instance-only contexts. The host re-checks this at dispatch.
+func (d Definition) IsInstanceRead() bool {
+	return d.InvocationScope == InvocationScopeInstance && d.ReadOnlyHint
+}
+
+// IsWorkspaceRead reports whether the descriptor is a workspace-scoped read.
+// The host re-checks this at dispatch.
+func (d Definition) IsWorkspaceRead() bool {
+	return d.InvocationScope == InvocationScopeWorkspace && d.ReadOnlyHint
 }
 
 type Snapshot struct {

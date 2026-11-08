@@ -58,7 +58,7 @@ adding a wake reason cannot quietly exempt it from the ceiling.
 - **AC-OFFICE-BUDGET-007.2:** The attended allowlist shall be exactly:
   `task_assigned`, `task_comment`, `task_review_requested`,
   `task_changes_requested`, `task_blockers_resolved`,
-  `task_children_completed`, `approval_resolved`, `routine_dispatch_event`,
+  `handoff_completed`, `task_children_completed`, `approval_resolved`, `routine_dispatch_event`,
   `manual_resume_after_failure`, `task_mentioned`, `task_reopened`,
   `task_reopened_via_comment`, `task_unblocked`, `task_ready_to_close`,
   `stage_pending`, `stage_changes_requested`, and the legacy literals

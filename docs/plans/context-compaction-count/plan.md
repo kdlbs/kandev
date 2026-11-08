@@ -106,3 +106,9 @@ Execution is sequential in the primary conversation because the frontend contrac
 - The database update must compare and increment atomically so duplicate event delivery or multiple backend subscribers cannot double count one observed drop.
 - Reset and model-change paths may clear `context_window`, but must not clear `context_compaction_count`; the next sample after a cleared baseline must not increment.
 - Public session documentation now mentions the inferred count and its approximate nature; no separate reference page is needed for this contextual hover detail.
+
+## Follow-up fix packages
+
+The [Copilot inference correction](../copilot-compaction-inference/plan.md)
+narrows usage-drop eligibility after issue #5089 confirmed mixed parent/child samples.
+This completed package records the original implementation. The follow-up owns the correction and its new verification results.

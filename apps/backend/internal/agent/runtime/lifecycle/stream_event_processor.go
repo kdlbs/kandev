@@ -32,6 +32,7 @@ type streamEventProcessor struct {
 	client            *agentctl.Client
 	delivery          AgentDeliveryRepository
 	startupGeneration uint64
+	attempt           *deliveryStartupAttempt
 	events            chan agentctl.AgentEvent
 	done              chan struct{}
 
@@ -54,6 +55,7 @@ func newStreamEventProcessor(
 	client *agentctl.Client,
 	delivery AgentDeliveryRepository,
 	startupGeneration uint64,
+	attempt *deliveryStartupAttempt,
 ) *streamEventProcessor {
 	ctx, cancel := context.WithCancel(parent)
 	processor := &streamEventProcessor{
@@ -64,6 +66,7 @@ func newStreamEventProcessor(
 		client:            client,
 		delivery:          delivery,
 		startupGeneration: startupGeneration,
+		attempt:           attempt,
 		events:            make(chan agentctl.AgentEvent, streamProjectionQueueSize),
 		done:              make(chan struct{}),
 	}
@@ -132,7 +135,7 @@ func (p *streamEventProcessor) run() {
 
 func (p *streamEventProcessor) handleEvent(batch *streamEventBatch, event agentctl.AgentEvent) error {
 	prepared, err := p.manager.prepareAgentEventWithReceipt(
-		p.ctx, p.execution, p.client, p.delivery, event, p.batchableEvent(event),
+		p.ctx, p.execution, p.client, p.delivery, event, p.batchableEvent(event), p.attempt,
 	)
 	if err != nil {
 		return err
@@ -147,7 +150,7 @@ func (p *streamEventProcessor) handleEvent(batch *streamEventBatch, event agentc
 		}
 		if prepared.receiptDeferred {
 			return p.manager.replayPreparedAgentEventsWithReceipt(
-				p.ctx, p.execution, []preparedAgentEvent{prepared}, p.delivery, p.client, p.startupGeneration,
+				p.ctx, p.execution, []preparedAgentEvent{prepared}, p.delivery, p.client, p.startupGeneration, p.attempt,
 			)
 		}
 		return p.manager.processPreparedAgentEvent(
@@ -185,7 +188,7 @@ func (p *streamEventProcessor) flushBatch(batch *streamEventBatch) error {
 		return nil
 	}
 	err := p.manager.commitPreparedAgentEvents(
-		p.ctx, p.execution, batch.items, p.delivery, p.client, p.startupGeneration,
+		p.ctx, p.execution, batch.items, p.delivery, p.client, p.startupGeneration, p.attempt,
 	)
 	batch.items = nil
 	batch.bytes = 0
@@ -253,7 +256,7 @@ func (sm *StreamManager) processPreparedAgentEvent(
 		if !prepared.skipAcknowledgement {
 			sm.scheduleDurableDeliveryAck(execution, client, prepared.event)
 		}
-		if !prepared.skipCallback {
+		if !prepared.skipCallback && !prepared.staleTerminal {
 			sm.notifyAgentEvent(execution, prepared.event, startupGeneration)
 		}
 		return nil

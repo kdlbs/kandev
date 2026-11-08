@@ -373,6 +373,7 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			metadata[mcpprofile.CoordinatorToolPolicyMetadataKey] = encoded
 		}
 	}
+	putBuiltinLaunchMetadata(metadata, req.McpProfile)
 	putPrimaryCheckoutOptions(metadata, req)
 	for k, v := range req.ExecutorConfig {
 		if isTrustedExecutorConfigKey(k) {
@@ -382,7 +383,7 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			metadata[k] = v
 			continue
 		}
-		if k == mcpprofile.CoordinatorToolPolicyMetadataKey {
+		if k == mcpprofile.CoordinatorToolPolicyMetadataKey || k == mcpprofile.BuiltinBindingMetadataKey {
 			continue
 		}
 		if _, exists := metadata[k]; !exists {
@@ -1511,6 +1512,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		DeliveryStreamID:               reqWithWorktree.DeliveryStreamID,
 		DeliveryIncarnationID:          reqWithWorktree.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:      reqWithWorktree.DeliveryHarnessGeneration,
+		CopilotNativeSessionEvents:     m.copilotNativeLaunchAllowed(rt, agentConfig.ID(), reqWithWorktree.DeliveryStreamID),
 		DurableJournalHostRoot:         m.dataDir,
 		DurableJournalOwnerID:          journalOwnerID,
 		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
@@ -1905,6 +1907,11 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	if req == nil {
 		return nil, errors.New("launch request is required")
 	}
+	if req.McpProfile != nil && req.McpProfile.BuiltinPackages != nil {
+		if err := m.validateBuiltinOwner(ctx, req.TaskID, req.SessionID, req.WorkspaceID, req.McpProfile); err != nil {
+			return nil, err
+		}
+	}
 	if m.executorAdmission != nil {
 		var err error
 		ctx, err = m.executorAdmission(ctx, req.SessionID, getMetadataString(req.Metadata, "executor_id"), getMetadataString(req.Metadata, MetadataKeyExecutorProfileID))
@@ -2022,13 +2029,19 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			return nil, acquireErr
 		}
 		defer activityLease.Release()
+		if execution.AgentCommand != "" {
+			return nil, nil
+		}
+		if err := m.prepareBuiltinWorkspaceExecution(sharedCtx, execution, req); err != nil {
+			return nil, err
+		}
 		if len(req.McpProviders) > 0 {
 			client, releaseClient := execution.AcquireAgentCtlClient()
 			defer releaseClient()
 			if client == nil {
 				return nil, fmt.Errorf("execution %q has no agentctl client for MCP provider promotion", execution.ID)
 			}
-			if err := client.SetMcpProviders(sharedCtx, req.McpProviders); err != nil {
+			if err := m.updateBuiltinProfile(sharedCtx, execution, builtinProviderUpdate(req.McpProviders), func() error { return client.SetMcpProviders(sharedCtx, req.McpProviders) }); err != nil {
 				return nil, fmt.Errorf("set MCP providers during workspace execution promotion: %w", err)
 			}
 		}
@@ -2284,30 +2297,11 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 		return nil, err
 	}
-	// A reset/relaunch receives the complete durable repository projection from
-	// the orchestrator. Reconcile it through the fresh live agentctl rather than
-	// relying on the legacy primary-repository prepare script alone.
-	// Plugin environments have no prepare script, so the primary repository is
-	// materialized the same way.
-	pluginRemote := reqWithWorktree.ExecutorType == string(models.ExecutorTypePluginRemote)
-	minimumRepos := 2
-	if pluginRemote {
-		minimumRepos = 1
-	}
-	if rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) >= minimumRepos && execInstance != nil && execInstance.Client != nil {
-		projection, projectionErr := remoteWorkspaceProjectionFromLaunch(&reqWithWorktree, pluginRemote)
-		if projectionErr == nil {
-			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection)
-		}
-		if projectionErr != nil {
-			rollbackErr := m.stopLaunchRuntimeOnRollback(context.WithoutCancel(ctx), rt, execInstance, nil)
-			err = errors.Join(
-				fmt.Errorf("reconstruct remote workspace repositories: %w", projectionErr),
-				rollbackErr,
-			)
-			m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
-			return nil, err
-		}
+	if projectionErr := reconcileLaunchWorkspace(ctx, rt, &reqWithWorktree, execInstance); projectionErr != nil {
+		rollbackErr := m.stopLaunchRuntimeOnRollback(context.WithoutCancel(ctx), rt, execInstance, nil)
+		err = errors.Join(fmt.Errorf("reconstruct remote workspace repositories: %w", projectionErr), rollbackErr)
+		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
+		return nil, err
 	}
 
 	// Remote executors clone the workspace inside the
@@ -2506,6 +2500,7 @@ func (m *Manager) buildExecutionFromInstance(
 ) (*AgentExecution, error) {
 	execution := execInstance.ToAgentExecution(execReq)
 	execution.ExecutionProfileID = executionProfileID(req)
+	m.applyCopilotNativeLaunchCapability(execution, rt, execReq.DeliveryStreamID)
 	if profileInfo != nil {
 		execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
 	}
@@ -2828,6 +2823,13 @@ func (m *Manager) stopRegisteredLaunchRuntime(
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	execution.agentctlLifecycleMu.Lock()
 	defer execution.agentctlLifecycleMu.Unlock()
+	// Release remote files before the runtime (and its helper endpoint) stops.
+	if client := execution.currentAgentCtlClient(); client != nil {
+		if err := m.cleanupProjectMCPFiles(context.Background(), execution, client); err != nil {
+			m.logger.Warn("failed to release project MCP files during registered launch rollback",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
+	}
 	if rt != nil && execInstance != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		retainedRuntime := retainsRuntimeOnLaunchRollback(execution)
@@ -2900,6 +2902,14 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
 		zap.String("reason", reason))
+	// Cleanup may use the client while the lifecycle write lease is already
+	// held; never re-acquire it here.
+	if client := execution.currentAgentCtlClient(); client != nil {
+		if err := m.cleanupProjectMCPFiles(context.Background(), execution, client); err != nil {
+			m.logger.Warn("failed to release project MCP files during launch rollback",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
+	}
 	if rt != nil && execInstance != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -2913,6 +2923,7 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 		client.Close()
 	}
 	execution.EndSessionSpan()
+	execution.clearProjectMCPDelivery()
 	m.cleanupPassthroughMCPConfig(execution)
 }
 
@@ -3002,7 +3013,7 @@ func (m *Manager) SetMcpMode(ctx context.Context, executionID string, mode strin
 	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
-	return client.SetMcpMode(ctx, mode)
+	return m.updateBuiltinProfile(ctx, execution, builtinModeUpdate(mode), func() error { return client.SetMcpMode(ctx, mode) })
 }
 
 // SetMcpProvidersForSession replaces the task-mode MCP provider capabilities
@@ -3025,7 +3036,7 @@ func (m *Manager) SetMcpProvidersForSession(ctx context.Context, sessionID strin
 	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
-	if err := client.SetMcpProviders(ctx, providers); err != nil {
+	if err := m.updateBuiltinProfile(ctx, execution, builtinProviderUpdate(providers), func() error { return client.SetMcpProviders(ctx, providers) }); err != nil {
 		return fmt.Errorf("set MCP providers for session %s: %w", sessionID, err)
 	}
 	return nil
@@ -3044,13 +3055,26 @@ func (m *Manager) SetPluginToolsForAllExecutions(ctx context.Context, snapshot p
 		if client == nil {
 			continue
 		}
-		err := client.SetPluginTools(ctx, snapshot)
+		err := client.SetPluginTools(ctx, pluginToolSnapshotForExecution(execution, snapshot))
 		releaseClient()
 		if err != nil {
 			refreshErr = errors.Join(refreshErr, fmt.Errorf("refresh execution %s plugin tools: %w", execution.ID, err))
 		}
 	}
 	return refreshErr
+}
+
+// pluginToolSnapshotForExecution keeps legacy task agents on a surface-safe
+// catalog while a coordinator execution receives its coordinator-capable
+// projection, so a live refresh does not drop its plugin tools.
+func pluginToolSnapshotForExecution(execution *AgentExecution, snapshot plugintools.Snapshot) plugintools.Snapshot {
+	if execution == nil {
+		return plugintools.ProjectLegacySafe(snapshot)
+	}
+	if _, coordinator := execution.metadataValue(mcpprofile.CoordinatorToolPolicyMetadataKey); coordinator {
+		return plugintools.ProjectCoordinatorOnly(snapshot)
+	}
+	return plugintools.ProjectLegacySafe(snapshot)
 }
 
 // resolveAgentDisplayName resolves the agent display name from the execution's
@@ -3122,7 +3146,7 @@ func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
 // configureAndStartAgent configures the agent command and starts the agent subprocess.
 // Returns the effective boot command (full command with adapter args, or base command).
 func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution) (string, error) {
-	return m.configureAndStartAgentWithPreparedArgs(ctx, execution, nil)
+	return m.configureAndStartAgentWithPreparation(ctx, execution, nil)
 }
 
 func (m *Manager) configureAndStartAgentWithPreparedArgs(
@@ -3130,36 +3154,26 @@ func (m *Manager) configureAndStartAgentWithPreparedArgs(
 	execution *AgentExecution,
 	preparedArgs []string,
 ) (string, error) {
-	runtimeSnapshot := execution.RuntimeEnvironment()
-	metadata := execution.MetadataSnapshot()
-	metadataEnv := runtimeEnvFromMetadata(metadata)
-	var env map[string]string
-	if runtimeSnapshot == nil {
-		env = cloneStringMap(metadataEnv)
-		if env == nil {
-			env = make(map[string]string)
-		}
-		if err := m.mergeAgentProfileEnvForExecution(ctx, execution, env); err != nil {
-			m.updateExecutionError(execution.ID, "failed to resolve agent profile environment: "+err.Error())
-			return "", fmt.Errorf("resolve agent profile environment: %w", err)
-		}
-	} else if !hasRuntimeEnvOverlay(metadata) {
-		// Without a SetExecutionEnv overlay the snapshot is the environment
-		// this launch composed, including the managed credential broker
-		// values its helper entries expand. Nothing newer can replace them.
-		env = runtimeSnapshot
-	} else {
-		// SetExecutionEnv carries per-run values such as repository credentials.
-		// Compose them with the launch snapshot without re-reading profile
-		// secrets. Generated credential entries are filtered here, while the normal
-		// agentctl Configure boundary composes the request with the instance's
-		// canonical environment and preserves inherited user entries.
-		var err error
-		env, err = composeExecutionRuntimeEnvironment(runtimeSnapshot, metadataEnv)
-		if err != nil {
-			m.updateExecutionError(execution.ID, "failed to compose agent env: "+err.Error())
-			return "", fmt.Errorf("compose agent environment: %w", err)
-		}
+	return m.configureAndStartAgentWithPreparedArgsAndPreparation(ctx, execution, preparedArgs, nil)
+}
+
+func (m *Manager) configureAndStartAgentWithPreparation(
+	ctx context.Context,
+	execution *AgentExecution,
+	preparation *agentctltypes.ManagedRuntimePreparationDirective,
+) (string, error) {
+	return m.configureAndStartAgentWithPreparedArgsAndPreparation(ctx, execution, nil, preparation)
+}
+
+func (m *Manager) configureAndStartAgentWithPreparedArgsAndPreparation(
+	ctx context.Context,
+	execution *AgentExecution,
+	preparedArgs []string,
+	preparation *agentctltypes.ManagedRuntimePreparationDirective,
+) (string, error) {
+	env, err := m.environmentForPreparedLaunch(ctx, execution)
+	if err != nil {
+		return "", err
 	}
 	normalizeManagedGitHelperEnvironment(execution.RuntimeName, env)
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
@@ -3193,11 +3207,25 @@ func (m *Manager) configureAndStartAgentWithPreparedArgs(
 			return "", err
 		}
 	}
-	if err := client.ConfigureAgent(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, execution.LaunchWrapper); err != nil {
+	delivery, err := execution.mcpProjectDeliveryFor(client)
+	if err != nil {
+		return "", err
+	}
+	if delivery != nil {
+		if err := client.RequireCapability(ctx, agentctltypes.ProjectMCPDeliveryCapability); err != nil {
+			return "", err
+		}
+	}
+	if err := client.ConfigureAgentWithProjectDelivery(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, execution.LaunchWrapper); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 
-	fullCommand, err := client.Start(ctx)
+	var fullCommand string
+	if preparation != nil {
+		fullCommand, err = client.StartWithManagedRuntimePreparation(ctx, *preparation)
+	} else {
+		fullCommand, err = client.Start(ctx)
+	}
 	if err != nil {
 		m.updateExecutionError(execution.ID, "failed to start agent: "+err.Error())
 		return "", fmt.Errorf("failed to start agent: %w", err)
@@ -3208,6 +3236,43 @@ func (m *Manager) configureAndStartAgentWithPreparedArgs(
 		bootCommand = execution.AgentCommand
 	}
 	return bootCommand, nil
+}
+
+func (m *Manager) environmentForPreparedLaunch(ctx context.Context, execution *AgentExecution) (map[string]string, error) {
+	runtimeSnapshot := execution.RuntimeEnvironment()
+	metadata := execution.MetadataSnapshot()
+	metadataEnv := runtimeEnvFromMetadata(metadata)
+	var env map[string]string
+	switch {
+	case runtimeSnapshot == nil:
+		env = cloneStringMap(metadataEnv)
+		if env == nil {
+			env = make(map[string]string)
+		}
+		if err := m.mergeAgentProfileEnvForExecution(ctx, execution, env); err != nil {
+			m.updateExecutionError(execution.ID, "failed to resolve agent profile environment: "+err.Error())
+			return nil, fmt.Errorf("resolve agent profile environment: %w", err)
+		}
+	case !hasRuntimeEnvOverlay(metadata):
+		// Without a SetExecutionEnv overlay the snapshot is the environment
+		// this launch composed, including the managed credential broker
+		// values its helper entries expand. Nothing newer can replace them.
+		env = runtimeSnapshot
+	default:
+		// SetExecutionEnv carries per-run values such as repository credentials.
+		// Compose them with the launch snapshot without re-reading profile
+		// secrets. Generated credential entries are filtered here, while the normal
+		// agentctl Configure boundary composes the request with the instance's
+		// canonical environment and preserves inherited user entries.
+		var err error
+		env, err = composeExecutionRuntimeEnvironment(runtimeSnapshot, metadataEnv)
+		if err != nil {
+			m.updateExecutionError(execution.ID, "failed to compose agent env: "+err.Error())
+			return nil, fmt.Errorf("compose agent environment: %w", err)
+		}
+	}
+
+	return env, nil
 }
 
 // hasRuntimeEnvOverlay reports whether SetExecutionEnv delivered a per-run

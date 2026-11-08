@@ -68,6 +68,19 @@ Existing token fields remain compatible projections of the current committed gen
 Historical native IDs remain available for diagnostics and recovery.
 SQL writes compare the expected incarnation and generation before replacement.
 
+### In-place context reset
+
+A workflow context reset replaces the native conversation inside a live execution without
+restarting the process or rotating the delivery stream. It keeps the current generation and
+rebinds that generation's native ID. The same transaction stores the new resume token,
+and both writes must succeed together. The rebind compares the generation's previous native ID,
+the owning execution, and the absence of a newer generation. It is refused while an
+incomplete restore attempt exists. An append-only history row keeps the previous native ID,
+the new native ID, the execution, and the time. If the rebind is refused, the reset fails and
+the previous token and generation stay authoritative. Explicit context continuation and Start
+fresh still create a new generation.
+Delivery: [Context reset native rebind](../../../plans/context-reset-native-rebind/plan.md).
+
 Outcomes are `native_resumed`, `reattached`, `context_continued`, and `blocked`.
 Context delivery status remains separate from the restore outcome.
 A created conversation is not proof that its first prompt ran.
@@ -146,9 +159,14 @@ The snapshot contains the current task objective, saved plan reference, workspac
 It includes recent user messages, assistant messages, and concise tool outcomes.
 It excludes debug protocol frames, credential material, sibling conversations, and private child-session history.
 It does not read arbitrary workspace files or private harness databases.
+The explicit continuation prompt labels that material as historical context and
+asks the agent not to retry an earlier action solely because its result is
+missing or uncertain. This guidance does not replace delivery authorization,
+queue fencing, or an operator's current explicit instructions.
 
 The serialized snapshot has a 64 KiB UTF-8 limit.
 The builder reserves 16 KiB for task, workspace, and reduced plan context.
+The historical-context guidance counts within that reservation.
 Included plan text uses `planinjection.Reduce` with `planinjection.HandoverBudget` (12,000 bytes).
 That plan text counts within the 16 KiB reservation and the 64 KiB total, not in addition to either.
 The remaining snapshot budget holds recent conversation.

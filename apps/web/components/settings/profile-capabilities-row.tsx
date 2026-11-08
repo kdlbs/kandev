@@ -55,7 +55,16 @@ type CapabilitiesRowProps = {
   onRetryConfig: () => Promise<void>;
   agentName: string;
   baselineProfile?: ProfileFormData;
+  resolveConfigurationOptions?: ModelConfigResolver;
+  onConfigurationApply?: ModelConfigApply;
 };
+
+type ModelConfigResolver = NonNullable<
+  import("@/components/model-config-selector").ModelConfigSelectorProps["resolveConfigurationOptions"]
+>;
+type ModelConfigApply = NonNullable<
+  import("@/components/model-config-selector").ModelConfigSelectorProps["onConfigurationApply"]
+>;
 
 function CapabilitiesRow(props: CapabilitiesRowProps) {
   if (props.profile.provider_kind === "openai_compatible") {
@@ -115,6 +124,8 @@ type ModelAndModePickersProps = {
   showRefresh: boolean;
   labelCls?: string;
   gapCls: string;
+  resolveConfigurationOptions?: ModelConfigResolver;
+  onConfigurationApply?: ModelConfigApply;
 };
 
 function ModelAndModePickers({
@@ -136,6 +147,8 @@ function ModelAndModePickers({
   showRefresh,
   labelCls,
   gapCls,
+  resolveConfigurationOptions,
+  onConfigurationApply,
 }: ModelAndModePickersProps) {
   const { t } = useTranslation();
   const hasModes = modes.length > 0;
@@ -170,6 +183,8 @@ function ModelAndModePickers({
             disabled={disableUnverifiedModels}
             configOptionsLoading={configIsLoading}
             keepOpenOnModelChange={supportsDynamicModels}
+            resolveConfigurationOptions={resolveConfigurationOptions}
+            onConfigurationApply={onConfigurationApply}
           />
         </div>
       </div>
@@ -227,6 +242,8 @@ function CapabilitiesRowContent({
   agentName,
   baselineProfile,
   disableUnverifiedModels,
+  resolveConfigurationOptions,
+  onConfigurationApply,
 }: CapabilitiesRowProps) {
   const activeMode = findActiveMode(modes, profile.mode, currentModeId);
   const labelCls = isCompact ? "text-xs" : undefined;
@@ -254,6 +271,8 @@ function CapabilitiesRowContent({
         showRefresh={showRefresh}
         labelCls={labelCls}
         gapCls={gapCls}
+        resolveConfigurationOptions={resolveConfigurationOptions}
+        onConfigurationApply={onConfigurationApply}
       />
       <ModelDiscoveryNote discovery={discovery} />
       <ModelConfigResolutionStatus
@@ -288,6 +307,8 @@ type ProfileCapabilitiesSectionProps = {
   agentName: string;
   isCompact: boolean;
   result: ReturnType<typeof useProfileFormCapabilities>;
+  resolveConfigurationOptions?: ModelConfigResolver;
+  onConfigurationApply?: ModelConfigApply;
 };
 
 export function ProfileCapabilitiesSection({
@@ -298,6 +319,8 @@ export function ProfileCapabilitiesSection({
   agentName,
   isCompact,
   result,
+  resolveConfigurationOptions,
+  onConfigurationApply,
 }: ProfileCapabilitiesSectionProps) {
   const {
     capabilities,
@@ -336,6 +359,8 @@ export function ProfileCapabilitiesSection({
       configIsLoading={configIsLoading}
       onRetryConfig={refreshModelConfig}
       baselineProfile={baselineProfile}
+      resolveConfigurationOptions={resolveConfigurationOptions}
+      onConfigurationApply={onConfigurationApply}
     />
   );
 }
