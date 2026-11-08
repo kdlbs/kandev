@@ -156,7 +156,7 @@ func parseCodexUsage(body []byte, now time.Time) (*ProviderUsage, error) {
 			ResetAt:        codexResetAt(w, now),
 			Observation: &WindowObservation{
 				UtilizationObserved: utilizationObserved(w.UsedPercent),
-				ResetAtObserved:     w.ResetAt > 0 || (w.ResetAfterSeconds != nil && *w.ResetAfterSeconds >= 0),
+				ResetAtObserved:     reportedCodexReset(w),
 			},
 		})
 	}
@@ -180,6 +180,16 @@ func codexWindowLabel(seconds int64) string {
 	default:
 		return fmt.Sprintf("%d-day", hours/24)
 	}
+}
+
+// reportedCodexReset reports a reset the provider stated explicitly. A relative
+// reset too large to represent as a duration stays unobserved.
+func reportedCodexReset(w *codexWindow) bool {
+	if w.ResetAt > 0 {
+		return true
+	}
+	return w.ResetAfterSeconds != nil && *w.ResetAfterSeconds >= 0 &&
+		*w.ResetAfterSeconds <= int64((1<<63-1)/time.Second)
 }
 
 func codexResetAt(w *codexWindow, now time.Time) time.Time {

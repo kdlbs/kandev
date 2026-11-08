@@ -7,6 +7,48 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
 
+const providerOpenCodeGo = "opencode-go"
+
+// IsGoSubscriptionQuota reports a quota failure on a non-free local Go model.
+// Published free models have separate allowances from the subscription pool.
+func IsGoSubscriptionQuota(candidate Candidate, failure *routingerr.Error) bool {
+	return failure != nil && failure.Code == routingerr.CodeQuotaLimited && !candidate.RemoteExecution &&
+		ProviderOf(candidate.ModelID) == providerOpenCodeGo && !candidate.CatalogFree && !IsFreeModel(candidate.ModelID)
+}
+
+// shortQuotaSuspension reports a quota failure whose established provider or
+// model scope also applies to the short backoff when no reset was reported.
+func shortQuotaSuspension(candidate Candidate, failure *routingerr.Error, scope LimitSuspension) bool {
+	if failure == nil || failure.Code != routingerr.CodeQuotaLimited {
+		return false
+	}
+	switch scope {
+	case SuspensionProvider:
+		return IsGoSubscriptionQuota(candidate, failure)
+	case SuspensionModel:
+		return isFreeUsageQuota(candidate, failure)
+	default:
+		return false
+	}
+}
+
+// freeUsageQuotaRules are the explicit OpenCode Free usage-limit signatures.
+var freeUsageQuotaRules = map[string]bool{
+	"provider.catalog.free_usage.v1":           true,
+	"opencode.stderr.free_usage_unlabelled.v1": true,
+	"opencode.stderr.free_usage_prefixed.v1":   true,
+}
+
+// isFreeUsageQuota reports an explicit Free usage-limit notice on a free
+// OpenCode Zen candidate. It never relabels a paid model or another provider.
+func isFreeUsageQuota(candidate Candidate, failure *routingerr.Error) bool {
+	provider := ProviderOf(candidate.ModelID)
+	return failure != nil && failure.Code == routingerr.CodeQuotaLimited &&
+		(provider == "opencode" || provider == "opencode-zen") &&
+		(candidate.CatalogFree || IsFreeModel(candidate.ModelID)) &&
+		freeUsageQuotaRules[failure.ClassifierRule]
+}
+
 // ProviderLimit is the operator-entered limit setting of one provider, keyed by
 // the provider prefix of its model IDs.
 type ProviderLimit struct {
@@ -90,7 +132,7 @@ func IsFreeModel(modelID string) bool {
 // account-level allowance is a separate tier check.
 func ModelScoped(modelID string) bool {
 	switch ProviderOf(modelID) {
-	case "opencode-go", "opencode", "opencode-zen", "openrouter":
+	case providerOpenCodeGo, "opencode", "opencode-zen", "openrouter":
 		return true
 	default:
 		return false
@@ -108,9 +150,12 @@ const (
 
 // FailureCauseFor refines a classified limit failure from the provider wording.
 // An unrecognized cause stays empty and the caller falls back to observations.
-func FailureCauseFor(_ Candidate, failure *routingerr.Error) FailureCause {
+func FailureCauseFor(candidate Candidate, failure *routingerr.Error) FailureCause {
 	if failure == nil {
 		return ""
+	}
+	if isFreeUsageQuota(candidate, failure) {
+		return CauseFreeDailyLimit
 	}
 	text := strings.ToLower(failure.RawExcerpt)
 	switch {

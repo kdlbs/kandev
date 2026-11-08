@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -67,6 +68,12 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 		resolved = failure
 	}
 	scope := limitSuspensionScope(candidate, failure, resolved)
+	if dynamicruntime.IsGoSubscriptionQuota(candidate, resolved) && a.goAccountBound(ctx, candidate.ID) {
+		// Go subscription exhaustion covers its non-free models on this
+		// account, while other providers on the same credential binding and
+		// known free Go models remain usable.
+		scope = dynamicruntime.SuspensionProvider
+	}
 	// A classified quota limit on a paid model without the provider's own
 	// reset uses the operator-entered monthly reset. The monthly allowance is
 	// provider-scoped.
@@ -93,6 +100,21 @@ func (a *tierLimitAdapter) withSelectedExpectedModel(ctx context.Context, candid
 		candidate.CatalogFree = known && free
 	}
 	return candidate
+}
+
+// goAccountBound reports that the host binding resolver proves the profile's
+// separate OpenCode Go account. An override or unavailable profile keeps the
+// binding-wide scope rather than being attributed to the host account.
+func (a *tierLimitAdapter) goAccountBound(ctx context.Context, profileID string) bool {
+	if a.usage.settingsStore == nil {
+		return false
+	}
+	profile, agentType, ok := a.usage.loadProfile(ctx, profileID)
+	if !ok {
+		return false
+	}
+	binding, ok := a.usage.bindingFor(profile, agentType)
+	return ok && strings.HasPrefix(binding.accountKey, accountPrefixOpenCodeGo+":")
 }
 
 // limitSuspensionScope chooses how widely a limit failure suspends routing.
