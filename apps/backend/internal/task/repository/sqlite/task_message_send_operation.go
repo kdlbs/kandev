@@ -209,6 +209,9 @@ func (r *Repository) PruneSendOperations(ctx context.Context, limit int) (settle
 	staleBefore := now.Add(-sendOperationStalePending)
 	retentionBefore := now.Add(-sendOperationRetention)
 
+	// The outer state check is not redundant: on PostgreSQL a settle that
+	// commits while this update waits on the row lock is re-evaluated against
+	// the outer WHERE only, so without it a fresh outcome could be overwritten.
 	staleResult, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_message_send_operations
 		   SET state = ?, failure_code = ?, settled_at = ?, updated_at = ?
@@ -218,9 +221,11 @@ func (r *Repository) PruneSendOperations(ctx context.Context, limit int) (settle
 			 ORDER BY created_at ASC
 			 LIMIT ?
 		 )
+		   AND state = ?
 	`),
 		models.SendOperationStateFailed, models.SendOperationFailureOutcomeUnknown, now, now,
 		models.SendOperationStatePending, staleBefore, limit,
+		models.SendOperationStatePending,
 	)
 	if err != nil {
 		return 0, 0, err

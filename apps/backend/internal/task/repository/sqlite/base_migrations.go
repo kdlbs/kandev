@@ -748,6 +748,11 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	_ = r.migrate.Apply("task_message_send_operations.retention", `
 		CREATE INDEX IF NOT EXISTS idx_task_message_send_operations_retention
 			ON task_message_send_operations(created_at)`)
+	// The stale-pending sweep looks only at pending rows; leading with state
+	// keeps it from walking the retained settled history on the shared writer.
+	_ = r.migrate.Apply("task_message_send_operations.stale_pending", `
+		CREATE INDEX IF NOT EXISTS idx_task_message_send_operations_state_created
+			ON task_message_send_operations(state, created_at)`)
 
 	// Delivery refresh resolves snapshots through their environment owner or a
 	// task/session binding. Both keys are needed by that correlated lookup, and
