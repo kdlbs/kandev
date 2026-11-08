@@ -1332,7 +1332,7 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 // StopAgentWithReason stops an agent execution and passes a semantic reason to runtime teardown.
 func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, reason string, force bool) error {
 	stopWatch := newStopWaitWatch(30*time.Second, func(phase stopWaitPhase) {
-		captureStopWaitSnapshot(m.logger, executionID, phase)
+		reportStopWaitDiagnostic(m.logger, executionID, phase)
 	})
 	defer stopWatch.finish()
 	var pendingRecovery *remoteRecoveryRetry
@@ -1359,7 +1359,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 				return errors.New("pending remote recovery is already being reconciled")
 			}
 			defer m.finishRemoteRecoveryAttempt(pendingRecovery)
-			stopped, err := m.stopPendingRemoteRecovery(ctx, pendingRecovery, reason, force)
+			stopped, err := m.stopPendingRemoteRecovery(ctx, pendingRecovery, reason, force, stopWatch)
 			if err != nil {
 				return err
 			}
@@ -1368,10 +1368,10 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 			}
 			return nil
 		}
-		if handled, err := m.stopPersistedKubernetesExecution(ctx, executionID, reason, force); handled {
+		if handled, err := m.stopPersistedKubernetesExecution(ctx, executionID, reason, force, stopWatch); handled {
 			return err
 		}
-		if handled, err := m.stopPersistedSSHExecution(ctx, executionID, reason, force); handled {
+		if handled, err := m.stopPersistedSSHExecution(ctx, executionID, reason, force, stopWatch); handled {
 			return err
 		}
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
@@ -1426,11 +1426,11 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// detaching would leave an executors_running row claiming a live agent
 	// with no agent.stopped published. See isPassthroughExecution.
 	if reason == StopReasonBackendShutdown && isRemoteRecoveryBackendShutdown(execution.RuntimeName) {
-		return m.detachAgentExecution(executionID, execution)
+		return m.detachAgentExecution(executionID, execution, stopWatch)
 	}
 	if m.agentSurvivalEnabled && reason == StopReasonBackendShutdown &&
 		execution.RuntimeName == executor.NameStandalone && !isPassthroughExecution(execution) {
-		return m.detachAgentExecution(executionID, execution)
+		return m.detachAgentExecution(executionID, execution, stopWatch)
 	}
 
 	m.logger.Info("stopping agent",
@@ -1577,11 +1577,13 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 // local reference lets this backend's process exit (moments later, in the
 // same shutdown) reclaim the socket without disturbing the still-running
 // agentctl instance or its live stream.
-func (m *Manager) detachAgentExecution(executionID string, execution *AgentExecution) error {
+func (m *Manager) detachAgentExecution(executionID string, execution *AgentExecution, stopWatch *stopWaitWatch) error {
+	stopWatch.advance(stopWaitDetachClient)
 	execution.agentctlLifecycleMu.Lock()
 	execution.detachAgentctlClient()
 	execution.agentctlLifecycleMu.Unlock()
 
+	stopWatch.advance(stopWaitRemove)
 	execution.EndSessionSpan()
 	m.RemoveExecution(executionID)
 	m.clearRemoteStatus(execution.SessionID)

@@ -1,9 +1,13 @@
 package lifecycle
 
 import (
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/pprof"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,6 +31,14 @@ const (
 	stopWaitPersistence    stopWaitPhase = "persist_terminal_state"
 	stopWaitRemove         stopWaitPhase = "remove_tracking"
 	stopWaitPublish        stopWaitPhase = "stopped_event_publish"
+)
+
+const (
+	stopWaitSnapshotCooldown = 15 * time.Minute
+	stopWaitSnapshotLimit    = 8 << 20
+	maxStopWaitSnapshots     = 4
+	stopWaitSnapshotPrefix   = "kandev-stop-wait-"
+	stopWaitSnapshotSuffix   = ".goroutines"
 )
 
 type stopWaitWatch struct {
@@ -53,7 +65,11 @@ func newStopWaitWatch(after time.Duration, report func(stopWaitPhase)) *stopWait
 	return watch
 }
 
-func (w *stopWaitWatch) advance(phase stopWaitPhase) { w.phase.Store(phase) }
+func (w *stopWaitWatch) advance(phase stopWaitPhase) {
+	if w != nil {
+		w.phase.Store(phase)
+	}
+}
 
 func (w *stopWaitWatch) finish() {
 	w.once.Do(func() {
@@ -64,46 +80,146 @@ func (w *stopWaitWatch) finish() {
 
 var lastStopWaitSnapshot atomic.Int64
 
+func reportStopWaitDiagnostic(log *logger.Logger, executionID string, phase stopWaitPhase) {
+	log.Warn("agent stop is taking longer than expected",
+		zap.String("execution_id", executionID),
+		zap.String("phase", string(phase)),
+	)
+	captureStopWaitSnapshot(log, executionID, phase)
+}
+
 // captureStopWaitSnapshot records stack sites without goroutine arguments. A
 // short process-wide cooldown keeps a fan-out stall to one local artifact.
 func captureStopWaitSnapshot(log *logger.Logger, executionID string, phase stopWaitPhase) {
+	captureStopWaitSnapshotInDir(log, executionID, phase, os.TempDir())
+}
+
+func captureStopWaitSnapshotInDir(log *logger.Logger, executionID string, phase stopWaitPhase, dir string) {
 	now := time.Now().UnixNano()
+	var previous int64
 	for {
 		last := lastStopWaitSnapshot.Load()
-		if now-last < int64(15*time.Minute) {
+		if last != 0 && now-last < int64(stopWaitSnapshotCooldown) {
 			return
 		}
 		if lastStopWaitSnapshot.CompareAndSwap(last, now) {
+			previous = last
 			break
 		}
 	}
-	file, err := os.CreateTemp("", "kandev-stop-wait-*.goroutines")
+	file, err := os.CreateTemp(dir, stopWaitSnapshotPrefix+"*.goroutines")
 	if err != nil {
-		log.Warn("stop wait snapshot unavailable", zap.String("execution_id", executionID), zap.String("phase", string(phase)), zap.Error(err))
+		lastStopWaitSnapshot.CompareAndSwap(now, previous)
+		log.Warn("stop wait snapshot unavailable",
+			zap.String("execution_id", executionID),
+			zap.String("phase", string(phase)),
+			zap.Error(err),
+		)
 		return
 	}
-	writer := &stopWaitLimitedWriter{writer: file, remaining: 8 << 20}
+	writer := &stopWaitLimitedWriter{writer: file, remaining: stopWaitSnapshotLimit}
 	if profile := pprof.Lookup("goroutine"); profile != nil {
 		err = profile.WriteTo(writer, 1)
 	}
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
+	if err != nil {
+		_ = os.Remove(file.Name())
+		lastStopWaitSnapshot.CompareAndSwap(now, previous)
+		log.Warn("stop wait snapshot failed",
+			zap.String("execution_id", executionID),
+			zap.String("phase", string(phase)),
+			zap.Error(err),
+		)
+		return
+	}
+	if err := pruneStopWaitSnapshots(dir, file.Name()); err != nil {
+		log.Warn("stop wait snapshot retention cleanup failed",
+			zap.String("execution_id", executionID),
+			zap.String("phase", string(phase)),
+			zap.Error(err),
+		)
+	}
 	log.Warn("stop wait goroutine snapshot",
-		zap.String("execution_id", executionID), zap.String("phase", string(phase)),
-		zap.String("goroutine_snapshot", file.Name()), zap.Bool("snapshot_truncated", writer.remaining == 0), zap.Error(err))
+		zap.String("execution_id", executionID),
+		zap.String("phase", string(phase)),
+		zap.String("goroutine_snapshot", file.Name()),
+		zap.Bool("snapshot_truncated", writer.truncated),
+	)
+}
+
+func pruneStopWaitSnapshots(dir, currentPath string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read stop wait snapshot directory: %w", err)
+	}
+	type snapshotFile struct {
+		path    string
+		name    string
+		modTime time.Time
+	}
+	files := make([]snapshotFile, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, stopWaitSnapshotPrefix) || !strings.HasSuffix(name, stopWaitSnapshotSuffix) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("inspect stop wait snapshot %q: %w", name, err)
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		files = append(files, snapshotFile{
+			path:    filepath.Join(dir, name),
+			name:    name,
+			modTime: info.ModTime(),
+		})
+	}
+	currentPath = filepath.Clean(currentPath)
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].path == currentPath {
+			return true
+		}
+		if files[j].path == currentPath {
+			return false
+		}
+		if files[i].modTime.Equal(files[j].modTime) {
+			return files[i].name > files[j].name
+		}
+		return files[i].modTime.After(files[j].modTime)
+	})
+	// Retain at most four stop-wait snapshots in the temporary directory.
+	for _, file := range files[min(maxStopWaitSnapshots, len(files)):] {
+		if err := os.Remove(file.path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove old stop wait snapshot %q: %w", file.name, err)
+		}
+	}
+	return nil
 }
 
 type stopWaitLimitedWriter struct {
 	writer    io.Writer
 	remaining int
+	truncated bool
 }
 
 func (w *stopWaitLimitedWriter) Write(p []byte) (int, error) {
 	if w.remaining == 0 {
+		if len(p) > 0 {
+			w.truncated = true
+		}
 		return len(p), nil
 	}
 	writeSize := min(len(p), w.remaining)
+	if writeSize < len(p) {
+		w.truncated = true
+	}
 	n, err := w.writer.Write(p[:writeSize])
 	w.remaining -= n
 	if err != nil {

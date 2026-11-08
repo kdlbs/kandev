@@ -274,7 +274,7 @@ func (m *Manager) retryPendingRemoteStop(ctx context.Context, entry *remoteRecov
 	if execution, exists := m.executionStore.GetBySessionID(entry.record.SessionID); exists && execution.ID == entry.record.AgentExecutionID {
 		return true
 	}
-	stopped, err := m.stopPendingRemoteRecovery(ctx, entry, reason, force)
+	stopped, err := m.stopPendingRemoteRecovery(ctx, entry, reason, force, nil)
 	if err != nil {
 		m.logger.Debug("pending remote stop remains retryable", zap.String("session_id", entry.record.SessionID), zap.Error(err))
 	} else if stopped {
