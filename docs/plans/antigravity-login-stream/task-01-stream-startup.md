@@ -23,6 +23,7 @@ system_design:
 Fix the Antigravity sign-in caller's interpretation of `Client.StreamUpdates`.
 Prove a healthy connection reaches initialization and native authentication,
 while genuine setup failures and cancellation retain their failure behavior.
+Ensure a racing authentication request cannot register after stream cleanup.
 
 ## In scope
 
@@ -32,14 +33,16 @@ while genuine setup failures and cancellation retain their failure behavior.
   a local WebSocket, with channel-controlled handshake/response ordering.
 - Demonstrate RED with the existing caller before changing production code.
 - Call StreamUpdates directly; remove the wait helper and polling goroutine.
+- Synchronize request registration with active-stream retirement and cover a
+  late request after disconnect cleanup.
 - Verify dial rejection, disconnect while initializing, and cancellation during
   a pending handshake. Preserve cleanup and sanitized error propagation.
 - Record exact check results here and synchronize the plan and companion records.
 
 ## Out of scope
 
-CLI migration, discovery/auth-store changes, generic client refactors, UI changes,
-real Google consent, and live-instance mutation.
+CLI migration, discovery/auth-store changes, broad generic client refactors,
+UI changes, real Google consent, and live-instance mutation.
 
 ## Acceptance
 
@@ -61,6 +64,7 @@ reviewed root configuration through a scoped trusted-config environment.
 (cd apps/backend && go test -trimpath ./internal/agent/hostutility -run 'TestAntigravityLoginStream' -count=1 -v)
 (cd apps/backend && go test -trimpath -race ./internal/agent/hostutility -count=1)
 (cd apps/backend && go test -trimpath ./internal/agent/runtime/agentctl -run 'Test(StreamUpdates|HasAgentStream)' -count=1)
+(cd apps/backend && go test -trimpath ./internal/agent/runtime/agentctl -run '^TestRegisterPendingRequestRejectsDisconnectedStream$' -count=1)
 bash scripts/lint-go-changed apps/backend/internal/agent/hostutility/antigravity_login.go apps/backend/internal/agent/hostutility/antigravity_login_stream_test.go
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
@@ -77,6 +81,8 @@ repair. Assess public documentation impact with `/docs-maintainer` before delive
 
 - `apps/backend/internal/agent/hostutility/antigravity_login.go`
 - `apps/backend/internal/agent/hostutility/antigravity_login_stream_test.go` (new)
+- `apps/backend/internal/agent/runtime/agentctl/client_stream.go`
+- `apps/backend/internal/agent/runtime/agentctl/agent_test.go`
 - `docs/specs/agents/system-design/antigravity-acp-agent.md`
 - `docs/plans/antigravity-login-stream/plan.md` and this work order
 - `docs/plans/antigravity-local-subscription/plan.md`
@@ -123,6 +129,11 @@ Implemented and verified on November 8, 2026.
   during initialize, and cancelled pending setup. Cancellation uses the actual
   attempt-owner classifier, since closing a pending dial can return a network
   error rather than `context.Canceled`. No vendor binary or credentials are used.
+- PR review identified a race between stream retirement and authentication
+  request registration. Registration now holds the client read lock until the
+  request is tracked, so disconnect cleanup drains it or stale registration is
+  rejected. `TestRegisterPendingRequestRejectsDisconnectedStream` covers the
+  late-registration case.
 
 Commands and results (working directories as in Verification):
 
@@ -132,7 +143,10 @@ Commands and results (working directories as in Verification):
 | `go test -trimpath ./internal/agent/hostutility -run 'TestAntigravityLoginStream' -count=1 -v` | Expected RED on old caller, then passed with the fix. |
 | `TMPDIR=/private/tmp go test -trimpath -race ./internal/agent/hostutility -count=1` | Passed. |
 | `go test -trimpath ./internal/agent/runtime/agentctl -run 'Test(StreamUpdates\|HasAgentStream)' -count=1` | Passed. |
-| `bash scripts/lint-go-changed apps/backend/internal/agent/hostutility/antigravity_login.go apps/backend/internal/agent/hostutility/antigravity_login_stream_test.go` | Passed; zero issues. |
+| `go test -trimpath -race ./internal/agent/runtime/agentctl -count=1` | Passed after the stream-retirement registration guard. |
+| `go test -trimpath ./internal/agent/runtime/agentctl -run '^TestRegisterPendingRequestRejectsDisconnectedStream$' -count=1` | Passed. |
+| `go test -race -trimpath ./internal/agentctl/server/process -run '^TestWorkspaceTrackerUnchangedDirtyReplay$' -count=10` | Passed; the initial CI run had one panic in this unchanged test. |
+| `bash scripts/lint-go-changed apps/backend/internal/agent/hostutility/antigravity_login.go apps/backend/internal/agent/hostutility/antigravity_login_stream_test.go apps/backend/internal/agent/runtime/agentctl/client_stream.go apps/backend/internal/agent/runtime/agentctl/agent_test.go` | Passed; zero issues. |
 | `python3 scripts/list-docs.py validate` | Passed. |
 | `python3 scripts/lint-spec-files.py --all` | Passed. |
 | Local `.github/scripts/pr-docs.cjs` `validateCoverage` with the changed work orders and their current plan/requirement/design contents | Passed; covered, no errors. |
@@ -144,6 +158,11 @@ The sandbox required a writable task-owned `GOCACHE` and
 the existing cache-repair positive control because its descriptor-based path
 walk rejects the macOS `/var` symlink. Using canonical `TMPDIR=/private/tmp`
 made the complete package pass without changing that unrelated test or code.
+
+The initial PR check for the ambient integration environment failed in the
+unchanged `TestWorkspaceTrackerUnchangedDirtyReplay` with `panic: close of closed
+channel`; ten focused local race-enabled repetitions passed. The updated PR run
+will establish whether that CI failure recurs.
 
 Internal docs updated: the sign-in design, this package, and the original
 subscription plan/Task 03. Public docs were checked; this caller repair changes

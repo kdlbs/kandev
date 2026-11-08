@@ -55,7 +55,8 @@ the instance. The prior argv repair in #5052 does not cover this later step.
 ### Out of scope
 
 - Migrating to `agy acp`, importing CLI credentials, or changing discovery.
-- Changing generic client APIs, native bundle pins, auth policy, or UI markup.
+- Changing public generic client APIs, redesigning transport behavior, changing
+  native bundle pins, auth policy, or UI markup.
 - Completing real Google consent or the wider browser/native qualification gates.
 - Restarting or mutating the user's running Kandev instance.
 
@@ -66,8 +67,10 @@ In `apps/backend/internal/agent/hostutility/antigravity_login.go`, call
 setup error with `open antigravity login stream`, and initialize only after
 success. Delete `waitForAntigravityStream` and its polling/channel machinery.
 Keep the attempt context, client-owned reader, and existing cleanup owner.
-Pending RPCs already fail when the stream disconnects; do not add another
-reader, retry loop, or global connection owner.
+Pending RPC registration must be synchronized with stream retirement, so an
+in-flight request is either included in disconnect cleanup or rejected before
+it can be registered on a retired stream. Do not add another reader, retry
+loop, or global connection owner.
 
 Add `antigravity_login_stream_test.go` beside the caller. Reuse the existing
 command fixture and real `agentctl.Client`; supply local HTTP responses for
@@ -86,7 +89,7 @@ cancellation while connection setup is pending. Join fixture handlers/readers.
 | Rejected WebSocket handshake | Preserve the setup error; no initialize request. | Dial-failure subtest with reachable healthy control. |
 | Disconnect during initialize | Fail through existing pending-request handling. | Disconnect subtest; no retry or successful sign-in. |
 | Cancel pending connection setup | Return promptly and release owned resources. | Channel-controlled cancellation subtest. |
-| Other providers / generic stream client | Existing behavior. | No shared implementation change; focused client stream tests. |
+| Other providers / generic stream client | A request racing stream retirement is drained or rejected immediately. | Active-stream registration regression and focused client tests. |
 
 ## Tests
 
@@ -95,6 +98,8 @@ cancellation while connection setup is pending. Join fixture handlers/readers.
   authentication. Demonstrate the old caller fails before applying the correction.
 - `TestAntigravityLoginStreamFailure`: protects AC-AGENTS-ANTIGRAVITY-ACP-010.5
   for dial rejection, disconnect, and cancellation.
+- `TestRegisterPendingRequestRejectsDisconnectedStream`: prevents a late
+  authentication request from registering after stream disconnect cleanup.
 - Existing `TestAntigravityLoginConfigurePreservesCommand` and attempt lifecycle
   tests continue to protect the prior argv and ownership corrections.
 
@@ -120,8 +125,9 @@ test covers handshake rejection, disconnect during initialize, and cancellation
 classified by the existing attempt owner.
 
 The focused regressions, full hostutility package with the race detector,
-existing client stream tests, changed-package lint, specification/catalog
-checks, documentation coverage preflight, and diff checks pass. The
+full agentctl package with the race detector, late-registration regression,
+changed-package lint, specification/catalog checks, documentation coverage
+preflight, and diff checks pass. The
 [work order](task-01-stream-startup.md#results) records commands and environment
 details. Internal design and companion delivery records are synchronized.
 Public setup instructions and rendered UI are unchanged; this restores the
