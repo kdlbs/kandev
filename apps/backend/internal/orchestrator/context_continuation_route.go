@@ -97,11 +97,41 @@ func sameFailedContextRoute(current, expected *models.TaskSession) bool {
 		current.TaskID == expected.TaskID
 }
 
+// retainedContextContinuationRoute reports a manual retry claim that a route
+// action kept behind the recovery fence for this explicit recovery.
+func (s *Service) retainedContextContinuationRoute(ctx context.Context, session *models.TaskSession) bool {
+	return s.profileExecutionResolver != nil && session != nil && session.RouteState == dynamicRouteStatusRetrying &&
+		session.RouteGeneration > 0 && session.ExecutionProfileID != "" &&
+		(s.agentManager == nil || !s.agentManager.IsAgentRunningForSession(ctx, session.ID))
+}
+
 func (s *Service) releaseAbandonedContextContinuationRoute(ctx context.Context, sessionID string, generation int64, succeeded *bool) {
 	if *succeeded {
 		return
 	}
-	if err := s.profileExecutionResolver.MarkRouteRecoveryActionRequired(context.WithoutCancel(ctx), sessionID, generation); err != nil {
+	cleanupCtx := context.WithoutCancel(ctx)
+	if err := s.profileExecutionResolver.MarkRouteRecoveryActionRequired(cleanupCtx, sessionID, generation); err != nil {
 		s.logger.Warn("failed to release abandoned context recovery route", zap.String("session_id", sessionID), zap.Error(err))
+		return
 	}
+	s.mirrorReleasedContextContinuationRoute(cleanupCtx, sessionID, generation)
+}
+
+// The session projection follows the engine only when the engine returned this
+// generation to action_required and the projection still shows the claim, so a
+// newer route transition is never overwritten.
+func (s *Service) mirrorReleasedContextContinuationRoute(ctx context.Context, sessionID string, generation int64) {
+	loader, ok := s.repo.(dynamicRouteStateLoader)
+	if !ok {
+		return
+	}
+	state, err := loader.LoadRouteState(ctx, sessionID)
+	if err != nil || state == nil || state.Status != dynamicRouteStatusActionRequired || state.Generation != generation {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteState != dynamicRouteStatusRetrying {
+		return
+	}
+	s.mirrorDynamicRouteProjection(ctx, session, generation, dynamicRouteStatusActionRequired, RouteActionLaunchFailedReason)
 }

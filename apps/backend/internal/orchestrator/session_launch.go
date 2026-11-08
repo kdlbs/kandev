@@ -1586,7 +1586,7 @@ func (s *Service) RecoverSessionWithOptions(
 			settleErr := s.finishContinuationCheckpoint(context.WithoutCancel(ctx), checkpoint, models.ContinuitySnapshotUncertain)
 			return nil, errors.Join(claimErr, settleErr)
 		}
-		if claimed {
+		if claimed || s.retainedContextContinuationRoute(launchCtx, session) {
 			defer s.releaseAbandonedContextContinuationRoute(ctx, sessionID, session.RouteGeneration, &continuationSucceeded)
 		}
 	}
