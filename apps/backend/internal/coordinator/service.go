@@ -172,6 +172,11 @@ type Service struct {
 	// merge proposals.
 	merge bool
 
+	// notes is true when agent-tier notes are effective (phase 3.1 effective and
+	// features.coordinatorPhase35): the note routes, the per-turn index and
+	// proposal note references.
+	notes bool
+
 	// learningHealth computes the Learning section's health line; guarded by observerMu.
 	learningHealth LearningHealthReader
 	// automatic holds the automatic path's injectable seams.

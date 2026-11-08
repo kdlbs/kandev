@@ -425,6 +425,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorPhase35",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_PHASE35",
+			Kind:        KindFeature,
+			Label:       "Coordinator project notes",
+			Description: "Lets managers keep versioned, cited project notes that are checked and delivered to every coordinator turn as lower-trust advisory data. Requires Workspace coordinators, Coordinator control, Coordinator autonomy and Coordinator record and measure.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "Managers' notes enter every turn of the coordinator as lower-trust data and can steer its proposals. " +
+				"Notes never grant permissions or change manager instructions. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorPhase35 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorPhase35 = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

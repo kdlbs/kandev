@@ -492,7 +492,8 @@ func initIntegrationWiring(
 	}
 	coordinatorSvc, err := initCoordinatorWiring(ctx, dbPool, storeTracker, taskSvc, workflowSvc, repos.AgentSettings, cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, cfg.Features.CoordinatorPhase3, cfg.Features.CoordinatorPhase31, log,
 		coordinator.WithAnswer(phase3Effective(cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, cfg.Features.CoordinatorPhase3) && cfg.Features.CoordinatorAnswer),
-		coordinator.WithMerge(phase3Effective(cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, cfg.Features.CoordinatorPhase3) && cfg.Features.CoordinatorMerge))
+		coordinator.WithMerge(phase3Effective(cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, cfg.Features.CoordinatorPhase3) && cfg.Features.CoordinatorMerge),
+		coordinator.WithNotes(phase31Effective(cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, cfg.Features.CoordinatorPhase3, cfg.Features.CoordinatorPhase31) && cfg.Features.CoordinatorPhase35))
 	if err != nil {
 		return nil, err
 	}
