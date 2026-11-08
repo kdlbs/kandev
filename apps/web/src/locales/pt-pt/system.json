@@ -818,5 +818,8 @@
   "toolPayload.historyRefsDeleted_one": "Removeu {{count}} referência de checkpoint",
   "toolPayload.historyRefsDeleted_other": "Removeu {{count}} referências de checkpoint",
   "toolPayload.historyRetry_one": "{{count}} limpeza de checkpoint aguarda nova tentativa",
-  "toolPayload.historyRetry_other": "{{count}} limpezas de checkpoints aguardam nova tentativa"
+  "toolPayload.historyRetry_other": "{{count}} limpezas de checkpoints aguardam nova tentativa",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.label": "Transferir filas de sessões principais terminadas",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.description": "Quando a sessão principal de uma tarefa falha, é cancelada ou termina, transfere as mensagens em fila para a sessão que passa a ser a principal.",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.riskDescription": "As mensagens em fila podem ser entregues a uma sessão diferente daquela para a qual foram colocadas em fila. Mantenha esta opção desativada para conservar cada mensagem na sessão original."
 }

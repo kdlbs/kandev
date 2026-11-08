@@ -818,5 +818,8 @@
   "toolPayload.historyRefsDeleted_one": "체크포인트 참조 {{count}}개를 제거했습니다",
   "toolPayload.historyRefsDeleted_other": "체크포인트 참조 {{count}}개를 제거했습니다",
   "toolPayload.historyRetry_one": "체크포인트 정리 {{count}}개가 재시도를 기다리고 있습니다",
-  "toolPayload.historyRetry_other": "체크포인트 정리 {{count}}개가 재시도를 기다리고 있습니다"
+  "toolPayload.historyRetry_other": "체크포인트 정리 {{count}}개가 재시도를 기다리고 있습니다",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.label": "종료된 기본 세션의 대기열 인계",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.description": "작업의 기본 세션이 실패, 취소 또는 완료되면 대기 중인 메시지를 새 기본 세션으로 옮깁니다.",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.riskDescription": "대기 중인 메시지가 처음 지정한 세션과 다른 세션에 전달될 수 있습니다. 메시지를 원래 세션에 유지하려면 꺼 두세요."
 }
