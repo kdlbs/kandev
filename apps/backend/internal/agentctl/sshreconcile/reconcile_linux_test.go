@@ -524,7 +524,22 @@ func TestReconcileVerifyModeChecksIdentityWithoutSignalling(t *testing.T) {
 }
 
 func processAlive(pid int) bool {
-	return syscall.Kill(pid, 0) == nil
+	if syscall.Kill(pid, 0) != nil {
+		return false
+	}
+	// A zombie has exited; in some CI containers PID 1 does not reap orphaned
+	// children promptly, so kill(0) still succeeds for the unreaped entry.
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return false
+	}
+	line := string(data)
+	end := strings.LastIndexByte(line, ')')
+	if end < 0 || end+1 >= len(line) {
+		return true
+	}
+	fields := strings.Fields(line[end+1:])
+	return len(fields) == 0 || (fields[0] != "Z" && fields[0] != "X")
 }
 
 func waitProcessGone(t *testing.T, pid int) {
