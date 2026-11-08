@@ -75,8 +75,8 @@ and is not claimed connected here.
 tried concrete IDs and last selected candidate. Same-candidate retries preserve
 the chain. Permitted cross-candidate fallback starts at the failed candidate's
 tier and excludes tried IDs. If the failed candidate no longer exists in saved
-order and no tried candidate locates a tier, the chain fails closed instead of
-restarting at the first tier. A person's Retry of a route left waiting with no
+order and no tried candidate locates a tier, the chain's position is unknown
+and selection restarts at the first tier, still excluding tried IDs. A person's Retry of a route left waiting with no
 current candidate and no exclusion or preference starts a fresh chain, so an
 exhausted traversal is reconsidered from the first tier; tried attempts remain
 history and open circuits or recovery guards still apply. Automatic and other
