@@ -861,6 +861,12 @@ func startAgentInfrastructure(
 	if services.Coordinator != nil {
 		orchestratorSvc.SetCoordinatorLookup(services.Coordinator)
 		orchestratorSvc.SetCoordinatorStandingInstructionsReader(coordinatorStandingInstructionsReader(services.Coordinator, log))
+		if services.Coordinator.NotesEnabled() {
+			orchestratorSvc.SetCoordinatorNotesDelivery(orchestrator.CoordinatorNotesDelivery{
+				Prepare:  services.Coordinator.PrepareTurnNotes,
+				Accepted: services.Coordinator.RecordTurnNotesAccepted,
+			})
+		}
 	}
 
 	// Wire the watcher-dependency enumerator into the agent settings
