@@ -8,7 +8,10 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Switch } from "@kandev/ui/switch";
 import { AgentProfilePicker } from "@/components/settings/agent-profile-picker";
-import { DynamicPolicyEditor } from "@/components/settings/dynamic-agent-policy-editor";
+import {
+  isDynamicErrorPolicyValid,
+  DynamicPolicyEditor,
+} from "@/components/settings/dynamic-agent-policy-editor";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { AgentProfile } from "@/lib/types/http";
 import type {
@@ -70,7 +73,8 @@ export function DynamicAgentCandidateList({
               tiersEnabled
                 ? "agents:dynamicTierCandidatesDescription"
                 : "agents:dynamicCandidatesDescription",
-            )}
+            )}{" "}
+            {t("agents:candidatePriorityHelp")}
           </p>
         </div>
         <AgentProfilePicker
@@ -103,7 +107,7 @@ export function DynamicAgentCandidateList({
                 <div className="flex min-w-0 basis-full items-center gap-3 sm:basis-auto sm:flex-1">
                   <Badge variant="outline">
                     {tiersEnabled
-                      ? t("agents:orderedTierNumber", { tier: numbers[index] })
+                      ? t("agents:candidatePriorityNumber", { tier: numbers[index] })
                       : index + 1}
                   </Badge>
                   <span className="min-w-0 truncate text-sm font-medium">
@@ -171,22 +175,77 @@ export function DynamicAgentCandidateList({
                   onChange={(next) => updateCandidate(index, next)}
                 />
               )}
-              <div className="grid min-w-0 gap-4 md:grid-cols-2">
-                <DynamicPolicyEditor
-                  errorClass="transient"
-                  policy={candidate.policies.transient}
-                  onChange={(patch) => updateCandidatePolicy(index, "transient", patch)}
-                />
-                <DynamicPolicyEditor
-                  errorClass="hard"
-                  policy={candidate.policies.hard}
-                  onChange={(patch) => updateCandidatePolicy(index, "hard", patch)}
-                />
-              </div>
+              <CandidatePolicies
+                candidate={candidate}
+                onChange={(errorClass, patch) => updateCandidatePolicy(index, errorClass, patch)}
+              />
             </li>
           ))}
         </ol>
       )}
     </div>
+  );
+}
+
+function CandidatePolicySummary({ candidate }: { candidate: DynamicAgentCandidate }) {
+  const { t } = useTranslation();
+  return (
+    <span className="space-y-1">
+      {(["transient", "hard"] as const).map((kind) => {
+        const policy = candidate.policies[kind];
+        return (
+          <span key={kind} className="block text-xs">
+            {t(kind === "transient" ? "agents:dynamicTransientErrors" : "agents:dynamicHardErrors")}
+            {": "}
+            {t("agents:candidatePolicySummary", {
+              retries: policy.retry.enabled ? policy.retry.maxRetries : 0,
+              seconds: policy.waitForReset.enabled ? policy.waitForReset.maxWaitSeconds : 0,
+              outcome: t(
+                policy.onExhausted === "skip"
+                  ? "agents:dynamicPolicySkip"
+                  : "agents:dynamicPolicyStop",
+              ),
+            })}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+// The policy editors stay collapsed behind a one-line summary per error class.
+// An invalid policy opens the panel so the save-blocking field stays visible.
+function CandidatePolicies({
+  candidate,
+  onChange,
+}: {
+  candidate: DynamicAgentCandidate;
+  onChange: (errorClass: DynamicErrorClass, patch: Partial<DynamicErrorPolicy>) => void;
+}) {
+  return (
+    <details
+      open={
+        !isDynamicErrorPolicyValid(candidate.policies.transient) ||
+        !isDynamicErrorPolicyValid(candidate.policies.hard) ||
+        undefined
+      }
+      className="rounded-md border p-3"
+    >
+      <summary className="cursor-pointer text-sm" data-testid="dynamic-candidate-policy-summary">
+        <CandidatePolicySummary candidate={candidate} />
+      </summary>
+      <div className="mt-3 grid min-w-0 gap-4 md:grid-cols-2">
+        <DynamicPolicyEditor
+          errorClass="transient"
+          policy={candidate.policies.transient}
+          onChange={(patch) => onChange("transient", patch)}
+        />
+        <DynamicPolicyEditor
+          errorClass="hard"
+          policy={candidate.policies.hard}
+          onChange={(patch) => onChange("hard", patch)}
+        />
+      </div>
+    </details>
   );
 }

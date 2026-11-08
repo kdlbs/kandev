@@ -173,7 +173,7 @@ func (s *Service) restoreFailedRouteAutoRetries(ctx context.Context) {
 // is busy or settled differently, or a workspace that turned the setting off
 // leaves the recovery surface as it is.
 func (s *Service) runFailedRouteAutoRetry(ctx context.Context, sessionID string, generation int64) {
-	s.removeDynamicPolicyRecoveryTimer(sessionID)
+	s.removeDynamicPolicyRecoveryTimer(sessionID, generation)
 	if !s.dynamicPolicyRecoveryActive(ctx) {
 		return
 	}
