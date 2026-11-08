@@ -29,15 +29,31 @@ type Handler struct {
 	logger               *zap.Logger
 	authenticatedControl func(*gin.Context) bool
 	instanceID           string
+	preparation          *managedRuntimePreparationState
+	probes               probeLifecycle
 }
 
 // NewHandler creates a new inference handler.
 func NewHandler(_ string, logger *zap.Logger) *Handler {
+	preparation := newManagedRuntimePreparationState()
 	return &Handler{
-		acpExecutor:   NewACPInferenceExecutor(logger),
-		codexExecutor: NewCodexAppServerInferenceExecutor(logger),
+		acpExecutor:   NewACPInferenceExecutor(logger, preparation),
+		codexExecutor: NewCodexAppServerInferenceExecutor(logger, preparation),
 		logger:        logger,
+		preparation:   preparation,
 	}
+}
+
+// Close retires attempt evidence and retries cleanup for any owner retained
+// after a prior filesystem cleanup failure.
+func (h *Handler) Close() error {
+	if h == nil {
+		return nil
+	}
+	if err := h.probes.close(); err != nil {
+		return err
+	}
+	return h.preparation.close()
 }
 
 // RegisterRoutes registers the inference routes on the given router group.
@@ -70,8 +86,18 @@ func (h *Handler) handleProbe(c *gin.Context) {
 	if !h.admitWrapper(c, req.InferenceConfig) {
 		return
 	}
+	if req.Preparation != nil && (h.authenticatedControl == nil || !h.authenticatedControl(c)) {
+		c.AbortWithStatusJSON(http.StatusForbidden, ProbeResponse{Success: false, Error: "authenticated control is required for managed runtime preparation"})
+		return
+	}
 
-	resp, err := h.probeExecutor(req).Probe(c.Request.Context(), &req)
+	ctx, release, err := h.probes.begin(c.Request.Context())
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, ProbeResponse{Success: false, Error: "utility probes are stopping"})
+		return
+	}
+	defer release()
+	resp, err := h.probeExecutor(req).Probe(ctx, &req)
 	if err != nil {
 		h.logger.Error("inference probe failed",
 			append(h.probeExecutionFailureFields(err), zap.Error(err))...)
@@ -163,6 +189,7 @@ func probeFailureCodeClass(code ProbeFailureCode) string {
 	switch code {
 	case ProbeFailureManagedRuntimeNPMResolution,
 		ProbeFailureManagedRuntimeNPMPolicy,
+		ProbeFailureManagedRuntimeCacheIncomplete,
 		ProbeFailureUnsupportedContext,
 		ProbeFailureAuthenticationRequired:
 		return string(code)
