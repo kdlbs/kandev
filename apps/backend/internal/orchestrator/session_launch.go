@@ -234,6 +234,12 @@ type LaunchSessionRequest struct {
 	// create flow. It is server-side provenance, so clients cannot turn the
 	// generic launch path into a workflow turn-start admission.
 	InitialCreatePrompt bool `json:"-"`
+	// PromptIsTaskDescription marks Prompt as an internal task-description
+	// transport rather than an explicit launch instruction. Task-creation
+	// producers set it so workflow step templates keep their existing
+	// replacement behavior. It is server-side provenance, kept off the wire
+	// protocol so a client cannot opt an explicit brief out of preservation.
+	PromptIsTaskDescription bool `json:"-"`
 	// InitialPromptPreview is supplied only by task creation after attachment claim.
 	InitialPromptPreview *models.InitialPromptPreview `json:"-"`
 	// InitialPromptSubmission is persisted during task-session preparation and
@@ -1046,6 +1052,12 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
 	options := startCreatedSessionOptions{lifecycleLockHeld: req.QuickChatInitialStart}
+	if req.Prompt != "" && !req.PromptIsTaskDescription {
+		// The launching caller supplied an explicit instruction, not the
+		// task-description transport used by internals. Select the existing
+		// preserving composer before seam 2 can serialize this request.
+		options.preserveDirectPrompt = true
+	}
 	if req.QuickChatInitialStart {
 		options.onQuickChatStartAttemptClaimed = func(attemptID string) {
 			req.QuickChatStartAgentAttemptID = attemptID

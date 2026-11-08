@@ -266,6 +266,8 @@ The agent tool has additional rules:
 
 If `intent` is omitted, the backend infers it from those fields. That inference exists for first-party compatibility; an external client should send an explicit intent so a later field change does not select a different path.
 
+For `intent: "start_created"`, a non-empty `prompt` is an explicit launch instruction. Kandev preserves it in the first stored and agent-bound message even when the destination step prompt has no `{{task_prompt}}` placeholder. A step prompt with the placeholder inserts the instruction there; a replacing step prompt runs before the retained instruction. Task creation and other internal callers can transport the task description in the same field. That input keeps the step template's normal replacement behavior, and the backend never infers its origin from text equality. Sending an instruction does not grant read-only or other provider permissions.
+
 ```json
 {
   "id": "launch-session-1",

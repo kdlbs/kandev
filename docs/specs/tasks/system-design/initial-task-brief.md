@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-INITIAL-TASK-BRIEF-001
 created: 2026-09-12
-updated: 2026-10-07
+updated: 2026-11-08
 owners:
   - kandev
 ---
@@ -148,6 +148,92 @@ Existing launch, workflow-entry, and Office callers do not opt into this direct
 admission option. No public API field, database migration, or new UI control is needed.
 This design records a local extension of existing ownership, so no separate ADR is required.
 
+## Explicit prepared-session launches
+
+This extension implements AC-001.13 through AC-001.16 of
+`REQ-TASKS-INITIAL-TASK-BRIEF-001`. The
+[delivery package](../../../plans/workflow-prompt-handoff-integrity/plan.md)
+records issue #5178, diagnostic limits, and implementation results. Direct-message
+brief admission above keeps its existing scope.
+
+### Input origin and composition
+
+`launchStartCreated` distinguishes explicit launch input from the task
+description that internal creation callers transport in `LaunchSessionRequest.Prompt`.
+The HTTP `TaskHandlers.dispatchTaskSession` is one such description producer.
+Origin is never inferred from equality with the current description, `AutoStart`,
+the selected step, or prompt wording.
+
+A server-only `PromptIsTaskDescription` flag on `LaunchSessionRequest`
+(`json:"-"`) carries that origin. This is an internal field, not a public launch
+option. Ordinary task creation sets it; explicit launch requests and Quick Chat
+do not. Keep `InitialCreatePrompt` on its dedicated admission path and
+`NoInitialPrompt` on its prompt-free path.
+
+For explicit nonempty input, `launchStartCreated` sets the existing
+`startCreatedSessionOptions.preserveDirectPrompt` before admission can defer
+the request. The composer reuses `stepPromptBodyWithOptions`: a placeholder
+inserts the input; a replacing template precedes the retained input. An empty
+template retains the input. The helper's default replacement behavior is
+unchanged for other callers.
+
+Leave the private `startCreatedSessionWithComposedPrompt` path single-pass.
+Do not prepend the task description, serialize the retained plan into the input,
+or treat a retained plan as authority to replace the explicit instruction.
+This repair preserves instructions as text. It does not implement a provider
+permission sandbox or promise that a model obeys every instruction.
+
+### Persistence, replay, and provider boundary
+
+Keep one final canonical prompt through `wrapCreatedSessionPrompt`,
+`executor.LaunchOptions.Prompt`, and `postLaunchCreated`. Compare its visible
+instruction with `Message.ToAPI` content and raw content, then inspect the
+first native ACP prompt through the mock provider's opt-in trace.
+Attachment materialization can add its existing native delivery context.
+For text-only input, compare the complete canonical text where the boundaries
+permit equality. Never use preview content as proof of provider delivery.
+
+`seam2StartCreatedPayload` already stores `preserve_direct_prompt` and
+`replayCeilingLaunchStartCreated` restores it. The producer sets the value
+before this serialization. The original input, attachment identities, trusted
+expansion snapshot, and entry binding are retained through existing replay and
+Send Now paths. Legacy payloads without the flag retain their existing default.
+Origin is never guessed from stored text.
+
+The initial-submission callbacks still compare the original raw content and
+attachments before provider admission. This repair neither creates new recovery
+receipts nor replays accepted or uncertain submissions. Task-creation receipt
+recovery keeps the replacement semantics in the
+[initial recovery design](prompt-attachments.md#workflow-context-during-initial-recovery).
+Test matching pending receipts and rejection/error callbacks without converting
+raw receipt data into composed prompt authority.
+
+Use the existing server-owned saved-prompt and canvas capability channels.
+Preserve a previously prepared expansion, including an empty snapshot, without
+trusting a client-supplied system block. Mode wrappers run once. Task/session
+ownership, actor, executor, profile, title, question, and completion guards stay
+ahead of provider dispatch. No new schema, permission, or public request field
+is required.
+
+### Verification and compatibility
+
+Verification uses a real SQLite repository and turn service with the existing
+manager mock for launch, storage, and replay tests. A native mock ACP trace
+supplies the separate transport proof. Coverage includes replacing, placeholder,
+and empty templates; retained plans; trusted saved prompts; canvas; attachments;
+and direct-message equivalence. It also includes internal creation, empty input,
+no initial turn, and already-composed automatic entry as compatibility controls.
+
+Desktop and phone reuse the existing session transcript and prompt navigation.
+No component, layout, control, or localization change was required. The focused
+E2E cases inspect the admitted instruction after reload on both viewports.
+Public API guidance distinguishes an explicit launch instruction from automatic
+task-description substitution.
+
+This is an extension of the existing admitted-input and server-context rules.
+The origin flag is a local implementation choice. The existing saved-prompt
+decision remains authoritative; no additional ADR or ownership boundary is needed.
+
 ## Related contracts
 
 - [Workflow first-prompt ownership](workflow-step-agent-start-ownership.md#prompt-history-contract)
@@ -160,3 +246,5 @@ This design records a local extension of existing ownership, so no separate ADR 
 [Initial task brief fix package](../../../plans/initial-task-brief/plan.md)
 
 [Initial task brief after recovery](../../../plans/initial-task-brief-after-recovery/plan.md)
+
+[Workflow prompt and handoff integrity](../../../plans/workflow-prompt-handoff-integrity/plan.md)

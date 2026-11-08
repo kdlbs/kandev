@@ -1909,17 +1909,21 @@ func (h *TaskHandlers) dispatchTaskSession(
 		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 		defer cancel()
 		launchResp, err := h.orchestrator.LaunchSession(startCtx, &orchestrator.LaunchSessionRequest{
-			TaskID:                taskID,
-			Intent:                orchestrator.IntentStartCreated,
-			SessionID:             sessionID,
-			AgentProfileID:        body.AgentProfileID,
-			Prompt:                description,
-			SkipMessageRecord:     false,
-			PlanMode:              body.PlanMode,
-			Attachments:           body.Attachments,
-			InitialCreatePrompt:   dispatch.initialCreatePrompt,
-			NoInitialPrompt:       dispatch.noInitialPrompt,
-			QuickChatInitialStart: dispatch.quickChatInitialStart,
+			TaskID:            taskID,
+			Intent:            orchestrator.IntentStartCreated,
+			SessionID:         sessionID,
+			AgentProfileID:    body.AgentProfileID,
+			Prompt:            description,
+			SkipMessageRecord: false,
+			PlanMode:          body.PlanMode,
+			Attachments:       body.Attachments,
+			// Normal creation transports the task description here and keeps
+			// the workflow template's replacement semantics. Quick Chat sends
+			// the user's explicit opening prompt through the same dispatcher.
+			PromptIsTaskDescription: !dispatch.quickChatInitialStart,
+			InitialCreatePrompt:     dispatch.initialCreatePrompt,
+			NoInitialPrompt:         dispatch.noInitialPrompt,
+			QuickChatInitialStart:   dispatch.quickChatInitialStart,
 		})
 		if err != nil {
 			h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", taskID), zap.String("session_id", sessionID))
