@@ -3237,9 +3237,10 @@ const (
 )
 
 type executionTeardownClaim struct {
-	intent           executionTeardownIntent
-	expiresAt        time.Time
-	cleanupCompleted bool
+	intent             executionTeardownIntent
+	expiresAt          time.Time
+	cleanupCompleted   bool
+	preserveActiveTurn bool
 }
 
 // claimExecutionTeardown accepts the first teardown intent for one concrete
@@ -3259,6 +3260,14 @@ func (s *Service) claimExecutionTeardownWithToken(
 	sessionID, executionID string,
 	intent executionTeardownIntent,
 ) (executionTeardownClaim, bool) {
+	return s.claimExecutionTeardownWithTokenAndTurnPolicy(sessionID, executionID, intent, false)
+}
+
+func (s *Service) claimExecutionTeardownWithTokenAndTurnPolicy(
+	sessionID, executionID string,
+	intent executionTeardownIntent,
+	preserveActiveTurn bool,
+) (executionTeardownClaim, bool) {
 	if sessionID == "" || executionID == "" {
 		return executionTeardownClaim{}, false
 	}
@@ -3266,8 +3275,9 @@ func (s *Service) claimExecutionTeardownWithToken(
 	for {
 		now := time.Now()
 		claim := executionTeardownClaim{
-			intent:    intent,
-			expiresAt: now.Add(completedExecutionRetention),
+			intent:             intent,
+			expiresAt:          now.Add(completedExecutionRetention),
+			preserveActiveTurn: preserveActiveTurn,
 		}
 		value, loaded := s.executionTeardownClaims.LoadOrStore(key, claim)
 		if !loaded {
@@ -3428,6 +3438,46 @@ func (s *Service) RegisterExecutionStopOwner(sessionID, executionID string, forc
 	})
 }
 
+// RegisterExecutionReplacementStopOwner claims a profile-replacement stop
+// without allowing the old execution's event to complete the incoming turn.
+func (s *Service) RegisterExecutionReplacementStopOwner(
+	ctx context.Context,
+	sessionID, executionID string,
+) bool {
+	if sessionID == "" || executionID == "" {
+		return false
+	}
+	if cancelInFlightGuardHeldForSession(ctx, sessionID) ||
+		executionReplacementStopOwnerGuardHeldForSession(ctx, sessionID) {
+		return s.registerExecutionReplacementStopOwnerLocked(sessionID, executionID)
+	}
+	guard, release := s.acquireCancelInFlightGuard(sessionID)
+	if !guard.TryLock() {
+		release()
+		return false
+	}
+	defer func() {
+		guard.Unlock()
+		release()
+	}()
+	return s.registerExecutionReplacementStopOwnerLocked(sessionID, executionID)
+}
+
+func (s *Service) registerExecutionReplacementStopOwnerLocked(sessionID, executionID string) bool {
+	if s.isCancelInFlight(sessionID) {
+		return false
+	}
+
+	_, claimed := s.claimExecutionTeardownWithTokenAndTurnPolicy(
+		sessionID, executionID, executionTeardownIntentForce, true,
+	)
+	if claimed {
+		return true
+	}
+	claim, exists := s.executionTeardownClaimFor(sessionID, executionID)
+	return exists && claim.preserveActiveTurn
+}
+
 func (s *Service) deleteExecutionTeardownClaimIfExpired(key string, expiresAt time.Time) {
 	value, ok := s.executionTeardownClaims.Load(key)
 	if !ok {
@@ -3442,6 +3492,11 @@ func (s *Service) deleteExecutionTeardownClaimIfExpired(key string, expiresAt ti
 func (s *Service) hasExecutionTeardownOwner(sessionID, executionID string) bool {
 	_, ok := s.executionTeardownClaimFor(sessionID, executionID)
 	return ok
+}
+
+func (s *Service) executionTeardownPreservesActiveTurn(sessionID, executionID string) bool {
+	claim, ok := s.executionTeardownClaimFor(sessionID, executionID)
+	return ok && claim.preserveActiveTurn
 }
 
 func (s *Service) hasGracefulExecutionTeardownOwner(sessionID, executionID string) bool {
@@ -4762,7 +4817,9 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 		// Settlement must never wait for the session lifecycle lock here: the
 		// stop publisher can be the goroutine that already holds it.
 		s.settleBackgroundWorkWithoutWaiting(context.WithoutCancel(ctx), data.SessionID, data.AgentExecutionID)
-		s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
+		if !s.executionTeardownPreservesActiveTurn(data.SessionID, data.AgentExecutionID) {
+			s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
+		}
 		return
 	}
 

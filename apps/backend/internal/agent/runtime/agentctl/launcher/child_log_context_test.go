@@ -3,6 +3,7 @@ package launcher
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -268,6 +269,52 @@ func TestChildLogIntegerBounds(t *testing.T) {
 		{"retained_bytes", -1},
 		{"retained_bytes", 1.5},
 		{"limit_bytes", "8192"},
+	}
+	for _, tt := range invalid {
+		raw, err := json.Marshal(tt.value)
+		require.NoError(t, err)
+		require.False(t, childLogContextValidators[tt.key](raw), "%s=%v", tt.key, tt.value)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.36
+// @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-004.8
+func TestPipeOutputPreservesStartupExitContext(t *testing.T) {
+	line := encodeChildLogLine(t, zapcore.ErrorLevel, "agent process exited with error",
+		zap.Int("exit_code", 1),
+		zap.String("exit_disposition", "ordinary_exit"),
+		zap.Uint64("process_generation", 7),
+		zap.String("process_reason", "mise_config_untrusted"),
+		zap.Strings("recent_stderr", []string{"private raw stderr"}),
+		zap.Error(errors.New("private raw error")),
+	)
+	observed, _ := forwardChildLogLineAt(t, line, zapcore.DebugLevel)
+	entries := observed.All()
+	require.Len(t, entries, 1)
+	decoded := decodedChildMessage(t, entries[0].Message)
+	require.Equal(t, float64(1), decoded["exit_code"])
+	require.Equal(t, "ordinary_exit", decoded["exit_disposition"])
+	require.Equal(t, float64(7), decoded["process_generation"])
+	require.Equal(t, "mise_config_untrusted", decoded["process_reason"])
+	for _, sensitive := range []string{"private raw stderr", "private raw error", "recent_stderr"} {
+		require.NotContains(t, entries[0].Message, sensitive)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.36
+func TestPipeOutputRejectsUnsafeStartupExitContext(t *testing.T) {
+	invalid := []struct {
+		key   string
+		value any
+	}{
+		{"exit_disposition", "ordinary"},
+		{"exit_disposition", "killed"},
+		{"process_reason", "mise"},
+		{"process_reason", "/private/mise.toml"},
+		{"process_generation", 0},
+		{"process_generation", -1},
+		{"process_generation", 1.5},
+		{"process_generation", "7"},
 	}
 	for _, tt := range invalid {
 		raw, err := json.Marshal(tt.value)
