@@ -1310,6 +1310,12 @@ func decodeAgentErrorCauses(raw json.RawMessage) []AgentErrorCause {
 				cause.PromptNotSent = &promptNotSent
 			}
 		}
+		if value, ok := fields["exit_code"]; ok {
+			var exitCode *int
+			if json.Unmarshal(value, &exitCode) == nil && exitCode != nil {
+				cause.ExitCode = exitCode
+			}
+		}
 		if value, ok := fields["storage"]; ok {
 			var storage AgentErrorStorage
 			if json.Unmarshal(value, &storage) == nil {

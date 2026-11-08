@@ -37,6 +37,7 @@ import (
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/common/securityutil"
+	"github.com/kandev/kandev/internal/common/startupdiag"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -196,11 +197,12 @@ type Manager struct {
 	exitErr            atomic.Value // error
 
 	// Stderr buffering for error context
-	stderrBuffer          []string
-	stderrBufferTruncated bool
-	stderrMu              sync.RWMutex
-	stderrConsumer        adapter.StderrLineConsumer
-	stderrSanitizer       adapter.StderrLineSanitizer
+	stderrBuffer            []string
+	stderrBufferTruncated   bool
+	startupDiagnosticReason string
+	stderrMu                sync.RWMutex
+	stderrConsumer          adapter.StderrLineConsumer
+	stderrSanitizer         adapter.StderrLineSanitizer
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
@@ -3591,6 +3593,14 @@ func (m *Manager) readStderr(stderrDone chan<- stderrReadResult) {
 			m.stderrConsumer.ConsumeStderrLine(rawLine)
 		}
 
+		// Recognized toolchain signatures project to a fixed safe marker before
+		// a launch wrapper can discard the otherwise-untrusted raw line.
+		if marker, reason := startupdiag.ProjectLine(rawLine); marker != "" {
+			m.recordStartupDiagnostic(reason)
+			m.appendStderr(marker)
+			continue
+		}
+
 		line, keep := safeManagedNpmStderrLine(rawLine)
 		if !keep && m.cfg != nil && !m.cfg.LaunchWrapper.IsZero() {
 			continue
@@ -3676,12 +3686,32 @@ func (m *Manager) managedStartupStderrSnapshot() ([]string, bool) {
 	return result, !m.stderrBufferTruncated
 }
 
+// managedStartupDiagnosticSnapshot returns the recognized reason with the
+// current retention completeness. Ring eviction invalidates attribution.
+func (m *Manager) managedStartupDiagnosticSnapshot() (string, bool) {
+	m.stderrMu.RLock()
+	defer m.stderrMu.RUnlock()
+	return m.startupDiagnosticReason, !m.stderrBufferTruncated
+}
+
+func (m *Manager) recordStartupDiagnostic(reason string) {
+	if reason == "" {
+		return
+	}
+	m.stderrMu.Lock()
+	defer m.stderrMu.Unlock()
+	if m.startupDiagnosticReason == "" {
+		m.startupDiagnosticReason = reason
+	}
+}
+
 // ClearStderrBuffer clears the stderr buffer (e.g., after successful operation)
 func (m *Manager) ClearStderrBuffer() {
 	m.stderrMu.Lock()
 	defer m.stderrMu.Unlock()
 	m.stderrBuffer = nil
 	m.stderrBufferTruncated = false
+	m.startupDiagnosticReason = ""
 }
 
 // waitForExit waits for the process to exit
@@ -3704,13 +3734,16 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 	_ = m.closeStderrReader()
 	intentionalStop := m.Status() == StatusStopping
 	recentStderr, stderrRetainedComplete := m.managedStartupStderrSnapshot()
-	evidence := newManagedStartupEvidence(generation, err, intentionalStop, stderrComplete, stderrRetainedComplete, stderrPresent, recentStderr)
+	diagnosticReason, diagnosticRetained := m.managedStartupDiagnosticSnapshot()
+	evidence := newManagedStartupEvidence(generation, err, intentionalStop, stderrComplete, stderrRetainedComplete, stderrPresent, recentStderr, diagnosticReason, diagnosticRetained)
 	m.recordManagedStartupEvidence(evidence)
 
 	switch {
 	case intentionalStop:
 		m.exitCode.Store(0)
-		m.logger.Info("agent process exited during intentional stop")
+		m.logger.Info("agent process exited during intentional stop",
+			zap.String("exit_disposition", string(evidence.ExitDisposition)),
+			zap.Uint64("process_generation", generation))
 	case err != nil:
 		m.exitErr.Store(errorWrapper{err: err})
 		exitCode := -1
@@ -3722,6 +3755,9 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 		m.logger.Error("agent process exited with error",
 			zap.Error(err),
 			zap.Int("exit_code", exitCode),
+			zap.String("exit_disposition", string(evidence.ExitDisposition)),
+			zap.Uint64("process_generation", generation),
+			zap.String("process_reason", evidence.DiagnosticReason),
 			zap.Strings("recent_stderr", recentStderr))
 
 		// Send error event to the updates channel so UI can display it. This is
@@ -3756,7 +3792,11 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 		}
 	default:
 		m.exitCode.Store(0)
-		m.logger.Info("agent process exited successfully")
+		m.logger.Info("agent process exited successfully",
+			zap.Int("exit_code", 0),
+			zap.String("exit_disposition", string(evidence.ExitDisposition)),
+			zap.Uint64("process_generation", generation),
+			zap.String("process_reason", evidence.DiagnosticReason))
 	}
 
 	if !intentionalStop {

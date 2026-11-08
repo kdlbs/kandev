@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/startupdiag"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -140,7 +141,25 @@ func managedStartupEvidenceFromDetails(details map[string]any) *types.ManagedSta
 	if err := json.Unmarshal(data, &evidence); err != nil || evidence.ProcessGeneration == 0 {
 		return nil
 	}
+	normalizeManagedStartupEvidence(&evidence)
 	return &evidence
+}
+
+func normalizeManagedStartupEvidence(evidence *types.ManagedStartupEvidence) {
+	if evidence == nil {
+		return
+	}
+	switch evidence.ExitDisposition {
+	case types.ManagedStartupExitOrdinary,
+		types.ManagedStartupExitIntentional,
+		types.ManagedStartupExitSignal,
+		types.ManagedStartupExitUnknown:
+	default:
+		evidence.ExitDisposition = types.ManagedStartupExitUnknown
+	}
+	if evidence.DiagnosticReason != startupdiag.ReasonMiseConfigUntrusted || !evidence.DiagnosticComplete {
+		evidence.DiagnosticReason = ""
+	}
 }
 
 // NewSessionResponse from agentctl

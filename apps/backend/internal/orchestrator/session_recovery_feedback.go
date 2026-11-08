@@ -21,6 +21,7 @@ type SessionRecoveryIdentity struct {
 type SessionRecoveryFailure struct {
 	Err      error
 	Identity SessionRecoveryIdentity
+	Causes   []models.AgentErrorCause
 }
 
 func (e *SessionRecoveryFailure) Error() string {
@@ -46,6 +47,17 @@ func RecoveryFailureIdentity(err error) (SessionRecoveryIdentity, bool) {
 	return failure.Identity, true
 }
 
+// RecoveryFailureCauses returns the normalized safe causes correlated to the
+// specific recovery failure, never to an unrelated or historical session row.
+func RecoveryFailureCauses(err error) ([]models.AgentErrorCause, bool) {
+	var failure *SessionRecoveryFailure
+	if !errors.As(err, &failure) || failure == nil || len(failure.Causes) == 0 {
+		return nil, false
+	}
+	causes := models.NormalizeAgentErrorCauses(failure.Causes)
+	return causes, len(causes) > 0
+}
+
 func (s *Service) withSessionRecoveryFailureIdentity(
 	ctx context.Context,
 	taskID, sessionID string,
@@ -60,10 +72,11 @@ func (s *Service) withSessionRecoveryFailureIdentity(
 		return err
 	}
 	identity := sessionRecoveryIdentity(attempt, executionID)
-	identity.ErrorStamp = s.matchingSessionRecoveryErrorStamp(
+	stamp, matchedCauses := s.matchingSessionRecoveryFailureEvidence(
 		ctx, taskID, sessionID, identity,
 	)
-	return &SessionRecoveryFailure{Err: err, Identity: identity}
+	identity.ErrorStamp = stamp
+	return &SessionRecoveryFailure{Err: err, Identity: identity, Causes: matchedCauses}
 }
 
 func isSessionRecoveryFailure(err error) bool {
@@ -83,27 +96,27 @@ func sessionRecoveryIdentity(attempt *resumeAttempt, executionID string) Session
 	return identity
 }
 
-func (s *Service) matchingSessionRecoveryErrorStamp(
+func (s *Service) matchingSessionRecoveryFailureEvidence(
 	ctx context.Context,
 	taskID, sessionID string,
 	identity SessionRecoveryIdentity,
-) string {
+) (string, []models.AgentErrorCause) {
 	lookupCtx := context.Background()
 	if ctx != nil {
 		lookupCtx = context.WithoutCancel(ctx)
 	}
 	if s == nil || s.repo == nil || taskID == "" || sessionID == "" {
-		return ""
+		return "", nil
 	}
 	session, err := s.repo.GetTaskSession(lookupCtx, sessionID)
 	if err != nil || session == nil || session.TaskID != taskID {
-		return ""
+		return "", nil
 	}
 	lastError, ok := models.LoadLastAgentError(session.Metadata)
 	if !ok || lastError.IsDismissed() || !recoveryIdentityMatchesLastError(identity, lastError) {
-		return ""
+		return "", nil
 	}
-	return lastError.Stamp()
+	return lastError.Stamp(), models.NormalizeAgentErrorCauses(lastError.Causes)
 }
 
 // HasActiveSessionRecoveryForFailure reports ownership only for the concrete

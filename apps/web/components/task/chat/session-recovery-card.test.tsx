@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
+import type { ActiveSessionRecovery } from "@/lib/active-session-recovery";
 import type { Message, TaskSession } from "@/lib/types/http";
 import type { SessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import { SessionRecoveryProvider, useSessionComposerRecovery } from "./session-recovery-context";
@@ -14,6 +15,10 @@ afterEach(cleanup);
 const RECOVERY_CARD = "session-recovery-card";
 const NPM_POLICY = "managed_runtime_npm_policy";
 const CONNECTION_LOST = "Connection lost";
+const RUNTIME_RETRY_BUTTON = "managed-runtime-npm-retry-button";
+const MISE_SUMMARY = "mise did not trust this workspace's configuration.";
+const EXIT_CODE_ONE = "Exit code: 1";
+const PREREQUISITE = "session-recovery-prerequisite";
 const resume = vi.fn();
 const relocate = vi.fn().mockResolvedValue(true);
 const actions = {
@@ -103,7 +108,7 @@ describe("composer recovery ownership", () => {
         );
       expect(screen.getByTestId(RECOVERY_CARD)).toBeTruthy();
       expect(screen.queryByTestId(RESUME_BUTTON)).toBeNull();
-      fireEvent.click(screen.getByTestId("managed-runtime-npm-retry-button"));
+      fireEvent.click(screen.getByTestId(RUNTIME_RETRY_BUTTON));
       expect(resume).toHaveBeenCalledWith("runtime_retry");
     },
   );
@@ -225,10 +230,7 @@ it.each(["managed_runtime_npm_resolution", NPM_POLICY, "provider_quota_limited"]
     else expect(screen.queryByTestId(RESUME_BUTTON)).toBeNull();
     expect(screen.queryByTestId(FRESH_BUTTON)).toBeNull();
     if (kind !== "provider_quota_limited")
-      expect(screen.getByTestId("managed-runtime-npm-retry-button")).toHaveProperty(
-        "disabled",
-        true,
-      );
+      expect(screen.getByTestId(RUNTIME_RETRY_BUTTON)).toHaveProperty("disabled", true);
   },
 );
 
@@ -248,7 +250,7 @@ it.each(["managed_runtime_npm_resolution", NPM_POLICY])(
         />
       </StateProvider>,
     );
-    expect(screen.getByTestId("managed-runtime-npm-retry-button")).toBeTruthy();
+    expect(screen.getByTestId(RUNTIME_RETRY_BUTTON)).toBeTruthy();
     expect(screen.queryByTestId(RESTORE_WORKSPACE_BUTTON)).toBeNull();
     expect(screen.queryByTestId(RESUME_BUTTON)).toBeNull();
   },
@@ -388,4 +390,115 @@ it("withholds restore during a retryable guard in the composer", () => {
   );
   expect(screen.queryByTestId(RESTORE_WORKSPACE_BUTTON)).toBeNull();
   expect(screen.getByTestId(RESUME_BUTTON)).toBeTruthy();
+});
+
+function processExitModel(reason: string, exitCode: number): ActiveSessionRecovery {
+  return {
+    sessionId: "session",
+    stamp: "failure",
+    kind: "managed_runtime_startup",
+    error: {
+      message: "The agent exited before startup completed.",
+      occurredAt: "2026-11-07T12:00:00Z",
+      phase: "bootstrap",
+      attemptId: "resume-1",
+      executionId: "exec-1",
+      causes: [
+        {
+          operation: "start",
+          code: "process_exited",
+          reason,
+          exit_code: exitCode,
+        },
+      ],
+    },
+  };
+}
+
+function renderProcessExitCard(
+  reason: string,
+  exitCode: number,
+  extraActions: Partial<SessionRecoveryActions> = {},
+) {
+  return render(
+    <StateProvider
+      initialState={
+        {
+          agentProfiles: { items: [{ id: "profile" }] },
+          taskSessions: { items: { session } },
+        } as unknown as Partial<AppState>
+      }
+    >
+      <SessionRecoveryCard
+        model={processExitModel(reason, exitCode)}
+        actions={{ ...actions, ...extraActions } as SessionRecoveryActions}
+        onNewSession={vi.fn()}
+      />
+    </StateProvider>,
+  );
+}
+
+it("renders the final process exit for a managed runtime retry failure", () => {
+  renderProcessExitCard("mise_config_untrusted", 1);
+  const card = screen.getByTestId(RECOVERY_CARD);
+  expect(screen.getByRole("heading", { name: "Agent startup blocked by mise" })).toBeTruthy();
+  expect(card.textContent).toContain(MISE_SUMMARY);
+  expect(screen.getByTestId(PREREQUISITE)).toBeTruthy();
+  expect(card.textContent).toContain(EXIT_CODE_ONE);
+  expect(screen.getByTestId(RUNTIME_RETRY_BUTTON)).toBeTruthy();
+  expect(screen.queryByTestId(RESUME_BUTTON)).toBeNull();
+});
+
+it("renders an unknown final process exit without mise attribution", () => {
+  renderProcessExitCard("unclassified", 3);
+  const card = screen.getByTestId(RECOVERY_CARD);
+  expect(screen.getByRole("heading", { name: "Agent exited before startup" })).toBeTruthy();
+  expect(card.textContent).toContain("The agent exited before startup completed.");
+  expect(screen.queryByTestId(PREREQUISITE)).toBeNull();
+  expect(card.textContent).toContain("Exit code: 3");
+});
+
+it("keeps a later branch refusal visible over the earlier process cause", () => {
+  renderProcessExitCard("mise_config_untrusted", 1, {
+    branchDetails: {
+      kind: "branch_unrecoverable",
+      recovery_action: "resume_new_branch",
+      original_branch: "feature/gone",
+    } as never,
+  });
+  const card = screen.getByTestId(RECOVERY_CARD);
+  expect(card.textContent).toContain("Branch is no longer available");
+  expect(card.textContent).not.toContain(MISE_SUMMARY);
+  expect(screen.queryByTestId(PREREQUISITE)).toBeNull();
+  expect(card.textContent).toContain(EXIT_CODE_ONE);
+});
+
+it("keeps a later guard refusal visible over the earlier process cause", () => {
+  renderProcessExitCard("mise_config_untrusted", 1, {
+    guardDetails: { kind: "session_recovery_in_progress", retryable: true } as never,
+    recoveryError: new Error("Recovery refused for a different reason"),
+  });
+  const card = screen.getByTestId(RECOVERY_CARD);
+  expect(card.textContent).toContain("Recovery refused for a different reason");
+  expect(card.textContent).not.toContain(MISE_SUMMARY);
+  expect(screen.queryByTestId(PREREQUISITE)).toBeNull();
+  expect(card.textContent).toContain(EXIT_CODE_ONE);
+});
+
+it("keeps a later manual recovery failure visible over the earlier process cause", () => {
+  renderProcessExitCard("mise_config_untrusted", 1, {
+    manualRecoveryFailure: {
+      operation: "resume",
+      sessionId: "session",
+      errorStamp: "failure",
+      requestKey: "request",
+      operationId: 1,
+    },
+    recoveryError: new Error("A different resume failure"),
+  });
+  const card = screen.getByTestId(RECOVERY_CARD);
+  expect(card.textContent).toContain("Failed to resume session");
+  expect(card.textContent).not.toContain("mise did not trust this workspace's configuration.");
+  expect(screen.queryByTestId(PREREQUISITE)).toBeNull();
+  expect(card.textContent).toContain(EXIT_CODE_ONE);
 });
