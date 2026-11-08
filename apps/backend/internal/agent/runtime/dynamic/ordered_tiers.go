@@ -263,9 +263,10 @@ func orderedStartIndex(tiers []orderedTier, current string, skipping bool, tried
 		if len(tried) == 0 {
 			return 0
 		}
-		// The chain's position is not established in the current saved order.
-		// Fail closed instead of restarting at the first tier.
-		return len(tiers)
+		// No tried candidate remains in the current saved order, so the
+		// chain's position is unknown. Restart at the first tier rather than
+		// ending the retry without a candidate.
+		return 0
 	}
 	if skipping && bestDirection == orderedNextTier {
 		return best + 1
