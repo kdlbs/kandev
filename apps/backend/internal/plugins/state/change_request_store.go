@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS plugin_task_change_requests (
  repository_id TEXT NOT NULL, number BIGINT NOT NULL, url TEXT NOT NULL DEFAULT '',
  title TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT 'open',
  head_branch TEXT NOT NULL DEFAULT '', base_branch TEXT NOT NULL DEFAULT '',
- created_at DATETIME NOT NULL, merged_at DATETIME, closed_at DATETIME, updated_at DATETIME NOT NULL,
+ created_at {{timestamp}} NOT NULL, merged_at {{timestamp}}, closed_at {{timestamp}}, updated_at {{timestamp}} NOT NULL,
  UNIQUE (installation_id, workspace_id, provider_id, provider_host, repository_id, number)
 )`,
 	`CREATE INDEX IF NOT EXISTS idx_plugin_task_change_requests_task ON plugin_task_change_requests(installation_id, workspace_id, task_id)`,
