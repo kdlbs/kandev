@@ -2108,6 +2108,15 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		execution.setMetadataValue("session_id", req.SessionID)
 		execution.setMetadataValue("prompt_turn_id", req.TurnID)
 		execution.setPromptTurnID(req.TurnID)
+		// Project MCP resolves from execution.AgentProfileID, so the selected
+		// profile must be in place before materialization. It is persisted only
+		// after the final agent-launch admission succeeds.
+		previousProfileID := execution.AgentProfileID
+		profileChanged := false
+		if profileInfo != nil && profileInfo.ProfileID != "" && execution.AgentProfileID != profileInfo.ProfileID {
+			execution.AgentProfileID = profileInfo.ProfileID
+			profileChanged = true
+		}
 		if !req.IsPassthrough {
 			executorType := req.ExecutorType
 			if executorType == "" {
@@ -2115,6 +2124,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			}
 			if err := m.materializeRuntimeProjectMCPWithPreparation(sharedCtx, execution, agentConfig, profileInfo, executorType, progressRecorder); err != nil {
 				m.publishExecutionPrepareCompleted(execution, progressRecorder, err)
+				execution.AgentProfileID = previousProfileID
 				execution.AgentCommand = ""
 				execution.ContinueCommand = ""
 				execution.AgentArgs = nil
@@ -2134,11 +2144,6 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		// Workspace-only executions can be created from a session row that stores
 		// the task assignee. The launch request carries the acting Office identity,
 		// so persist it only after the final agent-launch admission succeeds.
-		profileChanged := false
-		if profileInfo != nil && profileInfo.ProfileID != "" && execution.AgentProfileID != profileInfo.ProfileID {
-			execution.AgentProfileID = profileInfo.ProfileID
-			profileChanged = true
-		}
 		if req.AgentProfileID != "" {
 			execution.OfficeAgentProfileID = req.AgentProfileID
 			profileChanged = true
