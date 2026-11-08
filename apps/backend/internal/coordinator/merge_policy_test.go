@@ -75,6 +75,9 @@ func TestPrincipalReplacement(t *testing.T) {
 	if err != nil || plan.Rows[0].SelectedBy != "u2" || plan.Rows[0].AutomaticSinceRevision != 2 || plan.Audits[0].Kind != auditPrincipalReplaced {
 		t.Fatalf("plan = %+v err = %v", plan, err)
 	}
+	if a := plan.Audits[0]; a.Before != "u1" || a.After != "u2" {
+		t.Fatalf("audit must record the previous principal: %+v", a)
+	}
 	// A listed automatic entry without the marker is unchanged.
 	plan, _ = planRepoPolicies(stored, []RepoPolicyChange{{RepositoryID: "r1", Policy: RepoAutomatic}}, "u2", false, 0, 6, no)
 	if plan.changed() {

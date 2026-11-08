@@ -81,15 +81,26 @@ func scanMergeProposal(row interface{ Scan(...any) error }) (*MergeProposal, err
 	return &m, nil
 }
 
+// lockMergeChangeTx serialises creation of proposals for one change on
+// PostgreSQL; it must run before the open-proposal read. The lock is
+// transaction-scoped and re-entrant, and SQLite's single writer needs none.
+func (s *Store) lockMergeChangeTx(ctx context.Context, tx coordinatorExec, workspaceID, changeKey string) error {
+	if !dialect.IsPostgres(s.db.DriverName()) {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(`SELECT pg_advisory_xact_lock(hashtextextended(?, 0))`), "coordinator_merge_open|"+workspaceID+"|"+changeKey); err != nil {
+		return fmt.Errorf("lock merge change: %w", err)
+	}
+	return nil
+}
+
 // insertMergeRowTx stores the merge detail of a just-inserted proposal. It
 // frees the change key of any proposal that has since settled, then claims it;
 // the unique index refuses a second open proposal for one change in a
 // workspace.
 func (s *Store) insertMergeRowTx(ctx context.Context, tx coordinatorExec, m MergeProposal) error {
-	if dialect.IsPostgres(s.db.DriverName()) {
-		if _, err := tx.ExecContext(ctx, s.db.Rebind(`SELECT pg_advisory_xact_lock(hashtextextended(?, 0))`), "coordinator_merge_open|"+m.WorkspaceID+"|"+m.ChangeKey); err != nil {
-			return fmt.Errorf("lock merge change: %w", err)
-		}
+	if err := s.lockMergeChangeTx(ctx, tx, m.WorkspaceID, m.ChangeKey); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, s.db.Rebind(`UPDATE coordinator_merge_proposals SET open_key = NULL
 		WHERE workspace_id = ? AND open_key = ? AND NOT EXISTS (

@@ -83,8 +83,13 @@ func (s *Store) NewestClassChangeTx(ctx context.Context, exec coordinatorExec, c
 // path claimed at or after since, whatever their status now.
 func (s *Store) CountAutomaticDecidedTx(ctx context.Context, exec coordinatorExec, coordinatorID string, since time.Time) (int, error) {
 	var n int
-	err := exec.QueryRowContext(ctx, s.db.Rebind(`SELECT COUNT(*) FROM coordinator_proposals
-		WHERE coordinator_id = ? AND decided_automatically = 1 AND automatic_at >= ?`), coordinatorID, since.UTC()).Scan(&n)
+	err := exec.QueryRowContext(ctx, s.db.Rebind(`SELECT
+		(SELECT COUNT(*) FROM coordinator_proposals
+			WHERE coordinator_id = ? AND decided_automatically = 1 AND automatic_at >= ?)
+		+ (SELECT COUNT(*) FROM coordinator_merge_dispatches d
+			JOIN coordinator_merge_proposals m ON m.proposal_id = d.proposal_id
+			WHERE m.coordinator_id = ? AND d.automatic = 1 AND d.dispatched_at >= ?)`),
+		coordinatorID, since.UTC(), coordinatorID, since.UTC()).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count automatic approvals: %w", err)
 	}

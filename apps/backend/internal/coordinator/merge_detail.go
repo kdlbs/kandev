@@ -103,7 +103,7 @@ func (s *Service) OpenMergeDetail(ctx context.Context, p *Proposal) (*Proposal, 
 			}
 		}
 	}
-	if reading, err := s.readMerge(ctx, c, m, targetOf(p), false); err == nil {
+	if reading, err := s.readMerge(ctx, c, m, targetOf(p), false, false); err == nil {
 		detail.Live, detail.Reason = liveOf(reading.Snap), reading.Decision.Reason
 	}
 	if d, err := s.store.getDispatch(ctx, s.store.ro, p.ID); err == nil && d != nil {

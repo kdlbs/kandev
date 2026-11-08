@@ -34,6 +34,12 @@ type Source struct {
 // New builds a Source over the database holding the sync tables and tasks.
 func New(db *sqlx.DB) *Source { return &Source{db: db} }
 
+// sel runs a read with the placeholders rebound for the connection's dialect;
+// every query in this package goes through it.
+func (s *Source) sel(ctx context.Context, dest any, query string, args ...any) error {
+	return s.db.SelectContext(ctx, dest, s.db.Rebind(query), args...)
+}
+
 // normalizeHost reduces a host or base URL to a lowercase bare host.
 func normalizeHost(h string) string {
 	h = strings.TrimSpace(h)
@@ -117,7 +123,7 @@ type githubRow struct {
 
 func (s *Source) githubRows(ctx context.Context, workspaceID string, key mergestate.ChangeKey) ([]githubRow, error) {
 	var rows []githubRow
-	err := s.db.SelectContext(ctx, &rows, `
+	err := s.sel(ctx, &rows, `
 		SELECT gtp.task_id, gtp.github_host, gtp.state, gtp.head_sha, gtp.checks_state, gtp.checks_total,
 		       gtp.mergeable_state, gtp.has_merge_conflicts, gtp.review_state, gtp.unresolved_review_threads,
 		       gtp.base_branch, gtp.last_synced_at
@@ -257,7 +263,7 @@ type gitlabRow struct {
 
 func (s *Source) gitlabRows(ctx context.Context, workspaceID string, key mergestate.ChangeKey) ([]gitlabRow, error) {
 	var rows []gitlabRow
-	err := s.db.SelectContext(ctx, &rows, `
+	err := s.sel(ctx, &rows, `
 		SELECT m.task_id, m.host, m.state, m.head_sha, m.base_branch, m.pipeline_state, m.pipeline_jobs_total,
 		       m.merge_status, m.detailed_merge_status, m.draft, m.approval_state, m.required_approvals,
 		       m.unresolved_discussions, m.last_synced_at
@@ -346,7 +352,7 @@ func (s *Source) OpenChanges(ctx context.Context, workspaceID string) ([]string,
 		RepoID string `db:"repository_id"`
 		Number int    `db:"pr_number"`
 	}
-	if err := s.db.SelectContext(ctx, &gh, `
+	if err := s.sel(ctx, &gh, `
 		SELECT DISTINCT gtp.github_host, gtp.repository_id, gtp.pr_number
 		FROM github_task_prs gtp JOIN tasks t ON t.id = gtp.task_id
 		WHERE t.workspace_id = ? AND t.archived_at IS NULL AND gtp.state = 'open' AND gtp.repository_id <> ''`, workspaceID); err != nil {
@@ -357,7 +363,7 @@ func (s *Source) OpenChanges(ctx context.Context, workspaceID string) ([]string,
 		RepoID string `db:"repository_id"`
 		Number int    `db:"mr_iid"`
 	}
-	if err := s.db.SelectContext(ctx, &gl, `
+	if err := s.sel(ctx, &gl, `
 		SELECT DISTINCT m.host, m.repository_id, m.mr_iid
 		FROM gitlab_task_mrs m JOIN tasks t ON t.id = m.task_id
 		WHERE t.workspace_id = ? AND t.archived_at IS NULL AND m.state = 'open' AND m.repository_id <> ''`, workspaceID); err != nil {
@@ -386,7 +392,7 @@ func (s *Source) ChangesLinkedToTask(ctx context.Context, workspaceID, taskID st
 		RepoID string `db:"repository_id"`
 		Number int    `db:"pr_number"`
 	}
-	if err := s.db.SelectContext(ctx, &gh, `
+	if err := s.sel(ctx, &gh, `
 		SELECT gtp.github_host, gtp.repository_id, gtp.pr_number
 		FROM github_task_prs gtp JOIN tasks t ON t.id = gtp.task_id
 		WHERE t.workspace_id = ? AND t.archived_at IS NULL AND gtp.task_id = ? AND gtp.repository_id <> ''`, workspaceID, taskID); err != nil {
@@ -397,7 +403,7 @@ func (s *Source) ChangesLinkedToTask(ctx context.Context, workspaceID, taskID st
 		RepoID string `db:"repository_id"`
 		Number int    `db:"mr_iid"`
 	}
-	if err := s.db.SelectContext(ctx, &gl, `
+	if err := s.sel(ctx, &gl, `
 		SELECT m.host, m.repository_id, m.mr_iid
 		FROM gitlab_task_mrs m JOIN tasks t ON t.id = m.task_id
 		WHERE t.workspace_id = ? AND t.archived_at IS NULL AND m.task_id = ? AND m.repository_id <> ''`, workspaceID, taskID); err != nil {

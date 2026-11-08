@@ -39,10 +39,10 @@ type mergeReading struct {
 
 // readMerge evaluates the recheck of a merge proposal: every condition read
 // again from the provider, failing closed.
-func (s *Service) readMerge(ctx context.Context, c *Coordinator, m *MergeProposal, taskID string, automatic bool) (mergeReading, error) {
+func (s *Service) readMerge(ctx context.Context, c *Coordinator, m *MergeProposal, taskID string, automatic, claimed bool) (mergeReading, error) {
 	in := mergestate.RecheckInput{Automatic: automatic, ExpectedHead: m.HeadSHA}
 	var out mergeReading
-	authority, err := s.mergeAuthority(ctx, c, m, automatic)
+	authority, err := s.mergeAuthority(ctx, c, m, automatic, claimed)
 	if err != nil {
 		return out, err
 	}
@@ -115,9 +115,10 @@ func threadsTri(unresolved int) mergestate.Tri {
 	return mergestate.Unmet
 }
 
-// mergeAuthority reports whether the flags, the stored repository policy and,
-// for an automatic attempt, the execution principal allow the merge now.
-func (s *Service) mergeAuthority(ctx context.Context, c *Coordinator, m *MergeProposal, automatic bool) (bool, error) {
+// mergeAuthority reports whether the flags and the stored repository policy
+// allow the merge now. A claimed automatic attempt also needs the execution
+// principal to be valid; waiting passes do not check it.
+func (s *Service) mergeAuthority(ctx context.Context, c *Coordinator, m *MergeProposal, automatic, claimed bool) (bool, error) {
 	if !s.merge {
 		return false, nil
 	}
@@ -132,7 +133,10 @@ func (s *Service) mergeAuthority(ctx context.Context, c *Coordinator, m *MergePr
 	if !automatic {
 		return true, nil
 	}
-	return row.Policy == RepoAutomatic && s.principalValid(ctx, c.WorkspaceID, row.SelectedBy), nil
+	if row.Policy != RepoAutomatic {
+		return false, nil
+	}
+	return !claimed || s.principalValid(ctx, c.WorkspaceID, row.SelectedBy), nil
 }
 
 func (s *Service) repositoryLive(ctx context.Context, workspaceID, repositoryID string) (bool, error) {

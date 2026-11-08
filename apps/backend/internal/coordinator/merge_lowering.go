@@ -45,21 +45,9 @@ func (s *Store) pendingLowerings(ctx context.Context, q coordinatorExec) ([]stri
 
 // dailyMergeCountTx counts the automatic claims of the last 24 hours: the
 // other classes' decided proposals plus the merge dispatches, which count at
-// the dispatch record.
+// the dispatch record. Every automatic class shares this one budget.
 func (s *Service) dailyMergeCountTx(ctx context.Context, tx coordinatorExec, coordinatorID string) (int, error) {
-	since := s.store.now().UTC().Add(-automaticLimitWindow)
-	n, err := s.store.CountAutomaticDecidedTx(ctx, tx, coordinatorID, since)
-	if err != nil {
-		return 0, err
-	}
-	var dispatches int
-	err = tx.QueryRowContext(ctx, s.store.db.Rebind(`SELECT COUNT(*) FROM coordinator_merge_dispatches d
-		JOIN coordinator_merge_proposals m ON m.proposal_id = d.proposal_id
-		WHERE m.coordinator_id = ? AND d.automatic = 1 AND d.dispatched_at >= ?`), coordinatorID, since).Scan(&dispatches)
-	if err != nil {
-		return 0, fmt.Errorf("count merge dispatches: %w", err)
-	}
-	return n + dispatches, nil
+	return s.store.CountAutomaticDecidedTx(ctx, tx, coordinatorID, s.store.now().UTC().Add(-automaticLimitWindow))
 }
 
 // applyPendingLowering lowers the repository of a provider-rejected automatic

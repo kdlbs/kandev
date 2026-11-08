@@ -19,6 +19,11 @@ type githubMergeAPI interface {
 	ListBranchCommitsForAutomation(ctx context.Context, workspaceID, host, owner, repo, branch string, page int) ([]github.BranchCommit, bool, error)
 }
 
+const (
+	mergeableStateBlocked = "blocked"
+	mergeableStateUnknown = "unknown"
+)
+
 type githubMerge struct{ api githubMergeAPI }
 
 func (g githubMerge) readLive(ctx context.Context, ws string, t mergeTarget, number int) (mergestate.Snapshot, error) {
@@ -41,8 +46,8 @@ func githubSnapshotOf(read *github.PRLiveRead) mergestate.Snapshot {
 	snap := mergestate.Snapshot{
 		State: changeStateOf(pr.State), Draft: triOfMet(!pr.Draft), TargetBranch: pr.BaseBranch,
 		HeadSHA: pr.HeadSHA, MergeCommit: read.MergeCommit, Pipeline: githubPipelineOf(st),
-		Mergeable: githubMergeableOf(state), UnresolvedThreads: -1, Behind: behindOfState(state),
-		Approvals: githubApprovalsOf(st.ReviewState),
+		UnresolvedThreads: -1, Behind: behindOfState(state),
+		Approvals: githubApprovalsOf(st.ReviewState, state),
 	}
 	if snap.State == mergestate.StateMerged {
 		snap.MergedHeadSHA = pr.HeadSHA
@@ -50,6 +55,7 @@ func githubSnapshotOf(read *github.PRLiveRead) mergestate.Snapshot {
 	if st.UnresolvedReviewThreadsPopulated {
 		snap.UnresolvedThreads = st.UnresolvedReviewThreads
 	}
+	snap.Mergeable = githubMergeableOf(state, snap.Approvals, snap.UnresolvedThreads)
 	in := mergestate.ConflictInput{Provider: mergeProviderGitHub, MergeableState: state}
 	if read.HasMergeConflicts != nil {
 		clear := !*read.HasMergeConflicts
@@ -73,7 +79,11 @@ func githubPipelineOf(st *github.PRStatus) mergestate.Pipeline {
 	return mergestate.PipelineUnavailable
 }
 
-func githubMergeableOf(state string) mergestate.MergeableReading {
+// githubMergeableOf maps GitHub's mergeable state. A blocked state is explained
+// by the waiting approval or thread condition when one is unmet, so it waits
+// instead of refusing; behind is mergeable and left to the provider's own
+// up-to-date rule.
+func githubMergeableOf(state string, approvals mergestate.Tri, threads int) mergestate.MergeableReading {
 	switch state {
 	case "clean", "has_hooks":
 		return mergestate.MergeableReading{Mergeable: mergestate.Met}
@@ -81,18 +91,39 @@ func githubMergeableOf(state string) mergestate.MergeableReading {
 		return mergestate.MergeableReading{Mergeable: mergestate.Unmet, Explains: mergestate.CondDraft}
 	case "unstable":
 		return mergestate.MergeableReading{Mergeable: mergestate.Unmet, Explains: mergestate.CondPipeline}
-	case "dirty", "blocked", "behind":
+	case "behind":
+		return mergestate.MergeableReading{Mergeable: mergestate.Met}
+	case mergeableStateBlocked:
+		switch {
+		case approvals == mergestate.Unmet:
+			return mergestate.MergeableReading{Mergeable: mergestate.Unmet, Explains: mergestate.CondApprovals}
+		case threads > 0:
+			return mergestate.MergeableReading{Mergeable: mergestate.Unmet, Explains: mergestate.CondThreads}
+		}
+		return mergestate.MergeableReading{Mergeable: mergestate.Unmet}
+	case "dirty":
 		return mergestate.MergeableReading{Mergeable: mergestate.Unmet}
 	}
 	return mergestate.MergeableReading{Mergeable: mergestate.Unavailable}
 }
 
-func githubApprovalsOf(review string) mergestate.Tri {
+// githubApprovalsOf reads approvals from the review state. A pull request with
+// no reviews meets approvals unless the provider reports it blocked, which is
+// then taken as a missing required review.
+func githubApprovalsOf(review, mergeableState string) mergestate.Tri {
 	switch review {
 	case "approved":
 		return mergestate.Met
 	case "changes_requested", providerStatePending:
 		return mergestate.Unmet
+	case "":
+		if mergeableState == mergeableStateBlocked {
+			return mergestate.Unmet
+		}
+		if mergeableState == "" || mergeableState == mergeableStateUnknown {
+			return mergestate.Unavailable
+		}
+		return mergestate.Met
 	}
 	return mergestate.Unavailable
 }
@@ -101,7 +132,7 @@ func behindOfState(state string) int {
 	switch state {
 	case "behind":
 		return 1
-	case "", "unknown":
+	case "", mergeableStateUnknown:
 		return -1
 	}
 	return 0

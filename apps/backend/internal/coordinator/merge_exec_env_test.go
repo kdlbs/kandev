@@ -28,6 +28,7 @@ type fakeMerger struct {
 	calls      []mergeCall
 	reads      int
 	onMerge    func()
+	onRead     func(n int)
 	pages      [][]string
 	pagesErr   error
 	pageCalls  int
@@ -35,9 +36,13 @@ type fakeMerger struct {
 
 func (f *fakeMerger) ReadLive(context.Context, string, mergestate.ChangeKey) (mergestate.Snapshot, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.reads++
-	return f.snap, f.snapErr
+	n, hook, snap, err := f.reads, f.onRead, f.snap, f.snapErr
+	f.mu.Unlock()
+	if hook != nil {
+		hook(n)
+	}
+	return snap, err
 }
 
 func (f *fakeMerger) Methods(context.Context, string, mergestate.ChangeKey) (MethodSet, error) {

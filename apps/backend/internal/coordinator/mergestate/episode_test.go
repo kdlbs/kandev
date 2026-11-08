@@ -126,3 +126,22 @@ func TestEpisodeKey(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestPendingFirstReadIsBaselineSoLaterRedWakes(t *testing.T) {
+	first := Transition(nil, KindRed, obs(1, "a", PipelinePending, ConflictClear, 0))
+	if !first.Write || first.Row.Active || !first.Row.Baseline {
+		t.Fatalf("pending first read: %+v", first)
+	}
+	r := Transition(&first.Row, KindRed, obs(2, "a", PipelineRed, ConflictClear, 0))
+	if !r.Wake || !r.Row.Active || r.Row.Baseline {
+		t.Fatalf("red after pending baseline did not wake: %+v", r)
+	}
+	none := Transition(nil, KindRed, obs(1, "a", PipelineNone, ConflictClear, 0))
+	if !none.Write || none.Row.Active {
+		t.Fatalf("none first read: %+v", none)
+	}
+	cu := Transition(nil, KindConflict, obs(1, "a", PipelineGreen, ConflictUnknown, 0))
+	if !cu.Write || cu.Row.Active {
+		t.Fatalf("conflict unknown on a successful read: %+v", cu)
+	}
+}

@@ -157,8 +157,9 @@ func planOne(stored map[string]RepoPolicyRow, c RepoPolicyChange, actor string, 
 			return RepoPolicyRow{}, PolicyAudit{}, &MergeConflictError{Code: codePrincipalValid}
 		}
 		row := stored[c.RepositoryID]
+		previous := row.SelectedBy
 		row.SelectedBy = actor
-		return row, PolicyAudit{Kind: auditPrincipalReplaced, Subject: c.RepositoryID, Before: row.SelectedBy, After: actor, Revision: next}, nil
+		return row, PolicyAudit{Kind: auditPrincipalReplaced, Subject: c.RepositoryID, Before: previous, After: actor, Revision: next}, nil
 	}
 	row := RepoPolicyRow{RepositoryID: c.RepositoryID, Policy: c.Policy}
 	if c.Policy == RepoAutomatic {

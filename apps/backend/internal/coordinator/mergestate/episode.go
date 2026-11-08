@@ -97,13 +97,27 @@ func readingOf(kind Kind, o Observation) reading {
 	return readUnknown
 }
 
+// readSucceeded reports whether the observation carries a successful read for
+// the kind, even when that read neither raises nor clears the condition (a
+// pending or absent pipeline, a conflict the provider is still computing).
+func readSucceeded(kind Kind, o Observation) bool {
+	switch kind {
+	case KindRed:
+		return o.Pipeline != PipelineUnavailable
+	case KindConflict:
+		return o.Conflict != ConflictUnknown || o.Pipeline != PipelineUnavailable
+	default:
+		return o.UnresolvedThreads >= 0
+	}
+}
+
 // Transition applies an observation to the stored row (nil for the first
 // observation). An observation that started no later than the stored one is
 // discarded, so a slower older read never overwrites a newer one.
 func Transition(prev *Row, kind Kind, o Observation) Result {
 	rd := readingOf(kind, o)
 	if prev == nil {
-		if rd == readUnknown {
+		if !readSucceeded(kind, o) {
 			return Result{}
 		}
 		row := Row{Active: rd == readActive, Generation: 1, HeadSHA: o.HeadSHA, Baseline: true, ObservedAt: o.StartedAt}

@@ -60,7 +60,10 @@ func (s *Service) evaluateAutomaticMerge(ctx context.Context, c *Coordinator, p 
 		s.markManagerOnly(ctx, p, m, notePolicyChange, reasonPolicyChanged)
 		return statusPendingMerge, reasonManagerOnly
 	}
-	reading, err := s.readMerge(ctx, c, m, targetOf(p), true)
+	if held, reason := s.loweringHold(ctx, p, m); held {
+		return statusPendingMerge, reason
+	}
+	reading, err := s.readMerge(ctx, c, m, targetOf(p), true, false)
 	if err != nil {
 		s.logger.Warn("merge: recheck unreadable", zap.String("proposal_id", p.ID), zap.Error(err))
 		return statusPendingMerge, ""
@@ -80,6 +83,21 @@ func (s *Service) evaluateAutomaticMerge(ctx context.Context, c *Coordinator, p 
 		return s.claimAndRunAutomatic(ctx, c, p, row)
 	}
 	return statusPendingMerge, ""
+}
+
+// loweringHold keeps an automatic proposal pending, unclaimed, while a
+// lowering of its repository is pending; an unreadable marker holds it too.
+func (s *Service) loweringHold(ctx context.Context, p *Proposal, m *MergeProposal) (bool, string) {
+	pending, err := s.store.pendingLoweringTx(ctx, s.store.ro, p.CoordinatorID, m.RepositoryID)
+	if err != nil {
+		s.logger.Warn("merge: pending lowering unreadable", zap.String("proposal_id", p.ID), zap.Error(err))
+		return true, ""
+	}
+	if !pending {
+		return false, ""
+	}
+	s.noteWaiting(ctx, p, m, reasonLoweringPending)
+	return true, reasonLoweringPending
 }
 
 func targetOf(p *Proposal) string {
@@ -201,7 +219,7 @@ func (s *Service) pendingMergeSettlement(ctx context.Context, c *Coordinator, p 
 	if !p.CreatedAt.Add(mergeExpiry).After(s.store.now()) {
 		return refuseExpired
 	}
-	if ok, err := s.mergeAuthority(ctx, c, m, false); err == nil && !ok {
+	if ok, err := s.mergeAuthority(ctx, c, m, false, false); err == nil && !ok {
 		return refuseAuthority
 	}
 	merger := s.changeMerger()

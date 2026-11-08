@@ -219,6 +219,9 @@ func (s *Service) insertMergeProposal(ctx context.Context, c *Coordinator, args 
 	p := &Proposal{CoordinatorID: c.ID, WorkspaceID: c.WorkspaceID, Kind: ProposalKindMerge, TargetTaskID: &args.TaskID, RawSpec: string(spec)}
 	var existing *Proposal
 	pre := func(ctx context.Context, tx coordinatorExec) (*Proposal, error) {
+		if err := s.store.lockMergeChangeTx(ctx, tx, c.WorkspaceID, t.key.String()); err != nil {
+			return nil, err
+		}
 		open, err := s.store.openMergeForChange(ctx, tx, c.WorkspaceID, t.key.String())
 		if err != nil || open == nil {
 			return nil, err

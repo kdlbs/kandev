@@ -10,11 +10,11 @@ import (
 
 // Notes a manager-only merge proposal shows.
 const (
-	noteDailyLimit   = "Daily limit reached"
-	noteNotContained = "Not contained"
-	noteNotAdmitted  = "Not admitted"
-	notePolicyChange = "Policy changed; a manager will decide"
-	noteLowering     = "Lowering automatic merge policy is pending"
+	noteDailyLimit        = "Daily limit reached"
+	noteNotContained      = "Not contained"
+	noteNotAdmitted       = "Not admitted"
+	notePolicyChange      = "Policy changed; a manager will decide"
+	reasonLoweringPending = "lowering_pending"
 )
 
 // mergeRun is one claimed merge attempt.
@@ -58,8 +58,12 @@ func (s *Service) runMerge(ctx context.Context, claim Claim) {
 		s.logger.Error("merge: claimed proposal unreadable", zap.String("proposal_id", claim.ProposalID), zap.Error(err))
 		return
 	}
+	if !r.p.CreatedAt.Add(mergeExpiry).After(s.store.now()) {
+		r.refuse(ctx, refuseExpired)
+		return
+	}
 	for attempt := 0; attempt < 2; attempt++ {
-		reading, err := s.readMerge(ctx, r.c, r.m, r.taskID, r.automatic)
+		reading, err := s.readMerge(ctx, r.c, r.m, r.taskID, r.automatic, true)
 		if err != nil {
 			s.logger.Warn("merge: recheck unreadable", zap.String("proposal_id", r.p.ID), zap.Error(err))
 			r.release(ctx, "unavailable:read", false)
@@ -165,8 +169,8 @@ func (r *mergeRun) dispatchLocked(ctx context.Context, tx coordinatorExec, depRe
 		return dispatchDepsChanged, "", "", nil
 	}
 	if r.automatic {
-		if note, err := r.automaticGate(ctx, tx); err != nil || note != "" {
-			return dispatchStopped, note, "gate", err
+		if note, reason, err := r.automaticStop(ctx, tx, row); err != nil || reason != "" {
+			return dispatchStopped, note, reason, err
 		}
 	}
 	err = s.store.insertDispatchTx(ctx, tx, MergeDispatch{
@@ -176,15 +180,28 @@ func (r *mergeRun) dispatchLocked(ctx context.Context, tx coordinatorExec, depRe
 	return dispatchedNow, "", "", err
 }
 
-// automaticGate returns the note of the first thing that stops an automatic
-// dispatch under the lock: a pending lowering of the repository or the daily
-// limit counted at dispatch.
-func (r *mergeRun) automaticGate(ctx context.Context, tx coordinatorExec) (string, error) {
-	s := r.svc
-	pending, err := s.store.pendingLoweringTx(ctx, tx, r.c.ID, r.m.RepositoryID)
-	if err != nil || pending {
-		return noteLowering, err
+// automaticStop returns what stops an automatic dispatch under the lock, in
+// order: a policy revision that moved, a pending lowering of the repository and
+// the daily limit counted at dispatch.
+func (r *mergeRun) automaticStop(ctx context.Context, tx coordinatorExec, row RepoPolicyRow) (note, reason string, err error) {
+	if row.AutomaticSinceRevision != *r.m.AutomaticRevision {
+		return notePolicyChange, reasonPolicyChanged, nil
 	}
+	pending, err := r.svc.store.pendingLoweringTx(ctx, tx, r.c.ID, r.m.RepositoryID)
+	if err != nil || pending {
+		return "", reasonLoweringPending, err
+	}
+	note, err = r.dailyLimitNote(ctx, tx)
+	if note != "" {
+		return note, "gate", err
+	}
+	return "", "", err
+}
+
+// dailyLimitNote returns the note of an exhausted daily limit counted at
+// dispatch, or "".
+func (r *mergeRun) dailyLimitNote(ctx context.Context, tx coordinatorExec) (string, error) {
+	s := r.svc
 	used, err := s.dailyMergeCountTx(ctx, tx, r.c.ID)
 	if err != nil {
 		return "", err
