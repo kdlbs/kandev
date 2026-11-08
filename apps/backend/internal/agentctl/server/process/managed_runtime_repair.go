@@ -120,12 +120,14 @@ func (m *Manager) prepareManagedRuntimeRepair(
 	}
 	prepared, err := lease.Prepare(ctx, snapshot.Env, m.managedRuntimeRepairRunner(snapshot))
 	if err != nil {
-		_ = lease.Close()
+		if prepared == nil {
+			_ = lease.Close()
+		}
 		if ctx.Err() != nil {
-			return nil, managedRuntimeRepairPrepared, ctx.Err()
+			return prepared, managedRuntimeRepairPrepared, ctx.Err()
 		}
 		m.logger.Warn("managed runtime repair preparation failed", zap.Error(err))
-		return nil, managedRuntimeRepairPrepared, errors.New("reusable managed runtime preparation failed")
+		return prepared, managedRuntimeRepairPrepared, errors.New("reusable managed runtime preparation failed")
 	}
 	return prepared, managedRuntimeRepairPrepared, nil
 }
@@ -201,7 +203,8 @@ func (m *Manager) scheduleManagedRuntimePublicationExpiry(
 // its original recovery deadline and reaps only the exact owned process.
 func (m *Manager) expireManagedRuntimeRepair(prepared *managedruntime.PreparedRuntime, revision uint64) {
 	m.startMu.Lock()
-	owned := m.preparedRuntime == prepared && m.preparedRuntimeRevision == revision
+	owned := m.preparedRuntime == prepared && m.preparedRuntimeRevision == revision &&
+		!m.repairInitialized
 	generation := m.ProcessGeneration()
 	m.startMu.Unlock()
 	if !owned || prepared.RepairPublished() {
@@ -238,6 +241,14 @@ func (m *Manager) ManagedRuntimeInitialized(generation uint64) {
 	if prepared == nil || generation == 0 || generation != m.ProcessGeneration() {
 		return
 	}
+	// Initialization success is the publication boundary. Disarm expiry before
+	// any publication attempt so a file or context failure keeps the healthy
+	// current agent running.
+	m.repairInitialized = true
+	if m.repairPublicationTimer != nil {
+		m.repairPublicationTimer.Stop()
+		m.repairPublicationTimer = nil
+	}
 	if prepared.RepairPublished() {
 		return
 	}
@@ -268,9 +279,6 @@ func (m *Manager) ManagedRuntimeInitialized(generation uint64) {
 			zap.Uint64("process_generation", generation),
 			zap.Error(err))
 		return
-	}
-	if m.repairPublicationTimer != nil {
-		m.repairPublicationTimer.Stop()
 	}
 	m.logger.Info("managed runtime repair published", zap.Uint64("process_generation", generation))
 }

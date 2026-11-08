@@ -542,6 +542,9 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		var prepareErr error
 		prepared, prepareErr = e.preparation.prepareProbeRepair(ctx, req, cfg, env, e.logger)
 		if prepareErr != nil {
+			if prepared != nil {
+				e.preparation.retainOwner(prepared)
+			}
 			return &ProbeResponse{Success: false, Error: "private managed runtime preparation failed"}, nil
 		}
 		args, prepareErr = prepared.RewriteNpxCommand(args)

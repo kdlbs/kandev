@@ -404,13 +404,12 @@ func (l *RepairLease) Prepare(
 		store: l.store, lease: l, digest: l.digest, generationID: generationID, ownerID: ownerID,
 	}
 	prepared, err := allocateOwnedRuntime(ctx, generationDir, ownerID, l.context.PackageSpec, env, run, repair)
-	if err != nil {
-		return nil, err
+	if prepared != nil {
+		l.mu.Lock()
+		l.prepared = prepared
+		l.mu.Unlock()
 	}
-	l.mu.Lock()
-	l.prepared = prepared
-	l.mu.Unlock()
-	return prepared, nil
+	return prepared, err
 }
 
 // Publish atomically selects the prepared generation after successful

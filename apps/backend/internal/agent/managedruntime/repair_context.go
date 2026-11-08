@@ -397,12 +397,13 @@ func repairNPMConfigDigest(home string, env []string, npmFingerprint string) (st
 	if path := repairNPMConfigPath(env, "NPM_CONFIG_GLOBALCONFIG"); path != "" {
 		paths = append(paths, path)
 	}
-	if prefix := repairEnvValue(env, "NPM_CONFIG_PREFIX"); prefix != "" && filepath.IsAbs(prefix) {
+	if prefix := repairNPMConfigPath(env, "NPM_CONFIG_PREFIX"); prefix != "" {
 		paths = append(paths, filepath.Join(prefix, "etc", "npmrc"))
 	}
 	if npmExecutable := strings.SplitN(npmFingerprint, "|", 2)[0]; filepath.IsAbs(npmExecutable) {
-		prefix := filepath.Dir(filepath.Dir(npmExecutable))
-		paths = append(paths, filepath.Join(prefix, "etc", "npmrc"))
+		if globalConfig := repairNPMGlobalConfigPath(npmExecutable); globalConfig != "" {
+			paths = append(paths, globalConfig)
+		}
 	}
 	digest := sha256.New()
 	seen := make(map[string]struct{}, len(paths))
@@ -420,11 +421,34 @@ func repairNPMConfigDigest(home string, env []string, npmFingerprint string) (st
 }
 
 func repairNPMConfigPath(env []string, key string) string {
-	value := repairEnvValue(env, key)
-	if value == "" || !filepath.IsAbs(value) {
-		return ""
+	for _, candidate := range []string{key, strings.ToLower(key)} {
+		value := repairEnvValue(env, candidate)
+		if value == "" {
+			continue
+		}
+		if !filepath.IsAbs(value) {
+			return ""
+		}
+		return filepath.Clean(value)
 	}
-	return filepath.Clean(value)
+	return ""
+}
+
+// repairNPMGlobalConfigPath derives npm's effective global npmrc from the
+// resolved executable. npm's default is <prefix>/etc/npmrc; a resolved
+// .../lib/node_modules/npm/... script must trim the npm package path, not use
+// the package's own etc directory.
+func repairNPMGlobalConfigPath(executable string) string {
+	clean := filepath.Clean(executable)
+	slash := filepath.ToSlash(clean)
+	if index := strings.Index(slash, "/lib/node_modules/npm/"); index >= 0 {
+		return filepath.Join(filepath.FromSlash(slash[:index]), "etc", "npmrc")
+	}
+	base := filepath.Base(clean)
+	if base == "npm" || base == "npm.cmd" {
+		return filepath.Join(filepath.Dir(filepath.Dir(clean)), "etc", "npmrc")
+	}
+	return ""
 }
 
 func writeBoundedRepairFileDigest(digest interface{ Write([]byte) (int, error) }, path string) error {

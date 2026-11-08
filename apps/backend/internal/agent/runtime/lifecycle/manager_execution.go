@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
@@ -1071,9 +1072,11 @@ type executionCreatePreparation struct {
 }
 
 type executionEnvironmentPreparation struct {
-	env                   map[string]string
-	approvedSecretEnvKeys []string
-	managedGoCachePath    string
+	env                              map[string]string
+	approvedSecretEnvKeys            []string
+	managedGoCachePath               string
+	managedRuntimeInstallerEnvDigest string
+	managedRuntimeOwnerUserID        string
 }
 
 func (m *Manager) reconcileExecutionWorkspace(ctx context.Context, taskID string, info *WorkspaceInfo) error {
@@ -1134,53 +1137,65 @@ func (m *Manager) prepareExecutionCreateRequestForPurpose(
 
 	preparation := &executionCreatePreparation{
 		request: &ExecutorCreateRequest{
-			InstanceID:                      executionID,
-			ExecutorType:                    info.ExecutorType,
-			TaskID:                          taskID,
-			SessionID:                       info.SessionID,
-			TaskEnvironmentID:               info.TaskEnvironmentID,
-			WorkspaceID:                     info.WorkspaceID,
-			RepositoryIDs:                   repositoryIDsFromWorkspace(info.WorkspaceRepositories),
-			DurableJournalHostRoot:          m.dataDir,
-			DurableJournalOwnerID:           workspaceJournalOwnerID(info),
-			DeliveryIncarnationID:           info.DeliveryIncarnationID,
-			DeliveryHarnessGeneration:       info.DeliveryHarnessGeneration,
-			DeliveryStreamID:                info.DeliveryStreamID,
-			WorkspaceReuseRequired:          info.TaskEnvironmentID != "",
-			AgentProfileID:                  executionProfileID,
-			OfficeAgentProfileID:            workspaceOfficeAgentProfileID(info),
-			WorkspacePath:                   info.WorkspacePath,
-			WorkspaceSourceRoots:            workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
-			Protocol:                        protocolForAgent(agentConfig),
-			CodexAppServerEnabled:           codexAppServerEnabledForAgent(agentConfig),
-			Env:                             envPreparation.env,
-			AutoApprovePermissions:          workspace.AutoApprovePermissions,
-			AutoApprovePermissionsOverride:  workspace.AutoApprovePermissionsOverride,
-			McpMode:                         info.McpMode,
-			PromptSuggestions:               m.promptSuggestionsForLaunch(ctx, info.McpMode),
-			AgentConfig:                     agentConfig,
-			Metadata:                        workspace.Metadata,
-			ApprovedSecretEnvKeys:           append([]string(nil), envPreparation.approvedSecretEnvKeys...),
-			PreviousExecutionID:             info.AgentExecutionID,
-			AuthToken:                       workspace.AuthToken,
-			BootstrapNonce:                  m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
-			AgentctlStartupConfig:           agentctlStartupConfigForExecutor(m.agentctlStartupConfig, info.ExecutorType),
-			RemoteContributions:             workspace.RemoteContributions,
-			ContributionDestinations:        workspace.ContributionDestinations,
-			ManagedRuntimeVersion:           managedRuntimeOptions.ManagedRuntimeVersion,
-			ManagedRuntimeFamily:            managedRuntimeOptions.ManagedRuntimeFamily,
-			ManagedRuntimeSource:            managedRuntimeOptions.ManagedRuntimeSource,
-			NativeRuntimeVersion:            managedRuntimeOptions.NativeRuntimeVersion,
-			OpenCodePluginRuntime:           openCodePluginRuntimeFor(agentConfig, managedRuntimeOptions, m.agentctlStartupConfig.OpenCodePluginEnabled),
-			ComparisonTargets:               workspace.ComparisonTargets,
-			RetainedBuiltinBinding:          workspace.RetainedBuiltinBinding,
-			RetainedResourceCircuitIdentity: workspace.RetainedResourceCircuitIdentity,
+			InstanceID:                       executionID,
+			ExecutorType:                     info.ExecutorType,
+			TaskID:                           taskID,
+			SessionID:                        info.SessionID,
+			TaskEnvironmentID:                info.TaskEnvironmentID,
+			WorkspaceID:                      info.WorkspaceID,
+			RepositoryIDs:                    repositoryIDsFromWorkspace(info.WorkspaceRepositories),
+			DurableJournalHostRoot:           m.dataDir,
+			DurableJournalOwnerID:            workspaceJournalOwnerID(info),
+			DeliveryIncarnationID:            info.DeliveryIncarnationID,
+			DeliveryHarnessGeneration:        info.DeliveryHarnessGeneration,
+			DeliveryStreamID:                 info.DeliveryStreamID,
+			WorkspaceReuseRequired:           info.TaskEnvironmentID != "",
+			AgentProfileID:                   executionProfileID,
+			OfficeAgentProfileID:             workspaceOfficeAgentProfileID(info),
+			WorkspacePath:                    info.WorkspacePath,
+			WorkspaceSourceRoots:             workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
+			Protocol:                         protocolForAgent(agentConfig),
+			CodexAppServerEnabled:            codexAppServerEnabledForAgent(agentConfig),
+			Env:                              envPreparation.env,
+			ManagedRuntimeInstallerEnvDigest: envPreparation.managedRuntimeInstallerEnvDigest,
+			ManagedRuntimeOwnerUserID:        envPreparation.managedRuntimeOwnerUserID,
+			AutoApprovePermissions:           workspace.AutoApprovePermissions,
+			AutoApprovePermissionsOverride:   workspace.AutoApprovePermissionsOverride,
+			McpMode:                          info.McpMode,
+			PromptSuggestions:                m.promptSuggestionsForLaunch(ctx, info.McpMode),
+			AgentConfig:                      agentConfig,
+			Metadata:                         workspace.Metadata,
+			ApprovedSecretEnvKeys:            append([]string(nil), envPreparation.approvedSecretEnvKeys...),
+			PreviousExecutionID:              info.AgentExecutionID,
+			AuthToken:                        workspace.AuthToken,
+			BootstrapNonce:                   m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
+			AgentctlStartupConfig:            agentctlStartupConfigForExecutor(m.agentctlStartupConfig, info.ExecutorType),
+			RemoteContributions:              workspace.RemoteContributions,
+			ContributionDestinations:         workspace.ContributionDestinations,
+			ManagedRuntimeVersion:            managedRuntimeOptions.ManagedRuntimeVersion,
+			ManagedRuntimeFamily:             managedRuntimeOptions.ManagedRuntimeFamily,
+			ManagedRuntimeSource:             managedRuntimeOptions.ManagedRuntimeSource,
+			NativeRuntimeVersion:             managedRuntimeOptions.NativeRuntimeVersion,
+			OpenCodePluginRuntime:            openCodePluginRuntimeFor(agentConfig, managedRuntimeOptions, m.agentctlStartupConfig.OpenCodePluginEnabled),
+			ComparisonTargets:                workspace.ComparisonTargets,
+			RetainedBuiltinBinding:           workspace.RetainedBuiltinBinding,
+			RetainedResourceCircuitIdentity:  workspace.RetainedResourceCircuitIdentity,
 		},
 		profileInfo: profileInfo,
 	}
 	m.wireKubernetesInventoryPersistence(preparation.request, info.ExecutorType)
 	m.wirePluginExecutorInventoryPersistence(preparation.request, info.ExecutorType)
 	return preparation, nil
+}
+
+func managedRuntimeWorkspaceOwnerUserID(ctx context.Context, info *WorkspaceInfo) string {
+	if info != nil && info.OwnerUserID != "" {
+		return info.OwnerUserID
+	}
+	if identity, ok := authn.IdentityFromContext(ctx); ok && identity.UserID != "" {
+		return identity.UserID
+	}
+	return ""
 }
 
 func (m *Manager) resolveWorkspaceExecutionProfile(ctx context.Context, profileID string) *AgentProfileInfo {
@@ -1208,13 +1223,14 @@ func (m *Manager) prepareExecutionEnvironment(
 ) (*executionEnvironmentPreparation, error) {
 	officeAgentProfileID := workspaceOfficeAgentProfileID(info)
 	managedReq := &LaunchRequest{
-		TaskID:             taskID,
-		WorkspaceID:        info.WorkspaceID,
-		SessionID:          info.SessionID,
-		AgentProfileID:     officeAgentProfileID,
-		ExecutionProfileID: executionProfileID,
-		ExecutorType:       info.ExecutorType,
-		Env:                make(map[string]string),
+		TaskID:                    taskID,
+		WorkspaceID:               info.WorkspaceID,
+		ManagedRuntimeOwnerUserID: managedRuntimeWorkspaceOwnerUserID(ctx, info),
+		SessionID:                 info.SessionID,
+		AgentProfileID:            officeAgentProfileID,
+		ExecutionProfileID:        executionProfileID,
+		ExecutorType:              info.ExecutorType,
+		Env:                       make(map[string]string),
 	}
 	if err := m.prepareManagedGoCacheEnvironment(ctx, managedReq); err != nil {
 		return nil, err
@@ -1239,9 +1255,11 @@ func (m *Manager) prepareExecutionEnvironment(
 		env = nil
 	}
 	return &executionEnvironmentPreparation{
-		env:                   env,
-		approvedSecretEnvKeys: managedReq.ApprovedSecretEnvKeys,
-		managedGoCachePath:    managedReq.managedGoCachePath,
+		env:                              env,
+		approvedSecretEnvKeys:            managedReq.ApprovedSecretEnvKeys,
+		managedGoCachePath:               managedReq.managedGoCachePath,
+		managedRuntimeInstallerEnvDigest: managedReq.ManagedRuntimeInstallerEnvDigest,
+		managedRuntimeOwnerUserID:        managedRuntimeWorkspaceOwnerUserID(ctx, info),
 	}, nil
 }
 

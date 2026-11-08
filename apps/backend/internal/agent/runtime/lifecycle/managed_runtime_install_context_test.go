@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/auth/authn"
 )
 
 func TestManagedRuntimeInstallerEnvironmentDigest(t *testing.T) {
@@ -102,5 +103,19 @@ func TestManagedRuntimePreparationRemainingBudget(t *testing.T) {
 	unbounded, err := managedRuntimePreparationWithRemainingBudget(context.Background(), preparation)
 	if err != nil || unbounded.RemainingBudgetSeconds != 0 {
 		t.Fatalf("unbounded preparation = (%#v, %v), want no explicit budget", unbounded, err)
+	}
+}
+
+func TestManagedRuntimeWorkspaceOwnerResolution(t *testing.T) {
+	info := &WorkspaceInfo{OwnerUserID: "workspace-owner"}
+	if got := managedRuntimeWorkspaceOwnerUserID(context.Background(), info); got != "workspace-owner" {
+		t.Fatalf("workspace owner = %q, want the recorded owner", got)
+	}
+	identity := authn.WithIdentity(context.Background(), authn.Identity{UserID: "actor-a"})
+	if got := managedRuntimeWorkspaceOwnerUserID(identity, &WorkspaceInfo{}); got != "actor-a" {
+		t.Fatalf("actor owner = %q, want the authenticated actor", got)
+	}
+	if got := managedRuntimeWorkspaceOwnerUserID(context.Background(), &WorkspaceInfo{}); got != "" {
+		t.Fatalf("missing owner = %q, want empty", got)
 	}
 }

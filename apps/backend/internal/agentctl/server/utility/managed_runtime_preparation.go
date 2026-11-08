@@ -377,11 +377,10 @@ func (s *managedRuntimePreparationState) prepareProbeRepair(
 		return prepared, reuseErr
 	}
 	prepared, err := lease.Prepare(ctx, env, runPrivateProbeCommand(logger))
-	if err != nil {
+	if err != nil && prepared == nil {
 		_ = lease.Close()
-		return nil, err
 	}
-	return prepared, nil
+	return prepared, err
 }
 
 // publishProbeRepair revalidates the probe's installation context and

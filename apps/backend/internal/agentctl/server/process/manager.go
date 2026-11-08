@@ -390,6 +390,7 @@ type Manager struct {
 	preparedRepairContext    *managedruntime.RepairContext
 	preparedRepairEnv        []string
 	preparedRepairInherited  []string
+	repairInitialized        bool
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
 	// created so the flag always describes the current channel — a Start that
@@ -2153,6 +2154,7 @@ func (m *Manager) installPreparedRuntime(prepared *managedruntime.PreparedRuntim
 	}
 	m.preparedRuntime = prepared
 	m.preparedRuntimeRevision = m.configRevision
+	m.repairInitialized = false
 	if prepared == nil || prepared.RepairPublished() {
 		m.preparedRepairContext = nil
 		m.preparedRepairEnv = nil
@@ -2176,6 +2178,7 @@ func (m *Manager) detachPreparedRuntimeLocked() {
 	m.preparedRepairContext = nil
 	m.preparedRepairEnv = nil
 	m.preparedRepairInherited = nil
+	m.repairInitialized = false
 	if m.repairPublicationTimer != nil {
 		m.repairPublicationTimer.Stop()
 		m.repairPublicationTimer = nil

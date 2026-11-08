@@ -673,3 +673,36 @@ func TestRepairPublishedConcurrentObservation(t *testing.T) {
 		t.Fatal("published repair is not observable")
 	}
 }
+
+func TestRepairLeasePreservesHandleWhenCleanupCannotFinish(t *testing.T) {
+	store, home := openTestRepairStore(t)
+	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
+	repairContext, err := store.Context(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := store.BeginRecovery(context.Background(), repairContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := true
+	prepared, err := lease.Prepare(context.Background(), input.Env, func(_ context.Context, command ManagedRuntimeCommand) error {
+		command.RetainWhile(func() bool { return live })
+		return errors.New("installer failed")
+	})
+	if err == nil {
+		t.Fatal("expected preparation failure")
+	}
+	if prepared == nil {
+		t.Fatal("failed cleanup lost the owned handle")
+	}
+	if live {
+		live = false
+	}
+	if closeErr := prepared.Close(); closeErr != nil {
+		t.Fatalf("close retained handle: %v", closeErr)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatalf("close retained lease: %v", err)
+	}
+}

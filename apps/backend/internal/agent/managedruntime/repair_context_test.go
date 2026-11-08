@@ -289,3 +289,31 @@ func TestRepairContextTracksEffectiveNPMConfigFiles(t *testing.T) {
 		t.Fatal("a repair prepared before an npmrc change matched the successor context")
 	}
 }
+
+func TestRepairNPMGlobalConfigPath(t *testing.T) {
+	for executable, want := range map[string]string{
+		"/usr/local/bin/npm":                             "/usr/local/etc/npmrc",
+		"/usr/local/lib/node_modules/npm/bin/npm-cli.js": "/usr/local/etc/npmrc",
+		"/home/user/.nvm/versions/node/v22/bin/npm":      "/home/user/.nvm/versions/node/v22/etc/npmrc",
+		"/usr/lib/node_modules/npm/bin/npm-cli.js":       "/usr/etc/npmrc",
+	} {
+		if got := repairNPMGlobalConfigPath(executable); got != want {
+			t.Fatalf("global npmrc for %q = %q, want %q", executable, got, want)
+		}
+	}
+	if got := repairNPMGlobalConfigPath("/usr/local/bin/node"); got != "" {
+		t.Fatalf("non-npm executable global npmrc = %q, want empty", got)
+	}
+}
+
+func TestRepairNPMConfigPathAcceptsLowercaseOverrides(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "npmrc")
+	for _, key := range []string{"NPM_CONFIG_USERCONFIG", "npm_config_userconfig"} {
+		if got := repairNPMConfigPath([]string{key + "=" + path}, "NPM_CONFIG_USERCONFIG"); got != path {
+			t.Fatalf("%s path = %q, want %q", key, got, path)
+		}
+	}
+	if got := repairNPMConfigPath([]string{"npm_config_userconfig=relative"}, "NPM_CONFIG_USERCONFIG"); got != "" {
+		t.Fatalf("relative npm config path = %q, want empty", got)
+	}
+}

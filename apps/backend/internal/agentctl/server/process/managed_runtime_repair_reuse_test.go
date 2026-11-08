@@ -453,12 +453,19 @@ func TestManagedRuntimeRepairRevalidationRejectsChangedNPMRC(t *testing.T) {
 	manager.startupEvidenceMu.Lock()
 	manager.startupGeneration = 3
 	manager.startupEvidenceMu.Unlock()
+	manager.scheduleManagedRuntimePublicationExpiry(prepared, time.Now().Add(time.Hour), manager.configRevision)
 	if err := os.WriteFile(userConfig, []byte("registry=https://two.example.test/\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	manager.ManagedRuntimeInitialized(3)
 	if prepared.RepairPublished() {
 		t.Fatal("published a repair under a changed npm configuration")
+	}
+	if manager.repairPublicationTimer != nil {
+		t.Fatal("publication failure left expiry armed against a healthy initialized agent")
+	}
+	if !manager.repairInitialized {
+		t.Fatal("initialization success did not fence expiry")
 	}
 	if _, outcome, _ := store.Lookup(context.Background(), repairContext); outcome == managedruntime.RepairOutcomeHit {
 		t.Fatal("changed npm configuration selected the candidate")

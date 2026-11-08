@@ -2034,8 +2034,11 @@ type WorkspaceInfo struct {
 	DeliveryHarnessGeneration uint64
 	DeliveryStreamID          string
 	TaskID                    string
-	SessionID                 string // Task session ID (from task_sessions table)
-	TaskEnvironmentID         string // Env this session belongs to (shared across sessions in same task)
+	// OwnerUserID is the authenticated application owner used for reusable
+	// repair identity. Empty disables reuse rather than sharing implicitly.
+	OwnerUserID       string
+	SessionID         string // Task session ID (from task_sessions table)
+	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
 	// RecoveryErrorObservation captures session and owner identity before
 	// selected-workspace inspection so a refusal can be conditionally recorded.
 	RecoveryErrorObservation *models.WorkspaceRecoveryErrorObservation
