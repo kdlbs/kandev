@@ -9,6 +9,7 @@ import { linkToTask } from "@/lib/links";
 export type ChildStallAlertDescriptor = {
   child_task_id: string;
   child_task_title?: string;
+  child_session_id?: string;
   turn_id?: string;
   step_name?: string;
   cause?: string;
@@ -31,7 +32,7 @@ function isDescriptor(value: unknown): value is ChildStallAlertDescriptor {
   if (typeof descriptor.child_task_id !== "string" || descriptor.child_task_id.length === 0) {
     return false;
   }
-  return ["child_task_title", "turn_id", "step_name", "cause"].every(
+  return ["child_task_title", "child_session_id", "turn_id", "step_name", "cause"].every(
     (key) => descriptor[key] === undefined || typeof descriptor[key] === "string",
   );
 }
@@ -53,7 +54,10 @@ function ChildStallAlertRow({ alert }: { alert: ChildStallAlertDescriptor }) {
   return (
     <li className="flex min-w-0 flex-col gap-1" data-testid="child-stall-alert">
       <Link
-        href={linkToTask(alert.child_task_id)}
+        href={linkToTask(
+          alert.child_task_id,
+          alert.child_session_id ? { sessionId: alert.child_session_id } : undefined,
+        )}
         className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 self-start rounded-full bg-purple-500/20 px-2.5 py-1 font-medium text-purple-300 hover:bg-purple-500/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [@media(pointer:coarse)]:min-h-11"
         data-testid="child-stall-alert-link"
       >
