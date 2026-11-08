@@ -134,7 +134,11 @@ func TestManagedRuntimeCacheResume(t *testing.T) {
 			if directive.RemainingBudgetSeconds < 1 || directive.RemainingBudgetSeconds > 90 {
 				t.Fatalf("recovery budget = %d, want a bounded remaining deadline", directive.RemainingBudgetSeconds)
 			}
+			if directive.DeadlineUnixNano <= 0 {
+				t.Fatal("recovery directive omitted the exact deadline")
+			}
 			directive.RemainingBudgetSeconds = 0
+			directive.DeadlineUnixNano = 0
 			if directive != (agentctltypes.ManagedRuntimePreparationDirective{
 				Condition:               agentctltypes.ManagedRuntimeCacheRootManifestMissing,
 				PackageSpec:             packageSpec,

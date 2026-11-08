@@ -220,8 +220,9 @@ func newRepairReuseManager(t *testing.T, home string, command, env []string, dig
 func repairReuseEnvironment(t *testing.T, home string) ([]string, string) {
 	t.Helper()
 	bin := t.TempDir()
-	for _, name := range []string{"node", "npm"} {
-		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+	for name, version := range map[string]string{"node": "24.0.0", "npm": "11.0.0"} {
+		script := "#!/bin/sh\necho " + version + "\n"
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}

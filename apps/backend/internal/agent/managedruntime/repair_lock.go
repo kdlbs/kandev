@@ -21,11 +21,18 @@ func acquireRepairContextLock(ctx context.Context, file *os.File) error {
 		return errors.New("managed runtime repair lock is unavailable")
 	}
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		locked, err := tryLockRepairContext(file)
 		if err != nil {
 			return err
 		}
 		if locked {
+			if err := ctx.Err(); err != nil {
+				_ = unlockRepairContextLock(file)
+				return err
+			}
 			return nil
 		}
 		timer := time.NewTimer(repairLockPollInterval)

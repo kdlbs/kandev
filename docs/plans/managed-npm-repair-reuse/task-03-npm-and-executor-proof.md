@@ -143,6 +143,8 @@ Verified on 2026-11-08.
   private-preparation and online-retry controls.
 - Utility/store reuse is separately proven on the execution host by the
   desktop and mobile profile discovery scenarios in Task 04.
-- Remaining platform evidence: a native Windows lock/replace run in the Windows
-  verification lane. This package does not claim cross-platform completion
-  without it.
+- On Windows, reusable repair remains disabled until a native ACL and
+  ownership verification is implemented; recovery continues through the
+  existing private path. A native Windows lock/replace run remains in the
+  Windows verification lane, and this package does not claim cross-platform
+  completion without it.

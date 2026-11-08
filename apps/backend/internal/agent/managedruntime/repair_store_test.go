@@ -706,3 +706,17 @@ func TestRepairLeasePreservesHandleWhenCleanupCannotFinish(t *testing.T) {
 		t.Fatalf("close retained lease: %v", err)
 	}
 }
+
+func TestRepairStoreRejectsCanceledWaiterWithFreeLock(t *testing.T) {
+	store, home := openTestRepairStore(t)
+	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
+	repairContext, err := store.Context(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := store.BeginRecovery(ctx, repairContext); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled free-lock recovery error = %v, want context canceled", err)
+	}
+}

@@ -58,7 +58,7 @@ func (m *Manager) resolveStrictEnvironment(
 		return nil, fmt.Errorf("resolve task environment: %w", err)
 	}
 	m.logEnvironmentOverrides(req, records)
-	req.ManagedRuntimeInstallerEnvDigest = managedRuntimeInstallerEnvironmentDigest(definitions, resolved)
+	req.ManagedRuntimeInstallerEnvDigest = managedRuntimeInstallerEnvironmentDigest(definitions, resolved, req.Env)
 	return resolved, nil
 }
 
@@ -66,7 +66,11 @@ func (m *Manager) resolveStrictEnvironment(
 // installer environment. Generated Kandev runtime values (task, session,
 // instance, transport) never enter the identity, so compatible launches share
 // an installation without merging different profile or credential inputs.
-func managedRuntimeInstallerEnvironmentDigest(definitions []runtimeenv.Definition, resolved map[string]string) string {
+func managedRuntimeInstallerEnvironmentDigest(
+	definitions []runtimeenv.Definition,
+	resolved map[string]string,
+	requestEnv map[string]string,
+) string {
 	values := make(map[string]string)
 	for _, definition := range definitions {
 		if definition.Origin == runtimeenv.OriginManagedRuntime {
@@ -74,6 +78,14 @@ func managedRuntimeInstallerEnvironmentDigest(definitions []runtimeenv.Definitio
 		}
 		if value, ok := resolved[definition.Key]; ok {
 			values[definition.Key] = value
+		}
+	}
+	for key, value := range requestEnv {
+		if managedruntime.InstallerEnvironmentKeyIsGenerated(key) {
+			continue
+		}
+		if _, exists := values[key]; !exists {
+			values[key] = value
 		}
 	}
 	return managedruntime.InstallerEnvironmentDigest(values)

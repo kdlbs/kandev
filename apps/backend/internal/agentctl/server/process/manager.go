@@ -1983,6 +1983,12 @@ func (m *Manager) StartWithManagedRuntimePreparation(
 		return 0, errors.New("managed runtime preparation budget is invalid")
 	}
 	deadline := managedRuntimePublicationDeadline(time.Now(), directive.RemainingBudgetSeconds)
+	if directive.DeadlineUnixNano > 0 {
+		deadline = time.Unix(0, directive.DeadlineUnixNano)
+	}
+	if !deadline.After(time.Now()) {
+		return 0, errors.New("managed runtime recovery deadline expired")
+	}
 	ctx, release, err := m.BeginOwnedOperation(ctx)
 	if err != nil {
 		return 0, err
@@ -2002,7 +2008,9 @@ func (m *Manager) StartWithManagedRuntimePreparation(
 	if !contextOK {
 		repairContext = managedruntime.RepairContext{}
 	}
-	prepared, outcome, err := m.prepareManagedRuntimeRepair(ctx, directive, snapshot, repairContext, contextOK)
+	prepareCtx, cancelPrepare := context.WithDeadline(ctx, deadline)
+	defer cancelPrepare()
+	prepared, outcome, err := m.prepareManagedRuntimeRepair(prepareCtx, directive, snapshot, repairContext, contextOK)
 	if err != nil {
 		if prepared != nil {
 			m.retainPreparedRuntime(prepared)
@@ -2011,6 +2019,10 @@ func (m *Manager) StartWithManagedRuntimePreparation(
 	}
 	m.logger.Info("managed runtime repair recovery selected",
 		zap.String("outcome", outcome))
+	if prepared != nil && !time.Now().Before(deadline) {
+		_ = prepared.Close()
+		return 0, errors.New("managed runtime recovery deadline expired before start")
+	}
 
 	generation, startErr := m.startWithGeneration(ctx, &directive, prepared, &revision)
 	if contextOK && startErr == nil && prepared != nil && !prepared.RepairPublished() {
@@ -2065,6 +2077,7 @@ func (m *Manager) startWithGeneration(
 			if err := prepared.Close(); err != nil {
 				m.retainPreparedRuntime(prepared)
 			}
+			m.detachPreparedRuntimeLocked()
 			prepared = nil
 		}
 	}

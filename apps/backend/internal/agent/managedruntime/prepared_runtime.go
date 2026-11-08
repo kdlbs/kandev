@@ -109,7 +109,7 @@ func allocateOwnedRuntime(
 		return prepared.cleanupAfterPreparationFailure(err)
 	}
 	command := ManagedRuntimeCommand{
-		Path: "npm",
+		Path: repairNPMExecutable(env),
 		Args: []string{
 			"--prefix", prepared.project,
 			"--cache", prepared.cache,

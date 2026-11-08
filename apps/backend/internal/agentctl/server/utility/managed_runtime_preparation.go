@@ -373,10 +373,21 @@ func (s *managedRuntimePreparationState) prepareProbeRepair(
 		}
 		return preparePrivateProbeRuntime(ctx, req.Preparation.PackageSpec, env, logger)
 	}
-	if prepared, outcome, reuseErr := lease.Reuse(ctx); outcome == managedruntime.RepairOutcomeHit {
-		return prepared, reuseErr
+	prepared, outcome, reuseErr := lease.Reuse(ctx)
+	if reuseErr != nil {
+		_ = lease.Close()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if logger != nil {
+			logger.Warn("probe repair recheck failed; using private preparation", zap.Error(reuseErr))
+		}
+		return preparePrivateProbeRuntime(ctx, req.Preparation.PackageSpec, env, logger)
 	}
-	prepared, err := lease.Prepare(ctx, env, runPrivateProbeCommand(logger))
+	if outcome == managedruntime.RepairOutcomeHit {
+		return prepared, nil
+	}
+	prepared, err = lease.Prepare(ctx, env, runPrivateProbeCommand(logger))
 	if err != nil && prepared == nil {
 		_ = lease.Close()
 	}
@@ -391,7 +402,7 @@ func (s *managedRuntimePreparationState) publishProbeRepair(
 	req *ProbeRequest,
 	cfg *InferenceConfigDTO,
 ) error {
-	if prepared == nil || prepared.RepairPublished() {
+	if prepared == nil || !prepared.HasRepairOwner() || prepared.RepairPublished() {
 		return nil
 	}
 	repairContext, ok := s.probeRepairContext(req, cfg)

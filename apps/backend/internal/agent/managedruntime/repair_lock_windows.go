@@ -3,6 +3,7 @@
 package managedruntime
 
 import (
+	"errors"
 	"os"
 	"os/user"
 	"strings"
@@ -24,8 +25,21 @@ func validatePrivateRepairPermissions(os.FileInfo) error {
 	return nil
 }
 
+// Windows repair reuse stays disabled until a native ACL verification exists.
+// The private recovery path remains available.
 func validatePrivateRepairOwnership(os.FileInfo) error {
-	return nil
+	return errors.New("managed runtime repair ACL verification is unavailable on Windows")
+}
+
+func openRepairConfigFile(path string) (*os.File, error) {
+	handle, err := openManagedRuntimeReadHandle(0, managedRuntimeWindowsNTPath(path), windows.FILE_NON_DIRECTORY_FILE)
+	if err != nil {
+		if isManagedRuntimeNotFound(err) {
+			return nil, os.ErrNotExist
+		}
+		return nil, err
+	}
+	return os.NewFile(uintptr(handle), path), nil
 }
 
 func syncRepairDirectory(string) {}

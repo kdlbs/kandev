@@ -1,22 +1,27 @@
 package managedruntime
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
 	// RepairContextSchemaVersion identifies the canonical reusable-repair
 	// installation context. A reader rejects any other version.
 	RepairContextSchemaVersion = 1
+	repairNPMExecutableName    = "npm"
 	maxRepairNPMConfigBytes    = 64 << 10
 )
 
@@ -254,7 +259,7 @@ func resolveRepairLocalEnvironment(env, inheritedEnv []string) (repairLocalEnvir
 	if local.node, err = repairToolchainFingerprint(env, "node"); err != nil {
 		return repairLocalEnvironment{}, err
 	}
-	if local.npm, err = repairToolchainFingerprint(env, "npm"); err != nil {
+	if local.npm, err = repairToolchainFingerprint(env, repairNPMExecutableName); err != nil {
 		return repairLocalEnvironment{}, err
 	}
 	home, err := repairHomeDirectory(env)
@@ -274,6 +279,17 @@ func resolveRepairLocalEnvironment(env, inheritedEnv []string) (repairLocalEnvir
 	return local, nil
 }
 
+func repairNPMExecutable(env []string) string {
+	searchPath := repairEnvValue(env, "PATH")
+	if searchPath == "" {
+		searchPath = os.Getenv("PATH")
+	}
+	if executable, err := repairFindExecutable(searchPath, repairNPMExecutableName); err == nil {
+		return executable
+	}
+	return repairNPMExecutableName
+}
+
 func repairToolchainFingerprint(env []string, name string) (string, error) {
 	searchPath := repairEnvValue(env, "PATH")
 	if searchPath == "" {
@@ -290,7 +306,31 @@ func repairToolchainFingerprint(env []string, name string) (string, error) {
 	if err != nil || !info.Mode().IsRegular() {
 		return "", fmt.Errorf("inspect %s for managed runtime repair context", name)
 	}
-	return fmt.Sprintf("%s|%d|%d", executable, info.Size(), info.ModTime().UnixNano()), nil
+	fingerprint := fmt.Sprintf("%s|%d|%d", executable, info.Size(), info.ModTime().UnixNano())
+	if name == repairNPMExecutableName {
+		version, versionErr := repairNPMVersion(executable, env)
+		if versionErr != nil {
+			return "", versionErr
+		}
+		fingerprint += "|" + version
+	}
+	return fingerprint, nil
+}
+
+func repairNPMVersion(executable string, env []string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, executable, "--version")
+	command.Env = append([]string(nil), env...)
+	output, err := command.Output()
+	if err != nil {
+		return "", fmt.Errorf("resolve npm version for managed runtime repair context: %w", err)
+	}
+	version := strings.TrimSpace(string(output))
+	if version == "" || len(version) > 128 || strings.ContainsAny(version, "\x00\r\n") {
+		return "", errors.New("npm version for managed runtime repair context is invalid")
+	}
+	return version, nil
 }
 
 func repairHomeDirectory(env []string) (string, error) {
@@ -373,9 +413,16 @@ func repairEnvironmentDigest(env []string) string {
 // repairEphemeralEnvironmentKey excludes only namespaces this process or the
 // launcher owns. Authorized installer values still arrive through the
 // authenticated provenance digest, so no user input is guessed away here.
+// InstallerEnvironmentKeyIsGenerated reports whether an environment key is a
+// generated Kandev or transport value that must not enter installation
+// identity. Authorized user overrides are not filtered.
+func InstallerEnvironmentKeyIsGenerated(key string) bool {
+	return repairEphemeralEnvironmentKey(key)
+}
+
 func repairEphemeralEnvironmentKey(key string) bool {
 	if strings.HasPrefix(key, "KANDEV_") || strings.HasPrefix(key, "AGENTCTL_") ||
-		strings.HasPrefix(key, "SSH_") {
+		strings.HasPrefix(key, "SSH_") || strings.HasPrefix(key, "GIT_CONFIG_") {
 		return true
 	}
 	switch key {
@@ -393,6 +440,9 @@ func repairNPMConfigDigest(home string, env []string, npmFingerprint string) (st
 	}
 	if path := repairNPMConfigPath(env, "NPM_CONFIG_USERCONFIG"); path != "" {
 		paths = append(paths, path)
+		if globalConfig := repairUserGlobalConfigPath(path); globalConfig != "" {
+			paths = append(paths, globalConfig)
+		}
 	}
 	if path := repairNPMConfigPath(env, "NPM_CONFIG_GLOBALCONFIG"); path != "" {
 		paths = append(paths, path)
@@ -451,19 +501,52 @@ func repairNPMGlobalConfigPath(executable string) string {
 	return ""
 }
 
+func repairUserGlobalConfigPath(path string) string {
+	contents, err := readBoundedRepairConfigFile(path)
+	if err != nil {
+		return ""
+	}
+	globalConfig := ""
+	for _, line := range strings.Split(string(contents), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(key), "globalconfig") {
+			continue
+		}
+		value = strings.Trim(strings.TrimSpace(value), "\"'")
+		if filepath.IsAbs(value) {
+			globalConfig = filepath.Clean(value)
+		}
+	}
+	return globalConfig
+}
+
+func readBoundedRepairConfigFile(path string) ([]byte, error) {
+	file, err := openRepairConfigFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() > maxRepairNPMConfigBytes {
+		return nil, errors.New("npm configuration for managed runtime repair is not a bounded regular file")
+	}
+	contents, err := io.ReadAll(io.LimitReader(file, maxRepairNPMConfigBytes+1))
+	if err != nil || len(contents) > maxRepairNPMConfigBytes {
+		return nil, errors.New("npm configuration for managed runtime repair is unreadable")
+	}
+	return contents, nil
+}
+
 func writeBoundedRepairFileDigest(digest interface{ Write([]byte) (int, error) }, path string) error {
-	info, err := os.Lstat(path)
+	contents, err := readBoundedRepairConfigFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		_, _ = digest.Write([]byte("\x00missing\x00"))
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("inspect npm configuration for managed runtime repair: %w", err)
-	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > maxRepairNPMConfigBytes {
-		return errors.New("npm configuration for managed runtime repair is not a bounded regular file")
-	}
-	contents, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read npm configuration for managed runtime repair: %w", err)
 	}

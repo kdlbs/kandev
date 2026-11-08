@@ -216,6 +216,10 @@ func (m *Manager) expireManagedRuntimeRepair(prepared *managedruntime.PreparedRu
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		// Serialize with starts so the generation cannot change between the
+		// check and the stop. Stop does not acquire startOperationMu.
+		m.startOperationMu.Lock()
+		defer m.startOperationMu.Unlock()
 		if current := m.ProcessGeneration(); current != generation {
 			return
 		}

@@ -64,4 +64,7 @@ type ManagedRuntimePreparationDirective struct {
 	// uses agentctl's local cap; an expired or malformed value rejects the
 	// directive. It never extends the caller's own deadline.
 	RemainingBudgetSeconds int `json:"remaining_budget_seconds,omitempty"`
+	// DeadlineUnixNano is the caller's exact recovery deadline. Agentctl uses
+	// it instead of reconstructing a deadline from the seconds field.
+	DeadlineUnixNano int64 `json:"deadline_unix_nano,omitempty"`
 }

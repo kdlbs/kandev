@@ -3286,6 +3286,12 @@ func (m *Manager) configureAndStartAgentWithPreparedArgsAndPreparation(
 		}
 	}
 	installContext := managedRuntimeInstallContext(execution)
+	if installContext != nil && hasRuntimeEnvOverlay(execution.MetadataSnapshot()) {
+		// A per-run environment overlay can change installer inputs after the
+		// launch digest was captured. Reuse is not safe without fresh trusted
+		// provenance, so keep the private/ordinary path.
+		installContext = nil
+	}
 	if err := client.ConfigureAgentWithProjectDeliveryAndInstallContext(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, installContext, execution.LaunchWrapper); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
@@ -3346,6 +3352,7 @@ func managedRuntimePreparationWithRemainingBudget(
 		seconds = 1
 	}
 	preparation.RemainingBudgetSeconds = seconds
+	preparation.DeadlineUnixNano = deadline.UnixNano()
 	return preparation, nil
 }
 

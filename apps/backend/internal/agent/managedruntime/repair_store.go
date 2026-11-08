@@ -266,14 +266,30 @@ func decodeRepairKey(contents []byte) ([]byte, error) {
 }
 
 func createExclusivePrivateFile(path string, contents []byte) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	directory := filepath.Dir(path)
+	temporary, err := os.CreateTemp(directory, ".repair-identity-*")
 	if err != nil {
 		return err
 	}
-	_, writeErr := file.Write(contents)
-	syncErr := file.Sync()
-	closeErr := file.Close()
-	return errors.Join(writeErr, syncErr, closeErr)
+	temporaryPath := temporary.Name()
+	cleanup := func() { _ = os.Remove(temporaryPath) }
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		cleanup()
+		return err
+	}
+	_, writeErr := temporary.Write(contents)
+	syncErr := temporary.Sync()
+	closeErr := temporary.Close()
+	if err := errors.Join(writeErr, syncErr, closeErr); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Link(temporaryPath, path); err != nil {
+		cleanup()
+		return err
+	}
+	return os.Remove(temporaryPath)
 }
 
 func newRepairRandomID(size int) (string, error) {
@@ -458,6 +474,16 @@ func (s *RepairStore) MatchesRepairContext(prepared *PreparedRuntime, repairCont
 	repair.mu.Lock()
 	defer repair.mu.Unlock()
 	return repair.digest == digest
+}
+
+// HasRepairOwner reports whether this handle belongs to the reusable store.
+func (p *PreparedRuntime) HasRepairOwner() bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.repair != nil
 }
 
 // RetireRepairPublication abandons an unpublished candidate at its caller's

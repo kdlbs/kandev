@@ -23,7 +23,7 @@ func TestManagedRuntimeInstallerEnvironmentDigest(t *testing.T) {
 		"KANDEV_TASK_ID": "task-a", "KANDEV_SESSION_ID": "session-a",
 		"PROFILE_VAR": "baseline", "NPM_TOKEN": "credential-a", "EXECUTOR_VAR": "executor",
 	}
-	digest := managedRuntimeInstallerEnvironmentDigest(definitions, resolved)
+	digest := managedRuntimeInstallerEnvironmentDigest(definitions, resolved, nil)
 	if digest == "" {
 		t.Fatal("installer environment digest is empty")
 	}
@@ -37,7 +37,7 @@ func TestManagedRuntimeInstallerEnvironmentDigest(t *testing.T) {
 	generatedResolved["KANDEV_SESSION_ID"] = "session-b"
 	generatedChanged[0] = runtimeenv.Definition{Key: "KANDEV_TASK_ID", Literal: "task-b", Origin: runtimeenv.OriginManagedRuntime}
 	generatedChanged[1] = runtimeenv.Definition{Key: "KANDEV_SESSION_ID", Literal: "session-b", Origin: runtimeenv.OriginManagedRuntime}
-	if changed := managedRuntimeInstallerEnvironmentDigest(generatedChanged, generatedResolved); changed != digest {
+	if changed := managedRuntimeInstallerEnvironmentDigest(generatedChanged, generatedResolved, nil); changed != digest {
 		t.Fatal("generated task identity changed the installer installation context")
 	}
 	for name, mutate := range map[string]func(map[string]string){
@@ -51,14 +51,14 @@ func TestManagedRuntimeInstallerEnvironmentDigest(t *testing.T) {
 				changed[key] = value
 			}
 			mutate(changed)
-			if managedRuntimeInstallerEnvironmentDigest(definitions, changed) == digest {
+			if managedRuntimeInstallerEnvironmentDigest(definitions, changed, nil) == digest {
 				t.Fatalf("changed %s input reused the installer installation context", name)
 			}
 		})
 	}
-	if digest := managedRuntimeInstallerEnvironmentDigest(nil, nil); digest == "" {
+	if digest := managedRuntimeInstallerEnvironmentDigest(nil, nil, nil); digest == "" {
 		t.Fatal("a known empty installer environment must still produce a stable digest")
-	} else if again := managedRuntimeInstallerEnvironmentDigest(nil, nil); again != digest {
+	} else if again := managedRuntimeInstallerEnvironmentDigest(nil, nil, nil); again != digest {
 		t.Fatalf("empty installer environment digest changed: %q != %q", digest, again)
 	}
 }
@@ -117,5 +117,22 @@ func TestManagedRuntimeWorkspaceOwnerResolution(t *testing.T) {
 	}
 	if got := managedRuntimeWorkspaceOwnerUserID(context.Background(), &WorkspaceInfo{}); got != "" {
 		t.Fatalf("missing owner = %q, want empty", got)
+	}
+}
+
+func TestManagedRuntimeInstallerEnvironmentDigestIncludesRequestOverrides(t *testing.T) {
+	base := managedRuntimeInstallerEnvironmentDigest(nil, nil, nil)
+	override := managedRuntimeInstallerEnvironmentDigest(nil, nil, map[string]string{
+		"NPM_CONFIG_REGISTRY": "https://registry.example.test/",
+	})
+	if base == override {
+		t.Fatal("request installer override did not change the installation identity")
+	}
+	generated := managedRuntimeInstallerEnvironmentDigest(nil, nil, map[string]string{
+		"KANDEV_TASK_ID":    "task-a",
+		"KANDEV_SESSION_ID": "session-a",
+	})
+	if generated != base {
+		t.Fatal("generated launch identifiers changed the installation identity")
 	}
 }

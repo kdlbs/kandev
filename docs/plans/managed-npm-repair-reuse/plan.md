@@ -231,8 +231,10 @@ Implementation results on 2026-11-08:
   custom/global npmrc, configuration-revision, admission-deadline, publication
   failure, unsafe identity file, utility authorization, capability negotiation,
   and initialize-before-discovery tests.
-- Remaining platform evidence: Windows-native lock/replace verification in the
-  Windows lane. No cross-platform completion claim is made without it.
+- On Windows, reuse is intentionally disabled until native ACL verification
+  exists; private recovery remains available. Windows-native lock/replace
+  verification remains in the Windows lane, and no cross-platform completion
+  claim is made without it.
 
 No implementation worker or delegation was authorized or used.
 
