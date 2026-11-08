@@ -145,6 +145,7 @@
   "conflictAutomationsTitle": "自動化:",
   "conflictQuickChatsTitle": "クイックチャット:",
   "conflictTasksTitle": "タスク:",
+  "conflictUnknownWorkspace": "不明なワークスペース",
   "conflictTierMappingRow": "{{provider}} の {{workspace}} にある <0>{{tier}}</0> ティア",
   "conflictTierMappingsTitle": "ワークスペースのティアマッピング:",
   "conflictWatchersTitle": "ウォッチャー (無効化される):",

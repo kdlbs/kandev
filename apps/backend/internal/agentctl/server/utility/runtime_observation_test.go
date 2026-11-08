@@ -393,6 +393,107 @@ func TestRuntimeObservationUsesBundledClaudeSDKManifest(t *testing.T) {
 	}
 }
 
+func TestRuntimeObservationUsesPreparedPrivateNPMCacheArgument(t *testing.T) {
+	privateCache := filepath.Join(t.TempDir(), "private npm cache")
+	sharedCache := filepath.Join(t.TempDir(), "shared npm cache")
+	workDir := t.TempDir()
+
+	got, err := resolveNPMCacheRoot(
+		context.Background(),
+		filepath.Join(t.TempDir(), "npx"),
+		[]string{
+			"npx", "--yes", "--prefer-offline",
+			"--prefix", filepath.Join(t.TempDir(), "private project"),
+			"--cache", privateCache,
+			"@agentclientprotocol/claude-agent-acp@1.2.3",
+		},
+		[]string{"NPM_CONFIG_CACHE=" + sharedCache},
+		workDir,
+		zap.NewNop(),
+	)
+	if err != nil {
+		t.Fatalf("resolve private runtime cache: %v", err)
+	}
+	if got != privateCache {
+		t.Fatalf("runtime cache root = %q, want private cache %q", got, privateCache)
+	}
+}
+
+func TestRuntimeObservationUsesProviderFromPreparedPrivateCache(t *testing.T) {
+	bridgeSpec := "@agentclientprotocol/claude-agent-acp@1.2.3"
+	privateCache := t.TempDir()
+	sharedCache := t.TempDir()
+	for cacheRoot, providerVersion := range map[string]string{
+		privateCache: "0.16.1",
+		sharedCache:  "9.9.9",
+	} {
+		executionRoot := npxTreeRoot(cacheRoot, bridgeSpec)
+		writePackageManifest(t,
+			filepath.Join(executionRoot, "node_modules", "@agentclientprotocol", "claude-agent-acp", "package.json"),
+			"@agentclientprotocol/claude-agent-acp", "1.2.3",
+		)
+		writePackageManifest(t,
+			filepath.Join(executionRoot, "node_modules", "@anthropic-ai", "claude-agent-sdk", "package.json"),
+			"@anthropic-ai/claude-agent-sdk", providerVersion,
+		)
+	}
+	runtimeSpec, ok := agents.BuiltinManagedNPMRuntime("claude-acp")
+	if !ok {
+		t.Fatal("Claude ACP should be a registered managed npm runtime")
+	}
+	logicalCommand := runtimeSpec.RuntimeCommand("1.2.3").Args()
+	preparedArgs := append([]string(nil), logicalCommand...)
+	packageIndex := indexOfArgument(preparedArgs, bridgeSpec)
+	if packageIndex < 0 {
+		t.Fatal("logical command is missing the exact package spec")
+	}
+	preparedArgs[4] = filepath.Join(t.TempDir(), "private project")
+	preparedArgs = append(preparedArgs[:packageIndex], append([]string{"--cache", privateCache}, preparedArgs[packageIndex:]...)...)
+	provider := agents.RuntimeComponentDescriptor{
+		Name: "Claude Agent SDK", Package: "@anthropic-ai/claude-agent-sdk",
+		Source: agents.RuntimeComponentBundled, Owner: agents.RuntimeComponentOwnerKandev,
+	}
+	descriptor := &agents.RuntimeObservationDescriptor{
+		Bridge: agents.RuntimeComponentDescriptor{
+			Name: "Claude", Package: "@agentclientprotocol/claude-agent-acp",
+			Source: agents.RuntimeComponentManaged, Owner: agents.RuntimeComponentOwnerKandev,
+		},
+		Provider: &provider,
+	}
+	info := NewACPInferenceExecutor(zap.NewNop()).collectRuntimeObservation(
+		context.Background(), descriptor, logicalCommand, nil, preparedArgs,
+		[]string{"NPM_CONFIG_CACHE=" + sharedCache}, "", t.TempDir(), "1.2.3",
+	)
+	observed := runtimeComponentByRole(t, info, agents.RuntimeComponentProvider)
+	if observed.ObservedVersion != "0.16.1" {
+		t.Fatalf("provider version = %q, want private-cache version 0.16.1 (shared cache contains 9.9.9)", observed.ObservedVersion)
+	}
+}
+
+func TestRuntimeObservationIgnoresAgentCacheFlagAfterPackage(t *testing.T) {
+	privateCache := filepath.Join(t.TempDir(), "private npm cache")
+	got, found, err := managedNPMCacheArgument([]string{
+		"npx", "--cache", privateCache,
+		"@agentclientprotocol/claude-agent-acp@1.2.3", "--cache", "/agent/cli/cache",
+	})
+	if err != nil {
+		t.Fatalf("parse npx cache argument: %v", err)
+	}
+	if !found || got != privateCache {
+		t.Fatalf("parsed cache = (%q, %t), want private cache and found=true", got, found)
+	}
+
+	got, found, err = managedNPMCacheArgument([]string{
+		"npx", "@agentclientprotocol/claude-agent-acp@1.2.3", "--cache", "/agent/cli/cache",
+	})
+	if err != nil {
+		t.Fatalf("parse cache-like agent argument: %v", err)
+	}
+	if found || got != "" {
+		t.Fatalf("agent --cache was treated as npm cache: (%q, %t)", got, found)
+	}
+}
+
 func TestRuntimeObservationKeepsExternalIdentityAfterVersionFailure(t *testing.T) {
 	if runtime.GOOS == windowsGOOS {
 		t.Skip("uses a Unix executable fixture")
