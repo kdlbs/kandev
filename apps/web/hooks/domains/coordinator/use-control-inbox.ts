@@ -2,8 +2,8 @@ import { useCallback, useMemo } from "react";
 import type { ApiRequestOptions } from "@/lib/api/client";
 import {
   listClarificationInbox,
-  listEarlierTurnClarificationInbox,
   listInboxRecoveryBlocks,
+  listUnansweredClarificationInbox,
 } from "@/lib/api/domains/clarification-inbox-api";
 import { listFailedInbox } from "@/lib/api/domains/failed-inbox-api";
 import type { ClarificationInboxBundle, InboxRecoveryBlock } from "@/lib/types/clarification-inbox";
@@ -40,7 +40,10 @@ export async function readWorkspaceInbox(
       return { items: page.bundles, truncated: Boolean(page.next_cursor) };
     }),
     section<ClarificationInboxBundle>(async () => {
-      const page = await listEarlierTurnClarificationInbox(workspaceId, options);
+      // Superseded questions come from the unanswered read so the workspace
+      // setting, retention, and close-on-late-answer lifecycle all apply.
+      const page = await listUnansweredClarificationInbox(workspaceId, options);
+      if (!page.enabled) return { items: [], truncated: false };
       return { items: page.bundles, truncated: Boolean(page.next_cursor) };
     }),
     section<InboxRecoveryBlock>(async () => {
