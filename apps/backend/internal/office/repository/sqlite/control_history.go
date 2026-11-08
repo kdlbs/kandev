@@ -72,9 +72,12 @@ func (r *Repository) ReadControlHistory(ctx context.Context, wsID string, now ti
 		out.Sources[source.name] = ControlCoverage{State: "known", Total: &total, Returned: len(rows), Truncated: total > len(rows)}
 		out.Events = append(out.Events, rows...)
 	}
-	// Merged change requests, server starts and circuit transitions are not
-	// projected here; naming them keeps an empty list from reading as "none".
-	for _, family := range []string{"github_merge", "plugin_merge", "server_start", "circuit_history"} {
+	if err := r.appendControlMergeHistory(ctx, out); err != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	// Server starts and circuit transitions are not projected here; naming
+	// them keeps an empty list from reading as "none".
+	for _, family := range []string{"server_start", "circuit_history"} {
 		out.Sources[family] = ControlCoverage{State: "unavailable", Reason: "not_projected"}
 	}
 	sort.Slice(out.Events, func(i, j int) bool {
