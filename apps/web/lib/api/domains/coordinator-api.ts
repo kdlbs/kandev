@@ -13,6 +13,11 @@ import type {
   ImprovementSpec,
   PendingChangeStatus,
 } from "@/lib/api/domains/coordinator-changes-api";
+import type {
+  MergeDetail,
+  MergeRepoChange,
+  MergeSettings,
+} from "@/lib/api/domains/coordinator-merge-api";
 
 // Mirrors internal/coordinator/validate.go's ProfileStatus.
 export type ProfileStatus = "ok" | "missing" | "passthrough";
@@ -24,7 +29,8 @@ export type ProposalStatus =
   | "approved"
   | "rejected"
   | "failed"
-  | "returned";
+  | "returned"
+  | "uncertain";
 
 // Mirrors internal/coordinator/models.go's ProposalSpec.
 export type ProposalSpec = {
@@ -106,12 +112,17 @@ export type CoordinatorSettings = {
   projects?: Projects.SettingsProjects;
   // Present only while features.coordinatorPhase31 is effective.
   projects_config?: Projects.ProjectsConfig;
+  // Present only while features.coordinatorMerge is effective.
+  merge?: MergeSettings;
 };
 
 export type PutSettingsRequest = {
   policy?: { actions: PolicyActions; eligibility?: EligibilitySettings };
   watches?: { scope: "all" | "selected"; workflow_ids?: string[] };
   projects?: Projects.ProjectsRequest;
+  // A save naming a repository whose policy changes carries the read policy_revision.
+  policy_revision?: number;
+  merge?: { repositories: MergeRepoChange[] };
 };
 
 export type CoordinatorListResponse = {
@@ -146,7 +157,7 @@ export type PatchCoordinatorRequest = {
 };
 
 // Mirrors internal/coordinator/models.go's ProposalKind* constants.
-export type OtherProposalKind = "message" | "move" | "resume" | "improvement" | "answer";
+export type OtherProposalKind = "message" | "move" | "resume" | "improvement" | "answer" | "merge";
 
 // Mirrors internal/coordinator/dto.go's ProposalDTO (Build decision 10).
 // claim_token is never serialized by the backend and has no field here.
@@ -238,9 +249,29 @@ export function isAnswerProposal(p: WireProposal): p is AnswerProposal {
 }
 export type ImprovementProposal = KindProposalOf<"improvement", ImprovementSpec>;
 
+// Mirrors internal/coordinator/merge_reading.go's mergeSpec. A settled merge that
+// was refused is a rejected row whose reject_reason is the refusal code. `merge`
+// is present on the detail read only.
+export type MergeSpec = {
+  task_id: string;
+  repository_id: string;
+  change_key: string;
+  head_sha: string;
+  method: string;
+};
+export type MergeProposal = KindProposalOf<"merge", MergeSpec> & { merge?: MergeDetail };
+
+export function isMergeProposal(p: WireProposal): p is MergeProposal {
+  return p.kind === "merge";
+}
+
 // Every proposal the client caches and renders: create_task, or a phase-2 kind
 // it knows. A row of any other kind is never stored.
-export type StoredProposal = CreateTaskProposal | KindProposal | ImprovementProposal;
+export type StoredProposal =
+  | CreateTaskProposal
+  | KindProposal
+  | ImprovementProposal
+  | MergeProposal;
 
 export function isKindProposal(p: WireProposal): p is KindProposal {
   return p.kind === "resume" || p.kind === "message" || p.kind === "move" || p.kind === "answer";
@@ -251,7 +282,9 @@ export function isImprovementProposal(p: WireProposal): p is ImprovementProposal
 }
 
 export function isStoredProposal(p: WireProposal): p is StoredProposal {
-  return isCreateTaskProposal(p) || isKindProposal(p) || isImprovementProposal(p);
+  return (
+    isCreateTaskProposal(p) || isKindProposal(p) || isImprovementProposal(p) || isMergeProposal(p)
+  );
 }
 
 // isCreateTaskProposal narrows to the create_task kind; phase-1 rows carry

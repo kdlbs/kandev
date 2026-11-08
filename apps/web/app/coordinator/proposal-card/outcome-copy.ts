@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import type {
   ImprovementProposal,
   KindProposal,
+  MergeProposal,
   StoredProposal,
 } from "@/lib/api/domains/coordinator-api";
 import { ACTION_LABEL_KEY } from "@/lib/coordinators/control-draft";
@@ -107,7 +108,7 @@ const POLICY_KEYS: Record<PolicyAction, string> = {
 
 /** "Policy: <action> requires approval", fixed text from the stored kind. */
 export function policyLineText(
-  proposal: Exclude<StoredProposal, ImprovementProposal>,
+  proposal: Exclude<StoredProposal, ImprovementProposal | MergeProposal>,
   t: TFunction,
 ): string {
   const action: PolicyAction =

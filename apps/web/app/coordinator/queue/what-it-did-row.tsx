@@ -145,6 +145,13 @@ function UndoControl({ item, now, canManage, busy, resolvePerson, onUndo }: Undo
       </span>
     );
   }
+  if (item.action_class === "merge") {
+    return (
+      <span className="text-muted-foreground text-xs" data-testid="activity-merge-no-undo">
+        {t("coordinator:mergeCannotUndo")}
+      </span>
+    );
+  }
   if (item.undoable && canManage) {
     return (
       <Button

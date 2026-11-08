@@ -6,6 +6,8 @@ import type { QueueItem } from "@/lib/coordinator/attention";
 import { formatAge } from "@/lib/coordinator/format";
 import { agentStateLabel, otherRowStatusText } from "@/lib/coordinator/queue-text";
 import type { TaskPR } from "@/lib/types/github";
+import { useQueueMerge } from "./queue-merge-context";
+import { QueueRowMerge } from "./queue-row-merge";
 import { ReadyToMergeActions } from "./ready-to-merge-row";
 
 export type QueueRowProps = {
@@ -86,6 +88,7 @@ export function QueueRow({
   phase2 = false,
   canManage = false,
 }: QueueRowProps) {
+  const merge = useQueueMerge();
   const stepName = stepNameByTaskId.get(item.task.id);
   const withActions = phase2 && item.group === "ready_to_merge";
   const link = (
@@ -103,17 +106,23 @@ export function QueueRow({
       <span className="text-muted-foreground ml-auto text-xs">{formatAge(item.ageMs)}</span>
     </TaskLink>
   );
-  if (withActions) {
-    return (
-      <ReadyToMergeActions item={item} prsByTaskId={prsByTaskId} canManage={canManage}>
-        {(actions) => (
-          <div className="flex flex-wrap items-center gap-2">
-            {link}
-            <div className="p-2">{actions}</div>
-          </div>
-        )}
-      </ReadyToMergeActions>
-    );
-  }
-  return link;
+  const row = withActions ? (
+    <ReadyToMergeActions item={item} prsByTaskId={prsByTaskId} canManage={canManage}>
+      {(actions) => (
+        <div className="flex flex-wrap items-center gap-2">
+          {link}
+          <div className="p-2">{actions}</div>
+        </div>
+      )}
+    </ReadyToMergeActions>
+  ) : (
+    link
+  );
+  if (!merge || (item.group !== "in_review" && item.group !== "ready_to_merge")) return row;
+  return (
+    <div>
+      {row}
+      <QueueRowMerge taskId={item.task.id} merge={merge} />
+    </div>
+  );
 }

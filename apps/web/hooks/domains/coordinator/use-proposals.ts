@@ -14,7 +14,7 @@ import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import { useWebSocketClient } from "@/lib/ws/connection";
 
 const SETTLED_STATUSES = new Set(["approved", "rejected", "returned"]);
-const OPEN_STATUSES = new Set(["pending", "approving", "failed"]);
+const OPEN_STATUSES = new Set(["pending", "approving", "failed", "uncertain"]);
 
 export function isSettledProposal(proposal: Pick<StoredProposal, "status">): boolean {
   return SETTLED_STATUSES.has(proposal.status);

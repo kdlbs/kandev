@@ -10,6 +10,7 @@ export type ActivityClass =
   | "stop"
   | "answer"
   | "improvement"
+  | "merge"
   | "unknown";
 
 export const ACTIVITY_CLASSES: readonly ActivityClass[] = [
@@ -21,6 +22,7 @@ export const ACTIVITY_CLASSES: readonly ActivityClass[] = [
   "stop",
   "answer",
   "improvement",
+  "merge",
   "unknown",
 ];
 
@@ -36,7 +38,9 @@ export type ActivityOutcome =
   | "failed"
   | "refused"
   | "undone"
-  | "returned";
+  | "returned"
+  | "uncertain"
+  | "note";
 
 // Mirrors internal/coordinator/activity.go's ActivityAuthorization values.
 export type ActivityAuthorization = "requires_approval" | "denied" | "automatic";

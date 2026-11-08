@@ -12,12 +12,15 @@ import {
   type ApproveProposalEdits,
   type CreateTaskProposal,
   type ImprovementProposal,
+  isMergeProposal,
   type KindProposal,
+  type MergeProposal,
   type MessageSpec,
   type ProposalSpec,
   type StoredProposal,
 } from "@/lib/api/domains/coordinator-api";
 import { AnswerProposalCard } from "./answer-card";
+import { MergeProposalCard } from "./merge-card";
 import { RunsWithLine } from "./runs-with-line";
 import type { AttentionTask } from "@/lib/coordinator/attention";
 import type { StandingOrder } from "@/lib/api/domains/coordinator-api";
@@ -84,9 +87,13 @@ export type ProposalCardProps = {
   onReplyStarted?: () => void;
 };
 
+type GenericCardProps = Omit<ProposalCardProps, "proposal"> & {
+  proposal: Exclude<StoredProposal, MergeProposal>;
+};
+
 const ACTIONABLE: ReadonlySet<StoredProposal["status"]> = new Set(["pending", "failed"]);
 
-function splitProposal(proposal: StoredProposal) {
+function splitProposal(proposal: Exclude<StoredProposal, MergeProposal>) {
   const improvementProposal: ImprovementProposal | null = isImprovementProposal(proposal)
     ? proposal
     : null;
@@ -327,7 +334,10 @@ function CardBody(props: CardBodyProps) {
           {!improvementProposal && (
             <CardDescription>
               {kindProposal
-                ? policyLineText(proposal as Exclude<StoredProposal, ImprovementProposal>, t)
+                ? policyLineText(
+                    proposal as Exclude<StoredProposal, ImprovementProposal | MergeProposal>,
+                    t,
+                  )
                 : t("coordinator:policyProposeOnly")}
             </CardDescription>
           )}
@@ -365,7 +375,7 @@ function GenericProposalCard({
   onFormForceClosed,
   computeNeedsYouCount,
   onReplyStarted,
-}: ProposalCardProps) {
+}: GenericCardProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const now = useNowTick();
@@ -548,5 +558,8 @@ export function ProposalCard(props: ProposalCardProps) {
   if (isAnswerProposal(props.proposal)) {
     return <AnswerProposalCard {...props} proposal={props.proposal} />;
   }
-  return <GenericProposalCard {...props} />;
+  if (isMergeProposal(props.proposal)) {
+    return <MergeProposalCard {...props} proposal={props.proposal} />;
+  }
+  return <GenericProposalCard {...props} proposal={props.proposal} />;
 }

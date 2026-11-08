@@ -3,6 +3,7 @@ import type { useToast } from "@/components/toast-provider";
 import {
   isCreateTaskProposal,
   isImprovementProposal,
+  isMergeProposal,
   type KindProposal,
   type StoredProposal,
 } from "@/lib/api/domains/coordinator-api";
@@ -42,6 +43,8 @@ async function toastApproved(proposal: StoredProposal, ctx: OutcomeContext) {
   let title: string;
   if (isImprovementProposal(proposal)) {
     title = ctx.t("coordinator:improvementApprovedPending");
+  } else if (isMergeProposal(proposal)) {
+    title = ctx.t("coordinator:mergeToastMerged");
   } else if (isCreateTaskProposal(proposal)) {
     const step = resolveStepName(effectiveProposalSpec(proposal), ctx.stepNameByWorkflowStep);
     const card = await ctx.resolveCardLabel(proposal);

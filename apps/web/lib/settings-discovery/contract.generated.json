@@ -5565,10 +5565,7 @@
           "change_timing": "future_views",
           "settings_href": "/settings/preferences/layouts?tab=sidebar",
           "schema": {
-            "enum": [
-              "simple",
-              "compact"
-            ],
+            "enum": ["simple", "compact"],
             "type": "string"
           }
         },
