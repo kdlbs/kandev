@@ -3,7 +3,8 @@ import { IconClockHour4, IconGauge, IconHourglass, IconMessageQuestion } from "@
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { formatTime } from "@/lib/i18n/formats";
+import { formatDateTime, formatTime } from "@/lib/i18n/formats";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import type { Task } from "@/lib/types/http";
 import type {
   TaskStatusSummaryLaunchQueue,
@@ -15,8 +16,8 @@ import type {
  * limit wait rather than a workflow state. The workflow state alone cannot
  * express these: a task waiting for a step slot, a task waiting for a session
  * slot, a task whose session is waiting for an answer and a task whose model is
- * rate-limited all land in the same REVIEW bucket, so they used to render the
- * one green "turn finished" icon.
+ * rate-limited can all share the REVIEW bucket, so the recorded wait, not the
+ * workflow state, selects the icon.
  */
 export type TaskWaitReason = "wip_queue" | "session_ceiling" | "awaiting_answer" | "quota";
 
@@ -133,12 +134,23 @@ function useWaitReasonCopy(
     };
   }
   if (reason === "quota" && quotaWait) {
-    const deadline = new Date(quotaWait.deadline);
-    if (!Number.isNaN(deadline.getTime())) {
-      return { label, help: t("task:waitingReasonQuotaClearsAt", { time: formatTime(deadline) }) };
-    }
+    const time = formatQuotaDeadline(quotaWait.deadline);
+    if (time) return { label, help: t("task:waitingReasonQuotaClearsAt", { time }) };
   }
   return { label, help: t(WAIT_REASON_HELP_KEY[reason]) };
+}
+
+/**
+ * Formats a strict RFC3339 reset instant, naming the day unless it is today.
+ * A malformed wire value returns null so the caller keeps the generic help.
+ */
+export function formatQuotaDeadline(value: string, now: Date = new Date()): string | null {
+  const nanos = parseStrictRfc3339Timestamp(value);
+  if (nanos === null) return null;
+  const deadline = new Date(Number(nanos / BigInt(1_000_000)));
+  return deadline.toDateString() === now.toDateString()
+    ? formatTime(deadline)
+    : formatDateTime(deadline);
 }
 
 /**
