@@ -2545,6 +2545,7 @@ func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromW
 		"wip_admitted":              task.WIPAdmitted,
 		"queued_for_step_id":        task.QueuedForStepID,
 		"queue_promotion":           queuePromotion,
+		"step_transition_id":        task.WorkflowStepTransitionID,
 	}
 	if task.QueuedAt != nil {
 		data["queued_at"] = task.QueuedAt.Format(time.RFC3339)
