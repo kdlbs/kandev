@@ -71,7 +71,12 @@ func (c *sessionCeilingController) observeNativeCapacityRequestsLocked(ctx conte
 			continue
 		}
 		req := admissionRequest{sessionID: route.ID, taskID: route.TaskID, profileID: route.LogicalProfileID, origin: launchOriginAutomatic, seam: "nativeRoute"}
-		requests[route.ID] = c.resolveAdmissionGradeLocked(ctx, req)
+		// Match native admission: route IDs are not task-session lookup keys.
+		if c.resolveGrade != nil {
+			grade, readErr := c.resolveGrade(ctx, admissionRequest{taskID: route.TaskID, profileID: route.LogicalProfileID})
+			req.grade, req.gradeKnown = grade, readErr == nil
+		}
+		requests[route.ID] = req
 	}
 	return nil
 }
