@@ -1,7 +1,6 @@
 ---
 id: 01-agent-notes
 title: Manager-curated coordinator notes
-authors: []
 status: pending
 wave: 1
 depends_on: []
