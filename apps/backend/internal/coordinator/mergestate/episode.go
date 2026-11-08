@@ -2,6 +2,7 @@ package mergestate
 
 import (
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -46,6 +47,19 @@ type Result struct {
 // EpisodeKey identifies one episode of a change; it keys wake uniqueness.
 func EpisodeKey(changeKey string, generation int) string {
 	return changeKey + "#" + strconv.Itoa(generation)
+}
+
+// ParseEpisodeKey splits an episode key into its change key and generation.
+func ParseEpisodeKey(key string) (changeKey string, generation int, ok bool) {
+	i := strings.LastIndex(key, "#")
+	if i <= 0 {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(key[i+1:])
+	if err != nil || n < 1 {
+		return "", 0, false
+	}
+	return key[:i], n, true
 }
 
 type reading int

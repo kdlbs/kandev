@@ -10,6 +10,8 @@ type wakeLine struct {
 	Kind  WakeKind
 	Ref   string
 	Title string
+	// Detail is bounded provider text for a change wake, rendered as data.
+	Detail string
 }
 
 const wakeTitleRunes = 80
@@ -21,7 +23,7 @@ func buildWakeMessage(lines []wakeLine) string {
 	b.WriteString("Unattended turn. No person started this turn or is watching it.\n")
 	b.WriteString("Events since your last turn (" + strconv.Itoa(len(lines)) + "):\n")
 	for _, l := range lines {
-		b.WriteString("- " + string(l.Kind) + " on " + l.Ref + " \"" + sanitizeWakeTitle(l.Title) + "\"\n")
+		b.WriteString("- " + string(l.Kind) + " on " + l.Ref + " \"" + sanitizeWakeTitle(l.Title) + "\"" + detailSuffix(l.Detail) + "\n")
 	}
 	b.WriteString("These were current when this turn started and may have changed since; read\n")
 	b.WriteString("current state before acting. Propose what should happen. Proposals wait for a\n")
@@ -43,4 +45,11 @@ func sanitizeWakeTitle(title string) string {
 		}
 	}
 	return string(runes)
+}
+
+func detailSuffix(detail string) string {
+	if detail == "" {
+		return ""
+	}
+	return " (" + sanitizeWakeTitle(detail) + ")"
 }

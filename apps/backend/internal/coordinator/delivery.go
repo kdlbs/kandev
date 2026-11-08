@@ -3,11 +3,13 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/coordinator/mergestate"
 	"github.com/kandev/kandev/internal/orchestrator"
 )
 
@@ -73,7 +75,7 @@ func (s *Service) sendTurn(ctx context.Context, coord *Coordinator, adm Admissio
 	messageID, err := s.wakeSender.PromptUnattendedWake(ctx, orchestrator.UnattendedWakePrompt{
 		TaskID:     adm.TaskID,
 		SessionID:  adm.SessionID,
-		Content:    buildWakeMessage(s.wakeLines(ctx, started.Wakes)),
+		Content:    buildWakeMessage(s.wakeLines(ctx, started.WorkspaceID, started.Wakes)),
 		WakeTurnID: turnID,
 		OnReserved: func(reservedTurnID string) {
 			s.writeBinding(ctx, turnID, "reserved", s.store.bindReservedTurn, reservedTurnID)
@@ -117,10 +119,13 @@ func (s *Service) writeBinding(ctx context.Context, turnID, what string, write f
 
 // wakeLines resolves each wake's task for the transcript; an unreadable task
 // is listed by its id with an empty title.
-func (s *Service) wakeLines(ctx context.Context, wakes []deliveredWake) []wakeLine {
+func (s *Service) wakeLines(ctx context.Context, workspaceID string, wakes []deliveredWake) []wakeLine {
 	lines := make([]wakeLine, len(wakes))
 	for i, w := range wakes {
 		lines[i] = wakeLine{Kind: w.Kind, Ref: w.TaskID}
+		if w.Kind.IsMerge() {
+			lines[i].Detail = s.mergeWakeDetail(ctx, workspaceID, w)
+		}
 		if s.conversationTasks == nil {
 			continue
 		}
@@ -134,4 +139,23 @@ func (s *Service) wakeLines(ctx context.Context, wakes []deliveredWake) []wakeLi
 		}
 	}
 	return lines
+}
+
+// mergeWakeDetail renders the change a merge wake is about: provider,
+// repository, number, condition and head SHA. An unreadable episode yields the
+// change identity alone.
+func (s *Service) mergeWakeDetail(ctx context.Context, workspaceID string, w deliveredWake) string {
+	changeKey, _, ok := mergestate.ParseEpisodeKey(w.EpisodeKey)
+	if !ok {
+		return ""
+	}
+	parts := strings.Split(changeKey, "|")
+	if len(parts) != 4 {
+		return ""
+	}
+	detail := parts[0] + " " + parts[2] + " #" + parts[3] + " " + strings.TrimPrefix(string(w.Kind), "change_")
+	if head := s.store.changeHead(ctx, workspaceID, changeKey, w.Kind); head != "" {
+		detail += " head " + head
+	}
+	return detail
 }

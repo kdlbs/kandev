@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/coordinator/mergestate"
@@ -206,4 +207,78 @@ func (s *Store) OpenChangeEpisodes(ctx context.Context, workspaceID, changeKey s
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// ChangeEpisodeOpen reports whether the stored episode named by a merge wake's
+// episode key is still the change's active, non-baseline episode of that kind.
+func (s *Store) ChangeEpisodeOpen(ctx context.Context, workspaceID string, kind WakeKind, episodeKey string) (OpenEpisode, bool, error) {
+	changeKey, generation, ok := mergestate.ParseEpisodeKey(episodeKey)
+	if !ok || !kind.IsMerge() {
+		return OpenEpisode{}, false, nil
+	}
+	var e OpenEpisode
+	var stored int
+	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`SELECT generation, head_sha, last_observed_at
+		FROM coordinator_change_conditions
+		WHERE workspace_id = ? AND change_key = ? AND kind = ? AND active = 1 AND baseline = 0`),
+		workspaceID, changeKey, string(kind)[len("change_"):]).Scan(&stored, &e.HeadSHA, &e.ObservedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return OpenEpisode{}, false, nil
+	}
+	if err != nil {
+		return OpenEpisode{}, false, fmt.Errorf("read change episode: %w", err)
+	}
+	e.ChangeKey, e.Kind, e.Generation = changeKey, mergestate.Kind(string(kind)[len("change_"):]), stored
+	return e, stored == generation, nil
+}
+
+// TaskWorkflows returns the workflow of each live, non-ephemeral task of the
+// workspace among taskIDs. Tasks absent from the result are archived, deleted
+// or in another workspace.
+func (s *Store) TaskWorkflows(ctx context.Context, workspaceID string, taskIDs []string) (map[string]string, error) {
+	out := map[string]string{}
+	for start := 0; start < len(taskIDs); start += existingWakeKeysChunk {
+		chunk := taskIDs[start:min(start+existingWakeKeysChunk, len(taskIDs))]
+		args := []any{workspaceID}
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`SELECT id, COALESCE(workflow_id, '') FROM tasks
+			WHERE workspace_id = ? AND archived_at IS NULL AND is_ephemeral = 0 AND id IN (`+placeholders(len(chunk))+`)`), args...)
+		if err != nil {
+			return nil, fmt.Errorf("read task workflows: %w", err)
+		}
+		if err := scanTaskWorkflows(rows, out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func scanTaskWorkflows(rows *sql.Rows, into map[string]string) error {
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id, workflow string
+		if err := rows.Scan(&id, &workflow); err != nil {
+			return fmt.Errorf("scan task workflow: %w", err)
+		}
+		into[id] = workflow
+	}
+	return rows.Err()
+}
+
+func placeholders(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
+}
+
+// changeHead returns the head SHA stored with the change's condition row for
+// the wake kind, or empty when none is stored or the read fails.
+func (s *Store) changeHead(ctx context.Context, workspaceID, changeKey string, kind WakeKind) string {
+	var head string
+	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`SELECT head_sha FROM coordinator_change_conditions
+		WHERE workspace_id = ? AND change_key = ? AND kind = ?`), workspaceID, changeKey, strings.TrimPrefix(string(kind), "change_")).Scan(&head)
+	if err != nil {
+		return ""
+	}
+	return head
 }
