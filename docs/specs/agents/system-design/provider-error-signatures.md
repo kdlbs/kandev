@@ -266,3 +266,7 @@ confidence apply, so dynamic circuits use their legacy behavior. Account and
 tier context is filled during the orchestrator refinement pass, which keeps
 the original code; a rule that depends on them can refine scope but cannot
 admit a new code.
+
+For a structured HTTP status without a built-in mapping, a configured catalog
+may refine the unknown result only after known built-in signatures have been
+checked. With no matching catalog rule the original unknown result is retained.
