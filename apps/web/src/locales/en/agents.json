@@ -632,6 +632,7 @@
   "providerTierRequestWindow": "Requests per short window",
   "providerTierRequestWindowSeconds": "Short window (seconds)",
   "providerTierUnknown": "Unknown",
+  "providerTierEffective": "Effective",
   "providerTierSources": "Default: {{defaults}}. Learned: {{learned}}. Override: {{override}}.",
   "providerLimitProvenance": "Default source: {{provenance}}.",
   "providerLimitProvenancePublished": "published",
