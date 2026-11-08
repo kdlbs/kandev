@@ -132,6 +132,7 @@ func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admis
 	var err error
 	req, err = c.prepareQueuedTaskCapacityLocked(ctx, req)
 	if err != nil {
+		c.logPopulationUnknown("capacity_queue", populationReadFailure(err), "session_id", req.sessionID)
 		return admissionDecision{ceiling: c.ceiling, reasonCode: ceilingReasonUnknownPopulation}
 	}
 	if req.seam != officeRunCapacitySeam {
@@ -139,6 +140,16 @@ func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admis
 	}
 	d, p, maximum := c.inspectAllAdmissionLocked(ctx, req)
 	observed, gradeLimit = &p, maximum
+	// Existing ownership does not consume another slot when configuration
+	// changes or the population becomes unreadable.
+	if selected, ok := c.reserveSelectedStartLocked(req, p); ok {
+		selected.populationKnown = d.populationKnown
+		return selected
+	}
+	if existing, owned := c.existingGradedAdmissionLocked(req, p, handoff); owned {
+		existing.populationKnown = d.populationKnown
+		return c.persistAdmissionGradeLocked(ctx, req, existing)
+	}
 	if d.reasonCode != "" {
 		return d
 	}
@@ -147,12 +158,6 @@ func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admis
 	}
 	if queued, ok := c.consumeQueuedOfficeCapacityLocked(req, p); ok {
 		return queued
-	}
-	if selected, ok := c.reserveSelectedStartLocked(req, p); ok {
-		return selected
-	}
-	if existing, owned := c.existingGradedAdmissionLocked(req, p, handoff); owned {
-		return c.persistAdmissionGradeLocked(ctx, req, existing)
 	}
 	d.reasonCode = c.allCapacityLimitReason(p, maximum)
 	if d.reasonCode == "" {
@@ -165,22 +170,19 @@ func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admis
 
 func (c *sessionCeilingController) inspectAllAdmissionLocked(ctx context.Context, req admissionRequest) (admissionDecision, gradedPopulation, int) {
 	d := admissionDecision{ceiling: c.ceiling}
-	p := gradedPopulation{}
 	maximum, configured := c.requestedGradeLimitLocked(req)
-	if !configured {
+	// The population is read before any refusal so existing owners can still be
+	// recognized while configuration is incomplete.
+	p, err := c.readGradedPopulationLocked(ctx, req.grade)
+	d.population = p.total
+	d.populationKnown = err == nil && !p.unknown
+	if !configured || (req.gradeKnown && p.missing) {
 		d.reasonCode = ceilingReasonNeedsConfiguration
 		return d, p, maximum
 	}
 	if !req.gradeKnown {
 		c.logPopulationUnknown("admission_grade", "grade_unknown", "session_id", req.sessionID)
 		d.reasonCode = ceilingReasonUnknownPopulation
-		return d, p, maximum
-	}
-	p, err := c.readGradedPopulationLocked(ctx, req.grade)
-	d.population = p.total
-	d.populationKnown = err == nil && !p.unknown
-	if p.missing {
-		d.reasonCode = ceilingReasonNeedsConfiguration
 		return d, p, maximum
 	}
 	if !d.populationKnown {
