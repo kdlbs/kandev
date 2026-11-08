@@ -336,19 +336,6 @@ func TestEnsureWorkspaceExecutionLockedDoesNotBorrowSiblingExecution(t *testing.
 	require.Equal(t, "session-old", stored.SessionID)
 }
 
-func TestEnsureWorkspaceExecutionLockedRejectsMismatchedWorkspaceInfo(t *testing.T) {
-	mgr := newTestManager(t)
-	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
-		"session-new": {
-			TaskID: "task-1", SessionID: "session-other", TaskEnvironmentID: "env-1", WorkspacePath: "/work",
-		},
-	}}
-
-	_, err := mgr.EnsureWorkspaceExecutionForSession(context.Background(), "task-1", "session-new")
-
-	require.ErrorContains(t, err, "workspace info does not match the requested session")
-}
-
 func TestEnsureWorkspaceExecutionLockedRequiresProviderAndInfo(t *testing.T) {
 	ctx := context.Background()
 

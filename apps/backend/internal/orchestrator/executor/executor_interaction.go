@@ -154,14 +154,6 @@ func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSess
 
 	executionID, err := e.resolveExecutionIDForStop(ctx, session.ID)
 	if err != nil {
-		if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
-			// A confirmed absent controller is already stopped. Persist only
-			// this session's cancellation; delivery evidence stays unresolved.
-			_, _, stateErr := e.transitionSessionState(
-				ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason,
-			)
-			return stateErr
-		}
 		return err
 	}
 
