@@ -1052,7 +1052,7 @@ func (m *Manager) SetUserInputRequestHandler(handler adapter.UserInputRequestHan
 func (m *Manager) currentWorkspaceSourceRoots() []string {
 	m.repoTrackersMu.RLock()
 	defer m.repoTrackersMu.RUnlock()
-	return append([]string(nil), m.workspaceSourceRoots...)
+	return append([]string{}, m.workspaceSourceRoots...)
 }
 
 // WorkspaceSourceRoots returns the live, current source-root allowlist

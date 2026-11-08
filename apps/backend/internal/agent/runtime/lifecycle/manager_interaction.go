@@ -1370,6 +1370,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		if handled, err := m.stopPersistedSSHExecution(ctx, executionID, reason, force); handled {
 			return err
 		}
+		if handled, err := m.stopPersistedStandaloneExecution(ctx, executionID, reason, force); handled {
+			return err
+		}
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
 	execution.cancelStartupRecovery()
@@ -1641,6 +1644,9 @@ func (m *Manager) StopBySessionID(ctx context.Context, sessionID string, force b
 	}
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
+		if row := m.liveStandaloneExecutionRow(ctx, sessionID); row != nil {
+			return m.StopAgent(ctx, row.AgentExecutionID, force)
+		}
 		return fmt.Errorf("no agent running for session %q", sessionID)
 	}
 

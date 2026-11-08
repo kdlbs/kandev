@@ -32,7 +32,7 @@ type realStandaloneControl struct {
 
 	mu                   sync.Mutex
 	methods              []string
-	failCreateRemaining  int
+	failCreateResponse   int
 	failDeleteBeforeStop map[string]bool
 	failDeleteAfterStop  map[string]bool
 }
@@ -57,9 +57,9 @@ func (c *realStandaloneControl) recorded() []string {
 	return append([]string(nil), c.methods...)
 }
 
-func (c *realStandaloneControl) failNextCreate() {
+func (c *realStandaloneControl) failNextCreateResponse() {
 	c.mu.Lock()
-	c.failCreateRemaining++
+	c.failCreateResponse++
 	c.mu.Unlock()
 }
 
@@ -100,15 +100,6 @@ func (c *realStandaloneControl) getInstance(id string) (*agentctl.InstanceInfo, 
 
 func (c *realStandaloneControl) createInstance(ctx context.Context, req *agentctl.CreateInstanceRequest) (*agentctl.CreateInstanceResponse, error) {
 	c.record("CREATE " + req.ID)
-	c.mu.Lock()
-	fail := c.failCreateRemaining > 0
-	if fail {
-		c.failCreateRemaining--
-	}
-	c.mu.Unlock()
-	if fail {
-		return nil, errors.New("injected create response loss")
-	}
 	created, err := c.mgr.CreateInstance(ctx, &instancepkg.CreateRequest{
 		ID: req.ID, WorkspacePath: req.WorkspacePath, Protocol: req.Protocol,
 		SessionID: req.SessionID, TaskID: req.TaskID, Env: req.Env,
@@ -119,6 +110,15 @@ func (c *realStandaloneControl) createInstance(ctx context.Context, req *agentct
 	})
 	if err != nil {
 		return nil, err
+	}
+	c.mu.Lock()
+	loseResponse := c.failCreateResponse > 0
+	if loseResponse {
+		c.failCreateResponse--
+	}
+	c.mu.Unlock()
+	if loseResponse {
+		return nil, errors.New("injected create response loss")
 	}
 	return &agentctl.CreateInstanceResponse{ID: created.ID, Port: created.Port}, nil
 }
@@ -371,6 +371,9 @@ func TestStandaloneRetainedJournalRestartRecovery(t *testing.T) {
 		statuses.setDelivery(live.ID, &journal.RecoveryDescriptor{
 			StorageCapability: journal.StorageCapability{Version: 2, Durable: true},
 			SessionID:         "session-restart",
+			StreamID:          "stream-1",
+			IncarnationID:     "incarnation-1",
+			HarnessGeneration: 1,
 		})
 
 		control := newRealStandaloneControl(mgr)
@@ -400,17 +403,21 @@ func TestStandaloneRetainedJournalRestartRecovery(t *testing.T) {
 		})
 		require.NoError(t, err)
 		control := newRealStandaloneControl(mgr)
-		control.failNextCreate()
+		control.failNextCreateResponse()
 		server := newRealStandaloneControlServer(t, control)
 
 		_, err = newStandaloneReconnectExecutor(t, server).CreateInstance(context.Background(), standaloneRestartRequest(root, "replacement-interrupted", first.ID))
 		require.Error(t, err)
 		_, oldPresent := mgr.GetInstance(first.ID)
 		require.False(t, oldPresent, "the stopped owner must have been disposed before the interrupted create")
+		_, replacementPresent := mgr.GetInstance("replacement-interrupted")
+		require.True(t, replacementPresent, "the failed response must leave the journal owner created by that request")
 
 		recovered, err := newStandaloneReconnectExecutor(t, server).CreateInstance(context.Background(), standaloneRestartRequest(root, "replacement-interrupted", first.ID))
 		require.NoError(t, err)
 		require.Equal(t, "replacement-interrupted", recovered.StandaloneInstanceID)
+		require.Contains(t, control.recorded(), "DELETE replacement-interrupted",
+			"retry must reconcile the owner created by the lost response before reopening its journal")
 	})
 
 	t.Run("blocked teardown preserves the owner and unrelated sessions", func(t *testing.T) {

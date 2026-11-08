@@ -713,6 +713,10 @@ type ExecutorCreateRequest struct {
 	// previous execution, captured before fresh-helper launch metadata strips it.
 	// Only a retained-peer adoption may restore it; fresh helpers never inherit it.
 	RetainedBuiltinBinding any
+	// RetainedResourceCircuitIdentity is the exact persisted resource-circuit
+	// identity of the previous execution. Adoption restores only this value and
+	// leaves the resource unknown when it is unavailable.
+	RetainedResourceCircuitIdentity any
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string
@@ -905,6 +909,17 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	for k, v := range ri.Metadata {
 		metadata[k] = v
 	}
+	adoptedPeer := ri.RuntimeName == agentruntime.RuntimeStandalone && instanceReusesExistingProcess(ri)
+	if adoptedPeer {
+		// Only the retained execution's persisted resource identity may charge
+		// that process. Leave the resource unknown when the evidence is absent;
+		// the requested execution's current-policy identity must not apply.
+		if value, ok := ri.Metadata[MetadataKeyResourceCircuitIdentity]; ok {
+			metadata[MetadataKeyResourceCircuitIdentity] = value
+		} else {
+			delete(metadata, MetadataKeyResourceCircuitIdentity)
+		}
+	}
 	// The adopted agentctl identity is process/runtime provenance, not a
 	// request preference. A fresh allocation must not inherit a stale adopted
 	// ID from the previous execution's metadata.
@@ -917,17 +932,11 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	} else {
 		delete(metadata, MetadataKeyExecutorType)
 	}
-	if ri.RuntimeName == agentruntime.RuntimeStandalone && instanceReusesExistingProcess(ri) {
-		// The retained instance already owned the captured circuit resource;
-		// the requested execution identity never owns it.
-		rebindResourceCircuitIdentity(metadata, ri.InstanceID)
-	}
 
 	workspacePath := ri.WorkspacePath
 	if workspacePath == "" {
 		workspacePath = req.WorkspacePath
 	}
-	adoptedPeer := ri.RuntimeName == agentruntime.RuntimeStandalone && instanceReusesExistingProcess(ri)
 	workspaceSourceRoots := req.WorkspaceSourceRoots
 	if adoptedPeer || ri.WorkspaceSourceRoots != nil {
 		// A retained instance's own live allowlist is authoritative for

@@ -211,7 +211,18 @@ Production:
   dedicated `RetainedBuiltinBinding` field, restores only that exact value on a
   selected peer, and verifies it without running fresh-helper preparation or
   rewriting the binding. A retained peer with a required binding that is absent
-  blocks instead of preparing or rebinding.
+  blocks instead of preparing or rebinding. The launch path also reads the
+  persisted binding from the live runtime row when a predecessor ID is absent,
+  and never substitutes current launch policy.
+- Retained resource-circuit identity is restored from persisted evidence only;
+  current-policy credentials are never assigned to a surviving process, and
+  missing evidence leaves the resource unknown.
+- Uncertain agent states (`error`, `stopping`, unknown) block recovery instead
+  of being treated as stopped. Successful delivery descriptors must carry the
+  requested session, stream, incarnation, and generation evidence.
+- A detached failed adoption remains stop-capable: `StopBySessionID` and
+  `GetExecutionIDForSession` resolve the live standalone runtime row, and an
+  exact persisted standalone stop path tears down the peer and deletes the row.
 - Empty retained workspace allowlists and environments remain authoritative for
   adoption. Missing required roots block when the replacement request declares
   roots; request overrides are never substituted for retained evidence. The
@@ -222,7 +233,7 @@ Tests and verification (from the repository root):
 - `go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle -run '^(TestStandaloneReconnect|TestStandaloneRetainedOwner|TestStandaloneRetainedAdoption|TestStandaloneRetainedJournal|TestAdoptedStandalone|TestNewWorkspaceHelper|TestReuseExisting|TestDockerReconnect|TestToAgentExecution)' -count=1` passed.
 - `go test -trimpath -race -tags fts5 ./internal/agentctl/server/instance -run '^TestCreateInstance(RejectsUnavailableJournal|TeardownReleasesJournal)$' -count=1` passed.
 - `go test -trimpath -tags fts5 ./internal/task/service -run '^TestGetWorkspaceInfoForSession' -count=1` passed.
-- Full `./internal/agent/runtime/lifecycle` package passed (`go test -trimpath -tags fts5`, final run 183.3s).
+- Full `./internal/agent/runtime/lifecycle` package passed (`go test -trimpath -tags fts5`, final run 192.2s).
 - `go build -trimpath -tags fts5 ./...` passed.
 - `bash scripts/lint-go-changed` over all changed and untracked Go files: 0 issues.
 - `git diff --check`: clean.
@@ -230,8 +241,10 @@ Tests and verification (from the repository root):
   [the reproduction record](reproduction.md); the permanent reconnect tests
   were added with the correction and exercise a real bbolt handle.
 - New regressions cover a real executor-running row plus captured events for
-  nonterminal adoption detach, a workspace restore through
-  `GetOrEnsureExecution` -> `Launch` -> `StartAgentProcess` with GET-only
-  built-in verification, exact persisted-binding restoration, blocked missing
-  binding, and empty/nil retained roots and environments over the control JSON
-  round trip.
+  nonterminal adoption detach and persisted Stop reachability, a workspace
+  restore through `GetOrEnsureExecution` -> `Launch` -> `StartAgentProcess`
+  with GET-only built-in verification, exact persisted-binding restoration,
+  blocked missing binding, launch binding lookup without a predecessor ID,
+  current-policy binding rejection, retained resource identity, uncertain
+  status rejection, incomplete delivery descriptors, and empty/nil retained
+  roots and environments over the control JSON round trip.

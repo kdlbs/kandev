@@ -40,25 +40,6 @@ func captureResourceCircuitIdentity(metadata map[string]interface{}, executionID
 	}
 }
 
-// rebindResourceCircuitIdentity moves a captured circuit identity onto the
-// execution that actually owns the selected process.
-func rebindResourceCircuitIdentity(metadata map[string]interface{}, executionID string) {
-	if metadata == nil || executionID == "" {
-		return
-	}
-	value, ok := metadata[MetadataKeyResourceCircuitIdentity]
-	if !ok {
-		return
-	}
-	switch identity := value.(type) {
-	case resourceCircuitIdentity:
-		identity.ExecutionID = executionID
-		metadata[MetadataKeyResourceCircuitIdentity] = identity
-	case map[string]interface{}:
-		identity["execution_id"] = executionID
-	}
-}
-
 // CapturedResourceCircuitKey returns only the resource belonging to this
 // execution/profile pair. Missing retained metadata remains unknown.
 func CapturedResourceCircuitKey(metadata map[string]interface{}, executionID, profileID string) string {

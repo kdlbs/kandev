@@ -139,10 +139,15 @@ func TestNewWorkspaceHelperDoesNotInheritPreviousProcessBinding(t *testing.T) {
 	manager := newTestManager(t)
 	prior, err := p.MarshalBuiltinBinding(builtinDispatchProfile(p.PackageCore))
 	require.NoError(t, err)
-	info := &WorkspaceInfo{TaskID: "task-a", SessionID: "session-a", WorkspaceID: "workspace", AgentID: "auggie", ExecutorType: "local", WorkspacePath: t.TempDir(), Metadata: map[string]interface{}{p.BuiltinBindingMetadataKey: prior}}
+	priorIdentity := resourceCircuitIdentity{ExecutionID: "prior-execution", ProfileID: "profile-1", Key: "prior-resource"}
+	info := &WorkspaceInfo{TaskID: "task-a", SessionID: "session-a", WorkspaceID: "workspace", AgentID: "auggie", ExecutorType: "local", WorkspacePath: t.TempDir(), Metadata: map[string]interface{}{
+		p.BuiltinBindingMetadataKey:        prior,
+		MetadataKeyResourceCircuitIdentity: priorIdentity,
+	}}
 	prepared, err := manager.prepareExecutionCreateRequest(context.Background(), info.TaskID, info, "new-execution")
 	require.NoError(t, err)
 	require.NotContains(t, prepared.request.Metadata, p.BuiltinBindingMetadataKey)
 	require.Equal(t, prior, prepared.request.RetainedBuiltinBinding)
+	require.Equal(t, priorIdentity, prepared.request.RetainedResourceCircuitIdentity)
 	require.Equal(t, prior, info.Metadata[p.BuiltinBindingMetadataKey])
 }

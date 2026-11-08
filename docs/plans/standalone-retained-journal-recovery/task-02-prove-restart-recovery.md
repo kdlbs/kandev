@@ -218,11 +218,18 @@ Integration:
     usable throughout.
 - Retained records survive teardown and reopen. A dispatching submission is
   reclassified as `interrupted_unknown`, never marked successful.
-- The manager-level regression proves a workspace-first restore through
+- A manager-level regression proves a workspace-first restore through
   `GetOrEnsureExecution` -> `Launch` -> `StartAgentProcess` on a bound live
   peer. It captures the persisted built-in MCP binding, restores it unchanged,
   verifies with GET only, performs no fresh-helper prepare/rebind, and dispatches
   no ACP lifecycle action.
+- A combined lifecycle/restart regression drives the real pre-creation resolver
+  through `GetOrEnsureExecution` and `StartAgentProcess` with a real instance
+  manager, control server, and journal. It asserts the retained execution
+  identity, GET-only built-in verification, and no startup dispatch.
+- A lost create response after the replacement journal owner was created is
+  reconciled by the next attempt, which disposes that exact owner before
+  reopening its journal.
 - A task-service regression proves workspace restore carries the persisted
   built-in binding from the runtime inventory into `WorkspaceInfo`.
 - The E2E runs exercise the full backend with its real SQLite persistence,
@@ -234,8 +241,9 @@ Verification:
 - `go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle -run '^TestStandaloneRetainedWorkspaceRestoreKeepsBuiltinBinding$' -count=1 -v` passed.
 - `go test -trimpath -tags fts5 ./internal/task/service -run '^TestGetWorkspaceInfoForSessionCarriesRetainedBuiltinBinding$' -count=1 -v` passed.
 - `bash scripts/lint-go-changed` over all changed and untracked Go files: 0 issues.
-- Full `./internal/agent/runtime/lifecycle` package passed (final run 183.3s).
-- Full `./internal/task/service` package passed (final run 98.3s).
+- Full `./internal/agent/runtime/lifecycle` package passed (final run 192.2s).
+- Full `./internal/task/service` package passed (final run 84.1s).
+- `./internal/agentctl/server/process` package passed (final run 231.3s).
 - Desktop: `pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/session/agent-survival-restart.spec.ts` passed 3 tests.
 - Mobile: `pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome tests/session/mobile-agent-survival-restart.spec.ts` passed 2 tests.
 - `python3 scripts/list-docs.py validate`: 437 decisions and 1937 specifications validated.

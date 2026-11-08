@@ -1422,11 +1422,15 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	}
 
 	metadata := buildLaunchMetadata(reqWithWorktree, mainRepoGitDir, worktreeID, worktreeBranch)
-	retainedBuiltinBinding, hasRetainedBuiltinBinding := metadata[mcpprofile.BuiltinBindingMetadataKey]
-	var persistedBuiltinBinding any
-	hasPersistedBuiltinBinding := false
-	if reqWithWorktree.PreviousExecutionID != "" {
-		persistedBuiltinBinding, hasPersistedBuiltinBinding = m.retainedBuiltinBindingForSession(ctx, reqWithWorktree.SessionID)
+	var persistedBuiltinBinding, persistedResourceCircuitIdentity any
+	hasPersistedBuiltinBinding, hasPersistedResourceCircuitIdentity := false, false
+	if reqWithWorktree.SessionID != "" {
+		persistedBuiltinBinding, hasPersistedBuiltinBinding = m.retainedExecutionMetadataForSession(
+			ctx, reqWithWorktree.SessionID, mcpprofile.BuiltinBindingMetadataKey,
+		)
+		persistedResourceCircuitIdentity, hasPersistedResourceCircuitIdentity = m.retainedExecutionMetadataForSession(
+			ctx, reqWithWorktree.SessionID, MetadataKeyResourceCircuitIdentity,
+		)
 	}
 	if err := m.applyAuthoritativeKubernetesProfileConfig(ctx, reqWithWorktree, metadata); err != nil {
 		return nil, nil, nil, err
@@ -1557,8 +1561,9 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		// The persisted row is the authority for a retained peer. The launch
 		// metadata may carry a current-policy binding for a fresh helper.
 		execReq.RetainedBuiltinBinding = persistedBuiltinBinding
-	} else if hasRetainedBuiltinBinding && reqWithWorktree.PreviousExecutionID != "" {
-		execReq.RetainedBuiltinBinding = retainedBuiltinBinding
+	}
+	if hasPersistedResourceCircuitIdentity {
+		execReq.RetainedResourceCircuitIdentity = persistedResourceCircuitIdentity
 	}
 	m.wireKubernetesInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
 	m.wirePluginExecutorInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
@@ -2519,10 +2524,10 @@ func shouldDeferMissingWorktreeResumeValidation(req *LaunchRequest, workspacePat
 	return errors.Is(err, os.ErrNotExist)
 }
 
-// retainedBuiltinBindingForSession reads the exact persisted built-in binding
-// for a session's prior execution. Only an adopted peer may restore it.
-func (m *Manager) retainedBuiltinBindingForSession(ctx context.Context, sessionID string) (any, bool) {
-	if m == nil || sessionID == "" {
+// retainedExecutionMetadataForSession reads one exact persisted metadata value
+// from a session's live runtime row. Only an adopted peer may restore it.
+func (m *Manager) retainedExecutionMetadataForSession(ctx context.Context, sessionID, key string) (any, bool) {
+	if m == nil || sessionID == "" || key == "" {
 		return nil, false
 	}
 	reader, ok := m.runningWriter.(executorRunningReader)
@@ -2533,8 +2538,8 @@ func (m *Manager) retainedBuiltinBindingForSession(ctx context.Context, sessionI
 	if err != nil || running == nil || running.Metadata == nil {
 		return nil, false
 	}
-	value, bound := running.Metadata[mcpprofile.BuiltinBindingMetadataKey]
-	return value, bound
+	value, found := running.Metadata[key]
+	return value, found
 }
 
 // buildExecutionFromInstance turns the spawned ExecutorInstance + request shape

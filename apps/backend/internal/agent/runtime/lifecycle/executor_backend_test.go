@@ -174,14 +174,39 @@ func TestToAgentExecutionFreezesStartupDisposition(t *testing.T) {
 	require.Equal(t, AgentStartupReattachedExisting, execution.startupDispositionSnapshot())
 }
 
-func TestToAgentExecutionRebindsAdoptedStandaloneResourceCircuitIdentity(t *testing.T) {
-	capturedID := "requested-execution"
+func TestToAgentExecutionAdoptionUsesRetainedResourceCircuitIdentity(t *testing.T) {
 	req := &ExecutorCreateRequest{
-		InstanceID:     capturedID,
+		InstanceID:     "requested-execution",
 		AgentProfileID: "profile-1",
 		Metadata: map[string]interface{}{
 			MetadataKeyResourceCircuitIdentity: resourceCircuitIdentity{
-				ExecutionID: capturedID, ProfileID: "profile-1", Key: "resource-key",
+				ExecutionID: "requested-execution", ProfileID: "profile-1", Key: "current-policy-key",
+			},
+		},
+	}
+	instance := &ExecutorInstance{
+		InstanceID:  "retained-execution",
+		RuntimeName: agentruntime.RuntimeStandalone,
+		Metadata: map[string]interface{}{
+			MetadataKeyReuseExistingProcess: true,
+			MetadataKeyResourceCircuitIdentity: resourceCircuitIdentity{
+				ExecutionID: "retained-execution", ProfileID: "profile-1", Key: "retained-key",
+			},
+		},
+	}
+	execution := instance.ToAgentExecution(req)
+	require.Equal(t, "retained-execution", execution.ID)
+	require.Equal(t, "retained-key", execution.resourceCircuitKey(),
+		"adoption must keep the retained process's persisted resource identity")
+}
+
+func TestToAgentExecutionAdoptionLeavesMissingResourceIdentityUnknown(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		InstanceID:     "requested-execution",
+		AgentProfileID: "profile-1",
+		Metadata: map[string]interface{}{
+			MetadataKeyResourceCircuitIdentity: resourceCircuitIdentity{
+				ExecutionID: "requested-execution", ProfileID: "profile-1", Key: "current-policy-key",
 			},
 		},
 	}
@@ -191,8 +216,8 @@ func TestToAgentExecutionRebindsAdoptedStandaloneResourceCircuitIdentity(t *test
 		Metadata:    map[string]interface{}{MetadataKeyReuseExistingProcess: true},
 	}
 	execution := instance.ToAgentExecution(req)
-	require.Equal(t, "retained-execution", execution.ID)
-	require.Equal(t, "resource-key", execution.resourceCircuitKey())
+	require.Empty(t, execution.resourceCircuitKey(),
+		"current launch policy must not be assigned to a retained process without persisted evidence")
 }
 
 func TestToAgentExecutionAdoptionUsesRetainedEmptyEvidence(t *testing.T) {

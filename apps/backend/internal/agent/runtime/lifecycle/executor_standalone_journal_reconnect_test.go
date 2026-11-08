@@ -133,6 +133,34 @@ func seedRetainedJournalForSession(t *testing.T, path, sessionID string) (journa
 	return event, submission
 }
 
+func TestStandaloneDeliveryDescriptorRequiresOwnership(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		SessionID: "session-5165", DeliveryStreamID: "stream-1",
+		DeliveryIncarnationID: "incarnation-1", DeliveryHarnessGeneration: 2,
+	}
+	descriptor := func(sessionID, streamID, incarnationID string, generation uint64) *agentctl.DeliveryStatus {
+		return &agentctl.DeliveryStatus{
+			StorageCapability: journal.StorageCapability{Version: journal.CurrentVersion, Durable: true},
+			SessionID:         sessionID, StreamID: streamID,
+			IncarnationID: incarnationID, HarnessGeneration: generation,
+		}
+	}
+	require.NoError(t, validateStandaloneDeliveryDescriptor(req, descriptor("session-5165", "stream-1", "incarnation-1", 2)))
+	for name, status := range map[string]*agentctl.DeliveryStatus{
+		"missing":            nil,
+		"missing owner":      descriptor("", "stream-1", "incarnation-1", 2),
+		"wrong owner":        descriptor("other-session", "stream-1", "incarnation-1", 2),
+		"missing stream":     descriptor("session-5165", "", "incarnation-1", 2),
+		"wrong stream":       descriptor("session-5165", "other-stream", "incarnation-1", 2),
+		"missing generation": descriptor("session-5165", "stream-1", "incarnation-1", 0),
+		"wrong generation":   descriptor("session-5165", "stream-1", "incarnation-1", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Error(t, validateStandaloneDeliveryDescriptor(req, status))
+		})
+	}
+}
+
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-001.2
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-001.3
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-002.1
@@ -373,17 +401,45 @@ func TestStandaloneReconnectBlocksUnresolvedJournalOwners(t *testing.T) {
 		require.False(t, fixture.control.hasMethod("CREATE"))
 	})
 
+	t.Run("uncertain agent status blocks", func(t *testing.T) {
+		for _, status := range []string{"error", "stopping", ""} {
+			t.Run(status, func(t *testing.T) {
+				root := t.TempDir()
+				location, err := journal.ResolveLocation(root, "session-5165")
+				require.NoError(t, err)
+				statusServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					_ = json.NewEncoder(w).Encode(map[string]string{"agent_status": status})
+				}))
+				t.Cleanup(statusServer.Close)
+				_, statusPort := parseHTTPURL(t, statusServer.URL)
+				control := newJournalReconnectControl(func(string) string { return location.Path })
+				control.addInstance("retained-execution", "task-5165", "session-5165", statusPort, false)
+				fixture, server := newStandaloneJournalControlServer(t, control)
+
+				_, err = newStandaloneReconnectExecutor(t, server).CreateInstance(context.Background(), standaloneReconnectRequest(root, "requested-execution", "retained-execution"))
+				require.ErrorIs(t, err, errStandaloneJournalOwnerBlocked)
+				require.False(t, fixture.control.hasMethod("DELETE"))
+				require.False(t, fixture.control.hasMethod("CREATE"))
+			})
+		}
+	})
+
 	t.Run("duplicate identifiers block", func(t *testing.T) {
-		executor := &StandaloneExecutor{logger: newTestDockerLogger()}
+		control := newJournalReconnectControl(func(string) string { return "" })
+		statusServer := newReconnectStatusServer(t, control)
+		_, statusPort := parseHTTPURL(t, statusServer.URL)
+		control.addInstance("duplicate", "task-5165", "session-5165", statusPort, false)
+		executor := newStandaloneReconnectExecutor(t, statusServer)
 		_, err := executor.classifyStandaloneJournalOwners(
 			context.Background(), nil, standaloneReconnectRequest(t.TempDir(), "requested-execution", ""),
 			[]*agentctl.InstanceInfo{
-				{ID: "duplicate", TaskID: "task-5165", SessionID: "session-5165", Port: 41001},
-				{ID: "duplicate", TaskID: "task-5165", SessionID: "session-5165", Port: 41002},
+				{ID: "duplicate", TaskID: "task-5165", SessionID: "session-5165", Port: statusPort},
+				{ID: "duplicate", TaskID: "task-5165", SessionID: "session-5165", Port: statusPort},
 			},
 			map[string]struct{}{},
 		)
 		require.ErrorIs(t, err, errStandaloneJournalOwnerBlocked)
+		require.Contains(t, err.Error(), `agent instance "duplicate" was reported more than once`)
 	})
 
 	t.Run("incomplete inventory blocks", func(t *testing.T) {

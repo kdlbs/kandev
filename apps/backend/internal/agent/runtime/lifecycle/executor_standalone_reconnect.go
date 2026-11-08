@@ -18,6 +18,11 @@ import (
 // opening the same session journal a second time.
 var errStandaloneJournalOwnerBlocked = errors.New("retained standalone agent journal owner could not be reconciled")
 
+const (
+	standaloneOwnerStatusStarting = "starting"
+	standaloneOwnerStatusStopped  = "stopped"
+)
+
 type standaloneOwnerCandidate struct {
 	info     *agentctl.InstanceInfo
 	liveness reconnectOwnerLiveness
@@ -167,8 +172,13 @@ func (r *StandaloneExecutor) standaloneOwnerLiveness(
 	if status == nil {
 		return reconnectOwnerUnknown, fmt.Errorf("agent instance %q status is missing", info.ID)
 	}
-	if !status.IsAgentRunning() {
+	switch status.AgentStatus {
+	case agentProcessStatusRunning, standaloneOwnerStatusStarting:
+		// Continue to delivery ownership checks below.
+	case standaloneOwnerStatusStopped:
 		return reconnectOwnerStopped, nil
+	default:
+		return reconnectOwnerUnknown, fmt.Errorf("agent instance %q status %q does not prove a stopped owner", info.ID, status.AgentStatus)
 	}
 	if err := validateStandaloneOwnerDelivery(ctx, client, req); err != nil {
 		return reconnectOwnerUnknown, err
@@ -200,17 +210,23 @@ func isUnsupportedStandaloneDeliveryRoute(err error) bool {
 
 func validateStandaloneDeliveryDescriptor(req *ExecutorCreateRequest, descriptor *agentctl.DeliveryStatus) error {
 	if descriptor == nil {
-		return nil
+		return errors.New("delivery descriptor is missing")
 	}
-	switch {
-	case descriptor.SessionID != "" && descriptor.SessionID != req.SessionID:
+	if descriptor.SessionID == "" {
+		return errors.New("delivery descriptor has no session identity")
+	}
+	if descriptor.SessionID != req.SessionID {
 		return errors.New("delivery identity conflicts with the requested session")
-	case req.DeliveryStreamID != "" && descriptor.StreamID != "" && descriptor.StreamID != req.DeliveryStreamID:
+	}
+	if req.DeliveryStreamID != "" && (descriptor.StreamID == "" || descriptor.StreamID != req.DeliveryStreamID) {
 		return errors.New("delivery stream conflicts with the requested stream")
-	case req.DeliveryIncarnationID != "" && descriptor.IncarnationID != "" && descriptor.IncarnationID != req.DeliveryIncarnationID:
+	}
+	if req.DeliveryIncarnationID != "" &&
+		(descriptor.IncarnationID == "" || descriptor.IncarnationID != req.DeliveryIncarnationID) {
 		return errors.New("delivery incarnation conflicts with the requested incarnation")
-	case req.DeliveryHarnessGeneration > 0 && descriptor.HarnessGeneration > 0 &&
-		descriptor.HarnessGeneration != req.DeliveryHarnessGeneration:
+	}
+	if req.DeliveryHarnessGeneration > 0 &&
+		(descriptor.HarnessGeneration == 0 || descriptor.HarnessGeneration != req.DeliveryHarnessGeneration) {
 		return errors.New("delivery harness generation conflicts with the requested generation")
 	}
 	return nil
@@ -234,6 +250,11 @@ func (r *StandaloneExecutor) buildAdoptedStandaloneInstance(
 	} else if req.McpProfile != nil && req.McpProfile.BuiltinPackages != nil {
 		client.Close()
 		return nil, standaloneOwnerBlocked(errors.New("retained agent has no persisted built-in MCP binding for the requested workspace"))
+	}
+	if req.RetainedResourceCircuitIdentity != nil {
+		// Restore the persisted resource identity exactly. The current launch
+		// policy may target a different credential resource.
+		metadata[MetadataKeyResourceCircuitIdentity] = req.RetainedResourceCircuitIdentity
 	}
 	if info.WorkspaceSourceRoots == nil && len(req.WorkspaceSourceRoots) > 0 {
 		client.Close()

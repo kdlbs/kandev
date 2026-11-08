@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -122,6 +123,15 @@ func (e *standaloneAdoptionExecutor) stoppedInstances() []*ExecutorInstance {
 	return append([]*ExecutorInstance(nil), e.stopInstances...)
 }
 
+type persistedStandaloneWriter struct {
+	*captureExecutorRunningWriter
+	rows []*models.ExecutorRunning
+}
+
+func (w *persistedStandaloneWriter) ListExecutorsRunning(context.Context) ([]*models.ExecutorRunning, error) {
+	return w.rows, nil
+}
+
 func newStandaloneAdoptionTestManager(t *testing.T, backend *standaloneAdoptionExecutor) *Manager {
 	t.Helper()
 	return newStandaloneAdoptionTestManagerWithEventBus(t, backend, &MockEventBus{})
@@ -224,11 +234,15 @@ func TestStandaloneRetainedAdoptionFailurePreservesPeer(t *testing.T) {
 		}
 		eventBus := &MockEventBusWithTracking{}
 		stopManager := newStandaloneAdoptionTestManagerWithEventBus(t, stopBackend, eventBus)
-		writer := &captureExecutorRunningWriter{prior: &models.ExecutorRunning{
+		row := &models.ExecutorRunning{
 			ID: "session-1", SessionID: "session-1", TaskID: "task-1",
-			AgentExecutionID: "retained-execution", Status: models.ExecutorRunningStatusRunning,
-			Resumable: true,
-		}}
+			AgentExecutionID: "retained-execution", Runtime: agentruntime.RuntimeStandalone,
+			Status: models.ExecutorRunningStatusRunning, Resumable: true, AgentctlPort: 41001,
+		}
+		writer := &persistedStandaloneWriter{
+			captureExecutorRunningWriter: &captureExecutorRunningWriter{prior: row},
+			rows:                         []*models.ExecutorRunning{row},
+		}
 		stopManager.SetExecutorRunningWriter(writer)
 		stopExecution := launchRetainedOwner(t, stopManager, stopBackend)
 		require.NotNil(t, writer.running, "launch must persist the retained execution row")
@@ -244,6 +258,14 @@ func TestStandaloneRetainedAdoptionFailurePreservesPeer(t *testing.T) {
 		}
 		_, tracked := stopManager.executionStore.Get(stopExecution.ID)
 		require.False(t, tracked)
+
+		persistedID, err := stopManager.GetExecutionIDForSession(context.Background(), "session-1")
+		require.NoError(t, err)
+		require.Equal(t, stopExecution.ID, persistedID)
+		require.NoError(t, stopManager.StopBySessionID(context.Background(), "session-1", false))
+		require.Equal(t, int32(1), stopBackend.stopCount.Load(),
+			"explicit Stop must reach the detached peer through its persisted runtime row")
+		require.Equal(t, 1, writer.deleteCalls)
 	})
 }
 
