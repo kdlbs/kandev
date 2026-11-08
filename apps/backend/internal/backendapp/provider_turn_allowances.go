@@ -29,6 +29,9 @@ type providerTurnAllowances struct {
 	*profileUsageSnapshot
 	claims      providerTurnAllowanceStore
 	admissionMu sync.Mutex
+	// inferencePopulation adds native inference incumbents bound to the same
+	// provider allowance. Nil keeps the session-only population.
+	inferencePopulation func(context.Context, snapshotBinding, string) ([]tasksqlite.ProviderTurnClaim, error)
 }
 
 func (s *providerTurnAllowances) profileBinding(ctx context.Context, id, model string, actual ...map[string]string) (snapshotBinding, error) {
@@ -122,9 +125,28 @@ func (s *providerTurnAllowances) AdmitProviderTurn(ctx context.Context, req agen
 	if !s.turnRequestBindingKnown(req, b) {
 		return false, s.unresolvedProviderTurn(ctx, req, b)
 	}
+	return s.admitBoundProviderTurn(ctx, req, b, nil)
+}
+
+// admitBoundProviderTurn acquires a claim for an already bound provider
+// account. The caller holds admissionMu across population, policy and claim
+// acquisition; before runs after the population read and before acquisition.
+func (s *providerTurnAllowances) admitBoundProviderTurn(ctx context.Context, req agentruntime.ProviderTurnRequest, b snapshotBinding, before func() error) (bool, error) {
 	population, err := s.incumbentTurns(ctx, b.key, req)
 	if err != nil {
 		return false, err
+	}
+	if s.inferencePopulation != nil {
+		inference, readErr := s.inferencePopulation(ctx, b, req.ExecutionID)
+		if readErr != nil {
+			return false, readErr
+		}
+		population = append(population, inference...)
+	}
+	if before != nil {
+		if err := before(); err != nil {
+			return false, err
+		}
 	}
 	claim := providerTurnClaim(req)
 	refund, err := s.claims.AcquireProviderTurn(ctx, b.key, claim, population)

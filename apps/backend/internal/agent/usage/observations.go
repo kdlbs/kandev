@@ -28,7 +28,7 @@ func (c *UsageCache) SnapshotPair(key string) (current, previous *ProviderUsage)
 	if entry == nil || entry.err != nil {
 		return nil, nil
 	}
-	return cloneProviderUsage(entry.usage), cloneProviderUsage(entry.previous)
+	return cloneProviderUsage(entry.sample), cloneProviderUsage(entry.previous)
 }
 
 func cloneProviderUsage(source *ProviderUsage) *ProviderUsage {

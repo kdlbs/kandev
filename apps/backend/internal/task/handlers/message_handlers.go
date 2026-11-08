@@ -160,6 +160,7 @@ type canvasGuidanceProjection struct {
 	promptReferencesPrepared      bool
 	initialTaskBriefDispatchOwner bool
 	deliverySubmissionID          string
+	promptTurnID                  string
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -655,6 +656,7 @@ type wsAddMessageRequest struct {
 	promptReferencesPrepared        bool
 	initialTaskBriefDispatchPending bool
 	deliverySubmissionID            string
+	promptTurnID                    string
 }
 
 type addMessageReplayIdentity struct {
@@ -1200,6 +1202,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 	req.Content = message.Content
 	req.deliverySubmissionID = message.ID
+	req.promptTurnID = message.TurnID
 	initialTaskBriefQueued := (initialTaskBrief != nil && !initialTaskBrief.Selected) || queueBehindInitialBriefDispatch
 	// An idempotent create can return a row committed by another process, so
 	// the candidate pointer is not necessarily the object that selected the
@@ -1818,7 +1821,7 @@ func (h *MessageHandlers) dispatchPromptAsync(
 		}
 		if steer {
 			h.forwardMessageAsSteer(
-				promptCtx, taskID, sessionID, content, model, planMode, attachments, req.deliverySubmissionID,
+				promptCtx, taskID, sessionID, content, model, planMode, attachments, req.deliverySubmissionID, req.promptTurnID,
 			)
 			return
 		}
@@ -1832,6 +1835,7 @@ func (h *MessageHandlers) dispatchPromptAsync(
 				promptReferencesPrepared:      req.promptReferencesPrepared,
 				initialTaskBriefDispatchOwner: req.initialTaskBriefDispatchPending,
 				deliverySubmissionID:          req.deliverySubmissionID,
+				promptTurnID:                  req.promptTurnID,
 			},
 		)
 	}()
@@ -1871,7 +1875,12 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 	planMode bool,
 	attachments []v1.MessageAttachment,
 	deliverySubmissionID string,
+	promptTurnIDs ...string,
 ) {
+	promptTurnID := ""
+	if len(promptTurnIDs) > 0 {
+		promptTurnID = promptTurnIDs[0]
+	}
 	var err error
 	if steerer, ok := h.orchestrator.(recordedMessageSteerer); ok {
 		_, err = steerer.SteerRecordedMessage(ctx, taskID, sessionID, content, model, planMode, attachments)
@@ -1890,7 +1899,7 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 		// targets a RUNNING session, never a CREATED one, so this takes the
 		// ordinary prompt branch (PromptTask + resume + error handling).
 		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false, "",
-			canvasGuidanceProjection{deliverySubmissionID: deliverySubmissionID})
+			canvasGuidanceProjection{deliverySubmissionID: deliverySubmissionID, promptTurnID: promptTurnID})
 		return
 	}
 	if errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
@@ -1898,7 +1907,7 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 		return
 	}
 	if !isAgentReportedError(err) {
-		h.createPromptErrorMessage(ctx, taskID, sessionID, err)
+		h.createPromptErrorMessage(ctx, taskID, sessionID, err, promptTurnID)
 	}
 }
 
@@ -1987,6 +1996,7 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 			if _, createErr := h.service.CreateMessage(ctx, &service.CreateMessageRequest{
 				TaskSessionID: sessionID,
 				TaskID:        taskID,
+				TurnID:        projection.promptTurnID,
 				Content:       errorMsg,
 				AuthorType:    "agent",
 				Type:          string(v1.MessageTypeError),
@@ -2007,10 +2017,12 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 	promptReferencesPrepared := false
 	initialTaskBriefDispatchOwner := false
 	deliverySubmissionID := ""
+	promptTurnID := ""
 	if len(canvasGuidance) > 0 {
 		promptReferencesPrepared = canvasGuidance[0].promptReferencesPrepared
 		initialTaskBriefDispatchOwner = canvasGuidance[0].initialTaskBriefDispatchOwner
 		deliverySubmissionID = canvasGuidance[0].deliverySubmissionID
+		promptTurnID = canvasGuidance[0].promptTurnID
 	}
 	if deliveryPrompt, ok := h.orchestrator.(deliverySubmissionPromptOrchestrator); ok && len(canvasGuidance) > 0 && canvasGuidance[0].deliverySubmissionID != "" {
 		_, err = deliveryPrompt.PromptTaskWithDeliverySubmissionID(
@@ -2060,7 +2072,7 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		if !isAgentReportedError(err) &&
 			!h.queuePromptIfRuntimeUnavailable(ctx, taskID, sessionID, content, model, planMode, attachments, err) &&
 			!isPromptErrorOwnedByRecovery(err) {
-			h.createPromptErrorMessage(ctx, taskID, sessionID, err)
+			h.createPromptErrorMessage(ctx, taskID, sessionID, err, promptTurnID)
 		}
 	}
 }
@@ -2334,7 +2346,11 @@ func (h *MessageHandlers) handlePromptWithResume(
 
 // createPromptErrorMessage creates an agent error message visible to the user when
 // forwarding a prompt to the agent fails.
-func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, sessionID string, promptErr error) {
+func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, sessionID string, promptErr error, turnIDs ...string) {
+	turnID := ""
+	if len(turnIDs) > 0 {
+		turnID = turnIDs[0]
+	}
 	h.logger.Warn("failed to forward message as prompt to agent",
 		zap.String("task_id", taskID),
 		zap.Error(promptErr))
@@ -2352,6 +2368,7 @@ func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, 
 	if _, createErr := h.service.CreateMessage(ctx, &service.CreateMessageRequest{
 		TaskSessionID: sessionID,
 		TaskID:        taskID,
+		TurnID:        turnID,
 		Content:       errorMsg,
 		AuthorType:    "agent",
 		Type:          string(v1.MessageTypeError),

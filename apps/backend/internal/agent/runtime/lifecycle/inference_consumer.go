@@ -86,3 +86,8 @@ func inferenceIdentityMatchesExecution(identity agentctl.InferenceIdentity, exec
 	sessionMatches := identity.SessionID == "" || identity.SessionID == execution.SessionID
 	return taskMatches && sessionMatches
 }
+
+// InferenceProviderPopulation shares the normal prompt owner's incumbent view.
+func (m *Manager) InferenceProviderPopulation() []ProviderTurnRequest {
+	return m.sessionManager.providerTurnPopulation("", 0)
+}
