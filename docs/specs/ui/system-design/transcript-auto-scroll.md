@@ -263,15 +263,21 @@ The Tasks [resumption design](../../tasks/system-design/quick-chat-session-resum
 continues to own recovery policy and session identity.
 
 Content resize and native scroll notifications can arrive in either order.
-`useFollowIntent` retains the immediately preceding measurement and the
-pre-reflow baseline needed to attribute native movement to content reflow until
-that movement is reconciled, including growth followed by shrinkage. A content
-measurement alone must not erase that evidence while automatic placement is
-blocked. Blocker release retains the existing guarded correction for pending
-content growth. Explicit reader input still cancels following immediately.
-Disabled auto-scroll, unread targets, navigation, and session replacement
-retain their existing guards. The correction adds no timer loop or synchronous
-measurement to message commits.
+`useFollowIntent` retains the immediately preceding measurement, the
+pre-reflow baseline, and the interval's peak geometry needed to attribute
+native movement to content reflow until that movement is reconciled, including
+growth followed by shrinkage across multiple resizes. A content measurement
+alone must not erase that evidence while automatic placement is blocked.
+Blocker release retains the existing guarded correction for pending content
+growth. Explicit reader input still cancels following immediately. Disabled
+auto-scroll, unread targets, navigation, and session replacement retain their
+existing guards. The correction adds no timer loop or synchronous measurement
+to message commits.
+
+A connection change invalidates an in-flight cached refresh. Its provisional
+placement settles immediately instead of waiting for a request whose
+generation can no longer commit; the reconnect recovery path owns subsequent
+history updates.
 
 Desktop Quick Chat retains its floating dialog and expanded view. Phone Quick
 Chat retains the full-height dialog, safe-area clearance, and fixed composer.

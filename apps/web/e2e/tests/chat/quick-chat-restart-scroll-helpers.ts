@@ -162,13 +162,13 @@ export async function expectScrollerAtBottom(
     .toBeLessThan(10);
 }
 
-function expectBoxInsideViewport(
+function isBoxInsideViewport(
   contentBox: { x: number; y: number; width: number; height: number },
   viewportBox: { x: number; y: number; width: number; height: number },
-): void {
-  expect(contentBox.y).toBeGreaterThanOrEqual(viewportBox.y - 1);
-  expect(contentBox.y + contentBox.height).toBeLessThanOrEqual(
-    viewportBox.y + viewportBox.height + 1,
+): boolean {
+  return (
+    contentBox.y >= viewportBox.y - 1 &&
+    contentBox.y + contentBox.height <= viewportBox.y + viewportBox.height + 1
   );
 }
 
@@ -180,11 +180,21 @@ export async function expectLatestReplyAtBottom(
 ): Promise<void> {
   const reply = quickChatLatestReply(dialog, latestReply);
   await expect(reply).toBeVisible({ timeout });
-  const [replyBox, scrollerBox] = await Promise.all([reply.boundingBox(), scroller.boundingBox()]);
-  expect(replyBox).not.toBeNull();
-  expect(scrollerBox).not.toBeNull();
-  if (!replyBox || !scrollerBox) throw new Error("Quick Chat latest reply geometry is unavailable");
-  expectBoxInsideViewport(replyBox, scrollerBox);
+  await expect
+    .poll(
+      async () => {
+        const [replyBox, scrollerBox] = await Promise.all([
+          reply.boundingBox(),
+          scroller.boundingBox(),
+        ]);
+        return Boolean(replyBox && scrollerBox && isBoxInsideViewport(replyBox, scrollerBox));
+      },
+      {
+        timeout,
+        message: "Quick Chat latest reply should settle inside the transcript viewport",
+      },
+    )
+    .toBe(true);
   await expectScrollerAtBottom(scroller);
 }
 
@@ -202,16 +212,21 @@ export async function expectActiveResumeStatusInViewport(
     .filter({ hasText: /starting|resuming/i })
     .first();
   await expect(status).toBeVisible({ timeout });
-  const [statusBox, scrollerBox] = await Promise.all([
-    status.boundingBox(),
-    scroller.boundingBox(),
-  ]);
-  expect(statusBox).not.toBeNull();
-  expect(scrollerBox).not.toBeNull();
-  if (!statusBox || !scrollerBox) {
-    throw new Error("Quick Chat resume status geometry is unavailable");
-  }
-  expectBoxInsideViewport(statusBox, scrollerBox);
+  await expect
+    .poll(
+      async () => {
+        const [statusBox, scrollerBox] = await Promise.all([
+          status.boundingBox(),
+          scroller.boundingBox(),
+        ]);
+        return Boolean(statusBox && scrollerBox && isBoxInsideViewport(statusBox, scrollerBox));
+      },
+      {
+        timeout,
+        message: "Quick Chat resume status should settle inside the transcript viewport",
+      },
+    )
+    .toBe(true);
   return status;
 }
 

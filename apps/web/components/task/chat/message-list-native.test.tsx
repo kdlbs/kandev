@@ -4148,6 +4148,59 @@ it.each([
 );
 
 it.each([
+  { enabled: true, reading: false, expected: 700 },
+  { enabled: true, reading: true, expected: 100 },
+  { enabled: false, reading: false, expected: 100 },
+])(
+  "preserves follow through repeated resizes before native restoration (enabled=$enabled reading=$reading)",
+  ({ enabled, reading, expected }) => {
+    const contentResizes = stubContentResizeObserver();
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    try {
+      const view = render(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          metrics={metrics}
+          enabled={enabled}
+          initialPlacementPending
+        />,
+      );
+      const container = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      installClampedScrollTop(container, metrics);
+      act(() => {
+        if (reading) {
+          container.dispatchEvent(new WheelEvent("wheel", { deltaY: -30 }));
+        }
+        // More than four resizes before reconciliation must not evict the
+        // peak height needed to explain this upward native restoration.
+        metrics.scrollHeight = 1600;
+        contentResizes.forEach((resize) => resize());
+        for (const height of [1500, 1400, 1300, 1200, 1100]) {
+          metrics.scrollHeight = height;
+          contentResizes.forEach((resize) => resize());
+        }
+        metrics.scrollTop = 100;
+        container.dispatchEvent(new Event("scroll"));
+      });
+      view.rerender(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          metrics={metrics}
+          enabled={enabled}
+          initialPlacementPending={false}
+        />,
+      );
+      expect(metrics.scrollTop).toBe(expected);
+    } finally {
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  },
+);
+
+it.each([
   { order: RESIZE_FIRST, enabled: true, reading: false, expected: 900 },
   { order: SCROLL_FIRST, enabled: true, reading: false, expected: 900 },
   { order: RESIZE_FIRST, enabled: true, reading: true, expected: 500 },

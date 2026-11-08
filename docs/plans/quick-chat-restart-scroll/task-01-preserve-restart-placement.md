@@ -160,10 +160,12 @@ recovery through transport gates rather than timing assumptions.
 
 Implemented. `QuickChatMessageSurface` forwards `panelState.historyRefreshPending`
 to `MessageList`. `useFollowIntent` tracks the latest measured content geometry
-separately from bounded pre-reflow evidence (the baseline and recent peaks).
-Reconciliation accepts movement explained by any retained measurement, so
-resize-first restoration and growth followed by shrinkage (with the shrink
-measurement arriving before or after native movement) keep follow intent.
+separately from bounded pre-reflow evidence (the baseline, interval peak, and
+recent peaks). Reconciliation accepts movement explained by any retained
+measurement, so resize-first restoration and growth followed by shrinkage
+(with the shrink measurement arriving before or after native movement) keep
+follow intent, including long resize sequences. A connection change settles an
+in-flight cached refresh so provisional placement cannot remain pending.
 Reader-input checks, disabled preferences, session cancellation, and the
 guarded pending-resize correction are unchanged.
 
@@ -172,15 +174,21 @@ Regression tests added before the production repair:
 - `quick-chat-content.test.tsx`: cached refresh readiness reaches the list with
   `messagesLoading` false.
 - `message-list-native.test.tsx`: resize-first native restoration, growth then
-  native shrink in both notification orders, scroll-first, reader cancellation,
-  and disabled controls while placement is blocked.
+  native shrink in both notification orders, repeated resizes beyond the recent
+  retention window, scroll-first, reader cancellation, and disabled controls
+  while placement is blocked.
+- `use-session-messages.test.ts`: a connection change clears cached-entry
+  history pending without losing the later stale response guard.
+- E2E reply and status containment checks retry fresh geometry instead of
+  asserting one transient frame.
 
 Verification:
 
 - `pnpm exec vitest run components/quick-chat/quick-chat-content.test.tsx
   components/task/chat/message-list-native.test.tsx
   components/task/chat/message-list-native-scroll.test.ts
-  components/task/chat/use-chat-scroll-motion.test.tsx`: 155 passed.
+  components/task/chat/use-chat-scroll-motion.test.tsx
+  hooks/domains/session/use-session-messages.test.ts`: 195 passed.
 - `pnpm run typecheck` and `pnpm run lint`: passed.
 - `quick-chat-restart-scroll.spec.ts` on `chromium`: 3 passed.
 - `mobile-quick-chat-restart-scroll.spec.ts` on `mobile-chrome`: 1 passed.

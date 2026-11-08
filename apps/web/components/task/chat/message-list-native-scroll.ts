@@ -714,12 +714,21 @@ function trackContentReflowEvidence(
   element: HTMLElement,
   lastScrollGeometryRef: React.MutableRefObject<TranscriptScrollGeometry | null>,
   pendingReflowBaselineRef: React.MutableRefObject<TranscriptScrollGeometry | null>,
+  peakReflowGeometryRef: React.MutableRefObject<TranscriptScrollGeometry | null>,
   recentReflowGeometriesRef: React.MutableRefObject<TranscriptScrollGeometry[]>,
 ): void {
   const next = readTranscriptScrollGeometry(element);
   const previous = lastScrollGeometryRef.current;
   if (previous && next.scrollHeight !== previous.scrollHeight) {
     pendingReflowBaselineRef.current ??= previous;
+    const peak = peakReflowGeometryRef.current;
+    if (!peak || previous.scrollHeight > peak.scrollHeight) {
+      peakReflowGeometryRef.current = previous;
+    }
+    const currentPeak = peakReflowGeometryRef.current;
+    if (!currentPeak || next.scrollHeight > currentPeak.scrollHeight) {
+      peakReflowGeometryRef.current = next;
+    }
     const recent = recentReflowGeometriesRef.current;
     const lastCandidate = recent[recent.length - 1];
     if (!lastCandidate || lastCandidate.scrollHeight !== previous.scrollHeight) {
@@ -768,6 +777,7 @@ function useFollowIntent({
 }) {
   const lastScrollGeometryRef = useRef<TranscriptScrollGeometry | null>(null);
   const pendingReflowBaselineRef = useRef<TranscriptScrollGeometry | null>(null);
+  const peakReflowGeometryRef = useRef<TranscriptScrollGeometry | null>(null);
   const recentReflowGeometriesRef = useRef<TranscriptScrollGeometry[]>([]);
   useLayoutEffect(() => {
     const element = scrollRef.current;
@@ -777,6 +787,7 @@ function useFollowIntent({
         element,
         lastScrollGeometryRef,
         pendingReflowBaselineRef,
+        peakReflowGeometryRef,
         recentReflowGeometriesRef,
       );
     recordGeometry();
@@ -792,9 +803,11 @@ function useFollowIntent({
       const currentGeometry = readTranscriptScrollGeometry(el);
       const previousGeometry = lastScrollGeometryRef.current;
       const pendingBaseline = pendingReflowBaselineRef.current;
+      const peakReflow = peakReflowGeometryRef.current;
       const recentReflowGeometries = recentReflowGeometriesRef.current;
       lastScrollGeometryRef.current = currentGeometry;
       pendingReflowBaselineRef.current = null;
+      peakReflowGeometryRef.current = null;
       recentReflowGeometriesRef.current = [];
       // Content reflow cannot revoke bottom-follow without reader input.
       // Explicit navigation releases still reconcile against the actual geometry.
@@ -803,7 +816,7 @@ function useFollowIntent({
           enabled: preserveFollow,
           isNearBottom: isNearBottomRef.current,
           userReading: userReading.current,
-          candidates: [previousGeometry, pendingBaseline, ...recentReflowGeometries],
+          candidates: [previousGeometry, pendingBaseline, peakReflow, ...recentReflowGeometries],
           current: currentGeometry,
         })
       ) {

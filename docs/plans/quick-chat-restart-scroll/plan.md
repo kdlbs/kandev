@@ -135,8 +135,8 @@ Both views map to criteria `.16`, `.17`, `.19`, and `.20`.
 - `message-list-native.test.tsx`: add `preserves follow through resize-first
   native restoration while placement is blocked`. Cover both notification
   orders, enabled and disabled following, and actual reader cancellation. Add
-  the growth-then-native-shrink sequence with a 700px expected final offset;
-  retain disabled and reader-input controls.
+  the growth-then-native-shrink sequence with a 700px expected final offset and
+  the repeated-resize peak case; retain disabled and reader-input controls.
 - Retain the existing no-measurement append, initial-placement, unread-divider,
   explicit-navigation, session-switch, and delayed-card cases.
 - `use-chat-scroll-motion.test.tsx`: retain blocker-release, content resize,
@@ -185,15 +185,17 @@ The work order is sequential. No delegation is authorized.
 Implementation and browser verification passed. `QuickChatMessageSurface` now
 forwards `historyRefreshPending`, and `useFollowIntent` tracks the latest
 measured content geometry separately from bounded pre-reflow evidence (the
-pre-reflow baseline and recent peaks). A single scroll reconciliation can
-therefore attribute movement to the immediately prior measurement or to an
-earlier reflow state, covering growth followed by shrinkage in either
-notification order as well as the original resize-first restoration. The unit
-regressions fail on the previous source and pass with the repair.
+pre-reflow baseline, the interval peak, and recent peaks). A single scroll
+reconciliation can therefore attribute movement to the immediately prior
+measurement or to an earlier reflow state, covering growth followed by
+shrinkage in either notification order and long resize sequences as well as
+the original resize-first restoration. A connection change now settles an
+in-flight cached refresh instead of leaving provisional placement pending.
+The unit regressions fail on the previous source and pass with the repair.
 
 Implementation checks:
 
-- Focused unit/component suites: 155 tests passed (4 files).
+- Focused unit/component suites: 195 tests passed (5 files).
 - Desktop `quick-chat-restart-scroll.spec.ts`: 3 tests passed, including the
   active resume status inside the viewport, cached refresh settlement proven by
   the transcript's pending/cleared overflow-anchor state, reader wheel control,
