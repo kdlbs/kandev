@@ -200,6 +200,9 @@ func (e *Executor) resolveEnvironmentForAdmission(
 		if err != nil {
 			return nil, fmt.Errorf("load selected task environment %q: %w", environmentID, err)
 		}
+		if env.IsRetired() {
+			return nil, fmt.Errorf("%w: task environment is retained as inactive history", models.ErrWorkspaceReuseUnsafe)
+		}
 		return env, nil
 	}
 	if taskID == "" {

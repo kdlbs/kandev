@@ -919,7 +919,7 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 		FROM task_workspace_groups g
 		JOIN task_workspace_group_members m
 		  ON m.workspace_group_id = g.id AND m.task_id = ? AND m.released_at IS NULL
-		LEFT JOIN task_environments e ON e.id = g.materialized_environment_id
+		LEFT JOIN task_environments e ON e.id = g.materialized_environment_id AND e.retired_at IS NULL
 		WHERE g.id = ?
 	`), session.TaskID, groupID).Scan(&environmentID, &status, &materializationSessionID, &claimUpdatedAt, &ownerID, &executorType)
 	if errors.Is(err, sql.ErrNoRows) || environmentID == "" {

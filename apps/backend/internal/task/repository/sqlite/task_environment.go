@@ -224,7 +224,7 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?, sandbox_id = ?,
 			task_dir_name = COALESCE(NULLIF(task_dir_name, ''), NULLIF(?, ''), task_dir_name),
 			updated_at = ?
-		WHERE id = ?
+		WHERE id = ? AND retired_at IS NULL
 	`),
 		env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
 		env.ControlPort, string(env.Status), env.MaterializationSessionID,
@@ -313,7 +313,7 @@ func (r *Repository) validateReadyTaskEnvironment(ctx context.Context, tx *sqlx.
 func (r *Repository) taskEnvironmentStateTx(ctx context.Context, tx *sqlx.Tx, environmentID string) (string, models.TaskEnvironmentStatus, error) {
 	var taskID string
 	var status string
-	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id, status FROM task_environments WHERE id = ?`), environmentID).Scan(&taskID, &status)
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id, status FROM task_environments WHERE id = ? AND retired_at IS NULL`), environmentID).Scan(&taskID, &status)
 	if err == sql.ErrNoRows {
 		return "", "", fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, environmentID)
 	}
