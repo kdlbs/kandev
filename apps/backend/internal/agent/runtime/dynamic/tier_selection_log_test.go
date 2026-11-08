@@ -147,8 +147,8 @@ func TestOrderedStartIndexDoesNotReopenAnEarlierTier(t *testing.T) {
 		{head: "c", mode: orderedTierMode, direction: orderedSameTier, rows: []Candidate{{ID: "c"}}},
 	}
 	tiers[1].rows = []Candidate{{ID: "x"}}
-	if got := orderedStartIndex(tiers, "b", true, []string{"b"}); got != len(tiers) {
-		t.Fatalf("deleted current start = %d, want a fail-closed %d", got, len(tiers))
+	if got := orderedStartIndex(tiers, "b", true, []string{"b"}); got != 0 {
+		t.Fatalf("deleted current start = %d, want a restart at 0", got)
 	}
 	if got := orderedStartIndex(tiers, "b", true, []string{"a"}); got != 0 {
 		t.Fatalf("existing tried start = %d, want 0", got)
