@@ -19,7 +19,7 @@ type controlTaskListRepository interface {
 // authenticated task list route. The legacy list payload is unchanged when the
 // caller does not ask for view=control.
 func (h *Handler) controlTasks(c *gin.Context) bool {
-	if c.Query("view") != "control" {
+	if c.Query("view") != controlView {
 		return false
 	}
 	reader, ok := h.labels.(controlTaskListRepository)

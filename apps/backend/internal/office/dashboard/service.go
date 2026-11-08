@@ -449,7 +449,7 @@ type DashboardService struct {
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
 	workspaceLister       WorkspaceLister                 // optional; nil disables the multi-workspace aggregate endpoint
 	taskStateWriter       shared.TaskStateWriter          // task repository owns transactional state changes and completion guards
-	controlCapacity       ControlCapacitySource           // optional; nil omits shared_capacity_waiting from the control dashboard
+	controlCapacity       *controlCapacityCache           // optional; nil omits shared_capacity_waiting from the control dashboard
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the

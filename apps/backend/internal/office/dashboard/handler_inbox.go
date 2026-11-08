@@ -84,6 +84,9 @@ func (h *Handler) dismissInboxItem(c *gin.Context) {
 // -- Activity --
 
 func (h *Handler) listActivity(c *gin.Context) {
+	if h.controlHistory(c) {
+		return
+	}
 	targetID := c.Query("target_id")
 	if targetID != "" {
 		entries, err := h.svc.ListActivityForTarget(c.Request.Context(), c.Param("wsId"), targetID, 50)

@@ -16,7 +16,7 @@ type controlDashboardRepository interface {
 
 // The existing workspace GET retains its authorization and default payload.
 func (h *Handler) controlDashboard(c *gin.Context) bool {
-	if c.Query("view") != "control" {
+	if c.Query("view") != controlView {
 		return false
 	}
 	reader, ok := h.labels.(controlDashboardRepository)
