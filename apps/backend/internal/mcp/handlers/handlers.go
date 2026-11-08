@@ -2888,6 +2888,11 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required", nil)
 	}
 	if req.DeliveryMode == "report" {
+		// A status report appends without a send operation; accepting an
+		// identity here would imply a replay guarantee the report path lacks.
+		if req.OperationID != "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "operation_id applies to queued or interrupt sends, not status reports", nil)
+		}
 		if req.ReplyToQuestionID != "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "report cannot answer a pending question", nil)
 		}

@@ -65,6 +65,10 @@ work or abandon it.
 - **AC-PLATFORM-TASK-MSG-OPID-001.3:** The operation identity shall be claimed
   durably before the first delivery side effect, so that a response lost
   after any later point still leaves a readable record.
+- **AC-PLATFORM-TASK-MSG-OPID-001.4:** A status report
+  (`delivery_mode="report"`) that supplies an operation identity shall be
+  rejected as a validation error before any delivery side effect, because the
+  append-only report path records no operation.
 
 ### REQ-PLATFORM-TASK-MSG-OPID-002: Determinable outcome
 

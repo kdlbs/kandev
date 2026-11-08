@@ -118,7 +118,8 @@ mode, requested session, or parent-question ID is rejected with
 The server supplies the trusted sending task/session. Another session cannot
 read or claim its operations, and readback never returns stored prompt content.
 Records remain for seven days and expire in bounded maintenance-admitted batches.
-Sends without `operation_id` retain their existing behavior.
+Sends without `operation_id` retain their existing behavior. Status reports
+(`delivery_mode="report"`) keep their append-only path and reject `operation_id`.
 
 ## Autopilot parent questions
 
