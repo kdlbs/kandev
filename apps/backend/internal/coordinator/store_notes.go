@@ -246,3 +246,11 @@ func (s *Store) RecordNoteValidation(ctx context.Context, coordinatorID, noteID 
 	})
 	return persisted, err
 }
+
+// TurnExists reports whether the ledger holds the coordinator's turn.
+func (s *Store) TurnExists(ctx context.Context, coordinatorID, turnID string) (bool, error) {
+	var n int
+	err := s.ro.QueryRowContext(ctx, s.db.Rebind(
+		`SELECT COUNT(*) FROM coordinator_turns WHERE id = ? AND coordinator_id = ?`), turnID, coordinatorID).Scan(&n)
+	return n > 0, err
+}

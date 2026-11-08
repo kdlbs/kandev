@@ -112,3 +112,8 @@ func foldCitationStates(states []CitationState) (result string, firstAbsent int)
 	}
 	return validationValid, -1
 }
+
+// TurnExists reports whether the coordinator's ledger holds the turn.
+func (s *Service) TurnExists(ctx context.Context, coordinatorID, turnID string) (bool, error) {
+	return s.store.TurnExists(ctx, coordinatorID, turnID)
+}
