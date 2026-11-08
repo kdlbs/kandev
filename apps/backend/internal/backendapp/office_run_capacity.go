@@ -16,7 +16,8 @@ import (
 // SetExecutionCapacityOwner is installed before Office schedulers/events start.
 func (l *officeRunSessionLauncher) SetExecutionCapacityOwner(owner *orchestrator.Service) {
 	l.capacity = owner
-	if owner != nil {
+	// With Office disabled there is no run-session repository to wire.
+	if owner != nil && l.repo != nil {
 		owner.SetRunSessionCapacitySource(l.repo)
 		owner.SetOfficeCapacityWaiters(l.officeCapacityWaiters)
 		owner.SetOfficeTaskCapacityRequeuer(l.repo.RequeueUnstartedTaskRunForCapacity)
