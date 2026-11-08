@@ -97,8 +97,9 @@ or unauthorized wakes.
   parent. The parent shall receive one alert only after the same child stalls on
   the same workflow entry for three consecutive nudged turns; further stalls on
   that escalated streak shall not alert the parent again. The consecutive count
-  is keyed to the child session and the captured workflow entry, and resets when
-  the entry or the cause changes. Every other cause keeps direct parent delivery.
+  is keyed to the child task and the captured workflow entry, survives a
+  session replacement on that entry, and resets when the entry or the cause
+  changes. Every other cause keeps direct parent delivery.
 
 ### REQ-TASKS-CHILD-STALL-003: Attribution and operating visibility
 

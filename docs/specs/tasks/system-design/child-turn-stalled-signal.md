@@ -153,15 +153,15 @@ same keyed admission path, so the child's normal queue policy, capacity, and
 Auto-run rules still govern dispatch. The parent alert that the operator turned
 into a child nudge is thereby removed.
 
-Escalation is bounded by a consecutive count keyed to the child session and the
-workflow entry captured at turn start (`child_stall_nudge` session metadata,
-updated with a single-key atomic write). The count advances only after a
-successful delivery, so a retried candidate is not counted twice. The first two
+Escalation is bounded by a consecutive count keyed to the child task and the
+workflow entry captured at turn start (`child_stall_nudge` task metadata,
+updated with a single-key atomic write that skips an archiving task). The
+count advances only after a successful delivery, so a retried candidate is not counted twice. The first two
 consecutive nudged stalls on one entry stay with the child; the third alerts the
 parent once and marks the streak escalated, after which further stalls on that
 entry are suppressed. A change of workflow entry or cause starts a new streak.
-Because a replaced child session carries no streak, its first stall after
-replacement is nudged afresh. Every other cause continues to use direct parent
+A session replacement preserves the task streak for the same entry; a new
+workflow entry starts afresh. Every other cause continues to use direct parent
 delivery unchanged.
 
 The new outcomes are recorded on the existing counters: the child reminder under
