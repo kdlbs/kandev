@@ -77,6 +77,7 @@ Keep graph renewal local to the process manager. No new retry API, backend polle
 ## Configuration and subscriber continuity
 
 Use `configureTracker` and the existing manager-owned configuration sources for each replacement.
+Prepare each replacement's comparison target before its polling starts.
 Preserve the effective Git environment, base branches, comparison targets, allowed source roots, recovery exclusions, and diagnostic identity.
 Preserve the last pushed polling mode, including paused mode. Initial required observations retain existing startup behavior.
 Comparison preparation remains asynchronous and subject to existing cancellation and credential rules.
@@ -86,10 +87,12 @@ Publication, attachment, and retirement form one subscriber handoff under the ma
 Subscribe and unsubscribe hold that same lock through attachment or channel closure.
 Retired trackers clear their actual subscription sets before Stop, including subscribers already removed from the manager registry.
 This prevents a retired tracker from retaining a channel that a concurrent unsubscribe is allowed to close.
-Renewal must also update process-output routing through `ProcessRunner.setWorkspaceTracker`.
+Renewal must also update process-output routing through `ProcessRunner.setWorkspaceTracker` and rebind cached root and repository Git operators to the replacement trackers.
+The operator keeps its operation lock and other cached state while its tracker reference is swapped atomically.
 
 Lazy trackers remain synchronous read resources. Renewal does not start polling for every cached subpath.
 All existing path validation and registered-source authorization remain mandatory.
+Lazy creation is admitted instance-owned work: once permanent teardown begins, a stopped cached entry is not replaced and a fresh observation cannot start outside teardown cancellation and drain.
 
 ## Ordering, cancellation, and failure
 

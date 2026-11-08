@@ -176,14 +176,15 @@ Task 01 also requires changed-file Go lint. Task 02 owns focused web lint and ty
 
 - RED gate: `TestManagerWorkspaceRestartFreshStatus/persistent` failed with `get fresh status ... context canceled` when renewal was disabled before the production edit.
 - Process regression: `go test -trimpath ./internal/agentctl/server/process -run '^TestManagerWorkspaceRestart' -count=1` passed.
-- Process race suite: `go test -trimpath -race ./internal/agentctl/server/process -count=1 -timeout 15m` passed in 565.993s.
-- API race suite: `go test -trimpath -race ./internal/agentctl/server/api -count=1 -timeout 15m` passed in 218.883s.
+- Process race suite: `go test -trimpath -race ./internal/agentctl/server/process -count=1 -timeout 15m` passed in 486.214s.
+- API race suite: `go test -trimpath -race ./internal/agentctl/server/api -count=1 -timeout 15m` passed in 209.218s.
 - Lifecycle callback regressions: `go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle -run 'Test(BuildWorkspaceCallbacks|WorkspaceStreamPromotion|ConnectWorkspaceStream|RetryManagedRuntimeStartupLifecycle)' -count=1` passed in 2.405s.
 - Changed Go lint: `bash scripts/lint-go-changed ...` reported `0 issues`.
 - Desktop browser proof: `pnpm e2e:run --project chromium tests/session/managed-runtime-git-restart.spec.ts` passed in 19.1s (test 16.3s).
 - Phone browser proof: `pnpm e2e:run --project mobile-chrome tests/session/mobile-managed-runtime-git-restart.spec.ts` passed in 17.9s (test 14.1s).
 - Existing desktop and phone workspace-stream-promotion scenarios passed after the correlation trace extension.
-- Deterministic subscriber handoff regression: `TestManagerWorkspaceRestartSubscriberHandoffRace` covers publication, concurrent unsubscribe, retirement, delayed old-tracker publication, and delayed subscribe for reconcile and rebind. The focused handoff race command passed in 21.361s.
+- Deterministic subscriber handoff regression: `TestManagerWorkspaceRestartSubscriberHandoffRace` covers publication, concurrent unsubscribe, retirement, delayed old-tracker publication, and delayed subscribe for reconcile and rebind.
+- Fixup regressions cover cached Git operator rebinding, replacement comparison-target preparation, lazy teardown rejection, the public one-shot restart lifecycle, and required patch markers in restart assertions. The focused restart suite passed in 7.028s.
 - Browser negative control: with renewal disabled, the desktop scenario failed at `Waiting for the restart file membership workspace stream event` while agentctl logged `context_canceled` Git failures.
 - Focused web lint and `pnpm run typecheck`: passed.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.test.py`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`: passed.

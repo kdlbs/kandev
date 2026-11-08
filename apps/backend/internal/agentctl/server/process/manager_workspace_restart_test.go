@@ -71,11 +71,14 @@ func getRestartStatus(t *testing.T, tracker *WorkspaceTracker) types.GitStatusUp
 
 func assertRestartFile(t *testing.T, status types.GitStatusUpdate, path, marker string) {
 	t.Helper()
+	if marker == "" {
+		t.Fatal("assertRestartFile requires a non-empty marker")
+	}
 	file, ok := status.Files[path]
 	if !ok {
 		t.Fatalf("status files missing %q: %+v", path, status.Files)
 	}
-	if file.Diff != "" && marker != "" && !strings.Contains(file.Diff, marker) {
+	if !strings.Contains(file.Diff, marker) {
 		t.Fatalf("file %q diff does not contain %q: %q", path, marker, file.Diff)
 	}
 }
@@ -284,21 +287,22 @@ func TestManagerWorkspaceRestartFreshStatus(t *testing.T) {
 				t.Errorf("stop one-shot restart fixture: %v", err)
 			}
 		})
-		mgr.adapter = newOneShotStubAdapter()
-		mgr.adapterCfg = &adapter.Config{OneShotConfig: &adapter.OneShotConfig{
-			InitialArgs:  cfg.AgentArgs,
-			ContinueArgs: cfg.ContinueArgs,
-		}}
-
-		oldRoot := mgr.GetWorkspaceTracker()
-		mgr.stopWorkspaceTrackers()
-		writeFile(t, repoDir, restartTestFileName, "RESTART_ONE_SHOT\n")
-		mgr.renewWorkspaceTrackersForStart(context.Background())
-		if mgr.GetWorkspaceTracker() == oldRoot {
-			t.Fatal("one-shot renewal reused the terminal root tracker")
+		mgr.createAdapterFn = func() error {
+			mgr.adapter = newOneShotStubAdapter()
+			mgr.adapterCfg.OneShotConfig = &adapter.OneShotConfig{
+				InitialArgs:  cfg.AgentArgs,
+				ContinueArgs: cfg.ContinueArgs,
+			}
+			return nil
 		}
-		if err := mgr.startOneShot(); err != nil {
-			t.Fatalf("start one-shot adapter: %v", err)
+
+		startRestartManager(t, mgr)
+		oldRoot := mgr.GetWorkspaceTracker()
+		stopRestartManager(t, mgr)
+		writeFile(t, repoDir, restartTestFileName, "RESTART_ONE_SHOT\n")
+		startRestartManager(t, mgr)
+		if mgr.GetWorkspaceTracker() == oldRoot {
+			t.Fatal("one-shot restart reused the terminal root tracker")
 		}
 		status := getRestartStatus(t, mgr.GetWorkspaceTracker())
 		assertRestartFile(t, status, restartTestFileName, "RESTART_ONE_SHOT")
@@ -587,6 +591,17 @@ func TestGetWorkspaceTrackerForReplacesStoppedLazyTracker(t *testing.T) {
 	}
 }
 
+func TestGetWorkspaceTrackerForRejectsCreationAfterTeardown(t *testing.T) {
+	taskRoot := t.TempDir()
+	initGitRepoAt(t, filepath.Join(taskRoot, "nested", "repo"))
+	mgr := newRestartManager(t, &config.InstanceConfig{WorkDir: taskRoot})
+
+	mgr.CloseAdmission()
+	if _, err := mgr.GetWorkspaceTrackerFor("nested/repo"); !errors.Is(err, ErrManagerStopping) {
+		t.Fatalf("lazy creation after admission close = %v, want ErrManagerStopping", err)
+	}
+}
+
 func TestManagerWorkspaceRestartLazyTracker(t *testing.T) {
 	taskRoot := t.TempDir()
 	lazyRepo := filepath.Join(taskRoot, "nested", "repo")
@@ -625,6 +640,53 @@ func TestManagerWorkspaceRestartLazyTracker(t *testing.T) {
 	}
 	if _, ok := status.Files["lazy.txt"]; !ok && !slices.Contains(status.Untracked, "lazy.txt") {
 		t.Fatalf("lazy status does not report lazy.txt: files=%+v untracked=%v", status.Files, status.Untracked)
+	}
+}
+
+func TestManagerWorkspaceRestartRebindsCachedGitOperators(t *testing.T) {
+	taskRoot := t.TempDir()
+	initGitRepoAt(t, filepath.Join(taskRoot, "alpha"))
+	initGitRepoAt(t, filepath.Join(taskRoot, "beta"))
+	mgr := newRestartManager(t, &config.InstanceConfig{WorkDir: taskRoot})
+
+	rootOperator := mgr.GitOperator()
+	alphaOperator, err := mgr.GitOperatorFor("alpha")
+	if err != nil {
+		t.Fatalf("create alpha operator: %v", err)
+	}
+	if rootOperator.currentWorkspaceTracker() != mgr.GetWorkspaceTracker() {
+		t.Fatal("root operator did not bind the initial root tracker")
+	}
+	if alphaOperator.currentWorkspaceTracker() != mgr.findRepositoryTracker("alpha") {
+		t.Fatal("alpha operator did not bind the initial repository tracker")
+	}
+
+	mgr.stopWorkspaceTrackers()
+	mgr.renewWorkspaceTrackersForStart(context.Background())
+
+	if mgr.GitOperator() != rootOperator {
+		t.Fatal("renewal recreated the cached root operator instead of rebinding it")
+	}
+	if rootOperator.currentWorkspaceTracker() != mgr.GetWorkspaceTracker() {
+		t.Fatal("cached root operator still publishes through the retired tracker")
+	}
+	if alphaOperator.currentWorkspaceTracker() != mgr.findRepositoryTracker("alpha") {
+		t.Fatal("cached repository operator still publishes through the retired tracker")
+	}
+}
+
+func TestManagerWorkspaceRestartPreparesComparisonTarget(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+	target := comparisonTargetProcessTestTarget()
+	mgr, _ := newComparisonTargetTestManager(t, repoDir, target, nil)
+
+	mgr.stopWorkspaceTrackers()
+	mgr.renewWorkspaceTrackersForStart(context.Background())
+
+	resolution := waitForComparisonResolution(t, mgr.GetWorkspaceTracker(), comparisonTargetStatusReady, "")
+	if resolution.Ref != target.ComparisonRef() {
+		t.Fatalf("replacement comparison ref = %q, want %q", resolution.Ref, target.ComparisonRef())
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -294,6 +295,7 @@ type stubAdapter struct {
 	connectCalled       bool
 	requiresProcessKill bool
 	updatesCh           chan adapter.AgentEvent
+	closeOnce           sync.Once
 }
 
 func newStubAdapter() *stubAdapter {
@@ -331,7 +333,7 @@ func (s *stubAdapter) GetSessionID() string                           { return "
 func (s *stubAdapter) GetOperationID() string                         { return "" }
 func (s *stubAdapter) SetPermissionHandler(adapter.PermissionHandler) {}
 func (s *stubAdapter) Close() error {
-	close(s.updatesCh)
+	s.closeOnce.Do(func() { close(s.updatesCh) })
 	return nil
 }
 func (s *stubAdapter) RequiresProcessKill() bool { return s.requiresProcessKill }

@@ -157,11 +157,13 @@ func (m *Manager) reconcileWorkspaceTrackerGraph(
 			used[existing] = struct{}{}
 			continue
 		}
+		m.prepareTrackerComparisonTarget(desired, false)
 		desired.Start(ctx)
 		retained = append(retained, desired)
 		added = append(added, desired)
 	}
 	if !rootReused {
+		m.prepareTrackerComparisonTarget(root, false)
 		root.Start(ctx)
 		added = append(added, root)
 	}
@@ -178,8 +180,10 @@ func (m *Manager) replaceWorkspaceTrackerGraph(
 ) error {
 	desiredRoot, desiredTrackers := m.buildWorkspaceTrackerGraph(ctx, workDir, roots, true, true)
 	oldRoot, oldTrackers := m.snapshotTrackers()
+	m.prepareTrackerComparisonTarget(desiredRoot, false)
 	desiredRoot.Start(ctx)
 	for _, tracker := range desiredTrackers {
+		m.prepareTrackerComparisonTarget(tracker, false)
 		tracker.Start(ctx)
 	}
 	all := append([]*WorkspaceTracker{desiredRoot}, desiredTrackers...)
@@ -252,6 +256,7 @@ func (m *Manager) installWorkspaceTrackerGraph(
 ) {
 	m.streamSubscribersMu.Lock()
 	m.publishWorkspaceTrackerGraph(root, trackers, workDir, roots, started...)
+	m.rebindGitOperatorTrackers(root, trackers)
 	if m.workspaceGraphAfterPublish != nil {
 		m.workspaceGraphAfterPublish()
 	}

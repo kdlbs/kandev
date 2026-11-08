@@ -31,6 +31,12 @@ type BridgeSocket = {
   onMessage(handler: (message: string | Buffer) => void): void;
 };
 
+type GitReadResult = {
+  frameType: "response" | "error";
+  action: string;
+  payload: Record<string, unknown> | null;
+};
+
 type PromotionTraceState = {
   taskId: string;
   sessionId: string;
@@ -39,7 +45,7 @@ type PromotionTraceState = {
   statusEvents: WorkspaceStatusEvent[];
   pendingGitReads: Map<string, string>;
   heldGitReads: HeldRequest[];
-  gitReadResults: Map<string, "response" | "error">;
+  gitReadResults: Map<string, GitReadResult>;
   holdGitReads: boolean;
   holdStartedAt: string | null;
   holdStartedAtMs: number | null;
@@ -134,11 +140,25 @@ function recordLaunchResponse(
 }
 
 function recordGitReadResponse(frame: WireFrame, state: PromotionTraceState) {
-  if (typeof frame.id !== "string" || !isGitReadAction(state.pendingGitReads.get(frame.id))) return;
+  if (typeof frame.id !== "string") return;
+  const action = state.pendingGitReads.get(frame.id);
+  if (!isGitReadAction(action)) return;
   state.pendingGitReads.delete(frame.id);
-  state.gitReadResults.set(frame.id, frame.type === "error" ? "error" : "response");
+  state.gitReadResults.set(frame.id, {
+    frameType: frame.type === "error" ? "error" : "response",
+    action,
+    payload: recordValue(frame.payload),
+  });
   if (state.holdStartedAtMs === null) state.gitReadResponsesBeforeHold += 1;
   else state.gitReadResponsesAfterHold += 1;
+}
+
+function isSuccessfulGitRead(action: string, payload: Record<string, unknown> | null): boolean {
+  if (!payload || payload.success === false || payload.ready === false) return false;
+  if (action === "session.git.refresh") {
+    return payload.success === true && payload.status_state === "ready";
+  }
+  return true;
 }
 
 function recordStatusEvent(payload: Record<string, unknown>, state: PromotionTraceState) {
@@ -241,18 +261,30 @@ function createPromotionTrace(state: PromotionTraceState) {
       for (const request of state.heldGitReads.splice(0)) request.server.send(request.frame);
     },
     async releaseHeldGitReadsAndWaitForResponses(): Promise<void> {
-      const heldIds = state.heldGitReads
-        .map((request) => parseFrame(request.frame)?.id)
-        .filter((id): id is string => typeof id === "string");
+      const held = state.heldGitReads
+        .map((request) => {
+          const frame = parseFrame(request.frame);
+          return frame && typeof frame.id === "string" && isGitReadAction(frame.action)
+            ? { id: frame.id, action: frame.action }
+            : null;
+        })
+        .filter((request): request is { id: string; action: string } => request !== null);
       this.releaseHeldGitReads();
-      if (heldIds.length === 0) return;
+      if (held.length === 0) return;
       await expect
-        .poll(() => heldIds.every((id) => state.gitReadResults.has(id)), {
+        .poll(() => held.every((request) => state.gitReadResults.has(request.id)), {
           timeout: 30_000,
           message: "Released foreground Git reads should produce correlated responses",
         })
         .toBe(true);
-      expect(heldIds.filter((id) => state.gitReadResults.get(id) !== "response")).toEqual([]);
+      for (const request of held) {
+        const result = state.gitReadResults.get(request.id);
+        expect(result?.frameType, `${request.action} should respond`).toBe("response");
+        expect(
+          isSuccessfulGitRead(request.action, result?.payload ?? null),
+          `${request.action} response should report success: ${JSON.stringify(result?.payload)}`,
+        ).toBe(true);
+      }
     },
     diagnostics() {
       return {

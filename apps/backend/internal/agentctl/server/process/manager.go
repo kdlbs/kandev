@@ -314,6 +314,9 @@ type Manager struct {
 	adapter                 adapter.AgentAdapter
 	adapterCfg              *adapter.Config
 	userInputRequestHandler adapter.UserInputRequestHandler
+	// createAdapterFn is an optional test seam for adapter construction. Nil
+	// uses createAdapter.
+	createAdapterFn func() error
 
 	// Agent event notifications (protocol-agnostic)
 	updatesCh chan adapter.AgentEvent
@@ -1354,24 +1357,41 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 		return nil, err
 	}
 	if cleaned == "" {
-		return m.workspaceTracker, nil
+		return m.GetWorkspaceTracker(), nil
 	}
 	if tracker := m.findRepositoryTracker(cleaned); tracker != nil {
 		return tracker, nil
 	}
 
 	m.workspaceTrackersMu.Lock()
-	defer m.workspaceTrackersMu.Unlock()
-	if m.workspaceTrackersBySubpath == nil {
-		m.workspaceTrackersBySubpath = make(map[string]*WorkspaceTracker)
-	}
-	if t, ok := m.workspaceTrackersBySubpath[cleaned]; ok {
-		if t.live() {
-			return t, nil
+	if tracker, ok := m.workspaceTrackersBySubpath[cleaned]; ok {
+		if tracker.live() {
+			m.workspaceTrackersMu.Unlock()
+			return tracker, nil
 		}
 		// Stop is terminal; a cached tracker from a previous lifecycle cannot
 		// serve a later read. Drop it and build a live replacement below.
 		delete(m.workspaceTrackersBySubpath, cleaned)
+	}
+	m.workspaceTrackersMu.Unlock()
+
+	// Lazy creation is instance-owned work. Permanent teardown admission must
+	// reject it before a replacement tracker or its first observation starts
+	// outside the teardown cancellation and drain. A cached live tracker above
+	// remains reusable without admission.
+	release, err := m.admitStart()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	m.workspaceTrackersMu.Lock()
+	defer m.workspaceTrackersMu.Unlock()
+	if m.workspaceTrackersBySubpath == nil {
+		m.workspaceTrackersBySubpath = make(map[string]*WorkspaceTracker)
+	}
+	if t, ok := m.workspaceTrackersBySubpath[cleaned]; ok && t.live() {
+		return t, nil
 	}
 	t := NewWorkspaceTrackerForRepo(full, cleaned, m.logger)
 	m.configureTracker(t, cleaned, m.currentWorkspaceSourceRoots())
@@ -1682,7 +1702,7 @@ func (m *Manager) GitOperator() *GitOperator {
 	defer m.gitOperatorMu.Unlock()
 
 	if m.gitOperator == nil {
-		m.gitOperator = NewGitOperator(m.cfg.WorkDir, m.logger, m.workspaceTracker)
+		m.gitOperator = NewGitOperator(m.cfg.WorkDir, m.logger, m.GetWorkspaceTracker())
 		m.gitOperator.setEnvironmentProvider(m.gitEnvironment)
 		if binding, ok := m.cfg.RemoteContributions[""]; ok {
 			m.gitOperator.setRemoteContribution(&binding)
@@ -1692,6 +1712,33 @@ func (m *Manager) GitOperator() *GitOperator {
 		}
 	}
 	return m.gitOperator
+}
+
+// rebindGitOperatorTrackers points cached operators at the replacement graph so
+// later stage, commit, reset, and refresh work reaches the live workspace
+// stream. Operators keep their operation locks and other cached state.
+func (m *Manager) rebindGitOperatorTrackers(root *WorkspaceTracker, trackers []*WorkspaceTracker) {
+	m.gitOperatorMu.Lock()
+	defer m.gitOperatorMu.Unlock()
+	if m.gitOperator != nil {
+		m.gitOperator.setWorkspaceTracker(root)
+	}
+	if len(m.gitOperatorsBySubpath) == 0 {
+		return
+	}
+	byRepository := make(map[string]*WorkspaceTracker, len(trackers))
+	for _, tracker := range trackers {
+		if tracker != nil && tracker.RepositoryName() != "" {
+			byRepository[tracker.RepositoryName()] = tracker
+		}
+	}
+	for subpath, operator := range m.gitOperatorsBySubpath {
+		tracker := byRepository[subpath]
+		if tracker == nil {
+			tracker = root
+		}
+		operator.setWorkspaceTracker(tracker)
+	}
 }
 
 // GitOperatorFor returns a git operator scoped to a sub-directory of the
@@ -2223,7 +2270,11 @@ func (m *Manager) buildAdapterConfig() error {
 			zap.String("command", srv.Command))
 	}
 
-	if err := m.createAdapter(); err != nil {
+	createAdapter := m.createAdapter
+	if m.createAdapterFn != nil {
+		createAdapter = m.createAdapterFn
+	}
+	if err := createAdapter(); err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
 

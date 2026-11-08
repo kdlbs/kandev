@@ -140,7 +140,7 @@ Completed.
 
 - `managed-runtime-git-restart.spec.ts` and `mobile-managed-runtime-git-restart.spec.ts` cross the real silent-exit first attempt and release-barrier second attempt on the retained task, session, and execution.
 - `managed-runtime-git-restart-helpers.ts` asserts attempt two, one accepted prompt, one agent response, unchanged execution identity, streamed file membership, settled detail, no foreground read response during the hold, the rendered diff, and a correlated fresh `session.git.refresh` after release.
-- `workspace-stream-promotion-trace.ts` gained a release-and-await helper that records each held read's correlated response or error frame.
+- `workspace-stream-promotion-trace.ts` gained a release-and-await helper that records each held read's correlated frame and validates its action-specific success contract, so a `ready: false` response cannot pass.
 - Desktop passed in 16.5s (test 13.4s); phone passed in 15.7s (test 13.0s). A final paired rerun after the screenshot evidence addition passed at 19.5s (desktop) and 16.0s (phone).
 - A negative control with renewal disabled failed at `Waiting for the restart file membership workspace stream event`, and agentctl logged `context_canceled` Git failures.
 - Focused ESLint and `pnpm run typecheck` passed.

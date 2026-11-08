@@ -100,6 +100,9 @@ func decodeMultiGitStatusRestart(t *testing.T, server *Server, path string) Mult
 
 func assertRestartGitFile(t *testing.T, files map[string]interface{}, path, marker string) {
 	t.Helper()
+	if marker == "" {
+		t.Fatal("assertRestartGitFile requires a non-empty marker")
+	}
 	raw, ok := files[path]
 	if !ok {
 		t.Fatalf("git status files missing %q: %v", path, files)
@@ -108,10 +111,9 @@ func assertRestartGitFile(t *testing.T, files map[string]interface{}, path, mark
 	if !ok {
 		t.Fatalf("file %q payload = %T", path, raw)
 	}
-	if diff, _ := file["diff"].(string); diff != "" && marker != "" {
-		if !strings.Contains(diff, marker) {
-			t.Fatalf("file %q diff does not contain %q: %q", path, marker, diff)
-		}
+	diff, _ := file["diff"].(string)
+	if !strings.Contains(diff, marker) {
+		t.Fatalf("file %q diff does not contain %q: %q", path, marker, diff)
 	}
 }
 
