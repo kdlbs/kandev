@@ -218,7 +218,7 @@ func Classify(in Input) *Error {
 			hint = parseResetClockHintAt(text, observedAt)
 			e.ResetHintInferred = hint != nil
 		}
-		if hint == nil && e.ClassifierRule == openCodePeriodUsageRule && !in.OpenCodeRelativeResetUntrusted {
+		if hint == nil && openCodePeriodResetRules[e.ClassifierRule] && !in.OpenCodeRelativeResetUntrusted {
 			hint = openCodePeriodResetAt(text, in.OccurredAt)
 			e.ResetHintInferred = hint != nil
 		}

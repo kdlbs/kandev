@@ -8,6 +8,15 @@ import (
 
 const openCodePeriodUsageRule = "opencode.stderr.usage_limit.v1"
 
+// openCodePeriodResetRules are the OpenCode quota rules whose line may carry a
+// relative "resets in" deadline: the period limits and the free usage limit,
+// which is classified by its own unlabelled and prefixed rules.
+var openCodePeriodResetRules = map[string]bool{
+	openCodePeriodUsageRule:                    true,
+	"opencode.stderr.free_usage_unlabelled.v1": true,
+	"opencode.stderr.free_usage_prefixed.v1":   true,
+}
+
 var openCodeRelativeResetPattern = regexp.MustCompile(`(?i)\bresets?\s+in\s+([^\r\n.!?;]+)`)
 var openCodeRelativeUnitPattern = regexp.MustCompile(`(?i)(\d{1,4})\s*(days?|hours?|hrs?|minutes?|mins?|min|seconds?|secs?)\b`)
 var openCodeRelativeGluedSuffix = regexp.MustCompile(`^[.!?;]+[^\s.!?;]`)
@@ -48,8 +57,8 @@ func openCodePeriodResetAt(text string, observedAt time.Time) *time.Time {
 
 func matchesOpenCodePeriodRule(line string) bool {
 	for _, rule := range providerRules["opencode-acp"] {
-		if rule.id == openCodePeriodUsageRule {
-			return rule.pattern.MatchString(line)
+		if openCodePeriodResetRules[rule.id] && rule.pattern.MatchString(line) {
+			return true
 		}
 	}
 	return false
