@@ -1527,6 +1527,12 @@ func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend
 	m.logger.Warn("rolling back duplicate execution after session-conflict race",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if err := m.cleanupProjectMCPFiles(ctx, execution, client); err != nil {
+		m.logger.Warn("failed to release project MCP files during raced launch rollback",
+			zap.String("execution_id", execution.ID), zap.Error(err))
+	}
+	releaseClient()
 	if rt != nil && runtimeInstance != nil {
 		if stopErr := m.stopLaunchRuntimeOnRollback(ctx, rt, runtimeInstance, execution); stopErr != nil {
 			m.logger.Warn("failed to stop raced runtime instance during rollback",

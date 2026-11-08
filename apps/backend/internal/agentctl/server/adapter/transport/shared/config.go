@@ -27,6 +27,11 @@ type Config struct {
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
 
+	// ProjectMCPDelivery is execution-bound evidence that the host materialized
+	// the bound built-in packages into a project configuration file. Session
+	// request payloads cannot replace it.
+	ProjectMCPDelivery *types.ProjectMCPDelivery
+
 	// AgentID is the agent identifier from the registry (e.g., "auggie", "amp", "claude-code").
 	// Used for logging and debug capture. Adapters should use this instead of hardcoded names.
 	AgentID string

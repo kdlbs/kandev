@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -35,6 +36,9 @@ func TestCopilotPluginDiscoveryRoute(t *testing.T) {
 	if err := reg.Register(agents.NewCopilotACP()); err != nil {
 		t.Fatal(err)
 	}
+	ctrl.SetManagedRuntimeSelectionStore(handlerSelectionStore{
+		selection: managedruntime.Selection{Package: "@github/copilot", Version: "1.0.104"},
+	})
 	ctrl.SetCopilotPluginRunner(handlerCopilotRunner{stdout: []byte(`[{"name":"spark","marketplace":"copilot-plugins","version":"1.0.0","enabled":true,"source":"installed"}]`)})
 	response := doSettingsRequest(router, http.MethodPost, "/api/v1/agents/agent-row-1/plugin-discovery", `{"profile_id":"profile-1"}`)
 	if response.Code != http.StatusOK {

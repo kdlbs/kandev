@@ -75,8 +75,8 @@ type nativePolicyFixture struct {
 
 func TestCopilotPluginNativeAcceptance(t *testing.T) {
 	version := strings.TrimSpace(os.Getenv(nativeVersionEnv))
-	if version != "1.0.88" && version != "1.0.104" {
-		t.Fatalf("%s must select exactly 1.0.88 or 1.0.104", nativeVersionEnv)
+	if version != "1.0.88" && version != "1.0.104" && version != "1.0.105" {
+		t.Fatalf("%s must select exactly 1.0.88, 1.0.104, or 1.0.105", nativeVersionEnv)
 	}
 	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
 		t.Fatalf("native qualification is scoped to darwin/arm64; got %s/%s", runtime.GOOS, runtime.GOARCH)

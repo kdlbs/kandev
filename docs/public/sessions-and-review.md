@@ -264,6 +264,14 @@ conversation is restored. This also applies when shutdown interrupted final
 bookkeeping after the result was saved. The old result remains unchanged, and
 no previous prompt is sent again.
 
+Some older sessions saved a completion label before the matching terminal event
+was retained. Kandev can still recover the saved conversation when it verifies
+that the original process stopped and every delivery record stays consistent.
+Resume keeps the historical label and payload, clears only the matching recovery
+notice, and does not resend the instruction. A live owner, a later terminal, or
+an unverified record keeps the session blocked with the cause. Do not edit the
+database to bypass this check.
+
 A resumed runtime checks delivery recovery before enabling new work. If the saved
 evidence needs explicit recovery, the Resume controls appear before you send a
 new instruction. An existing draft is retained while recovery runs; send it once
