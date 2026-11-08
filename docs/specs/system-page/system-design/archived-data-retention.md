@@ -139,7 +139,10 @@ value, so a concurrent write wins instead of being overwritten.
 
 Selection walks `task_resource_cleanup_jobs` by `state = succeeded` under a
 captured upper job id. `SucceededCleanupJobEligible` re-checks both the state
-and the completion cutoff inside the writer transaction, and the update is
+and the completion cutoff inside the writer transaction, and keeps every job of
+a task that `retention.LoadForTask` still reads (the same protection predicate
+that inventory selects on), so a reduced snapshot never drops a keep-files
+decision or a protected path. The update is
 guarded on `state = succeeded` plus the previous snapshot value, so a job that
 left the terminal state keeps its snapshot.
 

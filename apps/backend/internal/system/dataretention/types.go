@@ -76,12 +76,15 @@ type progress struct {
 	Message       int64  `json:"message"`
 	UpperTask     string `json:"upper_task"`
 	UpperMessage  int64  `json:"upper_message"`
-	Job           string `json:"job"`
-	JobAfter      string `json:"job_after"`
-	UpperJob      string `json:"upper_job"`
-	Phase         string `json:"phase"`
-	Revision      int64  `json:"revision"`
-	Started       bool   `json:"started"`
+	// UpperMessageRow is the highest message rowid when the pass started; every
+	// session's UpperMessage is clamped to it.
+	UpperMessageRow int64  `json:"upper_message_row"`
+	Job             string `json:"job"`
+	JobAfter        string `json:"job_after"`
+	UpperJob        string `json:"upper_job"`
+	Phase           string `json:"phase"`
+	Revision        int64  `json:"revision"`
+	Started         bool   `json:"started"`
 }
 
 const (

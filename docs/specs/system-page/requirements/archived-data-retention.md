@@ -37,7 +37,10 @@ completes the preparation choice.
 - **Completed cleanup job:** A `task_resource_cleanup_jobs` row whose state is
   `succeeded` and whose `completed_at` is at or before the cleanup cutoff. Every
   other state, including a missing or unreadable completion timestamp, is
-  retained.
+  retained. A job whose task still has a row the workspace protection inventory
+  reads (a `retain`, `unknown`, or `unclassified` protection, or an unfinished
+  `cleanup` protection) is retained too, because that inventory re-derives the
+  keep-files decision and protected paths from the task's snapshots.
 - **Archive source evidence contract:** The three snapshot fields
   `archive_source_manifest`, `workspace_id`, and `worktrees`. Together they are
   what the archive-source-manifest read endpoint still consumes from a completed
@@ -129,7 +132,8 @@ archive evidence stays retrievable after task deletion.
 - **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-003.1:** Only a `succeeded` job with a
   readable completion timestamp at or before the cutoff shall be reduced. The
   `pending`, `retry_wait`, `waiting_for_clean`, `running`, `prepared`, `failed`,
-  and `cancelled` states shall never be reduced.
+  and `cancelled` states shall never be reduced, and neither shall a job of a
+  task the workspace protection inventory still reads.
 - **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-003.2:** The archive source evidence
   contract shall survive reduction. `archive_source_manifest`, `workspace_id`, and
   `worktrees` shall be preserved byte-for-byte, because the manifest read path
@@ -144,7 +148,8 @@ archive evidence stays retrievable after task deletion.
   dropped deliberately, because the retained set is the evidence contract rather
   than an inventory of known field names.
 - **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-003.5:** A malformed snapshot shall be
-  skipped and counted, never deleted.
+  skipped and counted, never deleted. A snapshot whose retained fields do not
+  have the shapes the evidence reader decodes is malformed.
 - **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-003.6:** The job row, its trigger, its
   state, attempt count, `next_attempt_at`, `last_error`, `created_at`,
   `updated_at`, and `completed_at` shall remain, so cleanup history and its result

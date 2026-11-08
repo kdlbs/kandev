@@ -132,12 +132,19 @@ var archivedTaskEligibilitySQL = `SELECT EXISTS(SELECT 1 FROM tasks t
  AND julianday(t.archived_at)>julianday('0001-01-01') AND julianday(t.archived_at)<=julianday(?))`
 
 // succeededCleanupJobEligibilitySQL pins both the terminal state and a readable
-// completion timestamp, so an in-flight or failed job is never reduced.
+// completion timestamp, so an in-flight or failed job is never reduced. A job is
+// also kept while its task has any row the workspace protection inventory
+// (retention.LoadForTask) still reads: that inventory re-derives the keep-files
+// decision and the protected paths from every snapshot of such a task, so
+// reducing one would silently drop the protection the user chose.
 var succeededCleanupJobEligibilitySQL = `SELECT EXISTS(SELECT 1 FROM task_resource_cleanup_jobs j
  WHERE j.id=? AND j.state=?
  AND j.completed_at IS NOT NULL
  AND julianday(j.completed_at) IS NOT NULL
- AND julianday(j.completed_at)>julianday('0001-01-01') AND julianday(j.completed_at)<=julianday(?))`
+ AND julianday(j.completed_at)>julianday('0001-01-01') AND julianday(j.completed_at)<=julianday(?)
+ AND NOT EXISTS(SELECT 1 FROM task_resource_cleanup_jobs p WHERE p.task_id=j.task_id
+  AND (p.workspace_protection IN ('retain','unknown','unclassified')
+  OR (p.workspace_protection='cleanup' AND p.state NOT IN ('succeeded','cancelled')))))`
 
 // ArchivedMessageRow is one candidate transcript row with its stored metadata
 // length, so a batch can be bounded before any body is fetched.
@@ -183,8 +190,20 @@ func NextSessionID(ctx context.Context, q sqlx.QueryerContext, taskID, after str
 	return id, err
 }
 
+// HistoryUpperMessageRowID captures the highest message rowid when a pass
+// starts. Each session's own upper cursor is clamped to it, so a message
+// appended after the pass started stays outside the pass even when its session
+// is opened later.
+func HistoryUpperMessageRowID(ctx context.Context, q sqlx.QueryerContext) (int64, error) {
+	var rowID int64
+	stmt, cancel := budgetedStatementCtx(ctx)
+	defer cancel()
+	err := sqlx.GetContext(stmt, q, &rowID, `SELECT COALESCE(MAX(rowid),0) FROM task_session_messages`)
+	return rowID, err
+}
+
 // SessionUpperMessageRowID captures a session's highest message rowid so a pass
-// never walks rows appended after it started.
+// never walks rows appended after the session was opened.
 func SessionUpperMessageRowID(ctx context.Context, q sqlx.QueryerContext, sessionID string) (int64, error) {
 	var rowID int64
 	stmt, cancel := budgetedStatementCtx(ctx)
@@ -206,12 +225,16 @@ func NextArchivedMessageRows(ctx context.Context, q sqlx.QueryerContext, session
 	return rows, err
 }
 
-// ArchivedMessageMetadata reads one candidate message's metadata body.
-func ArchivedMessageMetadata(ctx context.Context, q sqlx.QueryerContext, rowID int64, id string) (string, error) {
+// ArchivedMessageMetadata reads one candidate message's metadata body only while
+// it still has the length the batch was charged for. A body that changed size
+// since it was measured is not loaded and reports sql.ErrNoRows, so a read
+// outside the writer cannot pull more than the admitted bytes.
+func ArchivedMessageMetadata(ctx context.Context, q sqlx.QueryerContext, rowID int64, id string, size int64) (string, error) {
 	var raw string
 	stmt, cancel := budgetedStatementCtx(ctx)
 	defer cancel()
-	err := sqlx.GetContext(stmt, q, &raw, `SELECT COALESCE(metadata,'') FROM task_session_messages WHERE rowid=? AND id=?`, rowID, id)
+	err := sqlx.GetContext(stmt, q, &raw, `SELECT COALESCE(metadata,'') FROM task_session_messages
+	 WHERE rowid=? AND id=? AND COALESCE(LENGTH(CAST(metadata AS BLOB)),0)=?`, rowID, id, size)
 	return raw, err
 }
 
@@ -272,12 +295,14 @@ func CleanupJobSnapshotBytes(ctx context.Context, q sqlx.QueryerContext, id stri
 }
 
 // CleanupJobSnapshotBody reads the stored snapshot value for a job already
-// sized and admitted by the batch budget.
-func CleanupJobSnapshotBody(ctx context.Context, q sqlx.QueryerContext, id string) (string, error) {
+// sized and admitted by the batch budget. A snapshot whose size changed since it
+// was measured is not loaded and reports sql.ErrNoRows.
+func CleanupJobSnapshotBody(ctx context.Context, q sqlx.QueryerContext, id string, size int64) (string, error) {
 	var snapshot string
 	stmt, cancel := budgetedStatementCtx(ctx)
 	defer cancel()
-	err := sqlx.GetContext(stmt, q, &snapshot, `SELECT resource_snapshot FROM task_resource_cleanup_jobs WHERE id=?`, id)
+	err := sqlx.GetContext(stmt, q, &snapshot, `SELECT resource_snapshot FROM task_resource_cleanup_jobs
+	 WHERE id=? AND COALESCE(LENGTH(CAST(resource_snapshot AS BLOB)),0)=?`, id, size)
 	return snapshot, err
 }
 

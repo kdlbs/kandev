@@ -143,8 +143,11 @@ to the union of archived tasks (`archived_at IS NOT NULL`) and finished tasks
 archived under `ArchivedTaskEligible` **or** finished under `PayloadTaskEligible`
 at the same cutoff; the finished path additionally requires the task's terminal
 state, so a nonterminal task never qualifies through it. Both checks use the same
-chronological SQLite date comparison the existing passes use. Equal timestamps
-are retained.
+chronological SQLite date comparison the existing passes use. The boundary
+differs per path: the archived path is inclusive, so an `archived_at` exactly at
+the cutoff qualifies; the finished path keeps the existing inactivity contract,
+which requires every activity timestamp to be strictly before the cutoff, so a
+finished task whose latest activity equals the cutoff is retained.
 
 For an eligible page, the target applies `models.ReduceToolPayload` to each
 message's `metadata` and writes through `WriteReducedMessageMetadata` under a

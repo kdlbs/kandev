@@ -96,17 +96,18 @@ without deleting conversations.
 
 - **AC-SYSTEM-PAGE-DB-HISTORY-RETENTION-001.1:** An enabled policy shall
   periodically reduce only `task_session_messages.metadata` of messages whose
-  task is finished or archived and whose relevant timestamp is at or before the
-  cutoff. The default window is 14 days; valid windows are 1-3650 days; the
-  cutoff boundary is inclusive.
+  task is finished or archived at the cutoff. The default window is 14 days;
+  valid windows are 1-3650 days. The boundary per eligibility path is defined
+  in 001.3.
 - **AC-SYSTEM-PAGE-DB-HISTORY-RETENTION-001.2:** The reduction shall reuse the
   existing tool-payload removal rules and removal marker. It shall not introduce
   a second marker vocabulary or a divergent remover for the same field.
 - **AC-SYSTEM-PAGE-DB-HISTORY-RETENTION-001.3:** A task shall be eligible when it
-  is archived (`ArchivedTaskEligible`: `archived_at` at or before the cutoff) or
-  finished (`PayloadTaskEligible` at the same cutoff), compared chronologically
-  through the same date comparison the existing passes use. A nonterminal task
-  shall not be eligible through the finished path.
+  is archived (`ArchivedTaskEligible`: `archived_at` at or before the cutoff,
+  inclusive) or finished (`PayloadTaskEligible` at the same cutoff: every
+  activity timestamp strictly before it, so equality is retained), compared
+  chronologically through the same date comparison the existing passes use. A
+  nonterminal task shall not be eligible through the finished path.
 - **AC-SYSTEM-PAGE-DB-HISTORY-RETENTION-001.4:** The reduction shall preserve
   every message row, its content, identity, ordering, type, and timestamps, and
   shall never delete a message.

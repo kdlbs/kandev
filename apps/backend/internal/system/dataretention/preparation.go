@@ -3,6 +3,8 @@ package dataretention
 import (
 	"context"
 	"errors"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -67,8 +69,8 @@ func (s *Service) finishPreparation(ctx context.Context, prepared record, receip
 	if backupErr != nil {
 		code = "backup_failed"
 		detail = limitPreparationDetail(backupErr.Error())
-		s.logFailure(ctx, "archived data retention preparation failed", backupErr)
 	}
+	failed := false
 	_, err := s.change(ctx, func(r *record, tx *sqlx.Tx) error {
 		if r.Policy.Revision != prepared.Policy.Revision || r.Preparation.State != stateRunning ||
 			r.Operation == nil || r.Operation.ID != prepared.Operation.ID {
@@ -79,6 +81,7 @@ func (s *Service) finishPreparation(ctx context.Context, prepared record, receip
 			r.Preparation.Error = code
 			r.PreparationDetail = detail
 			finishOperation(r, stateFailed, code, s.opts.Now())
+			failed = true
 			return nil
 		}
 		r.Preparation.State = stateReady
@@ -94,6 +97,12 @@ func (s *Service) finishPreparation(ctx context.Context, prepared record, receip
 		return err
 	}
 	if backupErr != nil {
+		// Only a failure this call actually recorded is logged: a superseded or
+		// cancelled preparation recorded nothing, and a cancellation is not a
+		// backup failure.
+		if failed && !errors.Is(backupErr, context.Canceled) {
+			s.logFailure(ctx, "archived data retention preparation failed", backupErr)
+		}
 		return errors.New(code)
 	}
 	return nil
@@ -103,11 +112,19 @@ func (s *Service) finishPreparation(ctx context.Context, prepared record, receip
 // message cannot bloat the settings row.
 const preparationDetailLimit = 1024
 
+// limitPreparationDetail normalizes invalid UTF-8 before bounding the persisted
+// message and cuts on a rune boundary, so JSON encoding cannot expand the stored
+// detail beyond the limit.
 func limitPreparationDetail(message string) string {
+	message = strings.ToValidUTF8(message, "�")
 	if len(message) <= preparationDetailLimit {
 		return message
 	}
-	return message[:preparationDetailLimit]
+	cut := preparationDetailLimit
+	for cut > 0 && !utf8.RuneStart(message[cut]) {
+		cut--
+	}
+	return message[:cut]
 }
 
 // recoverPreparation fails a preparation whose worker is gone. Ticks are

@@ -45,6 +45,10 @@ func (s *Service) loop(ctx context.Context) {
 	first := true
 	var burst time.Time
 	failures := 0
+	// failedID is the operation the consecutive failures belong to. A failure
+	// on a different operation starts a new count, so retry exhaustion is only
+	// ever recorded against the operation that actually failed.
+	failedID := ""
 	for {
 		select {
 		case <-ctx.Done():
@@ -62,10 +66,13 @@ func (s *Service) loop(ctx context.Context) {
 			}
 			first = false
 		}
-		err := s.tick(ctx)
+		id, err := s.tick(ctx)
+		if id != failedID {
+			failures, failedID = 0, id
+		}
 		failures = nextFailureCount(failures, err)
 		if failures >= 5 {
-			s.failActive(ctx)
+			s.failActive(ctx, id, err)
 			failures = 0
 		}
 		timer.Reset(s.nextDelay(ctx, err, &burst))
@@ -98,10 +105,12 @@ func (s *Service) nextDelay(ctx context.Context, workErr error, burst *time.Time
 	return 100 * time.Millisecond
 }
 
-func (s *Service) tick(ctx context.Context) error {
+// tick runs one unit of work and reports the identity of the operation it
+// worked on, so the caller can bind failures to that operation.
+func (s *Service) tick(ctx context.Context) (id string, err error) {
 	r, err := readRecord(ctx, s.pool.Reader())
 	if err != nil {
-		return err
+		return "", err
 	}
 	work, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
@@ -115,6 +124,9 @@ func (s *Service) tick(ctx context.Context) error {
 	defer func() {
 		cancel()
 		s.mu.Lock()
+		// claimActive may have replaced the identity with the operation this
+		// tick started, which is the one any failure belongs to.
+		id = s.activeID
 		s.activeCancel = nil
 		s.activeID = ""
 		s.mu.Unlock()
@@ -136,7 +148,7 @@ func (s *Service) tick(ctx context.Context) error {
 			s.opts.Report(ctx, status.Operation)
 		}
 	}
-	return err
+	return "", err
 }
 
 // stepScheduled starts the daily pass once the approved revision is due. Both
@@ -176,9 +188,13 @@ func (s *Service) reconcile(ctx context.Context) error {
 
 // failActive records a terminal failure for work that exhausted its retries. A
 // pass that already reduced something is partial, not failed, so the effect
-// stays visible.
-func (s *Service) failActive(ctx context.Context) {
+// stays visible. Only the operation that failed is finished: a cancel or a new
+// operation committed since then is left alone.
+func (s *Service) failActive(ctx context.Context, id string, cause error) {
 	_, _ = s.change(ctx, func(r *record, tx *sqlx.Tx) error {
+		if id == "" || currentID(r) != id {
+			return nil
+		}
 		if r.Preparation.State == stateRunning {
 			s.failPreparation(r)
 			return nil
@@ -190,7 +206,11 @@ func (s *Service) failActive(ctx context.Context) {
 		if r.Operation.Messages.Reduced > 0 || r.Operation.CleanupJobs.Reduced > 0 {
 			state = statePartial
 		}
-		finishOperation(r, state, "scan_failed", s.opts.Now())
+		code := "scan_failed"
+		if errors.Is(cause, errBackupVerificationFailed) {
+			code = errBackupVerificationFailed.Error()
+		}
+		finishOperation(r, state, code, s.opts.Now())
 		scheduleNextPass(r, s.opts.Now())
 		return nil
 	})

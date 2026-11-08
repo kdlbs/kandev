@@ -57,6 +57,12 @@ func ReduceCleanupSnapshot(snapshot string, reducedAt time.Time) (SnapshotReduct
 		result.Reason = "already_removed"
 		return result, nil
 	}
+	if !retainedFieldsWellTyped(fields) {
+		// The evidence reader decodes these keys into typed fields; a snapshot it
+		// cannot decode is left exactly as stored rather than partly reduced.
+		result.Reason = payloadMalformed
+		return result, nil
+	}
 	removed := make([]string, 0, len(fields))
 	for key := range fields {
 		if cleanupSnapshotRetained(key) {
@@ -73,6 +79,30 @@ func ReduceCleanupSnapshot(snapshot string, reducedAt time.Time) (SnapshotReduct
 	// same bytes.
 	sort.Strings(removed)
 	return encodeSnapshotReduction(fields, removed, snapshot, reducedAt)
+}
+
+// retainedFieldsWellTyped checks the retained keys against the shapes
+// GetTaskSourceManifest decodes: a string workspace identity and arrays of
+// objects for the manifest and the worktree inventory. A missing key or a JSON
+// null is accepted, as the reader accepts it.
+func retainedFieldsWellTyped(fields rawPayloadObject) bool {
+	if raw, ok := fields[cleanupSnapshotWorkspaceKey]; ok {
+		var workspaceID *string
+		if json.Unmarshal(raw, &workspaceID) != nil {
+			return false
+		}
+	}
+	for _, key := range []string{CleanupSnapshotManifestKey, cleanupSnapshotWorktreesKey} {
+		raw, ok := fields[key]
+		if !ok {
+			continue
+		}
+		var items []map[string]json.RawMessage
+		if json.Unmarshal(raw, &items) != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func encodeSnapshotReduction(fields rawPayloadObject, removed []string, snapshot string, reducedAt time.Time) (SnapshotReduction, error) {

@@ -10,7 +10,12 @@ import (
 	"github.com/kandev/kandev/internal/system/maintenance"
 )
 
-var errMaintenanceBusy = errors.New("maintenance_busy")
+var (
+	errMaintenanceBusy = errors.New("maintenance_busy")
+	// errBackupVerificationFailed keeps its own failure code when retries run
+	// out, so a backup problem is not reported as a scan failure.
+	errBackupVerificationFailed = errors.New("backup_verification_failed")
+)
 
 // stepCleanup runs one mutating batch under the shared maintenance admission, so
 // a pass defers while backup, restore, reset or compaction owns the writer.
@@ -98,7 +103,10 @@ func (s *Service) checkReceipt(ctx context.Context, r record) error {
 		return errors.New("backup_unavailable")
 	}
 	if err := s.opts.VerifyBackup(ctx, r.Receipt); err != nil {
-		return errors.New("backup_verification_failed")
+		if !errors.Is(err, context.Canceled) {
+			s.logFailure(ctx, "archived data retention backup verification failed", err)
+		}
+		return errBackupVerificationFailed
 	}
 	return nil
 }

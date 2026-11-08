@@ -289,6 +289,10 @@ func (s *Service) startOperation(ctx context.Context, q sqlx.QueryerContext, r *
 	if err != nil {
 		return err
 	}
+	upperMessageRow, err := tasksqlite.HistoryUpperMessageRowID(ctx, q)
+	if err != nil {
+		return err
+	}
 	upperJob, err := tasksqlite.SucceededCleanupUpperJobID(ctx, q)
 	if err != nil {
 		return err
@@ -305,12 +309,13 @@ func (s *Service) startOperation(ctx context.Context, q sqlx.QueryerContext, r *
 		PolicyRevision: r.Policy.Revision,
 	}
 	r.Progress = progress{
-		SchemaVersion: schemaVersion,
-		UpperTask:     upperTask,
-		UpperJob:      upperJob,
-		Phase:         phaseMessages,
-		Revision:      r.Policy.Revision,
-		Started:       true,
+		SchemaVersion:   schemaVersion,
+		UpperTask:       upperTask,
+		UpperMessageRow: upperMessageRow,
+		UpperJob:        upperJob,
+		Phase:           phaseMessages,
+		Revision:        r.Policy.Revision,
+		Started:         true,
 	}
 	return nil
 }

@@ -516,12 +516,12 @@ func TestArchivedDataAnalyzeRejectsWhilePreparationPending(t *testing.T) {
 	}
 	connection.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = connection.Close() })
-	// The settings row and the two scan cursors startOperation reads, so a
+	// The settings row and the three scan cursors startOperation reads, so a
 	// permitted analysis can actually start and the busy refusal is the only
 	// reason it is stopped.
 	for _, ddl := range []string{
 		`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT '')`,
-		`CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT '', archived_at TEXT)`,
+		`CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT '', archived_at TEXT)`, messagesDDL,
 		`CREATE TABLE task_resource_cleanup_jobs (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT '', completed_at TEXT)`,
 	} {
 		if _, err := connection.Exec(ddl); err != nil {
@@ -573,6 +573,9 @@ func TestArchivedDataAnalyzeRejectsWhilePreparationPending(t *testing.T) {
 	}
 }
 
+// messagesDDL is the message table startOperation reads for its pass cursor.
+const messagesDDL = `CREATE TABLE task_session_messages (id TEXT PRIMARY KEY, task_session_id TEXT, metadata TEXT)`
+
 // newRetentionSafetyService builds a dataretention.Service over a temp SQLite
 // pool with the minimal schema needed to drive a preparation and a cleanup-job
 // pass, together with the fake backup callbacks a case supplies.
@@ -587,8 +590,8 @@ func newRetentionSafetyService(t *testing.T, opts dataretention.Options) (*datar
 	t.Cleanup(func() { _ = connection.Close() })
 	for _, ddl := range []string{
 		`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT '')`,
-		`CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT '', archived_at TEXT, queued_for_step_id TEXT, queued_at TEXT, created_at TEXT, updated_at TEXT)`,
-		`CREATE TABLE task_resource_cleanup_jobs (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT '', completed_at TEXT, resource_snapshot TEXT)`,
+		`CREATE TABLE tasks (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT '', archived_at TEXT, queued_for_step_id TEXT, queued_at TEXT, created_at TEXT, updated_at TEXT)`, messagesDDL,
+		`CREATE TABLE task_resource_cleanup_jobs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT '', completed_at TEXT, resource_snapshot TEXT, workspace_protection TEXT NOT NULL DEFAULT 'unclassified')`,
 	} {
 		if _, err := connection.Exec(ddl); err != nil {
 			t.Fatal(err)
@@ -711,15 +714,15 @@ func TestArchivedRetentionCleanupPreservesEvidenceAndProtectedRows(t *testing.T)
 	})
 	const old = "2000-01-01T00:00:00Z"
 	operational := strings.Repeat("x", 4096)
-	eligible := `{"archive_source_manifest":{"manifest":1},"workspace_id":"ws-1","worktrees":[{"id":"w1"}],"progress":"` + operational + `"}`
-	protected := `{"archive_source_manifest":{"manifest":2},"workspace_id":"ws-2","worktrees":[{"id":"w2"}],"progress":"running"}`
+	eligible := `{"archive_source_manifest":[{"manifest":1}],"workspace_id":"ws-1","worktrees":[{"id":"w1"}],"progress":"` + operational + `"}`
+	protected := `{"archive_source_manifest":[{"manifest":2}],"workspace_id":"ws-2","worktrees":[{"id":"w2"}],"progress":"running"}`
 	if _, err := connection.Exec(
-		`INSERT INTO task_resource_cleanup_jobs(id,state,completed_at,resource_snapshot) VALUES('job-eligible','succeeded',?,?)`, old, eligible,
+		`INSERT INTO task_resource_cleanup_jobs(id,task_id,state,completed_at,resource_snapshot,workspace_protection) VALUES('job-eligible','task-1','succeeded',?,?,'')`, old, eligible,
 	); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := connection.Exec(
-		`INSERT INTO task_resource_cleanup_jobs(id,state,completed_at,resource_snapshot) VALUES('job-protected','running',?,?)`, old, protected,
+		`INSERT INTO task_resource_cleanup_jobs(id,task_id,state,completed_at,resource_snapshot,workspace_protection) VALUES('job-protected','task-2','running',?,?,'')`, old, protected,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -738,7 +741,7 @@ func TestArchivedRetentionCleanupPreservesEvidenceAndProtectedRows(t *testing.T)
 		t.Fatalf("reduced snapshot is not JSON: %v (%s)", err, reduced)
 	}
 	for key, want := range map[string]string{
-		"archive_source_manifest": `{"manifest":1}`,
+		"archive_source_manifest": `[{"manifest":1}]`,
 		"workspace_id":            `"ws-1"`,
 		"worktrees":               `[{"id":"w1"}]`,
 	} {
@@ -775,9 +778,9 @@ func TestArchivedRetentionBatchFailureRollsBack(t *testing.T) {
 		VerifyBackup: func(context.Context, string) error { return nil },
 	})
 	const old = "2000-01-01T00:00:00Z"
-	original := `{"archive_source_manifest":{"manifest":1},"workspace_id":"ws-1","worktrees":[{"id":"w1"}],"progress":"` + strings.Repeat("x", 4096) + `"}`
+	original := `{"archive_source_manifest":[{"manifest":1}],"workspace_id":"ws-1","worktrees":[{"id":"w1"}],"progress":"` + strings.Repeat("x", 4096) + `"}`
 	if _, err := connection.Exec(
-		`INSERT INTO task_resource_cleanup_jobs(id,state,completed_at,resource_snapshot) VALUES('job-eligible','succeeded',?,?)`, old, original,
+		`INSERT INTO task_resource_cleanup_jobs(id,task_id,state,completed_at,resource_snapshot,workspace_protection) VALUES('job-eligible','task-1','succeeded',?,?,'')`, old, original,
 	); err != nil {
 		t.Fatal(err)
 	}
