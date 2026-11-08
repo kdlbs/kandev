@@ -18,6 +18,7 @@ import { ManagedCloneRelocationConfirmation } from "./managed-clone-relocation-c
 import { matchingAutomaticRecovery } from "@/lib/session-recovery-presentation";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { isLocalStorageCause, storageCauseFromError } from "@/lib/session-delivery-storage";
+import { isProcessExitCause } from "./session-process-exit-recovery";
 
 function useFocusComposerAfterRecoveryCard(ref: { current: HTMLDivElement | null }) {
   useLayoutEffect(() => {
@@ -217,6 +218,8 @@ function RecoveryCardHeader({
   failure: string;
 }) {
   const { t } = useTranslation();
+  const explicitGuidance = hasExplicitRecoveryGuidance(actions);
+  const displayedCopy = explicitGuidance ? { ...copy, prerequisite: null } : copy;
   const { summary, suppressSummary } = recoveryHeaderCopy(
     copy,
     actions,
@@ -247,7 +250,7 @@ function RecoveryCardHeader({
             {summary}
           </p>
         )}
-        <RecoveryStatusNotices copy={copy} />
+        <RecoveryStatusNotices copy={displayedCopy} />
         {model.kind === "provider_quota_limited" && model.metadata?.model_id && (
           <p className="mt-1 text-xs text-muted-foreground">
             {t("chat:providerQuotaModel", { model: model.metadata.model_id })}
@@ -287,6 +290,14 @@ function RecoveryStatusNotices({
           {copy.workspaceStatus}
         </p>
       ) : null}
+      {copy.prerequisite ? (
+        <p
+          className="mt-1 break-words text-xs text-muted-foreground"
+          data-testid="session-recovery-prerequisite"
+        >
+          {copy.prerequisite}
+        </p>
+      ) : null}
       {copy.freshStartWarning ? (
         <p
           className="mt-1 break-words text-xs text-muted-foreground"
@@ -314,13 +325,26 @@ function recoveryHeaderCopy(
   const hasDistinctGuidance = Boolean(
     actions.recoveryError || actions.branchDetails || actions.guardDetails,
   );
+  const hasExplicitGuidance = hasExplicitRecoveryGuidance(actions);
   let summary = actions.recoveryNotice ?? copy.summary;
   if (hasDistinctGuidance) summary = failure;
-  if (copy.hasTypedSelectionCause || copy.hasTypedCleanupCause) summary = copy.summary;
+  if (
+    copy.hasTypedSelectionCause ||
+    copy.hasTypedCleanupCause ||
+    (!hasExplicitGuidance && copy.hasTypedProcessCause)
+  )
+    summary = copy.summary;
   return {
     summary,
     suppressSummary: !copy.showSummary && !hasDistinctGuidance,
   };
+}
+
+function hasExplicitRecoveryGuidance(actions: SessionRecoveryActions) {
+  if (actions.branchDetails || actions.guardDetails) return true;
+  if (actions.recoveryNoticeKind === "inspection_busy") return true;
+  const manual = actions.manualRecoveryFailure;
+  return Boolean(manual && !manual.causes?.some(isProcessExitCause));
 }
 
 function StorageSettingsLink({ cause }: { cause: ReturnType<typeof storageCauseFromError> }) {

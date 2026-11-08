@@ -41,7 +41,7 @@ func (m *Manager) PreviewLaunchExecutionUsage(ctx context.Context, req *LaunchRe
 }
 func localPreparedUsageExecutor(kind string) bool {
 	switch kind {
-	case "local", "local_pc", "worktree", "standalone":
+	case string(taskmodels.ExecutorTypeLocal), "local_pc", string(taskmodels.ExecutorTypeWorktree), "standalone":
 		return true
 	default:
 		return false

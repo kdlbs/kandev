@@ -254,12 +254,17 @@ func (sm *SessionManager) initializeSessionWithSettingsPolicy(
 	sm.logger.Info("sending ACP initialize request",
 		zap.String("agent_type", agentConfig.ID()))
 
+	processGeneration := client.ProcessGeneration()
 	agentInfo, err := client.Initialize(ctx, "kandev", "1.0.0")
 	if err != nil {
 		sm.logger.Error("ACP initialize failed",
 			zap.String("agent_type", agentConfig.ID()),
 			zap.Error(err))
-		return nil, &SessionInitializationPhaseError{Phase: SessionInitializationPhaseACPInitialize, Cause: err}
+		return nil, &SessionInitializationPhaseError{
+			Phase:             SessionInitializationPhaseACPInitialize,
+			ProcessGeneration: processGeneration,
+			Cause:             err,
+		}
 	}
 
 	result := &InitializeResult{

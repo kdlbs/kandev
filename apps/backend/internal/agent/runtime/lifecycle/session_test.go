@@ -60,6 +60,7 @@ type mockAgentServer struct {
 	taskSessionID        string
 	nativeSessionID      string
 	deliveryStatus       *agentctl.DeliveryStatus
+	processGeneration    uint64
 	upgrader             websocket.Upgrader
 	handler              func(msg ws.Message) *ws.Message
 	afterResponse        func(msg ws.Message)
@@ -126,9 +127,10 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 	mux.HandleFunc("/api/v1/start", func(w http.ResponseWriter, _ *http.Request) {
 		m.mu.Lock()
 		m.httpActionLog = append(m.httpActionLog, "start")
+		generation := m.processGeneration
 		m.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"success":true,"command":"cursor-agent acp"}`)
+		_, _ = fmt.Fprintf(w, `{"success":true,"command":"cursor-agent acp","process_generation":%d}`, generation)
 	})
 	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
 		m.mu.Lock()

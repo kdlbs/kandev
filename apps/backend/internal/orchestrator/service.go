@@ -1002,6 +1002,10 @@ type Service struct {
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
 
+	// officeLaunchProfilePreview returns the execution profile Office would
+	// launch an agent with, without recording any routing decision.
+	officeLaunchProfilePreview OfficeLaunchProfilePreviewFunc
+
 	// stepHistoryRecorder persists the ADR 0015 audit row for orchestrator
 	// step transitions: auto-advance (StepTransitionTriggerAutoComplete) and
 	// the deferred move_task_kandev path (StepTransitionTriggerManual).
@@ -2036,6 +2040,7 @@ func NewService(
 	})
 	exec.SetOnCancelledResumeExecutionCleanup(s.cleanupCancelledResumeExecution)
 	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
+	exec.SetOnExecutionReplacementStopOwnerRegistration(s.RegisterExecutionReplacementStopOwner)
 	exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
 		s.writeTaskReviewState(ctx, taskID, completedSessionID)
 	})
@@ -2561,6 +2566,7 @@ func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromW
 		"wip_admitted":              task.WIPAdmitted,
 		"queued_for_step_id":        task.QueuedForStepID,
 		"queue_promotion":           queuePromotion,
+		"step_transition_id":        task.WorkflowStepTransitionID,
 	}
 	if task.QueuedAt != nil {
 		data["queued_at"] = task.QueuedAt.Format(time.RFC3339)

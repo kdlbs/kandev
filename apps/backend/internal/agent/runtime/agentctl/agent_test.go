@@ -504,6 +504,95 @@ func TestInitializeStartupEvidence(t *testing.T) {
 	}
 }
 
+func TestInitializeStartupEvidenceDropsMalformedOptionalFields(t *testing.T) {
+	evidence := managedStartupEvidenceFromDetails(map[string]any{
+		"startup_evidence": map[string]any{
+			"process_generation":      9,
+			"exit_disposition":        "private_disposition",
+			"exit_code":               1.5,
+			"diagnostic_reason":       "mise_config_untrusted",
+			"diagnostic_complete":     false,
+			"collection_complete":     true,
+			"npm_diagnostic_complete": true,
+		},
+	})
+	if evidence == nil {
+		t.Fatal("required generation evidence was dropped")
+	}
+	if evidence.ProcessGeneration != 9 || evidence.ExitDisposition != types.ManagedStartupExitUnknown {
+		t.Fatalf("evidence = %#v, want generation 9 and unknown disposition", evidence)
+	}
+	if evidence.ExitCode != nil {
+		t.Fatalf("fractional exit code = %#v, want nil", evidence.ExitCode)
+	}
+	if evidence.DiagnosticReason != "" {
+		t.Fatalf("incomplete diagnostic reason = %q, want empty", evidence.DiagnosticReason)
+	}
+}
+
+func TestInitializeStartupEvidenceAcceptsCompleteMiseReason(t *testing.T) {
+	evidence := managedStartupEvidenceFromDetails(map[string]any{
+		"startup_evidence": map[string]any{
+			"process_generation":  uint64(9),
+			"exit_disposition":    "ordinary_exit",
+			"exit_code":           1,
+			"diagnostic_reason":   "mise_config_untrusted",
+			"diagnostic_complete": true,
+		},
+	})
+	if evidence == nil || evidence.ExitCode == nil || *evidence.ExitCode != 1 ||
+		evidence.DiagnosticReason != "mise_config_untrusted" || !evidence.DiagnosticComplete {
+		t.Fatalf("evidence = %#v, want a complete recognized mise refusal", evidence)
+	}
+}
+
+func TestInitializeStartupEvidenceExitCodeNullMissingAndZero(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		evidence   map[string]any
+		wantNil    bool
+		wantStatus int
+	}{
+		{
+			name: "missing",
+			evidence: map[string]any{
+				"process_generation": uint64(9), "exit_disposition": "ordinary_exit",
+			},
+			wantNil: true,
+		},
+		{
+			name: "explicit null",
+			evidence: map[string]any{
+				"process_generation": uint64(9), "exit_disposition": "ordinary_exit", "exit_code": nil,
+			},
+			wantNil: true,
+		},
+		{
+			name: "zero",
+			evidence: map[string]any{
+				"process_generation": uint64(9), "exit_disposition": "ordinary_exit", "exit_code": 0,
+			},
+			wantStatus: 0,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			evidence := managedStartupEvidenceFromDetails(map[string]any{"startup_evidence": tt.evidence})
+			if evidence == nil {
+				t.Fatal("required generation evidence was dropped")
+			}
+			if tt.wantNil {
+				if evidence.ExitCode != nil {
+					t.Fatalf("exit code = %#v, want missing status", evidence.ExitCode)
+				}
+				return
+			}
+			if evidence.ExitCode == nil || *evidence.ExitCode != tt.wantStatus {
+				t.Fatalf("exit code = %#v, want %d", evidence.ExitCode, tt.wantStatus)
+			}
+		})
+	}
+}
+
 func TestStartStoresProcessGenerationWithoutChangingReturnValue(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/start" {
