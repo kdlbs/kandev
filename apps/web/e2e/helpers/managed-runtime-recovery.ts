@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { DatabaseSync } from "./node-sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -6,24 +7,28 @@ import path from "node:path";
 import type { BackendContext } from "../fixtures/backend";
 import type { ApiClient } from "./api-client";
 import type { AgentProfile } from "../../lib/types/http-agents";
+import {
+  startManagedRuntimeTestRegistry,
+  type ManagedRuntimeTestRegistry,
+} from "./managed-runtime-test-registry";
 
 export const MANAGED_RUNTIME_CACHE_ROOT = "/tmp/kandev-managed-npm-cache";
 const MANAGED_RUNTIME_AGENT_NAME = "opencode-acp";
 const MANAGED_RUNTIME_TEST_MODEL = "opencode/big-pickle";
 const OPENCODE_SELECTION_KEY = "managed_runtime.opencode.selection";
-const nativeSelections = new WeakMap<BackendContext, string>();
+const originalRuntimeSelections = new WeakMap<BackendContext, string>();
 
 function selectManagedRuntime(backend: BackendContext, restore = false): void {
   const database = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
   try {
     database.exec("PRAGMA busy_timeout = 10000");
     if (restore) {
-      const original = nativeSelections.get(backend);
+      const original = originalRuntimeSelections.get(backend);
       if (original === undefined) return;
       database
         .prepare("UPDATE settings SET value = ? WHERE key = ?")
         .run(original, OPENCODE_SELECTION_KEY);
-      nativeSelections.delete(backend);
+      originalRuntimeSelections.delete(backend);
       return;
     }
     const row = database
@@ -32,9 +37,45 @@ function selectManagedRuntime(backend: BackendContext, restore = false): void {
     if (!row) throw new Error("OpenCode runtime selection must exist before managed-runtime setup");
     const selection = JSON.parse(row.value);
     if (selection.source !== "native") return;
-    nativeSelections.set(backend, row.value);
+    originalRuntimeSelections.set(backend, row.value);
     selection.source = "managed";
     selection.selected_version = "";
+    selection.revision += 1;
+    database
+      .prepare("UPDATE settings SET value = ? WHERE key = ?")
+      .run(JSON.stringify(selection), OPENCODE_SELECTION_KEY);
+  } finally {
+    database.close();
+  }
+}
+
+function selectManagedRuntimeFamily(backend: BackendContext, family?: "v1" | "v2"): void {
+  if (!family) {
+    selectManagedRuntime(backend);
+    return;
+  }
+  const database = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+  try {
+    database.exec("PRAGMA busy_timeout = 10000");
+    const row = database
+      .prepare("SELECT value FROM settings WHERE key = ?")
+      .get(OPENCODE_SELECTION_KEY) as { value: string };
+    if (!originalRuntimeSelections.has(backend)) originalRuntimeSelections.set(backend, row.value);
+    const selection = JSON.parse(row.value);
+    const versions = JSON.parse(
+      fs.readFileSync(
+        path.resolve(
+          __dirname,
+          "../../../backend/internal/agent/agents/managed_npm_runtime_versions.json",
+        ),
+        "utf8",
+      ),
+    ) as Record<string, string>;
+    selection.family = family;
+    selection.package = family === "v2" ? "@opencode/cli" : "opencode-ai";
+    selection.source = "managed";
+    selection.selected_version = versions[selection.package];
+    selection.applied_default_version = selection.selected_version;
     selection.revision += 1;
     database
       .prepare("UPDATE settings SET value = ? WHERE key = ?")
@@ -53,16 +94,20 @@ export function managedRuntimeStartupAttemptFile(launchId: string): string {
   return path.join(MANAGED_RUNTIME_CACHE_ROOT, "kandev-e2e-attempts", safeLaunchId);
 }
 
-export function managedRuntimeStartupSentinels(packageSpec: string, launchId: string) {
+export function managedRuntimeStartupSentinels(
+  packageSpec: string,
+  launchId: string,
+  cacheRoot = MANAGED_RUNTIME_CACHE_ROOT,
+) {
   const safeLaunchId = launchId.replace(/[^A-Za-z0-9_-]/g, "_");
-  const cacheRoot = path.join(MANAGED_RUNTIME_CACHE_ROOT, "_npx");
+  const npxRoot = path.join(cacheRoot, "_npx");
   return {
     selected: path.join(
-      cacheRoot,
+      npxRoot,
       managedRuntimeExecutionCacheKey(packageSpec),
       `retry-sentinel-${safeLaunchId}`,
     ),
-    sibling: path.join(cacheRoot, "0123456789abcdef", `sibling-sentinel-${safeLaunchId}`),
+    sibling: path.join(npxRoot, "0123456789abcdef", `sibling-sentinel-${safeLaunchId}`),
   };
 }
 
@@ -77,14 +122,229 @@ export type ManagedRuntimeStartupFixtureMode =
   | "transient"
   | "silent-exit"
   | "permanent"
-  | "repeat-failure";
+  | "repeat-failure"
+  | "missing-root-manifest";
 
 export type ManagedRuntimePreparationOptions = {
   startupMode?: ManagedRuntimeStartupFixtureMode;
   launchId?: string;
   hostSubprocess?: boolean;
   retryReleaseFile?: string;
+  cacheRoot?: string;
+  registryHost?: string;
+  runtimeFamily?: "v1" | "v2";
 };
+
+export type IncompleteManagedRuntimeFixture = {
+  profile: AgentProfile;
+  packageSpec: string;
+  cacheRoot: string;
+  registry: ManagedRuntimeTestRegistry;
+  sharedRoot: string;
+  sentinels: ReturnType<typeof managedRuntimeStartupSentinels>;
+  npmInvocationLog?: string;
+  hostFixturePaths: string[];
+  releaseBackendEnv: () => Promise<void>;
+};
+
+function readOpenCodePackageSpec(backend: BackendContext): string {
+  const database = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+  try {
+    const row = database
+      .prepare("SELECT value FROM settings WHERE key = ?")
+      .get(OPENCODE_SELECTION_KEY) as { value: string } | undefined;
+    if (!row) throw new Error("OpenCode runtime selection must exist before managed-runtime setup");
+    const selection = JSON.parse(row.value) as {
+      family?: string;
+      selected_version?: string;
+      applied_default_version?: string;
+    };
+    const packageName = selection.family === "v2" ? "@opencode/cli" : "opencode-ai";
+    const versionsPath = path.resolve(
+      __dirname,
+      "../../../backend/internal/agent/agents/managed_npm_runtime_versions.json",
+    );
+    const versions = JSON.parse(fs.readFileSync(versionsPath, "utf8")) as Record<string, string>;
+    const version =
+      selection.selected_version || selection.applied_default_version || versions[packageName];
+    if (!version) throw new Error(`managed OpenCode package ${packageName} has no exact version`);
+    return `${packageName}@${version}`;
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Starts one isolated managed runtime with a private local registry and a
+ * per-test execution cache. The wrapper only models npm's first ENOENT; the
+ * agentctl owner performs the private install through the real npm executable.
+ */
+export async function prepareIncompleteManagedRuntimeProfile(
+  apiClient: ApiClient,
+  backend: BackendContext,
+  options: ManagedRuntimePreparationOptions & { seedHealthyCache?: boolean } = {},
+): Promise<IncompleteManagedRuntimeFixture> {
+  const launchId = options.launchId ?? randomUUID();
+  const cacheRoot =
+    options.cacheRoot ?? `/tmp/kandev-managed-npm-cache-${createSha512(launchId).slice(0, 12)}`;
+  selectManagedRuntimeFamily(backend, options.runtimeFamily);
+  const packageSpec = readOpenCodePackageSpec(backend);
+  const registry = await startManagedRuntimeTestRegistry({
+    root: backend.tmpDir,
+    packageSpec,
+    binName: "opencode",
+    advertisedHost: options.registryHost,
+  });
+  const sharedRoot = path.join(cacheRoot, "_npx", managedRuntimeExecutionCacheKey(packageSpec));
+  const binDirectory = path.join(backend.tmpDir, "managed-runtime-bin");
+  const hostFixturePaths: string[] = [];
+  const npxPath = path.join(binDirectory, "npx");
+  fs.mkdirSync(binDirectory, { recursive: true });
+  fs.copyFileSync(path.resolve(__dirname, "../fixtures/managed-runtime-npx.sh"), npxPath);
+  fs.chmodSync(npxPath, 0o755);
+  hostFixturePaths.push(npxPath);
+
+  let npmInvocationLog: string | undefined;
+  if (options.hostSubprocess) {
+    const realNpmPath = execFileSync("which", ["npm"], { encoding: "utf8" }).trim();
+    // Keep Node available when the native OpenCode directory is excluded.
+    const nodePath = path.join(binDirectory, "node");
+    fs.symlinkSync(process.execPath, nodePath);
+    hostFixturePaths.push(nodePath);
+    const npmPath = path.join(binDirectory, "npm");
+    npmInvocationLog = path.join(backend.tmpDir, `managed-runtime-npm-${launchId}.log`);
+    fs.writeFileSync(
+      npmPath,
+      `#!/bin/sh\nnode -e 'require("node:fs").appendFileSync(process.env.E2E_NPM_EXEC_LOG, JSON.stringify(process.argv.slice(1))+"\\n")' -- "$@"\nexec "${realNpmPath}" "$@" 2>> "$E2E_NPM_EXEC_LOG.stderr"\n`,
+      { mode: 0o755 },
+    );
+    hostFixturePaths.push(npmPath);
+  }
+
+  seedManagedRuntimeExecutionTree(cacheRoot, packageSpec, "opencode", launchId);
+  if (!options.seedHealthyCache) fs.rmSync(path.join(sharedRoot, "package.json"));
+
+  const inheritedPath = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  const pathWithoutNativeOpenCode = inheritedPath.filter(
+    (directory) => !fs.existsSync(path.join(directory, "opencode")),
+  );
+  const mockAgentPath = path.resolve(__dirname, "../../../backend/bin/mock-agent");
+  const backendEnv = {
+    KANDEV_MOCK_AGENT: "true",
+    NPM_CONFIG_CACHE: cacheRoot,
+    NPM_CONFIG_REGISTRY: registry.url,
+    // npm prefers lowercase config inherited from package-manager scripts.
+    npm_config_registry: registry.url,
+    NPM_CONFIG_AUDIT: "false",
+    NPM_CONFIG_FUND: "false",
+    E2E_NPX_MODE: "missing-root-manifest",
+    KANDEV_E2E_NPX_MOCK_OTHERS: "true",
+    E2E_NPX_LAUNCH_ID: "managed-runtime-host-probe",
+    E2E_MOCK_AGENT_PATH: mockAgentPath,
+    E2E_REAL_NPX: execFileSync("which", ["npx"], { encoding: "utf8" }).trim(),
+    E2E_NPM_EXEC_LOG: npmInvocationLog ?? "",
+    PATH: [
+      binDirectory,
+      path.resolve(__dirname, "../../../backend/bin"),
+      ...pathWithoutNativeOpenCode,
+    ].join(path.delimiter),
+  };
+  const releaseBackendEnv = await backend.useEnv(backendEnv);
+
+  let profileId = "";
+  try {
+    const { agents: persistedAgents } = await apiClient.listAgents();
+    const managedAgent = persistedAgents.find((agent) => agent.name === MANAGED_RUNTIME_AGENT_NAME);
+    if (!managedAgent)
+      throw new Error("OpenCode managed runtime is missing from the agent catalogue");
+    const profileEnv = [
+      { key: "NPM_CONFIG_CACHE", value: cacheRoot },
+      { key: "NPM_CONFIG_REGISTRY", value: registry.url },
+      { key: "npm_config_registry", value: registry.url },
+      { key: "NPM_CONFIG_AUDIT", value: "false" },
+      { key: "NPM_CONFIG_FUND", value: "false" },
+      { key: "E2E_NPX_MODE", value: options.startupMode ?? "missing-root-manifest" },
+      { key: "E2E_NPX_LAUNCH_ID", value: launchId },
+      {
+        key: "E2E_PRIVATE_ROOT_MARKER",
+        value: path.join(cacheRoot, "kandev-e2e-private-roots"),
+      },
+    ];
+    if (options.hostSubprocess) {
+      profileEnv.push({ key: "E2E_MOCK_AGENT_PATH", value: mockAgentPath });
+      profileEnv.push({ key: "E2E_REAL_NPX", value: backendEnv.E2E_REAL_NPX });
+      profileEnv.push({ key: "E2E_NPM_EXEC_LOG", value: npmInvocationLog ?? "" });
+    }
+    const profile = await apiClient.createAgentProfile(
+      managedAgent.id,
+      "E2E incomplete npm runtime",
+      {
+        model: MANAGED_RUNTIME_TEST_MODEL,
+        env_vars: profileEnv,
+      },
+    );
+    profileId = profile.id;
+    return {
+      profile,
+      packageSpec,
+      cacheRoot,
+      registry,
+      sharedRoot,
+      sentinels: managedRuntimeStartupSentinels(packageSpec, launchId, cacheRoot),
+      npmInvocationLog,
+      hostFixturePaths,
+      releaseBackendEnv: async () => {
+        selectManagedRuntime(backend, true);
+        await releaseBackendEnv();
+      },
+    };
+  } catch (error) {
+    if (profileId) await apiClient.deleteAgentProfile(profileId, true).catch(() => undefined);
+    selectManagedRuntime(backend, true);
+    await releaseBackendEnv().catch(() => undefined);
+    await registry.close().catch(() => undefined);
+    for (const fixturePath of hostFixturePaths) fs.rmSync(fixturePath, { force: true });
+    throw error;
+  }
+}
+
+/** Seed a complete exact-package npx execution tree that can later be damaged. */
+export function seedManagedRuntimeExecutionTree(
+  cacheRoot: string,
+  packageSpec: string,
+  binName: string,
+  launchId: string,
+) {
+  const separator = packageSpec.lastIndexOf("@");
+  const packageName = packageSpec.slice(0, separator);
+  const version = packageSpec.slice(separator + 1);
+  const executionRoot = path.join(cacheRoot, "_npx", managedRuntimeExecutionCacheKey(packageSpec));
+  const packageDirectory = path.join(executionRoot, "node_modules", ...packageName.split("/"));
+  const binDirectory = path.join(executionRoot, "node_modules", ".bin");
+  fs.mkdirSync(path.join(packageDirectory, "bin"), { recursive: true });
+  fs.mkdirSync(binDirectory, { recursive: true });
+  fs.writeFileSync(path.join(executionRoot, "package.json"), JSON.stringify({ private: true }));
+  fs.writeFileSync(
+    path.join(packageDirectory, "package.json"),
+    JSON.stringify({ name: packageName, version, bin: { [binName]: `bin/${binName}.js` } }),
+  );
+  fs.writeFileSync(path.join(packageDirectory, "bin", `${binName}.js`), "#!/bin/sh\nexit 1\n", {
+    mode: 0o755,
+  });
+  const link = path.join(binDirectory, binName);
+  if (!fs.existsSync(link)) {
+    fs.symlinkSync(
+      path.relative(binDirectory, path.join(packageDirectory, "bin", `${binName}.js`)),
+      link,
+    );
+  }
+  const safeLaunchId = launchId.replace(/[^A-Za-z0-9_-]/g, "_");
+  fs.mkdirSync(path.join(cacheRoot, "_npx", "0123456789abcdef"), { recursive: true });
+  const sentinels = managedRuntimeStartupSentinels(packageSpec, launchId, cacheRoot);
+  fs.writeFileSync(sentinels.selected, "preserved\n");
+  fs.writeFileSync(sentinels.sibling, "preserved\n");
+  return { executionRoot, packageDirectory, binDirectory, safeLaunchId };
+}
 
 /**
  * The real managed OpenCode agent is enabled only for this container-backed
