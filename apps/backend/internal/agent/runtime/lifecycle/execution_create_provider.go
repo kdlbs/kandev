@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -31,7 +32,12 @@ func (m *Manager) prepareExecutionProvider(ctx context.Context, info *WorkspaceI
 	}
 	options, err := m.resolveManagedRuntimeCommandOptions(ctx, models.ExecutorType(info.ExecutorType).Runtime(), config)
 	if err != nil {
-		return nil, err
+		// Cancellation belongs to the caller; any other runtime-resolution
+		// failure leaves the provider unavailable like a missing agent.
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		return workspaceOnlyProviderFallback(info, agentLaunch, err)
 	}
 	return &executionCreateProvider{
 		agentConfig:    config,
