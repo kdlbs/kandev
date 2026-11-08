@@ -272,6 +272,7 @@ var webPushDefaultEvents = []string{
 	EventTaskSessionPermissionAsked,
 	EventTaskSessionFailed,
 	EventTaskSessionTurnFinished,
+	EventTaskChildStallUndeliverable,
 }
 
 // EnsureWebPushProvider creates the user's Web Push provider on first use. An

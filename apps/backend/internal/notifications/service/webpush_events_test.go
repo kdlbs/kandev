@@ -70,7 +70,7 @@ func TestEnsureWebPushProviderCreatesOneProviderWithAttentionEvents(t *testing.T
 	for _, sub := range repo.subscriptions[pushProviders[0].ID] {
 		events[sub.EventType] = true
 	}
-	for _, want := range []string{EventTaskSessionPermissionAsked, EventTaskSessionFailed, EventTaskSessionClarificationAsked, EventTaskSessionTurnFinished} {
+	for _, want := range []string{EventTaskSessionPermissionAsked, EventTaskSessionFailed, EventTaskSessionClarificationAsked, EventTaskSessionTurnFinished, EventTaskChildStallUndeliverable} {
 		if !events[want] {
 			t.Errorf("default web push events missing %s", want)
 		}
