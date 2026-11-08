@@ -23,6 +23,8 @@ type recordingPassthroughRunner struct {
 	readyOrPending  bool
 }
 
+const initialPassthroughSelectedVersion = "1.0.104"
+
 func (r *recordingPassthroughRunner) Start(_ context.Context, req process.InteractiveStartRequest) (*process.InteractiveProcessInfo, error) {
 	r.startReq = req
 	r.startCalls++
@@ -69,6 +71,7 @@ func newCopilotPassthroughInitialManager(t *testing.T) (*Manager, *AgentExecutio
 	mgr.profileResolver = &mockPassthroughProfileResolver{
 		agentName: agents.CopilotACPAgentID, cliPassthrough: true, profile: profile,
 	}
+	mgr.managedRuntimeSelections = &copilotSelectionReader{version: initialPassthroughSelectedVersion}
 	mgr.SetCopilotPluginRunner(pluginRunner)
 	pty := &recordingPassthroughRunner{}
 	mgr.passthroughRunnerOverride = pty
@@ -88,7 +91,8 @@ func TestCopilotPluginInitialPassthroughStartsSupportedSelection(t *testing.T) {
 	))
 	version, ok := copilotplugins.RuntimeVersionFromCommand(pty.startReq.Command)
 	require.True(t, ok, "passthrough command must carry the selected managed runtime")
-	require.True(t, copilotplugins.RuntimeSupported(version), "selected runtime %q must be supported", version)
+	require.Equal(t, initialPassthroughSelectedVersion, version,
+		"passthrough command must retain the selected managed runtime")
 }
 
 func TestCopilotPluginInitialPassthroughEmptySelectionStarts(t *testing.T) {

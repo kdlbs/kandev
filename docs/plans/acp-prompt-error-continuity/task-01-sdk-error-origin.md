@@ -98,7 +98,7 @@ None. This work order supplies the SDK dependency for Task 02.
 ## Inputs
 
 - [Design: SDK response provenance](../../specs/platform/system-design/acp-prompt-error-continuity.md#sdk-response-provenance)
-- [Requirements: 004](../../specs/platform/requirements/transient-turn-runtime-continuity.md#req-platform-turn-continuity-004-continue-chat-after-acp-prompt-errors)
+- [Requirements: 004](../../specs/platform/requirements/acp-prompt-error-continuity.md#req-platform-turn-continuity-004-continue-chat-after-acp-prompt-errors)
 - The current fork's `Connection.handleResponse`, `SendRequest`, `waitForResponse`, and notification barriers.
 - The host's `internal/agentctl/server/acp/connection.go` logger-ready wrapper.
 

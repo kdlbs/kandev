@@ -70,3 +70,33 @@ func marshalCompactionTestValue(t *testing.T, value any) []byte {
 	}
 	return encoded
 }
+
+func TestContextCompactionValidReportingRejectsEveryUnsupportedField(t *testing.T) {
+	base := ContextCompactionObservation{
+		Kind:     ContextCompactionObservationKindReporting,
+		Provider: "copilot-acp",
+	}
+	cases := []struct {
+		name         string
+		availability string
+		coverage     string
+		want         bool
+	}{
+		{name: "availability only", availability: ContextCompactionAvailabilityUnavailable, want: true},
+		{name: "coverage only", coverage: ContextCompactionCoveragePartial, want: true},
+		{name: "both", availability: ContextCompactionAvailabilityAvailable, coverage: ContextCompactionCoverageObserved, want: true},
+		{name: "unsupported availability with valid coverage", availability: "unknown", coverage: ContextCompactionCoverageObserved, want: false},
+		{name: "unsupported coverage with valid availability", availability: ContextCompactionAvailabilityAvailable, coverage: "unknown", want: false},
+		{name: "empty update", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			observation := base
+			observation.Availability = tc.availability
+			observation.Coverage = tc.coverage
+			if got := observation.ValidReporting(); got != tc.want {
+				t.Fatalf("ValidReporting() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

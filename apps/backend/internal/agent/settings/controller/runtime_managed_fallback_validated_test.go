@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -57,9 +58,19 @@ func (s *validatingSelectionStore) SaveValidated(
 	return nil
 }
 
+func nextRuntimeMinorVersion(t *testing.T, version string) string {
+	t.Helper()
+	parsed, err := managedruntime.ParseStableVersion(version)
+	if err != nil {
+		t.Fatalf("unexpected stable version %q: %v", version, err)
+	}
+	return fmt.Sprintf("%d.%d.0", parsed.Major(), parsed.Minor()+1)
+}
+
 type fallbackHarness struct {
 	agent     *agents.OpenCodeACP
 	spec      agents.ManagedNPMRuntimeSpec
+	target    string
 	updater   *recoveryRuntimeUpdater
 	selection *validatingSelectionStore
 }
@@ -74,11 +85,13 @@ func newFallbackHarness(t *testing.T) *fallbackHarness {
 	ag := agents.NewOpenCodeACP()
 	spec := ag.ManagedNPMRuntime()
 	defaultVersion := spec.DefaultVersionOrPinned()
+	target := nextRuntimeMinorVersion(t, defaultVersion)
 	return &fallbackHarness{
-		agent: ag,
-		spec:  spec,
+		agent:  ag,
+		spec:   spec,
+		target: target,
 		updater: &recoveryRuntimeUpdater{
-			metadata:     RuntimeVersionMetadata{Latest: "1.19.0", Versions: []string{"1.19.0", "1.18.30", defaultVersion}},
+			metadata:     RuntimeVersionMetadata{Latest: target, Versions: []string{target, "1.18.30", defaultVersion}},
 			currentFound: true,
 			current:      hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.0"},
 			probeCaps:    hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: defaultVersion},
@@ -125,11 +138,11 @@ func TestManagedFallbackPreviewReportsValidatedDefaultAsCurrent(t *testing.T) {
 	if _, found, _ := h.selection.Get(ctx, h.agent.ID(), h.spec.Package); found {
 		t.Fatal("return to default persisted an operator selection")
 	}
-	assertFallbackPreview(t, c, "1.19.0", defaultVersion, "update")
+	assertFallbackPreview(t, c, h.target, defaultVersion, "update")
 	assertFallbackPreview(t, c, defaultVersion, defaultVersion, "up_to_date")
 
 	restarted, _ := h.controller()
-	assertFallbackPreview(t, restarted, "1.19.0", defaultVersion, "update")
+	assertFallbackPreview(t, restarted, h.target, defaultVersion, "update")
 	if caps, _ := h.updater.CurrentCapabilities(h.agent.ID()); caps.AgentVersion != "1.0.0" {
 		t.Fatalf("fallback published candidate as native host capabilities: %+v", caps)
 	}
@@ -143,12 +156,12 @@ func TestManagedFallbackIgnoresValidatedVersionThatIsNoLongerEffective(t *testin
 		t.Fatal(err)
 	}
 	c, _ := h.controller()
-	assertFallbackPreview(t, c, "1.19.0", "", "repair")
+	assertFallbackPreview(t, c, h.target, "", "repair")
 
 	if err := h.selection.SaveValidated(ctx, h.agent.ID(), "other-package", h.spec.DefaultVersionOrPinned()); err != nil {
 		t.Fatal(err)
 	}
-	assertFallbackPreview(t, c, "1.19.0", "", "repair")
+	assertFallbackPreview(t, c, h.target, "", "repair")
 }
 
 // @covers AC-AGENTS-RUNTIME-NOTIFY-001.8
@@ -172,5 +185,5 @@ func TestManagedFallbackRecordFailureKeepsActivationSucceeded(t *testing.T) {
 	if _, found, _ := h.selection.Get(ctx, h.agent.ID(), h.spec.Package); found {
 		t.Fatal("return to default was not committed")
 	}
-	assertFallbackPreview(t, c, "1.19.0", "", "repair")
+	assertFallbackPreview(t, c, h.target, "", "repair")
 }

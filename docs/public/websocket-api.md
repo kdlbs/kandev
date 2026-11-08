@@ -1034,6 +1034,8 @@ overlap, even after client state is rebuilt.
 When both fields are absent, clients preserve their current projection and
 reconcile through normal session refetch after a gap.
 
+Session detail and compact session payloads carry `agent_workspace_path`, the confirmed native working directory of the current session incarnation. It is `null` when Kandev has no committed generation evidence. `workspace_path` remains the effective Files root, and `worktree_path` remains the primary checkout, so the three values can differ after a live repository attachment promotes the task root without restarting the agent. Ready and materialization events also publish `agent_workspace_path`; a client that receives a partial event without the field must preserve its current value, while an explicit `null` clears it.
+
 File changes are batched for up to 100 ms and flushed immediately at 50 entries. `session.shell.output` also represents shell exit events through its payload. Treat all stream messages as lossy and refresh session/Git status after a gap.
 
 ### User-, run-, and metrics-scoped broadcasts

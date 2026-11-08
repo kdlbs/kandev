@@ -1512,6 +1512,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		DeliveryStreamID:               reqWithWorktree.DeliveryStreamID,
 		DeliveryIncarnationID:          reqWithWorktree.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:      reqWithWorktree.DeliveryHarnessGeneration,
+		CopilotNativeSessionEvents:     m.copilotNativeLaunchAllowed(rt, agentConfig.ID(), reqWithWorktree.DeliveryStreamID),
 		DurableJournalHostRoot:         m.dataDir,
 		DurableJournalOwnerID:          journalOwnerID,
 		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
@@ -2518,6 +2519,7 @@ func (m *Manager) buildExecutionFromInstance(
 ) (*AgentExecution, error) {
 	execution := execInstance.ToAgentExecution(execReq)
 	execution.ExecutionProfileID = executionProfileID(req)
+	m.applyCopilotNativeLaunchCapability(execution, rt, execReq.DeliveryStreamID)
 	if profileInfo != nil {
 		execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
 	}
@@ -2840,6 +2842,13 @@ func (m *Manager) stopRegisteredLaunchRuntime(
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	execution.agentctlLifecycleMu.Lock()
 	defer execution.agentctlLifecycleMu.Unlock()
+	// Release remote files before the runtime (and its helper endpoint) stops.
+	if client := execution.currentAgentCtlClient(); client != nil {
+		if err := m.cleanupProjectMCPFiles(context.Background(), execution, client); err != nil {
+			m.logger.Warn("failed to release project MCP files during registered launch rollback",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
+	}
 	if rt != nil && execInstance != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		retainedRuntime := retainsRuntimeOnLaunchRollback(execution)
@@ -2912,6 +2921,14 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
 		zap.String("reason", reason))
+	// Cleanup may use the client while the lifecycle write lease is already
+	// held; never re-acquire it here.
+	if client := execution.currentAgentCtlClient(); client != nil {
+		if err := m.cleanupProjectMCPFiles(context.Background(), execution, client); err != nil {
+			m.logger.Warn("failed to release project MCP files during launch rollback",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
+	}
 	if rt != nil && execInstance != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -2925,6 +2942,7 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 		client.Close()
 	}
 	execution.EndSessionSpan()
+	execution.clearProjectMCPDelivery()
 	m.cleanupPassthroughMCPConfig(execution)
 }
 
@@ -3147,7 +3165,7 @@ func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
 // configureAndStartAgent configures the agent command and starts the agent subprocess.
 // Returns the effective boot command (full command with adapter args, or base command).
 func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentExecution) (string, error) {
-	return m.configureAndStartAgentWithPreparedArgs(ctx, execution, nil)
+	return m.configureAndStartAgentWithPreparation(ctx, execution, nil)
 }
 
 func (m *Manager) configureAndStartAgentWithPreparedArgs(
@@ -3155,36 +3173,26 @@ func (m *Manager) configureAndStartAgentWithPreparedArgs(
 	execution *AgentExecution,
 	preparedArgs []string,
 ) (string, error) {
-	runtimeSnapshot := execution.RuntimeEnvironment()
-	metadata := execution.MetadataSnapshot()
-	metadataEnv := runtimeEnvFromMetadata(metadata)
-	var env map[string]string
-	if runtimeSnapshot == nil {
-		env = cloneStringMap(metadataEnv)
-		if env == nil {
-			env = make(map[string]string)
-		}
-		if err := m.mergeAgentProfileEnvForExecution(ctx, execution, env); err != nil {
-			m.updateExecutionError(execution.ID, "failed to resolve agent profile environment: "+err.Error())
-			return "", fmt.Errorf("resolve agent profile environment: %w", err)
-		}
-	} else if !hasRuntimeEnvOverlay(metadata) {
-		// Without a SetExecutionEnv overlay the snapshot is the environment
-		// this launch composed, including the managed credential broker
-		// values its helper entries expand. Nothing newer can replace them.
-		env = runtimeSnapshot
-	} else {
-		// SetExecutionEnv carries per-run values such as repository credentials.
-		// Compose them with the launch snapshot without re-reading profile
-		// secrets. Generated credential entries are filtered here, while the normal
-		// agentctl Configure boundary composes the request with the instance's
-		// canonical environment and preserves inherited user entries.
-		var err error
-		env, err = composeExecutionRuntimeEnvironment(runtimeSnapshot, metadataEnv)
-		if err != nil {
-			m.updateExecutionError(execution.ID, "failed to compose agent env: "+err.Error())
-			return "", fmt.Errorf("compose agent environment: %w", err)
-		}
+	return m.configureAndStartAgentWithPreparedArgsAndPreparation(ctx, execution, preparedArgs, nil)
+}
+
+func (m *Manager) configureAndStartAgentWithPreparation(
+	ctx context.Context,
+	execution *AgentExecution,
+	preparation *agentctltypes.ManagedRuntimePreparationDirective,
+) (string, error) {
+	return m.configureAndStartAgentWithPreparedArgsAndPreparation(ctx, execution, nil, preparation)
+}
+
+func (m *Manager) configureAndStartAgentWithPreparedArgsAndPreparation(
+	ctx context.Context,
+	execution *AgentExecution,
+	preparedArgs []string,
+	preparation *agentctltypes.ManagedRuntimePreparationDirective,
+) (string, error) {
+	env, err := m.environmentForPreparedLaunch(ctx, execution)
+	if err != nil {
+		return "", err
 	}
 	normalizeManagedGitHelperEnvironment(execution.RuntimeName, env)
 	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
@@ -3218,11 +3226,25 @@ func (m *Manager) configureAndStartAgentWithPreparedArgs(
 			return "", err
 		}
 	}
-	if err := client.ConfigureAgent(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, execution.LaunchWrapper); err != nil {
+	delivery, err := execution.mcpProjectDeliveryFor(client)
+	if err != nil {
+		return "", err
+	}
+	if delivery != nil {
+		if err := client.RequireCapability(ctx, agentctltypes.ProjectMCPDeliveryCapability); err != nil {
+			return "", err
+		}
+	}
+	if err := client.ConfigureAgentWithProjectDelivery(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, execution.LaunchWrapper); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 
-	fullCommand, err := client.Start(ctx)
+	var fullCommand string
+	if preparation != nil {
+		fullCommand, err = client.StartWithManagedRuntimePreparation(ctx, *preparation)
+	} else {
+		fullCommand, err = client.Start(ctx)
+	}
 	if err != nil {
 		m.updateExecutionError(execution.ID, "failed to start agent: "+err.Error())
 		return "", fmt.Errorf("failed to start agent: %w", err)
@@ -3233,6 +3255,43 @@ func (m *Manager) configureAndStartAgentWithPreparedArgs(
 		bootCommand = execution.AgentCommand
 	}
 	return bootCommand, nil
+}
+
+func (m *Manager) environmentForPreparedLaunch(ctx context.Context, execution *AgentExecution) (map[string]string, error) {
+	runtimeSnapshot := execution.RuntimeEnvironment()
+	metadata := execution.MetadataSnapshot()
+	metadataEnv := runtimeEnvFromMetadata(metadata)
+	var env map[string]string
+	switch {
+	case runtimeSnapshot == nil:
+		env = cloneStringMap(metadataEnv)
+		if env == nil {
+			env = make(map[string]string)
+		}
+		if err := m.mergeAgentProfileEnvForExecution(ctx, execution, env); err != nil {
+			m.updateExecutionError(execution.ID, "failed to resolve agent profile environment: "+err.Error())
+			return nil, fmt.Errorf("resolve agent profile environment: %w", err)
+		}
+	case !hasRuntimeEnvOverlay(metadata):
+		// Without a SetExecutionEnv overlay the snapshot is the environment
+		// this launch composed, including the managed credential broker
+		// values its helper entries expand. Nothing newer can replace them.
+		env = runtimeSnapshot
+	default:
+		// SetExecutionEnv carries per-run values such as repository credentials.
+		// Compose them with the launch snapshot without re-reading profile
+		// secrets. Generated credential entries are filtered here, while the normal
+		// agentctl Configure boundary composes the request with the instance's
+		// canonical environment and preserves inherited user entries.
+		var err error
+		env, err = composeExecutionRuntimeEnvironment(runtimeSnapshot, metadataEnv)
+		if err != nil {
+			m.updateExecutionError(execution.ID, "failed to compose agent env: "+err.Error())
+			return nil, fmt.Errorf("compose agent environment: %w", err)
+		}
+	}
+
+	return env, nil
 }
 
 // hasRuntimeEnvOverlay reports whether SetExecutionEnv delivered a per-run

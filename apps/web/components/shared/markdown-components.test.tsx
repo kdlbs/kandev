@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/no-duplicate-string -- Shared workspace fixtures repeat across surface cases. */
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -13,7 +14,10 @@ const appState = vi.hoisted(() => ({
         "session-1": {
           worktree_path: "/root/.kandev/tasks/example/kandev",
         },
-      } as Record<string, { worktree_path: string; workspace_path?: string }>,
+      } as Record<
+        string,
+        { worktree_path: string; workspace_path?: string; agent_workspace_path?: string | null }
+      >,
     },
   },
 }));
@@ -431,6 +435,51 @@ describe("markdownComponents workspace roots", () => {
 
     expect(openFile).toHaveBeenNthCalledWith(1, "kandev/docs/specs/native/spec.md");
     expect(openFile).toHaveBeenNthCalledWith(2, "plugin/ui/bundle.js");
+  });
+
+  it("opens a promoted session's relative link in its original checkout", () => {
+    appState.value.taskSessions.items["session-1"] = {
+      worktree_path: "/root/.kandev/tasks/example/kandev",
+      workspace_path: "/root/.kandev/tasks/example",
+      agent_workspace_path: "/root/.kandev/tasks/example/kandev",
+    };
+
+    render(<Markdown>{"[base image work order](implementation_plans/task-00.md)"}</Markdown>);
+
+    fireEvent.click(screen.getByRole("link", { name: "base image work order" }));
+
+    expect(openFile).toHaveBeenCalledWith("kandev/implementation_plans/task-00.md");
+  });
+
+  it("keeps an explicit source prefix without adding the native base twice", () => {
+    appState.value.taskSessions.items["session-1"] = {
+      worktree_path: "/root/.kandev/tasks/example/kandev",
+      workspace_path: "/root/.kandev/tasks/example",
+      agent_workspace_path: "/root/.kandev/tasks/example/kandev",
+    };
+
+    render(
+      <MarkdownFileLinkContext.Provider
+        value={{
+          worktreePath: "/root/.kandev/tasks/example",
+          relativeBasePath: "/root/.kandev/tasks/example/kandev",
+          onOpenFile: openFile,
+          fileRootAliases: [
+            {
+              repositoryId: "repo-plugin",
+              sourceRoot: "/home/jcfs/projects/plugin",
+              workspaceRelativeRoot: "plugin",
+            },
+          ],
+        }}
+      >
+        <Markdown>{"[sibling](plugin/ui/bundle.js)"}</Markdown>
+      </MarkdownFileLinkContext.Provider>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "sibling" }));
+
+    expect(openFile).toHaveBeenCalledWith("plugin/ui/bundle.js");
   });
 });
 

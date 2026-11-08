@@ -364,6 +364,10 @@ type Handlers struct {
 	reviewRunner       ReviewRunner
 	pluginSvc          *plugins.Service
 	canvasAuthoringSvc CanvasAuthoringService
+	// pluginToolAuthEnabled reports whether endpoint authentication is
+	// enforced; external workspace scope fails closed when it cannot resolve a
+	// real caller identity.
+	pluginToolAuthEnabled func() bool
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation            TaskPRAutomationService

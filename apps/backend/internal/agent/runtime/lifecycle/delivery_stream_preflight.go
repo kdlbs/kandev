@@ -72,11 +72,14 @@ func (sm *StreamManager) initialDeliveryReplayCursor(ctx context.Context, execut
 // While no native identity, SQL generation, cursor, or submission exists for the
 // incarnation, replay its retained events from zero; the existing bootstrap
 // processor waits for committed authority before writing receipts or acknowledgments.
+// An explicit fresh-start replacement may also replay the selected stream whose
+// committed SQL predecessor is exactly one positive generation behind it. Any
+// receipt, projection, or acknowledgement still waits for the successor commit.
 // Explicit history continuations retain their prepared-checkpoint admission.
 func canReplayFreshBootstrapEvents(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, status *agentctl.DeliveryStatus) bool {
 	stream := status.Stream
-	if execution.ForceContextContinuation || !execution.deliveryBootstrap.Load() || execution.ACPSessionID != "" ||
-		execution.RequiredNativeConversationID != "" || execution.DeliveryHarnessGeneration != 1 || stream == nil || stream.FirstRetained != 1 ||
+	if execution == nil || execution.ForceContextContinuation || execution.ACPSessionID != "" || execution.RequiredNativeConversationID != "" ||
+		stream == nil || stream.FirstRetained != 1 ||
 		stream.Acknowledged != 0 || status.Unresolved || status.SubmissionCount != 0 || len(status.Submissions) != 0 || status.SubmissionsTruncated {
 		return false
 	}
@@ -87,16 +90,21 @@ func canReplayFreshBootstrapEvents(ctx context.Context, execution *AgentExecutio
 	if !supported {
 		return false
 	}
-	_, err := reader.GetCurrentHarnessSessionGeneration(ctx, execution.SessionID, execution.DeliveryIncarnationID)
-	return errors.Is(err, models.ErrTaskSessionNotFound)
+	current, err := reader.GetCurrentHarnessSessionGeneration(ctx, execution.SessionID, execution.DeliveryIncarnationID)
+	if execution.deliveryBootstrap.Load() {
+		return execution.DeliveryHarnessGeneration == 1 && errors.Is(err, models.ErrTaskSessionNotFound)
+	}
+	return err == nil && execution.DeliveryHarnessGeneration > 1 && current != nil && current.Generation > 0 &&
+		replacementGenerationPending(execution, current)
 }
 
-// A fresh-start replacement or authorized context continuation can retain
-// setup events before SQL commits its successor generation. Replay them from
-// zero; event processing still waits for that commit before any receipt.
+// An authorized context continuation can retain setup events before SQL
+// commits its successor generation. Replay them from zero; event processing
+// still waits for that commit before any receipt. Fresh-start replacements are
+// admitted by canReplayFreshBootstrapEvents with its stricter identity checks.
 func canReplaySuccessorSetupEvents(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, status *agentctl.DeliveryStatus) bool {
 	stream := status.Stream
-	if !execution.replacesPredecessorGeneration() || stream == nil || stream.FirstRetained != 1 || stream.Acknowledged != 0 ||
+	if !execution.ForceContextContinuation || stream == nil || stream.FirstRetained != 1 || stream.Acknowledged != 0 ||
 		status.Unresolved || status.SubmissionCount != 0 || len(status.Submissions) != 0 || status.SubmissionsTruncated {
 		return false
 	}

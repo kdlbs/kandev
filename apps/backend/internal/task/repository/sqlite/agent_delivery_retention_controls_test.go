@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -196,4 +197,16 @@ func protectRetentionControl(t *testing.T, repo *Repository, event *models.Agent
 	}
 	_, err := repo.db.ExecContext(t.Context(), repo.db.Rebind(query), event.StreamID, event.Sequence)
 	require.NoError(t, err)
+}
+
+// TestRetentionControlAllowlistKeepsCompactionObservationsProtected pins the
+// boundary that an observation payload is not generic control data: retiring it
+// would discard the only durable evidence of a native compaction attempt.
+func TestRetentionControlAllowlistKeepsCompactionObservationsProtected(t *testing.T) {
+	if strings.Contains(agentDeliveryRetentionControlTypesSQL, "context_compaction_observation") {
+		t.Fatal("compaction observations must stay protected retention barriers")
+	}
+	if !strings.Contains(agentDeliveryRetentionControlTypesSQL, "'context_window'") {
+		t.Fatal("existing generic control types must remain prunable")
+	}
 }

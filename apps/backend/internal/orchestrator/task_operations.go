@@ -24,6 +24,7 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/editors/capabilities"
 	"github.com/kandev/kandev/internal/events"
@@ -5747,11 +5748,13 @@ func (s *Service) CancelTaskExecution(ctx context.Context, taskID string, reason
 	return err
 }
 
-// CancelTaskExecutionSynchronously stops every active session for a task and
-// waits for each runtime process to exit. Archive and delete cascades use this
-// boundary so an unarchive cannot race a late asynchronous stop callback.
+// CancelTaskExecutionSynchronously stops every session that still has a
+// runtime for a task and waits for each process to exit. It includes terminal
+// rows because a previous stop can persist CANCELLED before runtime teardown
+// fails. Archive and delete cascades use this boundary so cleanup cannot race
+// a late asynchronous stop callback.
 func (s *Service) CancelTaskExecutionSynchronously(ctx context.Context, taskID, reason string, force bool) error {
-	sessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		return err
 	}
@@ -7753,15 +7756,21 @@ func (s *Service) finishPromptExecutorDispatch(
 		return nil, &acceptedPromptDispatchError{err: publicationErr}
 	}
 	if delivery != nil {
-		if completionErr := delivery.markCompleted(context.WithoutCancel(ctx)); completionErr != nil {
-			recoveryErr := s.deliveryRecoveryError(
-				context.WithoutCancel(ctx), sessionID, "backend_delivery_completion_failed", delivery,
-			)
-			return &PromptResult{
-					StopReason: result.StopReason, AgentMessage: result.AgentMessage, TurnID: rollback.turnID,
-				}, &acceptedPromptDispatchError{
-					err: errors.Join(completionErr, recoveryErr),
-				}
+		// A foreground handoff releases the prompt without a terminal delivery
+		// event. Keep the submission dispatching so the real terminal event
+		// settles its exact submission. A terminal that already projected
+		// before this return keeps its authoritative outcome.
+		if result.StopReason != streams.EventTypeForegroundIdle {
+			if completionErr := delivery.markCompleted(context.WithoutCancel(ctx)); completionErr != nil {
+				recoveryErr := s.deliveryRecoveryError(
+					context.WithoutCancel(ctx), sessionID, "backend_delivery_completion_failed", delivery,
+				)
+				return &PromptResult{
+						StopReason: result.StopReason, AgentMessage: result.AgentMessage, TurnID: rollback.turnID,
+					}, &acceptedPromptDispatchError{
+						err: errors.Join(completionErr, recoveryErr),
+					}
+			}
 		}
 	}
 	return &PromptResult{StopReason: result.StopReason, AgentMessage: result.AgentMessage, TurnID: rollback.turnID}, nil
@@ -11416,8 +11425,10 @@ func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID st
 	if err := s.finishCancelledAgentTurnWithFreshContext(ctx, sessionID, prepared); err != nil {
 		return err
 	}
-	s.acknowledgeRetainedPromptFailure(prepared.identity)
 	s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
+	// Settlement can wait for ordered stream consumers that need this guard.
+	guard.unlock()
+	s.acknowledgeRetainedPromptFailure(prepared.identity)
 
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil
