@@ -1038,6 +1038,13 @@ type CancelledResumeExecutionCleanupFunc func(
 // stop still runs, while orphan cleanup uses the record to avoid duplicating it.
 type ExecutionStopOwnerRegistrationFunc func(sessionID, agentExecutionID string, force bool)
 
+// ExecutionReplacementStopOwnerRegistrationFunc requires an exact-execution
+// teardown claim before a profile replacement stops the old execution.
+type ExecutionReplacementStopOwnerRegistrationFunc func(
+	ctx context.Context,
+	sessionID, agentExecutionID string,
+) bool
+
 // TaskReviewStateReconcileFunc is called when runtime work stopped and the
 // parent task should move to REVIEW only if no session is still STARTING/RUNNING.
 type TaskReviewStateReconcileFunc func(ctx context.Context, taskID, completedSessionID string)
@@ -1211,6 +1218,8 @@ type Executor struct {
 	// Callback for registering explicit exact-execution teardown ownership before
 	// a legacy stop persists CANCELLED. The requested stop always runs.
 	onExecutionStopOwnerRegistration ExecutionStopOwnerRegistrationFunc
+	// Profile replacements abort when the exact stop cannot be coordinated with cancellation.
+	onExecutionReplacementStopOwnerRegistration ExecutionReplacementStopOwnerRegistrationFunc
 
 	// Callback for REVIEW reconciliation after runtime start failures. Set by the
 	// orchestrator so failed-start writes share the same serialized guard as
@@ -1621,6 +1630,13 @@ func (e *Executor) SetOnCancelledResumeExecutionCleanup(fn CancelledResumeExecut
 // SetOnExecutionStopOwnerRegistration sets the explicit-stop ownership registrar.
 func (e *Executor) SetOnExecutionStopOwnerRegistration(fn ExecutionStopOwnerRegistrationFunc) {
 	e.onExecutionStopOwnerRegistration = fn
+}
+
+// SetOnExecutionReplacementStopOwnerRegistration sets the required replacement-stop claim.
+func (e *Executor) SetOnExecutionReplacementStopOwnerRegistration(
+	fn ExecutionReplacementStopOwnerRegistrationFunc,
+) {
+	e.onExecutionReplacementStopOwnerRegistration = fn
 }
 
 // SetOnTaskReviewStateReconcile sets the guarded task REVIEW reconciliation
