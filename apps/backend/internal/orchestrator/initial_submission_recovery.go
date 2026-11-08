@@ -464,6 +464,7 @@ func (s *Service) wrapInitialSubmissionReplayPrompt(
 	taskID, sessionID, prompt string,
 	attachments []v1.MessageAttachment,
 	session *models.TaskSession,
+	promptReferenceContext string,
 ) (string, error) {
 	if session == nil || session.ID != sessionID || session.TaskID != taskID {
 		return "", errors.New("initial task submission replay session identity changed")
@@ -496,7 +497,7 @@ func (s *Service) wrapInitialSubmissionReplayPrompt(
 	}
 	return s.wrapCreatedSessionPrompt(
 		ctx, prompt, taskID, sessionID, session, dbTask,
-		isOfficeTask, configMode, titleOwner, includeCanvasGuidance, nil, "",
+		isOfficeTask, configMode, titleOwner, includeCanvasGuidance, nil, promptReferenceContext,
 	), nil
 }
 
@@ -525,6 +526,7 @@ func (s *Service) replayInitialPromptSubmission(
 	ctx context.Context,
 	taskID, sessionID string,
 	submission *models.InitialPromptSubmission,
+	prepared *initialRecoveryPrompt,
 	attempt *resumeAttempt,
 ) error {
 	if submission == nil || attempt == nil || !submission.HasReplayableContent() {
@@ -540,12 +542,17 @@ func (s *Service) replayInitialPromptSubmission(
 		s.cleanupCancelledResumeAttempt(attempt)
 		return err
 	}
+	prompt := submission.Content
+	planMode := submission.PlanMode
 	options := promptTaskOptions{
 		capacityIntent:                  turnCapacityOverride,
 		resumeAttempt:                   attempt,
 		firstLaunchPromptContext:        true,
 		preserveInitialSubmissionReplay: true,
 		disableDispatchRetry:            true,
+		// The cached retry prompt must stay raw so a later dynamic fallback
+		// composes the current workflow instructions exactly once.
+		retryPrompt: &submission.Content,
 		beforeProviderAdmission: func() error {
 			if err := s.validateResumeAttempt(attempt); err != nil {
 				return err
@@ -567,8 +574,15 @@ func (s *Service) replayInitialPromptSubmission(
 			registry.releaseInitialPromptHold(attempt)
 		},
 	}
+	if prepared != nil {
+		prompt = prepared.content
+		planMode = prepared.planMode
+		options.promptReferenceContext = prepared.referenceContext
+		options.promptReferencesPrepared = true
+		options.ceilingEntryBinding = prepared.binding
+	}
 	_, err := s.promptTask(
-		ctx, taskID, sessionID, submission.Content, "", submission.PlanMode,
+		ctx, taskID, sessionID, prompt, "", planMode,
 		submission.Attachments, false, launchOriginManual, options,
 	)
 	return err
