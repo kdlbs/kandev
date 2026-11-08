@@ -103,19 +103,32 @@ func (r *workspaceDeleteSecretRecorder) calls() []string {
 	return append([]string(nil), r.workspaceID...)
 }
 
+type workspaceDeleteCleanupJobRow struct {
+	ID          string    `db:"id"`
+	OperationID string    `db:"operation_id"`
+	TaskID      string    `db:"task_id"`
+	Trigger     string    `db:"trigger"`
+	State       string    `db:"state"`
+	Attempts    int       `db:"attempts"`
+	LastError   string    `db:"last_error"`
+	CreatedAt   time.Time `db:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at"`
+}
+
 type workspaceDeleteFixture struct {
-	database   *sqlx.DB
-	repo       *sqliterepo.Repository
-	workspaces *workspaceDeleteObservedWorkspaceRepo
-	tasks      *workspaceDeleteObservedTaskRepo
-	service    *service.Service
-	router     *gin.Engine
-	dispatch   *ws.Dispatcher
-	canvas     *workspaceDeleteCanvasRecorder
-	secrets    *workspaceDeleteSecretRecorder
-	units      *orgunit.Service
-	eventMu    sync.Mutex
-	observed   []*bus.Event
+	database    *sqlx.DB
+	repo        *sqliterepo.Repository
+	workspaces  *workspaceDeleteObservedWorkspaceRepo
+	tasks       *workspaceDeleteObservedTaskRepo
+	service     *service.Service
+	router      *gin.Engine
+	dispatch    *ws.Dispatcher
+	canvas      *workspaceDeleteCanvasRecorder
+	secrets     *workspaceDeleteSecretRecorder
+	units       *orgunit.Service
+	eventMu     sync.Mutex
+	observed    []*bus.Event
+	cleanupJobs []workspaceDeleteCleanupJobRow
 }
 
 func newWorkspaceDeleteFixture(t *testing.T) *workspaceDeleteFixture {
@@ -171,6 +184,7 @@ func newWorkspaceDeleteFixture(t *testing.T) *workspaceDeleteFixture {
 	})
 	require.NoError(t, err)
 	RegisterWorkspaceRoutes(f.router, f.dispatch, f.service, log)
+	f.cleanupJobs = f.snapshotCleanupJobs(t)
 	return f
 }
 
@@ -237,6 +251,17 @@ func (f *workspaceDeleteFixture) countRows(t *testing.T, table, column, value st
 	require.NoError(t, f.database.GetContext(t.Context(), &count,
 		fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s = ?", table, column), value))
 	return count
+}
+
+func (f *workspaceDeleteFixture) snapshotCleanupJobs(t *testing.T) []workspaceDeleteCleanupJobRow {
+	t.Helper()
+	var jobs []workspaceDeleteCleanupJobRow
+	require.NoError(t, f.database.SelectContext(t.Context(), &jobs, `
+		SELECT id, operation_id, task_id, trigger, state, attempts, last_error, created_at, updated_at
+		FROM task_resource_cleanup_jobs
+		ORDER BY id
+	`))
+	return jobs
 }
 
 type workspaceDeleteResult struct {
@@ -329,6 +354,7 @@ func (f *workspaceDeleteFixture) requireNoDeleteProgress(t *testing.T, workspace
 	require.Empty(t, canvasWorkspaceIDs, "denied or invalid delete must not clean canvases")
 	require.Empty(t, canvasTaskIDs, "denied or invalid delete must not clean task canvases")
 	require.Empty(t, f.secrets.calls(), "denied or invalid delete must not delete secrets")
+	require.Equal(t, f.cleanupJobs, f.snapshotCleanupJobs(t), "denied or invalid delete must not create cleanup jobs")
 	require.Empty(t, f.eventsOfType(events.WorkspaceDeleted), "denied or invalid delete must not publish workspace.deleted")
 	require.Empty(t, f.eventsOfType(events.WorkflowDeleted), "denied or invalid delete must not publish workflow.deleted")
 	require.Empty(t, f.eventsOfType(events.TaskDeleted), "denied or invalid delete must not publish task.deleted")

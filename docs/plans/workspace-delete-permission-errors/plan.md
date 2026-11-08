@@ -267,7 +267,7 @@ and `workspace_delete_errors_test.go`. No other production file changed.
 | Implementation check | Exact result |
 | --- | --- |
 | Causal RED overlay | Reverted only the two mapper branches through a temporary Go overlay. Exit 1 with 13 expected subtest failures: four error-projection cases, six HTTP/WS permission denials, the wrong-name permission-order case, and both storage-text cases. Success, hidden/missing parity, admin, foreign-org, validation, and rollback controls passed. |
-| Targeted GREEN gate | Exit 0. The five named tests passed for both transports, including real membership/resolver denials, retained dependent rows, zero cleanup calls, and typed storage rollback. |
+| Targeted GREEN gate | Exit 0. The five named tests passed for both transports, including real membership/resolver denials, retained dependent rows, zero cleanup calls, unchanged resource-cleanup job rows, and typed storage rollback. |
 | Existing deletion handler tests | Exit 0. `TestHTTPDeleteWorkspace*` and `TestWSDeleteWorkspace*` passed with typed absence fixtures. |
 | Existing service deletion tests | Exit 0. `TestService_DeleteWorkspace*` passed with unchanged cascade, cleanup, rollback, and event behavior. |
 | Race variants of all three gates | Exit 0. No race reports. |

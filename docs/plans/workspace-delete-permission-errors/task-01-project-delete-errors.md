@@ -176,6 +176,9 @@ use `repoerrors.ErrWorkspaceNotFound`. New coverage lives in
   storage-text cases. Success and privacy controls passed on that baseline.
 - GREEN: the five named tests passed; `TestHTTPDeleteWorkspace*`,
   `TestWSDeleteWorkspace*`, and `TestService_DeleteWorkspace*` passed.
+- Denial coverage snapshots `task_resource_cleanup_jobs` before and after the
+  request and requires the records to remain unchanged, so a job inserted
+  without invoking the recorded inventory or cleanup callbacks cannot pass.
 - Race variants of all three gates passed. Full `internal/task/handlers` and
   `internal/task/service` packages passed. `go build -trimpath ./...` passed.
 - `scripts/lint-go-changed` reported 0 issues after `gofmt`.
