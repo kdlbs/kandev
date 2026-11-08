@@ -98,13 +98,26 @@ func (m *Manager) stopPersistedStandaloneRecord(
 	if err := m.stopWorkspaceRuntime(ctx, backend, instance, force); err != nil {
 		return fmt.Errorf("stop persisted standalone runtime: %w", err)
 	}
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	if err := m.deleteExecutorRunningRow(cleanupCtx, row.SessionID, row.AgentExecutionID); err != nil &&
-		!errors.Is(err, models.ErrExecutorRunningNotFound) {
-		return fmt.Errorf("delete persisted standalone runtime row: %w", err)
+	if err := m.repairPersistedStandaloneRow(ctx, row); err != nil {
+		return fmt.Errorf("repair persisted standalone runtime row: %w", err)
 	}
 	m.clearRemoteStatus(row.SessionID)
+	return nil
+}
+
+// repairPersistedStandaloneRow keeps the row resumable for a later explicit
+// continuation while clearing its live process handle.
+func (m *Manager) repairPersistedStandaloneRow(ctx context.Context, row *models.ExecutorRunning) error {
+	if cas, ok := m.runningWriter.(interface {
+		RepairExecutorRunningDeadIfCurrent(context.Context, string, string, time.Time) error
+	}); ok {
+		return cas.RepairExecutorRunningDeadIfCurrent(ctx, row.SessionID, row.AgentExecutionID, row.UpdatedAt)
+	}
+	if repair, ok := m.runningWriter.(interface {
+		RepairExecutorRunningDead(context.Context, string) error
+	}); ok {
+		return repair.RepairExecutorRunningDead(ctx, row.SessionID)
+	}
 	return nil
 }
 

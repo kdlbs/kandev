@@ -259,13 +259,11 @@ func TestStandaloneRetainedAdoptionFailurePreservesPeer(t *testing.T) {
 		_, tracked := stopManager.executionStore.Get(stopExecution.ID)
 		require.False(t, tracked)
 
-		persistedID, err := stopManager.GetExecutionIDForSession(context.Background(), "session-1")
-		require.NoError(t, err)
-		require.Equal(t, stopExecution.ID, persistedID)
 		require.NoError(t, stopManager.StopBySessionID(context.Background(), "session-1", false))
 		require.Equal(t, int32(1), stopBackend.stopCount.Load(),
 			"explicit Stop must reach the detached peer through its persisted runtime row")
-		require.Equal(t, 1, writer.deleteCalls)
+		require.Equal(t, 0, writer.deleteCalls, "the stopped row must remain resumable")
+		require.Equal(t, 1, writer.repairCalls)
 	})
 }
 

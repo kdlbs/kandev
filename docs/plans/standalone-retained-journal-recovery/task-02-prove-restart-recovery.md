@@ -230,6 +230,9 @@ Integration:
 - A lost create response after the replacement journal owner was created is
   reconciled by the next attempt, which disposes that exact owner before
   reopening its journal.
+- The existing mobile dynamic-unclassified-fallback E2E was reproduced during
+  fixup and passes after persisted Stop repairs the runtime row instead of
+  deleting its resumable evidence.
 - A task-service regression proves workspace restore carries the persisted
   built-in binding from the runtime inventory into `WorkspaceInfo`.
 - The E2E runs exercise the full backend with its real SQLite persistence,
@@ -241,7 +244,7 @@ Verification:
 - `go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle -run '^TestStandaloneRetainedWorkspaceRestoreKeepsBuiltinBinding$' -count=1 -v` passed.
 - `go test -trimpath -tags fts5 ./internal/task/service -run '^TestGetWorkspaceInfoForSessionCarriesRetainedBuiltinBinding$' -count=1 -v` passed.
 - `bash scripts/lint-go-changed` over all changed and untracked Go files: 0 issues.
-- Full `./internal/agent/runtime/lifecycle` package passed (final run 192.2s).
+- Full `./internal/agent/runtime/lifecycle` package passed (final run 170.5s).
 - Full `./internal/task/service` package passed (final run 84.1s).
 - `./internal/agentctl/server/process` package passed (final run 231.3s).
 - Desktop: `pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/session/agent-survival-restart.spec.ts` passed 3 tests.

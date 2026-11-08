@@ -558,12 +558,9 @@ func localWorkspaceExpectedRepository(info *WorkspaceInfo, repository WorkspaceR
 
 // GetExecutionIDForSession returns the execution ID for a session from the in-memory
 // execution store. Returns empty string and error if no execution is found.
-func (m *Manager) GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error) {
+func (m *Manager) GetExecutionIDForSession(_ context.Context, sessionID string) (string, error) {
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
 		return execution.ID, nil
-	}
-	if row := m.liveStandaloneExecutionRow(ctx, sessionID); row != nil {
-		return row.AgentExecutionID, nil
 	}
 	return "", fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 }
