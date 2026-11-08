@@ -124,6 +124,21 @@ Negative controls on the unmodified base:
   `env key "SHARED_TOKEN" unavailable`. Base has no grant field. The temporary
   test was removed after the run.
 
+Mutation control on the fix:
+
+- In a disposable source export, the executor-profile path was changed to
+  resolve `profile.EnvVars` without `withoutSecretShares`. With that change,
+  `TestExecutorProfileBindingsNeverHonorAgentProfileShares` failed because the
+  collaborator resolved the shared value. Restoring the file made the test
+  pass again. The candidate checkout was not modified.
+
+Known limits:
+
+- Only `startAgentOnPreparedWorkspace` requires a launch actor. Other prepared
+  and internal starts keep their existing contracts, and some bookkeeping runs
+  before admission. See
+  [Scope and limits](../../specs/executors/system-design/prepared-launch-actor.md#scope-and-limits).
+
 ## Risks
 
 - **Disclosure.** A grant discloses the value to every authorized starter's

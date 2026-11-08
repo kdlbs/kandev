@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // Synthetic accounts: owner-a and collaborator-b share org-1, outsider-c is
@@ -225,13 +226,33 @@ func TestSharedProfileSecretAuthDisabledStaysUnscoped(t *testing.T) {
 	}
 }
 
+// An executor profile row carrying a grant (a legacy or direct write) must not
+// let the session environment reveal another user's secret, even with an
+// active same-org grantor that would satisfy an agent-profile share.
 func TestExecutorProfileBindingsNeverHonorAgentProfileShares(t *testing.T) {
-	m := newSharedSecretManager(t, activeGrantors(activeOwner))
-	_, err := m.resolveAgentProfileEnvVars(sharedSecretCtx(sharedTestCollab, sharedTestOrg),
-		withoutSecretShares(sharedBinding(sharedSecretID, sharedTestOwner)))
-	if !errors.Is(err, ErrProfileSecretUnavailable) {
-		t.Fatalf("stripped share resolved: %v", err)
+	const profileID = "synthetic-executor-profile"
+	reader := &fakeExecutorProfileReader{
+		session: &models.TaskSession{ID: "session-1", ExecutorProfileID: profileID},
+		profiles: map[string]*models.ExecutorProfile{
+			profileID: {ID: profileID, EnvVars: sharedBinding(sharedSecretID, sharedTestOwner)},
+		},
 	}
+	m := newSharedSecretManager(t, activeGrantors(activeOwner))
+	m.SetExecutorProfileReader(reader)
+
+	ownerEnv, err := m.ExecutorProfileEnvForSession(sharedSecretCtx(sharedTestOwner, sharedTestOrg), "session-1", "")
+	if err != nil || ownerEnv[sharedTestEnvKey] != sharedSecretValue {
+		t.Fatalf("owner executor profile env = %v", err)
+	}
+
+	collabEnv, err := m.ExecutorProfileEnvForSession(sharedSecretCtx(sharedTestCollab, sharedTestOrg), "session-1", "")
+	if !errors.Is(err, ErrProfileSecretUnavailable) {
+		t.Fatalf("collaborator resolved an executor profile share: %v", err)
+	}
+	if len(collabEnv) != 0 {
+		t.Fatalf("collaborator received executor profile env: %d entries", len(collabEnv))
+	}
+	assertNoSecretLeak(t, err)
 }
 
 func sharedStrictManager(t *testing.T) *Manager {

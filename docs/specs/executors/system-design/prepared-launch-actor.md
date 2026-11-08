@@ -21,12 +21,16 @@ the [implementation plan](../../../plans/shared-profile-account-boundaries/plan.
 
 | Requirement | Design sections |
 | --- | --- |
-| REQ-EXECUTORS-PREPARED-LAUNCH-ACTOR-001 | Control flow; Launch option; Failure behavior |
+| REQ-EXECUTORS-PREPARED-LAUNCH-ACTOR-001 | Control flow; Launch option; Scope and limits; Failure behavior |
 
 ## Control flow
 
+The guarded start is reached only through the session-resume path, for a
+CREATED session that already has an `executors_running` row:
+
 ```text
-StartCreatedSession / attemptColdResume
+ensureSessionRunning* -> runResumeAttempt -> coldResumeSession
+  -> attemptColdResume                          (CREATED + executors_running row)
   -> Service.startAgentOnPreparedWorkspace      (RequireExecutorActor: true)
   -> launchPreparedSessionWithDynamicFallback   (options carried unchanged)
   -> Executor.launchPreparedSession
@@ -36,6 +40,10 @@ StartCreatedSession / attemptColdResume
        requirePreparedLaunchActor(ctx, opts)    <- new
        worktree recovery, agent profile, runtime StartAgentProcess / LaunchAgent
 ```
+
+`StartCreatedSession` and its variants do not reach
+`startAgentOnPreparedWorkspace`. They call `launchPreparedSessionWithDynamicFallback`
+directly without the option. See [Scope and limits](#scope-and-limits).
 
 The check runs under the per-session launch lock, after admission and before:
 
@@ -70,6 +78,36 @@ Admission keeps these properties:
   durable actor.
 - A deleted or disabled durable actor does not resolve, so the context stays
   identity-free and this check refuses the start.
+
+## Scope and limits
+
+Only `startAgentOnPreparedWorkspace` sets the option. These other prepared or
+internal launches keep their existing contracts. They still pass through the
+same executor admission and use any caller identity in the context, but they
+add no required-actor check:
+
+- `startCreatedSession`, including every `StartCreatedSession*` variant;
+- `startTask`, for prepared launches of a new task;
+- `launchPreparedDynamicRelaunch`, the prepared mode of a dynamic relaunch;
+- `Executor.ExecuteWithFullProfile`.
+
+Even on the guarded path, these steps run before admission can refuse the
+start:
+
+- `startAgentOnPreparedWorkspace` checks the context ceiling and calls
+  `ClaimTaskTitleSession`. A refused start can therefore leave a first-turn
+  title claim on the session.
+- `launchPreparedSessionWithDynamicFallback` checks the context ceiling again.
+  When a dynamic profile resolver is wired, it also reads the session and
+  computes the dynamic launch decision. Its continuation input is built from
+  stored task, conversation, and plan data.
+- On the concrete path, `launchConcretePreparedSession` runs fixed-profile and
+  ceiling dispatch admission, and commits the ceiling-entry dispatch before
+  calling the executor.
+
+These steps read stored state and record title and dispatch bookkeeping. They
+do not resolve profile secrets, start a runtime process, or deliver a prompt.
+They are disclosed as limits of this change, not as covered behavior.
 
 ## Failure behavior
 

@@ -112,7 +112,12 @@ go test -trimpath -race -count=1 -timeout 600s \
   - A partial resolution drops only the denied entry.
   - Cancellation propagates.
   - Auth-disabled resolution stays unscoped.
-  - Executor-profile bindings never use agent-profile grants.
+  - Executor-profile bindings never use agent-profile grants. The test goes
+    through `ExecutorProfileEnvForSession` with a granted executor-profile row
+    and an active same-org grantor. The owner resolves the value; the
+    collaborator gets `ErrProfileSecretUnavailable` and no environment.
+    Removing `withoutSecretShares` from that path in a disposable copy made
+    the test fail.
   - Strict resolution honors only the exact binding and names the profile and
     reason on denial.
 - **Controller.** The following are covered:
