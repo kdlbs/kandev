@@ -1,5 +1,10 @@
 ---
 status: in_progress
+requirements:
+  - REQ-COSTS-TIER-LIMITS-001
+  - REQ-COSTS-TIER-LIMITS-002
+system_design:
+  - ../../specs/costs/system-design/provider-tier-limits.md
 ---
 
 # Provider account tier limits delivery

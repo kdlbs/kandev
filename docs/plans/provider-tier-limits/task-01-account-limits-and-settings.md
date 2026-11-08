@@ -1,5 +1,21 @@
 ---
+id: 01-account-limits-and-settings
+title: Account limits and settings
 status: in progress
+wave: 1
+depends_on: []
+plan: plan.md
+requirements:
+  - REQ-COSTS-TIER-LIMITS-001
+acceptance_criteria:
+  - AC-COSTS-TIER-LIMITS-001.1
+  - AC-COSTS-TIER-LIMITS-001.2
+  - AC-COSTS-TIER-LIMITS-001.3
+  - AC-COSTS-TIER-LIMITS-001.4
+  - AC-COSTS-TIER-LIMITS-001.5
+  - AC-COSTS-TIER-LIMITS-001.6
+system_design:
+  - ../../specs/costs/system-design/provider-tier-limits.md
 ---
 
 # Account limits and settings
