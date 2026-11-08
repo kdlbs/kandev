@@ -1046,6 +1046,51 @@ func TestEnsureWorkspaceExecutionForSession_CreatesOwnExecutionInSharedTaskEnvir
 	}
 }
 
+type siblingDuringEnvironmentLookupProvider struct {
+	*mockWorkspaceInfoProvider
+	onEnvironment func()
+}
+
+func (p *siblingDuringEnvironmentLookupProvider) GetWorkspaceInfoForEnvironment(ctx context.Context, taskEnvironmentID string) (*WorkspaceInfo, error) {
+	if p.onEnvironment != nil {
+		p.onEnvironment()
+		p.onEnvironment = nil
+	}
+	return p.mockWorkspaceInfoProvider.GetWorkspaceInfoForEnvironment(ctx, taskEnvironmentID)
+}
+
+func TestGetOrEnsureExecutionForEnvironmentDoesNotShareSiblingUnderSessionKey(t *testing.T) {
+	provider := &siblingDuringEnvironmentLookupProvider{mockWorkspaceInfoProvider: &mockWorkspaceInfoProvider{
+		envInfos: map[string]*WorkspaceInfo{"env-1": {
+			TaskID: "task-1", SessionID: "session-1", TaskEnvironmentID: "env-1",
+			WorkspacePath: "/workspace/task-1", AgentID: "auggie",
+		}},
+	}}
+	mgr, backend := newEnvironmentExecutionTestManager(t, provider)
+	sibling := &AgentExecution{
+		ID: "exec-sibling", SessionID: "session-2", TaskID: "task-1", TaskEnvironmentID: "env-1",
+		Status: v1.AgentStatusRunning, agentctl: newReadyAgentctlClient(t, newTestLogger()),
+	}
+	// The sibling appears after the environment fast path but before the
+	// session-keyed slot runs, whose result session-1 peers would receive.
+	provider.onEnvironment = func() {
+		if err := mgr.executionStore.Add(sibling); err != nil {
+			t.Errorf("add sibling execution: %v", err)
+		}
+	}
+
+	got, err := mgr.GetOrEnsureExecutionForEnvironment(context.Background(), "env-1")
+	if err != nil {
+		t.Fatalf("GetOrEnsureExecutionForEnvironment returned error: %v", err)
+	}
+	if got.ID == sibling.ID || got.SessionID != "session-1" {
+		t.Fatalf("shared result = %q owned by %q, want session-1's own execution", got.ID, got.SessionID)
+	}
+	if backend.createCount.Load() != 1 {
+		t.Fatalf("CreateInstance calls = %d, want 1", backend.createCount.Load())
+	}
+}
+
 func TestCreateExecutionResolvesProfileOnceForEnvAndAutoApprove(t *testing.T) {
 	profileResolver := &countingProfileResolver{
 		info: &AgentProfileInfo{

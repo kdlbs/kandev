@@ -196,12 +196,9 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 			}
 			return execution, nil
 		}
-		if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
-			if err := m.ensureWorkspaceSessionAdmitted(sharedCtx, info.TaskID, info); err != nil {
-				return nil, err
-			}
-			return execution, nil
-		}
+		// This slot is keyed by info.SessionID, so session-keyed peers receive
+		// its result. A sibling's execution that appeared after the fast path
+		// must not be shared under this session's key.
 		// createExecution publishes AgentctlStarting before spawning the
 		// waitForAgentctlReady goroutine, so frontend gates flip out of
 		// `undefined` even on this lazy-create path.
