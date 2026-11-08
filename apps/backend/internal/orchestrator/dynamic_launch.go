@@ -1828,7 +1828,7 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 	launchMode := dynamicRelaunchLaunchModeCreated
 	if officeErr != nil || isOfficeTask {
 		launchMode = dynamicRelaunchLaunchModePrepared
-	} else if origin == launchOriginManual {
+	} else if origin == launchOriginManual && s.dynamicRelaunchHasResumeSource(ctx, data.SessionID) {
 		launchMode = dynamicRelaunchLaunchModePrompt
 	}
 	if !s.stopDynamicRelaunchPredecessor(ctx, data.AgentExecutionID) {
@@ -1847,7 +1847,17 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 	return task, session, prompt, launchMode, true
 }
 
+// stopDynamicRelaunchPredecessor stops the execution a relaunch replaces and
+// reports whether the successor may launch. An absent predecessor counts as
+// stopped: an empty execution ID (the restart orphan sweep can leave a route
+// with no recorded execution) or a runtime that confirms the execution is gone.
+// Every other stop error keeps the relaunch from launching over an unresolved
+// teardown.
 func (s *Service) stopDynamicRelaunchPredecessor(ctx context.Context, agentExecutionID string) bool {
+	if agentExecutionID == "" {
+		s.logger.Debug("dynamic fallback predecessor has no recorded execution")
+		return true
+	}
 	if s.lspLeases != nil {
 		s.lspLeases.StopLSPLeasesForExecution(agentExecutionID)
 	}
