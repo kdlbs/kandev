@@ -15,6 +15,7 @@ import (
 func (f *deliverFixture) mergeWake(t *testing.T, kind mergestate.Kind) (changeKey string) {
 	t.Helper()
 	changeKey = "github|github.com|repo-9|42"
+	f.svc.merge = true
 	f.fix.addTask(t, "tm", "wf-a")
 	f.conv.tasks["tm"] = &taskmodels.Task{ID: "tm", Identifier: "KAN-tm", Title: "merge task"}
 	in := ChangeObservationInput{WorkspaceID: f.c.WorkspaceID, ChangeKey: changeKey}
@@ -81,5 +82,24 @@ func TestDeliverMergeWakeOutsideWatchIsSuperseded(t *testing.T) {
 	}
 	if f.sender.count() != 0 {
 		t.Fatalf("a wake for an unwatched card was delivered")
+	}
+}
+
+func TestDeliverMergeWakeHeldWhileFlagOff(t *testing.T) {
+	f := newDeliverFixture(t)
+	f.mergeWake(t, mergestate.KindRed)
+	f.svc.merge = false
+	if err := f.deliver(); err != nil {
+		t.Fatal(err)
+	}
+	if f.sender.count() != 0 {
+		t.Fatal("a merge wake was delivered with the flag off")
+	}
+	var status string
+	if err := f.store.db.QueryRow(f.store.db.Rebind(`SELECT status FROM coordinator_wakes WHERE kind = 'change_red'`)).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "pending" {
+		t.Fatalf("status = %s, want the wake retained pending", status)
 	}
 }

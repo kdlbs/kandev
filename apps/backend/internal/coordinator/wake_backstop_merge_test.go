@@ -29,6 +29,7 @@ func (e *wakeEnv) openEpisode(t *testing.T, changeKey string, p mergestate.Pipel
 func TestBackstopDerivesMissingMergeWakes(t *testing.T) {
 	e := newWakeEnv(t)
 	e.fix.addTask(t, "tm", "wf-a")
+	e.svc.merge = true
 	e.svc.SetChangeLinks(fakeChangeLinks{byChange: map[string][]string{testChangeKey: {"tm"}}})
 	e.openEpisode(t, testChangeKey, mergestate.PipelineRed)
 
@@ -46,6 +47,7 @@ func TestBackstopDerivesMissingMergeWakes(t *testing.T) {
 func TestBackstopSkipsBaselineAndUnlinkedAndAutonomyOff(t *testing.T) {
 	e := newWakeEnv(t)
 	e.fix.addTask(t, "tm", "wf-a")
+	e.svc.merge = true
 	e.svc.SetChangeLinks(fakeChangeLinks{byChange: map[string][]string{testChangeKey: {"tm"}}})
 	baseline := ChangeObservationInput{WorkspaceID: "ws-1", ChangeKey: "github|github.com|r1|7"}
 	baseline.Obs = mergeObs(1, "h1", mergestate.PipelineRed, mergestate.ConflictClear, 0)
@@ -70,10 +72,22 @@ func TestBackstopMergeWakeRespectsWatchSet(t *testing.T) {
 	e.fix.addTask(t, "tm", "wf-elsewhere")
 	mustExec(t, e.store, `UPDATE coordinators SET watch_scope = 'selected' WHERE id = ?`, e.fix.c.ID)
 	mustExec(t, e.store, `INSERT INTO coordinator_watches (coordinator_id, workflow_id, workspace_id, created_at) VALUES (?, 'wf-a', 'ws-1', ?)`, e.fix.c.ID, mergeObs(0, "", "", 0, 0).StartedAt)
+	e.svc.merge = true
 	e.svc.SetChangeLinks(fakeChangeLinks{byChange: map[string][]string{testChangeKey: {"tm"}}})
 	e.openEpisode(t, testChangeKey, mergestate.PipelineRed)
 	e.pass(t)
 	if got := pendingWakeKinds(t, e.store, e.fix.c.ID); len(got) != 0 {
 		t.Fatalf("wake for a card outside the watch set: %v", got)
+	}
+}
+
+func TestBackstopMergeWakesOffWithFlagOff(t *testing.T) {
+	e := newWakeEnv(t)
+	e.fix.addTask(t, "tm", "wf-a")
+	e.svc.SetChangeLinks(fakeChangeLinks{byChange: map[string][]string{testChangeKey: {"tm"}}})
+	e.openEpisode(t, testChangeKey, mergestate.PipelineRed)
+	e.pass(t)
+	if got := pendingWakeKinds(t, e.store, e.fix.c.ID); len(got) != 0 {
+		t.Fatalf("merge wake derived with the flag off: %v", got)
 	}
 }

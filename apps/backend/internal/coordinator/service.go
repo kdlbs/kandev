@@ -167,6 +167,11 @@ type Service struct {
 	// features.coordinatorAnswer): the answer tool, proposing and approving.
 	answer bool
 
+	// merge is true when merge stewardship is effective (phase 3 effective and
+	// features.coordinatorMerge): change wakes, repository merge policy and
+	// merge proposals.
+	merge bool
+
 	// learningHealth computes the Learning section's health line; guarded by observerMu.
 	learningHealth LearningHealthReader
 	// automatic holds the automatic path's injectable seams.
@@ -183,8 +188,10 @@ type Service struct {
 	// scope; guarded by wakeMu.
 	projects ProjectReader
 	// changeLinks resolves the tasks linked to a change; nil disables merge wakes.
-	changeLinks  ChangeLinks
-	recorderSubs []bus.Subscription
+	changeLinks ChangeLinks
+	// changeObserver reads changes through the provider integrations.
+	changeObserver *ChangeObserver
+	recorderSubs   []bus.Subscription
 	// recorderStopped latches once StopWakeRecorder ran: later hook and event
 	// entries are refused. wakeInFlight counts handlers and hooks in flight.
 	recorderStopped bool

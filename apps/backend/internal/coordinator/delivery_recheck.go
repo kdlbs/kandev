@@ -82,6 +82,9 @@ func (s *Service) partitionWakes(ctx context.Context, src WakeSources, coord *Co
 		if len(keep) >= deliveryWakeLimit {
 			break
 		}
+		if w.Kind.IsMerge() && !s.merge {
+			continue
+		}
 		holds, err := s.wakeHolds(ctx, src, coord, g, repos, workflows, w)
 		if err != nil {
 			s.logger.Warn("coordinator delivery: episode read failed",

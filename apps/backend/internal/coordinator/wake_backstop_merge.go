@@ -14,7 +14,7 @@ import (
 func (b *WakeBackstop) recordMergeWakes(ctx context.Context, c *Coordinator) bool {
 	s := b.svc
 	links := s.changeLinkReader()
-	if links == nil {
+	if links == nil || !s.merge {
 		return true
 	}
 	open, err := s.store.ListOpenEpisodes(ctx, c.WorkspaceID)
@@ -66,7 +66,6 @@ func (b *WakeBackstop) linkedTasks(ctx context.Context, links ChangeLinks, works
 // watchedLinkedTasks returns the linked tasks that are live and in the
 // coordinator's Watches.
 func (b *WakeBackstop) watchedLinkedTasks(ctx context.Context, c *Coordinator, linked map[string][]string) (map[string]struct{}, bool) {
-	s := b.svc
 	seen := map[string]struct{}{}
 	var ids []string
 	for _, tasks := range linked {
@@ -77,24 +76,35 @@ func (b *WakeBackstop) watchedLinkedTasks(ctx context.Context, c *Coordinator, l
 			}
 		}
 	}
+	watched, err := b.svc.watchedTasksFor(ctx, c, ids)
+	if !b.mergeReadOK(ctx, "merge watched tasks", err) {
+		return nil, false
+	}
+	return watched, true
+}
+
+// watchedTasksFor returns the live tasks among ids that are in the
+// coordinator's Watches. A failed read is the error and the caller fails
+// closed.
+func (s *Service) watchedTasksFor(ctx context.Context, c *Coordinator, ids []string) (map[string]struct{}, error) {
 	if len(ids) == 0 {
-		return nil, true
+		return nil, nil
 	}
 	set, err := s.store.EffectiveWatchSet(ctx, s.store.ro, c.ID, c.WorkspaceID)
-	if !b.mergeReadOK(ctx, "merge watch set", err) {
-		return nil, false
+	if err != nil {
+		return nil, err
 	}
 	g, err := s.newWatchGate(ctx, set, c.WorkspaceID)
-	if !b.mergeReadOK(ctx, "merge watch gate", err) {
-		return nil, false
+	if err != nil {
+		return nil, err
 	}
 	workflows, err := s.store.TaskWorkflows(ctx, c.WorkspaceID, ids)
-	if !b.mergeReadOK(ctx, "merge task workflows", err) {
-		return nil, false
+	if err != nil {
+		return nil, err
 	}
 	repos, err := s.taskRepositoryIDs(ctx, g, ids)
-	if !b.mergeReadOK(ctx, "merge task repositories", err) {
-		return nil, false
+	if err != nil {
+		return nil, err
 	}
 	watched := map[string]struct{}{}
 	for id, workflow := range workflows {
@@ -102,5 +112,5 @@ func (b *WakeBackstop) watchedLinkedTasks(ctx context.Context, c *Coordinator, l
 			watched[id] = struct{}{}
 		}
 	}
-	return watched, true
+	return watched, nil
 }
