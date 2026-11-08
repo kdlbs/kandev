@@ -434,9 +434,10 @@ intentionally.
 The Host owns the `plugin_task_change_requests` ledger. Its unique key is
 `(installation_id, workspace_id, provider_id, provider_host, repository_id,
 number)` and terminal timestamps are nullable, matching the table existing
-installations already carry, so it opens without a migration. Disable fences new
-writes while keeping the installation's history, so a re-enable can reuse it;
-uninstall deletes the rows, and workspace deletion removes every row for that
+installations already carry, so it opens without a migration. Disable and
+uninstall delete the installation's rows after its conversations are cleaned
+up; a re-enabled plugin reports its change requests again. Workspace deletion
+removes every row for that
 workspace. An in-place upgrade keeps the installation identity
 but advances the approval revision, so a write approved for the old manifest is
 denied. `ListChangeRequestEvidenceExact` returns the calling

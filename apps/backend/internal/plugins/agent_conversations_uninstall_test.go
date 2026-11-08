@@ -264,3 +264,26 @@ func TestServiceUninstallPreservesChangeRequestsWhenManagedDetachFails(t *testin
 		t.Fatalf("rows after successful uninstall = %d, want 0", len(rows))
 	}
 }
+
+func TestServiceDisableDeletesChangeRequests(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	rec := installTestPlugin(t, svc, "kandev-plugin-notes")
+	ledger := newChangeRequestEvidenceStore(t)
+	svc.SetChangeRequestStore(ledger)
+	if _, _, err := ledger.ReportChangeRequest(context.Background(), state.ChangeRequestRecord{
+		InstallationID: rec.InstallationID, WorkspaceID: "ws-1", TaskID: "task-1",
+		ProviderID: "forgejo", RepositoryID: "repo-1", Number: 1, State: state.ChangeRequestStateOpen,
+	}); err != nil {
+		t.Fatalf("seed change request: %v", err)
+	}
+	if err := svc.Disable(rec.ID); err != nil {
+		t.Fatalf("Disable(): %v", err)
+	}
+	rows, err := ledger.ListChangeRequestsByTask(context.Background(), rec.InstallationID, "ws-1", "task-1")
+	if err != nil {
+		t.Fatalf("list after disable: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("rows after disable = %d, want 0", len(rows))
+	}
+}
