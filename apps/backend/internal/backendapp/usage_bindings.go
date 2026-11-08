@@ -120,8 +120,7 @@ func (a *usageProviderAdapter) bindingFor(profile *settingsmodels.AgentProfile, 
 	if profile == nil {
 		return usageBinding{}, false
 	}
-	if !snapshotHostBinding(profile) || snapshotCredentialOverride(profile) || snapshotProcessOverride(agentType) ||
-		(agentType == claudeACPAgentID && snapshotClaudeProviderUncertain(profile)) {
+	if !hostUsageBindingProved(profile, agentType) {
 		return usageBinding{}, false
 	}
 	home, _ := os.UserHomeDir()
@@ -166,6 +165,15 @@ func (a *usageProviderAdapter) bindingFor(profile *settingsmodels.AgentProfile, 
 		accountKey: accountPrefixProfile + ":" + profile.ID, source: "none",
 		modelID: profile.Model, class: fixedModelClass(agentusage.ModelClassUnknown),
 	}, true
+}
+
+// hostUsageBindingProved reports whether a host-run profile provably uses the
+// host account's own credentials, so the host account's usage is its usage.
+func hostUsageBindingProved(profile *settingsmodels.AgentProfile, agentType string) bool {
+	if agentType == claudeACPAgentID && snapshotClaudeProviderUncertain(profile) {
+		return false
+	}
+	return snapshotHostBinding(profile) && !snapshotCredentialOverride(profile) && !snapshotProcessOverride(agentType)
 }
 
 // ProfileUsage returns the profile's observed utilization when a client is
