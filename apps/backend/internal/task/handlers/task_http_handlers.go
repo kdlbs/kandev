@@ -316,7 +316,10 @@ func buildTaskDTOsWithSessionInfo(
 		log.Warn("failed to load pending actions for task list, using empty map", zap.Error(pendingErr))
 		pendingActionsBySession = map[string]models.TaskPendingAction{}
 	}
-	if summaryErr == nil {
+	// The empty pending-action fallback is display-only: repairing from it would
+	// persist a cleared pending action (or rebuild a missing summary without
+	// one), so a pending-action read failure skips repair like the boot builder.
+	if summaryErr == nil && pendingErr == nil {
 		var reconcileErr error
 		statusSummaries, reconcileErr = reconcileTaskStatusSummariesAfterRevision(
 			ctx, svc, log, tasks, statusSummaries, sessionsByTask, pendingActionsBySession,
