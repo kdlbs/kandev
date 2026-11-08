@@ -208,7 +208,7 @@ func (s *Service) persistDynamicLaunchDecision(
 	}
 	if session.ExecutionProfileID == decision.ExecutionProfileID &&
 		session.RouteGeneration == decision.Generation &&
-		decision.Status == "" {
+		decision.Status == "" && rejectedDynamicRuntimeExecution(session) == "" {
 		return nil
 	}
 	previousExecutionProfileID := session.ExecutionProfileID
@@ -231,7 +231,7 @@ func (s *Service) persistDynamicLaunchDecision(
 	if previousExecutionProfileID != decision.ExecutionProfileID {
 		session.DownstreamACPSessionID = ""
 	}
-	if DynamicCandidateRuntimeResetRequired(previousExecutionProfileID, decision.ExecutionProfileID) {
+	if DynamicCandidateSelectionResetRequired(session, previousExecutionProfileID) {
 		changed, err := s.persistDynamicCandidateRuntimeReset(ctx, session, expectedState, expectedUpdatedAt)
 		if err != nil {
 			return err
@@ -871,7 +871,7 @@ func (s *Service) reevaluatedDynamicLaunchDecision(
 }
 
 func (s *Service) persistReevaluatedDynamicSelection(ctx context.Context, observed, selected *models.TaskSession) (bool, error) {
-	if DynamicCandidateRuntimeResetRequired(observed.ExecutionProfileID, selected.ExecutionProfileID) {
+	if DynamicCandidateSelectionResetRequired(selected, observed.ExecutionProfileID) {
 		return s.PersistDynamicCandidateSwitch(ctx, selected, observed.State, observed.UpdatedAt)
 	}
 	lock := s.sessionSettingsSnapshotLock(selected.ID)
