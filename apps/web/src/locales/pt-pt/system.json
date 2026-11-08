@@ -858,6 +858,8 @@
   "archivedData.targetCleanupJobs": "Jobs de limpeza concluídos",
   "archivedData.targetRemoved_one": "{{count}} linha reduzida. Redução de bytes guardados: {{size}}.",
   "archivedData.targetRemoved_other": "{{count}} linhas reduzidas. Redução de bytes guardados: {{size}}.",
+  "archivedData.targetEstimated_one": "Estimativa: {{count}} linha a reduzir. Redução estimada de bytes guardados: {{size}}.",
+  "archivedData.targetEstimated_other": "Estimativa: {{count}} linhas a reduzir. Redução estimada de bytes guardados: {{size}}.",
   "archivedData.targetScanned": "{{rows}} linhas analisadas, {{eligible}} elegíveis, {{before}} guardados antes da passagem.",
   "archivedData.targetOversized_one": "{{count}} linha excedia o limite por linha e foi mantida intacta.",
   "archivedData.targetOversized_other": "{{count}} linhas excediam o limite por linha e foram mantidas intactas.",

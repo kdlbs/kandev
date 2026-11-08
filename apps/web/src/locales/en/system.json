@@ -858,6 +858,8 @@
   "archivedData.targetCleanupJobs": "Completed cleanup jobs",
   "archivedData.targetRemoved_one": "Reduced {{count}} row. Stored-byte reduction: {{size}}.",
   "archivedData.targetRemoved_other": "Reduced {{count}} rows. Stored-byte reduction: {{size}}.",
+  "archivedData.targetEstimated_one": "Estimated {{count}} row to reduce. Estimated stored-byte reduction: {{size}}.",
+  "archivedData.targetEstimated_other": "Estimated {{count}} rows to reduce. Estimated stored-byte reduction: {{size}}.",
   "archivedData.targetScanned": "Scanned {{rows}} rows, {{eligible}} eligible, {{before}} stored before the pass.",
   "archivedData.targetOversized_one": "{{count}} row was above the per-row limit and kept intact.",
   "archivedData.targetOversized_other": "{{count}} rows were above the per-row limit and kept intact.",

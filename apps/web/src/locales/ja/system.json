@@ -858,6 +858,8 @@
   "archivedData.targetCleanupJobs": "完了したクリーンアップジョブ",
   "archivedData.targetRemoved_one": "{{count}} 行を縮小しました。保存バイト数の削減: {{size}}",
   "archivedData.targetRemoved_other": "{{count}} 行を縮小しました。保存バイト数の削減: {{size}}",
+  "archivedData.targetEstimated_one": "縮小対象の見込み: {{count}} 行。保存バイト数の削減見込み: {{size}}",
+  "archivedData.targetEstimated_other": "縮小対象の見込み: {{count}} 行。保存バイト数の削減見込み: {{size}}",
   "archivedData.targetScanned": "{{rows}} 行をスキャン、{{eligible}} 行が対象、処理前の保存量は {{before}} です。",
   "archivedData.targetOversized_one": "{{count}} 行が 1 行あたりの上限を超えたため、そのまま保持しました。",
   "archivedData.targetOversized_other": "{{count}} 行が 1 行あたりの上限を超えたため、そのまま保持しました。",

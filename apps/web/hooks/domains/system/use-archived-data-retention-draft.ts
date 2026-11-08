@@ -42,6 +42,25 @@ function acceptSavedDraft(
   if (!current || serialize(current) === serialize(submitted)) return saved;
   return { ...current, revision: saved.revision };
 }
+// rebaseArchivedDraft carries a local edit onto a newer saved policy. Only the
+// fields the administrator changed against the previous saved policy are kept;
+// every other field, and the revision, come from the new saved policy. A
+// preparation that enables the policy, or a cancellation that advances the
+// revision, therefore cannot leave a stale flag or revision in the draft.
+export function rebaseArchivedDraft(
+  current: ArchivedDataPolicy | null,
+  previous: ArchivedDataPolicy | null,
+  saved: ArchivedDataPolicy,
+): ArchivedDataPolicy {
+  if (!current || !previous || serialize(current) === serialize(previous)) return saved;
+  const next: ArchivedDataPolicy = { ...saved };
+  if (current.enabled !== previous.enabled) next.enabled = current.enabled;
+  if (serialize(current.archived_age) !== serialize(previous.archived_age))
+    next.archived_age = current.archived_age;
+  if (serialize(current.cleanup_age) !== serialize(previous.cleanup_age))
+    next.cleanup_age = current.cleanup_age;
+  return serialize(next) === serialize(current) ? current : next;
+}
 function validationKey(canEdit: boolean, invalid: boolean, needsChoice: boolean, choice: string) {
   if (!canEdit) return "system:archivedData.adminOnly";
   if (invalid) return "system:archivedData.invalidDays";
@@ -69,9 +88,8 @@ export function useArchivedDataRetentionDraft(
   }, [scopeKey]);
   useEffect(() => {
     if (!saved) return;
-    setDraft((current) =>
-      !current || serialize(current) === serialize(baseline.current) ? saved : current,
-    );
+    const previous = baseline.current;
+    setDraft((current) => rebaseArchivedDraft(current, previous, saved));
     baseline.current = saved;
   }, [saved]);
   const dirty = Boolean(draft && saved && serialize(draft) !== serialize(saved));

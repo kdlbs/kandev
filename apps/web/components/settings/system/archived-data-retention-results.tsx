@@ -20,18 +20,33 @@ const targetLabel = {
 } as const;
 
 // The two targets are reported separately everywhere. Collapsing them into one
-// number would let one target's effect be read as the other's.
-function TargetResult({ target, labelKey }: { target: ArchivedDataTarget; labelKey: string }) {
+// number would let one target's effect be read as the other's. An analysis
+// reduces nothing: its bytes are an estimate over the eligible rows, so it is
+// worded as an estimate instead of a completed reduction.
+function TargetResult({
+  target,
+  labelKey,
+  estimate,
+}: {
+  target: ArchivedDataTarget;
+  labelKey: string;
+  estimate: boolean;
+}) {
   const { t } = useTranslation();
   const skipped = skippedTotal(target.skipped);
   return (
     <div className="space-y-0.5">
       <p className="text-sm font-medium">{t(labelKey)}</p>
       <p className="text-sm">
-        {t("system:archivedData.targetRemoved", {
-          count: target.reduced,
-          size: formatBytes(target.bytes),
-        })}
+        {estimate
+          ? t("system:archivedData.targetEstimated", {
+              count: target.eligible,
+              size: formatBytes(target.bytes),
+            })
+          : t("system:archivedData.targetRemoved", {
+              count: target.reduced,
+              size: formatBytes(target.bytes),
+            })}
       </p>
       <p className="text-xs text-muted-foreground">
         {t("system:archivedData.targetScanned", {
@@ -77,8 +92,16 @@ function OperationResult({ operation }: { operation: ArchivedDataOperation }) {
         <p>{t("system:archivedData.empty")}</p>
       ) : (
         <>
-          <TargetResult target={operation.messages} labelKey={targetLabel.messages} />
-          <TargetResult target={operation.cleanup_jobs} labelKey={targetLabel.cleanup_jobs} />
+          <TargetResult
+            target={operation.messages}
+            labelKey={targetLabel.messages}
+            estimate={operation.kind === "analysis"}
+          />
+          <TargetResult
+            target={operation.cleanup_jobs}
+            labelKey={targetLabel.cleanup_jobs}
+            estimate={operation.kind === "analysis"}
+          />
         </>
       )}
       <details className="text-xs text-muted-foreground">

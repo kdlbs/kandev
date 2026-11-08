@@ -858,6 +858,8 @@
   "archivedData.targetCleanupJobs": "완료된 정리 작업",
   "archivedData.targetRemoved_one": "{{count}}개 행 축소. 저장 바이트 절감: {{size}}",
   "archivedData.targetRemoved_other": "{{count}}개 행 축소. 저장 바이트 절감: {{size}}",
+  "archivedData.targetEstimated_one": "축소 예상 {{count}}개 행. 예상 저장 바이트 절감: {{size}}",
+  "archivedData.targetEstimated_other": "축소 예상 {{count}}개 행. 예상 저장 바이트 절감: {{size}}",
   "archivedData.targetScanned": "{{rows}}개 행 검사, 대상 {{eligible}}개, 처리 전 저장량 {{before}}.",
   "archivedData.targetOversized_one": "{{count}}개 행이 행당 한도를 초과해 그대로 유지되었습니다.",
   "archivedData.targetOversized_other": "{{count}}개 행이 행당 한도를 초과해 그대로 유지되었습니다.",

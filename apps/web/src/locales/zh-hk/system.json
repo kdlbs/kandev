@@ -858,6 +858,8 @@
   "archivedData.targetCleanupJobs": "已完成的清理任務",
   "archivedData.targetRemoved_one": "已縮減 {{count}} 行。存儲字節減少：{{size}}。",
   "archivedData.targetRemoved_other": "已縮減 {{count}} 行。存儲字節減少：{{size}}。",
+  "archivedData.targetEstimated_one": "預計可縮減 {{count}} 行。預計存儲字節減少：{{size}}。",
+  "archivedData.targetEstimated_other": "預計可縮減 {{count}} 行。預計存儲字節減少：{{size}}。",
   "archivedData.targetScanned": "已掃描 {{rows}} 行，其中 {{eligible}} 行符合條件，本輪之前存儲 {{before}}。",
   "archivedData.targetOversized_one": "{{count}} 行超出單行上限，已原樣保留。",
   "archivedData.targetOversized_other": "{{count}} 行超出單行上限，已原樣保留。",
