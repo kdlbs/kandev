@@ -4352,9 +4352,10 @@ func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentP
 	// an old run afterwards fails. That is the accepted trade — see
 	// docs/specs/office/requirements/automations-settings.md.
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT DISTINCT t.id, t.title, t.is_ephemeral
+		SELECT DISTINCT t.id, t.title, t.is_ephemeral, t.workspace_id, COALESCE(w.name, '')
 		FROM task_sessions ts
 		JOIN tasks t ON t.id = ts.task_id
+		LEFT JOIN workspaces w ON w.id = t.workspace_id
 		WHERE ts.agent_profile_id = ? AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		  AND NOT (COALESCE(t.origin, '') = '`+models.TaskOriginAutomationRun+`'
 		           AND ts.state = 'WAITING_FOR_INPUT')
@@ -4366,7 +4367,7 @@ func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentP
 	var result []agentdto.ActiveTaskInfo
 	for rows.Next() {
 		var info agentdto.ActiveTaskInfo
-		if err := rows.Scan(&info.TaskID, &info.TaskTitle, &info.IsEphemeral); err != nil {
+		if err := rows.Scan(&info.TaskID, &info.TaskTitle, &info.IsEphemeral, &info.WorkspaceID, &info.WorkspaceName); err != nil {
 			return nil, err
 		}
 		result = append(result, info)

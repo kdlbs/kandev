@@ -224,6 +224,9 @@ func (s *Service) dispatchWatcherEvent(ctx context.Context, src WatcherSource, e
 	// tick — acceptable for v1.
 	release, ok := s.acquireWatcherSlot(ctx, integration, src.WatchMetadataKey(), src.WatchID(evt), src.MaxInflightTasks(evt))
 	if !ok {
+		if claimed, supported := src.(interface{ ReservationClaimed(any) bool }); supported && claimed.ReservationClaimed(evt) {
+			src.Release(context.WithoutCancel(ctx), evt)
+		}
 		return
 	}
 

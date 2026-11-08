@@ -63,6 +63,24 @@ func currentDeliverySubmissionID(execution *AgentExecution) string {
 	return models.StringFromAny(execution.MetadataSnapshot()[initialDeliverySubmissionIDMetadataKey])
 }
 
+// deliverySubmissionIdentityMismatch reports whether a completion belongs to a
+// different prompt attempt than the execution's current or expected initial
+// submission. A replayed terminal event keeps its receipt, projection,
+// settlement, and ACK, but must not complete the live prompt.
+func deliverySubmissionIdentityMismatch(execution *AgentExecution, submissionID string) bool {
+	if execution == nil || submissionID == "" {
+		return false
+	}
+	expected := currentDeliverySubmissionID(execution)
+	if expected == "" {
+		expected = initialPromptDeliverySubmissionID(execution)
+	}
+	if expected == "" {
+		return false
+	}
+	return deliverySubmissionIdentityForPrompt(expected, "") != deliverySubmissionIdentityForPrompt(submissionID, "")
+}
+
 func clearInitialDeliverySubmissionID(execution *AgentExecution, submissionID string) {
 	if execution == nil || submissionID == "" {
 		return
