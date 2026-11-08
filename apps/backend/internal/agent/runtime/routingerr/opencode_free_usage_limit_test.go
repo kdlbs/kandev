@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12
 func TestClassify_OpenCodePrefixedFreeUsageLimit(t *testing.T) {
 	resetInjection()
 	cases := []struct {
@@ -40,6 +41,7 @@ func TestClassify_OpenCodePrefixedFreeUsageLimit(t *testing.T) {
 	}
 }
 
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12
 func TestClassify_OpenCodePrefixedFreeUsageLimitRejectsUnrelatedText(t *testing.T) {
 	resetInjection()
 	cases := []struct {
@@ -52,6 +54,9 @@ func TestClassify_OpenCodePrefixedFreeUsageLimitRejectsUnrelatedText(t *testing.
 		{"unknown prefix", "opencode-acp", "TypeError: free usage limit reached"},
 		{"incomplete notice", "opencode-acp", "AI_APICallError: free usage limit"},
 		{"missing word boundary", "opencode-acp", "AI_APICallError: free usage limit reachedness"},
+		{"phrase crosses diagnostic lines", "opencode-acp", "Error: free\nusage limit reached"},
+		{"label crosses diagnostic lines", "opencode-acp", "Internal error\n: free usage limit reached"},
+		{"label colon crosses diagnostic lines", "opencode-acp", "Error\n: free usage limit reached"},
 		{"Claude provider", "claude-acp", "AI_APICallError: free usage limit reached"},
 		{"Codex provider", "codex-acp", "AI_APICallError: free usage limit reached"},
 		{"Copilot provider", "copilot-acp", "AI_APICallError: free usage limit reached"},
@@ -64,6 +69,24 @@ func TestClassify_OpenCodePrefixedFreeUsageLimitRejectsUnrelatedText(t *testing.
 				t.Fatalf("classification = %s/%s, want unmatched runtime error", got.Code, got.ClassifierRule)
 			}
 		})
+	}
+}
+
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12
+func TestClassify_OpenCodeFreeUsageIgnoresFencedExamples(t *testing.T) {
+	resetInjection()
+	const fencedExample = "```text\nError: free usage limit reached\n```"
+
+	fenced := Classify(Input{Phase: PhasePromptSend, ProviderID: "opencode-acp", Stderr: fencedExample})
+	if fenced.Code != CodeAgentRuntime || fenced.ClassifierRule != "phase.poststart.unknown" {
+		t.Fatalf("fenced example classified as %s/%s, want unmatched runtime error", fenced.Code, fenced.ClassifierRule)
+	}
+
+	withDiagnostic := Classify(Input{
+		Phase: PhasePromptSend, ProviderID: "opencode-acp", Stderr: fencedExample + "\nError: free usage limit reached",
+	})
+	if withDiagnostic.Code != CodeQuotaLimited || withDiagnostic.ClassifierRule != "opencode.stderr.free_usage_prefixed.v1" {
+		t.Fatalf("diagnostic after fenced example classified as %s/%s, want prefixed quota", withDiagnostic.Code, withDiagnostic.ClassifierRule)
 	}
 }
 

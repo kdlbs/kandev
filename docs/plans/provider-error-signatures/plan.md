@@ -37,6 +37,7 @@ provider scope, prose boundary, precedence, and reset-hint behavior.
 ### In scope
 
 - The provider rule patterns in `apps/backend/internal/agent/runtime/routingerr/rules.go`.
+- The sanitized provider-message projection in `apps/backend/internal/agentctl/types/streams/provider_error.go`.
 - Narrow coverage of the remaining signatures, using existing tests and
   disposable overlays outside the repository's automatic test collection.
 - The `provider-neutral` labeled JSON signature in
@@ -75,8 +76,10 @@ in task 02; hosted CI and combined unmerged-source validation remain separate.
 ### Prefixed free-usage follow-up
 
 Cover the established OpenCode error labels that can prefix `free usage limit
-reached`. Keep the signature limited to OpenCode and to the start of a
-diagnostic line, preserve structured and earlier account-limit precedence, and
-do not infer a reset time. The production rule was already present in the PR;
-task 03 adds committed regression tests for its accepted labels, rejected
-prose and provider cases, and precedence.
+reached`. Keep the signature limited to OpenCode, outside fenced examples, and
+to one diagnostic line. Preserve line boundaries in the sanitized ACP message
+so a later diagnostic line remains classifiable. Preserve structured and
+earlier account-limit precedence, and do not infer a reset time. The production
+rule was already present in the PR; task 03 adds regression tests for accepted
+labels, rejected prose and provider cases, sanitized ACP projection, and
+precedence.

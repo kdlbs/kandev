@@ -67,7 +67,9 @@ errors does not take its own healthy account out of rotation.
 - **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.6:** For `opencode-acp`, an
   opening `free usage limit reached` line without an error-envelope label shall
   classify as a quota limit. This criterion covers only the unlabelled
-  provider-specific form.
+  provider-specific form and shall not match inside a fenced code example. It
+  is an OpenCode-specific exception to the shared quota signature list in
+  criterion 001.3.
 - **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.10:** OpenCode diagnostics opening
   with `Rate limit exceeded: free-models-per-day...` or
   `Rate limit exceeded: limit_rpd/<model>` shall classify as rate limited even
@@ -98,12 +100,15 @@ errors does not take its own healthy account out of rotation.
   opening diagnostic line with one of the established `AI_APICallError:`,
   `Error:`, `Internal error:`, or `API Error:` labels followed by `free usage
   limit reached` shall classify as a quota limit. Match this form only at the
-  start of a diagnostic line. Matching shall be case-insensitive and shall
-  accept flexible whitespace within multiword labels and the phrase, and after
-  the label's colon. Quoted prose, unknown labels, and other providers shall
-  not match. Existing structured status and earlier account-limit rules shall
-  keep precedence. Do not infer a reset hint when the diagnostic gives no
-  reset time.
+  start of a diagnostic line. Ignore this form inside fenced code examples.
+  Matching shall be case-insensitive and shall accept flexible horizontal
+  whitespace within multiword labels and the phrase, and after the label's
+  colon. Whitespace shall not cross a diagnostic line boundary. Quoted prose,
+  unknown labels, split-line signatures, and other providers shall not match.
+  Existing structured status and earlier account-limit rules shall keep
+  precedence. Do not infer a reset hint when the diagnostic gives no reset
+  time. This criterion and criterion 001.6 are OpenCode-specific exceptions to
+  the shared quota signature list in criterion 001.3.
 
 Criterion 001.11 was added by the October 28
 [OpenCode capacity package](../../../plans/opencode-capacity-retry/plan.md).

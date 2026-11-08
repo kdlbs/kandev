@@ -71,10 +71,14 @@ Additional bounded signatures:
   `Error:`, `Internal error:`, or `API Error:` label and then says `free usage
   limit reached` is also an OpenCode-scoped quota rule
   (`AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12`). Match only these labels at
-  the start of a diagnostic line. Keep case and whitespace handling consistent
-  with the existing catalogue. Do not match prose, unknown labels, or another
-  provider. Existing structured status and earlier account-limit rules retain
-  precedence, and the signature provides no reset hint.
+  the start of a diagnostic line and outside fenced code examples. Keep
+  matching case-insensitive. Horizontal whitespace between label words, after
+  the colon, and between phrase words cannot cross a line boundary. Preserve
+  diagnostic line boundaries in the sanitized message so later diagnostic
+  lines remain classifiable. Do not match prose, unknown labels, split-line
+  signatures, or another provider. Existing structured status and earlier
+  account-limit rules retain precedence, and the signature provides no reset
+  hint.
 - OpenCode daily rate-limit wording (`free-models-per-day` and
   `limit_rpd/<model>`) is matched against raw diagnostic text only because the
   shared sanitizer masks its distinguishing token. `RawExcerpt` remains the
