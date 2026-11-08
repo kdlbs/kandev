@@ -914,7 +914,8 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 	groupID string,
 	route *models.WorkflowSessionRoute,
 ) error {
-	var environmentID, status, materializationSessionID, ownerID, executorType string
+	var environmentID, status, materializationSessionID, ownerID string
+	var environment models.TaskEnvironment
 	var claimUpdatedAt sql.NullTime
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT materialized_environment_id FROM task_workspace_groups WHERE id = ?
@@ -926,20 +927,32 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 	}
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT COALESCE(e.id, ''), COALESCE(e.status, ''), COALESCE(e.materialization_session_id, ''), e.updated_at,
-		       COALESCE(e.task_id, ''), COALESCE(e.executor_type, '')
+	       COALESCE(e.task_id, ''), COALESCE(e.executor_type, ''), COALESCE(e.executor_id, ''),
+	       COALESCE(e.executor_profile_id, ''), COALESCE(e.container_id, ''),
+	       COALESCE(e.container_bootstrap_nonce_secret_id, ''),
+	       COALESCE(e.container_control_auth_token_secret_id, ''), COALESCE(e.sandbox_id, '')
 		FROM task_workspace_groups g
 		JOIN task_workspace_group_members m
 		  ON m.workspace_group_id = g.id AND m.task_id = ? AND m.released_at IS NULL
 		LEFT JOIN task_environments e ON e.id = g.materialized_environment_id
 		WHERE g.id = ?
-	`), session.TaskID, groupID).Scan(&environmentID, &status, &materializationSessionID, &claimUpdatedAt, &ownerID, &executorType)
+	`), session.TaskID, groupID).Scan(
+		&environmentID, &status, &materializationSessionID, &claimUpdatedAt, &ownerID,
+		&environment.ExecutorType, &environment.ExecutorID, &environment.ExecutorProfileID,
+		&environment.ContainerID, &environment.ContainerBootstrapNonceSecretID,
+		&environment.ContainerControlAuthTokenSecretID, &environment.SandboxID,
+	)
 	if errors.Is(err, sql.ErrNoRows) || environmentID == "" {
 		return fmt.Errorf("%w: shared workspace group is unavailable", models.ErrWorkspaceReuseUnsafe)
 	}
 	if err != nil {
 		return fmt.Errorf("load shared workspace environment: %w", err)
 	}
-	if eligibleSharedGroupExecutorTransition(session.TaskID, ownerID, executorType, requestedExecutorType) {
+	executorType, known := environment.EffectiveExecutorType()
+	if !known {
+		return fmt.Errorf("%w: shared workspace executor could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	if eligibleSharedGroupExecutorTransition(session.TaskID, ownerID, string(executorType), requestedExecutorType) {
 		if err := r.validateSharedGroupTransitionOwnerTx(ctx, tx, ownerID); err != nil {
 			return err
 		}
@@ -955,7 +968,7 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 		}
 		return tx.Commit()
 	}
-	if err := validateSharedWorkspaceExecutor(session.TaskID, ownerID, executorType, requestedExecutorType); err != nil {
+	if err := validateSharedWorkspaceExecutor(session.TaskID, ownerID, string(executorType), requestedExecutorType); err != nil {
 		return err
 	}
 	switch models.TaskEnvironmentStatus(status) {
@@ -1013,9 +1026,13 @@ func (r *Repository) bindExistingTaskWorkspaceForSessionTx(
 	if err != nil {
 		return false, err
 	}
-	if workspace.ExecutorType != "" && requestedExecutorType != "" && workspace.ExecutorType != requestedExecutorType {
+	workspaceExecutorType, known := workspace.effectiveExecutorType()
+	if !known {
+		return false, fmt.Errorf("%w: canonical task environment executor could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	if requestedExecutorType != "" && string(workspaceExecutorType) != requestedExecutorType {
 		return false, fmt.Errorf("%w: canonical task environment uses executor %q; selected executor is %q",
-			models.ErrWorkspaceExecutorMismatch, workspace.ExecutorType, requestedExecutorType)
+			models.ErrWorkspaceExecutorMismatch, workspaceExecutorType, requestedExecutorType)
 	}
 	if err := r.prepareCanonicalTaskWorkspaceForSessionTx(ctx, tx, workspace, session.ID); err != nil {
 		return false, err
@@ -1028,11 +1045,27 @@ func (r *Repository) bindExistingTaskWorkspaceForSessionTx(
 }
 
 type canonicalTaskWorkspace struct {
-	ID             string
-	ExecutorType   string
-	Status         string
-	MaterializerID string
-	ClaimUpdatedAt sql.NullTime
+	ID                                string
+	ExecutorType                      string
+	ExecutorID                        string
+	ExecutorProfileID                 string
+	ContainerID                       string
+	ContainerBootstrapNonceSecretID   string
+	ContainerControlAuthTokenSecretID string
+	SandboxID                         string
+	Status                            string
+	MaterializerID                    string
+	ClaimUpdatedAt                    sql.NullTime
+}
+
+func (workspace *canonicalTaskWorkspace) effectiveExecutorType() (models.ExecutorType, bool) {
+	return (&models.TaskEnvironment{
+		ExecutorType: workspace.ExecutorType, ExecutorID: workspace.ExecutorID,
+		ExecutorProfileID: workspace.ExecutorProfileID, ContainerID: workspace.ContainerID,
+		ContainerBootstrapNonceSecretID:   workspace.ContainerBootstrapNonceSecretID,
+		ContainerControlAuthTokenSecretID: workspace.ContainerControlAuthTokenSecretID,
+		SandboxID:                         workspace.SandboxID,
+	}).EffectiveExecutorType()
 }
 
 func (r *Repository) loadCanonicalTaskWorkspaceForSessionTx(
@@ -1042,9 +1075,17 @@ func (r *Repository) loadCanonicalTaskWorkspaceForSessionTx(
 ) (*canonicalTaskWorkspace, error) {
 	workspace := &canonicalTaskWorkspace{}
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT id, executor_type, status, COALESCE(materialization_session_id, ''), updated_at
+		SELECT id, executor_type, executor_id, executor_profile_id,
+			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''),
+			COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
+			status, COALESCE(materialization_session_id, ''), updated_at
 		FROM task_environments WHERE task_id = ?
-	`), taskID).Scan(&workspace.ID, &workspace.ExecutorType, &workspace.Status, &workspace.MaterializerID, &workspace.ClaimUpdatedAt)
+	`), taskID).Scan(
+		&workspace.ID, &workspace.ExecutorType, &workspace.ExecutorID, &workspace.ExecutorProfileID,
+		&workspace.ContainerID, &workspace.ContainerBootstrapNonceSecretID,
+		&workspace.ContainerControlAuthTokenSecretID, &workspace.SandboxID,
+		&workspace.Status, &workspace.MaterializerID, &workspace.ClaimUpdatedAt,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1052,9 +1093,17 @@ func (r *Repository) loadCanonicalTaskWorkspaceForSessionTx(
 		return nil, err
 	}
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT executor_type, status, COALESCE(materialization_session_id, ''), updated_at
+		SELECT executor_type, executor_id, executor_profile_id,
+			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''),
+			COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
+			status, COALESCE(materialization_session_id, ''), updated_at
 		FROM task_environments WHERE id = ?
-	`), workspace.ID).Scan(&workspace.ExecutorType, &workspace.Status, &workspace.MaterializerID, &workspace.ClaimUpdatedAt); err != nil {
+	`), workspace.ID).Scan(
+		&workspace.ExecutorType, &workspace.ExecutorID, &workspace.ExecutorProfileID,
+		&workspace.ContainerID, &workspace.ContainerBootstrapNonceSecretID,
+		&workspace.ContainerControlAuthTokenSecretID, &workspace.SandboxID,
+		&workspace.Status, &workspace.MaterializerID, &workspace.ClaimUpdatedAt,
+	); err != nil {
 		return nil, fmt.Errorf("reload canonical task workspace: %w", err)
 	}
 	return workspace, nil

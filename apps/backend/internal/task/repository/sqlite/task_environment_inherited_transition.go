@@ -149,9 +149,14 @@ func (r *Repository) loadInheritedTransitionCanonicalTx(
 ) (*inheritedTransitionCanonical, error) {
 	canonical := &inheritedTransitionCanonical{}
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT id, task_id, executor_type, status, COALESCE(materialization_session_id, ''), updated_at
+		SELECT id, task_id, executor_type, executor_id, executor_profile_id,
+			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''),
+			COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
+			status, COALESCE(materialization_session_id, ''), updated_at
 		FROM task_environments WHERE task_id = ?
-	`), taskID).Scan(&canonical.ID, &canonical.TaskID, &canonical.ExecutorType, &canonical.Status,
+	`), taskID).Scan(&canonical.ID, &canonical.TaskID, &canonical.ExecutorType, &canonical.ExecutorID,
+		&canonical.ExecutorProfileID, &canonical.ContainerID, &canonical.ContainerBootstrapNonceSecretID,
+		&canonical.ContainerControlAuthTokenSecretID, &canonical.SandboxID, &canonical.Status,
 		&canonical.MaterializerID, &canonical.ClaimUpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -163,9 +168,14 @@ func (r *Repository) loadInheritedTransitionCanonicalTx(
 		return nil, err
 	}
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT id, task_id, executor_type, status, COALESCE(materialization_session_id, ''), updated_at
+		SELECT id, task_id, executor_type, executor_id, executor_profile_id,
+			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''),
+			COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
+			status, COALESCE(materialization_session_id, ''), updated_at
 		FROM task_environments WHERE task_id = ?
-	`), taskID).Scan(&canonical.ID, &canonical.TaskID, &canonical.ExecutorType, &canonical.Status,
+	`), taskID).Scan(&canonical.ID, &canonical.TaskID, &canonical.ExecutorType, &canonical.ExecutorID,
+		&canonical.ExecutorProfileID, &canonical.ContainerID, &canonical.ContainerBootstrapNonceSecretID,
+		&canonical.ContainerControlAuthTokenSecretID, &canonical.SandboxID, &canonical.Status,
 		&canonical.MaterializerID, &canonical.ClaimUpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("reload canonical child environment: %w", err)
@@ -174,12 +184,28 @@ func (r *Repository) loadInheritedTransitionCanonicalTx(
 }
 
 type inheritedTransitionCanonical struct {
-	ID             string
-	TaskID         string
-	ExecutorType   string
-	Status         string
-	MaterializerID string
-	ClaimUpdatedAt sql.NullTime
+	ID                                string
+	TaskID                            string
+	ExecutorType                      string
+	ExecutorID                        string
+	ExecutorProfileID                 string
+	ContainerID                       string
+	ContainerBootstrapNonceSecretID   string
+	ContainerControlAuthTokenSecretID string
+	SandboxID                         string
+	Status                            string
+	MaterializerID                    string
+	ClaimUpdatedAt                    sql.NullTime
+}
+
+func (canonical *inheritedTransitionCanonical) effectiveExecutorType() (models.ExecutorType, bool) {
+	return (&models.TaskEnvironment{
+		ExecutorType: canonical.ExecutorType, ExecutorID: canonical.ExecutorID,
+		ExecutorProfileID: canonical.ExecutorProfileID, ContainerID: canonical.ContainerID,
+		ContainerBootstrapNonceSecretID:   canonical.ContainerBootstrapNonceSecretID,
+		ContainerControlAuthTokenSecretID: canonical.ContainerControlAuthTokenSecretID,
+		SandboxID:                         canonical.SandboxID,
+	}).EffectiveExecutorType()
 }
 
 func (r *Repository) claimExistingInheritedTransitionEnvironmentTx(
@@ -188,7 +214,11 @@ func (r *Repository) claimExistingInheritedTransitionEnvironmentTx(
 	taskID, sessionID, currentEnvironmentID, executorType string,
 	canonical *inheritedTransitionCanonical,
 ) error {
-	if canonical.ExecutorType != "" && canonical.ExecutorType != executorType {
+	canonicalExecutorType, known := canonical.effectiveExecutorType()
+	if !known {
+		return fmt.Errorf("%w: canonical task environment executor could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	if string(canonicalExecutorType) != executorType {
 		if err := r.bindRefusedInheritedTransitionSessionTx(ctx, tx, taskID, sessionID, currentEnvironmentID, canonical); err != nil {
 			return err
 		}
@@ -196,7 +226,7 @@ func (r *Repository) claimExistingInheritedTransitionEnvironmentTx(
 			return fmt.Errorf("persist refused session's canonical child environment binding: %w", err)
 		}
 		return fmt.Errorf("%w: canonical task environment uses executor %q; selected executor is %q",
-			models.ErrWorkspaceExecutorMismatch, canonical.ExecutorType, executorType)
+			models.ErrWorkspaceExecutorMismatch, canonicalExecutorType, executorType)
 	}
 	return r.bindInheritedTransitionToExistingEnvironmentTx(
 		ctx, tx, taskID, sessionID, canonical.ID, currentEnvironmentID,
@@ -243,11 +273,15 @@ func (r *Repository) claimNewInheritedTransitionEnvironmentTx(
 	if source.TaskID != inheritedOwnerID {
 		return "", false, fmt.Errorf("%w: inherited environment ownership changed during transition admission", models.ErrWorkspaceReuseUnsafe)
 	}
-	if source.TaskID == taskID || source.ExecutorType == "" || source.ExecutorType == executorType ||
+	sourceExecutorType, known := source.effectiveExecutorType()
+	if !known {
+		return "", false, fmt.Errorf("%w: inherited environment executor could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	if source.TaskID == taskID || string(sourceExecutorType) == executorType ||
 		executorType == string(models.ExecutorTypeKubernetes) {
 		return "", false, nil
 	}
-	if source.ExecutorType == string(models.ExecutorTypeKubernetes) {
+	if sourceExecutorType == models.ExecutorTypeKubernetes {
 		return "", false, fmt.Errorf("%w: Kubernetes inherited environments cannot transition across task ownership", models.ErrWorkspaceReuseUnsafe)
 	}
 	if source.ArchivedAt.Valid {
@@ -259,9 +293,25 @@ func (r *Repository) claimNewInheritedTransitionEnvironmentTx(
 }
 
 type inheritedTransitionSource struct {
-	TaskID       string
-	ExecutorType string
-	ArchivedAt   sql.NullTime
+	TaskID                            string
+	ExecutorType                      string
+	ExecutorID                        string
+	ExecutorProfileID                 string
+	ContainerID                       string
+	ContainerBootstrapNonceSecretID   string
+	ContainerControlAuthTokenSecretID string
+	SandboxID                         string
+	ArchivedAt                        sql.NullTime
+}
+
+func (source *inheritedTransitionSource) effectiveExecutorType() (models.ExecutorType, bool) {
+	return (&models.TaskEnvironment{
+		ExecutorType: source.ExecutorType, ExecutorID: source.ExecutorID,
+		ExecutorProfileID: source.ExecutorProfileID, ContainerID: source.ContainerID,
+		ContainerBootstrapNonceSecretID:   source.ContainerBootstrapNonceSecretID,
+		ContainerControlAuthTokenSecretID: source.ContainerControlAuthTokenSecretID,
+		SandboxID:                         source.SandboxID,
+	}).EffectiveExecutorType()
 }
 
 func (r *Repository) loadInheritedTransitionSourceTx(
@@ -271,9 +321,13 @@ func (r *Repository) loadInheritedTransitionSourceTx(
 ) (*inheritedTransitionSource, error) {
 	source := &inheritedTransitionSource{}
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT e.task_id, e.executor_type, t.archived_at
+		SELECT e.task_id, e.executor_type, e.executor_id, e.executor_profile_id,
+			e.container_id, COALESCE(e.container_bootstrap_nonce_secret_id, ''),
+			COALESCE(e.container_control_auth_token_secret_id, ''), e.sandbox_id, t.archived_at
 		FROM task_environments e JOIN tasks t ON t.id = e.task_id WHERE e.id = ?
-	`), environmentID).Scan(&source.TaskID, &source.ExecutorType, &source.ArchivedAt)
+	`), environmentID).Scan(&source.TaskID, &source.ExecutorType, &source.ExecutorID,
+		&source.ExecutorProfileID, &source.ContainerID, &source.ContainerBootstrapNonceSecretID,
+		&source.ContainerControlAuthTokenSecretID, &source.SandboxID, &source.ArchivedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

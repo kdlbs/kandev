@@ -569,11 +569,17 @@ func (m *mockRepository) claimMockInheritedEnvironmentTransition(
 	session *models.TaskSession,
 ) (*models.TaskEnvironment, bool, bool, error) {
 	inherited := m.taskEnvironments[inheritedEnvironmentID]
-	if inherited == nil || inherited.TaskID == taskID || inherited.ExecutorType == "" ||
-		inherited.ExecutorType == executorType || executorType == string(models.ExecutorTypeKubernetes) {
+	if inherited == nil || inherited.TaskID == taskID {
 		return nil, false, false, nil
 	}
-	if inherited.ExecutorType == string(models.ExecutorTypeKubernetes) {
+	inheritedExecutorType, known := inherited.EffectiveExecutorType()
+	if !known {
+		return nil, false, false, models.ErrWorkspaceReuseUnsafe
+	}
+	if string(inheritedExecutorType) == executorType || executorType == string(models.ExecutorTypeKubernetes) {
+		return nil, false, false, nil
+	}
+	if inheritedExecutorType == models.ExecutorTypeKubernetes {
 		return nil, false, false, models.ErrWorkspaceReuseUnsafe
 	}
 	canonical := &models.TaskEnvironment{
@@ -594,11 +600,15 @@ func (m *mockRepository) attachMockCanonicalTransitionEnvironment(
 	canonical *models.TaskEnvironment,
 	session *models.TaskSession,
 ) (*models.TaskEnvironment, bool, bool, error) {
-	if canonical.ExecutorType != "" && canonical.ExecutorType != executorType {
+	canonicalExecutorType, known := canonical.EffectiveExecutorType()
+	if !known {
+		return nil, false, false, models.ErrWorkspaceReuseUnsafe
+	}
+	if string(canonicalExecutorType) != executorType {
 		session.TaskEnvironmentID = canonical.ID
 		session.WorkspacePath = canonical.WorkspacePath
 		return nil, false, false, fmt.Errorf("%w: canonical task environment uses executor %q; selected executor is %q",
-			models.ErrWorkspaceExecutorMismatch, canonical.ExecutorType, executorType)
+			models.ErrWorkspaceExecutorMismatch, canonicalExecutorType, executorType)
 	}
 	if err := m.recoverMockCanonicalTransitionEnvironment(sessionID, executorID, executorProfileID, canonical); err != nil {
 		return nil, false, false, err

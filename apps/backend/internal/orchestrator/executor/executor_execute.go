@@ -1890,28 +1890,33 @@ func rejectInheritedEnvironmentExecutorMismatch(
 		return fmt.Errorf("%w: inherited environment owner could not be verified", models.ErrWorkspaceReuseUnsafe)
 	}
 	if taskUsesInheritedWorkspace(task) && env.TaskID == task.ID {
-		if env.ExecutorType == "" {
+		environmentType, known := env.EffectiveExecutorType()
+		if !known {
 			return fmt.Errorf("%w: canonical task environment executor could not be verified", models.ErrWorkspaceReuseUnsafe)
 		}
-		if !allowExecutorTransition && env.ExecutorType != requestedExecutorType {
+		if !allowExecutorTransition && string(environmentType) != requestedExecutorType {
 			return fmt.Errorf("%w: canonical task environment uses executor %q; selected executor is %q",
-				models.ErrWorkspaceExecutorMismatch, env.ExecutorType, requestedExecutorType)
+				models.ErrWorkspaceExecutorMismatch, environmentType, requestedExecutorType)
 		}
 	}
 	if env.TaskID == "" || env.TaskID == task.ID {
 		return nil
 	}
 	kubernetes := requestedExecutorType == string(models.ExecutorTypeKubernetes)
-	if taskUsesInheritedWorkspace(task) && !kubernetes && env.ExecutorType == "" {
+	environmentType, known := env.EffectiveExecutorType()
+	if taskUsesInheritedWorkspace(task) && !known {
 		return fmt.Errorf("%w: inherited environment executor could not be verified", models.ErrWorkspaceReuseUnsafe)
 	}
-	if taskUsesInheritedWorkspace(task) && env.ExecutorType != "" && env.ExecutorType != requestedExecutorType &&
+	if taskUsesInheritedWorkspace(task) && kubernetes && env.ExecutorType == "" {
+		return fmt.Errorf("%w: Kubernetes environments are task-owned; create a task with workspace_mode=\"new_workspace\"", models.ErrWorkspaceReuseUnsupported)
+	}
+	if taskUsesInheritedWorkspace(task) && string(environmentType) != requestedExecutorType &&
 		(!allowExecutorTransition || kubernetes) {
 		return fmt.Errorf("%w: inherited task environment belongs to executor %q, launch selected %q",
-			models.ErrWorkspaceReuseUnsafe, env.ExecutorType, requestedExecutorType)
+			models.ErrWorkspaceReuseUnsafe, environmentType, requestedExecutorType)
 	}
 	// Foreign Kubernetes ownership is invalid even for legacy tasks without an inherited-workspace policy.
-	if kubernetes && (env.ExecutorType == "" || env.ExecutorType == requestedExecutorType) {
+	if kubernetes && (!known || string(environmentType) == requestedExecutorType) {
 		return fmt.Errorf("%w: Kubernetes environments are task-owned; create a task with workspace_mode=\"new_workspace\"", models.ErrWorkspaceReuseUnsupported)
 	}
 	return nil
@@ -2898,9 +2903,16 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	if taskUsesInheritedWorkspace(task) {
+		var resolveErr error
+		execConfig, resolveErr = e.resolveImplicitExecutorForEnvironment(ctx, existingEnv, execConfig)
+		if resolveErr != nil {
+			return nil, executorConfig{}, resolveErr
+		}
+	}
+	req.ExecutorType = execConfig.ExecutorType
 	if execConfig.ExecutorID != "" {
 		metadata = execConfig.Metadata
-		req.ExecutorType = execConfig.ExecutorType
 		req.ExecutorConfig = execConfig.ExecutorCfg
 		req.SetupScript = execConfig.SetupScript
 	}

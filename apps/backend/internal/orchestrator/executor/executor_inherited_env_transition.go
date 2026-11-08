@@ -34,6 +34,16 @@ func (e *Executor) claimInheritedEnvironmentTransition(
 		metadata["executor_profile_id"] = session.ExecutorProfileID
 	}
 	selected := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	if selected.ImplicitSelection && session.TaskEnvironmentID != "" {
+		environment, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+		if err != nil {
+			return fmt.Errorf("%w: load inherited environment executor identity", models.ErrWorkspaceReuseUnsafe)
+		}
+		selected, err = e.resolveImplicitExecutorForEnvironment(ctx, environment, selected)
+		if err != nil {
+			return err
+		}
+	}
 	if selected.ExecutorType == "" {
 		return fmt.Errorf("%w: selected executor type could not be verified", models.ErrWorkspaceReuseUnsafe)
 	}
@@ -105,8 +115,12 @@ func (e *Executor) inheritedTransitionWillRebind(
 	if source == nil {
 		return false, fmt.Errorf("%w: inherited environment is unavailable before transition", models.ErrWorkspaceReuseUnsafe)
 	}
-	if source.TaskID == task.ID || source.ExecutorType == "" || source.ExecutorType == selectedExecutorType ||
-		source.ExecutorType == string(models.ExecutorTypeKubernetes) || selectedExecutorType == string(models.ExecutorTypeKubernetes) {
+	sourceExecutorType, known := source.EffectiveExecutorType()
+	if !known {
+		return false, fmt.Errorf("%w: inherited environment executor could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	if source.TaskID == task.ID || string(sourceExecutorType) == selectedExecutorType ||
+		sourceExecutorType == models.ExecutorTypeKubernetes || selectedExecutorType == string(models.ExecutorTypeKubernetes) {
 		return false, nil
 	}
 	return true, nil
@@ -146,12 +160,13 @@ func (e *Executor) retireInheritedRuntimeForTransition(
 }
 
 func validateInheritedRuntimeTransitionTarget(environment *models.TaskEnvironment, selectedExecutorType string) error {
-	if environment.ID == "" || environment.ExecutorType == "" {
+	environmentType, known := environment.EffectiveExecutorType()
+	if environment.ID == "" || !known {
 		return fmt.Errorf("%w: canonical child runtime environment identity is incomplete", models.ErrWorkspaceReuseUnsafe)
 	}
-	if environment.ExecutorType != selectedExecutorType {
+	if string(environmentType) != selectedExecutorType {
 		return fmt.Errorf("%w: canonical task environment uses executor %q; selected executor is %q",
-			models.ErrWorkspaceExecutorMismatch, environment.ExecutorType, selectedExecutorType)
+			models.ErrWorkspaceExecutorMismatch, environmentType, selectedExecutorType)
 	}
 	return nil
 }

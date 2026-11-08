@@ -50,6 +50,10 @@ later child session.
   success or agent admission.
 - Preserve typed refusal for Kubernetes, resume of a session still bound to the
   inherited environment, and unsafe or unknown ownership.
+- Treat a legacy environment with an empty executor type as implicit local only
+  when it has no executor/profile identity or remote runtime handles. For an
+  unconfigured inherited launch, keep the already-bound source or child
+  canonical executor selection; unresolved explicit identities remain unsafe.
 - Add real-repository and barrier-based regression coverage for two different
   session IDs, later sessions, group members, creating/failed parents, and stale
   prepared runtimes.
@@ -88,6 +92,10 @@ later child session.
 - Concurrent sessions selecting different executor types still bind to one
   canonical child environment. The losing executor receives a clear mismatch
   refusal before it allocates another workspace.
+- Legacy blank executor types are classified consistently during inherited,
+  canonical-child, and shared-group admission. Executor/profile identities,
+  container/sandbox handles, and unknown executor types never gain implicit
+  local admission.
 
 ## Verification
 
@@ -154,12 +162,24 @@ cd apps/backend && go test ./internal/orchestrator/... ./internal/task/repositor
 - Passed public-doc tests (63/63), public-doc validation (55 pages), docs
   inventory validation (437 decisions and 1937 specifications), specification
   lint, and `git diff --check`.
+- PR fixup follow-up race checks passed for the three original backend CI
+  regressions, the different-executor SQLite claim, and the executor allocation
+  barrier. The changed-file Go lint reports zero issues; `gofmt -l`, SQL guard,
+  store conformance race tests, and the baseline-aware architecture lint pass.
+- Managed E2E follow-up passed the seven retained desktop cases, both failed
+  mobile cases, and the cancellation reproduction with retries disabled. The
+  cancellation CI screenshot showed the cancelled-turn marker and idle
+  composer; its cancel-button state assertion did not reproduce locally. The
+  artifact had no trace or backend cancellation error evidence.
 
 ## Regression tests
 
 - `TestClaimInheritedTaskEnvironmentTransitionDifferentExecutorsShareOneCanonicalEnvironment`
   proves two distinct sessions bind to one child environment and the other
   executor receives a typed mismatch.
+- `TestTaskEnvironmentEffectiveExecutorType` and the SQLite legacy-source,
+  canonical-child, and shared-group tests prove implicit-local compatibility
+  while unresolved identities and remote runtime handles fail closed.
 - `TestClaimInheritedTaskEnvironmentTransitionRecoversCancelledOwnerWithoutStalePublication`
   proves cancellation allows guarded takeover and rejects the former owner's
   stale finalizer.

@@ -420,7 +420,11 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 // executor. Clearing it makes local execution fall back to RepositoryPath and
 // makes worktree execution materialize through its normal preparer.
 func prepareExecutorTransition(req *LaunchAgentRequest, env *models.TaskEnvironment) bool {
-	if req == nil || env == nil || env.ExecutorType == "" || env.ExecutorType == req.ExecutorType {
+	if req == nil || env == nil || req.ExecutorType == "" {
+		return false
+	}
+	environmentType, known := env.EffectiveExecutorType()
+	if !known || string(environmentType) == req.ExecutorType {
 		return false
 	}
 	req.WorkspacePath = ""

@@ -829,7 +829,7 @@ func TestCreateTaskSessionWithSharedGroupWorkspaceBindingDefersEligibleExecutorT
 	foreign := &models.TaskEnvironment{
 		ID:                       "environment-group-owner",
 		TaskID:                   owner.TaskID,
-		ExecutorType:             string(models.ExecutorTypeLocal),
+		ExecutorType:             "",
 		Status:                   models.TaskEnvironmentStatusCreating,
 		MaterializationSessionID: owner.ID,
 	}

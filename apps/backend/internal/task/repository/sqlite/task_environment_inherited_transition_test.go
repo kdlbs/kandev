@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -89,6 +90,114 @@ func TestClaimInheritedTaskEnvironmentTransitionDetachesFailedForeignEnvironment
 				t.Fatalf("foreign %s environment changed during detach: %+v", sourceStatus, unchangedSource)
 			}
 		})
+	}
+}
+
+func TestClaimInheritedTaskEnvironmentTransitionClassifiesLegacyImplicitLocalSource(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	source, sessions := seedInheritedTransition(t, repo, "legacy-implicit-local", models.TaskEnvironmentStatusReady)
+	source.ExecutorType = ""
+	if err := repo.UpdateTaskEnvironment(ctx, source); err != nil {
+		t.Fatalf("clear legacy source executor type: %v", err)
+	}
+
+	childEnvironment, handled, rebound, err := repo.ClaimInheritedTaskEnvironmentTransition(
+		ctx, sessions[0].TaskID, sessions[0].ID, source.ID,
+		string(models.ExecutorTypeLocalDocker), "docker-child", "profile-child",
+	)
+	if err != nil || !handled || !rebound || childEnvironment == nil {
+		t.Fatalf("legacy implicit-local transition = %+v, handled %v rebound %v error %v; want a detached child environment", childEnvironment, handled, rebound, err)
+	}
+	if childEnvironment.TaskID != sessions[0].TaskID || childEnvironment.ExecutorType != string(models.ExecutorTypeLocalDocker) {
+		t.Fatalf("child environment = %+v, want child-owned Docker environment", childEnvironment)
+	}
+	unchangedSource, err := repo.GetTaskEnvironment(ctx, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchangedSource.ExecutorType != "" || unchangedSource.TaskID != source.TaskID || unchangedSource.WorkspacePath != source.WorkspacePath {
+		t.Fatalf("legacy parent environment changed during transition: %+v", unchangedSource)
+	}
+}
+
+func TestClaimInheritedTaskEnvironmentTransitionRejectsUnverifiableLegacySource(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*models.TaskEnvironment)
+	}{
+		{name: "executor identity", mutate: func(environment *models.TaskEnvironment) { environment.ExecutorID = "missing-executor" }},
+		{name: "profile identity", mutate: func(environment *models.TaskEnvironment) { environment.ExecutorProfileID = "missing-profile" }},
+		{name: "container handle", mutate: func(environment *models.TaskEnvironment) { environment.ContainerID = "container-123" }},
+		{name: "sandbox handle", mutate: func(environment *models.TaskEnvironment) { environment.SandboxID = "sandbox-123" }},
+		{name: "container secret handles", mutate: func(environment *models.TaskEnvironment) {
+			environment.ContainerBootstrapNonceSecretID = "bootstrap-secret"
+			environment.ContainerControlAuthTokenSecretID = "control-secret"
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := newRepoForEntityTests(t)
+			ctx := context.Background()
+			source, sessions := seedInheritedTransition(t, repo, "legacy-unknown-"+strings.ReplaceAll(test.name, " ", "-"), models.TaskEnvironmentStatusReady)
+			source.ExecutorType = ""
+			test.mutate(source)
+			if err := repo.UpdateTaskEnvironment(ctx, source); err != nil {
+				t.Fatalf("update legacy source identity: %v", err)
+			}
+
+			_, handled, _, err := repo.ClaimInheritedTaskEnvironmentTransition(
+				ctx, sessions[0].TaskID, sessions[0].ID, source.ID,
+				string(models.ExecutorTypeLocalDocker), "docker-child", "profile-child",
+			)
+			if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+				t.Fatalf("transition error = %v, handled %v; want ErrWorkspaceReuseUnsafe", err, handled)
+			}
+			if environment, getErr := repo.GetTaskEnvironmentByTaskID(ctx, sessions[0].TaskID); getErr != nil || environment != nil {
+				t.Fatalf("child environment = %+v, %v; want no claim", environment, getErr)
+			}
+			bound, getErr := repo.GetTaskSession(ctx, sessions[0].ID)
+			if getErr != nil {
+				t.Fatal(getErr)
+			}
+			if bound.TaskEnvironmentID != source.ID || bound.WorkspacePath != source.WorkspacePath {
+				t.Fatalf("session binding = %q path %q; want original inherited binding", bound.TaskEnvironmentID, bound.WorkspacePath)
+			}
+		})
+	}
+}
+
+func TestClaimInheritedTaskEnvironmentTransitionClassifiesLegacyCanonicalEnvironment(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	source, sessions := seedInheritedTransition(t, repo, "legacy-canonical", models.TaskEnvironmentStatusReady)
+	canonical := &models.TaskEnvironment{
+		ID: "environment-child-legacy-canonical", TaskID: sessions[0].TaskID,
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: "/child/legacy",
+	}
+	if err := repo.CreateTaskEnvironment(ctx, canonical); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		UPDATE task_sessions SET task_environment_id = ?, workspace_path = ? WHERE id = ?
+	`), canonical.ID, canonical.WorkspacePath, sessions[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
+	_, handled, _, err := repo.ClaimInheritedTaskEnvironmentTransition(
+		ctx, sessions[0].TaskID, sessions[0].ID, source.ID,
+		string(models.ExecutorTypeLocalDocker), "docker-child", "profile-child",
+	)
+	if !errors.Is(err, models.ErrWorkspaceExecutorMismatch) {
+		t.Fatalf("canonical legacy executor classification = handled %v error %v; want mismatch against implicit local", handled, err)
+	}
+	bound, err := repo.GetTaskSession(ctx, sessions[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bound.TaskEnvironmentID != canonical.ID || bound.WorkspacePath != canonical.WorkspacePath {
+		t.Fatalf("refused session binding = %q path %q; want canonical %q and path", bound.TaskEnvironmentID, bound.WorkspacePath, canonical.ID)
 	}
 }
 
