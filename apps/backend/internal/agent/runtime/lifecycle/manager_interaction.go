@@ -1375,6 +1375,8 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	execution.cancelStartupRecovery()
 	stopCtx := ctx
 	preserveRuntime := shouldPreserveRecoverableRuntime(execution, reason)
+	preserveAdoptedPeer := adoptionPreservesPeer(nil, execution) && !execution.isSessionInitialized() &&
+		(reason == StopReasonRecoverableAgentFailure || reason == StopReasonAgentBootstrapFailed)
 	if force || preserveRuntime {
 		var cancelStop context.CancelFunc
 		stopCtx, cancelStop = kubernetesDurableContext(ctx)
@@ -1392,6 +1394,15 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	}
 	if m.streamManager != nil {
 		m.streamManager.cancelDeliveryReconciliation(executionID)
+	}
+	if preserveAdoptedPeer {
+		// A failed adoption owns only its attempt-local transport. Keep the
+		// selected peer process, journal handle, durable inventory, and MCP
+		// claims for the next authenticated attempt. This is a nonterminal
+		// detach: no status/finished mark, row repair, removal, or agent.stopped
+		// event. An explicit user Stop still runs the normal termination path.
+		releaseAdoptedPeerTransport(execution)
+		return m.detachAgentExecution(executionID, execution)
 	}
 	backendForce := force
 	if preserveRuntime {
@@ -1445,8 +1456,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 			return fmt.Errorf("preserve turn changes for execution %q: %w", executionID, err)
 		}
 	}
-	agentStopFailed := m.stopExecutionAgentctl(stopCtx, executionID, execution, backendForce)
-	// A preserved runtime must not fall through to the executor's
+	agentStopFailed := m.stopExecutionAgentctl(stopCtx, executionID, execution, backendForce) // A preserved runtime must not fall through to the executor's
 	// AgentStopFailed cleanup, which stops the container and can turn a
 	// recoverable failure into loss of the workspace. Keep the execution and
 	// its cleanup ownership tracked so a later attempt can finish the stop.
@@ -1577,6 +1587,20 @@ func (m *Manager) detachAgentExecution(executionID string, execution *AgentExecu
 		zap.Stringer("runtime", execution.RuntimeName))
 
 	return nil
+}
+
+// releaseAdoptedPeerTransport closes only the client this attempt opened. It
+// never sends Stop, so the selected peer keeps its process, journal, and MCP
+// claims for the next authenticated attempt or an explicit Stop.
+func releaseAdoptedPeerTransport(execution *AgentExecution) {
+	if execution == nil {
+		return
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client != nil {
+		client.Close()
+	}
+	releaseClient()
 }
 
 func (m *Manager) stopExecutionAgentctl(

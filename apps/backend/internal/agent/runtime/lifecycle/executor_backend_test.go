@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
@@ -171,6 +172,61 @@ func TestToAgentExecutionFreezesStartupDisposition(t *testing.T) {
 	metadata[MetadataKeyReuseExistingProcess] = false
 
 	require.Equal(t, AgentStartupReattachedExisting, execution.startupDispositionSnapshot())
+}
+
+func TestToAgentExecutionRebindsAdoptedStandaloneResourceCircuitIdentity(t *testing.T) {
+	capturedID := "requested-execution"
+	req := &ExecutorCreateRequest{
+		InstanceID:     capturedID,
+		AgentProfileID: "profile-1",
+		Metadata: map[string]interface{}{
+			MetadataKeyResourceCircuitIdentity: resourceCircuitIdentity{
+				ExecutionID: capturedID, ProfileID: "profile-1", Key: "resource-key",
+			},
+		},
+	}
+	instance := &ExecutorInstance{
+		InstanceID:  "retained-execution",
+		RuntimeName: agentruntime.RuntimeStandalone,
+		Metadata:    map[string]interface{}{MetadataKeyReuseExistingProcess: true},
+	}
+	execution := instance.ToAgentExecution(req)
+	require.Equal(t, "retained-execution", execution.ID)
+	require.Equal(t, "resource-key", execution.resourceCircuitKey())
+}
+
+func TestToAgentExecutionAdoptionUsesRetainedEmptyEvidence(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		Env:                  map[string]string{"REQUEST_ONLY": "value"},
+		WorkspaceSourceRoots: []string{"/request/root"},
+	}
+	instance := &ExecutorInstance{
+		InstanceID:           "retained-execution",
+		RuntimeName:          agentruntime.RuntimeStandalone,
+		Metadata:             map[string]interface{}{MetadataKeyReuseExistingProcess: true},
+		Env:                  map[string]string{},
+		WorkspaceSourceRoots: []string{},
+	}
+	execution := instance.ToAgentExecution(req)
+	require.Empty(t, execution.WorkspaceSourceRoots, "an empty retained allowlist is authoritative")
+	require.NotContains(t, execution.RuntimeEnvironment(), "REQUEST_ONLY")
+	require.Empty(t, execution.RuntimeEnvironment())
+}
+
+func TestToAgentExecutionAdoptionUsesNilRetainedEvidence(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		Env:                  map[string]string{"REQUEST_ONLY": "value"},
+		WorkspaceSourceRoots: []string{"/request/root"},
+	}
+	instance := &ExecutorInstance{
+		InstanceID:  "retained-execution",
+		RuntimeName: agentruntime.RuntimeStandalone,
+		Metadata:    map[string]interface{}{MetadataKeyReuseExistingProcess: true},
+	}
+	execution := instance.ToAgentExecution(req)
+	require.Empty(t, execution.WorkspaceSourceRoots, "missing retained roots must not fall back to the replacement request")
+	require.NotContains(t, execution.RuntimeEnvironment(), "REQUEST_ONLY")
+	require.Empty(t, execution.RuntimeEnvironment())
 }
 
 func TestToAgentExecutionCapturesDefensiveRuntimeEnvironment(t *testing.T) {

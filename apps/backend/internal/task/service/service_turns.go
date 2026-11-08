@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -1006,6 +1007,12 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		info.RuntimeName = running.Runtime
 		info.AgentExecutionID = running.AgentExecutionID
 		mergePersistentWorkspaceMetadata(info, running.Metadata)
+		// A retained helper's built-in binding is execution authority, not a
+		// generic persistent launch preference. Carry it separately so only an
+		// adopted peer can restore it; fresh helpers still start unbound.
+		if value, bound := running.Metadata[mcpprofile.BuiltinBindingMetadataKey]; bound {
+			ensureWorkspaceMetadata(info)[mcpprofile.BuiltinBindingMetadataKey] = value
+		}
 		if officeProfileID, ok := running.Metadata[lifecycle.MetadataKeyOfficeAgentProfileID].(string); ok && strings.TrimSpace(officeProfileID) != "" {
 			info.AgentProfileID = officeProfileID
 		}

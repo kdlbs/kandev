@@ -706,7 +706,13 @@ type ExecutorCreateRequest struct {
 	WorkspaceSourceRoots       []string
 	Protocol                   string
 	CodexAppServerEnabled      bool
-	Env                        map[string]string
+	// Env is the launch request environment. Executors that adopt a retained
+	// process keep the peer's own environment instead (see ExecutorInstance.Env).
+	Env map[string]string
+	// RetainedBuiltinBinding is the exact persisted built-in MCP binding of the
+	// previous execution, captured before fresh-helper launch metadata strips it.
+	// Only a retained-peer adoption may restore it; fresh helpers never inherit it.
+	RetainedBuiltinBinding any
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string
@@ -911,10 +917,30 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	} else {
 		delete(metadata, MetadataKeyExecutorType)
 	}
+	if ri.RuntimeName == agentruntime.RuntimeStandalone && instanceReusesExistingProcess(ri) {
+		// The retained instance already owned the captured circuit resource;
+		// the requested execution identity never owns it.
+		rebindResourceCircuitIdentity(metadata, ri.InstanceID)
+	}
 
 	workspacePath := ri.WorkspacePath
 	if workspacePath == "" {
 		workspacePath = req.WorkspacePath
+	}
+	adoptedPeer := ri.RuntimeName == agentruntime.RuntimeStandalone && instanceReusesExistingProcess(ri)
+	workspaceSourceRoots := req.WorkspaceSourceRoots
+	if adoptedPeer || ri.WorkspaceSourceRoots != nil {
+		// A retained instance's own live allowlist is authoritative for
+		// adoption, including an explicitly empty list; request roots describe
+		// the replacement launch.
+		workspaceSourceRoots = ri.WorkspaceSourceRoots
+	}
+	runtimeEnv := req.Env
+	if adoptedPeer || ri.Env != nil {
+		// An adopted instance keeps the environment it was created with,
+		// including an empty one; a launch request's overrides must not be
+		// pushed into a surviving peer.
+		runtimeEnv = ri.Env
 	}
 	originalWorkspacePath := req.OriginalWorkspacePath
 	if originalWorkspacePath == "" {
@@ -964,7 +990,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		ContainerIP:                ri.ContainerIP,
 		WorkspacePath:              workspacePath,
 		OriginalWorkspacePath:      originalWorkspacePath,
-		WorkspaceSourceRoots:       append([]string(nil), req.WorkspaceSourceRoots...),
+		WorkspaceSourceRoots:       append([]string(nil), workspaceSourceRoots...),
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
@@ -983,7 +1009,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		historyEnabled:             historyEnabled,
 		promptDoneCh:               make(chan PromptCompletionSignal, 1),
 	}
-	execution.setRuntimeEnvironment(req.Env)
+	execution.setRuntimeEnvironment(runtimeEnv)
 	execution.sshApprovedEnvKeys = append([]string(nil), req.ApprovedSecretEnvKeys...)
 	return execution
 }
