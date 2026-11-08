@@ -1940,6 +1940,10 @@ func (w *Workspace) IsImproveKandev() bool {
 // on sessionless WIP slot release gets when it does not choose its own.
 const DefaultWIPSessionlessReleaseGraceMinutes = 10
 
+// MaxWIPSessionlessReleaseGraceMinutes bounds the grace at one year, far below
+// the value whose conversion to time.Duration would overflow.
+const MaxWIPSessionlessReleaseGraceMinutes = 525600
+
 type Workspace struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`

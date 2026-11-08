@@ -1,4 +1,6 @@
 export const DEFAULT_WIP_RELEASE_GRACE_MINUTES = 10;
+/** Upper bound shared with the backend: one year, far below duration overflow. */
+export const MAX_WIP_RELEASE_GRACE_MINUTES = 525600;
 
 export type WipReleaseSaved = {
   enabled: boolean;
@@ -22,7 +24,7 @@ export function wipReleaseSavedFrom(workspace: {
 }
 
 export function isValidGraceMinutes(value: string): boolean {
-  return /^\d+$/.test(value) && Number(value) > 0;
+  return /^\d+$/.test(value) && Number(value) > 0 && Number(value) <= MAX_WIP_RELEASE_GRACE_MINUTES;
 }
 
 /** Returns only the fields the draft changed relative to the saved policy. */
@@ -37,4 +39,13 @@ export function buildWipReleaseUpdates(
     updates.wip_sessionless_release_grace_minutes = grace;
   }
   return updates;
+}
+
+/**
+ * Returns the value a draft field takes after a save: the saved server value
+ * when the field was not edited while the save was in flight, otherwise the
+ * in-flight edit, which then stays dirty against the new baseline.
+ */
+export function settleDraftField<T>(current: T, requested: T, saved: T): T {
+  return current === requested ? saved : current;
 }

@@ -294,7 +294,7 @@
   "wipReleaseEnabled": "释放没有活动会话的任务所占名额",
   "wipReleaseGraceMinutes": "宽限期（分钟）",
   "wipReleaseGraceHint": "自任务或会话最后一次活动起经过此时间后释放名额。",
-  "wipReleaseGraceMustBePositive": "请输入大于零的整数分钟数。",
+  "wipReleaseGraceMustBePositive": "请输入 1 到 525600（一年）之间的整数分钟数。",
   "clone": "克隆",
   "cloneWorkspace": "克隆工作区",
   "cloneWorkspaceNamed": "克隆 {{name}}",

@@ -294,7 +294,7 @@
   "wipReleaseEnabled": "釋放沒有活動工作階段的任務所佔名額",
   "wipReleaseGraceMinutes": "寬限期（分鐘）",
   "wipReleaseGraceHint": "自任務或工作階段最後一次活動起經過此時間後釋放名額。",
-  "wipReleaseGraceMustBePositive": "請輸入大於零的整數分鐘數。",
+  "wipReleaseGraceMustBePositive": "請輸入 1 至 525600（一年）之間的整數分鐘數。",
   "clone": "複製",
   "cloneWorkspace": "複製工作區",
   "cloneWorkspaceNamed": "複製 {{name}}",

@@ -55,7 +55,7 @@ integrations, and workflow transitions without exceeding configured WIP capacity
   session state. A workspace may opt in, per workspace and off by default, to
   stop counting an admitted `IN_PROGRESS` or `FAILED` task whose sessions are
   all terminal (or that has none) once a configurable grace (default 10
-  minutes, positive whole minutes) has passed since its last task or session
+  minutes, whole minutes from 1 to one year) has passed since its last task or session
   change. The released task is not moved, re-stated, or un-admitted; it counts
   again as soon as it has a live session. After the grace, the next queued or
   feeder task is pulled without another task move or a restart.

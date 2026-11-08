@@ -294,7 +294,7 @@
   "wipReleaseEnabled": "Release slots of tasks without a live session",
   "wipReleaseGraceMinutes": "Grace period (minutes)",
   "wipReleaseGraceHint": "Time since the task's last task or session activity before its slot is released.",
-  "wipReleaseGraceMustBePositive": "Enter a whole number of minutes greater than zero.",
+  "wipReleaseGraceMustBePositive": "Enter a whole number of minutes from 1 to 525600 (one year).",
   "clone": "Clone",
   "cloneWorkspace": "Clone workspace",
   "cloneWorkspaceNamed": "Clone {{name}}",

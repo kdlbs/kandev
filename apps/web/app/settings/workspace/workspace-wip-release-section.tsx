@@ -10,6 +10,7 @@ import type { WorkspaceState } from "@/lib/state/slices";
 import {
   buildWipReleaseUpdates,
   isValidGraceMinutes,
+  settleDraftField,
   wipReleaseSavedFrom,
   type WipReleaseSaved,
 } from "./workspace-wip-release-draft";
@@ -33,13 +34,19 @@ function useWipReleaseDraft(workspace: Workspace) {
   const graceIsDirty = !graceValid || Number(graceMinutes) !== saved.graceMinutes;
 
   const save = async () => {
+    const requested = { enabled, graceMinutes };
     try {
-      const updates = buildWipReleaseUpdates({ enabled, graceMinutes }, saved);
+      const updates = buildWipReleaseUpdates(requested, saved);
       const updated = await updateWorkspaceAction(workspace.id, updates);
-      // Only the saved baseline moves; an edit made while the request was in
-      // flight stays in the draft and stays dirty against the new baseline.
+      // The baseline moves to the server values. Fields not edited while the
+      // request was in flight follow it, including values another tab saved;
+      // an in-flight edit stays in the draft and stays dirty.
       const next = wipReleaseSavedFrom(updated);
       setSaved(next);
+      setEnabled((current) => settleDraftField(current, requested.enabled, next.enabled));
+      setGraceMinutes((current) =>
+        settleDraftField(current, requested.graceMinutes, String(next.graceMinutes)),
+      );
       const { workspaces, setWorkspaces } = storeApi.getState();
       setWorkspaces(
         workspaces.items.map((item) =>

@@ -294,7 +294,7 @@
   "wipReleaseEnabled": "Ŕēĺēàśē śĺōţś ōƒ ţàśķś ŵĩţĥōũţ à ĺĩvē śēśśĩōń",
   "wipReleaseGraceMinutes": "Ĝŕàćē ƥēŕĩōď (ḿĩńũţēś)",
   "wipReleaseGraceHint": "Ţĩḿē śĩńćē ţĥē ţàśķ'ś ĺàśţ ţàśķ ōŕ śēśśĩōń àćţĩvĩţŷ ƀēƒōŕē ĩţś śĺōţ ĩś ŕēĺēàśēď.",
-  "wipReleaseGraceMustBePositive": "Ēńţēŕ à ŵĥōĺē ńũḿƀēŕ ōƒ ḿĩńũţēś ĝŕēàţēŕ ţĥàń źēŕō.",
+  "wipReleaseGraceMustBePositive": "Ēńţēŕ à ŵĥōĺē ńũḿƀēŕ ōƒ ḿĩńũţēś ƒŕōḿ 1 ţō 525600 (ōńē ŷēàŕ).",
   "clone": "Ćĺōńē",
   "cloneWorkspace": "Ćĺōńē ŵōŕķśƥàćē",
   "cloneWorkspaceNamed": "Ćĺōńē {{name}}",

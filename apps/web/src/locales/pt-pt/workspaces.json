@@ -294,7 +294,7 @@
   "wipReleaseEnabled": "Libertar vagas de tarefas sem sessão ativa",
   "wipReleaseGraceMinutes": "Período de tolerância (minutos)",
   "wipReleaseGraceHint": "Tempo desde a última atividade da tarefa ou da sessão até a vaga ser libertada.",
-  "wipReleaseGraceMustBePositive": "Introduza um número inteiro de minutos maior que zero.",
+  "wipReleaseGraceMustBePositive": "Introduza um número inteiro de minutos entre 1 e 525600 (um ano).",
   "clone": "Clonar",
   "cloneWorkspace": "Clonar espaço de trabalho",
   "cloneWorkspaceNamed": "Clonar {{name}}",

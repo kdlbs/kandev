@@ -497,7 +497,8 @@ for throughput on workspaces that prefer it.
 
 Two workspace columns hold the policy: `wip_sessionless_release_enabled`
 (boolean, default `false`) and `wip_sessionless_release_grace_minutes`
-(integer, default `10`, must be positive). They travel with the existing
+(integer, default `10`, 1 to 525600 minutes; the one-year cap keeps the
+cutoff duration from overflowing). They travel with the existing
 workspace update path (HTTP `PATCH /api/v1/workspaces/:id`, WebSocket
 `workspace.update`), workspace events, the boot payload, and the workspace
 settings page.

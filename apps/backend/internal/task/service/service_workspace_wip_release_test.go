@@ -39,8 +39,11 @@ func TestWorkspaceWIPSessionlessReleaseDefaultsAndUpdates(t *testing.T) {
 		}
 	}
 
-	invalid := 0
-	if _, err := svc.UpdateWorkspace(ctx, workspace.ID, &UpdateWorkspaceRequest{WIPSessionlessReleaseGraceMinutes: &invalid}); !errors.Is(err, ErrWorkspaceWIPReleaseGraceInvalid) {
-		t.Fatalf("non-positive grace update = %v, want ErrWorkspaceWIPReleaseGraceInvalid", err)
+	// 200000000 minutes overflows time.Duration and would move the release
+	// cutoff into the future.
+	for _, invalid := range []int{0, models.MaxWIPSessionlessReleaseGraceMinutes + 1, 200000000} {
+		if _, err := svc.UpdateWorkspace(ctx, workspace.ID, &UpdateWorkspaceRequest{WIPSessionlessReleaseGraceMinutes: &invalid}); !errors.Is(err, ErrWorkspaceWIPReleaseGraceInvalid) {
+			t.Fatalf("grace update %d = %v, want ErrWorkspaceWIPReleaseGraceInvalid", invalid, err)
+		}
 	}
 }

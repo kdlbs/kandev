@@ -25,7 +25,7 @@ occupancy explanation.
 ## In scope
 
 - Workspace columns `wip_sessionless_release_enabled` (default `false`) and
-  `wip_sessionless_release_grace_minutes` (default `10`, positive), with
+  `wip_sessionless_release_grace_minutes` (default `10`, 1 to 525600), with
   schema, replayable migration, repository, service validation, HTTP and
   WebSocket update, DTO, events, and boot payload.
 - One release predicate appended to every admitted-occupant count only when

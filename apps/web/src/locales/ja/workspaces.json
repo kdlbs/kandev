@@ -294,7 +294,7 @@
   "wipReleaseEnabled": "稼働中のセッションがないタスクの枠を空ける",
   "wipReleaseGraceMinutes": "猶予時間（分）",
   "wipReleaseGraceHint": "タスクまたはセッションの最後の活動からこの時間が過ぎると枠を空けます。",
-  "wipReleaseGraceMustBePositive": "0 より大きい整数（分）を入力してください。",
+  "wipReleaseGraceMustBePositive": "1 から 525600（1 年）までの整数（分）を入力してください。",
   "clone": "複製",
   "cloneWorkspace": "ワークスペースを複製",
   "cloneWorkspaceNamed": "{{name}} を複製",
