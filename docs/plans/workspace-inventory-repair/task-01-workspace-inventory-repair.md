@@ -171,3 +171,9 @@ authorized test DSN is available. These results do not claim operating recovery.
 The first normal commit hook rejected cyclomatic complexity 16 (limit 15).
 Task/session lookup and validation were extracted without changing the contract;
 the applicable focused checks and ordinary hook are rerun after this refactor.
+
+Review follow-up: an ordinary launch after a completed metadata-only repair
+rejected the repaired local checkout through the automatic local-source denial.
+Branch continuity now applies the task-scoped local checkout checks to a fenced
+local receipt only. A focused executor test covers repair followed by ordinary
+Resume; it needs the host Git config isolated on this Windows host.

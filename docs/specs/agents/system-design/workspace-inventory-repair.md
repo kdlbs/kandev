@@ -302,3 +302,5 @@ it. The existing environment recovery claim excludes the current session runtime
 as well as borrowers. No new schema, ledger, signature or retry scheduler is
 introduced. A changed entry/generation conflicts, and no repair result itself
 authorizes a later launch.
+A later ordinary launch that attests a fenced local receipt applies the same
+task-scoped local checkout checks instead of the automatic local-source denial.

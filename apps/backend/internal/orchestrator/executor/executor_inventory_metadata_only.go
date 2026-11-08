@@ -117,6 +117,12 @@ func validateScopedInventoryCandidate(ctx context.Context, env *models.TaskEnvir
 	if info.Repository == nil || info.Repository.SourceType != sourceTypeLocal || inventoryMetadataFence(ctx) == nil {
 		return validateWorkspaceInventoryRepairCandidate(env, info, candidate)
 	}
+	return validateLocalInventoryCandidate(env, info, candidate)
+}
+
+// validateLocalInventoryCandidate requires a task-scoped checkout of the
+// configured local repository, distinct from the repository itself.
+func validateLocalInventoryCandidate(env *models.TaskEnvironment, info *repoInfo, candidate *models.TaskEnvironmentRepo) error {
 	if !repairPathIsTaskScoped(env, candidate.WorktreePath) || !isLocalGitRepo(info.RepositoryPath) {
 		return models.ErrWorkspaceInventoryRecoveryConflict
 	}
