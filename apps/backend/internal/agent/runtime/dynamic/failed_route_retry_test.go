@@ -202,3 +202,25 @@ func TestScheduleFailedRouteRetryDeclinesUnrecoverableRoutes(t *testing.T) {
 		t.Fatalf("stale generation: err = %v, want stale", err)
 	}
 }
+
+type allowAllLimits struct{}
+
+func (allowAllLimits) CheckLimit(context.Context, Candidate, string, time.Time) (LimitVerdict, error) {
+	return LimitVerdict{}, nil
+}
+
+func TestScheduleFailedRouteRetryWaitsForNarrowLimitSuspensions(t *testing.T) {
+	f := newFailedRouteRetryFixture(t)
+	f.profile.Candidates[0].ModelID = "anthropic/model-a"
+	f.profile.Candidates[1].ModelID = "openai/model-b"
+	f.engine.SetLimitChecker(allowAllLimits{})
+	generation := f.exhaust(f.now.Add(10*time.Second), f.now.Add(20*time.Second))
+	// The binding circuits close within the minimum delay, but a model and a
+	// provider suspension keep each candidate blocked for hours.
+	f.engine.Circuits().Open(narrowSuspensionKey(f.profile.Candidates[0], SuspensionModel), f.now.Add(3*time.Hour), routingerr.CodeQuotaLimited)
+	f.engine.Circuits().Open(narrowSuspensionKey(f.profile.Candidates[1], SuspensionProvider), f.now.Add(2*time.Hour), routingerr.CodeQuotaLimited)
+	pending, scheduled, err := f.schedule(generation, rateLimitedOnA, 1)
+	if err != nil || !scheduled || !pending.Due.Equal(f.now.Add(2*time.Hour)) {
+		t.Fatalf("schedule = %#v scheduled=%v err=%v, want the earliest candidate's suspension expiry", pending, scheduled, err)
+	}
+}
