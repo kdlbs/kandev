@@ -33,6 +33,15 @@ const (
 	sendOperationErrorConflict = "operation_id_conflict"
 )
 
+// SendOperationConflictCode is the stable conflict code, exported so the
+// Office runtime gateway can map it without matching message text.
+const SendOperationConflictCode = sendOperationErrorConflict
+
+// SendOperationNotRetainedCode answers a replay-only send whose identity has no
+// retained record. Nothing was delivered; the caller may continue with an
+// ordinary authorized send.
+const SendOperationNotRetainedCode = "operation_not_retained"
+
 // sendOperationIDPattern bounds a caller-supplied identity. It is untrusted
 // input that reaches a unique index, a stored row, and a metric-free log line,
 // so length and charset are checked before anything is claimed.
@@ -315,8 +324,26 @@ func sendOperationReceipt(operation *models.TaskMessageSendOperation, replayed b
 	}
 	if replayed {
 		receipt["replayed"] = true
+		receipt[sendOperationRetryKey] = operation.RetrySafe()
+		receipt["instruction"] = sendOperationInstruction(operation)
 	}
 	return receipt
+}
+
+// sendOperationInstruction states the one decision a caller has to make after
+// reading a recorded operation, shared by replay receipts and readback.
+func sendOperationInstruction(operation *models.TaskMessageSendOperation) string {
+	switch operation.State {
+	case models.SendOperationStatePending:
+		return "the first attempt may still commit; do not resend, wait and read again"
+	case models.SendOperationStateCommitted:
+		return "delivered; do not resend"
+	case models.SendOperationStateFailed:
+		if operation.RetrySafe() {
+			return "definitively not delivered; a fresh operation_id may be used"
+		}
+	}
+	return "delivery outcome is unknown; do not resend"
 }
 
 // decorateSendOperationReceipt adds the operation fields to the ordinary

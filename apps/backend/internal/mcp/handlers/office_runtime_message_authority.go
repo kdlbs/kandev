@@ -31,3 +31,19 @@ func officeRuntimeMessageAuthorized(ctx context.Context, principal mcpscope.Prin
 	return ok && principal.Surface == mcpprofile.SurfaceOfficeTask &&
 		authority.taskID == principal.CallerTaskID && authority.sessionID == principal.CallerSessionID
 }
+
+type sendOperationReplayOnlyKey struct{}
+
+// WithSendOperationReplayOnly marks an identified send as a pure replay read:
+// a retained record is returned as usual, and a missing one is answered with
+// SendOperationNotRetainedCode instead of reaching target lookup or dispatch.
+// The Office gateway uses it to recover a receipt before re-checking a target
+// that may since have been deleted or lost its prompt grant.
+func WithSendOperationReplayOnly(ctx context.Context) context.Context {
+	return context.WithValue(ctx, sendOperationReplayOnlyKey{}, true)
+}
+
+func sendOperationReplayOnly(ctx context.Context) bool {
+	replayOnly, _ := ctx.Value(sendOperationReplayOnlyKey{}).(bool)
+	return replayOnly
+}

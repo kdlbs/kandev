@@ -110,8 +110,14 @@ Use `operation_state` and `failure_code` to interpret the result.
 | `failed/outcome_unknown` | The delivery outcome remains unknown. Do not resend. |
 | `claimed=false` | No retained record exists. Bounded retention means this does not prove no historical delivery; `retry_safe=false`. |
 
+An operation ID is 1-128 letters, digits, `.`, `_`, `:` or `-` and starts with
+a letter or digit. It is not accepted with `delivery_mode="report"`. A repeat
+answer to an already-answered parent question echoes the ID without recording
+a send.
+
 A replay with the same retained ID returns its recorded outcome without another
-message, queue entry, turn, or interrupt. Different target task, prompt, delivery
+message, queue entry, turn, or interrupt, with the same `retry_safe` and
+`instruction` that readback gives. Different target task, prompt, delivery
 mode, requested session, or parent-question ID is rejected with
 `operation_id_conflict`. The comparison uses the stored field values directly.
 

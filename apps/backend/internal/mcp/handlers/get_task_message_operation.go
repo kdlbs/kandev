@@ -142,19 +142,6 @@ func claimedSendOperationPayload(operation *models.TaskMessageSendOperation) map
 	if operation.SettledAt != nil {
 		payload["settled_at"] = operation.SettledAt.UTC().Format(time.RFC3339)
 	}
-	switch operation.State {
-	case models.SendOperationStatePending:
-		payload["instruction"] = "the first attempt may still commit; do not resend, wait and read again"
-	case models.SendOperationStateCommitted:
-		payload["instruction"] = "delivered; do not resend"
-	case models.SendOperationStateFailed:
-		if operation.RetrySafe() {
-			payload["instruction"] = "definitively not delivered; a fresh operation_id may be used"
-		} else {
-			payload["instruction"] = "delivery outcome is unknown; do not resend"
-		}
-	default:
-		payload["instruction"] = "delivery outcome is unknown; do not resend"
-	}
+	payload["instruction"] = sendOperationInstruction(operation)
 	return payload
 }

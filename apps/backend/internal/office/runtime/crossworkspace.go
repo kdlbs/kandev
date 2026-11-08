@@ -38,8 +38,12 @@ type CrossWorkspaceMessage struct {
 	OperationID string `json:"operation_id,omitempty"`
 }
 
+// CrossWorkspaceError is a refusal the route returns as-is. Code, when set, is
+// the backend's stable error code (for example operation_id_conflict), so a
+// client need not parse the message to tell one refusal from another.
 type CrossWorkspaceError struct {
 	Status  int
+	Code    string
 	Message string
 }
 
@@ -179,7 +183,11 @@ func (h *Handler) respondCrossWorkspaceRead(
 		var target *CrossWorkspaceError
 		if errors.As(err, &target) {
 			h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
-			c.JSON(target.Status, gin.H{"error": target.Message})
+			response := gin.H{"error": target.Message}
+			if target.Code != "" {
+				response["code"] = target.Code
+			}
+			c.JSON(target.Status, response)
 			return
 		}
 		h.respondRuntimeError(c, runCtx, action, targetType, targetID, err)

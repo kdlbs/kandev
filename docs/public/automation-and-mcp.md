@@ -1160,6 +1160,11 @@ ordinary task message. Read and prompt grants are independent. The signed run
 must still be active and hold the corresponding live Office capability. These
 commands do not give taskless runs foreign workspace access or enable a grant.
 An operation ID follows the existing task-message receipt and retry rules.
+Repeating `tasks send` with the same operation ID and prompt returns the
+retained receipt while the signed run is live, even if the target was deleted
+or its prompt grant was revoked; an `operation_id_conflict` returns HTTP 409.
+With `--workspace`, `tasks list` accepts only `--workflow` and rejects other
+filters. A run whose source session has ended cannot use these commands.
 
 </details>
 
