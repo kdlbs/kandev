@@ -405,10 +405,10 @@ func recordRouteDecisionTx(
 	createdAt := decisionReasonTime(decision, state)
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO dynamic_route_attempts (
-			id, session_id, logical_profile_id, execution_profile_id,
+			id, session_id, route_id, logical_profile_id, execution_profile_id,
 			route_generation, profile_version, reason, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`), uuid.New().String(), decision.SessionID, decision.LogicalProfileID,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), uuid.New().String(), sessionID, routeID, decision.LogicalProfileID,
 		decision.ExecutionProfileID, decision.Generation, decision.ProfileVersion,
 		decision.Reason, createdAt); err != nil {
 		return err
@@ -431,15 +431,26 @@ func (r *Repository) AppendRouteAttempt(ctx context.Context, attempt dynamicrunt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	sessionID, routeID, err := r.routeOwnerColumns(ctx, tx, attempt.SessionID)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO dynamic_route_attempts (
-			id, session_id, logical_profile_id, execution_profile_id,
+			id, session_id, route_id, logical_profile_id, execution_profile_id,
 			route_generation, profile_version, reason, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`), uuid.New().String(), attempt.SessionID, attempt.LogicalProfileID,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), uuid.New().String(), sessionID, routeID, attempt.LogicalProfileID,
 		attempt.ExecutionProfileID, attempt.Generation, attempt.ProfileVersion,
-		attempt.Reason, createdAt)
-	return err
+		attempt.Reason, createdAt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) LoadRouteState(ctx context.Context, sessionID string) (*dynamicruntime.RouteState, error) {
