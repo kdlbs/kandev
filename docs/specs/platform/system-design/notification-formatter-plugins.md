@@ -242,6 +242,11 @@ revision, and host-supported status as data, not authority. The independent UI
 bundle registers its formatter key and uses host-owned React/UI, i18n, and shared
 Save contributor APIs. No Apprise parser/editor is copied into core.
 
+An unactivated selection defers its own save with `SettingsSaveDeferredError`.
+The coordinator continues independent contributors while retaining dirty status
+and refusing save-and-leave. Explicit cancellation still stops the save loop.
+The editor prepares first; only explicit activation selects the prepared revision.
+
 The plugin editor has separate subscription status, event selection, title/body,
 variable help, synthetic sample selection, plain-text preview, staged restore,
 and conflict/loading/error state. Save advances only the submitted baseline;

@@ -86,6 +86,9 @@ plugin's implementation and permanent tests belong in a dedicated repository.
   owner shall prepare and validate configuration through the editor or import without connecting it
   to delivery. Activation shall select only the exact validated revision.
   Failed preparation or activation shall retain the previous delivery selection.
+  A pending selection shall not prevent shared Save from saving independent
+  notification settings. Until activation or Reset, it shall remain dirty and
+  prevent save-and-leave from silently discarding the selection.
 - **AC-PLATFORM-NOTIFICATION-FORMATTER-002.6:** For an active formatter, one
   explicit Save shall persist a complete new revision and attempt its activation
   against the observed binding revision. A conflict or failed activation shall

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { NotificationFormatters } from "./notification-formatters";
-import { SettingsSaveCancelledError } from "./settings-save-provider";
+import { SettingsSaveDeferredError } from "./settings-save-provider";
 
 const mocks = vi.hoisted(() => ({ hook: vi.fn(), contributor: vi.fn() }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
@@ -52,7 +52,7 @@ it("registers a selection-only draft and refuses to imply first activation on Sa
   render(<NotificationFormatters providers={providers} />);
   const contribution = mocks.contributor.mock.lastCall?.[0];
   expect(contribution.isDirty).toBe(true);
-  await expect(contribution.save()).rejects.toBeInstanceOf(SettingsSaveCancelledError);
+  await expect(contribution.save()).rejects.toBeInstanceOf(SettingsSaveDeferredError);
   expect(value.readActiveBinding).toHaveBeenCalledOnce();
   expect(value.activate).not.toHaveBeenCalled();
 });

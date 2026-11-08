@@ -185,3 +185,19 @@ formatter component/API tests, frontend typecheck/full lint/i18n checks,
 changed-package Go lint, and specification validation passed. Managed desktop
 and Pixel 5 E2E checks passed, including selection-only preparation, no implicit
 first binding, explicit activation, preview, and shared default restoration.
+
+### Independent shared-save follow-up
+
+PR #5141 comment `4504572313` exposed a selection-only draft cancelling the
+remaining shared-save contributors. Pending activation now defers only that
+contributor while retaining dirty/navigation/Reset semantics. Ordinary explicit
+save cancellation still stops subsequent contributors. The fix belongs to the
+generic host; the independent Apprise editor already prepares before explicit
+activation and requires no package change.
+
+The new integration regression failed before the fix for both initial selection
+and switching from an existing binding, then passed with the real save coordinator.
+The formatter and coordinator suites passed 35 tests; frontend typecheck and full
+lint passed. Full Vitest exceeded 600 seconds and reported two failures in
+`plan-comment-migration.test.ts`; the same two failures reproduced on unchanged
+stable-candidate source `c846cf102`. This is not a green full-suite result.

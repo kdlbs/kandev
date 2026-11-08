@@ -202,6 +202,10 @@ upgrade. Task 05 records preserved data/settings and post-restart readback;
 Task 04 retains the broader matrix and published-SDK limitations. An operational
 private build does not establish public SDK support or an upstream merge.
 
+The independent shared-save correction for PR #5141 is recorded in Task 01.
+Pending first activation retains the selection without cancelling unrelated
+provider or notification-sound saves.
+
 ## Risks
 
 - A one-second renderer RPC can add latency on the notification path; enforce

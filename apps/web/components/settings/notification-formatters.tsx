@@ -9,7 +9,7 @@ import {
   useNotificationFormatter,
 } from "@/hooks/domains/settings/use-notification-formatter";
 import { SettingsGroup } from "./settings-group";
-import { SettingsSaveCancelledError, useSettingsSaveContributor } from "./settings-save-provider";
+import { SettingsSaveDeferredError, useSettingsSaveContributor } from "./settings-save-provider";
 
 type FormatterProvider = NotificationFormatterSlotProps["provider"];
 
@@ -67,7 +67,7 @@ async function saveFormatterSelection(
 ) {
   if (clearing) return state.clear();
   const active = await state.readActiveBinding();
-  if (formatterBindingId(active) !== state.selected) throw new SettingsSaveCancelledError();
+  if (formatterBindingId(active) !== state.selected) throw new SettingsSaveDeferredError();
 }
 
 function FormatterStatus({
