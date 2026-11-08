@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // ChangeRequestState enumerates the lifecycle states a plugin-reported task
@@ -24,15 +25,24 @@ const (
 	ChangeRequestStateClosed = "closed"
 )
 
-var ErrChangeRequestTaskConflict = errors.New("plugin task change request is associated with a different task")
+var (
+	ErrChangeRequestTaskConflict = errors.New("plugin task change request is associated with a different task")
+	// ErrChangeRequestAmbiguous reports that a host-less identity matches rows
+	// on more than one provider host. The Host never guesses which object the
+	// caller meant and never acts on several of them at once.
+	ErrChangeRequestAmbiguous = errors.New("plugin task change request identity has multiple provider hosts")
+)
 
 // ChangeRequestRecord is one Host-owned, plugin-reported task change request.
 // The row is keyed by the owning installation and workspace plus the plugin's
-// provider identity (provider id, repository id, number), so two plugins can
-// never collide on the same forge object and a disabled or uninstalled plugin
-// leaves rows that are fenced by owner rather than silently reused. The
+// host-qualified provider identity (provider id, provider host, repository id,
+// number), so two plugins can never collide on the same forge object, two code
+// hosts that reuse a provider id stay distinct, and a disabled or uninstalled
+// plugin leaves rows that are fenced by owner rather than silently reused. The
 // installation id is a Host-minted opaque principal (store.Record): the
-// service maps it to the plugin id for uninstall fencing.
+// service maps it to the plugin id for uninstall fencing. Timestamps are
+// RFC3339 text in the record; an empty terminal instant means "not set" and is
+// stored as NULL.
 type ChangeRequestRecord struct {
 	ID             string `db:"id"`
 	InstallationID string `db:"installation_id"`
@@ -75,41 +85,37 @@ func NewChangeRequestStore(pool *db.Pool) (*ChangeRequestStore, error) {
 	return store, nil
 }
 
-// initChangeRequestSchemaDDL is the single source of truth for the table
-// shape. The task index is created separately so both SQLite and Postgres
-// receive one statement per Exec.
-const initChangeRequestSchemaDDL = `
-		CREATE TABLE IF NOT EXISTS plugin_task_change_requests (
-			id TEXT PRIMARY KEY,
-			installation_id TEXT NOT NULL,
-			workspace_id TEXT NOT NULL,
-			task_id TEXT NOT NULL,
-			provider_id TEXT NOT NULL,
-			provider_host TEXT NOT NULL DEFAULT '',
-			repository_id TEXT NOT NULL,
-			number BIGINT NOT NULL,
-			url TEXT NOT NULL DEFAULT '',
-			title TEXT NOT NULL DEFAULT '',
-			state TEXT NOT NULL DEFAULT 'open',
-			head_branch TEXT NOT NULL DEFAULT '',
-			base_branch TEXT NOT NULL DEFAULT '',
-			created_at TEXT NOT NULL,
-			merged_at TEXT NOT NULL DEFAULT '',
-			closed_at TEXT NOT NULL DEFAULT '',
-			updated_at TEXT NOT NULL,
-			UNIQUE (installation_id, workspace_id, provider_id, repository_id, number)
-		);
-	`
+// changeRequestSchemaStatements is the single source of truth for the table
+// shape. Each statement is rendered for the active driver and run with its own
+// Exec so both SQLite and Postgres accept it. The unique key includes the
+// provider host, terminal instants are nullable timestamps, and the shape is
+// the one existing installations already carry, so CREATE TABLE IF NOT EXISTS
+// opens such a table unchanged.
+var changeRequestSchemaStatements = []string{`
+CREATE TABLE IF NOT EXISTS plugin_task_change_requests (
+ id TEXT PRIMARY KEY, installation_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+ task_id TEXT NOT NULL, provider_id TEXT NOT NULL, provider_host TEXT NOT NULL DEFAULT '',
+ repository_id TEXT NOT NULL, number BIGINT NOT NULL, url TEXT NOT NULL DEFAULT '',
+ title TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT 'open',
+ head_branch TEXT NOT NULL DEFAULT '', base_branch TEXT NOT NULL DEFAULT '',
+ created_at DATETIME NOT NULL, merged_at DATETIME, closed_at DATETIME, updated_at DATETIME NOT NULL,
+ UNIQUE (installation_id, workspace_id, provider_id, provider_host, repository_id, number)
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_plugin_task_change_requests_task ON plugin_task_change_requests(installation_id, workspace_id, task_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_plugin_task_change_requests_merged ON plugin_task_change_requests(workspace_id, state, merged_at)`,
+}
 
 func (s *ChangeRequestStore) initSchema() error {
-	if _, err := s.db.Exec(initChangeRequestSchemaDDL); err != nil {
-		return err
+	for _, statement := range changeRequestSchemaStatements {
+		rendered, err := dialect.RenderSchema(s.db.DriverName(), statement)
+		if err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(rendered); err != nil {
+			return err
+		}
 	}
-	_, err := s.db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_plugin_task_change_requests_task
-			ON plugin_task_change_requests(installation_id, workspace_id, task_id);
-	`)
-	return err
+	return nil
 }
 
 // validChangeRequestState reports whether state is one of the three lifecycle
@@ -203,11 +209,14 @@ func normalizeChangeRequestRecord(record ChangeRequestRecord, now string) Change
 }
 
 // ReportChangeRequest upserts one plugin-reported task change request. The
-// owning installation, workspace, provider, repository, and number identify
-// the row; the latest report updates the descriptive fields. The created,
-// merged, and closed instants are latched, and merged and closed are terminal
-// states, so a stale poll cannot reopen or unmerge a row. The second return
-// reports whether the row already existed.
+// owning installation, workspace, provider, provider host, repository, and
+// number identify the row; the latest report updates the descriptive fields.
+// A report without a provider host updates the unique existing row of that
+// identity and keeps its host; when rows exist on several hosts it fails with
+// ErrChangeRequestAmbiguous. The created, merged, and closed instants are
+// latched, and merged and closed are terminal states, so a stale poll cannot
+// reopen or unmerge a row. The second return reports whether the row already
+// existed.
 func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, record ChangeRequestRecord) (ChangeRequestRecord, bool, error) {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -230,46 +239,43 @@ func (s *ChangeRequestStore) reportChangeRequestTx(ctx context.Context, tx *sqlx
 	}
 	now := time.Now().UTC().Format(changeRequestTimestampLayout)
 	record = normalizeChangeRequestRecord(record, now)
-	var existing ChangeRequestRecord
-	err := tx.GetContext(ctx, &existing, tx.Rebind(`SELECT `+changeRequestColumns+` FROM plugin_task_change_requests WHERE installation_id = ? AND workspace_id = ? AND provider_id = ? AND repository_id = ? AND number = ?`),
-		record.InstallationID, record.WorkspaceID, record.ProviderID, record.RepositoryID, record.Number)
+	existing, err := lookupChangeRequest(ctx, tx, record)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return ChangeRequestRecord{}, false, err
 	}
-	created := err != nil
-	if !created && existing.TaskID != record.TaskID {
-		return ChangeRequestRecord{}, false, ErrChangeRequestTaskConflict
+	created := errors.Is(err, sql.ErrNoRows)
+	if !created {
+		if existing.TaskID != record.TaskID {
+			return ChangeRequestRecord{}, false, ErrChangeRequestTaskConflict
+		}
+		// A host-less report may update the unique existing object but never
+		// changes that object's host-qualified identity.
+		record.ProviderHost = existing.ProviderHost
 	}
+	merged := changeRequestKnownTimestamp(s.db.DriverName(), "merged_at")
+	closed := changeRequestKnownTimestamp(s.db.DriverName(), "closed_at")
 	_, err = tx.ExecContext(ctx, tx.Rebind(`
-		INSERT INTO plugin_task_change_requests (
-			id, installation_id, workspace_id, task_id, provider_id, provider_host,
-			repository_id, number, url, title, state, head_branch, base_branch,
-			created_at, merged_at, closed_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(installation_id, workspace_id, provider_id, repository_id, number)
-		DO UPDATE SET provider_host = excluded.provider_host,
-			url = excluded.url, title = excluded.title,
+		INSERT INTO plugin_task_change_requests (`+changeRequestColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(installation_id, workspace_id, provider_id, provider_host, repository_id, number)
+		DO UPDATE SET url = excluded.url, title = excluded.title,
 			state = CASE WHEN plugin_task_change_requests.state IN ('merged', 'closed')
 				THEN plugin_task_change_requests.state ELSE excluded.state END,
 			head_branch = excluded.head_branch, base_branch = excluded.base_branch,
-			merged_at = CASE
-				WHEN plugin_task_change_requests.state = 'closed' THEN plugin_task_change_requests.merged_at
-				WHEN plugin_task_change_requests.merged_at <> '' THEN plugin_task_change_requests.merged_at
-				ELSE excluded.merged_at END,
-			closed_at = CASE
-				WHEN plugin_task_change_requests.state = 'merged' THEN plugin_task_change_requests.closed_at
-				WHEN plugin_task_change_requests.closed_at <> '' THEN plugin_task_change_requests.closed_at
-				ELSE excluded.closed_at END,
+			merged_at = CASE WHEN plugin_task_change_requests.state = 'closed' THEN plugin_task_change_requests.merged_at
+				ELSE COALESCE(`+merged+`, excluded.merged_at) END,
+			closed_at = CASE WHEN plugin_task_change_requests.state = 'merged' THEN plugin_task_change_requests.closed_at
+				ELSE COALESCE(`+closed+`, excluded.closed_at) END,
 			updated_at = excluded.updated_at
+		WHERE plugin_task_change_requests.task_id = excluded.task_id
 	`), record.ID, record.InstallationID, record.WorkspaceID, record.TaskID, record.ProviderID, record.ProviderHost,
 		record.RepositoryID, record.Number, record.URL, record.Title, record.State, record.HeadBranch, record.BaseBranch,
-		record.CreatedAt, record.MergedAt, record.ClosedAt, record.UpdatedAt)
+		record.CreatedAt, optionalChangeRequestValue(record.MergedAt), optionalChangeRequestValue(record.ClosedAt), record.UpdatedAt)
 	if err != nil {
 		return ChangeRequestRecord{}, false, err
 	}
-	var stored ChangeRequestRecord
-	if err := tx.GetContext(ctx, &stored, tx.Rebind(`SELECT `+changeRequestColumns+` FROM plugin_task_change_requests WHERE installation_id = ? AND workspace_id = ? AND provider_id = ? AND repository_id = ? AND number = ?`),
-		record.InstallationID, record.WorkspaceID, record.ProviderID, record.RepositoryID, record.Number); err != nil {
+	stored, err := lookupChangeRequest(ctx, tx, record)
+	if err != nil {
 		return ChangeRequestRecord{}, false, err
 	}
 	if stored.TaskID != record.TaskID {
@@ -278,19 +284,72 @@ func (s *ChangeRequestStore) reportChangeRequestTx(ctx context.Context, tx *sqlx
 	return stored, created, nil
 }
 
+// lookupChangeRequest resolves the caller's identity to at most one row. With
+// a provider host it is an exact key lookup; without one it matches the
+// identity on any host and rejects a second match as ambiguous.
+func lookupChangeRequest(ctx context.Context, tx *sqlx.Tx, record ChangeRequestRecord) (ChangeRequestRecord, error) {
+	query := `SELECT ` + changeRequestColumns + ` FROM plugin_task_change_requests
+		WHERE installation_id = ? AND workspace_id = ? AND provider_id = ? AND repository_id = ? AND number = ?`
+	args := []any{record.InstallationID, record.WorkspaceID, record.ProviderID, record.RepositoryID, record.Number}
+	if record.ProviderHost != "" {
+		query += ` AND provider_host = ?`
+		args = append(args, record.ProviderHost)
+	}
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(query+` ORDER BY id LIMIT 2`), args...)
+	if err != nil {
+		return ChangeRequestRecord{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return ChangeRequestRecord{}, err
+		}
+		return ChangeRequestRecord{}, sql.ErrNoRows
+	}
+	stored, err := scanChangeRequest(rows)
+	if err != nil {
+		return ChangeRequestRecord{}, err
+	}
+	if rows.Next() {
+		return ChangeRequestRecord{}, ErrChangeRequestAmbiguous
+	}
+	return stored, rows.Err()
+}
+
+// changeRequestKnownTimestamp reads a stored terminal instant as NULL when it
+// is unset. SQLite tables carried over from older shapes may hold empty text
+// instead of NULL; Postgres timestamp columns can only hold NULL.
+func changeRequestKnownTimestamp(driver, column string) string {
+	qualified := "plugin_task_change_requests." + column
+	if dialect.IsPostgres(driver) {
+		return qualified
+	}
+	return "NULLIF(" + qualified + ", '')"
+}
+
+func optionalChangeRequestValue(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
 // RemoveChangeRequest deletes one plugin-reported task change request owned
 // by the calling installation. Removing a row that does not exist is not an
 // error; removing another installation's row is impossible because every
-// statement is scoped to the caller's installation id.
+// statement is scoped to the caller's installation id. The identity carries
+// no provider host, so when it matches rows on several hosts nothing is
+// deleted and ErrChangeRequestAmbiguous is returned.
 func (s *ChangeRequestStore) RemoveChangeRequest(ctx context.Context, installationID, workspaceID, providerID, repositoryID string, number int64) error {
-	if installationID == "" || workspaceID == "" || providerID == "" || repositoryID == "" || number <= 0 {
-		return errors.New("plugin task change request: required identity fields are missing")
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
-		DELETE FROM plugin_task_change_requests
-		WHERE installation_id = ? AND workspace_id = ? AND provider_id = ? AND repository_id = ? AND number = ?
-	`), installationID, workspaceID, providerID, repositoryID, number)
-	return err
+	defer func() { _ = tx.Rollback() }()
+	if err := removeChangeRequestTx(ctx, tx, installationID, workspaceID, providerID, repositoryID, number); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ListChangeRequestsByTask returns every change request the installation
@@ -300,13 +359,22 @@ func (s *ChangeRequestStore) ListChangeRequestsByTask(ctx context.Context, insta
 	if installationID == "" || workspaceID == "" || taskID == "" {
 		return nil, errors.New("plugin task change request: installation, workspace, and task are required")
 	}
-	var records []ChangeRequestRecord
-	if err := s.ro.SelectContext(ctx, &records, s.ro.Rebind(
+	rows, err := s.ro.QueryxContext(ctx, s.ro.Rebind(
 		`SELECT `+changeRequestColumns+` FROM plugin_task_change_requests WHERE installation_id = ? AND workspace_id = ? AND task_id = ? ORDER BY updated_at DESC, id`),
-		installationID, workspaceID, taskID); err != nil {
+		installationID, workspaceID, taskID)
+	if err != nil {
 		return nil, err
 	}
-	return records, nil
+	defer func() { _ = rows.Close() }()
+	var records []ChangeRequestRecord
+	for rows.Next() {
+		record, err := scanChangeRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	return records, rows.Err()
 }
 
 // DeleteByInstallation removes every change request row for one installation

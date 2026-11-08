@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 	"time"
 
@@ -20,6 +21,9 @@ const (
 	exactTaskChangeRequestReportMethod = "ReportTaskChangeRequestExact"
 	exactTaskChangeRequestRemoveMethod = "RemoveTaskChangeRequestExact"
 	exactTaskChangeRequestCapability   = "host.v2.write:task_change_requests"
+
+	changeRequestHTTPScheme       = "http"
+	changeRequestSecureHTTPScheme = "https"
 )
 
 type exactTaskChangeRequestCommandManager struct{ host *pluginHost }
@@ -119,6 +123,11 @@ func validChangeRequestTimestamp(value string) bool {
 }
 
 func exactTaskChangeRequestReportDigest(input pluginsdk.ExactTaskChangeRequestReport) (string, error) {
+	var valid bool
+	input, valid = normalizeExactReportProviderHost(input)
+	if !valid {
+		return "", errors.New("invalid task change request payload")
+	}
 	canonical := struct {
 		WorkspaceID  string `json:"workspace_id"`
 		TaskID       string `json:"task_id"`
@@ -165,6 +174,11 @@ func (h *pluginHost) reportTaskChangeRequestExact(ctx context.Context, input plu
 	if !validTaskChangeRequestReport(input) {
 		return &pluginsdk.CommandResult{Status: pluginsdk.CommandInvalid, Reason: "invalid_request"}, pluginsdk.TaskChangeRequest{}, nil
 	}
+	var hostValid bool
+	input, hostValid = normalizeExactReportProviderHost(input)
+	if !hostValid {
+		return &pluginsdk.CommandResult{Status: pluginsdk.CommandInvalid, Reason: "invalid_request"}, pluginsdk.TaskChangeRequest{}, nil
+	}
 	digest, err := exactTaskChangeRequestReportDigest(input)
 	if err != nil {
 		return &pluginsdk.CommandResult{Status: pluginsdk.CommandInvalid, Reason: "invalid_request"}, pluginsdk.TaskChangeRequest{}, nil
@@ -193,7 +207,7 @@ func (h *pluginHost) reportTaskChangeRequestExact(ctx context.Context, input plu
 		if record.Receipt.ResultStatus != string(pluginsdk.CommandApplied) {
 			return commandResultFromRecord(record), pluginsdk.TaskChangeRequest{}, nil
 		}
-		candidate, err := h.findReportedChangeRequest(ctx, ledger, input)
+		candidate, err := h.findReportedChangeRequest(ctx, ledger, input, record.Receipt.TargetID)
 		if err != nil {
 			return unavailableTaskChangeRequest("task_change_request_receipt_unavailable"), pluginsdk.TaskChangeRequest{}, nil
 		}
@@ -216,6 +230,9 @@ func (h *pluginHost) reportTaskChangeRequestExact(ctx context.Context, input plu
 		HeadBranch: input.HeadBranch, BaseBranch: input.BaseBranch,
 		CreatedAt: input.CreatedAt, MergedAt: input.MergedAt, ClosedAt: input.ClosedAt,
 	}, store, record.Intent.OperationID, string(pluginsdk.CommandApplied))
+	if errors.Is(err, state.ErrChangeRequestAmbiguous) {
+		return h.completeChangeRequestFailure(ctx, store, record, pluginsdk.CommandConflict, "change_request_identity_ambiguous", input.TaskID, ""), pluginsdk.TaskChangeRequest{}, nil
+	}
 	if errors.Is(err, state.ErrChangeRequestTaskConflict) {
 		return h.completeChangeRequestFailure(ctx, store, record, pluginsdk.CommandConflict, "task_changed", input.TaskID, ""), pluginsdk.TaskChangeRequest{}, nil
 	}
@@ -225,14 +242,17 @@ func (h *pluginHost) reportTaskChangeRequestExact(ctx context.Context, input plu
 	return commandResultFromRecord(completed), taskChangeRequestToSDK(reported), nil
 }
 
-func (h *pluginHost) findReportedChangeRequest(ctx context.Context, ledger *state.ChangeRequestStore, input pluginsdk.ExactTaskChangeRequestReport) (*state.ChangeRequestRecord, error) {
+// findReportedChangeRequest resolves the row an applied report receipt names.
+// Matching the receipt's target id keeps a replay on the row it wrote even
+// when the same identity exists on another provider host.
+func (h *pluginHost) findReportedChangeRequest(ctx context.Context, ledger *state.ChangeRequestStore, input pluginsdk.ExactTaskChangeRequestReport, targetID string) (*state.ChangeRequestRecord, error) {
 	reported, err := ledger.ListChangeRequestsByTask(ctx, h.installationID, input.WorkspaceID, input.TaskID)
 	if err != nil {
 		return nil, err
 	}
 	for index := range reported {
 		candidate := &reported[index]
-		if candidate.ProviderID == strings.TrimSpace(input.ProviderID) &&
+		if candidate.ID == targetID && candidate.ProviderID == strings.TrimSpace(input.ProviderID) &&
 			candidate.RepositoryID == strings.TrimSpace(input.RepositoryID) && candidate.Number == input.Number {
 			return candidate, nil
 		}
@@ -275,6 +295,9 @@ func (h *pluginHost) removeTaskChangeRequestExact(ctx context.Context, input plu
 	completed, err := ledger.RemoveChangeRequestWithReceipt(ctx, h.installationID, input.WorkspaceID,
 		strings.TrimSpace(input.ProviderID), strings.TrimSpace(input.RepositoryID), input.Number,
 		store, record.Intent.OperationID, string(pluginsdk.CommandApplied))
+	if errors.Is(err, state.ErrChangeRequestAmbiguous) {
+		return h.completeChangeRequestFailure(ctx, store, record, pluginsdk.CommandConflict, "change_request_identity_ambiguous", "", ""), nil
+	}
 	if err != nil {
 		return uncertainTaskChangeRequest("task_change_request_transaction_failed"), nil
 	}
@@ -430,4 +453,35 @@ func (h *pluginHost) completeChangeRequestFailure(ctx context.Context, store *st
 		return uncertainTaskChangeRequest("command_receipt_unavailable")
 	}
 	return commandResultFromRecord(completed)
+}
+
+// normalizeExactReportProviderHost canonicalizes the provider host that
+// qualifies the change request identity. An explicit host must be a bare
+// host[:port]; it is lower-cased. Without one, the host of an http(s) URL is
+// used, so two code hosts that reuse a provider id stay distinct rows. A
+// report with neither keeps an empty host.
+func normalizeExactReportProviderHost(input pluginsdk.ExactTaskChangeRequestReport) (pluginsdk.ExactTaskChangeRequestReport, bool) {
+	if input.ProviderHost != "" {
+		host, err := changeRequestHost(input.ProviderHost)
+		input.ProviderHost = host
+		return input, err == nil
+	}
+	parsed, err := url.Parse(input.URL)
+	if err == nil && parsed.User == nil && (parsed.Scheme == changeRequestSecureHTTPScheme || parsed.Scheme == changeRequestHTTPScheme) {
+		if host, hostErr := changeRequestHost(parsed.Host); hostErr == nil {
+			input.ProviderHost = host
+		}
+	}
+	return input, true
+}
+
+func changeRequestHost(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse("//" + strings.TrimSpace(value))
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || len(value) > 512 {
+		return "", errors.New("invalid task change request provider host")
+	}
+	return strings.ToLower(parsed.Host), nil
 }

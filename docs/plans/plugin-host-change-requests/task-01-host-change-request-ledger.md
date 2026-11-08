@@ -30,7 +30,9 @@ id.
 
 - Exact `ReportTaskChangeRequestExact` and `RemoveTaskChangeRequestExact` Host
   commands behind the existing manifest and workspace approval boundary.
-- Installation, workspace, provider, immutable repository, and number identity.
+- Installation, workspace, provider, provider host, immutable repository, and
+  number identity; a host-less identity that matches several hosts is rejected
+  as ambiguous.
 - A first report fixes the task association; merged and closed are terminal.
 - `UNCERTAIN` when a ledger write succeeds but the durable receipt cannot be
   completed; the same idempotency key reconciles.

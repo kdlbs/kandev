@@ -10,6 +10,13 @@ import (
 // request: what the plugin observes on its own code host. The host owns the
 // row; the provider id must be one of the calling plugin's manifest-declared
 // repository_providers.
+//
+// ProviderHost is part of the identity, so two code hosts that reuse the same
+// provider id, repository id, and number stay distinct. It is a bare
+// host[:port], compared case-insensitively. When it is empty the host of an
+// http(s) URL is used; a report with neither updates the one existing row of
+// that identity and is a CONFLICT (change_request_identity_ambiguous) when
+// rows exist on several hosts.
 type ExactTaskChangeRequestReport struct {
 	RequestID        string
 	WorkspaceID      string
@@ -32,7 +39,9 @@ type ExactTaskChangeRequestReport struct {
 }
 
 // ExactTaskChangeRequestRemove deletes one plugin-reported task change
-// request owned by the calling installation.
+// request owned by the calling installation. The identity carries no provider
+// host: when it matches rows on several hosts nothing is removed and the
+// result is a CONFLICT (change_request_identity_ambiguous).
 type ExactTaskChangeRequestRemove struct {
 	RequestID        string
 	WorkspaceID      string

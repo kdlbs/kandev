@@ -413,8 +413,12 @@ with `RemoveTaskChangeRequestExact`. Writes require
 manifest digest. The reported `provider_id` must be one of the plugin's
 manifest-declared `repository_providers`; the task must exist in the same
 workspace and must not be archived. The identity is the owning installation,
-workspace, provider, immutable repository id, and change-request number. The
-first report fixes the task association; another task cannot take over the row
+workspace, provider, provider host, immutable repository id, and change-request
+number, so two code hosts that reuse a provider id stay distinct. The provider
+host is a bare `host[:port]`, lower-cased; when a report omits it the Host
+takes it from an `http(s)` URL. A report or remove whose identity has no host
+and matches rows on several hosts returns `CONFLICT` with
+`change_request_identity_ambiguous` and changes nothing. The first report fixes the task association; another task cannot take over the row
 and must remove and report it instead. State is `open`, `merged`, or `closed`;
 merged and closed are terminal and their timestamps latch, so a stale report
 cannot reopen or unmerge a row. An open report carries no terminal timestamp, a
@@ -427,7 +431,10 @@ in one transaction. If that transaction cannot be confirmed, the result is
 receipt without repeating the write. Use a new idempotency key to retry
 intentionally.
 
-The Host owns the `plugin_task_change_requests` ledger. Disable fences new
+The Host owns the `plugin_task_change_requests` ledger. Its unique key is
+`(installation_id, workspace_id, provider_id, provider_host, repository_id,
+number)` and terminal timestamps are nullable, matching the table existing
+installations already carry, so it opens without a migration. Disable fences new
 writes while keeping the installation's history, so a re-enable can reuse it;
 uninstall deletes the rows, and workspace deletion removes every row for that
 workspace. An in-place upgrade keeps the installation identity
