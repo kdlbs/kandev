@@ -60,6 +60,10 @@ func retainsRuntimeOnLaunchRollback(execution *AgentExecution) bool {
 	if execution == nil {
 		return false
 	}
+	if execution.RuntimeName == agentruntime.RuntimeStandalone &&
+		execution.startupDispositionSnapshot() == AgentStartupReattachedExisting {
+		return true
+	}
 	if execution.RuntimeName == agentruntime.RuntimeKubernetes {
 		return execution.isResumedSession || execution.attachedExistingCompute
 	}

@@ -161,9 +161,12 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 			running.Metadata = make(map[string]interface{})
 		}
 		for k, v := range prior.Metadata {
-			if k == metadataKeyPassthroughMCPClaims || k == idleActivityMetadataKey || k == mcpprofile.BuiltinBindingMetadataKey {
+			if k == metadataKeyPassthroughMCPClaims || k == idleActivityMetadataKey || k == mcpprofile.BuiltinBindingMetadataKey ||
+				k == MetadataKeySSHLaunchReceipt {
 				// Current execution metadata owns claim state. Copying an absent
-				// claim or clock from a prior row would undo its removal.
+				// claim or clock from a prior row would undo its removal. The SSH
+				// launch receipt is the same shape of fact: a replacement launch
+				// that cleared it must never inherit the predecessor's proof.
 				continue
 			}
 			if _, ok := running.Metadata[k]; !ok {

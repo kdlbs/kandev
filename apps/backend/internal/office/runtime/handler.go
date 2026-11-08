@@ -538,7 +538,8 @@ func (h *Handler) respondRuntimeError(
 ) {
 	if errors.Is(err, errTaskTitleRequired) || errors.Is(err, ErrProjectRequired) ||
 		errors.Is(err, ErrInvalidWakeReason) || errors.Is(err, ErrReasonTooLong) ||
-		errors.Is(err, ErrInvalidListParams) || errors.Is(err, ErrCommentBodyRequired) {
+		errors.Is(err, ErrInvalidListParams) || errors.Is(err, ErrCommentBodyRequired) ||
+		errors.Is(err, ErrInvalidTaskRelations) {
 		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
