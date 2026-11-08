@@ -14,6 +14,19 @@ func (f fakeChangeLinks) TasksLinkedToChange(_ context.Context, _, changeKey str
 	return f.byChange[changeKey], nil
 }
 
+func (f fakeChangeLinks) ChangesLinkedToTask(_ context.Context, _, taskID string) ([]string, error) {
+	var keys []string
+	for k, ids := range f.byChange {
+		for _, id := range ids {
+			if id == taskID {
+				keys = append(keys, k)
+			}
+		}
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+
 func (f fakeChangeLinks) OpenChanges(context.Context, string) ([]string, error) {
 	keys := make([]string, 0, len(f.byChange))
 	for k := range f.byChange {

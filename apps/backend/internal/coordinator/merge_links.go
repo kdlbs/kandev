@@ -13,6 +13,9 @@ type ChangeLinks interface {
 	// TasksLinkedToChange returns the IDs of the workspace's tasks linked to
 	// the change key (provider|host|repository ID|number).
 	TasksLinkedToChange(ctx context.Context, workspaceID, changeKey string) ([]string, error)
+	// ChangesLinkedToTask returns the canonical keys of the changes a live task
+	// links.
+	ChangesLinkedToTask(ctx context.Context, workspaceID, taskID string) ([]string, error)
 	// OpenChanges returns the change keys of the workspace's open changes that
 	// are linked to a live task, sorted ascending.
 	OpenChanges(ctx context.Context, workspaceID string) ([]string, error)

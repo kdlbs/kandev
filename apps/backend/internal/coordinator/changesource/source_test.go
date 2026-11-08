@@ -175,3 +175,18 @@ func TestOpenChangesListsOnlyOpenLiveLinkedChanges(t *testing.T) {
 		t.Fatalf("keys = %v err = %v", keys, err)
 	}
 }
+
+func TestChangesLinkedToTask(t *testing.T) {
+	e := newEnv(t)
+	e.addPR(t, "t1", nil)
+	e.addPR(t, "t1", func(p *github.TaskPR) { p.PRNumber = 8 })
+	e.addPR(t, "t2", func(p *github.TaskPR) { p.PRNumber = 9 })
+	keys, err := e.src.ChangesLinkedToTask(context.Background(), "ws", "t1")
+	if err != nil || len(keys) != 2 {
+		t.Fatalf("keys = %v err = %v", keys, err)
+	}
+	none, _ := e.src.ChangesLinkedToTask(context.Background(), "ws", "t3")
+	if len(none) != 0 {
+		t.Fatalf("cross-workspace task listed: %v", none)
+	}
+}

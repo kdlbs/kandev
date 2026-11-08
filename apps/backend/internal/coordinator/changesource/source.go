@@ -377,3 +377,39 @@ func (s *Source) OpenChanges(ctx context.Context, workspaceID string) ([]string,
 	sort.Strings(keys)
 	return keys, nil
 }
+
+// ChangesLinkedToTask returns the canonical keys of every change a live task
+// links, whatever the change state.
+func (s *Source) ChangesLinkedToTask(ctx context.Context, workspaceID, taskID string) ([]string, error) {
+	var gh []struct {
+		Host   string `db:"github_host"`
+		RepoID string `db:"repository_id"`
+		Number int    `db:"pr_number"`
+	}
+	if err := s.db.SelectContext(ctx, &gh, `
+		SELECT gtp.github_host, gtp.repository_id, gtp.pr_number
+		FROM github_task_prs gtp JOIN tasks t ON t.id = gtp.task_id
+		WHERE t.workspace_id = ? AND t.archived_at IS NULL AND gtp.task_id = ? AND gtp.repository_id <> ''`, workspaceID, taskID); err != nil {
+		return nil, fmt.Errorf("list task github changes: %w", err)
+	}
+	var gl []struct {
+		Host   string `db:"host"`
+		RepoID string `db:"repository_id"`
+		Number int    `db:"mr_iid"`
+	}
+	if err := s.db.SelectContext(ctx, &gl, `
+		SELECT m.host, m.repository_id, m.mr_iid
+		FROM gitlab_task_mrs m JOIN tasks t ON t.id = m.task_id
+		WHERE t.workspace_id = ? AND t.archived_at IS NULL AND m.task_id = ? AND m.repository_id <> ''`, workspaceID, taskID); err != nil {
+		return nil, fmt.Errorf("list task gitlab changes: %w", err)
+	}
+	keys := make([]string, 0, len(gh)+len(gl))
+	for _, r := range gh {
+		keys = append(keys, mergestate.ChangeKey{Provider: providerGitHub, Host: normalizeHost(r.Host), RepoID: r.RepoID, Number: r.Number}.String())
+	}
+	for _, r := range gl {
+		keys = append(keys, mergestate.ChangeKey{Provider: providerGitLab, Host: normalizeHost(r.Host), RepoID: r.RepoID, Number: r.Number}.String())
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
