@@ -298,6 +298,8 @@ type ProposalDTO struct {
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
 	RunsWith      *RunsWith      `json:"runs_with"`
+	// Merge is present on the detail read of a merge proposal only.
+	Merge *MergeDetail `json:"merge,omitempty"`
 
 	// ProposalPhase2 is nil, and its fields are absent from the body, while
 	// the phase-2 flag is off.

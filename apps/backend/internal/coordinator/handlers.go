@@ -258,7 +258,10 @@ func (h *Handlers) httpGetProposal(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewProposalDTOPhases(found, h.service.phase2, h.service.phase3))
+	found, detail := h.service.OpenMergeDetail(ctx, found)
+	dto := NewProposalDTOPhases(found, h.service.phase2, h.service.phase3)
+	dto.Merge = detail
+	c.JSON(http.StatusOK, dto)
 }
 
 // httpApproveProposal backs

@@ -44,6 +44,7 @@ func TestCoordinatorRoutesNameNoMergeOrCompletion(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc, _ := newTestServiceForSubscribers(t)
 	svc.phase2 = true
+	svc.merge = true
 	router := gin.New()
 	RegisterRoutes(router, svc, newTestLogger(t))
 	routes := router.Routes()
@@ -51,8 +52,15 @@ func TestCoordinatorRoutesNameNoMergeOrCompletion(t *testing.T) {
 		t.Fatal("no routes registered")
 	}
 	for _, r := range routes {
-		if forbiddenSurface.MatchString(strings.TrimPrefix(r.Path, "/api/v1/workspaces/:id")) {
+		path := strings.TrimPrefix(r.Path, "/api/v1/workspaces/:id")
+		if forbiddenSurface.MatchString(path) && !mergeRoute(path) {
 			t.Errorf("route %s %s suggests a merge or completion", r.Method, r.Path)
 		}
 	}
+}
+
+// mergeRoute reports whether a path belongs to the merge spec: the protection
+// refresh and the two manager actions on an uncertain merge proposal.
+func mergeRoute(path string) bool {
+	return strings.Contains(path, "/merge/protection/") || strings.HasSuffix(path, "/merge/check") || strings.HasSuffix(path, "/merge/release")
 }

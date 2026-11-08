@@ -13,6 +13,28 @@ func registerMergeRoutes(workspace *gin.RouterGroup, h *Handlers) {
 	workspace.GET("/coordinators/:cid/tasks/:tid/dependencies", h.httpGetDependencies)
 	workspace.PUT("/coordinators/:cid/tasks/:tid/dependencies", h.httpPutDependencies)
 	workspace.POST("/coordinators/:cid/merge/protection/refresh", h.httpRefreshProtection)
+	workspace.POST("/coordinators/:cid/proposals/:pid/merge/check", h.httpCheckMerge)
+	workspace.POST("/coordinators/:cid/proposals/:pid/merge/release", h.httpReleaseMerge)
+}
+
+// httpCheckMerge backs POST .../proposals/:pid/merge/check (Check now).
+func (h *Handlers) httpCheckMerge(c *gin.Context) {
+	p, err := h.service.CheckMergeNow(c.Request.Context(), c.Param("id"), c.Param("cid"), c.Param("pid"))
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, NewProposalDTOPhases(p, h.service.phase2, h.service.phase3))
+}
+
+// httpReleaseMerge backs POST .../proposals/:pid/merge/release.
+func (h *Handlers) httpReleaseMerge(c *gin.Context) {
+	p, err := h.service.ReleaseMerge(c.Request.Context(), c.Param("id"), c.Param("cid"), c.Param("pid"))
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, NewProposalDTOPhases(p, h.service.phase2, h.service.phase3))
 }
 
 // httpRefreshProtection backs POST .../coordinators/:cid/merge/protection/refresh:
