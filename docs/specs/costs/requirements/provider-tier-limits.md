@@ -23,6 +23,7 @@ Free inference, flat-fee subscriptions, and pay-as-you-go inference have separat
 - **AC-COSTS-TIER-LIMITS-001.5:** OpenRouter free rate errors shall refresh the same account's key endpoint: positive daily remaining means a minute block; zero means the daily reset. Unavailable evidence preserves lane 8's existing ladder.
 - **AC-COSTS-TIER-LIMITS-001.6:** UI/docs shall distinguish provider measurements and local request estimates. Credentials shall remain inside existing resolution paths and never enter responses.
 - **AC-COSTS-TIER-LIMITS-001.7:** A classified quota failure on a non-free OpenCode Go model whose host binding resolver proves the Go account shall skip sibling non-free Go models on the same credential binding under the existing backoff, including when no reset is reported. Known free Go models and other providers on that binding shall remain selectable, no reset shall be assigned, and an override or unproved binding keeps the binding-wide behavior.
+- **AC-COSTS-TIER-LIMITS-001.8:** With limits enabled, OpenCode Go and OpenCode Zen shall be distinct provider accounts even when their credentials share one auth file. A Go observation shall not train or exhaust Zen's allowance, and existing Zen configuration and learned values shall not be copied into the Go account.
 
 ### REQ-COSTS-TIER-LIMITS-002: Account, model, and shared-group scopes
 

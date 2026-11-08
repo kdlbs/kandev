@@ -32,6 +32,14 @@ Costs owns limit facts and budgets. Reuse `usageProviderAdapter` account binding
 
 Gateway concurrency is requests; admission concurrency is task turns, a conservative proxy. The short request window preserves 5/10m rather than rounding it into incorrect RPM. Unknown DevPass dollar/token budgets and Go Plus budgets stay empty until measured, learned, or overridden. The historical Go usage reader's fixed `plan: go` is not evidence of the base plan, so dollar references require explicit confirmed plan metadata. Published current references are [LLM Gateway](https://docs.llmgateway.io/resources/rate-limits) and [OpenRouter](https://openrouter.ai/docs/api_reference/limits); operator-supplied base Go figures remain a separately identified reference.
 
+With limits enabled, OpenCode Go uses its own `opencode-go` account identity,
+separate from Zen's `opencode-zen` identity even when both credentials reside
+in the same OpenCode auth file. Account-tier observations and admission group
+only that provider's profiles. Existing mixed Zen configuration and learned rows
+remain untouched; no shared allowance is copied into the Go identity, and no
+storage migration or settings write is performed. Review operator-owned Go
+overrides on the separate account before relying on them.
+
 ## Accounting and admission
 
 Attributed task usage rows provide token/cost totals and response-count lower bounds. A distinct native response counts once; summary-only streams are estimated. Existing agent-stream assistant/response identities supplement in-flight counts. The larger stream/ledger count avoids adding two representations. Missing events and assistant segmentation can undercount or overcount actual HTTP calls. Provider daily counters and subscription percentages remain separate measurements.
