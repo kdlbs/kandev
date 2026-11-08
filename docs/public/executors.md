@@ -54,6 +54,35 @@ The connection test's **Docker daemon** step reports which of three different pr
 
 Choose Remote Docker over a single-node Kubernetes cluster when you want a container per task on one machine and do not otherwise run Kubernetes. Kubernetes covers the same ground and adds resource limits, admission control, and scheduling, but it asks for a storage provisioner, a namespace, RBAC, and a worker image built and pushed to a registry by digest. Remote Docker keeps the Docker executor's Dockerfile-and-build loop, with no registry in the basic case.
 
+## Docker log and temporary storage limits
+
+New containers created by the Docker client use rotating `json-file` logs with
+`max-size=100m` and `max-file=3`. This applies to normal and interactive creation,
+including a remote Docker daemon. Existing containers keep their storage
+configuration when Kandev reconnects to them.
+
+This per-container choice overrides the daemon's default logging driver and
+rotation limits. Collectors that require another driver do not receive these
+containers' output through that driver.
+
+The default `/tmp` is a 2 GiB executable tmpfs with mode 1777, `nosuid`, and
+`nodev`. Agents and package managers can run temporary launchers from this
+directory. An explicit task mount at `/tmp`, including an equivalent path such
+as `/tmp/`, keeps its own storage policy. The tmpfs hides files that the image
+supplies under `/tmp`.
+
+Tmpfs uses host memory and swap. Its use counts against the container's memory
+limit. The 2 GiB capacity does not increase that limit, so temporary writes can
+cause an out-of-memory termination before the tmpfs is full.
+
+Tmpfs contents disappear when the container stops, including before a restart
+of that same container. A session stop that leaves the container running does
+not clear its tmpfs. Write required outputs and evidence to persistent task
+storage.
+
+These limits do not bound the writable layer, workspaces, other bind mounts, or
+evidence archives; those still need their own retention and cleanup.
+
 ## Plugin-managed remote executors
 
 Plugin remote providers appear in **Settings > Executors** when an installed, active plugin declares a compatible `executor_providers` contract. No separate feature flag or restart is required. Disabled, incompatible, or unavailable providers remain ineligible for new launches, and built-in executors continue to work when no provider plugin is installed.
