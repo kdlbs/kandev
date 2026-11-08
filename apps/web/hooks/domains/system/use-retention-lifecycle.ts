@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError } from "@/lib/api/client";
+import type { BackupListScope, useBackupListScope } from "./backup-list-query";
+import type { BackupPreparationCorrelation } from "./backup-preparation-correlation";
 
 // Shared status/mutation lifecycle for the install-wide retention policies. The
 // two policies own different records and different shapes, but their read,
@@ -12,6 +14,11 @@ export type RetentionLifetime = {
   mutating: boolean;
   reading: Promise<void> | null;
   generation: number;
+  // The backend identity the state belongs to; a new identity resets the owner.
+  scope: BackupListScope;
+  // Correlates a saved backup choice with its preparation, so the backup list is
+  // refreshed once the prepared backup settles.
+  preparation: BackupPreparationCorrelation;
 };
 
 export type RetentionAcceptedOperation = { id: string; kind: "analysis" | "cleanup" };
@@ -21,8 +28,16 @@ export type RetentionErrorSinks = {
   setActionError: (value: unknown) => void;
 };
 
-export function newRetentionLifetime(): RetentionLifetime {
-  return { epoch: 0, mounted: false, mutating: false, reading: null, generation: 0 };
+export function newRetentionLifetime(scope: BackupListScope): RetentionLifetime {
+  return {
+    epoch: 0,
+    mounted: false,
+    mutating: false,
+    reading: null,
+    generation: 0,
+    scope,
+    preparation: { activeRevision: null, settledRevision: -1 },
+  };
 }
 
 // An accepted operation is observed once the status reports that id, or once the
@@ -74,10 +89,13 @@ export async function performRetentionMutation<T>(
   // i18n-exempt: machine-only conflict; the card renders a translated error category.
   if (owner.mutating) throw new ApiError("busy", 409, { code: "busy" });
   owner.mutating = true;
-  owner.generation++;
+  const mutationGeneration = ++owner.generation;
   owner.reading = null;
   const { epoch } = owner;
-  const current = () => owner.mounted && owner.epoch === epoch;
+  // A scope change bumps the generation and releases the slot, so a mutation
+  // from the previous scope must neither apply its result nor clear the new one.
+  const current = () =>
+    owner.mounted && owner.epoch === epoch && owner.generation === mutationGeneration;
   updates.pending(true);
   updates.clearErrors();
   try {
@@ -88,8 +106,10 @@ export async function performRetentionMutation<T>(
     if (current()) updates.setActionError(cause);
     throw cause;
   } finally {
-    owner.mutating = false;
-    if (current()) updates.pending(false);
+    if (current()) {
+      owner.mutating = false;
+      updates.pending(false);
+    }
   }
 }
 
@@ -134,6 +154,7 @@ export function useAcceptedOperationRefresh(
 export function useRetentionLifetime(
   owner: { current: RetentionLifetime },
   reload: () => Promise<void>,
+  scopeKey: string,
 ) {
   useEffect(() => {
     const lifetime = owner.current;
@@ -144,7 +165,48 @@ export function useRetentionLifetime(
       lifetime.epoch++;
       lifetime.reading = null;
     };
-  }, [owner, reload]);
+  }, [owner, reload, scopeKey]);
+}
+
+/**
+ * Owns the lifetime for one backend identity. When the backup-list scope moves
+ * (another API base, boot, or signed-in user), the in-flight read and mutation
+ * are orphaned and the caller's state is reset, so one backend's status is never
+ * shown or acted on under another.
+ */
+export function useRetentionScopeOwner(
+  backupScope: ReturnType<typeof useBackupListScope>,
+  acceptedOperation: { current: RetentionAcceptedOperation | null },
+  resetState: () => void,
+): { current: RetentionLifetime } {
+  const owner = useRef<RetentionLifetime | null>(null);
+  if (owner.current === null) owner.current = newRetentionLifetime(backupScope.captureScope());
+  const lifetime = owner as { current: RetentionLifetime };
+  useLayoutEffect(() => {
+    const current = lifetime.current;
+    if (
+      current.scope.identityKey === backupScope.identityKey &&
+      current.scope.generation === backupScope.generation
+    ) {
+      return;
+    }
+    current.scope = backupScope.captureScope();
+    current.epoch++;
+    current.generation++;
+    current.mutating = false;
+    current.reading = null;
+    current.preparation = { activeRevision: null, settledRevision: -1 };
+    acceptedOperation.current = null;
+    resetState();
+  }, [
+    acceptedOperation,
+    backupScope.captureScope,
+    backupScope.generation,
+    backupScope.identityKey,
+    lifetime,
+    resetState,
+  ]);
+  return lifetime;
 }
 
 export function useRetentionMutation(
