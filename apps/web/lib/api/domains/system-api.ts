@@ -1,6 +1,7 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
 import type {
+  PersistenceDiagnostics,
   SystemInfo,
   DiskUsageResponse,
   DatabaseStats,
@@ -35,6 +36,13 @@ const SYSTEM_BASE = "/api/v1/system";
 
 export function fetchSystemInfo(options?: ApiRequestOptions): Promise<SystemInfo> {
   return fetchJson<SystemInfo>(`${SYSTEM_BASE}/info`, options);
+}
+
+/** The required-store diagnostics the control header reads for its DB badge. */
+export function fetchPersistenceDiagnostics(
+  options?: ApiRequestOptions,
+): Promise<PersistenceDiagnostics> {
+  return fetchJson<PersistenceDiagnostics>(`${SYSTEM_BASE}/diagnostics/persistence`, options);
 }
 
 // --- Disk usage ---------------------------------------------------------

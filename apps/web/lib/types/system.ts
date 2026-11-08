@@ -25,6 +25,22 @@ export interface SystemInfo {
   started_at: string;
 }
 
+/** One required store's public diagnostic row. */
+export interface PersistenceStoreDiagnostic {
+  id: string;
+  owner_package: string;
+  state: "healthy" | "initializing" | "unhealthy" | (string & {});
+  last_checked_at?: string;
+  error?: string;
+}
+
+/** GET /api/v1/system/diagnostics/persistence. */
+export interface PersistenceDiagnostics {
+  driver: string;
+  state: "healthy" | "initializing" | "unhealthy" | (string & {});
+  stores: PersistenceStoreDiagnostic[];
+}
+
 export interface DiskBreakdown {
   data_dir: number;
   worktrees: number;

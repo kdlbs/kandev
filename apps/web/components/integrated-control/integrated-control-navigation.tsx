@@ -19,7 +19,14 @@ import {
 import { cn } from "@/lib/utils";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { useIntegratedControl } from "./integrated-control-provider";
-import { ControlCoordinatorConversation } from "./integrated-control-conversation-links";
+import {
+  ControlCoordinatorConversation,
+  ControlIndependentConversations,
+} from "./integrated-control-conversation-links";
+import type {
+  ControlCoordinatorList,
+  ControlWorkspace,
+} from "@/hooks/domains/coordinator/use-integrated-control-data";
 import { ControlInboxNavCount } from "./control-inbox-nav-count";
 
 const icons: Record<ControlView, typeof IconActivity> = {
@@ -84,14 +91,15 @@ export function IntegratedControlNavigation({
 
 /**
  * The workspace tree stays quiet: names and one coordinator conversation entry
- * each, from the shared control snapshot only. Read problems are reported by
- * the page banner, and refreshing is the page header's job.
+ * each, from the shared control snapshot only. Workspace status and read
+ * problems live on the right-hand screens and their one banner.
  */
 function ControlWorkspaceTree({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
   const view = controlView(usePathname());
   if (!control) return null;
+  const data = control.data;
   return (
     <section
       className="space-y-1 border-t pt-3"
@@ -105,38 +113,63 @@ function ControlWorkspaceTree({ onNavigate }: { onNavigate?: () => void }) {
           {t("sidebar:integratedControl.coordinatorsOff")}
         </p>
       )}
-      {control.data?.workspaces.map((workspace) => {
-        const coordinators = control.data?.byWorkspace[workspace.id]?.items ?? [];
-        return (
-          <div
-            key={workspace.id}
-            className="min-w-0"
-            data-testid={`control-workspace-${workspace.id}`}
-          >
-            <p className="truncate px-2 py-1.5 text-sm font-medium">{workspace.name}</p>
-            {coordinators.length > 0 && (
-              <div className="ml-3 border-l pl-2">
-                {coordinators.map((coordinator) => (
-                  <ControlCoordinatorConversation
-                    key={coordinator.id}
-                    workspaceId={workspace.id}
-                    coordinator={coordinator}
-                    named={coordinators.length > 1}
-                    canManage={hasScope(workspace.scopes, SCOPE.workspaceManage)}
-                    view={view}
-                    onNavigate={onNavigate}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-      {control.data?.workspaces.length === 0 && (
+      {data?.workspaces.map((workspace) => (
+        <ControlWorkspaceEntry
+          key={workspace.id}
+          workspace={workspace}
+          coordinators={data.byWorkspace[workspace.id]}
+          view={view}
+          onNavigate={onNavigate}
+        />
+      ))}
+      {data?.workspaces.length === 0 && (
         <p className="px-2 text-sm text-muted-foreground">
           {t("sidebar:integratedControl.noWorkspaces")}
         </p>
       )}
     </section>
+  );
+}
+
+function ControlWorkspaceEntry({
+  workspace,
+  coordinators,
+  view,
+  onNavigate,
+}: {
+  workspace: ControlWorkspace;
+  coordinators?: ControlCoordinatorList;
+  view: ControlView;
+  onNavigate?: () => void;
+}) {
+  const items = coordinators?.items ?? [];
+  return (
+    <div className="min-w-0" data-testid={`control-workspace-${workspace.id}`}>
+      <Link
+        href={controlHref("workspaces", workspace.id)}
+        onNavigated={onNavigate}
+        className="flex min-h-7 cursor-pointer items-center rounded-md px-2 py-1.5 text-sm font-medium hover:bg-muted max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+      >
+        <span className="truncate">{workspace.name}</span>
+      </Link>
+      <div className="ml-3 border-l pl-2">
+        {items.map((coordinator) => (
+          <ControlCoordinatorConversation
+            key={coordinator.id}
+            workspaceId={workspace.id}
+            coordinator={coordinator}
+            named={items.length > 1}
+            canManage={hasScope(workspace.scopes, SCOPE.workspaceManage)}
+            view={view}
+            onNavigate={onNavigate}
+          />
+        ))}
+        <ControlIndependentConversations
+          workspaceId={workspace.id}
+          view={view}
+          onNavigate={onNavigate}
+        />
+      </div>
+    </div>
   );
 }

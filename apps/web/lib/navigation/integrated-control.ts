@@ -30,10 +30,12 @@ export function controlHref(
   view: ControlView,
   workspaceId?: string,
   coordinatorId?: string,
+  taskId?: string,
 ): string {
   const query = new URLSearchParams();
   if (workspaceId) query.set("workspace", workspaceId);
   if (coordinatorId) query.set("coordinator", coordinatorId);
+  if (taskId) query.set("task", taskId);
   const suffix = query.size > 0 ? `?${query}` : "";
   return `${INTEGRATED_CONTROL_HREF}/${view}${suffix}`;
 }
