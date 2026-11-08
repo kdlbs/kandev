@@ -29,6 +29,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
@@ -50,6 +51,14 @@ func main() {
 }
 
 func runMain() int {
+	// Take the launcher's job name before anything can start a process, so no
+	// descendant inherits it and records the outer job as its own. Startup fails
+	// closed when the variable cannot be removed.
+	if err := processidentity.TakeWindowsJobNameFromEnv(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
 	if code, handled := runGitHubUtilityCommand(); handled {
 		return code
 	}

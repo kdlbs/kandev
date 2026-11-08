@@ -81,7 +81,8 @@ An adopted endpoint can recover its connection without spawning a new process wh
 Persist or reuse an owner-scoped process identity record for controlled child cleanup.
 Identify installation, execution, runtime epoch, OS process birth identity, and process group/job where supported.
 A PID or port alone cannot authorize termination. Revalidate identity at the kill boundary.
-Windows keeps the existing suspended-start Job Object path.
+Windows keeps the existing suspended-start Job Object path. The launcher names that kill-on-close job `Local\kandev-agentctl-<uuid>`, records the name in the agentctl process identity, and passes it to the child in `KANDEV_INTERNAL_WINDOWS_JOB_NAME`. agentctl takes and removes that variable first at startup, so its descendants never inherit it, and records the name in its own identity only after `IsProcessInJob` confirms membership.
+After the original server is confirmed gone (exit time set, or the PID reused by a process with another birth time), `OwnedSessionTerminated` opens the named job and reports termination when it has no active process or no longer exists; `TerminateOwnedSession` terminates the remaining job members and waits. A live owner, unknown state, legacy identity without a job name, foreign name, or unreadable job stays unverified (AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-002.7).
 Linux retains parent-death handling and verifies remaining owned children; do not assume SIGTERM killed every descendant.
 macOS/BSD needs explicit owned-process-group containment after confirmed server death.
 If evidence is absent, preserve the process and block the affected session rather than killing an unrelated process.
