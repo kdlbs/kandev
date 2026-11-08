@@ -1322,6 +1322,37 @@ at runtime instead of assuming that a domain's full schema is present in the
 tool definition. Existing lifecycle tools and compatibility MCP tools remain
 available where documented.
 
+Repository clone URLs use the same tools. Read the saved value with
+`get_settings_kandev`, then preview one replacement without writing:
+
+```json
+{
+  "target": {
+    "resource_type": "repository",
+    "resource_id": "repository-id",
+    "workspace_id": "workspace-id"
+  },
+  "changes": { "remote_url": "git@github.com:acme/widget.git" },
+  "options": { "validate_only": true }
+}
+```
+
+The result carries a `validation` object with the saved and effective URLs,
+provider identity, and `validation_scope`. Repeat the same call without
+`options`, or with `"validate_only": false`, to commit the change. A committed
+update republishes `settings.remote_url` and a `repository.updated` event. The
+option is accepted only for a repository target with exactly one `remote_url`
+change. Unknown options, non-boolean values, mixed preview changes, and null or
+blank URLs are rejected without a write.
+
+Built-in GitHub, GitLab, and Azure DevOps providers verify the credential-free
+locator against the saved provider, host, namespace or project, and repository
+name. An active plugin provider must instead return its exact HTTPS clone URL
+and matching immutable descriptor. The preview is advisory: every update repeats
+validation. The repair changes registration data only. It does not rewrite an
+existing checkout or restart a task. See
+[Repair a registered clone URL](git-operations.md#repair-a-registered-clone-url).
+
 `export_workflow_kandev` takes `workflow_id` and returns one version 2
 `kandev_workflow` JSON document with explicit step completion booleans. It omits
 instance IDs and timestamps. Pass its JSON text unchanged as `document` to
