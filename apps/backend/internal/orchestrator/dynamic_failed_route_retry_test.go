@@ -339,7 +339,7 @@ func TestFailedRouteAutoRetry_TerminalSessionIsNotRearmed(t *testing.T) {
 func TestFailedRouteAutoRetry_StaleGenerationIsNotRearmed(t *testing.T) {
 	f := newFailedRouteFixture(t, "fr-stale-defer", failedRouteSettings{autoRetry: true, max: 1})
 	generation := f.exhaustWithRateLimit()
-	f.svc.removeDynamicPolicyRecoveryTimer(f.session)
+	f.svc.removeDynamicPolicyRecoveryTimer(f.session, generation)
 	if f.svc.deferFailedRouteAutoRetry(f.ctx, f.session, generation+1) {
 		t.Fatal("a deferral for another generation re-armed the retry")
 	}

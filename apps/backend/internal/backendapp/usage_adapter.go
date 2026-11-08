@@ -32,11 +32,20 @@ func (a *usageProviderAdapter) GetUsage(ctx context.Context, profileID string) (
 	if !ok {
 		return nil, nil
 	}
+	// With provider usage limits enabled, a reading feeds account allowances,
+	// so an unproved host binding must not borrow the host account's usage.
+	// The legacy reader keeps its existing behavior while limits are off.
+	if a.tierLimits != nil && !snapshotHostBinding(profile) {
+		return nil, nil
+	}
 	if a.proxyResolver != nil {
 		if client, cacheKey, ok := a.proxyResolver.Resolve(profile); ok {
 			a.svc.Register(profileID, client, cacheKey)
 			return a.svc.GetUsage(ctx, profileID)
 		}
+	}
+	if a.tierLimits != nil && !hostUsageBindingProved(profile, profile.AgentID) {
+		return nil, nil
 	}
 	if ag.BillingType() != agentusage.BillingTypeSubscription {
 		return nil, nil
