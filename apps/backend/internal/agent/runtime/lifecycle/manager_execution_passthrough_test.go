@@ -313,7 +313,7 @@ func TestEnsureWorkspaceExecutionForSessionRequiresSessionID(t *testing.T) {
 	require.ErrorContains(t, err, "session_id is required")
 }
 
-func TestEnsureWorkspaceExecutionLockedReusesEnvironmentExecution(t *testing.T) {
+func TestEnsureWorkspaceExecutionLockedDoesNotBorrowSiblingExecution(t *testing.T) {
 	mgr := newTestManager(t)
 	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
 		"session-new": {
@@ -327,9 +327,26 @@ func TestEnsureWorkspaceExecutionLockedReusesEnvironmentExecution(t *testing.T) 
 
 	got, err := mgr.EnsureWorkspaceExecutionForSession(context.Background(), "task-1", "session-new")
 
-	require.NoError(t, err)
-	require.Same(t, existing, got,
-		"sibling sessions in one task environment must share the existing execution, not create a second one")
+	// The sibling's conversation and teardown ownership stay with session-old;
+	// session-new must be admitted through its own execution.
+	require.Error(t, err)
+	require.Nil(t, got)
+	stored, exists := mgr.executionStore.Get("exec-existing")
+	require.True(t, exists)
+	require.Equal(t, "session-old", stored.SessionID)
+}
+
+func TestEnsureWorkspaceExecutionLockedRejectsMismatchedWorkspaceInfo(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-new": {
+			TaskID: "task-1", SessionID: "session-other", TaskEnvironmentID: "env-1", WorkspacePath: "/work",
+		},
+	}}
+
+	_, err := mgr.EnsureWorkspaceExecutionForSession(context.Background(), "task-1", "session-new")
+
+	require.ErrorContains(t, err, "workspace info does not match the requested session")
 }
 
 func TestEnsureWorkspaceExecutionLockedRequiresProviderAndInfo(t *testing.T) {

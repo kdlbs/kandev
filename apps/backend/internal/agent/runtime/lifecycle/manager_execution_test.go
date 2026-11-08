@@ -996,7 +996,7 @@ func TestEnsureWorkspaceExecutionForSession_EmptyTaskID(t *testing.T) {
 	})
 }
 
-func TestEnsureWorkspaceExecutionForSession_ReusesExistingTaskEnvironmentExecution(t *testing.T) {
+func TestEnsureWorkspaceExecutionForSession_CreatesOwnExecutionInSharedTaskEnvironment(t *testing.T) {
 	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
 		infos: map[string]*WorkspaceInfo{
 			"session-1": {
@@ -1031,14 +1031,18 @@ func TestEnsureWorkspaceExecutionForSession_ReusesExistingTaskEnvironmentExecuti
 	if err != nil {
 		t.Fatalf("EnsureWorkspaceExecutionForSession returned error: %v", err)
 	}
-	if got.ID != existing.ID {
-		t.Fatalf("execution ID = %q, want existing environment execution %q", got.ID, existing.ID)
+	// A sibling session shares the environment, not the conversation owner.
+	if got.ID == existing.ID {
+		t.Fatalf("execution ID = %q, want a separate execution for session-2", got.ID)
 	}
-	if got.SessionID != "session-1" {
-		t.Fatalf("execution session ID = %q, want original owner session", got.SessionID)
+	if got.SessionID != "session-2" {
+		t.Fatalf("execution session ID = %q, want session-2", got.SessionID)
 	}
-	if backend.createCount.Load() != 0 {
-		t.Fatalf("CreateInstance calls = %d, want 0", backend.createCount.Load())
+	if backend.createCount.Load() != 1 {
+		t.Fatalf("CreateInstance calls = %d, want 1", backend.createCount.Load())
+	}
+	if existing.SessionID != "session-1" {
+		t.Fatalf("existing execution owner = %q, want session-1", existing.SessionID)
 	}
 }
 

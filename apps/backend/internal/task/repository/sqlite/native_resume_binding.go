@@ -121,6 +121,14 @@ func (r *Repository) verifyNativeResumeInventoryTx(ctx context.Context, tx *sqlx
 	if err != nil || !valid {
 		return false, err
 	}
+	continued, err := r.contextContinuedSubmissionIDsTx(ctx, tx.Tx, proof.SessionID, proof.IncarnationID, proof.NativeSessionID, proof.HarnessGeneration)
+	if err != nil {
+		return false, err
+	}
+	historical := make(map[string]bool, len(continued))
+	for _, id := range continued {
+		historical[id] = true
+	}
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`SELECT id, incarnation_id, harness_generation, payload_hash, state, terminal_stream_id, terminal_sequence FROM agent_delivery_submissions WHERE session_id = ? AND state IN ('prepared', 'accepted', 'dispatching', 'interrupted_unknown')`), proof.SessionID)
 	if err != nil {
 		return false, err
@@ -128,20 +136,27 @@ func (r *Repository) verifyNativeResumeInventoryTx(ctx context.Context, tx *sqlx
 	defer func() { _ = rows.Close() }()
 	count := 0
 	for rows.Next() {
-		var id, incarnation, hash, stream string
-		var generation, sequence int64
-		var state models.DeliverySubmissionState
-		if err := rows.Scan(&id, &incarnation, &generation, &hash, &state, &stream, &sequence); err != nil {
+		var submission models.AgentDeliverySubmission
+		if err := rows.Scan(&submission.ID, &submission.IncarnationID, &submission.HarnessGeneration, &submission.PayloadHash,
+			&submission.State, &submission.TerminalStreamID, &submission.TerminalSequence); err != nil {
 			return false, err
 		}
-		row, found := retired[id]
-		if !found || state != models.DeliverySubmissionInterruptedUnknown || (row.State != "" && row.State != state) || incarnation != proof.IncarnationID ||
-			generation != row.HarnessGeneration || hash != row.PayloadHash || sequence != row.TerminalSequence || stream != row.TerminalStreamID {
+		row, found := retired[submission.ID]
+		if !found && historical[submission.ID] {
+			continue
+		}
+		if !found || !nativeResumeInventoryRowMatches(proof, row, &submission) {
 			return false, nil
 		}
 		count++
 	}
 	return count+terminalCount+unprovenCount == len(retired), rows.Err()
+}
+
+func nativeResumeInventoryRowMatches(proof *models.NativeResumeDeliveryEvidence, row models.NativeResumeSubmissionEvidence, submission *models.AgentDeliverySubmission) bool {
+	return submission.State == models.DeliverySubmissionInterruptedUnknown && (row.State == "" || row.State == submission.State) &&
+		submission.IncarnationID == proof.IncarnationID && submission.HarnessGeneration == row.HarnessGeneration &&
+		submission.PayloadHash == row.PayloadHash && submission.TerminalSequence == row.TerminalSequence && submission.TerminalStreamID == row.TerminalStreamID
 }
 
 func (r *Repository) verifyNativeResumeCursorTx(ctx context.Context, tx *sqlx.Tx, proof *models.NativeResumeDeliveryEvidence) (bool, error) {
@@ -228,6 +243,13 @@ func (r *Repository) restoreAuthenticatedNativeNoticeTx(ctx context.Context, tx 
 	}
 	if recovery.HistoryGap != nil || recovery.SessionID != proof.SessionID || recovery.IncarnationID != proof.IncarnationID {
 		return false, nil
+	}
+	if recovery.HarnessGeneration < proof.HarnessGeneration {
+		resolved, err := r.hasResolvedContextContinuationNoticeTx(ctx, tx.Tx, recovery, proof)
+		if err != nil || !resolved {
+			return false, err
+		}
+		return true, r.writeContinuedRecoveryNoticeTx(ctx, tx.Tx, metadata, metadataRaw, recovery, completedAt)
 	}
 	if recovery.Phase == models.AgentDeliveryRecoveryRestored {
 		resolved, err := r.hasResolvedNativeResumeRecoveryTx(ctx, tx, recovery)

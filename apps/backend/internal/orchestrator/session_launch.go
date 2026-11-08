@@ -1398,7 +1398,22 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 		}
 		return nil, fmt.Errorf("failed to restore workspace: %w", err)
 	}
-	agentExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, req.SessionID)
+	// An environment may already have an execution owned by another session.
+	// Restoration succeeds only after this session has its own ready binding.
+	agentExecutionID, err := s.agentManager.GetExecutionIDForSession(ctx, req.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("workspace execution is not bound to the requested session: %w", err)
+	}
+	if strings.TrimSpace(agentExecutionID) == "" {
+		return nil, errors.New("workspace execution is not bound to the requested session")
+	}
+	if err := s.agentManager.WaitForAgentctlReady(ctx, req.SessionID); err != nil {
+		return nil, fmt.Errorf("workspace execution is not ready: %w", err)
+	}
+	currentExecutionID, err := s.agentManager.GetExecutionIDForSession(ctx, req.SessionID)
+	if err != nil || currentExecutionID != agentExecutionID {
+		return nil, errors.New("workspace execution binding changed while waiting for readiness")
+	}
 
 	resp := &LaunchSessionResponse{
 		Success:          true,
@@ -1564,6 +1579,18 @@ func (s *Service) RecoverSessionWithOptions(
 		return nil, normalizeRecoverSessionError(err)
 	}
 
+	continuationSucceeded := false
+	if checkpoint != nil {
+		claimed, claimErr := s.claimContextContinuationRoute(launchCtx, session)
+		if claimErr != nil {
+			settleErr := s.finishContinuationCheckpoint(context.WithoutCancel(ctx), checkpoint, models.ContinuitySnapshotUncertain)
+			return nil, errors.Join(claimErr, settleErr)
+		}
+		if claimed {
+			defer s.releaseAbandonedContextContinuationRoute(ctx, sessionID, session.RouteGeneration, &continuationSucceeded)
+		}
+	}
+
 	resp, err := s.LaunchSession(launchCtx, &LaunchSessionRequest{
 		TaskID:                           taskID,
 		SessionID:                        sessionID,
@@ -1634,6 +1661,7 @@ func (s *Service) RecoverSessionWithOptions(
 	if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
 		return nil, normalizeRecoverSessionError(err)
 	}
+	continuationSucceeded = true
 	return resp, nil
 }
 
