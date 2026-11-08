@@ -76,7 +76,11 @@ tried concrete IDs and last selected candidate. Same-candidate retries preserve
 the chain. Permitted cross-candidate fallback starts at the failed candidate's
 tier and excludes tried IDs. If the failed candidate no longer exists in saved
 order and no tried candidate locates a tier, the chain fails closed instead of
-restarting at the first tier. The existing narrow unclassified path uses the same
+restarting at the first tier. A person's Retry of a route left waiting with no
+current candidate and no exclusion or preference starts a fresh chain, so an
+exhausted traversal is reconsidered from the first tier; tried attempts remain
+history and open circuits or recovery guards still apply. Automatic and other
+reasons keep the exhausted chain. The existing narrow unclassified path uses the same
 ordered search and preserves its workflow fencing. Policy counter carry/reset
 preserves the independent chain. Verified current output/effects end a chain
 through a separate generation-fenced method, never the general counter helper.
