@@ -898,10 +898,10 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 }
 
 func (s *Service) claimMovedPromotion(ctx context.Context, task *models.Task, entryID int64) bool {
-	if entryID <= 0 {
-		return s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending)
-	}
 	if task == nil || task.Metadata == nil {
+		return false
+	}
+	if entryID < 0 {
 		return false
 	}
 	if _, ok := task.Metadata[models.MetaKeyQueuePromotionPending]; !ok {
@@ -911,6 +911,9 @@ func (s *Service) claimMovedPromotion(ctx context.Context, task *models.Task, en
 		ClaimQueuePromotionEntry(context.Context, string, int64) (bool, error)
 	})
 	if !ok {
+		if entryID == 0 {
+			return s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending)
+		}
 		s.logger.Warn("task.moved: repository cannot claim a specific promotion entry", zap.String("task_id", task.ID))
 		return false
 	}
