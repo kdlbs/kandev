@@ -66,6 +66,16 @@ func TestCursorMCPAuthenticateAfterCompletedTerminalReconnectStartsFreshLogin(t 
 	if err := manager.SetExecutionEnv(context.Background(), execution.ID, map[string]string{"PATH": os.Getenv("PATH")}); err != nil {
 		t.Fatal(err)
 	}
+	// Managed terminals run in their persisted owner's execution, which the
+	// manager resolves from the owner task's primary session and environment.
+	ownerSession := &models.TaskSession{
+		ID: execution.SessionID, TaskID: execution.TaskID, TaskEnvironmentID: execution.TaskEnvironmentID,
+	}
+	ownerEnvironment := &models.TaskEnvironment{
+		ID: execution.TaskEnvironmentID, TaskID: execution.TaskID, Status: models.TaskEnvironmentStatusReady,
+	}
+	manager.SetWorkspaceInfoProvider(cursorTerminalOwnerWorkspace{session: ownerSession, workspacePath: workspace})
+	manager.SetExecutorProfileReader(cursorTerminalOwnerReader{session: ownerSession, environment: ownerEnvironment})
 
 	recoveryManager := &fakeCursorMCPRecoveryManager{authSpec: runtime.CursorMCPAuthenticationSpec{
 		TaskID: execution.TaskID, TaskEnvironmentID: execution.TaskEnvironmentID,
@@ -158,6 +168,57 @@ func TestCursorMCPAuthenticateAfterCompletedTerminalReconnectStartsFreshLogin(t 
 	startLogin(secondConn)
 	waitForMarker("xx")
 	_ = secondConn.Close()
+}
+
+// cursorTerminalOwnerWorkspace resolves the single task session that owns the
+// integration test's managed terminals.
+type cursorTerminalOwnerWorkspace struct {
+	session       *models.TaskSession
+	workspacePath string
+}
+
+func (w cursorTerminalOwnerWorkspace) info() *lifecycle.WorkspaceInfo {
+	return &lifecycle.WorkspaceInfo{
+		TaskID: w.session.TaskID, SessionID: w.session.ID,
+		TaskEnvironmentID: w.session.TaskEnvironmentID, WorkspacePath: w.workspacePath,
+	}
+}
+
+func (w cursorTerminalOwnerWorkspace) GetWorkspaceInfoForSession(context.Context, string, string) (*lifecycle.WorkspaceInfo, error) {
+	return w.info(), nil
+}
+
+func (w cursorTerminalOwnerWorkspace) GetWorkspaceInfoForEnvironment(context.Context, string) (*lifecycle.WorkspaceInfo, error) {
+	return w.info(), nil
+}
+
+func (w cursorTerminalOwnerWorkspace) GetPrimarySession(context.Context, string) (*models.TaskSession, error) {
+	return w.session, nil
+}
+
+type cursorTerminalOwnerReader struct {
+	session     *models.TaskSession
+	environment *models.TaskEnvironment
+}
+
+func (r cursorTerminalOwnerReader) GetTask(_ context.Context, id string) (*models.Task, error) {
+	return &models.Task{ID: id}, nil
+}
+
+func (r cursorTerminalOwnerReader) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
+	return r.session, nil
+}
+
+func (cursorTerminalOwnerReader) HasActiveTaskResourceCleanupJob(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (r cursorTerminalOwnerReader) GetTaskEnvironment(context.Context, string) (*models.TaskEnvironment, error) {
+	return r.environment, nil
+}
+
+func (cursorTerminalOwnerReader) GetExecutorProfile(context.Context, string) (*models.ExecutorProfile, error) {
+	return nil, nil
 }
 
 func waitForUserShellExit(t *testing.T, runner *agentprocess.InteractiveRunner, scopeID, terminalID string) {

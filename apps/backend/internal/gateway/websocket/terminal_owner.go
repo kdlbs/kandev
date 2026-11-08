@@ -30,6 +30,11 @@ func (h *TerminalHandler) resolveEnvironmentTerminalExecution(ctx context.Contex
 		return nil, err
 	}
 	if err := h.lifecycleMgr.CheckTaskEnvironmentAccess(ctx, taskID, environmentID); err != nil {
+		// The environment was already visible to this caller above, so a
+		// removal after the owner lookup keeps its missing-target close.
+		if errors.Is(err, repoerrors.ErrTaskEnvironmentNotFound) {
+			return nil, err
+		}
 		return nil, terminalservice.ErrTaskMismatch
 	}
 	execution, err := h.lifecycleMgr.GetOrEnsureExecutionForTaskEnvironment(ctx, taskID, environmentID)
