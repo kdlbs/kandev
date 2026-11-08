@@ -844,7 +844,7 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 		return
 	}
 	queuePromotionToken := queuePromotionLifecycleToken(task)
-	if data.QueuePromotion && !s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending) {
+	if data.QueuePromotion && !s.claimMovedPromotion(ctx, task, data.StepTransitionID) {
 		return
 	}
 
@@ -895,6 +895,33 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 		return
 	}
 	s.handleTaskMovedWithBarrier(ctx, data, manualBarrier, queuePromotionToken)
+}
+
+func (s *Service) claimMovedPromotion(ctx context.Context, task *models.Task, entryID int64) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	if entryID < 0 {
+		return false
+	}
+	if _, ok := task.Metadata[models.MetaKeyQueuePromotionPending]; !ok {
+		return false
+	}
+	claimer, ok := s.repo.(interface {
+		ClaimQueuePromotionEntry(context.Context, string, int64) (bool, error)
+	})
+	if !ok {
+		if entryID == 0 {
+			return s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending)
+		}
+		s.logger.Warn("task.moved: repository cannot claim a specific promotion entry", zap.String("task_id", task.ID))
+		return false
+	}
+	claimed, err := claimer.ClaimQueuePromotionEntry(ctx, task.ID, entryID)
+	if err != nil {
+		s.logger.Warn("task.moved: failed to claim promotion entry", zap.String("task_id", task.ID), zap.Error(err))
+	}
+	return err == nil && claimed
 }
 
 // workflowMovePendingOptions decodes the one-shot entry options carried on a
