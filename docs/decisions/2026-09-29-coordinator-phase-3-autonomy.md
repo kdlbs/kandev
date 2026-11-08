@@ -427,3 +427,12 @@ two days of approvals, not thirty. Decisions:
 
 The requirements are `REQ-COORDINATOR-AUTOMATIC-005` to `-008`.
 
+
+## Amendment 2026-11-08: change conditions wake on watched cards
+
+Decision 1 limits wakes to the coordinator's own tasks. When
+`features.coordinatorMerge` is on, three more conditions wake it for a task
+a Watch covers, each only for that task's linked change: `change_red`,
+`change_conflict` and `change_threads`. Own-task wakes, episode uniqueness,
+the 200-wake cap and delivery rules are unchanged. See
+[Coordinator merge authority](2026-11-08-coordinator-merge-authority.md).

@@ -77,6 +77,9 @@ start it again without losing its queue.
 - **AC-COORDINATOR-PAUSE-002.3:** While a coordinator is paused, a proposal
   that the automatic path would approve (any proposal whose needed classes all read `automatic`, including `resume` and `start_agent` from the 2026-11-07 amendment) shall stay `pending` for a manager,
   with the note "Paused; a manager will decide", and shall count against the coordinator's daily automatic limit in no way. Resume shall not approve it automatically; automatic approval is tried only when a proposal is created.
+  With `features.coordinatorMerge` on, a merge proposal follows
+  [AC-COORDINATOR-MERGE-003.8](merge.md): paused, it stays `pending` for a manager
+  and is never evaluated automatically again.
 - **AC-COORDINATOR-PAUSE-002.4:** A manager's message to a paused coordinator
   shall start a turn as it does when the coordinator is not paused, and the
   coordinator's proposals from it shall be created as usual.

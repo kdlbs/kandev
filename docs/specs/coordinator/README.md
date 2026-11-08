@@ -37,9 +37,7 @@ control, and Watches by project.
   proposals and its own attention count. In the UI it is called
   "Coordinator". It is not Office's coordinator role, which is an Office agent
   role defined by the [Office system](../office/README.md).
-- **Proposal:** a stored request by a coordinator to create one task, or, in
-  phase 2, to resume, message or move one. Only a person with
-  `workspace.manage` can approve or reject it.
+- **Proposal:** a stored request by a coordinator to perform an action. Managers with `workspace.manage` can approve or reject it; eligible actions may also be approved automatically under their respective policies.
 - **Policy (May do):** a coordinator's setting per action (`denied`,
   `requires_approval` or `automatic`); its tool profile is derived from it.
 - **Watches:** the workflows a coordinator reads and proposes about.
@@ -68,7 +66,8 @@ control, and Watches by project.
 - **Autonomy:** a per-coordinator setting that allows unattended turns.
 - **Wake:** a durable record of one episode on one of the coordinator's own
   tasks (a question, permission, stall, error or completion) waiting to be
-  delivered.
+  delivered; with `features.coordinatorMerge` on, also a change episode (red,
+  conflict, threads) on a watched task ([merge](requirements/merge.md)).
 - **Unattended turn:** a coordinator turn started by a wake delivery, not by a
   person.
 - **Containment:** the check that must pass before an unattended turn starts.
@@ -93,7 +92,7 @@ This system owns:
 - coordinator policy, Watches, standing orders, goals and the activity log;
 - the workspace-wide copilot launcher and its page context chip;
 - wakes, unattended turn records, class reviews and pending changes;
-- the `features.coordinator`, `features.coordinatorPhase2` and `features.coordinatorPhase3` release toggles.
+- the `features.coordinator`, `features.coordinatorPhase2`, `features.coordinatorPhase3` and `features.coordinatorMerge` release toggles.
 
 ## Exclusions
 
@@ -144,3 +143,4 @@ The system is new and has no legacy sources.
 - [Coordinator phase 3 implementation plan](../../plans/workspace-coordinator-p3/plan.md)
 - [Coordinator phase 3.1: record and measure](../../decisions/2026-09-30-coordinator-phase-3-1-record-and-measure.md)
 - [Coordinator phase 3.1 implementation plan](../../plans/workspace-coordinator-p3-1/plan.md)
+- [Coordinator merge authority](../../decisions/2026-11-08-coordinator-merge-authority.md)

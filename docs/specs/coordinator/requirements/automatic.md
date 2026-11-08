@@ -47,7 +47,7 @@ The source mockup (`mockup-v2.1`, outside this repository) shows "Raise to
 automatic" (in the built settings page the raise is phase 2's **Automatic**
 option of May do, saved with the page's Save; see
 [integration](integration.md#requirements)) gated "until the last 30 days of this class has been reviewed",
-the record "Raised to automatic, recorded against you", and merge and Move to
+the record "Raised to automatic, recorded against you", and merge (except as [merge stewardship](merge.md) permits) and Move to
 Done as classes that cannot be raised. The plan's ASCII preview UI-06 is the
 reference.
 
