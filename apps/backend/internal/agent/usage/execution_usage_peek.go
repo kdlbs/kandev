@@ -6,6 +6,23 @@ import (
 	"time"
 )
 
+// PeekPreparedExecutionAccount reads only an existing native source's identity.
+// It never refreshes credentials, requests a provider profile, or fetches usage.
+func (s *UsageService) PeekPreparedExecutionAccount(ctx context.Context, input ExecutionUsageInput) (provider, account, organization string, known bool) {
+	if s == nil {
+		return "", "", "", false
+	}
+	source, reason := resolveExecutionUsageSource(input)
+	if reason != "" {
+		return "", "", "", false
+	}
+	identity, ok := peekExecutionAccount(ctx, s.peekExecutionClient(source))
+	if !ok {
+		return "", "", "", false
+	}
+	return source.provider, identity.account, identity.organization, true
+}
+
 // PeekExecutionUsage reads already measured facts for this native pin. It never
 // refreshes OAuth credentials, requests a provider profile, or fetches usage.
 func (s *UsageService) PeekExecutionUsage(ctx context.Context, input ExecutionUsageInput) *ExecutionUsageReport {
