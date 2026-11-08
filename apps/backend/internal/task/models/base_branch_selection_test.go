@@ -44,11 +44,6 @@ func TestBaseBranchSelectionValidationFailsClosed(t *testing.T) {
 			want:      "source",
 		},
 		{
-			name:      "explicit without branch",
-			selection: BaseBranchSelection{Version: 1, Source: BaseBranchSelectionSourceExplicit},
-			want:      "requires a branch",
-		},
-		{
 			name:      "unsafe branch",
 			selection: BaseBranchSelection{Version: 1, Branch: "../main", Source: BaseBranchSelectionSourceInherited},
 			want:      "invalid",
@@ -97,6 +92,14 @@ func TestBaseBranchSelectionPolicy(t *testing.T) {
 				Version: 1, Branch: "main", Source: BaseBranchSelectionSourceExplicit,
 			}},
 			baseBranch: "main",
+			want:       BaseBranchFallbackPolicyStrict,
+		},
+		{
+			name: "explicit deferred branch stays strict",
+			metadata: map[string]interface{}{BaseBranchSelectionMetadataKey: BaseBranchSelection{
+				Version: 1, Source: BaseBranchSelectionSourceExplicit,
+			}},
+			baseBranch: "trunk",
 			want:       BaseBranchFallbackPolicyStrict,
 		},
 		{

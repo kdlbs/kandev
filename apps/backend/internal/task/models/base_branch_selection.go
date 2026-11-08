@@ -46,8 +46,8 @@ type BaseBranchSelection struct {
 }
 
 // Validate rejects malformed or credential-free metadata rehydrated from a
-// task-repository row. An explicit selection must name its branch; inherited
-// and automatic selections may defer the branch until default discovery.
+// task-repository row. Any source may defer its branch while a later
+// resolution supplies it; the source still controls substitution permission.
 func (s BaseBranchSelection) Validate() error {
 	if s.Version != BaseBranchSelectionVersion {
 		return fmt.Errorf("base branch selection version %d is not supported", s.Version)
@@ -59,11 +59,9 @@ func (s BaseBranchSelection) Validate() error {
 		return fmt.Errorf("base branch selection branch %q is invalid", s.Branch)
 	}
 	switch s.Source {
-	case BaseBranchSelectionSourceExplicit:
-		if s.Branch == "" {
-			return errors.New("explicit base branch selection requires a branch")
-		}
-	case BaseBranchSelectionSourceInherited, BaseBranchSelectionSourceRepositoryDefault:
+	case BaseBranchSelectionSourceExplicit,
+		BaseBranchSelectionSourceInherited,
+		BaseBranchSelectionSourceRepositoryDefault:
 	default:
 		return fmt.Errorf("base branch selection source %q is not supported", s.Source)
 	}

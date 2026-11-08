@@ -1307,9 +1307,6 @@ func buildBaseBranchSelection(
 	if policy != nil || repoInput.RemoteContribution != nil || resolvePRNumber(repoInput) > 0 {
 		source = models.BaseBranchSelectionSourceExplicit
 	}
-	if finalBaseBranch == "" {
-		source = models.BaseBranchSelectionSourceRepositoryDefault
-	}
 	return models.BaseBranchSelection{
 		Version: models.BaseBranchSelectionVersion,
 		Branch:  finalBaseBranch,

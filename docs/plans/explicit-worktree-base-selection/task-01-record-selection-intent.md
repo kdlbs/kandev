@@ -161,5 +161,8 @@ Implemented and verified on 2026-11-08.
 - `TestBaseBranchSelection_AddBranchInputForms` covers omitted and explicit
   bases for LocalPath, GitHubURL, and RepositoryID inputs; omission is captured
   before repository resolution can fill `BaseBranch`.
+- A PR-linked input with an omitted base records explicit intent with a deferred
+  branch, so its later target resolution stays strict. `TestBaseBranchSelection_Policy`
+  covers the empty explicit binding.
 - Full package suites for task service, SQLite, MCP handlers, and backendapp
   pass with the change.

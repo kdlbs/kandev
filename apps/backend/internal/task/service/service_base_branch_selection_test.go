@@ -127,6 +127,20 @@ func TestBaseBranchSelection_Producers(t *testing.T) {
 		requireSelection(t, loadOnlySelectionRow(t, svc, child.Task.ID).Metadata, "feature/parent", models.BaseBranchSelectionSourceInherited)
 	})
 
+	t.Run("PR-linked omitted base stays strict", func(t *testing.T) {
+		task := createSelectionTask(t, svc, workflowID, TaskRepositoryInput{
+			RepositoryID: "repo-selection-a", PRNumber: 42, CheckoutBranch: "feature/head",
+		})
+		row := loadOnlySelectionRow(t, svc, task.ID)
+		requireSelection(t, row.Metadata, "", models.BaseBranchSelectionSourceExplicit)
+		if policy := models.ResolveBaseBranchFallbackPolicy(row.Metadata, "main"); policy.PermitsRepositoryDefaultSubstitution() {
+			t.Fatalf("PR-linked deferred base policy = %q, want strict", policy)
+		}
+		if policy := models.ResolveAttachmentBaseBranchFallbackPolicy(row.Metadata, row.BaseBranch); policy.PermitsRepositoryDefaultSubstitution() {
+			t.Fatalf("PR-linked empty attachment base policy = %q, want strict", policy)
+		}
+	})
+
 	t.Run("branch policy snapshot", func(t *testing.T) {
 		if err := repo.CreateRepository(ctx, &models.Repository{
 			ID: "repo-selection-policy", WorkspaceID: "ws-base-selection", Name: "policy", DefaultBranch: "main",

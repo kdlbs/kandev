@@ -52,6 +52,10 @@ Branch equality validates the record's binding. It never proves selection
 intent. In particular, equality with `repositories.default_branch`, a parent
 branch, or a session branch grants no permission.
 
+An `explicit` record may defer its branch text while a PR-linked target or a
+selected policy resolves the effective base at launch. The empty binding still
+grants no substitution. An omitted non-PR base records `repository_default`.
+
 ## Producers and persistence
 
 Add an internal-only selection-source field to `service.TaskRepositoryInput`
