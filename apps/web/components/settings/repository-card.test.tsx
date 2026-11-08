@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/lib/i18n";
 import { StateProvider } from "@/components/state-provider";
@@ -65,7 +65,11 @@ function script(id: string): RepositoryScript {
   } as RepositoryScript;
 }
 
-function renderCard(repo: RepositoryWithScripts, autoOpen = false) {
+function renderCard(
+  repo: RepositoryWithScripts,
+  autoOpen = false,
+  onDiscard?: (repositoryId: string) => void,
+) {
   return render(
     <StateProvider>
       <ToastProvider>
@@ -74,7 +78,7 @@ function renderCard(repo: RepositoryWithScripts, autoOpen = false) {
             repository={repo}
             workspaceId="workspace-1"
             savedRepository={repo}
-            isRepositoryDirty={false}
+            isRepositoryDirty={Boolean(onDiscard)}
             areScriptsDirty={false}
             autoOpen={autoOpen}
             onUpdate={vi.fn()}
@@ -82,6 +86,7 @@ function renderCard(repo: RepositoryWithScripts, autoOpen = false) {
             onUpdateScript={vi.fn()}
             onDeleteScript={vi.fn()}
             onSave={vi.fn()}
+            onDiscard={onDiscard}
             onDelete={vi.fn()}
           />
         </SettingsSaveProvider>
@@ -91,6 +96,15 @@ function renderCard(repo: RepositoryWithScripts, autoOpen = false) {
 }
 
 describe("RepositoryCard preview", () => {
+  it("discards the repository draft through the shared settings Reset action", async () => {
+    const onDiscard = vi.fn();
+    renderCard(repository(), false, onDiscard);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reset" }));
+
+    await waitFor(() => expect(onDiscard).toHaveBeenCalledWith("repo-1"));
+  });
+
   it("uses the singular form for exactly one custom script", () => {
     renderCard(repository({ scripts: [script("a")] }));
 

@@ -40,6 +40,21 @@ func TestMapKanbanStateIncludesWIPAdmissionFields(t *testing.T) {
 	}
 }
 
+func TestMapWorkflowItemStateIncludesPrompt(t *testing.T) {
+	prompt := "Shared step-entry instructions"
+	item := mapWorkflowItemState(taskdto.WorkflowDTO{ID: "wf-1", WorkspaceID: "ws-1", Prompt: &prompt})
+	if item["prompt"] != prompt {
+		t.Fatalf("workflow prompt = %#v, want %q", item["prompt"], prompt)
+	}
+
+	// The workflow settings page saves this value, so an unset prompt must be
+	// an explicit empty string rather than an absent key.
+	item = mapWorkflowItemState(taskdto.WorkflowDTO{ID: "wf-2", WorkspaceID: "ws-1"})
+	if got, ok := item["prompt"]; !ok || got != "" {
+		t.Fatalf("unset workflow prompt = %#v (present %v), want empty string", got, ok)
+	}
+}
+
 func TestMapUserSettingsStateIncludesTurnChangedFilesPreference(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
 		Settings: userdto.UserSettingsDTO{ShowTurnChangedFiles: false},

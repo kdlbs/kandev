@@ -31,12 +31,22 @@ describe("feature flag repository contract", () => {
     expect(defaultFeatureFlags.dynamicAgentRouting).toBe(false);
   });
 
+  it("omits the retired dynamic circuit backoff toggle", () => {
+    expect(defaultFeatureFlags).not.toHaveProperty("dynamicCircuitBackoffEscalation");
+  });
+
   it("keeps canvases disabled by default", () => {
     expect(defaultFeatureFlags.canvases).toBe(false);
   });
 
   it("keeps Integrated control opt-in in the frontend", () => {
     expect(defaultFeatureFlags.integratedControl).toBe(false);
+  });
+
+  it("keeps the background-work browser fallback false until hydration", () => {
+    // Shipped profiles enable the feature, but the browser must not invent a
+    // default of its own before the authoritative value arrives.
+    expect(defaultFeatureFlags.agentBackgroundWork).toBe(false);
   });
 
   it("omits the graduated remote executor plugins flag", () => {

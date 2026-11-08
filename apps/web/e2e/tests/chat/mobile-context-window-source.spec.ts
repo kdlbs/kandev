@@ -50,7 +50,7 @@ test("context source help is reachable by touch without overflow", async ({
   apiClient,
   seedData,
 }) => {
-  await seedContextWindowTask(testPage, apiClient, seedData);
+  await seedContextWindowTask(testPage, apiClient, seedData, { compactionCount: 0 });
 
   const contextTrigger = testPage.getByRole("button", { name: "Context window: 21% used" });
   await contextTrigger.tap();
@@ -60,7 +60,7 @@ test("context source help is reachable by touch without overflow", async ({
   const contextUsage = contextTooltip.getByTestId("context-window-usage").first();
   await expect(contextUsage).toBeVisible();
   await expectSourceRightOfTokenCount(contextTooltip);
-  await expectCompactionCount(contextTooltip);
+  await expectCompactionCount(contextTooltip, 0);
 
   const sourceHelpButton = contextUsage.locator('button[aria-label="About context window source"]');
   const sourceHelpId = await sourceHelpButton.getAttribute("aria-describedby");
@@ -78,9 +78,13 @@ test("context source help is reachable by touch without overflow", async ({
   await compactionHelpButton.tap();
 
   await expect(contextUsage).toBeVisible();
-  await expect(testPage.locator(`[id="${compactionHelpId}"]`)).toHaveCSS("opacity", "1");
+  const compactionHelp = testPage.locator(`[id="${compactionHelpId}"]`);
+  await expect(compactionHelp).toHaveCSS("opacity", "1");
+  await expect(compactionHelp).toContainText(
+    "Copilot ACP usage is excluded because it can mix parent and subagent contexts",
+  );
   await compactionHelpButton.tap();
-  await expect(testPage.locator(`[id="${compactionHelpId}"]`)).toHaveCSS("opacity", "0");
+  await expect(compactionHelp).toHaveCSS("opacity", "0");
   const hasHorizontalOverflow = await testPage.evaluate(() => {
     const root = document.scrollingElement ?? document.documentElement;
     return root.scrollWidth > root.clientWidth + 1;

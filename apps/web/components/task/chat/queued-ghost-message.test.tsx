@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- queue ghost behavior is covered in one focused suite. */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render as renderBase, screen, waitFor } from "@testing-library/react";
 import { QueuedGhostMessage, canMergeEntry, canMergeWithAbove } from "./queued-ghost-message";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
@@ -25,6 +25,10 @@ vi.mock("@kandev/ui/tooltip", () => ({
   TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
+
+function render(ui: React.ReactNode) {
+  return renderBase(ui, { wrapper: StateProvider });
+}
 
 const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";

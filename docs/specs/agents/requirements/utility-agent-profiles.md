@@ -27,6 +27,7 @@ Utility agents run unattended one-shot jobs, but choosing only an agent family a
 - **AC-AGENTS-UTILITY-AGENT-PROFILES-001.6:** Eligible choices are enabled, non-deleted, global concrete profiles for ACP inference-capable agents and global dynamic profiles with at least one valid candidate. CLI-passthrough profiles and workspace-scoped Office profiles are not eligible.
 - **AC-AGENTS-UTILITY-AGENT-PROFILES-001.7:** A utility invocation resolves its effective profile at the start of the call. It uses that profile's agent, model, mode, dynamic config options, enabled CLI flags, command prefix, environment/secret references, and permission policy. Editing the profile affects the next call; an in-flight call keeps the configuration resolved when it started.
 - **AC-AGENTS-UTILITY-AGENT-PROFILES-001.8:** A dynamic selection resolves through the shared dynamic conductor. The caller submits the same profile ID as for a concrete selection. The call record retains that logical profile ID and the concrete execution profile that produced the final result.
+- **AC-AGENTS-UTILITY-AGENT-PROFILES-001.9:** A disabled custom utility rejects new session-bound and sessionless invocations with a clear client error, without creating a call or launching a provider. An enabled or re-enabled custom utility remains subject to the existing profile eligibility checks. Disabling it does not cancel an already admitted call; built-in utility behavior is unchanged. The same outcome applies to callers on desktop and mobile.
 
 ## System design
 

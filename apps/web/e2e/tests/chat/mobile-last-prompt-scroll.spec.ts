@@ -2,7 +2,6 @@
 // scroll-to-start); the anchored bar is a desktop-only affordance and never
 // renders on mobile, even when "Show anchored prompt bar" is enabled.
 import { test, expect } from "../../fixtures/test-base";
-import { SessionPage } from "../../pages/session-page";
 import {
   FIRST_PROMPT_MARKER,
   LAST_PROMPT_MARKER,
@@ -70,17 +69,15 @@ test("phone reaches an unloaded last prompt without rendering the desktop bar", 
     {
       sendViaButton: true,
       trailingFillerCount: 120,
+      reloadAfterSeeding: true,
       onSessionId: (id) => {
         sessionId = id;
       },
     },
   );
   const promptId = await persistedLastPromptId(apiClient, sessionId);
-  await testPage.reload();
-  await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 30_000 });
 
-  const chat = new SessionPage(testPage).activeChat();
+  const chat = session.activeChat();
   const row = chat.locator(`#msg-${promptId}`);
   await expect(chat.getByTestId("anchored-last-prompt-bar")).toHaveCount(0);
   await expect(row).toHaveCount(0);

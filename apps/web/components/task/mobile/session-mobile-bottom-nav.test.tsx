@@ -1,5 +1,13 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({
+      features: { agentBackgroundWork: true },
+    }),
+}));
+
 import { pluginRegistry } from "@/lib/plugins/registry";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
@@ -292,5 +300,78 @@ describe("SessionMobileBottomNav canvas picker", () => {
     fireEvent.click(option);
 
     expect(onOpenCanvas).toHaveBeenCalledWith("canvas-1");
+  });
+});
+
+describe("SessionMobileBottomNav background work", () => {
+  it("offers Panels without plugins or canvases and opens Background Work", () => {
+    const onPanelChange = vi.fn();
+    render(
+      <SessionMobileBottomNav
+        taskId="task-1"
+        sessionId="session-1"
+        sessionKind="managed"
+        activePanel="chat"
+        onPanelChange={onPanelChange}
+        showStatus={false}
+        onOpenStatus={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Panels" }));
+    fireEvent.click(screen.getByTestId("mobile-background-work-open"));
+
+    expect(onPanelChange).toHaveBeenCalledWith("background-work");
+    expect(screen.queryByTestId("mobile-background-work-open")).toBeNull();
+  });
+
+  it("keeps the Panels entry active while inspecting background work", () => {
+    render(
+      <SessionMobileBottomNav
+        taskId="task-1"
+        sessionId="session-1"
+        sessionKind="managed"
+        activePanel="background-work"
+        onPanelChange={vi.fn()}
+        showStatus={false}
+        onOpenStatus={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Panels" }).className).toContain("text-primary");
+  });
+
+  it("does not offer Background Work for a passthrough session", () => {
+    const taskCanvas: Canvas = {
+      id: "canvas-passthrough",
+      plugin_instance_id: "instance-1",
+      plugin_id: "plugin-1",
+      workspace_id: "workspace-1",
+      task_id: "task-1",
+      scope_kind: "task",
+      title: "Release board",
+      status: "active",
+      active_release_id: "release-1",
+      active_release_status: "valid",
+    };
+    const onOpenCanvas = vi.fn();
+    render(
+      <SessionMobileBottomNav
+        taskId="task-1"
+        sessionId="session-1"
+        sessionKind="passthrough"
+        activePanel="chat"
+        onPanelChange={vi.fn()}
+        showStatus={false}
+        onOpenStatus={vi.fn()}
+        taskCanvases={[taskCanvas]}
+        onOpenCanvas={onOpenCanvas}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Panels" }));
+    expect(screen.queryByTestId("mobile-background-work-open")).toBeNull();
+    fireEvent.click(screen.getByTestId("mobile-canvas-option-canvas-passthrough"));
+    expect(onOpenCanvas).toHaveBeenCalledWith("canvas-passthrough");
   });
 });

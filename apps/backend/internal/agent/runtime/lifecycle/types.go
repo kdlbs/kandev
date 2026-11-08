@@ -14,8 +14,11 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/ctxmutex"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -30,6 +33,12 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
+	builtinMCPMu sync.Mutex
+	// projectMCP carries execution-bound evidence that the host materialized
+	// the selected built-in packages into a project configuration file. It is
+	// produced only after a successful write and never persisted.
+	projectMCP                   projectMCPDeliveryState
+	builtinDispatch              *builtinDispatchState
 	RequiredNativeConversationID string
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
@@ -40,6 +49,10 @@ type AgentExecution struct {
 	// CausingRunID is the trusted Office run that initiated this task-owned
 	// execution. RunID remains reserved for run-owned runtime identity.
 	CausingRunID string
+	// TerminalCausingRunID keeps the launch cause on terminal events after
+	// CausingRunID is consumed by the first ready event. A new prompt replaces
+	// this value with its current launch cause.
+	TerminalCausingRunID string
 	// startupDisposition is frozen from the merged executor metadata before
 	// this execution is published to lifecycle callers.
 	startupDisposition AgentStartupDisposition
@@ -71,26 +84,38 @@ type AgentExecution struct {
 	WorkspaceID                     string
 	// ExecutorType preserves launch locality for features that must only access
 	// the backend user's host filesystem. Empty means locality is unknown.
-	ExecutorType string
+	ExecutorType  string
+	RepositoryIDs []string
 	// AgentProfileID is the concrete profile used by the running CLI. The
 	// historical name is retained inside lifecycle because profile resolution,
 	// MCP, env, and command construction all consume this value.
 	AgentProfileID string
+	// CopilotSelectedPlugins carries the stable plugin identities from the
+	// authorized profile snapshot. Roots are resolved at each new process
+	// boundary and never persisted here.
+	CopilotSelectedPlugins []string
+	// ExecutionProfileID names the concrete CLI profile that owns this
+	// execution. Empty falls back to AgentProfileID for legacy sessions.
+	ExecutionProfileID string
 	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
 	// launches, where AgentProfileID owns both identity and execution config.
-	OfficeAgentProfileID      string
-	AgentID                   string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
-	ContainerID               string
-	ContainerIP               string   // IP address of the container for agentctl communication
-	WorkspacePath             string   // Path to the workspace (worktree or repository path)
-	WorkspaceSourceRoots      []string // Canonical durable source roots permitted by agentctl file operations
-	ACPSessionID              string   // ACP session ID to resume, if available
-	DeliveryStreamID          string   // Generation-scoped durable agentctl stream
-	DeliveryIncarnationID     string   // Kandev session incarnation owning the stream
-	DeliveryHarnessGeneration uint64   // Native harness generation owning the stream
+	OfficeAgentProfileID string
+	AgentID              string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
+	// CopilotNativeSessionEvents reports whether this launch requested the
+	// Copilot native event stream from a capable agentctl peer.
+	CopilotNativeSessionEvents bool
+	AuthPolicy                 *acpcompat.AuthPolicy
+	ContainerID                string
+	ContainerIP                string   // IP address of the container for agentctl communication
+	WorkspacePath              string   // Path to the workspace (worktree or repository path)
+	WorkspaceSourceRoots       []string // Canonical durable source roots permitted by agentctl file operations
+	ACPSessionID               string   // ACP session ID to resume, if available
+	DeliveryStreamID           string   // Generation-scoped durable agentctl stream
+	DeliveryIncarnationID      string   // Kandev session incarnation owning the stream
+	DeliveryHarnessGeneration  uint64   // Native harness generation owning the stream
 	// Fresh native startup buffers delivery until its initial SQL generation exists.
 	deliveryBootstrap          atomic.Bool
-	deliveryNegotiation        atomic.Pointer[deliveryNegotiationGate]
+	deliveryStartup            atomic.Pointer[deliveryStartupAttempt]
 	deliveryStreamConnectError atomic.Pointer[deliveryStreamFailure]
 	// DeliveryMode records the recovery protocol selected for this execution.
 	// It is set before an adopted execution is published so admission and stream
@@ -106,6 +131,7 @@ type AgentExecution struct {
 	DeliveryReplayCursor uint64
 	AgentCommand         string               // Command to start the agent subprocess
 	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
+	LaunchWrapper        launchwrapper.Spec   `json:"-"`
 	AgentArgs            []string             // Structured argv for AgentCommand
 	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
@@ -172,7 +198,7 @@ type AgentExecution struct {
 	// completion's attribution while its stream frame is in flight.
 	promptTurnID      string
 	promptTurnIDs     map[uint64]string
-	promptLifecycleMu sync.Mutex
+	promptLifecycleMu ctxmutex.Mutex
 	// cancelEscalatedPromptGeneration identifies a prompt whose cancellation
 	// released the execution locally before the agentctl stream closed. The
 	// resulting disconnect is expected teardown and must not replace the
@@ -224,7 +250,7 @@ type AgentExecution struct {
 	agentctlURLFallback       atomic.Pointer[string]
 	agentctlLifecycleMu       sync.RWMutex
 	agentctlSourceMu          sync.RWMutex
-	remoteInstanceLifecycleMu sync.Mutex
+	remoteInstanceLifecycleMu ctxmutex.Mutex
 	// contextResetMu owns the reset attempt boundary. While a session reset is
 	// in flight, fresh-session setup events are retained until the lifecycle
 	// manager has committed the new ACP session. A timed-out attempt discards
@@ -293,6 +319,12 @@ type AgentExecution struct {
 	// (e.g., after backend restart). Used by StartAgentProcess to route passthrough sessions
 	// to ResumePassthroughSession instead of startPassthroughSession.
 	isResumedSession bool
+	// attachedExistingCompute records that this attempt attached to runtime
+	// storage that already existed instead of allocating it. Recovery retention
+	// reads it so a reused workspace is not destroyed with the failed attempt.
+	// Conversation-resume intent is a separate fact and never authorizes or
+	// prevents destructive cleanup.
+	attachedExistingCompute bool
 	// suppressBootStatusMessage is set only for silent restart restore, where a
 	// boot status would otherwise create a synthetic completed transcript turn.
 	suppressBootStatusMessage bool
@@ -1235,6 +1267,11 @@ func (ae *AgentExecution) replaceAgentctlClient(client *agentctl.Client) *agentc
 	ae.publishAgentctlURL(client.BaseURL())
 	ae.agentctlSourceMu.Lock()
 	defer ae.agentctlSourceMu.Unlock()
+	return ae.replaceAgentctlClientLocked(client)
+}
+
+// replaceAgentctlClientLocked publishes under the caller's source write lease.
+func (ae *AgentExecution) replaceAgentctlClientLocked(client *agentctl.Client) *agentctl.Client {
 	previous := ae.currentAgentCtlClient()
 	ae.agentctlOverride.Store(client)
 	return previous
@@ -1711,7 +1748,12 @@ type LaunchRequest struct {
 	TaskDescription           string              // Task description to send via ACP prompt
 	Attachments               []MessageAttachment // Attachments (images/files) for the initial prompt
 	Env                       map[string]string   // Additional env vars
-	WorkspaceLayout           string
+	// AuthPolicy is the internal child-process authentication contract for
+	// eligible host-local providers. Nil preserves existing behavior.
+	AuthPolicy *acpcompat.AuthPolicy
+	// LocalRuntimeEnv pins a validated host-local helper after environment merge.
+	LocalRuntimeEnv map[string]string
+	WorkspaceLayout string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string
@@ -1886,13 +1928,14 @@ type CredentialsManager interface {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
-	ProfileID     string
-	ProfileName   string
-	AgentID       string
-	AgentName     string // e.g., "auggie", "claude", "codex"
-	Model         string // applied through ACP model selection at session start
-	Mode          string // applied via ACP session/set_mode at session start (empty = use agent default)
-	ConfigOptions map[string]string
+	ResourceCircuitKey string
+	ProfileID          string
+	ProfileName        string
+	AgentID            string
+	AgentName          string // e.g., "auggie", "claude", "codex"
+	Model              string // applied through ACP model selection at session start
+	Mode               string // applied via ACP session/set_mode at session start (empty = use agent default)
+	ConfigOptions      map[string]string
 	// FallbackModel is the optional single ACP model ID to switch to when
 	// Model is unavailable. Ignored when AutoFallback is enabled.
 	FallbackModel string
@@ -1908,6 +1951,7 @@ type AgentProfileInfo struct {
 	CursorPluginsMCPEnabled bool
 	MCPSelectionMode        string
 	MCPSelectedServers      []string
+	CopilotSelectedPlugins  []string
 	NativeSessionResume     bool // Agent supports ACP session/load for resume
 	SupportsMCP             bool
 	// CLIFlags is the resolved user-configurable list of CLI flags for this
@@ -1955,6 +1999,13 @@ type BootMessageRequest struct {
 // McpConfigProvider returns MCP configuration for a given agent profile ID.
 type McpConfigProvider interface {
 	GetConfigByProfileID(ctx context.Context, profileID string) (*mcpconfig.ProfileConfig, error)
+}
+
+// MCPResolutionProvider is the typed effective-set boundary used when catalog
+// and scope-selection storage is available. Legacy providers remain supported
+// for unimported workspaces and focused test managers.
+type MCPResolutionProvider interface {
+	Resolve(context.Context, mcpconfig.ResolutionContext, mcpconfig.Policy) (*mcpconfig.EffectiveMCPResolution, error)
 }
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation

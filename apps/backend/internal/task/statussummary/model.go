@@ -58,8 +58,12 @@ type TaskStatusSummary struct {
 	PendingAction       string              `json:"pending_action,omitempty"`
 	ActiveError         *ActiveErrorSummary `json:"active_error,omitempty"`
 	TaskError           *ActiveErrorSummary `json:"task_error,omitempty"`
-	Git                 *GitSummary         `json:"git,omitempty"`
-	PullRequest         *PullRequestSummary `json:"pull_request,omitempty"`
+	// TurnError is the bounded task-owned attention pointer for the latest
+	// failed interactive turn. It never blocks the composer and never drives
+	// recovery controls.
+	TurnError   *TurnErrorSummary   `json:"turn_error,omitempty"`
+	Git         *GitSummary         `json:"git,omitempty"`
+	PullRequest *PullRequestSummary `json:"pull_request,omitempty"`
 	// QueuedPromptCount is the number of prompts currently en-queued for the
 	// task across all of its sessions (pending semantics identical to
 	// message.queue.get). Omitted when zero so task rows without queued work
@@ -71,6 +75,10 @@ type TaskStatusSummary struct {
 	// CompletionGate is a bounded task-owned progress projection. Detailed
 	// criterion descriptions and evidence remain available from the task API.
 	CompletionGate *CompletionGateSummary `json:"completion_gate,omitempty"`
+	// UnreadSessionIDs lists, sorted, the task's sessions that have an unread
+	// transcript-visible message. The task is unread when it is non-empty.
+	// Omitted when empty.
+	UnreadSessionIDs []string `json:"unread_session_ids,omitempty"`
 }
 
 // CompletionGateSummary keeps task-list transport bounded while exposing the
@@ -118,6 +126,17 @@ type ActiveErrorSummary struct {
 	Category         string                   `json:"category,omitempty"`
 	RecoveryActions  []string                 `json:"recovery_actions,omitempty"`
 	Causes           []models.AgentErrorCause `json:"causes,omitempty"`
+}
+
+// TurnErrorSummary is the compact, task-list-safe projection of one failed
+// interactive turn. Message text is sanitized before it reaches this struct.
+type TurnErrorSummary struct {
+	SessionID  string    `json:"session_id,omitempty"`
+	TurnID     string    `json:"turn_id,omitempty"`
+	MessageID  string    `json:"message_id,omitempty"`
+	Stamp      string    `json:"stamp"`
+	OccurredAt time.Time `json:"occurred_at"`
+	Preview    string    `json:"preview"`
 }
 
 type GitSummary struct {
@@ -191,13 +210,58 @@ func (s TaskStatusSummary) Validate() error {
 	if err := validateActiveError(s.TaskError); err != nil {
 		return err
 	}
+	if err := validateTurnError(s.TurnError); err != nil {
+		return err
+	}
 	if err := validatePullRequest(s.PullRequest); err != nil {
 		return err
 	}
 	if err := validateLaunchQueue(s.LaunchQueue); err != nil {
 		return err
 	}
+	if err := validateUnreadSessionIDs(s.UnreadSessionIDs); err != nil {
+		return err
+	}
 	return validateCompletionGate(s.CompletionGate)
+}
+
+func validateTurnError(value *TurnErrorSummary) error {
+	if value == nil {
+		return nil
+	}
+	if value.Stamp == "" {
+		return fmt.Errorf("turn error stamp is required")
+	}
+	if err := validateUTF8Bytes("turn error stamp", value.Stamp, maxActiveErrorStampBytes); err != nil {
+		return err
+	}
+	if err := validateUTF8Bytes("turn error session", value.SessionID, maxSessionIDBytes); err != nil {
+		return err
+	}
+	if err := validateUTF8Bytes("turn error turn", value.TurnID, maxSessionIDBytes); err != nil {
+		return err
+	}
+	if err := validateUTF8Bytes("turn error message", value.MessageID, maxSessionIDBytes); err != nil {
+		return err
+	}
+	return validateUTF8Bytes("turn error preview", value.Preview, MaxActiveErrorPreviewBytes)
+}
+
+// validateUnreadSessionIDs requires bounded, sorted, unique session IDs so the
+// canonical payload is stable for semantic equality.
+func validateUnreadSessionIDs(ids []string) error {
+	for i, id := range ids {
+		if id == "" {
+			return fmt.Errorf("unread session id cannot be empty")
+		}
+		if err := validateUTF8Bytes("unread session id", id, maxSessionIDBytes); err != nil {
+			return err
+		}
+		if i > 0 && ids[i-1] >= id {
+			return fmt.Errorf("unread session ids must be sorted and unique")
+		}
+	}
+	return nil
 }
 
 func validateCompletionGate(gate *CompletionGateSummary) error {
@@ -382,11 +446,13 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 		PendingAction:       s.PendingAction,
 		ActiveError:         s.ActiveError,
 		TaskError:           s.TaskError,
+		TurnError:           s.TurnError,
 		Git:                 s.Git,
 		PullRequest:         s.PullRequest,
 		QueuedPromptCount:   s.QueuedPromptCount,
 		LaunchQueue:         s.LaunchQueue,
 		CompletionGate:      s.CompletionGate,
+		UnreadSessionIDs:    s.UnreadSessionIDs,
 	})
 }
 
@@ -399,9 +465,29 @@ type semanticPayload struct {
 	PendingAction       string                 `json:"pending_action,omitempty"`
 	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
 	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
+	TurnError           *TurnErrorSummary      `json:"turn_error,omitempty"`
 	Git                 *GitSummary            `json:"git,omitempty"`
 	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
 	QueuedPromptCount   int                    `json:"queued_prompt_count,omitempty"`
 	LaunchQueue         *LaunchQueueSummary    `json:"launch_queue,omitempty"`
 	CompletionGate      *CompletionGateSummary `json:"completion_gate,omitempty"`
+	UnreadSessionIDs    []string               `json:"unread_session_ids,omitempty"`
+}
+
+// TurnErrorSummaryFromMetadata projects the current task turn-error attention.
+// An acknowledged record keeps its transcript history but exposes no current
+// attention. The preview is bound separately from the stored 4096-byte message.
+func TurnErrorSummaryFromMetadata(metadata map[string]interface{}) *TurnErrorSummary {
+	value, ok := models.LoadTaskTurnError(metadata)
+	if !ok || value.Acknowledged() {
+		return nil
+	}
+	return &TurnErrorSummary{
+		SessionID:  truncateString(value.SessionID, maxSessionIDBytes),
+		TurnID:     truncateString(value.TurnID, maxSessionIDBytes),
+		MessageID:  truncateString(value.MessageID, maxSessionIDBytes),
+		Stamp:      truncateString(value.StampValue, maxActiveErrorStampBytes),
+		OccurredAt: value.OccurredAt,
+		Preview:    truncateString(value.Message, MaxActiveErrorPreviewBytes),
+	}
 }

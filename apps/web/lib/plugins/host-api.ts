@@ -171,7 +171,7 @@ import type {
   PluginTaskReviewOptions,
   PluginTranslationOptions,
 } from "./types";
-import type { PluginUIApi, SettingsSaveContributor } from "@kandev/plugin-sdk";
+import type { PluginUIApi, SettingsSaveContributor } from "@kdlbs/plugin-sdk";
 import {
   PluginStorageConflictError,
   type PluginStorageApi,

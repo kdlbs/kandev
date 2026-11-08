@@ -10,6 +10,7 @@ import {
   configOptionToModelOptions,
   isModelConfigOption,
   ModelConfigSelector,
+  type ModelConfigSelectorProps,
   type SelectConfigOption,
 } from "@/components/model-config-selector";
 import { ModelConfigResolutionStatus } from "@/components/settings/model-config-resolution-status";
@@ -17,6 +18,7 @@ import type { AvailableAgent } from "@/lib/types/http";
 import type { ConfigureSessionOperation, ConfigureSessionRule } from "@/lib/types/workflow-actions";
 import { reconcileConfigOptionValues } from "./profile-model-config";
 import { useSessionConfigModelOptions } from "./use-session-config-model-options";
+import { useCandidateModelOptions } from "@/hooks/domains/settings/use-candidate-model-options";
 import {
   type AgentChoice,
   defaultModelForAgent,
@@ -84,6 +86,18 @@ export function SessionConfigRuleCard({
     onChange,
     onResolutionPendingChange,
   });
+  const resolveConfigurationOptions = useCandidateModelOptions({ agentName: rule.agent_name });
+  const applyConfiguration = (selection: {
+    model: string;
+    configOptions: Record<string, string>;
+  }) => {
+    if (rule.operation !== "set") return;
+    handleRuleChange({
+      ...rule,
+      model: selection.model,
+      config_options: { ...(rule.config_options ?? {}), ...selection.configOptions },
+    });
+  };
 
   return (
     <div
@@ -113,6 +127,8 @@ export function SessionConfigRuleCard({
           onRetryConfig={refreshConfig}
           readOnly={readOnly}
           onChange={handleRuleChange}
+          resolveConfigurationOptions={resolveConfigurationOptions}
+          onConfigurationApply={applyConfiguration}
         />
       )}
     </div>
@@ -330,6 +346,8 @@ function SessionConfigRuleSettings({
   onRetryConfig,
   readOnly,
   onChange,
+  resolveConfigurationOptions,
+  onConfigurationApply,
 }: {
   rule: Extract<ConfigureSessionRule, { operation: "set" }>;
   modelOptions: { id: string; name: string; description?: string; usageMultiplier?: string }[];
@@ -342,6 +360,8 @@ function SessionConfigRuleSettings({
   onRetryConfig: () => Promise<void>;
   readOnly: boolean;
   onChange: (rule: ConfigureSessionRule) => void;
+  resolveConfigurationOptions?: ModelConfigSelectorProps["resolveConfigurationOptions"];
+  onConfigurationApply?: ModelConfigSelectorProps["onConfigurationApply"];
 }) {
   const { t } = useTranslation();
   return (
@@ -362,6 +382,8 @@ function SessionConfigRuleSettings({
           placeholder={t("workflows:chooseModelAndSessionSettings")}
           ariaLabel={t("workflows:settingsForAgent", { agent: rule.agent_name })}
           triggerClassName={settingsControlClassName("w-full")}
+          resolveConfigurationOptions={resolveConfigurationOptions}
+          onConfigurationApply={onConfigurationApply}
         />
       ) : (
         <p className="rounded-md border border-border/60 p-2 text-xs text-muted-foreground">

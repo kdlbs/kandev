@@ -299,6 +299,7 @@ vi.mock("@/components/task-create-dialog-state", () => ({
       },
     ],
     snapshots: {},
+    selectedWorkflowSteps: { status: "idle", steps: [], retry: () => undefined },
     repositories: [],
     repositoriesLoading: false,
     taskCreateLastUsed: {
@@ -338,6 +339,10 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
   return {
     blockedBy: [],
     setBlockedBy: () => undefined,
+    mcpServerIds: [],
+    setMcpServerIds: () => undefined,
+    mcpServerIdsDirty: false,
+    setMcpServerIdsDirty: () => undefined,
     taskName: "Task title",
     autopilot: false,
     setAutopilot: () => undefined,

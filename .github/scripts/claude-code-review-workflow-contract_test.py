@@ -42,6 +42,20 @@ def job_block(workflow: str, job: str, next_job: str | None) -> str:
 
 
 class ClaudeCodeReviewWorkflowContractTest(unittest.TestCase):
+    # @covers AC-CI-ACTIONS-SECURITY-001.1, AC-CI-ACTIONS-SECURITY-001.2
+    def test_automatic_fork_review_keeps_trusted_policy_and_event_head_data(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        block = job_block(workflow, "claude-review-fork", None)
+        self.assertIn("ref: ${{ github.workflow_sha }}", block)
+        self.assertNotIn("ref: refs/pull/", block)
+        self.assertIn("bash .github/scripts/prepare-pr-review.sh", block)
+        self.assertIn("CLAUDE_REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}", block)
+        review = workflow_step(block, "Run Claude Code Review (GITHUB_TOKEN fallback)")
+        self.assertIn("--permission-mode dontAsk", review)
+        self.assertIn("Bash(python3 .github/scripts/claude-read-pr-file.py:*)", review)
+        self.assertNotIn("Bash(gh pr diff:*)", review)
+        self.assertIn(".claude-review/review.patch", review)
+
     def test_review_workflow_ignores_pr_updates(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
 

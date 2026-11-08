@@ -34,8 +34,8 @@ const (
 	// DependencyFailed means the predecessor reached a terminal state that is
 	// not success. It never resolves the edge.
 	DependencyFailed = "failed"
-	// DependencyPending means the predecessor has not finished. Archived
-	// predecessors are pending: archival is neither success nor failure.
+	// DependencyPending means the predecessor has not finished. Archival
+	// alone does not change whether the predecessor finished successfully.
 	DependencyPending = "pending"
 	// dependencyMissing marks an edge whose predecessor row is gone. Internal
 	// only: such edges are dropped from the projection rather than reported.
@@ -852,17 +852,14 @@ func buildDependencyView(
 //
 // Resolution requires SUCCESS. This is deliberately stricter than the
 // on_children_completed trigger, which counts FAILED as terminal: a chain must
-// never proceed on a failed step. Archived tasks are pending, because archival
-// is neither success nor failure.
+// never proceed on a failed step. Archival does not change the persisted
+// outcome: an archived completed predecessor remains resolved.
 func DependencyStatusForTask(task *models.Task) string {
 	if task == nil {
 		return DependencyPending
 	}
 	switch task.State {
 	case v1.TaskStateCompleted:
-		if task.ArchivedAt != nil {
-			return DependencyPending
-		}
 		return DependencyResolved
 	case v1.TaskStateFailed, v1.TaskStateCancelled:
 		return DependencyFailed

@@ -4,10 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
 // MetaKeyLastLaunchError stores the task-owned launch failure. Unlike the
@@ -61,6 +64,7 @@ const (
 	AgentErrorCauseOperationResume           = "resume"
 	AgentErrorCauseOperationRestoreWorkspace = "restore_workspace"
 	AgentErrorCauseOperationStart            = "start"
+	AgentErrorCauseOperationDelivery         = "delivery"
 
 	AgentErrorCauseCodeAuthenticationRequired    = "authentication_required"
 	AgentErrorCauseCodePermissionDenied          = "permission_denied"
@@ -75,6 +79,8 @@ const (
 	AgentErrorCauseCodePermissionModeFailed      = "permission_mode_failed"
 	AgentErrorCauseCodePermissionModeUnconfirmed = "permission_mode_unconfirmed"
 	AgentErrorCauseCodePermissionModeMismatch    = "permission_mode_mismatch"
+	AgentErrorCauseCodeDeliveryStorage           = "delivery_storage"
+	AgentErrorCauseCodePluginPreparationFailed   = "plugin_preparation_failed"
 
 	AgentErrorCauseReasonRequestedNotAdvertised = "requested_not_advertised"
 	AgentErrorCauseReasonCatalogEmpty           = "catalog_empty"
@@ -86,22 +92,52 @@ const (
 	AgentErrorCauseReasonEffectiveMismatch      = "effective_mismatch"
 )
 
+const AgentErrorCausePluginPreparationDetail = "The selected Copilot plugins could not be prepared."
+
 // AgentErrorCause keeps the bounded, operation-specific explanation for one
 // recovery attempt. It is intentionally smaller than LastAgentError so a
 // resume failure and a workspace fallback can remain distinct without
 // persisting provider transport payloads.
 type AgentErrorCause struct {
-	Operation      string `json:"operation"`
-	Code           string `json:"code"`
-	Detail         string `json:"detail,omitempty"`
-	Reason         string `json:"reason,omitempty"`
-	RequestedModel string `json:"requested_model,omitempty"`
-	EffectiveModel string `json:"effective_model,omitempty"`
-	AttemptedModel string `json:"attempted_model,omitempty"`
-	RequestedMode  string `json:"requested_mode,omitempty"`
-	EffectiveMode  string `json:"effective_mode,omitempty"`
-	PromptNotSent  *bool  `json:"prompt_not_sent,omitempty"`
+	Operation      string             `json:"operation"`
+	Storage        *AgentErrorStorage `json:"storage,omitempty"`
+	Code           string             `json:"code"`
+	Detail         string             `json:"detail,omitempty"`
+	Reason         string             `json:"reason,omitempty"`
+	RequestedModel string             `json:"requested_model,omitempty"`
+	EffectiveModel string             `json:"effective_model,omitempty"`
+	AttemptedModel string             `json:"attempted_model,omitempty"`
+	RequestedMode  string             `json:"requested_mode,omitempty"`
+	EffectiveMode  string             `json:"effective_mode,omitempty"`
+	RuntimeVersion string             `json:"runtime_version,omitempty"`
+	PromptNotSent  *bool              `json:"prompt_not_sent,omitempty"`
 }
+
+// AgentErrorStorage is the bounded, validated storage evidence attached to a
+// delivery failure. Absent measurements remain nil; malformed values are
+// dropped before persistence or transport.
+type AgentErrorStorage struct {
+	Reason             string     `json:"reason"`
+	Location           string     `json:"location,omitempty"`
+	ExecutorLabel      string     `json:"executor_label,omitempty"`
+	ObservedAt         *time.Time `json:"observed_at,omitempty"`
+	DiskAvailableBytes *int64     `json:"disk_available_bytes,omitempty"`
+	DiskRequiredBytes  *int64     `json:"disk_required_bytes,omitempty"`
+	RetainedBytes      *int64     `json:"retained_bytes,omitempty"`
+	LimitBytes         *int64     `json:"limit_bytes,omitempty"`
+	EventBytes         *int64     `json:"event_bytes,omitempty"`
+}
+
+// Closed delivery storage reasons share the source wire values.
+const (
+	AgentStorageReasonDiskSpaceLow        = "disk_space_low"
+	AgentStorageReasonFilesystemFull      = "filesystem_full"
+	AgentStorageReasonDiskQuotaExceeded   = "disk_quota_exceeded"
+	AgentStorageReasonJournalLimitReached = "journal_limit_reached"
+	AgentStorageReasonStreamLimitReached  = "stream_limit_reached"
+	AgentStorageReasonEventTooLarge       = "event_too_large"
+	AgentStorageReasonWriteFailed         = "storage_write_failed"
+)
 
 // NormalizeAgentErrorCauses removes malformed, duplicate, and excess causes
 // before a session error crosses a persistence or transport boundary.
@@ -118,7 +154,8 @@ func NormalizeAgentErrorCauses(causes []AgentErrorCause) []AgentErrorCause {
 		cause.Detail = truncateUTF8Bytes(cause.Detail, maxAgentErrorCauseDetailBytes)
 		identity := cause.Operation + "\x00" + cause.Code + "\x00" + cause.Detail +
 			"\x00" + cause.Reason + "\x00" + cause.RequestedModel + "\x00" + cause.EffectiveModel +
-			"\x00" + cause.AttemptedModel + "\x00" + cause.RequestedMode + "\x00" + cause.EffectiveMode
+			"\x00" + cause.AttemptedModel + "\x00" + cause.RequestedMode + "\x00" + cause.EffectiveMode +
+			"\x00" + cause.RuntimeVersion + "\x00" + agentErrorStorageIdentity(cause.Storage)
 		switch {
 		case cause.PromptNotSent == nil:
 			identity += "\x00unknown"
@@ -151,7 +188,7 @@ func AgentErrorCausesEqual(left, right []AgentErrorCause) bool {
 			a.Reason != b.Reason || a.RequestedModel != b.RequestedModel ||
 			a.EffectiveModel != b.EffectiveModel || a.AttemptedModel != b.AttemptedModel ||
 			a.RequestedMode != b.RequestedMode ||
-			a.EffectiveMode != b.EffectiveMode {
+			a.EffectiveMode != b.EffectiveMode || a.RuntimeVersion != b.RuntimeVersion {
 			return false
 		}
 		if (a.PromptNotSent == nil) != (b.PromptNotSent == nil) {
@@ -160,8 +197,34 @@ func AgentErrorCausesEqual(left, right []AgentErrorCause) bool {
 		if a.PromptNotSent != nil && *a.PromptNotSent != *b.PromptNotSent {
 			return false
 		}
+		if agentErrorStorageIdentity(a.Storage) != agentErrorStorageIdentity(b.Storage) {
+			return false
+		}
 	}
 	return true
+}
+
+func agentErrorStorageIdentity(storage *AgentErrorStorage) string {
+	if storage == nil {
+		return "none"
+	}
+	observedAt := ""
+	if storage.ObservedAt != nil {
+		observedAt = storage.ObservedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return strings.Join([]string{
+		storage.Reason, storage.Location, storage.ExecutorLabel, observedAt,
+		agentErrorMeasurement(storage.DiskAvailableBytes), agentErrorMeasurement(storage.DiskRequiredBytes),
+		agentErrorMeasurement(storage.RetainedBytes), agentErrorMeasurement(storage.LimitBytes),
+		agentErrorMeasurement(storage.EventBytes),
+	}, "\x00")
+}
+
+func agentErrorMeasurement(value *int64) string {
+	if value == nil {
+		return "unknown"
+	}
+	return strconv.FormatInt(*value, 10)
 }
 
 func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
@@ -180,6 +243,7 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 		cause.AttemptedModel = safeAgentErrorSelector(cause.AttemptedModel)
 		cause.RequestedMode = ""
 		cause.EffectiveMode = ""
+		cause.RuntimeVersion = ""
 	case AgentErrorCauseCodePermissionModeFailed,
 		AgentErrorCauseCodePermissionModeUnconfirmed,
 		AgentErrorCauseCodePermissionModeMismatch:
@@ -192,10 +256,33 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 		cause.RequestedModel = ""
 		cause.EffectiveModel = ""
 		cause.AttemptedModel = ""
+		cause.RuntimeVersion = ""
 	case AgentErrorCauseCodeRuntimeCleanupFailed:
 		promptNotSent := cause.PromptNotSent
 		clearAgentErrorCauseEvidence(cause)
 		cause.PromptNotSent = promptNotSent
+	case AgentErrorCauseCodePluginPreparationFailed:
+		cause.Storage = nil
+		cause.RequestedModel = ""
+		cause.EffectiveModel = ""
+		cause.AttemptedModel = ""
+		cause.RequestedMode = ""
+		cause.EffectiveMode = ""
+		cause.PromptNotSent = nil
+		cause.Detail = AgentErrorCausePluginPreparationDetail
+		if !isKnownAgentErrorCauseReason(cause.Code, cause.Reason) {
+			cause.Reason = ""
+			cause.RuntimeVersion = ""
+			return
+		}
+		cause.RuntimeVersion = safeAgentErrorRuntimeVersion(cause.RuntimeVersion)
+	case AgentErrorCauseCodeDeliveryStorage:
+		storage := normalizeAgentErrorStorage(cause.Storage)
+		clearAgentErrorCauseEvidence(cause)
+		cause.Storage = storage
+		if cause.Operation != AgentErrorCauseOperationDelivery {
+			clearAgentErrorCauseEvidence(cause)
+		}
 	default:
 		clearAgentErrorCauseEvidence(cause)
 	}
@@ -206,13 +293,25 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 }
 
 func clearAgentErrorCauseEvidence(cause *AgentErrorCause) {
+	cause.Storage = nil
 	cause.Reason = ""
 	cause.RequestedModel = ""
 	cause.EffectiveModel = ""
 	cause.AttemptedModel = ""
 	cause.RequestedMode = ""
 	cause.EffectiveMode = ""
+	cause.RuntimeVersion = ""
 	cause.PromptNotSent = nil
+}
+
+func safeAgentErrorRuntimeVersion(value string) string {
+	if len(value) == 0 || len(value) > 256 || !utf8.ValidString(value) {
+		return ""
+	}
+	if _, err := managedruntime.ParseStableVersion(value); err != nil {
+		return ""
+	}
+	return value
 }
 
 func isKnownAgentErrorCauseReason(code, reason string) bool {
@@ -231,6 +330,16 @@ func isKnownAgentErrorCauseReason(code, reason string) bool {
 		return reason == AgentErrorCauseReasonConfirmationMissing
 	case AgentErrorCauseCodePermissionModeMismatch:
 		return reason == AgentErrorCauseReasonEffectiveMismatch
+	case AgentErrorCauseCodePluginPreparationFailed:
+		switch reason {
+		case "cli_unavailable", "timeout", "cancelled", "output_limit", "invalid_inventory", "legacy_errors",
+			"runtime_unsupported", "plugin_loading_unsupported", "unsupported_launch_context", "metadata_unavailable",
+			"ambiguous_identity", "missing_root", "manifest_mismatch", "unsafe_root", "builtin_not_mountable",
+			"external_not_mountable", "unsupported_source", "manual_mount_conflict", "policy_unverified":
+			return true
+		default:
+			return false
+		}
 	default:
 		return false
 	}
@@ -320,7 +429,7 @@ func NormalizeAgentErrorDetails(details string, causes []AgentErrorCause) string
 func agentErrorCauseEvidenceBytes(cause AgentErrorCause) int {
 	total := len(cause.Operation) + len(cause.Code) + len(cause.Detail) + len(cause.Reason) +
 		len(cause.RequestedModel) + len(cause.EffectiveModel) + len(cause.AttemptedModel) +
-		len(cause.RequestedMode) + len(cause.EffectiveMode)
+		len(cause.RequestedMode) + len(cause.EffectiveMode) + len(cause.RuntimeVersion)
 	if cause.PromptNotSent != nil {
 		total++
 	}
@@ -330,7 +439,8 @@ func agentErrorCauseEvidenceBytes(cause AgentErrorCause) int {
 func isKnownAgentErrorCauseOperation(operation string) bool {
 	return operation == AgentErrorCauseOperationStart ||
 		operation == AgentErrorCauseOperationResume ||
-		operation == AgentErrorCauseOperationRestoreWorkspace
+		operation == AgentErrorCauseOperationRestoreWorkspace ||
+		operation == AgentErrorCauseOperationDelivery
 }
 
 func isKnownAgentErrorCauseCode(code string) bool {
@@ -348,6 +458,8 @@ func isKnownAgentErrorCauseCode(code string) bool {
 		AgentErrorCauseCodePermissionModeFailed,
 		AgentErrorCauseCodePermissionModeUnconfirmed,
 		AgentErrorCauseCodePermissionModeMismatch,
+		AgentErrorCauseCodeDeliveryStorage,
+		AgentErrorCauseCodePluginPreparationFailed,
 		LaunchErrorCategoryBaseBranchMissing,
 		LaunchErrorCategoryDefaultBranchUnresolved,
 		LaunchErrorCategoryWorkspaceCheckoutFailed,
@@ -593,4 +705,92 @@ func truncateUTF8Bytes(value string, maxBytes int) string {
 		value = value[:len(value)-1]
 	}
 	return value
+}
+
+// normalizeAgentErrorStorage validates closed reasons and nonnegative
+// measurements. Unknown measurements stay omitted instead of becoming zero.
+func normalizeAgentErrorStorage(storage *AgentErrorStorage) *AgentErrorStorage {
+	if storage == nil || !isKnownAgentStorageReason(storage.Reason) {
+		return nil
+	}
+	normalized := &AgentErrorStorage{
+		Reason:             storage.Reason,
+		Location:           safeStorageLocation(storage.Location),
+		ExecutorLabel:      safeStorageExecutorLabel(storage.ExecutorLabel),
+		DiskAvailableBytes: nonNegativeAgentErrorMeasurement(storage.DiskAvailableBytes),
+		DiskRequiredBytes:  nonNegativeAgentErrorMeasurement(storage.DiskRequiredBytes),
+		RetainedBytes:      nonNegativeAgentErrorMeasurement(storage.RetainedBytes),
+		LimitBytes:         positiveAgentErrorMeasurement(storage.LimitBytes),
+		EventBytes:         nonNegativeAgentErrorMeasurement(storage.EventBytes),
+	}
+	if storage.ObservedAt != nil && !storage.ObservedAt.IsZero() {
+		observedAt := storage.ObservedAt.UTC()
+		normalized.ObservedAt = &observedAt
+	}
+	return normalized
+}
+
+// NormalizeAgentErrorStorage exposes the same validation to wire conversions.
+func NormalizeAgentErrorStorage(storage *AgentErrorStorage) *AgentErrorStorage {
+	return normalizeAgentErrorStorage(storage)
+}
+
+func isKnownAgentStorageReason(reason string) bool {
+	switch reason {
+	case AgentStorageReasonDiskSpaceLow,
+		AgentStorageReasonFilesystemFull,
+		AgentStorageReasonDiskQuotaExceeded,
+		AgentStorageReasonJournalLimitReached,
+		AgentStorageReasonStreamLimitReached,
+		AgentStorageReasonEventTooLarge,
+		AgentStorageReasonWriteFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func nonNegativeAgentErrorMeasurement(value *int64) *int64 {
+	if value == nil || *value < 0 {
+		return nil
+	}
+	copied := *value
+	return &copied
+}
+
+func positiveAgentErrorMeasurement(value *int64) *int64 {
+	if value == nil || *value <= 0 {
+		return nil
+	}
+	copied := *value
+	return &copied
+}
+
+func safeStorageLocation(location string) string {
+	switch location {
+	case "local_runtime", "executor_runtime":
+		return location
+	default:
+		return "unknown"
+	}
+}
+
+func safeStorageExecutorLabel(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" || len(label) > maxAgentErrorSelectorBytes || !utf8.ValidString(label) {
+		return ""
+	}
+	for _, char := range label {
+		if unicode.IsControl(char) || char == '/' || char == '\\' || char == '@' {
+			return ""
+		}
+	}
+	return label
+}
+
+// AgentErrorStorageEqual compares normalized storage evidence. It is used by
+// live projections that must publish only a semantic change.
+func AgentErrorStorageEqual(left, right *AgentErrorStorage) bool {
+	return agentErrorStorageIdentity(normalizeAgentErrorStorage(left)) ==
+		agentErrorStorageIdentity(normalizeAgentErrorStorage(right))
 }

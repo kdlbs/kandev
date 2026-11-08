@@ -326,9 +326,10 @@ func TestWSSyncTaskPRPassiveKeepsActionsCache(t *testing.T) {
 	if _, err := wsSyncTaskPR(svc, nil)(ctx, explicit); err != nil {
 		t.Fatalf("explicit actions sync: %v", err)
 	}
-	explicitValue, ok := svc.workflowRunsCache.get(key)
-	if !ok || explicitValue.([]WorkflowRun)[0].ID != 2 {
-		t.Fatalf("explicit task refresh did not replace the Actions cache: %#v", explicitValue)
+	// The monitored workflow phase reads current GraphQL evidence, so an
+	// explicit refresh invalidates the REST cache instead of repopulating it.
+	if explicitValue, ok := svc.workflowRunsCache.get(key); ok {
+		t.Fatalf("explicit task refresh reused the Actions cache: %#v", explicitValue)
 	}
 	if _, ok := svc.workflowRunsCache.get(personalKey); ok {
 		t.Fatal("explicit task refresh left the personal-read Actions cache populated")

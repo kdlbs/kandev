@@ -18,12 +18,14 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		PendingAction:       derivePendingAction(state),
 		ActiveError:         deriveActiveError(state),
 		TaskError:           cloneActiveError(state.taskError),
+		TurnError:           cloneTurnError(state.turnError),
 		Git:                 deriveGitSummary(state),
 		PullRequest:         derivePullRequestSummary(state),
 		QueuedPromptCount:   state.queuedCount,
 		LastActivityAt:      cloneTimePtr(state.lastActivityAt),
 		LaunchQueue:         cloneLaunchQueue(state.launchQueue),
 		CompletionGate:      cloneCompletionGate(state.completionGate),
+		UnreadSessionIDs:    deriveUnreadSessionIDs(state),
 	}
 }
 
@@ -106,6 +108,30 @@ func equalLaunchQueue(left, right *LaunchQueueSummary) bool {
 	// persisted projection on every refresh.
 	return left.Capacity.InUse == right.Capacity.InUse &&
 		left.Capacity.Limit == right.Capacity.Limit
+}
+
+func cloneTurnError(value *TurnErrorSummary) *TurnErrorSummary {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+// EqualTurnErrorSummary compares the bounded attention projection, including
+// the stamp and occurrence time that make two failures distinct.
+func EqualTurnErrorSummary(left, right *TurnErrorSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
+}
+
+func equalTurnError(left, right *TurnErrorSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func cloneActiveError(value *ActiveErrorSummary) *ActiveErrorSummary {

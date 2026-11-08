@@ -1,6 +1,8 @@
 import { test, expect } from "../fixtures/test-base";
 import { AutomationsPage } from "../pages/automations-page";
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe("Pull request merged automation on mobile", () => {
   test("edits the trigger with touch and persists the configuration", async ({
     testPage,

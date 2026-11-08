@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -423,6 +424,9 @@ func TestWorkspaceAuthStatusUsesSelectedAppRegistration(t *testing.T) {
 		if err := service.ApplyAppRegistrationRuntime(resolved); err != nil {
 			t.Fatal(err)
 		}
+		service.currentAppRegistrationRuntime(resolved.Registration.ID).appClient.httpClient.Transport = enterpriseTransportFunc(
+			func(*http.Request) (*http.Response, error) { return nil, errors.New("fixture provider unavailable") },
+		)
 	}
 	for _, registration := range []*AppRegistration{
 		activeA.Registration, activeB.Registration, invalid.Registration,

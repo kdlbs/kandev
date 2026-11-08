@@ -10,405 +10,438 @@ requirements:
   - REQ-AGENTS-ANTIGRAVITY-ACP-006
   - REQ-AGENTS-ANTIGRAVITY-ACP-007
   - REQ-AGENTS-ANTIGRAVITY-ACP-008
+  - REQ-AGENTS-ANTIGRAVITY-ACP-009
+  - REQ-AGENTS-ANTIGRAVITY-ACP-010
+  - REQ-AGENTS-ANTIGRAVITY-ACP-011
+  - REQ-AGENTS-ANTIGRAVITY-ACP-012
+  - REQ-AGENTS-ANTIGRAVITY-ACP-013
+  - REQ-AGENTS-ANTIGRAVITY-ACP-014
+  - REQ-AGENTS-ANTIGRAVITY-ACP-015
 ---
 
 # Google Antigravity ACP agent system design
 
 ## Purpose and boundaries
 
-The agent system owns the Antigravity agent's declared identity, discovery
-predicate, launch argument vector, config-root template, skill directories, and
-remote-auth methods. Google's ACP server owns its own credentials, session
-storage, harness subprocess, and model catalogue.
+Agents owns Antigravity identity, runtime selection, readiness, local authentication, compatibility, and setup UI.
+The vendor server owns Google tokens, refresh, account entitlement, the loopback listener, and conversation storage.
+Tasks, costs, Office, and platform retain their existing lifecycle, accounting, routing, and process ownership.
+This design supplies normalized observations to those systems. It creates no parallel routing or accounting service.
 
-This design does not own ACP transport, process supervision, capability
-probing, MCP wiring, or executor provisioning. It constrains only what Kandev
-declares about this agent and what Kandev may assume about the server.
+The supported new path is one personal Google account on the local Kandev machine.
+Task sessions use separate server processes and one shared native store.
+No per-task home, account registry, hosted callback, or Google quota client is introduced.
+Existing remote-auth declarations remain compatible metadata. They do not establish remote subscription support.
 
-Six requirement criteria touch those unowned layers and are deliberately
-written as *declare-nothing-new* constraints rather than as new behavior:
-`AC-AGENTS-ANTIGRAVITY-ACP-003.13` on the shared command builder's `cli_flags`
-and sandbox-prefix append, `AC-AGENTS-ANTIGRAVITY-ACP-005.1` and `.2` on the
-advertised authentication methods and their order,
-`AC-AGENTS-ANTIGRAVITY-ACP-005.3` and `.4` on authentication and stderr, and
-`AC-AGENTS-ANTIGRAVITY-ACP-006.1` on capability derivation. Each is satisfied by
-this agent adding no agent-specific override, because the shared layer already
-behaves that way: `CommandBuilder.BuildCommand` appends `cli_flags` for every
-agent with no per-agent opt-out (see [launch surface](#launch-surface)), the
-session-start adapter caches the `initialize` result's `authMethods` and
-re-emits them in that order, `maybeEmitAuthRequired` classifies a `-32000` as
-auth-required whenever auth methods are cached, and the capability path reads
-`agentCapabilities`. Build should assert the absence of an override, not
-re-implement the shared rule. If a future change makes the shared rule
-insufficient for this agent, that is a change to the runtime's design, not this
-one.
-
-**Which layer presents the auth methods.** `AC-AGENTS-ANTIGRAVITY-ACP-005.1` and
-`.2` bind the session-start adapter: it is the layer that caches the advertised
-methods when `initialize` returns and re-emits them, in the server's order, when
-`session/new` answers `-32000`. They do not bind the capability probe: on an
-authenticated run that path does read the advertised methods, but when
-`session/new` answers `-32000` it returns before reaching that step. An
-unauthenticated probe therefore records the auth-required state of
-`AC-AGENTS-ANTIGRAVITY-ACP-005.3` carrying no method list, which is the shared
-behavior for every ACP agent rather than something this one declares. Making the
-probe carry them would change a shared cross-agent path this design does not
-own, so it is out of scope here rather than implied by `.1`.
-
-Values here are either **measured** against build
-`agy_acp_server_20260818_01_RC01`, darwin-arm64, on 2026-09-03, or **registry**
-values read from `antigravity-acp/agent.json` and never executed; each section
-says which. The probed artifact was removed after the session and no transcript
-was retained, so the measured values are a summary of that session and
-re-checking one means re-downloading that build. Only darwin-arm64 was ever
-executed: every Windows and Linux value here is registry-sourced. This is a
-record of an external contract, not a Kandev implementation plan.
+The [requirements](../requirements/antigravity-acp-agent.md) explicitly retire conflicting September draft restrictions.
+The [plan](../../../plans/antigravity-local-subscription/plan.md) contains implementation and qualification gates.
+Implementation is present for Tasks 01-06. Both documents remain draft until live qualification evidence is recorded.
 
 ## Requirement mapping
 
-| Requirement | Design section |
+| Requirements | Design sections |
 | --- | --- |
-| `REQ-AGENTS-ANTIGRAVITY-ACP-001` | [Distribution artifact](#distribution-artifact) |
-| `REQ-AGENTS-ANTIGRAVITY-ACP-002` | [Harness resolution](#harness-resolution) |
-| `REQ-AGENTS-ANTIGRAVITY-ACP-003` | [Launch surface](#launch-surface) |
-| `REQ-AGENTS-ANTIGRAVITY-ACP-004` | [Persistence](#persistence) |
-| `REQ-AGENTS-ANTIGRAVITY-ACP-005` | [Security](#security) |
-| `REQ-AGENTS-ANTIGRAVITY-ACP-006` | [Data and contracts](#data-and-contracts) |
-| `REQ-AGENTS-ANTIGRAVITY-ACP-007` | [Distribution artifact](#distribution-artifact) |
-| `REQ-AGENTS-ANTIGRAVITY-ACP-008` | [Control flow](#control-flow) |
+| REQ-AGENTS-ANTIGRAVITY-ACP-001, REQ-AGENTS-ANTIGRAVITY-ACP-002 | Existing identity; local runtime resolution |
+| REQ-AGENTS-ANTIGRAVITY-ACP-003, REQ-AGENTS-ANTIGRAVITY-ACP-004 | Launch policy; control flow; persistence |
+| REQ-AGENTS-ANTIGRAVITY-ACP-005, REQ-AGENTS-ANTIGRAVITY-ACP-006 | Authentication; shared ACP compatibility |
+| REQ-AGENTS-ANTIGRAVITY-ACP-007, REQ-AGENTS-ANTIGRAVITY-ACP-008 | Installation; concurrency and cleanup |
+| REQ-AGENTS-ANTIGRAVITY-ACP-009 | Local runtime resolution; installation; qualification |
+| REQ-AGENTS-ANTIGRAVITY-ACP-010 | Launch policy; authentication; security |
+| REQ-AGENTS-ANTIGRAVITY-ACP-011 | Shared ACP compatibility; control flow |
+| REQ-AGENTS-ANTIGRAVITY-ACP-012 | Native human questions |
+| REQ-AGENTS-ANTIGRAVITY-ACP-013 | Failure and recovery |
+| REQ-AGENTS-ANTIGRAVITY-ACP-014 | Usage and billing |
+| REQ-AGENTS-ANTIGRAVITY-ACP-015 | Setup UI |
+
+## Source evidence and limits
+
+Investigation date: 2026-11-02. Kandev source baseline: `f648e79f9ecc7d5db0db301f20d0b23c7cb44d97`.
+T3 Code was reviewed at commit `3ddd3989e03e44c0106c6e3e44033a2f5b8b50ae`.
+Useful primary sources:
+
+- [Official ACP registry entry](https://github.com/agentclientprotocol/registry/blob/main/antigravity-acp/agent.json).
+- [T3 installation](https://github.com/pingdotgg/t3code/blob/3ddd3989e03e44c0106c6e3e44033a2f5b8b50ae/apps/server/src/provider/AntigravityInstallation.ts).
+- [T3 authentication](https://github.com/pingdotgg/t3code/blob/3ddd3989e03e44c0106c6e3e44033a2f5b8b50ae/apps/server/src/provider/antigravityAuthSupport.ts).
+- [T3 ACP policy](https://github.com/pingdotgg/t3code/blob/3ddd3989e03e44c0106c6e3e44033a2f5b8b50ae/apps/server/src/provider/acp/AntigravityAcpSupport.ts).
+- [T3 turn outcomes](https://github.com/pingdotgg/t3code/blob/3ddd3989e03e44c0106c6e3e44033a2f5b8b50ae/apps/server/src/provider/acp/AntigravityTurnOutcome.ts).
+
+| Evidence | Observation | Confidence and limit |
+| --- | --- | --- |
+| Installed `agy` 1.4.12 | Google login works for its model catalog; `--acp` exits with unsupported flag. | Direct CLI execution. Does not authenticate standalone ACP. |
+| Official ACP 1.4.5, Linux x64 | Archive contains server plus harness. Digest verified before extraction. | Archive and packaged source inspected. Other platforms were not executed. |
+| Unmodified native launch | SIGILL before initialize on this Linux machine. | Direct execution and stack/disassembly evidence. Vendor fix not established. |
+| CPU 0 diagnostic launch | Initialize succeeds; unauthenticated session creation returns a typed auth error. | Controlled workaround only. No production affinity policy follows. |
+| Explicit `oauth-personal` | Native server prints a Google consent URL on stderr with PKCE and an ephemeral localhost callback. | Attempt cancelled without completing consent. Successful subscription inference is not yet verified. |
+| Vendor 1.4.5 code | Prompt results can contain typed token usage; `/usage` fetches allowance and renders Markdown. | Source evidence, not a captured successful authenticated turn. No provider dollar cost observed. |
+| Vendor model policy | `zed` is among clients eligible for third-party model discovery. | Source evidence. Account entitlement still determines the available catalog. |
+| T3 turn handling | Native error steps can reveal failures hidden behind chat text plus `end_turn`. | Prior-art implementation. Kandev must qualify the exact journal schema with its chosen runtime. |
+
+The Linux x64 archive was `agy-acp-server-1.4.5-linux-x86_64.zip`, with 321783181 compressed bytes.
+Its SHA-256 was `923923a0d7dc8073f66cc6f78647a3107e3a7ee2b7e1a24df8b3927b5188013b`.
+This is research evidence, not permission to download a mutable registry target at execution time.
+Private `acp-debug/` captures contain consent state and diagnostic data. They must not become committed fixtures.
 
 ## Components and responsibilities
 
-- **Kandev agent declaration.** Identity, discovery, argument vector, config
-  root, skill directories, remote-auth methods. Static metadata only.
-- **`agy_acp_server.par` / `.exe`.** Google's ACP server. A Mach-O executable
-  wrapping a packed Python archive; the `.par` suffix is part of the filename,
-  not an interpreter hint, and the file is executed directly. Speaks ACP over
-  stdio.
-- **`localharness_external`.** A sibling executable the server drives over gRPC
-  using protobuf messages (`localharness_pb2`). Located by the server itself,
-  never by Kandev.
-
-### Distribution artifact
-
-The ACP registry entry `antigravity-acp/agent.json` publishes a
-`distribution.binary` matrix, read verbatim on 2026-09-03:
-
-| Platform | `cmd` | `args` |
+| Boundary | Existing location | Planned responsibility |
 | --- | --- | --- |
-| `darwin-aarch64` | `./agy_acp_server.par` | none |
-| `linux-x86_64` | `./agy_acp_server.par` | `["--uid="]` |
-| `linux-aarch64` | `./agy_acp_server.par` | `["--uid="]` |
-| `windows-x86_64` | `./agy_acp_server.exe` | none |
-| `windows-aarch64` | `./agy_acp_server.exe` | none |
+| Agent declaration | `internal/agent/agents/antigravity_acp.go` | Preserve identity, base arguments, skills, resume, and remote metadata. Declare the subscription default. |
+| Native bundle helper | `internal/agent/antigravityruntime/` | Trusted artifact records, bounded installation, filesystem validation, and local resolution. No generic native package manager. |
+| Install orchestration | `internal/agent/settings/controller/agent_install.go`, `install_job.go` | Reuse job status, output, cancellation, maintenance interlock, and operator authorization. Accept a typed Go action for this local bundle. |
+| Launch selection | `internal/agent/runtime/lifecycle/command.go`, `internal/agent/hostutility/manager.go` | Resolve the same absolute bundle executable on local paths. Preserve remote command behavior. |
+| Wire compatibility | `internal/agentctl/acpcompat/`, `server/adapter/transport/acp/dialect.go` | Pure Antigravity client-info, auth-method, URL, question, and error translation helpers. |
+| ACP/process ownership | `internal/agentctl/server/adapter/transport/acp/`, `internal/agentctl/server/process/` | Execute RPCs, observe stderr safely, maintain auth state, and manage process generations. |
+| Sessionless setup | `internal/agent/hostutility/`, `agent/capabilities/handlers/` | Own one bounded local sign-in attempt using existing authenticated agentctl instances and client methods. |
+| Product UI | Settings card and task auth guidance | Install/sign-in/retry state, phone presentation, and capability refresh. |
+| Errors and usage | Existing routing errors, task events, and usage contracts | Consume provider observations without adding a new policy engine. |
 
-**The executable name carries its suffix on every platform.** There is no
-`agy_acp_server` without an extension: the archives contain `.par` (darwin,
-linux) and `.exe` (windows), and the registry invokes exactly those. Kandev's
-discovery name and argument vector therefore use the suffixed, platform-specific
-name and require no rename, symlink, or wrapper from the user. An earlier draft
-of this pair used the bare name and would have made the agent undiscoverable on
-every platform.
+Paths in this table are relative to `apps/backend/` except Product UI.
+Keep provider-specific pure translation in the ACP compatibility layer, following ADR 0044.
+Stateful process and database operations stay outside dialect functions.
 
-The darwin-arm64 archive is 314,500,221 bytes,
-`sha256 f122ca7e7030a27f9649da4cf1a7d80e12c48c5f6118ff35affc34d56cbf83dd`. It
-holds exactly two archive-root entries:
+## Existing identity
 
-| Entry | Uncompressed | Mode |
-| --- | --- | --- |
-| `agy_acp_server.par` | 792,105,680 | `0755` |
-| `localharness_external` | 101,551,680 | `0555` |
+Keep `antigravity-acp`, display order 22, logos, non-virtual ACP, and existing profiles.
+Base constructors remain pure. The local resolver replaces only the executable and supplies the selected helper path before shared profile wrapping.
+MCP configuration stays in ACP session creation. No project-local MCP file or assumed transport override is added.
+Native load/resume decisions remain capability-driven.
 
-An extraction therefore costs roughly 894 MB. The executable is signed
-`Developer ID Application: Google LLC (EQHXZ8M8AV)` with hardened runtime and a
-2026-08-19 timestamp, so it runs on macOS without a quarantine prompt when
-fetched by a non-quarantining downloader.
+## Local runtime resolution
 
-The archive URL carries a rotating build stamp
-(`agy_acp_server_20260818_01_RC01`) and Google publishes no checksum beside it.
-That, the size, and the fact that Kandev executes `InstallScript()` verbatim as
-remote shell are the three reasons provisioning is excluded from this layer.
+Use one provider-specific resolver from discovery, local task launch, recovery, probes, inference, and sign-in.
+Inputs include platform, locality, effective environment, and the existing Kandev user cache location.
+The result includes server path, helper path, provenance, exact managed version when known, and a bounded failure reason.
+Do not infer installation from the presence of `agy`.
 
-`agy` 1.1.25, the separate Antigravity CLI, is not an alternative entry point:
-it exposes no ACP mode in `--help` or `--helpfull`, contains no reference to the
-ACP server, and authenticates into `~/.gemini/antigravity-cli/`.
+Resolution order:
 
-### Prior-art departure
+1. Select the compiled, reviewed managed bundle when its versioned destination exists.
+2. Validate its complete manifest and both regular executable files. An invalid destination is an error, not a PATH fallback.
+3. If no managed destination exists, resolve the manual server through PATH and validate its sibling harness.
+4. For a manual override, resolve and validate the actual `ANTIGRAVITY_HARNESS_PATH` instead of accepting any non-empty value.
+5. Return unavailable when no complete runtime exists. Return context errors unchanged.
 
-Kandev's built-in ACP agents that launch a bare binary rather than `npx` are
-Cursor, Kimi, Kiro, Qoder, Trae, Devin, Grok, Hermes and Omp. Each detects one
-PATH entry and stops, and each returns a non-empty `InstallScript()` — Kimi,
-Kiro and Qoder return prose rather than runnable shell, which is the latent form
-of the hazard below, while Cursor, Devin and Hermes return real installers. This
-agent departs on three counts, each forced by measured behavior rather than
-preference.
+Managed bundles use a provider subdirectory under the existing Kandev user cache, keyed by version, platform, and archive digest.
+Use absolute paths. Completed directories are immutable; launch never deletes or rewrites them.
+An external PATH installation remains externally owned. Installation never replaces it or rewrites PATH.
+No version selector, native auto-updater, SQL migration, or npm package identity is needed for this pinned first release.
 
-**Discovery checks a second file.** With the executable present but its harness
-absent, the server still starts and still answers `initialize`, logging only
-`Localharness not found.` to stderr. One-entry detection would therefore report
-a half-installed agent as healthy and lose capability later, inside a prompt.
-The predicate checks the sibling directly so the failure surfaces at discovery.
-See [harness resolution](#harness-resolution) for the search order this mirrors.
+Filesystem discovery performs no subprocess calls.
+The existing capability probe separately establishes readiness and captures startup failures.
+A file-complete install can therefore be installed but not ready.
+A remote executor never receives a backend-local managed path.
 
-**No CLI passthrough.** Every one of those agents also declares a passthrough
-config so the user can drop to the raw CLI under a PTY. This server has no such
-mode: `--helpfull` exposes only `--[no]debug` and `--[no]notices`, there is no
-subcommand or REPL, and the process speaks ACP over stdio and exits on stdin
-EOF. Declaring passthrough would surface a toggle that spawns a process the user
-cannot interact with, so AC-AGENTS-ANTIGRAVITY-ACP-001.9 declines it.
+## Installation
 
-**The install script is empty.** That value runs verbatim as remote shell on the
-SSH, Kubernetes and Sprites executors, so prose in it is a command those
-executors attempt to execute. Because the artifact is also a version-pinned
-314 MB download expanding to roughly 894 MB, the honest value is the empty
-string, and the install guidance moves to `Description()`.
+Keep `AntigravityACP.InstallScript()` empty so remote bootstrap receives no shell payload.
+Extend the current install job runner with a server-owned typed action, retaining the existing script path for other agents.
+Requests accept an agent identity, never a URL, shell command, extraction path, or arbitrary version.
+The controller selects the trusted Antigravity artifact for the host platform.
+Add `supports_local_install` to discovery DTOs and web agent types.
+Catalog filters and Install controls accept that capability or an existing install script.
+The binary bundle flow shows guidance rather than a fabricated shell command.
 
-## Data and contracts
+The reviewed artifact table contains OS/architecture, exact version, Google URL, SHA-256, compressed-size limit, expanded-size limit, and two expected entry names.
+Cover Linux, Darwin, and Windows x64/arm64 only when the official artifact exists and the platform has qualification evidence.
+Fail unsupported combinations explicitly. Do not invent an artifact URL from a naming convention.
+Recheck registry checksums and the selected native version during implementation, then pin the reviewed values in code.
 
-`--helpfull` exposes exactly two flags on darwin, `--[no]debug` and
-`--[no]notices`. There is no `--uid`, `--model`, `--acp`, or port flag, which is
-why the argument vector cannot vary with model, permission policy, or resume
-target.
+Download to a task-owned staging directory with request context and bounded time/size.
+Verify digest before extraction. Accept only the expected server and harness regular files.
+Reject duplicate names, absolute paths, traversal, links, special files, excess entry count, and excess expanded bytes.
+Apply executable permissions on Unix. Publish the complete directory with atomic same-filesystem rename.
+Cancellation and failure remove staging only. Existing complete bundles remain untouched.
+A valid existing destination is an idempotent success.
+A corrupt or conflicting destination produces repair guidance; replacement requires stopping users first and must not overwrite a live bundle.
+No automatic update or garbage collection is part of this package.
 
-`initialize` returns:
+Reuse install maintenance and operator-mutation guards. Office/task credentials cannot initiate global installation or authentication.
+After install, invalidate filesystem discovery and capability caches. A failed readiness probe does not become an install success claim about inference.
 
-- `agentInfo`: `{name: antigravity-acp, title: Google Antigravity, version:
-  agy_acp_server_20260818_01_RC01}`
-- `agentCapabilities`: `loadSession: true`; `promptCapabilities` `{image, audio,
-  embeddedContext}`; `mcpCapabilities` `{http: true, sse: true}`;
-  `sessionCapabilities` `{list, resume}`; `auth: {logout}`
-- `authMethods`: `oauth-personal`, `oauth-business`, `gemini-api-key`,
-  `agent-platform`
+## Launch policy
 
-The server echoes the requested `protocolVersion` verbatim and does not clamp:
-a request of `1` returned `1`, and a request of `99` returned `99`. The echoed
-value carries no information about what the server supports, which is why
-capability decisions must read `agentCapabilities` instead.
+Local subscription operations share one effective policy after inherited and profile environments have been combined.
+Carry a small typed auth policy in the existing instance and inference configuration: selected method plus interactive permission.
+Use `acp_auth_policy: {method_id: "oauth-personal", allow_interactive: false}` on the internal wire contract.
+The dedicated setup instance sets `allow_interactive: true`; profiles and task requests cannot set it.
+Advertise `antigravity_personal_auth_v1` through existing agentctl capability negotiation before using this contract or transient auth status.
+Only eligible local Antigravity launches receive `oauth-personal`; only the dedicated operator setup instance permits interaction.
+This is an internal child-process contract, not a new persisted profile option.
+Remote and other-provider launches retain their existing policy. A retained agentctl lacking this contract requires upgrade guidance.
+Validate home/locality before spawn. A profile changing the user home, a non-empty `GEMINI_HOME`, or unknown locality is ineligible for this local flow.
+Return actionable setup guidance instead of redirecting state or silently dropping the override.
+Preserve unrelated task environment variables.
 
-## Launch surface
+Strip these conflicting inputs only from the Antigravity child environment:
 
-One argument vector serves the session command, the runtime command, and the
-one-shot inference command, so no path can drift to a different one:
+- `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`.
+- `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_CLOUD_QUOTA_PROJECT`, `GOOGLE_GENAI_USE_VERTEXAI`.
+- `AGY_ACP_CCPA_PROJECT`, `AGY_ACP_ENABLE_OAUTH`.
 
-| Platform | Argument vector | Source |
-| --- | --- | --- |
-| darwin | `agy_acp_server.par` | registry `cmd`; binary measured |
-| linux | `agy_acp_server.par --uid=` | registry `cmd` + `args`, not measured |
-| windows | `agy_acp_server.exe` | registry `cmd`, not measured |
+Validate these names against the selected vendor release and add a regression for every recognized credential-mode input.
+Use the resolved harness path. Replace inherited `BROWSER` with a Kandev-owned no-op browser helper for this child only.
+The helper exits successfully without launching a browser, preventing Python from falling through to another browser.
+Use the resolved absolute agentctl executable, a private helper subcommand, and tested Python BROWSER argument quoting.
+It must work with spaces and Windows drive letters. Do not shell-expand URL arguments.
+A small helper is preferable to a remote OAuth bridge or a new credential reader.
 
-The name is the same one discovery looks up on that platform, which is what
-keeps a successful detection from producing an unlaunchable command. Selection
-is by the platform of the Kandev process building the command — the host, not an
-executor's target. That distinction is real rather than theoretical: discovery
-calls `exec.LookPath` on the host, while the SSH executor ships the built command
-verbatim to the remote, so a darwin host driving a hand-provisioned linux remote
-would send the darwin vector and drop `--uid=`. Nothing here can correct it,
-because command construction receives no per-executor platform, and the
-requirements name the mixed-platform remote as an explicit exclusion.
+Keep native credential backend selection. Do not force file storage or copy `agy` credentials.
+The native macOS keychain and Linux/Windows file backend remain vendor-owned.
+Shared profile flags and sandbox prefixes still apply. An unsupported wrapped environment must fail explicitly rather than bypass the subscription policy.
 
-The rules are also total: every platform yields a defined lookup name and a
-non-empty vector. There is no "build no command" outcome to express — the command
-surfaces return a value, not an error — and an empty vector would not be inert,
-because the SSH preflight skips binary verification when the built command has no
-arguments, turning a clean early failure into an opaque spawn error later.
-Availability is gated by discovery alone.
+## Shared ACP compatibility
 
-Nothing else varies the declared vector. `--helpfull` exposes only `--[no]debug`
-and `--[no]notices` on darwin, so there is no model, permission, auto-approve,
-agent-type, or resume flag to vary, and this agent's own construction passes
-neither of the two that exist. The working directory is the task workspace, the
-environment map is empty with nothing stripped, and shutdown needs no forced kill
-because the server exits on stdin EOF.
+Add a narrow Antigravity policy to the existing compatibility helpers:
 
-**Which layer the vector describes.** Everything above describes what this agent
-*constructs*, which is not the whole of what is launched.
-`CommandBuilder.BuildCommand` calls the agent's own `BuildCommand` and then
-appends the profile's configured `cli_flags` to every agent's vector, after which
-`prependCommandPrefix` prepends any sandbox launcher tokens. No agent has an
-opt-out from either, and adding one here would change a contract shared by all of
-them, which [purpose and boundaries](#purpose-and-boundaries) rules out. So
-AC-AGENTS-ANTIGRAVITY-ACP-003.7 binds this agent's own construction only: a user
-who puts `--debug` or `--notices` in their profile's `cli_flags` gets it passed,
-and that is the shared `cli_flags` feature working as designed rather than a
-defect in this agent. The same boundary is why the "exactly" in
-AC-AGENTS-ANTIGRAVITY-ACP-003.1 and `.2`, and the list in `.6`, are claims about
-the declared vector rather than the final argv.
-AC-AGENTS-ANTIGRAVITY-ACP-003.13 states that binding, so a test asserting it
-knows which layer to call.
+- Override only wire `clientInfo` to `zed` version `0.0.0`.
+- Require `oauth-personal` in advertised methods for the local subscription path.
+- Parse the vendor's consent prompt and structured errors.
+- Recognize native human-input requests.
 
-The linux `--uid=` argument is the one real risk in this table. The darwin build
-exposes no `uid` flag at all, and absl rejects an unknown flag at startup, so if
-the linux build matches darwin rather than the registry the agent fails to start
-there. That argument stays registry-sourced and unverified: the requirements
-exclude Windows and Linux verification from this layer, so confirming it with
-`--helpfull` against the linux archive is follow-up work, not a condition of
-this change.
+The adapter and utility executor both consume the same helpers.
+The policy covers task initialize, capability probes, model resolution probes, utility inference, sign-in, and restored sessions.
+Registered-agent acpdbg also uses the provider identity and local runtime policy; arbitrary raw `--exec` remains diagnostic.
+Do not globally rename Kandev or report `zed` as the product or task owner.
+This is a compatibility assumption about the vendor's client allowlist, not a guarantee of third-party model entitlement.
+The override is scoped to the Antigravity agent only; disabling that agent is the kill switch.
+No separate global identity flag is introduced because the vendor allowlist is the only reason for the override.
 
-## Control flow
+Preserve `initialize` data before attempting authentication or `session/new`.
+On an unauthenticated result, probes return advertised auth methods and `auth_required`, without an empty successful catalog.
+Other providers retain the canonical identity and authentication path.
 
-Kandev spawns one server process per session and speaks ACP over its stdio. The
-server spawns and supervises its own harness subprocess.
+## Authentication
 
-Concurrent sessions run independent processes over a shared config root. Kandev
-adds no lock: arbitration inside the config root is the server's own concern.
+### Background operations
 
-Closing stdin after `initialize` terminated the process within one second with
-exit code 0, so graceful shutdown needs no forced process kill.
+After initialize, call native `authenticate` with `oauth-personal` before new/load/resume.
+Cached credentials and silent refresh remain native operations.
+If the server requires interactive consent, the stderr consumer recognizes its prompt before generic buffering or logging.
+Because the no-op browser helper prevents browser launch, the operation can cancel authentication and report `auth_required` promptly.
+Close a temporary probe/inference process and its loopback listener through existing bounded cleanup.
+Do not automatically start an interactive retry from boot, Office, task start, or recovery.
+
+Shared adapter/process code owns RPC sequencing and cancellation.
+Pure dialect helpers only describe the compatibility policy and parse observations.
+Use generation checks so a late auth result cannot initialize a replacement process.
+Only the explicitly interactive setup operation may retain a consent URL.
+
+### Explicit local sign-in
+
+Add a small in-memory attempt owner to `hostutility.Manager`.
+It creates a dedicated temporary native agentctl instance, using existing runtime ownership and authenticated clients.
+Reuse configure/start/initialize/`Client.Authenticate`; do not implement another JSON-RPC transport.
+`Client.ConfigureAgent` takes the complete argv in `agentArgs`, including the executable at index zero.
+The sign-in owner passes `command.Args()` unchanged in that field; it must not pass `args[1:]`.
+The separate `command` string does not supply a missing executable when structured arguments are present.
+The receiver validates structured arguments before start. Keep that validation intact.
+Test the sign-in caller through the real configure HTTP handler, including Linux flags, paths with spaces, and executable-only commands.
+The [sign-in launch repair](../../../plans/antigravity-sign-in-launch/plan.md) records the regression and its delivery checks.
+The dedicated instance has no task, injected task MCP, or inference prompt.
+It is separate from task instances and from concurrent capability probes.
+
+Proposed operator endpoints beside the existing capabilities handler:
+
+- `POST /api/v1/antigravity-acp/login`: start or return the active attempt.
+- `GET /api/v1/antigravity-acp/login/:attemptID`: read its current snapshot.
+- `DELETE /api/v1/antigravity-acp/login/:attemptID`: cancel it idempotently.
+
+The login group is a sibling of `/api/v1/agent-capabilities` because Gin does not
+allow a static `antigravity-acp` child beside that group's existing `:type`
+wildcard.
+
+Use the existing local operator/configuration mutation guard and maintenance exclusion on start/cancel.
+Reads require the same authorized operator. Do not expose global login through workspace/task MCP capabilities.
+Reject arbitrary agent names or auth-method inputs on this personal-only operation.
+
+Snapshot fields: `attempt_id`, `state`, `expires_at`, optional active `authorization_url`, and a sanitized `error_code`/message.
+States: `starting`, `waiting_for_browser`, `checking`, `succeeded`, `failed`, `cancelled`, `expired`.
+Use one attempt per host process, a ten-minute overall deadline, and a short terminal retention period.
+The latest attempt ID is discoverable to the authorized settings client so reload can reattach without persisting the URL.
+Backend restart clears attempts; the UI returns to a fresh probe rather than resurrecting old URLs.
+
+The agentctl stderr consumer stores a recognized URL only in an active auth attempt's transient memory.
+Add a narrow authenticated `agent.auth.status` stream request to read that snapshot while `authenticate` is pending.
+It is a request response, not a journaled task event. Redact it in transport tracing.
+Extend the existing stderr consumer/sanitizer interfaces rather than creating another stderr reader.
+Use the same parser for the utility executor's bounded stderr sink.
+Generic stderr buffers, logs, and error strings retain a redacted marker only.
+Verify status/cancel calls remain serviceable while the long authentication RPC is pending.
+Retained agentctl versions without this capability fail with upgrade guidance; do not fall back to reading unredacted stderr.
+
+The operator opens the validated URL in a browser on the Kandev machine.
+Google redirects to the ephemeral localhost listener created by the native server.
+Kandev serves no OAuth callback and exchanges no token.
+The server validates OAuth state/PKCE and writes its own credentials and selected auth method.
+A successful native response moves the attempt to `checking`, then a fresh ordinary capability probe establishes readiness and models.
+If authentication succeeds but model discovery fails, preserve that distinction and expose retryable probe guidance.
+Never tell users to repeat consent solely because a catalog request failed.
+
+Cancellation, timeout, backend shutdown, and process failure close only the owned setup instance.
+Clear the URL on every terminal transition. Reject late updates by attempt ID and process generation.
+Keep ordinary task processes running. Do not delete native credentials when an attempt ends.
+No cross-process account lock is claimed; independent Kandev processes share vendor refresh behavior.
+
+## Native human questions
+
+The current process manager can auto-approve the first allowed option.
+Antigravity encodes human questions as permission requests whose tool-call ID starts with `interaction_`.
+Their answer choices can all have `allow_once`, making ordinary auto-approve an accidental answer selection.
+
+Classify this request before coordinator, managed-MCP, and generic approval branches.
+Carry an explicit human-input classification through normalized permission data.
+Only the Antigravity compatibility helper recognizes its native prefix.
+Reuse the existing pending question/permission UI with exact option IDs and labels.
+No additional form builder is needed.
+Explicit human answers use the existing permission response and deduplication path.
+Stop, cancellation, and stale-generation checks remain authoritative.
+Ordinary tools keep existing approval policies. Office waits when the user must answer.
+Registered-agent acpdbg stops a recognized human-question capture without selecting an option.
+The product UI owns live answer qualification; a generic diagnostic auto-approval must not invent that answer.
 
 ## Failure and recovery
 
-### Harness resolution
+### Structured failures
 
-This is the design's central hazard. The server resolves its harness like this:
+Add provider-specific pure mappings to existing routing-error signatures and ACP translation.
+Distinguish authentication, subscription/entitlement, model access, quota exhaustion, transient throttling, and provider failure.
+Use structured status/reason/data and known native error envelopes.
+A `-32000` with advertised auth methods is not sufficient evidence of an auth error by itself.
+Preserve valid reset timestamps or duration hints. Leave missing reset data unknown.
+Never parse normal assistant prose or arbitrary tool output as a provider error.
 
-1. If `ANTIGRAVITY_HARNESS_PATH` is already set, return immediately.
-2. Otherwise search `dirname(abspath(sys.argv[0]))`, then
-   `dirname(abspath(sys.executable))`, for `localharness_external` then
-   `localharness` (`.exe` variants on Windows), first match wins.
-3. If nothing matches, log `Localharness not found.` and continue starting.
+### Errors hidden behind end_turn
 
-Kandev accepts a candidate only when it is a regular file. On non-Windows
-hosts, it also requires at least one execute bit. Windows mode bits do not
-control executable access, so the regular-file check applies there.
+For the qualified release, use a small read-only native outcome reader, separate from usage accounting.
+The candidate path is `~/.gemini/antigravity-acp/conversations/<native-session-id>.db`.
+Qualify the exact location and schema with the selected version before coding against them.
+T3 observes table `steps`, columns `idx`, `step_type`, `step_payload`, and error step type 17.
+Those are private vendor details, not a stable ACP contract.
 
-`abspath` does not resolve symlinks, and step 3 is not fatal. Measured:
+Use the existing Go SQLite dependency. Open read-only, respect WAL, and bound busy waits and payload reads.
+Validate the session identifier, root containment, every path component, regular-file type, and file identity.
+Reject symlinks or replacement files. Never scan other sessions or import their history.
+Before submitting a prompt, record the current high-water index or prove the file is absent.
+After the result, inspect only newly appended current-turn records, capped at 16 KiB of relevant error payload.
+An old error is not a new failure. A resumed session keeps the same before/after boundary rule.
+Native `refusal` is evidence of quota only for the qualified version whose mapping has been verified.
+Other agents retain ordinary refusal semantics.
+The validated native `/usage` command uses its RPC result without requiring a model trajectory record.
+Do not exempt arbitrary slash-prefixed prompts from outcome checks.
 
-| Layout | Result |
-| --- | --- |
-| Real path, harness sibling present | clean start, no warning |
-| Real path, harness removed | `Localharness not found.`, still starts |
-| Symlink from a harness-less PATH directory | `Localharness not found.`, still starts |
+If the native version hides failures and the required outcome check is unavailable, return a sanitized outcome-verification failure.
+Do not emit success completion or auto-advance the workflow from an unverified outcome.
+Classify this as an unknown provider/runtime compatibility failure, not fabricated quota or auth.
+Missing journal data never triggers a replay or model switch.
+Once a later vendor version provides reliable structured failures, qualification may remove this reader through a separate contract update.
 
-In all three cases `initialize` succeeded. A user who symlinks the executable
-onto PATH, or extracts only one of the two files, therefore gets an agent that
-looks healthy at every point Kandev normally checks and loses capability later,
-inside a prompt. Kandev's discovery predicate closes that gap by checking the
-sibling directly, and treats a set `ANTIGRAVITY_HARNESS_PATH` as satisfying it
-because step 1 makes the directory irrelevant in that case.
+### Recovery ownership
 
-### Authentication errors
+Send normalized failures through current task recovery and Office routing policy.
+Basic task chat benefits without Office.
+No new cooldown, provider poller, account scheduler, or automatic retry loop is introduced.
+Keep recoverable prompt errors within the existing native process and conversation.
+Follow the accepted ACP prompt-error lifetime decision; process death and broken transport remain separate failures.
+Late completion/error events must retain existing generation and turn ownership checks.
 
-`session/new` before authentication returns JSON-RPC `-32000` `"Authentication
-required"`, with a message enumerating the settings key and the environment
-variables each method needs. The server also writes a Python traceback to stderr
-for that handled error, so stderr traceback text is not evidence of a failed
-launch when a well-formed JSON-RPC error arrived on stdout.
+## Usage and billing
 
-`authenticate` with `gemini-api-key` and no `GEMINI_API_KEY` in the launch
-environment returns `-32602` and does not authenticate.
+`AntigravityACP.BillingType()` supplies subscription default metadata for this supported personal path.
+It is not a verified account invoice or the effective billing proof for legacy remote/API-key setups.
+Do not register an Antigravity allowance client in the Office usage adapter.
+
+The current ACP adapter already reads optional `session/prompt` usage and `usage_update` context data.
+Preserve that path and add fixtures instead of building a parallel token collector.
+The native fields include `inputTokens`, `outputTokens`, `cachedReadTokens`, `cachedWriteTokens`, `thoughtTokens`, and `totalTokens`.
+Keep existing per-turn normalization, token deduplication, message persistence, and reload behavior.
+`usage_update.used/size` is context occupancy, not cumulative billing usage.
+Main-trajectory values may omit child-agent usage. Record the observed scope rather than claiming task-complete totals.
+
+The investigated server does not supply a provider-billed dollar amount.
+Keep provider cost absent. Existing price-based estimates remain estimates, including under a subscription.
+Do not infer an extra charge or measured zero cost from billing metadata.
+Where model pricing is unavailable, leave the estimate unavailable.
+Add concise localized subscription guidance in the existing usage details surface.
+
+Pass `/usage` through the native slash-command path.
+The server performs its own allowance lookup and returns Markdown in task chat without model inference.
+Its internal Google HTTP endpoint is not a public Kandev integration contract.
+Do not parse that Markdown into quota bars or count the command as a new model token delta.
+No fresh five-hour/weekly guarantee is implied; display whatever windows and reset information the server actually returns.
+
+## Setup UI
+
+Reuse the installed-agent card, install job events, capability statuses, and model refresh hooks.
+Add a focused Antigravity sign-in view instead of sending users to an unstructured host shell.
+Other agents retain their current PTY login dialogs.
+Task auth-required guidance links to this same view and preserves the task draft and task identity.
+
+Desktop composition:
+
+- The card offers Install ACP when missing, Sign in with Google when needed, and Ready after capability confirmation.
+- A focused dialog shows subscription guidance, browser progress, Open Google sign-in, Copy link, Cancel, and clear retry state.
+- The dialog explains the separate ACP login and same-machine callback.
+
+Phone composition:
+
+- Follow `components/task/mobile/mobile-picker-sheet.tsx` and the existing `useTouchDrawer`/responsive breakpoint conventions.
+- Use an inset sheet for the short action flow, with a focused full-screen state if text or keyboard needs more room.
+- Place status and the primary action above supporting details. Keep Cancel reachable and controls at least 44px.
+- Offer start, monitor, copy, cancel, and retry. Explain that the link must be opened on the Kandev machine.
+- Do not make a same-phone loopback flow the primary action. No remote callback relay is added.
+
+Use live status announcements, visible focus, Escape/Back behavior, and translated copy in all seven locales.
+Generate the Traditional Chinese pair through the repository tool.
+Reload reads the active attempt snapshot. Terminal states clear the URL and restore focus to the opener.
+Use synthetic mock auth in browser tests; CI must not consume a real Google subscription or launch consent.
 
 ## Persistence
 
-`<home>` is `$GEMINI_HOME` when set and non-empty, otherwise `~/.gemini`.
-Startup logged `Gemini home resolved to /Users/henry/.gemini (default;
-$GEMINI_HOME is unset)`; setting `GEMINI_HOME=/tmp/gemhome` moved both the
-resolved home and the settings path. Nothing is written to the config root
-before authentication succeeds.
-
-| Path | Contents |
-| --- | --- |
-| `<home>/antigravity-acp/settings.json` | `auth.type`, `gcp.project`, `gcp.location` |
-| `<home>/antigravity-acp/acp_token.json` | `oauth-personal` token |
-| `<home>/antigravity-acp/acp_business_token.json` | `oauth-business` token |
-| `<home>/antigravity-acp/trusted_workspaces.json` | trusted workspace roots |
-| `<home>/antigravity-acp/brain/` | harness per-conversation artifacts |
-| `<home>/antigravity-acp/conversations/` | session trajectories |
-
-Session lookup is scoped to the resolved home: an unknown identifier reports
-`Session not found in the current GEMINI_HOME`. Resume therefore depends on the
-config root being identical across relaunches, which is what makes per-task
-`GEMINI_HOME` isolation incompatible with resume.
-
-**Declared template versus resolved root.** Kandev declares one static
-`SessionDirTemplate`, `{home}/.gemini/antigravity-acp`. That string is not
-expanded against a home directory at launch. Its single production consumer is
-the container bind-mount source, where `SessionDirHostPath` strips the `{home}/`
-prefix and rebases the remainder onto `<kandev-home>/agent-sessions/<instance>/`
-— a kandev-managed directory deliberately outside every home, so host state DBs
-and session caches stay out of the container. That mount is created only when the
-agent also declares a `SessionDirTarget`, and per
-AC-AGENTS-ANTIGRAVITY-ACP-004.10 this agent declares none. For this agent the
-template is therefore a *statement about where the server keeps its config root*
-with no runtime effect today, not a path Kandev resolves.
-
-As a statement it is accurate exactly when `GEMINI_HOME` is unset or empty; it
-diverges when the environment exports a non-empty one, because the runtime
-declaration inherits the environment unmodified and so the server sees it. That
-divergence is not repairable here: the field is a static string on every agent,
-consumed by container and remote paths that resolve it against a target the
-local environment does not describe, so deriving it from a local variable would
-be wrong for exactly the executors that consume it. Kandev declares the default
-root, never reads `GEMINI_HOME`, and the requirements name any non-default
-`GEMINI_HOME` as an explicit exclusion rather than pretending the template still
-describes it. Remote credential upload has the same shape: it resolves sources
-against `os.UserHomeDir()`, so it too addresses the default root only.
-
-Skill resolution appends `<cwd>/.agents/skills/` and `<cwd>/.gemini/skills` for
-the project, and `<home>/config/skills` plus `<home>/antigravity-cli/skills`
-globally. Kandev declares the first of each pair — `.agents/skills` and
-`.gemini/config/skills` — matching the single project and user skill directory
-its injection contract supports. The server searches both entries of each pair,
-so taking the first is a determinism choice rather than a capability one; it
-also keeps Kandev out of `antigravity-cli/`, the directory the `agy` CLI owns
-and the requirements isolate. Because that global pair resolves against `<home>`,
-the declared user skill directory carries the same `GEMINI_HOME` divergence as
-the session template: under a non-default `GEMINI_HOME` Kandev would inject user
-skills where the server does not look, which is why the requirements name it in
-that exclusion alongside session-dir seeding and the remote-auth copy.
-
-Note that `<home>/antigravity-acp` nests inside `~/.gemini`, which is already
-the Gemini agent's session directory template. The two remain distinct values;
-neither is aliased to the other.
+No application database migration is required.
+Managed runtime files are separate from the native store.
+Only runtime provenance/version and existing agent/profile data enter ordinary product responses.
+Auth attempts and URLs remain in process memory. The vendor persists tokens and selected auth method.
+Usage and normalized failures use existing durable task contracts without raw native database payloads.
 
 ## Security
 
-Credentials are written and read by the ACP server alone. Kandev copies token
-files for remote executors and sets environment variables, and otherwise does
-not create, modify, or delete anything under the config root.
+Global setup actions use existing operator authority, mutation guards, and maintenance exclusion.
+Do not trust a task token to authorize host credential changes.
+Accept consent URLs only from the exact active native process.
+Require HTTPS `accounts.google.com`, the recognized authorization path, PKCE/state fields, and an HTTP localhost/loopback redirect with a valid ephemeral port.
+Reject userinfo, fragments, foreign redirects, and expired/foreign-attempt URLs.
+Native code owns state comparison and token exchange; Kandev does not proxy callbacks.
+No arbitrary URL opener or network fetch is exposed by the helper.
 
-API keys cannot be supplied over the ACP wire: `gemini-api-key` reads
-`GEMINI_API_KEY` and `agent-platform` reads `GOOGLE_API_KEY` or
-`GOOGLE_CLOUD_PROJECT`/`GOOGLE_CLOUD_LOCATION` with Application Default
-Credentials, all from the launch environment. Remote auth therefore needs both a
-file-copy method and environment-variable methods.
-
-Which token file exists depends on the method the user chose, so a file-copy
-method must tolerate absent entries rather than requiring all of them.
+Sanitize URLs before generic stderr storage, tracing, logs, and errors.
+Never put OAuth secrets or native error blobs into metrics, task messages, public fixtures, or spec examples.
+Use fabricated URLs and credentials in tests.
+Read the native outcome journal only for the active session and only through the bounded read-only reader.
 
 ## Observability
 
-The server logs to stderr in absl format at INFO by default. The two lines worth
-recognising are `Gemini home resolved to <path>` at startup, which reports the
-effective config root, and `Localharness not found.`, which is the only signal
-of the partial-install state described above.
+Reuse install/probe/auth status and structured logs for runtime provenance, version, platform, stage, and sanitized reason code.
+Distinguish download failure, incomplete install, native crash, consent required, consent cancelled, catalog failure, and unverified turn outcome.
+Do not add high-cardinality metrics or expose consent URLs in diagnostics.
+No new metrics service is required.
 
-`--debug` raises verbosity. Kandev does not pass it; a user debugging an install
-runs the binary directly.
+## Qualification
 
-## Deferred work
-
-The requirements' `## Out of scope` names these exclusions; this is what a
-follow-up would have to decide.
-
-**Provisioning the artifact.** A five-platform URL matrix, where the cache lives,
-how integrity is verified given Google publishes no checksum beside the archive,
-how a rotating build-stamped URL is refreshed, and whether a ~894 MB extraction
-is per-host or shared. Until that exists no image ships the binary, so the
-containerized, Kubernetes, SSH and Sprites executors report it not found.
-
-**A variable config root.** Supporting a non-default `GEMINI_HOME` means making
-the declared template environment-derived, which the static `SessionDirTemplate`
-contract shared by every agent does not allow today. Setting it per task or
-session would additionally isolate credentials, forcing a fresh login per task,
-and would break the resume property REQ-AGENTS-ANTIGRAVITY-ACP-004 depends on.
-
-**Multi-variable remote auth.** `agent-platform` also resolves via
-`GOOGLE_CLOUD_PROJECT` plus `GOOGLE_CLOUD_LOCATION` with Application Default
-Credentials. A remote-auth method carries a single `EnvVar`, so that combination
-cannot be expressed and an ADC-only remote host has no auth path until the method
-shape grows.
+The current Linux SIGILL prevents an unqualified success claim on the investigated host.
+The CPU 0 diagnostic suggests a native per-CPU indexing issue; that root cause remains an inference.
+Do not ship a universal affinity wrapper as its fix.
+Before marking local subscription support complete, run the reviewed native release without affinity on each claimed platform.
+Record startup, consent, authenticated model discovery, prompt, `/usage`, stop, resume, and two simultaneous tasks.
+If the Linux release remains broken, report that platform as blocked and preserve actionable diagnostics.
+Do not mark the live work order passed or quietly substitute `agy`.
 
 ## Related decisions
 
-None. This design records an external vendor contract and introduces no new
-Kandev architecture boundary.
+- [Host utility agentctl](../../../decisions/0002-host-utility-agentctl-for-sessionless-flows.md).
+- [ACP compatibility dialects](../../../decisions/0044-acp-agent-compatibility-dialects.md).
+- [Operator-owned agent settings](../../../decisions/2026-07-24-operator-owned-agent-launcher-settings.md).
+- [Runtime update authority](../../../decisions/2026-10-01-agent-runtime-update-authority.md).
+- [ACP prompt-error runtime lifetime](../../../decisions/2026-10-29-acp-prompt-error-runtime-lifetime.md).
+
+These existing decisions supply the ownership rules. Provider-local choices and their alternatives are recorded here.
+No new generic authentication framework, account manager, or duplicate ADR is required.

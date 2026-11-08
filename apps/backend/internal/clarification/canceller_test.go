@@ -29,6 +29,7 @@ type stubMessageStore struct {
 	findHasDeadline   bool
 	findContextErr    error
 	findErr           error
+	currentTurnID     string
 }
 
 func (s *stubMessageStore) GetTaskSession(context.Context, string) (*taskmodels.TaskSession, error) {
@@ -54,6 +55,10 @@ func (s *stubMessageStore) FindMessagesByPendingID(ctx context.Context, pendingI
 		return nil, nil
 	}
 	return msgs, nil
+}
+
+func (s *stubMessageStore) CurrentClarificationTurnID(context.Context, string) (string, error) {
+	return s.currentTurnID, nil
 }
 
 func (s *stubMessageStore) FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error) {

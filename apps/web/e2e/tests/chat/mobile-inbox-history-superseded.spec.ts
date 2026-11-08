@@ -5,6 +5,12 @@
 // mirrors inbox-history-superseded.spec.ts's desktop coverage rather than
 // duplicating its assertions.
 import { test, expect } from "../../fixtures/test-base";
+import {
+  expectClarificationReferencePopup,
+  expectTruncatedQuestionSummary,
+  LONG_REFERENCE_LABEL,
+  seedMarkdownHistory,
+} from "../../helpers/clarification-markdown";
 
 const MIN_TOUCH_TARGET_PX = 44;
 const QUESTION_TITLE = "Pick a deployment target";
@@ -12,6 +18,64 @@ const QUESTION_PROMPT = "Which environment should this ship to?";
 const OPTION_LABEL = "Staging";
 
 test.describe("Inbox History tab on mobile", () => {
+  // @covers AC-UI-CLARIFICATION-MARKDOWN-001.1 through .3, .5 through .7
+  test("renders Markdown question history without overflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const fixture = await seedMarkdownHistory(apiClient, seedData, "Mobile Markdown history");
+    try {
+      await testPage.goto("/needs-you-inbox");
+      await testPage.getByTestId("inbox-tab-history").tap();
+      const row = testPage.locator(`[data-pending-id="${fixture.pendingId}"]`);
+      await expect(row).toHaveCount(1);
+      const toggle = row.getByTestId("inbox-history-row-toggle");
+      await expect(toggle).toContainText("Read storage guide");
+      await expectTruncatedQuestionSummary(toggle.locator("span.font-medium"));
+      await toggle.tap();
+      const detail = row.getByTestId("inbox-history-clarification-detail");
+      await expect(detail.getByText("pnpm build pnpm test", { exact: true })).toHaveCSS(
+        "white-space",
+        "pre-wrap",
+      );
+      await expect(detail.locator("ol > li")).toHaveCount(2);
+      await expect(detail.locator("code").filter({ hasText: "Postgres" })).toBeVisible();
+      const guidance = detail.getByRole("link", { name: "storage guide", exact: true });
+      await expectClarificationReferencePopup(testPage, () => guidance.tap());
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+      const longReference = detail.getByRole("link", { name: LONG_REFERENCE_LABEL, exact: true });
+      const bounds = await longReference.boundingBox();
+      const detailBounds = await detail.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(detailBounds).not.toBeNull();
+      expect(bounds!.x).toBeGreaterThanOrEqual(detailBounds!.x - 1);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(
+        detailBounds!.x + detailBounds!.width + 1,
+      );
+      for (const id of ["inbox-history-open-task", "inbox-history-copy-id"]) {
+        const action = await row.getByTestId(id).boundingBox();
+        expect(action!.height).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
+        expect(action!.width).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
+      }
+      expect(
+        await testPage.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(await testPage.evaluate(() => document.documentElement.clientWidth));
+      const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+      const original = messages.find(
+        (message) => message.metadata?.pending_id === fixture.pendingId,
+      );
+      expect(original?.metadata?.status).toBe("pending");
+      await prCapture.screenshot("mobile-clarification-markdown-history", {
+        caption: "Phone History wraps formatted questions and keeps row actions reachable",
+      });
+    } finally {
+      await apiClient.deleteTask(fixture.taskId);
+    }
+  });
+
   test("open-task and copy-id stay reachable with a 44px touch target, with no clipping (AC .14, AC .29)", async ({
     testPage,
     apiClient,

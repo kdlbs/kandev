@@ -5,30 +5,38 @@ package repoclone
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestGitCredentialHelperSupportsRepeatedRequests(t *testing.T) {
-	t.Parallel()
+	tmpDir := filepath.Join(t.TempDir(), "tmp ' credential helpers")
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
+		t.Fatalf("create temporary directory: %v", err)
+	}
+	t.Setenv("TMPDIR", tmpDir)
 
-	helper, files, helperEnv, cleanup, err := gitCredentialHelperCommand(&cloneAuth{
-		username: "x-token-auth", password: "transient-token",
+	cmd := exec.Command("sh", "-c", `set -e
+for _ in 1 2; do
+  printf 'protocol=https\nhost=github.com\npath=acme/private.git\n\n' | git credential fill
+done`)
+	cleanup, err := configureGitCommand(cmd, &cloneAuth{
+		origin: "https://github.com", username: "x-token-auth", password: "transient-token",
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("configure Git credential helper: %v", err)
 	}
 	t.Cleanup(cleanup)
 
-	cmd := exec.Command("sh", "-c", `"$1" get; "$1" get`, "credential-helper-test", helper)
-	cmd.ExtraFiles = files
-	cmd.Env = append(os.Environ(), helperEnv...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("run credential helper twice: %v: %s", err, output)
+		t.Fatalf("run Git credential helper twice: %v: %s", err, output)
 	}
-	want := "username=x-token-auth\npassword=transient-token\n" +
-		"username=x-token-auth\npassword=transient-token\n"
-	if string(output) != want {
-		t.Fatalf("repeated credential helper output = %q, want %q", output, want)
+	if got := strings.Count(string(output), "username=x-token-auth\n"); got != 2 {
+		t.Fatalf("credential helper returned username %d times, want 2: %q", got, output)
+	}
+	if got := strings.Count(string(output), "password=transient-token\n"); got != 2 {
+		t.Fatalf("credential helper returned password %d times, want 2: %q", got, output)
 	}
 }

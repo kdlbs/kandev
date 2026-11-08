@@ -3,9 +3,11 @@ package lifecycle
 import (
 	"context"
 	"fmt"
-	"github.com/kandev/kandev/internal/agent/executor"
-	"github.com/kandev/kandev/internal/task/retention"
 	"time"
+
+	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/task/retention"
 )
 
 type workspaceRetentionReader interface {
@@ -48,6 +50,49 @@ func (m *Manager) stopWorkspaceRuntimeAndRelease(ctx context.Context, backend Ex
 		return err
 	}
 	return releaseExecutorInstanceRuntimeInventory(ctx, instance)
+}
+
+// rollbackPreservesRuntime reports whether a failed launch attempt attached to
+// existing compute and therefore must not destroy it. Before an AgentExecution
+// exists, ExecutorInstance.ReusedWorkspace is the only provenance; afterwards
+// the execution's immutable attachment record is authoritative, with the
+// instance field retaining its value as a defensive fallback.
+func rollbackPreservesRuntime(execInstance *ExecutorInstance, execution *AgentExecution) bool {
+	if execution != nil && retainsRuntimeOnLaunchRollback(execution) {
+		return true
+	}
+	if execInstance == nil || !execInstance.ReusedWorkspace {
+		return false
+	}
+	switch execInstance.RuntimeName {
+	case agentruntime.RuntimeRemoteDocker, agentruntime.RuntimeKubernetes:
+		return true
+	default:
+		return false
+	}
+}
+
+// stopLaunchRuntimeOnRollback routes every post-attachment launch failure
+// through one retention policy. A retained runtime releases only attempt-local
+// transport; fresh allocations and explicit cleanup keep destructive authority.
+func (m *Manager) stopLaunchRuntimeOnRollback(
+	ctx context.Context,
+	backend ExecutorBackend,
+	instance *ExecutorInstance,
+	execution *AgentExecution,
+) error {
+	if backend == nil || instance == nil {
+		return nil
+	}
+	if !rollbackPreservesRuntime(instance, execution) {
+		return m.stopWorkspaceRuntimeAndRelease(ctx, backend, instance, true)
+	}
+	if instance.RuntimeName == agentruntime.RuntimeRemoteDocker {
+		// Preserve the retained container even if an earlier stop attempt was
+		// unconfirmed. This reason is also what a later retry expects.
+		instance.StopReason = StopReasonAgentBootstrapFailed
+	}
+	return m.stopWorkspaceRuntime(ctx, backend, instance, false)
 }
 
 func (m *Manager) checkRetainedWorkspaceResource(ctx context.Context, taskID string, resourceIDs ...string) error {

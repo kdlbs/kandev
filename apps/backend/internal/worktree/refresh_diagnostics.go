@@ -20,6 +20,7 @@ const (
 	refreshDiagnosticNonFastForward = "non_fast_forward"
 	refreshDiagnosticRepository     = "repository_access_failed"
 	refreshDiagnosticLock           = "lock_contention"
+	refreshDiagnosticInvalidRef     = "invalid_local_ref"
 	refreshDiagnosticTimeout        = "timeout"
 	refreshDiagnosticCanceled       = "canceled"
 	refreshDiagnosticUnknown        = "unknown"
@@ -47,6 +48,8 @@ func classifyRefreshDiagnostic(output string, runErr, contextErr error) refreshD
 func classifyRefreshDiagnosticOutput(output string) (string, string) {
 	lower := strings.ToLower(output)
 	switch {
+	case hasInvalidLocalRefDiagnostic(lower):
+		return refreshDiagnosticInvalidRef, "Git reported an invalid local reference. Inspect repository references before retrying."
 	case strings.Contains(lower, "permission denied (publickey)"),
 		strings.Contains(lower, "no supported authentication methods available"):
 		return refreshDiagnosticSSHKey, "The SSH server rejected the configured public key."
@@ -96,6 +99,23 @@ func classifyRefreshDiagnosticOutput(output string) (string, string) {
 	default:
 		return refreshDiagnosticUnknown, "The Git refresh failed for an unknown reason."
 	}
+}
+
+func hasInvalidLocalRefDiagnostic(output string) bool {
+	for line := range strings.SplitSeq(output, "\n") {
+		line = strings.TrimSpace(line)
+		for _, prefix := range []string{
+			"fatal: bad object ",
+			"fatal: bad ref ",
+			"fatal: git show-ref: bad ref ",
+		} {
+			if ref, ok := strings.CutPrefix(line, prefix); ok &&
+				strings.HasPrefix(ref, "refs/") && len(strings.TrimSpace(ref)) > len("refs/") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func newRefreshDiagnostic(code, detail string, runErr error) refreshDiagnostic {

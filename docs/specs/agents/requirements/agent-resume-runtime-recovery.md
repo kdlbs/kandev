@@ -12,6 +12,8 @@ owners:
 
 Preserve the observable behavior documented for Agent Resume and Runtime Recovery.
 
+[MCP profile continuity](mcp-profile-continuity.md) defines tool delivery when recovery starts a replacement process.
+
 ## Requirements
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001: Agent Resume and Runtime Recovery

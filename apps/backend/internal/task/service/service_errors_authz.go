@@ -26,7 +26,7 @@ func IsForbidden(err error) bool { return errors.Is(err, ErrForbidden) }
 // defaults, visibility, and delete. It applies the 404-vs-403 rule so a caller
 // who cannot see the workspace never learns it exists.
 func (s *Service) requireWorkspaceManage(ctx context.Context, workspace *models.Workspace) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	if !s.needsWorkspaceAuthorization(ctx) {
 		return nil
 	}
 	decision := s.workspaceDecision(ctx, workspace)
@@ -36,5 +36,5 @@ func (s *Service) requireWorkspaceManage(ctx context.Context, workspace *models.
 	if !decision.Has(authz.ScopeWorkspaceManage) {
 		return ErrForbidden
 	}
-	return nil
+	return s.authorizeWorkspaceCollaboration(ctx, workspace.ID, models.CollaborationControl)
 }

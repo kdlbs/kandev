@@ -176,9 +176,10 @@ func TestPrepareSession_Success(t *testing.T) {
 		t.Fatalf("expected first session to carry immutable original marker, metadata = %#v", createdSession.Metadata)
 	}
 
-	// Verify SetSessionPrimary was called
+	// The mock store predates the atomic election contract, so the executor
+	// retains its explicit promotion fallback for legacy repositories.
 	if len(repo.setSessionPrimaryCalls) != 1 {
-		t.Errorf("Expected 1 SetSessionPrimary call, got %d", len(repo.setSessionPrimaryCalls))
+		t.Errorf("Expected 1 SetSessionPrimary fallback call, got %d", len(repo.setSessionPrimaryCalls))
 	}
 }
 

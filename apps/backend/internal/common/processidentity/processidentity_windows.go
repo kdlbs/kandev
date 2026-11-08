@@ -231,3 +231,6 @@ func takenWindowsJobName() string {
 	defer ownWindowsJobName.Unlock()
 	return ownWindowsJobName.name
 }
+
+// OwnedGroupTerminated is unverifiable on Windows, which has no POSIX process groups.
+func OwnedGroupTerminated(Identity) (bool, error) { return false, ErrUnverifiableIdentity }

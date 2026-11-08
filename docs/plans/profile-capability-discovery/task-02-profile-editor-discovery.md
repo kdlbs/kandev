@@ -183,3 +183,19 @@ Verification passed:
 - Targeted ESLint and `pnpm run typecheck` passed after the review follow-up.
 - Public documentation, specification catalog/lint, and PR documentation-coverage checks passed.
 - Final `git diff --check` passed.
+
+## Profile-name fixture selection (2026-10-27)
+
+The SDK PR's first profile-name attempt failed before navigation because the
+first registered agent had no profile. Provider order is not a selection
+contract. A controlled catalog with a profileless first row reproduces the
+same TypeError. Selecting the exact seedData profile ID and its owning family
+passes under that same ordering. The normal test retains its Save, reload,
+exact-name and baseline-restoration assertions. Temporary catalog injection
+is removed. No production behavior or timeout changes. Full-spec repetitions,
+typecheck, lint, normal hooks and fresh CI remain required.
+
+Controlled profileless-first RED/GREEN and the normal full five-case profile
+spec pass. The combined Azure/profile selection passes six cases with retries
+disabled, alongside full typecheck and zero-warning scoped lint. No temporary
+catalog injection remains. Normal hooks and new-head CI remain required.

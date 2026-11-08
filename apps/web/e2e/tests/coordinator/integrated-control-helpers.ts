@@ -378,3 +378,59 @@ export function controlPhoneGeometryCase() {
     }
   });
 }
+
+export function controlCircuitCases() {
+  test("provider circuits show active blocks and expired availability", async ({
+    testPage,
+    backend,
+    apiClient,
+    seedData,
+  }) => {
+    const context = { testPage, backend, apiClient, seedData };
+    const seeded = await setup(context, true);
+    const page = context.testPage;
+    try {
+      await page.route("**/api/v1/routing/circuits", (route) =>
+        route.fulfill({
+          json: {
+            circuits: [
+              {
+                resource_key: "credential:active",
+                scope: "credential",
+                scope_value: "active-account",
+                state: "open",
+                code: "rate_limited",
+                until: "2099-01-01T00:00:00Z",
+                failures: 2,
+              },
+              {
+                resource_key: "profile:expired",
+                scope: "profile",
+                scope_value: "expired-profile",
+                state: "open",
+                code: "provider_unavailable",
+                until: "2020-01-01T00:00:00Z",
+                failures: 1,
+              },
+            ],
+          },
+        }),
+      );
+      const loaded = waitForHttp(page, "GET", /\/api\/v1\/routing\/circuits$/);
+      await page.goto("/control/providers");
+      await loaded;
+      const card = page.getByRole("region", { name: "Provider resource circuits" });
+      await expect(card).toBeVisible();
+      await expect(card).toContainText("1 circuit is blocking routing");
+      const expired = card.getByTestId("control-provider-circuit").filter({ hasText: "expired-" });
+      await expect(expired).toHaveCount(1);
+      await expect(expired).toContainText("Available");
+      await expect(expired).not.toContainText("Next attempt");
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    } finally {
+      await seeded.dispose();
+    }
+  });
+}

@@ -5,7 +5,9 @@ requirements:
   - REQ-PLATFORM-DIAGNOSTIC-SIGNAL-001
   - REQ-PLATFORM-DIAGNOSTIC-SIGNAL-002
   - REQ-PLATFORM-DIAGNOSTIC-SIGNAL-003
+  - REQ-PLATFORM-DIAGNOSTIC-SIGNAL-004
 created: 2026-10-05
+updated: 2026-11-04
 owners:
   - kandev
 ---
@@ -26,6 +28,7 @@ It preserves process control, retention, runtime reclaim decisions, and MCP capa
 | REQ-PLATFORM-DIAGNOSTIC-SIGNAL-001 | Child JSON forwarding; Verification |
 | REQ-PLATFORM-DIAGNOSTIC-SIGNAL-002 | Routine diagnostic sites; Verification |
 | REQ-PLATFORM-DIAGNOSTIC-SIGNAL-003 | Child pipe draining; Verification |
+| REQ-PLATFORM-DIAGNOSTIC-SIGNAL-004 | Shutdown attribution; Verification |
 
 ## Child JSON forwarding
 
@@ -39,13 +42,73 @@ Reject trailing content, duplicate required fields, unknown levels, and mismatch
 Decode and ignore additional fields, including repeated fields, so nested logger context does not block severity recognition.
 Do not recursively inspect JSON text embedded in a message.
 
-Reconstruct the forwarded record from only the four validated envelope fields.
-Drop additional child fields before writing the record to installation-wide parent logs, which may be included in diagnostic bundles.
+Reconstruct the record from the validated envelope and the typed context allowlist below.
+Drop all other child fields before installation-wide logging and diagnostic bundles.
 Preserve the stream field on the parent entry.
 The child pipe reader bounds the line size before parsing a record.
 Do not persist raw provider stderr through a new path.
 Error-class levels map to the parent's error method, not fatal or panic methods.
 Unknown stdout remains debug, and unknown stderr remains warning.
+
+### Safe context allowlist
+
+The parent keeps its launcher component and stream fields.
+Child context remains inside the reconstructed JSON message and cannot overwrite parent context.
+Use fixed key dispatch and typed validation, without recursive object forwarding.
+
+| Fields | Accepted values |
+| --- | --- |
+| `component` | `process-manager`, `workspace-tracker`, `instance-manager`, `control-server`, `api-server`, `process-runner`, `interactive-runner`, `shell`, `shell-manager`, `git-operator`, `status-tracker`, `workspace-preview`, `vscode-manager`, `wakeup-scheduler` |
+| `task_id`, `session_id`, `instance_id`, `execution_id`, `submission_id`, `request_id` | Canonical lowercase UUID strings, exactly 36 bytes |
+| `state` | `healthy`, `pressure`, `guarded`, `cancelling`, `interrupted`, `cancellation_failed`, `storage_error`, `delivery_failed` |
+| `error_class`, `reason` | `permission_denied`, `not_found`, `context_canceled`, `deadline_exceeded`, `git_start_failed`, `git_command_failed`, `repository_context_unavailable`, `io_error`, `unknown`, `agent_running`, `managed_runtime_npm_resolution`, `managed_runtime_npm_policy`, `unsupported_profile_context`, `authentication_required`, `evidence_changed` |
+| `operation` | `read_directory`, `read_file`, `stat`, `git_inspection`, `submodule_discovery`, `agent_configure`, `agent_probe` |
+| `trigger` | `manual_refresh`, `user_select`, `turn_complete`, `startup_grace`, `poll` |
+| `runtime` | `desktop`, `server` |
+| `poll_mode` | `fast`, `slow`, `paused` |
+| `exit_code` | JSON integer from -1 through 4294967295 |
+| `retained_bytes`, `limit_bytes` | Nonnegative JSON integers that fit signed 64-bit storage |
+
+Drop an optional field with an invalid type, unsupported value, excessive length, or duplicate occurrence.
+When nested Zap loggers repeat `component`, accept the last value only if every occurrence belongs to the allowlist.
+Otherwise omit the component and retain valid severity.
+Required envelope duplicates retain their existing malformed-record fallback.
+Never route an invalid optional field through that raw fallback.
+The fixed field count and existing 64 KiB input limit bound reconstruction.
+Do not forward `error`, `target`, `path`, repository names, URLs, headers, tokens, payloads, or provider stderr.
+
+Filesystem and submodule producers add a safe `error_class` beside their existing local fields.
+Normalize filesystem operation names to the closed forwarding vocabulary at that producer boundary.
+Use typed cancellation, deadline, permission, missing-file, and process-start evidence before the `unknown` fallback.
+Submodule failures add `operation=submodule_discovery` and an exit code only when a typed process result supplies it.
+The existing raw error field stays outside the forwarding allowlist.
+Existing common filesystem diagnostics own shared filesystem classification.
+
+Configuration and probe producers use the additive values under
+[failure attribution](runtime-failure-attribution.md#agentctl-failure-producers).
+The probe classes reuse existing typed codes.
+These additions do not admit arbitrary code strings or raw error text.
+The [runtime stall work order](../../../plans/runtime-stall-diagnostics/task-02-classify-agentctl-failures.md)
+defines producer and forwarding verification.
+
+`refreshDeliveryPressure` emits info for transitions to `healthy` and retains warnings for every other transition.
+It keeps its existing transition-only emission, state machine, limits, and cancellation decisions.
+
+## Shutdown attribution
+
+`Launcher.Stop` marks intentional stop and sends the graceful signal while retaining the parent-liveness writer.
+It closes that writer on return after its existing exit or forced-cleanup wait.
+Do not close the writer before signaling the child.
+Signal delivery failure still closes owned descriptors and retains its existing returned error.
+
+In `cmd/agentctl`, `waitForShutdown` records planned signal handling at info.
+Unexpected monitor completion records `parent liveness pipe closed, initiating shutdown` at warning.
+That message describes the observed event without inferring OS process death.
+The monitor remains armed until child exit or actual parent loss.
+EOF still begins the same 30-second child cleanup.
+No new liveness protocol, acknowledgement, grace period, or environment variable is required.
+Unix process groups and Windows containment retain their current platform behavior.
+Survival-enabled launches still omit the pipe, and `Stop` remains a no-op for that launch.
 
 ## Child pipe draining
 
@@ -122,7 +185,16 @@ Do not alter input capability checks or duplicate-name resolution.
 
 Parser and observer tests cover JSON, console, slog, malformed input, and both streams.
 Include payload text containing fake severity words, duplicate required envelope fields, duplicate additional fields, and sensitive additional fields excluded from parent output.
+Include allowlisted context, malformed optional values, duplicate components, invalid UUIDs, and numeric overflow.
+Observer tests assert privacy against both the message and parent context.
 Prove JSON WARN/ERROR survive an info logger threshold and produce no parent panic.
+
+Real pipe and helper-process tests cover planned Stop, unexpected EOF, abrupt parent loss, signal failure, and bounded forced cleanup.
+Keep nil-monitor, ownership-shutdown, exit callback, and survival controls.
+Journal-backed tests cover initial healthy, pressure, guarded, and recovered healthy transitions.
+Filesystem and submodule tests assert safe fields at their real producer boundaries.
+Launcher-owned integration tests forward records from the real Zap JSON encoder with those field shapes.
+Keep producer and forwarding assertions separate without importing backend runtime code into the standalone agentctl package.
 
 Health tests cover repeated healthy results, repeated failures, recovery, and changed failing store sets.
 Reclaim tests cover unchanged refusal decisions and genuine probe errors.

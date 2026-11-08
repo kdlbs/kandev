@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
@@ -51,6 +52,41 @@ func mcpSelectionValues(mode *string, servers *[]string) (string, []string) {
 	return mcpSelectionModeOrInherit(mode), selectedServersOrEmpty(servers)
 }
 
+// normalizeCopilotPluginSelection validates applicability and returns a
+// deterministic canonical set. A nil request means the caller omitted the
+// field: creation defaults to an empty set and updates keep the committed
+// value. An explicit empty list clears the selection on any profile so shared
+// clients can normalize their payloads.
+func normalizeCopilotPluginSelection(agentName string, requested *[]string, existing []string) ([]string, error) {
+	if requested == nil {
+		if existing == nil {
+			return []string{}, nil
+		}
+		return append([]string{}, existing...), nil
+	}
+	if len(*requested) == 0 {
+		return []string{}, nil
+	}
+	if agentName != agents.CopilotACPAgentID {
+		return nil, fmt.Errorf("copilot_selected_plugins requires a concrete Copilot profile")
+	}
+	if err := copilotplugins.ValidateSelection(*requested); err != nil {
+		return nil, fmt.Errorf("copilot_selected_plugins is invalid: %w", err)
+	}
+	return copilotplugins.SortSelection(*requested), nil
+}
+
+func (c *Controller) agentNameForProfile(ctx context.Context, profile *models.AgentProfile) (string, error) {
+	agent, err := c.repo.GetAgent(ctx, profile.AgentID)
+	if err != nil {
+		return "", err
+	}
+	if agent == nil {
+		return "", errors.New("agent not found for profile")
+	}
+	return agent.Name, nil
+}
+
 type CreateProfileRequest struct {
 	AgentID           string
 	Name              string
@@ -69,6 +105,10 @@ type CreateProfileRequest struct {
 	// default unless the curated entry specifies Default: true).
 	CLIFlags []dto.CLIFlagDTO
 	EnvVars  []dto.ProfileEnvVarDTO
+	// DevinSandboxInherited is a request-only intent flag. It marks an explicit
+	// "Use CLI settings" choice on a new Devin profile so creation does not add
+	// the default disabled override.
+	DevinSandboxInherited bool
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string
@@ -81,6 +121,7 @@ type CreateProfileRequest struct {
 	CursorPluginsMCPEnabled *bool
 	MCPSelectionMode        *string
 	MCPSelectedServers      *[]string
+	CopilotSelectedPlugins  *[]string
 	Dynamic                 *dto.DynamicAgentProfileDTO
 }
 
@@ -122,6 +163,10 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	if err := dto.ValidateMCPSelection(req.MCPSelectionMode, req.MCPSelectedServers); err != nil {
 		return nil, err
 	}
+	copilotPlugins, err := normalizeCopilotPluginSelection(agent.Name, req.CopilotSelectedPlugins, nil)
+	if err != nil {
+		return nil, err
+	}
 	displayName, err := c.resolveDisplayName(agentConfig, agent.Name)
 	if err != nil {
 		return nil, err
@@ -147,6 +192,15 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		return nil, err
 	}
 	mcpSelectionMode, mcpSelectedServers := mcpSelectionValues(req.MCPSelectionMode, req.MCPSelectedServers)
+	mode, envVars := devinProfilePermissionDefaults(
+		agent.Name, req.Mode, req.EnvVars, !req.DevinSandboxInherited,
+	)
+	if err := validateProfileEnvVarDTOs(envVars); err != nil {
+		return nil, err
+	}
+	if err := validateDevinProfilePermissionIntent(agent.Name, mode, envVars); err != nil {
+		return nil, err
+	}
 	profile := &models.AgentProfile{
 		AgentID:                 req.AgentID,
 		Name:                    req.Name,
@@ -155,7 +209,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		FallbackModel:           strings.TrimSpace(req.FallbackModel),
 		AutoFallback:            req.AutoFallback,
 		RequireExactModel:       req.RequireExactModel,
-		Mode:                    req.Mode,
+		Mode:                    mode,
 		ConfigOptions:           profileconfig.SanitizeConfigOptions(req.ConfigOptions),
 		AllowIndexing:           req.AllowIndexing,
 		AutoApprove:             req.AutoApprove,
@@ -164,9 +218,10 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		CursorPluginsMCPEnabled: cursorPluginsMCPEnabled(req.CursorPluginsMCPEnabled),
 		MCPSelectionMode:        mcpSelectionMode,
 		MCPSelectedServers:      mcpSelectedServers,
+		CopilotSelectedPlugins:  copilotPlugins,
 		Enabled:                 true,
 		CLIFlags:                cliFlags,
-		EnvVars:                 envVarsFromDTO(req.EnvVars),
+		EnvVars:                 envVarsFromDTO(envVars),
 		CommandPrefix:           strings.TrimSpace(req.CommandPrefix),
 		ProviderKind:            req.ProviderKind,
 		ProviderBaseURL:         req.ProviderBaseURL,
@@ -433,6 +488,7 @@ type UpdateProfileRequest struct {
 	CursorPluginsMCPEnabled *bool
 	MCPSelectionMode        *string
 	MCPSelectedServers      *[]string
+	CopilotSelectedPlugins  *[]string
 	Dynamic                 *dto.DynamicAgentProfileDTO
 	Force                   bool
 }
@@ -447,7 +503,8 @@ func enabledOnlyUpdate(req UpdateProfileRequest) bool {
 		req.ConfigOptions == nil && req.AllowIndexing == nil && req.AutoApprove == nil &&
 		req.CLIPassthrough == nil && req.CLIFlags == nil && req.EnvVars == nil &&
 		req.CommandPrefix == nil && !req.touchesProvider() && req.CursorMCPAuthEnabled == nil &&
-		req.CursorPluginsMCPEnabled == nil && req.MCPSelectionMode == nil && req.MCPSelectedServers == nil && req.Dynamic == nil
+		req.CursorPluginsMCPEnabled == nil && req.MCPSelectionMode == nil && req.MCPSelectedServers == nil &&
+		req.CopilotSelectedPlugins == nil && req.Dynamic == nil
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -457,6 +514,17 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	profile, err := c.repo.GetAgentProfile(ctx, req.ID)
 	if err != nil {
 		return nil, ErrAgentProfileNotFound
+	}
+	if req.CopilotSelectedPlugins != nil {
+		agentName, agentErr := c.agentNameForProfile(ctx, profile)
+		if agentErr != nil {
+			return nil, agentErr
+		}
+		selection, validateErr := normalizeCopilotPluginSelection(agentName, req.CopilotSelectedPlugins, profile.CopilotSelectedPlugins)
+		if validateErr != nil {
+			return nil, validateErr
+		}
+		profile.CopilotSelectedPlugins = selection
 	}
 	isDynamic := profileKind(profile) == dynamicProfileKind
 	if isDynamic && !c.dynamicAgentRoutingEnabled {
@@ -523,6 +591,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	if req.MCPSelectedServers != nil {
 		profile.MCPSelectedServers = append([]string{}, (*req.MCPSelectedServers)...)
 	}
+
 	if err := validateRequireExactModelPolicy(profile.Model, profile.RequireExactModel, profile.CLIPassthrough, isDynamic); err != nil {
 		return nil, err
 	}
@@ -594,6 +663,15 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	if err := c.applyProviderConfigUpdate(ctx, req, profile); err != nil {
 		return nil, err
 	}
+	if req.Mode != nil || req.EnvVars != nil {
+		agentName, agentErr := c.agentNameForProfile(ctx, profile)
+		if agentErr != nil {
+			return nil, agentErr
+		}
+		if err := validateDevinProfilePermissionIntent(agentName, profile.Mode, envVarsToDTO(profile.EnvVars)); err != nil {
+			return nil, err
+		}
+	}
 	profile.UserModified = true
 	if dynamic != nil {
 		result, handled, atomicErr := c.updateDynamicProfileAtomically(
@@ -611,7 +689,15 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, err
 		}
 	}
-	if err := c.repo.UpdateAgentProfileWithEnabledIntent(ctx, profile, req.Enabled); err != nil {
+	selectionIntent := req.CopilotSelectedPlugins
+	if selectionIntent != nil {
+		selectionIntent = &profile.CopilotSelectedPlugins
+	}
+	if intent, ok := c.repo.(store.AgentProfileSelectionIntent); ok {
+		if err := intent.UpdateAgentProfileWithSelectionIntent(ctx, profile, req.Enabled, selectionIntent); err != nil {
+			return nil, err
+		}
+	} else if err := c.repo.UpdateAgentProfileWithEnabledIntent(ctx, profile, req.Enabled); err != nil {
 		return nil, err
 	}
 	result := toProfileDTO(profile)
@@ -850,6 +936,7 @@ func duplicateClone(source *models.AgentProfile) *models.AgentProfile {
 		CursorPluginsMCPEnabled:    source.CursorPluginsMCPEnabled,
 		MCPSelectionMode:           mcpSelectionModeOrInherit(&source.MCPSelectionMode),
 		MCPSelectedServers:         append([]string{}, source.MCPSelectedServers...),
+		CopilotSelectedPlugins:     append([]string{}, source.CopilotSelectedPlugins...),
 		UserModified:               true,
 		Enabled:                    source.Enabled,
 		WorkspaceID:                source.WorkspaceID,
@@ -1416,6 +1503,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		CursorPluginsMCPEnabled: profile.CursorPluginsMCPEnabled,
 		MCPSelectionMode:        mcpSelectionModeOrInherit(&profile.MCPSelectionMode),
 		MCPSelectedServers:      append([]string{}, profile.MCPSelectedServers...),
+		CopilotSelectedPlugins:  append([]string{}, profile.CopilotSelectedPlugins...),
 		UserModified:            profile.UserModified,
 		WorkspaceID:             profile.WorkspaceID,
 		CreatedAt:               profile.CreatedAt,

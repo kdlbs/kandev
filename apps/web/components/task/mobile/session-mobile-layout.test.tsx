@@ -61,6 +61,7 @@ import {
   mobilePanelTopPadding,
   mobilePanelTopNavHeight,
   resolveMobilePluginPanel,
+  resolveMobileCorePanel,
   resolveMobileReviewSource,
   terminalPaddingBottom,
   useMobilePanelHandlers,
@@ -332,6 +333,21 @@ describe("resolveMobilePluginPanel", () => {
 
   it("keeps a ready selected panel when its registration is present", () => {
     expect(resolveMobilePluginPanel(panel, lifecycle("ready"), true)).toBe(panel);
+  });
+});
+
+describe("resolveMobileCorePanel", () => {
+  it("keeps a managed Background Work selection", () => {
+    expect(resolveMobileCorePanel("background-work", null, true)).toBe("background-work");
+  });
+
+  it("returns to Chat for passthrough or feature-disabled Background Work state", () => {
+    expect(resolveMobileCorePanel("background-work", null, false)).toBe("chat");
+  });
+
+  it("still falls back from an unavailable review surface", () => {
+    expect(resolveMobileCorePanel("review", null, true)).toBe("chat");
+    expect(resolveMobileCorePanel("review", "reviews", true)).toBe("review");
   });
 });
 

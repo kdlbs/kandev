@@ -27,9 +27,29 @@ export function cacheIdentity({
   go,
   compiler,
   lint,
+  saveMode = "all",
 }) {
-  if (!["static", "test-1", "test-2", "ambient", "e2e-build"].includes(family))
+  const families = [
+    "static",
+    "test-1",
+    "test-2",
+    "test-3",
+    "test-4",
+    "repository-1",
+    "repository-2",
+    "repository-3",
+    "postgres-packages",
+    "postgres-1",
+    "postgres-2",
+    "postgres-3",
+    "ambient",
+    "e2e-helpers",
+    "e2e-build",
+  ];
+  if (!families.includes(family))
     throw new Error("invalid cache family");
+  if (!["all", "build", "none"].includes(saveMode))
+    throw new Error("invalid cache save mode");
   if (
     !/^\d{4}-\d{2}-\d{2}$/.test(day) ||
     new Date(day).toISOString().slice(0, 10) !== day
@@ -54,6 +74,9 @@ export function cacheIdentity({
     buildPrefix,
     buildKey: `${buildPrefix}${day}`,
     buildPath: cachePath(go.GOCACHE),
+    moduleSave: saveMode === "all",
+    buildSave: saveMode === "all" || saveMode === "build",
+    lintSave: saveMode === "all" && family === "static" && Boolean(lint),
   };
   if (lint) {
     result.lintPrefix = `go-lint-v2-${hash([buildPrefix, required(lint.version), required(lint.config)])}-`;
@@ -105,9 +128,15 @@ function main() {
         : undefined;
     const values = cacheIdentity({
       family: process.env.CACHE_FAMILY,
+      saveMode: process.env.CACHE_SAVE_MODE ?? "all",
       day: new Date().toISOString().slice(0, 10),
       runner: `${required(process.env.RUNNER_OS)}-${required(process.env.RUNNER_ARCH)}`,
-      dependencies: filesHash(["apps/backend/go.mod", "apps/backend/go.sum"]),
+      dependencies: filesHash([
+        "apps/backend/go.mod",
+        "apps/backend/go.sum",
+        "pluginsdk/go.mod",
+        "pluginsdk/go.sum",
+      ]),
       recipe: filesHash([
         ".github/docker/ci-base/Dockerfile",
         ".github/actions/cache-go/action.yml",

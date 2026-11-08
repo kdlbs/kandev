@@ -5,21 +5,25 @@ import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import type { PRFeedback, TaskPR } from "@/lib/types/github";
 
-const feedbackState = vi.hoisted(() => ({ value: null as PRFeedback | null }));
+const feedbackState = vi.hoisted(() => ({
+  value: null as PRFeedback | null,
+  loading: false,
+  authenticated: true,
+}));
 
 vi.mock("@/hooks/domains/github/use-pr-ci-popover", () => ({
   usePRFeedbackBackgroundSync: vi.fn(),
   usePRCIPopover: () => ({
     feedback: feedbackState.value,
-    isFetching: false,
-    isRefreshing: false,
+    isFetching: feedbackState.loading,
+    isRefreshing: feedbackState.loading,
     lastUpdatedAt: null,
     refetch: vi.fn(),
   }),
 }));
 
 vi.mock("@/hooks/domains/github/use-github-status", () => ({
-  useGitHubStatus: () => ({ status: { authenticated: true } }),
+  useGitHubStatus: () => ({ status: { authenticated: feedbackState.authenticated } }),
 }));
 
 vi.mock("@/hooks/domains/github/use-task-ci-options", () => ({
@@ -83,6 +87,8 @@ function renderPopover() {
 
 describe("PR check disclosure cancellation", () => {
   beforeEach(() => {
+    feedbackState.loading = false;
+    feedbackState.authenticated = true;
     feedbackState.value = {
       pr: {} as PRFeedback["pr"],
       reviews: [],
@@ -116,6 +122,32 @@ describe("PR check disclosure cancellation", () => {
     expect(screen.queryByText("No checks have started")).toBeNull();
     expect(screen.queryByTestId("pr-check-group")).toBeNull();
     expect(screen.queryByTestId("pr-workflow-add-context")).toBeNull();
+  });
+
+  // @covers AC-INTEGRATIONS-GITHUB-PR-DISCLOSURE-001.2/.3
+  it("keeps the PR action available through initial loading and authentication failure", () => {
+    feedbackState.value = null;
+    feedbackState.loading = true;
+    const first = renderPopover();
+    const link = screen.getByRole("link", { name: "Open PR" });
+    expect(link.textContent).toContain("Open PR");
+    expect(link.getAttribute("href")).toBe(makePR().pr_url);
+    expect(screen.getByRole("status").textContent).toContain("Updating");
+    first.unmount();
+    feedbackState.authenticated = false;
+    renderPopover();
+    expect(screen.getByRole("link", { name: "Open PR" }).getAttribute("href")).toBe(
+      makePR().pr_url,
+    );
+    expect(screen.getByTestId("pr-popover-reconnect-link")).toBeTruthy();
+  });
+
+  it("retains cached check results while refreshing", () => {
+    feedbackState.loading = true;
+    renderPopover();
+    expect(screen.getByTestId("pr-checks-empty").textContent).toBe("Checks not successful");
+    expect(screen.queryByTestId("pr-checks-loading")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("Updating");
   });
 
   it("uses an authoritative empty check list instead of stale aggregate counts", () => {

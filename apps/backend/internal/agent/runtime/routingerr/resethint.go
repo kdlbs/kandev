@@ -21,6 +21,22 @@ var resetClockHintPattern = regexp.MustCompile(
 	`(?i)\bresets\s+(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\s+\(([^()\r\n]+)\)`,
 )
 
+// shortResetHintPattern is OpenCode's relative retry suffix, e.g.
+// "retry shortly (after 24 s)". Only the diagnostic's own trailing suffix
+// qualifies; the bounded capture keeps a malformed value out of the duration
+// conversion.
+var shortResetHintPattern = regexp.MustCompile(
+	`(?im)\(after\s+([0-9]{1,4})\s*s\)\s*$`,
+)
+
+// minShortResetHintSeconds and maxShortResetHintSeconds bound a usable
+// relative hint. Anything outside the range is ignored, not clamped, so a
+// provider cannot keep a session parked past the first capacity slots.
+const (
+	minShortResetHintSeconds = 1
+	maxShortResetHintSeconds = 60
+)
+
 var monthNames = [...]string{
 	"january", "february", "march", "april", "may", "june",
 	"july", "august", "september", "october", "november", "december",
@@ -52,6 +68,35 @@ func parseResetHintAt(text string, now time.Time) *time.Time {
 	parts, ok := parseResetHintParts(text)
 	if ok {
 		return resolveResetHintYear(parts, now)
+	}
+	return nil
+}
+
+// parseShortResetHintAt derives a bounded relative retry time from a
+// diagnostic's trailing "(after N s)" suffix. Any other shape yields no hint,
+// and an unusable hint never invalidates the failure's classification.
+func parseShortResetHintAt(text string, now time.Time) *time.Time {
+	match := shortResetHintPattern.FindStringSubmatch(text)
+	if match == nil {
+		return nil
+	}
+	seconds, ok := parseIntInRange(match[1], minShortResetHintSeconds, maxShortResetHintSeconds)
+	if !ok {
+		return nil
+	}
+	hint := now.Add(time.Duration(seconds) * time.Second)
+	return &hint
+}
+
+// parseOpenCodeCapacityResetHintAt derives the relative hint from the same
+// line that established the admission-refusal signature. Unrelated lines,
+// channels, and quoted examples cannot contribute a suffix.
+func parseOpenCodeCapacityResetHintAt(text string, now time.Time) *time.Time {
+	for _, line := range strings.Split(text, "\n") {
+		if !openCodeAdmissionRefusedLinePattern.MatchString(line) {
+			continue
+		}
+		return parseShortResetHintAt(line, now)
 	}
 	return nil
 }

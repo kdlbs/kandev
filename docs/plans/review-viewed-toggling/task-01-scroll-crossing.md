@@ -79,7 +79,10 @@ git diff --check
 ```
 
 E2E commands run sequentially with fresh builds through the managed runner.
-Do not use worker overrides. Lint/test any additional changed interaction hook.
+Do not use worker overrides. Lint/test any additional changed interaction hook. The CI follow-up also runs
+`components/review/use-review-diff-scroll-interaction.test.ts` and
+`components/review/use-review-scroll-anchor.test.ts` with the existing focused
+component/persistence tests.
 Verify browser tests are discovered and save screenshot evidence against the
 preview. Confirm repeated downward scroll leaves a cleared file unchecked until
 its sentinel returns and crosses again. Assert progress count and the shared
@@ -120,3 +123,29 @@ Implemented. Five regressions failed before the fix; the final focused run passe
 auto-marking and real touch scrolling. ESLint, typecheck (8 GiB heap), public
 documentation checks and specification checks passed. Fresh desktop/phone
 captures match UI-01/UI-02. Full command results are in [the plan](plan.md#verification-results).
+
+
+### CI follow-up: cancellation and manual-input precedence
+
+The SDK publishing PR's required browser run exposes an initial manual scroll
+that does not mark the target. Both failed attempts retain traces. The earlier
+fixture contamination is absent. Three unchanged local repetitions pass; the
+exact browser cause remains under investigation.
+
+A separate controlled regression proves that cancelling a pending content
+restoration restores its saved suppression after explicit user input has
+allowed marking. Wheel/touch, scroll-key, and scrollbar paths all finish
+suppressed. Repair their ordering: cancel restoration first, then apply the
+input's marking permission. Preserve descendant-pointer and unrelated-key
+gates, navigation suppression, crossing geometry, and existing eligibility.
+Use the real anchor hook with a queued frame in regression tests. Run affected
+component, anchor, persistence, desktop, and phone coverage before publishing.
+This is a verified source defect; it is not yet the established CI cause.
+
+
+Follow-up validation: all 52 focused unit cases, full typecheck, changed-file
+lint, documentation validators, and three desktop plus three phone browser
+repetitions pass after rebuilding web assets. Independent read-only review
+confirms the real-hook regression and narrow ordering correction. The original
+CI trace does not expose saved restoration state, so its precise cause remains
+unconfirmed. Fresh exact-head CI is required after publication.

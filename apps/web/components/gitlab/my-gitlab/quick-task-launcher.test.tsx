@@ -27,6 +27,17 @@ vi.mock("@/components/task-create-dialog", () => ({
 
 import { QuickTaskLauncher } from "./quick-task-launcher";
 
+/**
+ * Later assertions invoke a callback the dialog must have received. Returning a
+ * required callback keeps a missing registration a hard failure instead of an
+ * undefined call.
+ */
+function requireDialogCallback(name: string): unknown {
+  const callback = dialogProps?.[name];
+  if (!callback) throw new Error(`TaskCreateDialog did not provide ${name}`);
+  return callback;
+}
+
 const preset = {
   id: "review",
   label: "Review",
@@ -126,7 +137,7 @@ describe("GitLab QuickTaskLauncher", () => {
 
     await act(async () => {
       await (
-        dialogProps?.onSuccess as (
+        requireDialogCallback("onSuccess") as (
           task: Task,
           mode: "create",
           meta: { autoFocus: boolean },
@@ -200,7 +211,7 @@ describe("GitLab QuickTaskLauncher recovery", () => {
     );
 
     await act(async () => {
-      await (dialogProps?.onSuccess as (task: Task) => Promise<void>)({
+      await (requireDialogCallback("onSuccess") as (task: Task) => Promise<void>)({
         id: "task-issue",
         repositories: [],
       } as unknown as Task);
@@ -240,7 +251,7 @@ describe("GitLab QuickTaskLauncher recovery", () => {
     );
 
     await act(async () => {
-      await (dialogProps?.onSuccess as (task: Task) => Promise<void>)({
+      await (requireDialogCallback("onSuccess") as (task: Task) => Promise<void>)({
         id: "task-partial",
         repositories: [{ repository_id: "repo-1" }],
       } as Task);

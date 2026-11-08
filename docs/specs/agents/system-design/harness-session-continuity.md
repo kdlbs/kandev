@@ -68,6 +68,19 @@ Existing token fields remain compatible projections of the current committed gen
 Historical native IDs remain available for diagnostics and recovery.
 SQL writes compare the expected incarnation and generation before replacement.
 
+### In-place context reset
+
+A workflow context reset replaces the native conversation inside a live execution without
+restarting the process or rotating the delivery stream. It keeps the current generation and
+rebinds that generation's native ID. The same transaction stores the new resume token,
+and both writes must succeed together. The rebind compares the generation's previous native ID,
+the owning execution, and the absence of a newer generation. It is refused while an
+incomplete restore attempt exists. An append-only history row keeps the previous native ID,
+the new native ID, the execution, and the time. If the rebind is refused, the reset fails and
+the previous token and generation stay authoritative. Explicit context continuation and Start
+fresh still create a new generation.
+Delivery: [Context reset native rebind](../../../plans/context-reset-native-rebind/plan.md).
+
 Outcomes are `native_resumed`, `reattached`, `context_continued`, and `blocked`.
 Context delivery status remains separate from the restore outcome.
 A created conversation is not proof that its first prompt ran.

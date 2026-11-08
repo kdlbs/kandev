@@ -10,355 +10,261 @@ owners:
 
 ## Overview
 
-Google publishes a standalone ACP server for Antigravity as a signed native
-binary, separate from the `agy` CLI. Kandev needs it as a built-in agent so a
-user can select it for a task, run and resume a session over ACP, and use MCP
-servers and skills, without inventing a distribution, credential, or
-session-storage mechanism Google already owns. The agent system owns the durable
-decision: an agent identity plus its discovery, launch, config-root,
-authentication, and capability contract; transport and process supervision
-belong to the runtime. This first layer assumes the operator already installed
-the server; automated download and remote or containerized provisioning are
-named exclusions, not silence.
+Let a local Kandev user run Antigravity with a personal Google AI subscription.
+Use Google's standalone ACP server, which has separate credentials from the `agy` CLI.
+Provide installation, Google sign-in, model discovery, human questions, reliable failures, and native usage reporting.
+
+This revision extends the built-in agent. It does not claim the changes have shipped.
+The [system design](../system-design/antigravity-acp-agent.md) defines boundaries.
+The [implementation plan](../../../plans/antigravity-local-subscription/plan.md) records delivery and evidence.
 
 ## Terminology
 
-- **ACP server:** The executable in the ACP registry entry `antigravity-acp`
-  (`agy_acp_server.par`, `.exe` on windows). Not the `agy` CLI.
-- **Harness:** The `localharness_external` executable in the same archive, which
-  the ACP server locates and drives over gRPC.
-- **Config root:** `<home>/antigravity-acp`, where `<home>` is `$GEMINI_HOME`
-  when set and non-empty and `~/.gemini` otherwise. Holds settings, credentials,
-  trusted workspaces, and conversations. What Kandev declares about it is
-  REQ-AGENTS-ANTIGRAVITY-ACP-004.
-- **Advertised capabilities:** The `agentCapabilities` and `authMethods` in the
-  ACP `initialize` result.
+- **ACP server:** The executable from the `antigravity-acp` ACP registry entry.
+- **Harness:** Its companion `localharness_external`, with `localharness` as a legacy manual-install alternative.
+- **Native store:** Server-owned settings, credentials, and conversations under `~/.gemini/antigravity-acp` or the native credential backend.
+- **Subscription mode:** ACP method `oauth-personal`. Google determines entitlement and allowance.
+- **Local execution:** A native process sharing the Kandev host's user home. Local worktrees qualify; containers and remote machines do not.
+- **Estimated cost:** Tokens multiplied by model prices. This is not evidence of an additional Google charge.
 
-## Prior art
+## Draft revision and traceability
 
-Receipts first, because a leg with no receipt did not run.
+The September draft assumed manual installation and inherited API-key billing.
+The following criteria retain their identifiers and historical meanings but are retired acceptance gates.
+New criteria replace them explicitly. Identifiers are not reused.
 
-**Wiki leg: did not run, tool unavailable.** Vault
-`/Users/henry/Documents/henry/wiki`, collection `wiki`, `@henry`-pinned.
-`obsidian-wiki` and `qmd` are off PATH; the vault returns `Operation not
-permitted` to `ls` and `grep`.
-
-**Cross-product leg: did not run, tool unavailable.** The `saas-kb` MCP server
-and its `search_fsm_docs` tool are not exposed in this session.
-
-**In-repo prior art: read directly.** Kandev's built-in ACP
-agents are either managed npm runtimes on a pinned `npx` specification or
-binaries found on PATH and launched by name. Antigravity is the second kind, and
-Kandev has no managed non-npm download mechanism, which is why provisioning is
-excluded below rather than reinvented. It departs from that group three times —
-discovery checks a second file, the install script is empty, and there is no CLI
-passthrough — each argued in the design's
-[prior-art departure](../system-design/antigravity-acp-agent.md#prior-art-departure).
-
-## Evidence
-
-Values are of two kinds. **Measured** ones come from a manual probing session
-against build `agy_acp_server_20260818_01_RC01`, darwin-arm64, on 2026-09-03;
-the artifact was removed afterwards, so this pair summarizes that session rather
-than transcribing it, and re-checking one means re-downloading that build.
-**Registry** ones are read from the published `antigravity-acp/agent.json` and
-were never executed; each use says so.
+| Retired draft criteria | Former constraint | Replacement |
+| --- | --- | --- |
+| AC-AGENTS-ANTIGRAVITY-ACP-001.7 | Description explains manual installation only. | REQ-AGENTS-ANTIGRAVITY-ACP-009, REQ-AGENTS-ANTIGRAVITY-ACP-015 |
+| AC-AGENTS-ANTIGRAVITY-ACP-002.1, AC-AGENTS-ANTIGRAVITY-ACP-002.2, AC-AGENTS-ANTIGRAVITY-ACP-002.4, AC-AGENTS-ANTIGRAVITY-ACP-002.5, AC-AGENTS-ANTIGRAVITY-ACP-002.6, AC-AGENTS-ANTIGRAVITY-ACP-002.7 | PATH-only lookup, unchecked harness override, and PATH-derived matched path. | AC-AGENTS-ANTIGRAVITY-ACP-009.3 |
+| AC-AGENTS-ANTIGRAVITY-ACP-003.9 | Inherit the environment unchanged. | AC-AGENTS-ANTIGRAVITY-ACP-010.2 |
+| AC-AGENTS-ANTIGRAVITY-ACP-004.2, AC-AGENTS-ANTIGRAVITY-ACP-004.9 | Ignore non-default GEMINI_HOME. | AC-AGENTS-ANTIGRAVITY-ACP-010.3 |
+| AC-AGENTS-ANTIGRAVITY-ACP-005.3 | Use only generic -32000 auth classification. | REQ-AGENTS-ANTIGRAVITY-ACP-013 |
+| AC-AGENTS-ANTIGRAVITY-ACP-006.5 | Inherit default API-key billing. | AC-AGENTS-ANTIGRAVITY-ACP-014.1 |
+| AC-AGENTS-ANTIGRAVITY-ACP-007.2, AC-AGENTS-ANTIGRAVITY-ACP-007.3 | Reject local installation and use only existing missing-binary failures. | REQ-AGENTS-ANTIGRAVITY-ACP-009, AC-AGENTS-ANTIGRAVITY-ACP-007.4 |
 
 ## Requirements
 
 ### REQ-AGENTS-ANTIGRAVITY-ACP-001: Built-in Antigravity agent identity
 
-**Intent:** Give Antigravity a stable catalog identity so a user can select it
-for a task and profile like any other built-in agent.
+**Intent:** Preserve the existing identity and profiles.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-ANTIGRAVITY-ACP-001.1:** The agent identifier shall be
-  `antigravity-acp`, matching the `agentInfo.name` the ACP server reports.
-- **AC-AGENTS-ANTIGRAVITY-ACP-001.2:** The display name shall be `Antigravity`
-  and the catalog name shall be `Antigravity ACP Agent`.
-- **AC-AGENTS-ANTIGRAVITY-ACP-001.3:** The agent shall be enabled by default and
-  present in the default registry.
-- **AC-AGENTS-ANTIGRAVITY-ACP-001.4:** The display order shall be `22`, distinct
-  from every other built-in agent's, so the display-order sort never reaches its
-  stable-sort tiebreak here.
-- **AC-AGENTS-ANTIGRAVITY-ACP-001.5:** The agent shall return a non-empty light
-  and dark logo, and the light one for any other variant.
-- **AC-AGENTS-ANTIGRAVITY-ACP-001.6:** The agent shall declare the ACP
-  protocol and shall not be a virtual agent.
-- **AC-AGENTS-ANTIGRAVITY-ACP-001.7:** Because REQ-AGENTS-ANTIGRAVITY-ACP-007
-  contributes no install script, the description shall carry the install
-  guidance, stating all four of: the registry entry `antigravity-acp` as the
-  source; that the archive's two entries extract together into one directory;
-  that the directory be on PATH; and the platform executable name from
-  AC-AGENTS-ANTIGRAVITY-ACP-002.1. It shall embed no archive URL or build stamp,
-  both of which rotate.
-- **AC-AGENTS-ANTIGRAVITY-ACP-001.8:** The agent shall declare no agent-specific
-  permission settings; its catalog shall still expose the universal
-  auto-approve setting.
-- **AC-AGENTS-ANTIGRAVITY-ACP-001.9:** The agent shall not offer a CLI
-  passthrough mode.
+- **AC-AGENTS-ANTIGRAVITY-ACP-001.1:** The identifier shall remain `antigravity-acp`.
+- **AC-AGENTS-ANTIGRAVITY-ACP-001.2:** Display and catalog names shall remain `Antigravity` and `Antigravity ACP Agent`.
+- **AC-AGENTS-ANTIGRAVITY-ACP-001.3:** The default registry shall include the enabled agent.
+- **AC-AGENTS-ANTIGRAVITY-ACP-001.4:** Display order shall remain `22`, distinct from other built-in agents.
+- **AC-AGENTS-ANTIGRAVITY-ACP-001.5:** Light and dark logos shall remain available. Unknown variants shall use the light logo.
+- **AC-AGENTS-ANTIGRAVITY-ACP-001.6:** The agent shall use ACP and remain non-virtual.
+- **AC-AGENTS-ANTIGRAVITY-ACP-001.8:** The catalog shall expose universal auto-approve without agent-specific permission settings.
+- **AC-AGENTS-ANTIGRAVITY-ACP-001.9:** The agent shall have no CLI passthrough mode.
 
 ### REQ-AGENTS-ANTIGRAVITY-ACP-002: Discovery that fails closed on a partial install
 
-**Intent:** Report Antigravity as installed only when it can run, so a user
-never starts a session that silently loses capability mid-prompt.
+**Intent:** Check installation completeness without spawning a process during filesystem discovery.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-ANTIGRAVITY-ACP-002.1:** Discovery shall look up exactly one
-  executable name on the PATH of the Kandev process performing discovery:
-  `agy_acp_server.exe` on windows, `agy_acp_server.par` on every other platform.
-  The name is therefore defined on every platform. Registry-sourced.
-- **AC-AGENTS-ANTIGRAVITY-ACP-002.2:** When that executable is not on PATH,
-  discovery shall report unavailable with an empty matched path and no error.
-- **AC-AGENTS-ANTIGRAVITY-ACP-002.3:** When the executable is on PATH, discovery
-  shall additionally require a harness in the directory containing it, trying
-  `localharness_external` then `localharness`, first match wins, each
-  `.exe`-suffixed on windows and unsuffixed elsewhere. A name matches a regular
-  file, with an execute bit required on non-windows hosts. A directory, dangling
-  symlink, or unstat-able name does not match; discovery continues.
-- **AC-AGENTS-ANTIGRAVITY-ACP-002.4:** When `ANTIGRAVITY_HARNESS_PATH` is set to a
-  non-empty value in the environment discovery observes, the
-  AC-AGENTS-ANTIGRAVITY-ACP-002.3 check shall be treated as satisfied without
-  inspecting the directory.
-- **AC-AGENTS-ANTIGRAVITY-ACP-002.5:** When the executable is present but
-  neither AC-AGENTS-ANTIGRAVITY-ACP-002.3 nor AC-AGENTS-ANTIGRAVITY-ACP-002.4
-  holds, the AC-AGENTS-ANTIGRAVITY-ACP-002.2 outcome shall apply unchanged.
-- **AC-AGENTS-ANTIGRAVITY-ACP-002.6:** When discovery reports the agent
-  available, the matched path shall be the path PATH lookup returned, and MCP
-  support and session resume shall both be reported as supported.
-- **AC-AGENTS-ANTIGRAVITY-ACP-002.7:** The directory inspected by
-  AC-AGENTS-ANTIGRAVITY-ACP-002.3 shall be the directory of the path PATH lookup
-  returned, without resolving symbolic links.
-- **AC-AGENTS-ANTIGRAVITY-ACP-002.8:** Discovery shall create no files, write no
-  configuration, and start no process, so repeated calls over an unchanged PATH
-  and filesystem return equal results.
-- **AC-AGENTS-ANTIGRAVITY-ACP-002.9:** When the caller's context is cancelled or
-  expires during discovery, discovery shall return that error rather than
-  reporting the agent as unavailable.
+- **AC-AGENTS-ANTIGRAVITY-ACP-002.3:** Manual installs shall require a sibling `localharness_external` or `localharness`, in that order, unless a validated override applies.
+  Windows names shall have `.exe`. Candidates shall be regular files, executable on Unix. Invalid candidates shall be skipped.
+- **AC-AGENTS-ANTIGRAVITY-ACP-002.8:** Filesystem discovery shall create no files, write no configuration, and start no process.
+- **AC-AGENTS-ANTIGRAVITY-ACP-002.9:** Cancelled or expired discovery shall return the context error.
 
 ### REQ-AGENTS-ANTIGRAVITY-ACP-003: One launch command across every surface
 
-**Intent:** Keep the session, runtime, and inference commands identical, so a
-session and a capability probe cannot disagree about how the agent starts.
+**Intent:** Preserve deterministic base commands and consistent resolution.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.1:** On windows the argument vector shall be
-  exactly `agy_acp_server.exe` with no arguments; on darwin and on every platform
-  other than linux and windows, exactly `agy_acp_server.par` with no arguments.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.2:** On linux, the argument vector shall be
-  exactly `agy_acp_server.par --uid=`, matching the published registry entry for
-  both Linux platforms. Registry-sourced, not measured.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.3:** The platform selecting among
-  AC-AGENTS-ANTIGRAVITY-ACP-002.1, AC-AGENTS-ANTIGRAVITY-ACP-003.1 and
-  AC-AGENTS-ANTIGRAVITY-ACP-003.2 shall be that of the Kandev process building
-  the command — the host, not an executor's target; a remote executor on another
-  platform is a named exclusion below. Those three shall be total: a defined
-  lookup name and a non-empty vector on every platform. Availability is decided
-  by discovery alone, so no platform needs a special case here: anywhere else
-  AC-AGENTS-ANTIGRAVITY-ACP-002.2 governs the outcome.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.4:** Command construction shall be
-  deterministic: repeated calls on one platform shall produce equal vectors,
-  consulting neither PATH, the filesystem, nor the environment.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.5:** The session, runtime, and one-shot inference
-  commands shall produce the same argument vector for the same platform.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.6:** The argument vector shall not vary with
-  the selected model, permission policy, auto-approve setting, agent type, or
-  resume target.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.7:** This agent's own command construction
-  shall not add `--debug` or `--notices`.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.8:** The working directory shall be the task
-  workspace.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.9:** The runtime shall declare an empty
-  environment map and no stripped variables, so the agent inherits the execution
-  environment unmodified.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.10:** Resource limits shall be 4096 MB memory,
-  2.0 CPU cores, and a one-hour timeout, matching other built-in ACP agents.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.11:** The runtime shall not request an
-  immediate process kill on shutdown.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.12:** One-shot inference shall be supported.
-- **AC-AGENTS-ANTIGRAVITY-ACP-003.13:** AC-AGENTS-ANTIGRAVITY-ACP-003.1 through
-  003.7 bind this agent's own command construction, not the final launched argv:
-  the shared builder appends the profile's `cli_flags` and any sandbox command
-  prefix to every agent afterwards, and this agent shall declare no filter for
-  either.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.1:** The base command shall be `agy_acp_server.exe` on Windows and `agy_acp_server.par` elsewhere outside Linux.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.2:** The Linux base command shall remain `agy_acp_server.par --uid=`.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.3:** Base command platform selection shall use the Kandev host platform. Cross-platform remote execution remains excluded.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.4:** Base construction shall remain deterministic, without filesystem, environment, or PATH reads.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.5:** Session, runtime, and inference shall use equivalent base vectors.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.6:** Base arguments shall not vary with model, permissions, auto-approve, agent type, or resume target.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.7:** Agent-owned construction shall add neither `--debug` nor `--notices`.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.8:** Task sessions shall use their workspace as the working directory.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.10:** Declared limits shall remain 4096 MB, two CPU cores, and one hour.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.11:** The agent shall retain graceful shutdown rather than always requesting immediate kill.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.12:** One-shot inference shall remain supported.
+- **AC-AGENTS-ANTIGRAVITY-ACP-003.13:** Shared profile flags and sandbox prefixes shall retain their behavior after base construction.
 
 ### REQ-AGENTS-ANTIGRAVITY-ACP-004: Config root, sessions, and skills
 
-**Intent:** Point Kandev at the directories the server uses, so a long task
-survives a relaunch and Kandev never writes state it does not own.
+**Intent:** Share one native store across tasks and preserve resume.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-ANTIGRAVITY-ACP-004.1:** The session directory template shall be
-  `{home}/.gemini/antigravity-acp`.
-- **AC-AGENTS-ANTIGRAVITY-ACP-004.2:** Kandev shall not set, override, or read
-  `GEMINI_HOME`. The declared template is the server's default config root, so
-  it holds exactly when `GEMINI_HOME` is unset or empty in the execution
-  environment.
-- **AC-AGENTS-ANTIGRAVITY-ACP-004.3:** The agent shall declare native session resume
-  and that a session can be recovered.
-- **AC-AGENTS-ANTIGRAVITY-ACP-004.4:** Kandev shall introduce no per-launch
-  variation in the config root: one static template, no `GEMINI_HOME` set or
-  injected by Kandev, and no config-root flag. A relaunch therefore presents the
-  server the root the creating launch saw whenever the execution environment is
-  unchanged, which is the root the server scopes session lookup to.
-- **AC-AGENTS-ANTIGRAVITY-ACP-004.5:** The project skill directory shall be
-  `.agents/skills`.
-- **AC-AGENTS-ANTIGRAVITY-ACP-004.6:** The user skill directory shall be
-  `.gemini/config/skills`, the first entry of the server's global skill pair.
-  The server searches both entries, so this is a determinism choice rather than
-  a capability one, and it keeps Kandev out of the `agy` CLI's
-  `antigravity-cli/` domain.
-- **AC-AGENTS-ANTIGRAVITY-ACP-004.7:** The template nests inside the Gemini
-  agent's `{home}/.gemini`; the two shall remain distinct values, neither
-  aliased, merged, nor special-cased.
-- **AC-AGENTS-ANTIGRAVITY-ACP-004.8:** During a session, Kandev shall not
-  create, modify, or delete any file under the config root. Its only write there
-  is the user-initiated remote-auth copy in AC-AGENTS-ANTIGRAVITY-ACP-005.7,
-  which seeds a remote host before a session starts.
-- **AC-AGENTS-ANTIGRAVITY-ACP-004.9:** When `GEMINI_HOME` is set and non-empty,
-  the server resolves a config root the declared template does not describe.
-  Kandev shall not detect, read, or reconcile it; that host is a named exclusion
-  below.
-- **AC-AGENTS-ANTIGRAVITY-ACP-004.10:** The container session-directory target
-  shall be empty, so no bind mount is created for the config root and the
-  declared template has no runtime effect today, matching the other
-  native-binary ACP agents.
+- **AC-AGENTS-ANTIGRAVITY-ACP-004.1:** The session directory template shall remain `{home}/.gemini/antigravity-acp`.
+- **AC-AGENTS-ANTIGRAVITY-ACP-004.3:** Native resume and recovery declarations shall remain supported.
+- **AC-AGENTS-ANTIGRAVITY-ACP-004.4:** Kandev shall add no per-launch root, injected `GEMINI_HOME`, or config-root flag.
+- **AC-AGENTS-ANTIGRAVITY-ACP-004.5:** Project skills shall use `.agents/skills`.
+- **AC-AGENTS-ANTIGRAVITY-ACP-004.6:** User skills shall use `.gemini/config/skills`.
+- **AC-AGENTS-ANTIGRAVITY-ACP-004.7:** Antigravity and Gemini directory templates shall remain distinct, without aliasing or merging.
+- **AC-AGENTS-ANTIGRAVITY-ACP-004.8:** Kandev shall not modify native state during a session. Existing explicit remote-auth copying remains the only Kandev write exception.
+  Writes performed by the ACP server remain server-owned.
+- **AC-AGENTS-ANTIGRAVITY-ACP-004.10:** The container session-directory target shall remain empty, without a new bind mount.
 
 ### REQ-AGENTS-ANTIGRAVITY-ACP-005: Authentication owned by the ACP server
 
-**Intent:** Surface the server's own authentication contract instead of
-duplicating it, so an unauthenticated agent reads as "needs login", not "broken".
+**Intent:** Keep credential acquisition, refresh, and persistence inside the vendor server.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-ANTIGRAVITY-ACP-005.1:** Kandev shall present the authentication
-  methods the server advertises in its `initialize` result rather than a
-  hardcoded list.
-- **AC-AGENTS-ANTIGRAVITY-ACP-005.2:** Those methods shall be presented in the order
-  the server returned them, never re-sorted or re-ranked.
-- **AC-AGENTS-ANTIGRAVITY-ACP-005.3:** This agent shall declare no auth
-  classification of its own, relying on the shared ACP handling of a `-32000`
-  from a capability probe or session start, which records an
-  authentication-required state rather than a failed one. An unauthenticated
-  probe therefore records that state, not a success carrying an empty model
-  list.
-- **AC-AGENTS-ANTIGRAVITY-ACP-005.4:** This agent shall declare no stderr-derived
-  failure rule: when the server answers with a well-formed JSON-RPC error on
-  stdout, the traceback it also writes to stderr for that handled error is not an
-  additional or fatal launch failure.
-- **AC-AGENTS-ANTIGRAVITY-ACP-005.5:** Kandev shall surface the message the server
-  returns when an `authenticate` call fails because a required environment
-  variable is absent from the launch environment.
-- **AC-AGENTS-ANTIGRAVITY-ACP-005.6:** Kandev shall not mint, refresh, or
-  rewrite credentials; it only copies files the server already wrote per
-  AC-AGENTS-ANTIGRAVITY-ACP-005.7 and passes user-supplied variables.
-- **AC-AGENTS-ANTIGRAVITY-ACP-005.7:** Remote authentication shall offer a
-  file-copy method for darwin and linux carrying `settings.json`,
-  `acp_token.json` and `acp_business_token.json`, each under
-  `.gemini/antigravity-acp`, which is also the target directory.
-- **AC-AGENTS-ANTIGRAVITY-ACP-005.8:** The file-copy method shall not require every
-  listed file to exist; which token file is present depends on the
-  authentication method the user chose.
-- **AC-AGENTS-ANTIGRAVITY-ACP-005.9:** Remote authentication shall also offer
-  environment-variable methods for `GEMINI_API_KEY` and `GOOGLE_API_KEY`.
+- **AC-AGENTS-ANTIGRAVITY-ACP-005.1:** Advertised auth methods shall come from `initialize`, including when `session/new` requires authentication.
+- **AC-AGENTS-ANTIGRAVITY-ACP-005.2:** The method list shall retain server order. The subscription action shall not rewrite it.
+- **AC-AGENTS-ANTIGRAVITY-ACP-005.4:** A stderr traceback accompanying a handled JSON-RPC error shall not independently cause fatal launch failure.
+- **AC-AGENTS-ANTIGRAVITY-ACP-005.5:** Failed authentication shall expose its sanitized cause, including a missing required environment variable.
+- **AC-AGENTS-ANTIGRAVITY-ACP-005.6:** Kandev shall not mint, refresh, or rewrite native credentials.
+- **AC-AGENTS-ANTIGRAVITY-ACP-005.7:** Existing remote-auth metadata shall retain optional copies of `settings.json`, `acp_token.json`, and `acp_business_token.json` for Darwin and Linux.
+- **AC-AGENTS-ANTIGRAVITY-ACP-005.8:** The existing copy method shall tolerate absent method-specific files.
+- **AC-AGENTS-ANTIGRAVITY-ACP-005.9:** Existing remote-auth metadata shall retain explicit `GEMINI_API_KEY` and `GOOGLE_API_KEY` methods.
+  These declarations do not guarantee a new remote subscription sign-in flow.
 
-### REQ-AGENTS-ANTIGRAVITY-ACP-006: Capabilities read from the agent, not inferred
+### REQ-AGENTS-ANTIGRAVITY-ACP-006: Capabilities read from the agent
 
-**Intent:** Derive behavior from what the server advertises, so an echoed
-protocol version is never taken for a capability claim.
+**Intent:** Discover models and features from the selected server.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-ANTIGRAVITY-ACP-006.1:** This agent shall add no
-  `protocolVersion`-derived branch to the shared ACP capability path, which
-  already reads the advertised `agentCapabilities` and `authMethods`; the echoed
-  `protocolVersion` carries no capability information.
-- **AC-AGENTS-ANTIGRAVITY-ACP-006.2:** The agent shall not declare an assumed
-  HTTP or SSE MCP override, because the server advertises both.
-- **AC-AGENTS-ANTIGRAVITY-ACP-006.3:** MCP servers shall be passed through ACP
-  `session/new`, and the agent shall not declare a project-local MCP
-  configuration strategy.
-- **AC-AGENTS-ANTIGRAVITY-ACP-006.4:** The agent shall not declare that it
-  namespaces MCP tool names by server.
-- **AC-AGENTS-ANTIGRAVITY-ACP-006.5:** Billing type shall be resolved by the
-  shared default rule rather than pinned by this agent.
+- **AC-AGENTS-ANTIGRAVITY-ACP-006.1:** Capabilities shall come from advertised fields, not an echoed protocol version.
+- **AC-AGENTS-ANTIGRAVITY-ACP-006.2:** The agent shall add no assumed HTTP or SSE MCP capability override.
+- **AC-AGENTS-ANTIGRAVITY-ACP-006.3:** MCP servers shall pass through session creation without a project-local MCP strategy.
+- **AC-AGENTS-ANTIGRAVITY-ACP-006.4:** The agent shall add no assumed server namespace for MCP tool names.
 
-### REQ-AGENTS-ANTIGRAVITY-ACP-007: No automated provisioning
+### REQ-AGENTS-ANTIGRAVITY-ACP-007: No automated remote provisioning
 
-**Intent:** Contribute no install script, so a remote bootstrap never runs prose
-as a shell command or pulls a third of a gigabyte per host. Kandev executes that
-value verbatim as remote shell.
+**Intent:** Keep local installation separate from executor bootstrap scripts.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-ANTIGRAVITY-ACP-007.1:** The install script shall be the empty
-  string.
-- **AC-AGENTS-ANTIGRAVITY-ACP-007.2:** The agent shall therefore contribute no
-  text to remote bootstrap scripts on any executor, and requesting an install job
-  shall fail with the existing empty-install-script error, running nothing.
-- **AC-AGENTS-ANTIGRAVITY-ACP-007.3:** When an executor cannot find the agent on
-  its PATH, Kandev shall surface whichever failure that executor already
-  produces and add no new preflight: SSH's existing preflight names the agent
-  and the missing binary, elsewhere the spawn failure names the binary alone.
-  Neither shall fall back to another agent, command, or a download.
+- **AC-AGENTS-ANTIGRAVITY-ACP-007.1:** `InstallScript()` shall remain empty.
+- **AC-AGENTS-ANTIGRAVITY-ACP-007.4:** Remote bootstrap shall receive no Antigravity installer.
+  A missing remote runtime shall fail without downloading, substituting a host path, or switching agents.
 
 ### REQ-AGENTS-ANTIGRAVITY-ACP-008: Concurrent sessions
 
-**Intent:** State that concurrency in the config root belongs to the ACP server,
-so two tasks run at once and no one adds a lock the server does not expect.
+**Intent:** Preserve independent sessions while sharing the native store.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-ANTIGRAVITY-ACP-008.1:** Two concurrent Kandev sessions using this
-  agent shall each launch an independent server process.
-- **AC-AGENTS-ANTIGRAVITY-ACP-008.2:** Kandev shall not serialize those processes
-  and shall not lock, guard, or arbitrate access to the shared config root;
-  conflicting writes there are the ACP server's responsibility.
-- **AC-AGENTS-ANTIGRAVITY-ACP-008.3:** Terminating one session shall not terminate
-  the other nor remove shared state under the config root.
+- **AC-AGENTS-ANTIGRAVITY-ACP-008.1:** Concurrent tasks shall each launch an independent server process.
+- **AC-AGENTS-ANTIGRAVITY-ACP-008.2:** Task processes shall not share a Kandev lock on the native store. Native refresh coordination remains vendor-owned.
+- **AC-AGENTS-ANTIGRAVITY-ACP-008.3:** Stopping one task shall neither stop another nor remove shared native state.
+
+### REQ-AGENTS-ANTIGRAVITY-ACP-009: Explicit local runtime installation
+
+**Intent:** Install the official server and harness without overwriting user-managed binaries.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-ANTIGRAVITY-ACP-009.1:** Settings shall offer explicit local installation of a reviewed, exact release for supported hosts.
+  Both executables shall be installed. Guidance shall explain that `agy` alone is insufficient.
+- **AC-AGENTS-ANTIGRAVITY-ACP-009.2:** Installation shall verify trusted digest and bounded size, reject unsafe archive entries, and activate only a complete bundle.
+  Failure or cancellation shall preserve the previous usable installation. Launch and discovery shall never download implicitly.
+- **AC-AGENTS-ANTIGRAVITY-ACP-009.3:** Local operations shall resolve the same complete managed bundle, otherwise a complete manual PATH install.
+  An invalid existing managed bundle shall fail visibly without silently switching versions. Manual harness overrides shall be validated.
+- **AC-AGENTS-ANTIGRAVITY-ACP-009.4:** Installation and readiness shall remain distinct. Native crashes and unsupported platforms shall have actionable unavailable results.
+  Kandev shall not silently add CPU affinity or claim live qualification from fixture tests.
+
+### REQ-AGENTS-ANTIGRAVITY-ACP-010: Local personal Google authentication
+
+**Intent:** Use one Google subscription login without a hosted OAuth service.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-ANTIGRAVITY-ACP-010.1:** Local subscription operations shall explicitly select advertised `oauth-personal` before session creation or restore.
+  Missing support or authentication failure shall stop the operation without API-key fallback.
+- **AC-AGENTS-ANTIGRAVITY-ACP-010.2:** Tasks, probes, inference, and sign-in shall share one subscription launch policy.
+  Conflicting API-key and provider-mode inputs shall be removed from child environments only.
+  Background operations shall never open a consent browser. Required consent shall return `auth_required` promptly.
+- **AC-AGENTS-ANTIGRAVITY-ACP-010.3:** Local operations shall share the native user home and default store.
+  Conflicting profile HOME or non-empty `GEMINI_HOME` shall produce unsupported-configuration guidance without creating another store.
+- **AC-AGENTS-ANTIGRAVITY-ACP-010.4:** Explicit Sign in with Google shall run native `authenticate` and expose its active consent URL.
+  Google shall redirect to the native loopback listener on the same machine. Kandev shall need no hosted callback or token exchange.
+- **AC-AGENTS-ANTIGRAVITY-ACP-010.5:** One sign-in attempt shall run per Kandev host process, with status, cancellation, expiry, and failure.
+  Late results shall not replace newer state. Success shall require native authentication and refreshed capabilities, not a clicked Done button.
+- **AC-AGENTS-ANTIGRAVITY-ACP-010.6:** Consent URLs shall come from the active native process and pass Google HTTPS and loopback-redirect validation.
+  URLs shall remain transient and operator-only. Logs, task messages, durable events, and fixtures shall contain no secrets or consent URLs.
+
+### REQ-AGENTS-ANTIGRAVITY-ACP-011: Consistent ACP compatibility
+
+**Intent:** Discover the account's models with one provider-specific wire policy.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-ANTIGRAVITY-ACP-011.1:** Every Antigravity initialize path shall send `clientInfo.name = zed` and `clientInfo.version = 0.0.0`.
+  Other agents shall retain their identities. Product records and logs shall identify Kandev normally.
+- **AC-AGENTS-ANTIGRAVITY-ACP-011.2:** Models shall come from authenticated ACP discovery, without copying `agy models` or inventing entitlement.
+  An unavailable selected model shall fail explicitly without fallback.
+- **AC-AGENTS-ANTIGRAVITY-ACP-011.3:** New sessions, advertised resume/load, probes, and utility inference shall use the same runtime, home, auth, and client policy.
+  Unsupported recovery methods shall retain existing explicit recovery behavior.
+
+### REQ-AGENTS-ANTIGRAVITY-ACP-012: Human questions survive auto-approve
+
+**Intent:** Separate tool permission automation from answers only the user can choose.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-ANTIGRAVITY-ACP-012.1:** Antigravity `interaction_` permission requests shall be classified as human input before automatic approval.
+  Auto-approve shall never select an answer. Prefixes from other agents shall not trigger this provider-specific handling.
+- **AC-AGENTS-ANTIGRAVITY-ACP-012.2:** Pending permissions shall preserve question text, labels, option IDs, and request identity.
+  An explicit user response shall send the matching option once. Cancellation, stop, and stale responses shall retain existing safe behavior.
+- **AC-AGENTS-ANTIGRAVITY-ACP-012.3:** Ordinary permissions shall retain manual, auto-approve, coordinator, and managed-MCP policies.
+  Unattended execution shall wait for human questions rather than invent answers.
+
+### REQ-AGENTS-ANTIGRAVITY-ACP-013: Provider failures remain failures
+
+**Intent:** Give normal tasks and Office accurate recovery information.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-ANTIGRAVITY-ACP-013.1:** Structured auth, entitlement, model-access, quota, throttling, and provider errors shall map to existing normalized codes.
+  Generic `-32000` shall not always mean authentication failure. Unknown errors shall retain a sanitized cause.
+- **AC-AGENTS-ANTIGRAVITY-ACP-013.2:** A failed current turn shall not appear successful solely because ACP returned `end_turn`.
+  A bounded, read-only native error record may establish failure. Earlier errors, assistant prose, and tool output shall not establish new failures.
+  If required native outcome evidence cannot be verified, Kandev shall expose that limitation and withhold success completion.
+- **AC-AGENTS-ANTIGRAVITY-ACP-013.3:** Quota/reset and retry hints shall use valid provider evidence only. Missing reset information shall remain unknown.
+  Failures shall use existing recovery without automatic replay, model fallback, or workflow completion.
+  Recoverable prompt errors shall not by themselves destroy the native process or conversation.
+
+### REQ-AGENTS-ANTIGRAVITY-ACP-014: Honest usage and subscription reporting
+
+**Intent:** Show available usage without treating estimated dollars as an invoice.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-ANTIGRAVITY-ACP-014.1:** Default billing metadata shall identify subscription usage for this personal OAuth path.
+  UI copy shall distinguish estimates from additional Google charges. Metadata shall not promise entitlement or zero charges for other methods.
+- **AC-AGENTS-ANTIGRAVITY-ACP-014.2:** Supplied prompt usage shall retain input, output, cache-read, cache-write, thought, and total tokens through existing contracts.
+  Context occupancy shall remain separate. Missing fields shall not become invented measurements or duplicate deltas. Coverage shall state subagent inclusion.
+- **AC-AGENTS-ANTIGRAVITY-ACP-014.3:** Absent provider dollar cost shall remain absent. Price-based calculations shall remain explicitly estimated.
+  Missing model pricing shall not become a measured zero-dollar charge.
+- **AC-AGENTS-ANTIGRAVITY-ACP-014.4:** Native `/usage` shall use regular task commands and render the server's allowance/reset response.
+  It shall require no separate Google client, Office mode, fabricated quota bars, or synthetic model turn.
+
+### REQ-AGENTS-ANTIGRAVITY-ACP-015: Clear desktop and phone setup
+
+**Intent:** Make local setup understandable on every supported UI size.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-ANTIGRAVITY-ACP-015.1:** Settings shall distinguish missing runtime, installing, needs sign-in, signing in, ready, and actionable failure.
+  Sign-in success shall refresh models. Task auth guidance shall link to setup and preserve the task draft.
+- **AC-AGENTS-ANTIGRAVITY-ACP-015.2:** Desktop shall use existing settings cards and focused dialogs.
+  Phone shall use an inset sheet or focused screen, visible primary actions, 44px touch targets, and no horizontal overflow.
+  Phone users shall be able to start, monitor, cancel, and copy the link.
+  Guidance shall require consent in a browser on the Kandev machine. Opening a phone loopback callback shall not be presented as supported.
+- **AC-AGENTS-ANTIGRAVITY-ACP-015.3:** New copy shall use localization, accessible status announcements, focus management, and retry/cancel actions.
+  Reload shall reattach to active attempts. Closed or expired attempts shall not retain actionable stale URLs.
 
 ## Out of scope
 
-Each exclusion is a contract, not silence. The design's
-[deferred work](../system-design/antigravity-acp-agent.md#deferred-work) records
-what a follow-up would have to decide for the first three.
-
-- **Automated download and installation of the ACP server, and therefore
-  containerized, Kubernetes, SSH and Sprites provisioning.** Kandev has no
-  managed non-npm download mechanism, no image ships this binary, and
-  REQ-AGENTS-ANTIGRAVITY-ACP-007 contributes no install script, so those
-  executors report it not found.
-- **A remote executor whose platform differs from the Kandev host's.** Discovery
-  reads the host's PATH and every command surface is static, so a darwin host
-  driving a hand-provisioned linux remote ships the darwin vector and drops the
-  linux `--uid=` of AC-AGENTS-ANTIGRAVITY-ACP-003.2. Command construction takes
-  no per-executor platform input, so this layer neither detects nor corrects it.
-  REQ-AGENTS-ANTIGRAVITY-ACP-005's remote-auth methods serve the same-platform
-  remote, which is unaffected.
-- **Any non-default `GEMINI_HOME`, whether ambient or set per task.** The server
-  moves its whole config root while Kandev declares the default root and never
-  reads the variable, so session-dir seeding, the
-  AC-AGENTS-ANTIGRAVITY-ACP-005.7 copy and the AC-AGENTS-ANTIGRAVITY-ACP-004.6
-  user skill directory all address directories the server is not using: resume,
-  remote auth and user skills are undefined there, not merely degraded.
-- **Application Default Credentials for `agent-platform` remote auth.** A
-  single-variable remote-auth method cannot express `GOOGLE_CLOUD_PROJECT` plus
-  `GOOGLE_CLOUD_LOCATION` with ADC, so AC-AGENTS-ANTIGRAVITY-ACP-005.9 offers
-  only the two API-key methods and an ADC-only remote host has no auth path.
-- **A passthrough or TUI agent for the `agy` CLI.** `agy` 1.1.25 has no ACP mode,
-  is a different binary, and authenticates into `~/.gemini/antigravity-cli/`
-  rather than the config root, so binding both to one agent would make the
-  passthrough toggle silently switch credential domain and conversation store.
-- **Model catalog curation.** Models come from the existing ACP probe, which
-  needs authentication first. No static model list, no model flag.
-- **Windows and Linux verification.** Only darwin-arm64 was executed, so the
-  windows `.exe` name and the linux `--uid=` argument in
-  AC-AGENTS-ANTIGRAVITY-ACP-002.1/003.1/003.2 are registry-sourced and
-  unverified.
-- **Adding a failure reason to the discovery result.** Distinguishing "installed
-  but missing its harness" in user-facing text would change a discovery contract
-  shared by every agent, so the partial install reports plain unavailable.
+- Multiple accounts, per-task homes, credential import from `agy`, and Kandev-owned refresh.
+- Hosted callbacks, remote callback forwarding, SSH/container provisioning, and cross-platform remote launch guarantees.
+- Enterprise, ADC, API-key, and gateway setup UI. Existing remote-auth declarations remain compatible metadata only.
+- Automatic runtime updates, mutable `latest` downloads, and overwriting external PATH installs.
+- Automatic CPU affinity. The native Linux crash remains a compatibility gate until qualified evidence resolves it.
+- Google quota polling, Office allowance bars, quota-based routing, and full history-database usage accounting.
+- Static model curation and guarantees that a subscription includes every advertised model.

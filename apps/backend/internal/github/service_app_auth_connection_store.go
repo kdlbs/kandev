@@ -52,17 +52,20 @@ func (r *serviceAppConnectionStore) upsertWorkspaceConnectionLocked(ctx context.
 	var previousPAT string
 	var hadPreviousPAT bool
 	if existing != nil && existing.Source == ConnectionSourcePAT {
-		previousPAT, hadPreviousPAT, err = revealOptionalSecret(ctx, r.service.connectionSecrets, WorkspacePATSecretKey(connection.WorkspaceID))
+		previousPAT, hadPreviousPAT, err = revealOptionalSecret(ctx, r.service.connectionSecrets, WorkspacePATSecretKeyForHost(connection.WorkspaceID, existing.GitHubHost))
 		if err != nil {
 			return err
 		}
 	}
-	if err := r.service.applyAutomationTransition(ctx, existing, connection, func() error { return r.service.store.UpsertWorkspaceConnection(ctx, connection) }); err != nil {
+	if err := r.service.applyAutomationTransition(ctx, existing, connection, func() error { return r.service.store.ReplaceWorkspaceHostConnection(ctx, existing, connection) }); err != nil {
 		return fmt.Errorf("replace workspace GitHub connection: %w", err)
 	}
 	if existing != nil && existing.Source == ConnectionSourcePAT && hadPreviousPAT {
-		if err := r.service.connectionSecrets.Delete(ctx, WorkspacePATSecretKey(connection.WorkspaceID)); err != nil {
-			return errors.Join(err, restoreWorkspaceConnection(ctx, r.service.store, existing, connection.WorkspaceID), restoreOptionalSecret(ctx, r.service.connectionSecrets, WorkspacePATSecretKey(connection.WorkspaceID), workspacePATSecretName, previousPAT, hadPreviousPAT))
+		if err := r.service.connectionSecrets.Delete(ctx, WorkspacePATSecretKeyForHost(connection.WorkspaceID, existing.GitHubHost)); err != nil {
+			if defaultAuthFlowHost(existing.GitHubHost) == defaultAuthFlowHost(connection.GitHubHost) {
+				return errors.Join(err, restoreWorkspaceConnection(ctx, r.service.store, existing, connection.WorkspaceID), restoreOptionalSecret(ctx, r.service.connectionSecrets, WorkspacePATSecretKeyForHost(connection.WorkspaceID, existing.GitHubHost), workspacePATSecretName, previousPAT, hadPreviousPAT))
+			}
+			r.service.warnObsoletePATCleanup(existing)
 		}
 	}
 	if existing != nil && existing.InstallationID != nil {

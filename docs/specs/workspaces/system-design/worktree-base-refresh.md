@@ -541,6 +541,19 @@ No new logging configuration, subprocess, retry, or persistence is required.
 
 Delivery: [Recovery diagnostic fixes](../../../plans/recovery-diagnostics/plan.md).
 
+#### Invalid local ref diagnostics
+
+Under AC .14, classify fatal `bad object refs/...` and `bad ref refs/...` lines
+as `invalid_local_ref`. Emit only: "Git reported an invalid local reference.
+Inspect repository references before retrying." Ignore incidental URL or branch
+text. Cancellation and timeout win. Missing blobs, arbitrary object IDs, and
+`did not send all necessary objects` alone remain unknown.
+
+Preserve refresh policy and error identities. Add no repair or Git command.
+Test required and best-effort refresh with an unrelated empty fixture ref,
+negative matches, secret exclusion, and context precedence.
+Delivery: [Invalid Git ref diagnostics](../../../plans/git-invalid-ref-diagnostics/plan.md).
+
 ### Required refresh verification cause
 
 AC .24 extends the same diagnostics contract to the required checkout-branch

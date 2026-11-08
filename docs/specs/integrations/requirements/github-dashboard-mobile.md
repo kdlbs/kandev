@@ -25,9 +25,19 @@ Phone users need discoverable GitHub queries and usable result actions. Integrat
 - **AC-INTEGRATIONS-GITHUB-MOBILE-001.4:** Phone pagination shall expose previous, next, current/total page, and direct page selection through an in-app bottom drawer, not an operating-system select menu. Opening the chooser shall reveal and mark the current page. Selecting another page shall navigate once and dismiss; selecting the current page shall dismiss without refetching. Existing search limits and filter-triggered page resets shall remain unchanged, with no horizontal overflow.
 - **AC-INTEGRATIONS-GITHUB-MOBILE-001.5:** Drawer and page controls shall support dismissal, focus return, internal scrolling, safe-area clearance, and translated labels. Desktop query state and preferences shall remain unchanged by phone composition.
 
+### REQ-INTEGRATIONS-GITHUB-SAVED-QUERY-CAPABILITY-001: Saved-query creation capability
+
+**Intent:** Users can save a GitHub query on supported browser connections even when the browser does not expose `crypto.randomUUID`.
+
+#### Acceptance criteria
+
+- **AC-INTEGRATIONS-GITHUB-SAVED-QUERY-CAPABILITY-001.1:** When settings are available and the browser has `crypto.getRandomValues` but not `crypto.randomUUID`, confirming a valid saved query shall persist it in the existing scope, publish it, and close the save form after success on desktop and phone.
+- **AC-INTEGRATIONS-GITHUB-SAVED-QUERY-CAPABILITY-001.2:** Saved queries shall retain their name, kind, query, repository filter and existing non-secret `p_`-prefixed identity format. Browsers exposing `crypto.randomUUID` shall continue to support the same save outcome.
+
 ## Compatibility
 
 The [saved-query defaults contract](../../ui/requirements/github-saved-query-defaults.md) remains authoritative for default selection and scope; the drawer replaces only that document's historical filter-sheet presentation.
+The [secure-context fallback contract](../../auth/requirements/secure-context-browser-fallbacks.md) restricts fallback identifiers to non-security uses and retains plain HTTP support.
 
 ## Out of scope
 
@@ -36,3 +46,4 @@ New query storage, renamed/edited saved queries, changed authentication, direct 
 ## Implementation plans
 
 - [GitHub mobile parity](../../../plans/github-mobile-parity/plan.md)
+- [GitHub saved-query capability repair](../../../plans/github-saved-query-capability/plan.md)

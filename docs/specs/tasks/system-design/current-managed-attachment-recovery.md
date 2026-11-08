@@ -139,6 +139,35 @@ preserve inspected evidence through that operation, return the exact missing
 primitive for review before expanding scope. No claim is made of protection
 against arbitrary concurrent host filesystem writers beyond existing guards.
 
+## Git path query compatibility
+
+Attachment ownership inspection must not depend on `rev-parse
+--path-format=absolute`. Git 2.30 echoes that unrecognized argument before the
+requested path and exits successfully. Treating the complete output as a path
+then rejects a valid managed clone with `ErrRepositoryOwnershipMismatch`.
+Git's [2.32 release notes](https://github.com/git/git/blob/v2.32.0/Documentation/RelNotes/2.32.0.txt)
+identify `--path-format` as introduced during the 2.31 series.
+
+For `AC-TASKS-ATTACH-WORKSPACE-SOURCES-008.1` and
+`AC-TASKS-ATTACH-WORKSPACE-SOURCES-008.2`, use separate compatible queries:
+`--show-toplevel` already returns an absolute path, and `--absolute-git-dir`
+always returns an absolute Git directory. Query `--git-common-dir` without
+`--path-format`, resolve a relative result against the admitted checkout, and
+compare its physical path with the already-inspected standalone `.git`.
+Remove only the final record newline. Preserve space/newline path bytes and
+the registered lexical path. Physical resolution remains comparison evidence,
+never authority to admit another destination or bypass control-path inspection.
+
+Do not parse echoed options away or relax any ownership check. Retain origin,
+standalone Git-directory, redirection and ancestor checks, including mutation
+revalidation. The repair removes this attachment seam's implicit Git 2.31
+dependency; it does not establish a repository-wide minimum Git version or
+change other worktree inspection paths. Explicit-local attachment retains its
+existing route under `AC-TASKS-ATTACH-WORKSPACE-SOURCES-008.3`.
+
+The repair package and isolated Git 2.30/2.43 reproduction are recorded in
+[the compatibility plan](../../../plans/managed-attachment-git-compatibility/plan.md).
+
 ## Existing legacy reuse
 
 Legacy candidates come only from `ManagedCloneRelocationPaths`: exact

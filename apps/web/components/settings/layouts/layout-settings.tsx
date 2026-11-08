@@ -275,7 +275,7 @@ export function LayoutSettings() {
       <div className="min-w-0 space-y-6" data-testid="layout-settings">
         <LayoutSettingsHeader tabs={<SettingsTabsList ariaLabel={t("settings:layouts")} />} />
         <SettingsTabsPanel value="profiles">
-          <SettingsGroup title={t("settings:layoutProfiles")} contentClassName="p-0 divide-y-0">
+          <SettingsGroup title={t("settings:layoutProfiles")} contentClassName="py-0 divide-y-0">
             <LayoutProfilesPanel
               controller={controller}
               isFinePointer={isFinePointer}

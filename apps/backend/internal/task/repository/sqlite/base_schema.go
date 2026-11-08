@@ -25,6 +25,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 	steps := []func() error{
 		r.initDesktopDiscoverySchema,
 		r.initCoreSchema,
+		r.initBuiltinMCPPreferencesSchema,
 		r.initRepositorySetsSchema,
 		r.initRepositoryBranchPoliciesSchema,
 		r.initPlansSchema,
@@ -33,6 +34,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initSessionSchema,
 		r.initMessageShellOutputSchema,
 		r.initSessionContinuitySchema,
+		r.initSessionCompactionsSchema,
 		r.initAgentDeliverySchema,
 		r.initTurnChangesSchema,
 		r.initDynamicRoutingSchema,
@@ -54,6 +56,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.ensureDefaultWorkspace,
 		r.ensureDefaultExecutorsAndEnvironments,
 		func() error { return r.runMigrations(ctx) },
+		r.initWorkspaceCollaborationSchema,
 		r.hideBuiltinWorkflows,
 		r.healBuiltinWorkflowStepFlags,
 		r.healBuiltinWorkflowStepParticipantSeats,
@@ -355,6 +358,7 @@ func (r *Repository) initDynamicRoutingSchema() error {
 			until_at TIMESTAMP,
 			code TEXT NOT NULL DEFAULT '',
 			probe_until TIMESTAMP,
+			failure_count INTEGER NOT NULL DEFAULT 0,
 			updated_at TIMESTAMP NOT NULL
 		);
 
@@ -1148,6 +1152,17 @@ func (r *Repository) initAttachmentsSchema() error {
 		ON task_message_attachments(owner_id, state, expires_at);
 	CREATE INDEX IF NOT EXISTS idx_task_message_attachments_scope
 		ON task_message_attachments(workspace_id, task_id, session_id, state);
+	CREATE TABLE IF NOT EXISTS task_creation_attachments (
+		task_id TEXT NOT NULL,
+		attachment_id TEXT NOT NULL,
+		position INTEGER NOT NULL,
+		PRIMARY KEY (task_id, attachment_id),
+		UNIQUE (task_id, position),
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (attachment_id) REFERENCES task_message_attachments(id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_creation_attachments_order
+		ON task_creation_attachments(task_id, position);
 	`)
 	if err != nil {
 		return fmt.Errorf("init attachments schema: %w", err)

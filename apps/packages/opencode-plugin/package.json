@@ -1,0 +1,21 @@
+{
+  "name": "@kandev/opencode-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Kandev integration plugin supplied to supported OpenCode v2 runtimes",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/registry.test.mjs test/core.test.mjs test/shell-outcomes.test.mjs test/outbox.test.mjs",
+    "check:artifact": "node scripts/build.mjs --check",
+    "test:conformance": "node scripts/build.mjs && node --test --test-force-exit test/conformance.test.mjs"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "2.2.0",
+    "@types/node": "^20",
+    "esbuild": "0.27.2",
+    "tsx": "4.21.0",
+    "typescript": "^5"
+  }
+}

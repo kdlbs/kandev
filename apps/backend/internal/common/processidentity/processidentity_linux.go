@@ -277,6 +277,30 @@ func OwnedSessionTerminated(identity Identity) (bool, error) {
 	return len(processes) == 0, err
 }
 
+// OwnedGroupTerminated proves group absence through the kernel's process-group
+// lookup. A procfs snapshot cannot prove absence while members can fork and exit.
+func OwnedGroupTerminated(identity Identity) (bool, error) {
+	if identity.Validate() != nil || identity.PID <= 1 || identity.GroupID != identity.PID {
+		return false, ErrUnverifiableIdentity
+	}
+	wantBoot, _, err := parseBirthToken(identity.BirthToken)
+	if err != nil {
+		return false, err
+	}
+	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return false, fmt.Errorf("read kernel boot identity: %w", err)
+	}
+	if strings.TrimSpace(string(boot)) != wantBoot {
+		return true, nil
+	}
+	err = syscall.Kill(-identity.GroupID, 0)
+	if errors.Is(err, syscall.ESRCH) {
+		return true, nil
+	}
+	return false, err
+}
+
 // Procfs can return ESRCH when a process exits after its stat file was opened.
 func processNoLongerExists(err error) bool {
 	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)

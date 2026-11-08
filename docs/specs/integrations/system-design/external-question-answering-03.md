@@ -91,6 +91,10 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-EXTERNAL
 - **L4.** Each question SHALL carry `question_id`, `title`, `prompt`, `status`, and `options`, where
   each option carries `option_id`, `label`, and `description` — the exact identifiers
   `answer_question_kandev` accepts.
+  Optional question and option `images` are owned by the task system's
+  [question image design](../../tasks/system-design/question-image-previews.md#persistence-and-projections).
+  That contract adds saved references to this projection without changing answer
+  fields, authorization, or the required fields listed here.
 - **L4a. Every field named in L3 and L4 is always present and is never JSON `null`.** When a value is
   unknown, absent, or unparseable:
   - a **string** field (`task_id`, `session_id`, `context`, `question_id`, `title`, `prompt`,

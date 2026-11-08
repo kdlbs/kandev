@@ -114,3 +114,20 @@ describe("buildGitHubRepoUrl", () => {
     );
   });
 });
+
+it("round trips configured Enterprise repository links", () => {
+  const parsed = parseGitHubRepoUrl(
+    "https://git.company.example:8443/acme/site/tree/main/docs",
+    "git.company.example:8443",
+  );
+  expect(parsed).toEqual({
+    owner: "acme",
+    repo: "site",
+    branch: "main",
+    path: "docs",
+    host: "git.company.example:8443",
+  });
+  expect(parsed && buildGitHubRepoUrl(parsed)).toBe(
+    "https://git.company.example:8443/acme/site/tree/main/docs",
+  );
+});

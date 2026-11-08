@@ -44,6 +44,18 @@ Or invoke the binary directly: `apps/backend/bin/acpdbg <subcommand> [flags]`.
 - `--workdir PATH` — child cwd (default: fresh `/tmp/kandev-acpdbg-<pid>-*`)
 - `--verbose` — mirror frames to stderr as they're sent/received
 - `--stderr` — capture child stderr into the JSONL (useful when an agent crashes before the handshake completes)
+- `--client-capabilities JSON` — merge a JSON object into `initialize.clientCapabilities`; nested values merge with the debugger defaults
+- `--air-capabilities LIST` — advertise comma-separated AIR capabilities in `_meta.jetbrains.air`; this metadata merges with `--client-capabilities`
+
+For example, advertise the ACP 1.28 notice and compaction capabilities:
+
+```bash
+apps/backend/bin/acpdbg probe --client-capabilities '{"session":{"notices":{},"compaction":{}}}' --out /tmp/acpdbg-check claude-acp
+```
+
+`prompt --model` uses a `model` category config option when the session advertises one. It falls
+back to the legacy `session/set_model` request when that option is absent or the agent does not
+implement `session/set_config_option`.
 
 ### Verify resume under a different working directory
 

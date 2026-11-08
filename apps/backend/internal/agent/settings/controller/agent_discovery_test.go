@@ -129,6 +129,7 @@ func (s *opencodeDiscoverySelectionStore) GetOpenCodeSelection(context.Context) 
 
 func TestAvailableOpenCodeRuntimeMetadataUsesSelectedFamily(t *testing.T) {
 	openCode := agents.NewOpenCodeACP()
+	defaultVersion := agents.MustDefaultManagedNPMRuntimeVersion(managedruntime.OpenCodeV2Package)
 	store := &opencodeDiscoverySelectionStore{
 		recoverySelectionStore: newRecoverySelectionStore(),
 		selection: managedruntime.OpenCodeSelection{
@@ -137,7 +138,7 @@ func TestAvailableOpenCodeRuntimeMetadataUsesSelectedFamily(t *testing.T) {
 			Source:                managedruntime.OpenCodeSourceManaged,
 			Package:               managedruntime.OpenCodeV2Package,
 			SelectedVersion:       "2.0.19",
-			AppliedDefaultVersion: "2.0.18",
+			AppliedDefaultVersion: defaultVersion,
 			Revision:              3,
 		},
 	}
@@ -152,7 +153,7 @@ func TestAvailableOpenCodeRuntimeMetadataUsesSelectedFamily(t *testing.T) {
 	if item == nil {
 		t.Fatal("runtime metadata missing")
 	}
-	if item.Package != managedruntime.OpenCodeV2Package || item.DefaultVersion != "2.0.18" ||
+	if item.Package != managedruntime.OpenCodeV2Package || item.DefaultVersion != defaultVersion ||
 		item.ActiveVersion != "2.0.19" || item.EffectiveVersion != "2.0.19" {
 		t.Fatalf("OpenCode runtime metadata = %+v, want selected v2 package and version", item)
 	}

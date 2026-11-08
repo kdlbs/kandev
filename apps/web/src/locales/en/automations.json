@@ -359,5 +359,19 @@
   "runStatusRetrySchedulingFailed": "Retry could not be scheduled",
   "retryAttempt": "Attempt {{attempt}}",
   "retryDue": "Due {{when}}",
-  "stopRetry": "Stop retries"
+  "stopRetry": "Stop retries",
+  "pluginToolsTitle": "Plugin tools (optional)",
+  "pluginToolsDescription": "Select the tools this automation can use.",
+  "pluginToolsLoading": "Loading plugin tools...",
+  "pluginToolsLoadError": "Could not load plugin tools. The saved selection is unchanged.",
+  "pluginToolsRetry": "Retry",
+  "pluginToolsEmpty": "No installed plugin currently offers tools for private automations.",
+  "pluginToolsReviewRequired": "Review required: the plugin configuration changed.",
+  "pluginToolsPreviouslySelected": "Previously selected: {{names}}",
+  "pluginToolsReselect": "Select tools again and save to restore access.",
+  "pluginToolsClear": "Clear",
+  "pluginToolsRead": "Read",
+  "pluginToolsWrite": "Write",
+  "pluginToolsClearedHint": "Save to remove plugin tool access.",
+  "pluginToolsUnavailable": "Plugin unavailable"
 }

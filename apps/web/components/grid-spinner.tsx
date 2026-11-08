@@ -36,26 +36,40 @@ export function GridSpinner({ className, ariaLabel }: GridSpinnerProps) {
     const registrations = cubes.map((cube) => visibility.register(cube));
     let animations: Animation[] | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    // CSS already supplies the initial motion. Promote after the first frame
-    // so reading animation styles cannot block the task's initial paint.
-    const frame = requestAnimationFrame(() => {
-      timer = setTimeout(() => {
-        animations = startGridAnimations(cubes);
-        if (!animations) return;
-        for (let index = 0; index < cubes.length; index += 1) {
-          registrations[index]?.setAnimation(animations[index] ?? null);
-          cubes[index].style.animation = "none";
-        }
-      }, 0);
-    });
-
-    return () => {
+    let frame = 0;
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const reset = () => {
       cancelAnimationFrame(frame);
       clearTimeout(timer);
       for (const animation of animations ?? []) releaseAnimation(animation);
+      animations = null;
+      for (const registration of registrations) registration.setAnimation(null);
+      for (const cube of cubes) cube.style.removeProperty("animation-name");
+    };
+    const updateMotion = () => {
+      reset();
+      if (reducedMotion?.matches) return;
+      // CSS supplies the initial motion. Defer style reads past the first paint.
+      frame = requestAnimationFrame(() => {
+        timer = setTimeout(() => {
+          animations = startGridAnimations(cubes);
+          if (!animations) return;
+          for (let index = 0; index < cubes.length; index += 1) {
+            registrations[index]?.setAnimation(animations[index] ?? null);
+            cubes[index].style.animationName = "none";
+          }
+        }, 0);
+      });
+    };
+    updateMotion();
+    reducedMotion?.addEventListener("change", updateMotion);
+
+    return () => {
+      reducedMotion?.removeEventListener("change", updateMotion);
+      reset();
       for (const registration of registrations) registration.unregister();
       visibility.dispose();
-      for (const cube of cubes) cube.style.removeProperty("animation");
+      for (const cube of cubes) cube.style.removeProperty("animation-name");
     };
   }, []);
 

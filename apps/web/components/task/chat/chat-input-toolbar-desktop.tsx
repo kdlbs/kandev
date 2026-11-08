@@ -84,16 +84,6 @@ function buildCollapsibleItems(props: DesktopToolbarProps): ToolbarItemConfig[] 
   if (props.hideAgentControls) return [];
   return [
     {
-      id: "mcp",
-      section: "left",
-      render: () => (
-        <McpIndicator
-          mcpServers={props.mcpServers}
-          attachmentHistory={props.mcpAttachmentHistory}
-        />
-      ),
-    },
-    {
       id: "mode",
       section: "left",
       render: () => <ModeSelector sessionId={props.sessionId} />,
@@ -227,6 +217,15 @@ export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
       )}
     >
       <div className="flex items-center gap-0.5 shrink-0">
+        {!props.hideAgentControls && (
+          <div data-testid="toolbar-item-mcp">
+            <McpIndicator
+              mcpServers={props.mcpServers}
+              attachmentHistory={props.mcpAttachmentHistory}
+              selection={props.mcpSelection}
+            />
+          </div>
+        )}
         {!props.hidePlanMode && (
           <PlanToggleButton
             planModeEnabled={props.planModeEnabled}

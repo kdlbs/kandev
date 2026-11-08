@@ -42,6 +42,7 @@ test.describe("Port forwarding on mobile", () => {
     expect(ports.requestCount("port.tunnel.list")).toBe(priorReads + 1);
     await expect(session.portForwardRow(3000)).toHaveAttribute("data-forwarded", "true");
     await session.portForwardDialog.getByRole("button", { name: "Close", exact: true }).tap();
+    await expect(session.portForwardDialog).toBeHidden();
     ports.setTunnels([]);
     await openPorts(session);
     await expect(session.portForwardRow(8080)).toBeVisible();

@@ -5,55 +5,98 @@ import { Spinner } from "@kandev/ui/spinner";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "@/lib/i18n/formats";
 import type { StorageMaintenanceRun } from "@/lib/types/system";
-import { formatGigabytes } from "./storage-units";
 import { StorageGoCacheResult } from "./storage-go-cache-result";
+import {
+  StorageRunTechnicalDetails,
+  TemporaryArtifactRunResult,
+} from "./storage-run-result-details";
+import {
+  storageRunSummary,
+  type StorageRunDisplayStatus,
+  type StorageRunSummary,
+} from "./storage-run-summary";
+
+const STATUS_LABEL_KEYS: Record<StorageRunDisplayStatus, string> = {
+  queued: "system:storageRunStatusQueued",
+  running: "system:storageRunStatusRunning",
+  succeeded: "system:storageRunStatusSucceeded",
+  failed: "system:storageRunStatusFailed",
+  cancelled: "system:storageRunStatusCancelled",
+  skipped_busy: "system:storageRunStatusSkippedBusy",
+  incomplete: "system:storageRunStatusIncomplete",
+  partial: "system:storageRunStatusPartial",
+  unknown: "system:storageRunStatusUnknown",
+};
+
+const TRIGGER_LABEL_KEYS: Record<string, string> = {
+  scheduled: "system:storageRunTriggerScheduled",
+  manual: "system:storageRunTriggerManual",
+  analysis: "system:storageRunTriggerAnalysis",
+};
 
 function dateLabel(value: string): string {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? value : formatDateTime(parsed);
 }
 
-function recordValue(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : undefined;
+function genericExplanationKey(summary: StorageRunSummary): string | null {
+  if (summary.hasNonGoProviderError) {
+    return "system:storageHistoryOtherCleanupFailed";
+  }
+  if (
+    summary.status === "failed" &&
+    (summary.goCache === null ||
+      (summary.goCache.issueCategories.length === 0 && !summary.goCache.partial))
+  ) {
+    return "system:storageHistoryCouldNotComplete";
+  }
+  return null;
 }
 
-function temporaryArtifactResult(result: Record<string, unknown>): {
-  quarantinedBytes: number;
-  failed: number;
-} | null {
-  const outer = recordValue(result.result) ?? result;
-  const provider = recordValue(outer.temporary_artifacts);
-  const cleanup = recordValue(provider?.result) ?? provider;
-  if (!cleanup) return null;
-  const rawBytes = cleanup.quarantined_bytes ?? cleanup.reclaimed_bytes;
-  if (typeof rawBytes !== "number" || !Number.isFinite(rawBytes) || rawBytes < 0) return null;
-  const rawFailed = cleanup.failed;
-  return {
-    quarantinedBytes: rawBytes,
-    failed: typeof rawFailed === "number" && Number.isFinite(rawFailed) ? rawFailed : 0,
-  };
-}
-
-function TemporaryArtifactRunResult({ result }: { result: Record<string, unknown> }) {
+function StorageRunRow({ run }: { run: StorageMaintenanceRun }) {
   const { t } = useTranslation();
-  const cleanup = temporaryArtifactResult(result);
-  if (!cleanup) return null;
+  const summary = storageRunSummary(run);
+  const explanationKey = genericExplanationKey(summary);
   return (
-    <div className="mb-3 space-y-1 text-sm" data-testid="storage-temporary-artifacts-result">
-      <p>
-        {t("system:storageTemporaryArtifactsQuarantinedResult", {
-          size: formatGigabytes(cleanup.quarantinedBytes),
-        })}
-      </p>
-      <p className="text-muted-foreground">
-        {t("system:storageTemporaryArtifactsFreedAfterDelete")}
-      </p>
-      {cleanup.failed > 0 && (
-        <p className="text-amber-600">{t("system:storageTemporaryArtifactsMoveFailed")}</p>
-      )}
-    </div>
+    <AccordionItem value={run.id} data-testid={`storage-run-${run.id}`}>
+      <AccordionTrigger className="min-h-11 items-center px-3 no-underline">
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <Badge
+            variant={summary.status === "failed" ? "destructive" : "outline"}
+            className={
+              summary.status === "partial" || summary.status === "incomplete"
+                ? "border-amber-600/40 text-amber-700 dark:text-amber-500"
+                : undefined
+            }
+            data-testid="storage-run-status"
+            data-status={summary.status}
+          >
+            {t(STATUS_LABEL_KEYS[summary.status])}
+          </Badge>
+          <span data-testid="storage-run-trigger">
+            {t(TRIGGER_LABEL_KEYS[run.trigger] ?? "system:storageRunTriggerUnknown")}
+          </span>
+          <span className="text-muted-foreground">{dateLabel(run.started_at)}</span>
+        </span>
+      </AccordionTrigger>
+      <AccordionContent className="h-auto px-3 text-sm">
+        <div className="space-y-2" data-testid="storage-run-result">
+          <StorageGoCacheResult
+            result={run.result}
+            message={run.message}
+            busyPolicyEnabled={summary.busyPolicyEnabled}
+            testId="storage-go-cache-result"
+          />
+          <TemporaryArtifactRunResult result={run.result} />
+          {explanationKey && (
+            <div className="text-amber-600" data-testid="storage-run-generic-explanation">
+              {t(explanationKey)}
+            </div>
+          )}
+          <StorageRunTechnicalDetails message={run.message} result={run.result} />
+        </div>
+      </AccordionContent>
+    </AccordionItem>
   );
 }
 
@@ -98,40 +141,18 @@ function StorageRunHistoryContent({
   }
   if (error) {
     return (
-      <p className="break-words text-sm text-destructive" data-testid="storage-run-history-error">
+      <div className="break-words text-sm text-destructive" data-testid="storage-run-history-error">
         {t("system:storageSectionUnavailable")}: {error}
-      </p>
+      </div>
     );
   }
   if (runs.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("system:storageHistoryEmpty")}</p>;
+    return <div className="text-sm text-muted-foreground">{t("system:storageHistoryEmpty")}</div>;
   }
   return (
     <Accordion type="multiple">
       {runs.map((run) => (
-        <AccordionItem key={run.id} value={run.id} data-testid={`storage-run-${run.id}`}>
-          <AccordionTrigger className="min-h-11 items-center px-3 no-underline">
-            <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-              <Badge variant={run.state === "failed" ? "destructive" : "outline"}>
-                {run.state}
-              </Badge>
-              <span className="capitalize">{run.trigger}</span>
-              <span className="text-muted-foreground">{dateLabel(run.started_at)}</span>
-            </span>
-          </AccordionTrigger>
-          <AccordionContent className="px-3">
-            {run.message && <p className="mb-2 break-words text-amber-600">{run.message}</p>}
-            <StorageGoCacheResult
-              result={run.result}
-              busyPolicyEnabled={run.settings_snapshot.go_cache?.allow_cleanup_while_busy === true}
-              testId="storage-go-cache-result"
-            />
-            <TemporaryArtifactRunResult result={run.result} />
-            <pre className="max-w-full overflow-hidden whitespace-pre-wrap break-all rounded bg-muted p-3 text-[11px]">
-              {JSON.stringify(run.result, null, 2)}
-            </pre>
-          </AccordionContent>
-        </AccordionItem>
+        <StorageRunRow key={run.id} run={run} />
       ))}
     </Accordion>
   );

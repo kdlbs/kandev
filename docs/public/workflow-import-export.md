@@ -5,14 +5,14 @@ description: "Move Kanban workflows between workspaces with Kandev's portable YA
 
 # Workflow Import / Export
 
-Kandev's versioned portable format moves Kanban workflow definitions between workspaces or installations. It carries prompts, step behavior, portable agent-profile descriptors, WIP rules, supported events, and explicit task-completion policies. It deliberately omits database IDs and workspace ownership. New exports use version 2; version 1 documents remain accepted and receive compatibility defaults at import.
+Kandev's versioned portable format moves Kanban workflow definitions between workspaces or installations. It carries prompts, step behavior, portable agent-profile descriptors, WIP rules, supported events, and explicit task-completion policies. It deliberately omits database IDs and workspace ownership. Exports containing profile descriptors use version 3; versions 1 and 2 remain accepted.
 
 Use this for snapshots and one-time copies. Use [Workflow Sync](workflow-sync.md) when a GitHub repository should remain the source of truth.
 
 ## Quick path
 
 1. Export a regular Kanban workflow from **Settings > Workspaces > Workflows**.
-2. Copy or save the YAML.
+2. Copy the YAML or download it as `workflows.yaml`.
 3. Import it into the destination workspace.
 4. Review profile mapping and skipped names before using the workflow.
 
@@ -20,13 +20,13 @@ Use this for snapshots and one-time copies. Use [Workflow Sync](workflow-sync.md
 
 Open **Settings → Workspaces → select a workspace → Workflows**.
 
-- **Export All** opens a YAML dialog for the saved Kanban workflows visible on that settings page. Unsaved drafts and Office-style workflows are excluded. Choose **Copy** to put the text on the clipboard.
+- **Export All** opens a YAML dialog for the saved Kanban workflows visible on that settings page. Unsaved drafts and Office-style workflows are excluded. Choose **Copy** to put the text on the clipboard or **Download** to save `workflows.yaml`.
 - A workflow card's **Export** button exports only that workflow.
 - **Import** accepts a `.yml` or `.yaml` file, or pasted YAML. It previews the workflows that will be created and skipped. Exact direct step-profile matches are selected automatically; each unmatched direct step has a profile picker.
 - The browser import does not create workflows until every affected step has a valid profile selection. If no eligible profile exists, use **Retry** after creating or enabling a profile in **Settings > Agents**. Canceling the picker leaves the workspace unchanged.
 - The result reports created and skipped workflow names.
 
-Export does not download a file or change the workflow. Import creates new workflows; it never overwrites a same-named workflow. Delete an unwanted imported workflow through the normal workflow settings flow.
+Export does not change the workflow. Import creates new workflows; it never overwrites a same-named workflow. Delete an unwanted imported workflow through the normal workflow settings flow.
 
 > **Network security:** With authentication disabled, these HTTP routes are open. Experimental authentication requires a session or personal access token, but does not replace TLS. Keep the backend on loopback or behind an authenticated, origin-protected TLS proxy before exposing them to a network.
 
@@ -107,7 +107,7 @@ workflows:
 
 | Field | Type | Validation |
 |-------|------|------------|
-| `version` | integer | Must be `1` or `2`. New exports use `2`; version 1 is accepted for compatibility. |
+| `version` | integer | Must be `1`, `2`, or `3`. Profile descriptors with configuration options require `3`. |
 | `type` | string | Must be exactly `kandev_workflow`. |
 | `workflows` | list | Must contain at least one item. |
 
@@ -127,7 +127,7 @@ Unknown YAML fields are ignored by the current decoder. Do not use that as an ex
 
 | Field | Export behavior | Import behavior |
 |-------|-----------------|-----------------|
-| `name` | Always emitted. | Exact empty string is rejected. Existing target-workspace name causes a skip. |
+| `name` | Always emitted. | Exact empty string is rejected. Existing target-workspace names and later occurrences of the same exact name in one document are skipped. |
 | `description` | Omitted when empty. | Stored as supplied. |
 | `agent_profile` | Omitted when no workflow profile resolves. | Exact value match; see [Profile matching](#profile-matching). |
 | `steps` | Always emitted, possibly empty. | Empty lists are currently accepted, although an empty workflow is not useful. |
@@ -196,6 +196,8 @@ explicit session target. Version 2 adds `session_target` and explicit
 completion booleans. An initial target has only `kind: initial`. A source-step
 target has `kind: step` and an earlier `step_position`. The source step must
 select a profile directly and must not target another session.
+Version 3 retains those rules and adds profile configuration options. Older
+Kandev versions reject version 3 instead of ignoring the new options.
 
 If a source step is missing, later than its target, or invalid after a sync
 edit, import and sync report a validation error. Kandev does not silently pick
@@ -252,9 +254,16 @@ agent_profile:
   agent_name: Claude Code
   model: optional-model-id
   mode: optional-mode-id
+  config_options:
+    reasoning_effort: low
 ```
 
-`agent_name` is the agent display name, not an internal ID. Kandev searches for a profile whose display name, model, and mode all match exactly. Empty optional values also participate in the match.
+`agent_name` is the agent display name, not an internal ID. Kandev searches for
+a profile whose display name, model, mode, and, in version 3, configuration
+options all match exactly. Empty optional values participate in the match.
+Use `config_options: {}` for a profile with no configured options. Versions 1
+and 2 do not constrain options, so several local profiles may match.
+Option values are included in the exported file; review them before sharing it.
 
 In the browser import flow, the preview lists enabled global profiles from the
 destination workspace. An exact direct step-profile match is selected
@@ -268,21 +277,31 @@ unchanged selections remain available. Profile selection and the complete
 validation pass happen before the browser flow creates any workflow.
 
 Workflow-level profile descriptors are still matched automatically. A missing
-workflow-level match remains unset. Raw YAML imports and GitHub workflow sync
-keep their existing exact-match behavior, including leaving an unmatched direct
-step profile unset. They do not use the browser picker.
+workflow-level match remains unset. Raw YAML imports keep their existing
+tie-break and unmatched behavior. Repository sync reports a missing or
+ambiguous profile and leaves the affected workflow unchanged; see
+[Workflow Sync](workflow-sync.md#reconciliation-rules). They do not use the browser picker.
 
-If there is no exact match, import still succeeds and silently leaves that workflow or step profile unset. Before moving a file between installs, compare the destination's agent display names and supported model/mode identifiers. Never assume an illustrative model name exists in another install.
+For raw imports, no exact match leaves the workflow or step profile unset.
+Before moving a file between installs, compare the destination's agent display
+names, model and mode identifiers, and options.
 
 ## Import reconciliation and failure behavior
 
 Browser imports follow these rules:
 
 1. The preview decodes and validates the complete envelope, applies name deduplication, and returns direct step-profile candidates without creating anything.
-2. Existing workflows are compared by exact name. Matches are reported under `skipped`; they are not updated or merged.
+2. Names are compared exactly, including case and whitespace. Every occurrence matching an existing destination workflow, including hidden workflows, is skipped. Otherwise, the first occurrence in document order is retained and later occurrences are skipped. Skipped definitions are not updated or merged.
 3. Each new workflow and its steps receive fresh IDs. Step-position references are remapped to those IDs.
 4. Exact profile matches are preselected. Unmatched direct step descriptors require explicit eligible profile selections.
-5. The final request validates every binding, profile ID, profile revision, and portable reference before creating any workflow.
+5. The final request structurally validates every supplied binding and portable reference. It checks retained steps' profile IDs and revisions before creating any workflow.
+
+Preview, browser submission, raw YAML, and MCP imports use the same name-selection
+rule. Results report each skipped occurrence under `skipped`. Only retained
+workflows need profile selections, so a missing profile in a later duplicate
+does not block the first workflow. Preview and binding `workflow_index` values
+refer to the original document array, including skipped entries. Structural
+validation still checks the complete document before creation.
 
 Browser preview, selection validation, and profile conflicts write nothing. After
 that validation pass, a database failure during creation is still not one
@@ -365,7 +384,7 @@ After import, assign a workflow default or affected step agent profile if the de
 
 ## Troubleshooting
 
-- **`unsupported export version/type`:** use `version: 2` and `type: kandev_workflow` for new documents. Version 1 remains accepted for compatibility.
+- **`unsupported export version/type`:** use `type: kandev_workflow` and a supported version. Profile options require version 3, which older Kandev versions cannot read.
 - **Duplicate step position:** give every step in that workflow a unique integer and update every position reference.
 - **Missing `step_position`:** portable `move_to_step` never accepts a database or template `step_id`.
 - **Pull reference error:** ensure the target position exists, is not the same step, and does not participate in a cycle.

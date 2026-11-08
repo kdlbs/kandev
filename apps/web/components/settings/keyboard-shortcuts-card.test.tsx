@@ -60,6 +60,9 @@ describe("direct conflict labels", () => {
 });
 
 const GITHUB_ACTION_LABEL = "Open GitHub";
+const GITHUB_RECORDER = "shortcut-recorder-integration:github";
+const SEARCH_RECORDER = "shortcut-recorder-SEARCH";
+const SEARCH_LABEL = "Search shortcuts";
 
 describe("ShortcutRecorder keyboard accessibility", () => {
   function renderRecorder() {
@@ -122,7 +125,7 @@ describe("KeyboardShortcutsCard", () => {
     const onChange = vi.fn();
     const other = { SEARCH: { key: "o", modifiers: { ctrlOrCmd: true } } };
     const view = render(<KeyboardShortcutsCard overrides={other} onChange={onChange} />);
-    fireEvent.click(screen.getByTestId("shortcut-recorder-integration:github"));
+    fireEvent.click(screen.getByTestId(GITHUB_RECORDER));
     fireEvent.keyDown(window, { key: "g", ctrlKey: true, altKey: true });
     expect(onChange).toHaveBeenLastCalledWith({
       ...other,
@@ -133,7 +136,7 @@ describe("KeyboardShortcutsCard", () => {
     );
     fireEvent.click(
       screen
-        .getByTestId("shortcut-recorder-integration:github")
+        .getByTestId(GITHUB_RECORDER)
         .parentElement!.querySelector("button[aria-label='Reset (clear shortcut)']")!,
     );
     expect(onChange).toHaveBeenLastCalledWith(other);
@@ -174,7 +177,7 @@ describe("KeyboardShortcutsCard", () => {
       <KeyboardShortcutsCard overrides={{}} onChange={onChange} pluginEntries={[pluginEntry]} />,
     );
 
-    expect(screen.getByTestId("shortcut-recorder-SEARCH")).toBeTruthy();
+    expect(screen.getByTestId(SEARCH_RECORDER)).toBeTruthy();
     expect(screen.queryByTestId(`shortcut-recorder-${pluginEntry.id}`)).toBeNull();
     expect(screen.getByTitle("Same shortcut as: Session Cost: Open panel")).toBeTruthy();
   });
@@ -183,11 +186,112 @@ describe("KeyboardShortcutsCard", () => {
     const onChange = vi.fn();
     render(<KeyboardShortcutsCard overrides={{}} onChange={onChange} />);
 
-    fireEvent.click(screen.getByTestId("shortcut-recorder-SEARCH"));
+    fireEvent.click(screen.getByTestId(SEARCH_RECORDER));
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
 
     expect(onChange).toHaveBeenCalledWith({
       SEARCH: { key: "k", modifiers: { ctrlOrCmd: true } },
     });
   });
+});
+
+// @covers AC-UI-SHORTCUT-SETTINGS-FILTER-001.1
+it("filters the mounted settings card by a translated action label", () => {
+  render(<KeyboardShortcutsCard overrides={{}} onChange={vi.fn()} />);
+  const search = screen.getByRole("textbox", { name: SEARCH_LABEL });
+  fireEvent.change(search, { target: { value: "  gItHuB  " } });
+  expect(screen.getByTestId(GITHUB_RECORDER)).toBeTruthy();
+  expect(screen.queryByTestId(SEARCH_RECORDER)).toBeNull();
+});
+
+// @covers AC-UI-SHORTCUT-SETTINGS-FILTER-001.1, .2, .3, .4
+it("restores rows and pending overrides while retaining conflicts with hidden peers", () => {
+  const onChange = vi.fn();
+  const pluginEntry: ShortcutEntry = {
+    source: "plugin",
+    id: "plugin:test:open",
+    label: "Test plugin action",
+    default: { key: "k", modifiers: { ctrlOrCmd: true } },
+    pluginId: "test",
+    keybindingId: "open",
+  };
+  const overrides = { "integration:github": { key: "k", modifiers: { ctrlOrCmd: true } } };
+  render(
+    <KeyboardShortcutsCard
+      overrides={overrides}
+      onChange={onChange}
+      pluginEntries={[pluginEntry]}
+    />,
+  );
+  const search = screen.getByRole("textbox", { name: SEARCH_LABEL });
+  const initialRows = screen.getAllByTestId(/^shortcut-recorder-/).map((row) => row.dataset.testid);
+  fireEvent.change(search, { target: { value: "  CoMmAnD PaNeL  " } });
+  expect(screen.getByTestId(SEARCH_RECORDER)).toBeTruthy();
+  expect(screen.queryByTestId(GITHUB_RECORDER)).toBeNull();
+  expect(screen.getByTitle("Same shortcut as: Open GitHub, Test plugin action")).toBeTruthy();
+  fireEvent.change(search, { target: { value: "  GITHUB  " } });
+  const github = screen.getByTestId(GITHUB_RECORDER);
+  expect(github.getAttribute("data-settings-dirty")).toBe("true");
+  expect(screen.getByTitle("Same shortcut as: Command Panel, Test plugin action")).toBeTruthy();
+  fireEvent.change(search, { target: { value: "no such shortcut" } });
+  expect(screen.getAllByText("No matching shortcuts")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+  expect(screen.getAllByTestId(/^shortcut-recorder-/).map((row) => row.dataset.testid)).toEqual(
+    initialRows,
+  );
+  expect(screen.getByTestId(GITHUB_RECORDER).textContent).toContain("K");
+  expect(onChange).not.toHaveBeenCalled();
+  fireEvent.change(search, { target: { value: "   " } });
+  expect(screen.getAllByTestId(/^shortcut-recorder-/)).toHaveLength(initialRows.length);
+});
+
+it("filters dynamically supplied integration labels", () => {
+  render(
+    <KeyboardShortcutsCard
+      overrides={{}}
+      onChange={vi.fn()}
+      integrationEntries={[
+        {
+          source: "integration",
+          id: "integration:dynamic",
+          label: "Open Example Destination",
+          default: UNBOUND_SHORTCUT,
+          href: "/example",
+        },
+      ]}
+    />,
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: SEARCH_LABEL }), {
+    target: { value: "  eXAMple  " },
+  });
+  expect(screen.getByTestId("shortcut-recorder-integration:dynamic")).toBeTruthy();
+  expect(screen.queryByTestId(SEARCH_RECORDER)).toBeNull();
+});
+
+// @covers AC-UI-SHORTCUT-SETTINGS-FILTER-001.3
+it("stops recording and lets filter typing through without changing shortcuts", () => {
+  const onChange = vi.fn();
+  render(<KeyboardShortcutsCard overrides={{}} onChange={onChange} />);
+  const recorder = screen.getByTestId(SEARCH_RECORDER);
+  recorder.focus();
+  fireEvent.click(recorder);
+  expect(recorder.getAttribute("data-shortcut-recording")).toBe("true");
+  const search = screen.getByRole("textbox", { name: SEARCH_LABEL });
+  search.focus();
+  const event = new KeyboardEvent("keydown", { key: "g", bubbles: true, cancelable: true });
+  fireEvent(search, event);
+  expect(event.defaultPrevented).toBe(false);
+  expect(recorder.getAttribute("data-shortcut-recording")).toBe("false");
+  expect(onChange).not.toHaveBeenCalled();
+});
+
+// @covers AC-UI-SHORTCUT-SETTINGS-FILTER-001.2, .5
+it("returns keyboard focus to search after clearing", () => {
+  render(<KeyboardShortcutsCard overrides={{}} onChange={vi.fn()} />);
+  const search = screen.getByRole("textbox", { name: SEARCH_LABEL });
+  fireEvent.change(search, { target: { value: "github" } });
+  const clear = screen.getByRole("button", { name: "Clear search" });
+  clear.focus();
+  fireEvent.click(clear);
+  expect(document.activeElement).toBe(search);
 });

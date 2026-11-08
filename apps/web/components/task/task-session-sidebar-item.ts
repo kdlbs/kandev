@@ -1,7 +1,11 @@
 import type { KanbanState } from "@/lib/state/slices";
 import type { Repository, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
-import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
+import {
+  statusSummaryRowErrorPreview,
+  statusSummaryTurnError,
+  statusSummaryUnreadSessionIds,
+} from "@/lib/task-status-summary";
 import { workflowStepTitle } from "./task-session-sidebar-aggregate";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
@@ -104,7 +108,7 @@ function sidebarStatus(
   const sessionStatus = sidebarSessionStatus(summary, task);
   return {
     ...sessionStatus,
-    agentErrorMessage: statusSummaryActiveErrorPreview(
+    agentErrorMessage: statusSummaryRowErrorPreview(
       summary,
       context.acknowledgedAgentErrors,
       context.dismissedAgentErrors,
@@ -120,8 +124,16 @@ function sidebarStatus(
     issueInfo: issueInfoForTask(task),
     queuedCount: summary?.queued_prompt_count,
     launchQueue: summary?.launch_queue,
+    turnError: sidebarTurnError(summary),
     wipQueue: context.wipQueueByTaskId?.get(task.id),
+    unreadSessionIds: statusSummaryUnreadSessionIds(summary),
   };
+}
+
+function sidebarTurnError(summary: TaskStatusSummary | null | undefined) {
+  const value = statusSummaryTurnError(summary);
+  if (!value) return null;
+  return { stamp: value.stamp, preview: value.preview, sessionId: value.session_id };
 }
 
 function isPendingRemoval(

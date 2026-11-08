@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import type { FileTreeNode } from "@/lib/types/backend";
 import {
   moveNodesInTree,
+  compareTreeNodes,
+  insertNodeInTree,
+  renameNodeInTree,
   computeMoveTargets,
   findUnloadedAncestor,
   findNodeByPath,
@@ -167,5 +170,74 @@ describe("file tree reveal", () => {
     ]);
     expect(findUnloadedAncestor(loadedTree, targetPath, ancestors)).toBeNull();
     expect(findUnloadedAncestor(root([dir("other", [])]), targetPath, ancestors)).toBeNull();
+  });
+});
+
+describe("natural file tree order", () => {
+  // @covers AC-UI-FILE-TREE-NATURAL-ORDER-001.1
+  it("sorts root and nested directories and files by numeric runs without changing input", () => {
+    const children = [
+      file("step10.md", "folder2"),
+      dir("part10", [], "folder2"),
+      file("step2.md", "folder2"),
+      dir("part2", [], "folder2"),
+    ];
+    const tree = root([
+      file("step10.md"),
+      dir("folder10", []),
+      file("step2.md"),
+      dir("folder2", children),
+    ]);
+    const before = structuredClone(tree);
+    expect(sortRootChildren(tree).map((node) => node.name)).toEqual([
+      "folder2",
+      "folder10",
+      "step2.md",
+      "step10.md",
+    ]);
+    expect([...children].sort(compareTreeNodes).map((node) => node.name)).toEqual([
+      "part2",
+      "part10",
+      "step2.md",
+      "step10.md",
+    ]);
+    expect(tree).toEqual(before);
+  });
+
+  // @covers AC-UI-FILE-TREE-NATURAL-ORDER-001.2
+  it("uses lexical order for numeric ties regardless of input and preserves ordinary names", () => {
+    const names = ["file1", "file01"];
+    const lexical = [...names].sort((a, b) => a.localeCompare(b));
+    expect(names[0].localeCompare(names[1])).not.toBe(0);
+    for (const order of [names, [...names].reverse()]) {
+      expect(
+        sortRootChildren(root(order.map((name) => file(name)))).map((node) => node.name),
+      ).toEqual(lexical);
+    }
+    const ordinary = ["README.md", ".babelrc", "package.json", "alpha"];
+    expect(
+      sortRootChildren(root(ordinary.map((name) => file(name)))).map((node) => node.name),
+    ).toEqual([...ordinary].sort((a, b) => a.localeCompare(b)));
+  });
+
+  // @covers AC-UI-FILE-TREE-NATURAL-ORDER-001.3
+  it("keeps insertions, renames and visible paths in the same order", () => {
+    const original = root([
+      dir("folder2", [file("step10.md", "folder2")]),
+      file("step10.md"),
+      file("step3.md"),
+    ]);
+    const before = structuredClone(original);
+    const inserted = insertNodeInTree(original, "folder2", file("step2.md", "folder2"));
+    const renamed = renameNodeInTree(inserted, "step10.md", "step2.md");
+    expect(renamed.children?.map((node) => node.path)).toEqual(["folder2", "step2.md", "step3.md"]);
+    expect(getVisiblePaths(renamed, new Set(["folder2"]))).toEqual([
+      "folder2",
+      "folder2/step2.md",
+      "folder2/step10.md",
+      "step2.md",
+      "step3.md",
+    ]);
+    expect(original).toEqual(before);
   });
 });

@@ -1,6 +1,10 @@
 import { test, expect } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
-import { expectCompositorGridMotion } from "../../helpers/animation-assertions";
+import {
+  expectCompositorGridMotion,
+  expectReducedStatusMotion,
+} from "../../helpers/animation-assertions";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 import {
   sendQuickChatMessage,
@@ -17,6 +21,9 @@ test.describe("quick chat activity indicators", () => {
     const ws = watchWs(testPage);
     await testPage.goto("/");
     await testPage.getByTestId("app-nav-trigger").tap();
+    const menu = testPage.getByTestId("app-nav-sheet");
+    await expect(menu).toBeVisible();
+    await waitForFiniteAnimations(menu);
     await testPage.getByTestId("mobile-quick-chat-button").tap();
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     const created = testPage.waitForResponse(
@@ -45,6 +52,8 @@ test.describe("quick chat activity indicators", () => {
     const gridStatus = tab.getByRole("status");
     await expect(gridStatus).toBeVisible();
     await expectCompositorGridMotion(gridStatus);
+    await expectReducedStatusMotion(testPage);
+    await expectCompositorGridMotion(gridStatus);
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
@@ -56,7 +65,10 @@ test.describe("quick chat activity indicators", () => {
     await expect(indicator).toHaveAttribute("data-state", "finished");
 
     await button.tap();
+    await expect(menu).toBeVisible();
+    await waitForFiniteAnimations(menu);
     await testPage.getByTestId("mobile-quick-chat-button").tap();
+    await expect(menu).toBeHidden();
     await expect(indicator).toHaveCount(0);
     await expect(dialog).toBeVisible();
   });

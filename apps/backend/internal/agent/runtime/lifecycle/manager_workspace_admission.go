@@ -19,6 +19,13 @@ func (m *Manager) ensureWorkspaceSessionAdmitted(ctx context.Context, taskID str
 	if info == nil {
 		return fmt.Errorf("workspace info is required")
 	}
+	// Workspace-only creation must not replace a retained remote execution
+	// while its authenticated recovery owner is still pending.
+	if m.recoveryGuard != nil && m.pendingRemoteRecoveryForSession(info.SessionID) != nil {
+		if err := m.recoveryGuard.CheckLaunchAllowed(info.SessionID); err != nil {
+			return err
+		}
+	}
 	if info.TaskArchived || info.WorkspaceOwnerArchived {
 		return fmt.Errorf("%w: task workspace is archived", ErrSessionWorkspaceNotReady)
 	}

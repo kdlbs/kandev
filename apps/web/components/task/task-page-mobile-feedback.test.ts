@@ -14,6 +14,7 @@ function pageFeedbackParams(
     hasTaskMoveError: false,
     hasEnsureSessionError: false,
     hasBootstrapRecoveryError: false,
+    hasTaskReadRecovery: false,
     effectiveSessionId: null,
     isSessionPassthrough: false,
     hasResumptionError: false,
@@ -44,6 +45,15 @@ describe("shouldReservePageLevelMobileFeedbackOffset", () => {
     expect(
       shouldReservePageLevelMobileFeedbackOffset(pageFeedbackParams({ hasTaskMoveError: true })),
     ).toBe(true);
+    expect(
+      shouldReservePageLevelMobileFeedbackOffset(pageFeedbackParams({ hasTaskReadRecovery: true })),
+    ).toBe(true);
+    expect(
+      shouldReservePageLevelMobileFeedbackOffset({
+        ...pageFeedbackParams({ hasTaskReadRecovery: true }),
+        isMobile: false,
+      }),
+    ).toBe(false);
   });
 
   it("reserves space for a resumption error or notice", () => {

@@ -31,6 +31,10 @@ const (
 	// SQLite WAL mode allows many readers alongside a single writer; 4 is a
 	// reasonable default for a desktop/server workload.
 	defaultSQLiteReaderConns = 4
+
+	// maxSQLiteReaderConns bounds a configured reader pool so a mistaken
+	// setting cannot consume an unbounded number of file descriptors.
+	maxSQLiteReaderConns = 64
 )
 
 func init() {
@@ -65,12 +69,14 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 	// - foreign_keys=on: enforce FK constraints consistently.
 	// - busy_timeout: wait briefly on locks to reduce transient "database is locked".
 	// - journal_mode=WAL: better read concurrency with a single writer.
-	// - synchronous=FULL: committed delivery receipts must survive power loss before journal pruning.
+	// - synchronous=NORMAL: commits survive process termination. Power-loss
+	//   durability for journal release comes from db.DurabilityBarrier, which
+	//   commits on this connection with FULL before any journal release.
 	// - cache=shared: allow multiple connections to share a page cache.
 	// - txlock=immediate: acquire the writer before transaction predicate reads.
 	// journal_size_limit has no DSN parameter; applyWriterPragmas sets it.
 	dsn := fmt.Sprintf(
-		"file:%s?_foreign_keys=on&_mode=rwc&_busy_timeout=%d&_journal_mode=WAL&_synchronous=FULL&_cache=shared&_txlock=immediate",
+		"file:%s?_foreign_keys=on&_mode=rwc&_busy_timeout=%d&_journal_mode=WAL&_synchronous=NORMAL&_cache=shared&_txlock=immediate",
 		normalizedPath,
 		int(defaultBusyTimeout/time.Millisecond),
 	)
@@ -86,10 +92,24 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-// OpenSQLiteReader opens a read-only SQLite connection pool with multiple
-// concurrent connections. Combined with WAL mode, this allows readers to
-// proceed without blocking on (or being blocked by) writes.
+// OpenSQLiteReader opens a read-only SQLite connection pool with the default
+// number of concurrent connections.
 func OpenSQLiteReader(dbPath string) (*sql.DB, error) {
+	return OpenSQLiteReaderWithConns(dbPath, defaultSQLiteReaderConns)
+}
+
+// OpenSQLiteReaderWithConns opens a read-only SQLite connection pool with the
+// requested number of concurrent connections. Combined with WAL mode, this
+// allows readers to proceed without blocking on (or being blocked by) writes.
+// A zero value keeps the default; negative values and values above
+// maxSQLiteReaderConns are rejected.
+func OpenSQLiteReaderWithConns(dbPath string, readerConns int) (*sql.DB, error) {
+	if readerConns == 0 {
+		readerConns = defaultSQLiteReaderConns
+	}
+	if readerConns < 1 || readerConns > maxSQLiteReaderConns {
+		return nil, fmt.Errorf("sqlite reader connections must be between 1 and %d: %d", maxSQLiteReaderConns, readerConns)
+	}
 	normalizedPath := normalizeSQLitePath(dbPath)
 
 	// Reader DSN: read-only mode and FK enforcement.
@@ -106,8 +126,8 @@ func OpenSQLiteReader(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open read-only database: %w", err)
 	}
 
-	db.SetMaxOpenConns(defaultSQLiteReaderConns)
-	db.SetMaxIdleConns(defaultSQLiteReaderConns)
+	db.SetMaxOpenConns(readerConns)
+	db.SetMaxIdleConns(readerConns)
 
 	return db, nil
 }

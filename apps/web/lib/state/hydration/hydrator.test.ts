@@ -1059,3 +1059,59 @@ it("marks an absent inactive session after ordinary turn hydration", () => {
 
   expect(result.turns.loadedBySession["session-1"]).toBe(true);
 });
+
+describe("hydrateState — runtime storage snapshots", () => {
+  const localRuntime = "local_runtime";
+  const timestamp = "2026-10-27T10:00:00Z";
+  it("clears blocked pressure when a recovered snapshot omits pressure fields", () => {
+    const sessionId = "storage-session";
+    const taskId = "storage-task";
+    const draft = makeAppDraft();
+    draft.taskSessions.items[sessionId] = {
+      id: sessionId,
+      task_id: taskId,
+      state: "RUNNING",
+      started_at: timestamp,
+      updated_at: timestamp,
+      runtime_storage_health: {
+        state: "normal",
+        location: localRuntime,
+        age_seconds: 0,
+        write_pressure: true,
+        producer_paused: true,
+        failure_storage: { reason: "disk_quota_exceeded", location: localRuntime },
+        revision: 2,
+        epoch: 5,
+      },
+    } as never;
+
+    const result = produce(draft, (next: Draft<AppState>) => {
+      hydrateState(next, {
+        taskSessions: {
+          items: {
+            [sessionId]: {
+              id: sessionId,
+              task_id: taskId,
+              state: "RUNNING",
+              started_at: timestamp,
+              updated_at: timestamp,
+              runtime_storage_health: {
+                state: "normal",
+                location: localRuntime,
+                age_seconds: 0,
+                revision: 3,
+                epoch: 5,
+              },
+            },
+          },
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    const health = result.taskSessions.items[sessionId]?.runtime_storage_health;
+    expect(health?.revision).toBe(3);
+    expect(health?.write_pressure).toBeUndefined();
+    expect(health?.producer_paused).toBeUndefined();
+    expect(health?.failure_storage).toBeUndefined();
+  });
+});

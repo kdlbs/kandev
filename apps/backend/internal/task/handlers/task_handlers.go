@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -31,6 +32,8 @@ type handlerRepo interface {
 }
 
 type TaskHandlers struct {
+	quickChatCreationLocksMu      sync.Mutex
+	quickChatCreationLocks        map[string]*quickChatCreationLock
 	workspaceAdoptionCallerGuard  func(*gin.Context) bool
 	service                       *service.Service
 	orchestrator                  OrchestratorStarter
@@ -39,6 +42,7 @@ type TaskHandlers struct {
 	movePreviewer                 WorkflowMovePreviewer
 	foregroundActivity            dto.ForegroundActivityProvider
 	cancellationPending           dto.CancellationPendingProvider
+	runtimeStorageHealth          dto.RuntimeStorageHealthProvider
 	parkedProjection              dto.ParkedProvider
 	taskParkedProjection          dto.TaskParkedProvider
 	repo                          handlerRepo
@@ -52,6 +56,36 @@ type TaskHandlers struct {
 	onTaskCreatedWithPR           func(ctx context.Context, taskID, sessionID, prURL, branch string)
 	backgroundWorkEnabled         bool
 	logger                        *logger.Logger
+}
+
+type quickChatCreationLock struct {
+	mu         sync.Mutex
+	references int
+}
+
+func (h *TaskHandlers) lockQuickChatCreation(identity string) func() {
+	h.quickChatCreationLocksMu.Lock()
+	if h.quickChatCreationLocks == nil {
+		h.quickChatCreationLocks = make(map[string]*quickChatCreationLock)
+	}
+	lock := h.quickChatCreationLocks[identity]
+	if lock == nil {
+		lock = &quickChatCreationLock{}
+		h.quickChatCreationLocks[identity] = lock
+	}
+	lock.references++
+	h.quickChatCreationLocksMu.Unlock()
+
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		h.quickChatCreationLocksMu.Lock()
+		defer h.quickChatCreationLocksMu.Unlock()
+		lock.references--
+		if lock.references == 0 {
+			delete(h.quickChatCreationLocks, identity)
+		}
+	}
 }
 
 func (h *TaskHandlers) SetBackgroundWorkEnabled(enabled bool) {
@@ -194,6 +228,9 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	if cancellation, ok := orchestrator.(dto.CancellationPendingProvider); ok {
 		h.cancellationPending = cancellation
 	}
+	if runtimeStorage, ok := orchestrator.(dto.RuntimeStorageHealthProvider); ok {
+		h.runtimeStorageHealth = runtimeStorage
+	}
 	if parked, ok := orchestrator.(dto.ParkedProvider); ok {
 		h.parkedProjection = parked
 	}
@@ -233,6 +270,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/tasks/:id/context", h.httpGetTaskContext)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.POST("/task-sessions/:id/last-agent-error/dismiss", h.httpDismissLastAgentError)
+	api.POST("/tasks/:id/turn-error/dismiss", h.httpDismissTaskTurnError)
 	api.POST("/task-sessions/:id/mark-read", h.httpMarkSessionRead)
 	api.GET("/tasks/:id/sessions", h.httpListTaskSessions)
 	api.POST("/tasks/:id/sessions/ensure", h.httpEnsureTaskSession)
@@ -248,6 +286,10 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/delete-preflight", h.httpTaskDeletePreflight)
 	api.POST("/tasks/:id/exact-retirement/preview", h.httpPreviewExactRetirement)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
+	// Explicit discard of a pending deferred launch. Task-scoped and
+	// synchronous; the response distinguishes already-clear, discarded, and
+	// retained (the queued launch is still owned).
+	api.POST("/tasks/:id/deferred-launch/discard", h.httpDiscardDeferredLaunch)
 	api.PATCH("/tasks/:id/port-forwarding", h.httpUpdateTaskPortForwarding)
 	api.POST("/tasks/:id/detach", h.httpDetachTask)
 	api.POST("/tasks/:id/workspace-sources", h.httpAttachWorkspaceSources)
@@ -296,6 +338,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	// resync the tab strip so clients that missed WS events converge.
 	api.POST("/workspaces/:id/quick-chat", h.httpStartQuickChat)
 	api.GET("/workspaces/:id/quick-chats", h.httpListQuickChatSessions)
+	api.GET("/workspaces/:id/quick-chat/creations/:creation_id", h.httpGetQuickChatCreation)
 
 	// Config chat endpoint - creates ephemeral task with config-mode MCP tools
 	api.POST("/workspaces/:id/config-chat", h.httpStartConfigChat)

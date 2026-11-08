@@ -140,8 +140,8 @@ test.describe("Changes panel Git refresh recovery", () => {
       bridge.releaseFreshGitRefreshRequests();
       const response = await bridge.waitForResponse("fresh", priorFreshResponses);
       expect(response.success).toBe(true);
-      expect(bridge.responseIncludesFile("fresh", filePath)).toBe(true);
-      expect(bridge.responseHasPendingDetails("fresh", filePath)).toBe(true);
+      expect(bridge.responseIncludesFile("fresh", filePath, task.session_id)).toBe(true);
+      expect(bridge.responseHasPendingDetails("fresh", filePath, task.session_id)).toBe(true);
       await bridge.waitForDroppedPendingStatus();
 
       const fileRow = session.changes.getByTestId(`file-row-${filePath}`);

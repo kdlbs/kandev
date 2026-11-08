@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useCallback, type ReactNode } from "react";
+import { memo, useState, useCallback, useRef, type ReactNode } from "react";
 import { IconFile, IconLoader2, IconPhoto, IconRefresh } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -11,6 +11,7 @@ import {
   IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME,
   ImagePreviewContent,
 } from "@/components/task/chat/image-preview-dialog";
+import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import { ContextChip } from "./context-chip";
 
 // The image chip intentionally owns the preview, delivery toggle, and retry
@@ -20,7 +21,12 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
   const { t } = useTranslation("chat");
   const { isFinePointer } = useResponsiveBreakpoint();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const previewSrc = item.attachment.preview;
+  const chipRef = useRef<HTMLButtonElement>(null);
+  // A restored or oversized ready image has no inline preview; the authorized
+  // content URL keeps the thumbnail and larger viewer available.
+  const previewSrc =
+    item.attachment.preview ??
+    (item.attachment.attachmentId ? attachmentContentUrl(item.attachment.attachmentId) : undefined);
   const deliveryMode = item.attachment.deliveryMode;
   const uploadStatus = item.attachment.uploadStatus;
   const deliveryDescription =
@@ -145,11 +151,20 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
         preview={preview}
         onClick={previewSrc ? handleClick : undefined}
         onRemove={item.onRemove}
+        triggerRef={chipRef}
       />
       {previewSrc && (
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent
             aria-describedby={undefined}
+            showCloseButton={false}
+            onCloseAutoFocus={(event) => {
+              const opener = chipRef.current;
+              if (opener) {
+                event.preventDefault();
+                opener.focus();
+              }
+            }}
             className={IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME}
           >
             <ImagePreviewContent src={previewSrc} alt={t("chat:attachmentPreviewFullAlt")} />

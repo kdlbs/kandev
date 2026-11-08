@@ -44,7 +44,7 @@ Add the named tests before implementation using TDD. These commands run after th
 make -C apps/backend proto
 (cd apps/backend && go test -race ./internal/plugins ./internal/task/service -run 'TestExactHostAdmission|TestExactTaskUpdateRecovery' -count=1)
 (cd apps/backend && go test ./pkg/pluginsdk/... ./internal/plugins/manifest/...)
-(cd apps && pnpm --filter @kandev/plugin-sdk test && pnpm --filter @kandev/plugin-sdk typecheck)
+(cd apps && pnpm --filter @kdlbs/plugin-sdk test && pnpm --filter @kdlbs/plugin-sdk typecheck)
 ```
 
 Evidence to create:

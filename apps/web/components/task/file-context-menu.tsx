@@ -373,7 +373,7 @@ export function FileContextMenu({
   // A bulk selection would make a single-node "Open in <editor>" ambiguous.
   const showOpenInEditor = !isBulk && canOpenNodeInEditor(editorActions, node);
   const hasFileActions =
-    !!onDeleteFile || !!onRenameFile || !!onDownloadFile || !!onUploadFilesHere;
+    !isBulk || !!onDeleteFile || !!onRenameFile || !!onDownloadFile || !!onUploadFilesHere;
   const showAddToChatContext = !isBulk && !!onAddToChatContext;
   const fallbackAnchorRef = useRef<HTMLElement>(null);
   const anchorRef = providedAnchorRef ?? fallbackAnchorRef;

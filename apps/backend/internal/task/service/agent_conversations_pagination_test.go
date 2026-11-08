@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // acPagingTaskRepo is a task repo fake that honours page/pageSize the way the

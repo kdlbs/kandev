@@ -91,6 +91,60 @@ belong to the [watch-dialog package](../../../plans/gitlab-watch-dialog-ownershi
 This clarification excludes persistent drafts after closure, watch-list cache
 ownership, new polling or API contracts, and changes to other integrations.
 
+
+#### Merge API source-head compatibility
+
+The existing merge action and auto-merge shall work with GitLab instances or
+groups that require a commit SHA on the merge API. The
+[repair plan](../../../plans/gitlab-required-merge-sha/plan.md) records the
+implementation and verification; unrelated criteria retain their lifecycle.
+
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.24:** When a valid merge is requested through the existing action or automation, Kandev shall bind the merge to the current source-head SHA obtained for that same merge request and workspace connection, including when GitLab requires the SHA. Hosts that do not require it shall remain supported.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.25:** When the source head changes between the read and merge, the provider's mismatch shall remain a failure; Kandev shall not automatically retry that merge with the newer head. Obtaining a current head does not assert that a user reviewed it.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.26:** When the source-head SHA cannot be obtained or is empty or unusable, the operation shall fail without issuing a merge write. Existing provider failures shall remain failures.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.27:** The operation shall retain its workspace, configured host and credential, full project path and MR IID, method validation, squash and message behavior, and existing source-branch removal behavior.
+
+This clarification excludes review-freshness UX, new permissions or settings,
+source-branch deletion, and changes to other GitLab features or providers.
+
+#### Default merge squash choice
+
+This separate correction clarifies the default squash behavior preserved by
+AC .27; it does not alter the source-head compatibility requirements in
+AC .24-.27. The [squash-choice package](../../../plans/gitlab-squash-choice/plan.md)
+records its planned implementation and verification.
+
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.28:** When an interactive or automated merge requests no explicit squash method, Kandev shall let GitLab apply the merge request's persisted squash choice and project policy. A project merely allowing squash shall not cause Kandev to override an unchecked choice.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.29:** When squash is explicitly requested, Kandev shall request squash only if the project permits it; unsupported and unknown methods shall retain their existing validation failures. GitLab's required or prohibited squash policy remains authoritative.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.30:** The default choice shall have the same semantics through existing desktop and phone merge actions and automation, while retaining the workspace, host, credential, project, IID, source-head guard, messages and source-branch behavior required by AC .24-.27.
+
+This correction adds no squash setting, selection control, interface or stored
+default metadata. It does not claim that the source head was reviewed.
+
+#### Draft merge requests
+
+A draft MR is a deliberate hold that GitLab refuses to merge. The
+[draft-merge package](../../../plans/gitlab-draft-merge/plan.md) records the
+implementation and verification; AC .24-.30 keep their meaning. AC .31 adds one
+refusal case to the failure paths of AC .26: the operation fails without a merge
+write.
+
+A MR is a *draft* when its `draft` flag is set or its `detailed_merge_status`
+is `draft_status`. The title marker is one of `Draft:`, `[Draft]` or `(Draft)`,
+matched case-insensitively. A *transient* status is `checking`, `unchecked` or
+`preparing`. An empty `detailed_merge_status` (older hosts) is neither draft nor
+transient.
+
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.31:** When an open MR is a draft, the Kandev merge action shall fail without issuing a merge write, whether it is requested from the UI, the HTTP route or automation. The route shall answer `409` with a message stating that the MR is a draft and must be marked ready first. A draft takes precedence over any other status, including `mergeable`, and is checked before the source-head SHA is validated; an unknown or disallowed merge method, or a failed project merge-method read, still fails first with its existing error.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.32:** When an open MR is a draft, the task detail panel Merge button and its confirmation action, and the CI popover and phone drawer merge button, shall be shown disabled with visible text (not a tooltip alone) stating that the MR is a draft and must be marked ready first. The popover and drawer button shall appear for a draft even when the pipeline or discussion checks also fail, and shall stay hidden for every other not-ready reason as today. The auto-merge setting is not a merge control for this criterion. The detail panel renders its merge controls only once the live MR is loaded and decides from the live MR alone; the popover and drawer decide from the cached task MR alone.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.33:** When GitLab refuses the merge write itself with status 405, 406, 409 or 422, the merge route shall answer `409` (405, 406, 409) or `422` (422) with a fixed Kandev message chosen by that status from a closed set (not mergeable; branch changed since it was read; merge parameters rejected). Only the merge write is mapped: a failed read before it, and every other GitLab action, keep their existing mapping. Provider response text, titles, addresses and tokens shall never reach the HTTP response, the toast or the logs, and `APIError.Error()` shall not change. Other statuses keep their existing mapping.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.34:** When the user activates "Mark as ready" in the task detail panel on an open draft MR in the workspace's configured host, Kandev shall read the MR, strip every consecutive leading title marker together with the whitespace around it, write the stripped title, and re-read the MR. Rules: a MR that is not open fails with `409` before any write; a MR that is not a draft is a successful no-op with no write and returns the current MR; a draft whose title has no leading marker, or whose stripped title is empty, fails with `422` and no write; a marker only mid-title is left unchanged; a failed or nil re-read after a successful write fails with `502` and a message saying the title was updated; a re-read that reports the MR no longer open returns that MR with `200` (this is checked first, even when the closed MR is still flagged draft); otherwise a re-read that still reports a draft fails with `409` and a message saying GitLab still reports a draft. A blank project or an IID below 1 fails with `400` before any GitLab call, and a nil first read without an error fails with `502` and no write. Each failure named in this criterion carries a fixed Kandev message that states the cause and tells the user what to do next; a failed first read or title write keeps the existing provider-action mapping and message. Repeating the action is safe.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.35:** Kandev shall not clear a draft marker as part of a merge, automation or any action other than the control in AC .34. After any outcome of Mark as ready, the UI shall start one post-ready wait: it reloads the live MR (feedback, files and commits) and, while the reloaded status is transient, the detail panel Merge button stays disabled with the text "Checking merge status". The wait runs at most 5 reloads (the first immediately, each next 2 seconds after the previous settles) and stops at the first non-transient status; a reload whose feedback request fails counts and keeps the previous live MR, while a files or commits failure alone does not fail it. The hold exists only during the wait: a panel opened on an already transient MR never holds Merge. The wait ends at once on unmount, a change of workspace, host, project or IID, a manual refresh, or a new Mark as ready, and a reload in flight then is discarded; a Mark as ready request in flight at such an event still completes and is reported by toast, but starts no wait. When it ends, Merge follows its existing conditions (open state, no conflicts, no pending action) plus the draft rule even if the last status was transient; Kandev shall not newly require `mergeable`, and the popover and drawer keep their existing readiness check plus the draft precedence of AC .32. After the title write the server shall refresh the workspace's cached task MRs for that MR without touching comparison targets or manual base-branch overrides; a failed refresh does not change the response, and the next poll corrects the cache. The Mark as ready button is disabled while the action is pending, and its outcome is reported by toast.
+
+This addition excludes GitHub pull requests, source-branch removal settings, a
+mergeable-status gate for non-draft MRs, auto-merge changes beyond the backend
+guard, and Mark as ready in the popover or phone drawer.
+
 ## System design
 
-The migrated technical source is split into [part 1](../system-design/gitlab-integration-01.md), [part 2](../system-design/gitlab-integration-02.md).
+The migrated technical source is split into [part 1](../system-design/gitlab-integration-01.md), [part 2](../system-design/gitlab-integration-02.md), [part 3](../system-design/gitlab-integration-03.md).

@@ -3,7 +3,7 @@ package plugins
 import (
 	"context"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // exactExecutionController is satisfied by backendapp adapters over the native

@@ -2,7 +2,8 @@
 
 import { useCallback, useMemo, useRef } from "react";
 import { createTask } from "@/lib/api/domains/kanban-api";
-import { replaceTaskUrl } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
+import { useRouter } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import {
   buildRepositoriesPayload,
@@ -53,9 +54,11 @@ type CreateSubtaskArgs = {
   isLocalExecutor: boolean;
   freshBranchEnabled: boolean;
   onClose: () => void;
-  setActiveTask: (taskId: string) => void;
+  navigate: NavigateToChild;
   setActiveSession: (taskId: string, sessionId: string) => void;
 };
+
+type NavigateToChild = (href: string, options: { scroll: false; onNavigated: () => void }) => void;
 
 async function createSubtask({
   fs,
@@ -73,7 +76,7 @@ async function createSubtask({
   isLocalExecutor,
   freshBranchEnabled,
   onClose,
-  setActiveTask,
+  navigate,
   setActiveSession,
 }: CreateSubtaskArgs) {
   const repositories =
@@ -110,11 +113,14 @@ async function createSubtask({
   // Close the dialog before navigation. Navigation can remount the sidebar
   // that owns the dialog state, which makes a later close update a stale owner.
   onClose();
-  if (newSessionId) {
-    setActiveTask(response.id);
-    setActiveSession(response.id, newSessionId);
-    replaceTaskUrl(response.id);
-  }
+  if (!newSessionId) return;
+  navigate(linkToTask(response.id, { sessionId: newSessionId }), {
+    scroll: false,
+    // Publish the selection only once the history commit and router
+    // notification have landed, so a deferred navigation keeps the previous
+    // task and conversation selected until the user proceeds.
+    onNavigated: () => setActiveSession(response.id, newSessionId),
+  });
 }
 
 /**
@@ -142,7 +148,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
   } = opts;
   const freshBranchEnabled = fs.freshBranchEnabled;
   const { toast } = useToast();
-  const setActiveTask = useAppStore((s) => s.setActiveTask);
+  const router = useRouter();
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   // Synchronous guard: setIsCreating(true) won't reflect into the disabled
   // submit button until React commits, so a fast double-submit (Enter + click,
@@ -177,7 +183,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
           isLocalExecutor,
           freshBranchEnabled,
           onClose,
-          setActiveTask,
+          navigate: router.replace,
           setActiveSession,
         });
       } catch (error) {
@@ -203,7 +209,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
       defaultProfileId,
       availableRepositories,
       attachments,
-      setActiveTask,
+      router,
       setActiveSession,
       workspaceMode,
       isLocalExecutor,

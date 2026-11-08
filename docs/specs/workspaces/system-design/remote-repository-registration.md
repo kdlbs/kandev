@@ -1,6 +1,7 @@
 ---
 status: draft
 system: workspaces
+updated: 2026-10-29
 requirements:
   - REQ-WORKSPACES-REMOTE-REPOSITORY-REGISTRATION-001
 ---
@@ -90,7 +91,7 @@ existing record.
 The service builds one `TaskRepositoryInput` from the body with
 `ResolveProviderDefaults` set, runs `preflightRepositoryInputs` (plugin
 inspection replaces the input with the trusted descriptor; built-in URLs are
-parsed and provider-mismatch checked), then calls `ResolveRepositoryRef`,
+parsed, provider-mismatch checked, and origin verified), then calls `ResolveRepositoryRef`,
 which reaches `FindOrCreateRepository`. The returned repository is re-read by
 ID so the response reflects the persisted row.
 
@@ -161,6 +162,13 @@ fail closed with `repository_selection_invalid`; connection-read failures
 produce `repository_selection_unavailable`. Only that successful verification
 sets the internal `TrustedRemote` marker consumed by shared resolution.
 
+Shared preflight owns this verification for task creation and registration.
+Registration does not repeat the origin check after successful preflight.
+Unhinted URL discovery, including active VCS plugins, follows the task system's
+[workspace-verified admission design](../../tasks/system-design/project-repository-context.md#workspace-verified-remote-admission).
+Explicit provider selections remain pinned to that provider. Multiple successful unhinted candidates produce invalid selection before writes.
+The strict parser and lower resolver guard remain in place.
+
 Provider hints that disagree with a built-in locator (owner, name, provider,
 host) are rejected by `validateBuiltInRemoteHints` as
 `repository_selection_invalid` before resolution, so a stale or forged hint is
@@ -198,3 +206,8 @@ the `task-repository-handlers` component.
 ## Related decisions
 
 - [ADR-2026-07-20 provider-neutral remote repositories](../../../decisions/2026-07-20-provider-neutral-remote-repositories.md)
+
+## Implementation plans
+
+- [Settings remote registration](../../../plans/settings-remote-repository/plan.md)
+- [Shared provider-neutral admission](../../../plans/office-project-self-managed-gitlab/plan.md)

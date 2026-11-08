@@ -46,9 +46,10 @@ type Updates = {
 };
 
 function operationObserved(status: ToolPayloadRetentionStatus, accepted: AcceptedOperation) {
-  if (status.operation?.id === accepted.id) return true;
   const latest = accepted.kind === "analysis" ? status.last_analysis : status.last_run;
-  return latest != null;
+  if (latest != null) return true;
+  if (status.operation?.id === accepted.id) return status.operation.state !== "running";
+  return false;
 }
 
 function loadStatus(

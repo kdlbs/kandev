@@ -7,10 +7,18 @@ import { cn } from "@/lib/utils";
 
 const INLINE_ELEMENTS = ["strong", "em", "del", "code", "a", "br"];
 const BLOCK_ELEMENTS = ["p", "ul", "ol", "li", ...INLINE_ELEMENTS];
+const CONTEXT_ELEMENTS = [...BLOCK_ELEMENTS, "table", "thead", "tbody", "tr", "th", "td"];
+type ClarificationMarkdownVariant = "block" | "inline" | "context";
+
+function allowedElementsForVariant(variant: ClarificationMarkdownVariant) {
+  if (variant === "context") return CONTEXT_ELEMENTS;
+  if (variant === "block") return BLOCK_ELEMENTS;
+  return INLINE_ELEMENTS;
+}
 
 type ClarificationMarkdownProps = {
   children: string;
-  variant: "block" | "inline";
+  variant: ClarificationMarkdownVariant;
   linkBehavior?: "interactive" | "passive";
   className?: string;
 };
@@ -27,6 +35,19 @@ function markdownComponents(linkBehavior: "interactive" | "passive"): Components
       </ol>
     ),
     li: ({ children }) => <li className="pl-0.5 leading-relaxed">{children}</li>,
+    table: ({ children }) => (
+      <div data-clarification-context-table-scroll className="my-2 max-w-full overflow-x-auto">
+        <table className="w-max min-w-full border-collapse text-left">{children}</table>
+      </div>
+    ),
+    th: ({ children }) => (
+      <th className="whitespace-nowrap border border-border px-2 py-1 align-top font-medium">
+        {children}
+      </th>
+    ),
+    td: ({ children }) => (
+      <td className="whitespace-nowrap border border-border px-2 py-1 align-top">{children}</td>
+    ),
     code: ({ children, className }) => {
       const isBlock = className?.startsWith("language-") || String(children).includes("\n");
       if (isBlock) return <span className="whitespace-pre-wrap">{children}</span>;
@@ -63,7 +84,7 @@ export function ClarificationMarkdown({
 }: ClarificationMarkdownProps) {
   const content = (
     <ReactMarkdown
-      allowedElements={variant === "block" ? BLOCK_ELEMENTS : INLINE_ELEMENTS}
+      allowedElements={allowedElementsForVariant(variant)}
       components={markdownComponents(linkBehavior)}
       remarkPlugins={[remarkGfm, remarkBreaks]}
       skipHtml

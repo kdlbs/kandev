@@ -469,3 +469,58 @@ describe("TipTapInput current file fallbacks", () => {
     expect(screen.getByTestId(MENU).textContent).toBe(fallback);
   });
 });
+
+it("starts file search while task mentions are pending", async () => {
+  let resolveTasks!: (response: Response) => void;
+  const tasks = new Promise<Response>((resolve) => {
+    resolveTasks = resolve;
+  });
+  const fetchMock = vi.fn(() => tasks);
+  vi.stubGlobal("fetch", fetchMock);
+  const ref = createRef<TipTapInputHandle>();
+  render(
+    <StateProvider initialState={initialState}>
+      <TipTapInput
+        ref={ref}
+        sessionId="alpha"
+        workspaceId="workspace-1"
+        value=""
+        onChange={() => {}}
+      />
+    </StateProvider>,
+  );
+  await flush();
+  await query(ref);
+  expect(fetchMock).toHaveBeenCalled();
+  const started = DeferredSocket.current.searches().length;
+  await act(async () => {
+    resolveTasks(new Response(JSON.stringify({ tasks: [], total: 0 }), { status: 200 }));
+  });
+  await flush();
+  await reply(0, [CURRENT_FILE]);
+  expect(started).toBe(1);
+  expect(DeferredSocket.current.searches()).toHaveLength(started);
+  menuHas(CURRENT_FILE);
+});
+
+it.each(["query", "session", "unmount"] as const)(
+  "aborts superseded file requests on %s",
+  async (change) => {
+    const requests = vi.spyOn(client, "request");
+    try {
+      const fixture = await mount();
+      await query(fixture.ref, "old");
+      const signal = requests.mock.calls.find(
+        ([action]) => action === "workspace.files.search",
+      )?.[3];
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal?.aborted).toBe(false);
+      if (change === "query") await query(fixture.ref, "new");
+      else if (change === "session") await switchSession(fixture, "beta");
+      else fixture.view.unmount();
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      requests.mockRestore();
+    }
+  },
+);

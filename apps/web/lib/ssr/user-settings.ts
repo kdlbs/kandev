@@ -51,7 +51,10 @@ export function createDefaultUserSettings(): UserSettingsState {
     confirmTaskArchive: true,
     preventAutoStartAgentOnOpen: false,
     unreadDivider: false,
+    unreadTaskDot: false,
+    unreadTaskDotHideDelaySeconds: 2,
     agentGeneratedTaskTitles: true,
+    promptSuggestions: false,
     autoFocusNewTasks: true,
     agentTabCloseBehavior: "delete_session",
     mcpTaskAgentProfileDefault: "current_task",
@@ -293,7 +296,11 @@ function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
     preventAutoStartAgentOnOpen:
       s.prevent_auto_start_agent_on_open ?? current.preventAutoStartAgentOnOpen,
     unreadDivider: s.unread_divider ?? current.unreadDivider,
+    unreadTaskDot: s.unread_task_dot ?? current.unreadTaskDot,
+    unreadTaskDotHideDelaySeconds:
+      s.unread_task_dot_hide_delay_seconds ?? current.unreadTaskDotHideDelaySeconds,
     agentGeneratedTaskTitles: s.agent_generated_task_titles ?? current.agentGeneratedTaskTitles,
+    promptSuggestions: s.prompt_suggestions ?? current.promptSuggestions,
     autoFocusNewTasks: s.auto_focus_new_tasks ?? current.autoFocusNewTasks,
     agentTabCloseBehavior: mapDefined(
       s.agent_tab_close_behavior,

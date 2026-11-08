@@ -1,3 +1,4 @@
+import type { BuiltinMCPCreateDraft } from "@/lib/types/builtin-mcp";
 import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
 import type React from "react";
 import type { RefObject } from "react";
@@ -11,6 +12,7 @@ import type {
   TaskPriority,
   InitialWorkspaceLayout,
   CreateTaskResponse,
+  WorkflowSessionTarget,
 } from "@/lib/types/http";
 import type { createTask } from "@/lib/api";
 import type { UseBranchesByURLResult } from "@/hooks/domains/github/use-branches-by-url";
@@ -20,6 +22,7 @@ import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generato
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { TaskEditDialogDependenciesState } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
+import type { MCPInheritedSelection, MCPServerDefinition } from "@/lib/types/http-mcp";
 import type {
   KanbanMultiState,
   WorkflowSnapshotData,
@@ -35,6 +38,7 @@ import type {
 } from "@/components/task-create-dialog-options";
 import type { useToast } from "@/components/toast-provider";
 import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
+import type { TaskCreateRecovery } from "@/components/task-create-dialog-recovery";
 
 export type TaskCreateSubmit = (
   payload: Parameters<typeof createTask>[0],
@@ -84,6 +88,7 @@ export interface TaskCreateDialogProps {
     prompt: string;
     agentProfileId: string;
     executorId: string;
+    mcpServerIds?: string[];
     attachments?: ReturnType<
       typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
     >;
@@ -186,8 +191,9 @@ export type TaskRemoteRepoRow = {
 export type StepType = {
   id: string;
   title: string;
-  /** Workflow that supplied these fallback-only steps. */
+  /** Workflow that supplied these steps. */
   workflowId?: string;
+  color?: string;
   position?: number;
   is_start_step?: boolean;
   prompt?: string;
@@ -195,6 +201,17 @@ export type StepType = {
     on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
     on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
   };
+  /** Fixed workflow profile that owns this step, when one is configured. */
+  agent_profile_id?: string;
+  /** Session recipient declared by the step, when one is configured. */
+  session_target?: WorkflowSessionTarget | null;
+};
+
+/** Selected-workflow step metadata shared by launch preview and replacement rows. */
+export type TaskCreateWorkflowStepsResult = {
+  status: "idle" | "loading" | "success" | "error";
+  steps: StepType[];
+  retry: () => void;
 };
 
 export type TaskCreateDialogInitialValues = {
@@ -341,7 +358,6 @@ export type DialogComputedArgs = {
 export type TaskCreateEffectsArgs = {
   open: boolean;
   workspaceId: string | null;
-  workflowId: string | null;
   effectiveWorkflowId: string | null;
   repositories: Repository[];
   repositoriesLoading: boolean;
@@ -362,6 +378,8 @@ export type TaskCreateEffectsArgs = {
   lastUsedExecutorProfileId?: string | null;
   /** Backend-owned last-used branch. */
   lastUsedBranch?: string | null;
+  /** Complete selected-workflow steps owned by the task dialog observer. */
+  selectedWorkflowSteps: TaskCreateWorkflowStepsResult;
   /**
    * True when the currently-selected executor is the local-host one (no
    * worktree, no container). Drives the "reset row.branch on local switch"
@@ -399,9 +417,16 @@ export type TaskFormInputsHandle = {
 };
 
 export type DialogFormState = {
+  builtinMCPPreferences?: BuiltinMCPCreateDraft;
+  setBuiltinMCPPreferences?: (value: BuiltinMCPCreateDraft | undefined) => void;
   /** Predecessor task IDs chosen in the dialog's "Depends on" selector. */
   blockedBy: string[];
   setBlockedBy: (v: string[]) => void;
+  /** Task-level MCP additions. Empty means no additions at this scope. */
+  mcpServerIds: string[];
+  setMcpServerIds: (v: string[]) => void;
+  mcpServerIdsDirty: boolean;
+  setMcpServerIdsDirty: (dirty: boolean) => void;
   taskName: string;
   setTaskName: (v: string) => void;
   hasTitle: boolean;
@@ -530,6 +555,7 @@ export type DialogFormState = {
 };
 
 export type SubmitHandlersDeps = {
+  builtinMCPPreferences?: BuiltinMCPCreateDraft;
   isSessionMode: boolean;
   isEditMode: boolean;
   /** Create-mode opt-in: derive a provisional title from the prompt. */
@@ -574,6 +600,7 @@ export type SubmitHandlersDeps = {
     prompt: string;
     agentProfileId: string;
     executorId: string;
+    mcpServerIds?: string[];
     attachments?: ReturnType<
       typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
     >;
@@ -581,6 +608,8 @@ export type SubmitHandlersDeps = {
   onOpenChange: (open: boolean) => void;
   /** Create-mode transport override. Omitted to use Kandev's REST task endpoint. */
   createTask?: TaskCreateSubmit;
+  /** Native create-mode recovery owner. Custom transports bypass it. */
+  recovery?: TaskCreateRecovery;
   /** Refreshes selected branch-policy options after a stale task submission. */
   refreshBranchPolicies?: () => Promise<void>;
   preserveTaskCreateLastUsedOnClose?: () => void;
@@ -596,6 +625,8 @@ export type SubmitHandlersDeps = {
   setRemoteRepos: React.Dispatch<React.SetStateAction<TaskRemoteRepoRow[]>>;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;
+  setMcpServerIds: (v: string[]) => void;
+  setMcpServerIdsDirty: (v: boolean) => void;
   setSelectedWorkflowId: (v: string | null) => void;
   setFetchedSteps: (v: null) => void;
   setInitialWorkspaceLayout: (v: InitialWorkspaceLayout) => void;
@@ -610,6 +641,11 @@ export type SubmitHandlersDeps = {
   blockedBy?: string[];
   /** Edit-mode dependency draft and persistence state. */
   editDependencies?: Pick<TaskEditDialogDependenciesState, "isDirty" | "ready" | "save">;
+  /** Task-level MCP additions selected in the Advanced section. */
+  mcpServerIds?: string[];
+  mcpServerIdsDirty: boolean;
+  /** Persists task-level selections when editing an existing task. */
+  saveTaskMCPSelections?: (definitionIds: string[]) => Promise<unknown>;
   /** Optional host folder for repo-less tasks; empty means kandev creates a scratch workspace. */
   workspacePath: string;
   /** Priority to submit with the created task. Defaults to `medium`. */
@@ -740,6 +776,11 @@ export type DialogFormBodyProps = {
   onWorkflowAgentOverrideChange: (sourceProfileId: string, replacementProfileId: string) => void;
   onResetWorkflowAgentOverrides: () => void;
   onRetryWorkflowAgentOverrides: () => void;
+  /** Workspace MCP definitions available to the task selector. */
+  mcpDefinitions: MCPServerDefinition[];
+  mcpDefinitionsLoading: boolean;
+  mcpInheritedSelections: MCPInheritedSelection[];
+  mcpSelectionRecovery?: { error: unknown; reload: () => Promise<unknown> };
   /**
    * Called by a plugin composer action after it inserted text into the
    * description and wants the form submitted the native way. The dialog

@@ -1,13 +1,16 @@
-import { driveCapacityRetries } from "../../helpers/capacity-retry-clock";
+import { driveCapacityRetries, waitForCapacityRetry } from "../../helpers/capacity-retry-clock";
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { watchWs } from "../../helpers/causal-waits";
 import {
   assertCompletedCapacityACPTrace,
+  assertKnownFailedCommandCapacityACPTrace,
   assertRetainedACPTrace,
   assertRetainedFailureMessage,
   createRetainedCapacityFixture,
   expectCompletedCapacityProgress,
+  expectKnownFailedCommandVisible,
+  waitForKnownFailedCommandMessage,
   expectRetainedTurnReady,
   readMockACPTrace,
   waitForRetainedTurnFailure,
@@ -16,6 +19,7 @@ import { pollUntil } from "../../helpers/poll-until";
 import { SessionPage } from "../../pages/session-page";
 
 test.setTimeout(300_000);
+test.use({ trace: "retain-on-failure" });
 
 async function waitForExecutionId(
   apiClient: Parameters<typeof createRetainedCapacityFixture>[1],
@@ -212,6 +216,69 @@ test("phone: completed tools continue on the same runtime across reload and a se
   }
 });
 
+test("phone: confirmed failed command shows the retry notice and continues once", async ({
+  testPage,
+  apiClient,
+  backend,
+  seedData,
+}) => {
+  const fixture = await createRetainedCapacityFixture(
+    backend,
+    apiClient,
+    seedData,
+    "known-failed-command",
+    { controlRetryClock: true },
+  );
+  try {
+    const session = new SessionPage(testPage);
+    await testPage.goto(`/t/${fixture.taskId}`);
+    await session.waitForLoad();
+    await expectKnownFailedCommandVisible(session);
+    await waitForKnownFailedCommandMessage(apiClient, fixture.sessionId);
+    const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
+
+    const notice = await waitForCapacityRetry(apiClient, fixture.sessionId, 1);
+    expect(notice.metadata?.retry_in_seconds).toBeGreaterThan(0);
+    await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
+    await assertNoDocumentHorizontalOverflow(testPage);
+    await driveCapacityRetries(backend, apiClient, fixture.sessionId, 1);
+
+    await expect
+      .poll(
+        () =>
+          readMockACPTrace(fixture.tracePath).filter((record) => record.event === "prompt").length,
+        { timeout: 90_000 },
+      )
+      .toBe(2);
+    await expect
+      .poll(async () => {
+        const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+        return messages.filter(
+          (message) =>
+            message.author_type === "agent" &&
+            message.content?.includes(
+              "continued the unfinished request without repeating completed work",
+            ) === true,
+        ).length;
+      })
+      .toBeGreaterThan(0);
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
+        return sessions.find((candidate) => candidate.id === fixture.sessionId)?.state;
+      })
+      .toBe("WAITING_FOR_INPUT");
+    expect(await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId)).toBe(
+      executionId,
+    );
+    await expectKnownFailedCommandVisible(session);
+    assertKnownFailedCommandCapacityACPTrace(fixture.tracePath);
+    await assertNoDocumentHorizontalOverflow(testPage);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
 test("phone: capacity retry can be cancelled during backoff", async ({
   testPage,
   apiClient,
@@ -262,6 +329,7 @@ test("phone and desktop: one capacity episode exhausts after eleven dispatches a
 }) => {
   const fixture = await createRetainedCapacityFixture(backend, apiClient, seedData, "exhaust");
   try {
+    const watchers = [watchWs(testPage), watchWs(desktopTestPage)];
     const session = new SessionPage(testPage);
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
@@ -284,7 +352,24 @@ test("phone and desktop: one capacity episode exhausts after eleven dispatches a
       30_000,
       "waiting for the task session execution identity",
     );
-    await driveCapacityRetries(backend, apiClient, fixture.sessionId, 11);
+    // Persistence can finish while either browser is still draining retry events.
+    const delivered = watchers.map((watcher) =>
+      watcher.waitForEvent("session.conversation.changed", {
+        timeout: 180_000,
+        where: (payload) =>
+          payload.session_id === fixture.sessionId &&
+          Array.isArray(payload.operations) &&
+          payload.operations.some(
+            (operation: { message?: { metadata?: Record<string, unknown> } }) =>
+              operation.message?.metadata?.runtime_retained === true &&
+              operation.message.metadata.recovery_disposition === "exhausted",
+          ),
+      }),
+    );
+    await Promise.all([
+      driveCapacityRetries(backend, apiClient, fixture.sessionId, 11),
+      ...delivered,
+    ]);
     const failure = await waitForRetainedTurnFailure(apiClient, fixture.sessionId, "exhausted");
     assertRetainedFailureMessage(failure);
     expect(failure.metadata?.attempts_started).toBe(11);

@@ -44,6 +44,9 @@ func (s *Service) findPRByBranchForWatch(ctx context.Context, watch *PRWatch) (*
 	if watch == nil {
 		return nil, ErrGitHubWorkspaceRequired
 	}
+	if err := s.checkPRWatchActive(ctx, watch); err != nil {
+		return nil, err
+	}
 	return s.findPRByBranchForWorkspace(ctx, watch.WorkspaceID, watch.Owner, watch.Repo, watch.Branch, watch)
 }
 
@@ -53,6 +56,11 @@ func (s *Service) findPRByBranchForWorkspace(
 ) (*PR, error) {
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
 		return nil, err
+	}
+	if watch != nil {
+		if err := s.validatePRWatchHost(ctx, workspaceID, watch); err != nil {
+			return nil, err
+		}
 	}
 	resolved, err := s.resolveAutomationClient(ctx, workspaceID, owner, repo)
 	if err != nil {
@@ -86,6 +94,9 @@ func (s *Service) findPRByBranchForWorkspace(
 		}
 		return nil, err
 	}
+	if err := s.requireCurrentHost(ctx, workspaceID, resolved); err != nil {
+		return nil, err
+	}
 	if tracked {
 		if !attempt.joined {
 			s.completePRDiscoveryWatchAttempt(attempt, &PRStatus{PR: pr}, true, false, nil, false)
@@ -105,6 +116,12 @@ func (s *Service) findPRByBranchForWorkspace(
 				workspaceID, resolved.CacheScope, credentialGeneration, &rebound,
 			)
 		}
+	}
+	if pr != nil {
+		copy := *pr
+		fence := githubOperationFence{service: s, workspaceID: workspaceID, resolved: resolved}
+		copy.operationFence = &fence
+		pr = &copy
 	}
 	return pr, nil
 }

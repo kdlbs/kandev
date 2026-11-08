@@ -197,6 +197,9 @@ func (r *Repository) createCoreTables() error {
 	if err := r.createDeferredAssignmentsTable(); err != nil {
 		return err
 	}
+	if err := r.createHandoffCompletionOutboxTable(); err != nil {
+		return err
+	}
 	return nil
 }
 

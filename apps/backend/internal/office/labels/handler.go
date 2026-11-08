@@ -2,6 +2,7 @@ package labels
 
 import (
 	"net/http"
+	"net/url"
 
 	"github.com/gin-gonic/gin"
 )
@@ -21,6 +22,7 @@ func RegisterRoutes(api *gin.RouterGroup, svc *LabelService) {
 	h := NewHandler(svc)
 	api.GET("/workspaces/:wsId/tasks/:taskId/labels", h.listTaskLabels)
 	api.POST("/workspaces/:wsId/tasks/:taskId/labels", h.addLabel)
+	api.DELETE("/workspaces/:wsId/tasks/:taskId/labels", h.removeLabel)
 	api.DELETE("/workspaces/:wsId/tasks/:taskId/labels/:labelName", h.removeLabel)
 	api.GET("/workspaces/:wsId/labels", h.listWorkspaceLabels)
 	api.PATCH("/workspaces/:wsId/labels/:id", h.updateLabel)
@@ -60,11 +62,21 @@ func (h *Handler) addLabel(c *gin.Context) {
 }
 
 func (h *Handler) removeLabel(c *gin.Context) {
+	name := c.Param("labelName")
+	if name == "" {
+		query, err := url.ParseQuery(c.Request.URL.RawQuery)
+		names := query["name"]
+		if err != nil || len(names) != 1 || names[0] == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name must be a single non-empty query parameter"})
+			return
+		}
+		name = names[0]
+	}
 	if err := h.svc.RemoveLabelFromTask(
 		c.Request.Context(),
 		c.Param("taskId"),
 		c.Param("wsId"),
-		c.Param("labelName"),
+		name,
 	); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

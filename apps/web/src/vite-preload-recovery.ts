@@ -56,7 +56,7 @@ export function installVitePreloadRecovery({
   getHref = () => window.location.href,
   reload = () => window.location.reload(),
 }: VitePreloadRecoveryOptions = {}): () => void {
-  const handlePreloadError: EventListener = (event) => {
+  const handlePreloadError: EventListener = () => {
     let storage: RecoveryStorage;
     let storedMarker: string | null;
 
@@ -82,7 +82,7 @@ export function installVitePreloadRecovery({
       return;
     }
 
-    event.preventDefault();
+    // Keep the import rejected until navigation replaces this document.
     reload();
   };
 

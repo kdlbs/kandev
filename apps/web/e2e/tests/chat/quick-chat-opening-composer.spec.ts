@@ -169,13 +169,15 @@ test.describe("Quick Chat opening composer", () => {
     expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
     await expect(dialog.getByTestId("quick-chat-send")).toBeVisible();
 
-    const prompt = "Explain the startup path in this repository";
+    const prompt = "Explain the startup path in this repository\n\nInclude the message flow";
     const attachmentName = "startup-notes.txt";
     const attachmentPath = path.join(testInfo.outputDir, attachmentName);
     fs.mkdirSync(testInfo.outputDir, { recursive: true });
     fs.writeFileSync(attachmentPath, "Follow the native launcher into the task session.");
     await completeQuickChatOpening(testPage, dialog, apiClient, prompt, {
       submit: (send) => send.click(),
+      expectExactPrompt: true,
+      verifyReload: true,
       prepare: async () => {
         await dialog.locator('input[type="file"]').first().setInputFiles(attachmentPath);
         await expect(dialog.getByText(attachmentName, { exact: true })).toBeVisible();
@@ -216,9 +218,12 @@ test.describe("Quick Chat opening composer", () => {
       createAttempts += 1;
       if (createAttempts === 1) {
         return route.fulfill({
-          status: 503,
+          status: 422,
           contentType: "application/json",
-          body: JSON.stringify({ error: "Temporary start failure" }),
+          body: JSON.stringify({
+            error: "Temporary start failure",
+            error_code: "quick_chat_creation_rejected",
+          }),
         });
       }
       return route.continue();

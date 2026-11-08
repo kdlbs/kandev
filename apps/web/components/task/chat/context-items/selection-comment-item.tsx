@@ -28,7 +28,7 @@ export const SelectionCommentItem = memo(function SelectionCommentItem({
         <div key={comment.id} className="space-y-0.5 text-xs">
           {comment.selectedText ? (
             <div className="line-clamp-2 text-muted-foreground italic">
-              &ldquo;{comment.selectedText}&rdquo;
+              “{comment.selectedText}”
             </div>
           ) : null}
           <div className="break-words">{comment.text}</div>

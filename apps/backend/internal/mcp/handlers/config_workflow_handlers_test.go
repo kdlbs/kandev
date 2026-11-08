@@ -29,6 +29,9 @@ import (
 // import path uses.
 type memWorkflowProvider struct {
 	workflows []*taskmodels.Workflow
+	// db mirrors created workflow rows into the same store the step
+	// repository locks and validates.
+	db *sqlx.DB
 }
 
 func (m *memWorkflowProvider) ListWorkflows(_ context.Context, workspaceID string, _ bool) ([]*taskmodels.Workflow, error) {
@@ -61,6 +64,14 @@ func (m *memWorkflowProvider) CreateWorkflow(_ context.Context, workspaceID, nam
 		UpdatedAt:   now,
 	}
 	m.workflows = append(m.workflows, wf)
+	if m.db != nil {
+		if _, err := m.db.Exec(`
+			INSERT OR IGNORE INTO workflows (id, workspace_id, name, description, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, wf.ID, wf.WorkspaceID, wf.Name, wf.Description, wf.CreatedAt, wf.UpdatedAt); err != nil {
+			return nil, err
+		}
+	}
 	return wf, nil
 }
 
@@ -68,10 +79,31 @@ func (m *memWorkflowProvider) UpdateWorkflow(_ context.Context, workflow *taskmo
 	for i, wf := range m.workflows {
 		if wf.ID == workflow.ID {
 			m.workflows[i] = workflow
+			if m.db != nil {
+				if _, err := m.db.Exec(`
+					UPDATE workflows SET name = ?, description = ?, updated_at = ? WHERE id = ?
+				`, workflow.Name, workflow.Description, workflow.UpdatedAt, workflow.ID); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 	}
 	return sql.ErrNoRows
+}
+
+// ensureWorkflowRow mirrors a fixture workflow row into the test DB without
+// adding it to the provider's list view, so list/export/import assertions stay
+// about the workflows the test itself creates.
+func (m *memWorkflowProvider) ensureWorkflowRow(id, workspaceID, name string) {
+	if m.db == nil {
+		return
+	}
+	now := time.Now().UTC()
+	m.db.MustExec(`
+		INSERT OR IGNORE INTO workflows (id, workspace_id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, id, workspaceID, name, now, now)
 }
 
 // setupImportHandlers wires a Handlers value backed by an in-memory workflow
@@ -100,8 +132,9 @@ func setupImportHandlers(t *testing.T) (*Handlers, *memWorkflowProvider, *reposi
 
 	svc := workflowsvc.NewService(repo, testLogger(t))
 	t.Cleanup(func() { _ = svc.Close() })
-	provider := &memWorkflowProvider{}
+	provider := &memWorkflowProvider{db: db}
 	svc.SetWorkflowProvider(provider)
+	provider.ensureWorkflowRow("wf-test", "ws-1", "Test Workflow")
 
 	h := &Handlers{workflowSvc: svc, logger: testLogger(t).WithFields()}
 	return h, provider, repo
@@ -480,6 +513,7 @@ func TestHandleExportWorkflow_ReturnsPortableWorkflow(t *testing.T) {
 		ID: "wf-export", WorkspaceID: "ws-source", Name: "Portable Board",
 		Description: "A portable workflow", Prompt: "Keep the board moving",
 	})
+	provider.ensureWorkflowRow("wf-export", "ws-source", "Portable Board")
 	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
 		ID: "step-todo", WorkflowID: "wf-export", Name: "Todo", Position: 0,
 		Color: "#3b82f6", IsStartStep: true, ShowInCommandPanel: true,
@@ -515,6 +549,7 @@ func TestHandleExportWorkflow_ResultCanBeImportedUnchanged(t *testing.T) {
 	provider.workflows = append(provider.workflows, &taskmodels.Workflow{
 		ID: "wf-round-trip", WorkspaceID: "ws-source", Name: "Round Trip",
 	})
+	provider.ensureWorkflowRow("wf-round-trip", "ws-source", "Round Trip")
 	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
 		ID: "step-round-trip", WorkflowID: "wf-round-trip", Name: "Review", Position: 0,
 		Color: "purple", IsStartStep: true,

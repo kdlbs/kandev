@@ -139,15 +139,7 @@ func (c *squashRecordingClient) MergeMR(ctx context.Context, projectPath string,
 	return c.MockClient.MergeMR(ctx, projectPath, iid, squash, msg)
 }
 
-// TestService_MergeMRForAutomation_HonoursProjectSquashPolicy is the
-// regression for the QA finding that auto-merge hardcoded squash=false,
-// bypassing the project's configured merge methods. The fixture project
-// allows squash (MockClient.GetProjectMergeMethods returns AllowSquash:
-// true), so the empty-method resolution must select squash — the same
-// default the interactive merge path applies. Before the fix this asserted
-// false, meaning a squash-required project would have had its merge
-// rejected and a squash-by-default project would have been merged unsquashed.
-func TestService_MergeMRForAutomation_HonoursProjectSquashPolicy(t *testing.T) {
+func TestService_MergeMRForAutomation_LeavesSquashChoiceToGitLab(t *testing.T) {
 	svc, mock := newMRAutomationAuthFixture(t)
 	mock.SeedMR("group/project", &MR{IID: 1, HeadBranch: "feature", State: mrStateOpen})
 	recorder := &squashRecordingClient{MockClient: mock}
@@ -163,8 +155,8 @@ func TestService_MergeMRForAutomation_HonoursProjectSquashPolicy(t *testing.T) {
 	if recorder.calls != 1 {
 		t.Fatalf("MergeMR calls = %d, want 1", recorder.calls)
 	}
-	if !recorder.gotSquash {
-		t.Error("MergeMR squash = false, want true — automation must honour the project's squash policy, not hardcode false")
+	if recorder.gotSquash {
+		t.Error("MergeMR squash = true, want false so GitLab retains its choice")
 	}
 }
 

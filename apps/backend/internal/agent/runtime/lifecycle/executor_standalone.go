@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -293,12 +295,15 @@ func buildStandaloneCreateInstanceRequest(
 		AssumeMcpSse:               assumeMcpSse,
 		AssumeMcpHttp:              assumeMcpHttp,
 		McpMode:                    req.McpMode,
+		PromptSuggestions:          req.PromptSuggestions,
+		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,
+		AuthPolicy:                 req.AuthPolicy,
 		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
@@ -307,7 +312,12 @@ func buildStandaloneCreateInstanceRequest(
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
+		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}
+}
+
+func effectiveEnv(overrides map[string]string) []string {
+	return acpcompat.MergeEnvMap(os.Environ(), overrides)
 }
 
 func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
@@ -322,13 +332,25 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	}
 	env["KANDEV_TASK_ID"] = req.TaskID
 	env["KANDEV_SESSION_ID"] = req.SessionID
-
-	// Create instance via control API
-	// Agent command is NOT set - workspace access only. Agent is started explicitly via agentctl client.
+	for key, value := range req.LocalRuntimeEnv {
+		env[key] = value
+	}
 	agentType := ""
 	if req.AgentConfig != nil {
 		agentType = req.AgentConfig.ID()
 	}
+	if req.AuthPolicy != nil && acpcompat.IsAntigravity(agentType) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolve the shared Antigravity home: %w", err)
+		}
+		if err := acpcompat.ValidateLocalAntigravityEnvSlice(effectiveEnv(env), home); err != nil {
+			return nil, err
+		}
+	}
+
+	// Create instance via control API
+	// Agent command is NOT set - workspace access only. Agent is started explicitly via agentctl client.
 	disableAskQuestion := !agents.SupportsInteractiveMCPTools(req.AgentConfig)
 	assumeMcpSse := false
 	assumeMcpHttp := false
@@ -341,6 +363,9 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 			requiresProcessKill = rt.RequiresProcessKill
 			stripEnv = rt.StripEnv
 		}
+	}
+	if req.AuthPolicy != nil && acpcompat.IsAntigravity(agentType) {
+		stripEnv = append(stripEnv, acpcompat.AntigravityCredentialEnvNames()...)
 	}
 
 	createReq := buildStandaloneCreateInstanceRequest(
@@ -863,28 +888,42 @@ func (r *StandaloneExecutor) buildRecoveredInstancesWithLease(
 		}
 
 		recovered = append(recovered, &ExecutorInstance{
-			InstanceID:             inst.ID,
-			TaskID:                 taskID,
-			SessionID:              sessionID,
-			AgentProfileID:         agentProfileID,
-			RuntimeName:            r.Name(),
-			Client:                 client,
-			StandaloneInstanceID:   inst.ID,
-			StandalonePort:         inst.Port,
-			WorkspacePath:          workspacePath,
-			Metadata:               metadata,
-			Env:                    inst.Env,
-			WorkspaceSourceRoots:   inst.WorkspaceSourceRoots,
-			ProviderSessionID:      inst.ProviderSessionID,
-			DeliveryStatus:         deliveryStatus,
-			DeliveryLegacyEvidence: legacyEvidence,
-			DeliveryRecoveryError:  deliveryErr,
+			InstanceID:                 inst.ID,
+			TaskID:                     taskID,
+			SessionID:                  sessionID,
+			AgentProfileID:             agentProfileID,
+			RuntimeName:                r.Name(),
+			Client:                     client,
+			StandaloneInstanceID:       inst.ID,
+			StandalonePort:             inst.Port,
+			WorkspacePath:              workspacePath,
+			Metadata:                   metadata,
+			Env:                        inst.Env,
+			WorkspaceSourceRoots:       inst.WorkspaceSourceRoots,
+			ProviderSessionID:          inst.ProviderSessionID,
+			CopilotNativeSessionEvents: inst.CopilotNativeSessionEvents,
+			DeliveryStatus:             deliveryStatus,
+			DeliveryLegacyEvidence:     legacyEvidence,
+			DeliveryRecoveryError:      deliveryErr,
 		})
 	}
 	return recovered
 }
 
 const durableDeliveryCapabilityName = "agent-delivery.v1"
+
+// SupportsCopilotNativeSessionEvents reports whether this runtime can collect
+// Copilot native events. A fresh standalone launch uses the same agentctl build,
+// while an adopted retained peer must advertise the optional capability.
+func (r *StandaloneExecutor) SupportsCopilotNativeSessionEvents() bool {
+	if r == nil {
+		return false
+	}
+	if !r.peerCapabilitiesSet {
+		return true
+	}
+	return r.peerHasCapability(acpcompat.CopilotNativeCompactionCapability)
+}
 
 func (r *StandaloneExecutor) peerHasCapability(name string) bool {
 	for _, capability := range r.peerCapabilities {

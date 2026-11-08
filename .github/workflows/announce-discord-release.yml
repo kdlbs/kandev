@@ -1,0 +1,146 @@
+name: Announce Discord release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Exact published Stable release tag, for example v1.2.3"
+        required: true
+        type: string
+      mode:
+        description: "Preview, create a new announcement, or update an existing message"
+        required: false
+        default: preview
+        type: choice
+        options: [preview, create, update]
+      message_id:
+        description: "Existing Discord message ID (update only)"
+        required: false
+        default: ""
+        type: string
+      acknowledge_create:
+        description: "Publication succeeded and no announcement exists for this release"
+        required: false
+        default: false
+        type: boolean
+  workflow_call:
+    inputs:
+      release_tag:
+        description: "Exact published Stable release tag, for example v1.2.3"
+        required: true
+        type: string
+      mode:
+        description: "Preview, create a new announcement, or update an existing message"
+        required: false
+        default: preview
+        type: string
+      message_id:
+        description: "Existing Discord message ID (update only)"
+        required: false
+        default: ""
+        type: string
+      acknowledge_create:
+        description: "Publication succeeded and no announcement exists for this release"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    name: Preview Discord announcement
+    if: ${{ inputs.mode == 'preview' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record workflow and helper identity
+        env:
+          GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
+          GITHUB_WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          echo "Workflow ref: $GITHUB_WORKFLOW_REF"
+          echo "Workflow SHA: $GITHUB_WORKFLOW_SHA"
+          HELPER_CHECKOUT_SHA=$(git rev-parse HEAD)
+          echo "Helper checkout SHA: $HELPER_CHECKOUT_SHA"
+          echo "HELPER_CHECKOUT_SHA=$HELPER_CHECKOUT_SHA" >> "$GITHUB_ENV"
+
+      - name: Build and process the announcement
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          ANNOUNCEMENT_MODE: ${{ inputs.mode }}
+          DISCORD_MESSAGE_ID: ${{ inputs.message_id }}
+          ACKNOWLEDGE_CREATE: ${{ inputs.acknowledge_create }}
+          ANNOUNCEMENT_OUTPUT_DIR: ${{ runner.temp }}/discord-release
+        run: python3 .github/scripts/announce-discord-release.py
+
+      - name: Retain preview and confirmed receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: discord-release-preview-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/discord-release
+          if-no-files-found: ignore
+          retention-days: 30
+
+  deliver:
+    name: Send Discord announcement
+    if: ${{ inputs.mode != 'preview' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    concurrency:
+      group: discord-release-announcements-${{ github.repository }}
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - name: Check out the workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record workflow and helper identity
+        env:
+          GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
+          GITHUB_WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          echo "Workflow ref: $GITHUB_WORKFLOW_REF"
+          echo "Workflow SHA: $GITHUB_WORKFLOW_SHA"
+          HELPER_CHECKOUT_SHA=$(git rev-parse HEAD)
+          echo "Helper checkout SHA: $HELPER_CHECKOUT_SHA"
+          echo "HELPER_CHECKOUT_SHA=$HELPER_CHECKOUT_SHA" >> "$GITHUB_ENV"
+
+      - name: Build and process the announcement
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          ANNOUNCEMENT_MODE: ${{ inputs.mode }}
+          DISCORD_MESSAGE_ID: ${{ inputs.message_id }}
+          ACKNOWLEDGE_CREATE: ${{ inputs.acknowledge_create }}
+          ANNOUNCEMENT_OUTPUT_DIR: ${{ runner.temp }}/discord-release
+          DISCORD_GENERAL_WEBHOOK_URL: ${{ secrets.DISCORD_GENERAL_WEBHOOK_URL }}
+        run: python3 .github/scripts/announce-discord-release.py
+
+      - name: Retain preview and confirmed receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: discord-release-deliver-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/discord-release
+          if-no-files-found: ignore
+          retention-days: 30
