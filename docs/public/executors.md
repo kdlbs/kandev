@@ -627,6 +627,42 @@ The runtime preflights the selected agent command and reports an installation hi
 
 Stop attempts to kill the session's remote `agentctl` and remove only the remote session-runtime directory, then closes forwarding and SSH. Terminal archive/delete stops run the profile cleanup script first; cleanup is best-effort, so a failure does not block controller teardown. Plain Stop skips cleanup and preserves the task workspace for resume. The task directory always remains and no background sweeper currently removes it. The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` also remain for later sessions. Periodically audit the remote process list, session directories, and `<workdir-root>/tasks/` after confirming no session needs the data. An explicit resume re-dials SSH and reuses a live recorded PID when possible; otherwise Kandev starts a fresh remote controller and re-runs preparation.
 
+#### Controller recovery after session-directory loss
+
+A managed Linux SSH launch records the controller's own process identity during
+its authenticated handshake. Kandev stores that receipt with the session's
+runtime record, outside the remote session directory, so it survives a backend
+restart and the loss of that directory. Each launch attempt receives a new
+generation, and a replacement controller never inherits a predecessor's
+receipt. macOS launches keep the guarded pidfile stop because the race-safe
+pidfd operation is Linux-only.
+
+When a stop on a Linux host finds the recorded controller still alive but its
+session directory gone, Kandev runs a private `agentctl ssh-reconcile` helper on
+the host before any signal. The helper opens a Linux pidfd, verifies the recorded process birth
+identity, launch generation, user, command, and workdir, confirms the directory
+is still absent, and sends SIGTERM only through that handle. It never removes a
+path, escalates to SIGKILL, or falls back to a numeric PID signal. A replaced
+process, replaced directory, or unreadable evidence leaves the recorded runtime
+and its cleanup inventory intact.
+
+Outcomes of that recovery:
+
+- **Stopped, or already absent:** cleanup settles the recorded owner.
+- **Legacy launch with no recorded receipt, or a receipt that conflicts with
+  the runtime record:** unresolved. Start the session again to record proof, or
+  inspect the original host and stop that exact process under your own change
+  control, then retry the same cleanup.
+- **Unsupported pidfd kernel, permission failure, or unreadable process
+  evidence:** unresolved. Fix host policy or SSH permissions and retry the same
+  cleanup.
+- **Controller still alive after SIGTERM:** unresolved. Kandev does not
+  force-kill it. Confirm the process on the host before any manual action.
+
+Reconciliation never publishes a bare-PID kill instruction. A directory that
+reappears during recovery is preserved untouched, and one completed target
+never erases another target that is still unresolved.
+
 If a settled session’s remote controller dies while its SSH connection still answers, idle reclaim can release its runtime reservation after confirming the recorded process is absent. An unreachable SSH connection or inconclusive process check leaves the reservation unchanged; idle reclaim does not reconnect to establish absence.
 
 Backend shutdown closes forwarding and SSH without killing remote processes or running cleanup.
@@ -684,6 +720,7 @@ Before deleting any environment, push or otherwise preserve uncommitted work. Pr
 - **Sprite cannot resume:** check provider token, quota, sandbox existence, expiration, and network policy; a missing sandbox triggers fresh provisioning.
 - **SSH handshake fails:** test ssh-agent/key access, host fingerprint, bastion trust, SFTP, TCP forwarding, and remote OS/architecture.
 - **SSH agent is missing:** run the reported `command -v` check through the configured login shell and install the agent on that host.
+- **SSH cleanup is unresolved after the session directory disappeared:** inspect the recorded controller on the original host. Linux launches that recorded launch proof are reconciled automatically. Legacy controllers, unsupported pidfd kernels, permission failures, and controllers still alive after SIGTERM stay unresolved and keep the cleanup inventory. Do not kill by bare PID; confirm the controller's command, workdir, and launch generation first, then retry the same cleanup.
 - **Disk usage grows:** inspect **Settings > System > Disk usage**, Docker containers, provider sandboxes, host worktrees, and retained SSH task directories before removal.
 
 Related guides: [Docker](docker.md), [Git Operations](git-operations.md), [Operations](operations.md), and [Windows Support](windows-support.md).

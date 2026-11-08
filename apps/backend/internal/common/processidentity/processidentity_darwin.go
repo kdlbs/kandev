@@ -34,6 +34,12 @@ func Capture(pid int) (Identity, error) {
 	}, nil
 }
 
+// InspectProcStat is only meaningful where a caller holds a procfs handle.
+// Darwin has no procfs, so this fails closed.
+func InspectProcStat(Identity, string, []byte) (State, error) {
+	return StateUnknown, ErrUnverifiableIdentity
+}
+
 func Inspect(identity Identity) (State, error) {
 	if err := identity.Validate(); err != nil {
 		return StateUnknown, err
@@ -165,6 +171,10 @@ func darwinSessionMemberGroup(proc unix.KinfoProc, sessionID int) (int, error) {
 	}
 	return int(proc.Eproc.Pgid), nil
 }
+
+// SessionMembersRemain cannot prove session membership on Darwin without a
+// procfs snapshot, so it fails closed.
+func SessionMembersRemain(Identity) (bool, error) { return false, ErrUnverifiableIdentity }
 
 // OwnedSessionTerminated verifies process and descendant termination without signaling them.
 func OwnedSessionTerminated(identity Identity) (bool, error) {

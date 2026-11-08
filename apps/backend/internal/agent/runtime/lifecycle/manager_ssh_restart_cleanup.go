@@ -61,6 +61,14 @@ func (m *Manager) stopPersistedSSHRecord(
 	}
 	defer activityLease.Release()
 
+	// AC-EXECUTORS-SSH-EXECUTOR-001.24: the recorded owner must still be the
+	// current owner before any external effect, and again before settlement.
+	// The receipt participates through the same metadata comparison that
+	// already fences a replaced execution.
+	if err := m.revalidatePersistedSSHStopOwner(ctx, row); err != nil {
+		return true, err
+	}
+
 	instance := &ExecutorInstance{
 		InstanceID:  row.AgentExecutionID,
 		TaskID:      row.TaskID,
@@ -72,7 +80,38 @@ func (m *Manager) stopPersistedSSHRecord(
 	if err := m.stopPersistedSSHBackend(ctx, instance, force); err != nil {
 		return true, fmt.Errorf("stop persisted SSH runtime: %w", err)
 	}
+	if err := m.revalidatePersistedSSHStopOwner(ctx, row); err != nil {
+		return true, err
+	}
 	return true, nil
+}
+
+// revalidatePersistedSSHStopOwner compares the row a stop was authorized
+// against the current inventory row for the same execution. A successor
+// invalidates settlement even when the predecessor process already exited.
+func (m *Manager) revalidatePersistedSSHStopOwner(ctx context.Context, row *models.ExecutorRunning) error {
+	if row == nil || row.AgentExecutionID == "" {
+		return errors.New("persisted SSH runtime identity is incomplete")
+	}
+	store, ok := m.runningWriter.(persistedSSHCleanupStore)
+	if !ok {
+		return errors.New("persisted runtime inventory is unavailable")
+	}
+	rows, err := store.ListExecutorsRunning(ctx)
+	if err != nil {
+		return fmt.Errorf("re-read persisted runtime inventory: %w", err)
+	}
+	current, err := uniquePersistedSSHExecution(rows, row.AgentExecutionID)
+	if err != nil {
+		return err
+	}
+	if current == nil || current.Runtime != agentruntime.RuntimeSSH {
+		return fmt.Errorf("persisted SSH runtime row changed before settlement: %w", errRemoteRecoveryFenced)
+	}
+	if !samePersistedSSHStopOwner(row, current) {
+		return fmt.Errorf("persisted SSH runtime owner changed before settlement: %w", errRemoteRecoveryFenced)
+	}
+	return nil
 }
 
 func loadPersistedSSHExecution(
