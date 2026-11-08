@@ -451,6 +451,30 @@ remain the authorization boundary for physical cleanup.
   transaction rolls back, and the verified pre-upgrade backup remains the
   recovery source.
 
+## Duplicate active environment healing
+
+A newer active environment timestamp alone does not authorize deleting an older
+active environment's canonical repository inventory or Git snapshot history.
+Before duplicate environment deletion, the same transaction transfers
+repository rows only when the server-stored worktree executor/profile/generation
+and workspace identity agree with the ready winner. An empty legacy workspace
+path requires exactly one repository path matching the winner. Row IDs,
+worktree/branch/source fields and lifecycle timestamps survive. An incoming
+inventory is transferred only into an empty target. Any existing winner row,
+including one transferred from an earlier loser in the transaction, stops
+healing and rolls back all earlier changes. Slot conflicts also roll back; no
+conflict-ignore or filesystem/Git operation occurs.
+
+Environment-owned Git snapshots retain their IDs and payloads while their owner
+reference follows the canonical environment. Only sessions actually referencing
+deleted environment IDs are relinked, including borrowers of another task;
+unrelated references are not guessed from task membership. Empty duplicate rows
+keep the existing healing behavior. Active recovery claims, immutable receipts,
+recovery artifacts/operations, checkout adoptions, Kubernetes state, and
+resource handles that cannot be safely rebound stop startup without deleting
+those rows. PostgreSQL uses the existing ownership-cutover advisory lock and
+exclusive table locks. Retired environments are outside this healing.
+
 ## Out of Scope
 
 - Reclaiming workspaces merely because their session reference count reaches
