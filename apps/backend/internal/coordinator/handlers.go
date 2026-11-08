@@ -360,6 +360,7 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 	var undoErr *UndoRefusal
 	var settingsErr *SettingsError
 	var deniedErr *PolicyDeniedError
+	var mergeConflict *MergeConflictError
 	if status, body, ok := automaticErrorResponse(err); ok {
 		c.JSON(status, body)
 		return
@@ -369,6 +370,8 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"code": undoErr.Code, "reason": undoErr.Reason})
 	case errors.As(err, &settingsErr):
 		c.JSON(http.StatusBadRequest, settingsErrorBody(settingsErr))
+	case errors.As(err, &mergeConflict):
+		c.JSON(http.StatusConflict, gin.H{errorKey: mergeConflict.Code, "code": mergeConflict.Code})
 	case errors.As(err, &deniedErr):
 		c.JSON(http.StatusConflict, gin.H{"error": "policy_denied", "action": deniedErr.Action})
 	case errors.As(err, &fieldErr):

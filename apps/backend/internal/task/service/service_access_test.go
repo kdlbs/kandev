@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -461,4 +462,27 @@ type brokenWorkspaceReader struct {
 
 func (r *brokenWorkspaceReader) GetWorkspace(context.Context, string) (*models.Workspace, error) {
 	return nil, r.err
+}
+
+func TestUserHasWorkspaceScope(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+	ctx := context.Background()
+	cases := []struct {
+		name, ws, user string
+		want           bool
+	}{
+		{"owner manages", "ws-a", "user-a", true},
+		{"stranger does not", "ws-a", "user-b", false},
+		{"empty user does not", "ws-a", "", false},
+	}
+	for _, tc := range cases {
+		got, err := svc.UserHasWorkspaceScope(ctx, tc.ws, tc.user, authz.ScopeWorkspaceManage)
+		if err != nil || got != tc.want {
+			t.Fatalf("%s: got %v err %v", tc.name, got, err)
+		}
+	}
+	if _, err := svc.UserHasWorkspaceScope(ctx, "ws-missing", "user-a", authz.ScopeWorkspaceManage); err == nil {
+		t.Fatal("a missing workspace must be an error, not a grant")
+	}
 }

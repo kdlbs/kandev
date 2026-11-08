@@ -33,7 +33,7 @@ func (s *Store) migrateMerge() error {
 	if _, err := s.db.Exec(dialect.MustRenderSchema(s.db.DriverName(), mergeConditionsSQL)); err != nil {
 		return fmt.Errorf("coordinator merge schema: %w", err)
 	}
-	return nil
+	return s.migrateMergePolicy()
 }
 
 // WakeTarget is one coordinator and the watched task a change wake is for.

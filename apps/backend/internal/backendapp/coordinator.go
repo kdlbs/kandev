@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/coordinator/changesource"
@@ -60,6 +61,9 @@ func initCoordinatorWiring(
 	}
 	svc.SetUndoDeps(&coordinatorUndoSeam{tasks: taskSvc, steps: workflowSvc})
 	changes := changesource.New(dbPool.Reader())
+	if taskSvc != nil {
+		svc.SetPrincipalValidator(managerPrincipals{tasks: taskSvc})
+	}
 	svc.SetChangeLinks(changes)
 	svc.SetChangeObserver(coordinator.NewChangeObserver(changes))
 	return svc, nil
@@ -419,4 +423,12 @@ func wireCoordinatorSpend(writer *taskusage.Writer, svc *coordinator.Service, ta
 	if writer != nil {
 		writer.SetRecordedObserver(svc.ObserveUsage)
 	}
+}
+
+// managerPrincipals revalidates an execution principal as a manager of the
+// workspace.
+type managerPrincipals struct{ tasks *taskservice.Service }
+
+func (m managerPrincipals) ManagerAuthorized(ctx context.Context, workspaceID, userID string) (bool, error) {
+	return m.tasks.UserHasWorkspaceScope(ctx, workspaceID, userID, authz.ScopeWorkspaceManage)
 }

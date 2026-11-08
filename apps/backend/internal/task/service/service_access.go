@@ -84,7 +84,27 @@ func callerSubject(ctx context.Context) authz.Subject {
 // which is exactly how a transient database error becomes a privilege
 // escalation.
 func (s *Service) workspaceDecision(ctx context.Context, workspace *models.Workspace) authz.Decision {
-	subject := callerSubject(ctx)
+	return s.workspaceDecisionFor(ctx, workspace, callerSubject(ctx))
+}
+
+// UserHasWorkspaceScope reports whether a named user holds a scope on the
+// workspace through ownership or membership. The user's organization role is
+// not known here, so a user who reaches the workspace only through an
+// organization role reads as not holding the scope. A failed lookup is an
+// error, never a grant.
+func (s *Service) UserHasWorkspaceScope(ctx context.Context, workspaceID, userID string, scope authz.Scope) (bool, error) {
+	if userID == "" {
+		return false, nil
+	}
+	workspace, err := s.workspaces.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return false, err
+	}
+	subject := authz.Subject{UserID: userID, OrgID: workspace.OrgID, TenancyEnforced: tenancyEnforced}
+	return s.workspaceDecisionFor(ctx, workspace, subject).Has(scope), nil
+}
+
+func (s *Service) workspaceDecisionFor(ctx context.Context, workspace *models.Workspace, subject authz.Subject) authz.Decision {
 	if subject.Unscoped {
 		return authz.ResolveWorkspace(subject, authz.WorkspaceRef{})
 	}

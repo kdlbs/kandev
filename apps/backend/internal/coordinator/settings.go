@@ -71,6 +71,10 @@ type settingsRequest struct {
 	policy   *Policy
 	watches  *watchesRequest
 	projects *projectsRequest
+	// merge lists repository policies; nil when the body names none.
+	merge        []RepoPolicyChange
+	haveRevision bool
+	revision     int
 }
 
 type watchesRequest struct {
@@ -396,6 +400,9 @@ func (s *Service) GetSettings(ctx context.Context, workspaceID, coordinatorID st
 		return nil, err
 	}
 	out.Projects, out.ProjectsConfig = s.projectsView(ctx, workspaceID, state)
+	if out.Merge, err = s.mergeView(ctx, workspaceID, coordinatorID); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -421,6 +428,9 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID, coordinatorID s
 	}
 	req, err := parseSettingsBody(body, s.phase3, s.phase31, s.answer)
 	if err != nil {
+		return nil, err
+	}
+	if err := parseMergeMember(body, s.merge, &req); err != nil {
 		return nil, err
 	}
 	live, err := s.liveProjectEntries(ctx, workspaceID, req.projects)
@@ -452,6 +462,9 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID, coordinatorID s
 		s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
 	}
 	result.Projects, result.ProjectsConfig = s.projectsView(ctx, workspaceID, projects)
+	if result.Merge, err = s.mergeView(ctx, workspaceID, coordinatorID); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
@@ -473,19 +486,15 @@ func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspa
 		return nil, projectState{}, settingsOutcome{}, err
 	}
 	stored, policyErr := ParsePolicy(row.PolicyJSON)
-	rawSet, err := s.store.LoadWatchSet(ctx, tx, coordinatorID)
-	if err != nil {
-		return nil, projectState{}, settingsOutcome{}, err
-	}
-	current, err := s.effectiveWatchState(ctx, tx, workspaceID, rawSet)
-	if err != nil {
-		return nil, projectState{}, settingsOutcome{}, err
-	}
-	newWatches, err := s.resolveWatches(ctx, tx, workspaceID, rawSet, current, req.watches)
+	current, newWatches, err := s.resolveWatchState(ctx, tx, workspaceID, coordinatorID, req.watches)
 	if err != nil {
 		return nil, projectState{}, settingsOutcome{}, err
 	}
 	storedProjects, newProjects, err := s.resolveProjectsFor(ctx, tx, coordinatorID, req.projects, live)
+	if err != nil {
+		return nil, projectState{}, settingsOutcome{}, err
+	}
+	mergePlan, err := s.planMergePolicies(ctx, tx, workspaceID, coordinatorID, req, row.Revision)
 	if err != nil {
 		return nil, projectState{}, settingsOutcome{}, err
 	}
@@ -497,18 +506,15 @@ func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspa
 		final = *req.policy
 	}
 	scope := watchesOr(current, newWatches)
-	if newProjects != nil {
-		storedProjects = *newProjects
-	}
-	result := &CoordinatorPhase2{
-		Policy:         CoordinatorPolicyDTO{Actions: publicPolicy(s.withEffectiveAnswer(final).Actions, s.answer), Eligibility: final.EffectiveEligibility()},
-		PolicyRevision: row.Revision,
-		Watches:        CoordinatorWatchDTO{Scope: scope.scope, WorkflowIDs: nonNilIDs(scope.ids)},
-	}
-	if !policyChanged && !watchesChanged && newProjects == nil {
+	storedProjects = projectsOr(storedProjects, newProjects)
+	result := s.settingsResult(final, scope, row.Revision)
+	if !policyChanged && !watchesChanged && newProjects == nil && !mergePlan.changed() {
 		return result, storedProjects, settingsOutcome{}, nil
 	}
 	if err := s.commitSettings(ctx, tx, workspaceID, coordinatorID, row.PolicyJSON, row.Revision+1, stored, final, policyChanged, watchesChanged, scope, newProjects); err != nil {
+		return nil, projectState{}, settingsOutcome{}, err
+	}
+	if err := s.store.writeRepoPolicyPlan(ctx, tx, coordinatorID, decidingUserID(ctx), mergePlan); err != nil {
 		return nil, projectState{}, settingsOutcome{}, err
 	}
 	result.PolicyRevision = row.Revision + 1
@@ -516,6 +522,38 @@ func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspa
 		zap.String("coordinator_id", coordinatorID), zap.Int("old_revision", row.Revision),
 		zap.Int("new_revision", row.Revision+1), zap.Bool("policy_changed", actionsChanged), zap.Bool("eligibility_changed", eligibilityChanged), zap.Bool("watches_changed", watchesChanged), zap.Bool("projects_changed", newProjects != nil))
 	return result, storedProjects, settingsOutcome{changed: true, resetConversation: actionsChanged || watchesChanged || newProjects != nil}, nil
+}
+
+// projectsOr returns the resolved project state when the request changes it.
+func projectsOr(stored projectState, resolved *projectState) projectState {
+	if resolved != nil {
+		return *resolved
+	}
+	return stored
+}
+
+// resolveWatchState returns the effective Watches and the resolved change the
+// request makes to them, nil when it makes none.
+func (s *Service) resolveWatchState(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, req *watchesRequest) (watchState, *watchState, error) {
+	rawSet, err := s.store.LoadWatchSet(ctx, tx, coordinatorID)
+	if err != nil {
+		return watchState{}, nil, err
+	}
+	current, err := s.effectiveWatchState(ctx, tx, workspaceID, rawSet)
+	if err != nil {
+		return watchState{}, nil, err
+	}
+	resolved, err := s.resolveWatches(ctx, tx, workspaceID, rawSet, current, req)
+	return current, resolved, err
+}
+
+// settingsResult is the settings answer for a policy, watch state and revision.
+func (s *Service) settingsResult(final Policy, scope watchState, revision int) *CoordinatorPhase2 {
+	return &CoordinatorPhase2{
+		Policy:         CoordinatorPolicyDTO{Actions: publicPolicy(s.withEffectiveAnswer(final).Actions, s.answer), Eligibility: final.EffectiveEligibility()},
+		PolicyRevision: revision,
+		Watches:        CoordinatorWatchDTO{Scope: scope.scope, WorkflowIDs: nonNilIDs(scope.ids)},
+	}
 }
 
 // watchesOr returns the resolved watches when the request changes them, else

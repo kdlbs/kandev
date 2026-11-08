@@ -96,6 +96,8 @@ type CoordinatorPhase2 struct {
 	// effective (ProjectsConfig).
 	Projects       *ProjectsDTO       `json:"projects,omitempty"`
 	ProjectsConfig *ProjectsConfigDTO `json:"projects_config,omitempty"`
+	// Merge is the repository merge policies; absent while merge is off.
+	Merge *MergeSettingsDTO `json:"merge,omitempty"`
 }
 
 // SummaryDTO is the list route's per-coordinator card summary, present only
