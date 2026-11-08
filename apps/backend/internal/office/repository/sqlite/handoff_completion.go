@@ -157,11 +157,13 @@ func reuseHandoffCompletionAnchorTx(
 	}
 	var comments []models.TaskComment
 	if err := tx.SelectContext(ctx, &comments, tx.Rebind(`
-  SELECT * FROM task_comments WHERE task_id = ? AND source = ? ORDER BY created_at, id
- `), comment.TaskID, comment.Source); err != nil {
+  SELECT id, body FROM task_comments
+  WHERE task_id = ? AND source = ? AND body LIKE ? ESCAPE '!'
+  ORDER BY created_at, id
+ `), comment.TaskID, comment.Source, handoffCompletionAnchorLikePattern(completionKey)); err != nil {
 		return fmt.Errorf("find historical handoff completion comment: %w", err)
 	}
-	anchor := "<!-- handoff-completion:" + completionKey + " -->"
+	anchor := handoffCompletionMarker(completionKey)
 	for _, existing := range comments {
 		if strings.Contains(existing.Body, anchor) {
 			comment.ID = existing.ID
@@ -169,6 +171,17 @@ func reuseHandoffCompletionAnchorTx(
 		}
 	}
 	return nil
+}
+
+func handoffCompletionMarker(completionKey string) string {
+	return "<!-- handoff-completion:" + completionKey + " -->"
+}
+
+func handoffCompletionAnchorLikePattern(completionKey string) string {
+	escaped := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(
+		handoffCompletionMarker(completionKey),
+	)
+	return "%" + escaped + "%"
 }
 
 func ensureHandoffCompletionCommentTx(ctx context.Context, tx *sqlx.Tx, comment *models.TaskComment) error {

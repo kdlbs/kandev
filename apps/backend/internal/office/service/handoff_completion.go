@@ -186,7 +186,7 @@ func handoffCompletionComment(source HandoffCompletionSource, key string) *model
 		AuthorType: participantTypeAgent,
 		AuthorID:   source.SourceAgentProfileID,
 		Body: fmt.Sprintf("Handed-off task %q (%s) reached state %s.",
-			source.DeliveryTitle, source.DeliveryTaskID, source.DeliveryState) + "\n<!-- handoff-completion:" + key + " -->",
+			source.DeliveryTitle, source.DeliveryTaskID, source.DeliveryState),
 		Source: handoffCompletionCommentSource,
 	}
 }
