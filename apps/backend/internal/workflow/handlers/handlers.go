@@ -235,6 +235,10 @@ func (h *Handlers) writeStepMutationError(c *gin.Context, err error) {
 	if writeNotVisible(c, err, "Step not found") {
 		return
 	}
+	if errors.Is(err, taskmodels.ErrExecutorMutationDenied) {
+		c.JSON(http.StatusForbidden, gin.H{"error": taskmodels.ErrExecutorMutationDenied.Error()})
+		return
+	}
 	msg := strings.ToLower(err.Error())
 	switch {
 	case errors.Is(err, models.ErrInvalidWorkflowStepOrder) || isStepValidationError(msg):

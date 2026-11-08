@@ -222,7 +222,11 @@ A scheduled/poller trigger uses the creator. Any editor changing prompt,
 repository, triggers, workflow steps, or executor selection on a source targeting
 private compute must be eligible for that resource; otherwise shared-workspace
 edit access could turn the creator into a deputy. Validate the resulting source,
-not only a changed executor field. A later editor never becomes creator
+not only a changed executor field. A retained task or active-session binding that
+admission refuses for every caller (a deleted profile, a retired executor, or a
+missing environment) confers no compute and does not block content edits; every
+binding that still resolves, and every newly written executor selection, keeps
+the strict check, and lookup failures fail closed. A later editor never becomes creator
 implicitly. Persist a separate trusted executor actor on tasks created before a
 session exists, and on admitted sessions. WIP queues and recovery restore that
 actor without reading caller-writable metadata. Preserve it in both the task
