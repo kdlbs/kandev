@@ -290,6 +290,23 @@ func waitForOwnedSessionExit(ctx context.Context, sessionID int, rootStartTime u
 	}
 }
 
+// BirthBootMatches reports whether the recorded birth token belongs to the
+// current kernel boot. A malformed or unsupported token is unverifiable.
+func BirthBootMatches(identity Identity) (bool, error) {
+	if err := identity.Validate(); err != nil {
+		return false, err
+	}
+	wantBoot, _, err := parseBirthToken(identity.BirthToken)
+	if err != nil {
+		return false, err
+	}
+	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return false, fmt.Errorf("read kernel boot identity: %w", err)
+	}
+	return strings.TrimSpace(string(boot)) == wantBoot, nil
+}
+
 // SessionMembersRemain reports whether a live process other than the recorded
 // root still belongs to the recorded session and started at or after it. A
 // controller started from a login shell shares that shell's session with the

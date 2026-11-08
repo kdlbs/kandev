@@ -944,8 +944,24 @@ func (r *SSHExecutor) StopInstance(ctx context.Context, instance *ExecutorInstan
 
 	// Use the same SSH client we used for CreateInstance — if it's still
 	// alive we can kill the remote agentctl gracefully; otherwise just drop
-	// the connection on the floor.
-	if classification == sshTransportAnswering && state.client != nil && !r.isTransportLost(state) {
+	// the connection on the floor. A receipt-bearing tracked session
+	// revalidates directory ownership and live launch proof first.
+	trackedStopHandled := false
+	if classification == sshTransportAnswering && state.client != nil &&
+		!r.isTransportLost(state) && state.launchReceipt != nil {
+		cleanupCtx, cancel := sshRemoteCleanupContext(ctx)
+		handled, verifyErr := r.verifyTrackedControllerBeforeStop(cleanupCtx, state.client, instance, state)
+		cancel()
+		if verifyErr != nil {
+			_ = r.closeClientOnce(state)
+			_ = state.runtimeAPITunnel.Close()
+			r.awaitProbeExit(state)
+			return verifyErr
+		}
+		trackedStopHandled = handled
+	}
+	if !trackedStopHandled && classification == sshTransportAnswering &&
+		state.client != nil && !r.isTransportLost(state) {
 		stopRemote := r.stopRemote
 		if stopRemote == nil {
 			stopRemote = stopRemoteAgentctl
@@ -1048,6 +1064,23 @@ func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance 
 			}
 			if result.Outcome != sshlaunch.OutcomeAbsent {
 				return fmt.Errorf("%w: %s (%s)", errSSHLaunchReconciliationUnresolved, result.Reason, result.Detail)
+			}
+			// Absence of the process is not ownership of the directory. Remove
+			// it only when its own pidfile still proves it belonged to this
+			// launch; an unowned replacement directory is preserved.
+			filePID, present, pidErr := readRemoteAgentctlPidFile(cleanupCtx, client, sessionDir)
+			if pidErr != nil {
+				return fmt.Errorf("ssh: read persisted session pidfile for instance %q: %w", instance.InstanceID, pidErr)
+			}
+			if !present {
+				r.logger.Info("preserving unowned SSH session directory after controller absence",
+					zap.String("instance_id", instance.InstanceID),
+					zap.String("session_dir", sessionDir))
+				return nil
+			}
+			if filePID != pid {
+				return fmt.Errorf("%w: remote pidfile names pid %d, not %d",
+					errSSHLaunchIdentityConflict, filePID, pid)
 			}
 		}
 		if _, _, err := runSSHCommand(cleanupCtx, client, removeRemoteDirCommand(sessionDir)); err != nil {
@@ -1181,6 +1214,17 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		return fmt.Errorf("ssh resume: probe agentctl pid %d: %w", pid, err)
 	}
 	if !alive {
+		if receipt != nil {
+			result := r.reconcileRecordedController(ctx, client, sshReconcileVerifyRequest(*receipt))
+			if err := result.Validate(); err != nil {
+				_ = client.Close()
+				return fmt.Errorf("ssh resume: verify absent controller: %w", err)
+			}
+			if result.Outcome != sshlaunch.OutcomeAbsent {
+				_ = client.Close()
+				return fmt.Errorf("%w: %s (%s)", errSSHLaunchReconciliationUnresolved, result.Reason, result.Detail)
+			}
+		}
 		_ = client.Close()
 		clearSSHResumeRuntimeMetadata(req.Metadata)
 		return nil
@@ -1355,6 +1399,15 @@ func (r *SSHExecutor) resetManagedBrokerResume(
 	if err := stopRemote(ctx, client, sessionDir, pid); err != nil {
 		return fmt.Errorf("ssh resume: stop stale broker-backed agentctl: %w", err)
 	}
+	if receipt != nil {
+		result := r.reconcileRecordedController(ctx, client, sshReconcileVerifyRequest(*receipt))
+		if err := result.Validate(); err != nil {
+			return fmt.Errorf("ssh resume: verify drained broker-backed controller: %w", err)
+		}
+		if result.Outcome != sshlaunch.OutcomeAbsent {
+			return fmt.Errorf("%w: %s (%s)", errSSHLaunchReconciliationUnresolved, result.Reason, result.Detail)
+		}
+	}
 	clearSSHResumeRuntimeMetadata(req.Metadata)
 	return nil
 }
@@ -1441,6 +1494,16 @@ func (r *SSHExecutor) resetTrackedManagedBrokerResume(
 		}
 		return stopRemote(cleanupCtx, state.client, state.remoteDir, state.pid)
 	})
+	if stopErr == nil && receipt != nil {
+		verifyCtx, cancel := sshRemoteCleanupContext(ctx)
+		result := r.reconcileRecordedController(verifyCtx, state.client, sshReconcileVerifyRequest(*receipt))
+		cancel()
+		if err := result.Validate(); err != nil {
+			stopErr = fmt.Errorf("verify drained broker-backed controller: %w", err)
+		} else if result.Outcome != sshlaunch.OutcomeAbsent {
+			stopErr = fmt.Errorf("%w: %s (%s)", errSSHLaunchReconciliationUnresolved, result.Reason, result.Detail)
+		}
+	}
 	// Step 5: close the session SSH client, through its once-guard.
 	_ = r.closeClientOnce(state)
 	_ = state.runtimeAPITunnel.Close()

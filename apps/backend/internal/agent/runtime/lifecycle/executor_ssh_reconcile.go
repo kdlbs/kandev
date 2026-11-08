@@ -79,6 +79,40 @@ func (r *SSHExecutor) reconcileLostSSHSessionDirectory(
 	}
 }
 
+// verifyTrackedControllerBeforeStop revalidates a live tracked session's
+// directory ownership and launch proof immediately before a destructive stop.
+// It returns handled=true when the directory-loss helper already settled the
+// controller, so the caller must skip its numeric stop.
+func (r *SSHExecutor) verifyTrackedControllerBeforeStop(
+	ctx context.Context,
+	client *ssh.Client,
+	instance *ExecutorInstance,
+	state *sshSessionState,
+) (bool, error) {
+	if state == nil || state.launchReceipt == nil || client == nil {
+		return false, nil
+	}
+	verify := r.verifyRemoteIdentity
+	if verify == nil {
+		verify = verifyRemoteAgentctlIdentity
+	}
+	isOurs, err := verify(ctx, client, state.pid, state.remoteDir, state.remoteTaskDir)
+	if err != nil {
+		if errors.Is(err, errSSHRemoteSessionDirectoryMissing) {
+			return true, r.reconcileLostSSHSessionDirectory(ctx, client, instance, state.pid, err)
+		}
+		return false, fmt.Errorf("ssh: verify tracked agentctl identity: %w", err)
+	}
+	if !isOurs {
+		return false, fmt.Errorf("%w: tracked session directory no longer matches the controller",
+			errSSHLaunchIdentityConflict)
+	}
+	if err := r.verifyRecordedControllerIdentity(ctx, client, *state.launchReceipt); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
 // verifyRecordedControllerIdentity re-proves a receipt-bearing controller
 // before a legacy destructive branch or a recovery adoption. Only a verified
 // live process permits the caller to proceed.

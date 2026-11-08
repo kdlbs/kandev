@@ -16,8 +16,8 @@ func expectedSSHLaunchOwner(metadata map[string]interface{}, taskID, sessionID s
 		TaskID:               strings.TrimSpace(taskID),
 		SessionID:            strings.TrimSpace(sessionID),
 		ControllerInstanceID: strings.TrimSpace(getMetadataString(metadata, MetadataKeySSHAgentctlInstanceID)),
-		TaskDir:              strings.TrimSpace(getMetadataString(metadata, MetadataKeySSHRemoteTaskDir)),
-		SessionDir:           strings.TrimSpace(getMetadataString(metadata, MetadataKeySSHRemoteSessionDir)),
+		TaskDir:              getMetadataString(metadata, MetadataKeySSHRemoteTaskDir),
+		SessionDir:           getMetadataString(metadata, MetadataKeySSHRemoteSessionDir),
 		Target: sshlaunch.TargetBinding{
 			Host:            strings.TrimSpace(getMetadataString(metadata, MetadataKeySSHHost)),
 			Port:            strings.TrimSpace(getMetadataString(metadata, MetadataKeySSHPort)),

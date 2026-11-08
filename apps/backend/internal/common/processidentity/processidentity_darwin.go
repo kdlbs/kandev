@@ -172,6 +172,9 @@ func darwinSessionMemberGroup(proc unix.KinfoProc, sessionID int) (int, error) {
 	return int(proc.Eproc.Pgid), nil
 }
 
+// BirthBootMatches has no kernel boot identity on Darwin, so it fails closed.
+func BirthBootMatches(Identity) (bool, error) { return false, ErrUnverifiableIdentity }
+
 // SessionMembersRemain cannot prove session membership on Darwin without a
 // procfs snapshot, so it fails closed.
 func SessionMembersRemain(Identity) (bool, error) { return false, ErrUnverifiableIdentity }

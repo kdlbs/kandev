@@ -158,7 +158,22 @@ Implemented.
   normal reattach and the managed-broker refresh branch. It re-proves the live
   controller through `verify` before storing the session or running the
   broker-refresh stop, so conflicting proof cannot reach a forwarder,
-  adoption, or a numeric signal.
+  adoption, or a numeric signal. When the controller is absent, proof is
+  cleared only after the verify operation confirms its session children
+  drained; otherwise the metadata is retained and replacement is refused.
+- A tracked receipt-bearing session revalidates directory ownership and live
+  launch proof immediately before its numeric stop. A missing directory routes
+  through the pidfd helper; conflicting process or directory evidence returns
+  unresolved without signalling or removing anything.
+- A receipt-bearing abandoned record removes its session directory only when
+  the directory's own pidfile names the recorded PID. An unowned replacement
+  directory is preserved.
+- Helper admission also checks the live effective UID, rejects symlinked
+  ancestors between the session path and the task directory, and treats a
+  birth token from a previous boot as an identity conflict even when the PID is
+  absent.
+- A failed archive-delta teardown keeps its pending recovery entry and guard
+  retryable, including when the pinned snapshot is already archive-cancelled.
 - The helper reports `stopped` or `absent` only after every process in the
   recorded launch session is gone. `processidentity.SessionMembersRemain`
   supplies that post-exit evidence; a surviving child, including on a retry
@@ -214,6 +229,17 @@ Tests (all passing):
 - `TestSSHResumeRejectsReceiptPIDMismatch`
 - `TestSSHResumeRejectsUnverifiedLiveController`
 - `TestSSHBrokerResumeVerifiesControllerBeforeStop`
+- `TestSSHResumeRetainsProofWhenAbsentChildUnconfirmed`
+- `TestSSHBrokerResumeRetainsProofWhenChildUnconfirmed`
+- `TestSSHTrackedStopRevalidation`
+- `TestSSHTrackedStopRevalidationAllowsVerifiedLegacyStop`
+- `TestSSHAbandonedReceiptRequiresPidfileProofBeforeRemoval`
+- `TestSSHArchiveStopFailureRetainsPendingEntry`
+- `TestSSHStopAllowsArchiveRetryWithPinnedCancelledSnapshot`
+- `TestSSHRecoveryReportsAbsentController`
+- `TestReconcileRejectsSymlinkedSessionAncestors`
+- `TestBirthBootMatches`
+- `TestParseEffectiveUID`
 - `TestReconcileRetainsSurvivingChild` (including retry after leader exit)
 - `TestReconcileStopsAfterChildDrainage`
 - `TestReconcileVerifyModeChecksIdentityWithoutSignalling`

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -16,6 +17,9 @@ import (
 // @covers AC-EXECUTORS-SSH-EXECUTOR-001.18
 // @covers AC-EXECUTORS-SSH-EXECUTOR-001.24
 func TestHandshakeSSHLaunchReceiptBindsSelfAndOwner(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("bound SSH launch proof is issued only for Linux remotes")
+	}
 	generation, err := sshlaunch.NewGeneration()
 	if err != nil {
 		t.Fatalf("NewGeneration: %v", err)

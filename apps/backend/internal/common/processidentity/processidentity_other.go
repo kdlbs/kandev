@@ -20,6 +20,9 @@ func TerminateOwnedSession(context.Context, Identity, time.Duration) error {
 	return ErrUnverifiableIdentity
 }
 
+// BirthBootMatches fails closed where no kernel boot identity is available.
+func BirthBootMatches(Identity) (bool, error) { return false, ErrUnverifiableIdentity }
+
 // SessionMembersRemain fails closed when session membership cannot be inspected.
 func SessionMembersRemain(Identity) (bool, error) { return false, ErrUnverifiableIdentity }
 

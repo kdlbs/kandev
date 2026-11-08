@@ -95,3 +95,58 @@ func TestSSHBrokerResumeVerifiesControllerBeforeStop(t *testing.T) {
 	require.ErrorIs(t, err, errSSHLaunchReconciliationUnresolved)
 	require.Zero(t, stopCalls, "the broker refresh must not signal an unverified controller")
 }
+
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.22
+func TestSSHResumeRetainsProofWhenAbsentChildUnconfirmed(t *testing.T) {
+	owner := testSSHLaunchOwner()
+	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+		sshScriptRule{match: `printf %s "$HOME"`, result: sshOut("/home/kandev")},
+		sshScriptRule{match: "kill -0 4242", result: sshFail("no such process")},
+	).handle)
+	receipt := testSSHLaunchReceiptForServer(t, server, 4242)
+	metadata := resumeMetadataForTest(t, server, receipt)
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
+		return sshlaunch.Unresolved(sshlaunch.ReasonTerminationUnconfirmed, "a session child survived the controller")
+	}
+	err := exec.ResumeRemoteInstance(context.Background(), &ExecutorCreateRequest{
+		InstanceID: owner.ControllerInstanceID, TaskID: owner.TaskID, SessionID: owner.SessionID,
+		AuthToken: "token", Metadata: metadata,
+	})
+	require.ErrorIs(t, err, errSSHLaunchReconciliationUnresolved)
+	require.Contains(t, metadata, MetadataKeySSHLaunchReceipt,
+		"unconfirmed child drainage must preserve the proof and prevent replacement")
+}
+
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.19
+func TestSSHBrokerResumeRetainsProofWhenChildUnconfirmed(t *testing.T) {
+	owner := testSSHLaunchOwner()
+	server := newFakeSSHServer(t, nil)
+	receipt := testSSHLaunchReceiptForServer(t, server, 4242)
+	metadata := resumeMetadataForTest(t, server, receipt)
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec.brokerPreflight = func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error {
+		return nil
+	}
+	verifyCalls := 0
+	exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
+		verifyCalls++
+		if verifyCalls == 1 {
+			return sshlaunch.ReconcileResult{Outcome: sshlaunch.OutcomeVerified}
+		}
+		return sshlaunch.Unresolved(sshlaunch.ReasonTerminationUnconfirmed, "a session child survived the controller")
+	}
+	exec.stopRemote = func(context.Context, *ssh.Client, string, int) error { return nil }
+	err := exec.ResumeRemoteInstance(context.Background(), &ExecutorCreateRequest{
+		InstanceID: owner.ControllerInstanceID, TaskID: owner.TaskID, SessionID: owner.SessionID,
+		Metadata: metadata,
+		Env: map[string]string{
+			githubauth.CredentialBrokerURLEnv: "https://broker.example.test",
+			githubauth.CredentialLeaseEnv:     "lease-1",
+		},
+	})
+	require.ErrorIs(t, err, errSSHLaunchReconciliationUnresolved)
+	require.Equal(t, 2, verifyCalls, "the post-stop absence check must run after verified teardown")
+	require.Contains(t, metadata, MetadataKeySSHLaunchReceipt,
+		"unconfirmed child drainage must preserve the proof and prevent replacement")
+}

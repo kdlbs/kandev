@@ -213,6 +213,12 @@ were fixed and covered:
 5. The E2E waits for durable settlement or target-correlated refusal evidence
    and keeps fixture cleanup in `finally`.
 
+A second review round added admission hardening and retry safety: live
+effective-UID checks, symlinked-ancestor refusal, previous-boot conflict
+handling, tracked-stop revalidation, drainage-gated resume clearing,
+pidfile-proven directory removal, and retryable archive settlement. Each has a
+focused regression in Task 02's results.
+
 ## Risks
 
 - Linux pidfd policy and procfs visibility vary. Unsupported or denied access

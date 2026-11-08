@@ -246,6 +246,7 @@ func TestReconcileRejectsIdentityChanges(t *testing.T) {
 		},
 		"workdir": func(receipt *sshlaunch.Receipt) {
 			receipt.Owner.TaskDir = filepath.Join(taskDir, "other")
+			receipt.Owner.SessionDir = filepath.Join(receipt.Owner.TaskDir, "sessions", "session-1")
 		},
 		"uid": func(receipt *sshlaunch.Receipt) {
 			receipt.UID = os.Geteuid() + 1
@@ -254,6 +255,7 @@ func TestReconcileRejectsIdentityChanges(t *testing.T) {
 			if err := os.MkdirAll(receipt.Owner.SessionDir, 0o755); err != nil {
 				t.Fatalf("create replacement session directory: %v", err)
 			}
+			t.Cleanup(func() { _ = os.RemoveAll(receipt.Owner.SessionDir) })
 		},
 	}
 	for name, mutate := range cases {
@@ -349,24 +351,25 @@ func TestReconcileCommandLineAndMarkerParsers(t *testing.T) {
 
 func TestDirectoryAbsenceFailure(t *testing.T) {
 	root := t.TempDir()
-	missing := filepath.Join(root, "sessions", "session-1")
-	if _, ok := directoryAbsenceFailure(missing); !ok {
+	taskDir := filepath.Join(root, "task")
+	missing := filepath.Join(taskDir, "sessions", "session-1")
+	if _, ok := directoryAbsenceFailure(missing, taskDir); !ok {
 		t.Fatal("a positively absent session path was refused")
 	}
-	present := filepath.Join(root, "present")
+	present := filepath.Join(taskDir, "present")
 	if err := os.MkdirAll(present, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if failure, ok := directoryAbsenceFailure(present); ok {
+	if failure, ok := directoryAbsenceFailure(present, taskDir); ok {
 		t.Fatal("a present session path was accepted")
 	} else if failure.Reason != sshlaunch.ReasonIdentityConflict {
 		t.Fatalf("reason = %q, want identity_conflict", failure.Reason)
 	}
-	file := filepath.Join(root, "file")
+	file := filepath.Join(taskDir, "file")
 	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	if failure, ok := directoryAbsenceFailure(file); ok {
+	if failure, ok := directoryAbsenceFailure(file, taskDir); ok {
 		t.Fatal("a present file was accepted as an absent directory")
 	} else if failure.Reason != sshlaunch.ReasonIdentityConflict {
 		t.Fatalf("reason = %q, want identity_conflict", failure.Reason)
@@ -534,4 +537,69 @@ func waitProcessGone(t *testing.T, pid int) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("process %d did not exit", pid)
+}
+
+func TestParseEffectiveUID(t *testing.T) {
+	status := []byte("Name:\tpython3\nUid:\t1000\t1001\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\n")
+	uid, err := parseEffectiveUID(status)
+	if err != nil || uid != 1001 {
+		t.Fatalf("parseEffectiveUID = (%d, %v), want (1001, nil)", uid, err)
+	}
+	for _, invalid := range [][]byte{
+		[]byte("Name:\tpython3\n"),
+		[]byte("Uid:\t1000\n"),
+		[]byte("Uid:\t1000\tnot-a-uid\t1000\t1000\n"),
+	} {
+		if _, err := parseEffectiveUID(invalid); err == nil {
+			t.Fatalf("parseEffectiveUID(%q) accepted an invalid status", invalid)
+		}
+	}
+}
+
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.20
+func TestReconcileRejectsSymlinkedSessionAncestors(t *testing.T) {
+	realTask := t.TempDir()
+	linkTask := filepath.Join(t.TempDir(), "task-link")
+	if err := os.Symlink(realTask, linkTask); err != nil {
+		t.Fatalf("symlink task dir: %v", err)
+	}
+	sessionDir := filepath.Join(linkTask, "sessions", "session-1")
+	receipt := sshlaunch.Receipt{
+		Version:    sshlaunch.Version,
+		Generation: newGeneration(t),
+		Owner: sshlaunch.Owner{
+			TaskID: "task-1", SessionID: "session-1", ControllerInstanceID: "instance-1",
+			TaskDir: linkTask, SessionDir: sessionDir,
+			Target: sshlaunch.TargetBinding{
+				Host: "runner.example.test", Port: "22", User: "kandev", HostFingerprint: "SHA256:test",
+			},
+		},
+		UID: os.Geteuid(),
+		Process: processidentity.Identity{
+			PID: 4242, GroupID: 4242, SessionID: 4242, BirthToken: "linux:test-boot:1",
+		},
+	}
+	result := Reconcile(context.Background(), sshlaunch.ReconcileRequest{
+		Version: sshlaunch.Version, Mode: sshlaunch.ReconcileModeTerminate, Receipt: receipt,
+	})
+	if result.Outcome != sshlaunch.OutcomeUnresolved || result.Reason != sshlaunch.ReasonIdentityConflict {
+		t.Fatalf("symlinked task dir result = %#v, want unresolved identity_conflict", result)
+	}
+
+	realSessions := filepath.Join(realTask, "sessions")
+	if err := os.MkdirAll(realSessions, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	linkedSessions := filepath.Join(realTask, "linked-sessions")
+	if err := os.Symlink(realSessions, linkedSessions); err != nil {
+		t.Fatalf("symlink sessions: %v", err)
+	}
+	receipt.Owner.TaskDir = realTask
+	receipt.Owner.SessionDir = filepath.Join(linkedSessions, "session-1")
+	result = Reconcile(context.Background(), sshlaunch.ReconcileRequest{
+		Version: sshlaunch.Version, Mode: sshlaunch.ReconcileModeTerminate, Receipt: receipt,
+	})
+	if result.Outcome != sshlaunch.OutcomeUnresolved || result.Reason != sshlaunch.ReasonIdentityConflict {
+		t.Fatalf("symlinked sessions dir result = %#v, want unresolved identity_conflict", result)
+	}
 }

@@ -99,9 +99,21 @@ func (r *SSHExecutor) prepareSSHRecovery(
 		// The legacy verifier checks the command and pidfile only. A recycled
 		// PID with the same task command and a recreated pidfile must not be
 		// adopted, so re-prove the live birth identity and generation first.
-		if err := r.verifyRecordedControllerIdentity(recoveryCtx, client, *identity.launchReceipt); err != nil {
+		result := r.reconcileRecordedController(recoveryCtx, client, sshReconcileVerifyRequest(*identity.launchReceipt))
+		if err := result.Validate(); err != nil {
 			r.logger.Debug("ssh recovery rejected controller launch proof",
 				zap.String("session_id", record.SessionID), zap.Error(err))
+			return nil, nil, RecoveryOutcomeUnknown
+		}
+		switch result.Outcome {
+		case sshlaunch.OutcomeVerified:
+		case sshlaunch.OutcomeAbsent:
+			// The recorded controller and its session children are gone; a
+			// resumable session may start a fresh controller.
+			return nil, nil, RecoveryOutcomeNoMatchingInstance
+		default:
+			r.logger.Debug("ssh recovery could not verify controller launch proof",
+				zap.String("session_id", record.SessionID), zap.String("reason", string(result.Reason)))
 			return nil, nil, RecoveryOutcomeUnknown
 		}
 	}

@@ -58,7 +58,7 @@ func reconcileProcess(ctx context.Context, receipt sshlaunch.Receipt, mode sshla
 	beforeSignalRecheck()
 	// Recheck the disposable path immediately before signalling: a directory
 	// that appeared after the first inspection must survive untouched.
-	if failure, ok := directoryAbsenceFailure(receipt.Owner.SessionDir); !ok {
+	if failure, ok := directoryAbsenceFailure(receipt.Owner.SessionDir, receipt.Owner.TaskDir); !ok {
 		return failure
 	}
 	if err := unix.PidfdSendSignal(handle.pidfd, syscall.SIGTERM, nil, 0); err != nil {
@@ -77,6 +77,22 @@ func reconcileProcess(ctx context.Context, receipt sshlaunch.Receipt, mode sshla
 // child it launched are gone. A surviving child keeps the owner unresolved so
 // the cleanup inventory is not released under a live agent process.
 func absentOutcome(receipt sshlaunch.Receipt) sshlaunch.ReconcileResult {
+	// A recorded birth token from a previous boot cannot describe a process on
+	// this host. The owner is unresolved rather than absent because the session
+	// path may now belong to a replacement launched after the reboot.
+	matches, err := processidentity.BirthBootMatches(receipt.Process)
+	if err != nil {
+		if errors.Is(err, processidentity.ErrUnverifiableIdentity) {
+			return sshlaunch.Unresolved(sshlaunch.ReasonUnsupportedIdentity,
+				"recorded launch boot identity is unavailable")
+		}
+		return sshlaunch.Unresolved(sshlaunch.ReasonTerminationUnconfirmed,
+			"recorded launch boot identity could not be verified")
+	}
+	if !matches {
+		return sshlaunch.Unresolved(sshlaunch.ReasonIdentityConflict,
+			"recorded launch belongs to a previous boot")
+	}
 	return settledOutcome(receipt, sshlaunch.OutcomeAbsent)
 }
 
@@ -180,6 +196,17 @@ func (h *processHandle) admit(receipt sshlaunch.Receipt) (sshlaunch.ReconcileRes
 	if !commandLineMatches(cmdline, receipt.Owner.TaskDir) {
 		return sshlaunch.Unresolved(sshlaunch.ReasonIdentityConflict, "process command line does not match the recorded owner"), false
 	}
+	statusData, err := h.readProcFile("status")
+	if err != nil {
+		return sshlaunch.Unresolved(sshlaunch.ReasonProbeUnknown, "process credentials could not be read"), false
+	}
+	effectiveUID, err := parseEffectiveUID(statusData)
+	if err != nil {
+		return sshlaunch.Unresolved(sshlaunch.ReasonProbeUnknown, "process credentials could not be parsed"), false
+	}
+	if effectiveUID != receipt.UID {
+		return sshlaunch.Unresolved(sshlaunch.ReasonIdentityConflict, "process effective uid does not match the receipt"), false
+	}
 	environ, err := h.readProcFile("environ")
 	if err != nil {
 		return sshlaunch.Unresolved(sshlaunch.ReasonProbeUnknown, "process environment could not be read"), false
@@ -188,6 +215,27 @@ func (h *processHandle) admit(receipt sshlaunch.Receipt) (sshlaunch.ReconcileRes
 		return sshlaunch.Unresolved(sshlaunch.ReasonIdentityConflict, "process launch generation does not match the receipt"), false
 	}
 	return sshlaunch.ReconcileResult{}, true
+}
+
+// parseEffectiveUID reads the effective UID from a procfs status payload.
+// Format: "Uid:	<real>	<effective>	<saved>	<filesystem>".
+func parseEffectiveUID(data []byte) (int, error) {
+	for _, line := range strings.Split(string(data), "\n") {
+		value, ok := strings.CutPrefix(line, "Uid:")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(value)
+		if len(fields) < 2 {
+			return 0, errors.New("status Uid line is incomplete")
+		}
+		uid, err := strconv.Atoi(fields[1])
+		if err != nil || uid < 0 {
+			return 0, fmt.Errorf("status effective uid is invalid: %w", err)
+		}
+		return uid, nil
+	}
+	return 0, errors.New("status has no Uid line")
 }
 
 // readProcFile reads one entry through the opened process-directory handle, so

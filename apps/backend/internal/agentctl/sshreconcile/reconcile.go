@@ -28,7 +28,7 @@ func Reconcile(ctx context.Context, req sshlaunch.ReconcileRequest) sshlaunch.Re
 		return sshlaunch.Unresolved(sshlaunch.ReasonProbeUnknown, "launch receipt is incomplete")
 	}
 	if req.Mode.Effective() == sshlaunch.ReconcileModeTerminate {
-		if failure, ok := directoryAbsenceFailure(req.Receipt.Owner.SessionDir); !ok {
+		if failure, ok := directoryAbsenceFailure(req.Receipt.Owner.SessionDir, req.Receipt.Owner.TaskDir); !ok {
 			return failure
 		}
 	}
@@ -38,7 +38,7 @@ func Reconcile(ctx context.Context, req sshlaunch.ReconcileRequest) sshlaunch.Re
 // directoryAbsenceFailure admits only a positively absent canonical session
 // path. A present directory, file, or symlink refuses the terminate route
 // before any signal, and an unreadable path is unknown rather than absent.
-func directoryAbsenceFailure(sessionDir string) (sshlaunch.ReconcileResult, bool) {
+func directoryAbsenceFailure(sessionDir, taskDir string) (sshlaunch.ReconcileResult, bool) {
 	if strings.TrimSpace(sessionDir) == "" {
 		return sshlaunch.Unresolved(sshlaunch.ReasonProbeUnknown, "session directory is not recorded"), false
 	}
@@ -47,13 +47,44 @@ func directoryAbsenceFailure(sessionDir string) (sshlaunch.ReconcileResult, bool
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return sshlaunch.Unresolved(sshlaunch.ReasonProbeUnknown, "session directory could not be inspected"), false
 	}
-	parent := filepath.Dir(sessionDir)
-	if info, err := os.Lstat(parent); err == nil {
-		if !info.IsDir() {
-			return sshlaunch.Unresolved(sshlaunch.ReasonIdentityConflict, "session parent is not a directory"), false
+	return sessionAncestorFailure(sessionDir, taskDir)
+}
+
+// sessionAncestorFailure rejects a symlinked or non-directory ancestor between
+// the absent session path and the recorded task directory. A symlink can point
+// a canonical-looking session path at a replacement tree, so the terminate
+// route refuses it before any signal.
+func sessionAncestorFailure(sessionDir, taskDir string) (sshlaunch.ReconcileResult, bool) {
+	taskDir = filepath.Clean(strings.TrimSpace(taskDir))
+	sessionDir = filepath.Clean(strings.TrimSpace(sessionDir))
+	if taskDir == "" || taskDir == "." {
+		return sshlaunch.Unresolved(sshlaunch.ReasonProbeUnknown, "task directory is not recorded"), false
+	}
+	rel, err := filepath.Rel(taskDir, sessionDir)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return sshlaunch.Unresolved(sshlaunch.ReasonProbeUnknown, "session path is outside the recorded task directory"), false
+	}
+	for dir := filepath.Dir(sessionDir); ; dir = filepath.Dir(dir) {
+		info, statErr := os.Lstat(dir)
+		if errors.Is(statErr, fs.ErrNotExist) {
+			break
 		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return sshlaunch.Unresolved(sshlaunch.ReasonProbeUnknown, "session parent could not be inspected"), false
+		if statErr != nil {
+			return sshlaunch.Unresolved(sshlaunch.ReasonProbeUnknown, "session ancestor could not be inspected"), false
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return sshlaunch.Unresolved(sshlaunch.ReasonIdentityConflict, "session ancestor is a symlink"), false
+		}
+		if !info.IsDir() {
+			return sshlaunch.Unresolved(sshlaunch.ReasonIdentityConflict, "session ancestor is not a directory"), false
+		}
+		if filepath.Clean(dir) == taskDir {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
 	}
 	return sshlaunch.ReconcileResult{}, true
 }

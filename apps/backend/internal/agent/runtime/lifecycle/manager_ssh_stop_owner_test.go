@@ -230,6 +230,17 @@ func TestSSHStopUsesExactPersistedOwnerAfterSnapshotFence(t *testing.T) {
 }
 
 // @covers AC-EXECUTORS-SSH-EXECUTOR-001.24
+func TestSSHStopAllowsArchiveRetryWithPinnedCancelledSnapshot(t *testing.T) {
+	row := testSSHStopRow(t, "execution-1")
+	entry := testArchiveFencedEntry(row)
+	entry.snapshot = archivedSnapshot(entry.snapshot)
+	handled, stopped, err := runArchiveStopFallback(t, entry, entry.snapshot, row)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.Equal(t, 1, *stopped, "a retry whose pinned snapshot is already archive-cancelled must remain stoppable")
+}
+
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.24
 func TestSSHStopRejectsUnrelatedSnapshotChanges(t *testing.T) {
 	cases := map[string]func(*RemoteRecoverySnapshot){
 		"environment ownership generation": func(snapshot *RemoteRecoverySnapshot) {
@@ -289,4 +300,29 @@ func TestSSHStopRejectsSuccessorAfterSnapshotFence(t *testing.T) {
 	)
 	require.False(t, handled)
 	require.ErrorIs(t, err, errRemoteRecoveryFenced)
+}
+
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.23
+func TestSSHArchiveStopFailureRetainsPendingEntry(t *testing.T) {
+	row := testSSHStopRow(t, "execution-1")
+	entry := testArchiveFencedEntry(row)
+	manager := &Manager{
+		runningWriter:         &sshStopOwnerInventory{rows: []*models.ExecutorRunning{row}},
+		workspaceInfoProvider: fixedRemoteRecoverySnapshotProvider{snapshot: archivedSnapshot(entry.snapshot)},
+		logger:                newNopLogger(t),
+	}
+	manager.remoteRecoveryPending = map[string]*remoteRecoveryRetry{row.SessionID: entry}
+	_, err := manager.stopPersistedRemoteOwnerForRuntime(
+		context.Background(), entry, StopReasonCascadeArchive, true,
+		func(context.Context, string, string, bool) (bool, error) {
+			t.Fatal("the archive delta must use the persisted record path")
+			return false, nil
+		},
+		func(context.Context, *models.ExecutorRunning, string, bool) (bool, error) {
+			return true, errors.New("teardown failed")
+		},
+	)
+	require.Error(t, err)
+	require.Same(t, entry, manager.pendingRemoteRecoveryForSession(row.SessionID),
+		"a failed teardown must keep the pending entry and its recovery guard retryable")
 }

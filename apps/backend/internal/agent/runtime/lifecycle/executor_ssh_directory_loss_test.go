@@ -374,3 +374,74 @@ func TestSSHAbandonedReceiptRetainsSurvivingChildEvidence(t *testing.T) {
 		}
 	}
 }
+
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.22
+func TestSSHAbandonedReceiptRequiresPidfileProofBeforeRemoval(t *testing.T) {
+	owner := testSSHLaunchOwner()
+
+	t.Run("pidfile names the recorded launch", func(t *testing.T) {
+		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+			sshScriptRule{match: "ps -p 4242 -o command=", result: sshFail("")},
+			sshScriptRule{match: "cat -- '" + owner.SessionDir + "/agentctl.pid'", result: sshOut("4242")},
+			sshScriptRule{match: "rm -rf '" + owner.SessionDir + "'", result: sshOK},
+		).handle)
+		receipt := testSSHLaunchReceiptForServer(t, server, 4242)
+		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
+			return sshlaunch.ReconcileResult{Outcome: sshlaunch.OutcomeAbsent}
+		}
+		err := exec.StopInstance(context.Background(), &ExecutorInstance{
+			InstanceID: "instance-1", TaskID: owner.TaskID, SessionID: owner.SessionID,
+			StopReason: "task cleanup", Metadata: sshLaunchStopMetadata(t, server, receipt),
+		}, true)
+		require.NoError(t, err)
+		_, removed := server.lastCommandContaining("rm -rf '" + owner.SessionDir + "'")
+		require.True(t, removed, "a pidfile that names the recorded launch proves directory ownership")
+	})
+
+	t.Run("no pidfile leaves the unowned directory", func(t *testing.T) {
+		server := newFakeSSHServer(t, newSSHScriptedHandler(t,
+			sshScriptRule{match: "ps -p 4242 -o command=", result: sshFail("")},
+			sshScriptRule{match: "cat -- '" + owner.SessionDir + "/agentctl.pid'", result: sshFail("")},
+			sshScriptRule{match: "test -d '" + owner.SessionDir + "'", result: sshFail("")},
+		).handle)
+		receipt := testSSHLaunchReceiptForServer(t, server, 4242)
+		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
+			return sshlaunch.ReconcileResult{Outcome: sshlaunch.OutcomeAbsent}
+		}
+		err := exec.StopInstance(context.Background(), &ExecutorInstance{
+			InstanceID: "instance-1", TaskID: owner.TaskID, SessionID: owner.SessionID,
+			StopReason: "task cleanup", Metadata: sshLaunchStopMetadata(t, server, receipt),
+		}, true)
+		require.NoError(t, err)
+		for _, command := range server.commands() {
+			if strings.Contains(command, "rm -rf") {
+				t.Fatalf("an unowned session directory was removed: %q", command)
+			}
+		}
+	})
+}
+
+// @covers AC-EXECUTORS-SSH-EXECUTOR-001.22
+func TestSSHRecoveryReportsAbsentController(t *testing.T) {
+	owner := testSSHLaunchOwner()
+	server := newFakeSSHServer(t, nil)
+	receipt := testSSHLaunchReceiptForServer(t, server, 4242)
+	metadata := sshLaunchStopMetadata(t, server, receipt)
+	metadata[MetadataKeySSHRemoteAgentctlPort] = "43123"
+	record := &models.ExecutorRunning{
+		SessionID: owner.SessionID, TaskID: owner.TaskID,
+		Runtime: agentruntime.RuntimeSSH, AgentExecutionID: "execution-1", PID: 4242,
+		TransientAuthToken: "token", Metadata: metadata,
+	}
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	exec.reconcileRemote = func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult {
+		return sshlaunch.ReconcileResult{Outcome: sshlaunch.OutcomeAbsent}
+	}
+	instances, outcomes, err := exec.RecoverInstancesDetailed(context.Background(), []*models.ExecutorRunning{record})
+	require.NoError(t, err)
+	require.Empty(t, instances)
+	require.Equal(t, RecoveryOutcomeNoMatchingInstance, outcomes[owner.SessionID],
+		"a controller and children that are gone must allow a fresh controller to start")
+}

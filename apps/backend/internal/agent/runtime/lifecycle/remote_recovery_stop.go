@@ -197,23 +197,23 @@ func (m *Manager) stopPersistedRemoteOwnerForRuntime(
 	stopExecution func(context.Context, string, string, bool) (bool, error),
 	stopRecord func(context.Context, *models.ExecutorRunning, string, bool) (bool, error),
 ) (bool, error) {
-	err := m.validatePendingRemoteStopOwner(ctx, entry)
-	if err == nil {
-		return stopExecution(ctx, entry.record.AgentExecutionID, reason, force)
-	}
 	// An SSH cleanup can change the owning session's state (archive marks it
 	// cancelled) after the recovery snapshot was pinned. Only that exact
 	// terminal delta, under the running cleanup claim and an otherwise
-	// unchanged snapshot, may use the persisted exact owner. Any ownership,
-	// route, environment-generation, or delivery change remains fenced.
-	if errors.Is(err, errRemoteRecoveryFenced) &&
-		entry.record.Runtime == agentruntime.RuntimeSSH && stopReasonIssuesExternalCleanup(reason) {
+	// unchanged snapshot, may use the persisted exact owner. Check it before
+	// the generic owner validation: that validator removes the pending entry
+	// on a snapshot fence, and a failed teardown must stay retryable.
+	if entry.record.Runtime == agentruntime.RuntimeSSH && stopReasonIssuesExternalCleanup(reason) {
 		current, snapshotErr := m.remoteRecoverySnapshot(ctx, entry.record.SessionID)
 		if snapshotErr == nil && archiveStopSnapshotDeltaOnly(entry.snapshot, current) {
 			if persisted, loadErr := m.loadPersistedRemoteStopOwner(ctx, entry); loadErr == nil {
 				return stopRecord(ctx, persisted, reason, force)
 			}
 		}
+	}
+	err := m.validatePendingRemoteStopOwner(ctx, entry)
+	if err == nil {
+		return stopExecution(ctx, entry.record.AgentExecutionID, reason, force)
 	}
 	if reason != StopReasonTaskDeleted || !errors.Is(err, models.ErrTaskSessionNotFound) {
 		return false, err
@@ -240,9 +240,7 @@ func archiveStopSnapshotDeltaOnly(initial, current *RemoteRecoverySnapshot) bool
 	if !sameArchiveStopOwner(initial, current) {
 		return false
 	}
-	return !initial.TaskArchived && current.TaskArchived &&
-		!initial.TaskResourceCleanupRunning && current.TaskResourceCleanupRunning &&
-		initial.SessionState != models.TaskSessionStateCancelled &&
+	return current.TaskArchived && current.TaskResourceCleanupRunning &&
 		current.SessionState == models.TaskSessionStateCancelled
 }
 

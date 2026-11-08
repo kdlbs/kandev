@@ -53,7 +53,7 @@ The receipt contains:
 
 - Version `1` and a fresh random 128-bit launch generation.
 - Task ID, session ID, and the original controller instance ID.
-- Canonical task and session paths, plus the control server's opaque identity.
+- Canonical task and session paths.
 - `processidentity.Identity`, captured by the controller for its own PID.
 - Remote effective UID and a binding to the saved SSH target tuple.
 
@@ -124,10 +124,12 @@ For a complete Linux receipt, the helper performs these steps:
 
 1. Check the receipt schema, expected task/session/controller, SSH UID, and paths.
 2. Use `lstat`-style inspection of the canonical session path and its parents.
-   Require confirmed absence. A present directory, file, symlink, or unreadable
+   Require confirmed absence. A present directory, file, symlink, symlinked
+   ancestor between the session path and the task directory, or unreadable
    parent refuses this route before any signal.
 3. Open a Linux pidfd for the recorded positive PID. Then recheck the process
-   birth token, group/session identity, UID, command/workdir, and launch marker.
+   birth token, group/session identity, live effective UID, command/workdir, and
+   launch marker.
    Read procfs through an opened process-directory handle. Keep raw environment
    data only in memory, select the one marker, and discard the remainder.
 4. Recheck directory absence immediately before signalling. If ownership changed
@@ -147,8 +149,10 @@ observed replacement path prevents signalling the original process as well.
 
 An absent process plus an absent session directory returns success without a
 signal only when no recorded-session child remains. A reused PID, changed boot
-identity, or different generation returns an identity-conflict outcome. A
-matching command alone never grants authority.
+identity, or different generation returns an identity-conflict outcome. A birth
+token from a previous boot is an identity conflict even when the PID is absent,
+because the session path may belong to a replacement. A matching command alone
+never grants authority.
 
 `internal/common/processidentity` already supplies capture, birth-token parsing,
 and pidfd signalling patterns. Add only the narrow single-process operation
@@ -177,8 +181,21 @@ does not run `stopRemoteAgentctl` or directory removal after helper success.
 `ResumeRemoteInstance` validates any present receipt, including its PID, before
 either the normal reattach or the managed-broker refresh branch. Before
 adoption or the broker-refresh stop it re-proves the live controller through
-the verify operation. A conflicting receipt reaches neither a forwarder, an
+the verify operation. When the controller is gone, the receipt and its
+drainage proof are cleared only after the verify operation reports both the
+process and its session children absent; otherwise the resume fails and keeps
+the metadata. A conflicting receipt reaches neither a forwarder, an
 authenticated adoption, nor a numeric stop.
+
+A tracked session with a receipt revalidates directory ownership and live
+launch proof immediately before its numeric stop. A missing directory routes
+through the pidfd helper; a conflicting process or directory returns
+unresolved without signalling or removing anything. A receipt-bearing
+abandoned record removes its session directory only when the directory's own
+pidfile still names the recorded PID; an unowned directory is preserved. A
+failed archive-delta teardown keeps its pending recovery entry and guard so the
+retry poller can act again, including when the pinned snapshot is already
+archive-cancelled.
 
 `stopPersistedSSHRecord` and pending remote-stop recovery recheck the current
 runtime owner before external effects and before settlement. Compare the
