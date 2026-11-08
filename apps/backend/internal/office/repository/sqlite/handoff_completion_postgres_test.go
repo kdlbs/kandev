@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,11 +12,14 @@ import (
 	"github.com/kandev/kandev/internal/testutil"
 )
 
-// TestPostgresEnsureHandoffCompletionOutboxReusesLegacyMarker verifies that
-// the legacy-anchor lookup works with PostgreSQL LIKE escaping and preserves
-// the stored report. It skips unless KANDEV_TEST_POSTGRES_DSN is set.
+// TestPostgresEnsureHandoffCompletionOutboxReusesLegacyMarker races two
+// receipt writers against a legacy report. It verifies PostgreSQL LIKE
+// escaping, receipt idempotency, and preservation of the stored report. It
+// skips unless KANDEV_TEST_POSTGRES_DSN is set.
 func TestPostgresEnsureHandoffCompletionOutboxReusesLegacyMarker(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(2)
 	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("init task repo: %v", err)
 	}
@@ -41,7 +45,7 @@ func TestPostgresEnsureHandoffCompletionOutboxReusesLegacyMarker(t *testing.T) {
 		t.Fatalf("seed legacy comment: %v", err)
 	}
 
-	item := &sqlite.HandoffCompletionOutbox{
+	item := sqlite.HandoffCompletionOutbox{
 		CompletionKey:        completionKey,
 		CommentID:            completionKey,
 		SourceTaskID:         "source-task",
@@ -54,7 +58,7 @@ func TestPostgresEnsureHandoffCompletionOutboxReusesLegacyMarker(t *testing.T) {
 		DeliveryState:        "COMPLETED",
 		CommentEventPending:  true,
 	}
-	incoming := &models.TaskComment{
+	incoming := models.TaskComment{
 		ID:         completionKey,
 		TaskID:     "source-task",
 		AuthorType: "agent",
@@ -62,8 +66,25 @@ func TestPostgresEnsureHandoffCompletionOutboxReusesLegacyMarker(t *testing.T) {
 		Body:       "New report body.",
 		Source:     "handoff",
 	}
-	if err := repo.EnsureHandoffCompletionOutbox(ctx, item, incoming); err != nil {
-		t.Fatalf("ensure completion receipt: %v", err)
+	start := make(chan struct{})
+	errs := make([]error, 2)
+	var workers sync.WaitGroup
+	for i := range errs {
+		workers.Add(1)
+		go func(i int) {
+			defer workers.Done()
+			<-start
+			itemCopy := item
+			commentCopy := incoming
+			errs[i] = repo.EnsureHandoffCompletionOutbox(ctx, &itemCopy, &commentCopy)
+		}(i)
+	}
+	close(start)
+	workers.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent ensure %d: %v", i, err)
+		}
 	}
 
 	receipt, err := repo.GetHandoffCompletionOutbox(ctx, completionKey)
@@ -75,6 +96,13 @@ func TestPostgresEnsureHandoffCompletionOutboxReusesLegacyMarker(t *testing.T) {
 	}
 	if receipt.CommentID != legacy.ID {
 		t.Errorf("receipt comment ID = %q, want legacy UUID %q", receipt.CommentID, legacy.ID)
+	}
+	storedComments, err := repo.ListTaskComments(ctx, "source-task")
+	if err != nil {
+		t.Fatalf("list source comments: %v", err)
+	}
+	if len(storedComments) != 1 || storedComments[0].ID != receipt.CommentID {
+		t.Fatalf("source comments = %+v, want one comment referenced by the receipt", storedComments)
 	}
 	stored, err := repo.GetTaskComment(ctx, legacy.ID)
 	if err != nil {
