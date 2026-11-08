@@ -529,6 +529,16 @@ func (s *Service) completeTurnForStreamEvent(
 }
 
 // handleAgentErrorEvent handles agentEventError events by creating an error message and completing the turn.
+// streamFailureAgentType returns the transport type used to classify a stream
+// failure. The stream AgentID is the execution identity, which has no
+// provider rules; it is used only by events that carry no transport type.
+func streamFailureAgentType(payload *lifecycle.AgentStreamEventPayload) string {
+	if payload.AgentType != "" {
+		return payload.AgentType
+	}
+	return payload.AgentID
+}
+
 func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
@@ -537,11 +547,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		executionID = payload.AgentID
 	}
 	if sessionID != "" {
-		// Opt-in diagnostics use the transport type; OFF retains legacy attribution.
-		agentType := payload.AgentID
-		if s.config.ProviderKeywordContext && payload.AgentType != "" {
-			agentType = payload.AgentType
-		}
+		agentType := streamFailureAgentType(payload)
 		failure := watcher.AgentEventData{
 			TaskID:             taskID,
 			SessionID:          sessionID,

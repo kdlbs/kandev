@@ -34,10 +34,11 @@ the established higher-priority signals and sanitized excerpt contract.
 - **`internal/agent/runtime/dynamic`** evaluates the classified code with the
   candidate's saved recovery policy and opens resource circuits.
 
-With the extension enabled, the terminal stream consumer selects known rules by
-`AgentType`, retaining the legacy `AgentID` fallback when type is absent. OFF
-preserves the current base attribution. Execution identity, generation,
-output and effect fences are preserved.
+The terminal stream consumer selects known rules by `AgentType`, falling back
+to the stream `AgentID` only when the type is absent. The stream `AgentID` is
+the execution identity and has no provider rules, so classifying by it skipped
+every provider-specific rule. Execution identity, generation, output and effect
+fences are preserved.
 
 ## Inputs that carry prose
 
