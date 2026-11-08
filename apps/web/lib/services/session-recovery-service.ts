@@ -437,7 +437,9 @@ async function prepareInferenceClosure(
   options: SessionRecoveryRequest,
 ): Promise<InferenceClosureResume | null> {
   const closure = inferenceClosureResume(options);
-  if (closure && closure.stage !== "committed") {
+  // A committed closure may still hold its source when the final stop failed;
+  // replaying the same operation retries exactly that stop before recovery.
+  if (closure) {
     const stopped = await client.request<unknown>(
       "session.stop",
       {
