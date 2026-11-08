@@ -325,6 +325,8 @@ type ProposalPhase2 struct {
 	StandingOrderIDs []string        `json:"standing_order_ids"`
 	StartsAgent      bool            `json:"starts_agent"`
 	Outcome          json.RawMessage `json:"outcome"`
+	// Retryable is true for a failed answer a manager may approve again.
+	Retryable bool `json:"retryable,omitempty"`
 }
 
 // NewProposalDTO builds the phase-1 ProposalDTO from the domain type.
@@ -376,6 +378,7 @@ func newProposalDTO(p *Proposal, phase2 bool) *ProposalDTO {
 		extra = &ProposalPhase2{
 			Kind: kind, TargetTaskID: p.TargetTaskID, StandingOrderIDs: ids,
 			StartsAgent: p.StartsAgent, Outcome: outcome,
+			Retryable: p.Kind == ProposalKindAnswer && p.Status == ProposalStatusFailed && p.Error != nil && answerRetryable(*p.Error),
 		}
 	}
 	return &ProposalDTO{
@@ -434,6 +437,27 @@ func NewProposalConflictResponsePhases(p *Proposal, phase2, phase3 bool) *Propos
 		ErrorCode: ErrorCodeProposalConflict,
 		Proposal:  *NewProposalDTOPhases(p, phase2, phase3),
 	}
+}
+
+// ErrorCodeRefused is the error of the 409 body for a refused answer proposal.
+const ErrorCodeRefused = "refused"
+
+// RefusedConflictResponse is the 409 body approve, reject and reply return for
+// a refused answer proposal, and approve returns for the one it settles.
+type RefusedConflictResponse struct {
+	Error    string      `json:"error"`
+	Code     string      `json:"code"`
+	Proposal ProposalDTO `json:"proposal"`
+}
+
+// NewRefusedConflictResponse builds the refusal body; code is the refusal
+// reason stored on the row.
+func NewRefusedConflictResponse(p *Proposal, phase2, phase3 bool) *RefusedConflictResponse {
+	code := ""
+	if p.Error != nil {
+		code = *p.Error
+	}
+	return &RefusedConflictResponse{Error: ErrorCodeRefused, Code: code, Proposal: *NewProposalDTOPhases(p, phase2, phase3)}
 }
 
 // ConversationConflictResponse is the 409 body the conversation route

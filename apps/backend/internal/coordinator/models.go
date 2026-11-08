@@ -24,6 +24,9 @@ const (
 	ActionProposeMove    = mcpcontract.ActionProposeMove
 )
 
+// ActionProposeAnswer is mcpcontract.ActionProposeAnswer, re-exported.
+const ActionProposeAnswer = mcpcontract.ActionProposeAnswer
+
 // ActionProposeImprovement is mcpcontract.ActionProposeImprovement, re-exported.
 const ActionProposeImprovement = mcpcontract.ActionProposeImprovement
 
@@ -180,6 +183,7 @@ const (
 	ProposalKindMove        = "move"
 	ProposalKindResume      = "resume"
 	ProposalKindImprovement = "improvement"
+	ProposalKindAnswer      = "answer"
 )
 
 // Stall is a coordinator_stalls row: the most recent task.stalled episode

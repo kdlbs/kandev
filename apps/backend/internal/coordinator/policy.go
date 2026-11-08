@@ -26,7 +26,7 @@ const (
 // Action is a class of thing a coordinator may propose.
 type Action string
 
-// The six policy actions and the class recorded for a tool that maps to none.
+// The policy actions and the class recorded for a tool that maps to none.
 const (
 	ActionCreateTask Action = "create_task"
 	ActionStartAgent Action = "start_agent"
@@ -34,13 +34,14 @@ const (
 	ActionMove       Action = "move"
 	ActionResume     Action = "resume"
 	ActionStop       Action = "stop"
+	ActionAnswer     Action = "answer"
 	ActionUnknown    Action = "unknown"
 	// ActionImprovement is an activity-only class; it is not a policy action.
 	ActionImprovement Action = "improvement"
 )
 
 // AllActions is the fixed action order; ActionUnknown is not a policy action.
-var AllActions = []Action{ActionCreateTask, ActionStartAgent, ActionMessage, ActionMove, ActionResume, ActionStop}
+var AllActions = []Action{ActionCreateTask, ActionStartAgent, ActionMessage, ActionMove, ActionResume, ActionStop, ActionAnswer}
 
 const (
 	policyVersion     = 1
@@ -156,8 +157,10 @@ func deniedActions() map[Action]Setting {
 }
 
 // PhaseOnePolicy is create_task requires_approval with everything else denied.
+// The answer class is optional in storage, so it is left absent here.
 func PhaseOnePolicy() Policy {
 	p := Policy{Version: policyVersion, Actions: deniedActions()}
+	delete(p.Actions, ActionAnswer)
 	p.Actions[ActionCreateTask] = SettingRequiresApproval
 	return p
 }
@@ -177,7 +180,7 @@ func unreadablePolicy(reason string) (Policy, error) {
 }
 
 // ParsePolicy is pure and never logs. NULL is the phase-1 policy; any value it
-// cannot trust yields all six actions denied and ErrPolicyUnreadable; an
+// cannot trust yields every action denied and ErrPolicyUnreadable; an
 // action that is absent or holds an unusable setting is denied.
 func ParsePolicy(raw *string) (Policy, error) {
 	if raw == nil {
@@ -202,11 +205,17 @@ func ParsePolicy(raw *string) (Policy, error) {
 		return unreadablePolicy("actions is not an object")
 	}
 	p := Policy{Version: policyVersion, Actions: deniedActions(), Eligibility: eligibilityFromStored(top.Eligibility)}
+	if _, stored := stored[string(ActionAnswer)]; !stored {
+		delete(p.Actions, ActionAnswer)
+	}
 	for _, a := range AllActions {
 		var s Setting
 		if v, ok := stored[string(a)]; ok && json.Unmarshal(v, &s) == nil && validSetting(s) {
 			p.Actions[a] = s
 		}
+	}
+	if p.Actions[ActionAnswer] == SettingAutomatic {
+		p.Actions[ActionAnswer] = SettingDenied
 	}
 	return p, nil
 }

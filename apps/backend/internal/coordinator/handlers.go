@@ -377,8 +377,13 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, NewErrorResponse(err.Error()))
 	case errors.Is(err, ErrStandingOrderLimit):
 		c.JSON(http.StatusBadRequest, NewStandingOrderLimitResponse())
+	case errors.As(err, &conflictErr) && isRefusedAnswer(conflictErr.Proposal):
+		c.JSON(http.StatusConflict, NewRefusedConflictResponse(conflictErr.Proposal, h.service.phase2, h.service.phase3))
 	case errors.As(err, &conflictErr):
 		c.JSON(http.StatusConflict, NewProposalConflictResponsePhases(conflictErr.Proposal, h.service.phase2, h.service.phase3))
+	case errors.Is(err, ErrAnswerTargetRead):
+		h.logger.Error("coordinator answer target read failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": codeTargetReadFailed, "code": codeTargetReadFailed})
 	case errors.Is(err, ErrNotFound), errors.Is(err, repoerrors.ErrWorkspaceNotFound):
 		c.JSON(http.StatusNotFound, NewErrorResponse("not found"))
 	case errors.Is(err, service.ErrForbidden):

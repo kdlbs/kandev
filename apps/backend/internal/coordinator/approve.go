@@ -77,7 +77,7 @@ func (s *Service) approveProposal(ctx context.Context, workspaceID, coordinatorI
 		return nil, err
 	}
 	if exec := s.kindExecutor(proposal.Kind); exec != nil {
-		return s.approveKind(ctx, exec, proposal, edits)
+		return s.approveKindResult(ctx, exec, proposal, edits)
 	}
 	carriesEdits := carriesApproveEdits(edits)
 	decidedBy := decidingUserID(ctx)
@@ -601,6 +601,8 @@ func kindAction(kind string) Action {
 		return ActionResume
 	case ProposalKindImprovement:
 		return ActionImprovement
+	case ProposalKindAnswer:
+		return ActionAnswer
 	default:
 		return ActionCreateTask
 	}
@@ -612,6 +614,9 @@ func kindAction(kind string) Action {
 func (s *Service) recheckPolicy(ctx context.Context, coordinatorID string, proposal *Proposal) error {
 	if !s.phase2 || proposal.Kind == ProposalKindImprovement {
 		return nil
+	}
+	if proposal.Kind == ProposalKindAnswer {
+		return s.recheckAnswerFlag()
 	}
 	c, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
 	if err != nil {
@@ -627,6 +632,16 @@ func (s *Service) recheckPolicy(ctx context.Context, coordinatorID string, propo
 	}
 	if proposal.StartsAgent && !policy.Allows(ActionStartAgent) {
 		return &PolicyDeniedError{Action: ActionStartAgent}
+	}
+	return nil
+}
+
+// recheckAnswerFlag refuses an answer approval while the feature is not
+// effective. The class setting is not consulted: a pending proposal stays
+// approvable after the class is denied.
+func (s *Service) recheckAnswerFlag() error {
+	if !s.answer {
+		return &PolicyDeniedError{Action: ActionAnswer}
 	}
 	return nil
 }

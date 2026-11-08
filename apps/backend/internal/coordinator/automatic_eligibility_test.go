@@ -292,6 +292,7 @@ func TestRaise_LoweringIsNeverChecked(t *testing.T) {
 
 func TestRaise_OtherClassesRefusedByValidate(t *testing.T) {
 	_, c, _, svc, _ := automaticFixture(t)
+	svc.answer = true
 	for _, class := range AllActions {
 		if raisableClasses[class] {
 			continue

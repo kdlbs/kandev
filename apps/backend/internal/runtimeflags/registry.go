@@ -391,6 +391,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorAnswer",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_ANSWER",
+			Kind:        KindFeature,
+			Label:       "Coordinator answers",
+			Description: "Lets a coordinator draft the answer to a watched card's pending question or permission request, which a manager approves or edits before it is delivered. Requires Workspace coordinators, Coordinator control and Coordinator autonomy.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "A drafted answer unblocks a card's agent once a manager approves it, so a wrong approval steers that agent. " +
+				"Nothing is delivered without a manager's approval. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorAnswer },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorAnswer = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

@@ -13,6 +13,14 @@ func allDenied() map[Action]Setting {
 	return m
 }
 
+// readableDenied is allDenied without the optional answer entry, the shape a
+// readable stored policy parses to when it does not name answer.
+func readableDenied() map[Action]Setting {
+	m := allDenied()
+	delete(m, ActionAnswer)
+	return m
+}
+
 func TestParsePolicy_ResultTable(t *testing.T) {
 	phaseOne := PhaseOnePolicy().Actions
 	cases := []struct {
@@ -32,11 +40,11 @@ func TestParsePolicy_ResultTable(t *testing.T) {
 		{"actions not object", strPtr(`{"version":1,"actions":[]}`), allDenied(), true},
 		{"version 2", strPtr(`{"version":2,"actions":{"create_task":"requires_approval"}}`), allDenied(), true},
 		{"version missing", strPtr(`{"actions":{"create_task":"requires_approval"}}`), allDenied(), true},
-		{"absent action denied", strPtr(`{"version":1,"actions":{"create_task":"requires_approval"}}`), withSetting(allDenied(), ActionCreateTask, SettingRequiresApproval), false},
-		{"unknown key dropped", strPtr(`{"version":1,"actions":{"nuke":"automatic","move":"requires_approval"}}`), withSetting(allDenied(), ActionMove, SettingRequiresApproval), false},
-		{"null setting denied", strPtr(`{"version":1,"actions":{"move":null}}`), allDenied(), false},
-		{"unknown setting denied", strPtr(`{"version":1,"actions":{"move":"always"}}`), allDenied(), false},
-		{"automatic parses", strPtr(`{"version":1,"actions":{"move":"automatic"}}`), withSetting(allDenied(), ActionMove, SettingAutomatic), false},
+		{"absent action denied", strPtr(`{"version":1,"actions":{"create_task":"requires_approval"}}`), withSetting(readableDenied(), ActionCreateTask, SettingRequiresApproval), false},
+		{"unknown key dropped", strPtr(`{"version":1,"actions":{"nuke":"automatic","move":"requires_approval"}}`), withSetting(readableDenied(), ActionMove, SettingRequiresApproval), false},
+		{"null setting denied", strPtr(`{"version":1,"actions":{"move":null}}`), readableDenied(), false},
+		{"unknown setting denied", strPtr(`{"version":1,"actions":{"move":"always"}}`), readableDenied(), false},
+		{"automatic parses", strPtr(`{"version":1,"actions":{"move":"automatic"}}`), withSetting(readableDenied(), ActionMove, SettingAutomatic), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,8 +60,8 @@ func TestParsePolicy_ResultTable(t *testing.T) {
 					t.Errorf("%s = %q, want %q", a, got.Actions[a], tc.want[a])
 				}
 			}
-			if len(got.Actions) != len(AllActions) {
-				t.Errorf("actions has %d keys, want %d", len(got.Actions), len(AllActions))
+			if len(got.Actions) != len(tc.want) {
+				t.Errorf("actions has %d keys, want %d", len(got.Actions), len(tc.want))
 			}
 		})
 	}
@@ -70,6 +78,9 @@ func TestPhaseOnePolicy(t *testing.T) {
 		t.Fatalf("version = %d", p.Version)
 	}
 	for _, a := range AllActions {
+		if a == ActionAnswer {
+			continue
+		}
 		want := SettingDenied
 		if a == ActionCreateTask {
 			want = SettingRequiresApproval
@@ -96,7 +107,7 @@ func TestPolicyAllows(t *testing.T) {
 }
 
 func TestAllActionsFixedOrderExcludesUnknown(t *testing.T) {
-	want := []Action{ActionCreateTask, ActionStartAgent, ActionMessage, ActionMove, ActionResume, ActionStop}
+	want := []Action{ActionCreateTask, ActionStartAgent, ActionMessage, ActionMove, ActionResume, ActionStop, ActionAnswer}
 	if len(AllActions) != len(want) {
 		t.Fatalf("AllActions = %v", AllActions)
 	}

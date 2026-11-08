@@ -6,7 +6,7 @@ import { ApiError } from "@/lib/api/client";
 import {
   getCoordinatorSettings,
   putCoordinatorSettings,
-  type ControlAction,
+  type SettingsAction,
   type ControlSetting,
   type EligibilitySettings,
 } from "@/lib/api/domains/coordinator-api";
@@ -193,7 +193,7 @@ type DraftUpdate = (change: (current: ControlDraft) => ControlDraft) => void;
 
 function useDraftSetters(update: DraftUpdate) {
   const setAction = useCallback(
-    (action: ControlAction, value: ControlSetting) =>
+    (action: SettingsAction, value: ControlSetting) =>
       update((d) => ({ ...d, actions: { ...d.actions, [action]: value } })),
     [update],
   );

@@ -3,11 +3,15 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/coordinator/mcpcontract"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // registerCoordinatorTools registers each tool the session's bound list names
@@ -81,6 +85,7 @@ func (s *Server) coordinatorToolCatalog() map[string]func() {
 		"propose_resume_kandev":            s.registerProposeResumeTool,
 		"propose_message_kandev":           s.registerProposeMessageTool,
 		"propose_move_kandev":              s.registerProposeMoveTool,
+		"propose_answer_kandev":            s.registerProposeAnswerTool,
 		"propose_improvement_kandev":       s.registerProposeImprovementTool,
 		"get_coordinator_item_kandev":      s.registerGetCoordinatorItemTool,
 		"list_coordinator_activity_kandev": s.registerListCoordinatorActivityTool,
@@ -316,6 +321,62 @@ func (s *Server) proposeKindHandler(action string, fields ...string) server.Tool
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+func (s *Server) registerProposeAnswerTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("propose_answer_kandev",
+			mcp.WithDescription("Propose an answer to the pending question or permission request of a task on a board you watch, for a manager to approve, edit or reject. Nothing is delivered until a manager approves. target is \"clarification\" or \"permission\"; pending_id is the pending item's id from get_coordinator_item_kandev. draft is {answers: [{question_id, option_ids, custom_text}]} for a clarification, or {option_id} for a permission. sources lists the links or references you relied on as {ref, label} objects, confidence is one of low, med or high, needs_decision flags a judgement call, rationale says why. A repeat call with the same draft returns the open proposal with deduplicated true; a different draft replaces the open one."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task holding the pending item")),
+			mcp.WithString("target", mcp.Required(), mcp.Description("clarification or permission")),
+			mcp.WithString("pending_id", mcp.Required(), mcp.Description("The pending clarification bundle or permission request id")),
+			mcp.WithAny("draft", mcp.Required(), mcp.Description("The proposed answer")),
+			mcp.WithArray("sources", mcp.Description("Links or references behind the answer"), mcp.Items(map[string]any{
+				typeKey: objType,
+				propsKey: map[string]any{
+					"ref":   map[string]any{typeKey: stringType},
+					"label": map[string]any{typeKey: stringType},
+				},
+				reqKey: []string{"ref"},
+			})),
+			mcp.WithString("confidence", mcp.Description("How sure you are: low, med or high"), mcp.Enum("low", "med", "high")),
+			mcp.WithBoolean("needs_decision", mcp.Description("True when the answer is a judgement call for the manager")),
+			mcp.WithString("rationale", mcp.Description("Why this answer, at most 10,000 characters")),
+			standingOrderIDsOption(),
+		),
+		s.wrapHandler("propose_answer_kandev", s.proposeAnswerHandler()),
+	)
+}
+
+// proposeAnswerHandler forwards the argument object with its types intact. The
+// answer kind validates every member and names the offending field; the error
+// renders as "<message> (field: <field>)", or the bare message when no field is named.
+func (s *Server) proposeAnswerHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := req.GetArguments()
+		if payload == nil {
+			payload = map[string]interface{}{}
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionProposeAnswer, payload, &result); err != nil {
+			return mcp.NewToolResultError(answerErrorText(err)), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// answerErrorText renders a refusal as "<message> (field: <field>)", or the
+// bare message when the refusal names no field. Other errors keep their text.
+func answerErrorText(err error) string {
+	var be *BackendError
+	if !errors.As(err, &be) || be.Code != ws.ErrorCodeValidation {
+		return err.Error()
+	}
+	if field, _ := be.Details["field"].(string); field != "" {
+		return fmt.Sprintf("%s (field: %s)", be.Message, field)
+	}
+	return be.Message
 }
 
 const improvementContextArg = "context"

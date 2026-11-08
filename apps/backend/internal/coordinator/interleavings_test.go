@@ -41,6 +41,9 @@ func policyBody(overrides map[string]string) string {
 	out := `{"policy":{"actions":{`
 	first := true
 	for _, a := range AllActions {
+		if _, named := actions[string(a)]; !named {
+			continue
+		}
 		if !first {
 			out += ","
 		}

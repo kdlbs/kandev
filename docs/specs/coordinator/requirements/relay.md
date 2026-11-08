@@ -188,6 +188,8 @@ Mockup:
 - Recording who answered a clarification. The clarification contract stores
   no answerer today; changing it is a change to that contract, not to this
   system. Permissions keep their existing resolution audit.
-- Answering from the copilot chat, and any answer tool on the coordinator's
-  surface (D5): the coordinator never answers for a person.
+- Answering from the copilot chat. An answer tool on the coordinator's surface
+  (D5) was out of scope here and is now covered by
+  [answer proposals](answer-proposals.md): the coordinator drafts, a person
+  approves, and nothing is delivered without that approval.
 - Re-asking a question.

@@ -607,6 +607,12 @@ type FeaturesConfig struct {
 	// effect together with Coordinator, CoordinatorPhase2 and CoordinatorPhase3.
 	CoordinatorPhase31 bool `mapstructure:"coordinator_phase31" json:"coordinatorPhase31"`
 
+	// CoordinatorAnswer gates answer proposals: the coordinator drafts the
+	// answer to a watched card's pending question or permission request and a
+	// manager approves it. It only takes effect together with Coordinator,
+	// CoordinatorPhase2 and CoordinatorPhase3.
+	CoordinatorAnswer bool `mapstructure:"coordinator_answer" json:"coordinatorAnswer"`
+
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol
 	// adapter and profile catalogue are composed at startup.

@@ -21,15 +21,20 @@ var readTools = []string{
 // coordinator's own context. It exercises no policy action.
 const improvementTool = "propose_improvement_kandev"
 
+// answerTool is the propose tool for the answer class. It is listed only while
+// phase 3 is effective and the policy allows the class.
+const answerTool = "propose_answer_kandev"
+
 var proposeTool = map[Action]string{
 	ActionCreateTask: "propose_task_kandev",
 	ActionMessage:    "propose_message_kandev",
 	ActionMove:       "propose_move_kandev",
 	ActionResume:     "propose_resume_kandev",
+	ActionAnswer:     answerTool,
 }
 
 // proposeOrder is the fixed order propose tools follow in ToolNames.
-var proposeOrder = []Action{ActionCreateTask, ActionMessage, ActionMove, ActionResume}
+var proposeOrder = []Action{ActionCreateTask, ActionMessage, ActionMove, ActionResume, ActionAnswer}
 
 // ToolNames returns the MCP tools a coordinator conversation may call. With
 // phase2 false it is the phase-1 seven; with phase2 true it is the read tools,
@@ -48,6 +53,9 @@ func ToolNamesPhase31(p Policy, phase2, phase3, phase31 bool) []string {
 	}
 	names = append(names, activityTool)
 	for _, a := range proposeOrder {
+		if a == ActionAnswer && !phase3 {
+			continue
+		}
 		if p.Allows(a) {
 			names = append(names, proposeTool[a])
 		}
@@ -86,6 +94,7 @@ var actionTools = map[string]string{
 	mcpcontract.ActionProposeResume:  "propose_resume_kandev",
 	mcpcontract.ActionProposeMessage: "propose_message_kandev",
 	mcpcontract.ActionProposeMove:    "propose_move_kandev",
+	mcpcontract.ActionProposeAnswer:  answerTool,
 
 	mcpcontract.ActionProposeImprovement: improvementTool,
 	mcpcontract.ActionListTurns:          turnsTool,

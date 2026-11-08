@@ -20,7 +20,7 @@ func (s *Service) recordClassChanges(ctx context.Context, tx coordinatorExec, co
 		return nil
 	}
 	for _, class := range AllActions {
-		from, to := stored.Actions[class], final.Actions[class]
+		from, to := effectiveSetting(stored, class), effectiveSetting(final, class)
 		if from == to {
 			continue
 		}

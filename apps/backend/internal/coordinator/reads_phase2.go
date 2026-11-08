@@ -253,19 +253,54 @@ type PolicyView struct {
 	WorkflowIDs    []string            `json:"workflow_ids"`
 }
 
-// policyFor parses the stored policy. An unreadable policy denies every
-// action, and the failure is logged once per coordinator revision.
+// policyFor parses the stored policy and resolves the answer class: an absent
+// entry takes requires_approval, and the class is denied while answer
+// proposals are not effective. An unreadable policy denies every action,
+// answer included, and the failure is logged once per coordinator revision.
 func (s *Service) policyFor(c *Coordinator) Policy {
 	p, err := ParsePolicy(c.PolicyJSON)
-	if err == nil {
-		return p
+	if err != nil {
+		key := fmt.Sprintf("%s:%d", c.ID, c.PolicyRevision)
+		if _, seen := s.policyErrLogged.LoadOrStore(key, struct{}{}); !seen {
+			s.logger.Error("coordinator policy unreadable; denying every action",
+				zap.String("coordinator_id", c.ID), zap.Int("policy_revision", c.PolicyRevision), zap.Error(err))
+		}
+		return Policy{Version: policyVersion, Actions: deniedActions()}
 	}
-	key := fmt.Sprintf("%s:%d", c.ID, c.PolicyRevision)
-	if _, seen := s.policyErrLogged.LoadOrStore(key, struct{}{}); !seen {
-		s.logger.Error("coordinator policy unreadable; denying every action",
-			zap.String("coordinator_id", c.ID), zap.Int("policy_revision", c.PolicyRevision), zap.Error(err))
+	return s.withEffectiveAnswer(p)
+}
+
+// withEffectiveAnswer returns p with the answer class resolved. It copies the
+// action map, so the parsed policy is never changed.
+func (s *Service) withEffectiveAnswer(p Policy) Policy {
+	actions := make(map[Action]Setting, len(p.Actions)+1)
+	for a, v := range p.Actions {
+		actions[a] = v
 	}
-	return Policy{Version: policyVersion, Actions: deniedActions()}
+	if _, ok := actions[ActionAnswer]; !ok {
+		actions[ActionAnswer] = SettingRequiresApproval
+	}
+	if !s.answer {
+		actions[ActionAnswer] = SettingDenied
+	}
+	p.Actions = actions
+	return p
+}
+
+// publicPolicy is the action map a client receives: the answer class is
+// omitted while answer proposals are not effective, so a client never receives
+// or echoes a class it cannot name.
+func publicPolicy(actions map[Action]Setting, answerEffective bool) map[Action]Setting {
+	if answerEffective {
+		return actions
+	}
+	out := make(map[Action]Setting, len(actions))
+	for a, v := range actions {
+		if a != ActionAnswer {
+			out[a] = v
+		}
+	}
+	return out
 }
 
 // Policy returns the coordinator's effective policy and watch set. With
@@ -291,7 +326,7 @@ func (s *Service) Policy(ctx context.Context, coordinatorID string) (PolicyView,
 	}
 	return PolicyView{
 		CoordinatorID: c.ID, WorkspaceID: c.WorkspaceID, PolicyRevision: c.PolicyRevision,
-		Actions: s.policyFor(c).Actions, Eligibility: s.policyFor(c).EffectiveEligibility(), WatchScope: scope, WorkflowIDs: set.WorkflowIDs,
+		Actions: publicPolicy(s.policyFor(c).Actions, s.answer), Eligibility: s.policyFor(c).EffectiveEligibility(), WatchScope: scope, WorkflowIDs: set.WorkflowIDs,
 	}, nil
 }
 

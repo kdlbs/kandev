@@ -71,8 +71,10 @@ type CoordinatorWithOpenProposals struct {
 // packages on the same Store.
 type Service struct {
 	// kinds is the registry of non-create proposal kinds; executeTimeout bounds one Execute.
-	kinds          map[string]KindExecutor
-	kindDeps       KindDeps
+	kinds    map[string]KindExecutor
+	kindDeps KindDeps
+	// answerTargets overrides the relay-backed target read of the answer kind.
+	answerTargets  AnswerTargets
 	executeTimeout time.Duration
 	store          *Store
 	validator      *Validator
@@ -160,6 +162,10 @@ type Service struct {
 	// surface exist. The pause gate and the stored project scope are enforced
 	// whatever its value.
 	phase31 bool
+
+	// answer is true when answer proposals are effective (phase 3 effective and
+	// features.coordinatorAnswer): the answer tool, proposing and approving.
+	answer bool
 
 	// learningHealth computes the Learning section's health line; guarded by observerMu.
 	learningHealth LearningHealthReader

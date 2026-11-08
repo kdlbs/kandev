@@ -5,7 +5,12 @@ import { Button } from "@kandev/ui/button";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { Skeleton } from "@kandev/ui/skeleton";
 import AppLink from "@/components/routing/app-link";
-import type { ControlAction, ControlSetting } from "@/lib/api/domains/coordinator-api";
+import type {
+  ControlAction,
+  ControlSetting,
+  PolicyActions,
+  SettingsAction,
+} from "@/lib/api/domains/coordinator-api";
 import type { ClassEligibility } from "@/lib/api/domains/coordinator-automatic-api";
 import { linkToCoordinatorActivityClass } from "@/lib/coordinator/links";
 import { ACTION_LABEL_KEY, CONTROL_ACTIONS } from "@/lib/coordinators/control-draft";
@@ -33,7 +38,7 @@ type MayDoSectionProps = {
 };
 
 /** The classes the server accepts as automatic. */
-const RAISABLE_ACTIONS: ReadonlySet<ControlAction> = new Set([
+const RAISABLE_ACTIONS: ReadonlySet<SettingsAction> = new Set([
   "create_task",
   "start_agent",
   "resume",
@@ -51,10 +56,10 @@ export type MayDoAutomatic = {
 };
 
 /** Per-class raise surface; undefined while phase 3 is not effective. */
-export type MayDoAutomaticMap = Partial<Record<ControlAction, MayDoAutomatic>>;
+export type MayDoAutomaticMap = Partial<Record<SettingsAction, MayDoAutomatic>>;
 
 function automaticRadioState(
-  action: ControlAction,
+  action: SettingsAction,
   value: ControlSetting,
   canManage: boolean,
   automaticMap: MayDoAutomaticMap | undefined,
@@ -73,7 +78,7 @@ function Counts({
   counts,
   status,
 }: {
-  action: ControlAction;
+  action: SettingsAction;
   counts: ActionCounts | null;
   status: string;
 }) {
@@ -102,7 +107,7 @@ export type MayDoActivity = {
 };
 
 type RowProps = {
-  action: ControlAction;
+  action: SettingsAction;
   value: ControlSetting;
   disabled: boolean;
   onChange: (value: ControlSetting) => void;
@@ -115,7 +120,7 @@ function AutomaticOption({
   action,
   radio,
 }: {
-  action: ControlAction;
+  action: SettingsAction;
   radio: { disabled: boolean; noteKey: string };
 }) {
   const { t } = useTranslation();
@@ -223,15 +228,22 @@ function ActionRow({
 }
 
 export type MayDoRowsProps = {
-  actions: Record<ControlAction, ControlSetting>;
+  actions: PolicyActions;
   canManage: boolean;
-  onChange: (action: ControlAction, value: ControlSetting) => void;
+  onChange: (action: SettingsAction, value: ControlSetting) => void;
   activity?: MayDoActivity;
-  rowErrors?: Partial<Record<ControlAction, string>>;
+  rowErrors?: Partial<Record<SettingsAction, string>>;
   errorMessage?: string | null;
   freshConversationNote?: boolean;
   automatic?: MayDoAutomaticMap;
 };
+
+/** The six control classes, then `answer` only when the server names it. */
+function rowActions(actions: PolicyActions): [SettingsAction, ControlSetting][] {
+  const rows: [SettingsAction, ControlSetting][] = CONTROL_ACTIONS.map((a) => [a, actions[a]]);
+  if (actions.answer !== undefined) rows.push(["answer", actions.answer]);
+  return rows;
+}
 
 export function MayDoRows({
   actions,
@@ -252,11 +264,11 @@ export function MayDoRows({
         </p>
       )}
       <div className="divide-y">
-        {CONTROL_ACTIONS.map((action) => (
+        {rowActions(actions).map(([action, value]) => (
           <ActionRow
             key={action}
             action={action}
-            value={actions[action]}
+            value={value}
             disabled={!canManage}
             onChange={(next) => onChange(action, next)}
             activity={activity}

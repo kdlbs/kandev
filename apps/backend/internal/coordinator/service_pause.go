@@ -212,3 +212,12 @@ func (s *Service) pauseView(ctx context.Context, c *Coordinator) PauseView {
 	}
 	return view
 }
+
+// WithAnswer turns answer proposals on or off. Callers pass the effective
+// condition, never the raw flag.
+func WithAnswer(on bool) ServiceOption {
+	return func(s *Service) { s.answer = on }
+}
+
+// AnswerEnabled reports whether answer proposals are effective.
+func (s *Service) AnswerEnabled() bool { return s.answer }

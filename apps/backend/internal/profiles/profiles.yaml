@@ -184,6 +184,15 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Coordinator answers: the coordinator drafts the answer to a watched card's
+  # pending question or permission request and a manager approves it. Off in
+  # prod and dev; only effective together with KANDEV_FEATURES_COORDINATOR,
+  # _PHASE2 and _PHASE3.
+  KANDEV_FEATURES_COORDINATOR_ANSWER:
+    prod: "false"
+    dev:  "false"
+    e2e:  "true"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

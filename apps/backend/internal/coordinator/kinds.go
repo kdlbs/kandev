@@ -91,7 +91,7 @@ func (s *Service) kindExecutor(kind string) KindExecutor {
 // KindExecutors lists the registered executors in a stable order.
 func (s *Service) KindExecutors() []KindExecutor {
 	out := make([]KindExecutor, 0, len(s.kinds))
-	for _, k := range []string{ProposalKindResume, ProposalKindMessage, ProposalKindMove, ProposalKindImprovement} {
+	for _, k := range []string{ProposalKindResume, ProposalKindMessage, ProposalKindMove, ProposalKindImprovement, ProposalKindAnswer} {
 		if e, ok := s.kinds[k]; ok {
 			out = append(out, e)
 		}
@@ -105,6 +105,7 @@ func (s *Service) registerKinds() {
 		ProposalKindMessage:     &messageKind{svc: s},
 		ProposalKindMove:        &moveKind{svc: s},
 		ProposalKindImprovement: &improvementKind{svc: s},
+		ProposalKindAnswer:      &answerKind{svc: s},
 	}
 }
 

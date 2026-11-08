@@ -1,11 +1,12 @@
 import type {
   ControlAction,
   EligibilitySettings,
-  ControlSetting,
   CoordinatorSettings,
   ProjectEntry,
+  PolicyActions,
   ProjectsRequest,
   PutSettingsRequest,
+  SettingsAction,
 } from "@/lib/api/domains/coordinator-api";
 
 export const CONTROL_ACTIONS: readonly ControlAction[] = [
@@ -17,14 +18,18 @@ export const CONTROL_ACTIONS: readonly ControlAction[] = [
   "stop",
 ];
 
+/** The classes the settings page edits: the six control classes plus `answer` when the server names it. */
+export const SETTINGS_ACTIONS: readonly SettingsAction[] = [...CONTROL_ACTIONS, "answer"];
+
 /** i18n keys of the display label of each action; the wire token is never shown. */
-export const ACTION_LABEL_KEY: Record<ControlAction, string> = {
+export const ACTION_LABEL_KEY: Record<SettingsAction, string> = {
   create_task: "coordinator:mayDoCreateTask",
   start_agent: "coordinator:mayDoStartAgent",
   message: "coordinator:mayDoMessage",
   move: "coordinator:mayDoMove",
   resume: "coordinator:mayDoResume",
   stop: "coordinator:mayDoStop",
+  answer: "coordinator:mayDoAnswer",
 };
 
 export const MAX_WATCHED_BOARDS = 50;
@@ -72,7 +77,7 @@ export function sameEligibility(
 }
 
 export type ControlDraft = {
-  actions: Record<ControlAction, ControlSetting>;
+  actions: PolicyActions;
   /** Null while phase 3 is not effective: the settings read carries no `policy.eligibility`. */
   eligibility: EligibilitySettings | null;
   watches: WatchesDraft;
@@ -178,7 +183,7 @@ export function isEligibilityInvalid(draft: ControlDraft, stored: ControlDraft):
 
 export function isPolicyDirty(draft: ControlDraft, stored: ControlDraft): boolean {
   return (
-    CONTROL_ACTIONS.some((action) => draft.actions[action] !== stored.actions[action]) ||
+    SETTINGS_ACTIONS.some((action) => draft.actions[action] !== stored.actions[action]) ||
     isEligibilityDirty(draft, stored)
   );
 }
@@ -198,7 +203,7 @@ export function isWatchesInvalid(draft: ControlDraft, stored: ControlDraft): boo
 
 /**
  * The PUT body: only the members that differ from stored; the policy names all
- * six actions and carries `eligibility` only when it was edited.
+ * actions the server named and carries `eligibility` only when it was edited.
  */
 export function buildPutRequest(draft: ControlDraft, stored: ControlDraft): PutSettingsRequest {
   const request: PutSettingsRequest = {};
@@ -220,6 +225,12 @@ export function buildPutRequest(draft: ControlDraft, stored: ControlDraft): PutS
   return request;
 }
 
+/** Copies one drafted action into `actions`; an action the draft does not name stays as it is. */
+function keepAction(actions: PolicyActions, from: ControlDraft, action: SettingsAction) {
+  const value = from.actions[action];
+  if (value !== undefined) actions[action] = value;
+}
+
 /**
  * Folds a re-read stored value into the draft without discarding an edit:
  * an action the manager changed keeps its draft value, every other action
@@ -231,9 +242,8 @@ export function mergeStored(
   newStored: ControlDraft,
 ): ControlDraft {
   const actions = { ...newStored.actions };
-  for (const action of CONTROL_ACTIONS) {
-    if (draft.actions[action] !== oldStored.actions[action])
-      actions[action] = draft.actions[action];
+  for (const action of SETTINGS_ACTIONS) {
+    if (draft.actions[action] !== oldStored.actions[action]) keepAction(actions, draft, action);
   }
   const watches = sameWatches(draft.watches, oldStored.watches) ? newStored.watches : draft.watches;
   const projects = sameProjects(draft.projects, oldStored.projects)
@@ -252,8 +262,8 @@ export function settleAfterSave(
   response: ControlDraft,
 ): ControlDraft {
   const actions = { ...response.actions };
-  for (const action of CONTROL_ACTIONS) {
-    if (current.actions[action] !== sent.actions[action]) actions[action] = current.actions[action];
+  for (const action of SETTINGS_ACTIONS) {
+    if (current.actions[action] !== sent.actions[action]) keepAction(actions, current, action);
   }
   const watches = sameWatches(current.watches, sent.watches) ? response.watches : current.watches;
   const projects = sameProjects(current.projects, sent.projects)

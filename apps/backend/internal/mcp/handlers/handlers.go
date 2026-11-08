@@ -617,6 +617,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 		d.RegisterFunc(coordinator.ActionProposeResume, h.proposeKindHandler(coordinator.ProposalKindResume))
 		d.RegisterFunc(coordinator.ActionProposeMessage, h.proposeKindHandler(coordinator.ProposalKindMessage))
 		d.RegisterFunc(coordinator.ActionProposeMove, h.proposeKindHandler(coordinator.ProposalKindMove))
+		d.RegisterFunc(coordinator.ActionProposeAnswer, h.handleProposeAnswer)
 		d.RegisterFunc(coordinator.ActionProposeImprovement, h.handleProposeImprovement)
 		d.RegisterFunc(coordinator.ActionGetItem, h.handleGetCoordinatorItem)
 		d.RegisterFunc(coordinator.ActionListActivity, h.handleListCoordinatorActivity)

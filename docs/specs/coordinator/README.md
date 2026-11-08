@@ -75,6 +75,9 @@ control, and Watches by project.
 - **Cost ceiling:** the coordinator's declared spend limit per rolling 24 hours.
 - **Improvement proposal:** a proposal to replace the coordinator's context,
   applied only by a manager.
+- **Answer proposal:** a proposal of a drafted answer to a watched card's
+  pending clarification or permission request, delivered only when a manager
+  approves it (`features.coordinatorAnswer`).
 
 ## Ownership
 

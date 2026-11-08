@@ -2747,6 +2747,7 @@ func registerMCPAndDebugRoutes(
 			Tasks:     &coordinatorKindReader{tasks: p.taskSvc, liveExec: p.lifecycleMgr.HasLiveAgentExecution},
 			Resumer:   &coordinatorResumer{resume: p.orchestratorSvc.ResumeTaskSession},
 			Messenger: mcpHandlers,
+			Answer:    coordinatorAnswerDelivery{bundles: clarificationResolver, permissions: p.orchestratorSvc},
 		})
 	}
 

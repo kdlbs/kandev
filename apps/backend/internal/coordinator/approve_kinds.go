@@ -12,6 +12,16 @@ import (
 	"go.uber.org/zap"
 )
 
+// approveKindResult is approveKind with a refusal it settled returned as the
+// conflict a refused proposal answers with.
+func (s *Service) approveKindResult(ctx context.Context, exec KindExecutor, proposal *Proposal, edits ApproveProposalRequest) (*Proposal, error) {
+	p, err := s.approveKind(ctx, exec, proposal, edits)
+	if err == nil && isRefusedAnswer(p) {
+		return nil, &ProposalConflictError{Proposal: p}
+	}
+	return p, err
+}
+
 // approveKind is the approve path of a non-create kind: the status decision,
 // edit validation, the policy re-check, the claim, then Execute. Nothing
 // re-runs Execute on a claim that has gone stale (see settleStaleKind).
@@ -20,16 +30,19 @@ func (s *Service) approveKind(ctx context.Context, exec KindExecutor, proposal *
 	case ProposalStatusApproved, ProposalStatusRejected, ProposalStatusReturned:
 		return nil, &ProposalConflictError{Proposal: proposal}
 	case ProposalStatusApproving:
-		return s.approveApprovingKind(ctx, proposal, edits)
+		return s.approveApprovingKind(ctx, exec, proposal, edits)
 	case ProposalStatusPending, ProposalStatusFailed:
+		if proposal.Kind == ProposalKindAnswer && proposal.Error != nil && *proposal.Error == outcomeUnknownError {
+			return nil, &ProposalConflictError{Proposal: proposal}
+		}
 		return s.claimKind(ctx, exec, proposal, edits)
 	default:
 		return nil, errUnknownStatus(proposal)
 	}
 }
 
-func (s *Service) approveApprovingKind(ctx context.Context, proposal *Proposal, edits ApproveProposalRequest) (*Proposal, error) {
-	if carriesKindEdits(edits) {
+func (s *Service) approveApprovingKind(ctx context.Context, exec KindExecutor, proposal *Proposal, edits ApproveProposalRequest) (*Proposal, error) {
+	if kindCarriesEdits(exec, edits) {
 		return nil, &ProposalConflictError{Proposal: proposal}
 	}
 	cutoff := time.Now().UTC().Add(-staleApproveWindow)
@@ -54,6 +67,11 @@ func (s *Service) prepareKindApproval(ctx context.Context, exec KindExecutor, pr
 	if err != nil {
 		return nil, err
 	}
+	if v, ok := exec.(EditValidator); ok && !sameSpec(final, base) {
+		if err := v.ValidateEditsLive(ctx, proposal, base, final); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.recheckPolicy(ctx, proposal.CoordinatorID, proposal); err != nil {
 		return nil, err
 	}
@@ -68,7 +86,7 @@ func (s *Service) claimKind(ctx context.Context, exec KindExecutor, proposal *Pr
 	}
 	decidedBy := decidingUserID(ctx)
 	token := uuid.New().String()
-	matched, err := s.store.ClaimProposalRaw(ctx, proposal.ID, token, string(final), decidedBy, time.Now())
+	matched, err := s.claimRow(ctx, proposal, token, string(final), decidedBy)
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +94,33 @@ func (s *Service) claimKind(ctx context.Context, exec KindExecutor, proposal *Pr
 		return s.claimRaceResult(ctx, proposal.WorkspaceID, proposal.CoordinatorID, proposal.ID)
 	}
 	return s.runClaimedKind(ctx, exec, proposal, token, final, decidedBy)
+}
+
+// claimRow claims a pending or failed proposal. An answer claim is fenced on
+// the row the approver read and never takes a failed outcome_unknown row.
+func (s *Service) claimRow(ctx context.Context, proposal *Proposal, token, final, decidedBy string) (bool, error) {
+	if proposal.Kind == ProposalKindAnswer {
+		return s.store.ClaimProposalFenced(ctx, proposal.ID, token, final, decidedBy, time.Now(), proposal.UpdatedAt)
+	}
+	return s.store.ClaimProposalRaw(ctx, proposal.ID, token, final, decidedBy, time.Now())
+}
+
+// kindCarriesEdits reports whether an approve request carries edits for the
+// kind: its own rule when it has one, else the shared edit fields.
+func kindCarriesEdits(exec KindExecutor, edits ApproveProposalRequest) bool {
+	if c, ok := exec.(EditCarrier); ok {
+		return c.CarriesEdits(edits)
+	}
+	return carriesKindEdits(edits)
+}
+
+// failText is the text a failed row stores for an error raised outside
+// Execute: an answer stores only codes of its closed set.
+func failText(proposal *Proposal, text string) string {
+	if proposal.Kind == ProposalKindAnswer {
+		return failNotDelivered
+	}
+	return text
 }
 
 // runClaimedKind continues a just-committed kind claim: it publishes the
@@ -86,7 +131,7 @@ func (s *Service) runClaimedKind(ctx context.Context, exec KindExecutor, proposa
 
 	coordinator, err := s.store.GetCoordinatorByID(ctx, proposal.CoordinatorID)
 	if err != nil {
-		return s.failKind(ctx, exec, proposal, token, err.Error())
+		return s.failKind(ctx, exec, proposal, token, failText(proposal, err.Error()))
 	}
 	claim := Claim{
 		ProposalID: proposal.ID, Token: token, WorkspaceID: proposal.WorkspaceID, Coordinator: coordinator,
@@ -112,17 +157,20 @@ func (s *Service) executeKind(ctx context.Context, exec KindExecutor, proposal *
 	sctx, scancel := context.WithTimeout(context.WithoutCancel(ctx), settleBound)
 	defer scancel()
 	var failure *execFailure
+	var refused *execRefusal
 	switch {
 	case errors.Is(err, errSettleFenced):
 		return s.fencedResult(sctx, proposal)
 	case err == nil:
 		return s.completeKind(sctx, exec, proposal, claim, out)
+	case errors.As(err, &refused):
+		return s.refuseKind(sctx, proposal, claim.Token, refused.code)
 	case errors.As(err, &failure):
 		return s.failKind(sctx, exec, proposal, claim.Token, failure.text)
 	case deadlineFired || errors.Is(err, context.DeadlineExceeded):
 		return s.failKind(sctx, exec, proposal, claim.Token, outcomeUnknownError)
 	default:
-		return s.failKind(sctx, exec, proposal, claim.Token, err.Error())
+		return s.failKind(sctx, exec, proposal, claim.Token, failText(proposal, err.Error()))
 	}
 }
 

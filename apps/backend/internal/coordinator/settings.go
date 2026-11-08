@@ -26,6 +26,7 @@ const (
 	codeInvalidSetting         = "invalid_setting"
 	codeStopDeniedOnly         = "stop_denied_only"
 	codeAutomaticNotAvailable  = "automatic_not_available"
+	codeAnswerUnavailable      = "answer_unavailable"
 	codeInvalidScope           = "invalid_scope"
 	codeWatchesEmpty           = "watches_empty"
 	codeWatchesTooMany         = "watches_too_many"
@@ -79,14 +80,14 @@ type watchesRequest struct {
 
 // parseSettingsBody validates everything in the body that needs no stored
 // state. Policy is validated before Watches.
-func parseSettingsBody(body []byte, phase3, phase31 bool) (settingsRequest, error) {
+func parseSettingsBody(body []byte, phase3, phase31, answerAllowed bool) (settingsRequest, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil || top == nil {
 		return settingsRequest{}, bodyErr("", "body must be a JSON object")
 	}
 	var req settingsRequest
 	if raw, ok := presentMember(top, "policy"); ok {
-		p, err := parsePolicyMember(raw, phase3)
+		p, err := parsePolicyMember(raw, phase3, answerAllowed)
 		if err != nil {
 			return settingsRequest{}, err
 		}
@@ -118,7 +119,10 @@ func presentMember(obj map[string]json.RawMessage, key string) (json.RawMessage,
 	return raw, true
 }
 
-func parsePolicyMember(raw json.RawMessage, phase3 bool) (*Policy, error) {
+// parsePolicyMember reads a policy object. The original six classes are
+// required; answer is optional, and naming it while answerAllowed is false is
+// the field error answer_unavailable.
+func parsePolicyMember(raw json.RawMessage, phase3, answerAllowed bool) (*Policy, error) {
 	var member map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &member); err != nil || member == nil {
 		return nil, bodyErr("policy", "policy must be an object")
@@ -131,6 +135,29 @@ func parsePolicyMember(raw json.RawMessage, phase3 bool) (*Policy, error) {
 	if err := json.Unmarshal(rawActions, &actions); err != nil || actions == nil {
 		return nil, bodyErr("policy.actions", "policy.actions must be an object")
 	}
+	p, err := policyFromActions(actions, answerAllowed)
+	if err != nil {
+		return nil, err
+	}
+	if err := Validate(*p, phase3); err != nil {
+		return nil, policyValidateErr(err, *p)
+	}
+	if raw, ok := presentMember(member, "eligibility"); ok {
+		e, err := parseEligibilityMember(raw, phase3)
+		if err != nil {
+			return nil, err
+		}
+		p.Eligibility = e
+		if err := Validate(*p, phase3); err != nil {
+			return nil, policyValidateErr(err, *p)
+		}
+	}
+	return p, nil
+}
+
+// policyFromActions checks the named classes and builds the policy they
+// describe. Eligibility is parsed separately.
+func policyFromActions(actions map[string]json.RawMessage, answerAllowed bool) (*Policy, error) {
 	var unknown []string
 	for key := range actions {
 		if !isPolicyAction(Action(key)) {
@@ -142,32 +169,26 @@ func parsePolicyMember(raw json.RawMessage, phase3 bool) (*Policy, error) {
 		return nil, policyFieldErr(codeUnknownAction, unknown[0], "unknown action "+unknown[0])
 	}
 	for _, a := range AllActions {
-		if _, ok := actions[string(a)]; !ok {
+		if _, ok := actions[string(a)]; !ok && a != ActionAnswer {
 			return nil, policyFieldErr(codeActionMissing, string(a), "policy.actions must name every action")
 		}
 	}
-	p := Policy{Version: policyVersion, Actions: make(map[Action]Setting, len(AllActions))}
+	if _, named := actions[string(ActionAnswer)]; named && !answerAllowed {
+		return nil, policyFieldErr(codeAnswerUnavailable, string(ActionAnswer), "the answer class is not available")
+	}
+	p := &Policy{Version: policyVersion, Actions: make(map[Action]Setting, len(AllActions))}
 	for _, a := range AllActions {
+		raw, named := actions[string(a)]
+		if !named {
+			continue
+		}
 		var s string
-		if err := json.Unmarshal(actions[string(a)], &s); err != nil {
+		if err := json.Unmarshal(raw, &s); err != nil {
 			s = ""
 		}
 		p.Actions[a] = Setting(s)
 	}
-	if err := Validate(p, phase3); err != nil {
-		return nil, policyValidateErr(err, p)
-	}
-	if raw, ok := presentMember(member, "eligibility"); ok {
-		e, err := parseEligibilityMember(raw, phase3)
-		if err != nil {
-			return nil, err
-		}
-		p.Eligibility = e
-		if err := Validate(p, phase3); err != nil {
-			return nil, policyValidateErr(err, p)
-		}
-	}
-	return &p, nil
+	return p, nil
 }
 
 var integerLiteral = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
@@ -398,7 +419,7 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID, coordinatorID s
 	if _, err := s.store.GetCoordinator(ctx, workspaceID, coordinatorID); err != nil {
 		return nil, err
 	}
-	req, err := parseSettingsBody(body, s.phase3, s.phase31)
+	req, err := parseSettingsBody(body, s.phase3, s.phase31, s.answer)
 	if err != nil {
 		return nil, err
 	}
@@ -480,7 +501,7 @@ func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspa
 		storedProjects = *newProjects
 	}
 	result := &CoordinatorPhase2{
-		Policy:         CoordinatorPolicyDTO{Actions: final.Actions, Eligibility: final.EffectiveEligibility()},
+		Policy:         CoordinatorPolicyDTO{Actions: publicPolicy(s.withEffectiveAnswer(final).Actions, s.answer), Eligibility: final.EffectiveEligibility()},
 		PolicyRevision: row.Revision,
 		Watches:        CoordinatorWatchDTO{Scope: scope.scope, WorkflowIDs: nonNilIDs(scope.ids)},
 	}
@@ -514,6 +535,11 @@ func policyDelta(requested *Policy, stored Policy, storedErr error) (actions, el
 	}
 	if requested.Eligibility == nil {
 		requested.Eligibility = stored.Eligibility
+	}
+	if _, named := requested.Actions[ActionAnswer]; !named {
+		if v, ok := stored.Actions[ActionAnswer]; ok {
+			requested.Actions[ActionAnswer] = v
+		}
 	}
 	return storedErr != nil || !actionsEqual(*requested, stored), requested.EffectiveEligibility() != stored.EffectiveEligibility()
 }
@@ -579,13 +605,25 @@ func nonNilIDs(ids []string) []string {
 	return ids
 }
 
+// actionsEqual compares two policies by effective value: an absent answer
+// entry equals requires_approval.
 func actionsEqual(a, b Policy) bool {
 	for _, action := range AllActions {
-		if a.Actions[action] != b.Actions[action] {
+		if effectiveSetting(a, action) != effectiveSetting(b, action) {
 			return false
 		}
 	}
 	return true
+}
+
+// effectiveSetting is the stored setting of an action, with an absent answer
+// entry read as requires_approval.
+func effectiveSetting(p Policy, a Action) Setting {
+	v, ok := p.Actions[a]
+	if !ok && a == ActionAnswer {
+		return SettingRequiresApproval
+	}
+	return v
 }
 
 func (s *Service) effectiveWatchState(ctx context.Context, tx coordinatorExec, workspaceID string, raw WatchSet) (watchState, error) {

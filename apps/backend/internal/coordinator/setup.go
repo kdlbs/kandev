@@ -101,7 +101,7 @@ func decodeSetupRequest(body []byte, phase31 bool) (setupRequest, error) {
 		}
 	}
 	if req.policy != nil {
-		if _, err := parsePolicyMember(req.policy, false); isInvalidBody(err) {
+		if _, err := parsePolicyMember(req.policy, false, false); isInvalidBody(err) {
 			return setupRequest{}, err
 		}
 	}
@@ -233,7 +233,7 @@ func validateSetupPolicy(raw json.RawMessage) (Policy, error) {
 	if raw == nil {
 		return Policy{}, stepError(setupStepMayDo, policyFieldErr(codeActionMissing, string(AllActions[0]), "policy.actions must name every action"))
 	}
-	p, err := parsePolicyMember(raw, false)
+	p, err := parsePolicyMember(raw, false, false)
 	if err != nil {
 		return Policy{}, stepError(setupStepMayDo, err)
 	}
