@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/coordinator/mergestate"
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
@@ -27,6 +29,16 @@ const mergePolicySQL = `
 		refs_json TEXT NOT NULL,
 		updated_at {{timestamp}} NOT NULL,
 		PRIMARY KEY (coordinator_id, task_id)
+	);
+	CREATE TABLE IF NOT EXISTS coordinator_merge_protection (
+		workspace_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		branch TEXT NOT NULL,
+		pipeline TEXT NOT NULL,
+		approvals TEXT NOT NULL,
+		threads TEXT NOT NULL,
+		observed_at {{timestamp}} NOT NULL,
+		PRIMARY KEY (workspace_id, repository_id, branch)
 	);
 	CREATE TABLE IF NOT EXISTS coordinator_merge_audit (
 		id TEXT PRIMARY KEY,
@@ -159,4 +171,46 @@ func (s *Store) writeDepSet(ctx context.Context, tx coordinatorExec, coordinator
 		return fmt.Errorf("write dependency set: %w", err)
 	}
 	return nil
+}
+
+// ProtectionObservation is one recorded protection read of a repository
+// branch. Branch is empty for the repository's default branch.
+type ProtectionObservation struct {
+	RepositoryID string                 `json:"repository_id"`
+	Branch       string                 `json:"branch"`
+	Pipeline     mergestate.Enforcement `json:"pipeline"`
+	Approvals    mergestate.Enforcement `json:"approvals"`
+	Threads      mergestate.Enforcement `json:"threads"`
+	ObservedAt   time.Time              `json:"observed_at"`
+}
+
+func (s *Store) writeProtection(ctx context.Context, o ProtectionObservation, workspaceID string) error {
+	if _, err := s.db.ExecContext(ctx, s.db.Rebind(`INSERT INTO coordinator_merge_protection
+		(workspace_id, repository_id, branch, pipeline, approvals, threads, observed_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (workspace_id, repository_id, branch) DO UPDATE SET pipeline = excluded.pipeline,
+		approvals = excluded.approvals, threads = excluded.threads, observed_at = excluded.observed_at`),
+		workspaceID, o.RepositoryID, o.Branch, string(o.Pipeline), string(o.Approvals), string(o.Threads), o.ObservedAt.UTC()); err != nil {
+		return fmt.Errorf("write protection observation: %w", err)
+	}
+	return nil
+}
+
+// listProtection returns the workspace's protection observations ordered by
+// repository ID then branch ascending.
+func (s *Store) listProtection(ctx context.Context, workspaceID string) ([]ProtectionObservation, error) {
+	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`SELECT repository_id, branch, pipeline, approvals, threads, observed_at
+		FROM coordinator_merge_protection WHERE workspace_id = ? ORDER BY repository_id ASC, branch ASC`), workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list protection: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ProtectionObservation
+	for rows.Next() {
+		var o ProtectionObservation
+		if err := rows.Scan(&o.RepositoryID, &o.Branch, &o.Pipeline, &o.Approvals, &o.Threads, &o.ObservedAt); err != nil {
+			return nil, fmt.Errorf("scan protection: %w", err)
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
 }

@@ -81,6 +81,17 @@ type policyPlan struct {
 
 func (p policyPlan) changed() bool { return len(p.Rows) > 0 }
 
+// leftDenied lists the repositories whose policy changed from denied.
+func (p policyPlan) leftDenied() []string {
+	var out []string
+	for _, a := range p.Audits {
+		if a.Kind == auditPolicyChanged && a.Before == string(RepoDenied) {
+			out = append(out, a.Subject)
+		}
+	}
+	return out
+}
+
 func storedPolicy(stored map[string]RepoPolicyRow, id string) RepoPolicy {
 	if r, ok := stored[id]; ok && r.Policy.valid() {
 		return r.Policy
@@ -154,4 +165,8 @@ func planOne(stored map[string]RepoPolicyRow, c RepoPolicyChange, actor string, 
 		row.SelectedBy, row.AutomaticSinceRevision = actor, next
 	}
 	return row, PolicyAudit{Kind: auditPolicyChanged, Subject: c.RepositoryID, Before: string(cur), After: string(c.Policy), Revision: next}, nil
+}
+
+func errMergeUnavailable() *SettingsError {
+	return &SettingsError{Code: codeMergeUnavailable, Field: "merge", Message: "merge settings are not available"}
 }

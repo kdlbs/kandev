@@ -12,6 +12,21 @@ import (
 func registerMergeRoutes(workspace *gin.RouterGroup, h *Handlers) {
 	workspace.GET("/coordinators/:cid/tasks/:tid/dependencies", h.httpGetDependencies)
 	workspace.PUT("/coordinators/:cid/tasks/:tid/dependencies", h.httpPutDependencies)
+	workspace.POST("/coordinators/:cid/merge/protection/refresh", h.httpRefreshProtection)
+}
+
+// httpRefreshProtection backs POST .../coordinators/:cid/merge/protection/refresh:
+// it re-reads the protections of every branch shown in settings.
+func (h *Handlers) httpRefreshProtection(c *gin.Context) {
+	obs, err := h.service.RefreshProtectionAs(c.Request.Context(), c.Param("id"), c.Param("cid"))
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	if obs == nil {
+		obs = []ProtectionObservation{}
+	}
+	c.JSON(http.StatusOK, gin.H{"protection": obs})
 }
 
 // httpGetDependencies backs GET .../coordinators/:cid/tasks/:tid/dependencies.

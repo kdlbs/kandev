@@ -461,6 +461,9 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID, coordinatorID s
 	if out.changed {
 		s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
 	}
+	for _, repo := range out.leftDenied {
+		_, _ = s.ObserveProtection(ctx, workspaceID, repo, "")
+	}
 	result.Projects, result.ProjectsConfig = s.projectsView(ctx, workspaceID, projects)
 	if result.Merge, err = s.mergeView(ctx, workspaceID, coordinatorID); err != nil {
 		return nil, err
@@ -474,6 +477,8 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID, coordinatorID s
 type settingsOutcome struct {
 	changed           bool
 	resetConversation bool
+	// leftDenied lists repositories whose merge policy left denied.
+	leftDenied []string
 }
 
 // applySettings runs inside the coordinator lock: it reads the stored state,
@@ -521,7 +526,7 @@ func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspa
 	s.logger.Info("coordinator settings saved",
 		zap.String("coordinator_id", coordinatorID), zap.Int("old_revision", row.Revision),
 		zap.Int("new_revision", row.Revision+1), zap.Bool("policy_changed", actionsChanged), zap.Bool("eligibility_changed", eligibilityChanged), zap.Bool("watches_changed", watchesChanged), zap.Bool("projects_changed", newProjects != nil))
-	return result, storedProjects, settingsOutcome{changed: true, resetConversation: actionsChanged || watchesChanged || newProjects != nil}, nil
+	return result, storedProjects, settingsOutcome{changed: true, resetConversation: actionsChanged || watchesChanged || newProjects != nil, leftDenied: mergePlan.leftDenied()}, nil
 }
 
 // projectsOr returns the resolved project state when the request changes it.

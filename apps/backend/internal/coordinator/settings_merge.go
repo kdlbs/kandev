@@ -26,7 +26,7 @@ func parseMergeMember(body []byte, enabled bool, req *settingsRequest) error {
 		return nil
 	}
 	if !enabled {
-		return &SettingsError{Code: codeMergeUnavailable, Field: "merge", Message: "merge settings are not available"}
+		return errMergeUnavailable()
 	}
 	var member struct {
 		Repositories []struct {
@@ -107,6 +107,8 @@ func (s *Service) SetPrincipalValidator(v PrincipalValidator) {
 // MergeSettingsDTO is the settings read's repository merge policies.
 type MergeSettingsDTO struct {
 	Repositories []MergeRepoDTO `json:"repositories"`
+	// Protection is the recorded provider protection observations.
+	Protection []ProtectionObservation `json:"protection"`
 }
 
 // MergeRepoDTO is one workspace repository and its effective merge policy.
@@ -135,7 +137,14 @@ func (s *Service) mergeView(ctx context.Context, workspaceID, coordinatorID stri
 	if err != nil {
 		return nil, err
 	}
-	out := &MergeSettingsDTO{Repositories: make([]MergeRepoDTO, 0, len(repos))}
+	obs, err := s.store.listProtection(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if obs == nil {
+		obs = []ProtectionObservation{}
+	}
+	out := &MergeSettingsDTO{Repositories: make([]MergeRepoDTO, 0, len(repos)), Protection: obs}
 	for _, r := range repos {
 		row := stored[r.ID]
 		dto := MergeRepoDTO{RepositoryID: r.ID, Name: r.Name, Policy: storedPolicy(stored, r.ID)}

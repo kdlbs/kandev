@@ -104,7 +104,7 @@ func (s *Service) SaveDependencies(ctx context.Context, workspaceID, coordinator
 		return DepSet{}, err
 	}
 	if !s.merge {
-		return DepSet{}, &SettingsError{Code: codeMergeUnavailable, Field: "merge", Message: "merge settings are not available"}
+		return DepSet{}, errMergeUnavailable()
 	}
 	if _, err := s.store.GetCoordinator(ctx, workspaceID, coordinatorID); err != nil {
 		return DepSet{}, err

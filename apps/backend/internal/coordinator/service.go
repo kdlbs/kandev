@@ -192,7 +192,9 @@ type Service struct {
 	// changeObserver reads changes through the provider integrations.
 	changeObserver *ChangeObserver
 	// principals validates execution principals; nil reads every principal as invalid.
-	principals   PrincipalValidator
+	principals PrincipalValidator
+	// protection reads provider branch protection; nil records unknown.
+	protection   ProtectionReader
 	recorderSubs []bus.Subscription
 	// recorderStopped latches once StopWakeRecorder ran: later hook and event
 	// entries are refused. wakeInFlight counts handlers and hooks in flight.
