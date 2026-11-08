@@ -60,6 +60,9 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 			workspace.PUT("/coordinators/:cid/pause", h.httpPutPause)
 			workspace.GET("/coordinators/:cid/measures", h.httpGetMeasures)
 			registerLearningRoutes(workspace, h)
+			if svc.notes {
+				registerNoteRoutes(workspace, h)
+			}
 		}
 	}
 	workspace.GET("/coordinator-stalls", h.httpListStalls)

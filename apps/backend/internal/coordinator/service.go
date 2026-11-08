@@ -176,6 +176,8 @@ type Service struct {
 	// features.coordinatorPhase35): the note routes, the per-turn index and
 	// proposal note references.
 	notes bool
+	// noteResolver checks note citations; nil makes every citation unavailable.
+	noteResolver NoteResolver
 
 	// learningHealth computes the Learning section's health line; guarded by observerMu.
 	learningHealth LearningHealthReader
