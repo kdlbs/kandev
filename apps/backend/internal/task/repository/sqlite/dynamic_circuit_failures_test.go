@@ -41,6 +41,48 @@ func TestCircuitFailureCountAndUTCTimesRoundTrip(t *testing.T) {
 	}
 }
 
+// A backend restart restores the consecutive failure count, so the next
+// failure continues the ladder instead of starting again at one minute.
+//
+// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.21
+func TestCircuitFailureCountSurvivesRestart(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	before := dynamicruntime.NewCircuitRegistry(
+		dynamicruntime.WithCircuitPersistence(repo), dynamicruntime.WithCircuitClock(clock),
+	)
+	for range 2 {
+		before.OpenFailure("profile:candidate-a", dynamicruntime.FailureOpen{Code: routingerr.CodeRateLimited, Now: now})
+		now = now.Add(time.Hour)
+	}
+	if got := restoredCircuitFailures(t, before, "profile:candidate-a"); got != 2 {
+		t.Fatalf("failures before restart = %d, want 2", got)
+	}
+
+	after := dynamicruntime.NewCircuitRegistry(
+		dynamicruntime.WithCircuitPersistence(repo), dynamicruntime.WithCircuitClock(clock),
+	)
+	if err := after.Restore(ctx); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if got := restoredCircuitFailures(t, after, "profile:candidate-a"); got != 2 {
+		t.Fatalf("failures after restart = %d, want 2", got)
+	}
+	after.OpenFailure("profile:candidate-a", dynamicruntime.FailureOpen{Code: routingerr.CodeRateLimited, Now: now})
+	if !after.IsOpen("profile:candidate-a", now.Add(14*time.Minute)) {
+		t.Fatal("the third failure did not open the circuit")
+	}
+	snapshots, err := repo.LoadCircuits(ctx)
+	if err != nil || len(snapshots) != 1 {
+		t.Fatalf("LoadCircuits = %#v, %v", snapshots, err)
+	}
+	if want := now.Add(15 * time.Minute); !snapshots[0].Until.Equal(want) || snapshots[0].Failures != 3 {
+		t.Fatalf("persisted circuit = %#v, want until %v with 3 failures", snapshots[0], want)
+	}
+}
+
 // A successful probe closes the circuit but keeps its count; a restart must
 // still restore that count, so the closed row is loaded too.
 //

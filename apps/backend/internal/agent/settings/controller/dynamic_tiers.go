@@ -104,7 +104,12 @@ func (c *Controller) prepareTierSelections(routes []models.DynamicAgentRoute, re
 		if err != nil {
 			return err
 		}
-		if !c.dynamicProfileTiersEnabled && patch != nil && !sameTierObject(row.raw, patch) {
+		if !hasOwnedTierFields(row.raw) && !hasOwnedTierFields(patch) {
+			candidate.Policies.Selection = mergeOpaqueTierMetadata(row.raw, patch)
+			previousHead = row.head
+			continue
+		}
+		if !c.dynamicProfileTiersEnabled && ownedTierFieldsChanged(row.raw, patch) {
 			return fmt.Errorf("%w: dynamic profile tiers are disabled", ErrDynamicProfileRule)
 		}
 		var joinOverride *bool
@@ -164,4 +169,36 @@ func validateTierSelection(raw json.RawMessage, position int) error {
 		return fmt.Errorf("%w: only tier heads own a tier policy", ErrDynamicProfileRule)
 	}
 	return nil
+}
+
+// The tier toggle owns adjacency and tier policy only. Other selection owners
+// can continue editing their opaque model/usage data while this feature is off.
+func hasOwnedTierFields(object map[string]json.RawMessage) bool {
+	_, joined := object["join_previous"]
+	_, tier := object["tier"]
+	return joined || tier
+}
+
+func ownedTierFields(object map[string]json.RawMessage) map[string]json.RawMessage {
+	owned := map[string]json.RawMessage{}
+	for _, key := range []string{"join_previous", "tier"} {
+		if value, present := object[key]; present {
+			owned[key] = value
+		}
+	}
+	return owned
+}
+
+func ownedTierFieldsChanged(base, patch map[string]json.RawMessage) bool {
+	before := ownedTierFields(base)
+	return !sameTierObject(before, mergeTierObjects(before, ownedTierFields(patch)))
+}
+
+func mergeOpaqueTierMetadata(base, patch map[string]json.RawMessage) json.RawMessage {
+	merged := mergeTierObjects(base, patch)
+	if len(merged) == 0 {
+		return nil
+	}
+	encoded, _ := json.Marshal(merged)
+	return encoded
 }

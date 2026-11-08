@@ -965,6 +965,12 @@ Desktop shows three columns; phones show one tier at a time. Set a profile's
 tier when its provider or plan metadata cannot distinguish subscription from
 pay-as-you-go billing.
 
+When provider usage limits are enabled, OpenCode Go and Zen have separate
+account-limit rows, even when they share one OpenCode credentials file. Go's
+learned allowances do not apply to Zen. Existing Zen settings remain saved; review
+Go-specific owner overrides on the separate Go account after upgrading. No
+shared limit is copied automatically.
+
 Configure concurrent turns and requests per minute for each tier. Free accounts
 also support daily requests and an `HH:MM timezone` reset, such as `00:00 UTC`.
 The short request window preserves limits such as five requests per ten minutes
