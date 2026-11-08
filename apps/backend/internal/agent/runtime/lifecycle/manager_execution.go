@@ -274,12 +274,27 @@ func (m *Manager) submitExecutionOperation(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	result := m.ensureExecutionGroup.DoChan(key, func() (interface{}, error) {
+	result := m.ensureExecutionGroup.DoChan(coalescedExecutionKey(ctx, key), func() (interface{}, error) {
 		sharedCtx, cancel := m.coalescedExecutionContext(ctx)
 		defer cancel()
 		return operation(sharedCtx)
 	})
 	return awaitCoalescedResult(ctx, result)
+}
+
+// coalescedExecutionKey scopes the session-keyed singleflight bucket by the
+// held recovery claim's operation identity. A launch carrying a held recovery
+// admission must not join a workspace-only ensure peer's slot: the peer owns
+// no recovery authority and its inspection-busy failure would be inherited by
+// the authorized launch through the shared result. Callers without a claim
+// keep the plain session key, preserving the duplicate-execution protection
+// that motivated the shared bucket.
+func coalescedExecutionKey(ctx context.Context, key string) string {
+	claim := worktree.RecoveryClaimFromContext(ctx)
+	if claim == nil || claim.OperationID == "" {
+		return key
+	}
+	return key + "\x00recovery-claim:" + claim.OperationID
 }
 
 func (m *Manager) coalescedExecutionContext(ctx context.Context) (context.Context, context.CancelFunc) {
