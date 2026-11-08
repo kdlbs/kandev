@@ -292,6 +292,10 @@ type Manager struct {
 	// never reach the UI.
 	streamSubscribers   map[types.WorkspaceStreamSubscriber]struct{}
 	streamSubscribersMu sync.Mutex
+	// workspaceGraphAfterPublish is an optional test synchronization hook. It
+	// runs with streamSubscribersMu held, after a replacement graph is
+	// published and before subscribers move to it. Nil in production.
+	workspaceGraphAfterPublish func()
 
 	// Script/process runner (dev server, setup, cleanup, custom)
 	processRunner *ProcessRunner
@@ -1298,14 +1302,18 @@ func (m *Manager) stopWorkspaceTrackers() {
 // For single-repo workspaces this is equivalent to
 // GetWorkspaceTracker().SubscribeWorkspaceStream() — the per-repo list is
 // empty and only the root tracker fires events.
+//
+// Registration and attachment happen under streamSubscribersMu so a graph
+// handoff cannot snapshot the old tracker set, then attach this channel after
+// that set was retired.
 func (m *Manager) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
 	sub := make(types.WorkspaceStreamSubscriber, 100)
 	m.streamSubscribersMu.Lock()
+	defer m.streamSubscribersMu.Unlock()
 	if m.streamSubscribers == nil {
 		m.streamSubscribers = make(map[types.WorkspaceStreamSubscriber]struct{})
 	}
 	m.streamSubscribers[sub] = struct{}{}
-	m.streamSubscribersMu.Unlock()
 	root, trackers := m.snapshotTrackers()
 	root.AttachWorkspaceStreamSubscriber(sub)
 	for _, t := range trackers {
@@ -1315,11 +1323,13 @@ func (m *Manager) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
 }
 
 // UnsubscribeWorkspaceStream detaches the subscriber from every tracker and
-// closes the channel exactly once.
+// closes the channel exactly once. Deregistration, detachment and closure share
+// streamSubscribersMu with graph handoff so a retired tracker cannot keep a
+// channel that is about to close.
 func (m *Manager) UnsubscribeWorkspaceStream(sub types.WorkspaceStreamSubscriber) {
 	m.streamSubscribersMu.Lock()
+	defer m.streamSubscribersMu.Unlock()
 	delete(m.streamSubscribers, sub)
-	m.streamSubscribersMu.Unlock()
 	root, trackers := m.snapshotTrackers()
 	root.DetachWorkspaceStreamSubscriber(sub)
 	for _, t := range trackers {
@@ -1356,7 +1366,12 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 		m.workspaceTrackersBySubpath = make(map[string]*WorkspaceTracker)
 	}
 	if t, ok := m.workspaceTrackersBySubpath[cleaned]; ok {
-		return t, nil
+		if t.live() {
+			return t, nil
+		}
+		// Stop is terminal; a cached tracker from a previous lifecycle cannot
+		// serve a later read. Drop it and build a live replacement below.
+		delete(m.workspaceTrackersBySubpath, cleaned)
 	}
 	t := NewWorkspaceTrackerForRepo(full, cleaned, m.logger)
 	m.configureTracker(t, cleaned, m.currentWorkspaceSourceRoots())
@@ -1951,6 +1966,10 @@ func (m *Manager) startWithGeneration(
 			return 0, err
 		}
 	}
+	// Stop leaves every workspace tracker terminal. A retained manager that
+	// starts a replacement agent must replace them before the process reads or
+	// streams workspace state again.
+	m.renewWorkspaceTrackersForStart(ctx)
 
 	m.logger.Info("starting agent process",
 		zap.String("protocol", string(m.cfg.Protocol)),

@@ -39,6 +39,7 @@ type PromotionTraceState = {
   statusEvents: WorkspaceStatusEvent[];
   pendingGitReads: Map<string, string>;
   heldGitReads: HeldRequest[];
+  gitReadResults: Map<string, "response" | "error">;
   holdGitReads: boolean;
   holdStartedAt: string | null;
   holdStartedAtMs: number | null;
@@ -135,6 +136,7 @@ function recordLaunchResponse(
 function recordGitReadResponse(frame: WireFrame, state: PromotionTraceState) {
   if (typeof frame.id !== "string" || !isGitReadAction(state.pendingGitReads.get(frame.id))) return;
   state.pendingGitReads.delete(frame.id);
+  state.gitReadResults.set(frame.id, frame.type === "error" ? "error" : "response");
   if (state.holdStartedAtMs === null) state.gitReadResponsesBeforeHold += 1;
   else state.gitReadResponsesAfterHold += 1;
 }
@@ -238,6 +240,20 @@ function createPromotionTrace(state: PromotionTraceState) {
       state.holdGitReads = false;
       for (const request of state.heldGitReads.splice(0)) request.server.send(request.frame);
     },
+    async releaseHeldGitReadsAndWaitForResponses(): Promise<void> {
+      const heldIds = state.heldGitReads
+        .map((request) => parseFrame(request.frame)?.id)
+        .filter((id): id is string => typeof id === "string");
+      this.releaseHeldGitReads();
+      if (heldIds.length === 0) return;
+      await expect
+        .poll(() => heldIds.every((id) => state.gitReadResults.has(id)), {
+          timeout: 30_000,
+          message: "Released foreground Git reads should produce correlated responses",
+        })
+        .toBe(true);
+      expect(heldIds.filter((id) => state.gitReadResults.get(id) !== "response")).toEqual([]);
+    },
     diagnostics() {
       return {
         holdStartedAt: state.holdStartedAt,
@@ -285,6 +301,7 @@ export async function routeWorkspaceStreamPromotion(page: Page, taskId: string, 
     statusEvents: [],
     pendingGitReads: new Map(),
     heldGitReads: [],
+    gitReadResults: new Map(),
     holdGitReads: false,
     holdStartedAt: null,
     holdStartedAtMs: null,
