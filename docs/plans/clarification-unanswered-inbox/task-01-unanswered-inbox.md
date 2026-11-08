@@ -52,14 +52,24 @@ in, close exactly the question a late answer answered, and let agents see them b
 
 ## Verification
 
-The existing late-answer web hook tests and selected operational SQLite and handler tests were run.
-The backend checks used temporary overlays because those operational tests are not included in this
-proposal. The pull request records the precise scope and remaining unverified paths.
+```bash
+(cd apps/backend && go test ./internal/task/repository/sqlite -run 'Unanswered|LateAnswer' -count=1)
+(cd apps/backend && go test ./internal/clarification -count=1)
+(cd apps/backend && go test ./internal/mcp/handlers -count=1)
+(cd apps/web && pnpm exec vitest run components/needs-you-inbox hooks/use-late-clarification-message app/settings/workspace/workspace-unanswered-inbox lib/ws/handlers/workspaces-unanswered-inbox)
+```
+
+Playwright: `apps/web/e2e/tests/chat/needs-you-inbox-unanswered.spec.ts` (run in CI).
 
 ## Completion report
 
-- Existing SQLite and handler tests were reused from the operational source as temporary overlays;
-  the checks and limitations for this proposed change are described in the pull request.
+- Repository: SQLite cases cover the setting gate, active exclusion, late-answer isolation with an
+  admitted receipt, duplicate merge, terminal expiry, archive, retention, parent questions,
+  workspace scope, and sidecar pagination. A PostgreSQL counterpart skips without
+  `KANDEV_TEST_POSTGRES_DSN`.
+- Handlers and MCP: list, close, late-answer targets, bundle access, task-write and prompt-access
+  authority, unconfirmed admission, and the MCP `include_unanswered` option are covered. Web tests
+  cover the section, the settings card and draft, the late-answer hook, and the workspace event.
 - Late-answer receipt validation establishes a user-message admission for the task and session. It
   does not establish that the caller and sender are the same person.
 - PostgreSQL runtime and end-to-end browser behavior remain unverified for this proposal.
