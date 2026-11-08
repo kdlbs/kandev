@@ -262,3 +262,18 @@ func TestPrepareTurnNotesConcurrentSameTurnStoresOne(t *testing.T) {
 	}
 	f.svc.RecordTurnNotesAccepted(context.Background(), f.c.ID, "t1")
 }
+
+func TestRecordTurnNotesAcceptedUsesCommitTimeForExpiry(t *testing.T) {
+	f := newNotesFixture(t)
+	v := f.create("soon")
+	f.prepare("t1")
+	soon := f.now.Add(time.Minute)
+	if _, err := f.store.db.Exec(f.store.db.Rebind(`UPDATE coordinator_notes SET expires_at = ? WHERE id = ?`), soon, v.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(time.Hour) // expiry passes before the acceptance commit
+	f.svc.RecordTurnNotesAccepted(context.Background(), f.c.ID, "t1")
+	if n := f.note(v.ID); n.UseCount != 0 || !n.ExpiresAt.Equal(soon) {
+		t.Fatalf("note expired before commit must not be counted or extended: %+v", n)
+	}
+}

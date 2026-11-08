@@ -151,7 +151,7 @@ func (s *Service) RecordTurnNotesAccepted(ctx context.Context, coordinatorID, se
 	if !s.notes || coordinatorID == "" || sessionTurnID == "" {
 		return
 	}
-	if err := s.store.RecordNoteDelivery(ctx, coordinatorID, sessionTurnID, s.store.now().UTC()); err != nil {
+	if err := s.store.RecordNoteDelivery(ctx, coordinatorID, sessionTurnID); err != nil {
 		s.logger.Warn("coordinator notes: delivery not recorded", zap.String("coordinator_id", coordinatorID), zap.Error(err))
 	}
 }

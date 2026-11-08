@@ -145,3 +145,20 @@ func TestAttachPromptNotesChainsAcceptance(t *testing.T) {
 	}
 	assert.Empty(t, p.prepared)
 }
+
+func TestChainInitialPromptAcceptedCountsOnlyOnAcceptance(t *testing.T) {
+	var order []string
+	chained := chainInitialPromptAccepted(func(id string) { order = append(order, "prev:"+id) }, func() { order = append(order, "notes") })
+	if len(order) != 0 {
+		t.Fatalf("chaining must not run notes before acceptance: %v", order)
+	}
+	chained("exec-1")
+	if len(order) != 2 || order[0] != "prev:exec-1" || order[1] != "notes" {
+		t.Fatalf("order = %v", order)
+	}
+	var n int
+	chainInitialPromptAccepted(nil, func() { n++ })("x")
+	if n != 1 {
+		t.Fatalf("nil prev: notes ran %d times", n)
+	}
+}

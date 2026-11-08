@@ -56,7 +56,6 @@ func TestWithProposalNotesIgnoresOtherActionsAndPrincipals(t *testing.T) {
 	other := makeWSMessage(t, "coordinator.list_activity", map[string]interface{}{"note_ids": []string{"x"}})
 	require.Equal(t, ctx, h.withProposalNotes(ctx, other))
 	propose := makeWSMessage(t, coordinator.ActionProposeTask, map[string]interface{}{"note_ids": []string{"x"}})
-	require.Equal(t, propose.Action, coordinator.ActionProposeTask)
 	bare := t.Context()
 	require.Equal(t, bare, h.withProposalNotes(bare, propose))
 }

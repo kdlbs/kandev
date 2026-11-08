@@ -114,6 +114,7 @@ func TestNoteShapeRejections(t *testing.T) {
 		{"abs path", `{"type":"user","text":"a","citations":[{"kind":"file","repository_id":"r","path":"/etc/x","sha":"` + strings.Repeat("a", 40) + `"}]}`, NoteInvalidCitation},
 		{"duplicate", `{"type":"user","text":"a","citations":[{"kind":"pr","repository_id":"r","number":1},{"kind":"pr","repository_id":"r","number":1}]}`, NoteInvalidCitation},
 		{"credential text", `{"type":"user","text":"kandev_pat_abc"}`, NoteCredential},
+		{"credential split by a system tag", `{"type":"user","text":"kandev_<kandev-system>pat_abc"}`, NoteCredential},
 		{"unknown field", `{"type":"user","text":"a","x":1}`, NoteInvalidRequest},
 		{"null type", `{"type":null,"text":"a"}`, NoteInvalidRequest},
 		{"wrong type", `{"type":"user","text":5}`, NoteInvalidField},
@@ -301,10 +302,15 @@ func TestNoteConcurrentEditsCommitOne(t *testing.T) {
 	for _, err := range errs {
 		if err == nil {
 			ok++
+			continue
 		}
+		wantNoteErr(t, err, NoteConflict, ConflictVersion)
 	}
 	if ok != 1 {
 		t.Fatalf("errs = %v", errs)
+	}
+	if got := f.note(v.ID).CurrentVer; got != 2 {
+		t.Fatalf("current version = %d, want 2", got)
 	}
 }
 

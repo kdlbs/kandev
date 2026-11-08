@@ -62,6 +62,7 @@ func (s *Service) stampToolPolicy(metadata map[string]interface{}, c *Coordinato
 		PolicyRevision:     c.PolicyRevision,
 		ToolNames:          s.bindingToolNames(c),
 		PluginTools:        pluginTools,
+		Notes:              s.notes,
 	}
 	// The empty-id form is stamped before the task exists, so it cannot pass
 	// full validation. Once the id is available the binding must validate

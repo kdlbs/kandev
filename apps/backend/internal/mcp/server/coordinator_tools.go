@@ -107,7 +107,7 @@ func (s *Server) registerProposeTaskTool() {
 			mcp.WithString("source_task_id", mcp.Description("Optional existing task this proposal originated from")),
 			mcp.WithString("in_reply_to", mcp.Description("Optional id of a returned proposal of yours that this one revises after the manager's reply")),
 			standingOrderIDsOption(),
-			noteIDsOption(),
+			s.noteIDsOption(),
 		),
 		s.wrapHandler("propose_task_kandev", s.proposeTaskHandler()),
 	)
@@ -267,8 +267,11 @@ const standingOrderIDsArg = "standing_order_ids"
 const noteIDsArg = "note_ids"
 
 // noteIDsOption declares the optional note citation list every proposal tool
-// accepts. The value is forwarded untouched; the coordinator service judges it.
-func noteIDsOption() mcp.ToolOption {
+// accepts when the conversation was bound with notes on; otherwise it adds nothing. The value is forwarded untouched; the coordinator service judges it.
+func (s *Server) noteIDsOption() mcp.ToolOption {
+	if p := s.profile.CoordinatorToolPolicy; p == nil || !p.Notes {
+		return func(*mcp.Tool) {}
+	}
 	return mcp.WithArray(noteIDsArg,
 		mcp.Description("Optional ids of the notes from this turn's coordinator notes index that this proposal relies on, at most 5, no duplicates."),
 		mcp.Items(map[string]any{typeKey: stringType}))
@@ -295,7 +298,7 @@ func (s *Server) registerProposeResumeTool() {
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task whose session would be resumed")),
 			mcp.WithString("rationale", mcp.Description("Why the session should be resumed, at most 10,000 characters")),
 			standingOrderIDsOption(),
-			noteIDsOption(),
+			s.noteIDsOption(),
 		),
 		s.wrapHandler("propose_resume_kandev", s.proposeKindHandler(mcpcontract.ActionProposeResume, "task_id", "rationale")),
 	)
@@ -309,7 +312,7 @@ func (s *Server) registerProposeMessageTool() {
 			mcp.WithString("text", mcp.Required(), mcp.Description("The message, 1 to 4,000 characters after trimming")),
 			mcp.WithString("rationale", mcp.Description("Why the message should be sent, at most 10,000 characters")),
 			standingOrderIDsOption(),
-			noteIDsOption(),
+			s.noteIDsOption(),
 		),
 		s.wrapHandler("propose_message_kandev", s.proposeKindHandler(mcpcontract.ActionProposeMessage, "task_id", "text", "rationale")),
 	)
@@ -323,7 +326,7 @@ func (s *Server) registerProposeMoveTool() {
 			mcp.WithString(mcpcontract.FieldStepID, mcp.Required(), mcp.Description("The destination step in the task's current workflow")),
 			mcp.WithString("rationale", mcp.Description("Why the task should move, at most 10,000 characters")),
 			standingOrderIDsOption(),
-			noteIDsOption(),
+			s.noteIDsOption(),
 		),
 		s.wrapHandler("propose_move_kandev", s.proposeKindHandler(mcpcontract.ActionProposeMove, "task_id", mcpcontract.FieldStepID, "rationale")),
 	)
@@ -368,7 +371,7 @@ func (s *Server) registerProposeAnswerTool() {
 			mcp.WithBoolean("needs_decision", mcp.Required(), mcp.Description("True when the answer is a judgement call for the manager")),
 			mcp.WithString("rationale", mcp.Description("Why this answer, at most 10,000 characters")),
 			standingOrderIDsOption(),
-			noteIDsOption(),
+			s.noteIDsOption(),
 		),
 		s.wrapHandler("propose_answer_kandev", s.proposeAnswerHandler()),
 	)
@@ -399,7 +402,7 @@ func (s *Server) registerProposeMergeTool() {
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task whose linked change should be merged")),
 			mcp.WithString("change", mcp.Description("Which linked change, when the task has several")),
 			mcp.WithString("expected_head_sha", mcp.Required(), mcp.Description("The head commit SHA you reviewed")),
-			noteIDsOption(),
+			s.noteIDsOption(),
 		),
 		s.wrapHandler("propose_merge_kandev", s.proposeMergeHandler()),
 	)
@@ -451,7 +454,7 @@ func (s *Server) registerProposeImprovementTool() {
 						mcpKeyTaskID: map[string]any{typeKey: stringType},
 					},
 				})),
-			noteIDsOption(),
+			s.noteIDsOption(),
 		),
 		s.wrapHandler("propose_improvement_kandev", s.proposeImprovementHandler()),
 	)

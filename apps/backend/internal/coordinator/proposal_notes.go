@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -128,7 +129,11 @@ func (s *Store) checkProposalNotes(ctx context.Context, tx coordinatorExec, coor
 		id, reason := "", NoteRefMalformed
 		if e != nil {
 			id = *e
-			reason = s.judgeProposalNote(ctx, tx, coordinatorID, req, id, seen, at)
+			var jerr error
+			reason, jerr = s.judgeProposalNote(ctx, tx, coordinatorID, req, id, seen, at)
+			if jerr != nil {
+				return nil, jerr
+			}
 			id = strings.ToLower(id)
 		}
 		if reason != "" {
@@ -149,32 +154,35 @@ type noteLink struct {
 }
 
 // judgeProposalNote returns the first failing reason of one entry, or "".
-func (s *Store) judgeProposalNote(ctx context.Context, tx coordinatorExec, coordinatorID string, req *proposalNotesRequest, raw string, seen map[string]bool, at time.Time) string {
+func (s *Store) judgeProposalNote(ctx context.Context, tx coordinatorExec, coordinatorID string, req *proposalNotesRequest, raw string, seen map[string]bool, at time.Time) (string, error) {
 	parsed, err := uuid.Parse(raw)
 	if err != nil || len(raw) != 36 {
-		return NoteRefMalformed
+		return NoteRefMalformed, nil
 	}
 	id := parsed.String()
 	if dup := seen[id]; dup {
-		return NoteRefDuplicate
+		return NoteRefDuplicate, nil
 	}
 	seen[id] = true
 	n, err := s.noteOn(ctx, tx, coordinatorID, id)
+	if errors.Is(err, ErrNotFound) {
+		return NoteRefUnknown, nil
+	}
 	if err != nil {
-		return NoteRefUnknown
+		return "", fmt.Errorf("read proposal note: %w", err)
 	}
 	switch {
 	case n.DeletedAt != nil:
-		return NoteRefDeleted
+		return NoteRefDeleted, nil
 	case n.expired(at):
-		return NoteRefExpired
+		return NoteRefExpired, nil
 	case n.LastResult == validationStale:
-		return NoteRefStale
+		return NoteRefStale, nil
 	}
 	if _, ok := req.delivered[id]; !ok {
-		return NoteRefNotDelivered
+		return NoteRefNotDelivered, nil
 	}
-	return ""
+	return "", nil
 }
 
 func (s *Store) insertNoteLinks(ctx context.Context, tx coordinatorExec, proposalID string, links []noteLink) error {

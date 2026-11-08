@@ -113,11 +113,10 @@ func (c *noteChecker) checkPR(ctx context.Context, cite coordinator.NoteCitation
 		return coordinator.CitationUnavailable
 	}
 	_, err := c.r.prs.ReadLive(ctx, c.ws, mergestate.ChangeKey{Provider: repo.Provider, RepoID: repo.ID, Number: cite.Number})
-	var apiErr *github.GitHubAPIError
-	switch {
-	case err == nil:
+	if err == nil {
 		return coordinator.CitationPresent
-	case repo.Provider == mergeProviderGitHub && errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound:
+	}
+	if changeRequestMissing(repo.Provider, err) {
 		return coordinator.CitationAbsent
 	}
 	return coordinator.CitationUnavailable
@@ -203,4 +202,17 @@ func wireCoordinatorNotes(svc *coordinator.Service, tasks noteTasks, repos merge
 	svc.SetNoteResolver(&coordinatorNoteResolver{
 		tasks: tasks, repos: repos, turns: svc, prs: newCoordinatorMergeProviders(repos, ghImpl, glImpl),
 	})
+}
+
+// changeRequestMissing reports whether the provider answered 404 for the change.
+func changeRequestMissing(provider string, err error) bool {
+	var ghErr *github.GitHubAPIError
+	var glErr *gitlab.APIError
+	switch provider {
+	case mergeProviderGitHub:
+		return errors.As(err, &ghErr) && ghErr.StatusCode == http.StatusNotFound
+	case mergeProviderGitLab:
+		return errors.As(err, &glErr) && glErr.StatusCode == http.StatusNotFound
+	}
+	return false
 }

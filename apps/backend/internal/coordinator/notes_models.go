@@ -66,6 +66,8 @@ type NoteError struct {
 	Reason string
 	Field  string
 	Index  *int
+	// TooLarge marks a request body over the size limit (HTTP 413).
+	TooLarge bool
 }
 
 func (e *NoteError) Error() string {
@@ -74,6 +76,9 @@ func (e *NoteError) Error() string {
 
 // Status is the HTTP status of the rejection.
 func (e *NoteError) Status() int {
+	if e.TooLarge {
+		return http.StatusRequestEntityTooLarge
+	}
 	switch e.Code {
 	case NoteConflict, NoteLimitReached:
 		return http.StatusConflict

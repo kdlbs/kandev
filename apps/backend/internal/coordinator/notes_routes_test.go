@@ -40,7 +40,7 @@ func TestNoteRoutesStatuses(t *testing.T) {
 	if rec := f.do(r, http.MethodPut, "/"+v.ID, `{"type":"user","text":"x","citations":[],"version":9}`); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"reason":"version"`) {
 		t.Fatalf("conflict = %d %s", rec.Code, rec.Body)
 	}
-	if rec := f.do(r, http.MethodPost, "", strings.Repeat("x", maxNoteBodyBytes+1)); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), NoteInvalidRequest) {
+	if rec := f.do(r, http.MethodPost, "", strings.Repeat("x", maxNoteBodyBytes+1)); rec.Code != http.StatusRequestEntityTooLarge || !strings.Contains(rec.Body.String(), NoteInvalidRequest) {
 		t.Fatalf("oversize = %d %s", rec.Code, rec.Body)
 	}
 	if rec := f.do(r, http.MethodGet, "/"+v.ID, ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"versions"`) {

@@ -73,14 +73,15 @@ func (s *Store) InsertNoteSnapshot(ctx context.Context, snap *noteSnapshot, at t
 
 // RecordNoteDelivery writes the receipts of an accepted turn and, in the same
 // transaction, counts each newly receipted note and extends its expiry. A note
-// deleted or not strictly unexpired at the commit time gets a receipt only. A
+// deleted or not strictly unexpired at the commit time (read inside the lock) gets a receipt only. A
 // repeated call for the same turn changes nothing.
-func (s *Store) RecordNoteDelivery(ctx context.Context, coordinatorID, turnID string, at time.Time) error {
+func (s *Store) RecordNoteDelivery(ctx context.Context, coordinatorID, turnID string) error {
 	snap, found, err := s.GetNoteSnapshot(ctx, turnID)
 	if err != nil || !found || snap.CoordinatorID != coordinatorID || len(snap.Entries) == 0 {
 		return err
 	}
 	return s.withCoordinatorLock(ctx, coordinatorID, func(tx coordinatorExec) error {
+		at := s.now().UTC()
 		for _, e := range snap.Entries {
 			if err := s.deliverNoteOn(ctx, tx, coordinatorID, turnID, e, at); err != nil {
 				return err

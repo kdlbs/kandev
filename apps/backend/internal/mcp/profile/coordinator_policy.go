@@ -57,6 +57,9 @@ type CoordinatorToolPolicy struct {
 	PolicyRevision     int                     `json:"policy_revision"`
 	ToolNames          []string                `json:"tool_names"`
 	PluginTools        []CoordinatorPluginTool `json:"plugin_tools,omitempty"`
+	// Notes is true when the coordinator notes feature was on as the
+	// conversation opened; proposal tools advertise note_ids only then.
+	Notes bool `json:"notes,omitempty"`
 }
 
 // Validate refuses a binding that is incomplete or names a tool outside the

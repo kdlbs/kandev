@@ -14,7 +14,7 @@ const (
 	noteOpDelete = "delete"
 )
 
-// noteRequest is a decoded note mutation body (step 2 of the evaluation order).
+// noteRequest is a decoded note mutation body (envelope and field-type checks).
 type noteRequest struct {
 	op      string
 	typ     string
@@ -33,10 +33,12 @@ var noteFields = map[string][]string{
 
 // parseNoteRequest decodes body for op. It reports an unknown, missing or
 // null-where-required field as invalid_request and a wrong JSON type as
-// invalid_field; shape rules are step 4's concern.
+// invalid_field; content shape rules are checked later.
 func parseNoteRequest(op string, body []byte, tooLarge bool) (*noteRequest, *NoteError) {
 	if tooLarge {
-		return nil, noteErr(NoteInvalidRequest, "")
+		e := noteErr(NoteInvalidRequest, "")
+		e.TooLarge = true
+		return nil, e
 	}
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(bytes.TrimSpace(body), &obj) != nil || obj == nil {

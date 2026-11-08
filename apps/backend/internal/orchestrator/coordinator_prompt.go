@@ -147,3 +147,14 @@ func (s *Service) attachPromptNotes(
 		accepted()
 	}
 }
+
+// chainInitialPromptAccepted runs next after prev when the provider accepts
+// the initial prompt.
+func chainInitialPromptAccepted(prev func(string), next func()) func(string) {
+	return func(executionID string) {
+		if prev != nil {
+			prev(executionID)
+		}
+		next()
+	}
+}

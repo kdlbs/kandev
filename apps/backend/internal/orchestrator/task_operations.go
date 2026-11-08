@@ -1103,6 +1103,9 @@ func (s *Service) startCreatedSession(
 	if !session.IsPassthrough {
 		effectivePrompt, notesAccepted = s.withCoordinatorNotes(ctx, dbTask, initialTurnID, effectivePrompt, true)
 	}
+	if notesAccepted != nil {
+		options.onInitialPromptAccepted = chainInitialPromptAccepted(options.onInitialPromptAccepted, notesAccepted)
+	}
 	ctx = bindWorkflowStartPromptAttemptTurn(ctx, initialTurnID)
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, options.ceilingEntryBinding); err != nil {
 		if initialTurnCreated {
@@ -1165,10 +1168,6 @@ func (s *Service) startCreatedSession(
 			s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
 		}
 		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
-	}
-
-	if notesAccepted != nil {
-		notesAccepted()
 	}
 
 	// Record the initial user message and set plan mode metadata after launch.

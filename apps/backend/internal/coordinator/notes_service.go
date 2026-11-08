@@ -206,7 +206,7 @@ func (f *noteFlow) run(ctx context.Context, workspaceID string) (*NoteView, erro
 	return f.commit(ctx)
 }
 
-// earlyChecks runs steps 3 through 6. A non-nil view is a successful early
+// earlyChecks runs the state, no-op, version and shape checks before any I/O. A non-nil view is a successful early
 // outcome (repeated delete or no-op).
 func (f *noteFlow) earlyChecks(ctx context.Context, now time.Time) (*NoteView, error) {
 	if view, err := f.stateStep(f.note, now); view != nil || err != nil {
@@ -227,7 +227,7 @@ func (f *noteFlow) earlyChecks(ctx context.Context, now time.Time) (*NoteView, e
 	return nil, nil
 }
 
-// stateStep is step 3 against a note read now or at the commit.
+// stateStep checks deleted/expired state against a note read now or at the commit.
 func (f *noteFlow) stateStep(n *Note, now time.Time) (*NoteView, error) {
 	if n == nil {
 		return nil, nil
@@ -248,7 +248,7 @@ func (f *noteFlow) stateStep(n *Note, now time.Time) (*NoteView, error) {
 	return nil, nil
 }
 
-// shape is step 4: content shape and the credential gate.
+// shape checks content shape and the credential gate.
 func (f *noteFlow) shape(ctx context.Context) *NoteError {
 	req := f.req
 	typ, text, cites := req.typ, req.text, req.cites
@@ -288,7 +288,7 @@ func (f *noteFlow) equalsCurrent() bool {
 		citationSetKey(f.content.Citations) == citationSetKey(cur.Citations)
 }
 
-// resolve is step 8: every citation must resolve within the deadline.
+// resolve requires every citation must resolve within the deadline.
 func (f *noteFlow) resolve(ctx context.Context) *NoteError {
 	checker := f.s.openChecker(ctx, f.c)
 	states := runCitationJobs(ctx, checker, f.content.Citations, citationDeadline)
@@ -303,7 +303,7 @@ func (f *noteFlow) resolve(ctx context.Context) *NoteError {
 }
 
 func noteHasCredential(text string, cites []NoteCitation) bool {
-	if ContainsCredential(text) {
+	if ContainsCredential(text) || ContainsCredential(sanitizeNoteLine(text)) {
 		return true
 	}
 	for _, c := range cites {
@@ -324,8 +324,8 @@ func noteCredentialErr(text string, cites []NoteCitation) *NoteError {
 	return noteErr(NoteCredential, fieldCitations)
 }
 
-// commit is step 9: one short transaction under the coordinator lock that
-// re-runs steps 3, 5, 6 and 7 against committed state, then writes.
+// commit is one short transaction under the coordinator lock that
+// re-runs the state, no-op, version and limit checks against committed state, then writes.
 func (f *noteFlow) commit(ctx context.Context) (*NoteView, error) {
 	var out *NoteView
 	err := f.s.store.withCoordinatorLock(ctx, f.c.ID, func(tx coordinatorExec) error {

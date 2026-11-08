@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/coordinator/mcpcontract"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
 func callWith(args map[string]interface{}) mcp.CallToolRequest {
@@ -67,4 +68,16 @@ func TestProposalToolsOmitNoteIDsWhenAbsent(t *testing.T) {
 	require.NoError(t, err)
 	_, present := backend.lastPayload.(map[string]interface{})[noteIDsArg]
 	assert.False(t, present)
+}
+
+func TestNoteIDsAdvertisedOnlyWithNotesBinding(t *testing.T) {
+	advertised := func(p *mcpprofile.CoordinatorToolPolicy) bool {
+		s := &Server{profile: mcpprofile.Context{CoordinatorToolPolicy: p}}
+		tool := mcp.NewTool("propose_task_kandev", s.noteIDsOption())
+		_, ok := tool.InputSchema.Properties[noteIDsArg]
+		return ok
+	}
+	assert.False(t, advertised(nil), "no binding")
+	assert.False(t, advertised(&mcpprofile.CoordinatorToolPolicy{}), "binding with notes off")
+	assert.True(t, advertised(&mcpprofile.CoordinatorToolPolicy{Notes: true}), "binding with notes on")
 }

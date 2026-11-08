@@ -2,6 +2,8 @@ package backendapp
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/coordinator"
+	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/gitlab"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
@@ -96,6 +100,30 @@ func TestNoteResolverCitations(t *testing.T) {
 	for _, tc := range cases {
 		if got := checker.Check(context.Background(), tc.cite); got != tc.want {
 			t.Errorf("%s: got %v want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestChangeRequestMissing(t *testing.T) {
+	gl404 := fmt.Errorf("wrapped: %w", &gitlab.APIError{StatusCode: http.StatusNotFound})
+	gl500 := &gitlab.APIError{StatusCode: http.StatusInternalServerError}
+	gh404 := fmt.Errorf("wrapped: %w", &github.GitHubAPIError{StatusCode: http.StatusNotFound})
+	cases := []struct {
+		name     string
+		provider string
+		err      error
+		want     bool
+	}{
+		{"gitlab 404", mergeProviderGitLab, gl404, true},
+		{"gitlab 500", mergeProviderGitLab, gl500, false},
+		{"github 404", mergeProviderGitHub, gh404, true},
+		{"github error on gitlab repo", mergeProviderGitLab, gh404, false},
+		{"gitlab error on github repo", mergeProviderGitHub, gl404, false},
+		{"plain error", mergeProviderGitLab, fmt.Errorf("boom"), false},
+	}
+	for _, tc := range cases {
+		if got := changeRequestMissing(tc.provider, tc.err); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }
