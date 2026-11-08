@@ -24,8 +24,7 @@ func (m *Manager) stopPendingRemoteRecovery(
 		return false, nil
 	}
 	if entry.stopRuntimeCompleted {
-		stopWatch.advance(stopWaitPersistence)
-		return m.settlePendingRemoteStop(ctx, entry, reason, force)
+		return m.settlePendingRemoteStop(ctx, entry, reason, force, stopWatch)
 	}
 	if handled, err := m.stopPersistedPendingRemoteOwner(ctx, entry, reason, force, stopWatch); handled || err != nil {
 		return handled, err
@@ -108,8 +107,7 @@ func (m *Manager) stopAbsentRemoteOwner(
 		}
 	}
 	entry.stopRuntimeCompleted = true
-	stopWatch.advance(stopWaitPersistence)
-	return m.settlePendingRemoteStop(ctx, entry, reason, force)
+	return m.settlePendingRemoteStop(ctx, entry, reason, force, stopWatch)
 }
 
 func (m *Manager) stopAttachedRemoteOwner(
@@ -167,8 +165,7 @@ func (m *Manager) stopAttachedRemoteOwner(
 	// client was already closed after agentctl accepted the exact stop.
 	ri.DiscardRecovery = nil
 	entry.stopRuntimeCompleted = true
-	stopWatch.advance(stopWaitPersistence)
-	return m.settlePendingRemoteStop(ctx, entry, reason, force)
+	return m.settlePendingRemoteStop(ctx, entry, reason, force, stopWatch)
 }
 
 func (m *Manager) stopPersistedPendingRemoteOwner(
@@ -357,8 +354,10 @@ func (m *Manager) settlePendingRemoteStop(
 	entry *remoteRecoveryRetry,
 	reason string,
 	force bool,
+	stopWatch *stopWaitWatch,
 ) (bool, error) {
 	if entry.record.Runtime == agentruntime.RuntimeKubernetes && (force || shouldRunExecutorCleanup(reason)) {
+		stopWatch.advance(stopWaitRuntimeCleanup)
 		metadata, err := m.currentKubernetesConnectionMetadata(ctx, entry.record.Metadata)
 		if err != nil {
 			return false, fmt.Errorf("resolve current Kubernetes cleanup connection: %w", err)
@@ -370,6 +369,7 @@ func (m *Manager) settlePendingRemoteStop(
 			return false, fmt.Errorf("delete Kubernetes runtime secrets: %w", cleanupErr)
 		}
 	}
+	stopWatch.advance(stopWaitPersistence)
 	m.deleteExecutorRunning(ctx, entry.record.SessionID, entry.record.AgentExecutionID)
 	return true, nil
 }

@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -80,21 +81,51 @@ func (w *stopWaitWatch) finish() {
 
 var lastStopWaitSnapshot atomic.Int64
 
+// reportStopWaitDiagnostic records a stop warning and bounded goroutine
+// snapshot. The cooldown keeps a fan-out stall to one snapshot per process.
 func reportStopWaitDiagnostic(log *logger.Logger, executionID string, phase stopWaitPhase) {
+	logStopWaitWarning(log, executionID, phase)
+	dir, err := defaultStopWaitSnapshotDir()
+	if err != nil {
+		log.Warn("stop wait snapshot unavailable",
+			zap.String("execution_id", executionID),
+			zap.String("phase", string(phase)),
+			zap.Error(err),
+		)
+		return
+	}
+	captureStopWaitSnapshotInDir(log, executionID, phase, dir)
+}
+
+func reportStopWaitDiagnosticInDir(log *logger.Logger, executionID string, phase stopWaitPhase, dir string) {
+	logStopWaitWarning(log, executionID, phase)
+	captureStopWaitSnapshotInDir(log, executionID, phase, dir)
+}
+
+func logStopWaitWarning(log *logger.Logger, executionID string, phase stopWaitPhase) {
 	log.Warn("agent stop is taking longer than expected",
 		zap.String("execution_id", executionID),
 		zap.String("phase", string(phase)),
 	)
-	captureStopWaitSnapshot(log, executionID, phase)
 }
 
-// captureStopWaitSnapshot records stack sites without goroutine arguments. A
-// short process-wide cooldown keeps a fan-out stall to one local artifact.
-func captureStopWaitSnapshot(log *logger.Logger, executionID string, phase stopWaitPhase) {
-	captureStopWaitSnapshotInDir(log, executionID, phase, os.TempDir())
+func defaultStopWaitSnapshotDir() (string, error) {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user cache directory: %w", err)
+	}
+	return filepath.Join(cacheDir, "kandev", "stop-wait"), nil
 }
 
 func captureStopWaitSnapshotInDir(log *logger.Logger, executionID string, phase stopWaitPhase, dir string) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		log.Warn("stop wait snapshot unavailable",
+			zap.String("execution_id", executionID),
+			zap.String("phase", string(phase)),
+			zap.Error(err),
+		)
+		return
+	}
 	now := time.Now().UnixNano()
 	var previous int64
 	for {
@@ -150,6 +181,10 @@ func captureStopWaitSnapshotInDir(log *logger.Logger, executionID string, phase 
 }
 
 func pruneStopWaitSnapshots(dir, currentPath string) error {
+	return pruneStopWaitSnapshotsWithRemove(dir, currentPath, os.Remove)
+}
+
+func pruneStopWaitSnapshotsWithRemove(dir, currentPath string, remove func(string) error) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("read stop wait snapshot directory: %w", err)
@@ -184,7 +219,7 @@ func pruneStopWaitSnapshots(dir, currentPath string) error {
 	currentPath = filepath.Clean(currentPath)
 	sort.Slice(files, func(i, j int) bool {
 		if files[i].path == currentPath {
-			return true
+			return files[j].path != currentPath
 		}
 		if files[j].path == currentPath {
 			return false
@@ -194,13 +229,14 @@ func pruneStopWaitSnapshots(dir, currentPath string) error {
 		}
 		return files[i].modTime.After(files[j].modTime)
 	})
-	// Retain at most four stop-wait snapshots in the temporary directory.
+	// Retain at most four stop-wait snapshots in the user cache directory.
+	var removeErrors []error
 	for _, file := range files[min(maxStopWaitSnapshots, len(files)):] {
-		if err := os.Remove(file.path); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove old stop wait snapshot %q: %w", file.name, err)
+		if err := remove(file.path); err != nil && !os.IsNotExist(err) {
+			removeErrors = append(removeErrors, fmt.Errorf("remove old stop wait snapshot %q: %w", file.name, err))
 		}
 	}
-	return nil
+	return errors.Join(removeErrors...)
 }
 
 type stopWaitLimitedWriter struct {
