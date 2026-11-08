@@ -61,10 +61,9 @@ func (m *Manager) stopPersistedSSHRecord(
 	}
 	defer activityLease.Release()
 
-	// AC-EXECUTORS-SSH-EXECUTOR-001.24: the recorded owner must still be the
-	// current owner before any external effect, and again before settlement.
-	// The receipt participates through the same metadata comparison that
-	// already fences a replaced execution.
+	// The recorded owner must still be the current owner before any external
+	// effect, and again before settlement. The receipt participates through the
+	// identity comparison that already fences a replaced execution.
 	if err := m.revalidatePersistedSSHStopOwner(ctx, row); err != nil {
 		return true, err
 	}

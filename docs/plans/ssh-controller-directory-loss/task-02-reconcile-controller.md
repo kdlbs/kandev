@@ -154,6 +154,11 @@ Implemented.
   live birth identity and generation through the same `verify` operation
   before adoption. A recycled PID with the same command/workdir and a
   recreated pidfile is rejected.
+- `ResumeRemoteInstance` validates present proof, including PID, before the
+  normal reattach and the managed-broker refresh branch. It re-proves the live
+  controller through `verify` before storing the session or running the
+  broker-refresh stop, so conflicting proof cannot reach a forwarder,
+  adoption, or a numeric signal.
 - The helper reports `stopped` or `absent` only after every process in the
   recorded launch session is gone. `processidentity.SessionMembersRemain`
   supplies that post-exit evidence; a surviving child, including on a retry
@@ -206,6 +211,9 @@ Tests (all passing):
 - `TestSSHRecoveryRequiresTheRecordsOwnLaunchReceipt` (PID mismatch)
 - `TestSSHRecoveryRejectsAReplacementProcess`
 - `TestSSHAbandonedReceiptRetainsSurvivingChildEvidence`
+- `TestSSHResumeRejectsReceiptPIDMismatch`
+- `TestSSHResumeRejectsUnverifiedLiveController`
+- `TestSSHBrokerResumeVerifiesControllerBeforeStop`
 - `TestReconcileRetainsSurvivingChild` (including retry after leader exit)
 - `TestReconcileStopsAfterChildDrainage`
 - `TestReconcileVerifyModeChecksIdentityWithoutSignalling`

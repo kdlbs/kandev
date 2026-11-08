@@ -1119,15 +1119,26 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	if pidStr == "" || portStr == "" || sessionDir == "" || taskDir == "" {
 		return nil // not a resume — proceed with normal create
 	}
-	if hasManagedGitHubBrokerEnv(req.Env) {
-		return r.resetManagedBrokerResume(ctx, req, pidStr, sessionDir)
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil || pid <= 0 {
+		return fmt.Errorf("ssh resume: invalid remote agentctl pid %q", pidStr)
 	}
-	if err := requireSSHAgentctlAuthToken(req.AuthToken); err != nil {
-		return err
-	}
+	// Durable proof is validated before either resume branch can adopt or
+	// signal the recorded process. The broker-refresh branch historically
+	// signalled first, so this check must stay ahead of it.
 	receipt, err := persistedSSHLaunchReceipt(req.Metadata, req.TaskID, req.SessionID)
 	if err != nil {
 		return fmt.Errorf("ssh resume: persisted launch receipt is invalid: %w", err)
+	}
+	if receipt != nil && receipt.Process.PID != pid {
+		return fmt.Errorf("%w: resume receipt pid %d does not match recorded pid %d",
+			errSSHLaunchIdentityConflict, receipt.Process.PID, pid)
+	}
+	if hasManagedGitHubBrokerEnv(req.Env) {
+		return r.resetManagedBrokerResume(ctx, req, pid, sessionDir, receipt)
+	}
+	if err := requireSSHAgentctlAuthToken(req.AuthToken); err != nil {
+		return err
 	}
 
 	// Idempotency: if a previous resume attempt for this InstanceID already
@@ -1164,11 +1175,6 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	// os.FindProcess. The runtime-aware row predicate (RowProcessLiveness in
 	// liveness.go) deliberately returns Unknown for SSH rows so nothing applies a
 	// host-local check here (#1597 runtime-aware liveness).
-	pid, err := strconv.Atoi(pidStr)
-	if err != nil || pid <= 0 {
-		_ = client.Close()
-		return fmt.Errorf("ssh resume: invalid remote agentctl pid %q", pidStr)
-	}
 	alive, err := probeRemoteAgentctlLiveness(ctx, client, pid)
 	if err != nil {
 		_ = client.Close()
@@ -1178,6 +1184,12 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		_ = client.Close()
 		clearSSHResumeRuntimeMetadata(req.Metadata)
 		return nil
+	}
+	if receipt != nil {
+		if err := r.verifyRecordedControllerIdentity(ctx, client, *receipt); err != nil {
+			_ = client.Close()
+			return fmt.Errorf("ssh resume: verify controller launch proof: %w", err)
+		}
 	}
 	runtimeAPITunnel, _, err := openSSHRuntimeAPITunnelForRequest(client, req)
 	if err != nil {
@@ -1303,7 +1315,9 @@ func requireSSHAgentctlAuthToken(token string) error {
 func (r *SSHExecutor) resetManagedBrokerResume(
 	ctx context.Context,
 	req *ExecutorCreateRequest,
-	pidStr, sessionDir string,
+	pid int,
+	sessionDir string,
+	receipt *sshlaunch.Receipt,
 ) error {
 	brokerPreflight := r.brokerPreflight
 	if brokerPreflight == nil {
@@ -1318,7 +1332,7 @@ func (r *SSHExecutor) resetManagedBrokerResume(
 	state := r.sessions[req.InstanceID]
 	r.mu.Unlock()
 	if state != nil {
-		return r.resetTrackedManagedBrokerResume(ctx, req, state, brokerPreflight, stopRemote)
+		return r.resetTrackedManagedBrokerResume(ctx, req, state, receipt, brokerPreflight, stopRemote)
 	}
 
 	target, err := r.targetFromMetadata(req.Metadata)
@@ -1333,7 +1347,11 @@ func (r *SSHExecutor) resetManagedBrokerResume(
 	if err := brokerPreflight(ctx, client, req, SSHRemotePlatform{}); err != nil {
 		return err
 	}
-	pid, _ := strconv.Atoi(pidStr)
+	if receipt != nil {
+		if err := r.verifyRecordedControllerIdentity(ctx, client, *receipt); err != nil {
+			return fmt.Errorf("ssh resume: verify stale broker-backed controller: %w", err)
+		}
+	}
 	if err := stopRemote(ctx, client, sessionDir, pid); err != nil {
 		return fmt.Errorf("ssh resume: stop stale broker-backed agentctl: %w", err)
 	}
@@ -1352,6 +1370,7 @@ func (r *SSHExecutor) resetTrackedManagedBrokerResume(
 	ctx context.Context,
 	req *ExecutorCreateRequest,
 	state *sshSessionState,
+	receipt *sshlaunch.Receipt,
 	brokerPreflight func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error,
 	stopRemote func(context.Context, *ssh.Client, string, int) error,
 ) error {
@@ -1415,6 +1434,11 @@ func (r *SSHExecutor) resetTrackedManagedBrokerResume(
 	stopErr := r.runWithTransportBackstop(state, sshAgentctlCleanupTimeout, func() error {
 		cleanupCtx, cancel := sshRemoteCleanupContext(ctx)
 		defer cancel()
+		if receipt != nil {
+			if err := r.verifyRecordedControllerIdentity(cleanupCtx, state.client, *receipt); err != nil {
+				return fmt.Errorf("verify stale broker-backed controller: %w", err)
+			}
+		}
 		return stopRemote(cleanupCtx, state.client, state.remoteDir, state.pid)
 	})
 	// Step 5: close the session SSH client, through its once-guard.

@@ -174,6 +174,12 @@ identity evidence for a candidate and cannot use PID similarity alone. An
 invalid or conflicting receipt never falls back to legacy proof. The caller
 does not run `stopRemoteAgentctl` or directory removal after helper success.
 
+`ResumeRemoteInstance` validates any present receipt, including its PID, before
+either the normal reattach or the managed-broker refresh branch. Before
+adoption or the broker-refresh stop it re-proves the live controller through
+the verify operation. A conflicting receipt reaches neither a forwarder, an
+authenticated adoption, nor a numeric stop.
+
 `stopPersistedSSHRecord` and pending remote-stop recovery recheck the current
 runtime owner before external effects and before settlement. Compare the
 identity-bearing record fields (execution, task, session, executor, runtime,
