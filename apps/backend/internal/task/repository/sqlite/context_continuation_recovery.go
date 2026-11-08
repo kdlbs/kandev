@@ -76,7 +76,7 @@ func contextContinuationNoticeMatches(recovery models.AgentDeliveryRecovery, ses
 // complete authorized continuation ancestry before crossing historical generations.
 func (r *Repository) hasResolvedContextContinuationNoticeTx(ctx context.Context, tx *sql.Tx, recovery models.AgentDeliveryRecovery, proof *models.NativeResumeDeliveryEvidence) (bool, error) {
 	if recovery.HarnessGeneration >= proof.HarnessGeneration || !contextContinuationNoticeMatches(recovery, proof.SessionID, proof.IncarnationID, recovery.HarnessGeneration) ||
-		!nativeResumeProofCoversNotice(proof, recovery) {
+		!nativeResumeProofAdmitsHistoricalNotice(proof, recovery) {
 		return false, nil
 	}
 	var valid bool
@@ -86,6 +86,22 @@ func (r *Repository) hasResolvedContextContinuationNoticeTx(ctx context.Context,
 		return valid, err
 	}
 	return r.hasCompletedContextAncestryTx(ctx, tx, recovery, proof.HarnessGeneration)
+}
+
+// A retained peer record must match the notice exactly. A record the peer no
+// longer retains is absent from the proof; the inventory check has already
+// required such SQL history to have a consumed continuation ancestry, which
+// the SQL checks below verify again for this notice.
+func nativeResumeProofAdmitsHistoricalNotice(proof *models.NativeResumeDeliveryEvidence, recovery models.AgentDeliveryRecovery) bool {
+	if nativeResumeProofCoversNotice(proof, recovery) {
+		return true
+	}
+	for _, row := range proof.Submissions {
+		if row.ID == recovery.SubmissionID {
+			return false
+		}
+	}
+	return true
 }
 
 // HasResolvedContextContinuationRecovery verifies the historical notice without
