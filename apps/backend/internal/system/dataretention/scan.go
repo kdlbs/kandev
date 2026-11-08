@@ -3,6 +3,7 @@ package dataretention
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -264,6 +265,12 @@ func (s *Service) consumeMessagePage(ctx context.Context, q sqlx.QueryerContext,
 		target := &r.Operation.Messages
 		target.Rows++
 		target.TotalBytes += row.Bytes
+		// Eligibility was decided for the task being walked; a row stored under
+		// another task, or one the agent did not author, is never reduced.
+		if row.TaskID != p.Task || row.AuthorType != "agent" {
+			r.Operation.Messages.Skipped["invalid_message"]++
+			continue
+		}
 		if row.Bytes > models.ToolPayloadMaxBytes {
 			target.Oversized++
 			r.Operation.Messages.Skipped["oversize"]++
@@ -325,6 +332,14 @@ func (s *Service) reduceMessage(ctx context.Context, q sqlx.QueryerContext, r *r
 	}
 	if err := tasksqlite.WriteReducedMessageMetadata(ctx, tx, row.ID, raw, string(reduced.Metadata)); err != nil {
 		return "", err
+	}
+	// Incremental shell output lives in its own chunk rows; a reduced payload
+	// must drop them in the same transaction, as the tool payload policy does.
+	var metadata map[string]any
+	if json.Unmarshal([]byte(raw), &metadata) == nil && models.HasIncrementalShellOutput(metadata) {
+		if err := tasksqlite.RemoveMessageShellOutputTx(ctx, tx, row.ID); err != nil {
+			return "", err
+		}
 	}
 	target.Reduced++
 	r.FirstMutation = true

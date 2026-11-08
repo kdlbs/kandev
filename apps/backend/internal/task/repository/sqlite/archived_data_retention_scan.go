@@ -142,10 +142,12 @@ var succeededCleanupJobEligibilitySQL = `SELECT EXISTS(SELECT 1 FROM task_resour
 // ArchivedMessageRow is one candidate transcript row with its stored metadata
 // length, so a batch can be bounded before any body is fetched.
 type ArchivedMessageRow struct {
-	RowID int64  `db:"row_id"`
-	ID    string `db:"id"`
-	Type  string `db:"type"`
-	Bytes int64  `db:"bytes"`
+	RowID      int64  `db:"row_id"`
+	ID         string `db:"id"`
+	TaskID     string `db:"task_id"`
+	AuthorType string `db:"author_type"`
+	Type       string `db:"type"`
+	Bytes      int64  `db:"bytes"`
 }
 
 // NextHistoryTaskID returns the next candidate task after the cursor, bounded by
@@ -196,7 +198,7 @@ func NextArchivedMessageRows(ctx context.Context, q sqlx.QueryerContext, session
 	rows := []ArchivedMessageRow{}
 	stmt, cancel := budgetedStatementCtx(ctx)
 	defer cancel()
-	err := sqlx.SelectContext(stmt, q, &rows, `SELECT rowid AS row_id,id,type,
+	err := sqlx.SelectContext(stmt, q, &rows, `SELECT rowid AS row_id,id,COALESCE(task_id,'') AS task_id,COALESCE(author_type,'') AS author_type,type,
 	 COALESCE(LENGTH(CAST(metadata AS BLOB)),0) AS bytes
 	 FROM task_session_messages
 	 WHERE task_session_id=? AND rowid>? AND rowid<=? ORDER BY rowid LIMIT ?`,
