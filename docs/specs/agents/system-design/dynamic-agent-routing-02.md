@@ -265,6 +265,12 @@ require the current exclusive probe lease.
   successor launch from Retry or Try next drains the visible entry. A session
   without a dynamic route keeps the runtime-unavailable requeue, because its
   missing executor row can belong to a launch that has not run yet.
+- A Retry or Try next on such an orphaned route has no predecessor to stop and
+  no cold-resume source. The relaunch treats an empty predecessor execution ID,
+  and a runtime that confirms the execution is gone, as already stopped; any
+  other stop error still refuses the launch. A manual relaunch prompts through
+  a resume only when an `executors_running` row exists. Otherwise it starts a
+  fresh execution with the latest user prompt, as an automatic fallback does.
 - If the backend restarts during `switching`, it reconciles the persisted route
   generation and downstream ownership before launching. An ambiguous launch is
   not duplicated.
