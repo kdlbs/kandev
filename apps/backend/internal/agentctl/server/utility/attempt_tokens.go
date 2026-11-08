@@ -63,7 +63,11 @@ func (o *attemptOwner) consume(id string) (AttemptStatus, error) {
 	o.persistLocked(false, id)
 	if o.storageUnavailable || o.diagnostics.LastPersistResult == "write_failed" {
 		// Without durable consume evidence a successor cannot distinguish a
-		// started child from an unsent preparation, so refuse to start it.
+		// started child from an unsent preparation, so refuse to start it. The
+		// refused child never starts, so settle the token now and save that
+		// outcome; otherwise it would keep holding capacity after recovery.
+		settleNotStarted(a)
+		o.persistLocked(true, id)
 		return a.Status, errAttemptUnavailable
 	}
 	return a.Status, nil
