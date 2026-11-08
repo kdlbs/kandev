@@ -223,3 +223,24 @@ upgraded instance then passed six non-sending previews, exact active-binding
 and configuration-digest readback, desktop/Pixel 5 saved-template checks, and
 external health verification. No reimport, template activation, subscription
 write, or artificial real-recipient send was required for this patch update.
+
+### Shared-save frontend correction
+
+On 2026-11-08, host review fix `9503984b4` was backported onto the same private
+stable candidate as `4e43977e82c52002eadf68c7e4e7ba2519c51cb2`. The candidate's
+frontend passed typecheck/build and 35 formatter/coordinator tests. The actual
+installed plugin package passed the disposable desktop/Pixel 5 editor, six-event
+preview, migration, and three-binding recovery harness with that frontend.
+The repository Playwright runner was blocked by a missing delivery fixture;
+building the unrelated Go fixture exceeded 240 seconds. Its updated shared-save
+scenario is not claimed as executed by that runner.
+
+The operational change was a frontend-only atomic overlay, served through the
+existing `KANDEV_WEB_DIST_DIR`. The backend process and launcher remained
+unchanged; the host still reports `v0.99.1+notification-formatter.2`. Provider
+configuration and bindings matched their pre-transition digest, and the installed
+plugin archive remained unchanged. New shell entrypoint SHA-256:
+`23a4680f4e27c04f39b155607d63cc8b14fab5f3a6dff426c41dcbeb1e29dad3`.
+HTTP readback verified the new shell and all 86 entry assets, while 653 previous
+content-addressed assets remain available to existing tabs. The original web
+directory and a complete overlay receipt are retained privately for rollback.
