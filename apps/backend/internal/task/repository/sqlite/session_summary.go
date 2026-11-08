@@ -22,7 +22,7 @@ func (r *Repository) BatchGetTaskSessionSummaryObservations(
 	}
 	for _, chunk := range chunkIDs(ids, sqliteMaxHostParams) {
 		placeholders, args := buildInPlaceholders(chunk)
-		query := `SELECT ` + taskSessionSummarySelectCols(r.ro.DriverName()) + ` ` + taskSessionFromClause +
+		query := `SELECT ` + taskSessionSummarySelectCols(r.ro.DriverName()) + ` ` + taskSessionSummaryFromClause(r.ro.DriverName()) +
 			` LEFT JOIN executors e ON e.id = ts.executor_id` +
 			` WHERE ts.task_id IN (` + placeholders + `) ORDER BY ts.task_id, ts.started_at DESC`
 		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
@@ -92,12 +92,11 @@ func uniqueSessionSummaryTaskIDs(taskIDs []string) []string {
 }
 
 func taskSessionSummarySelectCols(driver string) string {
-	metadata := "CASE WHEN ts.metadata IS NULL OR ts.metadata = 'null' OR ts.metadata = '' THEN '{}' ELSE ts.metadata END"
 	if dialect.IsPostgres(driver) {
-		metadata = "CASE WHEN ts.metadata IS NULL OR ts.metadata = 'null' OR ts.metadata = '' THEN '{}'::jsonb ELSE ts.metadata::jsonb END"
+		return taskSessionSummaryPostgresSelectCols()
 	}
-	metadata = "(" + metadata + ")"
-	modelID, modelName := sessionSummaryModelColumns(driver, metadata)
+	metadata := "(CASE WHEN ts.metadata IS NULL OR ts.metadata = 'null' OR ts.metadata = '' THEN '{}' ELSE ts.metadata END)"
+	modelID, modelName := sessionSummaryModelColumns(metadata)
 	return strings.Join([]string{
 		"ts.id", "ts.task_id", "ts.queue_incarnation_id",
 		"COALESCE(er.agent_execution_id, '')", "COALESCE(er.container_id, '')",
@@ -114,6 +113,39 @@ func taskSessionSummarySelectCols(driver string) string {
 		"ts.started_at", "ts.completed_at", "ts.updated_at", "ts.is_primary", "ts.review_status",
 		"ts.is_passthrough", "ts.task_environment_id", "ts.name", "ts.last_read_message_id",
 	}, ", ")
+}
+
+// taskSessionSummaryPostgresSelectCols pairs with taskSessionSummaryFromClause:
+// the Postgres FROM clause parses the JSON text columns once per row through
+// lateral aliases (mm, mi, ms), and every expression here references those
+// parsed values instead of re-casting the raw text. Column order MUST match
+// scanTaskSessionSummaryObservation.
+func taskSessionSummaryPostgresSelectCols() string {
+	modelID, modelName := postgresSessionSummaryModelColumns()
+	return strings.Join([]string{
+		"ts.id", "ts.task_id", "ts.queue_incarnation_id",
+		"COALESCE(er.agent_execution_id, '')", "COALESCE(er.container_id, '')",
+		"ts.agent_profile_id", "ts.execution_profile_id", "ts.route_generation", "ts.route_state", "ts.route_reason",
+		"ts.executor_id", "ts.executor_profile_id", "ts.environment_id",
+		"ts.repository_id", "ts.base_branch", "ts.base_commit_sha",
+		"COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path)",
+		taskSessionAgentWorkspaceSelect,
+		"ms.prof ->> 'name'", "ms.prof ->> 'agent_id'",
+		"e.type AS executor_type", "e.name AS executor_name",
+		"ms.repo ->> 'path'",
+		"ts.state", "ts.error_message", "mm.meta ->> '" + models.SessionMetaKeyLastAgentError + "'", modelID, modelName,
+		"ts.started_at", "ts.completed_at", "ts.updated_at", "ts.is_primary", "ts.review_status",
+		"ts.is_passthrough", "ts.task_environment_id", "ts.name", "ts.last_read_message_id",
+	}, ", ")
+}
+
+// taskSessionSummaryFromClause returns the FROM clause that pairs with
+// taskSessionSummarySelectCols for the same driver.
+func taskSessionSummaryFromClause(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return taskSessionFromClause + postgresSessionSummaryLateralFrom
+	}
+	return taskSessionFromClause
 }
 
 func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSummaryObservation, error) {
