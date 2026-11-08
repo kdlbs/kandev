@@ -1161,13 +1161,15 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
 	tools := getRegisteredToolNames(s)
 	// 8 plan + 1 interaction + 1 related-tasks + 3 task-documents
-	// + 1 rich-output + 1 step_complete (ADR 0015) + 1 transfer = 16.
+	// + 1 rich-output + 1 step_complete (ADR 0015) + 1 transfer
+	// + 3 review run/source/readback = 19.
 	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
 	// (list_task_comments_kandev retired in favour of `agentctl kandev comment list …`).
 	// (record_step_decision_kandev retired in favour of the task-bound CLI.)
 	assert.Contains(t, tools, "step_complete_kandev", "office mode must register the ADR 0015 completion signal")
 	assert.Contains(t, tools, "transfer_task_kandev")
-	assert.Equal(t, 16, len(tools))
+	assert.Contains(t, tools, "run_code_review_kandev", "office task agents can run native code review")
+	assert.Equal(t, 19, len(tools))
 }
 
 func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
@@ -1185,10 +1187,10 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 	// the agentctl CLI as `agentctl kandev task create --parent …`).
 	assert.NotContains(t, tools, "delegate_task_kandev")
 	// 8 plan + 1 related-tasks + 3 task-documents + 1 rich-output
-	// + 1 step_complete (ADR 0015) + 1 transfer = 15
+	// + 1 step_complete (ADR 0015) + 1 transfer + 3 review run/source/readback = 18
 	// (no ask_user_question, no delegate, no list_task_comments)
 	assert.Contains(t, tools, "transfer_task_kandev")
-	assert.Equal(t, 15, len(tools))
+	assert.Equal(t, 18, len(tools))
 }
 
 func TestServerModeConstants(t *testing.T) {
@@ -1262,9 +1264,10 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
 	// Baseline 42 tools plus the five compact settings tools, the audited
-	// cross-workspace transfer tool, and generic task update.
+	// cross-workspace transfer tool, generic task update, and the three review
+	// run/source/readback tools.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 51, len(tools))
+	assert.Equal(t, 54, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 

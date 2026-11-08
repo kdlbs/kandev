@@ -164,6 +164,13 @@ func (h *Handlers) handleRunTaskReview(ctx context.Context, msg *ws.Message) (*w
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	// Every launch, including a plain manual one, starts inference and records
+	// a run on the task, so the caller must reach the task first.
+	if h.taskSvc != nil {
+		if err := h.taskSvc.AuthorizeTaskAccess(ctx, req.TaskID); err != nil {
+			return reviewLaunchError(msg, err)
+		}
+	}
 
 	launch := review.RunRequest{
 		TaskID:         req.TaskID,

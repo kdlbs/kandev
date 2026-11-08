@@ -2225,7 +2225,6 @@ func (s *Server) registerWalkthroughTools() {
 // render as inline comments in the user's Changes/Review panel, in the same
 // place the built-in review pass writes to.
 func (s *Server) registerReviewTools() {
-	s.registerTaskReviewTools()
 	s.mcpServer.AddTool(
 		mcp.NewTool("publish_review_findings_kandev",
 			mcp.WithDescription("Publish actionable code-review findings as comments anchored to the task's current changes. Use changed files and line numbers from the new version. Report correctness, security, concurrency, error handling, resource, contract, or test defects rather than linter-owned style. Findings are advisory and additive; an unresolved finding with the same anchor and title is refreshed. task_id defaults to the current task and may target another task within your reach."),
