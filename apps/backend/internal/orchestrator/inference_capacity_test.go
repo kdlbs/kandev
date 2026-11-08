@@ -2,14 +2,20 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
+	"github.com/kandev/kandev/internal/task/models"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 type testInferenceCapacityOwner interface {
@@ -60,15 +66,15 @@ func TestInferenceCapacityTaskAndChildUseOneANDPopulation(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newServiceWithCeiling(t, 1)
 	svc.sessionCeiling.lister = repo
-	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(gradeProfileStore(t), nil, false))
-	applyGradeCapacity(t, svc, 1, 1)
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(inferenceGradeProfileStore(t), nil, false))
+	applyInferenceGradeCapacity(t, svc, 1, 1)
 	owner := attachInferenceCapacity(t, svc, true)
 	binding := newCommonInferenceBinding("child", "A")
 	admitted, reason, err := owner.ReserveInferenceCapacity(ctx, binding)
 	if err != nil || !admitted || reason != "" {
 		t.Fatalf("child admission=%t %s %v", admitted, reason, err)
 	}
-	createGradeOwner(t, repo, "incoming", "A", false)
+	createInferenceGradeOwner(t, repo, "incoming", "A", false)
 	decision := svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "incoming", sessionID: "incoming-session", origin: launchOriginManual})
 	if decision.admitted || decision.reasonCode != ceilingReasonBothLimits || decision.population != 1 {
 		t.Fatalf("child omitted or counted twice: %+v", decision)
@@ -84,10 +90,10 @@ func TestInferenceCapacityLastSeatHasOneTaskOrChildWinner(t *testing.T) {
 		ctx := context.Background()
 		svc, repo := newServiceWithCeiling(t, 1)
 		svc.sessionCeiling.lister = repo
-		svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(gradeProfileStore(t), nil, false))
-		applyGradeCapacity(t, svc, 1, 1)
+		svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(inferenceGradeProfileStore(t), nil, false))
+		applyInferenceGradeCapacity(t, svc, 1, 1)
 		owner := attachInferenceCapacity(t, svc, true)
-		createGradeOwner(t, repo, "incoming", "A", false)
+		createInferenceGradeOwner(t, repo, "incoming", "A", false)
 		start := make(chan struct{})
 		results := make(chan bool, 2)
 		go func() {
@@ -120,10 +126,10 @@ func TestInferenceCapacityMissingInventoryIsNotAnEmptySeat(t *testing.T) {
 			ctx := context.Background()
 			svc, repo := newServiceWithCeiling(t, 1)
 			svc.sessionCeiling.lister = repo
-			svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(gradeProfileStore(t), nil, false))
-			applyGradeCapacity(t, svc, 1, 1)
+			svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(inferenceGradeProfileStore(t), nil, false))
+			applyInferenceGradeCapacity(t, svc, 1, 1)
 			attachInferenceCapacity(t, svc, known)
-			createGradeOwner(t, repo, "incoming", "A", false)
+			createInferenceGradeOwner(t, repo, "incoming", "A", false)
 			d := svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "incoming", sessionID: "incoming-session", origin: launchOriginManual})
 			if d.admitted != known {
 				t.Fatalf("known=%t decision=%+v", known, d)
@@ -139,13 +145,13 @@ func TestInferenceCapacityHeldIdentityIsFrozenAndForeignInstanceRejected(t *test
 	ctx := context.Background()
 	svc, repo := newServiceWithCeiling(t, 1)
 	svc.sessionCeiling.lister = repo
-	applyGradeCapacity(t, svc, 1, 1)
+	applyInferenceGradeCapacity(t, svc, 1, 1)
 	owner := attachInferenceCapacity(t, svc, true)
 	binding := newCommonInferenceBinding("child", "A")
 	if ok, _, err := owner.ReserveInferenceCapacity(ctx, binding); err != nil || !ok {
 		t.Fatalf("initial=%t %v", ok, err)
 	}
-	applyGradeCapacity(t, svc, 1, 0)
+	applyInferenceGradeCapacity(t, svc, 1, 0)
 	repeated := binding
 	repeated.Grade = "B"
 	if ok, _, err := owner.ReserveInferenceCapacity(ctx, repeated); err != nil || !ok {
@@ -170,7 +176,7 @@ func TestInferenceCapacityAutomaticKeepsLegacyAdmission(t *testing.T) {
 	if ok, _, err := owner.ReserveInferenceCapacity(ctx, newCommonInferenceBinding("legacy-child", "")); err != nil || !ok {
 		t.Fatalf("legacy child=%t %v", ok, err)
 	}
-	createGradeOwner(t, repo, "incoming", "", false)
+	createInferenceGradeOwner(t, repo, "incoming", "", false)
 	if d := svc.sessionCeiling.admit(ctx, admissionRequest{sessionID: "incoming-session", origin: launchOriginAutomatic}); !d.admitted {
 		t.Fatalf("legacy policy changed: %+v", d)
 	}
@@ -180,7 +186,7 @@ func TestInferenceCapacityObservationUsesAdmissionPopulation(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newServiceWithCeiling(t, 2)
 	svc.sessionCeiling.lister = repo
-	applyGradeCapacity(t, svc, 2, 2)
+	applyInferenceGradeCapacity(t, svc, 2, 2)
 	owner := attachInferenceCapacity(t, svc, true)
 	if ok, _, err := owner.ReserveInferenceCapacity(ctx, newCommonInferenceBinding("child", "A")); err != nil || !ok {
 		t.Fatalf("child=%t %v", ok, err)
@@ -216,7 +222,7 @@ func TestInferenceCapacityRequestedAndHeldClassificationReasons(t *testing.T) {
 			ctx := context.Background()
 			svc, repo := newServiceWithCeiling(t, 1)
 			svc.sessionCeiling.lister = repo
-			applyGradeCapacity(t, svc, 1, 1)
+			applyInferenceGradeCapacity(t, svc, 1, 1)
 			owner := attachInferenceCapacity(t, svc, true)
 			prior := newCommonInferenceBinding("prior", tc.grade)
 			prior.GradeKnown = tc.known
@@ -232,5 +238,75 @@ func TestInferenceCapacityRequestedAndHeldClassificationReasons(t *testing.T) {
 				t.Fatalf("refusal changed owner: %+v %v", stored, err)
 			}
 		})
+	}
+}
+
+// Grade fixtures are local to this file so the inference capacity tests do not
+// depend on execution-grade test helpers carried by another change.
+func inferenceGradeProfileStore(t *testing.T) settingsstore.Repository {
+	t.Helper()
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, cleanup, err := settingsstore.Provide(conn, conn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cleanup() })
+	ctx := context.Background()
+	if err := repo.CreateAgent(ctx, &settingsmodels.Agent{ID: "grade-agent", Name: "grade-agent"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateAgent(ctx, &settingsmodels.Agent{ID: "dynamic-grade-agent", Name: agents.DynamicAgentID}); err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range []*settingsmodels.AgentProfile{
+		{ID: "unconfigured-grade", AgentID: "grade-agent", Name: "Unconfigured", Enabled: true},
+		{ID: "dynamic-grade", AgentID: "dynamic-grade-agent", Name: "Dynamic", Enabled: true, ExecutionGrade: "Logical-Dynamic"},
+		{ID: "logical-grade", AgentID: "grade-agent", Name: "Logical", Enabled: true, ExecutionGrade: "Profile-A"},
+		{ID: "office-grade", AgentID: "grade-agent", Name: "Office", Enabled: true, ExecutionAgentProfileID: "logical-grade", ExecutionGrade: "Identity-Wrong"},
+	} {
+		if err := repo.CreateAgentProfile(ctx, profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return repo
+}
+
+func applyInferenceGradeCapacity(t *testing.T, svc *Service, maximum, gradeMaximum int) {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{"enabled": true, "max_sessions": maximum, "policy": "all", "grade_limits": map[string]int{"A": gradeMaximum, "B": 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var effective sessioncapacity.Effective
+	if err := json.Unmarshal(raw, &effective); err != nil {
+		t.Fatal(err)
+	}
+	if target, ok := any(svc).(interface {
+		SetExecutionCapacity(sessioncapacity.Effective)
+	}); ok {
+		target.SetExecutionCapacity(effective)
+	} else {
+		svc.SetSessionCapacity(maximum)
+	}
+}
+
+func createInferenceGradeOwner(t *testing.T, repo *tasksqlite.Repository, id, grade string, active bool) {
+	t.Helper()
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: id, Title: id, ExecutionGrade: grade}); err != nil {
+		t.Fatal(err)
+	}
+	session := &models.TaskSession{ID: id + "-session", TaskID: id}
+	if active {
+		session.State = models.TaskSessionStateRunning
+		session.AdmittedExecutionGrade = grade
+		session.AdmittedExecutionGradeKnown = true
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatal(err)
 	}
 }
