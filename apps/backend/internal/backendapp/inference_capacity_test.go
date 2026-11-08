@@ -366,3 +366,37 @@ func TestNativeInferenceRootUnknownLegacyClaimNeverReleased(t *testing.T) {
 		t.Fatalf("unknown legacy claim released: %+v err=%v ACKs=%d", held, err, h.acks)
 	}
 }
+
+func TestInferenceRefreshReadFailureKeepsHeldBindingAndFailsClosed(t *testing.T) {
+	h := newNativeInferenceHarness(t, 1, true)
+	ctx := context.Background()
+	heldBinding := sessioncapacity.InferenceBinding{
+		Key: "inference:owner:held", InstanceID: "instance", OwnerID: "owner",
+		AttemptID: "held", Grade: "A", GradeKnown: true, State: "reserved",
+	}
+	if err := h.store.UpdateInferenceBindings(ctx, func(active map[string]sessioncapacity.InferenceBinding) error {
+		active[heldBinding.Key] = heldBinding
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	consumer := &sharedInferenceConsumer{capacity: h.capacity, sources: []inferenceClientSource{failingInferenceReadSource{}}}
+	consumer.Refresh(ctx)
+	held, err := h.store.LoadInferenceBindings(ctx)
+	if err != nil || len(held) != 1 {
+		t.Fatalf("read failure erased held binding: %+v %v", held, err)
+	}
+	admitted, reason, reserveErr := h.capacity.ReserveInferenceCapacity(ctx, sessioncapacity.InferenceBinding{
+		Key: "inference:owner:new", InstanceID: "instance", OwnerID: "owner",
+		AttemptID: "new", Grade: "A", GradeKnown: true,
+	})
+	if admitted || reason != "ceiling_unknown_population" {
+		t.Fatalf("read failure did not fail closed: admitted=%v reason=%q err=%v", admitted, reason, reserveErr)
+	}
+}
+
+type failingInferenceReadSource struct{}
+
+func (failingInferenceReadSource) InferenceClients(context.Context) ([]agentruntime.InferenceClientRef, error) {
+	return nil, errors.New("inventory unavailable")
+}
