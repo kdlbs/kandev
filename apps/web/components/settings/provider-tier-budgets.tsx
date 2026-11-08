@@ -109,6 +109,7 @@ function ProviderBudgetEditor({
           )
         }
       />
+      <BudgetEffectiveValue value={budget.value} />
       <span className="break-words text-xs text-muted-foreground">
         {t("agents:providerTierSources", {
           defaults: defaults?.value ?? t("agents:providerTierUnknown"),
@@ -123,6 +124,16 @@ function ProviderBudgetEditor({
       ) : null}
       <BudgetRules id={id} effective={effective} onChange={onChange} />
     </div>
+  );
+}
+
+function BudgetEffectiveValue({ value }: { value?: number }) {
+  const { t } = useTranslation();
+  if (value === undefined) return null;
+  return (
+    <span className="text-xs text-muted-foreground">
+      {t("agents:providerTierEffective")}: {value}
+    </span>
   );
 }
 
