@@ -143,7 +143,10 @@ its work through complete existing agent profiles.
   `set_session_mode` is restored. Same-candidate retries keep their settings.
   Mode and model events whose execution profile differs from the session's
   current concrete profile are stale. A changed session revision rejects the
-  switch instead of overwriting newer state.
+  switch instead of overwriting newer state. A launch retry of the same
+  candidate also resets after a typed permission-mode application failure of
+  the current execution that proves no prompt was sent (covers older builds);
+  late settings from that execution are stale. Other failures do not reset.
 - A dynamic profile's candidate list can reference only concrete, launchable
   profiles. It cannot reference itself, another dynamic profile, or a rich
   Office identity in the first version. An Office identity's separate
