@@ -1,5 +1,21 @@
 ---
+id: 02-model-and-group-scopes
+title: Model and group scopes
 status: in_progress
+wave: 2
+depends_on: ["01-account-limits-and-settings"]
+plan: plan.md
+requirements:
+  - REQ-COSTS-TIER-LIMITS-002
+acceptance_criteria:
+  - AC-COSTS-TIER-LIMITS-002.1
+  - AC-COSTS-TIER-LIMITS-002.2
+  - AC-COSTS-TIER-LIMITS-002.3
+  - AC-COSTS-TIER-LIMITS-002.4
+  - AC-COSTS-TIER-LIMITS-002.5
+  - AC-COSTS-TIER-LIMITS-002.6
+system_design:
+  - ../../specs/costs/system-design/provider-tier-limits.md
 ---
 
 # Model and group scopes
