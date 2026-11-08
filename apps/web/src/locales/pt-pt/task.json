@@ -2373,7 +2373,7 @@
   "sessionBootstrapCauseUnknown": "Não foi possível concluir a operação de arranque.",
   "sessionBootstrapProcessMiseTitle": "O arranque do agente foi bloqueado pelo mise",
   "sessionBootstrapProcessMiseBody": "O mise não confiou na configuração deste espaço de trabalho.",
-  "sessionBootstrapProcessMisePrerequisite": "Reveja a configuração no anfitrião de execução antes de confiar nela. Se confiar, execute mise trust aí antes de tentar novamente.",
+  "sessionBootstrapProcessMisePrerequisite": "Reveja a configuração no anfitrião de execução antes de confiar nela. Se confiar, execute {{command}} aí antes de tentar novamente.",
   "sessionBootstrapProcessExitedTitle": "O agente terminou antes do arranque",
   "sessionBootstrapProcessExitedBody": "O agente terminou antes de o arranque ser concluído.",
   "sessionBootstrapCauseModelUnavailable": "Modelo guardado indisponível",

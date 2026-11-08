@@ -2422,7 +2422,7 @@
   "sessionBootstrapCauseUnknown": "起動操作を完了できなかった。",
   "sessionBootstrapProcessMiseTitle": "mise によりエージェントの起動がブロックされました",
   "sessionBootstrapProcessMiseBody": "mise はこのワークスペースの設定を信頼していません。",
-  "sessionBootstrapProcessMisePrerequisite": "信頼する前に実行ホストで設定を確認してください。信頼できる場合は、そこで mise trust を実行してから再試行してください。",
+  "sessionBootstrapProcessMisePrerequisite": "信頼する前に実行ホストで設定を確認してください。信頼できる場合は、そこで {{command}} を実行してから再試行してください。",
   "sessionBootstrapProcessExitedTitle": "起動前にエージェントが終了しました",
   "sessionBootstrapProcessExitedBody": "起動が完了する前にエージェントが終了しました。",
   "sessionBootstrapCauseModelUnavailable": "保存済みモデルを利用できない",

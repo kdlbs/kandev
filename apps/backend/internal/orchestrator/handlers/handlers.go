@@ -550,6 +550,11 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 			return recoveryResponse, responseErr
 		}
 		if recoveryResponse, responseErr := sessionRecoveryFailureResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			h.logger.Error("failed to recover session",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.SessionID),
+				zap.String("action", req.Action),
+				zap.Error(err))
 			return recoveryResponse, responseErr
 		}
 		h.logger.Error("failed to recover session",

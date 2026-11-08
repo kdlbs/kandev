@@ -267,6 +267,7 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 		cause.RequestedMode = ""
 		cause.EffectiveMode = ""
 		cause.RuntimeVersion = ""
+		cause.ExitCode = nil
 	case AgentErrorCauseCodePermissionModeFailed,
 		AgentErrorCauseCodePermissionModeUnconfirmed,
 		AgentErrorCauseCodePermissionModeMismatch:
@@ -280,6 +281,7 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 		cause.EffectiveModel = ""
 		cause.AttemptedModel = ""
 		cause.RuntimeVersion = ""
+		cause.ExitCode = nil
 	case AgentErrorCauseCodeRuntimeCleanupFailed:
 		promptNotSent := cause.PromptNotSent
 		clearAgentErrorCauseEvidence(cause)

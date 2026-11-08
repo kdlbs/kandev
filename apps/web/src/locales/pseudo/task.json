@@ -2386,7 +2386,7 @@
   "sessionBootstrapCauseUnknown": "Ţĥē śţàŕţũƥ ōƥēŕàţĩōń ćōũĺď ńōţ ƀē ćōḿƥĺēţēď.",
   "sessionBootstrapProcessMiseTitle": "Àĝēńţ śţàŕţũƥ ƀĺōćķēď ƀŷ ḿĩśē",
   "sessionBootstrapProcessMiseBody": "ḿĩśē ďĩď ńōţ ţŕũśţ ţĥĩś ŵōŕķśƥàćē'ś ćōńƒĩĝũŕàţĩōń.",
-  "sessionBootstrapProcessMisePrerequisite": "Ŕēvĩēŵ ţĥē ćōńƒĩĝũŕàţĩōń ōń ţĥē ēxēćũţĩōń ĥōśţ ƀēƒōŕē ţŕũśţĩńĝ ĩţ. Ĩƒ ŷōũ ţŕũśţ ĩţ, ŕũń ḿĩśē ţŕũśţ ţĥēŕē ƀēƒōŕē ŕēţŕŷĩńĝ.",
+  "sessionBootstrapProcessMisePrerequisite": "Ŕēvĩēŵ ţĥē ćōńƒĩĝũŕàţĩōń ōń ţĥē ēxēćũţĩōń ĥōśţ ƀēƒōŕē ţŕũśţĩńĝ ĩţ. Ĩƒ ŷōũ ţŕũśţ ĩţ, ŕũń {{command}} ţĥēŕē ƀēƒōŕē ŕēţŕŷĩńĝ.",
   "sessionBootstrapProcessExitedTitle": "Àĝēńţ ēxĩţēď ƀēƒōŕē śţàŕţũƥ",
   "sessionBootstrapProcessExitedBody": "Ţĥē àĝēńţ ēxĩţēď ƀēƒōŕē śţàŕţũƥ ćōḿƥĺēţēď.",
   "sessionBootstrapCauseModelUnavailable": "Śàvēď ḿōďēĺ ũńàvàĩĺàƀĺē",

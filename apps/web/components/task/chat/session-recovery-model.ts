@@ -406,7 +406,7 @@ function withAutomaticNotice(
   return notice &&
     !actions.recoveryError &&
     !copy.hasTypedSelectionCause &&
-    !copy.hasTypedProcessCause &&
+    (!copy.hasTypedProcessCause || noticeKind === "inspection_busy") &&
     (!copy.hasTypedCleanupCause || noticeKind === "inspection_busy")
     ? { ...copy, summary: notice }
     : copy;

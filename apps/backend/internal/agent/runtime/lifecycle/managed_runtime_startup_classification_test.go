@@ -45,6 +45,18 @@ func TestManagedStartupRecoveryClassification(t *testing.T) {
 			stderrConfigured: true,
 		},
 		{
+			name:  "confirmed mise refusal blocks transient npm retry",
+			phase: SessionInitializationPhaseACPInitialize,
+			evidence: &agentctltypes.ManagedStartupEvidence{
+				ProcessGeneration: 1, ExitDisposition: agentctltypes.ManagedStartupExitOrdinary,
+				ExitCode: &exitCode, NPMCode: "ECONNRESET", CollectionComplete: true,
+				NPMDiagnosticPresent: true, NPMDiagnosticComplete: true,
+				DiagnosticReason: "mise_config_untrusted", DiagnosticComplete: true,
+			},
+			stderr:           []string{"npm error code ECONNRESET", "mise did not trust this workspace's configuration."},
+			stderrConfigured: true,
+		},
+		{
 			name:  "ordinary exit with empty stderr retries unchanged",
 			phase: SessionInitializationPhaseACPInitialize,
 			evidence: &agentctltypes.ManagedStartupEvidence{

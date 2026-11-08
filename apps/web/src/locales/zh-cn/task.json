@@ -2373,7 +2373,7 @@
   "sessionBootstrapCauseUnknown": "无法完成启动操作。",
   "sessionBootstrapProcessMiseTitle": "代理启动被 mise 阻止",
   "sessionBootstrapProcessMiseBody": "mise 不信任此工作区的配置。",
-  "sessionBootstrapProcessMisePrerequisite": "在信任之前，请先在执行主机上检查配置。如果确认可信，请在该主机上运行 mise trust，然后重试。",
+  "sessionBootstrapProcessMisePrerequisite": "在信任之前，请先在执行主机上检查配置。如果确认可信，请在该主机上运行 {{command}}，然后重试。",
   "sessionBootstrapProcessExitedTitle": "代理在启动前退出",
   "sessionBootstrapProcessExitedBody": "代理在启动完成前退出。",
   "sessionBootstrapCauseModelUnavailable": "已保存的模型不可用",

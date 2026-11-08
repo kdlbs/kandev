@@ -96,6 +96,17 @@ func sessionRecoveryIdentity(attempt *resumeAttempt, executionID string) Session
 	return identity
 }
 
+func (s *Service) decorateResumeFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	attempt *resumeAttempt,
+	failure error,
+) error {
+	return s.withSessionRecoveryFailureIdentity(
+		ctx, taskID, sessionID, attempt, attempt.execution(), failure,
+	)
+}
+
 func (s *Service) matchingSessionRecoveryFailureEvidence(
 	ctx context.Context,
 	taskID, sessionID string,

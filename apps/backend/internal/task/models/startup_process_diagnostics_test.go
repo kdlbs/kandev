@@ -81,6 +81,29 @@ func TestAgentErrorCausesEqualDistinguishesExitStatus(t *testing.T) {
 	}
 }
 
+func TestNormalizeAgentErrorCauseClearsExitCodeFromSelectionCauses(t *testing.T) {
+	exitCode := 1
+	causes := NormalizeAgentErrorCauses([]AgentErrorCause{
+		{
+			Operation: AgentErrorCauseOperationStart, Code: AgentErrorCauseCodeModelUnavailable,
+			Reason: AgentErrorCauseReasonRequestedNotAdvertised, RequestedModel: "model-a", ExitCode: &exitCode,
+		},
+		{
+			Operation: AgentErrorCauseOperationResume, Code: AgentErrorCauseCodePermissionModeMismatch,
+			Reason: AgentErrorCauseReasonEffectiveMismatch, RequestedMode: "default", EffectiveMode: "plan",
+			ExitCode: &exitCode,
+		},
+	})
+	if len(causes) != 2 {
+		t.Fatalf("causes = %#v", causes)
+	}
+	for _, cause := range causes {
+		if cause.ExitCode != nil {
+			t.Fatalf("selection cause retained exit code: %#v", cause)
+		}
+	}
+}
+
 func TestLastAgentErrorNullExitCodeStaysMissing(t *testing.T) {
 	for _, tt := range []struct {
 		name     string

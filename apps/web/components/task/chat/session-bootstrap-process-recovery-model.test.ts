@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { TFunction } from "i18next";
 import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
 import { buildRecoveryCardModel } from "./session-bootstrap-recovery-model";
@@ -32,6 +32,25 @@ describe("process exit recovery card model", () => {
       value: "1",
     });
     expect(JSON.stringify(model)).not.toContain("/private/workspace");
+  });
+
+  it("keeps the mise trust command as an interpolation value", () => {
+    const translateCommand = vi.fn((key: string, options?: { command?: string }) =>
+      options?.command ? `${key}:${options.command}` : key,
+    ) as unknown as TFunction;
+    const model = buildRecoveryCardModel({
+      error: error({
+        operation: "start",
+        code: "process_exited",
+        reason: "mise_config_untrusted",
+        exit_code: 1,
+      }),
+      manualFailure: null,
+      manualError: null,
+      recoveryNotice: null,
+      translate: translateCommand,
+    });
+    expect(model.prerequisite).toBe("task:sessionBootstrapProcessMisePrerequisite:mise trust");
   });
 
   it("keeps an unknown ordinary exit unattributed while showing its status", () => {

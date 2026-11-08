@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -36,11 +35,17 @@ func TestStartupProcessRecoveryCauseSurvivesReadiness(t *testing.T) {
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyLastAgentError, lastError); err != nil {
 		t.Fatalf("seed last agent error: %v", err)
 	}
+	if err := repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateFailed, lastError.Message); err != nil {
+		t.Fatalf("seed failed session state: %v", err)
+	}
 
 	attempt := &resumeAttempt{id: 42, taskID: "t1", sessionID: "s1"}
 	attempt.setExecutionID("exec-1")
-	readiness := fmt.Errorf("session failed: %s", lastError.Message)
-	failure := svc.withSessionRecoveryFailureIdentity(ctx, "t1", "s1", attempt, "exec-1", readiness)
+	readiness := svc.waitForSessionReady(ctx, "s1")
+	if readiness == nil || errors.Is(readiness, context.Canceled) {
+		t.Fatalf("readiness failure = %v, want a failed-session wrapper", readiness)
+	}
+	failure := svc.decorateResumeFailure(ctx, "t1", "s1", attempt, readiness)
 	var recoveryFailure *SessionRecoveryFailure
 	if !errors.As(failure, &recoveryFailure) {
 		t.Fatalf("failure type = %T, want *SessionRecoveryFailure", failure)
@@ -55,7 +60,7 @@ func TestStartupProcessRecoveryCauseSurvivesReadiness(t *testing.T) {
 
 	staleAttempt := &resumeAttempt{id: 43, taskID: "t1", sessionID: "s1"}
 	staleAttempt.setExecutionID("exec-1")
-	stale := svc.withSessionRecoveryFailureIdentity(ctx, "t1", "s1", staleAttempt, "exec-1", readiness)
+	stale := svc.decorateResumeFailure(ctx, "t1", "s1", staleAttempt, readiness)
 	if _, ok := RecoveryFailureCauses(stale); ok {
 		t.Fatal("stale attempt acquired another attempt's causes")
 	}

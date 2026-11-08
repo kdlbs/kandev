@@ -2357,7 +2357,7 @@
   "sessionBootstrapCauseUnknown": "시작 작업을 완료하지 못했습니다.",
   "sessionBootstrapProcessMiseTitle": "mise로 인해 에이전트 시작이 차단되었습니다",
   "sessionBootstrapProcessMiseBody": "mise가 이 작업 공간의 구성을 신뢰하지 않았습니다.",
-  "sessionBootstrapProcessMisePrerequisite": "신뢰하기 전에 실행 호스트에서 구성을 검토하세요. 신뢰하는 경우 해당 호스트에서 mise trust를 실행한 후 다시 시도하세요.",
+  "sessionBootstrapProcessMisePrerequisite": "신뢰하기 전에 실행 호스트에서 구성을 검토하세요. 신뢰하는 경우 해당 호스트에서 {{command}}를 실행한 후 다시 시도하세요.",
   "sessionBootstrapProcessExitedTitle": "시작 전에 에이전트가 종료되었습니다",
   "sessionBootstrapProcessExitedBody": "시작이 완료되기 전에 에이전트가 종료되었습니다.",
   "sessionBootstrapCauseModelUnavailable": "저장된 모델을 사용할 수 없음",

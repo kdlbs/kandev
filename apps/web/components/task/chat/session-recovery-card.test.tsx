@@ -485,6 +485,18 @@ it("keeps a later guard refusal visible over the earlier process cause", () => {
   expect(card.textContent).toContain(EXIT_CODE_ONE);
 });
 
+it("keeps a later inspection-busy notice visible over the earlier process cause", () => {
+  renderProcessExitCard("mise_config_untrusted", 1, {
+    recoveryNotice: "Workspace recovery inspection is still running",
+    recoveryNoticeKind: "inspection_busy",
+  });
+  const card = screen.getByTestId(RECOVERY_CARD);
+  expect(card.textContent).toContain("Workspace recovery inspection is still running");
+  expect(card.textContent).not.toContain(MISE_SUMMARY);
+  expect(screen.queryByTestId(PREREQUISITE)).toBeNull();
+  expect(card.textContent).toContain(EXIT_CODE_ONE);
+});
+
 it("keeps a later manual recovery failure visible over the earlier process cause", () => {
   renderProcessExitCard("mise_config_untrusted", 1, {
     manualRecoveryFailure: {

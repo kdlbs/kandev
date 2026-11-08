@@ -3,6 +3,7 @@ package dto
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/statussummary"
@@ -10,21 +11,28 @@ import (
 
 func TestTaskDTOStatusSummaryPreservesProcessExitStatus(t *testing.T) {
 	exitCode := 1
+	summary := statussummary.BuildFromAuthoritative(statussummary.RebuildInput{
+		SessionsObserved: true,
+		Sessions: []statussummary.RebuildSession{{
+			ID:    "session-1",
+			State: string(models.TaskSessionStateFailed),
+			ActiveError: &statussummary.ActiveErrorSummary{
+				SessionID: "session-1",
+				Stamp:     "failure-stamp",
+				Preview:   models.AgentErrorCauseProcessExitedDetail,
+				Phase:     models.LaunchErrorPhaseBootstrap,
+				Causes: []models.AgentErrorCause{{
+					Operation: models.AgentErrorCauseOperationResume,
+					Code:      models.AgentErrorCauseCodeProcessExited,
+					Reason:    models.AgentErrorCauseReasonMiseConfigUntrusted,
+					ExitCode:  &exitCode,
+				}},
+			},
+		}},
+		Now: time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC),
+	})
 	task := FromTask(&models.Task{ID: "task-process-exit"})
-	task.StatusSummary = &statussummary.TaskStatusSummary{
-		Revision: 1,
-		ActiveError: &statussummary.ActiveErrorSummary{
-			SessionID: "session-1",
-			Stamp:     "failure-stamp",
-			Preview:   models.AgentErrorCauseProcessExitedDetail,
-			Causes: []models.AgentErrorCause{{
-				Operation: models.AgentErrorCauseOperationResume,
-				Code:      models.AgentErrorCauseCodeProcessExited,
-				Reason:    models.AgentErrorCauseReasonMiseConfigUntrusted,
-				ExitCode:  &exitCode,
-			}},
-		},
-	}
+	task.StatusSummary = &summary
 	encoded, err := json.Marshal(task)
 	if err != nil {
 		t.Fatalf("marshal task DTO: %v", err)

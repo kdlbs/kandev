@@ -3609,9 +3609,7 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	}
 	resumeCtx := cancellableResumeContext(attempt)
 	decorateResumeFailure := func(failure error) error {
-		return s.withSessionRecoveryFailureIdentity(
-			resumeCtx, taskID, sessionID, attempt, attempt.execution(), failure,
-		)
+		return s.decorateResumeFailure(resumeCtx, taskID, sessionID, attempt, failure)
 	}
 	s.noteMissingWorktreesBeforeResume(sessionID, session)
 	branchRecoveryBefore := s.captureBranchRecoveryBeforeResume(resumeCtx, taskID, sessionID, options)

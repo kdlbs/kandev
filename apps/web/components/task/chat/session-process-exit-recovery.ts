@@ -23,7 +23,7 @@ export function processExitPrerequisite(
   translate: TFunction,
 ): string | null {
   if (cause?.code !== "process_exited" || cause.reason !== "mise_config_untrusted") return null;
-  return translate("task:sessionBootstrapProcessMisePrerequisite");
+  return translate("task:sessionBootstrapProcessMisePrerequisite", { command: "mise trust" });
 }
 
 export function appendProcessExitDetail(

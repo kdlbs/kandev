@@ -341,6 +341,7 @@ function recoveryHeaderCopy(
 
 function hasExplicitRecoveryGuidance(actions: SessionRecoveryActions) {
   if (actions.branchDetails || actions.guardDetails) return true;
+  if (actions.recoveryNoticeKind === "inspection_busy") return true;
   const manual = actions.manualRecoveryFailure;
   return Boolean(manual && !manual.causes?.some(isProcessExitCause));
 }

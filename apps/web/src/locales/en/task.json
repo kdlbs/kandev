@@ -2386,7 +2386,7 @@
   "sessionBootstrapCauseUnknown": "The startup operation could not be completed.",
   "sessionBootstrapProcessMiseTitle": "Agent startup blocked by mise",
   "sessionBootstrapProcessMiseBody": "mise did not trust this workspace's configuration.",
-  "sessionBootstrapProcessMisePrerequisite": "Review the configuration on the execution host before trusting it. If you trust it, run mise trust there before retrying.",
+  "sessionBootstrapProcessMisePrerequisite": "Review the configuration on the execution host before trusting it. If you trust it, run {{command}} there before retrying.",
   "sessionBootstrapProcessExitedTitle": "Agent exited before startup",
   "sessionBootstrapProcessExitedBody": "The agent exited before startup completed.",
   "sessionBootstrapCauseModelUnavailable": "Saved model unavailable",
