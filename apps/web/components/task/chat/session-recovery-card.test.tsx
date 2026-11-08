@@ -392,11 +392,15 @@ it("withholds restore during a retryable guard in the composer", () => {
   expect(screen.getByTestId(RESUME_BUTTON)).toBeTruthy();
 });
 
-function processExitModel(reason: string, exitCode: number): ActiveSessionRecovery {
+function processExitModel(
+  reason: string,
+  exitCode: number,
+  kind = "managed_runtime_startup",
+): ActiveSessionRecovery {
   return {
     sessionId: "session",
     stamp: "failure",
-    kind: "managed_runtime_startup",
+    kind,
     error: {
       message: "The agent exited before startup completed.",
       occurredAt: "2026-11-07T12:00:00Z",
@@ -419,6 +423,7 @@ function renderProcessExitCard(
   reason: string,
   exitCode: number,
   extraActions: Partial<SessionRecoveryActions> = {},
+  kind = "managed_runtime_startup",
 ) {
   return render(
     <StateProvider
@@ -430,7 +435,7 @@ function renderProcessExitCard(
       }
     >
       <SessionRecoveryCard
-        model={processExitModel(reason, exitCode)}
+        model={processExitModel(reason, exitCode, kind)}
         actions={{ ...actions, ...extraActions } as SessionRecoveryActions}
         onNewSession={vi.fn()}
       />
@@ -449,13 +454,14 @@ it("renders the final process exit for a managed runtime retry failure", () => {
   expect(screen.queryByTestId(RESUME_BUTTON)).toBeNull();
 });
 
-it("renders an unknown final process exit without mise attribution", () => {
-  renderProcessExitCard("unclassified", 3);
+it("keeps managed runtime copy while showing an unknown final process exit in details", () => {
+  renderProcessExitCard("unclassified", 3, {}, "managed_runtime_npm_resolution");
   const card = screen.getByTestId(RECOVERY_CARD);
-  expect(screen.getByRole("heading", { name: "Agent exited before startup" })).toBeTruthy();
-  expect(card.textContent).toContain("The agent exited before startup completed.");
+  expect(screen.getByRole("heading", { name: "npm could not prepare the runtime" })).toBeTruthy();
   expect(screen.queryByTestId(PREREQUISITE)).toBeNull();
+  expect(card.textContent).toContain("Cause: process_exited");
   expect(card.textContent).toContain("Exit code: 3");
+  expect(screen.getByTestId(RUNTIME_RETRY_BUTTON)).toBeTruthy();
 });
 
 it("keeps a later branch refusal visible over the earlier process cause", () => {

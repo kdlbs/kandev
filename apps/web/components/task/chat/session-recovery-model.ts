@@ -459,6 +459,22 @@ function recoveryPresentationCopy(
       freshStartWarning: false,
       workspaceStatus: null,
     };
+  const managedRuntimeProcess =
+    bootstrap?.primaryCause?.code === "process_exited" &&
+    isManagedRuntimeRecovery(model) &&
+    bootstrap.primaryCause.reason !== "mise_config_untrusted";
+  if (managedRuntimeProcess) {
+    return {
+      ...recoveryCopy(model, t),
+      hasTypedSelectionCause: false,
+      hasTypedCleanupCause: false,
+      hasTypedProcessCause: false,
+      prerequisite: null,
+      noPromptSent: false,
+      freshStartWarning: false,
+      workspaceStatus: null,
+    };
+  }
   if (bootstrap)
     return {
       title: t(bootstrap.titleKey),
@@ -542,5 +558,12 @@ function isManagedRuntimeFailure(kind: string) {
     kind === "managed_runtime_npm_resolution" ||
     kind === "managed_runtime_npm_policy" ||
     kind === "managed_runtime_startup"
+  );
+}
+
+function isManagedRuntimeRecovery(model: ActiveSessionRecovery) {
+  if (isManagedRuntimeFailure(model.kind)) return true;
+  return Boolean(
+    model.metadata?.actions?.some((action) => sessionRecoveryAction(action) === "runtime_retry"),
   );
 }
