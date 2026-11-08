@@ -1253,6 +1253,7 @@ func startGatewayAndServe(
 	hostUtilityMgr.SetProviderUsageLimitsEnabled(cfg.Features.ProviderUsageLimits)
 	lifecycleMgr.SetPreparedExecutionUsageReader(hostUtilityMgr.PreviewPreparedExecutionUsage)
 	sharedInferenceOwner := wireSharedInferenceCapacity(orchestratorSvc, repos.SystemSettings, log.Zap(), lifecycleMgr, hostUtilityMgr)
+	sharedInferenceOwner.settler = repos.Task
 	nativeUsageOwner := wireNativeRouteCapacity(services.DynamicProfileResolver, orchestratorSvc, sharedInferenceOwner, repos.Task, repos.Utility)
 	if cfg.Features.ProviderUsageLimits && nativeUsageOwner != nil {
 		nativeUsageOwner.sessionUsage = lifecycleMgr.PreviewInferenceProfileUsage
@@ -1388,6 +1389,9 @@ func startGatewayAndServe(
 	if cfg.Features.ProviderUsageLimits {
 		tierUsage := newTierUsageSnapshot()
 		allowances := &providerTurnAllowances{profileUsageSnapshot: newProfileUsageSnapshot(usageAdapter), claims: repos.Task}
+		allowances.inferencePopulation = sharedInferenceOwner.inferenceProviderPopulation
+		sharedInferenceOwner.provider = allowances
+		sharedInferenceOwner.providerPopulation = lifecycleMgr.InferenceProviderPopulation
 		agentSettingsController.SetProfileUsageProvider(&tierUsageRecordingProvider{next: allowances, sink: tierUsage})
 		lifecycleMgr.SetProviderTurnAdmission(allowances)
 		providerLimits := newProviderLimitService(repos.Task, repos.AgentSettings, newDynamicLimitCalendar(usageAdapter, repos.Task))

@@ -10,6 +10,10 @@ import (
 // reasonPolicySkip is the route reason for a selection that skipped a candidate by policy.
 const reasonPolicySkip = "policy_skip"
 
+// reasonManualRetry is the route reason of a person's Retry of a route left
+// waiting without an eligible candidate.
+const reasonManualRetry = "manual_retry"
+
 const (
 	orderedTierMode = "order"
 	orderedSameTier = "same_tier_next"
@@ -106,6 +110,11 @@ func (e *Engine) prepareOrderedPlan(ctx context.Context, state RouteState, profi
 		return orderedPlan{}, err
 	}
 	chain, continuing := retainedSelectionChain(state, profile.ID, generation)
+	if startsFreshManualWaitingRetry(state, excluded, preferred, reason) {
+		// A new manual cycle keeps prior immutable attempts as history; it does
+		// not claim successful output or release any provider/recovery guard.
+		chain, continuing = retainedSelectionChain(RouteState{}, profile.ID, generation)
+	}
 	current := state.ExecutionProfileID
 	if current == "" {
 		current = chain.LastCandidateID
@@ -183,6 +192,13 @@ func retainedSelectionChain(state RouteState, profileID string, generation int64
 	chain = *previous
 	chain.TriedCandidateIDs = append([]string(nil), previous.TriedCandidateIDs...)
 	return chain, true
+}
+
+// startsFreshManualWaitingRetry reports a person's Retry of a route that is
+// waiting without a candidate, so an exhausted traversal can start over.
+func startsFreshManualWaitingRetry(state RouteState, excluded, preferred, reason string) bool {
+	return reason == reasonManualRetry && state.Status == routeStatusWaiting &&
+		state.ExecutionProfileID == "" && excluded == "" && preferred == ""
 }
 
 // Traverse lazily so an unreached round-robin tier cannot block an earlier
