@@ -47,40 +47,47 @@ func (h *Handlers) handleSetReviewSource(ctx context.Context, msg *ws.Message) (
 	return ws.NewResponse(msg.ID, msg.Action, map[string]any{"task_id": task.ID, "review_source": task.Metadata[review.SourceMetadataKey]})
 }
 
-func (h *Handlers) manualReviewOrigin(ctx context.Context, taskID, sessionID string) *review.OriginIdentity {
-	writer := h.manualReviewWriter(ctx, taskID, sessionID)
-	if writer == nil || (writer.AgentProfileID == "" && writer.ExecutionProfileID == "") {
-		return nil
+// manualReviewOrigin returns the writer a manual review excludes and whether
+// that exclusion is required. A readable task whose writer session carries no
+// agent profile, or that has no session yet, was changed by a person, so there
+// is no agent writer to exclude. An unreadable writer still fails closed.
+func (h *Handlers) manualReviewOrigin(ctx context.Context, taskID, sessionID string) (*review.OriginIdentity, bool) {
+	writer, readable := h.manualReviewWriter(ctx, taskID, sessionID)
+	if !readable {
+		return nil, true
 	}
-	return review.OriginFromSession(writer)
+	if writer == nil || (writer.AgentProfileID == "" && writer.ExecutionProfileID == "") {
+		return nil, false
+	}
+	return review.OriginFromSession(writer), true
 }
 
-func (h *Handlers) manualReviewWriter(ctx context.Context, taskID, sessionID string) *models.TaskSession {
+func (h *Handlers) manualReviewWriter(ctx context.Context, taskID, sessionID string) (*models.TaskSession, bool) {
 	if sessionID != "" {
 		return h.manualReviewNamedWriter(ctx, taskID, sessionID)
 	}
 	if h.taskSvc == nil {
-		return nil
+		return nil, false
 	}
 	sessions, err := h.taskSvc.ListTaskSessions(ctx, taskID)
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	for _, session := range sessions {
 		if session != nil && session.IsPrimary {
-			return session
+			return session, true
 		}
 	}
-	return nil
+	return nil, true
 }
 
-func (h *Handlers) manualReviewNamedWriter(ctx context.Context, taskID, sessionID string) *models.TaskSession {
+func (h *Handlers) manualReviewNamedWriter(ctx context.Context, taskID, sessionID string) (*models.TaskSession, bool) {
 	if h.sessionRepo == nil {
-		return nil
+		return nil, false
 	}
 	session, err := h.sessionRepo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil || session.TaskID != taskID {
-		return nil
+		return nil, false
 	}
-	return session
+	return session, true
 }

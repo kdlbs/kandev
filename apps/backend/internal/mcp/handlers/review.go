@@ -198,8 +198,7 @@ func (h *Handlers) handleRunTaskReview(ctx context.Context, msg *ws.Message) (*w
 		launch.OriginRequired = true
 		launch.Origin = h.mcpReviewOrigin(ctx, req.TaskID, principal)
 	} else {
-		launch.OriginRequired = true
-		launch.Origin = h.manualReviewOrigin(ctx, req.TaskID, req.SessionID)
+		launch.Origin, launch.OriginRequired = h.manualReviewOrigin(ctx, req.TaskID, req.SessionID)
 	}
 	run, err := h.reviewRunner.Launch(ctx, launch)
 	if err != nil {
