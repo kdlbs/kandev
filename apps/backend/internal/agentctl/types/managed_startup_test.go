@@ -78,6 +78,20 @@ func TestManagedStartupEvidenceValidEmptyNPMDiagnosticStaysComplete(t *testing.T
 	}
 }
 
+func TestManagedStartupEvidencePreservesCacheEvidence(t *testing.T) {
+	var evidence ManagedStartupEvidence
+	if err := json.Unmarshal([]byte(`{"process_generation":1,"exit_disposition":"ordinary_exit","exit_code":1,"cache_evidence":{"condition":"missing_file","package_spec":"pkg@1.2.3","process_generation":1,"probe_attempt_id":"attempt-1"}}`), &evidence); err != nil {
+		t.Fatalf("decode evidence: %v", err)
+	}
+	if evidence.CacheEvidence == nil ||
+		evidence.CacheEvidence.Condition != "missing_file" ||
+		evidence.CacheEvidence.PackageSpec != "pkg@1.2.3" ||
+		evidence.CacheEvidence.ProcessGeneration != 1 ||
+		evidence.CacheEvidence.ProbeAttemptID != "attempt-1" {
+		t.Fatalf("cache evidence = %#v", evidence.CacheEvidence)
+	}
+}
+
 func intPointer(value int) *int { return &value }
 
 func intPointersEqual(left, right *int) bool {

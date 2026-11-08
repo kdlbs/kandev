@@ -26,6 +26,7 @@ type ManagedStartupEvidence struct {
 	NPMDiagnosticPresent  bool                          `json:"npm_diagnostic_present"`
 	NPMDiagnosticComplete bool                          `json:"npm_diagnostic_complete"`
 	UnclassifiedNPMCode   bool                          `json:"unclassified_npm_code"`
+	CacheEvidence         *ManagedRuntimeCacheEvidence  `json:"cache_evidence,omitempty"`
 	DiagnosticReason      string                        `json:"diagnostic_reason,omitempty"`
 	DiagnosticComplete    bool                          `json:"diagnostic_complete"`
 }
@@ -62,6 +63,12 @@ func (e *ManagedStartupEvidence) UnmarshalJSON(data []byte) error {
 		e.NPMDiagnosticPresent = false
 		e.NPMDiagnosticComplete = false
 		e.UnclassifiedNPMCode = false
+	}
+	if raw, ok := fields["cache_evidence"]; ok {
+		var cache *ManagedRuntimeCacheEvidence
+		if err := json.Unmarshal(raw, &cache); err == nil {
+			e.CacheEvidence = cache
+		}
 	}
 	decodeManagedStartupString(fields["diagnostic_reason"], &e.DiagnosticReason)
 	decodeManagedStartupBool(fields["diagnostic_complete"], &e.DiagnosticComplete)

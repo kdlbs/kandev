@@ -121,6 +121,7 @@
   "conflictAutomationsTitle": "Automatizações:",
   "conflictQuickChatsTitle": "Chats rápidos:",
   "conflictTasksTitle": "Tarefas:",
+  "conflictUnknownWorkspace": "Área de trabalho desconhecida",
   "conflictTierMappingRow": "Escalão <0>{{tier}}</0> em {{workspace}} para {{provider}}",
   "conflictTierMappingsTitle": "Mapeamentos de escalão da área de trabalho:",
   "conflictUtilityAgentsTitle": "Agentes utilitários (manterão ligações obsoletas):",
