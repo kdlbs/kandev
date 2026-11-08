@@ -4,7 +4,7 @@ import { prepareIncompleteManagedRuntimeProfile } from "./managed-runtime-recove
 import { assertNoDocumentHorizontalOverflow } from "./layout-assertions";
 
 export function registerManagedNpmProbeRecoveryTests() {
-  test("profile discovery prepares an incomplete exact runtime without a repair action", async ({
+  test("reusable verified cache repair reuses the published profile discovery probe without a repair action", async ({
     apiClient,
     backend,
     testPage,
@@ -37,6 +37,25 @@ export function registerManagedNpmProbeRecoveryTests() {
       await testPage.keyboard.press("Escape");
       expect(fixture.registry.requests()).toBeGreaterThan(0);
       expect(fs.existsSync(`${fixture.sharedRoot}/package.json`)).toBe(false);
+      const requestsAfterRecovery = fixture.registry.requests();
+      const refreshedProbe = testPage.waitForResponse(
+        (response) =>
+          response.url().includes("/api/v1/agent-models/opencode-acp/") &&
+          response.url().endsWith("/probe"),
+      );
+      const refresh = testPage.getByTestId("profile-refresh-capabilities");
+      if (testInfo.project.name === "mobile-chrome") await refresh.tap();
+      else await refresh.click();
+      const refreshed = await refreshedProbe;
+      expect(await refreshed.json(), "reused profile probe response").toMatchObject({
+        status: "ok",
+      });
+      await expect(testPage.getByTestId("profile-capability-status")).toHaveAttribute(
+        "data-status",
+        "ready",
+        { timeout: 60_000 },
+      );
+      expect(fixture.registry.requests()).toBe(requestsAfterRecovery);
       await assertNoDocumentHorizontalOverflow(testPage);
       expect((await apiClient.getAgentProfile(fixture.profile.id)).model).toBe(
         fixture.profile.model,

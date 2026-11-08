@@ -2,7 +2,7 @@
 status: current
 system: agents
 created: 2026-11-07
-updated: 2026-11-07
+updated: 2026-11-08
 requirements:
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-004
@@ -132,8 +132,10 @@ process waits honor cancellation, including inherited output pipes.
 Cleanup removes only the verified owner root. A marker does not authorize a
 startup-wide orphan sweep. Failed cleanup retains ownership for a later retry.
 
-No shared preparation cache, persistent promotion, new storage table, or global
-launch lock is introduced. Independent operations have independent roots.
+The initial requirement-006 delivery adds no shared preparation cache, persistent
+promotion, storage table, or global launch lock. Its operations have independent roots.
+The [reusable repair design](managed-npm-repair-reuse.md) extends the lifetime
+of validated repairs while retaining this private fallback and shared-tree protection.
 Host probe retries retain the instance's existing admission ordering.
 For profile single-flight work, the existing flight owns preparation. One HTTP
 waiter's cancellation does not cancel other waiters. Context supersession,
@@ -245,3 +247,5 @@ and protocol initialization. It cannot substitute ETARGET or only count retries.
 
 The [delivery package](../../../plans/managed-npm-cache-recovery/plan.md)
 owns work order status and exact validation commands.
+The separate [reuse package](../../../plans/managed-npm-repair-reuse/plan.md)
+owns the proposed cross-launch extension. Its checks remain pending.

@@ -28,6 +28,7 @@ var SurvivalCapabilities = []string{
 	acpcompat.CopilotNativeCompactionCapability,
 	agentctltypes.ProjectMCPDeliveryCapability,
 	agentctltypes.ManagedRuntimePrivatePreparationCapability,
+	agentctltypes.ManagedRuntimeRepairReuseCapability,
 }
 
 // handleIdentity reports this launch's opaque identity and capability

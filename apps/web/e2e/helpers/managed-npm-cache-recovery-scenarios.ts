@@ -10,6 +10,52 @@ import {
 } from "./managed-runtime-recovery";
 import { SessionPage } from "../pages/session-page";
 
+function readSessionNativeID(backend: { tmpDir: string }, sessionId: string): string {
+  const database = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+  try {
+    database.exec("PRAGMA busy_timeout=5000");
+    const row = database
+      .prepare("SELECT downstream_acp_session_id FROM task_sessions WHERE id = ?")
+      .get(sessionId) as { downstream_acp_session_id?: string } | undefined;
+    return row?.downstream_acp_session_id ?? "";
+  } finally {
+    database.close();
+  }
+}
+
+function readSessionResumeToken(backend: { tmpDir: string }, sessionId: string): string {
+  const database = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+  try {
+    database.exec("PRAGMA busy_timeout=5000");
+    const row = database
+      .prepare("SELECT resume_token FROM executors_running WHERE session_id = ?")
+      .get(sessionId) as { resume_token?: string } | undefined;
+    return row?.resume_token ?? "";
+  } finally {
+    database.close();
+  }
+}
+
+async function expectPreparedRootLifetime(preparedRoot: string): Promise<void> {
+  if (!preparedRoot) return;
+  if (preparedRoot.includes("/managed-runtime-repairs/")) {
+    expect(fs.existsSync(preparedRoot)).toBe(true);
+    return;
+  }
+  await expect.poll(() => fs.existsSync(preparedRoot)).toBe(false);
+}
+
+function countInstallerInvocations(logPath: string, packageSpec: string): number {
+  if (!fs.existsSync(logPath)) return 0;
+  return fs
+    .readFileSync(logPath, "utf8")
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as string[])
+    .filter((invocation) => invocation.some((arg) => arg === `--package=${packageSpec}`)).length;
+}
+
 export function registerManagedNpmCacheRecoveryTests() {
   test.describe("managed npm incomplete cache recovery", () => {
     test.describe.configure({ retries: 0 });
@@ -106,7 +152,9 @@ export function registerManagedNpmCacheRecoveryTests() {
           const privateProject = args[prefixIndex + 1];
           const privateCache = args[cacheIndex + 1];
           preparedRoot = path.dirname(privateProject);
-          expect(privateProject).toContain("/kandev-managed-runtime-");
+          expect(privateProject).toMatch(
+            /(?:\/kandev-managed-runtime-[^/]+|\/managed-runtime-repairs\/v1\/generations\/[a-f0-9]{32})\/project$/,
+          );
           expect(privateCache).toContain(preparedRoot);
           expect(fixture.registry.requests()).toBeGreaterThan(0);
           const privateTree = path.join(
@@ -215,7 +263,7 @@ export function registerManagedNpmCacheRecoveryTests() {
           if (fixture) {
             await testPage.goto("/");
             await fixture.releaseBackendEnv();
-            if (preparedRoot) await expect.poll(() => fs.existsSync(preparedRoot)).toBe(false);
+            await expectPreparedRootLifetime(preparedRoot);
             if (profileId) await apiClient.deleteAgentProfile(profileId, true);
             await fixture.registry.close().catch(() => undefined);
             fs.rmSync(fixture.cacheRoot, { recursive: true, force: true });
@@ -225,6 +273,156 @@ export function registerManagedNpmCacheRecoveryTests() {
           }
         }
       });
+    }
+  });
+
+  test("reusable verified cache repair reuses the published runtime on a cold resume", async ({
+    apiClient,
+    backend,
+    seedData,
+    testPage,
+  }) => {
+    test.skip(process.platform === "win32", "the deterministic npx fixture is a POSIX script");
+    test.setTimeout(240_000);
+
+    const launchId = randomUUID();
+    let profileId = "";
+    let taskId = "";
+    let sessionId = "";
+    let fixture: Awaited<ReturnType<typeof prepareIncompleteManagedRuntimeProfile>> | undefined;
+    try {
+      fixture = await prepareIncompleteManagedRuntimeProfile(apiClient, backend, {
+        startupMode: "missing-root-manifest",
+        launchId,
+        hostSubprocess: true,
+      });
+      profileId = fixture.profile.id;
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Reusable verified cache repair",
+        fixture.profile.id,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      taskId = task.id;
+      if (!task.session_id) throw new Error("managed runtime task did not return a session ID");
+      sessionId = task.session_id;
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await waitForSessionState(apiClient, {
+        taskId,
+        sessionId,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "first recovery should publish a validated repair",
+        timeout: 60_000,
+      });
+      await session.expectChatResponseVisible("simple mock response", 0, { timeout: 15_000 });
+      const npmLog = fixture.npmInvocationLog;
+      if (!npmLog) throw new Error("host npm invocation capture is required");
+      await expect.poll(() => fs.existsSync(npmLog)).toBe(true);
+      const installerInvocations = countInstallerInvocations(npmLog, fixture.packageSpec);
+      expect(installerInvocations).toBeGreaterThan(0);
+      const registryRequests = fixture.registry.requests();
+      const firstSession = (await apiClient.listTaskSessions(taskId)).sessions.find(
+        (row) => row.id === sessionId,
+      );
+      const firstExecutionId = firstSession?.agent_execution_id;
+      expect(firstExecutionId).toBeTruthy();
+      const firstNativeID = readSessionNativeID(backend, sessionId);
+      const firstResumeToken = readSessionResumeToken(backend, sessionId);
+      expect(firstResumeToken).toBeTruthy();
+
+      await apiClient.stopSession({ session_id: sessionId, reason: "reuse proof", force: true });
+      await waitForSessionState(apiClient, {
+        taskId,
+        sessionId,
+        expectedState: "CANCELLED",
+        message: "session should stop before the cold resume",
+        timeout: 30_000,
+      });
+      await backend.restart();
+      await testPage.goto(`/t/${taskId}`);
+      const resumed = await apiClient.launchSession(
+        { task_id: taskId, session_id: sessionId, intent: "resume" },
+        60_000,
+      );
+      expect(resumed.agent_execution_id).not.toBe(firstExecutionId);
+      await waitForSessionState(apiClient, {
+        taskId,
+        sessionId,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "the published repair should start without another installation",
+        timeout: 60_000,
+      });
+      expect(countInstallerInvocations(npmLog, fixture.packageSpec)).toBe(installerInvocations);
+      expect(fixture.registry.requests()).toBe(registryRequests);
+      if (firstNativeID) {
+        expect(readSessionNativeID(backend, sessionId)).toBe(firstNativeID);
+      }
+      if (firstResumeToken) {
+        expect(readSessionResumeToken(backend, sessionId)).toBe(firstResumeToken);
+      }
+      await testPage.goto(`/t/${taskId}`);
+      await session.waitForLoad();
+      await expect(testPage.getByTestId("session-recovery-card")).toHaveCount(0);
+      await expect(testPage.getByTestId("failed-session-banner")).toHaveCount(0);
+      await session.waitForDirectInput();
+      const beforeFollowup = await apiClient.listSessionMessages(sessionId);
+      const beforeCount = beforeFollowup.messages.filter(
+        (message) =>
+          message.author_type === "user" && message.content?.trim() === "/e2e:simple-message",
+      ).length;
+      await session.sendMessageViaButton("/e2e:simple-message");
+      await session.expectChatResponseVisible("simple mock response", 1, { timeout: 60_000 });
+      const { messages } = await apiClient.listSessionMessages(sessionId);
+      expect(
+        messages.filter(
+          (message) =>
+            message.author_type === "user" && message.content?.trim() === "/e2e:simple-message",
+        ),
+      ).toHaveLength(beforeCount + 1);
+    } catch (error) {
+      await test.info().attach("managed-runtime-reuse-error", {
+        body: error instanceof Error ? (error.stack ?? error.message) : String(error),
+        contentType: "text/plain",
+      });
+      await test.info().attach("managed-runtime-reuse-backend-log", {
+        path: backend.logPath,
+        contentType: "text/plain",
+      });
+      throw error;
+    } finally {
+      if (sessionId) {
+        await apiClient
+          .stopSession({ session_id: sessionId, reason: "managed npm E2E cleanup", force: true })
+          .catch(() => undefined);
+        if (taskId) {
+          await waitForSessionState(apiClient, {
+            taskId,
+            sessionId,
+            expectedState: "CANCELLED",
+            message: "managed runtime E2E process should stop before cleanup",
+            timeout: 30_000,
+          }).catch(() => undefined);
+        }
+      }
+      if (fixture) {
+        await testPage.goto("/");
+        await fixture.releaseBackendEnv();
+        if (profileId) await apiClient.deleteAgentProfile(profileId, true);
+        await fixture.registry.close().catch(() => undefined);
+        fs.rmSync(fixture.cacheRoot, { recursive: true, force: true });
+        for (const fixturePath of fixture.hostFixturePaths) fs.rmSync(fixturePath, { force: true });
+        if (fixture.npmInvocationLog) {
+          fs.rmSync(fixture.npmInvocationLog, { force: true });
+          fs.rmSync(`${fixture.npmInvocationLog}.stderr`, { force: true });
+        }
+      }
     }
   });
 }

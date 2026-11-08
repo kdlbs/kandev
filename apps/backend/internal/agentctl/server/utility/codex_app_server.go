@@ -122,6 +122,11 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 			DurationMs:    int(time.Since(start).Milliseconds()),
 		}, nil
 	}
+	if prepared != nil && !prepared.RepairPublished() {
+		if publishErr := e.preparation.publishProbeRepair(prepared, req, req.InferenceConfig); publishErr != nil {
+			e.logger.Warn("managed runtime Codex probe repair publication failed", zap.Error(publishErr))
+		}
+	}
 	var listed protocol.ModelListResponse
 	if err := client.Call(ctx, protocol.MethodModelList, protocol.ModelListParams{}, &listed); err != nil {
 		cleanup()
@@ -469,11 +474,15 @@ func utilityUpstreamError(err error, stderr string) string {
 }
 
 func (e *CodexAppServerInferenceExecutor) prepareManagedProbeRuntime(ctx context.Context, req *ProbeRequest) (*managedruntime.PreparedRuntime, *ProbeResponse) {
+	if req == nil || req.InferenceConfig == nil {
+		return nil, nil
+	}
+	if selected, _ := e.preparation.selectProbeRuntime(ctx, req, req.InferenceConfig); selected != nil {
+		return selected, nil
+	}
 	if req.Preparation == nil {
 		return nil, nil
 	}
-	var prepared *managedruntime.PreparedRuntime
-	var err error
 	packageSpec, ok := managedRuntimeProbePackageForAgent(req.AgentID, req.InferenceConfig.Command)
 	if !ok || !e.preparation.validatesDirective(req.Preparation, req.AgentID, string(req.InferenceConfig.Protocol), req.InferenceConfig) {
 		return nil, &ProbeResponse{Error: "verified managed runtime evidence is stale"}
@@ -481,7 +490,7 @@ func (e *CodexAppServerInferenceExecutor) prepareManagedProbeRuntime(ctx context
 	if packageSpec != req.Preparation.PackageSpec {
 		return nil, &ProbeResponse{Error: "verified managed runtime package changed"}
 	}
-	prepared, err = preparePrivateProbeRuntime(ctx, packageSpec, sanitizeEnvForAgent(req.InferenceConfig), e.logger)
+	prepared, err := e.preparation.prepareProbeRepair(ctx, req, req.InferenceConfig, sanitizeEnvForAgent(req.InferenceConfig), e.logger)
 	if err != nil {
 		if prepared != nil {
 			e.preparation.retainOwner(prepared)

@@ -409,6 +409,25 @@ and executable before replacement and keeps those files while the process uses
 them. The incomplete shared cache and healthy sessions remain available.
 Preparation and replacement share one retry and a maximum 90-second budget.
 
+After the replacement reaches protocol initialization, Kandev publishes it in
+an execution-host repair store. Later compatible cold launches use that
+validated installation on their first attempt, including saved-session resume
+and startup, profile, and profile-model discovery. Reuse does not install the
+package again, contact the registry, change the saved profile, or restart a
+running agent. The store keeps each published installation on disk until you
+remove it explicitly, so disk use follows distinct repairs rather than session
+count.
+
+Reuse requires the same runtime owner, execution-host user, platform, exact
+package, npm toolchain and configuration, and authorized installer environment.
+A different version, user, registry configuration, or installation environment,
+a damaged publication record, or a replacement that never initialized does not
+authorize reuse. Kandev then falls back to the existing private preparation
+within the same attempt and deadline limits. Published installations last only
+while the execution host's Kandev storage persists: a new container, a rebuilt
+remote host, or lost executor storage is a normal cold start. Shared npm trees
+are never removed or rebuilt by automatic recovery.
+
 After an upgrade or restart, open the affected task normally. Eligible automatic
 resume keeps the saved conversation and transcript. You do not need to clean
 npm caches, change settings, update the runtime, or create another session.
@@ -1349,7 +1368,7 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Login required:** use the agent card's login terminal or sign in under Kandev's operating-system user; signing in as another user does not help the service.
 - **Model, mode, or command probe fails:** authenticate first, refresh discovery, and choose a value advertised by the installed version.
 - **Launch fails after editing flags:** inspect the command preview, remove stale arguments, and correct unmatched quotes or trailing escapes. If a queued automatic launch has an invalid built agent or continue command, Kandev drops that launch instead of retrying it. Correct the profile before starting the task again. Temporary provider or environment failures are not command-validation failures.
-- **Managed npm runtime cannot start:** Retry covers strict exact-package `ETARGET`, recognized temporary npm errors, an ordinary pre-initialization exit with complete generation-matched evidence of empty stderr, and independently verified missing npm execution manifests. Other permanent or unclassified errors and incomplete evidence do not retry. Kandev confirms cleanup and keeps the selected package and npm trees. If startup still fails, review the card's technical details and verify the service user's npm configuration and registry. Use **Settings > Agents** to prepare another trusted stable version when needed. Do not start with `npm cache clean --force`.
+- **Managed npm runtime cannot start:** Retry covers strict exact-package `ETARGET`, recognized temporary npm errors, an ordinary pre-initialization exit with complete generation-matched evidence of empty stderr, and independently verified missing npm execution manifests. Other permanent or unclassified errors and incomplete evidence do not retry. Kandev confirms cleanup and keeps the selected package and npm trees. A successful repair is reused by later compatible cold launches on the same execution-host storage; a changed user, version, platform, npm configuration, or installer environment falls back to a normal start. If startup still fails, review the card's technical details and verify the service user's npm configuration and registry. Use **Settings > Agents** to prepare another trusted stable version when needed. Do not start with `npm cache clean --force`.
 - **Environment value is absent:** confirm the secret still exists, the key is not reserved, and an executor/runtime variable is not already taking precedence.
 - **MCP selection cannot save:** the previous saved selection remains in
   effect. A forbidden response explains that the current connection cannot save

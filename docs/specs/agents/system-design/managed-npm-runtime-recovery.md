@@ -1,7 +1,7 @@
 ---
 status: draft
 system: agents
-updated: 2026-11-07
+updated: 2026-11-08
 requirements:
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-001
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002
@@ -216,6 +216,10 @@ owner, and phone touch targets from the session recovery design. No new page,
 dialog, or storage table is needed.
 
 ## Observability
+
+The [reusable repair design](managed-npm-repair-reuse.md) owns publication
+and later selection after verified incomplete-cache recovery. It leaves this
+document's eligibility, exact-version, deadline, and shared-tree rules intact.
 
 Structured recovery logs include the recovery scope, agent ID, attempt, outcome,
 and, for task sessions, the execution ID, runtime type, and startup generation.

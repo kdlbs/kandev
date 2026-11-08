@@ -33,6 +33,7 @@ type managedRuntimePreparationState struct {
 	mu       sync.Mutex
 	attempts map[string]managedRuntimeProbeAttempt
 	owners   []*managedruntime.PreparedRuntime
+	store    *managedruntime.RepairStore
 	closed   bool
 }
 
@@ -147,47 +148,7 @@ func preparePrivateProbeRuntime(
 	env []string,
 	logger *zap.Logger,
 ) (*managedruntime.PreparedRuntime, error) {
-	return managedruntime.PreparePrivateRuntime(ctx, packageSpec, env, func(
-		commandCtx context.Context,
-		command managedruntime.ManagedRuntimeCommand,
-	) error {
-		cmd := exec.CommandContext(commandCtx, command.Path, command.Args...)
-		cmd.Dir = command.Dir
-		cmd.Env = append([]string(nil), command.Env...)
-		cmd.Stdout = io.Discard
-		cmd.Stderr = io.Discard
-		configureACPCommand(cmd, logger)
-		cmd.WaitDelay = 2 * acpCommandTerminateGrace
-		if err := cmd.Start(); err != nil {
-			return err
-		}
-		waited := make(chan struct{})
-		command.RetainWhile(func() bool {
-			select {
-			case <-waited:
-				return acpProcessGroupAlive(cmd.Process.Pid)
-			default:
-				return true
-			}
-		})
-		lifecycle, lifecycleErr := installACPCommandLifecycle(cmd)
-		if lifecycleErr != nil {
-			acpCommandLogger(logger).Warn("failed to install private npm lifecycle", zap.Error(lifecycleErr))
-		}
-		waitErr := cmd.Wait()
-		close(waited)
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(commandCtx), 2*acpCommandTerminateGrace+2*acpCommandForceKillGrace)
-		reapACPProcessGroup(cleanupCtx, cmd.Process.Pid, logger)
-		cancel()
-		releaseACPCommandLifecycle(lifecycle)
-		if commandCtx.Err() != nil {
-			return commandCtx.Err()
-		}
-		if waitErr != nil {
-			return errors.New("private npm package preparation failed")
-		}
-		return nil
-	})
+	return managedruntime.PreparePrivateRuntime(ctx, packageSpec, env, runPrivateProbeCommand(logger))
 }
 
 func (s *managedRuntimePreparationState) validatesDirective(
@@ -312,4 +273,175 @@ func managedRuntimeProbeFingerprint(agentID, protocol string, cfg *InferenceConf
 
 func eligibleManagedRuntimeProbeConfig(cfg *InferenceConfigDTO) bool {
 	return cfg != nil && !cfg.OperatorDefined && len(cfg.CommandPrefix) == 0 && len(cfg.CLIFlags) == 0 && cfg.LaunchWrapper.IsZero()
+}
+
+// newManagedRuntimePreparationStateWithHome opens the executor-local reusable
+// repair store. An unavailable store leaves the legacy private path intact.
+func newManagedRuntimePreparationStateWithHome(
+	homeDir string,
+	excludedRoots []string,
+	logger *zap.Logger,
+) *managedRuntimePreparationState {
+	state := newManagedRuntimePreparationState()
+	if homeDir == "" {
+		return state
+	}
+	store, err := managedruntime.OpenRepairStore(homeDir, excludedRoots...)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("managed runtime repair reuse is unavailable", zap.Error(err))
+		}
+		return state
+	}
+	state.store = store
+	return state
+}
+
+// probeRepairContext builds the installation identity for one system utility
+// probe. The probe DTO's Env is already the complete authorized child
+// environment, so it carries installer provenance without name guessing.
+func (s *managedRuntimePreparationState) probeRepairContext(
+	req *ProbeRequest,
+	cfg *InferenceConfigDTO,
+) (managedruntime.RepairContext, bool) {
+	if s == nil || s.store == nil || req == nil || cfg == nil || !eligibleManagedRuntimeProbeConfig(cfg) {
+		return managedruntime.RepairContext{}, false
+	}
+	if !req.InstallContext.Valid() {
+		return managedruntime.RepairContext{}, false
+	}
+	packageSpec, ok := managedRuntimeProbePackageForAgent(req.AgentID, cfg.Command)
+	if !ok {
+		return managedruntime.RepairContext{}, false
+	}
+	protocol := string(cfg.Protocol)
+	if protocol == "" {
+		protocol = "acp"
+	}
+	repairContext, err := s.store.Context(managedruntime.RepairContextInput{
+		OwnerScope:         req.InstallContext.OwnerScope,
+		InstallerEnvDigest: req.InstallContext.InstallerEnvDigest,
+		PackageSpec:        packageSpec,
+		Protocol:           protocol,
+		Env:                sanitizeEnvForAgent(cfg),
+	})
+	if err != nil {
+		return managedruntime.RepairContext{}, false
+	}
+	return repairContext, true
+}
+
+// selectProbeRuntime reads a published compatible repair before the first
+// probe attempt. It never installs packages and never changes result ownership.
+func (s *managedRuntimePreparationState) selectProbeRuntime(
+	ctx context.Context,
+	req *ProbeRequest,
+	cfg *InferenceConfigDTO,
+) (*managedruntime.PreparedRuntime, managedruntime.RepairOutcome) {
+	repairContext, ok := s.probeRepairContext(req, cfg)
+	if !ok {
+		return nil, managedruntime.RepairOutcomeMiss
+	}
+	prepared, outcome, err := s.store.Lookup(ctx, repairContext)
+	if err != nil {
+		return nil, managedruntime.RepairOutcomeMiss
+	}
+	return prepared, outcome
+}
+
+// prepareProbeRepair prepares one replacement generation for a verified
+// probe failure. It reuses a generation another caller already published and
+// keeps the existing private path when storage or provenance is unavailable.
+func (s *managedRuntimePreparationState) prepareProbeRepair(
+	ctx context.Context,
+	req *ProbeRequest,
+	cfg *InferenceConfigDTO,
+	env []string,
+	logger *zap.Logger,
+) (*managedruntime.PreparedRuntime, error) {
+	repairContext, ok := s.probeRepairContext(req, cfg)
+	if !ok {
+		return preparePrivateProbeRuntime(ctx, req.Preparation.PackageSpec, env, logger)
+	}
+	lease, err := s.store.BeginRecovery(ctx, repairContext)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if logger != nil {
+			logger.Warn("probe repair store is unavailable; using private preparation", zap.Error(err))
+		}
+		return preparePrivateProbeRuntime(ctx, req.Preparation.PackageSpec, env, logger)
+	}
+	if prepared, outcome, reuseErr := lease.Reuse(ctx); outcome == managedruntime.RepairOutcomeHit {
+		return prepared, reuseErr
+	}
+	prepared, err := lease.Prepare(ctx, env, runPrivateProbeCommand(logger))
+	if err != nil {
+		_ = lease.Close()
+		return nil, err
+	}
+	return prepared, nil
+}
+
+// publishProbeRepair revalidates the probe's installation context and
+// publishes at protocol-initialization success. A changed context retires the
+// candidate instead of publishing under an obsolete identity.
+func (s *managedRuntimePreparationState) publishProbeRepair(
+	prepared *managedruntime.PreparedRuntime,
+	req *ProbeRequest,
+	cfg *InferenceConfigDTO,
+) error {
+	if prepared == nil || prepared.RepairPublished() {
+		return nil
+	}
+	repairContext, ok := s.probeRepairContext(req, cfg)
+	if !ok || !s.store.MatchesRepairContext(prepared, repairContext) {
+		prepared.RetireRepairPublication()
+		return errors.New("probe installer context changed before publication")
+	}
+	return prepared.PublishRepair()
+}
+
+// runPrivateProbeCommand installs one exact package through the existing
+// private probe process lifecycle.
+func runPrivateProbeCommand(logger *zap.Logger) managedruntime.ManagedRuntimeCommandRunner {
+	return func(commandCtx context.Context, command managedruntime.ManagedRuntimeCommand) error {
+		cmd := exec.CommandContext(commandCtx, command.Path, command.Args...)
+		cmd.Dir = command.Dir
+		cmd.Env = append([]string(nil), command.Env...)
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+		configureACPCommand(cmd, logger)
+		cmd.WaitDelay = 2 * acpCommandTerminateGrace
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		waited := make(chan struct{})
+		command.RetainWhile(func() bool {
+			select {
+			case <-waited:
+				return acpProcessGroupAlive(cmd.Process.Pid)
+			default:
+				return true
+			}
+		})
+		lifecycle, lifecycleErr := installACPCommandLifecycle(cmd)
+		if lifecycleErr != nil {
+			acpCommandLogger(logger).Warn("failed to install private npm lifecycle", zap.Error(lifecycleErr))
+		}
+		waitErr := cmd.Wait()
+		close(waited)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(commandCtx), 2*acpCommandTerminateGrace+2*acpCommandForceKillGrace)
+		reapACPProcessGroup(cleanupCtx, cmd.Process.Pid, logger)
+		cancel()
+		releaseACPCommandLifecycle(lifecycle)
+		if commandCtx.Err() != nil {
+			return commandCtx.Err()
+		}
+		if waitErr != nil {
+			return errors.New("private npm package preparation failed")
+		}
+		return nil
+	}
 }

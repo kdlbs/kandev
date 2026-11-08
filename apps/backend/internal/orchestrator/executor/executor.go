@@ -548,7 +548,11 @@ type LaunchAgentRequest struct {
 	CandidateExecutionID         string
 	OnExecutionAllocated         func(context.Context, string) error
 
-	TaskID                string
+	TaskID string
+	// OwnerUserID is the authenticated application owner used for reusable
+	// repair identity. It is resolved from the actor or workspace owner and is
+	// never derived from child environment values.
+	OwnerUserID           string
 	TaskScope             lifecycle.TaskLaunchScope
 	SessionSettingsPolicy ResumeSettingsPolicy
 	WorkspaceID           string // Kandev workspace ID — used to build scratch dir for repo-less tasks

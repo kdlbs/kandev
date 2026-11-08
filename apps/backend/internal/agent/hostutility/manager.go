@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/system/storage"
@@ -989,6 +990,45 @@ func (m *Manager) probeWithOverrides(
 	return caps
 }
 
+// managedRuntimeProbeInstallContext fingerprints the complete authorized
+// utility child environment. It carries no physical path or raw value.
+func managedRuntimeProbeInstallContext(
+	cfg *agentctlutil.InferenceConfigDTO,
+	ownerScope string,
+) *agentctltypes.ManagedRuntimeInstallContext {
+	if cfg == nil || ownerScope == "" {
+		return nil
+	}
+	values := make(map[string]string, len(cfg.Env))
+	for key, value := range cfg.Env {
+		values[key] = value
+	}
+	for _, key := range cfg.StripEnv {
+		values["strip:"+key] = ""
+	}
+	digest := managedruntime.InstallerEnvironmentDigest(values)
+	if digest == "" {
+		return nil
+	}
+	return &agentctltypes.ManagedRuntimeInstallContext{
+		InstallerEnvDigest: digest,
+		OwnerScope:         ownerScope,
+	}
+}
+
+// managedRuntimeProbeOwnerScope binds discovery to the authenticated actor.
+// Profile callers pass the settings layer's authorization scope; other probes
+// use the actor identity, with a stable system owner for internal startup work.
+func managedRuntimeProbeOwnerScope(ctx context.Context, profileScope string) string {
+	if profileScope != "" {
+		return managedruntime.RepairOwnerScopeProfile(profileScope)
+	}
+	if identity, ok := authn.IdentityFromContext(ctx); ok && identity.UserID != "" {
+		return managedruntime.RepairOwnerScopeAgentWide(identity.UserID)
+	}
+	return managedruntime.RepairOwnerScopeAgentWide("system")
+}
+
 func (m *Manager) probeManagedRuntime(
 	ctx context.Context,
 	inst *instance,
@@ -1002,6 +1042,10 @@ func (m *Manager) probeManagedRuntime(
 	}
 	req = cloneProbeRequestWithCommand(req, command)
 	req.InferenceConfig.Env = mergeInferenceEnv(req.InferenceConfig.Env, localEnv)
+	req.InstallContext = managedRuntimeProbeInstallContext(
+		req.InferenceConfig,
+		managedRuntimeProbeOwnerScope(ctx, ""),
+	)
 	resp, err := inst.client.Probe(ctx, req)
 	release()
 	if err != nil || !managedRuntimeProbeFailureRecoverable(resp) {

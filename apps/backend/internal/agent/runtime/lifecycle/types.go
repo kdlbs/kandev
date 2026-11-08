@@ -106,15 +106,22 @@ type AgentExecution struct {
 	// CopilotNativeSessionEvents reports whether this launch requested the
 	// Copilot native event stream from a capable agentctl peer.
 	CopilotNativeSessionEvents bool
-	AuthPolicy                 *acpcompat.AuthPolicy
-	ContainerID                string
-	ContainerIP                string   // IP address of the container for agentctl communication
-	WorkspacePath              string   // Path to the workspace (worktree or repository path)
-	WorkspaceSourceRoots       []string // Canonical durable source roots permitted by agentctl file operations
-	ACPSessionID               string   // ACP session ID to resume, if available
-	DeliveryStreamID           string   // Generation-scoped durable agentctl stream
-	DeliveryIncarnationID      string   // Kandev session incarnation owning the stream
-	DeliveryHarnessGeneration  uint64   // Native harness generation owning the stream
+	// ManagedRuntimeInstallerEnvDigest fingerprints the authorized installer
+	// environment for reusable managed npm repairs. It is runtime-only and is
+	// never persisted with the execution.
+	ManagedRuntimeInstallerEnvDigest string
+	// ManagedRuntimeOwnerUserID is the authenticated application owner of this
+	// launch. It scopes reusable repairs without entering child environment.
+	ManagedRuntimeOwnerUserID string
+	AuthPolicy                *acpcompat.AuthPolicy
+	ContainerID               string
+	ContainerIP               string   // IP address of the container for agentctl communication
+	WorkspacePath             string   // Path to the workspace (worktree or repository path)
+	WorkspaceSourceRoots      []string // Canonical durable source roots permitted by agentctl file operations
+	ACPSessionID              string   // ACP session ID to resume, if available
+	DeliveryStreamID          string   // Generation-scoped durable agentctl stream
+	DeliveryIncarnationID     string   // Kandev session incarnation owning the stream
+	DeliveryHarnessGeneration uint64   // Native harness generation owning the stream
 	// Fresh native startup buffers delivery until its initial SQL generation exists.
 	deliveryBootstrap          atomic.Bool
 	deliveryStartup            atomic.Pointer[deliveryStartupAttempt]
@@ -1768,6 +1775,13 @@ type LaunchRequest struct {
 	// every managed runtime value and can perform the final strict resolution.
 	EnvironmentDefinitions        []runtimeenv.Definition
 	EnvironmentResolutionRequired bool
+	// ManagedRuntimeInstallerEnvDigest fingerprints the authorized installer
+	// environment for reusable managed npm repairs. It is runtime-only and is
+	// never persisted with the execution.
+	ManagedRuntimeInstallerEnvDigest string
+	// ManagedRuntimeOwnerUserID is the authenticated application owner of this
+	// launch. It scopes reusable repairs without entering child environment.
+	ManagedRuntimeOwnerUserID string
 	// EnvironmentFinalized marks the immutable effective snapshot passed to the
 	// runtime. Later lifecycle steps must not merge profile or credential values
 	// over this snapshot.

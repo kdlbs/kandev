@@ -383,6 +383,13 @@ type Manager struct {
 	preparedRuntime          *managedruntime.PreparedRuntime
 	retainedPreparedRuntimes []*managedruntime.PreparedRuntime
 	managedRuntimeCommand    []string
+	repairStore              *managedruntime.RepairStore
+	repairPublicationTimer   *time.Timer
+	configRevision           uint64
+	preparedRuntimeRevision  uint64
+	preparedRepairContext    *managedruntime.RepairContext
+	preparedRepairEnv        []string
+	preparedRepairInherited  []string
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
 	// created so the flag always describes the current channel — a Start that
@@ -526,6 +533,17 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		deliverySubmissionHistory:  make(map[uint64]string),
 		workspaceSourceRoots:       canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
 		trackerGitEnv:              append([]string(nil), cfg.AgentEnv...),
+	}
+	if cfg.HomeDir != "" {
+		exclusions := append([]string{cfg.WorkDir}, cfg.WorkspaceSourceRoots...)
+		store, storeErr := managedruntime.OpenRepairStore(cfg.HomeDir, exclusions...)
+		if storeErr != nil {
+			log.Warn("managed runtime repair reuse is unavailable",
+				zap.String("component", "process-manager"),
+				zap.String("reason", "store_unavailable"))
+		} else {
+			m.repairStore = store
+		}
 	}
 	if cfg.DurableJournalPath != "" {
 		m.deliveryJournal, m.deliveryJournalErr = journal.Open(journal.Config{Path: cfg.DurableJournalPath})
@@ -1939,10 +1957,19 @@ func (m *Manager) Start(ctx context.Context) error {
 
 // StartWithGeneration starts the agent process and returns the generation
 // created by this call while startup remains serialized against replacement.
+// A compatible published repair is selected before the first attempt.
 func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	m.startOperationMu.Lock()
 	defer m.startOperationMu.Unlock()
-	return m.startWithGeneration(ctx, nil, nil)
+	prepared, _ := m.selectManagedRuntimeRepair(ctx)
+	generation, startErr := m.startWithGeneration(ctx, nil, prepared, nil)
+	if prepared != nil && !m.ownsPreparedRuntime(prepared) {
+		if closeErr := prepared.Close(); closeErr != nil {
+			m.retainPreparedRuntime(prepared)
+			startErr = errors.Join(startErr, closeErr)
+		}
+	}
+	return generation, startErr
 }
 
 // StartWithManagedRuntimePreparation starts with a private npm project/cache
@@ -1951,6 +1978,10 @@ func (m *Manager) StartWithManagedRuntimePreparation(
 	ctx context.Context,
 	directive types.ManagedRuntimePreparationDirective,
 ) (uint64, error) {
+	if directive.RemainingBudgetSeconds < 0 {
+		return 0, errors.New("managed runtime preparation budget is invalid")
+	}
+	deadline := managedRuntimePublicationDeadline(time.Now(), directive.RemainingBudgetSeconds)
 	ctx, release, err := m.BeginOwnedOperation(ctx)
 	if err != nil {
 		return 0, err
@@ -1961,20 +1992,36 @@ func (m *Manager) StartWithManagedRuntimePreparation(
 
 	m.startMu.Lock()
 	snapshot, err := m.validateManagedRuntimePreparationDirective(directive)
+	revision := m.configRevision
+	repairContext, contextOK := m.repairContextLocked()
 	m.startMu.Unlock()
 	if err != nil {
 		return 0, err
 	}
-	prepared, err := m.prepareManagedRuntimePrivately(ctx, directive.PackageSpec, snapshot)
+	if !contextOK {
+		repairContext = managedruntime.RepairContext{}
+	}
+	prepared, outcome, err := m.prepareManagedRuntimeRepair(ctx, directive, snapshot, repairContext, contextOK)
 	if err != nil {
 		if prepared != nil {
 			m.retainPreparedRuntime(prepared)
 		}
 		return 0, err
 	}
+	m.logger.Info("managed runtime repair recovery selected",
+		zap.String("outcome", outcome))
 
-	generation, startErr := m.startWithGeneration(ctx, &directive, prepared)
-	if !m.ownsPreparedRuntime(prepared) {
+	generation, startErr := m.startWithGeneration(ctx, &directive, prepared, &revision)
+	if contextOK && startErr == nil && prepared != nil && !prepared.RepairPublished() {
+		m.startMu.Lock()
+		snapshotContext := repairContext
+		m.preparedRepairContext = &snapshotContext
+		m.preparedRepairEnv = append([]string(nil), snapshot.Env...)
+		m.preparedRepairInherited = os.Environ()
+		m.startMu.Unlock()
+		m.scheduleManagedRuntimePublicationExpiry(prepared, deadline, revision)
+	}
+	if prepared != nil && !m.ownsPreparedRuntime(prepared) {
 		if closeErr := prepared.Close(); closeErr != nil {
 			m.retainPreparedRuntime(prepared)
 			startErr = errors.Join(startErr, closeErr)
@@ -1987,9 +2034,13 @@ func (m *Manager) startWithGeneration(
 	ctx context.Context,
 	preparation *types.ManagedRuntimePreparationDirective,
 	prepared *managedruntime.PreparedRuntime,
+	expectedRevision *uint64,
 ) (uint64, error) {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
+	if prepared == nil && preparation == nil {
+		m.detachPreparedRuntimeLocked()
+	}
 	release, err := m.admitStart()
 	if err != nil {
 		return 0, err
@@ -2002,6 +2053,20 @@ func (m *Manager) startWithGeneration(
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
 		return 0, fmt.Errorf("agent is already running")
 	}
+	if expectedRevision != nil && m.configRevision != *expectedRevision {
+		if prepared != nil {
+			_ = prepared.Close()
+		}
+		return 0, errors.New("managed runtime configuration changed during recovery")
+	}
+	if prepared != nil && preparation == nil {
+		if repairContext, ok := m.repairContextLocked(); !ok || !m.repairStore.MatchesRepairContext(prepared, repairContext) {
+			if err := prepared.Close(); err != nil {
+				m.retainPreparedRuntime(prepared)
+			}
+			prepared = nil
+		}
+	}
 	if m.cfg.DurableJournalPath != "" && m.deliveryJournalErr != nil {
 		m.status.Store(StatusError)
 		return 0, fmt.Errorf("durable delivery journal unavailable: %w", m.deliveryJournalErr)
@@ -2010,8 +2075,13 @@ func (m *Manager) startWithGeneration(
 	// A previous lifecycle may still be live: an agent that exited on its own
 	// never ran teardown, and Start is reachable without an intervening Stop.
 	m.finishPreviousLifecycle(ctx)
-	if preparation != nil {
-		if err := m.installPreparedRuntime(*preparation, prepared); err != nil {
+	if prepared != nil {
+		if preparation != nil {
+			if _, err := m.validateManagedRuntimePreparationDirective(*preparation); err != nil {
+				return 0, err
+			}
+		}
+		if err := m.installPreparedRuntime(prepared); err != nil {
 			return 0, err
 		}
 	}
@@ -2067,10 +2137,7 @@ func (m *Manager) startConfiguredProcess() (uint64, error) {
 	return generation, err
 }
 
-func (m *Manager) installPreparedRuntime(preparation types.ManagedRuntimePreparationDirective, prepared *managedruntime.PreparedRuntime) error {
-	if _, err := m.validateManagedRuntimePreparationDirective(preparation); err != nil {
-		return err
-	}
+func (m *Manager) installPreparedRuntime(prepared *managedruntime.PreparedRuntime) error {
 	if m.mainReapPending.Load() {
 		return errors.New("previous managed runtime descendants are still owned")
 	}
@@ -2080,8 +2147,39 @@ func (m *Manager) installPreparedRuntime(preparation types.ManagedRuntimePrepara
 		}
 		m.preparedRuntime = nil
 	}
+	if m.repairPublicationTimer != nil {
+		m.repairPublicationTimer.Stop()
+		m.repairPublicationTimer = nil
+	}
 	m.preparedRuntime = prepared
+	m.preparedRuntimeRevision = m.configRevision
+	if prepared == nil || prepared.RepairPublished() {
+		m.preparedRepairContext = nil
+		m.preparedRepairEnv = nil
+		m.preparedRepairInherited = nil
+	}
 	return nil
+}
+
+// detachPreparedRuntimeLocked releases any selected or pending handle when a
+// normal start misses or changes its installation context. Published files
+// remain available to their consumers.
+func (m *Manager) detachPreparedRuntimeLocked() {
+	if m.preparedRuntime == nil {
+		return
+	}
+	if err := m.preparedRuntime.Close(); err != nil {
+		m.retainedPreparedRuntimes = append(m.retainedPreparedRuntimes, m.preparedRuntime)
+	}
+	m.preparedRuntime = nil
+	m.preparedRuntimeRevision = 0
+	m.preparedRepairContext = nil
+	m.preparedRepairEnv = nil
+	m.preparedRepairInherited = nil
+	if m.repairPublicationTimer != nil {
+		m.repairPublicationTimer.Stop()
+		m.repairPublicationTimer = nil
+	}
 }
 
 func (m *Manager) startManagedProcess() (uint64, error) {
@@ -2577,7 +2675,7 @@ func lookupEnvValue(env []string, key string) string {
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
 func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, nil, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, nil, nil, wrapper...)
 }
 
 // ConfigureWithEnvironment sets the agent command and replaces the complete
@@ -2585,23 +2683,35 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 // instance variables that are absent from env remain available to the agent.
 // This must be called before Start() if the instance was created without a command.
 func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, nil, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, nil, nil, wrapper...)
 }
 
 // ConfigureWithProjectDelivery sets the agent command together with
 // execution-bound project delivery evidence. A missing record clears any
 // previous evidence so a new configuration cannot inherit it by omission.
 func (m *Manager) ConfigureWithProjectDelivery(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, delivery, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, delivery, nil, wrapper...)
+}
+
+// ConfigureWithProjectDeliveryAndInstallContext adds authenticated installer
+// provenance for reusable managed npm repairs.
+func (m *Manager) ConfigureWithProjectDeliveryAndInstallContext(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, wrapper ...launchwrapper.Spec) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, delivery, installContext, wrapper...)
 }
 
 // ConfigureWithEnvironmentAndProjectDelivery combines complete environment
 // replacement with execution-bound project delivery evidence.
 func (m *Manager) ConfigureWithEnvironmentAndProjectDelivery(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, delivery, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, delivery, nil, wrapper...)
 }
 
-func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
+// ConfigureWithEnvironmentAndProjectDeliveryAndInstallContext combines
+// complete environment replacement with authenticated installer provenance.
+func (m *Manager) ConfigureWithEnvironmentAndProjectDeliveryAndInstallContext(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, wrapper ...launchwrapper.Spec) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, delivery, installContext, wrapper...)
+}
+
+func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, wrapper ...launchwrapper.Spec) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 
@@ -2659,11 +2769,13 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	}
 
 	m.cfg.AgentEnv = mergedEnv
+	m.cfg.ManagedRuntimeInstallContext = installContext.Clone()
 	if m.adapterCfg != nil && m.adapterCfg.OneShotConfig != nil {
 		m.adapterCfg.OneShotConfig.Env = append([]string(nil), m.cfg.AgentEnv...)
 	}
 	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
 
+	m.configRevision++
 	m.logger.Info("agent configured", zap.Int("env_count", len(env)), zap.Bool("wrapped", !spec.IsZero()))
 
 	return nil
@@ -3257,6 +3369,10 @@ func (m *Manager) closePreparedRuntimeOwnersAfterTeardown() error {
 	}
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
+	if m.repairPublicationTimer != nil {
+		m.repairPublicationTimer.Stop()
+		m.repairPublicationTimer = nil
+	}
 	var closeErrors []error
 	if m.preparedRuntime != nil {
 		if err := m.preparedRuntime.Close(); err != nil {
@@ -3304,6 +3420,7 @@ func (m *Manager) closeDeliveryJournal() error {
 }
 
 func (m *Manager) stop(ctx context.Context) error {
+	m.retireManagedRuntimeRepair()
 	if err := m.passthrough.StopAll(ctx); err != nil {
 		return err
 	}

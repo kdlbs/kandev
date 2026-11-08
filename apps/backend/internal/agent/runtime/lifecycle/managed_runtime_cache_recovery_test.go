@@ -126,12 +126,21 @@ func TestManagedRuntimeCacheResume(t *testing.T) {
 				t.Fatal("task prompt was not dispatched after cache recovery")
 			}
 
-			if got := mock.preparationDirectives; len(got) != 1 || got[0] != (agentctltypes.ManagedRuntimePreparationDirective{
+			got := mock.preparationDirectives
+			if len(got) != 1 {
+				t.Fatalf("private preparation directives = %#v", got)
+			}
+			directive := got[0]
+			if directive.RemainingBudgetSeconds < 1 || directive.RemainingBudgetSeconds > 90 {
+				t.Fatalf("recovery budget = %d, want a bounded remaining deadline", directive.RemainingBudgetSeconds)
+			}
+			directive.RemainingBudgetSeconds = 0
+			if directive != (agentctltypes.ManagedRuntimePreparationDirective{
 				Condition:               agentctltypes.ManagedRuntimeCacheRootManifestMissing,
 				PackageSpec:             packageSpec,
 				FailedProcessGeneration: failedGeneration,
 			}) {
-				t.Fatalf("private preparation directives = %#v", got)
+				t.Fatalf("private preparation directive = %#v", directive)
 			}
 			if got := mock.loadedSessionIDs; !slices.Equal(got, []string{"saved-native-conversation"}) {
 				t.Fatalf("native conversations loaded = %#v, want the saved token once", got)

@@ -33,12 +33,14 @@ type ManagedRuntimeCommand struct {
 type ManagedRuntimeCommandRunner func(context.Context, ManagedRuntimeCommand) error
 
 // PreparedRuntime owns one private project and npm cache until its consumers stop.
+// A store-owned handle can be published; published handles never remove files.
 type PreparedRuntime struct {
 	root        string
 	project     string
 	cache       string
 	packageSpec string
 	ownerID     string
+	repair      *preparedRuntimeRepair
 	mu          sync.Mutex
 	closed      bool
 	consumers   []func() bool
@@ -75,9 +77,30 @@ func PreparePrivateRuntime(
 		_ = os.RemoveAll(root)
 		return nil, fmt.Errorf("create private managed runtime owner marker: %w", err)
 	}
+	return allocateOwnedRuntime(ctx, root, ownerID, packageSpec, env, run, nil)
+}
+
+// allocateOwnedRuntime prepares one owned project/cache at the already
+// allocated final root. Store-owned generations attach their repair owner
+// before installation so cancellation and teardown release the context lock.
+func allocateOwnedRuntime(
+	ctx context.Context,
+	root string,
+	ownerID string,
+	packageSpec string,
+	env []string,
+	run ManagedRuntimeCommandRunner,
+	repair *preparedRuntimeRepair,
+) (*PreparedRuntime, error) {
+	if err := ValidateExactPackageSpec(packageSpec); err != nil {
+		return nil, err
+	}
+	if run == nil {
+		return nil, errors.New("managed runtime command runner is required")
+	}
 	prepared := &PreparedRuntime{
 		root: root, project: filepath.Join(root, "project"), cache: filepath.Join(root, "cache"),
-		packageSpec: packageSpec, ownerID: ownerID,
+		packageSpec: packageSpec, ownerID: ownerID, repair: repair,
 	}
 	if err := prepared.createOwnedRoot(); err != nil {
 		return prepared.cleanupAfterPreparationFailure(err)
@@ -274,6 +297,7 @@ func packageArgIndex(args []string, packageSpec string) int {
 
 // Close removes only this verified owner root. Callers retain the owner after
 // a cleanup error and may retry Close after consumer processes have stopped.
+// A published repair keeps its files and releases only its context lock.
 func (p *PreparedRuntime) Close() error {
 	if p == nil {
 		return nil
@@ -283,10 +307,22 @@ func (p *PreparedRuntime) Close() error {
 	if p.closed {
 		return nil
 	}
+	if p.repair != nil && p.repair.isPublished() {
+		p.closed = true
+		p.repair.releaseLease()
+		return nil
+	}
 	for _, live := range p.consumers {
 		if live() {
 			return errors.New("private managed runtime consumers are still owned")
 		}
+	}
+	if p.repair != nil {
+		if err := p.repair.closeUnpublished(p); err != nil {
+			return err
+		}
+		p.closed = true
+		return nil
 	}
 	info, err := os.Lstat(p.root)
 	if errors.Is(err, os.ErrNotExist) {

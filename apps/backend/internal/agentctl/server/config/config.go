@@ -263,6 +263,10 @@ type InstanceConfig struct {
 	// launch files are created beneath it, never inside the workspace.
 	HomeDir string `json:"-"`
 
+	// ManagedRuntimeInstallContext carries authenticated installer provenance
+	// for reusable managed npm repairs. Nil disables reuse for this instance.
+	ManagedRuntimeInstallContext *agentctltypes.ManagedRuntimeInstallContext
+
 	// InstanceID is the stable identifier the InstanceManager assigned to
 	// this instance. Used by the API middleware to reject requests whose
 	// X-Instance-ID header doesn't match — a stale client that still
@@ -875,6 +879,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.OpenCodePluginRuntime != nil {
 		cfg.OpenCodePluginRuntime = overrides.OpenCodePluginRuntime
 	}
+	if overrides.ManagedRuntimeInstallContext != nil {
+		cfg.ManagedRuntimeInstallContext = overrides.ManagedRuntimeInstallContext.Clone()
+	}
 }
 
 // applyApprovalOverrides sets approval-related instance overrides. Env is a
@@ -893,40 +900,41 @@ func applyApprovalOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 
 // InstanceOverrides allows overriding default values when creating an instance
 type InstanceOverrides struct {
-	InstanceID                 string
-	Protocol                   agent.Protocol
-	AgentCommand               string
-	WorkDir                    string
-	AutoStart                  *bool
-	Env                        []string
-	AutoApprovePermissions     *bool
-	AgentType                  string
-	McpServers                 []McpServerConfig
-	SessionID                  string
-	TaskID                     string
-	DisableAskQuestion         bool
-	PromptSuggestions          bool
-	CopilotNativeSessionEvents bool
-	AssumeMcpSse               bool
-	AssumeMcpHttp              bool
-	McpMode                    string
-	McpProviders               []string
-	McpProfile                 *mcpprofile.Context
-	NamespacesMCPToolsByServer bool
-	RequiresProcessKill        bool
-	StripEnv                   []string
-	ProviderGatewayAuth        *acpprovider.GatewayAuth
-	AuthPolicy                 *acpcompat.AuthPolicy
-	BaseBranches               map[string]string
-	ComparisonTargets          map[string]models.ComparisonTarget
-	RemoteContributions        map[string]models.RemoteContribution
-	ContributionDestinations   map[string]models.ContributionDestination
-	WorkspaceSourceRoots       []string
-	DurableJournalPath         string
-	DeliveryStreamID           string
-	DeliveryIncarnationID      string
-	DeliveryHarnessGeneration  uint64
-	OpenCodePluginRuntime      *agentctltypes.OpenCodePluginRuntime
+	InstanceID                   string
+	Protocol                     agent.Protocol
+	AgentCommand                 string
+	WorkDir                      string
+	AutoStart                    *bool
+	Env                          []string
+	AutoApprovePermissions       *bool
+	AgentType                    string
+	McpServers                   []McpServerConfig
+	SessionID                    string
+	TaskID                       string
+	DisableAskQuestion           bool
+	PromptSuggestions            bool
+	CopilotNativeSessionEvents   bool
+	AssumeMcpSse                 bool
+	AssumeMcpHttp                bool
+	McpMode                      string
+	McpProviders                 []string
+	McpProfile                   *mcpprofile.Context
+	NamespacesMCPToolsByServer   bool
+	RequiresProcessKill          bool
+	StripEnv                     []string
+	ProviderGatewayAuth          *acpprovider.GatewayAuth
+	AuthPolicy                   *acpcompat.AuthPolicy
+	BaseBranches                 map[string]string
+	ComparisonTargets            map[string]models.ComparisonTarget
+	RemoteContributions          map[string]models.RemoteContribution
+	ContributionDestinations     map[string]models.ContributionDestination
+	WorkspaceSourceRoots         []string
+	DurableJournalPath           string
+	DeliveryStreamID             string
+	DeliveryIncarnationID        string
+	DeliveryHarnessGeneration    uint64
+	OpenCodePluginRuntime        *agentctltypes.OpenCodePluginRuntime
+	ManagedRuntimeInstallContext *agentctltypes.ManagedRuntimeInstallContext
 }
 
 func cloneComparisonTargets(values map[string]models.ComparisonTarget) map[string]models.ComparisonTarget {

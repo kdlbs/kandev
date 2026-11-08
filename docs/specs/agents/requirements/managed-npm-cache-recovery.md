@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-11-07
-updated: 2026-11-07
+updated: 2026-11-08
 owners:
   - kandev
 ---
@@ -19,6 +19,9 @@ The [shared managed runtime recovery contract](managed-npm-runtime-recovery.md)
 owns exact runtime selection, shared-cache protection, and the common retry budget.
 This document owns the verified incomplete execution-tree condition.
 It does not implement the pending missing bundled Codex dependency condition.
+
+The [reusable repair extension](managed-npm-repair-reuse.md) owns retention
+across later launches. This document retains the original per-operation contract.
 
 ## Requirements
 
@@ -51,3 +54,4 @@ upgrade or restart.
 ## Implementation package
 
 - [Incomplete npm cache recovery](../../../plans/managed-npm-cache-recovery/plan.md)
+- [Reusable repair extension](../../../plans/managed-npm-repair-reuse/plan.md)

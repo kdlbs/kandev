@@ -36,7 +36,7 @@ for argument in "$@"; do
 done
 
 case "$runtime_prefix" in
-	*/kandev-managed-runtime-*/project)
+	*/kandev-managed-runtime-*/project|*/managed-runtime-repairs/v1/generations/*/project)
 		# Execute the package installed by real npm from its isolated cache.
 		if [ -n "${E2E_PRIVATE_ROOT_MARKER:-}" ]; then
 			mkdir -p "$(dirname "$E2E_PRIVATE_ROOT_MARKER")"

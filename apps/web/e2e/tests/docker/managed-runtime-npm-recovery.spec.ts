@@ -3,7 +3,8 @@ import { execFileSync } from "node:child_process";
 import { test, expect } from "../../fixtures/docker-test-base";
 import { randomUUID } from "node:crypto";
 import { dockerFileContent, dockerPathExists } from "../../helpers/docker";
-import { waitForLatestSessionDone } from "../../helpers/session";
+import { waitForLatestSessionDone, waitForSessionState } from "../../helpers/session";
+import { dwell } from "../../helpers/causal-waits";
 import {
   MANAGED_RUNTIME_CACHE_ROOT,
   managedRuntimeStartupAttemptFile,
@@ -131,7 +132,9 @@ test("privately prepares the exact runtime on the execution host after a missing
       containerID,
       `${fixture.cacheRoot}/kandev-e2e-private-roots`,
     ).trim();
-    expect(privateProject).toContain("/kandev-managed-runtime-");
+    expect(privateProject).toMatch(
+      /(?:\/kandev-managed-runtime-[^/]+|\/managed-runtime-repairs\/v1\/generations\/[a-f0-9]{32})\/project$/,
+    );
     expect(
       dockerFileContent(
         containerID,
@@ -145,6 +148,112 @@ test("privately prepares the exact runtime on the execution host after a missing
     await session.expectChatResponseVisible("simple mock response", 0);
     await session.sendMessage("/e2e:simple-message");
     await session.expectChatResponseVisible("simple mock response", 1);
+  } finally {
+    await testPage.goto("/");
+    await fixture.releaseBackendEnv();
+    await apiClient.deleteAgentProfile(fixture.profile.id, true);
+    await fixture.registry.close();
+    fs.rmSync(fixture.cacheRoot, { recursive: true, force: true });
+    for (const fixturePath of fixture.hostFixturePaths) fs.rmSync(fixturePath, { force: true });
+  }
+});
+
+test("reusable verified cache repair keeps the published runtime across an agent process exit", async ({
+  apiClient,
+  backend,
+  seedData,
+  testPage,
+}) => {
+  test.setTimeout(300_000);
+  const gateway =
+    process.platform === "linux"
+      ? execFileSync(
+          "docker",
+          ["network", "inspect", "bridge", "--format", "{{(index .IPAM.Config 0).Gateway}}"],
+          { encoding: "utf8" },
+        ).trim()
+      : "host.docker.internal";
+  const launchId = randomUUID();
+  const fixture = await prepareIncompleteManagedRuntimeProfile(apiClient, backend, {
+    launchId,
+    registryHost: gateway,
+  });
+  try {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Executor reusable npm repair after process exit",
+      fixture.profile.id,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.dockerExecutorProfileId,
+      },
+    );
+    await waitForLatestSessionDone(apiClient, task.id, 1, "first recovery on the execution host");
+    const environment = await apiClient.getTaskEnvironment(task.id);
+    const containerID = environment?.container_id;
+    expect(containerID).toBeTruthy();
+    const privateProject = dockerFileContent(
+      containerID!,
+      `${fixture.cacheRoot}/kandev-e2e-private-roots`,
+    )
+      .trim()
+      .split("\n")
+      .at(-1)!;
+    expect(privateProject).toMatch(
+      /(?:\/kandev-managed-runtime-[^/]+|\/managed-runtime-repairs\/v1\/generations\/[a-f0-9]{32})\/project$/,
+    );
+    const requestsAfterRecovery = fixture.registry.requests();
+    expect(requestsAfterRecovery).toBeGreaterThan(0);
+    const top = execFileSync("docker", ["top", containerID!], { encoding: "utf8" });
+    const agentLine = top.split("\n").find((line) => line.includes("mock-agent"));
+    if (!agentLine) throw new Error("container mock agent process is missing");
+    process.kill(Number(agentLine.trim().split(/\s+/)[1]), "SIGKILL");
+    await dwell(
+      2_000,
+      "poll-interval",
+      "wait for the killed agent process to settle before resume",
+    );
+    if (!task.session_id) throw new Error("managed runtime task did not return a session ID");
+    await apiClient.launchSession(
+      { task_id: task.id, session_id: task.session_id, intent: "resume" },
+      120_000,
+    );
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "agent process restart should reuse the published executor repair",
+      timeout: 120_000,
+    });
+    expect(fixture.registry.requests()).toBe(requestsAfterRecovery);
+    expect(
+      dockerFileContent(
+        containerID!,
+        `${privateProject}/../cache/_npx/${fixture.sharedRoot.split("/").at(-1)}/package.json`,
+      ),
+    ).toContain("dependencies");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForDirectInput();
+
+    const secondTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Executor new container is a storage miss",
+      fixture.profile.id,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.dockerExecutorProfileId,
+      },
+    );
+    await waitForLatestSessionDone(apiClient, secondTask.id, 1, "new container storage lifetime");
+    expect(fixture.registry.requests()).toBeGreaterThan(requestsAfterRecovery);
   } finally {
     await testPage.goto("/");
     await fixture.releaseBackendEnv();

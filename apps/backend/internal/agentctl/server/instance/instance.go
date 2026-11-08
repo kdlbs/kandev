@@ -257,6 +257,10 @@ type CreateRequest struct {
 	// OpenCodePluginRuntime is the resolved OpenCode family/source/version for
 	// this launch. Nil keeps the integration off for non-OpenCode launches.
 	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime `json:"opencode_plugin_runtime,omitempty"`
+
+	// ManagedRuntimeInstallContext carries authenticated installer provenance
+	// for reusable managed npm repairs. Nil keeps the legacy private path.
+	ManagedRuntimeInstallContext *agentctltypes.ManagedRuntimeInstallContext `json:"managed_runtime_install_context,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

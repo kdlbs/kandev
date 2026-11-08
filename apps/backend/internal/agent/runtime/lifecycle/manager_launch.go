@@ -1501,56 +1501,58 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		pluginRuntimeOptions = agents.CommandOptions{}
 	}
 	execReq := &ExecutorCreateRequest{
-		InstanceID:                     executionID,
-		IsPassthrough:                  reqWithWorktree.IsPassthrough,
-		CausingRunID:                   reqWithWorktree.CausingRunID,
-		ExecutorType:                   reqWithWorktree.ExecutorType,
-		TaskID:                         reqWithWorktree.TaskID,
-		TaskTitle:                      reqWithWorktree.TaskTitle,
-		SessionID:                      launchInventorySessionID(reqWithWorktree),
-		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
-		WorkspaceID:                    reqWithWorktree.WorkspaceID,
-		RepositoryIDs:                  repositoryIDsFromLaunch(reqWithWorktree),
-		WorkspaceReuseRequired:         reqWithWorktree.WorkspaceReuseRequired,
-		ForceContextContinuation:       reqWithWorktree.ForceContextContinuation,
-		ReplacesNativeConversation:     reqWithWorktree.ReplaceNativeConversation,
-		AgentProfileID:                 executionProfileID(reqWithWorktree),
-		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
-		PromptTurnID:                   reqWithWorktree.TurnID,
-		WorkspacePath:                  reqWithWorktree.WorkspacePath,
-		OriginalWorkspacePath:          reqWithWorktree.OriginalWorkspacePath,
-		DeliveryStreamID:               reqWithWorktree.DeliveryStreamID,
-		DeliveryIncarnationID:          reqWithWorktree.DeliveryIncarnationID,
-		DeliveryHarnessGeneration:      reqWithWorktree.DeliveryHarnessGeneration,
-		CopilotNativeSessionEvents:     m.copilotNativeLaunchAllowed(rt, agentConfig.ID(), reqWithWorktree.DeliveryStreamID),
-		DurableJournalHostRoot:         m.dataDir,
-		DurableJournalOwnerID:          journalOwnerID,
-		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
-		Protocol:                       string(agentConfig.Runtime().Protocol),
-		CodexAppServerEnabled:          agentConfig.Enabled() && agentConfig.Runtime().Protocol == agent.ProtocolCodexAppServer,
-		Env:                            env,
-		AutoApprovePermissions:         profileInfo != nil && profileInfo.AutoApprove,
-		AutoApprovePermissionsOverride: autoApproveOverride,
-		Metadata:                       metadata,
-		AgentConfig:                    agentConfig,
-		ApprovedSecretEnvKeys:          append([]string(nil), reqWithWorktree.ApprovedSecretEnvKeys...),
-		McpServers:                     mcpServers,
-		PreviousExecutionID:            reqWithWorktree.PreviousExecutionID,
-		McpMode:                        reqWithWorktree.McpMode,
-		PromptSuggestions:              m.promptSuggestionsForLaunch(ctx, reqWithWorktree.McpMode),
-		McpProviders:                   reqWithWorktree.McpProviders,
-		McpProfile:                     reqWithWorktree.McpProfile,
-		AuthToken:                      launchAuthToken,
-		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
-		AgentctlStartupConfig:          agentctlStartupConfigForExecutor(m.agentctlStartupConfig, reqWithWorktree.ExecutorType),
-		OpenCodePluginRuntime:          openCodePluginRuntimeFor(agentConfig, pluginRuntimeOptions, m.agentctlStartupConfig.OpenCodePluginEnabled),
-		OnProgress:                     onProgress,
-		RemoteContributions:            remoteContributions,
-		ContributionDestinations:       contributionDestinations,
-		ComparisonTargets:              comparisonTargets,
-		ProviderGatewayAuth:            providerGatewayAuth,
-		AuthPolicy:                     reqWithWorktree.AuthPolicy,
-		LocalRuntimeEnv:                reqWithWorktree.LocalRuntimeEnv,
+		InstanceID:                       executionID,
+		IsPassthrough:                    reqWithWorktree.IsPassthrough,
+		CausingRunID:                     reqWithWorktree.CausingRunID,
+		ExecutorType:                     reqWithWorktree.ExecutorType,
+		TaskID:                           reqWithWorktree.TaskID,
+		TaskTitle:                        reqWithWorktree.TaskTitle,
+		SessionID:                        launchInventorySessionID(reqWithWorktree),
+		TaskEnvironmentID:                reqWithWorktree.TaskEnvironmentID,
+		WorkspaceID:                      reqWithWorktree.WorkspaceID,
+		RepositoryIDs:                    repositoryIDsFromLaunch(reqWithWorktree),
+		WorkspaceReuseRequired:           reqWithWorktree.WorkspaceReuseRequired,
+		ForceContextContinuation:         reqWithWorktree.ForceContextContinuation,
+		ReplacesNativeConversation:       reqWithWorktree.ReplaceNativeConversation,
+		AgentProfileID:                   executionProfileID(reqWithWorktree),
+		OfficeAgentProfileID:             reqWithWorktree.AgentProfileID,
+		PromptTurnID:                     reqWithWorktree.TurnID,
+		WorkspacePath:                    reqWithWorktree.WorkspacePath,
+		OriginalWorkspacePath:            reqWithWorktree.OriginalWorkspacePath,
+		DeliveryStreamID:                 reqWithWorktree.DeliveryStreamID,
+		DeliveryIncarnationID:            reqWithWorktree.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:        reqWithWorktree.DeliveryHarnessGeneration,
+		CopilotNativeSessionEvents:       m.copilotNativeLaunchAllowed(rt, agentConfig.ID(), reqWithWorktree.DeliveryStreamID),
+		DurableJournalHostRoot:           m.dataDir,
+		DurableJournalOwnerID:            journalOwnerID,
+		WorkspaceSourceRoots:             workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
+		Protocol:                         string(agentConfig.Runtime().Protocol),
+		CodexAppServerEnabled:            agentConfig.Enabled() && agentConfig.Runtime().Protocol == agent.ProtocolCodexAppServer,
+		Env:                              env,
+		AutoApprovePermissions:           profileInfo != nil && profileInfo.AutoApprove,
+		AutoApprovePermissionsOverride:   autoApproveOverride,
+		Metadata:                         metadata,
+		AgentConfig:                      agentConfig,
+		ApprovedSecretEnvKeys:            append([]string(nil), reqWithWorktree.ApprovedSecretEnvKeys...),
+		McpServers:                       mcpServers,
+		PreviousExecutionID:              reqWithWorktree.PreviousExecutionID,
+		McpMode:                          reqWithWorktree.McpMode,
+		PromptSuggestions:                m.promptSuggestionsForLaunch(ctx, reqWithWorktree.McpMode),
+		McpProviders:                     reqWithWorktree.McpProviders,
+		McpProfile:                       reqWithWorktree.McpProfile,
+		AuthToken:                        launchAuthToken,
+		BootstrapNonce:                   m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
+		AgentctlStartupConfig:            agentctlStartupConfigForExecutor(m.agentctlStartupConfig, reqWithWorktree.ExecutorType),
+		OpenCodePluginRuntime:            openCodePluginRuntimeFor(agentConfig, pluginRuntimeOptions, m.agentctlStartupConfig.OpenCodePluginEnabled),
+		OnProgress:                       onProgress,
+		RemoteContributions:              remoteContributions,
+		ContributionDestinations:         contributionDestinations,
+		ComparisonTargets:                comparisonTargets,
+		ProviderGatewayAuth:              providerGatewayAuth,
+		AuthPolicy:                       reqWithWorktree.AuthPolicy,
+		LocalRuntimeEnv:                  reqWithWorktree.LocalRuntimeEnv,
+		ManagedRuntimeInstallerEnvDigest: reqWithWorktree.ManagedRuntimeInstallerEnvDigest,
+		ManagedRuntimeOwnerUserID:        reqWithWorktree.ManagedRuntimeOwnerUserID,
 	}
 	if reqWithWorktree.ExecutorType == string(models.ExecutorTypePluginRemote) {
 		if err := m.preparePluginExecutorLaunch(ctx, execReq, metadata, reqWithWorktree.TaskEnvironmentID); err != nil {
@@ -3283,13 +3285,18 @@ func (m *Manager) configureAndStartAgentWithPreparedArgsAndPreparation(
 			return "", err
 		}
 	}
-	if err := client.ConfigureAgentWithProjectDelivery(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, execution.LaunchWrapper); err != nil {
+	installContext := managedRuntimeInstallContext(execution)
+	if err := client.ConfigureAgentWithProjectDeliveryAndInstallContext(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, installContext, execution.LaunchWrapper); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 
 	var fullCommand string
 	if preparation != nil {
-		fullCommand, err = client.StartWithManagedRuntimePreparation(ctx, *preparation)
+		directive, directiveErr := managedRuntimePreparationWithRemainingBudget(ctx, *preparation)
+		if directiveErr != nil {
+			return "", directiveErr
+		}
+		fullCommand, err = client.StartWithManagedRuntimePreparation(ctx, directive)
 	} else {
 		fullCommand, err = client.Start(ctx)
 	}
@@ -3303,6 +3310,43 @@ func (m *Manager) configureAndStartAgentWithPreparedArgsAndPreparation(
 		bootCommand = execution.AgentCommand
 	}
 	return bootCommand, nil
+}
+
+// managedRuntimeInstallContext carries only authenticated installer
+// provenance. The digest is computed from resolved environment definitions and
+// is never derived from task or transport identifiers.
+func managedRuntimeInstallContext(execution *AgentExecution) *agentctltypes.ManagedRuntimeInstallContext {
+	if execution == nil || execution.ManagedRuntimeInstallerEnvDigest == "" ||
+		execution.ManagedRuntimeOwnerUserID == "" {
+		return nil
+	}
+	return &agentctltypes.ManagedRuntimeInstallContext{
+		InstallerEnvDigest: execution.ManagedRuntimeInstallerEnvDigest,
+		OwnerScope:         managedruntime.RepairOwnerScopeTask(execution.ManagedRuntimeOwnerUserID),
+	}
+}
+
+// managedRuntimePreparationWithRemainingBudget binds publication to the
+// caller's original recovery deadline. An expired deadline never starts a
+// replacement.
+func managedRuntimePreparationWithRemainingBudget(
+	ctx context.Context,
+	preparation agentctltypes.ManagedRuntimePreparationDirective,
+) (agentctltypes.ManagedRuntimePreparationDirective, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return preparation, nil
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return preparation, errors.New("managed runtime recovery deadline expired")
+	}
+	seconds := int(remaining / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	preparation.RemainingBudgetSeconds = seconds
+	return preparation, nil
 }
 
 func (m *Manager) environmentForPreparedLaunch(ctx context.Context, execution *AgentExecution) (map[string]string, error) {
