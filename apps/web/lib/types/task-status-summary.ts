@@ -13,6 +13,7 @@ export type AgentErrorCause = {
   effective_mode?: string;
   runtime_version?: string;
   prompt_not_sent?: boolean;
+  exit_code?: number;
   storage?: {
     reason?: string;
     location?: string;

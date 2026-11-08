@@ -126,7 +126,7 @@
   "confirm": "확인",
   "contents": "내용",
   "contentSearchNeedsAnActiveTask": "내용 검색에는 활성 작업 세션이 필요합니다.",
-  "contextCompactionCountHelp": "Kandev는 컨텍스트 사용량 감소에서 이 횟수를 추론합니다. Copilot ACP 사용량은 상위 에이전트와 하위 에이전트 컨텍스트가 섞일 수 있어 제외됩니다. 샘플 누락이나 공급자 재설정은 정확도에 영향을 줄 수 있습니다.",
+  "contextCompactionCountHelp": "Kandev는 컨텍스트 사용량 감소에서 이 횟수를 추론합니다. 샘플 누락이나 공급자 재설정은 정확도에 영향을 줄 수 있습니다.",
   "contextCompactionStatusPartial": "일부",
   "contextCompactionStatusUnavailable": "사용 불가",
   "contextCompactionCountHelpNative": "새 증분은 Copilot 상위 압축 성공 이벤트를 사용합니다. 과거 추정치는 합계에 남아 있습니다. 공급자가 삭제하거나 생략한 이벤트는 누락될 수 있으므로 전체 기록이 아닙니다.",
