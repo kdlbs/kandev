@@ -164,6 +164,11 @@ func (s *Service) requireWorkspaceScope(
 func (s *Service) requireWorkspaceScopeAction(
 	ctx context.Context, workspaceID string, scope authz.Scope, notFound error, action models.WorkspaceCollaborationAction,
 ) (authz.Decision, error) {
+	// A collaboration conversation is bounded by the workspaces it was
+	// granted, so an unnamed workspace is never an unscoped request for it.
+	if workspaceID == "" && s.collaborationApplies(ctx) {
+		return authz.Denied(), notFound
+	}
 	if !s.needsWorkspaceAuthorization(ctx) || workspaceID == "" {
 		return authz.ResolveWorkspace(authz.Subject{Unscoped: true}, authz.WorkspaceRef{}), nil
 	}
