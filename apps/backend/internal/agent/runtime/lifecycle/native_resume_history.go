@@ -27,7 +27,10 @@ func contextContinuedNativeResumeHistory(ctx context.Context, execution *AgentEx
 	if !hasMissingHistoricalNativeSubmission(status, retained, rows) {
 		return rows, nil
 	}
-	if _, err := nativeResumeProofCursor(ctx, repository, status); err != nil {
+	// Classification needs the authenticated stream identity only. Adoption
+	// runs before replay advances a lagging cursor; the retirement proof still
+	// requires a complete projection before any fence is released.
+	if _, err := authenticatedNativeResumeCursor(ctx, repository, status); err != nil {
 		return nil, err
 	}
 	ids, err := reader.ListContextContinuedSubmissionIDs(ctx, execution.SessionID, status.IncarnationID, execution.ACPSessionID, int64(status.HarnessGeneration))
