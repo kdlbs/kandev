@@ -370,6 +370,9 @@ func pluginStateSchema(s testconformance.ScenarioContext) error {
 	if _, err := pluginstate.NewStore(pluginPool(s)); err != nil {
 		return fmt.Errorf("plugin state schema: %w", err)
 	}
+	if _, err := pluginstate.NewCommandStore(pluginPool(s)); err != nil {
+		return fmt.Errorf("plugin command receipt schema: %w", err)
+	}
 	return nil
 }
 
