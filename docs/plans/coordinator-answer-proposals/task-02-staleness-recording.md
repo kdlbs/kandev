@@ -6,6 +6,7 @@ wave: 2
 depends_on: ["01-kind-policy-flag"]
 plan: "plan.md"
 requirements:
+  - REQ-COORDINATOR-ANSWER-002
   - REQ-COORDINATOR-ANSWER-003
   - REQ-COORDINATOR-ANSWER-006
 acceptance_criteria:
