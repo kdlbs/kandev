@@ -124,3 +124,32 @@ func TestAttemptConsumeCancelRaceHasOneWinner(t *testing.T) {
 		}
 	}
 }
+
+func TestAttemptConsumeWriteFailureSettlesUnsentToken(t *testing.T) {
+	retained, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "delivery.bbolt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := newAttemptOwner(&config.InstanceConfig{InstanceID: "instance"}, retained)
+	prepared, err := owner.prepare(uuid.NewString(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := retained.Close(); err != nil {
+		t.Fatal(err)
+	}
+	refused, err := owner.consume(prepared.AttemptID)
+	if err == nil {
+		t.Fatal("consume without durable evidence started the child")
+	}
+	if !refused.Known || !refused.Settled || refused.State != AttemptNotStarted {
+		t.Fatalf("refused consume kept holding the token: %+v", refused)
+	}
+	cancelled, err := owner.cancelPrepared(prepared.AttemptID, "")
+	if err != nil || cancelled.State != AttemptNotStarted {
+		t.Fatalf("settled refusal was not idempotent for cancellation: %+v %v", cancelled, err)
+	}
+	if got, _ := owner.get(prepared.AttemptID); got.State == AttemptStarting || !got.Settled {
+		t.Fatalf("later read reverted the settlement: %+v", got)
+	}
+}
