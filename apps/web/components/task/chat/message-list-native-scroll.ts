@@ -36,6 +36,7 @@ export const TRANSCRIPT_SENTINEL_ROOT_MARGIN = "200px 0px 0px 0px";
 // INT32_MAX: WebKit resolves Number.MAX_SAFE_INTEGER to 0 (not bottom).
 const NATIVE_BOTTOM_SCROLL_TOP = 2_147_483_647;
 const USER_SCROLL_INTENT_WINDOW_MS = 250;
+const PENDING_REFLOW_GEOMETRY_LIMIT = 4;
 const LATER_SCROLL_KEYS = new Set(["End", "PageDown", "ArrowDown"]);
 const SCROLL_KEYS = new Set([
   "ArrowDown",
@@ -104,6 +105,19 @@ export function shouldPreserveFollowOnScroll(
   return (
     (contentDelta > 0 || (contentDelta < 0 && scrollTopDelta < 0)) &&
     Math.abs(scrollTopDelta) <= Math.abs(contentDelta) + 2
+  );
+}
+
+function shouldPreserveFollowOnReconciliation(params: {
+  enabled: boolean;
+  isNearBottom: boolean;
+  userReading: boolean;
+  candidates: Array<TranscriptScrollGeometry | null>;
+  current: TranscriptScrollGeometry;
+}): boolean {
+  if (!params.enabled || !params.isNearBottom || params.userReading) return false;
+  return params.candidates.some(
+    (candidate) => candidate !== null && shouldPreserveFollowOnScroll(candidate, params.current),
   );
 }
 
@@ -691,6 +705,32 @@ function useUpwardScrollIntent({ scrollRef, sessionId, onUserScrollIntent }: Aut
 }
 
 /**
+ * Retains bounded pre-reflow evidence while tracking the latest measured
+ * geometry. Native restoration can move the viewport after one or more resizes
+ * in either direction, so reconciliation needs the immediately prior state,
+ * the pre-reflow baseline, and recent peaks.
+ */
+function trackContentReflowEvidence(
+  element: HTMLElement,
+  lastScrollGeometryRef: React.MutableRefObject<TranscriptScrollGeometry | null>,
+  pendingReflowBaselineRef: React.MutableRefObject<TranscriptScrollGeometry | null>,
+  recentReflowGeometriesRef: React.MutableRefObject<TranscriptScrollGeometry[]>,
+): void {
+  const next = readTranscriptScrollGeometry(element);
+  const previous = lastScrollGeometryRef.current;
+  if (previous && next.scrollHeight !== previous.scrollHeight) {
+    pendingReflowBaselineRef.current ??= previous;
+    const recent = recentReflowGeometriesRef.current;
+    const lastCandidate = recent[recent.length - 1];
+    if (!lastCandidate || lastCandidate.scrollHeight !== previous.scrollHeight) {
+      recent.push(previous);
+      if (recent.length > PENDING_REFLOW_GEOMETRY_LIMIT) recent.shift();
+    }
+  }
+  lastScrollGeometryRef.current = next;
+}
+
+/**
  * Auto-scrolls to bottom when new messages arrive (if user is near bottom)
  * or when the agent starts working (isWorking transitions to true) — unless
  * auto-scroll is disabled for this session, in which case both are
@@ -727,12 +767,18 @@ function useFollowIntent({
   cancelMotion: () => void;
 }) {
   const lastScrollGeometryRef = useRef<TranscriptScrollGeometry | null>(null);
+  const pendingReflowBaselineRef = useRef<TranscriptScrollGeometry | null>(null);
+  const recentReflowGeometriesRef = useRef<TranscriptScrollGeometry[]>([]);
   useLayoutEffect(() => {
     const element = scrollRef.current;
     if (!element) return;
-    const recordGeometry = () => {
-      lastScrollGeometryRef.current = readTranscriptScrollGeometry(element);
-    };
+    const recordGeometry = () =>
+      trackContentReflowEvidence(
+        element,
+        lastScrollGeometryRef,
+        pendingReflowBaselineRef,
+        recentReflowGeometriesRef,
+      );
     recordGeometry();
     const observer = new ResizeObserver(recordGeometry);
     const content = element.querySelector("[data-chat-content]");
@@ -745,15 +791,21 @@ function useFollowIntent({
       if (!el || !isVisibleRef.current || isAnimating()) return;
       const currentGeometry = readTranscriptScrollGeometry(el);
       const previousGeometry = lastScrollGeometryRef.current;
+      const pendingBaseline = pendingReflowBaselineRef.current;
+      const recentReflowGeometries = recentReflowGeometriesRef.current;
       lastScrollGeometryRef.current = currentGeometry;
+      pendingReflowBaselineRef.current = null;
+      recentReflowGeometriesRef.current = [];
       // Content reflow cannot revoke bottom-follow without reader input.
       // Explicit navigation releases still reconcile against the actual geometry.
       if (
-        preserveFollow &&
-        isNearBottomRef.current &&
-        !userReading.current &&
-        previousGeometry &&
-        shouldPreserveFollowOnScroll(previousGeometry, currentGeometry)
+        shouldPreserveFollowOnReconciliation({
+          enabled: preserveFollow,
+          isNearBottom: isNearBottomRef.current,
+          userReading: userReading.current,
+          candidates: [previousGeometry, pendingBaseline, ...recentReflowGeometries],
+          current: currentGeometry,
+        })
       ) {
         return;
       }

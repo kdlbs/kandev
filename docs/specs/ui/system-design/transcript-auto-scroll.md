@@ -4,7 +4,7 @@ system: ui
 requirements:
   - REQ-UI-TRANSCRIPT-AUTO-SCROLL-001
 created: 2026-08-27
-updated: 2026-10-28
+updated: 2026-11-08
 owners:
   - kandev
 ---
@@ -252,6 +252,36 @@ and `isWorking` did not change. Scheduled correction rechecks user intent and
 session identity before writing. Motion settings choose the movement style,
 not whether reader gestures are respected.
 
+## Quick Chat history and resize settlement
+
+Quick Chat uses the same initial-placement lifecycle as task Chat.
+`QuickChatMessageSurface` forwards `panelState.historyRefreshPending` to
+`MessageList`, separately from `messagesLoading`. Cached rows can remain visible
+while a latest-window refresh is pending. Their placement is provisional until
+that refresh settles. Automatic agent recovery does not own transcript placement.
+The Tasks [resumption design](../../tasks/system-design/quick-chat-session-resumption.md)
+continues to own recovery policy and session identity.
+
+Content resize and native scroll notifications can arrive in either order.
+`useFollowIntent` retains the immediately preceding measurement and the
+pre-reflow baseline needed to attribute native movement to content reflow until
+that movement is reconciled, including growth followed by shrinkage. A content
+measurement alone must not erase that evidence while automatic placement is
+blocked. Blocker release retains the existing guarded correction for pending
+content growth. Explicit reader input still cancels following immediately.
+Disabled auto-scroll, unread targets, navigation, and session replacement
+retain their existing guards. The correction adds no timer loop or synchronous
+measurement to message commits.
+
+Desktop Quick Chat retains its floating dialog and expanded view. Phone Quick
+Chat retains the full-height dialog, safe-area clearance, and fixed composer.
+The native transcript remains the single vertical scroll owner in each view.
+History settlement and delayed footer layout keep the latest row and active
+`AgentStatus` within that viewport while bottom-follow intent remains active.
+Required tests cover a disposable backend restart, cached refresh, both notification
+orders, and reader cancellation on desktop and phone. These cases map to
+`AC-UI-TRANSCRIPT-AUTO-SCROLL-001.16`, `.17`, `.19`, and `.20`.
+
 ## Interaction boundaries
 
 The optimization does not replace geometry reads that answer a user-action
@@ -333,6 +363,7 @@ intersection. Message content and saved offsets are not logged.
 
 ## Implementation plans
 
+- [Quick Chat restart scroll](../../../plans/quick-chat-restart-scroll/plan.md)
 - [Initial history placement and latest navigation](../../../plans/transcript-initial-history-placement/plan.md)
 - [Earlier task-switch continuity](../../../plans/transcript-task-switch-continuity/plan.md)
 
