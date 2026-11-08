@@ -29,6 +29,8 @@ export type NativeDashboard = {
   queued_messages: number;
   transitions_24h: number;
   completed_tasks_24h: number;
+  /** Null when either recorded merge source is unavailable; absent on older servers. */
+  merged_change_requests_24h?: number | null;
 };
 
 /** One recorded task row of the per-task control projection. */

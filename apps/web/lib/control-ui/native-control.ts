@@ -19,6 +19,11 @@ function nativeWindow(v: Record<string, unknown>, id: string) {
     end - start === BigInt("86400000000000")
   );
 }
+/** Absent on older servers; null when the server reports the figure unknown. */
+function optionalNullableCount(v: unknown): boolean {
+  return v === undefined || v === null || count(v);
+}
+
 export function nativeDashboard(v: unknown, id: string): v is NativeDashboard {
   if (
     !nativeRecord(v) ||
@@ -33,6 +38,7 @@ export function nativeDashboard(v: unknown, id: string): v is NativeDashboard {
       count,
     ) &&
     (v.wip_waiting_tasks === undefined || count(v.wip_waiting_tasks)) &&
+    optionalNullableCount(v.merged_change_requests_24h) &&
     (v.shared_capacity_waiting === undefined || sharedCapacityWaiting(v.shared_capacity_waiting)) &&
     (v.task_stages === undefined ||
       (Array.isArray(v.task_stages) &&

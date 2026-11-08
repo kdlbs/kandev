@@ -58,6 +58,10 @@ type ControlMetrics struct {
 	QueuedMessages        int                `json:"queued_messages"`
 	Transitions24h        int                `json:"transitions_24h"`
 	CompletedTasks24h     int                `json:"completed_tasks_24h"`
+	// MergedChangeRequests24h counts built-in GitHub pull requests and
+	// plugin-reported change requests merged in the window, each merge once.
+	// Nil when either recorded merge source is unavailable.
+	MergedChangeRequests24h *int `json:"merged_change_requests_24h"`
 }
 
 func (r *Repository) ReadControlMetrics(ctx context.Context, wsID string, now time.Time) (*ControlMetrics, error) {
@@ -97,6 +101,7 @@ func (r *Repository) ReadControlMetrics(ctx context.Context, wsID string, now ti
 			return nil, err
 		}
 	}
+	out.MergedChangeRequests24h = r.controlMergedCount(ctx, wsID, out.Since, now)
 	return out, nil
 }
 
