@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -88,7 +89,17 @@ func tasksList(args []string) int {
 		return 1
 	}
 	if strings.TrimSpace(*workspace) != "" {
+		// The workspace route takes only a workflow; a silently dropped filter
+		// would return a list the caller did not ask for.
+		if unsupported := setFlagsExcept(fs, "workspace", "workflow"); len(unsupported) > 0 {
+			cliError("--workspace supports only --workflow; remove: --%s", strings.Join(unsupported, ", --"))
+			return 1
+		}
 		return listWorkspaceTasks(*workspace, *workflow)
+	}
+	if strings.TrimSpace(*workflow) != "" {
+		cliError("--workflow requires --workspace")
+		return 1
 	}
 	values := url.Values{}
 	for _, v := range status {
@@ -106,6 +117,17 @@ func tasksList(args []string) int {
 	setQueryIfNonEmpty(values, "cursor_id", *cursorID)
 	setQueryIfNonEmpty(values, "include_system", *includeSystem)
 	return getWithQuery("/api/v1/office/runtime/tasks", values)
+}
+
+// setFlagsExcept names the flags given on the command line, other than allowed.
+func setFlagsExcept(fs *flag.FlagSet, allowed ...string) []string {
+	var names []string
+	fs.Visit(func(f *flag.Flag) {
+		if !slices.Contains(allowed, f.Name) {
+			names = append(names, f.Name)
+		}
+	})
+	return names
 }
 
 func setQueryIfNonEmpty(values url.Values, key, value string) {
