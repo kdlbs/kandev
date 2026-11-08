@@ -155,9 +155,13 @@ func (c *sessionCeilingController) appendRunSessionGradesLocked(ctx context.Cont
 	}
 	rows, err := c.runSessions.ListAdmittedRunExecutions(ctx)
 	if err != nil {
+		c.logPopulationUnknown("office_runs", populationReadFailure(err), "", "")
 		return err
 	}
 	for _, row := range rows {
+		if !row.GradeKnown {
+			c.logPopulationUnknown("office_runs", "grade_unknown", "run_session_id", row.ID)
+		}
 		population.counted[runSessionCapacityKey(row.ID)] = struct{}{}
 		c.observeGradeLocked(population, row.Grade, row.GradeKnown, grade)
 	}

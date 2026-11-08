@@ -212,7 +212,9 @@ func orderedRemainingRows(tiers []orderedTier, triedIDs []string, preferred stri
 		var history map[string]int64
 		var historyLoaded bool
 		for index, tier := range tiers {
-			if tier.mode == tierModeRoundRobin && !historyLoaded {
+			// A round-robin tier with no eligible row is skipped without a
+			// history read, so its read failure cannot block a later tier.
+			if tier.mode == tierModeRoundRobin && !historyLoaded && tierHasEligibleRows(tier, tried, preferred, unavailable) {
 				var err error
 				history, err = readHistory()
 				if err != nil {

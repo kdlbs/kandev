@@ -4546,7 +4546,9 @@ func sessionSettingsEventIsStale(
 	}
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
-		return false
+		// Without the session the candidate cannot be confirmed, so settings
+		// reported by a concrete dynamic candidate are treated as stale.
+		return identity.ExecutionProfileID != ""
 	}
 	// A dynamic session that switched concrete candidates must not accept
 	// settings reported by the previous candidate's execution.
