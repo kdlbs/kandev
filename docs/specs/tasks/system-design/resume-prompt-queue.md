@@ -23,6 +23,7 @@ the current queue storage, session incarnation, and agent readiness events.
 | `001.7`, `001.8` | Failure and identity |
 | `001.10`, `001.11` | Workflow transitions during resume |
 | `002.1`, `002.2`, `002.3` | Expired runtime waits |
+| `003.1`, `003.2`, `003.3` | Backend restart |
 | `004.1`, `004.2`, `004.3` | Cancelled resume attempts |
 
 Criterion suffixes `001.*` refer to `AC-TASKS-RESUME-PROMPT-QUEUE-001` and
