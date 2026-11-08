@@ -1979,24 +1979,45 @@ func (s *Service) executeQueuedMessageWithReservation(
 	promptContent := queuedMessagePromptContent(queuedMsg)
 	var promptReferenceContext string
 	var preparedPromptContent *string
-	if messagequeue.IsChildStallAlert(queuedMsg) {
-		// The dispatch boundary rechecks every folded candidate, so a candidate
-		// that stopped qualifying is dropped from the parent prompt.
-		effective, eligible := s.childStallAlertPromptContent(promptCtx, queuedMsg)
-		if !eligible {
-			// No folded candidate qualifies any more, so the queued alert is
-			// discarded without creating a model turn. Requeueing returns it to
-			// the pending state where the stale-alert prune removes it.
-			s.logger.Info("discarding child stall alert without an eligible candidate",
+	if messagequeue.IsChildStallAlert(queuedMsg) || messagequeue.IsChildStallNudge(queuedMsg) {
+		// The dispatch boundary rechecks every folded candidate (or the
+		// reminder's source turn), so a candidate that stopped qualifying is
+		// dropped from both the prompt and the recorded history item.
+		plan := s.planChildStallDispatch(promptCtx, queuedMsg)
+		switch plan.verdict {
+		case childStallDispatchDiscard:
+			// No candidate qualifies any more, so the queued entry is discarded
+			// without creating a model turn. Requeueing returns it to the
+			// pending state where the stale-alert prune removes it.
+			s.logger.Info("discarding child stall entry without an eligible candidate",
 				zap.String("session_id", queuedMsg.SessionID),
 				zap.String("task_id", queuedMsg.TaskID),
 				zap.String("queue_id", queuedMsg.ID))
 			s.requeueMessageForReservation(promptCtx, reservation, queuedMsg, "child-stall-alert-without-eligible-candidate")
 			return
+		case childStallDispatchDefer:
+			// A candidate could not be read, so its unchecked text must not be
+			// sent. The entry stays queued in place; the follow-up drain is
+			// skipped so a persistent read failure cannot spin, and the
+			// producer's next pass asks the queue to drain again.
+			allowFollowupDrain = false
+			s.logger.Warn("deferring child stall entry whose candidate could not be rechecked",
+				zap.String("session_id", queuedMsg.SessionID),
+				zap.String("task_id", queuedMsg.TaskID),
+				zap.String("queue_id", queuedMsg.ID))
+			s.requeueMessageForReservation(promptCtx, reservation, queuedMsg, "child-stall-alert-recheck-deferred")
+			return
 		}
-		if effective != promptContent {
-			promptContent = effective
-			composed := effective
+		if plan.metadata != nil {
+			// Record only the candidates that reached the prompt; the stored
+			// queue entry is left untouched.
+			filtered := *queuedMsg
+			filtered.Metadata = plan.metadata
+			queuedMsg = &filtered
+		}
+		if plan.content != queuedMsg.Content {
+			composed := queuedMessagePromptContentFrom(queuedMsg, plan.content)
+			promptContent = composed
 			preparedPromptContent = &composed
 		}
 	}

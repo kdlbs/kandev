@@ -69,7 +69,9 @@ live on it; no table or column is added.
 - `child_stall` holds the settlement discriminator and the producer's state.
   Orphan abandonment writes `settlement=abandoned` in the same transaction as
   the abandon update. An explicit user cancellation writes
-  `settlement=cancelled` on the captured turn before it is settled. Any other
+  `settlement=cancelled` on the captured turn before it is settled, or right
+  after a completion frame settled it first while the producer has not yet
+  classified it (the settle grace covers that window). Any other
   completion is a live settlement. Legacy turns without `child_stall_start`
   are ineligible; live provenance is never reconstructed from `had_output` or
   equal timestamps.
@@ -83,8 +85,11 @@ An orchestrator-owned producer goroutine (`Start`/`Stop`, bounded by its
 context) runs a pass on startup, on a fixed interval, and shortly after a
 `turn.completed` event. Each pass reads child-task turns completed within the
 scan window whose `child_stall` state is not terminal, using dialect-neutral
-SQL and filtering metadata in Go. A turn is classified only after a short
-settle grace, so the orchestrator has finished applying turn-end transitions.
+SQL and filtering metadata in Go. It pages through the window by
+`(completed_at, id)`, so candidates that stay unresolved (held, waiting for the
+parent, failed, or delivered with a pending notice) never hide newer ones. A
+turn is classified only after a short settle grace, so the orchestrator has
+finished applying turn-end transitions.
 
 Classification uses only structured evidence already available in the task
 system. No external monitor, paid classifier, or unstructured transcript
@@ -96,16 +101,21 @@ interpretation is used.
 | `quota` / `execution_error` | Session failed with a persisted route error class (quota) or terminal error | Cancellation or unrelated historical error |
 | `missing_completion_signal` | The current step requires the completion signal and no signal is pending after turn-end handling settled | Optional signal, ordinary success, or pending transition processing |
 
-Cause precedence for a single item is input, quota/error, then missing signal;
-multiple causes do not create multiple items. Do not use no-output, elapsed
+An explicit cancellation suppresses the settlement before any cause, even
+when the cancelled turn left an input request behind. Cause precedence for a
+single item is input, quota/error, then missing signal; multiple causes do not
+create multiple items. A completion signal that names its workflow entry counts
+only for that entry; a legacy signal, and a recorded `step_complete` refusal,
+count only when not older than the entry. Do not use no-output, elapsed
 time, or the observed 5.8% rate as classification.
 
 Before any cause applies, the settlement predicate must hold: live settlement,
 child not archived or terminal, captured parent and workspace unchanged, no
-active turn in the settling session, and the latest transition ID equal to the
-captured one. A known state change suppresses the old candidate, even if a
-later turn stops again; the later turn gets its own identity. Read failures
-leave the candidate retryable. Classification never mutates workflow, task, or
+active turn in the settling session, no later turn of the child already
+settled in that session or its replacement, and the latest transition ID equal
+to the captured one. A known state change suppresses the old candidate, even if
+a later turn stops again; the later turn gets its own identity. Read failures,
+including the step and transition-ledger reads, leave the candidate retryable. Classification never mutates workflow, task, or
 session state and never acquires a parent slot.
 
 The producer persists the outcome on the source turn: `suppressed` (with a
@@ -122,7 +132,11 @@ A held candidate is promoted to `qualified` only when all of the following
 hold: the question is still pending; no queued parent item carries the same
 question ID; the parent primary session has no active turn and is idle; and a
 parent turn that started after the question was created has settled at least
-the settle grace ago. An answered question suppresses the candidate. This
+the settle grace ago. A primary session that started after the question and
+has no settled turn counts only once it is older than the settle grace, so a
+question still being transferred to it is seen as queued. An answered question
+suppresses the candidate, including when a fresh classification of the idle
+child would otherwise report another cause. This
 yields at most one reminder per stalled child turn, so an unanswered question
 cannot loop the parent. The producer never answers or resolves the question.
 
@@ -139,7 +153,10 @@ receipt with the insertion or fold and returns the existing queue item on
 replay. After admission the producer marks the source turn `delivered` with the
 queue item ID and parent session. A crash between the two steps replays the
 same keyed admission. A replacement parent session uses a new queue identity,
-so a `delivered` source-turn marker is the cross-session guard.
+so a `delivered` source-turn marker is the cross-session guard. A receipt
+outlives its queue row, so a notice admitted again after an earlier notice of
+the same candidate (re-home, or delivery after a hold) uses a re-admission key
+derived from the entry it replaces; a retry of the same step replays it.
 
 Transient failures retry with waits of 1, 5, 30, and 120 seconds, up to five
 attempts. Failed candidates keep their original identity and metadata and
@@ -156,10 +173,15 @@ into a child nudge is thereby removed.
 Escalation is bounded by a consecutive count keyed to the child task and the
 workflow entry captured at turn start (`child_stall_nudge` task metadata,
 updated with a single-key atomic write that skips an archiving task). The
-count advances only after a successful delivery, so a retried candidate is not counted twice. The first two
+count is written after the reminder or alert is admitted and before the
+candidate is marked, together with the counted turn and its routing; a write
+failure leaves the candidate unmarked, and a replay of a counted turn reuses
+the recorded routing, so a turn is counted exactly once. The first two
 consecutive nudged stalls on one entry stay with the child; the third alerts the
 parent once and marks the streak escalated, after which further stalls on that
-entry are suppressed. A change of workflow entry or cause starts a new streak.
+entry are suppressed. A change of workflow entry or cause starts a new streak;
+a stall with another cause on the same entry resets the stored streak when its
+parent alert is admitted.
 A session replacement preserves the task streak for the same entry; a new
 workflow entry starts afresh. Every other cause continues to use direct parent
 delivery unchanged.
@@ -181,10 +203,14 @@ a non-alert item, so FIFO order relative to other input is preserved.
 
 ## Parent availability
 
-Resolve only the parent's current primary session. When it is missing, failed,
-or cancelled, the candidate becomes `waiting_parent`, and the producer sends
-one operator notification (`task.child_stall_undeliverable`) for that candidate
-through the existing notification providers. Later passes deliver it once the
+Resolve only the parent's current primary session. A parent in a different
+workspace than the one captured at turn start is never alerted (reason
+`parent_other_workspace`). When the primary is missing, failed, or cancelled,
+the candidate becomes `waiting_parent`, and the producer sends one operator
+notification (`task.child_stall_undeliverable`) for that candidate through the
+existing notification providers. The notice is acknowledged on the candidate
+only after it was handed off; a failed publish retries on a later pass under the
+same `occurrence_id`. Later passes deliver it once the
 parent has a promptable primary session. The producer never creates a session
 or selects a sibling.
 
@@ -193,15 +219,23 @@ or selects a sibling.
 Immediately before keyed queue admission, re-read child relationship/workspace,
 archive/terminal status, settling session's active turn, workflow entry, and
 cause evidence, under the parent session's queue admission lock. A transition
-committed first suppresses the alert; a transition after admission cannot
-retroactively invalidate an already observed history item.
+committed first suppresses the alert; a recheck that reports a different cause
+or pending question defers the candidate to the next pass, which rebuilds the
+text. A transition after admission cannot retroactively invalidate an already
+observed history item.
 
 Preserve Auto-run OFF, pending questions, WIP, cancellation, queue capacity,
 FIFO, session incarnation, and normal prompt admission. No interrupt, priority
 bypass, or duplicate ordinary child report. When a queued alert is about to be
 dispatched, each folded candidate is rechecked; stale candidates are dropped
-from the prompt, and an alert with no eligible candidate is discarded without
-creating a model turn.
+from the prompt and from the recorded history item, a live candidate names its
+current cause and question, and an alert with no eligible candidate is
+discarded without creating a model turn. A candidate that cannot be read
+defers the whole entry in place instead of sending unchecked text; the
+producer's next pass asks the queue to drain again. A queued child reminder is
+rechecked the same way and withdrawn once its source no longer misses the
+signal. User- or agent-authored values (child title, step name) are quoted on
+one line, with control characters removed and length capped.
 
 ## Visibility and retention
 
@@ -222,7 +256,8 @@ desktop layout compressed into a phone is needed. See the plan's UI-01 preview.
 Resolved markers stay on their source turn for the turn's lifetime and are a
 few fields each; they are deleted only with the task. The producer scans only
 turns completed within seven days, and a resolved marker prevents an old event
-or scan from recreating its item. Queue admission receipts follow the queue's
+or scan from recreating its item. An operator retry of a failed candidate that
+settled before that window is not reported as a retry. Queue admission receipts follow the queue's
 existing task/session deletion. No transcript payload is copied into the queue
 item.
 
@@ -237,9 +272,10 @@ item could be left on a session that later stopped being the parent's primary.
 Each pass reconciles every delivered candidate in the scan window:
 
 - A candidate whose source turn no longer qualifies as a stall is resolved, and
-  its notice entry is withdrawn.
-- When the parent task is archived or terminal, the notice can never be
-  delivered, so its entry is withdrawn and the candidate is resolved.
+  its notice entry is withdrawn unless a folded sibling still needs it.
+- When the parent task is archived, terminal, deleted, or in another
+  workspace, the notice can never be delivered, so its entry is withdrawn and
+  the candidate is resolved.
 - When the parent has no promptable primary, the notice is withdrawn from the
   session queue and the candidate returns to `waiting_parent`, preserving the
   single operator notification. The candidate stays on the source turn and is
@@ -248,22 +284,27 @@ Each pass reconciles every delivered candidate in the scan window:
 - When the parent's current primary is promptable and is not the session holding
   the notice, the notice is re-homed to that primary through the existing
   keyed queue admission, so content, metadata, and the folded alert list are
-  preserved and the destination's own fold/merge rules apply. A re-home with no
-  remaining entry resolves the candidate.
+  preserved and the destination's own fold/merge rules apply. The notice is
+  admitted to the primary first and removed from its holder second, so an
+  interrupted move leaves it on at least one session and the candidate pending.
+  A candidate whose entry was moved by a folded sibling finds it again by its
+  descriptor. A re-home with no remaining entry resolves the candidate.
 - When the notice is already on the promptable primary, it is kept; it is
   resolved only once the entry is gone (dispatched, withdrawn, or consumed).
 
 Reconciliation is idempotent and bounded by the existing producer scan window
-(`childStallScanWindow`); a scan read failure leaves the candidate pending so
-the next pass retries. It is the same producer goroutine, so no second
+(`childStallScanWindow`); any read failure, including a source recheck or an
+entry lookup, leaves the candidate and its notice pending so the next pass
+retries. It is the same producer goroutine, so no second
 watchdog, collector, or scheduler is introduced.
 
 Alongside the per-candidate reconcile, each session that held a pending notice
 runs the existing stale/superseded prune, so equivalent notices for the same
-child collapse to one item even when the session never drains. Both paths are
-gated on `IsChildStallAlert`, so user, agent, workflow, and non-alert server
-entries, questions, answers, and approvals are never created, reordered, or
-removed. Withdrawal and re-home record bounded outcomes
+child collapse to one item even when the session never drains. A candidate
+without a turn identity is never superseded, and an entry that changed after it
+was assessed is not removed. Both paths are gated on the child-attention alert
+and reminder markers, so user, agent, workflow, and non-alert server entries,
+questions, answers, and approvals are never created, reordered, or removed. Withdrawal and re-home record bounded outcomes
 (`withdrawn_parent_gone`, `held_waiting_parent`, `rehomed_notice`) on the
 existing `task_child_stall_outcome_total` counter and stay out of metric labels.
 

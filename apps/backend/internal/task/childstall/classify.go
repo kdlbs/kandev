@@ -51,6 +51,7 @@ const (
 	ReasonReparented        = "reparented"
 	ReasonWorkspaceChanged  = "workspace_changed"
 	ReasonResumed           = "resumed"
+	ReasonSuperseded        = "superseded"
 	ReasonEntryChanged      = "entry_changed"
 	ReasonSessionClosed     = "session_closed"
 	ReasonSignalUnprocessed = "signal_unprocessed"
@@ -77,12 +78,16 @@ type PendingInput struct {
 // Evidence is everything a classification reads. Child is nil when the child
 // task no longer exists.
 type Evidence struct {
-	Start              models.ChildStallStart
-	Settlement         string
-	Child              *ChildSnapshot
-	SessionState       models.TaskSessionState
-	SessionErrorClass  string
-	SessionActiveTurn  bool
+	Start             models.ChildStallStart
+	Settlement        string
+	Child             *ChildSnapshot
+	SessionState      models.TaskSessionState
+	SessionErrorClass string
+	SessionActiveTurn bool
+	// Superseded is true when a later turn of the child already ran and
+	// settled after this one, so this settlement no longer describes the
+	// child's current stop.
+	Superseded         bool
 	PendingInputs      []PendingInput
 	StepRequiresSignal bool
 	PendingStepSignal  bool
@@ -149,6 +154,8 @@ func staleReason(evidence Evidence) (string, bool) {
 		return ReasonWorkspaceChanged, true
 	case evidence.SessionActiveTurn || sessionExecuting(evidence.SessionState):
 		return ReasonResumed, true
+	case evidence.Superseded:
+		return ReasonSuperseded, true
 	case child.LatestTransitionID != evidence.Start.TransitionID:
 		return ReasonEntryChanged, true
 	}
@@ -156,6 +163,11 @@ func staleReason(evidence Evidence) (string, bool) {
 }
 
 func classifyCause(evidence Evidence, policy Policy) Decision {
+	// An explicit cancellation never alerts, even when the cancelled turn left
+	// an input request behind.
+	if evidence.Settlement == models.ChildStallSettlementCancelled {
+		return suppressed(ReasonCancelled)
+	}
 	for _, input := range evidence.PendingInputs {
 		if input.ParentQuestionID != "" {
 			return Decision{Outcome: OutcomeHeld, Cause: CauseInputRequired, QuestionID: input.ParentQuestionID}
@@ -163,9 +175,6 @@ func classifyCause(evidence Evidence, policy Policy) Decision {
 	}
 	if len(evidence.PendingInputs) > 0 {
 		return qualified(CauseInputRequired)
-	}
-	if evidence.Settlement == models.ChildStallSettlementCancelled {
-		return suppressed(ReasonCancelled)
 	}
 	switch evidence.SessionState {
 	case models.TaskSessionStateFailed:

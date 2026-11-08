@@ -102,22 +102,37 @@ func abandonedTurnMetadata(metadataJSON string) (string, error) {
 	return serialized, err
 }
 
-// ListUnresolvedChildStallTurns returns completed child-task turns at or after
-// since that the child-turn stalled producer has not resolved, oldest first.
-func (r *Repository) ListUnresolvedChildStallTurns(ctx context.Context, since time.Time, limit int) ([]*models.Turn, error) {
+// ListUnresolvedChildStallTurns returns one page of completed child-task turns
+// at or after since that the child-turn stalled producer has not resolved,
+// oldest first. A non-nil after cursor resumes strictly after that turn, so a
+// caller paging through the window visits every unresolved turn even when more
+// than limit of them stay unresolved.
+func (r *Repository) ListUnresolvedChildStallTurns(
+	ctx context.Context,
+	since time.Time,
+	after *models.ChildStallScanCursor,
+	limit int,
+) ([]*models.Turn, error) {
 	if limit <= 0 {
 		limit = 200
 	}
 	predicate, _ := currentTurnAuthority(r.ro.DriverName(), "turn_row")
+	args := []interface{}{since.UTC(),
+		`%"` + models.TurnMetaKeyChildStallStart + `"%`,
+		`%"` + models.TurnMetaKeyChildStallResolved + `":true%`}
+	cursorClause := ""
+	if after != nil {
+		cursorClause = ` AND (completed_at > ? OR (completed_at = ? AND id > ?))`
+		args = append(args, after.CompletedAt.UTC(), after.CompletedAt.UTC(), after.TurnID)
+	}
+	args = append(args, limit)
 	query := `SELECT ` + turnSelectColumns + `
 		FROM task_session_turns turn_row
 		WHERE completed_at IS NOT NULL AND completed_at >= ? AND ` + predicate + `
-		  AND metadata LIKE ? AND metadata NOT LIKE ?
+		  AND metadata LIKE ? AND metadata NOT LIKE ?` + cursorClause + `
 		ORDER BY completed_at ASC, id ASC
 		LIMIT ?`
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), since.UTC(),
-		`%"`+models.TurnMetaKeyChildStallStart+`"%`,
-		`%"`+models.TurnMetaKeyChildStallResolved+`":true%`, limit)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}

@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -63,13 +65,41 @@ func (p *ChildStallProducer) deliver(
 		p.deliverMissingSignal(ctx, turn, start, state, decision, now)
 		return
 	}
-	p.deliverToParent(ctx, turn, start, state, decision, now)
+	p.deliverToParent(ctx, turn, start, state, decision, now, func() bool {
+		return p.resetNudgeStreak(ctx, turn, start, decision, now)
+	})
+}
+
+// resetNudgeStreak ends a missing-signal streak on the candidate's workflow
+// entry when the child stalls there for another cause, so the next
+// missing-signal stall starts a fresh streak instead of escalating on stalls
+// that were not consecutive. It reports false when the streak could not be
+// read or written, so delivery is retried before the candidate is marked.
+func (p *ChildStallProducer) resetNudgeStreak(
+	ctx context.Context,
+	turn *models.Turn,
+	start models.ChildStallStart,
+	decision childstall.Decision,
+	now time.Time,
+) bool {
+	childTask, err := p.store.GetTask(ctx, turn.TaskID)
+	if err != nil || childTask == nil {
+		return false
+	}
+	persisted, ok := models.LoadChildStallNudgeStreak(childTask.Metadata)
+	if !ok || persisted.TransitionID != start.TransitionID ||
+		(persisted.Count == 0 && !persisted.Escalated) {
+		return true
+	}
+	reset := childstall.NudgeStreak{Cause: decision.Cause, TransitionID: start.TransitionID}
+	return p.persistNudgeStreak(ctx, turn, reset, "", now)
 }
 
 // deliverMissingSignal nudges the child, escalates to the parent at the streak
 // threshold, and suppresses further stalls on an already-escalated streak. The
-// streak advances only when a delivery succeeds, so a retried candidate does
-// not double-count.
+// streak is written after the reminder or alert is admitted and before the
+// candidate is marked, and it records the turn it counted, so a replay after a
+// partial failure reuses that routing instead of counting the turn twice.
 func (p *ChildStallProducer) deliverMissingSignal(
 	ctx context.Context,
 	turn *models.Turn,
@@ -94,26 +124,29 @@ func (p *ChildStallProducer) deliverMissingSignal(
 		p.retryLater(ctx, turn, state, decision, err, now)
 		return
 	}
-	streak, action := p.nextNudgeStreak(childTask, decision, start.TransitionID)
+	streak, action := p.nextNudgeStreak(childTask, turn, decision, start.TransitionID)
+	recordStreak := func() bool { return p.persistNudgeStreak(ctx, turn, streak, action, now) }
 	switch action {
 	case childstall.NudgeActionSuppress:
 		state.State, state.Reason = string(childstall.OutcomeSuppressed), reasonNudgeEscalated
 		p.persist(ctx, turn, state, true, now)
 		recordChildStallReason(reasonNudgeEscalated)
 	case childstall.NudgeActionAlertParent:
-		if p.deliverToParent(ctx, turn, start, state, decision, now) {
-			p.persistNudgeStreak(ctx, turn, streak, now)
-		}
+		p.deliverToParent(ctx, turn, start, state, decision, now, recordStreak)
 	default:
-		if p.deliverChildNudge(ctx, turn, start, state, decision, childSession, now) {
-			p.persistNudgeStreak(ctx, turn, streak, now)
-		}
+		p.deliverChildNudge(ctx, turn, start, state, decision, childSession, now, recordStreak)
 	}
 }
 
+// reasonParentOtherWorkspace records a candidate whose parent task belongs to
+// a different workspace than the child, so the alert never crosses workspaces.
+const reasonParentOtherWorkspace = "parent_other_workspace"
+
 // deliverToParent queues an attributed alert for the parent's primary session.
-// It reports whether the alert was delivered, so the nudge escalation persists
-// its streak only on a real delivery.
+// beforeMark runs after the alert is admitted and before the candidate is
+// marked delivered; when it reports false the candidate is left as is, so the
+// next pass replays the keyed admission and runs it again. It reports whether
+// the alert was delivered.
 func (p *ChildStallProducer) deliverToParent(
 	ctx context.Context,
 	turn *models.Turn,
@@ -121,6 +154,7 @@ func (p *ChildStallProducer) deliverToParent(
 	state models.ChildStallState,
 	decision childstall.Decision,
 	now time.Time,
+	beforeMark func() bool,
 ) bool {
 	parentTask, err := p.store.GetTask(ctx, start.ParentTaskID)
 	if err != nil || parentTask == nil || parentTask.ArchivedAt != nil {
@@ -129,6 +163,12 @@ func (p *ChildStallProducer) deliverToParent(
 			return false
 		}
 		state.State, state.Reason = string(childstall.OutcomeSuppressed), "parent_unavailable"
+		p.persist(ctx, turn, state, true, now)
+		recordChildStallReason(state.Reason)
+		return false
+	}
+	if parentTask.WorkspaceID != start.WorkspaceID {
+		state.State, state.Reason = string(childstall.OutcomeSuppressed), reasonParentOtherWorkspace
 		p.persist(ctx, turn, state, true, now)
 		recordChildStallReason(state.Reason)
 		return false
@@ -142,12 +182,12 @@ func (p *ChildStallProducer) deliverToParent(
 		p.waitForParent(ctx, turn, start, state, decision, now)
 		return false
 	}
-	alert, err := p.buildAlert(ctx, turn, start, decision)
+	alert, err := p.buildAlert(ctx, turn, childStallAlertKey(turn, start, state, parentSession.ID), decision)
 	if err != nil {
 		p.retryLater(ctx, turn, state, decision, err, now)
 		return false
 	}
-	queued, identity, _, err := p.admitAlert(ctx, turn, start, parentSession, alert, "")
+	queued, identity, _, err := p.admitAlert(ctx, turn, start, parentSession, alert, decision)
 	var stale *childStallStaleError
 	switch {
 	case errors.As(err, &stale):
@@ -155,6 +195,9 @@ func (p *ChildStallProducer) deliverToParent(
 		return false
 	case err != nil:
 		p.retryLater(ctx, turn, state, decision, err, now)
+		return false
+	}
+	if beforeMark != nil && !beforeMark() {
 		return false
 	}
 	p.markDelivered(ctx, turn, state, decision, queued, parentSession.ID, now)
@@ -228,8 +271,10 @@ func (p *ChildStallProducer) markNudged(
 		zap.Duration("settlement_to_queue", lag))
 }
 
-// deliverChildNudge queues the short reminder for the child's own session. It
-// reports whether the reminder was delivered.
+// deliverChildNudge queues the short reminder for the child's own session.
+// beforeMark runs after admission and before the candidate is resolved, with
+// the same replay contract as deliverToParent. It reports whether the reminder
+// was delivered.
 func (p *ChildStallProducer) deliverChildNudge(
 	ctx context.Context,
 	turn *models.Turn,
@@ -238,9 +283,11 @@ func (p *ChildStallProducer) deliverChildNudge(
 	decision childstall.Decision,
 	childSession *models.TaskSession,
 	now time.Time,
+	beforeMark func() bool,
 ) bool {
 	alert := p.buildNudge(turn, start, decision.BlockedReason)
-	queued, identity, _, err := p.admitAlert(ctx, turn, start, childSession, alert, childstall.CauseMissingCompletionSignal)
+	expect := childstall.Decision{Outcome: childstall.OutcomeQualified, Cause: childstall.CauseMissingCompletionSignal}
+	queued, identity, _, err := p.admitAlert(ctx, turn, start, childSession, alert, expect)
 	var stale *childStallStaleError
 	switch {
 	case errors.As(err, &stale):
@@ -248,6 +295,9 @@ func (p *ChildStallProducer) deliverChildNudge(
 		return false
 	case err != nil:
 		p.retryLater(ctx, turn, state, decision, err, now)
+		return false
+	}
+	if beforeMark != nil && !beforeMark() {
 		return false
 	}
 	p.markNudged(ctx, turn, state, decision, queued, childSession.ID, now)
@@ -261,11 +311,14 @@ func (p *ChildStallProducer) deliverChildNudge(
 // nextNudgeStreak folds the candidate into the child task's stored streak and
 // returns the routing action. It is keyed to the task, not the settled turn's
 // session, so a session substitution does not reset the escalation count; the
-// streak still restarts when the workflow entry (transition) changes. The
-// stored streak is never mutated here; it is persisted only after a successful
-// delivery.
+// streak still restarts when the workflow entry (transition) changes. When the
+// stored streak was already advanced by this same turn (a replay after the
+// streak write succeeded but the candidate was not yet marked), the recorded
+// routing is reused and the turn is not counted again. The stored streak is
+// never mutated here.
 func (p *ChildStallProducer) nextNudgeStreak(
 	childTask *models.Task,
+	turn *models.Turn,
 	decision childstall.Decision,
 	transitionID int64,
 ) (childstall.NudgeStreak, childstall.NudgeAction) {
@@ -277,18 +330,25 @@ func (p *ChildStallProducer) nextNudgeStreak(
 			Count:        persisted.Count,
 			Escalated:    persisted.Escalated,
 		}
+		if persisted.LastTurnID == turn.ID && persisted.LastAction != "" &&
+			prev.Cause == decision.Cause && prev.TransitionID == transitionID {
+			return prev, childstall.NudgeAction(persisted.LastAction)
+		}
 	}
 	return childstall.AdvanceNudge(prev, decision.Cause, transitionID, p.nudgePolicy)
 }
 
-// persistNudgeStreak stores the advanced streak on the child task. A write
-// failure is logged and does not undo the delivered reminder.
+// persistNudgeStreak stores the advanced streak on the child task, recording
+// the turn and routing that advanced it. It reports false on a write failure so
+// the caller leaves the candidate unmarked and the next pass replays it; a task
+// that no longer accepts metadata (archiving/archived) is not retried.
 func (p *ChildStallProducer) persistNudgeStreak(
 	ctx context.Context,
 	turn *models.Turn,
 	streak childstall.NudgeStreak,
+	action childstall.NudgeAction,
 	now time.Time,
-) {
+) bool {
 	persisted := models.ChildStallNudgeStreak{
 		Cause:        string(streak.Cause),
 		TransitionID: streak.TransitionID,
@@ -296,21 +356,25 @@ func (p *ChildStallProducer) persistNudgeStreak(
 		Escalated:    streak.Escalated,
 		UpdatedAt:    now,
 	}
+	if action != "" {
+		persisted.LastTurnID, persisted.LastAction = turn.ID, string(action)
+	}
 	stored, err := p.store.SetTaskMetadataKeyIfNotArchived(
 		ctx, turn.TaskID, models.TaskMetaKeyChildStallNudge, persisted.ToMap(),
 	)
 	if err != nil {
-		p.log.Warn("failed to persist child stall nudge streak",
+		p.log.Warn("failed to persist child stall nudge streak; retrying next pass",
 			zap.String("turn_id", turn.ID), zap.Error(err))
-		return
+		return false
 	}
 	if !stored {
 		// The task stopped accepting metadata (archiving/archived) before the
-		// streak write; the delivery already happened, so only make the missed
+		// streak write; the child is leaving, so only make the missed
 		// escalation bookkeeping visible.
 		p.log.Debug("child stall nudge streak not persisted: task no longer accepts metadata",
 			zap.String("turn_id", turn.ID))
 	}
+	return true
 }
 
 // applyStale records a candidate that stopped qualifying at the admission
@@ -346,35 +410,43 @@ func (p *ChildStallProducer) waitForParent(
 ) {
 	first := state.State != childStallStateWaitingParent
 	state.State, state.Cause, state.QuestionID = childStallStateWaitingParent, string(decision.Cause), decision.QuestionID
-	notify := !state.OperatorNotified
+	if first {
+		if !p.persist(ctx, turn, state, false, now) {
+			return
+		}
+		recordChildStallOutcome(childStallStateWaitingParent)
+	}
+	if state.OperatorNotified {
+		return
+	}
+	// The notice is acknowledged only after it was handed off. A failed
+	// publish, or a crash before the acknowledgement is stored, retries on a
+	// later pass under the same occurrence_id, which the notification service
+	// deduplicates.
+	if !p.notifyOperator(ctx, turn, start, decision) {
+		return
+	}
 	state.OperatorNotified = true
-	if !first && !notify {
-		return
-	}
-	if !p.persist(ctx, turn, state, false, now) {
-		return
-	}
-	recordChildStallOutcome(childStallStateWaitingParent)
-	if notify {
-		p.notifyOperator(ctx, turn, start, decision)
-	}
+	p.persist(ctx, turn, state, false, now)
 }
 
+// notifyOperator publishes the undeliverable-stall notice. It reports whether
+// the notice was handed off; with no event bus there is nothing to retry.
 func (p *ChildStallProducer) notifyOperator(
 	ctx context.Context,
 	turn *models.Turn,
 	start models.ChildStallStart,
 	decision childstall.Decision,
-) {
-	recordChildStallOutcome("operator_notified")
+) bool {
 	p.log.Warn("child stalled but its parent cannot receive the alert",
 		zap.String("child_task_id", turn.TaskID),
 		zap.String("parent_task_id", start.ParentTaskID),
 		zap.String("cause", string(decision.Cause)))
 	if p.svc == nil || p.svc.eventBus == nil {
-		return
+		recordChildStallOutcome("operator_notified")
+		return true
 	}
-	_ = p.svc.eventBus.Publish(ctx, events.TaskChildStallUndeliverable, bus.NewEvent(
+	err := p.svc.eventBus.Publish(ctx, events.TaskChildStallUndeliverable, bus.NewEvent(
 		events.TaskChildStallUndeliverable, "orchestrator", map[string]interface{}{
 			"task_id":        turn.TaskID,
 			"session_id":     turn.TaskSessionID,
@@ -383,19 +455,29 @@ func (p *ChildStallProducer) notifyOperator(
 			"cause":          string(decision.Cause),
 			"occurrence_id":  childStallKey(turn, start),
 		}))
+	if err != nil {
+		p.log.Warn("failed to publish child stall operator notice; retrying next pass",
+			zap.String("turn_id", turn.ID), zap.Error(err))
+		return false
+	}
+	recordChildStallOutcome("operator_notified")
+	return true
 }
 
 // admitAlert rechecks eligibility and admits the keyed alert under the target
-// session's queue admission lock. A non-empty requireCause additionally demands
-// the recheck still classifies that cause, so a nudge is never sent for a
-// candidate that turned into a different stall.
+// session's queue admission lock. The recheck must still qualify with the cause
+// (and, when the recheck names one, the question) the alert text was built
+// from, so a reminder is never sent for a candidate that turned into a
+// different stall and an alert never names a question that is no longer the
+// pending one. A mismatch leaves the candidate qualified for the next pass,
+// which rebuilds the alert from fresh evidence.
 func (p *ChildStallProducer) admitAlert(
 	ctx context.Context,
 	turn *models.Turn,
 	start models.ChildStallStart,
 	session *models.TaskSession,
 	alert childStallAlert,
-	requireCause childstall.Cause,
+	expect childstall.Decision,
 ) (*messagequeue.QueuedMessage, messagequeue.QueueSessionIdentity, bool, error) {
 	queue := p.messageQueue()
 	if queue == nil {
@@ -412,7 +494,7 @@ func (p *ChildStallProducer) admitAlert(
 		if recheckErr != nil {
 			return fmt.Errorf("recheck child stall candidate: %w", recheckErr)
 		}
-		if decision.Outcome != childstall.OutcomeQualified || (requireCause != "" && decision.Cause != requireCause) {
+		if !admissionStillMatches(decision, expect) {
 			return &childStallStaleError{decision: decision}
 		}
 		var admitErr error
@@ -430,6 +512,15 @@ func (p *ChildStallProducer) admitAlert(
 		return admitErr
 	})
 	return queued, identity, replay, err
+}
+
+// admissionStillMatches reports whether the admission recheck still describes
+// the alert being admitted.
+func admissionStillMatches(recheck, expect childstall.Decision) bool {
+	if recheck.Outcome != childstall.OutcomeQualified || recheck.Cause != expect.Cause {
+		return false
+	}
+	return recheck.QuestionID == "" || recheck.QuestionID == expect.QuestionID
 }
 
 // recheck re-reads the candidate's evidence at a delivery boundary. A read
@@ -470,6 +561,41 @@ func childStallAdmissionKey(prefix string, turn *models.Turn, start models.Child
 	return prefix + hex.EncodeToString(sum[:20])
 }
 
+// childStallReadmissionKey is the admission identity of a parent notice that
+// is admitted again after an earlier notice of the same candidate: a re-home
+// (sourceQueueID is the entry being moved, content its text) or a re-delivery
+// after a hold (sourceQueueID is the withdrawn notice, content empty). The
+// queue keeps an admission receipt per session after its row is removed, so
+// re-using the original key on a session that once held the notice would
+// replay that receipt without recreating the row. Each re-admission derives
+// from the entry it replaces, so a key is never reused across moves, while a
+// retry of the same move replays its own admission.
+func childStallReadmissionKey(
+	turn *models.Turn,
+	start models.ChildStallStart,
+	destinationSessionID, sourceQueueID, content string,
+) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%s",
+		childStallKey(turn, start), destinationSessionID, sourceQueueID, content)))
+	return "child-stall-" + hex.EncodeToString(sum[:20])
+}
+
+// childStallAlertKey returns the admission key for a parent alert. A first
+// admission uses the original key, so a crash between admission and the
+// delivered mark replays it. A candidate that already had a notice (withdrawn
+// by a hold) is admitted under a re-admission key.
+func childStallAlertKey(
+	turn *models.Turn,
+	start models.ChildStallStart,
+	state models.ChildStallState,
+	destinationSessionID string,
+) string {
+	if state.QueueID == "" {
+		return childStallKey(turn, start)
+	}
+	return childStallReadmissionKey(turn, start, destinationSessionID, state.QueueID, "")
+}
+
 // buildNudge builds the short reminder queued for the child's own session.
 func (p *ChildStallProducer) buildNudge(turn *models.Turn, start models.ChildStallStart, blockedReason string) childStallAlert {
 	metadata := map[string]interface{}{
@@ -503,7 +629,7 @@ func formatChildStallNudge(blockedReason string) string {
 func (p *ChildStallProducer) buildAlert(
 	ctx context.Context,
 	turn *models.Turn,
-	start models.ChildStallStart,
+	key string,
 	decision childstall.Decision,
 ) (childStallAlert, error) {
 	child, err := p.store.GetTask(ctx, turn.TaskID)
@@ -536,7 +662,7 @@ func (p *ChildStallProducer) buildAlert(
 		"sender_session_id":                   turn.TaskSessionID,
 	}
 	return childStallAlert{
-		key:      childStallKey(turn, start),
+		key:      key,
 		content:  formatChildStallPrompt(child, turn, stepName, decision),
 		metadata: metadata,
 	}, nil
@@ -548,15 +674,37 @@ func formatChildStallPrompt(child *models.Task, turn *models.Turn, stepName stri
 	)
 }
 
+// childStallPromptFieldLimit caps a user- or agent-authored value quoted into
+// the server-authored alert text.
+const childStallPromptFieldLimit = 200
+
+// childStallPromptField renders a user- or agent-authored value (a task title
+// or step name) as one quoted line: control characters and line breaks become
+// spaces, whitespace runs collapse, and the value is capped. The text cannot
+// then break out of its line to forge instructions inside the server notice.
+func childStallPromptField(value string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) {
+			return ' '
+		}
+		return r
+	}, value)
+	runes := []rune(strings.Join(strings.Fields(cleaned), " "))
+	if len(runes) > childStallPromptFieldLimit {
+		runes = append(runes[:childStallPromptFieldLimit], '…')
+	}
+	return strconv.Quote(string(runes))
+}
+
 // formatChildStallPromptText renders one candidate's parent-facing alert text.
 // A folded alert rebuilds the text of the candidates that still qualify from
 // these same values, so a dropped candidate leaves no text behind.
 func formatChildStallPromptText(childTitle, childTaskID, turnID, stepName, cause, questionID string) string {
 	var b strings.Builder
 	b.WriteString("CHILD TASK NEEDS ATTENTION\n\n")
-	fmt.Fprintf(&b, "Child task: %s (%s)\n", childTitle, childTaskID)
+	fmt.Fprintf(&b, "Child task: %s (%s)\n", childStallPromptField(childTitle), childTaskID)
 	if stepName != "" {
-		fmt.Fprintf(&b, "Workflow step: %s\n", stepName)
+		fmt.Fprintf(&b, "Workflow step: %s\n", childStallPromptField(stepName))
 	}
 	fmt.Fprintf(&b, "Cause: %s\n", cause)
 	fmt.Fprintf(&b, "Child turn: %s\n\n", turnID)

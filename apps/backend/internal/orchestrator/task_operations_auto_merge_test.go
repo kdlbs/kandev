@@ -69,22 +69,37 @@ type childStallStoreFake struct {
 	sessions map[string]*models.TaskSession
 	turns    map[string]*models.Turn
 	listed   []*models.Turn
+	// Optional read results and failures for the review-fix tests.
+	taskErrs        map[string]error
+	turnErrs        map[string]error
+	latestCompleted map[string]*models.Turn
+	messages        map[string]*models.Message
+	transitionsErr  error
 }
 
 func newChildStallStoreFake() *childStallStoreFake {
 	return &childStallStoreFake{
-		tasks:    map[string]*models.Task{},
-		sessions: map[string]*models.TaskSession{},
-		turns:    map[string]*models.Turn{},
+		tasks:           map[string]*models.Task{},
+		sessions:        map[string]*models.TaskSession{},
+		turns:           map[string]*models.Turn{},
+		taskErrs:        map[string]error{},
+		turnErrs:        map[string]error{},
+		latestCompleted: map[string]*models.Turn{},
+		messages:        map[string]*models.Message{},
 	}
 }
 
-func (f *childStallStoreFake) ListUnresolvedChildStallTurns(context.Context, time.Time, int) ([]*models.Turn, error) {
+func (f *childStallStoreFake) ListUnresolvedChildStallTurns(
+	_ context.Context, _ time.Time, after *models.ChildStallScanCursor, _ int,
+) ([]*models.Turn, error) {
+	if after != nil {
+		return nil, nil
+	}
 	return f.listed, nil
 }
 
-func (f *childStallStoreFake) GetLatestCompletedTurnBySessionID(context.Context, string) (*models.Turn, error) {
-	return nil, nil
+func (f *childStallStoreFake) GetLatestCompletedTurnBySessionID(_ context.Context, sessionID string) (*models.Turn, error) {
+	return f.latestCompleted[sessionID], nil
 }
 
 func (f *childStallStoreFake) GetActiveTurnBySessionID(context.Context, string) (*models.Turn, error) {
@@ -92,6 +107,9 @@ func (f *childStallStoreFake) GetActiveTurnBySessionID(context.Context, string) 
 }
 
 func (f *childStallStoreFake) GetTurn(_ context.Context, id string) (*models.Turn, error) {
+	if err := f.turnErrs[id]; err != nil {
+		return nil, err
+	}
 	return f.turns[id], nil
 }
 
@@ -128,6 +146,9 @@ func (f *childStallStoreFake) SetTaskMetadataKeyIfNotArchived(_ context.Context,
 }
 
 func (f *childStallStoreFake) GetTask(_ context.Context, id string) (*models.Task, error) {
+	if err := f.taskErrs[id]; err != nil {
+		return nil, err
+	}
 	return f.tasks[id], nil
 }
 
@@ -153,6 +174,9 @@ func (f *childStallStoreFake) GetLatestTaskStepTransitionID(context.Context, str
 }
 
 func (f *childStallStoreFake) ListTaskStepTransitions(context.Context, string, int64, int) ([]models.StepTransition, error) {
+	if f.transitionsErr != nil {
+		return nil, f.transitionsErr
+	}
 	return []models.StepTransition{{ID: 1, OccurredAt: childStallReconcileNow.Add(-30 * time.Minute)}}, nil
 }
 
@@ -160,8 +184,8 @@ func (f *childStallStoreFake) ListPendingInteractions(context.Context, models.Pe
 	return nil, nil
 }
 
-func (f *childStallStoreFake) GetMessage(context.Context, string) (*models.Message, error) {
-	return nil, nil
+func (f *childStallStoreFake) GetMessage(_ context.Context, id string) (*models.Message, error) {
+	return f.messages[id], nil
 }
 
 // childStallStepGetterFake marks every step as requiring the completion signal,
@@ -271,6 +295,10 @@ func admitUserEntry(t *testing.T, ctx context.Context, queue *messagequeue.Servi
 }
 
 func seedStalledChild(store *childStallStoreFake, parent *models.Task) *models.Turn {
+	if parent.WorkspaceID == "" {
+		// Parent and child share a workspace; alerts never cross workspaces.
+		parent.WorkspaceID = "ws"
+	}
 	store.tasks["parent"] = parent
 	store.tasks["child"] = &models.Task{
 		ID: "child", State: v1.TaskStateInProgress, ParentID: "parent",
@@ -351,8 +379,10 @@ func TestReconcileDeliveredRehomesToCurrentPrimary(t *testing.T) {
 	if len(oldIDs) != 0 {
 		t.Fatalf("old session still holds entries: %v", oldIDs)
 	}
-	if !containsID(newIDs, "alert-key") {
-		t.Fatalf("new primary missing re-homed alert, got %v", newIDs)
+	// The move admits the notice under a re-admission identity; the candidate
+	// tracks the entry it now lives in.
+	if len(newIDs) != 1 || !containsID(newIDs, state.QueueID) {
+		t.Fatalf("new primary missing re-homed alert %q, got %v", state.QueueID, newIDs)
 	}
 	if state.ParentSessionID != "sess-new" {
 		t.Fatalf("parent session = %q, want sess-new", state.ParentSessionID)
@@ -450,8 +480,9 @@ func TestRunPassReconcilesDeliveredNoticeToCurrentPrimary(t *testing.T) {
 	if ids := queueEntryIDs(t, ctx, queue, "parent", "sess-old"); len(ids) != 0 {
 		t.Fatalf("runPass left the notice on the old session: %v", ids)
 	}
-	if ids := queueEntryIDs(t, ctx, queue, "parent", "sess-new"); !containsID(ids, "alert-key") {
-		t.Fatalf("runPass did not re-home the notice to the current primary, got %v", ids)
+	state, _ := models.LoadChildStallState(turn.Metadata)
+	if ids := queueEntryIDs(t, ctx, queue, "parent", "sess-new"); len(ids) != 1 || !containsID(ids, state.QueueID) {
+		t.Fatalf("runPass did not re-home the notice to the current primary, got %v (tracked %q)", ids, state.QueueID)
 	}
 }
 
@@ -738,15 +769,23 @@ func TestChildStallAlertPromptDropsStaleFoldedCandidate(t *testing.T) {
 		t.Fatalf("folded entry lost a candidate prompt: %q", entry.Content)
 	}
 
-	content, eligible := producer.svc.childStallAlertPromptContent(ctx, &entry)
-	if !eligible {
-		t.Fatal("a live candidate must keep the alert deliverable")
+	plan := producer.svc.planChildStallDispatch(ctx, &entry)
+	if plan.verdict != childStallDispatchSend {
+		t.Fatalf("a live candidate must keep the alert deliverable, verdict = %v", plan.verdict)
 	}
-	if !strings.Contains(content, "turn-1") {
-		t.Fatalf("prompt dropped the live candidate: %q", content)
+	if !strings.Contains(plan.content, "turn-1") {
+		t.Fatalf("prompt dropped the live candidate: %q", plan.content)
 	}
-	if strings.Contains(content, "turn-2") {
-		t.Fatalf("prompt kept the stale candidate: %q", content)
+	if strings.Contains(plan.content, "turn-2") {
+		t.Fatalf("prompt kept the stale candidate: %q", plan.content)
+	}
+	// The recorded history item carries only the candidate that reached the
+	// prompt, so the chat summary never lists the finished child.
+	recorded := messagequeue.ChildStallAlertDescriptors(&messagequeue.QueuedMessage{
+		QueuedBy: messagequeue.QueuedByServer, Metadata: plan.metadata,
+	})
+	if len(recorded) != 1 || recorded[0].TurnID != "turn-1" {
+		t.Fatalf("recorded descriptors = %+v, want only turn-1", recorded)
 	}
 }
 
@@ -768,9 +807,8 @@ func TestChildStallAlertPromptDiscardsAlertWithoutEligibleCandidate(t *testing.T
 	if len(entries) != 1 {
 		t.Fatalf("expected one queued alert, got %d", len(entries))
 	}
-	content, eligible := producer.svc.childStallAlertPromptContent(ctx, &entries[0])
-	if eligible {
-		t.Fatalf("an alert without an eligible candidate must be discarded, got %q", content)
+	if plan := producer.svc.planChildStallDispatch(ctx, &entries[0]); plan.verdict != childStallDispatchDiscard {
+		t.Fatalf("an alert without an eligible candidate must be discarded, got verdict %v", plan.verdict)
 	}
 }
 

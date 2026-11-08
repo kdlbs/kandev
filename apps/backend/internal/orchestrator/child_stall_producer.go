@@ -16,7 +16,7 @@ import (
 // ChildStallStore is the task storage the child-turn stalled producer reads
 // and annotates. The task SQL repository implements it.
 type ChildStallStore interface {
-	ListUnresolvedChildStallTurns(ctx context.Context, since time.Time, limit int) ([]*models.Turn, error)
+	ListUnresolvedChildStallTurns(ctx context.Context, since time.Time, after *models.ChildStallScanCursor, limit int) ([]*models.Turn, error)
 	GetLatestCompletedTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	GetTurn(ctx context.Context, id string) (*models.Turn, error)
@@ -173,30 +173,39 @@ func (p *ChildStallProducer) run(ctx context.Context) {
 }
 
 // runPass classifies and delivers every unresolved child-turn settlement in
-// the scan window. Passes never overlap.
+// the scan window. It pages through the window by (completed_at, id), so
+// candidates that stay unresolved (held, waiting for the parent, failed, or
+// delivered with a pending notice) never hide newer ones. Passes never overlap.
 func (p *ChildStallProducer) runPass(ctx context.Context) {
 	p.passMu.Lock()
 	defer p.passMu.Unlock()
 	now := p.now()
-	turns, err := p.store.ListUnresolvedChildStallTurns(ctx, now.Add(-childStallScanWindow), childStallScanLimit)
-	if err != nil {
-		recordChildStallOutcome("scan_failed")
-		p.log.Warn("child stall scan failed", zap.Error(err))
-		return
-	}
+	since := now.Add(-childStallScanWindow)
 	stats := childStallPassStats{}
 	holders := map[string]string{}
-	for _, turn := range turns {
-		if ctx.Err() != nil {
+	var cursor *models.ChildStallScanCursor
+	for {
+		turns, err := p.store.ListUnresolvedChildStallTurns(ctx, since, cursor, childStallScanLimit)
+		if err != nil {
+			recordChildStallOutcome("scan_failed")
+			p.log.Warn("child stall scan failed", zap.Error(err))
 			return
 		}
-		p.processTurn(ctx, turn, now, &stats)
-		if start, ok := models.LoadChildStallStart(turn.Metadata); ok {
-			if state, ok := models.LoadChildStallState(turn.Metadata); ok &&
-				state.QueueID != "" && state.ParentSessionID != "" {
-				holders[state.ParentSessionID] = start.ParentTaskID
+		for _, turn := range turns {
+			if ctx.Err() != nil {
+				return
 			}
+			p.processTurn(ctx, turn, now, &stats)
+			collectNoticeHolder(turn, holders)
 		}
+		if len(turns) < childStallScanLimit {
+			break
+		}
+		last := turns[len(turns)-1]
+		if last.CompletedAt == nil {
+			break
+		}
+		cursor = &models.ChildStallScanCursor{CompletedAt: *last.CompletedAt, TurnID: last.ID}
 	}
 	for sessionID, parentTaskID := range holders {
 		if ctx.Err() != nil {
@@ -205,6 +214,19 @@ func (p *ChildStallProducer) runPass(ctx context.Context) {
 		p.pruneNoticeSession(ctx, parentTaskID, sessionID)
 	}
 	stats.publish(now)
+}
+
+// collectNoticeHolder records the session holding a candidate's pending
+// parent notice, so the pass can prune that session's stale notices.
+func collectNoticeHolder(turn *models.Turn, holders map[string]string) {
+	start, ok := models.LoadChildStallStart(turn.Metadata)
+	if !ok {
+		return
+	}
+	if state, ok := models.LoadChildStallState(turn.Metadata); ok &&
+		state.QueueID != "" && state.ParentSessionID != "" {
+		holders[state.ParentSessionID] = start.ParentTaskID
+	}
 }
 
 func (p *ChildStallProducer) processTurn(ctx context.Context, turn *models.Turn, now time.Time, stats *childStallPassStats) {
@@ -234,7 +256,40 @@ func (p *ChildStallProducer) processTurn(ctx context.Context, turn *models.Turn,
 	if decision.Outcome == childstall.OutcomeHeld {
 		decision = p.promoteHeld(ctx, decision, now)
 	}
+	decision, err = p.suppressAnsweredHeld(ctx, state, decision)
+	if err != nil {
+		stats.observePending(turn)
+		recordChildStallOutcome("read_failed")
+		return
+	}
 	p.apply(ctx, turn, start, state, decision, now, stats)
+}
+
+// suppressAnsweredHeld keeps an answered parent question from turning a held
+// candidate into a different alert. Once the question the candidate was held
+// on is answered, a fresh classification no longer sees it and could report
+// the same idle child as another stall; the answer suppresses the candidate
+// instead. A read failure is returned so the candidate stays retryable.
+func (p *ChildStallProducer) suppressAnsweredHeld(
+	ctx context.Context,
+	state models.ChildStallState,
+	decision childstall.Decision,
+) (childstall.Decision, error) {
+	if state.State != string(childstall.OutcomeHeld) || state.QuestionID == "" ||
+		decision.Outcome != childstall.OutcomeQualified || decision.QuestionID != "" {
+		return decision, nil
+	}
+	question, err := p.store.GetMessage(ctx, state.QuestionID)
+	if err != nil {
+		return decision, err
+	}
+	if question == nil {
+		return decision, nil
+	}
+	if status, _ := question.Metadata[models.MetaKeyParentQuestionStatus].(string); status != parentQuestionStatusPendingValue {
+		return childstall.Decision{Outcome: childstall.OutcomeSuppressed, Reason: childstall.ReasonQuestionAnswered}, nil
+	}
+	return decision, nil
 }
 
 func (p *ChildStallProducer) apply(
@@ -345,11 +400,16 @@ func boundedChildStallError(err error) string {
 }
 
 // RetryFailed makes a failed candidate eligible again under its original
-// identity. It reports whether a failed candidate was reset.
+// identity. It reports whether a failed candidate was reset. A candidate that
+// settled before the scan window is not reset, because no pass would pick it
+// up again and the retry would only appear to succeed.
 func (p *ChildStallProducer) RetryFailed(ctx context.Context, sessionID, turnID string) (bool, error) {
 	turn, err := p.store.GetTurn(ctx, turnID)
 	if err != nil || turn == nil || turn.TaskSessionID != sessionID {
 		return false, err
+	}
+	if turn.CompletedAt == nil || turn.CompletedAt.Before(p.now().Add(-childStallScanWindow)) {
+		return false, nil
 	}
 	state, ok := models.LoadChildStallState(turn.Metadata)
 	if !ok || state.State != childStallStateFailed {

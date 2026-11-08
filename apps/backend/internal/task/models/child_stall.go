@@ -57,6 +57,13 @@ func (s ChildStallStart) ToMap() map[string]interface{} {
 	return value
 }
 
+// ChildStallScanCursor is the keyset position of the last turn a producer scan
+// page returned, ordered by (completed_at, id).
+type ChildStallScanCursor struct {
+	CompletedAt time.Time
+	TurnID      string
+}
+
 // ChildStallState is the producer state stored under TurnMetaKeyChildStall.
 type ChildStallState struct {
 	State            string     `json:"state"`
@@ -108,11 +115,16 @@ func LoadChildStallState(metadata map[string]interface{}) (ChildStallState, bool
 // state for one child task. It is keyed by the workflow entry the stalls
 // share; a new entry starts a fresh streak.
 type ChildStallNudgeStreak struct {
-	Cause        string    `json:"cause,omitempty"`
-	TransitionID int64     `json:"transition_id,omitempty"`
-	Count        int       `json:"count,omitempty"`
-	Escalated    bool      `json:"escalated,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Cause        string `json:"cause,omitempty"`
+	TransitionID int64  `json:"transition_id,omitempty"`
+	Count        int    `json:"count,omitempty"`
+	Escalated    bool   `json:"escalated,omitempty"`
+	// LastTurnID and LastAction record the turn whose stall last updated the
+	// streak and the routing it received, so a replay of that same turn reuses
+	// the recorded routing instead of counting the turn again.
+	LastTurnID string    `json:"last_turn_id,omitempty"`
+	LastAction string    `json:"last_action,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // ToMap returns the JSON-compatible metadata value.

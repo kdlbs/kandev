@@ -54,8 +54,9 @@ workflow completion.
   be classified as failure or success.
 - **AC-TASKS-CHILD-STALL-001.3:** Eligibility shall be checked again immediately
   before parent delivery. A committed deferred transition, same-step re-entry,
-  reparenting, archive, terminal state, or resumed execution shall prevent stale
-  delivery. Failed reads shall defer delivery without workflow mutation.
+  reparenting, archive, terminal state, resumed execution, or a later settled
+  turn of the child shall prevent stale delivery. Failed reads shall defer
+  delivery without workflow mutation.
 - **AC-TASKS-CHILD-STALL-001.4:** A child waiting on a pending parent question
   shall not alert while the original question delivery is still queued or
   running for the parent. Once a parent turn that started after the question

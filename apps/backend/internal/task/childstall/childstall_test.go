@@ -63,6 +63,21 @@ func TestClassifyRoutesEachCause(t *testing.T) {
 			wantOutcome: OutcomeSuppressed,
 			wantReason:  ReasonOrdinary,
 		},
+		{
+			name: "cancellation wins over a pending input",
+			mutate: func(e *Evidence) {
+				e.Settlement = models.ChildStallSettlementCancelled
+				e.PendingInputs = []PendingInput{{MessageID: "m1"}, {MessageID: "q1", ParentQuestionID: "q1"}}
+			},
+			wantOutcome: OutcomeSuppressed,
+			wantReason:  ReasonCancelled,
+		},
+		{
+			name:        "a later settled turn supersedes the settlement",
+			mutate:      func(e *Evidence) { e.Superseded = true },
+			wantOutcome: OutcomeSuppressed,
+			wantReason:  ReasonSuperseded,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
