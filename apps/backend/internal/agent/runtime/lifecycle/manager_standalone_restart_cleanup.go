@@ -44,6 +44,7 @@ func (m *Manager) stopPersistedStandaloneExecution(
 	executionID string,
 	reason string,
 	force bool,
+	stopWatch *stopWaitWatch,
 ) (bool, error) {
 	if reason == StopReasonBackendShutdown && m.agentSurvivalEnabled {
 		return false, nil
@@ -63,7 +64,7 @@ func (m *Manager) stopPersistedStandaloneExecution(
 	if row == nil {
 		return false, nil
 	}
-	return true, m.stopPersistedStandaloneRecord(ctx, row, reason, force)
+	return true, m.stopPersistedStandaloneRecord(ctx, row, reason, force, stopWatch)
 }
 
 func (m *Manager) stopPersistedStandaloneRecord(
@@ -71,7 +72,9 @@ func (m *Manager) stopPersistedStandaloneRecord(
 	row *models.ExecutorRunning,
 	reason string,
 	force bool,
+	stopWatch *stopWaitWatch,
 ) error {
+	stopWatch.advance(stopWaitActivity)
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
 	if err != nil {
 		return err
@@ -95,9 +98,11 @@ func (m *Manager) stopPersistedStandaloneRecord(
 		Metadata:             row.Metadata,
 		StopReason:           reason,
 	}
+	stopWatch.advance(stopWaitRuntime)
 	if err := m.stopWorkspaceRuntime(ctx, backend, instance, force); err != nil {
 		return fmt.Errorf("stop persisted standalone runtime: %w", err)
 	}
+	stopWatch.advance(stopWaitPersistence)
 	if err := m.repairPersistedStandaloneRow(ctx, row); err != nil {
 		return fmt.Errorf("repair persisted standalone runtime row: %w", err)
 	}

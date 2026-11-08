@@ -34,6 +34,7 @@ func (m *Manager) stopPersistedSSHExecution(
 	executionID string,
 	reason string,
 	force bool,
+	stopWatch *stopWaitWatch,
 ) (bool, error) {
 	store, ok := m.runningWriter.(persistedSSHCleanupStore)
 	if !ok {
@@ -46,7 +47,7 @@ func (m *Manager) stopPersistedSSHExecution(
 	if row == nil || row.Runtime != agentruntime.RuntimeSSH {
 		return false, nil
 	}
-	return m.stopPersistedSSHRecord(ctx, row, reason, force)
+	return m.stopPersistedSSHRecord(ctx, row, reason, force, stopWatch)
 }
 
 func (m *Manager) stopPersistedSSHRecord(
@@ -54,7 +55,9 @@ func (m *Manager) stopPersistedSSHRecord(
 	row *models.ExecutorRunning,
 	reason string,
 	force bool,
+	stopWatch *stopWaitWatch,
 ) (bool, error) {
+	stopWatch.advance(stopWaitActivity)
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
 	if err != nil {
 		return true, err
@@ -76,6 +79,7 @@ func (m *Manager) stopPersistedSSHRecord(
 		Metadata:    row.Metadata,
 		StopReason:  reason,
 	}
+	stopWatch.advance(stopWaitRuntime)
 	if err := m.stopPersistedSSHBackend(ctx, instance, force); err != nil {
 		return true, fmt.Errorf("stop persisted SSH runtime: %w", err)
 	}

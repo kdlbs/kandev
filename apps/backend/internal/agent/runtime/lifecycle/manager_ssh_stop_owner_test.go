@@ -133,7 +133,7 @@ func TestSSHStopRecordChecksOwnerBeforeExternalEffects(t *testing.T) {
 		runningWriter: &sshStopOwnerInventory{rows: []*models.ExecutorRunning{successor}},
 		logger:        newNopLogger(t),
 	}
-	handled, err := manager.stopPersistedSSHRecord(context.Background(), row, "task deleted", true)
+	handled, err := manager.stopPersistedSSHRecord(context.Background(), row, "task deleted", true, nil)
 	require.True(t, handled)
 	require.ErrorIs(t, err, errRemoteRecoveryFenced,
 		"a stale record must be fenced before the stop reaches the executor registry")
@@ -206,11 +206,12 @@ func runArchiveStopFallback(
 	stopped := 0
 	handled, err := manager.stopPersistedRemoteOwnerForRuntime(
 		context.Background(), entry, StopReasonCascadeArchive, true,
-		func(context.Context, string, string, bool) (bool, error) {
+		nil,
+		func(context.Context, string, string, bool, *stopWaitWatch) (bool, error) {
 			t.Fatal("a fenced snapshot must not dispatch the execution-ID stop")
 			return false, nil
 		},
-		func(_ context.Context, record *models.ExecutorRunning, _ string, _ bool) (bool, error) {
+		func(_ context.Context, record *models.ExecutorRunning, _ string, _ bool, _ *stopWaitWatch) (bool, error) {
 			stopped++
 			require.Equal(t, row.AgentExecutionID, record.AgentExecutionID)
 			return true, nil
@@ -289,11 +290,12 @@ func TestSSHStopRejectsSuccessorAfterSnapshotFence(t *testing.T) {
 	}
 	handled, err := manager.stopPersistedRemoteOwnerForRuntime(
 		context.Background(), entry, StopReasonTaskArchived, true,
-		func(context.Context, string, string, bool) (bool, error) {
+		nil,
+		func(context.Context, string, string, bool, *stopWaitWatch) (bool, error) {
 			t.Fatal("a successor must never reach the stop path")
 			return false, nil
 		},
-		func(context.Context, *models.ExecutorRunning, string, bool) (bool, error) {
+		func(context.Context, *models.ExecutorRunning, string, bool, *stopWaitWatch) (bool, error) {
 			t.Fatal("a successor must never reach the persisted-record stop path")
 			return false, nil
 		},
@@ -314,11 +316,12 @@ func TestSSHArchiveStopFailureRetainsPendingEntry(t *testing.T) {
 	manager.remoteRecoveryPending = map[string]*remoteRecoveryRetry{row.SessionID: entry}
 	_, err := manager.stopPersistedRemoteOwnerForRuntime(
 		context.Background(), entry, StopReasonCascadeArchive, true,
-		func(context.Context, string, string, bool) (bool, error) {
+		nil,
+		func(context.Context, string, string, bool, *stopWaitWatch) (bool, error) {
 			t.Fatal("the archive delta must use the persisted record path")
 			return false, nil
 		},
-		func(context.Context, *models.ExecutorRunning, string, bool) (bool, error) {
+		func(context.Context, *models.ExecutorRunning, string, bool, *stopWaitWatch) (bool, error) {
 			return true, errors.New("teardown failed")
 		},
 	)
