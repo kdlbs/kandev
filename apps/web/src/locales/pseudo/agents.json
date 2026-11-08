@@ -649,6 +649,7 @@
   "providerTierRequestWindow": "Ŕēqũēśţś ƥēŕ śĥōŕţ ŵĩńďōŵ",
   "providerTierRequestWindowSeconds": "Śĥōŕţ ŵĩńďōŵ (śēćōńďś)",
   "providerTierUnknown": "Ũńķńōŵń",
+  "providerTierEffective": "Ēƒƒēćţĩvē",
   "providerTierSources": "Ďēƒàũĺţ: {{defaults}}. Ĺēàŕńēď: {{learned}}. Ōvēŕŕĩďē: {{override}}.",
   "providerLimitProvenance": "Ďēƒàũĺţ śōũŕćē: {{provenance}}.",
   "providerLimitProvenancePublished": "ƥũƀĺĩśĥēď",

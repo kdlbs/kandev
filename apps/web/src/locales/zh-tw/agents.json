@@ -649,6 +649,7 @@
   "providerTierRequestWindow": "短視窗請求",
   "providerTierRequestWindowSeconds": "短視窗 (秒)",
   "providerTierUnknown": "未知",
+  "providerTierEffective": "生效值",
   "providerTierSources": "預設值: {{defaults}}。學習值: {{learned}}。覆蓋值: {{override}}。",
   "providerLimitProvenance": "預設值來源: {{provenance}}。",
   "providerLimitProvenancePublished": "公開值",

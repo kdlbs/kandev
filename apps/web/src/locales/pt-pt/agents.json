@@ -649,6 +649,7 @@
   "providerTierRequestWindow": "Pedidos por período curto",
   "providerTierRequestWindowSeconds": "Período curto (segundos)",
   "providerTierUnknown": "Desconhecido",
+  "providerTierEffective": "Efetivo",
   "providerTierSources": "Predefinição: {{defaults}}. Aprendido: {{learned}}. Substituição: {{override}}.",
   "providerLimitProvenance": "Origem da predefinição: {{provenance}}.",
   "providerLimitProvenancePublished": "publicado",

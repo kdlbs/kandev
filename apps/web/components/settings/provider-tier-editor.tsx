@@ -86,6 +86,11 @@ export function ProviderTierEditor({
               ? ` ${t("agents:providerLimitProvenance", { provenance: t(PROVENANCE_LABELS[state.defaults.provenance[field]]) })}`
               : ""}
           </span>
+          {state.effective[field] !== undefined && (
+            <span className="text-xs text-muted-foreground">
+              {t("agents:providerTierEffective")}: {state.effective[field]}
+            </span>
+          )}
         </div>
       ))}
       {tier === "free" ? (
@@ -99,6 +104,11 @@ export function ProviderTierEditor({
               placeholder={state.effective.daily_reset || t("agents:providerTierDailyResetExample")}
               onChange={(event) => onChange({ daily_reset: event.target.value || undefined })}
             />
+            {state.effective.daily_reset && (
+              <span className="text-xs text-muted-foreground">
+                {t("agents:providerTierEffective")}: {state.effective.daily_reset}
+              </span>
+            )}
           </div>
           <ProviderTierScopes
             prefix={prefix}
