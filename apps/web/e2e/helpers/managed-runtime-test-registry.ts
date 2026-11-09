@@ -9,8 +9,8 @@ export type ManagedRuntimeTestRegistry = {
   url: string;
   /** Every request the server received, including unrelated npm probes. */
   requests: () => number;
-  /** Requests that named the fixture package, independent of other probes. */
-  packageRequests: () => number;
+  /** Requests for the packaged archive; any increase proves an install ran. */
+  archiveRequests: () => number;
   close: () => Promise<void>;
 };
 
@@ -67,7 +67,7 @@ export async function startManagedRuntimeTestRegistry(options: {
   const shasum = createHash("sha1").update(archive).digest("hex");
   const integrity = `sha512-${createHash("sha512").update(archive).digest("base64")}`;
   let requestCount = 0;
-  let packageRequestCount = 0;
+  let archiveRequestCount = 0;
   let serverAddress = "";
   const tarballPath = `/archives/${encodeURIComponent(packedName)}`;
   const server = http.createServer((request, response) => {
@@ -78,8 +78,8 @@ export async function startManagedRuntimeTestRegistry(options: {
     } catch {
       // Keep the raw path when the URL contains malformed escapes.
     }
-    if (decodedPath.includes(packageName)) {
-      packageRequestCount++;
+    if (decodedPath.includes("/archives/")) {
+      archiveRequestCount++;
     }
     if (request.method !== "GET") {
       response.writeHead(405).end();
@@ -115,7 +115,7 @@ export async function startManagedRuntimeTestRegistry(options: {
   return {
     url: serverAddress,
     requests: () => requestCount,
-    packageRequests: () => packageRequestCount,
+    archiveRequests: () => archiveRequestCount,
     close: async () => {
       server.close();
       await once(server, "close");
