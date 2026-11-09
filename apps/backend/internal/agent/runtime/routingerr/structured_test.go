@@ -96,6 +96,34 @@ func TestClassifyHTTP429PreservesKnownHardQuota(t *testing.T) {
 	}
 }
 
+func TestClassifyHTTP429KeepsFreeUsageNoticeAsRateLimit(t *testing.T) {
+	got := Classify(Input{
+		ProviderID: "opencode-acp",
+		HTTPStatus: 429,
+		Stderr:     "AI_APICallError: free usage limit reached",
+	})
+	if got.Code != CodeRateLimited || got.ClassifierRule != "http.429" {
+		t.Fatalf("free usage with HTTP 429 = %q/%q, want rate_limited/http.429", got.Code, got.ClassifierRule)
+	}
+}
+
+func TestHardQuotaRuleRateStatusAllowlist(t *testing.T) {
+	for _, tc := range []struct {
+		rule string
+		want bool
+	}{
+		{rule: "codex.stderr.quota.v1", want: true},
+		{rule: "claude.stderr.weekly_limit.v1", want: true},
+		{rule: "opencode.stderr.free_usage_prefixed.v1", want: false},
+		{rule: "opencode.stderr.free_usage_unlabelled.v1", want: false},
+		{rule: "opencode.stderr.quota.v1", want: false},
+	} {
+		if got := hardQuotaRuleOutranksRateStatus(tc.rule); got != tc.want {
+			t.Errorf("hardQuotaRuleOutranksRateStatus(%q) = %t, want %t", tc.rule, got, tc.want)
+		}
+	}
+}
+
 // @covers AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.32
 func TestClassifyKeepsAlreadyNormalizedError(t *testing.T) {
 	normalized := &Error{Code: CodeQuotaLimited, Confidence: ConfHigh, ClassifierRule: "upstream.rule"}

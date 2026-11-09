@@ -229,7 +229,8 @@ func classify(in Input) *Error {
 	if e := classifyStructured(in, excerpt); e != nil {
 		if e.Code == CodeRateLimited {
 			if quota, ok := matchProviderRules(in.ProviderID, excerpt, rawText); ok &&
-				quota.Code == CodeQuotaLimited && quota.Confidence == ConfHigh {
+				quota.Code == CodeQuotaLimited && quota.Confidence == ConfHigh &&
+				hardQuotaRuleOutranksRateStatus(quota.ClassifierRule) {
 				e = quota
 			}
 		}
@@ -284,6 +285,24 @@ func classify(in Input) *Error {
 	e := classifyByPhase(in, excerpt)
 	e.ResetHint = in.ResetHint
 	return applyInvariants(e)
+}
+
+// hardQuotaRuleOutranksRateStatus identifies the provider signatures that
+// prove an exhausted quota. Other quota-labeled diagnostics can describe a
+// rate limit, so a structured HTTP 429 remains authoritative for those rules.
+func hardQuotaRuleOutranksRateStatus(rule string) bool {
+	switch rule {
+	case "claude.stderr.quota.v1",
+		"claude.stderr.session_limit.v1",
+		"claude.stderr.weekly_limit.v1",
+		"codex.stderr.quota.v1",
+		"opencode.stderr.usage_limit.v1",
+		ruleOpenCodeGoUsageLimit,
+		"opencode.stderr.credit.v1":
+		return true
+	default:
+		return false
+	}
 }
 
 func classifyInjection(in Input, excerpt string) *Error {

@@ -21,7 +21,7 @@ system_design:
 Carry an explicitly supplied HTTP error status and opaque provider code on the
 provider error projection, and feed the known structured signals to the shared
 classifier from every consumer that classifies a provider diagnostic. Preserve
-known hard-quota meaning when a structured rate-limit signal is also present,
+allowlisted hard-quota meaning when a structured rate-limit signal is also present,
 and fail closed when structured and text classifications conflict.
 
 ## In scope
@@ -37,8 +37,9 @@ and fail closed when structured and text classifications conflict.
   from `RequestError.Data`.
 - ACP, Kanban, Office, retained turn-failure, quota-metadata, and lifecycle
   diagnostic consumers build their classifier input through `RoutingInput`.
-- A high-confidence hard-quota signature remains `quota_limited` with HTTP
-  429; a metadata-only 429 remains `rate_limited`.
+- An allowlisted high-confidence hard-quota signature remains `quota_limited`
+  with HTTP 429; a metadata-only 429 and a 429 paired with a non-allowlisted
+  quota diagnostic remain `rate_limited`.
 - Diagnostic correlation rejects a code conflict in both chunk-first and
   terminal-first event order.
 
@@ -59,7 +60,7 @@ gates.
    opaque provider code alone do not change classification.
 3. ACP `-32000` classifies as authentication required; `-32603` does not.
 4. Metadata is lent only to a diagnostic whose normalized text matches.
-5. A known usage quota with HTTP 429 remains hard and does not enter the
+5. A known hard usage quota with HTTP 429 remains hard and does not enter the
    interactive retry path. A matching 529 text diagnostic paired with an HTTP
    500 terminal status remains ordinary output in both event orders.
 

@@ -19,6 +19,8 @@ type rule struct {
 // broad capacity phrase.
 const RuleOpenCodeCapacityAdmission = "opencode.capacity.admission_refused.v1"
 
+const ruleOpenCodeGoUsageLimit = "opencode.acp.go_usage_limit.v1"
+
 const openCodeAdmissionRefusedSignature = `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?` +
 	`upstream\s+request\s+failed:\s*\[ttft_admission_refused\]\s+the\s+cell\s+is\s+at\s+capacity\b`
 
@@ -105,7 +107,7 @@ var providerRules = map[string][]rule{
 		// OpenCode Go reports its subscription limit through the ACP prompt
 		// error without a reset time. A correlated period usage-limit notice,
 		// when present, matches the rule above first and keeps its reset hint.
-		mustRule("opencode.acp.go_usage_limit.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?go\s+usage\s+limit\s+exceeded\b`, CodeQuotaLimited, ConfHigh),
+		mustRule(ruleOpenCodeGoUsageLimit, `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?go\s+usage\s+limit\s+exceeded\b`, CodeQuotaLimited, ConfHigh),
 		// Explicit credit exhaustion takes precedence over generic payment wording.
 		mustRule("opencode.stderr.credit.v1", `(?im)^\s*(?:AI_APICallError:[^\n]*\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b|(?:(?:Error|Internal\s+error|API\s+Error):\s*)?\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b)`, CodeQuotaLimited, ConfHigh),
 		mustRule("opencode.stderr.subscription.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?payment\s+required\b`, CodeSubscriptionRequired, ConfHigh),

@@ -30,9 +30,10 @@ verbatim from Part 1 when Part 1 reached its file-size limit; Part 1's
 remains the authoritative gate bullet list and cross-references it here.
 
 Structured fields add only allowlisted, namespace-aware classifier mappings.
-High-confidence hard-quota signatures retain their meaning when a generic HTTP
-429 status is also present. These mappings do not change policy values, retry
-ownership, or candidate ordering.
+Only allowlisted hard-quota signatures retain their meaning when a generic HTTP
+429 status is also present. Other quota-labeled diagnostics keep HTTP status
+precedence. These mappings do not change policy values, retry ownership, or
+candidate ordering.
 
 ## Requirement mapping
 
@@ -70,8 +71,8 @@ output, thought output, partial utility result, or tool activity. A chunk
 recorded from text alone must match the terminal failure's structured-aware
 classification. When lifecycle imports the diagnostic before the stream chunk
 arrives, its structured-aware and text-only classifications must also agree.
-Known hard-quota text remains `quota_limited` when the terminal error carries
-HTTP 429; a 429 without hard-quota evidence remains `rate_limited`. Recovery
+An allowlisted hard-quota rule remains `quota_limited` when the terminal error
+carries HTTP 429; a 429 without a matching rule remains `rate_limited`. Recovery
 must not depend on whether the chunk or the terminal failure is delivered
 first.
 
