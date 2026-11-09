@@ -16,8 +16,7 @@ type KanbanDragSurfaceProps = Pick<
 
 export const KANBAN_AUTO_SCROLL_OPTIONS = {
   layoutShiftCompensation: { x: false, y: true },
-  canScroll: (element: Element) =>
-    element.getAttribute("data-testid") !== "desktop-kanban-scroll-window",
+  canScroll: (element: Element) => !element.hasAttribute("data-kanban-bounded-drag-scroll"),
 } as const;
 
 // A drag's pointer release must not activate another workflow's card.

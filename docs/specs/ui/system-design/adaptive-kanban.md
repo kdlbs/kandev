@@ -71,6 +71,8 @@ the drag overlay appears. That cleanup must not restore snap during a task drag.
 
 `KanbanDragSurface` excludes only the desktop Kanban scroll window from
 dnd-kit's built-in auto-scroller through its supported `canScroll` option.
+The desktop viewport declares `data-kanban-bounded-drag-scroll` for this ownership
+check. Test IDs and the generic horizontal-axis attribute do not define ownership.
 Column and outer-container vertical auto-scroll remain with dnd-kit. Tablet
 scrolling retains its existing owner. The library's option accepts an element
 predicate, but it cannot supply a different horizontal extent for each tick.

@@ -44,6 +44,7 @@ export function AdaptiveDesktopKanban({
     >
       <div
         ref={scrollWindowRef}
+        data-kanban-bounded-drag-scroll=""
         aria-label={t("kanban:columns")}
         data-testid="desktop-kanban-scroll-window"
         className={`kanban-scroll-region h-full min-h-0 min-w-0 overflow-x-auto overscroll-y-auto ${

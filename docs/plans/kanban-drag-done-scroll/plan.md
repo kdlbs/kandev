@@ -210,3 +210,7 @@ No ADR is required for this local correction within the existing board ownership
 - Cached geometry can admit blank travel after resizing or changing temporary steps.
 - Snapshot-only tests miss movement during a held pointer. Real geometry and hit testing are required.
 - Native desktop webviews can differ from Chromium. Do not claim coverage without a separate run.
+
+## PR review follow-up
+
+Replaced test-ID-based scroll ownership with a dedicated production data attribute. Added a rename regression and vertical-owner geometry checks. Post-review validation passed: 47 focused tests, seven affected desktop browser cases on a fresh production build, typecheck, scoped lint, and specification checks. Remote CI and automated reviews remain pending for the follow-up head.

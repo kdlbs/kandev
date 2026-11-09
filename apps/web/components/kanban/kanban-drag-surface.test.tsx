@@ -164,7 +164,17 @@ it("delegates only the desktop lane to bounded horizontal scrolling", () => {
   ] as const) {
     const element = document.createElement("div");
     element.setAttribute("data-testid", id);
+    if (id === "desktop-kanban-scroll-window") {
+      element.setAttribute("data-kanban-bounded-drag-scroll", "");
+    }
     expect(KANBAN_AUTO_SCROLL_OPTIONS.canScroll(element)).toBe(expected);
   }
   expect(KANBAN_AUTO_SCROLL_OPTIONS.canScroll(document.documentElement)).toBe(true);
+});
+
+it("keeps a bounded scroll owner excluded after its test id changes", () => {
+  const element = document.createElement("div");
+  element.setAttribute("data-kanban-bounded-drag-scroll", "");
+  element.setAttribute("data-testid", "renamed-for-testing");
+  expect(KANBAN_AUTO_SCROLL_OPTIONS.canScroll(element)).toBe(false);
 });

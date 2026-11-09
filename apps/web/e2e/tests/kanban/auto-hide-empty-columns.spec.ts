@@ -489,6 +489,11 @@ test("retains vertical column auto-scroll during a task drag", async ({
     await beginPointerDrag(testPage, kanban.taskCard(tasks[0].id));
     await testPage.mouse.move(box.x + box.width / 2, box.y + box.height - 4, { steps: 20 });
     await expect.poll(() => column.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
+    const lane = testPage.getByTestId("desktop-kanban-scroll-window");
+    expect(
+      await lane.evaluate((element) => element.scrollHeight - element.clientHeight),
+    ).toBeLessThanOrEqual(1);
+    expect(await lane.evaluate((element) => element.scrollTop)).toBe(0);
     await cancelPointerDrag(testPage, apiClient, tasks[0].id, board.steps[0].id);
   } finally {
     await testPage.keyboard.press("Escape");
