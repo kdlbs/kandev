@@ -138,3 +138,22 @@ func TestAgentReviewRunIsLimitedToTheTaskRepositories(t *testing.T) {
 	require.Len(t, f.runner.launched, 1)
 	require.Equal(t, f.session, f.runner.launched[0].WorktreePath)
 }
+
+func TestAgentReviewSourceAdmitsOtherWorktreesOfTheRegisteredRepository(t *testing.T) {
+	f := newReviewSourceFixture(t)
+	slots := t.TempDir()
+	gateSlot := filepath.Join(slots, "gate-1")
+	foreignSlot := filepath.Join(slots, "foreign")
+	for _, add := range []struct{ repo, branch, path string }{
+		{f.registered, "gate-1", gateSlot},
+		{f.outside, "foreign", foreignSlot},
+	} {
+		cmd := exec.Command("git", "worktree", "add", "-b", add.branch, add.path)
+		cmd.Dir = add.repo
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git worktree add: %s", out)
+	}
+	requireWSSuccess(t, f.setSource(t, f.agent, gateSlot))
+	requireWSForbidden(t, f.setSource(t, f.agent, foreignSlot))
+}

@@ -26,5 +26,6 @@ fallback. Preserve candidate ordering, ordinary review behavior and the existing
 run owner. Accept the native action in the workflow YAML loader without changing
 the shipped default workflow.
 
-Validate using focused existing checks and disposable source tests. Do not start
-a provider or add a persistent test suite as part of this port.
+Validate using focused existing checks and committed focused `*_test.go`
+coverage for the changed logic, as the repository testing rule requires. Do not
+start a provider as part of this port.
