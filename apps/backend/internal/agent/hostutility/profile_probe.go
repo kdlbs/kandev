@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -16,9 +17,94 @@ import (
 
 var errProfileContextChanged = errors.New("profile discovery context changed during probe; retry")
 
+type profileDiscoveryFlight struct {
+	agentType string
+	scopeKey  string
+	signature string
+	cancel    context.CancelCauseFunc
+}
+
+func (m *Manager) beginProfileDiscoveryFlight(
+	parent context.Context,
+	agentType, scope, baseRevision string,
+	runtimeGeneration, contextGeneration uint64,
+) (context.Context, func()) {
+	flightCtx, cancel := context.WithCancelCause(parent)
+	scopeKey, signature := m.profileDiscoveryFlightIdentity(agentType, scope, baseRevision, runtimeGeneration, contextGeneration)
+	m.modelGenerationMu.Lock()
+	defer m.modelGenerationMu.Unlock()
+	if m.profileGenerations[agentType] != runtimeGeneration || m.profileContextGenerations[baseRevision] != contextGeneration {
+		cancel(errProfileContextChanged)
+		return flightCtx, func() {}
+	}
+	m.profileFlightMu.Lock()
+	if m.profileDiscoveryFlights == nil {
+		m.profileDiscoveryFlights = make(map[uint64]profileDiscoveryFlight)
+	}
+	var superseded []context.CancelCauseFunc
+	for id, flight := range m.profileDiscoveryFlights {
+		if flight.scopeKey == scopeKey && flight.signature != signature {
+			superseded = append(superseded, flight.cancel)
+			delete(m.profileDiscoveryFlights, id)
+		}
+	}
+	m.nextProfileDiscoveryFlight++
+	flightID := m.nextProfileDiscoveryFlight
+	m.profileDiscoveryFlights[flightID] = profileDiscoveryFlight{
+		agentType: agentType, scopeKey: scopeKey, signature: signature, cancel: cancel,
+	}
+	m.profileFlightMu.Unlock()
+	for _, supersede := range superseded {
+		supersede(errProfileContextChanged)
+	}
+	return flightCtx, func() {
+		cancel(context.Canceled)
+		m.profileFlightMu.Lock()
+		delete(m.profileDiscoveryFlights, flightID)
+		m.profileFlightMu.Unlock()
+	}
+}
+
+func (m *Manager) profileDiscoveryFlightIdentity(
+	agentType, scope, baseRevision string,
+	runtimeGeneration, contextGeneration uint64,
+) (string, string) {
+	scopeKey := profileHMAC(m.profileKey, []byte("profile-scope-v1:"+agentType+"\x00"+scope))
+	signature := fmt.Sprintf("%s:%d:%d", baseRevision, runtimeGeneration, contextGeneration)
+	return scopeKey, signature
+}
+
+func (m *Manager) profileDiscoveryFlightIsCurrentLocked(
+	agentType, scope, baseRevision string,
+	runtimeGeneration, contextGeneration uint64,
+) bool {
+	scopeKey, signature := m.profileDiscoveryFlightIdentity(agentType, scope, baseRevision, runtimeGeneration, contextGeneration)
+	for _, flight := range m.profileDiscoveryFlights {
+		if flight.agentType == agentType && flight.scopeKey == scopeKey && flight.signature == signature {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Manager) cancelProfileDiscoveryFlights(agentType string) {
+	m.profileFlightMu.Lock()
+	var cancellations []context.CancelCauseFunc
+	for id, flight := range m.profileDiscoveryFlights {
+		if agentType == "" || flight.agentType == agentType {
+			cancellations = append(cancellations, flight.cancel)
+			delete(m.profileDiscoveryFlights, id)
+		}
+	}
+	m.profileFlightMu.Unlock()
+	for _, cancel := range cancellations {
+		cancel(errProfileContextChanged)
+	}
+}
+
 // ProbeProfileCapabilities runs a one-shot profile-context discovery probe.
-// It never repairs or installs a managed runtime and never writes the shared
-// agent-wide capability cache.
+// Verified incomplete managed npm roots may be prepared privately once; the
+// resulting capability snapshot remains scoped to this profile context.
 func (m *Manager) ProbeProfileCapabilities(
 	ctx context.Context,
 	agentType string,
@@ -32,7 +118,7 @@ func (m *Manager) ProbeProfileCapabilities(
 	}
 	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), modelConfigResolveTimeout)
 	defer cancel()
-	inst, ia, cfg, command, runtimeGeneration, err := m.profileProbeInputs(probeCtx, agentType)
+	inst, ia, cfg, command, localEnv, runtimeGeneration, err := m.profileProbeInputs(probeCtx, agentType)
 	if err != nil {
 		return ProfileCapabilityResult{}, err
 	}
@@ -62,7 +148,11 @@ func (m *Manager) ProbeProfileCapabilities(
 		if !m.profileContextIsCurrent(agentType, baseRevision, runtimeGeneration, contextGeneration) {
 			return nil, errProfileContextChanged
 		}
-		return m.probeProfileCapabilitiesFlight(probeCtx, inst, ia, cfg, command, req, key, baseRevision, revision, runtimeGeneration, contextGeneration)
+		flightCtx, finishFlight := m.beginProfileDiscoveryFlight(
+			probeCtx, agentType, req.Context.Scope, baseRevision, runtimeGeneration, contextGeneration,
+		)
+		defer finishFlight()
+		return m.probeProfileCapabilitiesFlight(flightCtx, inst, ia, cfg, command, localEnv, req, key, baseRevision, revision, runtimeGeneration, contextGeneration)
 	})
 	if err != nil {
 		return ProfileCapabilityResult{}, err
@@ -79,6 +169,7 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 	ia agents.InferenceAgent,
 	cfg *agents.InferenceConfig,
 	command agents.Command,
+	localEnv map[string]string,
 	req ProfileCapabilityRequest,
 	key, baseRevision, revision string,
 	runtimeGeneration, contextGeneration uint64,
@@ -100,7 +191,7 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 	}
 	probeReq := buildProbeRequest(inst, ia, req.Refresh, command)
 	probeReq.ProfileContext = true
-	probeReq.InferenceConfig.Env = cloneStringMap(req.Context.Env)
+	probeReq.InferenceConfig.Env = mergeInferenceEnv(cloneStringMap(req.Context.Env), localEnv)
 	cliFlags := req.Context.CLIFlags
 	if pluginFlags != nil {
 		cliFlags = pluginFlags
@@ -111,12 +202,30 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 	defer cancel()
 	release, err := inst.acquireOperation(probeCtx, false)
 	if err != nil {
+		if errors.Is(context.Cause(probeCtx), errProfileContextChanged) {
+			return ProfileCapabilityResult{}, errProfileContextChanged
+		}
 		return ProfileCapabilityResult{}, err
 	}
 	resp, err := inst.client.Probe(probeCtx, probeReq)
 	release()
 	if err != nil {
+		if errors.Is(context.Cause(probeCtx), errProfileContextChanged) {
+			return ProfileCapabilityResult{}, errProfileContextChanged
+		}
 		return ProfileCapabilityResult{}, err
+	}
+	resp = m.retryManagedRuntimeProbe(
+		probeCtx, inst, ia, agents.Command{}, command, probeReq, resp,
+		func() bool {
+			return !errors.Is(context.Cause(probeCtx), errProfileContextChanged) &&
+				m.profileContextIsCurrent(inst.agentType, baseRevision, runtimeGeneration, contextGeneration)
+		},
+		true,
+	)
+	if errors.Is(context.Cause(probeCtx), errProfileContextChanged) ||
+		!m.profileContextIsCurrent(inst.agentType, baseRevision, runtimeGeneration, contextGeneration) {
+		return ProfileCapabilityResult{}, errProfileContextChanged
 	}
 	caps := capabilitiesFromProbe(inst.agentType, resp, time.Now())
 	stampConfiguredRuntimeVersion(&caps, ia, command)
@@ -125,7 +234,7 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 		caps.Error = profileProbeError(resp)
 	}
 	result := ProfileCapabilityResult{Capabilities: caps, ContextRevision: revision}
-	if !m.setProfileCapabilityIfCurrent(inst.agentType, baseRevision, runtimeGeneration, contextGeneration, key, result) {
+	if !m.setProfileCapabilityIfCurrent(inst.agentType, req.Context.Scope, baseRevision, runtimeGeneration, contextGeneration, key, result) {
 		return ProfileCapabilityResult{}, errProfileContextChanged
 	}
 	m.log.Debug("profile capability probe completed",
@@ -133,6 +242,9 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 		zap.String("status", string(caps.Status)),
 		zap.String("context_revision", revision),
 		zap.Int("duration_ms", caps.DurationMs))
+	if errors.Is(context.Cause(ctx), errProfileContextChanged) {
+		return ProfileCapabilityResult{}, errProfileContextChanged
+	}
 	return result, nil
 }
 
@@ -149,7 +261,7 @@ func (m *Manager) resolveProfileModelConfig(
 	}
 	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), modelConfigResolveTimeout)
 	defer cancel()
-	inst, ia, cfg, command, runtimeGeneration, err := m.profileProbeInputs(probeCtx, agentType)
+	inst, ia, cfg, command, localEnv, runtimeGeneration, err := m.profileProbeInputs(probeCtx, agentType)
 	if err != nil {
 		return ModelConfigResolution{}, err
 	}
@@ -170,8 +282,24 @@ func (m *Manager) resolveProfileModelConfig(
 		}
 	}
 	value, err, _ := m.profileGroup.Do(key, func() (interface{}, error) {
+		if !req.Refresh {
+			cached, ok, current := m.getProfileResolutionIfCurrent(agentType, baseRevision, runtimeGeneration, contextGeneration, key)
+			if !current {
+				return nil, errProfileContextChanged
+			}
+			if ok {
+				return cached, nil
+			}
+		}
+		if !m.profileContextIsCurrent(agentType, baseRevision, runtimeGeneration, contextGeneration) {
+			return nil, errProfileContextChanged
+		}
+		flightCtx, finishFlight := m.beginProfileDiscoveryFlight(
+			probeCtx, agentType, req.ProfileContext.Scope, baseRevision, runtimeGeneration, contextGeneration,
+		)
+		defer finishFlight()
 		return m.resolveProfileModelConfigFlightOrCached(
-			probeCtx, inst, ia, command, req, key, baseRevision, revision, runtimeGeneration, contextGeneration,
+			flightCtx, inst, ia, command, localEnv, req, key, baseRevision, revision, runtimeGeneration, contextGeneration,
 		)
 	})
 	if err != nil {
@@ -188,6 +316,7 @@ func (m *Manager) resolveProfileModelConfigFlightOrCached(
 	inst *instance,
 	ia agents.InferenceAgent,
 	command agents.Command,
+	localEnv map[string]string,
 	req ModelConfigResolutionRequest,
 	key, baseRevision, revision string,
 	runtimeGeneration, contextGeneration uint64,
@@ -207,7 +336,7 @@ func (m *Manager) resolveProfileModelConfigFlightOrCached(
 		return nil, errProfileContextChanged
 	}
 	return m.resolveProfileModelConfigFlight(
-		ctx, inst, ia, command, req, key, baseRevision, revision, runtimeGeneration, contextGeneration,
+		ctx, inst, ia, command, localEnv, req, key, baseRevision, revision, runtimeGeneration, contextGeneration,
 	)
 }
 
@@ -216,6 +345,7 @@ func (m *Manager) resolveProfileModelConfigFlight(
 	inst *instance,
 	ia agents.InferenceAgent,
 	command agents.Command,
+	localEnv map[string]string,
 	req ModelConfigResolutionRequest,
 	key, baseRevision, revision string,
 	runtimeGeneration, contextGeneration uint64,
@@ -239,7 +369,7 @@ func (m *Manager) resolveProfileModelConfigFlight(
 	probeReq.Model = req.Model
 	probeReq.Mode = req.Mode
 	probeReq.ConfigOptions = cloneStringMap(req.ConfigOptions)
-	probeReq.InferenceConfig.Env = cloneStringMap(req.ProfileContext.Env)
+	probeReq.InferenceConfig.Env = mergeInferenceEnv(cloneStringMap(req.ProfileContext.Env), localEnv)
 	cliFlags := req.ProfileContext.CLIFlags
 	if pluginFlags != nil {
 		cliFlags = pluginFlags
@@ -250,12 +380,30 @@ func (m *Manager) resolveProfileModelConfigFlight(
 	defer cancel()
 	release, err := inst.acquireOperation(probeCtx, false)
 	if err != nil {
+		if errors.Is(context.Cause(probeCtx), errProfileContextChanged) {
+			return ModelConfigResolution{}, errProfileContextChanged
+		}
 		return ModelConfigResolution{}, err
 	}
 	resp, err := inst.client.Probe(probeCtx, probeReq)
 	release()
 	if err != nil {
+		if errors.Is(context.Cause(probeCtx), errProfileContextChanged) {
+			return ModelConfigResolution{}, errProfileContextChanged
+		}
 		return ModelConfigResolution{}, err
+	}
+	resp = m.retryManagedRuntimeProbe(
+		probeCtx, inst, ia, agents.Command{}, command, probeReq, resp,
+		func() bool {
+			return !errors.Is(context.Cause(probeCtx), errProfileContextChanged) &&
+				m.profileContextIsCurrent(inst.agentType, baseRevision, runtimeGeneration, contextGeneration)
+		},
+		true,
+	)
+	if errors.Is(context.Cause(probeCtx), errProfileContextChanged) ||
+		!m.profileContextIsCurrent(inst.agentType, baseRevision, runtimeGeneration, contextGeneration) {
+		return ModelConfigResolution{}, errProfileContextChanged
 	}
 	resolution := ModelConfigResolution{
 		AgentType: inst.agentType, Model: req.Model, Status: profileProbeStatus(resp),
@@ -267,37 +415,40 @@ func (m *Manager) resolveProfileModelConfigFlight(
 	} else {
 		resolution.Error = profileProbeError(resp)
 	}
-	if !m.setProfileResolutionIfCurrent(inst.agentType, baseRevision, runtimeGeneration, contextGeneration, key, resolution) {
+	if !m.setProfileResolutionIfCurrent(inst.agentType, req.ProfileContext.Scope, baseRevision, runtimeGeneration, contextGeneration, key, resolution) {
 		return ModelConfigResolution{}, errProfileContextChanged
 	}
 	m.log.Debug("profile model options probe completed",
 		zap.String("agent_type", inst.agentType),
 		zap.String("status", string(resolution.Status)),
 		zap.String("context_revision", revision))
+	if errors.Is(context.Cause(ctx), errProfileContextChanged) {
+		return ModelConfigResolution{}, errProfileContextChanged
+	}
 	return resolution, nil
 }
 
 func (m *Manager) profileProbeInputs(
 	ctx context.Context,
 	agentType string,
-) (*instance, agents.InferenceAgent, *agents.InferenceConfig, agents.Command, uint64, error) {
+) (*instance, agents.InferenceAgent, *agents.InferenceConfig, agents.Command, map[string]string, uint64, error) {
 	runtimeGeneration := m.profileGeneration(agentType)
 	inst, ia, err := m.getInstance(ctx, agentType)
 	if err != nil {
-		return nil, nil, nil, agents.Command{}, 0, err
+		return nil, nil, nil, agents.Command{}, nil, 0, err
 	}
 	cfg := inferenceConfigForHostUtility(ia)
 	if cfg == nil || !cfg.Supported {
-		return nil, nil, nil, agents.Command{}, 0, errors.New("inference configuration not available")
+		return nil, nil, nil, agents.Command{}, nil, 0, errors.New("inference configuration not available")
 	}
-	command, err := m.resolveInferenceCommand(ctx, agentType, ia, agents.Command{})
+	command, localEnv, err := m.resolveInferenceCommand(ctx, agentType, ia, agents.Command{})
 	if err != nil {
-		return nil, nil, nil, agents.Command{}, 0, err
+		return nil, nil, nil, agents.Command{}, nil, 0, err
 	}
 	if m.profileGeneration(agentType) != runtimeGeneration {
-		return nil, nil, nil, agents.Command{}, 0, errProfileContextChanged
+		return nil, nil, nil, agents.Command{}, nil, 0, errProfileContextChanged
 	}
-	return inst, ia, cfg, command, runtimeGeneration, nil
+	return inst, ia, cfg, command, localEnv, runtimeGeneration, nil
 }
 
 func (m *Manager) profileGeneration(agentType string) uint64 {
@@ -311,7 +462,6 @@ func (m *Manager) invalidateProfileCapabilities(agentType string) uint64 {
 		return 0
 	}
 	m.modelGenerationMu.Lock()
-	defer m.modelGenerationMu.Unlock()
 	if m.profileGenerations == nil {
 		m.profileGenerations = make(map[string]uint64)
 	}
@@ -319,7 +469,10 @@ func (m *Manager) invalidateProfileCapabilities(agentType string) uint64 {
 	if m.profileCache != nil {
 		m.profileCache.invalidateAgent(agentType)
 	}
-	return m.profileGenerations[agentType]
+	generation := m.profileGenerations[agentType]
+	m.cancelProfileDiscoveryFlights(agentType)
+	m.modelGenerationMu.Unlock()
+	return generation
 }
 
 func (m *Manager) profileContextGeneration(agentType, baseRevision string, runtimeGeneration uint64, refresh bool) (uint64, bool) {
@@ -392,20 +545,30 @@ func (m *Manager) getProfileResolutionIfCurrent(agentType, baseRevision string, 
 	return resolution, ok, true
 }
 
-func (m *Manager) setProfileCapabilityIfCurrent(agentType, baseRevision string, runtimeGeneration, contextGeneration uint64, key string, result ProfileCapabilityResult) bool {
+func (m *Manager) setProfileCapabilityIfCurrent(agentType, scope, baseRevision string, runtimeGeneration, contextGeneration uint64, key string, result ProfileCapabilityResult) bool {
 	m.modelGenerationMu.Lock()
 	defer m.modelGenerationMu.Unlock()
 	if m.profileGenerations[agentType] != runtimeGeneration || m.profileContextGenerations[baseRevision] != contextGeneration {
+		return false
+	}
+	m.profileFlightMu.Lock()
+	defer m.profileFlightMu.Unlock()
+	if !m.profileDiscoveryFlightIsCurrentLocked(agentType, scope, baseRevision, runtimeGeneration, contextGeneration) {
 		return false
 	}
 	m.profileCache.setCapability(key, agentType, result, time.Now())
 	return true
 }
 
-func (m *Manager) setProfileResolutionIfCurrent(agentType, baseRevision string, runtimeGeneration, contextGeneration uint64, key string, resolution ModelConfigResolution) bool {
+func (m *Manager) setProfileResolutionIfCurrent(agentType, scope, baseRevision string, runtimeGeneration, contextGeneration uint64, key string, resolution ModelConfigResolution) bool {
 	m.modelGenerationMu.Lock()
 	defer m.modelGenerationMu.Unlock()
 	if m.profileGenerations[agentType] != runtimeGeneration || m.profileContextGenerations[baseRevision] != contextGeneration {
+		return false
+	}
+	m.profileFlightMu.Lock()
+	defer m.profileFlightMu.Unlock()
+	if !m.profileDiscoveryFlightIsCurrentLocked(agentType, scope, baseRevision, runtimeGeneration, contextGeneration) {
 		return false
 	}
 	m.profileCache.setResolution(key, agentType, resolution, time.Now())

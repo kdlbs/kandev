@@ -33,6 +33,13 @@ type OwnerAdmission = lifecycle.OwnerAdmission
 type LaunchRequest = lifecycle.LaunchRequest
 type RouteOverride = lifecycle.RouteOverride
 type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
+
+// CapturedResourceCircuitKey reads the immutable resource of an execution;
+// it never reconstructs identity from current profile settings.
+func CapturedResourceCircuitKey(metadata map[string]interface{}, executionID, profileID string) string {
+	return lifecycle.CapturedResourceCircuitKey(metadata, executionID, profileID)
+}
+
 type AgentExecution = lifecycle.AgentExecution
 type CachedModeState = lifecycle.CachedModeState
 type IdleSuspensionIdentity = lifecycle.IdleSuspensionIdentity
@@ -57,6 +64,9 @@ const (
 	BackgroundWorkloadProbeResultSettled = client.ProbeResultSettled
 	BackgroundWorkloadProbeResultUnknown = client.ProbeResultUnknown
 )
+
+// MetadataKeyTaskEnvironmentID identifies the environment bound to an executor runtime.
+const MetadataKeyTaskEnvironmentID = lifecycle.MetadataKeyTaskEnvironmentID
 
 type CursorMCPAuthenticationSpec = lifecycle.CursorMCPAuthenticationSpec
 type CursorMCPRetryResult = lifecycle.CursorMCPRetryResult

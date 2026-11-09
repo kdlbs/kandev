@@ -554,6 +554,8 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithBasicAuth(
 	}, 0)
 }
 
+// refreshWorkspaceRepository updates origin and the Kandev-owned PR snapshot refs
+// without changing the checkout HEAD.
 func (c *Cloner) refreshWorkspaceRepository(
 	ctx context.Context, targetPath, cloneURL string, auth *cloneAuth, prNumber int,
 ) error {
@@ -583,7 +585,7 @@ func (c *Cloner) refreshWorkspaceRepository(
 		return err
 	}
 	if prNumber > 0 {
-		prRefspec := fmt.Sprintf("pull/%d/head:refs/kandev/pull/%d/head", prNumber, prNumber)
+		prRefspec := fmt.Sprintf("refs/pull/%d/head:refs/kandev/pull/%d/head", prNumber, prNumber)
 		if err := runFetch(prRefspec); err != nil {
 			return fmt.Errorf("refresh scoped workspace pull request: %w", err)
 		}

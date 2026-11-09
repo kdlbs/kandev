@@ -184,6 +184,57 @@ agent_tools:
       read_only_hint: true
       destructive_hint: false
       idempotent_hint: true
+  - name: list_findings
+    description: Lists findings in the workspace for private automations
+    surfaces: [automation]
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        scope:
+          type: string
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [findings, task_id, surface]
+      properties:
+        findings:
+          type: array
+          items:
+            type: object
+        task_id:
+          type: string
+        surface:
+          type: string
+    annotations:
+      read_only_hint: true
+      destructive_hint: false
+      idempotent_hint: true
+  - name: complete_report
+    description: Records a completed report from a private automation
+    surfaces: [automation]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [report]
+      properties:
+        report:
+          type: string
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [accepted, report, task_id]
+      properties:
+        accepted:
+          type: boolean
+        report:
+          type: string
+        task_id:
+          type: string
+    annotations:
+      read_only_hint: false
+      destructive_hint: false
+      idempotent_hint: false
 
 webhooks:
   - key: "test-hook"

@@ -1,0 +1,16 @@
+{
+  "jsonrpc": "2.0",
+  "method": "github.com/copilot/sessionEvent",
+  "params": {
+    "sessionId": "258e12a9-9e5a-4820-9f20-ee43e895e958",
+    "timestamp": "2026-11-05T23:27:14.421Z",
+    "type": "session.compaction_complete",
+    "data": {
+      "compactionAttemptId": "a1e1c2f4-01f3-4b95-a57a-c72e6a7eeb21",
+      "trigger": "threshold",
+      "success": false,
+      "outcome": "failed",
+      "failureReason": "empty_model_response"
+    }
+  }
+}

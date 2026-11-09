@@ -21,11 +21,12 @@ const (
 	ActionWorkspaceDelete = "workspace.delete"
 
 	// Repository actions
-	ActionRepositoryList   = "repository.list"
-	ActionRepositoryCreate = "repository.create"
-	ActionRepositoryGet    = "repository.get"
-	ActionRepositoryUpdate = "repository.update"
-	ActionRepositoryDelete = "repository.delete"
+	ActionRepositoryList              = "repository.list"
+	ActionRepositoryCreate            = "repository.create"
+	ActionRepositoryGet               = "repository.get"
+	ActionRepositoryUpdate            = "repository.update"
+	ActionRepositoryDelete            = "repository.delete"
+	ActionRepositoryValidateRemoteURL = "repository.remote_url.validate"
 
 	// Repository Set actions
 	ActionRepositorySetList   = "repository_set.list"
@@ -722,6 +723,7 @@ const (
 	ActionAutomationTriggerUpdate       = "automation.trigger.update"
 	ActionAutomationTriggerDelete       = "automation.trigger.delete"
 	ActionAutomationTriggerTypes        = "automation.trigger_types"
+	ActionAutomationPluginToolOptions   = "automation.plugin_tool_options"
 	ActionAutomationWebhookRevealSecret = "automation.webhook.reveal_secret"
 	ActionAutomationRunDelete           = "automation.run.delete"
 	ActionAutomationRunStop             = "automation.run.stop"

@@ -4,6 +4,7 @@ type RecoveryMetadata = {
   recovery_phase?: string;
   recovery_disposition?: string;
   recovery_reason?: string;
+  recovery_activity_confirmed?: boolean;
   attempts_started?: number;
   runtime_retained?: boolean;
 };
@@ -14,6 +15,19 @@ export function continuationPhase(metadata: RecoveryMetadata) {
   return phase === "waiting" || phase === "reconnecting" || phase === "continuing"
     ? phase
     : undefined;
+}
+
+/**
+ * True only for a persisted, attested continuation that has already resumed
+ * work. A missing, false, or malformed marker keeps the historical feedback.
+ */
+export function continuationActivityConfirmed(metadata: RecoveryMetadata) {
+  return (
+    metadata.recovery_activity_confirmed === true &&
+    metadata.retrying === true &&
+    metadata.recovery_mode === "continue" &&
+    metadata.recovery_phase === "continuing"
+  );
 }
 
 export function interruptionRecoveryKey(metadata: RecoveryMetadata) {

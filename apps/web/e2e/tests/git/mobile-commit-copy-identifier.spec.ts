@@ -5,6 +5,7 @@ import {
   openTaskSession,
   createStandardProfile,
 } from "../../helpers/git-helper";
+import { expectTouchSquareControl } from "../../helpers/control-sizing";
 import path from "node:path";
 
 test.describe.configure({ retries: 0 });
@@ -42,8 +43,7 @@ test("copies the full identifier by touch within the phone detail", async ({
   const action = detail.getByRole("button", { name: "Copy identifier" });
   await expect(action).toBeVisible();
   const box = await action.boundingBox();
-  expect(box!.width).toBeGreaterThanOrEqual(44);
-  expect(box!.height).toBeGreaterThanOrEqual(44);
+  await expectTouchSquareControl(action);
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(testPage.viewportSize()!.width);
   expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(

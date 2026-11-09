@@ -16,6 +16,10 @@ Open **Projects** or the sidebar's project add action, create a project, and ope
 
 A project can list local repository paths and supported Git URLs. Root tasks created with that project and no explicit repository selection attach the project's sources before their first launch. An explicit repository selection takes precedence, and a child inherits its parent's repository context. Invalid or unreadable project sources can prevent task creation.
 
+Bare remote URLs resolve from the selected workspace. Public GitHub, GitLab, and Azure DevOps URLs use the built-in provider rules. A self-managed GitLab URL resolves when the workspace has a GitLab connection whose host matches the URL origin exactly, including its scheme, host, and port. An installed repository plugin can resolve its own URL when the plugin is active, declares the repository inspection capability, and has a connection configured for that workspace. Kandev does not hold hostname lists for other providers, so install the plugin for the provider you use.
+
+An unknown URL, a URL that no connection or plugin recognizes, and a URL that two providers both recognize are rejected before any repository or task is created. Saved repository IDs and explicit provider selections keep their existing resolution rules and never fall back to another provider.
+
 Changing the project's sources later does not change existing task attachments. Check the task's actual repository context if it was created before a project edit. See [Executors](executors.md) for environment setup and [Git operations](git-operations.md) for worktrees and repository behavior.
 
 ## Create and assign a task

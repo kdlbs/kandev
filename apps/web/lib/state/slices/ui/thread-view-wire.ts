@@ -50,6 +50,7 @@ export const THREAD_SORT_KEYS: readonly ThreadSortKey[] = [
   "workflow",
   "priority",
   "primaryAgent",
+  "selection",
 ];
 
 const THREAD_FILTER_OPS: readonly ThreadFilterOp[] = [

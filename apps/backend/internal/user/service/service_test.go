@@ -2057,7 +2057,7 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 				Branch:       "feature",
 			},
 		}
-		repo := &recordingUserRepository{updateSettings: updatedSettings}
+		repo := &recordingUserRepository{updateSettings: updatedSettings, updateChanged: true}
 		eventBus := &recordingEventBus{}
 		svc := newTestService(repo, eventBus)
 
@@ -2105,7 +2105,7 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 				WorkflowIDsByWorkspace: map[string]string{"workspace-1": "workflow-1"},
 			},
 		}
-		repo := &recordingUserRepository{updateSettings: updatedSettings}
+		repo := &recordingUserRepository{updateSettings: updatedSettings, updateChanged: true}
 		eventBus := &recordingEventBus{}
 		svc := newTestService(repo, eventBus)
 
@@ -2117,6 +2117,22 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 		}
 		if len(eventBus.publishedEvents) != 1 {
 			t.Fatalf("expected one settings event, got %d", len(eventBus.publishedEvents))
+		}
+	})
+
+	t.Run("unchanged patch publishes no settings event", func(t *testing.T) {
+		repo := &recordingUserRepository{updateSettings: &models.UserSettings{UserID: store.DefaultUserID}, updateChanged: false}
+		eventBus := &recordingEventBus{}
+		svc := newTestService(repo, eventBus)
+
+		if err := svc.RecordTaskCreateLastUsed(context.Background(), models.TaskCreateLastUsed{Branch: "feature"}); err != nil {
+			t.Fatalf("RecordTaskCreateLastUsed: %v", err)
+		}
+		if repo.updateCalls != 1 {
+			t.Fatalf("expected one repository call, got %d", repo.updateCalls)
+		}
+		if len(eventBus.publishedEvents) != 0 {
+			t.Fatalf("expected no settings event, got %d", len(eventBus.publishedEvents))
 		}
 	})
 
@@ -2235,6 +2251,7 @@ type recordingUserRepository struct {
 	updateUserID                              string
 	updatePatch                               models.TaskCreateLastUsed
 	updateSettings                            *models.UserSettings
+	updateChanged                             bool
 	updateErr                                 error
 	getSettings                               *models.UserSettings
 	getErr                                    error
@@ -2298,14 +2315,14 @@ func (r *recordingUserRepository) UpdateTaskCreateLastUsed(
 	_ context.Context,
 	userID string,
 	patch models.TaskCreateLastUsed,
-) (*models.UserSettings, error) {
+) (*models.UserSettings, bool, error) {
 	r.updateCalls++
 	r.updateUserID = userID
 	r.updatePatch = patch
 	if r.updateErr != nil {
-		return nil, r.updateErr
+		return nil, false, r.updateErr
 	}
-	return r.updateSettings, nil
+	return r.updateSettings, r.updateChanged, nil
 }
 
 // Close records the close call.

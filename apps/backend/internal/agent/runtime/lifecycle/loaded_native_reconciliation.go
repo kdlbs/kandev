@@ -71,7 +71,13 @@ func (m *Manager) readLoadedNativeHistoricalOwner(ctx context.Context, execution
 	if err != nil {
 		return nil, err
 	}
-	return m.loadedNativeHistoricalOwner(ctx, execution, status, peer, rows)
+	unproven, err := nativeResumeUnprovenBackendRows(
+		ctx, execution, status, peer, rows, m.streamManager.deliveryRepository(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return m.loadedNativeHistoricalOwner(ctx, execution, status, peer, append(rows, unproven...))
 }
 func (m *Manager) loadedNativeHistoricalOwner(ctx context.Context, execution *AgentExecution, status *agentctl.DeliveryStatus, peer []journal.Submission, rows []*models.AgentDeliverySubmission) (*AgentDeliveryRecoveryIdentity, error) {
 	var historical *AgentDeliveryRecoveryIdentity
@@ -84,11 +90,22 @@ func (m *Manager) loadedNativeHistoricalOwner(ctx context.Context, execution *Ag
 				return nil, fmt.Errorf("%w: independent unretired history", ErrDeliveryRecoveryBlocked)
 			}
 			candidate := *row
-			if candidate.State == models.DeliverySubmissionDispatching && submission.State == journal.SubmissionInterruptedUnknown {
+			switch {
+			case candidate.State == models.DeliverySubmissionDispatching && submission.State == journal.SubmissionInterruptedUnknown:
 				candidate.State = models.DeliverySubmissionInterruptedUnknown
-			}
-			if !peerMatchesUnknownHistory(execution, status, submission, &candidate) {
-				return nil, ErrDeliveryOwnerMismatch
+				if !peerMatchesUnknownHistory(execution, status, submission, &candidate) {
+					return nil, ErrDeliveryOwnerMismatch
+				}
+			case candidate.State == models.DeliverySubmissionCompleted:
+				// A completed label without terminal proof still needs the full
+				// dead-owner assessment; discovery only identifies the owner.
+				if !peerMatchesUnprovenCompletion(execution, status, submission, &candidate) {
+					return nil, ErrDeliveryOwnerMismatch
+				}
+			default:
+				if !peerMatchesUnknownHistory(execution, status, submission, &candidate) {
+					return nil, ErrDeliveryOwnerMismatch
+				}
 			}
 			historical = m.persistedDeliveryRecordControlIdentity(ctx, DeliveryRecordEvidenceRequest{TaskID: execution.TaskID, SessionID: execution.SessionID}, journal.SubmissionSummary{
 				ID: submission.ID, SessionID: submission.SessionID, IncarnationID: submission.IncarnationID, HarnessGeneration: submission.HarnessGeneration, StreamID: submission.StreamID})

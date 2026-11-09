@@ -2,7 +2,7 @@
 status: current
 system: platform
 created: 2026-10-02
-updated: 2026-10-26
+updated: 2026-10-30
 requirements:
   - REQ-PLATFORM-INTERRUPTION-CONTINUATION-001
   - REQ-PLATFORM-INTERRUPTION-CONTINUATION-002
@@ -262,9 +262,76 @@ fabricated user message.
 
 Reuse the single inline `TransientRetryNotice`, accepted-turn output, and durable
 failure records. Waiting shows provider, actual failure category, attempt/countdown,
-and Cancel. Continuing shows backend-owned phase, without claiming a TCP failure
-for resource exhaustion. Cancellation/exhaustion reports attempts actually started.
+and Cancel. Continuing shows the backend-owned phase until confirmed activity
+changes the notice to neutral feedback. Resource exhaustion never claims a TCP
+failure. Cancellation/exhaustion reports attempts actually started.
 The internal prompt never renders in any message surface or user-prompt index.
+
+### Confirmed continuation activity
+
+This section implements `AC-PLATFORM-INTERRUPTION-CONTINUATION-003.5` through
+`003.7`. Recovery presentation and episode ownership have separate lifetimes.
+The accepted continuation remains in `transientRetries` after resumed activity.
+Neither output nor a neutral notice calls `resetTransientRetry`, retires the
+notice fence, completes a turn, or authorizes another prompt.
+
+Add optional boolean `recovery_activity_confirmed` to the existing status-message
+metadata. Only the backend sets it. Keep `retrying: true` and
+`recovery_phase: continuing` so the existing owner, cancellation, and cleanup
+paths remain applicable. Retain the original semantic failure code and actual
+attempt metadata for diagnostics. Persist neutral content and variant with the
+marker. No new table, retry job, capability version, or release toggle is needed.
+Absent, false, or malformed markers retain historical feedback behavior.
+
+Use `handleAgentStreamEvent` after its execution and cancellation guards to
+observe activity. Require the current recovery entry, continuation mode, a known
+current prompt attempt, and non-empty execution plus nonzero prompt generation.
+The event must match both the current prompt identity and the entry's
+`acceptedExecution` / `acceptedGeneration`. A session state transition is
+insufficient. `recordContinuationAcceptance` remains the acceptance boundary.
+
+Qualifying output is non-empty assistant text or reasoning, excluding user text,
+provider diagnostic candidates, and nested/background frames. Foreground tool
+activity needs a non-empty tool ID and positive attribution to the accepted
+prompt. Reuse `ParentToolCallID`, `normalizedIsBackgroundTask`, and existing tool
+ownership classification. A tool update without a corresponding current-prompt
+call cannot establish recovery. In particular, a late result for an inherited
+pending V3 tool is not proof that the new prompt resumed. Do not use transcript
+length, timestamps, tool titles, or session-wide activity as identity evidence.
+
+Activity and acceptance can arrive through different callbacks. Capture bounded
+qualifying activity against its prompt identity, then reconcile it when acceptance
+is recorded. Also reconcile on subsequent stream activity. Never synthesize
+acceptance from that evidence. Acceptance and the ordinary continuing-phase write
+must preserve an already confirmed presentation rather than restore warning copy.
+
+Serialize presentation publication with the existing per-session notice mutex.
+Revalidate the current entry before writing. Use the existing message update path
+and its message-updated publication so every viewer receives the same persisted
+metadata. Publish once per accepted prompt rather than once per text chunk.
+Mark publication complete only after a successful write. A later qualifying event
+can retry a failed write. Retain the existing bounded diagnostic logging.
+Follow the notice-to-entry lock order and release the prompt-evidence lock before
+acquiring the notice mutex.
+
+A later admitted failure creates a new retry reservation. Carry forward its
+existing policy and started count, but clear activity and publication state for
+the failed prompt. Its waiting notice omits the confirmed marker. Late callbacks
+must match the new entry and its accepted identity before any presentation write.
+Cancel, human supersession, success, and shutdown retain existing retirement
+semantics. Startup never treats the persisted marker as dispatch authority.
+
+`ActionMeta` and the feedback helper consume the optional marker only with an
+attested continuation mode and continuing phase. `TransientRetryNotice` then
+shows localized neutral “Agent resumed” feedback and the existing Cancel action.
+It omits warning styling, the failure heading, countdown, and attempt counter.
+The same status region announces this change without focus movement. The
+existing `retryNoticeVisible` behavior can keep the neutral card reachable while
+running. Waiting, reconnecting, legacy replay, and manual error records retain
+their existing presentation.
+
+The [resumed feedback package](../../../plans/continuation-resumed-feedback/plan.md)
+owns this amendment. Earlier completed packages retain their historical results.
 
 Retained-runtime refusals must carry `recovery_reason` from the same admission
 checks used for dispatch. Keep the closed existing reasons (`unsafe_work`,

@@ -86,6 +86,70 @@ test.describe("Mobile code walkthrough", () => {
     });
   });
 
+  // @covers AC-TASKS-WALKTHROUGH-TIME-001.1, AC-TASKS-WALKTHROUGH-TIME-001.3
+  // @covers AC-TASKS-WALKTHROUGH-TIME-001.4
+  test("shows generation time in English and Portuguese within the phone sheet", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const ws = watchWs(testPage);
+    await seedWalkthroughTask(testPage, apiClient, seedData);
+    const savedWalkthrough = ws.waitForResponse("task.walkthrough.get");
+    await testPage.getByTestId("walkthrough-launcher").tap();
+    const savedAt = (await savedWalkthrough).payload.updated_at;
+    expect(typeof savedAt).toBe("string");
+    const card = testPage.getByTestId("walkthrough-floating");
+    const generatedAt = card.getByTestId("walkthrough-generated-at");
+    for (const locale of ["en", "pt-pt"]) {
+      if (locale === "pt-pt") {
+        await testPage.evaluate(() => {
+          document.cookie = "kandev_locale=pt-pt; path=/; SameSite=Lax";
+        });
+        await testPage.reload();
+        await testPage.getByTestId("walkthrough-launcher").tap();
+      }
+      await expect(generatedAt).toHaveCount(1);
+      await expect(generatedAt).toHaveAttribute("datetime", savedAt as string);
+      const formatted = await testPage.evaluate(
+        ({ value, locale }) =>
+          new Intl.DateTimeFormat(locale, {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          }).format(new Date(value)),
+        { value: savedAt as string, locale },
+      );
+      await expect(generatedAt).toHaveText(
+        `${locale === "en" ? "Generated" : "Gerado em"} ${formatted}`,
+      );
+      const bounds = await card.boundingBox();
+      const timeBounds = await generatedAt.boundingBox();
+      const badgeTextLeft = await card.getByTestId("walkthrough-badge").evaluate((badge) => {
+        const range = document.createRange();
+        range.selectNodeContents(badge);
+        return range.getBoundingClientRect().x;
+      });
+      expect(timeBounds!.x).toBeCloseTo(badgeTextLeft, 0);
+      await expect(generatedAt).toHaveCSS("text-align", "left");
+      expect(timeBounds!.x).toBeGreaterThanOrEqual(bounds!.x);
+      expect(timeBounds!.x + timeBounds!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width);
+      expect(timeBounds!.y + timeBounds!.height).toBeLessThanOrEqual(bounds!.y + bounds!.height);
+      expect(await generatedAt.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      await expect(card.getByTestId("walkthrough-close")).toBeVisible();
+      await expect(card.getByTestId("walkthrough-next")).toBeVisible();
+      expect(
+        await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      ).toBe(true);
+      await prCapture.screenshot(`walkthrough-generation-time-${locale}`, {
+        caption: `Walkthrough generation time in the phone sheet (${locale})`,
+      });
+    }
+  });
+
   // @covers AC-UI-WALKTHROUGH-STEP-FEEDBACK-003.4
   test("selects a step with one touch after the viewport height changes", async ({
     testPage,

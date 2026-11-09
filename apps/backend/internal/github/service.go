@@ -218,6 +218,7 @@ type Service struct {
 	batchedProgressMu         sync.Mutex
 	batchedPRProgress         map[string]*batchedPRProgressEntry
 	batchedBranchProgress     map[string]*batchedBranchProgressEntry
+	batchedWorkflowProgress   map[string]*workflowPhaseProgressEntry
 
 	// stopCtx / stopCancel / bgWG own the lifecycle of background goroutines
 	// the service spawns lazily (currently refreshStaleWorkspaceWatches).

@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
 import { SessionPage } from "../pages/session-page";
@@ -151,4 +151,158 @@ export async function activeSessionId(page: Page): Promise<string | null> {
         }
       ).__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId ?? null,
   );
+}
+
+export type SupersededClarificationStatus = "answered" | "rejected";
+
+export const SUPERSEDED_OLD_QUESTION_PROMPT = "Which legacy database should we migrate first?";
+export const SUPERSEDED_CURRENT_QUESTION_PROMPT =
+  "Which environment should the new deployment use?";
+
+export type SupersededClarificationFixture = {
+  taskId: string;
+  sessionId: string;
+  currentTurnId: string;
+  oldQuestionPrompt: string;
+  currentQuestionPrompt: string;
+};
+
+/**
+ * Seeds a completed older turn with a detached pending question A and a newer
+ * open turn whose question B already resolved. The backend projection is clean,
+ * so the chat must keep A as history instead of reactivating it.
+ */
+export async function seedSupersededClarification(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+  status: SupersededClarificationStatus,
+): Promise<SupersededClarificationFixture> {
+  const task = await apiClient.createTask(seedData.workspaceId, title, {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  });
+  const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
+    state: "RUNNING",
+  });
+
+  const now = Date.now();
+  const oldTurnStartedAt = new Date(now - 240_000).toISOString();
+  const oldTurnCompletedAt = new Date(now - 230_000).toISOString();
+  const currentTurnStartedAt = new Date(now - 120_000).toISOString();
+  const currentQuestionCreatedAt = new Date(now - 110_000).toISOString();
+  const currentActivityCreatedAt = new Date(now - 60_000).toISOString();
+
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "clarification_request",
+    createdAt: oldTurnStartedAt,
+    newTurn: true,
+    turnStartedAt: oldTurnStartedAt,
+    turnCompletedAt: oldTurnCompletedAt,
+    metadata: {
+      pending_id: "pending-superseded-old",
+      session_id: sessionId,
+      question_id: "q-superseded-old",
+      question_index: 0,
+      question_total: 1,
+      status: "pending",
+      agent_disconnected: true,
+      question: {
+        id: "q-superseded-old",
+        title: "Legacy migration",
+        prompt: SUPERSEDED_OLD_QUESTION_PROMPT,
+        options: [
+          { option_id: "opt-old-staging", label: "Legacy staging", description: "" },
+          { option_id: "opt-old-production", label: "Legacy production", description: "" },
+        ],
+      },
+    },
+  });
+
+  const currentQuestion = await apiClient.seedSessionMessage(sessionId, {
+    type: "clarification_request",
+    createdAt: currentQuestionCreatedAt,
+    newTurn: true,
+    turnStartedAt: currentTurnStartedAt,
+    metadata: {
+      pending_id: "pending-superseded-current",
+      session_id: sessionId,
+      question_id: "q-superseded-current",
+      question_index: 0,
+      question_total: 1,
+      status,
+      ...(status === "answered"
+        ? {
+            response: {
+              question_id: "q-superseded-current",
+              selected_options: ["opt-new-staging"],
+            },
+          }
+        : {}),
+      question: {
+        id: "q-superseded-current",
+        title: "Deployment target",
+        prompt: SUPERSEDED_CURRENT_QUESTION_PROMPT,
+        options: [
+          { option_id: "opt-new-staging", label: "New staging", description: "" },
+          { option_id: "opt-new-production", label: "New production", description: "" },
+        ],
+      },
+    },
+  });
+  if (!currentQuestion.turnId) throw new Error("current question must belong to an open turn");
+
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "message",
+    content: "The newer turn continues with ordinary activity.",
+    createdAt: currentActivityCreatedAt,
+  });
+
+  return {
+    taskId: task.id,
+    sessionId,
+    currentTurnId: currentQuestion.turnId,
+    oldQuestionPrompt: SUPERSEDED_OLD_QUESTION_PROMPT,
+    currentQuestionPrompt: SUPERSEDED_CURRENT_QUESTION_PROMPT,
+  };
+}
+
+export async function expectCleanSupersededProjection(
+  apiClient: ApiClient,
+  sessionId: string,
+): Promise<void> {
+  await expect
+    .poll(async () => (await apiClient.getTaskSession(sessionId)).session.pending_action, {
+      message: "the resolved newer question must leave a clean session projection",
+      timeout: 30_000,
+    })
+    .toBeNull();
+}
+
+export async function expectNoActiveSupersededQuestion(
+  page: Page,
+  fixture: SupersededClarificationFixture,
+): Promise<{ session: SessionPage; historical: Locator }> {
+  const session = new SessionPage(page);
+  await session.waitForLoad();
+  await expect(session.clarificationBar()).toBeHidden();
+  await expect(
+    session
+      .activeChat()
+      .locator('[data-placeholder="Queue instructions while the question is pending..."]'),
+  ).toHaveCount(0);
+  await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
+
+  const historical = session
+    .activeChat()
+    .getByTestId("clarification-request-message")
+    .filter({ hasText: fixture.oldQuestionPrompt });
+  await expect(historical).toBeVisible();
+  await expect(
+    session
+      .activeChat()
+      .getByTestId("clarification-request-message")
+      .filter({ hasText: fixture.currentQuestionPrompt }),
+  ).toBeVisible();
+  return { session, historical };
 }

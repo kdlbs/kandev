@@ -134,6 +134,12 @@ service Host {
   rpc ListPendingTaskTransitionsExact(ListPendingTaskTransitionsExactRequest) returns (ListPendingTaskTransitionsExactResponse);
   rpc ListChangeRequestEvidenceExact(ListChangeRequestEvidenceExactRequest) returns (ListChangeRequestEvidenceExactResponse);
   rpc ListTaskUsageExact(ListTaskUsageExactRequest) returns (ListTaskUsageExactResponse);
+  // Workspace-authorized automation history reads. Definitions and runs use
+  // the shared bounded exact-read snapshot; GetAutomationRunExact refreshes one
+  // known run through its owning workspace.
+  rpc ListAutomationDefinitionsExact(ListAutomationDefinitionsExactRequest) returns (ListAutomationDefinitionsExactResponse);
+  rpc ListAutomationRunsExact(ListAutomationRunsExactRequest) returns (ListAutomationRunsExactResponse);
+  rpc GetAutomationRunExact(GetAutomationRunExactRequest) returns (GetAutomationRunExactResponse);
 
   rpc GetState(GetStateRequest) returns (GetStateResponse);
   rpc SetState(SetStateRequest) returns (SetStateResponse);
@@ -2654,3 +2660,91 @@ message ListChangeRequestEvidenceExactRequest { string request_id = 1; string wo
 message ListChangeRequestEvidenceExactResponse { repeated ChangeRequestEvidence items = 1; ExactReadPageInfo page_info = 2; }
 message ListTaskUsageExactRequest { string request_id = 1; string workspace_id = 2; repeated string task_ids = 3; ExactReadPage page = 4; }
 message ListTaskUsageExactResponse { repeated TaskUsageObservation items = 1; ExactReadPageInfo page_info = 2; }
+
+// Automation history reads. created_from is inclusive and created_before is
+// exclusive; omitted bounds select every retained matching record subject to
+// the shared exact-read snapshot limits.
+message AutomationDefinitionFilter {
+  string automation_id = 1;
+  optional string created_from = 2;
+  optional string created_before = 3;
+}
+message AutomationTriggerObservation {
+  string id = 1;
+  string kind = 2;
+  bool enabled = 3;
+  string cron_expression = 4;
+  optional string timezone = 5;
+  bool schedule_available = 6;
+}
+message AutomationDefinitionObservation {
+  string id = 1;
+  string workspace_id = 2;
+  string name = 3;
+  bool enabled = 4;
+  string created_at = 5;
+  string updated_at = 6;
+  string resource_version = 7;
+  string observed_at = 8;
+  repeated AutomationTriggerObservation triggers = 9;
+}
+message ListAutomationDefinitionsExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  AutomationDefinitionFilter filter = 3;
+  ExactReadPage page = 4;
+}
+message ListAutomationDefinitionsExactResponse {
+  repeated AutomationDefinitionObservation items = 1;
+  ExactReadPageInfo page_info = 2;
+}
+message AutomationRunFilter {
+  string automation_id = 1;
+  optional string created_from = 2;
+  optional string created_before = 3;
+}
+message AutomationRunObservation {
+  string id = 1;
+  string workspace_id = 2;
+  string automation_id = 3;
+  string automation_name = 4;
+  string trigger_id = 5;
+  string trigger_kind = 6;
+  string task_id = 7;
+  string session_id = 8;
+  string turn_id = 9;
+  string managed_conversation_id = 10;
+  string source_status = 11;
+  string status = 12;
+  string retry_state = 13;
+  string delivery_status = 14;
+  string retry_group_id = 15;
+  string retry_parent_run_id = 16;
+  optional int64 attempt_number = 17;
+  string created_at = 18;
+  optional string retry_scheduled_at = 19;
+  optional string retry_claimed_at = 20;
+  string summary = 21;
+  string error_excerpt = 22;
+  string resource_version = 23;
+  string observed_at = 24;
+}
+message ListAutomationRunsExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  AutomationRunFilter filter = 3;
+  ExactReadPage page = 4;
+}
+message ListAutomationRunsExactResponse {
+  repeated AutomationRunObservation items = 1;
+  ExactReadPageInfo page_info = 2;
+}
+message GetAutomationRunExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string run_id = 3;
+}
+message GetAutomationRunExactResponse {
+  AutomationRunObservation item = 1;
+  HostReadReceipt receipt = 2;
+}

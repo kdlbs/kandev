@@ -9,8 +9,21 @@ import (
 // RepositorySelectionResolver verifies a first-use, plugin-owned repository
 // URL and returns the complete trusted descriptor to persist. It must not
 // perform repository or task writes.
+//
+// DiscoverRepositorySelections inspects a bare URL with every eligible plugin
+// provider. Its candidates remain separate from an ordinary candidate failure
+// so the caller can reject ambiguity and interrupted passes.
 type RepositorySelectionResolver interface {
 	ResolveRepositorySelection(context.Context, string, TaskRepositoryInput) (TaskRepositoryInput, error)
+	DiscoverRepositorySelections(context.Context, string, TaskRepositoryInput) (RepositorySelectionDiscoveryResult, error)
+}
+
+// RepositorySelectionDiscoveryResult carries every validated plugin candidate
+// for one URL. Failure reports the most severe ordinary candidate inspection
+// error; an interrupted discovery is an operation error instead.
+type RepositorySelectionDiscoveryResult struct {
+	Candidates []TaskRepositoryInput
+	Failure    *RepositorySelectionError
 }
 
 // RepositorySelectionErrorCode is the stable transport classification for a
@@ -48,6 +61,12 @@ func (e *RepositorySelectionError) Unwrap() error { return e.cause }
 // NewRepositorySelectionError creates a safe typed error for adapters that
 // translate provider-specific failures into the task-service contract.
 func NewRepositorySelectionError(code RepositorySelectionErrorCode, cause error) error {
+	return NewRepositorySelectionFailure(code, cause)
+}
+
+// NewRepositorySelectionFailure creates the typed selection failure directly so
+// adapters can carry a candidate failure in a discovery result.
+func NewRepositorySelectionFailure(code RepositorySelectionErrorCode, cause error) *RepositorySelectionError {
 	return &RepositorySelectionError{Code: code, cause: cause}
 }
 
@@ -59,34 +78,49 @@ func (s *Service) preflightRepositoryInputs(
 	ctx context.Context, workspaceID string, inputs []TaskRepositoryInput,
 ) error {
 	for index, input := range inputs {
-		if err := s.inferEnterpriseGitHubProvider(ctx, workspaceID, &input); err != nil {
-			return err
-		}
-		inputs[index] = input
-		needsInspection, err := repositorySelectionNeedsInspection(input)
-		if err != nil {
-			return err
-		}
-		if !needsInspection {
-			if err := s.verifyEnterpriseGitHubOrigin(ctx, workspaceID, input); err != nil {
-				return err
-			}
-			continue
-		}
-		if s.repositorySelectionResolver == nil {
-			return NewRepositorySelectionError(RepositorySelectionErrorUnavailable, nil)
-		}
-		resolved, err := s.repositorySelectionResolver.ResolveRepositorySelection(ctx, workspaceID, input)
-		if err != nil {
-			return normalizeRepositorySelectionError(err)
-		}
-		resolved, err = trustResolvedRepositorySelection(input, resolved)
+		resolved, err := s.preflightRepositoryInput(ctx, workspaceID, input)
 		if err != nil {
 			return err
 		}
 		inputs[index] = resolved
 	}
 	return nil
+}
+
+// preflightRepositoryInput admits one repository input. Unhinted, non-public
+// remote URLs resolve through workspace-verified provider candidates; every
+// other input keeps its explicit, public, saved, local, or plugin path.
+func (s *Service) preflightRepositoryInput(
+	ctx context.Context, workspaceID string, input TaskRepositoryInput,
+) (TaskRepositoryInput, error) {
+	if workspaceRemoteProviderNeeded(input) {
+		return s.resolveWorkspaceRemoteProvider(ctx, workspaceID, input)
+	}
+	if err := s.inferEnterpriseGitHubProvider(ctx, workspaceID, &input); err != nil {
+		return TaskRepositoryInput{}, err
+	}
+	needsInspection, err := repositorySelectionNeedsInspection(input)
+	if err != nil {
+		return TaskRepositoryInput{}, err
+	}
+	if !needsInspection {
+		if err := s.verifyRemoteRepositoryOrigin(ctx, workspaceID, &input); err != nil {
+			return TaskRepositoryInput{}, err
+		}
+		return input, nil
+	}
+	if s.repositorySelectionResolver == nil {
+		return TaskRepositoryInput{}, NewRepositorySelectionError(RepositorySelectionErrorUnavailable, nil)
+	}
+	resolved, err := s.repositorySelectionResolver.ResolveRepositorySelection(ctx, workspaceID, input)
+	if err != nil {
+		return TaskRepositoryInput{}, normalizeRepositorySelectionError(err)
+	}
+	resolved, err = trustResolvedRepositorySelection(input, resolved)
+	if err != nil {
+		return TaskRepositoryInput{}, err
+	}
+	return resolved, nil
 }
 
 func repositorySelectionNeedsInspection(input TaskRepositoryInput) (bool, error) {

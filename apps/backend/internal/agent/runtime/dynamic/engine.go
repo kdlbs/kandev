@@ -91,6 +91,15 @@ func NewEngine(options ...EngineOption) *Engine {
 
 func (e *Engine) Circuits() *CircuitRegistry { return e.circuits }
 
+// CircuitSnapshots exposes the live circuits for read-only surfaces. It never
+// routes, writes, or releases anything.
+func (e *Engine) CircuitSnapshots() []CircuitSnapshot {
+	if e == nil || e.circuits == nil {
+		return []CircuitSnapshot{}
+	}
+	return e.circuits.Snapshots()
+}
+
 // ContinuationPersistence exposes the durable handoff seam without exposing
 // the engine's other persistence responsibilities to the conductor.
 func (e *Engine) ContinuationPersistence() ContinuationPersistence {
@@ -1381,16 +1390,13 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 		if candidate.ID != candidateID || candidate.BindingKey == "" {
 			continue
 		}
-		until := e.now().Add(circuitBackoff)
-		if failure.ResetHint != nil && failure.ResetHint.After(until) {
-			until = *failure.ResetHint
-		}
-		e.circuits.Open(candidate.BindingKey, until, failure.Code)
+		e.circuits.OpenFailure(candidate.BindingKey, FailureOpen{
+			Code: failure.Code, Now: e.now(),
+			ResetHint: failure.ResetHint, ResetHintInferred: failure.ResetHintInferred,
+		})
 		return
 	}
 }
-
-const circuitBackoff = time.Minute
 
 func qualifiesForCircuit(code routingerr.Code) bool {
 	switch code {

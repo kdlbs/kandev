@@ -355,6 +355,7 @@ func setupEmptyRemoteTaskRepo(t *testing.T) (string, string, *GitOperator) {
 	runGit(t, repoDir, "commit", "-m", "task change")
 
 	tracker := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	t.Cleanup(tracker.Stop)
 	tracker.SetBaseBranch("main")
 	return repoDir, originDir, NewGitOperator(repoDir, newTestLogger(t), tracker)
 }

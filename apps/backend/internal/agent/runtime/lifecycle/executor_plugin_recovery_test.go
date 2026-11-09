@@ -211,6 +211,9 @@ func TestPluginExecutorRestartRecovery(t *testing.T) {
 		t.Fatalf("recovered instances = %#v", instances)
 	}
 	defer instances[0].Client.Close()
+	if !instances[0].CopilotNativeSessionEvents {
+		t.Fatal("recovered plugin instance lost the adopted native subscription state")
+	}
 	if instances[0].WorkspacePath != pluginExecutorWorkspacePath ||
 		!slices.Equal(instances[0].WorkspaceSourceRoots, []string{"/workspace", "/workspace/src"}) ||
 		instances[0].Env["KANDEV_RUN_ID"] != "run-plugin-recovery" {
@@ -458,6 +461,7 @@ func setPluginRecoveredInstanceInfoFixture(t *testing.T, runtime *PluginRemoteEx
 			Port: testPluginExecutorInstancePort, WorkspacePath: pluginExecutorWorkspacePath,
 			Env:                  map[string]string{"KANDEV_RUN_ID": "run-plugin-recovery"},
 			WorkspaceSourceRoots: []string{"/workspace", "/workspace/src"}, ProviderSessionID: "native-plugin-session",
+			CopilotNativeSessionEvents: true,
 		}, nil
 	}
 }
@@ -490,6 +494,7 @@ func TestPluginRecoveredInstanceMetadataUsesAuthenticatedControlReader(t *testin
 			Port: testPluginExecutorInstancePort, WorkspacePath: pluginExecutorWorkspacePath,
 			Env:                  map[string]string{"KANDEV_RUN_ID": "run-plugin-recovery"},
 			WorkspaceSourceRoots: []string{"/workspace/src"}, ProviderSessionID: "native-plugin-session",
+			CopilotNativeSessionEvents: true,
 		}, nil
 	}
 	record := pluginExecutorRecoveryRecord(t, pluginExecutorPhaseReady, &pluginsdk.ExecutorResourceDescriptor{ResourceHandle: "resource-recovery"})

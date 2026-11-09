@@ -190,6 +190,12 @@ func userInputAnswerValues(
 	if len(values) == 0 {
 		return nil, &protocol.RPCError{Code: -32602, Message: "clarification response contains an unanswered Codex question"}
 	}
+	for _, attachment := range answer.Attachments {
+		if strings.TrimSpace(attachment.Path) == "" || strings.TrimSpace(attachment.Name) == "" {
+			return nil, &protocol.RPCError{Code: -32602, Message: "clarification answer attachment is missing its delivered path"}
+		}
+		values = append(values, fmt.Sprintf("Attached file: %s (%s)", attachment.Name, attachment.Path))
+	}
 	return values, nil
 }
 

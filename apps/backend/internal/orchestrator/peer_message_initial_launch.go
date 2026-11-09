@@ -160,7 +160,7 @@ func (s *Service) BeginPeerMessageStart(
 	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
 		return nil, messagequeue.ErrSessionIdentityMismatch
 	}
-	if err := s.authorizeTaskSessionPair(ctx, identity.TaskID, identity.SessionID); err != nil {
+	if err := s.authorizeTaskSessionPromptPair(ctx, identity.TaskID, identity.SessionID); err != nil {
 		return nil, err
 	}
 	for {

@@ -270,6 +270,54 @@ describe("useTaskPendingInput pending clarification turn authority", () => {
   });
 });
 
+describe("useTaskPendingInput superseded clarification authority", () => {
+  it("clears clarification flags beside a detached predecessor after the current question resolves", () => {
+    const oldTurn = turn("turn-old", PRIMARY_SESSION_ID, BASE_TIMESTAMP);
+    const currentTurn = turn("turn-current", PRIMARY_SESSION_ID, "2026-05-02T00:01:00Z");
+    const cleanSession = Object.assign(session(PRIMARY_SESSION_ID, "RUNNING"), {
+      pending_action: null,
+    });
+    const { result } = renderHook(
+      () => useTaskPendingInput(PRIMARY_SESSION_ID, { taskId: "task-1" }),
+      {
+        wrapper: wrapper(
+          {
+            [PRIMARY_SESSION_ID]: [
+              message({
+                id: "detached-old-question",
+                session_id: toSessionId(PRIMARY_SESSION_ID),
+                turn_id: oldTurn.id,
+                type: "clarification_request",
+                metadata: {
+                  pending_id: "pending-old",
+                  status: "pending",
+                  agent_disconnected: true,
+                },
+              }),
+              message({
+                id: "resolved-current-question",
+                session_id: toSessionId(PRIMARY_SESSION_ID),
+                turn_id: currentTurn.id,
+                type: "clarification_request",
+                metadata: { pending_id: "pending-current", status: "answered" },
+              }),
+              message({
+                id: "current-activity",
+                session_id: toSessionId(PRIMARY_SESSION_ID),
+                turn_id: currentTurn.id,
+              }),
+            ],
+          },
+          [cleanSession],
+          { [PRIMARY_SESSION_ID]: [oldTurn, currentTurn] },
+        ),
+      },
+    );
+
+    expect(result.current).toEqual({ clarification: false, permission: false });
+  });
+});
+
 describe("useTaskPendingInput clean clarification turn authority", () => {
   it("suppresses a visible predecessor when the session projection is explicitly clean", () => {
     const visiblePredecessor = turn("turn-visible-predecessor", PRIMARY_SESSION_ID, BASE_TIMESTAMP);

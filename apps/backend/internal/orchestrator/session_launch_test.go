@@ -882,6 +882,8 @@ func TestLaunchRestoreWorkspace_Success(t *testing.T) {
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
+	// Restoration succeeds only once this session owns a ready execution.
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-session1")
 
 	resp, err := svc.LaunchSession(context.Background(), &LaunchSessionRequest{
 		TaskID:    "task1",
@@ -1145,6 +1147,7 @@ func TestLaunchRestoreWorkspace_IncludesWorktreeInfo(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-session1")
 
 	resp, err := svc.LaunchSession(ctx, &LaunchSessionRequest{
 		TaskID:    "task1",

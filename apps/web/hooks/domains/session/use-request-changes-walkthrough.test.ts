@@ -6,6 +6,7 @@ const mockQueueMessage = vi.fn();
 const mockAddMessage = vi.fn();
 const mockToast = vi.fn();
 const mockListPrompts = vi.fn();
+const mockBuiltinSession = vi.fn();
 const mockGetWebSocketClient = vi.fn(() => ({ request: mockRequest }));
 type MockStoreState = ReturnType<typeof storeState>;
 let mockStoreState: MockStoreState;
@@ -25,6 +26,9 @@ vi.mock("@/lib/api/domains/queue-api", () => ({
 vi.mock("@/lib/api", () => ({
   listPrompts: (...args: unknown[]) => mockListPrompts(...args),
 }));
+vi.mock("@/lib/api/domains/builtin-mcp-api", () => ({
+  getBuiltinMCPSession: (...args: unknown[]) => mockBuiltinSession(...args),
+}));
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => mockGetWebSocketClient(),
@@ -34,9 +38,11 @@ import { useRequestChangesWalkthrough } from "./use-request-changes-walkthrough"
 
 function storeState(sessionState: string, planMode = false, foregroundActivity?: string) {
   return {
+    auth: { mode: "local", authenticated: true, user: { id: "user-1" } },
     taskSessions: {
       items: {
         "session-1": {
+          task_id: "task-1",
           state: sessionState,
           foreground_activity: foregroundActivity,
           queue_incarnation_id: "inc-1",
@@ -61,6 +67,11 @@ function renderRequestHook(ready = true) {
 function setup() {
   vi.clearAllMocks();
   mockStoreState = storeState("WAITING_FOR_INPUT");
+  mockBuiltinSession.mockResolvedValue({
+    task_id: "task-1",
+    session_id: "session-1",
+    walkthrough_availability: "available",
+  });
   mockListPrompts.mockResolvedValue({
     prompts: [
       {
@@ -97,6 +108,7 @@ describe("useRequestChangesWalkthrough", () => {
       expect.objectContaining({
         task_id: "task-1",
         session_id: "session-1",
+        builtin_intent: "walkthrough",
         content: expect.stringMatching(/^@changes-walkthrough\n\n<kandev-system>/),
       }),
       10000,
@@ -128,6 +140,7 @@ describe("useRequestChangesWalkthrough", () => {
         session_id: "session-1",
         task_id: "task-1",
         plan_mode: true,
+        builtin_intent: "walkthrough",
         content: expect.stringMatching(/^@changes-walkthrough\n\n<kandev-system>/),
       }),
     );
@@ -232,5 +245,100 @@ describe("useRequestChangesWalkthrough input-mode edge cases", () => {
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Session is not available for input", variant: "error" }),
     );
+  });
+});
+
+describe("useRequestChangesWalkthrough package authority", () => {
+  beforeEach(setup);
+  it.each(["unknown", "unavailable"])(
+    "does not send with %s package availability",
+    async (availability) => {
+      mockBuiltinSession.mockResolvedValue({
+        task_id: "task-1",
+        session_id: "session-1",
+        walkthrough_availability: availability,
+      });
+      const { result } = renderRequestHook();
+      await act(async () => result.current());
+      expect(mockRequest).not.toHaveBeenCalled();
+      expect(mockQueueMessage).not.toHaveBeenCalled();
+      expect(mockToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          variant: "error",
+          action: expect.objectContaining({ onClick: expect.any(Function) }),
+        }),
+      );
+    },
+  );
+  it("drops a pending request after navigation", async () => {
+    let resolve!: (value: unknown) => void;
+    mockListPrompts.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const { result, rerender } = renderHook(
+      ({ taskId }) => useRequestChangesWalkthrough({ taskId, sessionId: "session-1" }),
+      { initialProps: { taskId: "task-1" } },
+    );
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = result.current();
+    });
+    rerender({ taskId: "task-2" });
+    await act(async () => {
+      resolve({ prompts: [{ name: "changes-walkthrough", content: "walkthrough" }] });
+      await pending;
+    });
+    expect(mockRequest).not.toHaveBeenCalled();
+    expect(mockQueueMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("walkthrough request ownership", () => {
+  beforeEach(setup);
+  it("does not send after the authenticated user changes during discovery", async () => {
+    let resolve!: (value: unknown) => void;
+    mockBuiltinSession.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const { result } = renderRequestHook();
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = result.current();
+    });
+    mockStoreState.auth.user.id = "user-2";
+    await act(async () => {
+      resolve({
+        task_id: "task-1",
+        session_id: "session-1",
+        walkthrough_availability: "available",
+      });
+      await pending;
+    });
+    expect(mockListPrompts).not.toHaveBeenCalled();
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+  it("ignores a late send response after the authenticated user changes", async () => {
+    let resolve!: (value: unknown) => void;
+    mockRequest.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const { result } = renderRequestHook();
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = result.current();
+    });
+    mockStoreState.auth.user.id = "user-2";
+    await act(async () => {
+      resolve({ id: "message", session_id: "session-1" });
+      await pending;
+    });
+    expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockToast).not.toHaveBeenCalled();
   });
 });

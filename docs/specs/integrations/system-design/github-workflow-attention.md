@@ -18,10 +18,11 @@ The integration owns collection, storage, and interpretation. Existing shared co
 
 | Acceptance criteria | Design sections |
 | --- | --- |
-| 001.1, 001.6, 001.7 | Provider evidence |
+| 001.1, 001.6, 001.7, 001.10 | Provider evidence |
 | 001.2, 001.4 | Status and automation |
 | 001.5 | Storage and recovery |
 | 001.3, 001.8 | Presentation |
+| 001.9 | Monitored workflow phase |
 
 All criteria reference `AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION`.
 
@@ -53,12 +54,18 @@ A completed fork `pull_request` run with `action_required` and no jobs supplies 
 This is an interpretation of combined provider evidence, not an explicit approval-reason field.
 Other action-required runs use the generic attention classification.
 Unknown job counts must not become zero. Missing runs, `waiting`, and `UNSTABLE` alone never prove approval.
+A failed or deferred job read for any selected `action_required` run makes the whole observation incomplete.
+Classify it as `unknown`, so storage preserves same-head evidence as stale. Never downgrade it to the generic
+`action_required` reason, which would claim provider evidence Kandev did not observe.
 
 `getPRStatus` and `getPRFeedback` in `client_helpers.go` share the collector and classifier.
-The batched service path in `service_pr_watch_batched.go` enriches statuses before caching and applying them.
+Single-PR REST reads, clients without GraphQL, and the monitored-phase fallback below use this REST collector.
+GraphQL-capable batched sync uses the [monitored workflow phase](#monitored-workflow-phase) instead.
+A GraphQL response may resolve some aliases and reject others. A path-bearing
+error makes only the named PR or suite node unavailable; the resolved siblings
+keep their evidence. An error without a usable path fails the whole chunk.
 Cover both numbered and branch-discovered watches. The existing poller owns refresh cadence.
-Coalesce enrichment by credential scope, repository, and head identity within each sync.
-Use bounded concurrency and the existing context budget. Do not add a frontend poller or one request per mounted surface.
+Do not add a frontend poller or one request per mounted surface.
 The unwatched-task lifecycle sweep only reconciles PR state, the observed head, and stored workflow attention; it does not issue new Actions reads. Retained watches and REST feedback/status paths provide fresh workflow evidence, while a head change invalidates the stored observation.
 
 The REST [workflow runs contract](https://docs.github.com/en/rest/actions/workflow-runs) defines collection and permission requirements.
@@ -150,6 +157,7 @@ Desktop and mobile Playwright tests verify the existing entry points and the pro
 - [Requirements](../requirements/github-workflow-attention.md)
 - [Shared task summary design](../../ui/system-design/pr-task-status-summary.md)
 - [Implementation plan](../../../plans/github-workflow-attention/plan.md)
+- [Workflow approval freshness plan](../../../plans/github-workflow-approval-freshness/plan.md)
 
 ## Expiring Actions observations
 
@@ -172,8 +180,9 @@ arrive for the same SHA. Never use an infinite TTL. Cache job observations by
 credential scope, repository, run ID, and attempt, with the same expiry classes.
 A run-attempt change must not reuse jobs from an earlier attempt.
 
-Keep existing batched enrichment limits: concurrency 4 and total budget
-5 seconds. Preserve the outer status/search cache TTL of 30 seconds and the
+These caches serve the REST collector. The monitored workflow phase reads
+current GraphQL evidence on each pass and coalesces equivalent heads through
+its singleflight key instead. Preserve the outer status/search cache TTL of 30 seconds and the
 feedback TTL of 8 seconds. Long Actions entries only affect workflow attention,
 not checks, review status, or auto-merge decisions.
 
@@ -189,6 +198,106 @@ Provider errors retain unknown/stale-positive semantics and existing retry
 admission. Terminal PRs continue to skip Actions reads altogether.
 
 See [the implementation plan](../../../plans/watch-task-cleanup/plan.md).
+
+## Monitored workflow phase
+
+`AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.9` maps to this section.
+
+### Why the batched path does not use per-head REST
+
+Background REST admission allows one in-flight request per principal and
+resource, followed by at least one second of pacing. The poller requests
+non-blocking admission. A per-head REST fan-out therefore loses every read except
+one on each pass. On 2026-10-29 the running instance recorded about 21 rejected
+Actions reads per minute while GitHub reported 122 Core requests used in that hour.
+Serial REST reads would still need one paced request per head every minute,
+which cannot keep pace as the number of open PRs grows. The GraphQL evidence
+below costs one point per chunk of 20 PRs and one more query per pass for job counts.
+
+### Evidence source
+
+After the numbered and searching phases apply their status results, a third
+workflow phase reads Actions evidence for the open known PRs it just observed.
+The phase takes its input from the applied `TaskPR` rows: workspace, credential
+scope, repository, PR number, and stored head SHA. It does not reuse status
+results from memory, so an inventory tick and a continuation wake follow one path.
+
+Step 1 is a dedicated query, separate from the status batch, so its failure
+cannot withhold check or review status. It groups at most 20 PRs per request:
+
+```text
+repository(owner, name) {
+  prN: pullRequest(number) {
+    headRefOid
+    commits(last: 1) { nodes { commit { oid
+      checkSuites(first: 100) {
+        pageInfo { hasNextPage }
+        nodes { id status conclusion createdAt
+          workflowRun { databaseId event url workflow { databaseId name } } } } } } }
+  }
+}
+```
+
+Do not filter by GitHub App ID. App IDs differ on GitHub Enterprise Server.
+A suite with a non-null `workflowRun` is an Actions run. The query also selects
+`headRefName`, `headRepository`, and `headRepositoryOwner`, because an applied
+`TaskPR` row stores only the base repository and the fork identity must come from
+the same response.
+Production-shaped probes on 2026-10-29 rejected two alternatives. Adding
+`checkSuites` inside the 50-PR status batch returned HTTP 502 or truncated
+responses. Selecting `checkRuns` together with `workflowRun` across 20 PRs
+exceeded GitHub's resource limits.
+
+Step 2 runs only when step 1 found `COMPLETED` / `ACTION_REQUIRED` suites from
+`pull_request` events on fork PRs. One `nodes(ids:)` query, chunked at 50 suite
+IDs, reads `checkRuns(first: 0, filterBy: {checkType: LATEST}) { totalCount }`
+for each one. A zero count is the jobless approval signature. Suites outside that
+filter need no step-2 read, because they cannot qualify for approval.
+
+### Classification
+
+Convert each Actions suite into the existing `WorkflowRun` shape. Map run ID,
+workflow ID and name, event, lowercase status and conclusion, URL, and creation
+time from the suite. The suites come from the queried head commit of one PR, so
+take the head SHA from that commit and the head repository and branch from the
+PR. GraphQL does not expose a run attempt; store attempt `0` in that case.
+Attach the queried PR's identity as a `WorkflowRunPullRequest` association to
+each converted run, so action-required suites from any event on that head still
+match the PR rather than requiring a `pull_request` event.
+Then call `classifyWorkflowAttentionWithJobs` with a job reader that answers
+from the step-2 counts. A missing count is unavailable evidence, so the
+incomplete-observation rule above applies.
+
+A query or commit head that differs from the stored head SHA, or a suite page
+with `hasNextPage`, yields `unknown` for that PR. Do not page further.
+A TaskPR row without a head is skipped, and the store rejects an empty expected
+head, so every write stays head-scoped.
+
+### Writes and deferral
+
+Write through a narrow head-guarded update of `github_task_prs.workflow_attention`
+that applies `resolveTaskPRWorkflowAttention`. A row whose head changed since the
+phase read it is skipped. Publish the existing `github.task_pr.updated` event
+only when the stored observation changes semantically, so task status summaries
+derive the badge through their existing projection.
+
+The workflow phase owns its own singleflight and progress key
+(`batched-workflow:`), separate from the numbered and searching keys. A local
+`AdmissionDeferredError` from either step leaves the affected rows untouched.
+It does not mark them stale. The phase returns those PRs as unfinished workflow work.
+The PR monitor keeps them in its existing pending inventory with a workflow-phase
+marker. Its timer resumes only the workflow phase at the admission boundary.
+Completed status phases are not repeated. A genuine provider error yields
+`unknown`, which stores same-head evidence as stale, as before.
+
+When GraphQL is unsupported or step 1 fails with an invalid-query classification,
+use the REST collector for that workspace serially, one head at a time. A local
+deferral then stops the workspace's remaining heads and records them as pending
+workflow work, matching the bounded-fallback rules.
+
+Explicit refresh through the batched path runs the same phase under its
+interactive admission. Passive per-task sync returns the typed deferral instead
+of writing `unknown`.
 
 ## Task approval badge
 

@@ -124,10 +124,14 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
     const notice = await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,
-      (message) => message.metadata?.recovery_phase === "continuing",
+      (message) => message.metadata?.recovery_activity_confirmed === true,
     );
     await expect(session.transientRetryCard()).toHaveCount(1);
-    await expect(session.transientRetryCard()).toContainText("Continuing");
+    await expect(session.transientRetryCard()).toContainText("Agent resumed");
+    await expect(session.transientRetryCard()).not.toContainText("Continuing");
+    await expect(session.transientRetryCard()).not.toContainText("Agent connection lost");
+    await expect(session.transientRetryCard()).not.toContainText("Attempt 1 of 5");
+    await expect(session.recoveryCancelRetryButton()).toBeVisible();
     await expect(session.activeChat().getByText("continue", { exact: true })).toHaveCount(0);
     assertNativeContinuationTrace(fixture.tracePath, "read-hold");
     const screenshot = path.join(backend.tmpDir, "provider-interruption-continuation-desktop.png");
@@ -139,14 +143,18 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
     await testPage.reload();
     await session.waitForLoad();
     await expect(session.transientRetryCard()).toHaveCount(1);
+    await expect(session.transientRetryCard()).toContainText("Agent resumed");
     const after = await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,
-      (message) => message.metadata?.recovery_phase === "continuing",
+      (message) => message.metadata?.recovery_activity_confirmed === true,
     );
     expect(after.id).toBe(notice.id);
     await expect(session.activeChat().getByText("continue", { exact: true })).toHaveCount(0);
     const { messages: reloadedMessages } = await apiClient.listSessionMessages(fixture.sessionId);
+    expect(
+      reloadedMessages.some((message) => message.metadata?.recovery_activity_confirmed === true),
+    ).toBe(true);
     expect(
       reloadedMessages.filter(
         (message) => message.author_type === "user" && message.content === "continue",
@@ -158,7 +166,8 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
       const second = new SessionPage(viewer);
       await second.waitForLoad();
       await expect(second.transientRetryCard()).toHaveCount(1);
-      await expect(second.transientRetryCard()).toContainText("Continuing");
+      await expect(second.transientRetryCard()).toContainText("Agent resumed");
+      await expect(second.transientRetryCard()).not.toContainText("Attempt 1 of 5");
       await expect(second.activeChat().getByText("continue", { exact: true })).toHaveCount(0);
       assertNativeContinuationTrace(fixture.tracePath, "read-hold");
     } finally {

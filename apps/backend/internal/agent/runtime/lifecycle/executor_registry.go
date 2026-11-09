@@ -166,6 +166,11 @@ func (r *ExecutorRegistry) recoverDetailed(ctx context.Context, records []*model
 			r.logger.Error("failed to recover instances from runtime",
 				zap.String("runtime", string(name)),
 				zap.Error(err))
+			for _, record := range records {
+				if record != nil && isRecordOwnedByBackend(name, record.SessionID, records) {
+					allOutcomes[record.SessionID] = RecoveryOutcomeEnumerationFailed
+				}
+			}
 			lastErr = err
 			continue
 		}

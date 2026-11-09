@@ -198,6 +198,7 @@ export type QueueSessionIdentity = {
 };
 
 export type QueueMessageParams = {
+  builtin_intent?: "walkthrough";
   session_id: string;
   session_incarnation_id: string;
   task_id: string;
@@ -220,6 +221,8 @@ export type QueueMessageParams = {
   plan_comment_refs?: TaskPlanCommentRef[];
   preview_feedback_refs?: TaskPreviewFeedbackRef[];
   require_primary_session?: boolean;
+  /** Client-observed task turn-error stamp for this exact session. */
+  observed_turn_error_stamp?: string;
 };
 
 function isUncertainQueueTransportError(error: unknown): boolean {

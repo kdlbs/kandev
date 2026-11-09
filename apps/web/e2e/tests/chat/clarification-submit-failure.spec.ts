@@ -46,6 +46,7 @@ test.describe("Clarification submit failure feedback", () => {
 
     const postgres = session.clarificationOption("PostgreSQL");
     await postgres.click();
+    await session.submitClarification();
 
     const errorBanner = testPage.getByTestId("clarification-submit-error");
     await expect(errorBanner).toBeVisible({ timeout: 15_000 });
@@ -100,6 +101,7 @@ test.describe("Clarification submit failure feedback", () => {
     const sessionId = await activeSessionId(testPage);
     if (!sessionId) throw new Error("expected an active session for late clarification answer");
     await session.clarificationOption("PostgreSQL").click();
+    await session.submitClarification();
 
     await expect
       .poll(

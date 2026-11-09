@@ -75,8 +75,16 @@ test("phone: continuation Cancel is visible while running and preserves history"
       fixture.sessionId,
       (message) => message.content?.includes("Mock continuation accepted:") === true,
     );
+    await waitForContinuationMessage(
+      apiClient,
+      fixture.sessionId,
+      (message) => message.metadata?.recovery_activity_confirmed === true,
+    );
     await expect(session.transientRetryCard()).toHaveCount(1);
-    await expect(session.transientRetryCard()).toContainText("Continuing");
+    await expect(session.transientRetryCard()).toContainText("Agent resumed");
+    await expect(session.transientRetryCard()).not.toContainText("Continuing");
+    await expect(session.transientRetryCard()).not.toContainText("Agent connection lost");
+    await expect(session.transientRetryCard()).not.toContainText("Attempt 1 of 5");
     await expect(session.activeChat()).toContainText(
       "Mock interruption: partial history preserved.",
     );
@@ -89,12 +97,15 @@ test("phone: continuation Cancel is visible while running and preserves history"
     await expect(session.activeChat().getByText("continue", { exact: true })).toHaveCount(0);
     await testPage.reload();
     await session.waitForLoad();
-    await expect(session.transientRetryCard()).toContainText("Continuing");
+    await expect(session.transientRetryCard()).toContainText("Agent resumed");
     await expect(session.activeChat()).toContainText(
       "Mock interruption: partial history preserved.",
     );
     await expect(session.activeChat().getByText("continue", { exact: true })).toHaveCount(0);
     const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+    expect(messages.some((message) => message.metadata?.recovery_activity_confirmed === true)).toBe(
+      true,
+    );
     expect(
       messages.filter(
         (message) => message.author_type === "user" && message.content === "continue",

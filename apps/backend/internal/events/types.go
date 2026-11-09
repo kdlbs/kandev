@@ -134,6 +134,12 @@ const (
 	// capacity observation. It is independent of journal writes and transcript
 	// persistence.
 	TaskSessionRuntimeStorageChanged = "task_session.runtime_storage_changed"
+
+	// TaskSessionReadCursorChanged carries a session's persisted read cursor
+	// (last_read_message_id and its created_at) after a write. The task
+	// status projector derives the task unread aggregate from it. reset is
+	// true only when a test route force-set a possibly lower cursor.
+	TaskSessionReadCursorChanged = "task_session.read_cursor_changed"
 )
 
 // TaskStatusSummaryUpdated is a complete replacement projection for one

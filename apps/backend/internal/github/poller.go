@@ -278,13 +278,17 @@ const (
 type prWatchWorkspaceBatchOutcome struct {
 	workspaceID string
 	watches     []*PRWatch
-	// unfinished lists the watches whose provider phase did not complete, so
+	// unfinished lists the watches whose status phase did not complete, so
 	// only they can enter transport fallback or wait for admission.
 	unfinished []*PRWatch
-	state      prWatchBatchOutcomeState
-	results    []PRWatchSyncResult
-	deferred   *AdmissionDeferredError
-	err        error
+	// workflowUnfinished lists open known PRs whose Actions-attention refresh
+	// did not complete. They resume the workflow phase alone.
+	workflowUnfinished []*PRWatch
+	state              prWatchBatchOutcomeState
+	results            []PRWatchSyncResult
+	deferred           *AdmissionDeferredError
+	workflowDeferred   *AdmissionDeferredError
+	err                error
 }
 
 // tryBatchedPRWatchCheck runs the batched GraphQL flow for the supplied
@@ -345,12 +349,14 @@ func (p *Poller) checkWorkspacePRWatches(
 	// classified, so a later deferral cannot withhold a finished update.
 	p.publishBatchedPRWatchResults(ctx, syncOutcome.Results)
 	outcome := prWatchWorkspaceBatchOutcome{
-		workspaceID: workspaceID,
-		watches:     watches,
-		unfinished:  prWatchPendingWatches(syncOutcome.Pending),
-		results:     syncOutcome.Results,
-		deferred:    syncOutcome.Deferred,
-		err:         syncOutcome.Err,
+		workspaceID:        workspaceID,
+		watches:            watches,
+		unfinished:         prWatchStatusPendingWatches(syncOutcome.Pending),
+		workflowUnfinished: prWatchWorkflowPendingWatches(syncOutcome.Pending),
+		results:            syncOutcome.Results,
+		deferred:           syncOutcome.Deferred,
+		workflowDeferred:   syncOutcome.WorkflowDeferred,
+		err:                syncOutcome.Err,
 	}
 	if errors.Is(syncOutcome.Err, errGraphQLUnsupported) {
 		// A client without GraphQL support deliberately falls back to the
@@ -364,7 +370,8 @@ func (p *Poller) checkWorkspacePRWatches(
 	// deferral is not a provider failure and other errors keep their class.
 	// Recording it here is what lets a successful probe reset the schedule.
 	p.circuits.recordError(workspaceID, syncOutcome.Err, time.Now().UTC())
-	if syncOutcome.Err == nil && len(outcome.unfinished) == 0 {
+	if syncOutcome.Err == nil && syncOutcome.Deferred == nil &&
+		len(outcome.unfinished) == 0 && len(outcome.workflowUnfinished) == 0 {
 		outcome.state = prWatchBatchCompleted
 		return outcome
 	}
@@ -372,11 +379,12 @@ func (p *Poller) checkWorkspacePRWatches(
 		zap.String("workspace_id", workspaceID),
 		zap.Bool("deferred", syncOutcome.Deferred != nil),
 		zap.Error(syncOutcome.Err))
-	if len(outcome.unfinished) == 0 {
+	if len(outcome.unfinished) == 0 && len(outcome.workflowUnfinished) == 0 {
 		outcome.unfinished = watches
 	}
 	outcome.state = prWatchBatchDeferred
-	if syncOutcome.Deferred == nil && prWatchBatchFallbackAllowed(syncOutcome.Err) {
+	if len(outcome.unfinished) > 0 && syncOutcome.Deferred == nil &&
+		prWatchBatchFallbackAllowed(syncOutcome.Err) {
 		outcome.state = prWatchBatchFallbackEligible
 	}
 	return outcome

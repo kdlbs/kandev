@@ -1,3 +1,4 @@
+import type { BuiltinMCPInitialPreferences } from "@/lib/types/builtin-mcp";
 import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
 import { fetchJson, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
@@ -116,7 +117,10 @@ export async function createTask(
      * recorded as a start-when-unblocked intent rather than launching now.
      */
     blocked_by?: string[];
+    /** Symmetric task relationships to establish after creation. */
+    related_task_ids?: string[];
     mcp_server_ids?: string[];
+    builtin_mcp_preferences?: BuiltinMCPInitialPreferences;
     /** Explicitly opt out of (false) or into (true) the auto-start-on-unblock intent. */
     start_when_unblocked?: boolean;
     workspace_path?: string;

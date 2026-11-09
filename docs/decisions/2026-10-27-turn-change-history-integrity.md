@@ -77,4 +77,3 @@ internal; exceptional results reuse existing status areas and selected-diff expl
 - [Requirements](../specs/tasks/requirements/turn-changed-files.md)
 - [System design](../specs/tasks/system-design/turn-change-history-integrity.md)
 - [Fix plan](../plans/turn-change-history-integrity/plan.md)
-

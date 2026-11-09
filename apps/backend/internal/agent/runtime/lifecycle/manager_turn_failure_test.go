@@ -254,7 +254,7 @@ func TestTransientTurnFailureRequiresCurrentEligibleRuntime(t *testing.T) {
 		{name: "automation scope", change: func(e *AgentExecution) { e.TaskScope = TaskLaunchScopeAutomation }},
 		{name: "unknown scope", change: func(e *AgentExecution) { e.TaskScope = TaskLaunchScopeUnknown }},
 		{name: "passthrough", change: func(e *AgentExecution) { e.IsPassthrough = true }},
-		{name: "unproven provider", change: func(e *AgentExecution) { e.AgentID = "unproven-acp" }},
+		{name: "mismatched task owner", change: func(e *AgentExecution) { e.Owner.TaskID = "other-task" }},
 		{name: "utility execution", change: func(e *AgentExecution) { e.TaskID = "" }},
 		{name: "closed stream", change: func(e *AgentExecution) {
 			e.agentctlLifecycleMu.Lock()
@@ -284,6 +284,37 @@ func TestTransientTurnFailureRequiresCurrentEligibleRuntime(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPromptErrorRetentionUsesHostAttestation proves the host trusts the typed
+// ACP disposition for any ACP identity rather than a provider-name allowlist.
+func TestPromptErrorRetentionUsesHostAttestation(t *testing.T) {
+	fixture := readyForRetainedTurnFailure(t)
+	fixture.execution.AgentID = "custom-acp"
+
+	require.True(t, fixture.manager.handleCompleteEvent(fixture.execution, &agentctl.AgentEvent{
+		Type:                     "complete",
+		SessionID:                fixture.execution.SessionID,
+		PromptGeneration:         1,
+		Error:                    "Internal error: Failed to execute statement",
+		PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+		Data:                     map[string]any{"is_error": true},
+	}))
+	require.Equal(t, v1.AgentStatusReady, fixture.execution.Status)
+	require.Nil(t, fixture.execution.ExitCode)
+	require.Nil(t, fixture.execution.FinishedAt)
+
+	var turnFailed, failed bool
+	for _, event := range fixture.manager.eventBus.(*MockEventBus).PublishedEvents {
+		switch event.Type {
+		case events.AgentTurnFailed:
+			turnFailed = true
+		case events.AgentFailed:
+			failed = true
+		}
+	}
+	require.True(t, turnFailed, "an unlisted ACP identity must publish its turn-failure event")
+	require.False(t, failed, "retained turn failure must not publish terminal execution failure")
 }
 
 func TestTransientTurnFailureDuplicateDoesNotRepublish(t *testing.T) {

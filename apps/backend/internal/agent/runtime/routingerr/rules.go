@@ -1,6 +1,9 @@
 package routingerr
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 type rule struct {
 	id         string
@@ -10,7 +13,8 @@ type rule struct {
 	// rawText matches the raw diagnostic instead of the sanitized excerpt. It is
 	// only for bounded signatures whose distinguishing text the sanitizer masks;
 	// the stored/displayed excerpt remains sanitized.
-	rawText bool
+	rawText              bool
+	ignoreMarkdownFences bool
 }
 
 // RuleOpenCodeCapacityAdmission is the bounded OpenCode capacity signature.
@@ -18,6 +22,8 @@ type rule struct {
 // and capacity continuation on that provider requires this rule rather than a
 // broad capacity phrase.
 const RuleOpenCodeCapacityAdmission = "opencode.capacity.admission_refused.v1"
+
+const ruleOpenCodeGoUsageLimit = "opencode.acp.go_usage_limit.v1"
 
 const openCodeAdmissionRefusedSignature = `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?` +
 	`upstream\s+request\s+failed:\s*\[ttft_admission_refused\]\s+the\s+cell\s+is\s+at\s+capacity\b`
@@ -105,13 +111,22 @@ var providerRules = map[string][]rule{
 		// OpenCode Go reports its subscription limit through the ACP prompt
 		// error without a reset time. A correlated period usage-limit notice,
 		// when present, matches the rule above first and keeps its reset hint.
-		mustRule("opencode.acp.go_usage_limit.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?go\s+usage\s+limit\s+exceeded\b`, CodeQuotaLimited, ConfHigh),
+		mustRule(ruleOpenCodeGoUsageLimit, `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?go\s+usage\s+limit\s+exceeded\b`, CodeQuotaLimited, ConfHigh),
 		// Explicit credit exhaustion takes precedence over generic payment wording.
 		mustRule("opencode.stderr.credit.v1", `(?im)^\s*(?:AI_APICallError:[^\n]*\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b|(?:(?:Error|Internal\s+error|API\s+Error):\s*)?\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b)`, CodeQuotaLimited, ConfHigh),
 		mustRule("opencode.stderr.subscription.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?payment\s+required\b`, CodeSubscriptionRequired, ConfHigh),
 		mustRule("opencode.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
-		// Keep this provider-scoped rule limited to OpenCode's unlabelled opening line only.
-		mustRule("opencode.stderr.free_usage_unlabelled.v1", `(?im)^\s*free\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
+		// Keep these provider-scoped signatures on one diagnostic line and
+		// exclude fenced assistant examples from candidate detection.
+		mustRuleOutsideMarkdownFences(
+			"opencode.stderr.free_usage_unlabelled.v1",
+			`(?im)^[ \t]*free[ \t]+usage[ \t]+limit[ \t]+reached\b`, CodeQuotaLimited, ConfHigh,
+		),
+		mustRuleOutsideMarkdownFences(
+			"opencode.stderr.free_usage_prefixed.v1",
+			`(?im)^[ \t]*(?:AI_APICallError|Error|Internal[ \t]+error|API[ \t]+Error):[ \t]*free[ \t]+usage[ \t]+limit[ \t]+reached\b`,
+			CodeQuotaLimited, ConfHigh,
+		),
 		// OpenCode's upstream admission refusal is temporary capacity pressure,
 		// not a quota or generic runtime error. The bracketed token and the full
 		// opening line are required so bare capacity prose or a quoted example
@@ -138,10 +153,37 @@ var providerRules = map[string][]rule{
 		mustRule("amp.stderr.rate.v1", genericRateLimitSignature, CodeRateLimited, ConfHigh),
 		mustRule("amp.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
 	},
+	// Antigravity's structured classifier emits these exact normalized
+	// prefixes. Matching them lets the existing Kanban and Office consumers
+	// recover the same category from the message without re-reading private
+	// native evidence.
+	"antigravity-acp": {
+		mustRule("antigravity.native.auth.v1", antigravityMessageRule(AntigravityAuthMessage), CodeAuthRequired, ConfHigh),
+		mustRule("antigravity.native.subscription.v1", antigravityMessageRule(AntigravitySubscriptionMessage), CodeSubscriptionRequired, ConfHigh),
+		mustRule("antigravity.native.model_access.v1", antigravityMessageRule(AntigravityModelAccessMessage), CodeModelUnavailable, ConfHigh),
+		mustRule("antigravity.native.quota.v1", antigravityMessageRule(AntigravityQuotaMessage), CodeQuotaLimited, ConfHigh),
+		mustRule("antigravity.native.throttle.v1", antigravityMessageRule(AntigravityThrottleMessage), CodeRateLimited, ConfHigh),
+		mustRule("antigravity.native.provider_overloaded.v1", antigravityMessageRule(AntigravityProviderOverloadedMessage), CodeProviderOverloaded, ConfHigh),
+		mustRule("antigravity.native.provider_failure.v1", antigravityMessageRule(AntigravityProviderMessage), CodeProviderUnavailable, ConfHigh),
+		mustRule("antigravity.native.unknown.v1", antigravityMessageRule(AntigravityUnknownMessage), CodeUnknownProvider, ConfMedium),
+		mustRule("antigravity.outcome.unverified.v1", antigravityMessageRule(AntigravityOutcomeUnverifiedMessage), CodeAgentRuntime, ConfHigh),
+	},
+}
+
+func antigravityMessageRule(message string) string {
+	return `(?im)^\s*(?:(?:Internal\s+error|API\s+Error|Error):\s*)?` +
+		regexp.QuoteMeta(message) + `\b`
 }
 
 func mustRule(id, pat string, code Code, conf Confidence) rule {
 	return rule{id: id, pattern: regexp.MustCompile(pat), code: code, confidence: conf}
+}
+
+// mustRuleOutsideMarkdownFences creates a rule that ignores fenced examples.
+func mustRuleOutsideMarkdownFences(id, pat string, code Code, conf Confidence) rule {
+	r := mustRule(id, pat, code, conf)
+	r.ignoreMarkdownFences = true
+	return r
 }
 
 func mustRawRule(id, pat string, code Code, conf Confidence) rule {
@@ -167,6 +209,9 @@ func matchProviderRules(providerID, excerpt, rawText string) (*Error, bool) {
 		if r.rawText {
 			text = rawText
 		}
+		if r.ignoreMarkdownFences {
+			text = withoutMarkdownFencedCode(text)
+		}
 		if text != "" && r.pattern.MatchString(text) {
 			return &Error{
 				Code:           r.code,
@@ -176,4 +221,39 @@ func matchProviderRules(providerID, excerpt, rawText string) (*Error, bool) {
 		}
 	}
 	return nil, false
+}
+
+// withoutMarkdownFencedCode blanks fenced examples and preserves diagnostic lines.
+func withoutMarkdownFencedCode(text string) string {
+	lines := strings.Split(text, "\n")
+	var fenceMarker byte
+	fenceLength := 0
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " ")
+		marker := byte(0)
+		length := 0
+		if len(line)-len(trimmed) <= 3 && len(trimmed) >= 3 && (trimmed[0] == '`' || trimmed[0] == '~') {
+			marker = trimmed[0]
+			for length < len(trimmed) && trimmed[length] == marker {
+				length++
+			}
+			if length < 3 {
+				marker = 0
+			}
+		}
+		if fenceMarker == 0 {
+			if marker != 0 {
+				fenceMarker = marker
+				fenceLength = length
+				lines[i] = ""
+			}
+			continue
+		}
+		lines[i] = ""
+		if marker == fenceMarker && length >= fenceLength && strings.TrimSpace(trimmed[length:]) == "" {
+			fenceMarker = 0
+			fenceLength = 0
+		}
+	}
+	return strings.Join(lines, "\n")
 }

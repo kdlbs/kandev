@@ -496,6 +496,7 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await testPage.emulateMedia({ reducedMotion: "reduce" });
     const session = await seedOverflowingTask(
@@ -586,5 +587,8 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
         },
       )
       .toBeLessThanOrEqual(3);
+    await prCapture.screenshot("held-reading-phone", {
+      caption: "Phone transcript retains the reading position after upward touch and new output.",
+    });
   });
 });

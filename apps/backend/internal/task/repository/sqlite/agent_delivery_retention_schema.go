@@ -80,6 +80,11 @@ var agentDeliveryRetentionIndexes = []struct {
 			ON agent_delivery_inbox(stream_id, sequence) WHERE terminal <> 0`,
 	},
 	{
+		name: "idx_agent_delivery_inbox_submission_terminal",
+		query: `CREATE INDEX IF NOT EXISTS idx_agent_delivery_inbox_submission_terminal
+			ON agent_delivery_inbox(submission_id, stream_id) WHERE terminal <> 0`,
+	},
+	{
 		name: "idx_agent_delivery_inbox_retirement",
 		query: `CREATE INDEX IF NOT EXISTS idx_agent_delivery_inbox_retirement
 			ON agent_delivery_inbox(session_id, incarnation_id, stream_id, sequence)`,

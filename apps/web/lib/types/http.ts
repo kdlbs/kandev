@@ -176,7 +176,7 @@ export type WorkflowStep = {
    * Phase 2 (ADR-0004) semantic UX hint. Backend code does not branch on this;
    * frontend uses it to choose presentation (review/approval styling, etc).
    */
-  stage_type?: "work" | "review" | "approval" | "custom";
+  stage_type?: "work" | "review" | "approval" | "custom" | "hold";
   /**
    * ADR 0015: gate on_turn_complete transitions on an explicit
    * `step_complete_kandev` MCP signal from the agent. When true, the
@@ -584,7 +584,7 @@ export type WorkflowStepDTO = {
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   disable_unclassified_fallback?: boolean;
   session_target?: WorkflowSessionTarget | null;
-  stage_type?: "work" | "review" | "approval" | "custom";
+  stage_type?: "work" | "review" | "approval" | "custom" | "hold";
   wip_limit?: number;
   pull_from_step_id?: string | null;
   complete_task_on_enter: boolean;
@@ -719,6 +719,12 @@ export type RuntimeStorageHealth = {
   observed_at?: string;
   /** Backend receipt age. Browser freshness adds local monotonic elapsed time. */
   age_seconds?: number;
+  /** Accepted delivery-health receipt time. Independent from capacity. */
+  pressure_observed_at?: string;
+  /** Backend receipt age for accepted delivery-health reports. Missing means unknown. */
+  pressure_age_seconds?: number;
+  /** Browser receipt time for this local cache entry. Never sent by the backend. */
+  client_received_at_ms?: number;
   write_pressure?: boolean;
   producer_paused?: boolean;
   delivery_state?: string;
@@ -767,6 +773,12 @@ export type TaskSession = ActiveSubagentCountFields & {
   worktree_branch?: string;
   /** Effective task root containing every attached workspace source. */
   workspace_path?: string;
+  /**
+   * Confirmed native-session working directory used as the base for
+   * repository-relative chat links. Omitted means no update; null means the
+   * backend has no authoritative value.
+   */
+  agent_workspace_path?: string | null;
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
   /** Latest path-free managed workspace recovery operation for this environment. */
@@ -838,7 +850,7 @@ export type {
   ApproveSessionResponse,
 } from "./http-session-responses";
 
-export type NotificationProviderType = "local" | "apprise" | "system";
+export type NotificationProviderType = "local" | "apprise" | "system" | "webhook" | "webpush";
 
 export type NotificationProvider = {
   id: string;
@@ -1202,6 +1214,8 @@ export type Message = {
    * created_at ascending, ties by id); present only on user messages from an
    * indexed server payload, omitted on older payloads. */
   prompt_index?: number;
+  /** Response-only: the accepted prompt could not retire the observed turn-error badge. */
+  turn_error_acknowledgement_failed?: boolean;
 };
 
 export type Turn = {

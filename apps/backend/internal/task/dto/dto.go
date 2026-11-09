@@ -268,7 +268,8 @@ type TaskDTO struct {
 	DependsOn []TaskDependencyRefDTO `json:"depends_on,omitempty"`
 	// Blocks lists direct dependents so the dependency chip can render both
 	// directions without a second round trip.
-	Blocks []TaskDependencyRefDTO `json:"blocks,omitempty"`
+	Blocks  []TaskDependencyRefDTO `json:"blocks,omitempty"`
+	Related []TaskDependencyRefDTO `json:"related,omitempty"`
 	// StartWhenUnblocked reports that a launch intent is waiting on dependency
 	// resolution. Read-only here; set through the create request or the picker.
 	StartWhenUnblocked bool `json:"start_when_unblocked,omitempty"`
@@ -436,6 +437,9 @@ type TaskSessionDTO struct {
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
+	// AgentWorkspacePath is the confirmed native-session working directory used
+	// as the base for repository-relative chat links. Null means unknown.
+	AgentWorkspacePath *string `json:"agent_workspace_path"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for backward
 	// compatibility. Entries use the stable session-worktree wire shape
@@ -636,6 +640,9 @@ type TaskSessionSummaryDTO struct {
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
+	// AgentWorkspacePath is the confirmed native-session working directory used
+	// as the base for repository-relative chat links. Null means unknown.
+	AgentWorkspacePath *string `json:"agent_workspace_path"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for backward
 	// compatibility. Entries use the stable session-worktree wire shape.
@@ -1224,6 +1231,15 @@ func FromTaskWithSessionInfo(
 	}
 }
 
+// agentWorkspacePathPtr projects an empty native-workspace projection as an
+// explicit null so a full response can clear a stale client value.
+func agentWorkspacePathPtr(path string) *string {
+	if path == "" {
+		return nil
+	}
+	return &path
+}
+
 // FromTaskSessionSummary converts a session model to a summary DTO (no snapshot fields).
 func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 	result := TaskSessionSummaryDTO{
@@ -1245,6 +1261,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		BaseBranch:         session.BaseBranch,
 		BaseCommitSHA:      session.BaseCommitSHA,
 		WorkspacePath:      session.WorkspacePath,
+		AgentWorkspacePath: agentWorkspacePathPtr(session.AgentWorkspacePath),
 		State:              session.State,
 		ErrorMessage:       session.ErrorMessage,
 		Metadata:           session.Metadata,
@@ -1292,6 +1309,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		BaseBranch:           session.BaseBranch,
 		BaseCommitSHA:        session.BaseCommitSHA,
 		WorkspacePath:        session.WorkspacePath,
+		AgentWorkspacePath:   agentWorkspacePathPtr(session.AgentWorkspacePath),
 		State:                session.State,
 		ErrorMessage:         session.ErrorMessage,
 		Metadata:             session.Metadata,

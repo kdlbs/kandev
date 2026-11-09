@@ -25,7 +25,9 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/system/storage"
@@ -79,7 +81,12 @@ type Manager struct {
 	profileContextGenerationOrder *list.List
 	nextProfileContextGeneration  uint64
 	profileGroup                  singleflight.Group
+	profileFlightMu               sync.Mutex
+	profileDiscoveryFlights       map[uint64]profileDiscoveryFlight
+	nextProfileDiscoveryFlight    uint64
 	managedRuntimeSelections      managedruntime.SelectionReader
+	loginMu                       sync.Mutex
+	loginAttempt                  *antigravityLoginAttempt
 	startCancel                   context.CancelFunc
 	runtimeCtx                    context.Context
 	runtimeCancel                 context.CancelFunc
@@ -120,6 +127,14 @@ type instance struct {
 	operationGateOnce sync.Once
 	operationGate     *semaphore.Weighted
 }
+
+// Local aliases keep provider-specific helpers on the approved hostutility
+// runtime-client boundary instead of adding new direct runtime imports.
+type (
+	agentctlClient                = agentctlclient.Client
+	agentctlCreateInstanceRequest = agentctlclient.CreateInstanceRequest
+	agentctlAgentEvent            = agentctlclient.AgentEvent
+)
 
 // Shared probes and prompts each take one slot. Repair takes every slot so it
 // cannot remove an npm execution tree while another utility process uses it.
@@ -167,6 +182,7 @@ func NewManager(
 		profileContextGenerations:     make(map[string]uint64),
 		profileContextGenerationNodes: make(map[string]*list.Element),
 		profileContextGenerationOrder: list.New(),
+		profileDiscoveryFlights:       make(map[uint64]profileDiscoveryFlight),
 	}
 }
 
@@ -313,7 +329,20 @@ func (m *Manager) Stop(ctx context.Context) {
 	if runtimeCancel != nil {
 		runtimeCancel()
 	}
+	m.cancelProfileDiscoveryFlights("")
 	m.runtimeRebindWG.Wait()
+
+	m.loginMu.Lock()
+	login := m.loginAttempt
+	m.loginMu.Unlock()
+	if login != nil {
+		login.finish("cancelled", "cancelled", "Antigravity sign-in was cancelled")
+		login.cancel()
+		select {
+		case <-login.done:
+		case <-ctx.Done():
+		}
+	}
 
 	for _, inst := range instances {
 		deleteCtx, cancel := hostUtilityDeleteContext(ctx)
@@ -617,6 +646,28 @@ var safeAgentTypeName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // createInstance asks the control client to create a new workspace-only
 // agentctl instance in a tmp subdirectory dedicated to this agent type.
 func (m *Manager) createInstance(ctx context.Context, agentType string) (*instance, error) {
+	m.mu.RLock()
+	parentTmpDir := m.parentTmpDir
+	m.mu.RUnlock()
+	if parentTmpDir == "" {
+		return nil, errors.New("host utility manager not started")
+	}
+	workDir := filepath.Join(parentTmpDir, agentType)
+	req := &agentctlclient.CreateInstanceRequest{
+		WorkspacePath: workDir,
+		AgentType:     agentType,
+		// No AgentCommand / Protocol / AutoStart: the instance is workspace-only
+		// and never runs a persistent agent subprocess. Probe/Prompt calls
+		// spawn their own ephemeral ACP subprocesses via InferencePrompt/Probe.
+	}
+	return m.createInstanceWithRequest(ctx, agentType, workDir, req)
+}
+
+func (m *Manager) createInstanceWithRequest(
+	ctx context.Context,
+	agentType, workDir string,
+	req *agentctlclient.CreateInstanceRequest,
+) (*instance, error) {
 	if !safeAgentTypeName.MatchString(agentType) {
 		return nil, fmt.Errorf("invalid agent type %q: must match %s", agentType, safeAgentTypeName.String())
 	}
@@ -630,36 +681,19 @@ func (m *Manager) createInstance(ctx context.Context, agentType string) (*instan
 	if parentTmpDir == "" {
 		return nil, errors.New("host utility manager not started")
 	}
-	workDir := filepath.Join(parentTmpDir, agentType)
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", workDir, err)
 	}
-
-	req := &agentctlclient.CreateInstanceRequest{
-		WorkspacePath: workDir,
-		AgentType:     agentType,
-		// No AgentCommand / Protocol / AutoStart: the instance is workspace-only
-		// and never runs a persistent agent subprocess. Probe/Prompt calls
-		// spawn their own ephemeral ACP subprocesses via InferencePrompt/Probe.
+	if req == nil {
+		req = &agentctlclient.CreateInstanceRequest{}
 	}
-	var control *agentctlclient.ControlClient
-	controlCtx := ctx
-	var lease *agentctlclient.RuntimeLease
-	var err error
-	if m.runtimeOwner != nil {
-		lease, err = m.runtimeOwner.Acquire(ctx)
-		if err != nil {
-			return nil, err
-		}
-		defer lease.Close()
-		control = lease.NewControlClient(m.log)
-		controlCtx = lease.Context()
-	} else {
-		control = m.controlClient
+	req.WorkspacePath = workDir
+	req.AgentType = agentType
+	control, controlCtx, lease, release, err := m.hostControl(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if control == nil {
-		return nil, errors.New("host utility control client unavailable")
-	}
+	defer release()
 	resp, err := control.CreateInstance(controlCtx, req)
 	if err != nil {
 		return nil, fmt.Errorf("create instance: %w", err)
@@ -669,35 +703,14 @@ func (m *Manager) createInstance(ctx context.Context, agentType string) (*instan
 			return nil, fmt.Errorf("host utility instance creation outcome is uncertain after runtime retirement: %w", err)
 		}
 	}
-
-	var client *agentctlclient.Client
-	if lease != nil {
-		client = lease.NewBoundInstanceClient(resp.Port, m.log, agentctlclient.WithExecutionID(resp.ID))
-	} else {
-		client = agentctlclient.NewClient(m.controlHost, resp.Port, m.log,
-			agentctlclient.WithExecutionID(resp.ID),
-			agentctlclient.WithAuthToken(m.authToken))
-	}
-
-	// Wait a moment for the instance HTTP server to come up.
-	healthCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	if err := waitForClientHealthy(healthCtx, client); err != nil {
-		deleteCtx, deleteCancel := hostUtilityDeleteContext(ctx)
-		m.deleteInstance(deleteCtx, &instance{
-			agentType:  agentType,
-			instanceID: resp.ID,
-			workDir:    workDir,
-			client:     client,
-		})
-		deleteCancel()
-		return nil, fmt.Errorf("instance %s not healthy: %w", resp.ID, err)
+	client := m.newInstanceClient(lease, resp)
+	if err := m.waitForInstanceHealth(ctx, agentType, workDir, resp.ID, client); err != nil {
+		return nil, err
 	}
 	if lease != nil && lease.CheckCurrent() != nil {
 		client.Close()
 		return nil, agentctlclient.ErrRuntimeLeaseRetired
 	}
-
 	return &instance{
 		agentType:  agentType,
 		instanceID: resp.ID,
@@ -710,6 +723,55 @@ func (m *Manager) createInstance(ctx context.Context, agentType string) (*instan
 		workDir: workDir,
 		client:  client,
 	}, nil
+}
+
+func (m *Manager) hostControl(
+	ctx context.Context,
+) (*agentctlclient.ControlClient, context.Context, *agentctlclient.RuntimeLease, func(), error) {
+	if m.runtimeOwner != nil {
+		lease, err := m.runtimeOwner.Acquire(ctx)
+		if err != nil {
+			return nil, ctx, nil, func() {}, err
+		}
+		return lease.NewControlClient(m.log), lease.Context(), lease, lease.Close, nil
+	}
+	if m.controlClient == nil {
+		return nil, ctx, nil, func() {}, errors.New("host utility control client unavailable")
+	}
+	return m.controlClient, ctx, nil, func() {}, nil
+}
+
+func (m *Manager) newInstanceClient(
+	lease *agentctlclient.RuntimeLease,
+	resp *agentctlclient.CreateInstanceResponse,
+) *agentctlclient.Client {
+	if lease != nil {
+		return lease.NewBoundInstanceClient(resp.Port, m.log, agentctlclient.WithExecutionID(resp.ID))
+	}
+	return agentctlclient.NewClient(m.controlHost, resp.Port, m.log,
+		agentctlclient.WithExecutionID(resp.ID),
+		agentctlclient.WithAuthToken(m.authToken))
+}
+
+func (m *Manager) waitForInstanceHealth(
+	ctx context.Context,
+	agentType, workDir, instanceID string,
+	client *agentctlclient.Client,
+) error {
+	healthCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := waitForClientHealthy(healthCtx, client); err != nil {
+		deleteCtx, deleteCancel := hostUtilityDeleteContext(ctx)
+		m.deleteInstance(deleteCtx, &instance{
+			agentType:  agentType,
+			instanceID: instanceID,
+			workDir:    workDir,
+			client:     client,
+		})
+		deleteCancel()
+		return fmt.Errorf("instance %s not healthy: %w", instanceID, err)
+	}
+	return nil
 }
 
 func waitForClientHealthy(ctx context.Context, c *agentctlclient.Client) error {
@@ -934,29 +996,32 @@ func (m *Manager) probeManagedRuntime(
 	override agents.Command,
 	req *agentctlutil.ProbeRequest,
 ) (*agentctlutil.ProbeResponse, agents.Command, error) {
-	command, release, err := m.acquireInferenceCommand(ctx, inst, ia, override)
+	command, localEnv, release, err := m.acquireInferenceCommand(ctx, inst, ia, override)
 	if err != nil {
 		return nil, command, err
 	}
 	req = cloneProbeRequestWithCommand(req, command)
+	req.InferenceConfig.Env = mergeInferenceEnv(req.InferenceConfig.Env, localEnv)
 	resp, err := inst.client.Probe(ctx, req)
 	release()
-	if err != nil || resp.Success || resp.FailureCode != agentctlutil.ProbeFailureManagedRuntimeNPMResolution {
+	if err != nil || !managedRuntimeProbeFailureRecoverable(resp) {
 		return resp, command, err
 	}
+	return m.retryManagedRuntimeProbe(ctx, inst, ia, override, command, req, resp, nil, false), command, nil
+}
 
-	release, err = inst.acquireOperation(ctx, true)
-	if err != nil {
-		return resp, command, nil
+func mergeInferenceEnv(env, extra map[string]string) map[string]string {
+	if len(extra) == 0 {
+		return env
 	}
-	defer release()
-	command, err = m.resolveInferenceCommand(ctx, inst.agentType, ia, override)
-	if err != nil {
-		m.log.Warn("could not resolve selected runtime for probe recovery", zap.Error(err))
-		return resp, command, nil
+	merged := make(map[string]string, len(env)+len(extra))
+	for key, value := range env {
+		merged[key] = value
 	}
-	req = cloneProbeRequestWithCommand(req, command)
-	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, req, resp), command, nil
+	for key, value := range extra {
+		merged[key] = value
+	}
+	return merged
 }
 
 func (m *Manager) recoverManagedRuntimeProbe(
@@ -968,6 +1033,9 @@ func (m *Manager) recoverManagedRuntimeProbe(
 	initial *agentctlutil.ProbeResponse,
 ) *agentctlutil.ProbeResponse {
 	if ctx.Err() != nil {
+		return initial
+	}
+	if !managedRuntimeProbeFailureRecoverable(initial) {
 		return initial
 	}
 	managed, ok := ia.(agents.ManagedNPMRuntimeAgent)
@@ -985,15 +1053,38 @@ func (m *Manager) recoverManagedRuntimeProbe(
 			spec = selected.Spec
 		}
 	}
-	retryCommand, _, ok := managedRuntimeProbeRetry(failedCommand, spec)
+	retryCommand, packageSpec, ok := managedRuntimeProbeRetry(failedCommand, spec)
 	if !ok {
 		return initial
+	}
+	var preparation *agentctltypes.ManagedRuntimePreparationDirective
+	if initial.FailureCode == agentctlutil.ProbeFailureManagedRuntimeCacheIncomplete {
+		config := failedRequest.InferenceConfig
+		if config == nil || config.OperatorDefined || len(config.CommandPrefix) != 0 ||
+			len(config.CLIFlags) != 0 || !config.LaunchWrapper.IsZero() ||
+			initial.CacheEvidence == nil ||
+			initial.CacheEvidence.Condition != agentctltypes.ManagedRuntimeCacheRootManifestMissing ||
+			initial.CacheEvidence.PackageSpec != packageSpec || packageSpec == "" ||
+			initial.CacheEvidence.ProbeAttemptID == "" {
+			return initial
+		}
+		preparation = &agentctltypes.ManagedRuntimePreparationDirective{
+			Condition:      initial.CacheEvidence.Condition,
+			PackageSpec:    packageSpec,
+			ProbeAttemptID: initial.CacheEvidence.ProbeAttemptID,
+		}
+	}
+	recoveryCommand := retryCommand
+	if preparation != nil {
+		recoveryCommand = failedCommand
 	}
 	m.log.Info("recovering managed runtime host capability probe",
 		zap.String("agent_type", inst.agentType),
 		zap.String("recovery_scope", "host_capability_probe"),
 		zap.Int("attempt", 1))
-	response, err := inst.client.Probe(ctx, cloneProbeRequestWithCommand(failedRequest, retryCommand))
+	retryRequest := cloneProbeRequestWithCommand(failedRequest, recoveryCommand)
+	retryRequest.Preparation = preparation
+	response, err := inst.client.Probe(ctx, retryRequest)
 	if err != nil {
 		m.log.Warn("managed runtime host capability probe retry failed",
 			zap.String("agent_type", inst.agentType),
@@ -1007,6 +1098,50 @@ func (m *Manager) recoverManagedRuntimeProbe(
 		zap.String("recovery_scope", "host_capability_probe"),
 		zap.String("outcome", string(capabilityStatus(response))))
 	return response
+}
+
+func managedRuntimeProbeFailureRecoverable(response *agentctlutil.ProbeResponse) bool {
+	return response != nil && !response.Success &&
+		(response.FailureCode == agentctlutil.ProbeFailureManagedRuntimeNPMResolution ||
+			response.FailureCode == agentctlutil.ProbeFailureManagedRuntimeCacheIncomplete)
+}
+
+func (m *Manager) retryManagedRuntimeProbe(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	override agents.Command,
+	failedCommand agents.Command,
+	failedRequest *agentctlutil.ProbeRequest,
+	initial *agentctlutil.ProbeResponse,
+	contextCurrent func() bool,
+	requireSameCommand bool,
+) *agentctlutil.ProbeResponse {
+	if ctx.Err() != nil || !managedRuntimeProbeFailureRecoverable(initial) {
+		return initial
+	}
+	release, err := inst.acquireOperation(ctx, true)
+	if err != nil {
+		return initial
+	}
+	defer release()
+	if ctx.Err() != nil || (contextCurrent != nil && !contextCurrent()) {
+		return initial
+	}
+	command, localEnv, err := m.resolveInferenceCommand(ctx, inst.agentType, ia, override)
+	if err != nil {
+		m.log.Warn("could not resolve selected runtime for probe recovery", zap.Error(err))
+		return initial
+	}
+	if requireSameCommand && !slices.Equal(command.Args(), failedCommand.Args()) {
+		return initial
+	}
+	if ctx.Err() != nil || (contextCurrent != nil && !contextCurrent()) {
+		return initial
+	}
+	retryRequest := cloneProbeRequestWithCommand(failedRequest, command)
+	retryRequest.InferenceConfig.Env = mergeInferenceEnv(retryRequest.InferenceConfig.Env, localEnv)
+	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, retryRequest, initial)
 }
 
 func cloneProbeRequestWithCommand(
@@ -1147,44 +1282,48 @@ func (m *Manager) resolveInferenceCommand(
 	agentType string,
 	ia agents.InferenceAgent,
 	override agents.Command,
-) (agents.Command, error) {
+) (agents.Command, map[string]string, error) {
 	if !override.IsEmpty() {
-		return override, nil
+		return override, nil, nil
 	}
 	cfg := inferenceConfigForHostUtility(ia)
 	if cfg == nil || !cfg.Supported {
-		return agents.Command{}, errors.New("inference config not available")
+		return agents.Command{}, nil, errors.New("inference config not available")
 	}
 	command := cfg.Command
+	if resolver, ok := ia.(agents.LocalRuntimeAgent); ok {
+		return resolver.ResolveLocalRuntime(ctx)
+	}
 	ag, ok := ia.(agents.Agent)
 	if !ok || m.managedRuntimeSelections == nil {
-		return command, nil
+		return command, nil, nil
 	}
 	openCode, isOpenCode := ag.(*agents.OpenCodeACP)
 	reader, hasSelectionReader := m.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader)
 	if isOpenCode && hasSelectionReader {
-		return m.resolveOpenCodeInferenceCommand(ctx, openCode, reader)
+		resolved, err := m.resolveOpenCodeInferenceCommand(ctx, openCode, reader)
+		return resolved, nil, err
 	}
 	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
 	if !ok {
-		return command, nil
+		return command, nil, nil
 	}
 	spec := managed.ManagedNPMRuntime()
 	if spec.NativeBinaryOnPath() {
-		return spec.NativeCommand(), nil
+		return spec.NativeCommand(), nil, nil
 	}
 	selection, found, err := m.managedRuntimeSelections.Get(ctx, agentType, spec.Package)
 	if err != nil {
-		return agents.Command{}, fmt.Errorf("resolve active managed runtime version for %s: %w", agentType, err)
+		return agents.Command{}, nil, fmt.Errorf("resolve active managed runtime version for %s: %w", agentType, err)
 	}
 	version := spec.DefaultVersion
 	if found && selection.Package == spec.Package {
 		version = selection.Version
 	}
 	if cfg.Protocol == agent.ProtocolCodexAppServer {
-		return spec.RuntimeCommand(version), nil
+		return spec.RuntimeCommand(version), nil, nil
 	}
-	return spec.ACPCommand(version), nil
+	return spec.ACPCommand(version), nil, nil
 }
 
 func (m *Manager) resolveOpenCodeInferenceCommand(
@@ -1222,17 +1361,23 @@ func (m *Manager) acquireInferenceCommand(
 	inst *instance,
 	ia agents.InferenceAgent,
 	override agents.Command,
-) (agents.Command, func(), error) {
+) (agents.Command, map[string]string, func(), error) {
 	release, err := inst.acquireOperation(ctx, false)
 	if err != nil {
-		return agents.Command{}, nil, err
+		return agents.Command{}, nil, nil, err
 	}
-	command, err := m.resolveInferenceCommand(ctx, inst.agentType, ia, override)
+	command, localEnv, err := m.resolveInferenceCommand(ctx, inst.agentType, ia, override)
 	if err != nil {
 		release()
-		return agents.Command{}, nil, err
+		return agents.Command{}, nil, nil, err
 	}
-	return command, release, nil
+	if hostUtilityAuthPolicy(ia) != nil {
+		if err := inst.client.RequireCapability(ctx, acpcompat.AntigravityPersonalAuthCapability); err != nil {
+			release()
+			return agents.Command{}, nil, nil, err
+		}
+	}
+	return command, localEnv, release, nil
 }
 
 const modelConfigResolveTimeout = 60 * time.Second
@@ -1260,6 +1405,7 @@ func buildProbeRequest(
 			Env:             agents.RuntimeEnvFor(ia),
 			StripEnv:        agents.StripEnvFor(ia),
 			OperatorDefined: cfg.OperatorDefined,
+			AuthPolicy:      hostUtilityAuthPolicy(ia),
 		},
 	}
 }
@@ -1367,6 +1513,14 @@ func managedRuntimeCommandVersion(command agents.Command, spec agents.ManagedNPM
 		}
 	}
 	return ""
+}
+
+func hostUtilityAuthPolicy(ia agents.InferenceAgent) *acpcompat.AuthPolicy {
+	ag, ok := ia.(agents.Agent)
+	if !ok || !acpcompat.IsAntigravity(ag.ID()) {
+		return nil
+	}
+	return acpcompat.AntigravityAuthPolicy(false)
 }
 
 func inferenceConfigForHostUtility(ia agents.InferenceAgent) *agents.InferenceConfig {

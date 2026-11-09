@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
@@ -106,9 +107,9 @@ func acpErrorKindFromData(data any) string {
 
 // mergeAllowlistedProviderErrorMetadata fills provider_id and model_id
 // verbatim from the adapter's own state, and rpc_code/error_kind from the
-// underlying *acp.RequestError when err is (or wraps) one. Raw
-// RequestError.Data never crosses this call other than through the
-// validated error_kind extraction.
+// underlying *acp.RequestError when err is (or wraps) one. Explicit optional
+// HTTP status and provider code are merged by the bounded scalar extractor.
+// Raw RequestError.Data never crosses this call.
 func mergeAllowlistedProviderErrorMetadata(projection *streams.ProviderError, err error, providerID, modelID string) {
 	if projection.ProviderID == "" {
 		projection.ProviderID = providerID
@@ -126,6 +127,7 @@ func mergeAllowlistedProviderErrorMetadata(projection *streams.ProviderError, er
 	if projection.ErrorKind == "" {
 		projection.ErrorKind = acpErrorKindFromData(reqErr.Data)
 	}
+	mergeProviderFailureFields(projection, reqErr.Data)
 }
 
 // providerErrorFromACPPrompt projects the safe message from a terminal ACP
@@ -193,6 +195,10 @@ func providerErrorFromACPActionURL(err error) *streams.ProviderError {
 // error-only stderr is an optional signal; malformed or late diagnostics are
 // dropped and a full prompt channel never applies backpressure to stderr.
 func (a *Adapter) ConsumeStderrLine(line string) {
+	if acpcompat.IsAntigravity(a.agentID) {
+		a.consumeAntigravityStderr(line)
+		return
+	}
 	if a.agentID != opencodeAgentID {
 		return
 	}
@@ -216,6 +222,9 @@ func (a *Adapter) ConsumeStderrLine(line string) {
 // generic process diagnostics. Unrecognized records are excluded because they
 // may contain private URLs, identifiers, paths, or credentials.
 func (a *Adapter) SanitizeStderrLine(line string) (string, bool) {
+	if acpcompat.IsAntigravity(a.agentID) {
+		return a.sanitizeAntigravityStderr(line)
+	}
 	if a.agentID != opencodeAgentID {
 		return line, true
 	}

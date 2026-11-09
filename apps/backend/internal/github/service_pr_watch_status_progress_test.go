@@ -70,6 +70,8 @@ func (e *progressBatchExecutor) ExecuteGraphQL(
 	switch {
 	case strings.Contains(query, "ReviewThreadPages"):
 		return e.executeReviewThreadPage(out)
+	case strings.Contains(query, "query WorkflowSuites"), strings.Contains(query, "query WorkflowSuiteJobs"):
+		return json.Unmarshal([]byte(`{"data":{}}`), out)
 	case strings.Contains(query, "query Branches"):
 		return e.executeBranchBatch(query, out)
 	default:
@@ -351,6 +353,12 @@ func TestPRStatusProgress_PreservesEvidenceAndFences(t *testing.T) {
 			require.ErrorAs(t, err, &deferred, "incomplete pagination must leave the phase unfinished")
 			rows, listErr := store.ListTaskPRsByTask(ctx, "task-evidence")
 			require.NoError(t, listErr)
+			if len(rows) == 1 && rows[0].UnresolvedReviewThreads == executor.reviewThreads {
+				// The status phase completed; only the follow-on workflow phase
+				// is deferred by its own admission boundary.
+				completed = true
+				continue
+			}
 			require.Empty(t, rows, "partially decoded aggregates must not be published")
 			require.NoError(t, deferred.Wait(ctx))
 		}
@@ -369,7 +377,11 @@ func TestPRStatusProgress_PreservesEvidenceAndFences(t *testing.T) {
 			seedProgressWatch(t, store, "session-shared-b", "task-shared-b", progressTestPRNumber, "feat"),
 		}
 		_, err := service.SyncWorkspaceWatchesBatched(context.Background(), testWorkspaceID, watches)
-		require.NoError(t, err)
+		if err != nil {
+			var deferred *AdmissionDeferredError
+			require.ErrorAs(t, err, &deferred,
+				"only the follow-on workflow phase may defer after both statuses apply")
+		}
 		numberedCalls, _ := executor.counts()
 		require.Equal(t, 1, numberedCalls, "shared target must issue one read for both consumers")
 		for _, taskID := range []string{"task-shared-a", "task-shared-b"} {

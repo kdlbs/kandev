@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { notifyTurnErrorAcknowledgementFailure } from "@/lib/task-turn-error-feedback";
 import { queueMessage } from "@/lib/api/domains/queue-api";
 import type { QueueMessageParams, QueueSessionIdentity } from "@/lib/api/domains/queue-api";
 import type { QueueOperationToken, SessionSlice } from "@/lib/state/slices/session/types";
@@ -13,10 +14,12 @@ async function queueWithTerminalRefetch(
   refetch: QueueRefetch,
   token: QueueOperationToken,
   tolerateCommittedRefetchFailure: boolean,
-): Promise<true> {
+): Promise<{ acknowledgementFailed: boolean }> {
   let mutationError: unknown;
+  let acknowledgementFailed = false;
   try {
-    await queueMessage(params);
+    const accepted = await queueMessage(params);
+    acknowledgementFailed = accepted.turn_error_acknowledgement_failed === true;
   } catch (error) {
     mutationError = error;
   }
@@ -24,11 +27,11 @@ async function queueWithTerminalRefetch(
     await refetch(params.session_id, token);
   } catch (reconcileError) {
     if (mutationError) throw mutationError;
-    if (tolerateCommittedRefetchFailure) return true;
+    if (tolerateCommittedRefetchFailure) return { acknowledgementFailed };
     throw reconcileError;
   }
   if (mutationError) throw mutationError;
-  return true;
+  return { acknowledgementFailed };
 }
 
 export function useQueueAdmissionAction(
@@ -50,13 +53,14 @@ export function useQueueAdmissionAction(
       planCommentRefs,
       previewFeedbackRefs,
       requirePrimarySession,
+      observedTurnErrorStamp,
     }: QueueMessageInput) => {
       if (!identity || identity.task_id !== taskId) return false;
       const { session_id: sessionId, session_incarnation_id: incarnationId } = identity;
       const token = beginQueueOperation(sessionId, incarnationId);
       if (!token) return false;
       try {
-        return await queueWithTerminalRefetch(
+        const queueResult = await queueWithTerminalRefetch(
           {
             session_id: sessionId,
             session_incarnation_id: incarnationId,
@@ -71,11 +75,16 @@ export function useQueueAdmissionAction(
             ...(previewFeedbackRefs?.length ? { preview_feedback_refs: previewFeedbackRefs } : {}),
             ...(requirePrimarySession ? { require_primary_session: true } : {}),
             ...(contextFilesMeta ? { context_files: contextFilesMeta } : {}),
+            ...(observedTurnErrorStamp
+              ? { observed_turn_error_stamp: observedTurnErrorStamp }
+              : {}),
           },
           refetch,
           token,
           Boolean(clientQueueId),
         );
+        notifyTurnErrorAcknowledgementFailure(queueResult.acknowledgementFailed);
+        return true;
       } finally {
         finishQueueOperation(sessionId, token);
       }

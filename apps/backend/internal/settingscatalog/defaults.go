@@ -442,12 +442,26 @@ func repositoryDomain() DomainDescriptor {
 	fields := make([]FieldDescriptor, 0, len(paths))
 	for _, item := range paths {
 		field := domainWritable("repository", item.path, item.label, "Repository setting.", item.typ, owner, "workspace.manage")
+		if item.path == "remote_url" {
+			field.Description = "Credential-free clone locator. A replacement must preserve the saved provider identity, host, namespace, and name."
+		}
 		if item.path == "secret_bindings" {
 			field.Sensitive = true
 		}
 		fields = append(fields, field)
 	}
-	return supportedDomain("workspaces", "repository", "Repositories", "Workspace repository settings.", owner, ScopeResource, targetRulesResourceWorkspace(), fields...)
+	domain := supportedDomain("workspaces", "repository", "Repositories", "Workspace repository settings.", owner, ScopeResource, targetRulesResourceWorkspace(), fields...)
+	domain.Operations[0].Options = map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"validate_only": map[string]any{
+				"type":        "boolean",
+				"description": "Validate a single remote_url replacement without writing.",
+			},
+		},
+	}
+	return domain
 }
 
 func repositoryScriptDomain() DomainDescriptor {
@@ -630,7 +644,9 @@ func userSettingsDomain() DomainDescriptor {
 		"tasks_list_group", "task grouping", "string", "tasks_list_show_details", "task details", "boolean", "initial_setup_complete", "setup complete", "boolean",
 		"preferred_shell", "preferred shell", "string", "default_editor_id", "default editor", "string", "enable_preview_on_click", "preview on click", "boolean",
 		"chat_submit_key", "chat submit key", "string", "review_auto_mark_on_scroll", "review auto mark", "boolean", "confirm_task_archive", "confirm task archive", "boolean",
-		"prevent_auto_start_agent_on_open", "prevent auto start", "boolean", "unread_divider", "unread divider", "boolean", "agent_generated_task_titles", "generated titles", "boolean", "prompt_suggestions", "prompt suggestions", "boolean", "auto_focus_new_tasks", "auto focus new tasks", "boolean",
+		"prevent_auto_start_agent_on_open", "prevent auto start", "boolean", "unread_divider", "unread divider", "boolean", "unread_task_dot", "unread task dot", "boolean",
+		"unread_task_dot_hide_delay_seconds", "unread task dot hide delay", "integer",
+		"agent_generated_task_titles", "generated titles", "boolean", "prompt_suggestions", "prompt suggestions", "boolean", "auto_focus_new_tasks", "auto focus new tasks", "boolean",
 		"mcp_task_agent_profile_default", "MCP task profile", "string", "show_anchored_prompt_bar", "anchored prompt bar", "boolean", "show_scroll_to_last_prompt", "scroll to last prompt", "boolean",
 		"show_scroll_to_start", "scroll to start", "boolean", "show_transcript_auto_scroll_control", "transcript scroll control", "boolean", "show_todo_list_panel", "todo list panel", "boolean",
 		"show_todo_list_panel_only_when_not_empty", "todo list empty state", "boolean", "show_turn_changed_files", "turn changed files", "boolean",
@@ -669,6 +685,9 @@ func userSettingsDomain() DomainDescriptor {
 			field.SettingsHref = "/settings/preferences/layouts?tab=sidebar"
 			field.DefaultBehavior = "simple for new users; compact for existing users without a saved value"
 			field.Schema = map[string]any{"type": "string", "enum": []string{"simple", "compact"}}
+		case "unread_task_dot_hide_delay_seconds":
+			field.DefaultBehavior = "2 seconds"
+			field.Schema = map[string]any{"type": "integer", "minimum": 0, "maximum": 60}
 		case "keyboard_shortcuts":
 			field.Schema = keyboardShortcutsSchema()
 		case "sidebar_task_color_patch":

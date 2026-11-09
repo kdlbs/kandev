@@ -464,6 +464,10 @@ func exactReadSpecificUnavailableReason(method string, host *pluginHost) string 
 		if _, ok := host.taskData.(exactTaskObservationSource); !ok {
 			return "task_usage_data_unavailable"
 		}
+	case automationHistoryListDefinitionsMethod, automationHistoryListRunsMethod, automationHistoryGetRunMethod:
+		if host.automationHistoryDataDep == nil || host.automationHistoryDataDep() == nil {
+			return "automation_history_data_unavailable"
+		}
 	}
 	return ""
 }

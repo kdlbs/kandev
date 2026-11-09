@@ -13,6 +13,15 @@ import { completeQuickChatOpening } from "../chat/quick-chat-opening-composer-he
 
 type SessionMessage = Awaited<ReturnType<ApiClient["listSessionMessages"]>>["messages"][number];
 
+async function expectRetainedTurnAfterRetryCancel(session: SessionPage) {
+  const chat = session.activeChat();
+  await expect(chat.getByTestId("session-recovery-action-message")).toBeVisible();
+  await expect(chat.getByTestId("turn-error-dismiss-button")).toBeVisible();
+  await expect(session.recoveryResumeButton()).toHaveCount(0);
+  await expect(session.transientRetryCard()).toBeHidden();
+  await expect(chat.getByTestId("chat-input-area")).toBeVisible();
+}
+
 async function waitForRetryNotice(
   apiClient: ApiClient,
   sessionId: string,
@@ -173,10 +182,10 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
 
     // Stop the retry loop before this worker starts another task.
     await session.recoveryCancelRetryButton().click();
-    await expect(session.recoveryResumeButton()).toBeVisible();
+    await expectRetainedTurnAfterRetryCancel(session);
   });
 
-  test("Cancel stops the retry loop and surfaces the recovery banner", async ({
+  test("Cancel stops the retry loop and surfaces the retained turn error", async ({
     testPage,
     apiClient,
     seedData,
@@ -197,16 +206,9 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
       })
       .toBe(0);
 
-    // Cancelling falls through to the red Resume / Start-fresh recovery banner.
-    await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
-    await expect(session.recoveryFreshButton()).toBeVisible();
-    await expect(session.transientRetryCard()).toBeHidden();
-    await expect(testPage.getByTestId("session-recovery-card")).toContainText(
-      "Automatic recovery was cancelled. Resume or start fresh to continue.",
-    );
-    await expect(testPage.getByTestId("session-recovery-card")).not.toContainText(
-      "after several retries",
-    );
+    // Cancelling settles the retained turn: the runtime stays usable and the
+    // inline error replaces the retry card, so no restart recovery is needed.
+    await expectRetainedTurnAfterRetryCancel(session);
   });
 
   test("retries are paced — the attempt counter advances across the backoff", async ({
@@ -259,8 +261,7 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     await expect(session.transientRetryCard()).toContainText(/attempt [2-5] of 5/i);
 
     await session.recoveryCancelRetryButton().click();
-    await expect(session.recoveryResumeButton()).toBeVisible();
-    await expect(session.transientRetryCard()).toBeHidden();
+    await expectRetainedTurnAfterRetryCancel(session);
   });
 
   test("a 529 on the very first turn retries (launch prompt is cached)", async ({
@@ -295,6 +296,6 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     await expect(session.transientRetryCard()).toContainText(/attempt [2-5] of 5/i);
 
     await session.recoveryCancelRetryButton().click();
-    await expect(session.recoveryResumeButton()).toBeVisible();
+    await expectRetainedTurnAfterRetryCancel(session);
   });
 });

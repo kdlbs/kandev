@@ -604,6 +604,17 @@ func TestValidate_AgentToolContract(t *testing.T) {
 	}
 }
 
+func TestValidate_AgentToolAutomationSurface(t *testing.T) {
+	m := managedManifest(t)
+	m.AgentTools = []AgentTool{{
+		Name: "list_findings", Description: "List findings.",
+		Surfaces: []string{AgentToolSurfaceAutomation}, InputSchema: map[string]any{"type": "object"},
+	}}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+}
+
 func TestValidate_ManagedAgentToolRequiresExplicitWorkspaceCapability(t *testing.T) {
 	m := managedManifest(t)
 	m.AgentTools = []AgentTool{{

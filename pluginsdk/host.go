@@ -33,6 +33,9 @@ import (
 // own Go-native implementation of this same interface (backed by the real
 // state store / secrets / event bus) and hands it to GRPCPlugin.Host; the
 // SDK wraps it into the generated pluginv1.HostServer for registration.
+// With workspace collaboration enabled, domain calls must retain the incoming
+// plugin handler context. Detached work without a live server invocation cannot
+// acquire domain caller authority; plugin-owned storage keeps startup behavior.
 type Host interface {
 	// GetState looks up a single state entry. found is false, err is nil
 	// when the key does not exist.
@@ -311,7 +314,15 @@ func AgentConversations(host Host) (AgentConversationManager, bool) {
 // newHostClient wraps a *grpc.ClientConn (dialed over the go-plugin broker)
 // as a Go-native Host implementation.
 func newHostClient(conn *grpc.ClientConn) Host {
-	return &grpcHostClient{client: pluginv1.NewHostClient(conn)}
+	return &grpcHostClient{client: pluginv1.NewHostClient(hostCallClientConn{ClientConnInterface: conn})}
+}
+
+// NewHostClient returns the SDK Host handle for an existing gRPC connection to
+// a Kandev Host service. Normal plugins receive this handle from Serve; this
+// constructor supports integration tests and embedders that manage their own
+// connection.
+func NewHostClient(conn *grpc.ClientConn) Host {
+	return newHostClient(conn)
 }
 
 type grpcHostClient struct {
@@ -864,6 +875,7 @@ func (r grpcMessageReader) Send(ctx context.Context, taskID, sessionID, text str
 func registerHostServer(s grpc.ServiceRegistrar, impl Host) {
 	exact, _ := impl.(ExactHost)
 	exactQueries, _ := impl.(ExactQueryHost)
+	automationHistory, _ := impl.(AutomationHistoryHost)
 	taskCommands, _ := impl.(ExactTaskCommandHost)
 	claimCommands, _ := impl.(ExactTaskManagementClaimCommandHost)
 	completionGateCommands, _ := impl.(ExactTaskCompletionGateCommandHost)
@@ -872,8 +884,8 @@ func registerHostServer(s grpc.ServiceRegistrar, impl Host) {
 	executionCommands, _ := impl.(ExactExecutionCommandHost)
 	interactionCommands, _ := impl.(ExactInteractionCommandHost)
 	pluginv1.RegisterHostServer(s, &grpcHostServer{
-		impl: impl, exact: exact, exactQueries: exactQueries, taskCommands: taskCommands,
-		claimCommands: claimCommands, completionGateCommands: completionGateCommands,
+		impl: impl, exact: exact, exactQueries: exactQueries, automationHistory: automationHistory,
+		taskCommands: taskCommands, claimCommands: claimCommands, completionGateCommands: completionGateCommands,
 		workspaceAdminCommands:       workspaceAdminCommands,
 		sourceIssueWritebackCommands: sourceIssueWritebackCommands,
 		executionCommands:            executionCommands, interactionCommands: interactionCommands,
@@ -885,6 +897,7 @@ type grpcHostServer struct {
 	impl                         Host
 	exact                        ExactHost
 	exactQueries                 ExactQueryHost
+	automationHistory            AutomationHistoryHost
 	taskCommands                 ExactTaskCommandHost
 	claimCommands                ExactTaskManagementClaimCommandHost
 	completionGateCommands       ExactTaskCompletionGateCommandHost

@@ -266,7 +266,7 @@ func (s *Service) SearchEntityReferences(
 	if request == nil {
 		return nil, errors.New("plugins: missing entity reference request")
 	}
-	_, release, err := s.beginPluginDispatch(id, expected)
+	_, release, err := s.beginPluginDispatchContext(ctx, id, expected)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +289,7 @@ func (s *Service) AuthorizeEntityReference(
 	if request == nil {
 		return nil, errors.New("plugins: missing entity reference request")
 	}
-	_, release, err := s.beginPluginDispatch(id, expected)
+	_, release, err := s.beginPluginDispatchContext(ctx, id, expected)
 	if err != nil {
 		return nil, err
 	}

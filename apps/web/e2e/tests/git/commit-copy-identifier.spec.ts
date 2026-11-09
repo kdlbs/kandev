@@ -5,6 +5,7 @@ import {
   openTaskSession,
   createStandardProfile,
 } from "../../helpers/git-helper";
+import { expectTouchSquareControl } from "../../helpers/control-sizing";
 import path from "node:path";
 
 test.describe.configure({ retries: 0 });
@@ -55,9 +56,7 @@ test("copies the complete commit identifier by keyboard and fits desktop and coa
   await expect
     .poll(() => testPage.evaluate(() => matchMedia("(pointer: coarse)").matches))
     .toBe(true);
-  const coarse = await action.boundingBox();
-  expect(coarse!.width).toBeGreaterThanOrEqual(44);
-  expect(coarse!.height).toBeGreaterThanOrEqual(44);
+  await expectTouchSquareControl(action);
   await cdp.detach();
 });
 
@@ -95,8 +94,7 @@ test("keeps a touch-sized target on a narrow fine-pointer phone viewport", async
     .getByRole("button", { name: "Copy identifier" });
   await expect(action).toBeVisible();
   const box = await action.boundingBox();
-  expect(box!.width).toBeGreaterThanOrEqual(44);
-  expect(box!.height).toBeGreaterThanOrEqual(44);
+  await expectTouchSquareControl(action);
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(390);
   expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(

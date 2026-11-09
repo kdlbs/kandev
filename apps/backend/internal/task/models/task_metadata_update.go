@@ -24,7 +24,10 @@ func ProtectedTaskMetadataUpdate(existing, requested map[string]interface{}) map
 	}
 	StripOfficeCarrierMetadata(updated)
 	RestoreOfficeCarrierMetadata(updated, existing)
-	for _, key := range []string{MetaKeyDeferredLaunch, MetaKeyStepHandoffCarry, MetaKeyHandoffSource, MetaKeyHandoffs, MetaKeyAutomationStartOwned, MetaKeyRequiredSubtaskCount} {
+	for _, key := range []string{
+		MetaKeyDeferredLaunch, MetaKeyStepHandoffCarry, MetaKeyHandoffSource, MetaKeyHandoffs,
+		MetaKeyAutomationStartOwned, MetaKeyRequiredSubtaskCount, MetaKeyLastTurnError,
+	} {
 		if value, ok := existing[key]; ok {
 			updated[key] = value
 		} else {

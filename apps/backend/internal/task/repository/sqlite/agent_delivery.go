@@ -227,17 +227,10 @@ func (r *Repository) TransitionAgentDeliverySubmission(ctx context.Context, id s
 }
 
 func (r *Repository) ReceiveAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, remoteHighWater int64) (bool, error) {
-	if event == nil || event.StreamID == "" || event.Sequence <= 0 || event.EventType == "" ||
-		event.SessionID == "" || event.IncarnationID == "" || event.HarnessGeneration <= 0 {
-		return false, fmt.Errorf("stream, positive sequence, event type, and owner identity are required")
+	contentHash, err := r.prepareAgentDeliveryEventReceipt(event)
+	if err != nil {
+		return false, err
 	}
-	if event.ReceivedAt.IsZero() {
-		event.ReceivedAt = r.nowUTC()
-	}
-	contentHash := agentDeliveryEventHash(event)
-	event.ContentHash = contentHash
-	event.HashVersion = agentDeliveryPayloadHashVersion
-	event.PayloadBytes = int64(len(event.Payload))
 	if err := r.prepareAgentDeliveryOwnerStatement(ctx, event); err != nil {
 		return false, err
 	}
@@ -261,6 +254,24 @@ func (r *Repository) ReceiveAgentDeliveryEvent(ctx context.Context, event *model
 	}
 	r.refreshAgentDeliveryLag(ctx)
 	return inserted == 1, nil
+}
+
+// prepareAgentDeliveryEventReceipt validates the transport identity and stamps
+// the content hash and byte budget that the inbox stores. Preparation happens
+// before writer entry so the writer only holds admission and the insert.
+func (r *Repository) prepareAgentDeliveryEventReceipt(event *models.AgentDeliveryEvent) (string, error) {
+	if event == nil || event.StreamID == "" || event.Sequence <= 0 || event.EventType == "" ||
+		event.SessionID == "" || event.IncarnationID == "" || event.HarnessGeneration <= 0 {
+		return "", fmt.Errorf("stream, positive sequence, event type, and owner identity are required")
+	}
+	if event.ReceivedAt.IsZero() {
+		event.ReceivedAt = r.nowUTC()
+	}
+	contentHash := agentDeliveryEventHash(event)
+	event.ContentHash = contentHash
+	event.HashVersion = agentDeliveryPayloadHashVersion
+	event.PayloadBytes = int64(len(event.Payload))
+	return contentHash, nil
 }
 
 func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent, remoteHighWater int64, contentHash string) (int64, error) {

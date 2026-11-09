@@ -8,7 +8,13 @@ import { type ReactNode, type RefObject } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
-import { IconColumns, IconLayoutKanban, IconList, IconTimeline } from "@tabler/icons-react";
+import {
+  IconColumns,
+  IconLayoutKanban,
+  IconList,
+  IconHierarchy3,
+  IconTimeline,
+} from "@tabler/icons-react";
 import { MobileWorkspaceActionsSection } from "@/components/app-sidebar/app-sidebar-workspace-actions";
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
 import {
@@ -124,6 +130,15 @@ function MobileViewSection({
           >
             <IconTimeline className={mobileControlIconClass} />
             {t("kanban:pipeline")}
+          </ToggleGroupItem>
+        )}
+        {showPipeline && (
+          <ToggleGroupItem
+            value="graph"
+            className="h-10 min-w-0 flex-1 cursor-pointer gap-2 text-sm data-[state=on]:bg-muted data-[state=on]:text-foreground"
+          >
+            <IconHierarchy3 className={mobileControlIconClass} />
+            {t("kanban:graph")}
           </ToggleGroupItem>
         )}
         <ToggleGroupItem

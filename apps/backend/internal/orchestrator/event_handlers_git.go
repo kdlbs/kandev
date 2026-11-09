@@ -34,6 +34,10 @@ const gitSnapshotStatusReady = "ready"
 
 const automaticPermissionMessageWriteMaxAttempts = 3
 
+// automaticPermissionCleanupTimeout bounds failure settlement so audit and
+// presentation updates still run after the originating request context ends.
+const automaticPermissionCleanupTimeout = 5 * time.Second
+
 // gitSnapshotCacheMaxEntries bounds the in-memory throttle map so a long-lived
 // backend with many sessions can't grow it without limit. When the cache is
 // full and a new session arrives, the oldest entry by lastWrite is evicted.
@@ -703,11 +707,12 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 	}
 
 	contextWindowData := map[string]interface{}{
-		"size":       size,
-		"used":       data.ContextWindowUsed,
-		"remaining":  remaining,
-		"efficiency": efficiency,
-		"source":     source,
+		"size":                          size,
+		"used":                          data.ContextWindowUsed,
+		"remaining":                     remaining,
+		"efficiency":                    efficiency,
+		"source":                        source,
+		"compaction_inference_disabled": data.CompactionInferenceDisabled,
 	}
 
 	// Persist synchronously using json_set to atomically set one key without
@@ -717,6 +722,7 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 	// samples and produce an incorrect compaction count.
 	persisted, err := s.persistAndPublishContextWindowUpdate(
 		context.Background(), data.TaskID, data.TaskSessionID, generation, contextWindowData,
+		data.CompactionInferenceDisabled && !data.CopilotNativeSessionEvents,
 	)
 	switch {
 	case err != nil:
@@ -735,27 +741,75 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 	}
 }
 
+// compactionAvailabilitySetter is implemented by the task repository that owns
+// the native compaction reporting metadata. Kept optional so lightweight
+// orchestrator test doubles do not need to implement it.
+type compactionAvailabilitySetter interface {
+	SetSessionCompactionAvailability(
+		ctx context.Context,
+		sessionID string,
+		availability string,
+		coverage string,
+	) (*streams.ContextCompactionReporting, error)
+}
+
 func (s *Service) persistAndPublishContextWindowUpdate(
 	ctx context.Context,
 	taskID, sessionID string,
 	generation uint64,
 	contextWindowData map[string]interface{},
+	nativeCountingUnavailable bool,
 ) (bool, error) {
 	persisted, count, err := s.persistContextWindowUpdate(ctx, sessionID, generation, contextWindowData)
 	if !persisted || err != nil || s.eventBus == nil {
 		return persisted, err
 	}
+	if !s.contextWindowGenerationCurrent(sessionID, generation) {
+		return false, nil
+	}
+	session, readErr := s.repo.GetTaskSession(ctx, sessionID)
+	if readErr != nil || session == nil {
+		s.logger.Warn("cannot publish context window metadata without the authoritative session",
+			zap.String("session_id", sessionID),
+			zap.Error(readErr))
+		return true, readErr
+	}
+	metadata := map[string]interface{}{
+		contextWindowMetadataKey:                    contextWindowData,
+		models.SessionMetaKeyContextCompactionCount: count,
+	}
+	if reporting, ok := session.Metadata[models.SessionMetaKeyContextCompactionReporting]; ok {
+		metadata[models.SessionMetaKeyContextCompactionReporting] = reporting
+	}
+	if nativeCountingUnavailable &&
+		!compactionReportingUnavailablePartial(compactionReportingFromMetadata(session.Metadata)) {
+		if setter, ok := s.repo.(compactionAvailabilitySetter); ok {
+			reporting, reportErr := setter.SetSessionCompactionAvailability(
+				ctx, sessionID,
+				streams.ContextCompactionAvailabilityUnavailable,
+				streams.ContextCompactionCoveragePartial,
+			)
+			if reportErr != nil {
+				s.logger.Warn("failed to persist unavailable compaction reporting",
+					zap.String("session_id", sessionID),
+					zap.Error(reportErr))
+			} else if reporting != nil {
+				metadata[models.SessionMetaKeyContextCompactionReporting] = reporting
+			}
+		}
+	}
+	eventData := map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"metadata":   metadata,
+	}
+	if !session.UpdatedAt.IsZero() {
+		eventData["updated_at"] = session.UpdatedAt.Format(time.RFC3339Nano)
+	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 		events.TaskSessionStateChanged,
 		"orchestrator",
-		map[string]interface{}{
-			"task_id":    taskID,
-			"session_id": sessionID,
-			"metadata": map[string]interface{}{
-				contextWindowMetadataKey:                    contextWindowData,
-				models.SessionMetaKeyContextCompactionCount: count,
-			},
-		},
+		eventData,
 	))
 	return true, nil
 }
@@ -835,93 +889,26 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 		s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
 	}
 
-	turnID := s.getActiveTurnID(data.TaskSessionID)
-	permissionStored := false
-	if s.messageCreator != nil {
-		attempts := 0
-		var err error
-	permissionWrite:
-		for attempt := 1; attempt <= automaticPermissionMessageWriteMaxAttempts; attempt++ {
-			attempts = attempt
-			_, err = s.messageCreator.CreatePermissionRequestMessage(
-				ctx,
-				data.TaskID,
-				data.TaskSessionID,
-				data.RequestID,
-				data.PendingID,
-				data.ToolCallID,
-				data.Title,
-				turnID,
-				data.Options,
-				data.ActionType,
-				data.ActionDetails,
-				decision,
-			)
-			if err == nil || (!autoApproved && !autoCandidate) || attempts == automaticPermissionMessageWriteMaxAttempts {
-				break
-			}
-			timer := time.NewTimer(100 * time.Millisecond)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				err = ctx.Err()
-				break permissionWrite
-			case <-timer.C:
-			}
+	presentation := models.PermissionPresentationInteractive
+	if autoCandidate {
+		presentation = models.PermissionPresentationAutomatic
+	}
+	permissionStored := s.persistPermissionRequestMessage(ctx, data, decision, presentation)
+	if !permissionStored && (autoCandidate || autoApproved) {
+		if autoCandidate {
+			s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
 		}
-		if err != nil {
-			message := "failed to create permission request message"
-			fields := []zap.Field{
-				zap.String("task_id", data.TaskID),
-				zap.String("pending_id", data.PendingID),
-				zap.Error(err),
-			}
-			if decision != nil {
-				message = "failed to persist automatic permission decision"
-				fields = append(fields,
-					zap.Int("attempts", attempts),
-					zap.String("option_id", decision.OptionID),
-					zap.String("option_kind", decision.OptionKind),
-					zap.String("source", decision.Source),
-				)
-			}
-			s.logger.Error(message, fields...)
-			if autoCandidate {
-				s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
-				return
-			}
-		} else {
-			permissionStored = true
-			s.logger.Debug("created permission request message",
-				zap.String("task_id", data.TaskID),
-				zap.String("pending_id", data.PendingID))
-		}
-	} else if autoCandidate {
-		s.logger.Error("cannot persist automatic permission candidate without a message creator",
-			zap.String("task_id", data.TaskID), zap.String("pending_id", data.PendingID))
-		s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
 		return
-	} else if decision != nil {
-		s.logger.Error("cannot persist automatic permission decision without a message creator",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.TaskSessionID),
-			zap.String("request_id", data.RequestID),
-			zap.String("pending_id", data.PendingID),
-			zap.String("option_id", decision.OptionID),
-			zap.String("option_kind", decision.OptionKind),
-			zap.String("source", decision.Source))
 	}
 
 	if autoCandidate {
-		_, err := s.ResolveAgentPermission(ctx, ResolveAgentPermissionRequest{
+		if _, err := s.ResolveAgentPermission(ctx, ResolveAgentPermissionRequest{
 			TaskID: data.TaskID, SessionID: data.TaskSessionID,
 			RequestID: data.RequestID, PendingID: data.PendingID,
 			OptionID: data.AutoApprovedOptionID, Source: models.PermissionSourceAutoApprove,
-		})
-		if err != nil {
-			s.logger.Error("failed to resolve automatic permission decision",
-				zap.String("task_id", data.TaskID), zap.String("pending_id", data.PendingID), zap.Error(err))
-			s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+			AutomaticOnly: true,
+		}); err != nil {
+			s.handleAutomaticPermissionFailure(ctx, data, err)
 		}
 		return
 	}
@@ -930,13 +917,246 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 	}
 
 	if permissionStored && s.unattendedPermissionHandler != nil {
-		s.unattendedPermissionHandler(ctx, data.TaskID, data.TaskSessionID, data.PendingID, turnID)
+		s.unattendedPermissionHandler(ctx, data.TaskID, data.TaskSessionID, data.PendingID, s.getActiveTurnID(data.TaskSessionID))
 	}
 
 	// Automation tasks are hidden from the kanban, so there is no UI for the
 	// user to answer a permission prompt. Auto-reject and mark the run failed
 	// so the failure shows up in the automation's Recent Runs.
 	s.failAutomationRunOnPermission(ctx, data)
+}
+
+// persistPermissionRequestMessage writes the initial transcript row with its
+// presentation intent before any resolution claim or provider delivery. The
+// automatic candidate retries storage because the first row is the only place
+// its non-interactive presentation can be observed before resolution.
+func (s *Service) persistPermissionRequestMessage(
+	ctx context.Context,
+	data watcher.PermissionRequestData,
+	decision *models.PermissionDecision,
+	presentation models.PermissionPresentation,
+) bool {
+	options := models.PermissionRequestMessageOptions{Decision: decision, Presentation: presentation}
+	if s.messageCreator == nil {
+		if presentation == models.PermissionPresentationAutomatic || decision != nil {
+			s.logger.Error("cannot persist automatic permission decision without a message creator",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.TaskSessionID),
+				zap.String("request_id", data.RequestID),
+				zap.String("pending_id", data.PendingID))
+		}
+		return false
+	}
+
+	turnID := s.getActiveTurnID(data.TaskSessionID)
+	attempts := 0
+	var err error
+permissionWrite:
+	for attempt := 1; attempt <= automaticPermissionMessageWriteMaxAttempts; attempt++ {
+		attempts = attempt
+		_, err = s.messageCreator.CreatePermissionRequestMessage(
+			ctx,
+			data.TaskID,
+			data.TaskSessionID,
+			data.RequestID,
+			data.PendingID,
+			data.ToolCallID,
+			data.Title,
+			turnID,
+			data.Options,
+			data.ActionType,
+			data.ActionDetails,
+			options,
+		)
+		if err == nil || (presentation != models.PermissionPresentationAutomatic && decision == nil) || attempts == automaticPermissionMessageWriteMaxAttempts {
+			break
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			err = ctx.Err()
+			break permissionWrite
+		case <-timer.C:
+		}
+	}
+	if err != nil {
+		message := "failed to create permission request message"
+		fields := []zap.Field{
+			zap.String("task_id", data.TaskID),
+			zap.String("pending_id", data.PendingID),
+			zap.Error(err),
+		}
+		if decision != nil {
+			message = "failed to persist automatic permission decision"
+			fields = append(fields,
+				zap.Int("attempts", attempts),
+				zap.String("option_id", decision.OptionID),
+				zap.String("option_kind", decision.OptionKind),
+				zap.String("source", decision.Source),
+			)
+		}
+		s.logger.Error(message, fields...)
+		return false
+	}
+	s.logger.Debug("created permission request message",
+		zap.String("task_id", data.TaskID),
+		zap.String("pending_id", data.PendingID))
+	return true
+}
+
+// handleAutomaticPermissionFailure settles the presentation of a failed
+// automatic decision. Only a verified live, unclaimed request becomes
+// interactive; a dispatch claim or uncertain delivery keeps its replay barrier
+// and shows non-actionable feedback instead of a second answer.
+func (s *Service) handleAutomaticPermissionFailure(
+	ctx context.Context,
+	data watcher.PermissionRequestData,
+	resolveErr error,
+) {
+	s.logger.Error("failed to resolve automatic permission decision",
+		zap.String("task_id", data.TaskID),
+		zap.String("pending_id", data.PendingID),
+		zap.Error(resolveErr))
+
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), automaticPermissionCleanupTimeout)
+	defer cancel()
+
+	switch {
+	case errors.Is(resolveErr, ErrPermissionResolutionInProgress),
+		errors.Is(resolveErr, ErrPermissionAlreadyResolved):
+		// A competing resolver owns the outcome; do not reverse it.
+		return
+	case errors.Is(resolveErr, ErrPermissionDeliveryFailed),
+		errors.Is(resolveErr, ErrPermissionFinalizationFailed):
+		s.settleAutomaticPermissionUnavailable(cleanupCtx, data)
+	case errors.Is(resolveErr, ErrPermissionNotFound),
+		errors.Is(resolveErr, ErrPermissionStale),
+		errors.Is(resolveErr, ErrPermissionTaskOrSessionNotFound):
+		// The request was withdrawn or replaced. Keep it unanswerable, but do
+		// not leave an automatic row hidden without an explanation.
+		s.settleAutomaticPermissionUnavailable(cleanupCtx, data)
+	default:
+		if s.promoteAutomaticPermissionToInteractive(cleanupCtx, data) {
+			s.setSessionWaitingForInput(cleanupCtx, data.TaskID, data.TaskSessionID)
+			return
+		}
+		s.settleAutomaticPermissionUnavailable(cleanupCtx, data)
+	}
+	s.setSessionWaitingForInput(cleanupCtx, data.TaskID, data.TaskSessionID)
+}
+
+// promoteAutomaticPermissionToInteractive exposes an automatic candidate to a
+// person only while the exact live request is still pending and its durable row
+// still has no resolution claim. The identity-qualified update defeats a
+// concurrent claim or replacement.
+func (s *Service) promoteAutomaticPermissionToInteractive(
+	ctx context.Context,
+	data watcher.PermissionRequestData,
+) bool {
+	if !s.livePermissionStillPending(ctx, data) {
+		return false
+	}
+	_, updated, err := s.updateAutomaticPermissionPresentation(
+		ctx, data, models.PermissionPresentationInteractive, true,
+	)
+	return err == nil && updated
+}
+
+// settleAutomaticPermissionUnavailable closes a failed automatic attempt with
+// non-actionable feedback. An active competing resolver or a terminal outcome
+// keeps ownership. A claim written by this automatic attempt (for example when
+// its post-claim read failed) does not reopen the request, but also must not
+// leave the row hidden as automatic indefinitely.
+func (s *Service) settleAutomaticPermissionUnavailable(
+	ctx context.Context,
+	data watcher.PermissionRequestData,
+) {
+	audit, err := s.automaticPermissionAudit(ctx, data)
+	if err != nil {
+		s.logger.Warn("failed to read permission resolution audit while settling failure",
+			zap.String("task_id", data.TaskID), zap.String("pending_id", data.PendingID), zap.Error(err))
+	}
+	if automaticAttemptOwnedElsewhere(audit) {
+		return
+	}
+	requireUnclaimed := audit == nil || audit.ClaimID == ""
+	if _, updated, updateErr := s.updateAutomaticPermissionPresentation(
+		ctx, data, models.PermissionPresentationUnavailable, requireUnclaimed,
+	); updateErr == nil && updated {
+		return
+	}
+	// A claim may have appeared between the audit read and the update. Re-read
+	// once so our own automatic claim can still settle to unavailable, while a
+	// competing resolver or terminal outcome keeps its result.
+	audit, err = s.automaticPermissionAudit(ctx, data)
+	if err != nil || automaticAttemptOwnedElsewhere(audit) {
+		return
+	}
+	if audit != nil && audit.ClaimID != "" {
+		_, _, _ = s.updateAutomaticPermissionPresentation(
+			ctx, data, models.PermissionPresentationUnavailable, false,
+		)
+	}
+}
+
+func (s *Service) automaticPermissionAudit(
+	ctx context.Context,
+	data watcher.PermissionRequestData,
+) (*models.PermissionResolutionAudit, error) {
+	if s.messageCreator == nil {
+		return nil, nil
+	}
+	return s.messageCreator.GetPermissionResolutionAudit(
+		ctx, data.TaskID, data.TaskSessionID, data.RequestID, data.PendingID,
+	)
+}
+
+// automaticAttemptOwnedElsewhere reports whether another resolver or a terminal
+// decision already owns the request. A dispatching claim from this automatic
+// attempt is not competing ownership.
+func automaticAttemptOwnedElsewhere(audit *models.PermissionResolutionAudit) bool {
+	if audit == nil {
+		return false
+	}
+	if audit.Result == models.PermissionResolutionAccepted {
+		return true
+	}
+	return audit.Result == models.PermissionResolutionDispatching &&
+		audit.Source != models.PermissionSourceAutoApprove
+}
+
+func (s *Service) livePermissionStillPending(ctx context.Context, data watcher.PermissionRequestData) bool {
+	permissions, err := s.ListPendingAgentPermissions(ctx, data.TaskID, data.TaskSessionID)
+	if err != nil {
+		return false
+	}
+	for _, permission := range permissions {
+		if permission.RequestID == data.RequestID && permission.PendingID == data.PendingID {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) updateAutomaticPermissionPresentation(
+	ctx context.Context,
+	data watcher.PermissionRequestData,
+	presentation models.PermissionPresentation,
+	requireUnclaimed bool,
+) (*models.Message, bool, error) {
+	if s.messageCreator == nil {
+		return nil, false, ErrPermissionAuditFailed
+	}
+	return s.messageCreator.UpdatePermissionPresentation(ctx, models.PermissionPresentationUpdate{
+		TaskID:              data.TaskID,
+		SessionID:           data.TaskSessionID,
+		RequestID:           data.RequestID,
+		PendingID:           data.PendingID,
+		Presentation:        presentation,
+		RequirePresentation: models.PermissionPresentationAutomatic,
+		RequireUnclaimed:    requireUnclaimed,
+	})
 }
 
 func permissionDecisionFromEvent(data watcher.PermissionRequestData) *models.PermissionDecision {
@@ -966,7 +1186,7 @@ func permissionDecisionFromEvent(data watcher.PermissionRequestData) *models.Per
 // to an automation task and, if so, rejects the prompt and marks the
 // corresponding automation_run row as failed.
 func (s *Service) failAutomationRunOnPermission(ctx context.Context, data watcher.PermissionRequestData) {
-	if s.automationService == nil || data.TaskID == "" {
+	if s.automationService == nil || data.TaskID == "" || data.HumanInput {
 		return
 	}
 	task, err := s.repo.GetTask(ctx, data.TaskID)

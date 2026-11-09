@@ -146,6 +146,34 @@ one offered option with a nonempty label, `selected_label` is omitted.
 Free-text-only answers return `custom_text` without a selected label.
 Selections can also retain accompanying `custom_text`.
 
+An answer may also include an `attachments` array when the operator attaches
+evidence. Each entry has `attachment_id`, `type`, `name`, `mime_type`,
+`size_bytes`, `delivery_mode`, and a `path` that is readable in the current
+execution:
+
+```json
+{
+  "layout": {
+    "selected_option": "q1_opt1",
+    "selected_label": "Approve",
+    "attachments": [{
+      "attachment_id": "opaque-id",
+      "type": "image",
+      "name": "screenshot.png",
+      "mime_type": "image/png",
+      "size_bytes": 123,
+      "delivery_mode": "path",
+      "path": "/workspace/.kandev/attachments/<session>/screenshot.png"
+    }]
+  }
+}
+```
+
+Read the path with your file tools. The file is not returned as an inline image
+block or base64 data. An answer bundle accepts up to 10 files and 100 MiB in
+total, with a 100 MiB per-file limit. Files belong to the question whose answer
+carries them. A rejection has no attachments.
+
 ## Show an image with an operator question
 
 Add `images` to a question when the operator needs to inspect a screenshot or

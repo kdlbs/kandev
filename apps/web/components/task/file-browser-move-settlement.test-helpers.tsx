@@ -18,7 +18,8 @@ const wire = vi.hoisted(() => ({
   request: vi.fn(),
   on: vi.fn(),
   subscribeSession: vi.fn(() => () => {}),
-  subscribeUser: vi.fn(() => () => {}),
+  subscribeUser: vi.fn(),
+  unsubscribeUser: vi.fn(),
   sessionRead: vi.fn(),
 }));
 vi.mock("@/lib/ws/connection", () => ({

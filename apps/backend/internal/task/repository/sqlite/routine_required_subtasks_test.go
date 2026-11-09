@@ -108,6 +108,76 @@ func TestUpdateTaskStateIfWorkflowStepRequiresCurrentStep(t *testing.T) {
 	require.Equal(t, v1.TaskStateCompleted, current.State)
 }
 
+func TestUpdateTaskStateIfWorkflowStepAndStateChecksBothInputs(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-state-step-cas", Name: "Office"}))
+	wf, err := repo.EnsureOfficeWorkflow(ctx, "ws-state-step-cas")
+	require.NoError(t, err)
+	var stepID string
+	require.NoError(t, repo.db.QueryRowContext(ctx,
+		`SELECT id FROM workflow_steps WHERE workflow_id=? AND is_start_step=1`, wf,
+	).Scan(&stepID))
+
+	type stateStepWriter interface {
+		UpdateTaskStateIfWorkflowStepAndState(
+			context.Context, string, string, v1.TaskState, v1.TaskState,
+		) (bool, error)
+	}
+
+	for _, tc := range []struct {
+		name          string
+		taskID        string
+		currentState  v1.TaskState
+		expectedState v1.TaskState
+		expectedStep  string
+		wantApplied   bool
+		wantState     v1.TaskState
+	}{
+		{
+			name:         "matching state and step apply",
+			taskID:       "state-step-cas-match",
+			currentState: v1.TaskStateInProgress, expectedState: v1.TaskStateInProgress,
+			expectedStep: "step-current", wantApplied: true, wantState: v1.TaskStateCompleted,
+		},
+		{
+			name:         "blocked state is preserved",
+			taskID:       "state-step-cas-blocked",
+			currentState: v1.TaskStateBlocked, expectedState: v1.TaskStateInProgress,
+			expectedStep: "step-current", wantState: v1.TaskStateBlocked,
+		},
+		{
+			name:         "step mismatch is rejected",
+			taskID:       "state-step-cas-stale-step",
+			currentState: v1.TaskStateInProgress, expectedState: v1.TaskStateInProgress,
+			expectedStep: "step-stale", wantState: v1.TaskStateInProgress,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &models.Task{
+				ID: tc.taskID, WorkspaceID: "ws-state-step-cas", WorkflowID: wf,
+				WorkflowStepID: stepID, Title: "State and step CAS", State: tc.currentState,
+			}
+			require.NoError(t, repo.CreateTask(ctx, task))
+
+			writer, ok := any(repo).(stateStepWriter)
+			require.True(t, ok, "task repository must expose a state-and-step compare-and-set")
+			expectedStepID := tc.expectedStep
+			if expectedStepID == "step-current" {
+				expectedStepID = stepID
+			}
+			applied, err := writer.UpdateTaskStateIfWorkflowStepAndState(
+				ctx, task.ID, expectedStepID, tc.expectedState, v1.TaskStateCompleted,
+			)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantApplied, applied)
+			current, err := repo.GetTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantState, current.State)
+		})
+	}
+}
+
 func TestLegacyRequiredSubtaskMetadataDoesNotChangeCompletion(t *testing.T) {
 	repo := newRepoForBuiltinWorkflowTests(t)
 	ctx := context.Background()

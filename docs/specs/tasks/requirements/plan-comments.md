@@ -222,6 +222,8 @@ migration gate without changing task ownership or backend acceptance semantics.
 
 ## Implementation plans
 
+- [Plan comment Send delivery](../../../plans/plan-comment-send-lock-order/plan.md)
+  repairs notification ordering and agent admission under requirements 002 and 003.
 - [Plan comment foreground preservation](../../../plans/plan-comment-foreground-preservation/plan.md)
 
 - [Task-owned plan comments](../../../plans/task-owned-plan-comments/plan.md)

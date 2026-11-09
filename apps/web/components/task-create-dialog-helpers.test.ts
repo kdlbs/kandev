@@ -322,6 +322,15 @@ describe("buildCreateTaskPayload dependencies", () => {
     expect(buildCreateTaskPayload({ ...base, blockedBy: [] }).blocked_by).toBeUndefined();
     expect(buildCreateTaskPayload(base).blocked_by).toBeUndefined();
   });
+
+  it("sends related task selections as related_task_ids", () => {
+    expect(
+      buildCreateTaskPayload({ ...base, relatedTaskIds: ["task-c", "task-d"] }).related_task_ids,
+    ).toEqual(["task-c", "task-d"]);
+    expect(
+      buildCreateTaskPayload({ ...base, relatedTaskIds: [] }).related_task_ids,
+    ).toBeUndefined();
+  });
 });
 
 describe("buildCreateTaskPayload priority", () => {
@@ -359,6 +368,20 @@ describe("buildCreateTaskPayload priority", () => {
       initial_workspace_layout: "task_root",
       mcp_server_ids: ["mcp-selected"],
     });
+  });
+  it("submits explicit built-in consent atomically with task creation", () => {
+    const preferences = {
+      version: 1 as const,
+      expected_workspace_policy_revision: 4,
+      packages: { configuration: "on" as const, walkthroughs: "off" as const },
+    };
+    const builtinMCPPreferences = { workspaceId: base.workspaceId, preferences };
+    const payload = buildCreateTaskPayload({ ...base, ...{ builtinMCPPreferences } });
+    expect(payload).toHaveProperty("builtin_mcp_preferences", preferences);
+    expect(buildCreateTaskPayload(base)).not.toHaveProperty("builtin_mcp_preferences");
+    expect(() =>
+      buildCreateTaskPayload({ ...base, workspaceId: "foreign", ...{ builtinMCPPreferences } }),
+    ).toThrow();
   });
 });
 

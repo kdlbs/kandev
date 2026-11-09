@@ -30,6 +30,47 @@ An aborted creation leaves no partially configured provider. If the connection f
 reload the settings to confirm the saved state before retrying, especially when adding a provider.
 Saves for separate providers are independent.
 
+## Configure webhook notifications
+
+Open **Settings > Preferences > Notifications** and select **Add Webhook Provider**.
+Enter an HTTP or HTTPS endpoint. Add request headers or a secret when the endpoint
+needs them. Select the events that the provider must receive, then save the
+settings.
+
+Kandev sends a `POST` request with a versioned JSON body. For example:
+
+```json
+{
+  "version": "1.0",
+  "event": "session.turn_finished",
+  "title": "Agent turn finished",
+  "message": "The agent finished a turn.",
+  "type": "info",
+  "fields": {
+    "task_id": "task-123",
+    "task_session_id": "session-456",
+    "occurrence_id": "turn-789"
+  }
+}
+```
+
+The `fields` object contains the IDs that are available for the event. Kandev
+omits an ID when it is empty. A configured `Authorization` header takes
+precedence over the secret. If there is no such header, Kandev sends a non-empty
+secret as `Authorization: Bearer <secret>`.
+
+Save the settings before you select **Test**. The test sends the saved
+configuration.
+
+By default, Kandev rejects destinations that resolve to loopback, private,
+link-local, multicast, or other reserved addresses. Kandev also refuses
+cross-origin redirects, so credential headers do not reach another origin.
+Private or local destinations need an operator opt-in. Set
+`notifications.webhookAllowPrivateNetworks: true` in `config.yaml`, or set
+`KANDEV_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true` in the backend environment. This
+setting applies to the whole backend process. Kandev reads it at startup, so
+restart the backend after you change it.
+
 ## Use CLI passthrough on a phone
 
 Open a task running in CLI passthrough mode. Its connected terminal shows the
@@ -169,7 +210,7 @@ Turn on **Suggest next prompt** in **Settings > Task behavior > Conversation** t
 
 Suggestions come only from agents whose adapter establishes native support. Today the only implemented source is Claude Code. Claude Code's suggestion arrives about two seconds after the turn ends and reuses the conversation's prompt cache.
 
-Kandev recognizes the official Claude ACP bridge it pins (`@agentclientprotocol/claude-agent-acp` version 0.81.2) when it reports the expected package identity and metadata shape. This includes a custom Kandev agent definition that launches that bridge. A bridge with any other name or version qualifies only when it explicitly declares the vendor extension `agentCapabilities._meta.claudeCode.promptSuggestions: true` and implements the matching suggestion options and raw-message forwarding. That declaration is a Kandev opt-in contract, not a standard ACP capability, and upstream bridges do not advertise it yet.
+Kandev recognizes the official Claude ACP bridge it pins (`@agentclientprotocol/claude-agent-acp` versions 0.81.2 and 0.100.0) when it reports the expected package identity and metadata shape. This includes a custom Kandev agent definition that launches that bridge. A bridge with any other name or version qualifies only when it explicitly declares the vendor extension `agentCapabilities._meta.claudeCode.promptSuggestions: true` and implements the matching suggestion options and raw-message forwarding. That declaration is a Kandev opt-in contract, not a standard ACP capability, and upstream bridges do not advertise it yet.
 
 The model does not matter: OpenCode or Codex running an Anthropic model have no suggestions. Turning the setting on or off affects a supported session from its next start or resume. Claude stays silent when the next step is not obvious, early in a conversation, after an error, or in plan mode.
 
@@ -417,6 +458,8 @@ to the selected executor instead. The environment is fixed when the PTY starts, 
 terminal after a session resume or credential-policy change.
 
 On desktop, select **+ > Terminals > New Terminal**. Parked terminal sessions can appear in the same menu for reopening. The tab context menu offers **Rename** and **Terminate**, not a separate Close action. Selecting the tab's **X** deletes the terminal and asks for confirmation when it is busy. Removing the panel through layout management can instead park it and keep its PTY alive; terminating a live terminal or deleting a parked entry destroys it. On mobile, select **Terminal** in task navigation and use the terminal picker to create another.
+
+When tasks share a workspace or execution environment, each task keeps its own ordinary terminals. Switching tasks opens the selected task's terminal, and panel or layout restoration checks ownership before reconnecting. A terminal from a sibling task never appears in the terminal list and is never renamed, parked, or removed by another task's recovery.
 
 When you scroll up in a task terminal or desktop dev-server output, select **Jump to latest output** to return to the newest output. The action disappears at the bottom. New output does not pull you away from the scrollback you are reading.
 

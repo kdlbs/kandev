@@ -513,6 +513,7 @@ func buildLifecycleLaunchRequest(
 		TaskRepositoryID:              req.TaskRepositoryID,
 		RepositoryPath:                req.RepositoryPath,
 		BaseBranch:                    req.BaseBranch,
+		BaseBranchFallbackPolicy:      req.BaseBranchFallbackPolicy,
 		IntegrationRef:                req.IntegrationRef,
 		DefaultBranch:                 req.DefaultBranch,
 		CheckoutBranch:                req.CheckoutBranch,
@@ -592,6 +593,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 			RepositoryURL:              r.RepositoryURL,
 			RepoName:                   r.RepoName,
 			BaseBranch:                 r.BaseBranch,
+			BaseBranchFallbackPolicy:   r.BaseBranchFallbackPolicy,
 			IntegrationRef:             r.IntegrationRef,
 			DefaultBranch:              r.DefaultBranch,
 			CheckoutBranch:             r.CheckoutBranch,
@@ -1598,6 +1600,20 @@ func (w *orchestratorWrapper) NotifyQueuedUserPrompt(ctx context.Context, taskID
 	w.svc.NotifyQueuedUserPrompt(ctx, taskID, sessionID)
 }
 
+// ReserveMessageTurn reserves a bounded message-turn slot before a direct
+// request is acknowledged.
+func (w *orchestratorWrapper) ReserveMessageTurn(
+	ctx context.Context, taskID, sessionID, incarnationID string,
+) (*orchestrator.MessageTurnReservation, bool) {
+	return w.svc.ReserveMessageTurn(ctx, taskID, sessionID, incarnationID)
+}
+
+// RegisterMessageCapacityWait records a queue head blocked by the session
+// ceiling for the shared capacity sweep.
+func (w *orchestratorWrapper) RegisterMessageCapacityWait(ctx context.Context, taskID, sessionID, entryID string) {
+	w.svc.RegisterMessageCapacityWait(ctx, taskID, sessionID, entryID)
+}
+
 // StepRequiresCompletionSignal forwards to the orchestrator service.
 func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, taskID string) bool {
 	return w.svc.StepRequiresCompletionSignal(ctx, taskID)
@@ -1730,6 +1746,32 @@ func (a *messageCreatorAdapter) CreateUserMessageIdempotent(
 	return err
 }
 
+// SetUserMessageDeliveryStatus marks an exact session-owned user message with
+// the supplied delivery status and reports whether that message exists.
+func (a *messageCreatorAdapter) SetUserMessageDeliveryStatus(
+	ctx context.Context,
+	messageID, agentSessionID, status string,
+) (bool, error) {
+	return a.svc.SetUserMessageDeliveryStatus(ctx, messageID, agentSessionID, status)
+}
+
+// CreateCompletedUserMessageIdempotent records a user message in an
+// already-completed lifecycle-only turn.
+func (a *messageCreatorAdapter) CreateCompletedUserMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID string,
+	metadata map[string]interface{},
+) error {
+	_, err := a.svc.CreateCompletedUserMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		Content:       content,
+		AuthorType:    "user",
+		Metadata:      metadata,
+	})
+	return err
+}
+
 // CreateToolCallMessage creates a message for a tool call
 func (a *messageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, title, status, agentSessionID, turnID string, normalized *streams.NormalizedPayload) error {
 	metadata := map[string]interface{}{
@@ -1834,8 +1876,18 @@ func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
 	return err
 }
 
+// SessionMessageCreatedAt resolves the persisted message's immutable creation
+// time, including when an idempotent replay returns an existing row.
+func (a *messageCreatorAdapter) SessionMessageCreatedAt(ctx context.Context, messageID string) (time.Time, bool) {
+	message, err := a.svc.GetMessage(ctx, messageID)
+	if err != nil || message == nil || message.CreatedAt.IsZero() {
+		return time.Time{}, false
+	}
+	return message.CreatedAt.UTC(), true
+}
+
 // CreatePermissionRequestMessage creates a message for a permission request
-func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error) {
+func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, messageOptions models.PermissionRequestMessageOptions) (string, error) {
 	metadata := map[string]interface{}{
 		"request_id":     requestID,
 		"pending_id":     pendingID,
@@ -1844,8 +1896,13 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 		"action_type":    actionType,
 		"action_details": actionDetails,
 	}
-	if decision != nil {
-		metadata["permission_decision"] = decision
+	presentation := messageOptions.Presentation
+	if presentation == "" {
+		presentation = models.PermissionPresentationInteractive
+	}
+	metadata[models.PermissionPresentationMetadataKey] = string(presentation)
+	if messageOptions.Decision != nil {
+		metadata["permission_decision"] = messageOptions.Decision
 		metadata["status"] = string(models.PermissionStatusApproved)
 	}
 
@@ -1872,6 +1929,12 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 		return "", err
 	}
 	return msg.ID, nil
+}
+
+// UpdatePermissionPresentation conditionally changes one exact permission
+// transcript row's presentation.
+func (a *messageCreatorAdapter) UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+	return a.svc.UpdatePermissionPresentation(ctx, request)
 }
 
 // UpdatePermissionMessage updates a permission message's status

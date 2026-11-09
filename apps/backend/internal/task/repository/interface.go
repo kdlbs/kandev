@@ -467,9 +467,17 @@ type MessageRepository interface {
 	// (ADR 0052). Clarification bundles come back as one row per question.
 	ListPendingInteractions(ctx context.Context, filter models.PendingInteractionFilter) ([]*models.Message, error)
 	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*models.Message, bool, error)
+	// CompleteActiveClarificationBundleWithAttachments performs the same claim
+	// while atomically adopting every submitted answer file or none. The
+	// returned IDs are claims removed by this submission and must be released
+	// after commit.
+	CompleteActiveClarificationBundleWithAttachments(ctx context.Context, pendingID, status string, responses map[string]interface{}, claims []models.ClarificationAttachmentClaim, scope models.ClarificationAttachmentScope) ([]*models.Message, bool, []string, error)
 	FinalizeClarificationResponseDelivery(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	RestoreActiveClarificationBundle(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
+	// UpdatePermissionPresentation conditionally changes one exact permission
+	// row's presentation. It reports whether the update matched.
+	UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error)
 	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
 	FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
 	GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error)
@@ -793,6 +801,19 @@ type AgentDeliverySettlementRepository interface {
 	SettleAgentDeliveryTerminal(ctx context.Context, streamID string, sequence int64, outcome models.DeliverySubmissionState, settledAt time.Time) (bool, error)
 	ListPendingAgentDeliverySettlements(ctx context.Context, sessionID string) ([]*models.AgentDeliveryEffect, error)
 	CompleteAgentDeliveryTerminalSettlement(ctx context.Context, effectKey string, completedAt time.Time) (bool, error)
+	// CorrectSettledAgentDeliverySessionState conditionally repairs a stale
+	// STARTING or RUNNING session from one exact settled terminal. All terminal,
+	// receipt, projection, ownership, and successor evidence is revalidated in
+	// the writer transaction.
+	CorrectSettledAgentDeliverySessionState(ctx context.Context, request models.AgentDeliverySessionStateRequest) (*models.AgentDeliverySessionStateResult, error)
+	// LoadCurrentSettledAgentDeliveryTerminal returns the current persisted
+	// prompt/turn binding for an already-settled session, without scanning
+	// historical event payloads.
+	LoadCurrentSettledAgentDeliveryTerminal(ctx context.Context, sessionID string) (*models.AgentDeliverySessionStateRequest, bool, error)
+	// ListSettledAgentDeliverySessionStateCandidates returns a bounded set of
+	// completed terminals whose sessions still look active. Startup uses it to
+	// repair completed outboxes without scanning historical event payloads.
+	ListSettledAgentDeliverySessionStateCandidates(ctx context.Context, limit int) ([]*models.AgentDeliverySessionStateRequest, error)
 }
 
 // AgentDeliveryWorkflowOutcomeRepository records a guarded workflow no-op for
@@ -801,6 +822,16 @@ type AgentDeliverySettlementRepository interface {
 type AgentDeliveryWorkflowOutcomeRepository interface {
 	RecordAgentDeliveryWorkflowOutcome(ctx context.Context, taskID string, effect *models.AgentDeliveryEffect) (bool, error)
 	BackfillLegacyAgentDeliveryWorkflowEffect(ctx context.Context, effect *models.AgentDeliveryEffect) (bool, error)
+}
+
+// SessionUnreadStateRepository reads the task unread aggregate's inputs. It is
+// a separate capability so SessionRepository fakes need not implement it.
+type SessionUnreadStateRepository interface {
+	// ListSessionUnreadState returns, for each requested session that still
+	// exists, the cursor rank (zero without a cursor) and the newest
+	// unread-qualifying rank after it (or the cursor rank when none qualifies).
+	// Missing sessions are absent.
+	ListSessionUnreadState(ctx context.Context, sessionIDs []string) (map[string]statussummary.SessionUnreadState, error)
 }
 
 // SessionWorktreeRepository exposes session-scoped worktree projections over

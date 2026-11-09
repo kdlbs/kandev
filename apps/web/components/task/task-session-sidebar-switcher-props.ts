@@ -56,6 +56,9 @@ export function buildTaskSwitcherProps(args: {
   retryWorkspaceContext: (() => void) | undefined;
   totalTaskCount: number;
   selection: ReturnType<typeof useSidebarSelection>;
+  unreadMessagesEnabled: boolean;
+  unreadDotHideDelayMs: number;
+  displayedSessionId: string | null;
 }): TaskSwitcherComponentProps {
   return {
     grouped: args.grouped,
@@ -92,6 +95,9 @@ export function buildTaskSwitcherProps(args: {
     onRetryLoad: resolveSidebarRetry(args),
     retryLabel: resolveSidebarRetryLabel(args),
     totalTaskCount: args.totalTaskCount,
+    unreadMessagesEnabled: args.unreadMessagesEnabled,
+    unreadDotHideDelayMs: args.unreadDotHideDelayMs,
+    displayedSessionId: args.displayedSessionId,
     ...args.selection.switcherProps,
   };
 }

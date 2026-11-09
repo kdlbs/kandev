@@ -37,6 +37,11 @@
 # go here as `KANDEV_FEATURES_<NAME>` — the backend's config package
 # maps them to `features.<name>` Viper keys automatically.
 features:
+  KANDEV_FEATURES_WORKSPACE_COLLABORATION:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Integrated navigation across existing authorized workspace conversations.
   KANDEV_FEATURES_INTEGRATED_CONTROL:
     prod: "false"

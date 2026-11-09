@@ -75,6 +75,7 @@ const panelState = {
   historyRefreshPending: false,
   isInitialMessagesLoading: false,
   groupedItems: [] as RenderItem[],
+  messages: [priorTranscriptMessage],
   allMessages: [priorTranscriptMessage],
   footerActionMessages: [],
   permissionsByToolCallId: new Map(),

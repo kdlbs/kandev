@@ -542,6 +542,8 @@
       "thread_view_draft",
       "thread_views",
       "unread_divider",
+      "unread_task_dot",
+      "unread_task_dot_hide_delay_seconds",
       "workflow_filter_id",
       "workflow_ids_with_auto_hide_empty_steps",
       "workspace_id"

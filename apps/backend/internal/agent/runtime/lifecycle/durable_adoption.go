@@ -63,6 +63,24 @@ func currentDeliverySubmissionID(execution *AgentExecution) string {
 	return models.StringFromAny(execution.MetadataSnapshot()[initialDeliverySubmissionIDMetadataKey])
 }
 
+// deliverySubmissionIdentityMismatch reports whether a completion belongs to a
+// different prompt attempt than the execution's current or expected initial
+// submission. A replayed terminal event keeps its receipt, projection,
+// settlement, and ACK, but must not complete the live prompt.
+func deliverySubmissionIdentityMismatch(execution *AgentExecution, submissionID string) bool {
+	if execution == nil || submissionID == "" {
+		return false
+	}
+	expected := currentDeliverySubmissionID(execution)
+	if expected == "" {
+		expected = initialPromptDeliverySubmissionID(execution)
+	}
+	if expected == "" {
+		return false
+	}
+	return deliverySubmissionIdentityForPrompt(expected, "") != deliverySubmissionIdentityForPrompt(submissionID, "")
+}
+
 func clearInitialDeliverySubmissionID(execution *AgentExecution, submissionID string) {
 	if execution == nil || submissionID == "" {
 		return
@@ -282,7 +300,7 @@ func (m *Manager) restoreRecoveredSubmission(
 	if err != nil {
 		return err
 	}
-	activeBackend, err = acknowledgedNativeResumeHistory(ctx, execution, status, peerReader, activeBackend)
+	activeBackend, err = acknowledgedNativeResumeHistory(ctx, execution, status, peerReader, activeBackend, delivery)
 	if err != nil {
 		return err
 	}
@@ -605,4 +623,14 @@ func cloneDeliveryStatus(status *agentctl.DeliveryStatus) *agentctl.DeliveryStat
 	}
 	copy.Submissions = append([]journal.SubmissionSummary(nil), status.Submissions...)
 	return &copy
+}
+
+// recoveredDeliveryFailureIsConclusive reports whether durable adoption failed
+// because the recovered identity disagrees with authoritative evidence. Every
+// other blocked or unavailable outcome leaves the candidate incomplete.
+func recoveredDeliveryFailureIsConclusive(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	return errors.Is(err, ErrDurableAdoptionIdentityMismatch)
 }

@@ -29,12 +29,38 @@ const (
 // "started" activity are creation signals.
 func newCodexACPDialect() acpDialect {
 	return acpDialect{
-		capacityContinuationSupport: streams.CapacityContinuationCodexLiveSessionV1,
+		capacityContinuationSupport: streams.CapacityContinuationCodexLiveSessionV2,
 		subagentFrame:               parseCodexSubagentFrame,
+		subagentControl:             codexSubagentControl,
 		normalizePromptUsage:        normalizeCodexPromptUsage,
 		mcpToolCall:                 parseCodexMCPToolCall,
 		mcpToolResult:               normalizeCodexMCPToolResult,
 		responseAttemptReset:        codexResponseAttemptResetMeta,
+	}
+}
+
+func codexSubagentControl(toolName string, _ map[string]any, rawInput any) streams.SubagentControl {
+	input, ok := rawInput.(map[string]any)
+	if !ok {
+		return ""
+	}
+	sender, _ := input["senderThreadId"].(string)
+	_, statesOK := input["agentsStates"].(map[string]any)
+	receivers, receiversPresent := input["receiverThreadIds"]
+	if strings.TrimSpace(sender) == "" || !statesOK || !receiversPresent || !validCodexReceiverThreadIDs(receivers) {
+		return ""
+	}
+	switch toolName {
+	case "wait":
+		return streams.SubagentControlWait
+	case "closeAgent":
+		return streams.SubagentControlClose
+	case "sendInput", "followupTask":
+		return streams.SubagentControlMessage
+	case "resumeAgent":
+		return streams.SubagentControlResume
+	default:
+		return ""
 	}
 }
 
@@ -146,7 +172,8 @@ func codexModelCapacityMessage(text string) bool {
 		strings.Contains(normalized, "model is at capacity")
 }
 
-func parseCodexSubagentFrame(meta map[string]any, _ string, rawInput any) (subagentFrame, bool) {
+func parseCodexSubagentFrame(meta map[string]any, title string, rawInput any) (subagentFrame, bool) {
+	meta = codexSubagentMetadata(meta, title, rawInput)
 	codex, ok := nestedMap(meta, "codex")
 	if !ok {
 		return subagentFrame{}, false
@@ -160,7 +187,8 @@ func parseCodexSubagentFrame(meta map[string]any, _ string, rawInput any) (subag
 	return subagentFrame{}, false
 }
 
-func codexSubagentSignalFromMeta(meta map[string]any) codexSubagentSignal {
+func codexSubagentSignalFromFrame(meta map[string]any, title string, rawInput any) codexSubagentSignal {
+	meta = codexSubagentMetadata(meta, title, rawInput)
 	codex, ok := nestedMap(meta, "codex")
 	if !ok {
 		return codexSubagentSignalNone
@@ -172,6 +200,61 @@ func codexSubagentSignalFromMeta(meta map[string]any) codexSubagentSignal {
 		return codexSubagentSignalActivity
 	}
 	return codexSubagentSignalNone
+}
+
+// codexSubagentMetadata gives the legacy and structured-input wire formats the
+// same interpretation. Explicit Codex metadata is authoritative, even when it
+// is malformed or describes a control operation. Never mutate the wire frame.
+func codexSubagentMetadata(meta map[string]any, title string, rawInput any) map[string]any {
+	if _, present := meta["codex"]; present {
+		return meta
+	}
+	input, ok := rawInput.(map[string]any)
+	if !ok {
+		return meta
+	}
+	if _, present := input["activityKind"]; present {
+		activity, _ := input["activityKind"].(string)
+		childID, _ := input["agentThreadId"].(string)
+		agentPath, _ := input["agentPath"].(string)
+		if strings.TrimSpace(childID) == "" || codexSubagentName(agentPath) == "" ||
+			(activity != codexSubagentStarted && !codexActivityTerminal(activity)) {
+			return meta
+		}
+		return map[string]any{"codex": map[string]any{"subagent": map[string]any{
+			"threadId": childID, "path": agentPath, "activity": activity,
+		}}}
+	}
+	sender, _ := input["senderThreadId"].(string)
+	_, statesOK := input["agentsStates"].(map[string]any)
+	if title != codexCollaborationSpawnAgent || strings.TrimSpace(sender) == "" || !statesOK ||
+		!validCodexReceiverThreadIDs(input["receiverThreadIds"]) {
+		return meta
+	}
+	return map[string]any{"codex": map[string]any{"collaboration": map[string]any{
+		"tool": title, "senderThreadId": sender, "receiverThreadIds": input["receiverThreadIds"],
+	}}}
+}
+
+func validCodexReceiverThreadIDs(value any) bool {
+	switch ids := value.(type) {
+	case []any:
+		for _, value := range ids {
+			if id, ok := value.(string); !ok || strings.TrimSpace(id) == "" {
+				return false
+			}
+		}
+		return true
+	case []string:
+		for _, id := range ids {
+			if strings.TrimSpace(id) == "" {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func codexSenderThreadID(meta map[string]any) string {

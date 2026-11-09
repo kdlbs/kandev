@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+)
 
 // AgentDeliveryRetentionBatchOptions bounds one repository-owned retention
 // transaction. Zero values select the default limit; requested limits are
@@ -170,6 +174,16 @@ type AgentDeliveryCursor struct {
 type CanonicalAgentDeliveryProjectionResult struct {
 	CanonicalMessageID string
 	Appended           bool
+	// AlreadyProjected reports that the inbox row was projected before this
+	// call. The canonical message identity is still returned so a caller can
+	// acknowledge the cursor without notifying the UI again.
+	AlreadyProjected bool
+	// ContextCompactionCount is the committed lifetime count after applying a
+	// native compaction observation. Nil means this event did not change it.
+	ContextCompactionCount *int64
+	// ContextCompactionReporting is the committed reporting metadata after
+	// applying a native observation. Nil means this event did not change it.
+	ContextCompactionReporting *streams.ContextCompactionReporting
 }
 
 // AgentDeliveryEffect is a durable idempotency key for a projected workflow
@@ -194,4 +208,40 @@ type AgentDeliveryEffect struct {
 	WorkflowID              string     `json:"-"`
 	WorkflowStepID          string     `json:"-"`
 	WorkflowPolicyUpdatedAt *time.Time `json:"-"`
+}
+
+// AgentDeliverySessionStateOutcome is the closed result of one conditional
+// coarse session-state correction. Only changed represents a committed write.
+type AgentDeliverySessionStateOutcome string
+
+const (
+	AgentDeliverySessionStateChanged           AgentDeliverySessionStateOutcome = "changed"
+	AgentDeliverySessionStateAlreadyConsistent AgentDeliverySessionStateOutcome = "already_consistent"
+	AgentDeliverySessionStateSuperseded        AgentDeliverySessionStateOutcome = "superseded"
+	AgentDeliverySessionStateUnavailable       AgentDeliverySessionStateOutcome = "unavailable"
+)
+
+// AgentDeliverySessionStateRequest identifies the exact settled terminal whose
+// stale STARTING or RUNNING session state may be corrected. Every identity is
+// revalidated inside the writer transaction.
+type AgentDeliverySessionStateRequest struct {
+	SessionID         string
+	TaskID            string
+	ExecutionID       string
+	IncarnationID     string
+	HarnessGeneration int64
+	StreamID          string
+	Sequence          int64
+	SubmissionID      string
+	TurnID            string
+	Outcome           string
+}
+
+// AgentDeliverySessionStateResult reports the conditional correction result and
+// the committed state identity. UpdatedAt is set only for changed.
+type AgentDeliverySessionStateResult struct {
+	Outcome   AgentDeliverySessionStateOutcome
+	OldState  TaskSessionState
+	NewState  TaskSessionState
+	UpdatedAt time.Time
 }

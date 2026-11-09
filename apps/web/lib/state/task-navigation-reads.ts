@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { StoreApi } from "zustand";
 import { ApiError } from "@/lib/api/client";
+import { isTemporaryReadError } from "@/lib/api/temporary-read-error";
 import { fetchTask, listTaskSessions } from "@/lib/api";
 import { getBackendConfig } from "@/lib/config";
 import { toKanbanTask } from "@/lib/kanban/map-task";
@@ -36,6 +37,8 @@ export type TaskNavigationReadSnapshot = {
   identity?: TaskNavigationIdentity;
   error?: unknown;
   temporary: boolean;
+  /** Set once temporary recovery exhausts; cleared on success or scope invalidation. */
+  exhausted: boolean;
   revision: number;
   cycle: number;
 };
@@ -55,6 +58,7 @@ const IDLE_SNAPSHOT: TaskNavigationReadSnapshot = Object.freeze({
   phase: "idle",
   attempt: 0,
   temporary: false,
+  exhausted: false,
   revision: 0,
   cycle: 0,
 });
@@ -68,16 +72,7 @@ export function isTaskNavigationAbort(error: unknown): boolean {
 }
 
 export function isTemporaryTaskNavigationError(error: unknown): boolean {
-  if (error instanceof TypeError) return true;
-  if (error instanceof TaskNavigationCycleDeadlineError) return true;
-  if (!(error instanceof ApiError)) return false;
-  if ([429, 502, 503, 504].includes(error.status)) return true;
-  return (
-    error.body !== null &&
-    typeof error.body === "object" &&
-    "code" in error.body &&
-    (error.body as { code?: unknown }).code === "persistence_unavailable"
-  );
+  return isTemporaryReadError(error);
 }
 
 export class TaskNavigationReads {
@@ -297,7 +292,14 @@ export class TaskNavigationReads {
             this.loadIdentity,
           );
           this.assertCurrent(record, controller.signal);
-          this.publish(record, { phase: "succeeded", attempt, identity, temporary: false, cycle });
+          this.publish(record, {
+            phase: "succeeded",
+            attempt,
+            identity,
+            temporary: false,
+            exhausted: false,
+            cycle,
+          });
           return identity;
         } catch (error) {
           const outcome = this.classifyAttemptFailure({
@@ -353,7 +355,14 @@ export class TaskNavigationReads {
     this.assertCurrent(record, controller.signal);
     const temporary = isTemporaryTaskNavigationError(error);
     if (!temporary || attempt === RETRY_DELAYS_MS.length) {
-      this.publish(record, { phase: "failed", attempt, error, temporary, cycle });
+      this.publish(record, {
+        phase: "failed",
+        attempt,
+        error,
+        temporary,
+        exhausted: temporary,
+        cycle,
+      });
       return { kind: "fatal", error };
     }
     const retryAfterMs = error instanceof ApiError ? (error.retryAfterSeconds ?? 0) * 1_000 : 0;
@@ -388,6 +397,7 @@ export class TaskNavigationReads {
       attempt,
       error: deadlineError,
       temporary: true,
+      exhausted: true,
       cycle,
     });
     return deadlineError;
@@ -401,10 +411,14 @@ export class TaskNavigationReads {
 
   private publish(
     record: TaskNavigationReadRecord,
-    update: Omit<TaskNavigationReadSnapshot, "revision">,
+    update: Omit<TaskNavigationReadSnapshot, "revision" | "exhausted"> & { exhausted?: boolean },
   ) {
     if (this.records.get(readKey(record.generation, record.taskId)) !== record) return;
-    record.snapshot = { ...update, revision: record.snapshot.revision + 1 };
+    record.snapshot = {
+      ...update,
+      exhausted: update.exhausted ?? record.snapshot.exhausted,
+      revision: record.snapshot.revision + 1,
+    };
     this.listeners
       .get(readKey(record.generation, record.taskId))
       ?.forEach((listener) => listener());

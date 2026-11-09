@@ -73,6 +73,10 @@ func (c *Client) setDeliveryStatus(status *DeliveryStatus) {
 		stream := *status.Stream
 		copy.Stream = &stream
 	}
+	if status.AgentProcess != nil {
+		identity := *status.AgentProcess
+		copy.AgentProcess = &identity
+	}
 	copy.Submissions = append([]journal.SubmissionSummary(nil), status.Submissions...)
 	c.deliveryStatus = &copy
 }
@@ -129,8 +133,24 @@ func (c *Client) DeliveryRecoveryDescriptor() (*DeliveryStatus, bool) {
 		stream := *c.deliveryStatus.Stream
 		copy.Stream = &stream
 	}
+	if c.deliveryStatus.AgentProcess != nil {
+		identity := *c.deliveryStatus.AgentProcess
+		copy.AgentProcess = &identity
+	}
 	copy.Submissions = append([]journal.SubmissionSummary(nil), c.deliveryStatus.Submissions...)
 	return &copy, true
+}
+
+// ProcessManagerID returns the producer lifetime reported by the most recent
+// authenticated delivery descriptor. It is distinct from process_generation,
+// which restarts when agentctl creates a new process manager.
+func (c *Client) ProcessManagerID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.deliveryStatus == nil {
+		return ""
+	}
+	return c.deliveryStatus.ProcessManagerID
 }
 
 func (c *Client) setLastDeliverySubmissionID(id string) {

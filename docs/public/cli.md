@@ -251,6 +251,14 @@ make dev
 
 `make dev` builds the launcher plus the host `agentctl` and, on hosts other than Linux/amd64, one Linux/amd64 helper. It then invokes the repository's native Go launcher. The `kandev dev` syntax above belongs to that source launcher; installing the npm or Homebrew release does not install it as a second runtime mode.
 
+Source builds compile the frontend with `NODE_ENV=production`, even when the
+invoking shell sets `NODE_ENV=development`. This serves production React, which
+omits React development warnings and default performance-track
+instrumentation. Kandev runtime diagnostics are independent of that choice:
+`make start-debug` still enables backend debug file logging, pprof, and ACP
+frame logging. Use `make dev` with `NODE_ENV` unset or set to `development` when
+you need development React and hot reload.
+
 ### OS service commands
 
 The native CLI can install and manage a systemd user/system unit on Linux or a launchd agent/daemon on macOS:

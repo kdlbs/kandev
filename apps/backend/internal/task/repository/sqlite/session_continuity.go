@@ -35,6 +35,20 @@ const sessionContinuitySchema = `
 		CREATE INDEX IF NOT EXISTS idx_harness_generations_current
 			ON harness_session_generations(session_id, incarnation_id, generation DESC);
 
+		CREATE TABLE IF NOT EXISTS harness_native_session_rebinds (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			incarnation_id TEXT NOT NULL,
+			generation BIGINT NOT NULL,
+			previous_native_session_id TEXT NOT NULL,
+			native_session_id TEXT NOT NULL,
+			execution_id TEXT NOT NULL,
+			rebound_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS idx_harness_native_rebinds_session
+			ON harness_native_session_rebinds(session_id, incarnation_id, generation);
+
 		CREATE TABLE IF NOT EXISTS session_restore_attempts (
 			id TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL,
@@ -222,6 +236,9 @@ func (r *Repository) commitHarnessSessionGeneration(
 	if err := insertGenerationTx(ctx, tx, r.db.Rebind, generation); err != nil {
 		return false, err
 	}
+	if err := r.retireContextContinuationNoticeTx(ctx, tx, generation, expectedGeneration); err != nil {
+		return false, err
+	}
 	if err := r.moveOpenRecoveryBlocksWithGenerationTx(ctx, tx, generation, expectedGeneration); err != nil {
 		return false, err
 	}
@@ -315,6 +332,9 @@ func (r *Repository) CreateRestoreAttempt(ctx context.Context, attempt *models.R
 }
 
 func (r *Repository) CompleteRestoreAttempt(ctx context.Context, id, outcome string, completedAt time.Time) error {
+	if outcome == contextContinuationOutcome {
+		return r.completeContextContinuationAttempt(ctx, id, completedAt)
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE session_restore_attempts SET outcome = ?, completed_at = ? WHERE id = ?`), outcome, completedAt, id)
 	if err != nil {

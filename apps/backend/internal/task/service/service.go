@@ -410,6 +410,7 @@ var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
 	ErrWIPLimitExceeded          = wfmodels.ErrWIPLimitExceeded
 	ErrInvalidRepositorySettings = errors.New("invalid repository settings")
+	ErrRepositoryReadOnly        = errors.New("repository workspace is read-only")
 	ErrInvalidExecutorConfig     = errors.New("invalid executor config")
 	ErrExecutorProfileInUse      = errors.New("executor profile is referenced by a retained environment")
 	// Workspace-source sentinels are the service boundary consumed by the HTTP
@@ -476,6 +477,8 @@ type Repos struct {
 
 // Service provides task business logic
 type Service struct {
+	workspaceCollaboration          WorkspaceCollaborationBoundary
+	workspaceCollaborationStore     WorkspaceCollaborationStore
 	executorIdentityResolver        func(context.Context, string) (authn.Identity, bool)
 	workspaces                      repository.WorkspaceRepository
 	userDirectory                   UserDirectory
@@ -545,6 +548,7 @@ type Service struct {
 	clarificationCanceller          TerminalClarificationCanceller
 	parkedProjectionCanceller       ParkedProjectionCanceller
 	sessionCeilingReleaser          SessionCeilingReleaser
+	deferredLaunchDiscard           DeferredLaunchDiscardSettler
 	rowLivenessProber               TaskRowLivenessProber
 	executionLivenessChecker        TaskExecutionLivenessChecker
 	pendingRemoteRecoveryChecker    func(sessionID, executionID string) bool
@@ -599,6 +603,7 @@ type Service struct {
 	gitHubRepositoryOriginVerifier GitHubRepositoryOriginVerifier
 	repoCloneLocation              RepoCloneLocation
 	blockers                       BlockerRepository
+	relations                      RelationRepository
 	comments                       CommentRepository
 	taskStateActivity              TaskStateActivityLogger
 	secretStore                    secrets.SecretStore
@@ -608,6 +613,7 @@ type Service struct {
 	backgroundWorkActionDispatcher BackgroundWorkActionDispatcher
 	runtimeOverridesMu             sync.Mutex
 	mcpSelectionWriter             MCPSelectionWriter
+	builtinCreationWriter          BuiltinCreationWriter
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 

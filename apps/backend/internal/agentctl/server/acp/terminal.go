@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"syscall"
 
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"go.uber.org/zap"
 )
 
@@ -79,9 +80,9 @@ func (m *TerminalManager) Create(command string, args []string, cwd string, env 
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	if len(env) > 0 {
-		cmd.Env = os.Environ()
-		for k, v := range env {
+	cmd.Env = launchwrapper.StripAgentDebugSettings(os.Environ())
+	for k, v := range env {
+		if !launchwrapper.IsAgentDebugSetting(k) {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
 	}

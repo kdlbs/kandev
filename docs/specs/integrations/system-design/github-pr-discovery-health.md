@@ -319,6 +319,9 @@ Do not add one goroutine per watch or wait for admission inside a workspace pass
 
 A pending entry records workspace, unfinished phase, watch IDs and target
 identities, credential scope/generation, and the original retry boundary.
+Unfinished phases include the workflow-attention phase described in the
+[workflow attention design](github-workflow-attention.md#monitored-workflow-phase).
+A wake for workflow-only work resumes that phase alone.
 Coalesce equivalent pending targets. Keep entries proportional to active watches.
 Prune obsolete entries during each inventory reconciliation and before resumption.
 New inventory joins pending work without restarting completed phases.

@@ -17,6 +17,14 @@ legacy_specs: []
 
 # Fix plan: Turn change history integrity
 
+The completed [unavailable-card visibility package](../hide-unavailable-turn-changes/plan.md)
+replaces this package's unavailable-card expectations and UI-03 preview.
+It retains historical diagnostics and usable partial cards. The results below describe the original delivery.
+
+Follow-up: [generated-branch continuity](../turn-change-title-branch-continuity/plan.md)
+adds title-rename interaction coverage for issue #4961. This completed package's
+work-order statuses and recorded verification results remain its original delivery evidence.
+
 ## Overview
 
 Make turn comparisons account for upstream history changes while retaining the
@@ -428,4 +436,3 @@ Leave all package files unstaged and uncommitted.
 - SQLite/PostgreSQL parity needs real PostgreSQL evidence when configured.
   Existing skips and unrelated executor gaps remain visible.
 - Public docs change with implementation. This package changes internal intent only.
-

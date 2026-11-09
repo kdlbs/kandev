@@ -25,7 +25,7 @@ func atomicityService(t *testing.T) (*Service, notificationstore.Repository, *sq
 	require.NoError(t, err)
 	log, err := logger.NewFromZap(zap.NewNop())
 	require.NoError(t, err)
-	return NewService(repo, nil, nil, log, nil), repo, database
+	return NewService(repo, nil, nil, log, nil, false), repo, database
 }
 
 func rejectSubscriptionInsert(t *testing.T, database *sqlx.DB) {

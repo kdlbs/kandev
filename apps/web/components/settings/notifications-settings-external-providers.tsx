@@ -165,6 +165,7 @@ type ExternalProvidersSectionProps = {
   appriseName: string;
   appriseUrls: string;
   showAppriseForm: boolean;
+  webhookCreateFormOpen: boolean;
   notificationProvidersLoaded: boolean;
   notificationProvidersLoading: boolean;
   appriseRescanPending: boolean;
@@ -232,6 +233,16 @@ function AppriseRescanControls({
   );
 }
 
+type AppriseProviderSectionBodyProps = Omit<
+  ExternalProvidersSectionProps,
+  | "notificationProvidersLoaded"
+  | "notificationProvidersLoading"
+  | "appriseRescanPending"
+  | "appriseRescanError"
+  | "appriseRescanResult"
+  | "onRescanApprise"
+>;
+
 function AppriseProviderSectionBody({
   appriseAvailable,
   appriseProviders,
@@ -241,6 +252,7 @@ function AppriseProviderSectionBody({
   appriseName,
   appriseUrls,
   showAppriseForm,
+  webhookCreateFormOpen,
   setAppriseName,
   setAppriseUrls,
   onAppriseNameEdit,
@@ -250,15 +262,7 @@ function AppriseProviderSectionBody({
   onCancelForm,
   onDeleteProvider,
   onTestProvider,
-}: Omit<
-  ExternalProvidersSectionProps,
-  | "notificationProvidersLoaded"
-  | "notificationProvidersLoading"
-  | "appriseRescanPending"
-  | "appriseRescanError"
-  | "appriseRescanResult"
-  | "onRescanApprise"
->) {
+}: AppriseProviderSectionBodyProps) {
   const { t } = useTranslation();
   return (
     <>
@@ -307,7 +311,7 @@ function AppriseProviderSectionBody({
             variant="outline"
             className="cursor-pointer"
             onClick={() => onOpenForm("create")}
-            disabled={showAppriseForm}
+            disabled={showAppriseForm || webhookCreateFormOpen}
           >
             {t("settings:addAppriseProvider")}
           </Button>

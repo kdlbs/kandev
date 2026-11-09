@@ -2,7 +2,7 @@
 status: current
 system: agents
 created: 2026-09-29
-updated: 2026-10-16
+updated: 2026-11-07
 requirements:
   - REQ-AGENTS-PROFILE-DISCOVERY-001
   - REQ-AGENTS-PROFILE-DISCOVERY-002
@@ -26,11 +26,11 @@ These versions describe the reproduction, not a production rule or compatibility
 
 ## Requirement mapping
 
-| Requirement | Design sections |
-| --- | --- |
-| REQ-AGENTS-PROFILE-DISCOVERY-001 | API and authority; Launch context; Probe execution |
+| Requirement                      | Design sections                                       |
+| -------------------------------- | ----------------------------------------------------- |
+| REQ-AGENTS-PROFILE-DISCOVERY-001 | API and authority; Launch context; Probe execution    |
 | REQ-AGENTS-PROFILE-DISCOVERY-002 | Cache identity and refresh; Failure and observability |
-| REQ-AGENTS-PROFILE-DISCOVERY-003 | Editor state; Responsive behavior |
+| REQ-AGENTS-PROFILE-DISCOVERY-003 | Editor state; Responsive behavior                     |
 
 ## API and authority
 
@@ -58,6 +58,37 @@ No changes to public MCP tool schemas are required. Context-free consumers retai
 
 The response retains existing capability or model-option DTO fields and adds an opaque `context_revision` for profile requests.
 It identifies the resolved launch context, not a database revision, and contains no raw environment or CLI values.
+
+### Identity before the first profile save
+
+The registry owns an agent's executable and inference identity.
+An `agents` row owns persisted profile membership.
+An enabled registered agent can therefore accept a new draft before its parent row exists.
+Installation, authentication, and protocol failures retain their existing probe statuses.
+
+The shared settings resolver distinguishes a new draft from a saved profile before persistence lookup:
+
+- New draft: validate the registry entry and inference support without a parent-row lookup.
+  Require the complete launch snapshot and the existing execution authority.
+- Saved profile or saved-profile draft: require the persisted parent and validate the profile against its database ID.
+  Retain the concrete, global profile restrictions and reject unavailable or mismatched records before execution.
+- Both paths retain secret-scope validation, launch validation, managed runtime resolution, and existing disabled-agent checks.
+  A saved-profile lookup failure never becomes a new draft.
+
+Use the canonical registry ID in the new-draft scope: `<authorization-scope>:draft:<registry-id>`.
+Use that scope whether or not a parent row already exists.
+Saved profiles retain `<authorization-scope>:<profile-id>`.
+The existing HMAC identity also includes the agent and complete effective launch context.
+Parent creation must not change an otherwise identical draft scope or merge it with a saved profile's scope.
+
+Apply this distinction to both `FetchProfileDynamicModels` and `ResolveAgentModelConfig` through their shared resolver.
+The probe does not create an agent row, profile, task, or Kandev session.
+Explicit Save remains responsible for persistence.
+Availability listing and startup synchronization retain their existing responsibilities.
+
+This corrects an implementation gap under AC-AGENTS-PROFILE-DISCOVERY-001.2.
+It preserves the existing authority and persistence boundaries without a new ADR.
+The [first-draft repair package](../../../plans/first-draft-profile-discovery/plan.md) records the reproduction and regression coverage.
 
 ## Launch context
 
@@ -104,7 +135,9 @@ Cleanup terminates the owned process tree on success, timeout, cancellation, and
 
 The proposed [missing bundled Codex dependency extension](managed-npm-runtime-recovery.md#missing-bundled-codex-dependency)
 qualifies the no-install rule only for an independently verified incomplete
-managed runtime. Its retry must preserve this document's launch context,
+managed runtime. The proposed [incomplete-cache extension](managed-npm-cache-recovery.md)
+requires verified npm ENOENT for a missing execution-root manifest and matching installed package metadata. A missing executable link alone does not qualify. Both use the
+same private-preparation owner. Their retry must preserve this document's launch context,
 single-flight and late-result guards, and profile-only publication. Both
 baseline discovery and dependent model-option resolution use that same bounded
 recovery helper. It does not run a general runtime update or select another
@@ -226,6 +259,7 @@ A host-only path such as `CODEX_PATH` can still be invalid on a remote executor.
 - [Implementation plan](../../../plans/profile-capability-discovery/plan.md)
 - [Compact profile refresh delivery](../../../plans/first-run-agent-setup/plan.md)
 - [Generic launch wrapper implementation plan](../../../plans/generic-launch-wrappers/plan.md)
+- [First-draft profile discovery repair](../../../plans/first-draft-profile-discovery/plan.md)
 
 A global `CODEX_PATH` workaround cannot describe two differently configured profiles.
 Overwriting the agent-wide cache would leak one profile's catalog into another profile.

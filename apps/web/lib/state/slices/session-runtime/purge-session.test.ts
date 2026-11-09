@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionRuntimeSlice, purgeSessionRuntimeState } from "./session-runtime-slice";
 import type { SessionRuntimeSlice } from "./types";
+import { userShellScopeKey } from "@/lib/state/user-shell-scope";
 
 function makeStore() {
   return create<SessionRuntimeSlice>()(immer<SessionRuntimeSlice>(createSessionRuntimeSlice));
@@ -116,5 +117,48 @@ describe("purgeSessionRuntimeState", () => {
     expect(after.workspaceRestoration.byEnvironmentId[SHARED_ENVIRONMENT_ID]).toMatchObject({
       status: "pending",
     });
+  });
+});
+
+describe("purgeSessionRuntimeState — ordinary terminal scopes", () => {
+  it("removes every task scope for the environment after its last reference", () => {
+    const store = makeStore();
+    const s = store.getState();
+    s.registerSessionEnvironment(SESSION_ID, SHARED_ENVIRONMENT_ID);
+    const scopeA = { environmentId: SHARED_ENVIRONMENT_ID, taskId: "task-a" };
+    const scopeB = { environmentId: SHARED_ENVIRONMENT_ID, taskId: "task-b" };
+    const keyA = userShellScopeKey(scopeA);
+    const keyB = userShellScopeKey(scopeB);
+    s.setUserShells(scopeA, [{ terminalId: "shell-a", kind: "ordinary" }]);
+    s.setUserShells(scopeB, [{ terminalId: "shell-b", kind: "ordinary" }]);
+    s.setUserShells(scopeA, [{ terminalId: "bottom-panel", kind: "fixed" }]);
+
+    store.setState((draft) => {
+      purgeSessionRuntimeState(draft, SESSION_ID);
+    });
+
+    const after = store.getState().userShells;
+    expect(after.byScope[keyA]).toBeUndefined();
+    expect(after.byScope[keyB]).toBeUndefined();
+    expect(after.loaded[keyA]).toBeUndefined();
+    expect(after.listed[keyB]).toBeUndefined();
+    expect(after.byEnvironmentId[SHARED_ENVIRONMENT_ID]).toBeUndefined();
+  });
+
+  it("retains every task scope while another session shares the environment", () => {
+    const store = makeStore();
+    const s = store.getState();
+    s.registerSessionEnvironment(SESSION_ID, SHARED_ENVIRONMENT_ID);
+    s.registerSessionEnvironment("session-2", SHARED_ENVIRONMENT_ID);
+    const scope = { environmentId: SHARED_ENVIRONMENT_ID, taskId: "task-a" };
+    s.setUserShells(scope, [{ terminalId: "shell-a", kind: "ordinary" }]);
+
+    store.setState((draft) => {
+      purgeSessionRuntimeState(draft, SESSION_ID);
+    });
+
+    expect(store.getState().userShells.byScope[userShellScopeKey(scope)]).toEqual([
+      { terminalId: "shell-a", kind: "ordinary" },
+    ]);
   });
 });

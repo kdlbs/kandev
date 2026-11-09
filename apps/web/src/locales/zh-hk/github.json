@@ -1,4 +1,5 @@
 {
+  "openPr": "開啟 PR",
   "views": "視圖",
   "viewPicker": "視圖：{{view}}",
   "loadingSavedQueries": "正在載入已儲存的查詢...",

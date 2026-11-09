@@ -17,13 +17,14 @@ func TestCapacityContinuationSnapshotTerminalEventRoundTrip(t *testing.T) {
 	execution.promptGeneration = 7
 	require.NoError(t, mgr.executionStore.Add(execution))
 	snapshot := &streams.CapacityContinuationSnapshot{
-		Support: streams.CapacityContinuationCodexLiveSessionV1, PromptGeneration: 7,
-		EvidenceComplete: true, CompletedTools: 2,
+		Support: streams.CapacityContinuationCodexLiveSessionV2, PromptGeneration: 7,
+		EvidenceComplete: true, CompletedTools: 2, KnownFailedShellTools: 1,
 	}
 	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
 		Type: streams.EventTypeError, Error: "capacity", PromptGeneration: 7, CapacityContinuation: snapshot,
 	})
 	snapshot.CompletedTools = 99
+	snapshot.KnownFailedShellTools = 99
 
 	eventBus.mu.Lock()
 	defer eventBus.mu.Unlock()
@@ -36,8 +37,8 @@ func TestCapacityContinuationSnapshotTerminalEventRoundTrip(t *testing.T) {
 		var payload AgentEventPayload
 		require.NoError(t, json.Unmarshal(raw, &payload))
 		require.Equal(t, &streams.CapacityContinuationSnapshot{
-			Support: streams.CapacityContinuationCodexLiveSessionV1, PromptGeneration: 7,
-			EvidenceComplete: true, CompletedTools: 2,
+			Support: streams.CapacityContinuationCodexLiveSessionV2, PromptGeneration: 7,
+			EvidenceComplete: true, CompletedTools: 2, KnownFailedShellTools: 1,
 		}, payload.CapacityContinuation)
 		return
 	}
@@ -116,9 +117,4 @@ func TestCapacityContinuationRetainsOpenCodeRuntime(t *testing.T) {
 	}
 	require.True(t, turnFailed, "the OpenCode retained turn failure must publish agent.turn_failed")
 	require.False(t, failed, "an OpenCode retained turn failure must not publish a terminal execution failure")
-}
-
-func TestRetainableACPAgentCoversOpenCode(t *testing.T) {
-	require.True(t, isRetainableACPAgent(openCodeACPAgentID))
-	require.False(t, isRetainableACPAgent("unproven-acp"))
 }

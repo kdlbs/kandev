@@ -123,12 +123,13 @@ async function fetchFileResults(
   query: string,
   owner: FileSearchOwner,
   isCurrent: () => boolean,
+  signal: AbortSignal,
 ): Promise<string[]> {
   const client = getWebSocketClient();
   if (!client) return [];
   const cached = owner.completed;
   if (cached?.sessionId === sessionId && cached.query === query) return cached.results;
-  const response = await searchWorkspaceFiles(client, sessionId, query || "", 20);
+  const response = await searchWorkspaceFiles(client, sessionId, query || "", 20, signal);
   if (!isCurrent()) return [];
   owner.completed = { sessionId, query, results: response.files || [] };
   return owner.completed.results;
@@ -173,13 +174,17 @@ function useMentionItems(
         lastFileSearchRef.current === owner &&
         owner.lookup === lookup &&
         storeReadScopeIdentity(storeApi) === scope;
-      const allItems = await loadTaskMentionItems(
-        storeApi.getState(),
-        taskIdRef.current,
-        workspace,
-        query,
-        { signal: controller.signal, isCurrent },
-      );
+      const [allItems, files] = await Promise.all([
+        loadTaskMentionItems(storeApi.getState(), taskIdRef.current, workspace, query, {
+          signal: controller.signal,
+          isCurrent,
+        }),
+        owner.sessionId
+          ? fetchFileResults(owner.sessionId, query, owner, isCurrent, controller.signal).catch(
+              () => [],
+            )
+          : Promise.resolve([]),
+      ]);
       if (!isCurrent()) return [];
       allItems.push({
         id: "__plan__",
@@ -197,20 +202,14 @@ function useMentionItems(
           onSelect: () => {},
         });
       }
-      if (owner.sessionId) {
-        try {
-          const files = await fetchFileResults(owner.sessionId, query, owner, isCurrent);
-          if (!isCurrent()) return [];
-          for (const filePath of files) {
-            allItems.push({
-              id: filePath,
-              kind: "file",
-              label: filePath,
-              description: t("task:file"),
-              onSelect: () => {},
-            });
-          }
-        } catch {}
+      for (const filePath of files) {
+        allItems.push({
+          id: filePath,
+          kind: "file",
+          label: filePath,
+          description: t("task:file"),
+          onSelect: () => {},
+        });
       }
       return isCurrent() ? rankMentionItems(allItems, query, workspace) : [];
     },

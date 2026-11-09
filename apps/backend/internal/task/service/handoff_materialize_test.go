@@ -21,7 +21,7 @@ type fakeSessionReader struct {
 	tasks     map[string]*models.Task
 	// sessionsWithRunningExecutor records sessions that should be
 	// reported as still bound to an active executor by
-	// HasExecutorRunningRow. Tests use this to exercise the
+	// HasActiveExecutorRunningRow. Tests use this to exercise the
 	// cleanup-safety gate (post-review #5).
 	sessionsWithRunningExecutor map[string]bool
 }
@@ -72,7 +72,7 @@ func (f *fakeSessionReader) GetTask(_ context.Context, id string) (*models.Task,
 	return f.tasks[id], nil
 }
 
-func (f *fakeSessionReader) HasExecutorRunningRow(_ context.Context, sessionID string) (bool, error) {
+func (f *fakeSessionReader) HasActiveExecutorRunningRow(_ context.Context, sessionID string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.sessionsWithRunningExecutor[sessionID], nil

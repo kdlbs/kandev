@@ -538,6 +538,9 @@ func (s *Service) ImportWorkflowsWithBindings(
 	if err := s.AuthorizeWorkspace(ctx, workspaceID); err != nil {
 		return nil, err
 	}
+	if err := s.EnsureWorkspaceMutable(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	if err := validateImportExport(export); err != nil {
 		return nil, err
 	}

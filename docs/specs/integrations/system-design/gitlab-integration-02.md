@@ -24,6 +24,7 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITLAB-I
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .16-.19) | [Pipeline job summary classification](#pipeline-job-summary-classification) |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .24-.27) | [Merge API source-head compatibility](#merge-api-source-head-compatibility) |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .28-.30) | [Default merge squash choice](#default-merge-squash-choice) |
+| `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .31-.35) | [Draft merge requests](gitlab-integration-03.md#draft-merge-requests) |
 
 
 ## Merge API source-head compatibility

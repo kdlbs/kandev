@@ -16,6 +16,10 @@ Add task-specific replacements for fixed workflow profiles. Deliver persistence,
 validation, and routing first. Then expose the contract in Advanced settings.
 Both work orders are complete, including desktop and phone lifecycle evidence.
 
+The later [selected workflow metadata repair](../task-create-workflow-agent-metadata/plan.md)
+covers issue #4999 and the missing-snapshot gap in those browser fixtures.
+The results below record the original delivery only.
+
 ## Scope
 
 One replacement per distinct fixed step profile, task-only persistence, explicit

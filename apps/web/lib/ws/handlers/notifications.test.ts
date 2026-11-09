@@ -4,6 +4,8 @@ import type { AppState } from "@/lib/state/store";
 import {
   NOTIFICATION_EVENT_OFFICE_INBOX_ITEM,
   NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED,
+  NOTIFICATION_EVENT_SESSION_FAILED,
+  NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED,
   NOTIFICATION_EVENT_SESSION_TURN_FINISHED,
   NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE,
 } from "@/lib/notifications/events";
@@ -57,6 +59,8 @@ const ATTENTION_CASES = [
 ] as const;
 type SemanticNotificationMessage =
   | BackendMessageMap["session.clarification_requested"]
+  | BackendMessageMap["session.failed"]
+  | BackendMessageMap["session.permission_requested"]
   | BackendMessageMap["session.turn_finished"]
   | BackendMessageMap["office.inbox_item"];
 
@@ -75,12 +79,16 @@ function makeMessage(
   action:
     | "session.turn_finished"
     | "session.clarification_requested"
+    | "session.failed"
+    | "session.permission_requested"
     | "office.inbox_item" = "session.clarification_requested",
   title = MESSAGE_TITLE,
   body = MESSAGE_BODY,
   occurrenceId = "pending-1",
 ):
   | BackendMessageMap["session.clarification_requested"]
+  | BackendMessageMap["session.failed"]
+  | BackendMessageMap["session.permission_requested"]
   | BackendMessageMap["session.turn_finished"]
   | BackendMessageMap["office.inbox_item"] {
   return {
@@ -102,6 +110,8 @@ function getHandler(
   action:
     | "session.turn_finished"
     | "session.clarification_requested"
+    | "session.failed"
+    | "session.permission_requested"
     | "office.inbox_item" = "session.clarification_requested",
 ) {
   return (
@@ -110,6 +120,21 @@ function getHandler(
       (message: SemanticNotificationMessage) => void
     >
   )[action]!;
+}
+
+function expectedNativeNotificationCall(eventId: string) {
+  return [
+    "show_native_notification",
+    {
+      request: {
+        eventId,
+        title: MESSAGE_TITLE,
+        body: MESSAGE_BODY,
+        taskId: TASK_ID,
+        sessionId: SESSION_ID,
+      },
+    },
+  ] as const;
 }
 
 function expectNoAttention(invoke: ReturnType<typeof vi.fn>) {
@@ -195,36 +220,50 @@ describe("semantic session notification handlers", () => {
     handler(makeMessage());
     handler(makeMessage("message-2"));
 
+    expect(invoke.mock.calls).toEqual([
+      expectedNativeNotificationCall("session.clarification_requested:message-1"),
+      expectedNativeNotificationCall("session.clarification_requested:message-1"),
+      expectedNativeNotificationCall("session.clarification_requested:message-2"),
+    ]);
     expect(invoke).toHaveBeenCalledTimes(3);
-    expect(invoke).toHaveBeenNthCalledWith(1, "show_native_notification", {
-      request: {
-        eventId: "session.clarification_requested:message-1",
-        title: MESSAGE_TITLE,
-        body: MESSAGE_BODY,
-        taskId: TASK_ID,
-        sessionId: SESSION_ID,
-      },
-    });
-    expect(invoke).toHaveBeenNthCalledWith(2, "show_native_notification", {
-      request: {
-        eventId: "session.clarification_requested:message-1",
-        title: MESSAGE_TITLE,
-        body: MESSAGE_BODY,
-        taskId: TASK_ID,
-        sessionId: SESSION_ID,
-      },
-    });
-    expect(invoke).toHaveBeenNthCalledWith(3, "show_native_notification", {
-      request: {
-        eventId: "session.clarification_requested:message-2",
-        title: MESSAGE_TITLE,
-        body: MESSAGE_BODY,
-        taskId: TASK_ID,
-        sessionId: SESSION_ID,
-      },
-    });
     expect(notificationMock).not.toHaveBeenCalled();
     expect(playWaitingForInputSound).toHaveBeenCalledTimes(3);
+  });
+
+  it("uses the same failure event identity as the session failure bridge", () => {
+    const invoke = vi.fn().mockResolvedValue("shown");
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+      invoke,
+      transformCallback: vi.fn(),
+    };
+
+    getHandler(
+      makeStore(),
+      NOTIFICATION_EVENT_SESSION_FAILED,
+    )(makeMessage("failure-event-1", NOTIFICATION_EVENT_SESSION_FAILED));
+
+    expect(invoke).toHaveBeenCalledWith("show_native_notification", {
+      request: expect.objectContaining({ eventId: "session.failed:session-1" }),
+    });
+  });
+
+  it("sends permission requests through the native notification contract", () => {
+    const invoke = vi.fn().mockResolvedValue("shown");
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+      invoke,
+      transformCallback: vi.fn(),
+    };
+
+    getHandler(
+      makeStore(),
+      NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED,
+    )(makeMessage("permission-event-1", NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED));
+
+    expect(invoke).toHaveBeenCalledWith("show_native_notification", {
+      request: expect.objectContaining({
+        eventId: "session.permission_requested:permission-event-1",
+      }),
+    });
   });
 
   it("plays the sound and shows a notification when not suppressed", () => {

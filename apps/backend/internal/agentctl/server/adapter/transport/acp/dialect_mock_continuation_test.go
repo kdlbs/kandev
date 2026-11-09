@@ -17,7 +17,7 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 	}{
 		{"supported mock after completed tool", mockAgentID, 1, true, true, true, true},
 		{"supported mock before output", mockAgentID, 0, true, true, false, false},
-		{"untrusted provider marker", "other-acp", 0, false, false, false, false},
+		{"unlisted provider remote error", "other-acp", 0, false, true, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, fake, conn := setupHandoffFakeAgent(t)
@@ -70,7 +70,7 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 						require.Equal(t, streams.PromptFailureDispositionRetainRuntime, event.PromptFailureDisposition)
 					} else {
 						require.Nil(t, event.ContinuationSafety)
-						require.Empty(t, event.PromptFailureDisposition)
+						require.Equal(t, streams.PromptFailureDispositionRetainRuntime, event.PromptFailureDisposition)
 					}
 				}
 				require.NotEqual(t, streams.EventTypeComplete, event.Type)

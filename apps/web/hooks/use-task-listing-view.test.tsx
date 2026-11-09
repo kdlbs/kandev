@@ -81,4 +81,13 @@ describe("useTaskListingView", () => {
     );
     expect(window.localStorage.getItem(TASK_LISTING_VIEW_STORAGE_KEY)).toBe('"pipeline"');
   });
+
+  it("selects the board Graph view mode for the Graph listing view", () => {
+    const { result } = renderHook(() => useTaskListingView());
+    act(() => result.current.setView("graph"));
+    expect(result.current.effectiveView).toBe("graph");
+    expect(mocks.setUserSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kanbanViewMode: "graph" }),
+    );
+  });
 });

@@ -293,3 +293,45 @@ runtime:
 	}
 	return &buffer
 }
+
+func TestInspectRepositoryProviderLogsRejectedRequests(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	core, observed := observer.New(zapcore.InfoLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observed logger: %v", err)
+	}
+	svc.log = log
+
+	t.Run("invalid request", func(t *testing.T) {
+		before := observed.Len()
+		_, err := svc.inspectRepositoryProvider(t.Context(), "workspace-1", RepositoryProviderInspectionRequest{
+			Provider: "bitbucket",
+		}, nil)
+		assertRepositoryProviderError(t, err, RepositoryProviderErrorInvalid)
+		entries := observed.All()
+		if len(entries) != before+1 {
+			t.Fatalf("log entries = %d, want one", len(entries)-before)
+		}
+		fields := entries[before].ContextMap()
+		if fmt.Sprint(fields["failure_category"]) != "invalid" ||
+			fmt.Sprint(fields["response_shape"]) != repositoryProviderInspectionNotSent {
+			t.Fatalf("fields = %v", fields)
+		}
+	})
+
+	t.Run("missing owner", func(t *testing.T) {
+		before := observed.Len()
+		_, err := svc.inspectRepositoryProvider(t.Context(), "workspace-1", RepositoryProviderInspectionRequest{
+			Provider: "bitbucket", URL: discoveryTestURL,
+		}, nil)
+		assertRepositoryProviderError(t, err, RepositoryProviderErrorUnavailable)
+		entries := observed.All()
+		if len(entries) != before+1 {
+			t.Fatalf("log entries = %d, want one", len(entries)-before)
+		}
+		if got := fmt.Sprint(entries[before].ContextMap()["failure_category"]); got != "unavailable" {
+			t.Fatalf("failure category = %q, want unavailable", got)
+		}
+	})
+}
