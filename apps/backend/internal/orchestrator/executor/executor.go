@@ -258,6 +258,10 @@ var (
 	ErrTaskArchived            = errors.New("task is archived")
 	ErrStaleExecution          = errors.New("stale execution: no live execution in memory")
 	ErrAgentCommandMissing     = errors.New("existing execution has no agent command configured")
+	// ErrExecutorActorUnavailable means executor admission could not establish
+	// the user a resume must launch as, so the resume fails closed instead of
+	// launching without an identity.
+	ErrExecutorActorUnavailable = errors.New("resume requires an executor actor, but none is available")
 	// ErrSessionAdvancedToRunning reports that another launch advanced the
 	// session before this launch could persist its prepared runtime data.
 	ErrSessionAdvancedToRunning = errors.New("session state advanced to RUNNING before runtime persistence")

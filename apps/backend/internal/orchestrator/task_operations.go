@@ -4731,7 +4731,9 @@ func (s *Service) attemptColdResume(
 	if err != nil {
 		return false, err
 	}
-	execution, launchErr := s.executor.ResumeSession(dispatchCtx, session, true)
+	execution, launchErr := s.executor.ResumeSessionWithOptions(
+		dispatchCtx, session, true, executor.ResumeOptions{RequireExecutorActor: true},
+	)
 	releaseCeilingDispatch()
 	if execution != nil && resumeAttempt != nil {
 		resumeAttempt.setExecutionID(execution.AgentExecutionID)
