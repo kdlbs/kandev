@@ -284,14 +284,26 @@ func buildTaskDTOsWithSessionInfo(
 	for i, t := range tasks {
 		taskIDs[i] = t.ID
 	}
+	// The summary revision fences repairs, so the bounded summaries are read
+	// first and the session-summary projection is captured once, after that
+	// revision. The single batch then backs both DTO construction and lazy
+	// repair, matching the boot payload builder's ordering.
+	statusSummaries, summaryErr := svc.GetTaskStatusSummaries(ctx, taskIDs)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if summaryErr != nil {
+		log.Warn("failed to load task status summaries, using coarse task fields", zap.Error(summaryErr))
+		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	sessionObservationsByTask, err := svc.BatchGetTaskSessionSummaryObservations(ctx, taskIDs)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
 	}
 	if err != nil {
-		return nil, err
-	}
-	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	sessionsByTask := taskSessionModelsFromSummaryObservations(sessionObservationsByTask)
@@ -304,21 +316,13 @@ func buildTaskDTOsWithSessionInfo(
 		log.Warn("failed to load pending actions for task list, using empty map", zap.Error(pendingErr))
 		pendingActionsBySession = map[string]models.TaskPendingAction{}
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	statusSummaries, summaryErr := svc.GetTaskStatusSummaries(ctx, taskIDs)
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, ctxErr
-	}
-	if summaryErr != nil {
-		log.Warn("failed to load task status summaries, using coarse task fields", zap.Error(summaryErr))
-		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
-	}
-	if summaryErr == nil {
+	// The empty pending-action fallback is display-only: repairing from it would
+	// persist a cleared pending action (or rebuild a missing summary without
+	// one), so a pending-action read failure skips repair like the boot builder.
+	if summaryErr == nil && pendingErr == nil {
 		var reconcileErr error
 		statusSummaries, reconcileErr = reconcileTaskStatusSummariesAfterRevision(
-			ctx, svc, log, tasks, taskIDs, statusSummaries,
+			ctx, svc, log, tasks, statusSummaries, sessionsByTask, pendingActionsBySession,
 		)
 		if reconcileErr != nil {
 			return nil, reconcileErr
@@ -423,32 +427,19 @@ func reconcileTaskStatusSummariesAfterRevision(
 	svc *service.Service,
 	log *logger.Logger,
 	tasks []*models.Task,
-	taskIDs []string,
 	statusSummaries map[string]*statussummary.TaskStatusSummary,
+	sessionsByTask map[string][]*models.TaskSession,
+	pendingBySession map[string]models.TaskPendingAction,
 ) (map[string]*statussummary.TaskStatusSummary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// The summary revision fences repairs, so observations used for a repair
-	// must be captured after that revision.
-	sessionObservations, err := svc.BatchGetTaskSessionSummaryObservations(ctx, taskIDs)
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, ctxErr
-	}
-	if err != nil {
-		log.Warn("failed to refresh task sessions for status summary reconciliation", zap.Error(err))
-		return statusSummaries, nil
-	}
-	sessions := taskSessionModelsFromSummaryObservations(sessionObservations)
-	pendingActions, err := pendingActionsForInputCapableSessions(ctx, svc, sessions)
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, ctxErr
-	}
-	if err != nil {
-		log.Warn("failed to refresh pending actions for status summary reconciliation", zap.Error(err))
-		return statusSummaries, nil
-	}
-	reconciled, err := svc.ReconcileTaskStatusSummaries(ctx, tasks, sessions, pendingActions, statusSummaries)
+	// The observation batch was captured after the summary revision read (see
+	// the ordering in buildTaskDTOsWithSessionInfo), so the fence that requires
+	// repair observations to postdate the revision holds without a second
+	// projection read. A revision that advances after the fence is still
+	// protected by the revision-gated summary write.
+	reconciled, err := svc.ReconcileTaskStatusSummaries(ctx, tasks, sessionsByTask, pendingBySession, statusSummaries)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
 	}
