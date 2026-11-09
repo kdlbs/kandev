@@ -121,8 +121,43 @@ AC-001.1/.5: Editor, storage and ranking. AC-001.2/.3: Runtime and chain.
 AC-001.4: Feature/storage boundary. AC-001.6: Read-only preview. No operating
 configuration or installed-runtime change. AC-001.7 covers task/session RR and
 legacy unknown initialization. AC-001.8 covers provider-usage modes and their
-unknown handling. Cross-backend choice and keep-model remain original later
-increments.
+unknown handling. AC-001.9 covers the keep-model preference below. Cross-backend
+choice remains an original later increment.
+
+## Keep the chosen model between turns
+
+`keep_model_while_running` defaults to on and then a launch re-resolves the
+persisted route. When it is off, a new user turn calls `ReevaluateForNewTurn`,
+the same claiming selection a new launch uses, without an incumbent preference.
+
+- A launch that owns a new turn compares in `dynamicLaunchDecision`.
+- A chat user message to a warm runtime compares at the entry of `promptTask`,
+  before the prompt claims the session, under the route-action lock and the
+  session cancellation guard. Only the chat entry points
+  (`PromptTaskWithDeliverySubmissionID`, `PromptTaskWithPromptContext`) mark the
+  turn; their caller discards the `PromptResult`. It compares only when the
+  session is `WAITING_FOR_INPUT` with an active route, has no active turn and no cancel,
+  queued dispatch or steer in flight, the background-workload probe answers
+  `settled`, the `executors_running` runtime is `standalone`, and the session
+  is not passthrough. Otherwise the prompt keeps the current candidate and no
+  generation is claimed. Queue, lifecycle, recovery, replay and explicit
+  model-switch deliveries, prompts fenced to a live execution, and synchronous
+  `PromptTask` callers that read the result (for example a coordinator) never
+  compare, so they keep the current candidate and receive the turn's result.
+- If the current candidate wins, the claimed generation is marked active and the
+  warm runtime receives the prompt in its native conversation.
+- If another candidate wins, the turn uses the dynamic successor handover: stop
+  the idle predecessor, reset the session to `CREATED`, and start the successor
+  through `startCreatedSession` with the route preserved. The conductor sends the
+  new message followed by the bounded continuation package (task, workflow step,
+  conversation, tool summary, repository and plan summaries). The previous
+  provider's native conversation is not resumed on another candidate, and its
+  runtime settings are dropped as for any candidate switch. The user message is
+  not recorded again. Standalone user shells belong to the task environment and
+  keep running; other runtimes never switch here. A failed handover marks the
+  claimed generation `action_required` with the existing recovery actions.
+- When no candidate is eligible, the prompt fails with the no-eligible-candidate
+  error, as a launch does.
 
 
 ## Native owner journal bridge
@@ -145,5 +180,5 @@ and delayed recovery exclude native rows; native owners retain their recovery.
 This increment wires utility and taskless Office callers. The native owner
 validator accepts only utility-call and office-run-session keys; a review-run
 key fails closed until the existing G2 review composition is wired. PostgreSQL
-runtime evidence and independent-backend unique choice, keep-model and installed
-acceptance remain distinct original work.
+runtime evidence and independent-backend unique choice and installed acceptance
+remain distinct original work.

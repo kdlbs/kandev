@@ -6871,6 +6871,7 @@ func (s *Service) promptTaskWithPromptContext(
 	return s.promptTask(
 		ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, launchOriginManual,
 		promptTaskOptions{
+			chatUserTurn:                  true,
 			promptAlreadyComposed:         true,
 			fallbackUsesEffectivePrompt:   true,
 			promptReferenceContext:        promptReferenceContext,
@@ -6883,6 +6884,9 @@ func (s *Service) promptTaskWithPromptContext(
 
 type promptTaskOptions struct {
 	internalContinuation bool
+	// chatUserTurn marks a message the chat delivers without reading the
+	// PromptResult, so the turn may be handed to another dynamic candidate.
+	chatUserTurn bool
 	// recoveryAction is populated only by the explicit context-continuation
 	// path. It allows the already-authorized prompt to cross the recovery block
 	// without reopening the ordinary launch gate.
@@ -7150,6 +7154,13 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
 			return nil, err
 		}
+	}
+	// A dynamic profile that does not keep its model compares candidates at
+	// every new user turn, including one sent to a warm idle runtime.
+	if switchResult, switched, switchErr := s.switchIdleDynamicCandidateForNewTurn(
+		ctx, taskID, sessionID, prompt, model, planMode, attachments, origin, options,
+	); switched {
+		return switchResult, switchErr
 	}
 
 	session, foregroundClaim, err := s.prepareSessionAndForegroundClaimForPrompt(ctx, taskID, sessionID, options)

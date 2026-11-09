@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconGauge } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
-import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -17,7 +16,8 @@ import {
   fromLocalInputValue,
   toLocalInputValue,
 } from "@/lib/settings/provider-limits";
-import { settingsActionClassName } from "./settings-control";
+import { useSettingsSaveContributor } from "./settings-save-provider";
+import { serializeSettingsRevision } from "./settings-save-revision";
 import { ProviderAccountLimits } from "./provider-account-limits";
 
 type ProviderLimitsCardProps = {
@@ -76,25 +76,44 @@ function ProviderLimitsCardBody({ provider }: ProviderLimitsCardProps) {
 
 type SaveProviderLimit = ReturnType<typeof useProviderLimits>["save"];
 
+type ProviderLimitDraft = { monthly: string; blockUntil: string };
+
+function providerLimitDraft(limit: ProviderLimit): ProviderLimitDraft {
+  return {
+    monthly: toLocalInputValue(limit.monthly_reset_at),
+    blockUntil: toLocalInputValue(limit.block_until),
+  };
+}
+
+/**
+ * The provider's monthly reset and manual block. The draft registers with the
+ * page's shared settings save, which owns Save, Discard and the navigation
+ * warning for it.
+ */
+function useProviderLimitDraft(limit: ProviderLimit, onSave: SaveProviderLimit) {
+  const [draft, setDraft] = useState<ProviderLimitDraft>(() => providerLimitDraft(limit));
+  const [saved, setSaved] = useState<ProviderLimitDraft>(() => providerLimitDraft(limit));
+  useSettingsSaveContributor({
+    id: `provider-limit:${limit.provider}`,
+    revision: serializeSettingsRevision(draft),
+    isDirty: draft.monthly !== saved.monthly || draft.blockUntil !== saved.blockUntil,
+    save: async () => {
+      const submitted = draft;
+      await onSave(limit.provider, {
+        monthly_reset_at: fromLocalInputValue(submitted.monthly),
+        monthly_reset_timezone: submitted.monthly ? browserTimeZone() : "",
+        block_until: fromLocalInputValue(submitted.blockUntil),
+      });
+      setSaved(submitted);
+    },
+    discard: () => setDraft(saved),
+  });
+  return { draft, setDraft };
+}
+
 function ProviderLimitRow({ limit, onSave }: { limit: ProviderLimit; onSave: SaveProviderLimit }) {
   const { t } = useTranslation();
-  const [monthly, setMonthly] = useState(toLocalInputValue(limit.monthly_reset_at));
-  const [blockUntil, setBlockUntil] = useState(toLocalInputValue(limit.block_until));
-  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
-
-  const submit = async (nextMonthly: string, nextBlock: string) => {
-    setStatus("saving");
-    try {
-      await onSave(limit.provider, {
-        monthly_reset_at: fromLocalInputValue(nextMonthly),
-        monthly_reset_timezone: nextMonthly ? browserTimeZone() : "",
-        block_until: fromLocalInputValue(nextBlock),
-      });
-      setStatus("saved");
-    } catch {
-      setStatus("failed");
-    }
-  };
+  const { draft, setDraft } = useProviderLimitDraft(limit, onSave);
 
   const monthlyId = `provider-limit-monthly-${limit.provider}`;
   const blockId = `provider-limit-block-${limit.provider}`;
@@ -118,8 +137,11 @@ function ProviderLimitRow({ limit, onSave }: { limit: ProviderLimit; onSave: Sav
           <Input
             id={monthlyId}
             type="datetime-local"
-            value={monthly}
-            onChange={(event) => setMonthly(event.target.value)}
+            value={draft.monthly}
+            onChange={(event) => {
+              const monthly = event.target.value;
+              setDraft((current) => ({ ...current, monthly }));
+            }}
           />
           <span className="text-xs text-muted-foreground">
             {t("agents:providerLimitsMonthlyResetHint")}
@@ -130,45 +152,16 @@ function ProviderLimitRow({ limit, onSave }: { limit: ProviderLimit; onSave: Sav
           <Input
             id={blockId}
             type="datetime-local"
-            value={blockUntil}
-            onChange={(event) => setBlockUntil(event.target.value)}
+            value={draft.blockUntil}
+            onChange={(event) => {
+              const blockUntil = event.target.value;
+              setDraft((current) => ({ ...current, blockUntil }));
+            }}
           />
           <span className="text-xs text-muted-foreground">
             {t("agents:providerLimitsBlockHint")}
           </span>
         </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant="outline"
-          className={settingsActionClassName("cursor-pointer")}
-          disabled={status === "saving"}
-          onClick={() => void submit(monthly, blockUntil)}
-        >
-          {t("agents:providerLimitsSave")}
-        </Button>
-        <Button
-          variant="ghost"
-          className={settingsActionClassName("cursor-pointer")}
-          disabled={status === "saving" || (!monthly && !blockUntil)}
-          onClick={() => {
-            setMonthly("");
-            setBlockUntil("");
-            void submit("", "");
-          }}
-        >
-          {t("agents:providerLimitsClear")}
-        </Button>
-        {status === "saved" ? (
-          <span className="text-xs text-muted-foreground" role="status">
-            {t("agents:providerLimitsSaved")}
-          </span>
-        ) : null}
-        {status === "failed" ? (
-          <span className="text-xs text-destructive" role="alert">
-            {t("agents:providerLimitsSaveFailed")}
-          </span>
-        ) : null}
       </div>
     </div>
   );

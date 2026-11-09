@@ -29,19 +29,9 @@ export function ProviderAccountLimits({
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const [selected, setSelected] = useState<BillingTier>("free");
-  const { draft, setDraft, updateTier, submit, status } = useProviderAccountDraft(
-    account,
-    provider,
-    save,
-  );
+  const { draft, setDraft, updateTier, saving } = useProviderAccountDraft(account, provider, save);
   const visibleTiers = isMobile ? [selected] : BILLING_TIERS;
   const freeModels = freeTierModels(account);
-  const statusLabels = {
-    idle: "",
-    saving: "agents:providerTierSaving",
-    saved: "agents:providerLimitsSaved",
-    failed: "agents:providerLimitsSaveFailed",
-  };
   return (
     <section className="grid min-w-0 gap-3 rounded-md border p-3" aria-label={account.account_id}>
       <h3 className="break-all font-medium">{account.account_id}</h3>
@@ -51,7 +41,7 @@ export function ProviderAccountLimits({
         provider={provider}
         draft={draft}
         setDraft={setDraft}
-        disabled={status === "saving"}
+        disabled={saving}
       />
       {isMobile ? (
         <div role="tablist" className="grid grid-cols-3 gap-1">
@@ -79,39 +69,11 @@ export function ProviderAccountLimits({
             state={getProviderTierState(account, tier)}
             override={draft.tiers[tier] ?? {}}
             onChange={(patch) => updateTier(tier, patch)}
-            disabled={status === "saving"}
+            disabled={saving}
           />
         ))}
       </div>
-      <ProviderProfileTiers
-        account={account}
-        draft={draft}
-        setDraft={setDraft}
-        disabled={status === "saving"}
-      />
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          data-testid={`account-save-${account.account_id}`}
-          className={settingsActionClassName()}
-          disabled={status === "saving"}
-          onClick={() => void submit()}
-        >
-          {t("agents:providerLimitsSave")}
-        </Button>
-        <Button
-          variant="ghost"
-          className={settingsActionClassName()}
-          disabled={status === "saving"}
-          onClick={() => setDraft({ tiers: {} })}
-        >
-          {t("agents:providerTierResetOverrides")}
-        </Button>
-        {status !== "idle" ? (
-          <span role={status === "failed" ? "alert" : "status"} className="text-xs">
-            {t(statusLabels[status])}
-          </span>
-        ) : null}
-      </div>
+      <ProviderProfileTiers account={account} draft={draft} setDraft={setDraft} disabled={saving} />
     </section>
   );
 }

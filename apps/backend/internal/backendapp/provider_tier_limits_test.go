@@ -208,37 +208,85 @@ func TestCheckCandidateShortWindowReadsConfiguredSeconds(t *testing.T) {
 	}
 }
 
+func modelUsage(profile, model string, events int64) sqliterepo.ManualModelWindowUsage {
+	return sqliterepo.ManualModelWindowUsage{ProfileID: profile, Model: model, Usage: sqliterepo.ManualWindowUsage{EventCount: events}}
+}
+
 func TestCheckCandidateAppliesModelAndGroupScopeCounts(t *testing.T) {
 	now := tierTestNow()
 	model := agentusage.RequestScope{ID: agentusage.ModelScopeID("model-a"), Kind: agentusage.ScopeKindModel, Models: []string{"model-a"}, RequestsPerDay: tierF(3)}
 	group := agentusage.RequestScope{ID: "group:model-a+model-c", Kind: agentusage.ScopeKindGroup, Models: []string{"model-a", "model-c"}, RequestsPerDay: tierF(5)}
 	other := agentusage.RequestScope{ID: agentusage.ModelScopeID("other"), Kind: agentusage.ScopeKindModel, Models: []string{"other"}, RequestsPerDay: tierF(1)}
+	// Scope usage follows the recorded model of each request: p2 ran model-a
+	// and model-c through overrides, and p1's own model-b requests never count.
 	cases := []struct {
 		name   string
 		scopes []agentusage.RequestScope
-		events int64
+		groups []sqliterepo.ManualModelWindowUsage
 		deny   bool
 	}{
-		{"model scope just under", []agentusage.RequestScope{model}, 2, false},
-		{"model scope at limit", []agentusage.RequestScope{model}, 3, true},
-		{"group scope just under", []agentusage.RequestScope{group}, 4, false},
-		{"group scope at limit", []agentusage.RequestScope{group}, 5, true},
-		{"scope for another model never applies", []agentusage.RequestScope{other}, 50, false},
+		{"model scope just under", []agentusage.RequestScope{model}, []sqliterepo.ManualModelWindowUsage{modelUsage("p1", "acme/model-a", 2), modelUsage("p1", "acme/model-b", 50)}, false},
+		{"model scope at limit", []agentusage.RequestScope{model}, []sqliterepo.ManualModelWindowUsage{modelUsage("p1", "acme/model-a", 2), modelUsage("p2", "acme/model-a", 1)}, true},
+		{"group scope just under", []agentusage.RequestScope{group}, []sqliterepo.ManualModelWindowUsage{modelUsage("p1", "acme/model-a", 2), modelUsage("p2", "acme/model-c", 2), modelUsage("p1", "acme/model-b", 50)}, false},
+		{"group scope at limit", []agentusage.RequestScope{group}, []sqliterepo.ManualModelWindowUsage{modelUsage("p1", "acme/model-a", 2), modelUsage("p2", "acme/model-c", 3)}, true},
+		{"scope for another model never applies", []agentusage.RequestScope{other}, []sqliterepo.ManualModelWindowUsage{modelUsage("p1", "acme/other", 50)}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := newTierTestService(t, &fakeTierStore{events: tc.events}, agentusage.TierLimits{Scopes: tc.scopes})
+			svc := newTierTestService(t, &fakeModelTierStore{fakeTierStore: fakeTierStore{events: 50}, groups: tc.groups}, agentusage.TierLimits{Scopes: tc.scopes})
 			got, err := svc.CheckCandidate(context.Background(), dynamicruntime.Candidate{ID: "p1"}, "", now)
 			if err != nil {
 				t.Fatalf("CheckCandidate: %v", err)
 			}
 			if (got.Reason != "") != tc.deny {
-				t.Fatalf("events=%d admission=%+v, deny=%v", tc.events, got, tc.deny)
+				t.Fatalf("admission=%+v, deny=%v", got, tc.deny)
 			}
 			if tc.deny && (got.Reason != "limit_daily" || !got.RetryAt.Equal(time.Date(2026, 3, 11, 0, 0, 0, 0, time.UTC))) {
 				t.Fatalf("admission = %+v", got)
 			}
 		})
+	}
+}
+
+func TestCheckCandidateScopedBudgetCountsRecordedModels(t *testing.T) {
+	now := tierTestNow()
+	budget := agentusage.LimitBudget{Window: agentusage.WindowPeriodDay, Unit: "requests", Value: tierF(3), Reset: "rolling", Scope: string(agentusage.WindowScopePaidModels)}
+	cases := []struct {
+		name   string
+		groups []sqliterepo.ManualModelWindowUsage
+		deny   bool
+	}{
+		{"just under", []sqliterepo.ManualModelWindowUsage{modelUsage("p1", "acme/model-a", 2)}, false},
+		{"at limit", []sqliterepo.ManualModelWindowUsage{modelUsage("p1", "acme/model-a", 3)}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeModelTierStore{fakeTierStore: fakeTierStore{events: 99}, groups: tc.groups}
+			svc := newTierTestService(t, store, agentusage.TierLimits{Windows: []agentusage.LimitBudget{budget}})
+			got, err := svc.CheckCandidate(context.Background(), dynamicruntime.Candidate{ID: "p1"}, "", now)
+			if err != nil {
+				t.Fatalf("CheckCandidate: %v", err)
+			}
+			if (got.Reason != "") != tc.deny {
+				t.Fatalf("admission=%+v, deny=%v", got, tc.deny)
+			}
+		})
+	}
+}
+
+func TestCheckCandidateKeepsAccountWideEvidenceAfterAttributionFailure(t *testing.T) {
+	// A recorded request without a model leaves the per-model minute count
+	// unknown, but the account-wide daily allowance is still read and applied.
+	now := tierTestNow()
+	store := &fakeModelTierStore{fakeTierStore: fakeTierStore{events: 10}, groups: []sqliterepo.ManualModelWindowUsage{modelUsage("p1", "", 1)}}
+	svc := newTierTestService(t, store, agentusage.TierLimits{RequestsPerModel: true, RequestsPerMinute: tierF(1), RequestsPerDay: tierF(10)})
+	got, err := svc.CheckCandidate(context.Background(), dynamicruntime.Candidate{ID: "p1"}, "", now)
+	if err != nil || got.Reason != "limit_daily" {
+		t.Fatalf("admission = %+v err %v, want limit_daily", got, err)
+	}
+	store.events = 9
+	if _, err := svc.CheckCandidate(context.Background(), dynamicruntime.Candidate{ID: "p1"}, "", now); !errors.Is(err, errModelAttributionUnavailable) {
+		t.Fatalf("unproven per-model minute must surface the attribution failure: %v", err)
 	}
 }
 
@@ -289,12 +337,12 @@ func TestReadMinuteRequestCountAccountWideUsesLargerOfRecordedAndLive(t *testing
 	}
 	// Live events inside [start, end): the one at start and the 30s one. The
 	// event at end and the one before start are outside the window.
-	got, err := svc.readMinuteRequestCount(ctx, c, c.ids, start, end)
+	got, err := svc.readMinuteRequestCount(ctx, c, start, end)
 	if err != nil || got != 3 {
 		t.Fatalf("recorded 3 > live 2: got %v err %v", got, err)
 	}
 	store.events = 1
-	got, err = svc.readMinuteRequestCount(ctx, c, c.ids, start, end)
+	got, err = svc.readMinuteRequestCount(ctx, c, start, end)
 	if err != nil || got != 2 {
 		t.Fatalf("live 2 > recorded 1: got %v err %v", got, err)
 	}
@@ -316,7 +364,7 @@ func TestReadMinuteRequestCountPerModelOverrideCountsOnlyThatModel(t *testing.T)
 		{ProfileID: "p1", Model: "", Usage: sqliterepo.ManualWindowUsage{EventCount: 0}},
 	}}
 	svc := &providerTierLimitService{store: store}
-	got, err := svc.readMinuteRequestCount(ctx, c, nil, start, end)
+	got, err := svc.readMinuteRequestCount(ctx, c, start, end)
 	if err != nil || got != 3 {
 		t.Fatalf("model-a recorded across profiles and prefix forms: got %v err %v", got, err)
 	}
@@ -325,7 +373,7 @@ func TestReadMinuteRequestCountPerModelOverrideCountsOnlyThatModel(t *testing.T)
 	for i, model := range []string{"acme/model-a", "acme/model-a", "acme/model-a", "acme/model-a", "acme/model-b"} {
 		svc.requests.recordForModel("p1", string(rune('a'+i)), model, now.Add(-10*time.Second))
 	}
-	got, err = svc.readMinuteRequestCount(ctx, c, nil, start, end)
+	got, err = svc.readMinuteRequestCount(ctx, c, start, end)
 	if err != nil || got != 4 {
 		t.Fatalf("live 4 model-a events: got %v err %v", got, err)
 	}
@@ -341,23 +389,32 @@ func TestReadMinuteRequestCountPerModelOverrideRequiresPerModelLimit(t *testing.
 		groups:        []sqliterepo.ManualModelWindowUsage{{Model: "acme/model-a", Usage: sqliterepo.ManualWindowUsage{EventCount: 1}}},
 	}
 	svc := &providerTierLimitService{store: store}
-	got, err := svc.readMinuteRequestCount(context.Background(), c, c.ids, now.Add(-time.Minute), now)
+	got, err := svc.readMinuteRequestCount(context.Background(), c, now.Add(-time.Minute), now)
 	if err != nil || got != 9 {
 		t.Fatalf("account-wide count = %v err %v, want 9", got, err)
 	}
 }
 
-func TestReadMinuteRequestCountPerModelNonOverrideStaysAccountWide(t *testing.T) {
+func TestReadMinuteRequestCountPerModelCountsRecordedModelsWithoutOverride(t *testing.T) {
+	// p1's configured model is model-a. p2 ran model-a through an override and
+	// p1 also ran model-b; only the model-a requests count for p1's model.
 	now := tierTestNow()
 	c := tierContextFor("acme/model-a", true, false)
-	store := &fakeModelTierStore{fakeTierStore: fakeTierStore{events: 4}}
-	svc := &providerTierLimitService{store: store}
-	got, err := svc.readMinuteRequestCount(context.Background(), c, []string{"p1"}, now.Add(-time.Minute), now)
-	if err != nil || got != 4 {
-		t.Fatalf("got %v err %v", got, err)
+	store := &fakeModelTierStore{
+		fakeTierStore: fakeTierStore{events: 41},
+		groups: []sqliterepo.ManualModelWindowUsage{
+			{ProfileID: "p1", Model: "acme/model-a", Usage: sqliterepo.ManualWindowUsage{EventCount: 2}},
+			{ProfileID: "p2", Model: "acme/model-a", Usage: sqliterepo.ManualWindowUsage{EventCount: 1}},
+			{ProfileID: "p1", Model: "acme/model-b", Usage: sqliterepo.ManualWindowUsage{EventCount: 38}},
+		},
 	}
-	if len(store.calls) != 1 || len(store.calls[0].ids) != 1 || store.calls[0].ids[0] != "p1" {
-		t.Fatalf("the caller's filtered ids must be used: %+v", store.calls)
+	svc := &providerTierLimitService{store: store}
+	got, err := svc.readMinuteRequestCount(context.Background(), c, now.Add(-time.Minute), now)
+	if err != nil || got != 3 {
+		t.Fatalf("recorded model-a requests = %v err %v, want 3", got, err)
+	}
+	if len(store.calls) != 0 {
+		t.Fatalf("a per-model count must not read the account-wide total: %+v", store.calls)
 	}
 }
 
@@ -369,7 +426,7 @@ func TestReadMinuteRequestCountModelAttributionFailures(t *testing.T) {
 
 	t.Run("store cannot attribute models", func(t *testing.T) {
 		svc := &providerTierLimitService{store: &fakeTierStore{events: 99}}
-		got, err := svc.readMinuteRequestCount(ctx, c, nil, start, end)
+		got, err := svc.readMinuteRequestCount(ctx, c, start, end)
 		if !errors.Is(err, errModelAttributionUnavailable) || got != 0 {
 			t.Fatalf("got %v err %v", got, err)
 		}
@@ -377,14 +434,14 @@ func TestReadMinuteRequestCountModelAttributionFailures(t *testing.T) {
 	t.Run("recorded request without a model", func(t *testing.T) {
 		store := &fakeModelTierStore{groups: []sqliterepo.ManualModelWindowUsage{{Model: " ", Usage: sqliterepo.ManualWindowUsage{EventCount: 1}}}}
 		svc := &providerTierLimitService{store: store}
-		if _, err := svc.readMinuteRequestCount(ctx, c, nil, start, end); !errors.Is(err, errModelAttributionUnavailable) {
+		if _, err := svc.readMinuteRequestCount(ctx, c, start, end); !errors.Is(err, errModelAttributionUnavailable) {
 			t.Fatalf("err = %v", err)
 		}
 	})
 	t.Run("live request without a model", func(t *testing.T) {
 		svc := &providerTierLimitService{store: &fakeModelTierStore{}}
 		svc.requests.recordForModel("p1", "k1", "", now.Add(-5*time.Second))
-		if _, err := svc.readMinuteRequestCount(ctx, c, nil, start, end); !errors.Is(err, errModelAttributionUnavailable) {
+		if _, err := svc.readMinuteRequestCount(ctx, c, start, end); !errors.Is(err, errModelAttributionUnavailable) {
 			t.Fatalf("err = %v", err)
 		}
 	})
@@ -393,7 +450,7 @@ func TestReadMinuteRequestCountModelAttributionFailures(t *testing.T) {
 		at := now.Add(-5 * time.Second)
 		svc.requests.recordForModel("p1", "k1", "acme/model-a", at)
 		svc.requests.recordForModel("p1", "k1", "acme/model-b", at)
-		if _, err := svc.readMinuteRequestCount(ctx, c, nil, start, end); !errors.Is(err, errModelAttributionUnavailable) {
+		if _, err := svc.readMinuteRequestCount(ctx, c, start, end); !errors.Is(err, errModelAttributionUnavailable) {
 			t.Fatalf("err = %v", err)
 		}
 	})
@@ -401,7 +458,7 @@ func TestReadMinuteRequestCountModelAttributionFailures(t *testing.T) {
 		noIDs := c
 		noIDs.ids = nil
 		svc := &providerTierLimitService{store: &fakeModelTierStore{}}
-		got, err := svc.readMinuteRequestCount(ctx, noIDs, nil, start, end)
+		got, err := svc.readMinuteRequestCount(ctx, noIDs, start, end)
 		if err != nil || got != 0 {
 			t.Fatalf("got %v err %v", got, err)
 		}
