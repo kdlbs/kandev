@@ -6,8 +6,8 @@ import { AdaptiveDesktopKanban } from "./adaptive-desktop-kanban";
 const blankColumnSpaceTestId = "blank-column-space";
 const grabbingCursorClass = "cursor-grabbing";
 
-function renderBoard(isDragging = false) {
-  render(
+function Board({ isDragging = false }: { isDragging?: boolean }) {
+  return (
     <DndContext>
       <AdaptiveDesktopKanban
         steps={[{ id: "backlog", title: "Backlog", color: "bg-blue-500" }]}
@@ -31,9 +31,12 @@ function renderBoard(isDragging = false) {
           </div>
         )}
       />
-    </DndContext>,
+    </DndContext>
   );
+}
 
+function renderBoard(isDragging = false) {
+  render(<Board isDragging={isDragging} />);
   return screen.getByTestId("desktop-kanban-scroll-window");
 }
 
@@ -60,10 +63,17 @@ describe("AdaptiveDesktopKanban drag end reserve", () => {
   });
 
   it("disables snap during dragging and restores it after cancellation", () => {
-    const scroll = renderBoard(true);
+    const { rerender } = render(<Board isDragging />);
+    const scroll = screen.getByTestId("desktop-kanban-scroll-window");
     expect(scroll.style.scrollSnapType).toBe("none");
-    cleanup();
-    expect(renderBoard(false).style.scrollSnapType).toBe("");
+    expect(scroll.classList.contains("snap-none")).toBe(true);
+    expect(scroll.classList.contains("snap-mandatory")).toBe(false);
+    rerender(<Board isDragging={false} />);
+    expect(screen.getByTestId("desktop-kanban-scroll-window")).toBe(scroll);
+    expect(scroll.style.scrollSnapType).toBe("");
+    expect(scroll.classList.contains("snap-none")).toBe(false);
+    expect(scroll.classList.contains("snap-x")).toBe(true);
+    expect(scroll.classList.contains("snap-mandatory")).toBe(true);
   });
 
   it("@covers AC-UI-ADAPTIVE-KANBAN-001.9 keeps the reserve outside grid sizing", () => {

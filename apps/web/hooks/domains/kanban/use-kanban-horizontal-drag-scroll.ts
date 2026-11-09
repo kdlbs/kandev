@@ -86,8 +86,11 @@ function startDragScroll(
     owner.removeEventListener("touchmove", onTouchMove, true);
     owner.removeEventListener("pointerup", onPointerEnd, true);
     owner.removeEventListener("pointercancel", onPointerEnd, true);
-    owner.removeEventListener("touchend", stop, true);
-    owner.removeEventListener("touchcancel", stop, true);
+    owner.removeEventListener("touchend", onTouchEnd, true);
+    owner.removeEventListener("touchcancel", onTouchEnd, true);
+  };
+  const onTouchEnd = (event: TouchEvent) => {
+    if (event.touches.length === 0) stop();
   };
   const onPointerEnd = (event: PointerEvent) => {
     if (event.isPrimary !== false) stop();
@@ -96,8 +99,8 @@ function startDragScroll(
   owner.addEventListener("touchmove", onTouchMove, { capture: true, passive: true });
   owner.addEventListener("pointerup", onPointerEnd, true);
   owner.addEventListener("pointercancel", onPointerEnd, true);
-  owner.addEventListener("touchend", stop, true);
-  owner.addEventListener("touchcancel", stop, true);
+  owner.addEventListener("touchend", onTouchEnd, true);
+  owner.addEventListener("touchcancel", onTouchEnd, true);
   pendingFrame = view.requestAnimationFrame(tick);
   return stop;
 }

@@ -185,6 +185,24 @@ describe("desktop drag input lifecycle", () => {
     expect(frames.size).toBe(0);
   });
 
+  it.each(["touchend", "touchcancel"])(
+    "keeps scrolling when %s leaves the primary touch down",
+    (type) => {
+      const { scroll } = board();
+      pointer(499);
+      frame();
+      const before = scroll.scrollLeft;
+      fireEvent(
+        document,
+        new TouchEvent(type, { touches: [{ identifier: 1, clientX: 499, clientY: 150 } as Touch] }),
+      );
+      frame();
+      expect(scroll.scrollLeft).toBeGreaterThan(before);
+      fireEvent.pointerUp(document, { isPrimary: true });
+      expect(frames.size).toBe(0);
+    },
+  );
+
   it.each(["pointerup", "pointercancel", "touchend", "touchcancel"])(
     "stops pending travel on %s",
     (type) => {
@@ -192,7 +210,11 @@ describe("desktop drag input lifecycle", () => {
       pointer(499);
       frame();
       const before = scroll.scrollLeft;
-      document.dispatchEvent(new Event(type));
+      document.dispatchEvent(
+        type.startsWith("touch")
+          ? new TouchEvent(type, { touches: [] })
+          : new PointerEvent(type, { isPrimary: true }),
+      );
       pointer(499);
       frame();
       expect(scroll.scrollLeft).toBe(before);

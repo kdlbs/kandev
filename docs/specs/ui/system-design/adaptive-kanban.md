@@ -87,7 +87,9 @@ the controller with that current position. The activation event is a fallback
 when capture coordinates are unavailable.
 This captures fast moves before the active-drag render completes.
 It reads later pointer or touch coordinates from
-the owning document and scrolls only the active lane. A requestAnimationFrame
+the owning document and scrolls only the active lane. A secondary touch ending
+does not stop travel while another touch remains. Accepted drag termination
+still stops the controller through the monitor. A requestAnimationFrame
 loop reads the live viewport and lane-grid geometry, then limits each movement
 to actual column content. The right boundary is the lane grid's content end
 minus the viewport width, with a zero minimum. The reserve is excluded.
