@@ -113,7 +113,7 @@ function host() {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   sessionStorage.clear();
   useDockviewStore.getState().clearFileStates();
   useDockviewStore.setState({ api: null, centerGroupId: "center", isRestoringLayout: false });
@@ -201,6 +201,9 @@ it.each(["current", "host replaced", "visit retired"])(
       })),
     );
     await waitFor(() => expect(mocks.read).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(useDockviewStore.getState().openFiles.get("old.txt")?.originalHash).toBeTruthy(),
+    );
     await act(async () => expect(await h.result.current.rename("old.txt", "new.txt")).toBe(true));
     expect(useDockviewStore.getState().openFiles.has("new.txt")).toBe(true);
     if (owner === "host replaced") act(() => useDockviewStore.setState({ api: null }));
