@@ -79,6 +79,35 @@ func (r *Repository) CountPendingApprovalsByWorkspaces(ctx context.Context, work
 	return out, nil
 }
 
+// CountAgentInstancesByWorkspaceIDs returns total and working-agent counts
+// only for the supplied workspace IDs.
+func (r *Repository) CountAgentInstancesByWorkspaceIDs(
+	ctx context.Context, workspaceIDs []string,
+) (map[string]models.AgentWorkspaceCounts, error) {
+	out := make(map[string]models.AgentWorkspaceCounts, len(workspaceIDs))
+	for _, batch := range workspaceIDBatches(workspaceIDs) {
+		placeholders, args := placeholdersFor(batch)
+		var rows []struct {
+			WorkspaceID string `db:"workspace_id"`
+			Total       int    `db:"total"`
+			Running     int    `db:"running"`
+		}
+		query := `SELECT workspace_id, COUNT(*) AS total,
+			SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS running
+			FROM agent_profiles
+			WHERE ` + agentInstanceFilter + ` AND workspace_id IN (` + strings.Join(placeholders, ",") + `)
+			GROUP BY workspace_id`
+		args = append([]interface{}{models.AgentStatusWorking}, args...)
+		if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), args...); err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			out[row.WorkspaceID] = models.AgentWorkspaceCounts{Total: row.Total, Running: row.Running}
+		}
+	}
+	return out, nil
+}
+
 // ListActivityEntriesForWorkspaces returns the newest activity entries across
 // the supplied workspace set, up to limit entries total.
 func (r *Repository) ListActivityEntriesForWorkspaces(ctx context.Context, workspaceIDs []string, limit int) ([]*models.ActivityEntry, error) {

@@ -127,6 +127,42 @@ describe("Integrated control authorized read lifetime", () => {
 });
 
 describe("Integrated control refresh pacing and failures", () => {
+  it("reports an expired workspace read and recovers on retry backoff", async () => {
+    vi.useFakeTimers();
+    let requestSignal: AbortSignal | undefined;
+    api.workspaces.mockImplementationOnce(
+      (options: { init: { signal: AbortSignal } }) =>
+        new Promise((_, reject) => {
+          requestSignal = options.init.signal;
+          requestSignal.addEventListener(
+            "abort",
+            () => reject(new DOMException("The request timed out", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    try {
+      const { result } = mount();
+      expect(api.workspaces).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+      expect(requestSignal?.aborted).toBe(true);
+      expect(result.current.loading).toBe(false);
+      expect(result.current.failure).toMatchObject({ kind: "error" });
+      expect(result.current.failure?.retryAt).toBeTruthy();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(result.current.data?.workspaces.map((item) => item.id)).toEqual(["beta"]);
+      expect(result.current.failure).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("never aborts a read in flight; a live event during it settles into one follow-up read", async () => {
     const first = Promise.withResolvers<{ coordinators: (typeof coordinator)[] }>();
     api.coordinators.mockReturnValueOnce(first.promise);

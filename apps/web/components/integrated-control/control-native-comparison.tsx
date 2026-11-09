@@ -97,7 +97,7 @@ function useNativeColumns(kind: CompareKind) {
       header: t("sidebar:integratedControl.aggregate.workspace"),
       cell: ({ row }) => (
         <Link
-          href={controlHref("workspaces", row.original.workspace.id)}
+          href={controlHref("overview", row.original.workspace.id)}
           onClick={(event) => event.stopPropagation()}
           className="inline-flex min-h-7 cursor-pointer items-center max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         >
@@ -202,7 +202,7 @@ function NativeComparisonTable({ rows, kind }: { rows: NativeRow[]; kind: Compar
               <TableRow
                 key={row.id}
                 className="cursor-pointer"
-                onClick={() => router.push(controlHref("workspaces", row.original.workspace.id))}
+                onClick={() => router.push(controlHref("overview", row.original.workspace.id))}
                 data-testid={`control-native-${kind}-row`}
               >
                 {row.getVisibleCells().map((cell, index) => (

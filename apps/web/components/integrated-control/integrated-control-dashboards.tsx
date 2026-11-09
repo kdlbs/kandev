@@ -9,11 +9,22 @@ import { ControlGroupedHistory } from "./control-grouped-history";
 import { ControlNativeComparison } from "./control-native-comparison";
 import { ControlProviderCircuits } from "./control-provider-circuits";
 
-export function IntegratedControlDashboard({ view }: { view: ControlView }) {
+function selectWorkspaces<T extends { id: string }>(workspaces: T[], workspaceId?: string) {
+  return workspaceId ? workspaces.filter((workspace) => workspace.id === workspaceId) : workspaces;
+}
+
+export function IntegratedControlDashboard({
+  view,
+  workspaceId,
+}: {
+  view: ControlView;
+  workspaceId?: string;
+}) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
   if (!control?.data) return null;
-  const { workspaces, byWorkspace } = control.data;
+  const workspaces = selectWorkspaces(control.data.workspaces, workspaceId);
+  const { byWorkspace } = control.data;
   const rows = workspaces.flatMap((workspace) =>
     (byWorkspace[workspace.id]?.items ?? []).map((coordinator) => ({ workspace, coordinator })),
   );

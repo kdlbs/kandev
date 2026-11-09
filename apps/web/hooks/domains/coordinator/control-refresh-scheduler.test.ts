@@ -72,6 +72,50 @@ describe("control refresh scheduler", () => {
   });
 });
 
+describe("control refresh scheduler deadlines", () => {
+  it("aborts an expired read and starts a retry that can succeed", async () => {
+    const { calls, retries, scheduler } = harness();
+    const pending = scheduler.request();
+
+    try {
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(calls[0].signal.aborted).toBe(true);
+      await pending;
+      expect(retries.at(-1)).toBe(Date.now() + 5_000);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(calls).toHaveLength(2);
+      await settle(calls[1]);
+      calls[0].resolve("ok");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls).toHaveLength(2);
+    } finally {
+      scheduler.dispose();
+      await settle(calls[0]);
+    }
+  });
+
+  it("keeps an abort response from turning an expired read into a success", async () => {
+    const calls: AbortSignal[] = [];
+    const retries: Array<number | null> = [];
+    const scheduler = createControlRefreshScheduler({
+      run: (signal) =>
+        new Promise<ControlRefreshOutcome>((resolve) => {
+          calls.push(signal);
+          signal.addEventListener("abort", () => resolve("ok"), { once: true });
+        }),
+      onRetryScheduled: (at) => retries.push(at),
+    });
+
+    void scheduler.request();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(calls[0].aborted).toBe(true);
+    expect(retries.at(-1)).toBe(Date.now() + 5_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(calls).toHaveLength(2);
+    scheduler.dispose();
+  });
+});
+
 describe("control refresh scheduler timing", () => {
   it("re-reads every thirty seconds and restarts that clock after any read", async () => {
     const { calls, scheduler } = harness();

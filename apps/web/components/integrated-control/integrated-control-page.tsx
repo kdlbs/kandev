@@ -37,9 +37,13 @@ export function IntegratedControlPage() {
           <h1 className="truncate text-sm font-semibold">
             {t("sidebar:integratedControl.title")} / {t(CONTROL_VIEW_LABEL_KEYS[view])}
           </h1>
-          {workspace && coordinator && (
-            <p className="truncate text-xs text-muted-foreground">
-              {workspace.name} / {coordinator.name}
+          {workspace && (
+            <p
+              className="truncate text-xs text-muted-foreground"
+              data-testid="control-selected-workspace"
+            >
+              {workspace.name}
+              {coordinator ? ` / ${coordinator.name}` : null}
             </p>
           )}
         </div>
@@ -63,6 +67,7 @@ export function IntegratedControlPage() {
         view={view}
         workspace={workspace}
         coordinator={coordinator}
+        hasCoordinatorSelection={Boolean(coordinatorId)}
         hasSelection={Boolean(workspaceId || coordinatorId)}
       />
     </div>
@@ -73,11 +78,13 @@ function ControlBody({
   view,
   workspace,
   coordinator,
+  hasCoordinatorSelection,
   hasSelection,
 }: {
   view: ControlView;
   workspace?: ControlWorkspace;
   coordinator?: Coordinator;
+  hasCoordinatorSelection: boolean;
   hasSelection: boolean;
 }) {
   const { t } = useTranslation();
@@ -91,6 +98,8 @@ function ControlBody({
       </p>
     );
   if (!hasSelection) return <IntegratedControlDashboard view={view} />;
+  if (workspace && !hasCoordinatorSelection)
+    return <IntegratedControlDashboard view={view} workspaceId={workspace.id} />;
   if (workspace && coordinator)
     return <IntegratedControlConversation workspace={workspace} coordinator={coordinator} />;
   return (

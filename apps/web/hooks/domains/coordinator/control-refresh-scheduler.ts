@@ -1,5 +1,7 @@
 /** How often the control snapshot is re-read while nothing else asks for it. */
 export const CONTROL_REFRESH_INTERVAL_MS = 30_000;
+/** Maximum duration of one control snapshot read before its request is aborted. */
+export const CONTROL_REFRESH_TIMEOUT_MS = 15_000;
 /** Quiet time after the last live event before one re-read covers the burst. */
 export const CONTROL_EVENT_SETTLE_MS = 2_000;
 /** Live events start at most one re-read per this window, even when they never stop. */
@@ -16,6 +18,8 @@ export type ControlRefreshSchedulerOptions = {
   settleMs?: number;
   minGapMs?: number;
   backoffMs?: number[];
+  /** Maximum time one read may run before it is treated as a retryable failure. */
+  readTimeoutMs?: number;
   /**
    * A periodic or live-event read due while this returns false is skipped; the
    * caller's foreground-return read (one `request()`) covers it instead.
@@ -23,6 +27,8 @@ export type ControlRefreshSchedulerOptions = {
   isVisible?: () => boolean;
   /** The time of the next automatic retry after a failure, or null once a read succeeds. */
   onRetryScheduled?: (at: number | null) => void;
+  /** Called when a read reaches its deadline, before retry scheduling. */
+  onReadTimeout?: () => void;
 };
 
 export type ControlRefreshScheduler = {
@@ -34,6 +40,12 @@ export type ControlRefreshScheduler = {
 };
 
 type Deferred = { promise: Promise<void>; resolve: () => void };
+type ReadAttempt = {
+  controller: AbortController;
+  outcome: Promise<ControlRefreshOutcome>;
+  cancel: () => void;
+  cleanup: () => void;
+};
 
 function deferred(): Deferred {
   let resolve = () => {};
@@ -41,6 +53,43 @@ function deferred(): Deferred {
     resolve = done;
   });
   return { promise, resolve };
+}
+
+function beginRead(
+  options: ControlRefreshSchedulerOptions,
+  lifetime: AbortSignal,
+  timeoutMs: number,
+): ReadAttempt {
+  const controller = new AbortController();
+  const abortRead = () => controller.abort();
+  lifetime.addEventListener("abort", abortRead, { once: true });
+  let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+  let cancel = () => {};
+  const cancelled = new Promise<ControlRefreshOutcome>((resolve) => {
+    cancel = () => resolve("retry");
+  });
+  const timedOut = new Promise<ControlRefreshOutcome>((resolve) => {
+    timeoutTimer = setTimeout(() => {
+      controller.abort();
+      options.onReadTimeout?.();
+      resolve("retry");
+    }, timeoutMs);
+  });
+  let run: Promise<ControlRefreshOutcome>;
+  try {
+    run = Promise.resolve(options.run(controller.signal)).catch(() => "retry");
+  } catch {
+    run = Promise.resolve("retry");
+  }
+  return {
+    controller,
+    outcome: Promise.race([run, timedOut, cancelled]),
+    cancel,
+    cleanup: () => {
+      clearTimeout(timeoutTimer);
+      lifetime.removeEventListener("abort", abortRead);
+    },
+  };
 }
 
 /**
@@ -56,7 +105,10 @@ export function createControlRefreshScheduler(
   const settleMs = options.settleMs ?? CONTROL_EVENT_SETTLE_MS;
   const minGapMs = options.minGapMs ?? CONTROL_EVENT_MIN_GAP_MS;
   const backoff = options.backoffMs ?? CONTROL_RETRY_BACKOFF_MS;
+  const readTimeoutMs = options.readTimeoutMs ?? CONTROL_REFRESH_TIMEOUT_MS;
   const controller = new AbortController();
+  let activeRead: AbortController | null = null;
+  let cancelActiveRead = () => {};
   let inFlight: Promise<void> | null = null;
   let followUp: Deferred | null = null;
   let periodicTimer: ReturnType<typeof setTimeout> | undefined;
@@ -87,13 +139,14 @@ export function createControlRefreshScheduler(
   const launch = (): Promise<void> => {
     // Any read that starts now also covers the events and ticks that were waiting.
     clearTimers();
+    const attempt = beginRead(options, controller.signal, readTimeoutMs);
+    activeRead = attempt.controller;
+    cancelActiveRead = attempt.cancel;
     const current = (async () => {
-      let outcome: ControlRefreshOutcome = "retry";
-      try {
-        outcome = await options.run(controller.signal);
-      } catch {
-        outcome = "retry";
-      }
+      const outcome = await attempt.outcome;
+      attempt.cleanup();
+      if (activeRead === attempt.controller) activeRead = null;
+      if (cancelActiveRead === attempt.cancel) cancelActiveRead = () => {};
       inFlight = null;
       if (disposed) return;
       failures = outcome === "ok" ? 0 : failures + 1;
@@ -143,6 +196,8 @@ export function createControlRefreshScheduler(
     disposed = true;
     clearTimers();
     controller.abort();
+    activeRead?.abort();
+    cancelActiveRead();
     followUp?.resolve();
     followUp = null;
   };

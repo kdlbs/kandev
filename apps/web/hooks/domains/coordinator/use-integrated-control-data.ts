@@ -91,10 +91,12 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<ControlRefreshFailure | null>(null);
   const scheduler = useRef<ControlRefreshScheduler | null>(null);
+  const activeRead = useRef<AbortSignal | null>(null);
   const read = useCallback(
     async (signal: AbortSignal): Promise<ControlRefreshOutcome> => {
-      const current = () =>
-        !signal.aborted && stateReadScopeIdentity(store.getState()) === identity;
+      activeRead.current = signal;
+      const sameIdentity = () => stateReadScopeIdentity(store.getState()) === identity;
+      const current = () => !signal.aborted && activeRead.current === signal && sameIdentity();
       setLoading(true);
       try {
         const result = await readJourneyWorkspaces(store, { signal, refresh: true });
@@ -122,7 +124,10 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
         setFailure((previous) => ({ ...previous, kind }));
         return kind === "denied" ? "ok" : "retry";
       } finally {
-        if (current()) setLoading(false);
+        if (activeRead.current === signal && sameIdentity()) {
+          activeRead.current = null;
+          setLoading(false);
+        }
       }
     },
     [coordinatorEnabled, store, identity, owner],
@@ -137,11 +142,16 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
         setFailure((previous) =>
           previous ? { ...previous, retryAt: at ? new Date(at).toISOString() : undefined } : null,
         ),
+      onReadTimeout: () => {
+        setLoading(false);
+        setFailure((previous) => ({ ...previous, kind: "error" }));
+      },
     });
     scheduler.current = next;
     void next.request();
     return () => {
       next.dispose();
+      if (activeRead.current) activeRead.current = null;
       if (scheduler.current === next) scheduler.current = null;
     };
   }, [enabled, read]);

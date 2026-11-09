@@ -369,6 +369,34 @@ func (s *stubAgentReader) ListAgentInstances(_ context.Context, workspaceID stri
 	return out, nil
 }
 
+func (s *stubAgentReader) CountAgentInstancesByWorkspaceIDs(
+	_ context.Context, workspaceIDs []string,
+) (map[string]models.AgentWorkspaceCounts, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	visible := make(map[string]struct{}, len(workspaceIDs))
+	for _, workspaceID := range workspaceIDs {
+		visible[workspaceID] = struct{}{}
+	}
+	counts := make(map[string]models.AgentWorkspaceCounts, len(workspaceIDs))
+	for _, agent := range s.instances {
+		if agent == nil {
+			continue
+		}
+		if _, ok := visible[agent.WorkspaceID]; !ok {
+			continue
+		}
+		count := counts[agent.WorkspaceID]
+		count.Total++
+		if agent.Status == models.AgentStatusWorking {
+			count.Running++
+		}
+		counts[agent.WorkspaceID] = count
+	}
+	return counts, nil
+}
+
 func (s *stubAgentReader) ListAgentInstancesByIDs(_ context.Context, ids []string) ([]*models.AgentInstance, error) {
 	out := make([]*models.AgentInstance, 0, len(ids))
 	for _, id := range ids {
