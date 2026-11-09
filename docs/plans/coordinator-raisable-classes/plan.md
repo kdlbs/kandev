@@ -40,5 +40,5 @@ page changes, so one Playwright spec covers the eligibility group.
 ## Risks
 
 - `start_agent` evidence joins activity rows to proposals; check the index.
-- Containment fails on tank until an isolated executor and auth exist; the
-  feature is held, not broken, there.
+- Containment fails on the author's local deployment until an isolated
+  executor and auth exist; the feature is held, not broken, there.

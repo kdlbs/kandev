@@ -14,7 +14,7 @@ legacy_specs: []
 
 ## Overview
 
-After card 7480b441's answer proposal branch, deliver repository-scoped merge stewardship. The coordinator owns policy, proposals, wakes and projections; provider adapters own reads and merge dispatch. Work sequentially so the UI uses the completed guarded backend. This package does not authorize Build before the dependency is ready.
+After the answer-proposals slice ([plan](../coordinator-answer-proposals/plan.md)), deliver repository-scoped merge stewardship. The coordinator owns policy, proposals, wakes and projections; provider adapters own reads and merge dispatch. Work sequentially so the UI uses the completed guarded backend. This package does not authorize Build before the dependency is ready.
 
 ## Scope
 

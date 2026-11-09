@@ -12,11 +12,11 @@ legacy_specs: []
 
 # Coordinator agent-tier notes plan
 
-Implement the [requirements](../../specs/coordinator/requirements/agent-notes.md) and [design](../../specs/coordinator/system-design/agent-notes.md) after card 7480b441's answer branch is available. The raisable-classes branch is the base, not a reimplementation. One vertical work order keeps storage, per-turn delivery, proposal references and settings coherent. Do not start Build until that dependency is integrated. Before the answer kind exists, AC-COORDINATOR-AGENT-NOTES-003.1 is verified on the existing proposal kinds; the flag requires the coordinator, phase 2, phase 3 and phase 3.1 flags.
+Implement the [requirements](../../specs/coordinator/requirements/agent-notes.md) and [design](../../specs/coordinator/system-design/agent-notes.md) after the answer-proposals slice ([plan](../coordinator-answer-proposals/plan.md)) is available. The raisable-classes branch is the base, not a reimplementation. One vertical work order keeps storage, per-turn delivery, proposal references and settings coherent. Do not start Build until that dependency is integrated. Before the answer kind exists, AC-COORDINATOR-AGENT-NOTES-003.1 is verified on the existing proposal kinds; the flag requires the coordinator, phase 2, phase 3 and phase 3.1 flags.
 
 | Order | Result | Dependency |
 | --- | --- | --- |
-| [01](task-01-agent-notes.md) | Manager-curated notes and validated per-turn use | answer proposal card 7480b441 |
+| [01](task-01-agent-notes.md) | Manager-curated notes and validated per-turn use | answer-proposals slice |
 
 ## ASCII UI preview
 

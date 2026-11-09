@@ -399,7 +399,7 @@ Until then no phase 3 work order is built.
 
 ## Amendment 2026-11-07: resume and start_agent become raisable
 
-Henry approved revisiting D13 and the "raise any class from the start" row
+The repository owner approved revisiting D13 and the "raise any class from the start" row
 above. The maintainer wants `resume` and `start_agent` automatic after one to
 two days of approvals, not thirty. Decisions:
 

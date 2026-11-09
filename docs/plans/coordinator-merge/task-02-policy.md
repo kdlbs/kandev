@@ -55,7 +55,7 @@ Repository policy map with selecting manager, expected-revision compare (400 rev
 
 ## Dependencies
 
-Card 7480b441 answer branch.
+Answer-proposals slice.
 
 ## Risks
 

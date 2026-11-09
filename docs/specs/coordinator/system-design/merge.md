@@ -17,7 +17,7 @@ requirements:
 
 ## Purpose and boundaries
 
-The coordinator owns the proposal, repository policy and wake records. GitHub and GitLab own provider observations and mutations. Card 7480b441 adds the `answer` kind and policy class; no spec for it exists in this repository, so this design assumes only that the proposal-kind registry, tool-profile derivation and executor guard accept one more kind. Merge detail lives in its own table keyed by proposal ID so the shared proposal schema gains only the kind value and statuses. Build starts on that card's branch and reconciles any schema difference first.
+The coordinator owns the proposal, repository policy and wake records. GitHub and GitLab own provider observations and mutations. The answer-proposals slice ([ADR](../../../decisions/2026-11-07-coordinator-answer-proposals.md)) adds the `answer` kind and policy class; this design assumes only that the proposal-kind registry, tool-profile derivation and executor guard accept one more kind. Merge detail lives in its own table keyed by proposal ID so the shared proposal schema gains only the kind value and statuses. Build starts on that slice's branch and reconciles any schema difference first.
 
 ## Requirement mapping
 

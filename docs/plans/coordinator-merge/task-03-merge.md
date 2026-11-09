@@ -61,7 +61,7 @@ propose_merge_kandev tool and refusal codes, merge kind in executor and guard, m
 
 ## Dependencies
 
-Card 7480b441 answer branch, 02-policy.
+Answer-proposals slice, 02-policy.
 
 ## Risks
 

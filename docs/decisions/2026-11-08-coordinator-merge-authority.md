@@ -10,7 +10,7 @@ Phase 2 reserved merging to people. Managers now need different levels of coordi
 
 ## Decision
 
-Amend the phase 2 and phase 3 human-only merge boundary behind the coordinator merge flag. A manager chooses denied, approval or automatic per coordinator and repository; denied is the default. Execution checks the change and uses provider head protection, with no force, push or bypass. A merge cannot be undone by Kandev. Repository owners must amend their own rules, such as a CLAUDE.md reserving merges to Henry, before enabling automatic. Kandev neither reads nor enforces those files.
+Amend the phase 2 and phase 3 human-only merge boundary behind the coordinator merge flag. A manager chooses denied, approval or automatic per coordinator and repository; denied is the default. Execution checks the change and uses provider head protection, with no force, push or bypass. A merge cannot be undone by Kandev. Before enabling automatic, a repository whose own contributor rules reserve merging to a named maintainer must have its owner amend those rules. Kandev neither reads nor enforces those files.
 
 ## Consequences
 

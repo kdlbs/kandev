@@ -35,7 +35,7 @@ system_design:
 
 ## Summary and scope
 
-Implement the full note lifecycle, citations, safe per-turn injection, reference projection, flag and settings UI described by the linked contract. Integrate all proposal kinds after card 7480b441, including answer. Cover both database dialects, retry and concurrent mutation boundaries. Do not implement the dream or automatic learning.
+Implement the full note lifecycle, citations, safe per-turn injection, reference projection, flag and settings UI described by the linked contract. Integrate all proposal kinds after the answer-proposals slice, including answer. Cover both database dialects, retry and concurrent mutation boundaries. Do not implement the dream or automatic learning.
 
 ## Acceptance conditions
 
@@ -66,7 +66,7 @@ Create the named Playwright spec for the new feature, enabled with `KANDEV_FEATU
 
 ## Likely files, dependencies and risks
 
-`apps/backend/internal/coordinator/`, `internal/backendapp/coordinator.go`, `internal/orchestrator/`, MCP proposal tools, runtime flag registry, `profiles.yaml`, coordinator settings and locale catalogs under `apps/web/`. Resolve and integrate card 7480b441's branch before starting. Delivery identity and concurrency between note mutation and proposal creation require transactional tests. Backend tests must also pin: stale over unavailable precedence, the 5 second validation deadline, overlapping validations, receipt idempotency across recovery, expiry as the later of old and new, prompt_hash unchanged by note edits, no section in steers, emptiness checks and dream episodes, and flag-off rejection of `note_ids`.
+`apps/backend/internal/coordinator/`, `internal/backendapp/coordinator.go`, `internal/orchestrator/`, MCP proposal tools, runtime flag registry, `profiles.yaml`, coordinator settings and locale catalogs under `apps/web/`. Resolve and integrate the answer-proposals slice before starting. Delivery identity and concurrency between note mutation and proposal creation require transactional tests. Backend tests must also pin: stale over unavailable precedence, the 5 second validation deadline, overlapping validations, receipt idempotency across recovery, expiry as the later of old and new, prompt_hash unchanged by note edits, no section in steers, emptiness checks and dream episodes, and flag-off rejection of `note_ids`.
 
 ## Results
 

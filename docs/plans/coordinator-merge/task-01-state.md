@@ -48,7 +48,7 @@ Change observer (reuse PR/MR status sync, 60s freshness, backoff), normalized re
 
 ## Dependencies
 
-Card 7480b441 answer branch.
+Answer-proposals slice.
 
 ## Risks
 
