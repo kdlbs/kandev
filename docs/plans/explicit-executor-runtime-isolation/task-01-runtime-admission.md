@@ -140,7 +140,7 @@ Verification:
 (cd apps/backend && go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/orchestrator/executor ./internal/backendapp -run 'ExecutorRuntimeSelection|ExplicitRuntimeAdmission|ExplicitDockerCreation|DockerRuntimeIdentity|RuntimeAdmissionWiring' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/backendapp -run '^TestRuntimeAdmissionWiring$' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator/executor -run '^(TestLaunchPreparedSessionRejectsRetainedRuntimeBeforeEffects|TestExplicitExecutorProfileParentFailureIsUnresolved)$' -count=1)
-bash scripts/lint-go-changed <changed Go paths>
+(cd apps/backend && golangci-lint run ./internal/agent/runtime/lifecycle ./internal/orchestrator/executor ./internal/orchestrator ./internal/backendapp ./internal/task/repository/sqlite ./internal/task/dto ./internal/task/models --new-from-rev=origin/main --timeout=25m --concurrency=2)
 ```
 
 All commands passed. `golangci-lint` reported 0 issues for the changed packages.

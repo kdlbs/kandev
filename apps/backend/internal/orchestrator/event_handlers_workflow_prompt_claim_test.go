@@ -253,7 +253,7 @@ func TestWorkflowAutoStartRejectsSessionTerminalizedBeforeResume(t *testing.T) {
 		repo:         barrierRepo,
 		logger:       testLogger(),
 		agentManager: agentMgr,
-		executor:     executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}),
+		executor:     withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})),
 		messageQueue: queue,
 	}
 	errCh := make(chan error, 1)
@@ -301,7 +301,7 @@ func TestWorkflowAutoStartRollsBackPromptClaimWhenPostClaimReloadFails(t *testin
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.repo = failingRepo
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageQueue = queue
 	svc.turnService = &postClaimReloadErrorTurnService{
 		repoBackedTurnService: &repoBackedTurnService{repo: repo},
@@ -357,7 +357,7 @@ func TestWorkflowAutoStartRollsBackPromptClaimWhenTerminalizedAfterClaim(t *test
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.repo = barrierRepo
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageQueue = queue
 	svc.turnService = &terminalizeAfterPromptClaimTurnService{
 		repoBackedTurnService: &repoBackedTurnService{repo: repo},
@@ -544,7 +544,7 @@ func TestWorkflowAutoStartReleasesTerminalGuardAfterPromptAdmission(t *testing.T
 		release:          make(chan struct{}),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- svc.autoStartStepPrompt(ctx, session.TaskID, session, &wfmodels.WorkflowStep{}, "review the task", false, false, nil)

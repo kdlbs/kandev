@@ -177,7 +177,7 @@ func TestEnsureSessionRunning_ColdResumeReapsAndRetriesOnPromptReadyTimeout(t *t
 		State: v1.TaskStateInProgress,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	session, err = repo.GetTaskSession(ctx, "session1")
 	if err != nil {

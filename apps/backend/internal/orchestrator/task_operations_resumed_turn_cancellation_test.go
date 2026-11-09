@@ -149,7 +149,7 @@ func TestPromptTask_ResumedTurnCancelPreservesExecution(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	firstPromptDone := make(chan error, 1)
 	go func() {
@@ -329,7 +329,7 @@ func TestPromptTask_QueuedAcceptedTurnIdentityReadFailurePreservesExecution(t *t
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, manager)
 	svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	t.Cleanup(func() {
 		svc.clearAcceptedQueuedDispatch(sessionID)
 		svc.stopSendNowWorkers()
@@ -516,7 +516,7 @@ func TestResumeTaskSessionAndPrompt_AcceptedTurnCancelPreservesExecution(t *test
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resultDone := make(chan struct {
 		result *PromptResult
@@ -723,7 +723,7 @@ func TestResumeAttempt_AcceptedPublicationFailureDoesNotCleanup(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentManager)
-	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = failingReservedTurnPublisher{
 		TurnService: &repoBackedTurnService{repo: repo},
 		err:         publicationErr,
@@ -792,7 +792,7 @@ func TestResumeAttempt_ModelSwitchFallbackTransfersAcceptance(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	attempt, owner, err := svc.beginResumeAttempt(ctx, taskID, sessionID)
 	if err != nil || !owner {
 		t.Fatalf("begin model-switch attempt: attempt=%v owner=%v err=%v", attempt, owner, err)

@@ -38,7 +38,7 @@ func TestPromptTask_IdleSession_IsPromptable(t *testing.T) {
 		repoForExecutionLookup: repo,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateIdle)
 	session, err := repo.GetTaskSession(context.Background(), "session1")
@@ -220,7 +220,7 @@ func TestEnsureSessionRunning_IdleSessionTriggersResume(t *testing.T) {
 		State: v1.TaskStateInProgress,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	// Re-load
 	session, err = repo.GetTaskSession(ctx, "session1")
@@ -302,7 +302,7 @@ func TestEnsureSessionRunning_WaitsForPromptReadyAfterResume(t *testing.T) {
 		State: v1.TaskStateInProgress,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	session, err = repo.GetTaskSession(ctx, "session1")
 	if err != nil {
@@ -416,7 +416,7 @@ func TestEnsureSessionRunning_SurvivesCallerContextCancellationDuringResume(t *t
 		State: v1.TaskStateInProgress,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	session, err = repo.GetTaskSession(ctx, "session1")
 	if err != nil {
@@ -469,7 +469,7 @@ func TestEnsureSessionRunning_FailedStateWriteSurvivesCancelledCallerCtx(t *test
 	}
 
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), mockTR, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.taskRepo = taskRepo
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateIdle)
@@ -548,7 +548,7 @@ func TestEnsureSessionRunning_WaitsForPromptReadyWhenExecutionExists(t *testing.
 	}
 
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	done := make(chan error, 1)
 	go func() {
@@ -603,7 +603,7 @@ func TestEnsureSessionRunning_CancelledContextDoesNotReapExecution(t *testing.T)
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	agentMgr.mu.Lock()
@@ -659,7 +659,7 @@ func TestPromptTask_StalePromptStreamRecoversBeforeTimeout(t *testing.T) {
 		State: v1.TaskStateInProgress,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	_, err = svc.PromptTask(ctx, "task1", "session1", "are you stuck?", "", false, nil, false)
 	if err != nil {
@@ -777,7 +777,7 @@ func TestPromptTask_ReapsPromptDeadExecutionBeforeSend(t *testing.T) {
 		State: v1.TaskStateInProgress,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	if _, err := svc.PromptTask(ctx, "task1", "session1", "follow up", "", false, nil, false); err != nil {
 		t.Fatalf("expected prompt-dead execution to be replaced before send, got: %v", err)
@@ -863,7 +863,7 @@ func TestPromptTask_LazyResumeExecutionNotFoundFallsBackToFreshLaunch(t *testing
 		State: v1.TaskStateInProgress,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	exec := executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.executor = exec
 	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, testLogger(), scheduler.DefaultSchedulerConfig())
 

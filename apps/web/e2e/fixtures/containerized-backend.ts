@@ -9,10 +9,24 @@ import { ApiClient } from "../helpers/api-client";
 import { dwell } from "../helpers/causal-waits";
 
 const REPO_ROOT = path.resolve(__dirname, "../../../..");
-const BACKEND_BIN = path.join(REPO_ROOT, "apps/backend/bin/kandev");
+const HOST_BACKEND_BIN = path.join(REPO_ROOT, "apps/backend/bin/kandev");
+const LINUX_BACKEND_BIN = path.join(REPO_ROOT, "apps/backend/bin/kandev-linux-amd64");
 const AGENTCTL_BIN = path.join(REPO_ROOT, "apps/backend/bin/agentctl-linux-amd64");
 const MOCK_AGENT_BIN = path.join(REPO_ROOT, "apps/backend/bin/mock-agent-linux-amd64");
 const WEB_DIST = path.join(REPO_ROOT, "apps/web/dist");
+
+function backendBinary(): string {
+  const override = process.env.KANDEV_E2E_BACKEND_BIN?.trim();
+  if (override) {
+    return override;
+  }
+  if (process.platform === "linux") {
+    return HOST_BACKEND_BIN;
+  }
+  // The managed host build is a native binary on macOS. The disposable
+  // backend runs in Debian, so require a linux/amd64 build explicitly.
+  return LINUX_BACKEND_BIN;
+}
 
 export type ContainerizedBackend = {
   baseUrl: string;
@@ -25,6 +39,7 @@ export type ContainerizedBackend = {
   dockerStatus: (args: string[]) => number;
   dockerInspectPID: (containerID: string) => number;
   pidNamespace: (pid: number) => string;
+  standaloneWorkerPIDs: () => string[];
   sqlite: (sql: string) => string;
   stop: () => Promise<void>;
 };
@@ -73,14 +88,18 @@ function run(command: string, args: string[]): string {
  * backend and every worker are distinct containers on the inner daemon.
  */
 export async function startContainerizedBackend(): Promise<ContainerizedBackend> {
+  const backendBin = backendBinary();
   for (const [label, file] of [
-    ["kandev backend", BACKEND_BIN],
+    ["linux kandev backend", backendBin],
     ["agentctl helper", AGENTCTL_BIN],
     ["mock agent", MOCK_AGENT_BIN],
     ["web assets", path.join(WEB_DIST, "index.html")],
   ] as const) {
     if (!fs.existsSync(file)) {
-      throw new Error(`${label} is missing at ${file}; run the managed E2E build first`);
+      throw new Error(
+        `${label} is missing at ${file}; run the managed E2E build first ` +
+          "(non-Linux hosts also need `make -C apps/backend build-kandev-linux`)",
+      );
     }
   }
 
@@ -121,7 +140,9 @@ export async function startContainerizedBackend(): Promise<ContainerizedBackend>
   };
 
   const stop = async (): Promise<void> => {
-    hostDocker(["rm", "-f", dindName], true);
+    // Remove the dind container's anonymous daemon-storage volume too, so
+    // repeated runs on a persistent Docker host do not leak images/layers.
+    hostDocker(["rm", "-f", "-v", dindName], true);
     try {
       fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     } catch (error) {
@@ -205,7 +226,7 @@ export async function startContainerizedBackend(): Promise<ContainerizedBackend>
       `${tempRoot}:${tempRoot}`,
       ...env,
       "debian:bookworm-slim",
-      BACKEND_BIN,
+      backendBin,
       "__backend",
     ]);
 
@@ -240,6 +261,20 @@ export async function startContainerizedBackend(): Promise<ContainerizedBackend>
         Number(docker(["inspect", "-f", "{{.State.Pid}}", containerID])),
       pidNamespace: (pid: number) =>
         run("docker", ["exec", dindName, "readlink", `/proc/${pid}/ns/pid`]),
+      standaloneWorkerPIDs: () => {
+        const script = [
+          "for entry in /proc/[0-9]*; do",
+          '  [ "$entry" = "/proc/$$" ] && continue',
+          '  if tr "\\0" " " < "$entry/cmdline" 2>/dev/null | grep -q "mock-agent"; then',
+          '    echo "${entry#/proc/}"',
+          "  fi",
+          "done",
+        ].join("\n");
+        return docker(["exec", backendContainerID, "sh", "-c", script])
+          .split("\n")
+          .map((pid) => pid.trim())
+          .filter(Boolean);
+      },
       sqlite: (sql: string) =>
         hostDocker(["exec", dindName, "sqlite3", path.join(homeDir, "kandev.db"), sql]),
       stop,

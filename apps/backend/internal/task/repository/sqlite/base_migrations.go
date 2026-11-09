@@ -4,6 +4,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/startup"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // migrateMessagePayloadStorage adds digest-backed external storage for large
@@ -221,6 +223,11 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		return err
 	}
 	if err := r.migrateSessionsRemoveAgentExecutionID(); err != nil {
+		return err
+	}
+	// Repair runtime identities on legacy inventory rows so fail-closed
+	// selection admission does not permanently block upgraded sessions.
+	if err := r.backfillExecutorRunningRuntime(); err != nil {
 		return err
 	}
 	// Must run BEFORE migrateTaskEnvironmentsRemoveAgentExecutionID, which copies task_dir_name into the recreated table.
@@ -1289,6 +1296,89 @@ func (r *Repository) backfillExecutorsRunningFromTaskSessions() error {
 		return fmt.Errorf("backfill executors_running: %w", err)
 	}
 	return nil
+}
+
+// backfillExecutorRunningRuntime repairs inventory rows created before runtime
+// identity was recorded. Only persisted executor evidence is used: an executor
+// row, the session's executor snapshot, or the task environment. Rows whose
+// identity cannot be established stay empty and remain fail-closed.
+func (r *Repository) backfillExecutorRunningRuntime() error {
+	type legacyRuntimeRow struct {
+		ID               string `db:"id"`
+		ExecutorType     string `db:"executor_type"`
+		ExecutorSnapshot string `db:"executor_snapshot"`
+		EnvironmentType  string `db:"environment_type"`
+	}
+	rows, err := r.db.QueryxContext(r.migrationContext(), `
+		SELECT
+			er.id AS id,
+			COALESCE(e.type, '') AS executor_type,
+			COALESCE(ts.executor_snapshot, '{}') AS executor_snapshot,
+			COALESCE(te.executor_type, '') AS environment_type
+		FROM executors_running er
+		LEFT JOIN executors e ON e.id = er.executor_id
+		LEFT JOIN task_sessions ts ON ts.id = er.session_id
+		LEFT JOIN task_environments te ON te.id = ts.task_environment_id
+		WHERE COALESCE(er.runtime, '') = ''
+	`)
+	if err != nil {
+		return fmt.Errorf("backfill executor runtime: query legacy rows: %w", err)
+	}
+	var legacyRows []legacyRuntimeRow
+	for rows.Next() {
+		var legacy legacyRuntimeRow
+		if err := rows.StructScan(&legacy); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("backfill executor runtime: scan legacy row: %w", err)
+		}
+		legacyRows = append(legacyRows, legacy)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("backfill executor runtime: iterate legacy rows: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("backfill executor runtime: close legacy rows: %w", err)
+	}
+
+	for _, legacy := range legacyRows {
+		executorType := firstExecutorType(legacy.ExecutorType, snapshotExecutorType(legacy.ExecutorSnapshot), legacy.EnvironmentType)
+		if executorType == "" {
+			continue
+		}
+		runtimeName := models.ExecutorType(executorType).Runtime()
+		if runtimeName == "" {
+			continue
+		}
+		if _, err := r.db.ExecContext(r.migrationContext(),
+			r.db.Rebind(`UPDATE executors_running SET runtime = ? WHERE id = ? AND COALESCE(runtime, '') = ''`),
+			string(runtimeName), legacy.ID,
+		); err != nil {
+			return fmt.Errorf("backfill executor runtime: update row %q: %w", legacy.ID, err)
+		}
+	}
+	return nil
+}
+
+func snapshotExecutorType(snapshot string) string {
+	if strings.TrimSpace(snapshot) == "" {
+		return ""
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(snapshot), &parsed); err != nil {
+		return ""
+	}
+	value, _ := parsed["executor_type"].(string)
+	return strings.TrimSpace(value)
+}
+
+func firstExecutorType(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // commitCaptureActivatedAtMetaKey is the kandev_meta key published by

@@ -21,13 +21,16 @@ var ErrExecutorRuntimeAdmissionUnavailable = errors.New("executor runtime admiss
 var ErrExecutorRuntimeSelectionUnresolved = errors.New("executor runtime selection is unresolved")
 
 // admitExecutorRuntime validates the registered backend for a concrete
-// selection. An empty selection keeps the existing default behavior. When the
-// optional capability is not wired (isolated tests), lifecycle launch still
-// enforces the required runtime before any effect.
+// selection. An empty selection keeps the existing default behavior. A
+// concrete selection without runtime admission fails closed: preparation must
+// not perform side effects before lifecycle rejects an unavailable runtime.
 func (e *Executor) admitExecutorRuntime(executorType string) error {
 	trimmed := strings.TrimSpace(executorType)
-	if trimmed == "" || e.capabilities == nil {
+	if trimmed == "" {
 		return nil
+	}
+	if e.capabilities == nil {
+		return ErrExecutorRuntimeAdmissionUnavailable
 	}
 	return e.capabilities.ValidateExecutorRuntime(trimmed)
 }
@@ -146,15 +149,21 @@ func (e *Executor) admitRetainedPreparedSelection(
 
 // admitRetainedExecutionRuntime compares a retained execution's recorded
 // runtime with the admitted selection before reuse, promotion, resume, or new
-// authenticated effects.
+// authenticated effects. An empty resolved type is still forwarded so a
+// retained binding's own type can be validated by lifecycle.
 func (e *Executor) admitRetainedExecutionRuntime(ctx context.Context, session *models.TaskSession, executorType string) error {
-	trimmed := strings.TrimSpace(executorType)
-	if session == nil || trimmed == "" {
+	if session == nil {
 		return nil
+	}
+	trimmed := strings.TrimSpace(executorType)
+	if trimmed != "" && e.capabilities == nil {
+		return ErrExecutorRuntimeAdmissionUnavailable
 	}
 	admission, ok := e.capabilities.(ExecutorExecutionRuntimeAdmission)
 	if !ok {
-		// Lifecycle's own reuse admission remains the required backstop.
+		if trimmed != "" {
+			return ErrExecutorRuntimeAdmissionUnavailable
+		}
 		return nil
 	}
 	return admission.ValidateExecutionRuntime(ctx, session.ID, session.TaskEnvironmentID, trimmed)

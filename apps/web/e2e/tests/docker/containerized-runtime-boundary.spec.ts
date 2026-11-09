@@ -197,7 +197,11 @@ test.describe("containerized backend executor boundary", () => {
     const backendNamespace = containerized.pidNamespace(backendPID);
     const workerNamespace = containerized.pidNamespace(workerPID);
     expect(workerNamespace).not.toBe(backendNamespace);
-    expect(processes).not.toContain(String(backendPID));
+    const workerProcessPIDs = processes
+      .split("\n")
+      .slice(1)
+      .map((line) => line.trim().split(/\s+/, 1)[0]);
+    expect(workerProcessPIDs).not.toContain(String(backendPID));
   });
 
   test("a retained standalone worker is refused as Docker and still stops exactly", async ({
@@ -248,6 +252,11 @@ test.describe("containerized backend executor boundary", () => {
         `kill -0 ${localPID}`,
       ]),
     ).toBe(0);
+    const workerPIDs = containerized.standaloneWorkerPIDs();
+    expect(
+      workerPIDs.length,
+      "retained standalone worker must own an agent process",
+    ).toBeGreaterThan(0);
 
     // Select Docker on the same binding while the retained worker is
     // standalone. This is the defect, not an authorized environment
@@ -288,6 +297,18 @@ test.describe("containerized backend executor boundary", () => {
         { timeout: 30_000 },
       )
       .toMatch(/stopped|complete|^$/);
+    for (const workerPID of workerPIDs) {
+      expect(
+        containerized.dockerStatus([
+          "exec",
+          containerized.backendContainerID,
+          "sh",
+          "-c",
+          `kill -0 ${workerPID}`,
+        ]),
+        `retained standalone worker process ${workerPID} must be terminated`,
+      ).not.toBe(0);
+    }
     const finalState = containerized.sqlite(
       `select state from task_sessions where id='${sessionID}';`,
     );

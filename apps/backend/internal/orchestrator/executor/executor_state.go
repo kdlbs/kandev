@@ -128,12 +128,6 @@ type executorConfig struct {
 // If executorID is empty, it falls back to the workspace default.
 // Returns the resolved config with executor ID, type, and metadata.
 func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, workspaceID string, existingMetadata map[string]interface{}) executorConfig {
-	resolved := executorID
-	var defaultExecutorErr error
-	if resolved == "" {
-		resolved, defaultExecutorErr = e.defaultExecutorID(ctx, workspaceID)
-	}
-
 	metadata := existingMetadata
 	if metadata == nil {
 		metadata = make(map[string]interface{})
@@ -147,6 +141,20 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 	// caller-writable through POST/PATCH /api/v1/tasks and task.create /
 	// task.update, none of which filter keys.
 	clearAuthoritativeMetadataKeys(metadata)
+
+	resolved := executorID
+	var defaultExecutorErr error
+	if resolved == "" {
+		// The selected profile's parent executor is the strongest available
+		// selection. Resolve it before the workspace default so a missing or
+		// deleted default cannot turn a profile-only launch into an unresolved
+		// selection.
+		if cfg, handled, err := e.profileParentExecutorConfig(ctx, metadata); handled {
+			cfg.ResolutionErr = err
+			return cfg
+		}
+		resolved, defaultExecutorErr = e.defaultExecutorID(ctx, workspaceID)
+	}
 
 	// When no executor ID is resolved, check if the metadata carries an
 	// executor profile. The profile references a specific executor, so we
@@ -197,6 +205,48 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 	}
 
 	return cfg
+}
+
+// profileParentExecutorConfig resolves the executor a selected profile belongs
+// to. handled=false means the metadata has no resolvable profile parent and
+// the caller must continue with the workspace default.
+func (e *Executor) profileParentExecutorConfig(
+	ctx context.Context,
+	metadata map[string]interface{},
+) (executorConfig, bool, error) {
+	profileID, _ := metadata["executor_profile_id"].(string)
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return executorConfig{}, false, nil
+	}
+	profile, err := e.repo.GetExecutorProfile(ctx, profileID)
+	if err != nil {
+		if errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
+			return executorConfig{}, false, nil
+		}
+		return executorConfig{Metadata: metadata}, true,
+			fmt.Errorf("executor profile %q could not be loaded", profileID)
+	}
+	if profile == nil || strings.TrimSpace(profile.ExecutorID) == "" {
+		return executorConfig{}, false, nil
+	}
+	executor, err := e.repo.GetExecutor(ctx, profile.ExecutorID)
+	if err != nil || executor == nil {
+		return executorConfig{Metadata: metadata}, true,
+			fmt.Errorf("executor profile %q parent executor %q could not be loaded", profileID, profile.ExecutorID)
+	}
+	cfg := executorConfig{
+		ExecutorID:   profile.ExecutorID,
+		ExecutorType: string(executor.Type),
+		ExecutorCfg:  executor.Config,
+		Metadata:     metadata,
+		Resumable:    executor.Resumable,
+		RuntimeName:  string(executor.Type),
+	}
+	if err := e.applyProfile(ctx, profileID, &cfg, metadata); err != nil {
+		return cfg, true, err
+	}
+	return cfg, true, nil
 }
 
 func metadataHasExecutorSelection(metadata map[string]interface{}) bool {

@@ -51,6 +51,7 @@ Executors owns this contract because it owns runtime admission and physical reso
 - **AC-EXECUTORS-RUNTIME-SELECTION-002.1:** Before reusing an execution, cached access, workspace preparation, promotion, resume, and new prompt admission shall compare its actual runtime with the admitted selection.
   A retained standalone execution shall not satisfy Local Docker, including when Docker becomes available later.
 - **AC-EXECUTORS-RUNTIME-SELECTION-002.2:** Missing or contradictory retained evidence shall refuse new work until the boundary can be established.
+  A cold launch that carries retained execution evidence but cannot read the inventory shall refuse before workspace preparation, even when no in-memory execution exists.
   The refusal shall preserve source files, workspace inventory, conversation history, runtime identity, and unrelated retained work.
   It shall not migrate environments or terminate a worker automatically.
 - **AC-EXECUTORS-RUNTIME-SELECTION-002.3:** Authorized operators shall retain execution observation and Stop access for a mismatched retained worker.

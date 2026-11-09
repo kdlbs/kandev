@@ -2211,10 +2211,12 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		return nil, err
 	}
 	// Cold Launch has no cached execution to compare, but a durable row can
-	// still describe a retained worker. Refuse a mismatch before profile
+	// still describe a retained worker. A resume request is retained evidence
+	// even when the row cannot be read; refuse that uncertainty before profile
 	// resolution, workspace mutation, or runtime allocation.
+	retainedEvidence := strings.TrimSpace(req.ACPSessionID) != ""
 	if err := m.ensureDurableExecutionSelectionCompatible(
-		ctx, req.SessionID, req.TaskEnvironmentID, req.ExecutorType, false,
+		ctx, req.SessionID, req.TaskEnvironmentID, req.ExecutorType, retainedEvidence,
 	); err != nil {
 		return nil, err
 	}

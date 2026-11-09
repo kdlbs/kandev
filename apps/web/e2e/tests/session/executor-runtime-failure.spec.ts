@@ -14,9 +14,11 @@ test.describe("executor runtime refusal", () => {
 
     try {
       await testPage.goto(`/t/${refusal!.taskId}`);
-      await expect(testPage.locator("body")).toContainText(/unavailable|failed/i, {
-        timeout: 15_000,
-      });
+      const sessionError = testPage.getByTestId("ensure-session-error-banner");
+      await expect(sessionError).toBeVisible({ timeout: 15_000 });
+      await expect(sessionError).toContainText(
+        /executor runtime .*unavailable|executor_runtime_unavailable/i,
+      );
     } finally {
       await refusal!.cleanup();
     }

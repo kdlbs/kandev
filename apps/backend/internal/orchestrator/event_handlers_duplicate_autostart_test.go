@@ -127,7 +127,7 @@ func TestAutoStartTransientError_BootReadyDrainsOrphanedQueue(t *testing.T) {
 
 	msgCreator := &mockMessageCreator{}
 
-	exec := executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc := &Service{
 		logger:         testLogger(),
 		repo:           repo,
@@ -436,7 +436,7 @@ func TestAutoStartTransientError_AutoResumesWhenAgentDead(t *testing.T) {
 		return &executor.LaunchAgentResponse{AgentExecutionID: "exec-ar-resumed"}, nil
 	}
 
-	exec := executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	msgCreator := &mockMessageCreator{}
 	svc = &Service{
 		logger:         testLogger(),

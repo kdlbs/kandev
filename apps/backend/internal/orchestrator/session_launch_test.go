@@ -746,7 +746,7 @@ func TestRecoverSession_ContextContinuationCommitsBeforePromptAdmission(t *testi
 	}
 	svc := createTestServiceWithAgent(baseRepo, newMockStepGetter(), newMockTaskRepo(), manager)
 	svc.repo = repo
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	_, err = svc.RecoverSession(ctx, taskID, sessionID, sessionRecoveryActionContinueFromHistory)
 	if !errors.Is(err, commitErr) {

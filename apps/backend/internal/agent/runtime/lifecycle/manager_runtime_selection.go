@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -53,6 +54,12 @@ func (e *ExecutorRuntimeError) Error() string {
 	}
 	switch e.Reason {
 	case ExecutorRuntimeReasonMismatch:
+		if e.Detail != "" {
+			return fmt.Sprintf(
+				"selected executor runtime %q does not match the retained execution: %s",
+				selected, e.Detail,
+			)
+		}
 		return fmt.Sprintf(
 			"selected executor runtime %q does not match observed runtime %q",
 			selected, string(e.Observed),
@@ -180,6 +187,10 @@ func (m *Manager) validateRetainedExecutionRuntime(
 			ExecutorType: execution.ExecutorType,
 			Runtime:      selected,
 			Observed:     execution.RuntimeName,
+			Detail: fmt.Sprintf(
+				"retained execution belongs to task environment %q, not %q",
+				execution.TaskEnvironmentID, taskEnvironmentID,
+			),
 		}
 	}
 	if err := validateObservedRuntime(execution.ExecutorType, selected, execution.RuntimeName); err != nil {
@@ -266,13 +277,25 @@ func (m *Manager) validateDurableExecutionRuntime(
 	if err != nil {
 		return identityUnverifiedError("", selected, "retained runtime inventory could not be read")
 	}
-	if !available || row == nil {
+	if !available {
+		if m.runningWriter != nil {
+			return identityUnverifiedError("", selected, "retained runtime inventory is unavailable")
+		}
 		return nil
 	}
-	return validateDurableRow(selected, row)
+	if row == nil || executorRunningRowIsHistorical(row.Status) {
+		return nil
+	}
+	return validateDurableRow(selected, row, taskEnvironmentID)
 }
 
-func validateDurableRow(selected executor.Name, row *models.ExecutorRunning) error {
+func validateDurableRow(selected executor.Name, row *models.ExecutorRunning, taskEnvironmentID string) error {
+	if retainedRowBelongsToOtherEnvironment(row, taskEnvironmentID) {
+		// The row describes the predecessor for an authorized environment
+		// transition. It is not a reuse candidate for the selected environment;
+		// the transition retires that exact execution through its own cleanup.
+		return nil
+	}
 	if row == nil || row.Runtime == "" {
 		return identityUnverifiedError("", selected, "retained runtime identity is unavailable")
 	}
@@ -289,6 +312,28 @@ func validateDurableRow(selected executor.Name, row *models.ExecutorRunning) err
 	return nil
 }
 
+func retainedRowBelongsToOtherEnvironment(row *models.ExecutorRunning, taskEnvironmentID string) bool {
+	if row == nil || taskEnvironmentID == "" || row.Metadata == nil {
+		return false
+	}
+	rowEnvironmentID, _ := row.Metadata[MetadataKeyTaskEnvironmentID].(string)
+	return rowEnvironmentID != "" && rowEnvironmentID != taskEnvironmentID
+}
+
+// executorRunningRowIsHistorical reports whether the inventory row describes a
+// terminal execution. A stopped row is retained history, not a live worker, so
+// it cannot satisfy or contradict a new selected runtime.
+func executorRunningRowIsHistorical(status string) bool {
+	switch status {
+	case models.ExecutorRunningStatusFailed,
+		models.ExecutorRunningStatusStopped,
+		models.ExecutorRunningStatusComplete:
+		return true
+	default:
+		return false
+	}
+}
+
 // ensureDurableExecutionSelectionCompatible is the cold-path admission used
 // before workspace reconciliation, preparation request construction, or
 // backend allocation. evidenceRetained says the caller already knows a
@@ -300,23 +345,30 @@ func (m *Manager) ensureDurableExecutionSelectionCompatible(
 	executorType string,
 	evidenceRetained bool,
 ) error {
+	selected, required := normalizeExecutorSelection(executorType)
 	row, available, err := m.readRetainedInventory(ctx, sessionID)
 	if err != nil {
-		return identityUnverifiedError(executorType, executor.NameUnknown, "retained runtime inventory could not be read")
+		return identityUnverifiedError(executorType, selected, "retained runtime inventory could not be read")
 	}
 	if !available {
-		if evidenceRetained {
-			return identityUnverifiedError(executorType, executor.NameUnknown, "retained runtime inventory is unavailable")
+		// A configured writer that cannot read inventory is a wiring failure;
+		// retained evidence then fails closed. No writer at all is an isolated
+		// caller with no durable inventory to compare (production always wires
+		// one through the repository adapter).
+		if evidenceRetained && m.runningWriter != nil {
+			return identityUnverifiedError(executorType, selected, "retained runtime inventory is unavailable")
 		}
 		return nil
 	}
 	if row == nil {
 		if evidenceRetained {
-			return identityUnverifiedError(executorType, executor.NameUnknown, "retained runtime identity is unavailable")
+			return identityUnverifiedError(executorType, selected, "retained runtime identity is unavailable")
 		}
 		return nil
 	}
-	selected, required := normalizeExecutorSelection(executorType)
+	if executorRunningRowIsHistorical(row.Status) {
+		return nil
+	}
 	if !required {
 		// A durable row stores the normalized backend name, not an executor
 		// type. It is retained selection evidence when the request omits one.
@@ -328,7 +380,7 @@ func (m *Manager) ensureDurableExecutionSelectionCompatible(
 	if !required {
 		return nil
 	}
-	return validateDurableRow(selected, row)
+	return validateDurableRow(selected, row, taskEnvironmentID)
 }
 
 func validateObservedRuntime(executorType string, selected, observed executor.Name) error {
@@ -458,7 +510,8 @@ func (m *Manager) requireExecutionSelectionCompatibility(ctx context.Context, ex
 // authenticated worker remains observable and stoppable; it just cannot
 // authorize new prompts.
 func (m *Manager) recoveredAvailabilityCompatible(ctx context.Context, execution *AgentExecution) bool {
-	if err := m.requireExecutionSelectionCompatibility(ctx, execution); err != nil {
+	err := m.retryRecoveredAvailabilityCompatibility(ctx, execution)
+	if err != nil {
 		if m.logger != nil {
 			m.logger.Warn("suppressing recovered availability for mismatched executor runtime",
 				zap.String("execution_id", execution.ID),
@@ -470,4 +523,34 @@ func (m *Manager) recoveredAvailabilityCompatible(ctx context.Context, execution
 		return false
 	}
 	return true
+}
+
+// retryRecoveredAvailabilityCompatibility retries identity-read failures so a
+// transient inventory error cannot suppress a recovered execution's only
+// Ready event. Genuine mismatches are not retried.
+func (m *Manager) retryRecoveredAvailabilityCompatibility(ctx context.Context, execution *AgentExecution) error {
+	const attempts = 3
+	const retryDelay = 50 * time.Millisecond
+	var err error
+	for attempt := 0; attempt < attempts; attempt++ {
+		err = m.requireExecutionSelectionCompatibility(ctx, execution)
+		if err == nil || !errors.Is(err, ErrExecutorIdentityUnverified) || ctx.Err() != nil {
+			return err
+		}
+		if attempt == attempts-1 || !waitForRetainedInventoryRetry(ctx, retryDelay) {
+			return err
+		}
+	}
+	return err
+}
+
+func waitForRetainedInventoryRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }

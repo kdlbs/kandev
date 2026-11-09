@@ -461,6 +461,14 @@ type passthroughStdinCall struct {
 	Data      string
 }
 
+func (m *mockAgentManager) RequiresCloneURL(string) bool          { return false }
+func (m *mockAgentManager) ShouldApplyPreferredShell(string) bool { return false }
+func (m *mockAgentManager) ValidateExecutorRuntime(string) error  { return nil }
+
+func (m *mockAgentManager) ValidateExecutionRuntime(context.Context, string, string, string) error {
+	return nil
+}
+
 func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 	if m.launchAgentFunc != nil {
 		return m.launchAgentFunc(ctx, req)
@@ -1317,7 +1325,7 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 		}
 		agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
 		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
-		svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+		svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 		seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
 
 		if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "queued", "", messagequeue.QueuedByUser, false, nil); err != nil {
@@ -1738,7 +1746,7 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 		promptErr:      errors.New("agent stream disconnected: read tcp [::1]:56463->[::1]:10002: use of closed network connection"),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 
@@ -1805,7 +1813,7 @@ func TestExecuteQueuedMessage_RequeuesCoalescedMessageWithOriginalSender(t *test
 		promptErr:      errors.New("agent stream disconnected: read tcp [::1]:56463->[::1]:10002: use of closed network connection"),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q1",
@@ -1881,7 +1889,7 @@ func TestExecuteQueuedMessage_FiresOnTurnStart(t *testing.T) {
 		messageQueue: newAuthoritativeMemoryQueue(repo, log),
 	}
 	svc.SetWorkflowStepGetter(stepGetter)
-	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q1",
@@ -1936,7 +1944,7 @@ func TestExecuteQueuedMessage_NoOnTurnStart_StepUnchanged(t *testing.T) {
 		messageQueue: newAuthoritativeMemoryQueue(repo, log),
 	}
 	svc.SetWorkflowStepGetter(stepGetter)
-	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q1",
@@ -1960,7 +1968,7 @@ func TestExecuteQueuedMessage_NoOnTurnStart_StepUnchanged(t *testing.T) {
 
 func createTestServiceWithScheduler(repo *sqliterepo.Repository, stepGetter *mockStepGetter, taskRepo *mockTaskRepo, agentMgr executor.AgentManagerClient) *Service {
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
 	svc := &Service{
 		logger:             log,

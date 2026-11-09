@@ -33,7 +33,7 @@ func TestAutoStartAgentCallback_BusyRetryDoesNotRecoverFailedSession(t *testing.
 	require.NoError(t, repo.UpdateTaskSession(ctx, session))
 	probe := &failedAutoStartResumeManager{mockAgentManager: manager, t: t}
 	svc.agentManager = probe
-	svc.executor = executor.NewExecutor(probe, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(probe, repo, testLogger(), executor.ExecutorConfig{}))
 	launches := 0
 	cb := &autoStartAgentCallback{svc: svc, launch: func(callCtx context.Context, in engine.ActionInput) error {
 		launches++

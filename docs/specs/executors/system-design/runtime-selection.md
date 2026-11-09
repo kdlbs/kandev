@@ -36,6 +36,7 @@ Preserve that selection intent and propagate the existing authorization/lookup e
 An unresolved concrete executor/profile binding must never become the empty-selection compatibility path.
 An authenticated retained binding is also selection evidence, even when an older session omits its executor type.
 Resolve it through current ownership and provider rules. Do not replace it with the host default.
+Forward an empty resolved type to lifecycle retained validation so the binding's own type is still compared.
 
 `Manager.getExecutorBackend` must return a typed unavailable error for every missing nonempty backend.
 Its result must not depend on `ExecutorFallbackAllow` or `ExecutorFallbackWarn` for a required selection.
@@ -110,6 +111,7 @@ There is no client-supplied transition bypass or new cleanup permission.
 A same-binding environment labelled `local_docker` with actual standalone is the defect, not an eligible executor transition.
 Do not manufacture detachment from that mismatch. Unknown predecessor identity retains the existing refusal.
 When available, use the execution's persisted `task_environment_id` to distinguish predecessor inventory from selected-environment inventory.
+Classify that predecessor before runtime comparison so an authorized transition can replace it; same-binding rows stay refused.
 Do not infer that distinction from runtime names alone.
 
 ## Recovery and Stop

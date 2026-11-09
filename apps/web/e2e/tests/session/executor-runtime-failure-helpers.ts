@@ -71,7 +71,7 @@ export async function createDisabledDockerRefusal(
     const { sessions } = await apiClient.listTaskSessions(task.id);
     expect(sessions, "a refused Docker launch must not create a session").toHaveLength(0);
 
-    const environment = await apiClient.getTaskEnvironment(task.id).catch(() => null);
+    const environment = await apiClient.getTaskEnvironment(task.id);
     expect(environment, "a refused Docker launch must not create an environment").toBeNull();
 
     const current = await apiClient.getTask(task.id);

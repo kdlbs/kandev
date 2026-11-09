@@ -258,3 +258,56 @@ func TestExplicitExecutorProfileParentFailureIsUnresolved(t *testing.T) {
 		})
 	}
 }
+
+// TestConcreteSelectionWithoutRuntimeAdmissionFailsClosed proves a missing
+// admission capability refuses a concrete selection instead of allowing
+// preparation effects before lifecycle rejects an unavailable runtime.
+func TestConcreteSelectionWithoutRuntimeAdmissionFailsClosed(t *testing.T) {
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetCapabilities(nil)
+
+	if err := exec.admitExecutorRuntime(string(models.ExecutorTypeLocalDocker)); !errors.Is(err, ErrExecutorRuntimeAdmissionUnavailable) {
+		t.Fatalf("admitExecutorRuntime error = %v, want admission unavailable", err)
+	}
+	if err := exec.admitExecutorRuntime(""); err != nil {
+		t.Fatalf("empty selection error = %v, want nil", err)
+	}
+	if err := exec.admitRetainedExecutionRuntime(context.Background(), &models.TaskSession{
+		ID: "session-without-admission",
+	}, string(models.ExecutorTypeLocalDocker)); !errors.Is(err, ErrExecutorRuntimeAdmissionUnavailable) {
+		t.Fatalf("admitRetainedExecutionRuntime error = %v, want admission unavailable", err)
+	}
+}
+
+type recordingRetainedAdmission struct {
+	calls []string
+}
+
+func (a *recordingRetainedAdmission) RequiresCloneURL(string) bool          { return false }
+func (a *recordingRetainedAdmission) ShouldApplyPreferredShell(string) bool { return false }
+func (a *recordingRetainedAdmission) ValidateExecutorRuntime(string) error  { return nil }
+
+func (a *recordingRetainedAdmission) ValidateExecutionRuntime(
+	_ context.Context, _, _, executorType string,
+) error {
+	a.calls = append(a.calls, executorType)
+	return nil
+}
+
+// TestEmptyResolvedTypeStillValidatesRetainedBinding proves an empty resolved
+// type is forwarded so lifecycle can validate the retained binding's own type.
+func TestEmptyResolvedTypeStillValidatesRetainedBinding(t *testing.T) {
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	admission := &recordingRetainedAdmission{}
+	exec.SetCapabilities(admission)
+
+	err := exec.admitRetainedExecutionRuntime(context.Background(), &models.TaskSession{
+		ID: "session-legacy", TaskEnvironmentID: "environment-legacy",
+	}, "")
+	if err != nil {
+		t.Fatalf("admitRetainedExecutionRuntime error = %v", err)
+	}
+	if len(admission.calls) != 1 || admission.calls[0] != "" {
+		t.Fatalf("retained admission calls = %v, want one empty type", admission.calls)
+	}
+}

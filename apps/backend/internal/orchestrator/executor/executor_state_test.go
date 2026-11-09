@@ -326,3 +326,35 @@ func TestResolveExecutorConfig_KubernetesProfileKeysDoNotClobberNonKubernetesMet
 		t.Fatalf("non-Kubernetes launch metadata = %#v, want task metadata unchanged %#v", got, want)
 	}
 }
+
+// TestResolveExecutorConfigUsesProfileParentWhenWorkspaceDefaultMissing proves
+// a selected profile's parent executor is resolved before a deleted workspace
+// default turns a profile-only launch into an unresolved selection.
+func TestResolveExecutorConfigUsesProfileParentWhenWorkspaceDefaultMissing(t *testing.T) {
+	repo := &executorConfigWorkspaceRepository{
+		mockRepository: newMockRepository(),
+		workspace: &models.Workspace{
+			DefaultExecutorID: executorTestStringPointer("deleted-default"),
+		},
+	}
+	repo.executorProfiles["profile-profile"] = &models.ExecutorProfile{
+		ID: "profile-profile", ExecutorID: "executor-docker", Name: "Docker profile",
+	}
+	repo.executors["executor-docker"] = &models.Executor{
+		ID: "executor-docker", Type: models.ExecutorTypeLocalDocker,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	cfg := exec.resolveExecutorConfig(context.Background(), "", "workspace-config", map[string]interface{}{
+		"executor_profile_id": "profile-profile",
+	})
+	if cfg.ResolutionErr != nil {
+		t.Fatalf("resolveExecutorConfig error = %v", cfg.ResolutionErr)
+	}
+	if cfg.ExecutorID != "executor-docker" {
+		t.Fatalf("executor ID = %q, want executor-docker", cfg.ExecutorID)
+	}
+	if cfg.ExecutorType != string(models.ExecutorTypeLocalDocker) {
+		t.Fatalf("executor type = %q, want local_docker", cfg.ExecutorType)
+	}
+}

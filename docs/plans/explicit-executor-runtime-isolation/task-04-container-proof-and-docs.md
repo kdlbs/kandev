@@ -106,6 +106,9 @@ Keep one worker per shard and run the commands sequentially.
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
+# On a non-Linux host, provide a linux/amd64 backend binary first:
+# make -C apps/backend build-kandev-linux
+# export KANDEV_E2E_BACKEND_BIN=$PWD/apps/backend/bin/kandev-linux-amd64
 (cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/session/executor-runtime-failure.spec.ts)
 (cd apps/web && pnpm e2e:run --host --shards 1 --project mobile-chrome tests/session/mobile-executor-runtime-failure.spec.ts)
 (cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --shards 1 --project containers tests/docker/runtime-boundary.spec.ts tests/docker/docker-launch.spec.ts)

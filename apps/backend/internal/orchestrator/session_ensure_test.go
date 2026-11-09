@@ -509,7 +509,7 @@ func TestEnsureSession_EnsureExecution_TriggersResume(t *testing.T) {
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	log := testLogger()
-	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 
 	resp, err := svc.EnsureSession(ctx, "task1", EnsureSessionOptions{EnsureExecution: true})
 	if err != nil {
