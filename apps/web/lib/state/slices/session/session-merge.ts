@@ -6,6 +6,10 @@ import {
   readAgentDeliveryRecovery,
   type AgentDeliveryRecovery,
 } from "@/lib/session-agent-delivery-recovery";
+import {
+  mergeCompactionCountValue,
+  mergeCompactionReportingValue,
+} from "@/lib/state/slices/session-runtime/context-window";
 import { parseTurnTimestamp } from "./turn-actions";
 
 // i18n-exempt: stable backend failure code, not user-facing copy.
@@ -178,6 +182,16 @@ function mergeSessionMetadata(
   if (incoming.metadata == null) return existing.metadata;
   const current = existing.metadata ?? {};
   const next = { ...current, ...incoming.metadata };
+  const compactionCount = mergeCompactionCountValue(
+    current.context_compaction_count,
+    incoming.metadata.context_compaction_count,
+  );
+  if (compactionCount !== undefined) next.context_compaction_count = compactionCount;
+  const compactionReporting = mergeCompactionReportingValue(
+    current.context_compaction_reporting,
+    incoming.metadata.context_compaction_reporting,
+  );
+  if (compactionReporting) next.context_compaction_reporting = compactionReporting;
   const history = asMetadataRecord(current.agent_delivery_history_gaps);
   if (history)
     next.agent_delivery_history_gaps = {

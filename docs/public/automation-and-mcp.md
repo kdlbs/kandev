@@ -59,7 +59,9 @@ Task creation depends on the caller surface and the destination workspace:
 
 Office sessions do not receive an MCP task-creation tool. A direct backend call from an Office session is also denied. External MCP uses the same `create_task_kandev` contract for both workspace modes, subject to the client's authorization. The `workspace_mode` argument controls materialized workspace behavior, not Kanban or Office mode. `agent_profile_id` selects a launch profile and is not an Office assignee.
 
-The optional `workspace_mode` field advertises exactly two values: `inherit_parent` reuses the parent's materialized workspace/worktree and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `inherit_parent`. There is no unconditional schema default for top-level tasks.
+The optional `workspace_mode` field advertises exactly two values: `inherit_parent` normally reuses the parent's materialized workspace/worktree and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `inherit_parent`. There is no unconditional schema default for top-level tasks.
+
+If a new launch for an inherited child selects a different non-Kubernetes executor from the parent's materialized environment, Kandev creates a separate workspace owned by the child. Uncommitted parent changes are not copied into that workspace. A session that is still bound to the inherited environment must resume with its original executor. Kubernetes environments remain task-owned and cannot be shared across tasks.
 
 For a Kubernetes parent, use `workspace_mode: "new_workspace"` when creating a child that will run. Kubernetes Pods belong to one task, so a child cannot attach to the parent's environment.
 
@@ -1193,6 +1195,13 @@ $KANDEV_CLI kandev task create \
   --assignee "$AGENT_ID"
 ```
 
+`task create` also accepts two relation flags:
+
+- `--blocked-by ID,ID` makes the new task wait for the listed tasks. Each one must be the run's own task, a task in the run's scope, or a task the run's task can read (the run task's ancestors, descendants, siblings, or blockers). Anything else is refused without revealing whether the task exists. Blockers can only be declared on the task being created.
+- `--workspace-mode new_workspace` gives the new task its own workspace and worktree. `inherit_parent` (valid only with `--parent`) shares the parent's. Omit the flag to keep the default: a subtask shares its parent's workspace.
+
+`--priority`, `--workspace-group-id`, `--default-child-workspace`, and `--default-child-ordering` are not available to Office runs.
+
 Project list and create operations are forced to the workspace in the validated Office run token; the agent cannot select another workspace in these commands. Office runs cannot create or administer workspaces. Create additional workspaces through Kandev's user-facing setup and settings surfaces.
 
 An Office run can read tasks in its signed workspace with:
@@ -1372,6 +1381,39 @@ The compact envelope is stable as domains grow. Agents should discover fields
 at runtime instead of assuming that a domain's full schema is present in the
 tool definition. Existing lifecycle tools and compatibility MCP tools remain
 available where documented.
+
+Repository clone URLs use the same tools. Read the saved value with
+`get_settings_kandev`, then preview one replacement without writing:
+
+```json
+{
+  "target": {
+    "resource_type": "repository",
+    "resource_id": "repository-id",
+    "workspace_id": "workspace-id"
+  },
+  "changes": { "remote_url": "git@github.com:acme/widget.git" },
+  "options": { "validate_only": true }
+}
+```
+
+The result carries a `validation` object with the saved and effective URLs,
+provider identity, and `validation_scope`. Repeat the same call without
+`options`, or with `"validate_only": false`, to commit the change. A committed
+update republishes `settings.remote_url` and a `repository.updated` event. With
+`validate_only` set to `true`, the option accepts only a repository target with
+exactly one `remote_url` change. With `validate_only` set to `false`, ordinary
+repository settings updates and combined URL/settings or binding writes remain
+available. Unknown options, non-boolean values, mixed preview changes, and null
+or blank URLs are rejected without a write.
+
+Built-in GitHub, GitLab, and Azure DevOps providers verify the credential-free
+locator against the saved provider, host, namespace or project, and repository
+name. An active plugin provider must instead return its exact HTTPS clone URL
+and matching immutable descriptor. The preview is advisory: every update repeats
+validation. The repair changes registration data only. It does not rewrite an
+existing checkout or restart a task. See
+[Repair a registered clone URL](git-operations.md#repair-a-registered-clone-url).
 
 `export_workflow_kandev` takes `workflow_id` and returns one version 2
 `kandev_workflow` JSON document with explicit step completion booleans. It omits

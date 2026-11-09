@@ -127,6 +127,7 @@ func TestNativeGlobalArgsMatchCandidateCLIOptions(t *testing.T) {
 	}{
 		{version: "1.0.88", wantRemoteDisable: true},
 		{version: "1.0.104", wantTelemetryDisable: true},
+		{version: "1.0.105", wantTelemetryDisable: true},
 	}
 
 	for _, test := range tests {

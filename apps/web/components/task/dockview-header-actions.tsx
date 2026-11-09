@@ -23,6 +23,12 @@ import { sessionId as toSessionId } from "@/lib/types/ids";
 import { AddPanelMenuItems, MENU_ITEM_CLASS } from "./dockview-add-panel-items";
 import { useUserShells } from "@/hooks/domains/session/use-user-shells";
 import { useEnsureDefaultTerminalOrdinary } from "@/hooks/domains/session/use-ensure-default-terminal-ordinary";
+import {
+  captureUserShellPublicationOwner,
+  isActiveUserShellPublicationOwner,
+  makeUserShellScope,
+  resolveActiveUserShellScope,
+} from "@/lib/state/user-shell-scope";
 import { NewSessionDialog } from "./new-session-dialog";
 import { NewTaskDropdown } from "./new-task-dropdown";
 import { useActiveSessionDevScript } from "./repository-scripts-menu";
@@ -88,29 +94,25 @@ function useLeftHeaderState(
   };
 }
 
-export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
+type TerminalHandlersOptions = {
+  environmentId: string | null;
+  taskID: string | null;
+  groupId: string;
+};
+
+/** Create/script handlers for the dockview group header. */
+function useHeaderTerminalHandlers({ environmentId, taskID, groupId }: TerminalHandlersOptions) {
   const { t } = useTranslation();
-  const { group, containerApi } = props;
-  const state = useLeftHeaderState(group.id, containerApi);
-  const environmentId = useEnvironmentId();
-  const taskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
   const addUserShell = useAppStore((s) => s.addUserShell);
+  const storeApi = useAppStoreApi();
   const devScript = useActiveSessionDevScript();
-  const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
-  // Eagerly populate the user-shell store for this env+task so the
-  // dockview "+" menu's Terminals submenu and the per-tab badge logic
-  // both have the data ready on first open. Without this call, the
-  // store stays empty on desktop (the mobile right-panel hook is the
-  // only other call site) and the menu would render an empty section.
-  useUserShells(environmentId, taskID);
-  // Migrate the static `terminal-default` panel into a DB-backed
-  // ordinary terminal so its tab gets a real seq badge alongside any
-  // user-created terminals.
-  useEnsureDefaultTerminalOrdinary();
 
   const handleAddTerminal = useCallback(async () => {
     if (!environmentId) return;
+    const scope = makeUserShellScope(environmentId, taskID);
+    if (!scope) return;
+    const owner = captureUserShellPublicationOwner(storeApi.getState(), scope);
     try {
       // Pass taskId so the backend creates a DB-backed ordinary terminal
       // (with seq/kind) instead of a legacy passthrough shell. Also stamp
@@ -122,7 +124,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
       // render. Without this, the tab would briefly show the panel's
       // initial title ("Terminal {seq}") before the next WS list
       // catches up and rewrites it to the normalized "Terminal".
-      addUserShell(environmentId, {
+      addUserShell(scope, {
         terminalId: result.terminalId,
         kind: result.kind,
         seq: result.seq,
@@ -135,42 +137,99 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
         closable: result.closable ?? true,
         initialCommand: result.initialCommand,
       });
+      // A late completion still updates its captured cache, but must not
+      // insert or focus a panel in a replacement task's workbench.
+      if (!isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
       // Panel title is always set to "Terminal" — TerminalTab pushes the
       // custom name (or "Terminal") onto api.title via setTitle once it
       // mounts; passing "Terminal" here avoids a "Terminal 1" → "Terminal"
       // flash on first paint.
-      addTerminalPanel(result.terminalId, group.id, environmentId, taskID ?? undefined, "Terminal");
+      addTerminalPanel(result.terminalId, groupId, environmentId, taskID ?? undefined, "Terminal");
     } catch (error) {
       console.error("Failed to create terminal:", error);
     }
-  }, [environmentId, taskID, addTerminalPanel, addUserShell, group.id]);
+  }, [environmentId, taskID, addTerminalPanel, addUserShell, groupId, storeApi]);
 
   const handleRunScript = useCallback(
     async (scriptId: string) => {
       if (!environmentId) return;
+      const scope = makeUserShellScope(environmentId, taskID);
+      if (!scope) return;
+      const owner = captureUserShellPublicationOwner(storeApi.getState(), scope);
       try {
         const result = await createUserShell(environmentId, { scriptId });
         const title = result.label ?? t("common:script");
-        addTerminalPanel(result.terminalId, group.id, environmentId, undefined, title);
+        addUserShell(
+          { environmentId, taskId: null },
+          {
+            ...result,
+            kind: "script",
+            label: title,
+            closable: result.closable ?? true,
+            running: result.ptyStatus === "running",
+          },
+        );
+        if (!isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
+        addTerminalPanel(result.terminalId, groupId, environmentId, undefined, title);
       } catch (error) {
         console.error("Failed to run script:", error);
       }
     },
-    [environmentId, addTerminalPanel, group.id],
+    [environmentId, taskID, addTerminalPanel, addUserShell, groupId, storeApi],
   );
 
   const handleRunDevScript = useCallback(async () => {
     if (!environmentId || !devScript) return;
+    const scope = makeUserShellScope(environmentId, taskID);
+    if (!scope) return;
+    const owner = captureUserShellPublicationOwner(storeApi.getState(), scope);
     try {
       const result = await createUserShell(environmentId, {
         command: devScript,
         label: t("task:devServer"),
       });
-      addTerminalPanel(result.terminalId, group.id, environmentId, undefined, t("task:devServer"));
+      addUserShell(
+        { environmentId, taskId: null },
+        {
+          ...result,
+          kind: "script",
+          label: t("task:devServer"),
+          closable: result.closable ?? true,
+          running: result.ptyStatus === "running",
+        },
+      );
+      if (!isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
+      addTerminalPanel(result.terminalId, groupId, environmentId, undefined, t("task:devServer"));
     } catch (error) {
       console.error("Failed to start dev script:", error);
     }
-  }, [environmentId, devScript, addTerminalPanel, group.id]);
+  }, [environmentId, taskID, devScript, addTerminalPanel, addUserShell, groupId, storeApi]);
+
+  return { handleAddTerminal, handleRunScript, handleRunDevScript };
+}
+
+export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
+  const { t } = useTranslation();
+  const { group, containerApi } = props;
+  const state = useLeftHeaderState(group.id, containerApi);
+  const environmentId = useEnvironmentId();
+  const taskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
+  const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
+  // Eagerly populate the user-shell store for this env+task so the
+  // dockview "+" menu's Terminals submenu and the per-tab badge logic
+  // both have the data ready on first open. Without this call, the
+  // store stays empty on desktop (the mobile right-panel hook is the
+  // only other call site) and the menu would render an empty section.
+  useUserShells(environmentId, taskID);
+  // Migrate the static `terminal-default` panel into a DB-backed
+  // ordinary terminal so its tab gets a real seq badge alongside any
+  // user-created terminals.
+  useEnsureDefaultTerminalOrdinary();
+  const { handleAddTerminal, handleRunScript, handleRunDevScript } = useHeaderTerminalHandlers({
+    environmentId,
+    taskID,
+    groupId: group.id,
+  });
 
   if (state.isSidebarGroup) return null;
 
@@ -418,24 +477,41 @@ function TerminalScriptsDropdown({
 }: TerminalScriptsDropdownProps) {
   const { t } = useTranslation();
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
+  const addUserShell = useAppStore((s) => s.addUserShell);
+  const storeApi = useAppStoreApi();
 
   const handleRunScript = useCallback(
     async (scriptId: string) => {
       if (!environmentId) return;
+      const scope = resolveActiveUserShellScope(storeApi.getState());
+      if (!scope) return;
+      const owner = captureUserShellPublicationOwner(storeApi.getState(), scope);
       try {
         const result = await createUserShell(environmentId, { scriptId });
+        const title = result.label ?? t("common:script");
+        addUserShell(
+          { environmentId, taskId: null },
+          {
+            ...result,
+            kind: "script",
+            label: title,
+            closable: result.closable ?? true,
+            running: result.ptyStatus === "running",
+          },
+        );
+        if (!isActiveUserShellPublicationOwner(storeApi.getState(), owner)) return;
         addTerminalPanel(
           result.terminalId,
           rightBottomGroupId ?? undefined,
-          environmentId,
+          owner.scope.environmentId,
           undefined,
-          result.label ?? t("common:script"),
+          title,
         );
       } catch (error) {
         console.error("Failed to run script:", error);
       }
     },
-    [environmentId, addTerminalPanel, rightBottomGroupId],
+    [environmentId, addTerminalPanel, addUserShell, rightBottomGroupId, storeApi],
   );
 
   if (scripts.length === 0) return null;

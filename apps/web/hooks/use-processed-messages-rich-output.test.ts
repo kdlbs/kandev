@@ -171,4 +171,29 @@ describe("buildGroupedRenderItems rich-output hoisting", () => {
       messages: [{ id: "after-1" }, { id: "after-2" }],
     });
   });
+
+  // @covers AC-AGENTS-AGENT-RICH-OUTPUT-001.13
+  it("keeps completed package-qualified output between ordinary activity groups", () => {
+    const report = richOutputCall(2);
+    report.metadata = {
+      ...report.metadata,
+      normalized: {
+        kind: "generic",
+        generic: { name: "kandev-rich-output/show_rich_output_kandev" },
+      },
+    };
+    const items = buildGroupedRenderItems(
+      [
+        toolActivity("before-1"),
+        toolActivity("before-2"),
+        report,
+        toolActivity("after-1"),
+        toolActivity("after-2"),
+      ],
+      "s1",
+      { canAnchorPrepareProgress: false },
+    );
+    expect(items.map((item) => item.type)).toEqual(["turn_group", "message", "turn_group"]);
+    expect(items[1]).toMatchObject({ type: "message", message: { id: "rich" } });
+  });
 });

@@ -130,6 +130,10 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	require.True(t, ok, "workspace_mode should have a description")
 	assert.Contains(t, workspaceModeDesc, "inherit_parent")
 	assert.Contains(t, workspaceModeDesc, "new_workspace")
+	assert.Contains(t, workspaceModeDesc, "different non-Kubernetes executor")
+	assert.Contains(t, workspaceModeDesc, "separate child-owned workspace")
+	assert.Contains(t, workspaceModeDesc, "uncommitted parent changes are not copied")
+	assert.Contains(t, workspaceModeDesc, "Kubernetes environments cannot be shared across tasks")
 
 	// parent_id, workspace_id, workflow_id, workflow_step_id should NOT be required
 	required, _ := parsed["required"].([]interface{})

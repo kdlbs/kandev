@@ -11,7 +11,9 @@ export type AgentErrorCause = {
   attempted_model?: string;
   requested_mode?: string;
   effective_mode?: string;
+  runtime_version?: string;
   prompt_not_sent?: boolean;
+  exit_code?: number;
   storage?: {
     reason?: string;
     location?: string;
@@ -66,6 +68,13 @@ export type TaskStatusSummaryLaunchQueue = {
   };
 };
 
+export type TaskStatusSummaryQuotaWait = {
+  session_id: string;
+  reason: "quota_limited";
+  /** Instant a fresh selection is attempted again, as an ISO-8601 timestamp. */
+  deadline: string;
+};
+
 export type TaskStatusSummaryCompletionGate = {
   revision: number;
   criteria_count: number;
@@ -95,6 +104,8 @@ export type TaskStatusSummary = {
   completion_gate?: TaskStatusSummaryCompletionGate | null;
   /** Sorted IDs of sessions with an unread transcript-visible message. */
   unread_session_ids?: string[];
+  /** A session parked on an exhausted provider limit, until it lifts. */
+  quota_wait?: TaskStatusSummaryQuotaWait | null;
   active_error?: TaskStatusSummaryActiveError | null;
   /** Current task-owned failure, independent of the selected session. */
   task_error?: TaskStatusSummaryActiveError | null;

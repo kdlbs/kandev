@@ -33,13 +33,19 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
-	builtinMCPMu                 sync.Mutex
+	builtinMCPMu sync.Mutex
+	// projectMCP carries execution-bound evidence that the host materialized
+	// the selected built-in packages into a project configuration file. It is
+	// produced only after a successful write and never persisted.
+	projectMCP                   projectMCPDeliveryState
 	builtinDispatch              *builtinDispatchState
 	RequiredNativeConversationID string
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
 	InterruptedHarnessGeneration uint64
 	successorGenerationOwner     atomic.Pointer[successorGenerationOwner]
+	streamProgress               atomic.Pointer[streamProjectionProgress]
+	streamProjection             atomic.Pointer[streamProjectionTracker]
 
 	ID string
 	// CausingRunID is the trusted Office run that initiated this task-owned
@@ -95,17 +101,20 @@ type AgentExecution struct {
 	ExecutionProfileID string
 	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
 	// launches, where AgentProfileID owns both identity and execution config.
-	OfficeAgentProfileID      string
-	AgentID                   string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
-	AuthPolicy                *acpcompat.AuthPolicy
-	ContainerID               string
-	ContainerIP               string   // IP address of the container for agentctl communication
-	WorkspacePath             string   // Path to the workspace (worktree or repository path)
-	WorkspaceSourceRoots      []string // Canonical durable source roots permitted by agentctl file operations
-	ACPSessionID              string   // ACP session ID to resume, if available
-	DeliveryStreamID          string   // Generation-scoped durable agentctl stream
-	DeliveryIncarnationID     string   // Kandev session incarnation owning the stream
-	DeliveryHarnessGeneration uint64   // Native harness generation owning the stream
+	OfficeAgentProfileID string
+	AgentID              string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
+	// CopilotNativeSessionEvents reports whether this launch requested the
+	// Copilot native event stream from a capable agentctl peer.
+	CopilotNativeSessionEvents bool
+	AuthPolicy                 *acpcompat.AuthPolicy
+	ContainerID                string
+	ContainerIP                string   // IP address of the container for agentctl communication
+	WorkspacePath              string   // Path to the workspace (worktree or repository path)
+	WorkspaceSourceRoots       []string // Canonical durable source roots permitted by agentctl file operations
+	ACPSessionID               string   // ACP session ID to resume, if available
+	DeliveryStreamID           string   // Generation-scoped durable agentctl stream
+	DeliveryIncarnationID      string   // Kandev session incarnation owning the stream
+	DeliveryHarnessGeneration  uint64   // Native harness generation owning the stream
 	// Fresh native startup buffers delivery until its initial SQL generation exists.
 	deliveryBootstrap          atomic.Bool
 	deliveryStartup            atomic.Pointer[deliveryStartupAttempt]
@@ -1589,20 +1598,21 @@ func (ae *AgentExecution) EndSessionSpan() {
 // the top level. When LaunchRequest.Repositories is set, each entry produces
 // one prepared worktree under the shared TaskDirName.
 type RepoLaunchSpec struct {
-	TaskRepositoryID   string
-	RepositoryID       string
-	RepositoryPath     string
-	RepositoryURL      string // Clone URL for remote executors that need to clone
-	RepoName           string // Repository name used as subdirectory inside TaskDirName
-	BaseBranch         string
-	IntegrationRef     string
-	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch     string
-	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	QualifiedPRBase    *models.PRBase
-	RemoteContribution *models.RemoteContribution
-	CheckoutOptions    *models.RepositoryCheckoutOptions
-	WorktreeID         string // Existing worktree ID to reuse (skip creation if set)
+	TaskRepositoryID         string
+	RepositoryID             string
+	RepositoryPath           string
+	RepositoryURL            string // Clone URL for remote executors that need to clone
+	RepoName                 string // Repository name used as subdirectory inside TaskDirName
+	BaseBranch               string
+	BaseBranchFallbackPolicy models.BaseBranchFallbackPolicy
+	IntegrationRef           string
+	DefaultBranch            string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch           string
+	PRNumber                 int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	QualifiedPRBase          *models.PRBase
+	RemoteContribution       *models.RemoteContribution
+	CheckoutOptions          *models.RepositoryCheckoutOptions
+	WorktreeID               string // Existing worktree ID to reuse (skip creation if set)
 	// AllowBranchReplacement permits the explicit new-branch recovery action for
 	// this repository while retaining its environment record.
 	AllowBranchReplacement bool
@@ -1643,33 +1653,34 @@ type WorkspaceFolderSpec struct {
 // WorkspaceRepositorySpec is the durable host-side source needed to recreate
 // a task's owned repository entry after a restart.
 type WorkspaceRepositorySpec struct {
-	RepositoryID            string
-	TaskRepositoryID        string
-	TaskEnvironmentRepoID   string
-	RepositorySubpath       string
-	RepositorySubpathKnown  bool
-	RepositoryPath          string
-	WorktreePath            string
-	WorktreeBranch          string
-	CloneRelocation         *worktree.ManagedCloneRelocationProof
-	WorktreeSourceClonePath string
-	WorktreeSourceCommonDir string
-	RepoName                string
-	IntegrationRef          string
-	BaseBranch              string
-	DefaultBranch           string
-	CheckoutBranch          string
-	PRNumber                int
-	QualifiedPRBase         *models.PRBase
-	ComparisonTarget        *models.ComparisonTarget
-	WorktreeID              string
-	WorktreeBranchPrefix    string
-	WorktreeBranchTemplate  string
-	PullBeforeWorktree      bool
-	RemoteSyncHandled       bool
-	BranchSlug              string
-	BranchIdentitySlug      string
-	WorkspaceRelativePath   string
+	RepositoryID             string
+	TaskRepositoryID         string
+	TaskEnvironmentRepoID    string
+	RepositorySubpath        string
+	RepositorySubpathKnown   bool
+	RepositoryPath           string
+	WorktreePath             string
+	WorktreeBranch           string
+	CloneRelocation          *worktree.ManagedCloneRelocationProof
+	WorktreeSourceClonePath  string
+	WorktreeSourceCommonDir  string
+	RepoName                 string
+	IntegrationRef           string
+	BaseBranch               string
+	BaseBranchFallbackPolicy models.BaseBranchFallbackPolicy
+	DefaultBranch            string
+	CheckoutBranch           string
+	PRNumber                 int
+	QualifiedPRBase          *models.PRBase
+	ComparisonTarget         *models.ComparisonTarget
+	WorktreeID               string
+	WorktreeBranchPrefix     string
+	WorktreeBranchTemplate   string
+	PullBeforeWorktree       bool
+	RemoteSyncHandled        bool
+	BranchSlug               string
+	BranchIdentitySlug       string
+	WorkspaceRelativePath    string
 }
 
 // RouteOverride carries a fully resolved provider profile for one
@@ -1806,25 +1817,26 @@ type LaunchRequest struct {
 	CopyFiles string
 
 	// Worktree configuration
-	UseWorktree            bool   // Whether to use a Git worktree for isolation
-	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
-	RepositoryID           string // Repository ID for worktree tracking
-	TaskRepositoryID       string // Exact task_repositories row for worktree recovery
-	RepositoryPath         string // Path to the main repository (for worktree creation)
-	BaseBranch             string // Base branch for the worktree (e.g., "main")
-	IntegrationRef         string // Verified terminal integration target for managed branch compaction
-	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
-	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	QualifiedPRBase        *models.PRBase
-	RemoteContribution     *models.RemoteContribution
-	CheckoutOptions        *models.RepositoryCheckoutOptions
-	ComparisonTarget       *models.ComparisonTarget
-	WorktreeBranchPrefix   string // Branch prefix for worktree branches
-	WorktreeBranchTemplate string // Branch name template for worktree branches
-	WorktreeBranchTicket   string // External ticket value for branch templates
-	PullBeforeWorktree     bool   // Whether to pull from remote before creating the worktree
-	RemoteSyncHandled      bool   // Authenticated provider refresh already completed
+	UseWorktree              bool   // Whether to use a Git worktree for isolation
+	WorktreeID               string // Existing worktree ID to reuse (skip creation if set)
+	RepositoryID             string // Repository ID for worktree tracking
+	TaskRepositoryID         string // Exact task_repositories row for worktree recovery
+	RepositoryPath           string // Path to the main repository (for worktree creation)
+	BaseBranch               string // Base branch for the worktree (e.g., "main")
+	BaseBranchFallbackPolicy models.BaseBranchFallbackPolicy
+	IntegrationRef           string // Verified terminal integration target for managed branch compaction
+	DefaultBranch            string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch           string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber                 int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	QualifiedPRBase          *models.PRBase
+	RemoteContribution       *models.RemoteContribution
+	CheckoutOptions          *models.RepositoryCheckoutOptions
+	ComparisonTarget         *models.ComparisonTarget
+	WorktreeBranchPrefix     string // Branch prefix for worktree branches
+	WorktreeBranchTemplate   string // Branch name template for worktree branches
+	WorktreeBranchTicket     string // External ticket value for branch templates
+	PullBeforeWorktree       bool   // Whether to pull from remote before creating the worktree
+	RemoteSyncHandled        bool   // Authenticated provider refresh already completed
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
 	RefreshRepository          func(context.Context) error
@@ -1870,6 +1882,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		RepositoryPath:             r.RepositoryPath,
 		RepoName:                   r.RepoName,
 		BaseBranch:                 r.BaseBranch,
+		BaseBranchFallbackPolicy:   r.BaseBranchFallbackPolicy,
 		IntegrationRef:             r.IntegrationRef,
 		DefaultBranch:              r.DefaultBranch,
 		CheckoutBranch:             r.CheckoutBranch,

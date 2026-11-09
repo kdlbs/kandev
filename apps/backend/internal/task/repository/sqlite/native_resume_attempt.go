@@ -23,14 +23,21 @@ func (r *Repository) finishPreparedNativeAttemptTx(ctx context.Context, tx *sqlx
 	if err != nil {
 		return false, err
 	}
+	superseded := false
 	if !preparedNativeAttemptMatches(attempt, proof, blocks) {
-		return false, nil
+		superseded, err = r.preparedContextContinuationAttemptMatchesTx(ctx, tx, attempt, proof)
+		if err != nil || !superseded {
+			return false, err
+		}
 	}
 	checkpoint := attempt.Checkpoint
 	var ownerMatches bool
 	err = tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT EXISTS (SELECT 1 FROM task_sessions s JOIN tasks t ON t.id = s.task_id JOIN workspaces w ON w.id = t.workspace_id WHERE s.id = ? AND t.id = ? AND w.id = ? AND w.owner_id = ? AND w.org_id = ?)`), proof.SessionID, checkpoint.TaskID, checkpoint.WorkspaceID, checkpoint.WorkspaceOwnerID, checkpoint.WorkspaceOrgID).Scan(&ownerMatches)
 	if err != nil || !ownerMatches {
 		return false, err
+	}
+	if superseded {
+		return completeSupersededContextAttemptTx(ctx, tx, r.db.Rebind, attempt, encoded, completedAt)
 	}
 	return completeSilentRestoreAttemptTx(ctx, tx, r.db.Rebind, attempt.ID, attempt, encoded, *checkpoint, completedAt)
 }

@@ -359,14 +359,15 @@ func (s *fakeHTTPServer) Close() error {
 }
 
 type fakeProcessManager struct {
-	stopErr              error
-	stopped              bool
-	stopCalls            int
-	stopStarted          chan<- struct{}
-	stopRelease          <-chan struct{}
-	stopStartOnce        sync.Once
-	workspaceSourceRoots []string
-	sessionID            string
+	stopErr                    error
+	stopped                    bool
+	stopCalls                  int
+	stopStarted                chan<- struct{}
+	stopRelease                <-chan struct{}
+	stopStartOnce              sync.Once
+	workspaceSourceRoots       []string
+	sessionID                  string
+	copilotNativeSessionEvents bool
 }
 
 // legacyResourceReleaseError proves a process teardown error cannot authorize
@@ -384,6 +385,10 @@ func (e legacyResourceReleaseError) CanReleaseInstanceResources() bool {
 func (m *fakeProcessManager) CloseAdmission() {}
 
 func (m *fakeProcessManager) WorkspaceSourceRoots() []string { return m.workspaceSourceRoots }
+
+func (m *fakeProcessManager) CopilotNativeSessionEventsActive() bool {
+	return m.copilotNativeSessionEvents
+}
 
 func (m *fakeProcessManager) GetSessionID() string { return m.sessionID }
 

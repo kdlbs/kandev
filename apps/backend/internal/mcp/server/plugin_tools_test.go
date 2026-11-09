@@ -22,6 +22,54 @@ func instanceReadDefinition(pluginID, localName, installationID, policyVersion s
 	}
 }
 
+func workspaceReadDefinition(pluginID, localName, installationID, policyVersion string, surfaces ...string) plugintools.Definition {
+	definition := instanceReadDefinition(pluginID, localName, installationID, policyVersion, surfaces...)
+	definition.InvocationScope = plugintools.InvocationScopeWorkspace
+	definition.InputSchema = []byte(`{"type":"object","properties":{"key":{"type":"string"}}}`)
+	return definition
+}
+
+func TestPluginToolsWorkspaceScopeEligibility(t *testing.T) {
+	valid := workspaceReadDefinition("kandev-workspace-reader", "read_workspace_data", "install-1", "policy-1",
+		plugintools.SurfaceKanban, plugintools.SurfaceExternal)
+	require.NoError(t, validatePluginToolSnapshot(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{valid}}))
+
+	coordinator := valid
+	coordinator.Surfaces = []string{plugintools.SurfaceCoordinator, plugintools.SurfaceExternal}
+	require.ErrorContains(t, validatePluginToolSnapshot(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{coordinator}}),
+		"instance scope and a true read-only hint")
+
+	notReadOnly := valid
+	notReadOnly.ReadOnlyHint = false
+	require.ErrorContains(t, validatePluginToolSnapshot(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{notReadOnly}}),
+		"instance or workspace scope and a true read-only hint")
+
+	taskScoped := valid
+	taskScoped.InvocationScope = plugintools.InvocationScopeTask
+	require.ErrorContains(t, validatePluginToolSnapshot(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{taskScoped}}),
+		"instance or workspace scope and a true read-only hint")
+
+	unknown := valid
+	unknown.InvocationScope = "global"
+	require.ErrorContains(t, validatePluginToolSnapshot(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{unknown}}),
+		"unsupported invocation scope")
+}
+
+func TestPluginToolsExternalSurfaceRegistersWorkspaceRead(t *testing.T) {
+	s := NewWithProfile(&testBackend{}, "", "", 10005, newTestLogger(t), "", false, mcpprofile.Legacy(ModeExternal, true, nil))
+	tool := workspaceReadDefinition("kandev-workspace-reader", "read_workspace_data", "install-1", "policy-1",
+		plugintools.SurfaceKanban, plugintools.SurfaceExternal)
+
+	require.NoError(t, s.SetFilteredPluginTools(plugintools.Snapshot{Generation: "external", Revision: 1, Tools: []plugintools.Definition{tool}}))
+	require.Contains(t, s.mcpServer.ListTools(), tool.ExposedName)
+
+	instanceTool := instanceReadDefinition("kandev-provider-usage", "get_provider_usage", "install-1", "policy-1",
+		plugintools.SurfaceKanban, plugintools.SurfaceExternal)
+	require.NoError(t, s.SetFilteredPluginTools(plugintools.Snapshot{Generation: "external", Revision: 2,
+		Tools: []plugintools.Definition{instanceTool}}))
+	require.Contains(t, s.mcpServer.ListTools(), instanceTool.ExposedName)
+}
+
 func TestPluginToolsContextEligibility(t *testing.T) {
 	valid := instanceReadDefinition("kandev-provider-usage", "get_provider_usage", "install-1", "policy-1",
 		plugintools.SurfaceKanban, plugintools.SurfaceCoordinator, plugintools.SurfaceExternal)

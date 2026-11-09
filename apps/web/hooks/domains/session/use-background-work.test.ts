@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import type { WorkloadRunObservation } from "@/lib/types/background-work";
+import type { BackgroundWorkState } from "@/lib/state/slices/session-runtime/types";
 
 const SESSION_ID = "session-1";
 const BUILD_WATCHER = "Build Watcher";
@@ -13,6 +14,17 @@ vi.mock("@/lib/api/domains/background-work-api", () => ({
 }));
 
 let storeState: Record<string, unknown>;
+const beginBackgroundWorkRead = vi.fn((sessionId: string) => {
+  const backgroundWork = storeState.backgroundWork as BackgroundWorkState;
+  const generation = backgroundWork.nextReadGeneration ?? 1;
+  backgroundWork.nextReadGeneration = generation + 1;
+  backgroundWork.readGenerationBySessionId ??= {};
+  backgroundWork.readGenerationBySessionId[sessionId] = generation;
+  return generation;
+});
+const setBackgroundWorkLoading = vi.fn((sessionId: string, loading: boolean) => {
+  (storeState.backgroundWork as BackgroundWorkState).loadingBySessionId[sessionId] = loading;
+});
 const setBackgroundWorkloads = vi.fn((sessionId: string, workloads: WorkloadRunObservation[]) => {
   storeState.backgroundWork = {
     ...((storeState.backgroundWork as Record<string, unknown>) || {}),
@@ -39,6 +51,8 @@ vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({
     getState: () => ({
       ...storeState,
+      beginBackgroundWorkRead,
+      setBackgroundWorkLoading,
       setBackgroundWorkloads,
       setActiveBackgroundWorkload,
     }),

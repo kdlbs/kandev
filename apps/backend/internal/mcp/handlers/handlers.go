@@ -372,6 +372,10 @@ type Handlers struct {
 	reviewRunner       ReviewRunner
 	pluginSvc          *plugins.Service
 	canvasAuthoringSvc CanvasAuthoringService
+	// pluginToolAuthEnabled reports whether endpoint authentication is
+	// enforced; external workspace scope fails closed when it cannot resolve a
+	// real caller identity.
+	pluginToolAuthEnabled func() bool
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation            TaskPRAutomationService
@@ -1494,16 +1498,23 @@ func (h *Handlers) explicitRepoInputsWithDefaults(ctx context.Context, explicit 
 	repos := make([]service.TaskRepositoryInput, 0, len(explicit))
 	for _, r := range explicit {
 		baseBranch := r.BaseBranch
-		if baseBranch == "" && r.RepositoryID != "" && h.taskSvc != nil {
-			if repo, err := h.taskSvc.GetRepository(ctx, r.RepositoryID); err == nil && repo != nil {
-				baseBranch = repo.DefaultBranch
+		source := models.BaseBranchSelectionSourceExplicit
+		if baseBranch == "" {
+			// Record the omission before filling the repository default so the
+			// automatic selection remains distinguishable from an explicit one.
+			source = models.BaseBranchSelectionSourceRepositoryDefault
+			if r.RepositoryID != "" && h.taskSvc != nil {
+				if repo, err := h.taskSvc.GetRepository(ctx, r.RepositoryID); err == nil && repo != nil {
+					baseBranch = repo.DefaultBranch
+				}
 			}
 		}
 		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			LocalPath:    r.LocalPath,
-			GitHubURL:    r.GitHubURL,
-			BaseBranch:   baseBranch,
+			RepositoryID:              r.RepositoryID,
+			LocalPath:                 r.LocalPath,
+			GitHubURL:                 r.GitHubURL,
+			BaseBranch:                baseBranch,
+			BaseBranchSelectionSource: source,
 		})
 	}
 	return repos
@@ -1529,8 +1540,9 @@ func inheritedRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryI
 			continue
 		}
 		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			BaseBranch:   r.BaseBranch,
+			RepositoryID:              r.RepositoryID,
+			BaseBranch:                r.BaseBranch,
+			BaseBranchSelectionSource: models.BaseBranchSelectionSourceInherited,
 		})
 	}
 	return repos
@@ -1984,15 +1996,16 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 				return
 			}
 			launchReq = &orchestrator.LaunchSessionRequest{
-				TaskID:              task.ID,
-				Intent:              orchestrator.IntentStartCreated,
-				SessionID:           prepResp.SessionID,
-				AgentProfileID:      config.AgentProfileID,
-				ExecutorID:          config.ExecutorID,
-				ExecutorProfileID:   config.ExecutorProfileID,
-				WorkflowStepID:      task.WorkflowStepID,
-				Prompt:              task.Description,
-				InitialCreatePrompt: true,
+				TaskID:                  task.ID,
+				Intent:                  orchestrator.IntentStartCreated,
+				SessionID:               prepResp.SessionID,
+				AgentProfileID:          config.AgentProfileID,
+				ExecutorID:              config.ExecutorID,
+				ExecutorProfileID:       config.ExecutorProfileID,
+				WorkflowStepID:          task.WorkflowStepID,
+				Prompt:                  task.Description,
+				PromptIsTaskDescription: true,
+				InitialCreatePrompt:     true,
 			}
 		}
 

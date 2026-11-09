@@ -677,6 +677,14 @@ func (wt *WorkspaceTracker) disarmPollModeGraceLocked() {
 	}
 }
 
+// live reports whether this tracker's lifetime is still open. Stop cancels the
+// lifetime context exactly once and never reopens it, so a stopped tracker can
+// neither serve a later read nor restart its polling loops. A tracker that was
+// built but not started yet is live: it can still be started normally.
+func (wt *WorkspaceTracker) live() bool {
+	return wt != nil && wt.cancelCtx != nil && wt.cancelCtx.Err() == nil
+}
+
 // stopTimeout is the maximum time Stop() will wait for goroutines to exit.
 const stopTimeout = 5 * time.Second
 

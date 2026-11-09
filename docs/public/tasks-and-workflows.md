@@ -813,9 +813,13 @@ conversation.
 Retention is not a retry. Kandev does not replay the failed prompt and does not
 start automatic recovery for an error class that has no existing policy. The
 task row keeps an error badge until you select **Dismiss turn error**, use the
-task menu dismissal, or send a new prompt after the error appears. A real
-process exit, transport loss, or recovery failure still uses the normal runtime
-recovery controls.
+task menu dismissal, send a new prompt after the error appears, or select
+**Dismiss and continue**. **Dismiss and continue** sends one visible `continue`
+message to the same conversation, then acknowledges the error after the message
+is accepted. It keeps your composer draft and attachments, and it is unavailable
+while another turn or automatic recovery owns the session.
+A real process exit, transport loss, or recovery failure still uses the normal
+runtime recovery controls.
 
 ### Model capacity
 
@@ -826,9 +830,12 @@ budget. When OpenCode ends those retries with a capacity refusal, Kandev keeps
 the same runtime and continues the unfinished turn there.
 
 Kandev retries a model-capacity error when the runtime supports live
-continuation and at least one tool has a confirmed result. Kandev keeps
-confirmed actions in the conversation. It asks the agent to continue without
-repeating those actions. This does not guarantee exactly-once effects.
+continuation and at least one tool has a confirmed result. On a supported Codex
+conversation, a command that ended with a confirmed nonzero terminal exit also
+counts: its real failed result stays in the conversation, but it no longer
+blocks recovery by itself. Kandev keeps confirmed actions in the conversation.
+It asks the agent to continue without repeating those actions. This does not
+guarantee exactly-once effects.
 
 Kandev makes up to 11 additional attempts within 30 minutes. Waits increase
 from 5 seconds to a maximum of 5 minutes. A short provider wait hint can raise
@@ -839,10 +846,12 @@ restart also stops automatic recovery. It does not restore the retry schedule.
 The deadline does not stop a turn that is already running.
 
 Kandev leaves a model-capacity error for you to handle when a tool or permission
-is pending, an outcome is uncertain, background work is unaccounted for, the
-provider does not support live continuation, or the runtime is unavailable.
-The composer stays available for a new message. These limits apply to capacity
-recovery. Connection-loss recovery uses the normal short retry policy.
+is pending, a tool outcome is uncertain, a non-command tool failed, a command
+failed without confirmed terminal evidence, background work is unaccounted for,
+the provider does not support live continuation, or the runtime is unavailable.
+Review those tool results before you choose a manual next step. The composer
+stays available for a new message. These limits apply to capacity recovery.
+Connection-loss recovery uses the normal short retry policy.
 
 ## Answer clarification questions
 

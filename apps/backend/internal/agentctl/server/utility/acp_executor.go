@@ -46,12 +46,17 @@ const (
 // It spawns a new agent process, performs the ACP handshake, sends the prompt,
 // collects the response, and tears down the process.
 type ACPInferenceExecutor struct {
-	logger *zap.Logger
+	logger      *zap.Logger
+	preparation *managedRuntimePreparationState
 }
 
 // NewACPInferenceExecutor creates a new ACP inference executor.
-func NewACPInferenceExecutor(logger *zap.Logger) *ACPInferenceExecutor {
-	return &ACPInferenceExecutor{logger: logger}
+func NewACPInferenceExecutor(logger *zap.Logger, preparation ...*managedRuntimePreparationState) *ACPInferenceExecutor {
+	state := newManagedRuntimePreparationState()
+	if len(preparation) != 0 && preparation[0] != nil {
+		state = preparation[0]
+	}
+	return &ACPInferenceExecutor{logger: logger, preparation: state}
 }
 
 // Execute runs a one-shot prompt using the ACP protocol.
@@ -497,10 +502,40 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	// Probes intentionally omit the model flag so session/new returns the agent's
 	// default model and the complete availableModels list.
 	args := buildACPCommand(cfg, "")
+	var prepared *managedruntime.PreparedRuntime
+	var cleanup func()
+	defer func() {
+		if cleanup != nil {
+			cleanup()
+		}
+		if prepared != nil {
+			if closeErr := prepared.Close(); closeErr != nil {
+				e.preparation.retainOwner(prepared)
+			}
+		}
+	}()
 	env := sanitizeEnvForAgent(cfg)
 	env, envErr := prepareAntigravityUtilityEnv(ctx, req.AgentID, cfg, env)
 	if envErr != nil {
 		return &ProbeResponse{Success: false, Error: envErr.Error(), FailureCode: ProbeFailureUnsupportedContext}, nil
+	}
+	if req.Preparation != nil {
+		packageSpec, ok := managedRuntimeProbePackageForAgent(req.AgentID, cfg.Command)
+		if !ok || !e.preparation.validatesDirective(req.Preparation, req.AgentID, string(cfg.Protocol), cfg) {
+			return &ProbeResponse{Success: false, Error: "verified managed runtime evidence is stale"}, nil
+		}
+		if packageSpec != req.Preparation.PackageSpec {
+			return &ProbeResponse{Success: false, Error: "verified managed runtime package changed"}, nil
+		}
+		var prepareErr error
+		prepared, prepareErr = preparePrivateProbeRuntime(ctx, packageSpec, env, e.logger)
+		if prepareErr != nil {
+			return &ProbeResponse{Success: false, Error: "private managed runtime preparation failed"}, nil
+		}
+		args, prepareErr = prepared.RewriteNpxCommand(args)
+		if prepareErr != nil {
+			return &ProbeResponse{Success: false, Error: "private managed runtime command validation failed"}, nil
+		}
 	}
 	args, prepareErr := prepareACPLaunch(cfg, resolvedCmd, args, env)
 	if prepareErr != nil {
@@ -546,10 +581,9 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 			zap.Error(err))
 	}
 	var cleanupOnce sync.Once
-	cleanup := func() {
+	cleanup = func() {
 		cleanupOnce.Do(func() { cleanupACPCommand(ctx, cmd, lifecycle, e.logger) })
 	}
-	defer cleanup()
 
 	resp, err := e.probeACPSessionWithContext(
 		ctx, stdin, stdout, workDir, req.AgentID, req.Model, req.Mode, req.ConfigOptions, cfg.ProviderGatewayAuth, authSessionArgs{policy: cfg.AuthPolicy, consent: stderr.consent()},
@@ -566,17 +600,25 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		// Classification uses raw evidence; only the complete-line projection
 		// reaches the sanitized diagnostic log.
 		managedFailureCode := managedRuntimeProbeFailureCode(cfg.Command, stderrTail)
+		cacheEvidence := e.preparation.managedRuntimeCacheEvidenceForProbe(
+			ctx, req.AgentID, string(cfg.Protocol), cfg, args, cmd.Env, cmd.Path, cmd.Dir, &stderr, e.logger,
+		)
 		failureCode := managedFailureCode
 		failureMessage := sanitizeProbeDiagnostic(withUpstreamHint(err, cfg.ProviderGatewayAuth, stderrTail))
 		if req.ProfileContext || !cfg.LaunchWrapper.IsZero() {
 			failureMessage, failureCode = sanitizeProfileProbeFailure(err, stderrTail)
 		}
+		if cacheEvidence != nil {
+			failureCode = ProbeFailureManagedRuntimeCacheIncomplete
+			managedFailureCode = ProbeFailureManagedRuntimeCacheIncomplete
+		}
 		e.logProbeFailure(req, err, logTail, failureCode, managedFailureCode)
 		return &ProbeResponse{
-			Success:     false,
-			Error:       failureMessage,
-			FailureCode: failureCode,
-			DurationMs:  int(time.Since(startTime).Milliseconds()),
+			Success:       false,
+			Error:         failureMessage,
+			FailureCode:   failureCode,
+			CacheEvidence: cacheEvidence,
+			DurationMs:    int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
 	if len(resp.Models) == 0 && isOpenCode {
@@ -600,6 +642,9 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		cmd.Dir,
 		resp.AgentVersion,
 	)
+	if req.Preparation != nil {
+		e.preparation.retireProbeAttempt(req.Preparation.ProbeAttemptID)
+	}
 
 	resp.Success = true
 	resp.DurationMs = int(time.Since(startTime).Milliseconds())
@@ -1456,12 +1501,16 @@ const stderrTailLimit = 4 << 10
 // os/exec copies stderr on its own goroutine. The mutex protects both the
 // retained bytes and their first-line boundary while readers take snapshots.
 type stderrBuffer struct {
-	mu               sync.Mutex
-	buf              bytes.Buffer
-	consentScan      bytes.Buffer
-	partialFirstLine bool
-	consentOnce      sync.Once
-	consentCh        chan string
+	mu                    sync.Mutex
+	buf                   bytes.Buffer
+	consentScan           bytes.Buffer
+	managedNPMPartial     bytes.Buffer
+	managedNPMDiscardLine bool
+	managedNPMRaw         bytes.Buffer
+	managedNPMRawOverflow bool
+	partialFirstLine      bool
+	consentOnce           sync.Once
+	consentCh             chan string
 }
 
 // consent returns the channel that receives the first validated Google consent
@@ -1515,6 +1564,7 @@ func (b *stderrBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	written := len(p)
+	b.collectManagedNPMDiagnosticLocked(p)
 	if len(p) > stderrTailLimit {
 		cut := len(p) - stderrTailLimit
 		b.partialFirstLine = p[cut-1] != '\n'
@@ -1533,6 +1583,72 @@ func (b *stderrBuffer) Write(p []byte) (int, error) {
 	b.emitConsentLocked(b.consentScan.String())
 	b.redactConsentLocked()
 	return written, nil
+}
+
+const maxManagedRuntimeRawNPMDiagnosticBytes = 16 << 10
+
+func (b *stderrBuffer) collectManagedNPMDiagnosticLocked(p []byte) {
+	if b.managedNPMRawOverflow {
+		return
+	}
+	if b.managedNPMDiscardLine {
+		newline := bytes.IndexByte(p, '\n')
+		if newline < 0 {
+			return
+		}
+		p = p[newline+1:]
+		b.managedNPMDiscardLine = false
+	}
+	combined := make([]byte, 0, b.managedNPMPartial.Len()+len(p))
+	combined = append(combined, b.managedNPMPartial.Bytes()...)
+	combined = append(combined, p...)
+	b.managedNPMPartial.Reset()
+	for {
+		newline := bytes.IndexByte(combined, '\n')
+		if newline < 0 {
+			break
+		}
+		line := strings.TrimSuffix(string(combined[:newline]), "\r")
+		if isManagedNPMEvidenceLine(line) {
+			if b.managedNPMRaw.Len()+len(line)+1 > maxManagedRuntimeRawNPMDiagnosticBytes {
+				b.managedNPMRawOverflow = true
+				b.managedNPMRaw.Reset()
+				b.managedNPMPartial.Reset()
+				return
+			}
+			b.managedNPMRaw.WriteString(line)
+			b.managedNPMRaw.WriteByte('\n')
+		}
+		combined = combined[newline+1:]
+	}
+	if len(combined) > maxManagedRuntimeRawNPMDiagnosticBytes {
+		b.managedNPMDiscardLine = true
+		if looksLikeManagedNPMEvidencePrefix(combined) {
+			b.managedNPMRawOverflow = true
+			b.managedNPMRaw.Reset()
+		}
+		return
+	}
+	b.managedNPMPartial.Write(combined)
+}
+
+func isManagedNPMEvidenceLine(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(line))
+	return strings.HasPrefix(lower, "npm error code ") || strings.HasPrefix(lower, "npm err! code ") ||
+		strings.HasPrefix(lower, "npm error syscall ") || strings.HasPrefix(lower, "npm err! syscall ") ||
+		strings.HasPrefix(lower, "npm error path ") || strings.HasPrefix(lower, "npm err! path ")
+}
+
+func looksLikeManagedNPMEvidencePrefix(line []byte) bool {
+	lower := strings.ToLower(string(line))
+	return strings.HasPrefix(lower, "npm error ") || strings.HasPrefix(lower, "npm err! ")
+}
+
+func (b *stderrBuffer) managedNPMDiagnosticSnapshot() (string, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	partialDiagnostic := looksLikeManagedNPMEvidencePrefix(b.managedNPMPartial.Bytes())
+	return strings.TrimSpace(b.managedNPMRaw.String()), !b.managedNPMRawOverflow && !b.managedNPMDiscardLine && !partialDiagnostic
 }
 
 // tail returns what was retained, trimmed — the end of the output rather than

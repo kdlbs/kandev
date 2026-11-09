@@ -42,6 +42,8 @@ const (
 
 // ContainerConfig holds configuration for launching a Docker container
 type ContainerConfig struct {
+	// CopilotNativeSessionEvents is the manager-resolved native-event opt-in.
+	CopilotNativeSessionEvents bool
 	// ProviderGatewayAuth authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth            *acpprovider.GatewayAuth
@@ -148,6 +150,7 @@ func buildContainerCreateInstanceRequest(
 		AssumeMcpHttp:              assumeMcpHttp,
 		McpMode:                    config.McpMode,
 		PromptSuggestions:          config.PromptSuggestions,
+		CopilotNativeSessionEvents: config.CopilotNativeSessionEvents,
 		McpProviders:               config.McpProviders,
 		McpProfile:                 config.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),

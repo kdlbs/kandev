@@ -2,6 +2,68 @@
 
 All notable changes to Kandev.
 
+## 0.100.0 - 2026-11-09
+
+### Features
+
+- let Office agents set blockers and workspace mode on task create ([#4614](https://github.com/kdlbs/kandev/pull/4614)) by @point-source
+- group profile delete conflict tasks by workspace ([#5041](https://github.com/kdlbs/kandev/pull/5041)) by @jhillyerd
+- add workspace-scoped plugin tools ([#5107](https://github.com/kdlbs/kandev/pull/5107))
+
+### Bug Fixes
+
+- preserve legacy handoff report identity ([#5150](https://github.com/kdlbs/kandev/pull/5150)) by @dreampiler
+- classify prefixed OpenCode free usage limits ([#5120](https://github.com/kdlbs/kandev/pull/5120)) by @dreampiler
+- diagnose stalled stop phases ([#5139](https://github.com/kdlbs/kandev/pull/5139)) by @dreampiler
+- reconcile SSH controllers after directory loss ([#5145](https://github.com/kdlbs/kandev/pull/5145)) ([#5201](https://github.com/kdlbs/kandev/pull/5201))
+- reconcile standalone retained journal owners ([#5165](https://github.com/kdlbs/kandev/pull/5165)) ([#5200](https://github.com/kdlbs/kandev/pull/5200))
+- preserve fresh-start workflow context ([#5137](https://github.com/kdlbs/kandev/pull/5137)) ([#5198](https://github.com/kdlbs/kandev/pull/5198))
+- fail closed on missing explicit base ([#5142](https://github.com/kdlbs/kandev/pull/5142)) ([#5199](https://github.com/kdlbs/kandev/pull/5199))
+- preserve explicit disable at equal timestamps ([#5153](https://github.com/kdlbs/kandev/pull/5153)) by @dreampiler
+- bind worktree script messages without opening a turn ([#5151](https://github.com/kdlbs/kandev/pull/5151)) ([#5196](https://github.com/kdlbs/kandev/pull/5196))
+- restore workspace trackers after agent restart ([#5197](https://github.com/kdlbs/kandev/pull/5197))
+- distinguish restored history from requests ([#5062](https://github.com/kdlbs/kandev/pull/5062)) by @dreampiler
+- preserve successful antigravity login streams ([#5195](https://github.com/kdlbs/kandev/pull/5195))
+- bound logs and temporary scratch for new executors ([#5147](https://github.com/kdlbs/kandev/pull/5147)) by @jumprope-jesse
+- restore transcript scroll after backend restart ([#5194](https://github.com/kdlbs/kandev/pull/5194))
+- preserve unpublished commits when resuming retained repositories ([#5100](https://github.com/kdlbs/kandev/pull/5100)) by @jumprope-jesse
+- carry cross-step promotion entry ID ([#5144](https://github.com/kdlbs/kandev/pull/5144)) by @dreampiler
+- make generic compaction help provider-neutral ([#5166](https://github.com/kdlbs/kandev/pull/5166))
+- launch Office runs into prepared sessions with a different profile ([#5133](https://github.com/kdlbs/kandev/pull/5133)) by @point-source
+- preserve startup process exit diagnostics ([#5128](https://github.com/kdlbs/kandev/pull/5128)) ([#5168](https://github.com/kdlbs/kandev/pull/5168))
+- release capacity-deferred watcher reservations ([#5099](https://github.com/kdlbs/kandev/pull/5099)) by @jumprope-jesse
+- replay uncommitted fresh-start successor streams ([#5136](https://github.com/kdlbs/kandev/pull/5136))
+- recover incomplete npm caches after upgrades ([#5164](https://github.com/kdlbs/kandev/pull/5164))
+- handle namespaced versions in upgrade backups ([#5154](https://github.com/kdlbs/kandev/pull/5154))
+- restore weekly managed runtime updates ([#5076](https://github.com/kdlbs/kandev/pull/5076))
+- recover interrupted foreground handoff deliveries ([#5104](https://github.com/kdlbs/kandev/pull/5104)) ([#5109](https://github.com/kdlbs/kandev/pull/5109))
+- scope terminal ownership across shared task environments ([#5108](https://github.com/kdlbs/kandev/pull/5108))
+- restore Pi built-in MCP project delivery ([#5090](https://github.com/kdlbs/kandev/pull/5090)) ([#5096](https://github.com/kdlbs/kandev/pull/5096))
+- render rich output from built-in MCP packages ([#5097](https://github.com/kdlbs/kandev/pull/5097))
+
+## 0.99.1 - 2026-11-06
+
+### Features
+
+- count Copilot compactions from native events ([#5098](https://github.com/kdlbs/kandev/pull/5098))
+- continue failed turns after capacity and command errors ([#5087](https://github.com/kdlbs/kandev/pull/5087))
+
+### Bug Fixes
+
+- index task session environment lookups ([#5088](https://github.com/kdlbs/kandev/pull/5088)) ([#5092](https://github.com/kdlbs/kandev/pull/5092))
+- check Copilot plugin contracts and retain startup errors ([#5064](https://github.com/kdlbs/kandev/pull/5064)) ([#5078](https://github.com/kdlbs/kandev/pull/5078))
+- exclude Copilot mixed usage from compaction count ([#5089](https://github.com/kdlbs/kandev/pull/5089)) ([#5093](https://github.com/kdlbs/kandev/pull/5093))
+- preserve chat links and Changes health after live attachment ([#5084](https://github.com/kdlbs/kandev/pull/5084))
+- prevent cancellation and deletion deadlocks ([#5083](https://github.com/kdlbs/kandev/pull/5083))
+- settle Claude background terminal exits ([#5082](https://github.com/kdlbs/kandev/pull/5082))
+- recover SDK publication after immutable host releases ([#5085](https://github.com/kdlbs/kandev/pull/5085))
+- stop session creation from scanning delivery effects ([#5080](https://github.com/kdlbs/kandev/pull/5080))
+- preserve durable delivery startup budget ([#5057](https://github.com/kdlbs/kandev/pull/5057)) ([#5077](https://github.com/kdlbs/kandev/pull/5077))
+- resolve local Markdown links and image previews ([#5058](https://github.com/kdlbs/kandev/pull/5058)) by @sonicLee
+- honor proven startup model rejection policy ([#5060](https://github.com/kdlbs/kandev/pull/5060)) by @dreampiler
+- log entry deferral at WIP capacity ([#5061](https://github.com/kdlbs/kandev/pull/5061)) by @dreampiler
+- recognize retained local executor alias ([#5059](https://github.com/kdlbs/kandev/pull/5059)) by @dreampiler
+
 ## 0.99.0 - 2026-11-05
 
 ### Features

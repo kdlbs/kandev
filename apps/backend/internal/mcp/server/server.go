@@ -1158,11 +1158,15 @@ func validatePluginToolSnapshot(snapshot plugintools.Snapshot) error {
 			return err
 		}
 		if definition.InvocationScope != "" && definition.InvocationScope != plugintools.InvocationScopeTask &&
-			definition.InvocationScope != plugintools.InvocationScopeInstance {
+			definition.InvocationScope != plugintools.InvocationScopeInstance &&
+			definition.InvocationScope != plugintools.InvocationScopeWorkspace {
 			return fmt.Errorf("%s has unsupported invocation scope %q", name, definition.InvocationScope)
 		}
-		if declaresInstanceOnlySurface(definition.Surfaces) && !definition.IsInstanceRead() {
+		if declaresCoordinatorSurface(definition.Surfaces) && !definition.IsInstanceRead() {
 			return fmt.Errorf("%s requires instance scope and a true read-only hint", name)
+		}
+		if declaresExternalSurface(definition.Surfaces) && !definition.IsInstanceRead() && !definition.IsWorkspaceRead() {
+			return fmt.Errorf("%s requires instance or workspace scope and a true read-only hint", name)
 		}
 		if err := validatePluginToolSchema(definition.ExposedName+"/input", definition.InputSchema); err != nil {
 			return fmt.Errorf("%s input schema: %w", name, err)
@@ -1206,9 +1210,18 @@ func validatePluginToolSchema(name string, raw json.RawMessage) error {
 	return nil
 }
 
-func declaresInstanceOnlySurface(surfaces []string) bool {
+func declaresCoordinatorSurface(surfaces []string) bool {
 	for _, surface := range surfaces {
-		if surface == plugintools.SurfaceCoordinator || surface == plugintools.SurfaceExternal {
+		if surface == plugintools.SurfaceCoordinator {
+			return true
+		}
+	}
+	return false
+}
+
+func declaresExternalSurface(surfaces []string) bool {
+	for _, surface := range surfaces {
+		if surface == plugintools.SurfaceExternal {
 			return true
 		}
 	}
@@ -1290,7 +1303,10 @@ func (s *Server) registerPluginTools() {
 				!s.profile.CoordinatorToolPolicy.AllowsPlugin(definition.PluginID, definition.LocalName, definition.InstallationID, definition.PolicyVersion)) {
 			continue
 		}
-		if (surface == mcpprofile.SurfaceCoordinator || surface == mcpprofile.SurfaceExternal) && !definition.IsInstanceRead() {
+		if surface == mcpprofile.SurfaceCoordinator && !definition.IsInstanceRead() {
+			continue
+		}
+		if surface == mcpprofile.SurfaceExternal && !definition.IsInstanceRead() && !definition.IsWorkspaceRead() {
 			continue
 		}
 		tool := mcp.NewToolWithRawSchema(definition.ExposedName, definition.Description, definition.InputSchema)
@@ -1696,7 +1712,7 @@ func (s *Server) registerCreateTaskTool() {
 			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Auto-resolved if only one workspace exists. Defaulted from parent for subtasks when omitted.")),
 			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Auto-resolved if the workspace has only one workflow. Defaulted from parent for subtasks when workspace_id is also omitted; if supplied, it must belong to the effective workspace_id.")),
 			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted; for subtasks, pass only with an explicit workflow_id)")),
-			mcp.WithString("workspace_mode", mcp.Enum("inherit_parent", "new_workspace"), mcp.Description("Optional materialized-workspace mode. Omit for subtasks to inherit the parent's workspace/worktree. inherit_parent requires parent_id and reuses the parent's materialized workspace/worktree; new_workspace requests a separate workspace/worktree.")),
+			mcp.WithString("workspace_mode", mcp.Enum("inherit_parent", "new_workspace"), mcp.Description("Optional materialized-workspace mode. Omit for subtasks to inherit the parent's workspace/worktree. inherit_parent requires parent_id and normally reuses the parent's materialized workspace/worktree. If a new launch selects a different non-Kubernetes executor, Kandev creates a separate child-owned workspace; uncommitted parent changes are not copied. A session still bound to the inherited environment must resume with its original executor, and Kubernetes environments cannot be shared across tasks. new_workspace requests a separate workspace/worktree.")),
 			mcp.WithString("title", mcp.Required(), mcp.MaxLength(taskcontract.TaskTitleMaxLength), mcp.Description("A concise, few-word task title (maximum 60 characters).")),
 			mcp.WithString("prompt", mcp.Description("The initial prompt for the task agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. For auto-started subtasks, provide a specific and detailed prompt; omitting it starts the task agent without task-specific context.")),
 			mcp.WithString("priority", mcp.Enum(models.TaskPriorityCritical, models.TaskPriorityHigh, models.TaskPriorityMedium, models.TaskPriorityLow), mcp.DefaultString(models.TaskPriorityMedium), mcp.Description("Task priority. Defaults to medium when omitted.")),

@@ -40,7 +40,10 @@ type activatingCopilotRunner struct {
 	calls     int
 }
 
-func (r *activatingCopilotRunner) Run(context.Context, []string, map[string]string, string) (copilotplugins.CommandResult, error) {
+func (r *activatingCopilotRunner) Run(_ context.Context, argv []string, _ map[string]string, _ string) (copilotplugins.CommandResult, error) {
+	if isCopilotPluginHelpCommand(argv) {
+		return copilotplugins.CommandResult{Stdout: []byte("Options:\n  --plugin-dir <path>\n")}, nil
+	}
 	r.calls++
 	_ = r.selection.Save(context.Background(), "", "", r.next)
 	return copilotplugins.CommandResult{Stdout: []byte(`[{"name":"spark","marketplace":"m","version":"1.0.0","enabled":true,"source":"builtin"}]`)}, nil
