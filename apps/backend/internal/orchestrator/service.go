@@ -2169,6 +2169,14 @@ func (s *Service) SetCanvasesEnabled(enabled bool) {
 	}
 }
 
+// SetManagedRuntimeSingleUserOwner wires the live single-user repair-owner
+// fallback. The callback must report allowed only for disabled authentication.
+func (s *Service) SetManagedRuntimeSingleUserOwner(owner func() (string, bool)) {
+	if s.executor != nil {
+		s.executor.SetManagedRuntimeSingleUserOwner(owner)
+	}
+}
+
 // SetWorkspaceCollaborationEnabled applies the collaboration release gate to
 // task MCP profiles before agentctl receives them.
 func (s *Service) SetWorkspaceCollaborationEnabled(enabled bool) {

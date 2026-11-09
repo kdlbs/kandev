@@ -900,6 +900,8 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 		return resp
 	}
 
+	s.procMgr.ManagedRuntimeInitialized(ctx, req.ProcessGeneration)
+
 	// Get agent info after successful initialization
 	var agentInfoResp *AgentInfoResponse
 	if info := adapter.GetAgentInfo(); info != nil {

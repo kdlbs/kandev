@@ -904,6 +904,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 
 	info := &lifecycle.WorkspaceInfo{
 		TaskID:                  taskID,
+		OwnerUserID:             s.workspaceOwnerUserIDForTask(ctx, taskID),
 		SessionID:               sessionID,
 		TaskEnvironmentID:       session.TaskEnvironmentID,
 		WorkspacePath:           workspacePath,
