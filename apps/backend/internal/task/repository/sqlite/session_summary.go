@@ -91,12 +91,32 @@ func uniqueSessionSummaryTaskIDs(taskIDs []string) []string {
 	return ids
 }
 
+// taskSessionSummarySelectCols returns the ordered projection for both drivers.
+// Keep the column order aligned with scanTaskSessionSummaryObservation.
+// PostgreSQL expressions reference aliases from taskSessionSummaryFromClause.
 func taskSessionSummarySelectCols(driver string) string {
+	var (
+		agentProfileName    string
+		agentProfileAgentID string
+		repositoryPath      string
+		lastAgentErrorJSON  string
+		modelID             string
+		modelName           string
+	)
 	if dialect.IsPostgres(driver) {
-		return taskSessionSummaryPostgresSelectCols()
+		agentProfileName = "ms.prof ->> 'name'"
+		agentProfileAgentID = "ms.prof ->> 'agent_id'"
+		repositoryPath = "ms.repo ->> 'path'"
+		lastAgentErrorJSON = "mm.meta ->> '" + models.SessionMetaKeyLastAgentError + "'"
+		modelID, modelName = postgresSessionSummaryModelColumns()
+	} else {
+		metadata := "(CASE WHEN ts.metadata IS NULL OR ts.metadata = 'null' OR ts.metadata = '' THEN '{}' ELSE ts.metadata END)"
+		agentProfileName = dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "name")
+		agentProfileAgentID = dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "agent_id")
+		repositoryPath = dialect.JSONExtract(driver, "ts.repository_snapshot", "path")
+		lastAgentErrorJSON = dialect.JSONExtract(driver, metadata, models.SessionMetaKeyLastAgentError)
+		modelID, modelName = sessionSummaryModelColumns(metadata)
 	}
-	metadata := "(CASE WHEN ts.metadata IS NULL OR ts.metadata = 'null' OR ts.metadata = '' THEN '{}' ELSE ts.metadata END)"
-	modelID, modelName := sessionSummaryModelColumns(metadata)
 	return strings.Join([]string{
 		"ts.id", "ts.task_id", "ts.queue_incarnation_id",
 		"COALESCE(er.agent_execution_id, '')", "COALESCE(er.container_id, '')",
@@ -105,35 +125,10 @@ func taskSessionSummarySelectCols(driver string) string {
 		"ts.repository_id", "ts.base_branch", "ts.base_commit_sha",
 		"COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path)",
 		taskSessionAgentWorkspaceSelect,
-		dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "name"),
-		dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "agent_id"),
+		agentProfileName, agentProfileAgentID,
 		"e.type AS executor_type", "e.name AS executor_name",
-		dialect.JSONExtract(driver, "ts.repository_snapshot", "path"),
-		"ts.state", "ts.error_message", dialect.JSONExtract(driver, metadata, models.SessionMetaKeyLastAgentError), modelID, modelName,
-		"ts.started_at", "ts.completed_at", "ts.updated_at", "ts.is_primary", "ts.review_status",
-		"ts.is_passthrough", "ts.task_environment_id", "ts.name", "ts.last_read_message_id",
-	}, ", ")
-}
-
-// taskSessionSummaryPostgresSelectCols pairs with taskSessionSummaryFromClause:
-// the Postgres FROM clause parses the JSON text columns once per row through
-// lateral aliases (mm, mi, ms), and every expression here references those
-// parsed values instead of re-casting the raw text. Column order MUST match
-// scanTaskSessionSummaryObservation.
-func taskSessionSummaryPostgresSelectCols() string {
-	modelID, modelName := postgresSessionSummaryModelColumns()
-	return strings.Join([]string{
-		"ts.id", "ts.task_id", "ts.queue_incarnation_id",
-		"COALESCE(er.agent_execution_id, '')", "COALESCE(er.container_id, '')",
-		"ts.agent_profile_id", "ts.execution_profile_id", "ts.route_generation", "ts.route_state", "ts.route_reason",
-		"ts.executor_id", "ts.executor_profile_id", "ts.environment_id",
-		"ts.repository_id", "ts.base_branch", "ts.base_commit_sha",
-		"COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path)",
-		taskSessionAgentWorkspaceSelect,
-		"ms.prof ->> 'name'", "ms.prof ->> 'agent_id'",
-		"e.type AS executor_type", "e.name AS executor_name",
-		"ms.repo ->> 'path'",
-		"ts.state", "ts.error_message", "mm.meta ->> '" + models.SessionMetaKeyLastAgentError + "'", modelID, modelName,
+		repositoryPath,
+		"ts.state", "ts.error_message", lastAgentErrorJSON, modelID, modelName,
 		"ts.started_at", "ts.completed_at", "ts.updated_at", "ts.is_primary", "ts.review_status",
 		"ts.is_passthrough", "ts.task_environment_id", "ts.name", "ts.last_read_message_id",
 	}, ", ")
