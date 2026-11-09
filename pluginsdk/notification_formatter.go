@@ -7,10 +7,13 @@ import (
 	"unicode/utf8"
 
 	pluginv1 "github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
+
+const maxNotificationFormatterResponseBytes = 512 * 1024
 
 // NotificationFormatter is optional. Implementations render only the requested
 // immutable configuration and never deliver or mutate a notification.
@@ -47,11 +50,11 @@ func validNotificationText(value string, limit int) bool {
 }
 
 func (r *RemotePlugin) FormatNotification(ctx context.Context, req *NotificationFormatRequest) (*NotificationFormatResponse, error) {
-	return r.client.FormatNotification(ctx, req)
+	return r.client.FormatNotification(ctx, req, grpc.MaxCallRecvMsgSize(maxNotificationFormatterResponseBytes))
 }
 
 func (r *RemotePlugin) InspectNotificationConfiguration(ctx context.Context, req *NotificationConfigurationRequest) (*NotificationConfigurationResponse, error) {
-	return r.client.InspectNotificationConfiguration(ctx, req)
+	return r.client.InspectNotificationConfiguration(ctx, req, grpc.MaxCallRecvMsgSize(maxNotificationFormatterResponseBytes))
 }
 
 func (s *grpcPluginServer) FormatNotification(ctx context.Context, req *NotificationFormatRequest) (*NotificationFormatResponse, error) {

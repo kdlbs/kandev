@@ -98,7 +98,7 @@ func (c *Controller) action(ctx *gin.Context) {
 		if errors.Is(ctx.Request.Context().Err(), context.Canceled) {
 			return
 		}
-		c.log.Warn("plugin action invocation failed", zap.String("plugin", record.ID), zap.String("action", declared.Key), zap.Error(err))
+		c.log.Warn("plugin action invocation failed", zap.String("plugin", record.ID), zap.String("action", declared.Key), actionFailureDetail(declared.ResourceScope, err))
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{actionErrorField: "plugin action unavailable"})
 		return
 	}

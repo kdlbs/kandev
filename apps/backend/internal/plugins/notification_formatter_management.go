@@ -11,7 +11,15 @@ import (
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kdlbs/kandev/pluginsdk"
+	"go.uber.org/zap"
 )
+
+func actionFailureDetail(scope string, err error) zap.Field {
+	if scope == manifest.ActionScopeNotificationProvider {
+		return zap.String("reason", "formatter_action_failed")
+	}
+	return zap.Error(err)
+}
 
 func boundFormatterManagement(ctx *gin.Context, scope string) context.CancelFunc {
 	if scope != manifest.ActionScopeNotificationProvider {
