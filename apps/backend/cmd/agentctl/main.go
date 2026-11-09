@@ -69,6 +69,12 @@ func runMain() int {
 		return code
 	}
 
+	// The directory-loss reconciliation helper is a one-shot utility: it reads
+	// its request from stdin and exits without ever starting the HTTP server.
+	if len(os.Args) > 1 && os.Args[1] == "ssh-reconcile" {
+		return runSSHReconcile(context.Background(), os.Stdin, os.Stdout)
+	}
+
 	// Dispatch kandev CLI subcommands before flag parsing or server startup.
 	// When invoked as "agentctl kandev <cmd>", this runs the CLI and exits
 	// without starting the HTTP server.

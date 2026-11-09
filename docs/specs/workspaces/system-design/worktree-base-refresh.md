@@ -449,17 +449,16 @@ HTTPS route must not replace an executor-owned SSH route.
 
 ## Missing-base fallback
 
-A fetch error that explicitly reports a missing remote ref is the only failed
-fetch eligible for fallback. When the request carries a different non-empty
-fallback base, the manager fetches that branch through the same non-interactive
-route and applies the normal containing-ref checks. Success completes sync,
-uses the fallback ref, and records a warning naming the requested and fallback
-branches.
+The [worktree base selection design](worktree-base-selection.md) defines
+substitution eligibility for criteria .25 through .28. `FallbackBaseBranch`
+supplies a candidate, not permission to abandon an explicit selection.
 
-If the fallback is absent or its refresh fails, preparation remains failed. A
-missing requested or fallback remote ref uses `missing_remote_ref`; auth,
-network, timeout, cancellation, and other Git failures keep their existing
-fail-closed classifications.
+For an eligible inherited/default selection, a proven missing remote ref can
+use a separately refreshed fallback through the same non-interactive route.
+Containing-ref checks and warnings remain required. Without a usable fallback,
+preparation fails. Auth, network, timeout, cancellation, and unproven errors
+retain their existing classifications. The selection amendment is implemented;
+its linked plan owns the recorded evidence.
 
 ## Empty remote
 
