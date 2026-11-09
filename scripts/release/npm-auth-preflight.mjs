@@ -260,6 +260,12 @@ export async function runPreflight({
       "npm authentication preflight received an invalid SDK package name.",
       { category: "release_context" },
     );
+  if (sdkPackage !== sdkPackageName)
+    throw new NpmAuthPreflightError(
+      sdkPackage,
+      `npm authentication preflight only supports the canonical SDK package ${sdkPackageName}.`,
+      { category: "release_context" },
+    );
   if (!/^[0-9a-f]{40}$/.test(checkoutSha ?? ""))
     throw new NpmAuthPreflightError(
       null,

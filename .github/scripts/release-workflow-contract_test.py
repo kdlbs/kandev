@@ -2012,6 +2012,7 @@ class NpmAuthPreflightWorkflowTests(unittest.TestCase):
                 )
         prepare = job_block("prepare")
         self.assertIn("needs: [npm-auth-preflight]", prepare)
+        self.assertIn("!cancelled()", job_condition("prepare"))
 
     def test_prepare_dependency_reaches_every_build_and_publication_job(self):
         for name in (

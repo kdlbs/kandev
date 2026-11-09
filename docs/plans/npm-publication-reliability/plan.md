@@ -137,10 +137,10 @@ Design validation passed on 2026-11-09:
 
 Implementation verification passed on 2026-11-09 with the SDK's pinned Node 24.19.0 and npm 11.21.0:
 
-- `node --test scripts/release/*.test.mjs`: 149 tests passed.
-- Task 01 suite: `node --test scripts/release/publish-plugin-sdk.test.mjs scripts/release/sdk-release-io.test.mjs scripts/release/sdk-registry.test.mjs`: 33 tests passed.
-- Task 02 suite: `node --test scripts/release/sdk-diagnostics.test.mjs scripts/release/publish-plugin-sdk.test.mjs scripts/release/sdk-release-io.test.mjs scripts/release/sdk-runtime.test.mjs`: 44 tests passed.
-- Task 03 suite: `node --test scripts/release/npm-auth-preflight.test.mjs scripts/release/sdk-runtime.test.mjs scripts/release/sdk-registry.test.mjs`: 15 tests passed.
+- `node --test scripts/release/*.test.mjs`: 156 tests passed.
+- Task 01 suite: `node --test scripts/release/publish-plugin-sdk.test.mjs scripts/release/sdk-release-io.test.mjs scripts/release/sdk-registry.test.mjs`: 36 tests passed.
+- Task 02 suite: `node --test scripts/release/sdk-diagnostics.test.mjs scripts/release/publish-plugin-sdk.test.mjs scripts/release/sdk-release-io.test.mjs scripts/release/sdk-runtime.test.mjs`: 49 tests passed.
+- Task 03 suite: `node --test scripts/release/npm-auth-preflight.test.mjs scripts/release/sdk-runtime.test.mjs scripts/release/sdk-registry.test.mjs`: 17 tests passed.
 - `python3 .github/scripts/release-workflow-contract_test.py`: 78 tests passed.
 - `python3 .github/scripts/lint-action-pinning_test.py`: 9 tests passed.
 - `python3 .github/scripts/plugin-sdk-ci-contract_test.py`: 10 tests passed.

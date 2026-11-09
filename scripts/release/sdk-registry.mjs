@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 
 export const packageName = "@kdlbs/plugin-sdk";
 export const registryURL = "https://registry.npmjs.org";
-function registryFailure(message) {
-  const error = new Error(message);
+function registryFailure(message, cause) {
+  const error = new Error(message, cause ? { cause } : undefined);
   error.code = "REGISTRY_READ_FAILURE";
   return error;
 }
@@ -15,14 +15,24 @@ export function publicRegistryURL(raw) {
   return url;
 }
 export async function readPackage(version, fetchImpl = fetch) {
-  const response = await fetchImpl(`${registryURL}/@kdlbs%2fplugin-sdk`, {
-    headers: { accept: "application/json", "cache-control": "no-cache" },
-    signal: AbortSignal.timeout(20_000),
-  });
+  let response;
+  try {
+    response = await fetchImpl(`${registryURL}/@kdlbs%2fplugin-sdk`, {
+      headers: { accept: "application/json", "cache-control": "no-cache" },
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (error) {
+    throw registryFailure(`registry read failed: ${error.message}`, error);
+  }
   publicRegistryURL(response.url);
   if (!response.headers.get("content-type")?.includes("application/json"))
     throw registryFailure("registry returned a non-JSON response");
-  const text = await response.text();
+  let text;
+  try {
+    text = await response.text();
+  } catch (error) {
+    throw registryFailure("registry response body could not be read", error);
+  }
   if (text.length > 5 * 1024 * 1024)
     throw registryFailure("registry metadata exceeds size limit");
   let document;
@@ -66,9 +76,17 @@ export async function downloadArchive(
   fetchImpl = fetch,
 ) {
   publicRegistryURL(url);
-  const response = await fetchImpl(url, {
-    signal: AbortSignal.timeout(30_000),
-  });
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    throw registryFailure(
+      `registry archive download failed: ${error.message}`,
+      error,
+    );
+  }
   publicRegistryURL(response.url);
   if (
     !response.ok ||
@@ -77,7 +95,12 @@ export async function downloadArchive(
     throw registryFailure(
       `registry archive download failed: HTTP ${response.status}`,
     );
-  const bytes = Buffer.from(await response.arrayBuffer());
+  let bytes;
+  try {
+    bytes = Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    throw registryFailure("registry archive body could not be read", error);
+  }
   if (
     bytes.length === 0 ||
     bytes.length > 25 * 1024 * 1024 ||

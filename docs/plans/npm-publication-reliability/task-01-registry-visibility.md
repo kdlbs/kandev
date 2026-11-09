@@ -99,7 +99,8 @@ Completed on 2026-11-09.
 - Preserved one write per operation. A definite authentication rejection stops after one reconciliation read, while transport and identity errors remain errors.
 - Added delayed version, delayed `latest`, permanent absence, deadline, read-error, authentication-rejection, and uncertain-write regressions. Existing immutable-state, bootstrap, provenance, no-downgrade, and consumer tests remain green.
 - Review follow-up: preserved the verified version in the adapter registry projection so visible observation events and success summaries report the actual version.
+- PR review follow-up: start source verification before source loading, keep candidate verification active through finalization, mark verify-mode registry reads under version visibility, include structured npm codes in authentication checks, bound registry diagnostic values, and classify registry transport and response-body failures.
 - Verification with Node 24.19.0 and npm 11.21.0:
-  - `node --test scripts/release/publish-plugin-sdk.test.mjs scripts/release/sdk-release-io.test.mjs scripts/release/sdk-registry.test.mjs`: 33 tests passed.
-  - `node --test scripts/release/*.test.mjs`: 149 tests passed.
+  - `node --test scripts/release/publish-plugin-sdk.test.mjs scripts/release/sdk-release-io.test.mjs scripts/release/sdk-registry.test.mjs`: 36 tests passed.
+  - `node --test scripts/release/*.test.mjs`: 156 tests passed.
   - `git diff --check`: passed.

@@ -23,6 +23,8 @@ test("sanitizes known credentials, bearer headers, npmrc lines, JWTs, and signed
     "authorization: basic bG93ZXI6c2VjcmV0",
     "AUTHORIZATION: BASIC dXBwZXI6c2VjcmV0",
     "Proxy-authorization: Bearer proxy-secret-token",
+    '"authorization": "Basic cXVvdGVkOnNlY3JldA=="',
+    '"proxy-authorization": "basic cHJveHk6cXVvdGVk"',
     `//registry.npmjs.org/:_authToken=${npmToken}`,
     `_auth=${secret}`,
     `JWT ${jwt}`,
@@ -39,6 +41,8 @@ test("sanitizes known credentials, bearer headers, npmrc lines, JWTs, and signed
     "bG93ZXI6c2VjcmV0",
     "dXBwZXI6c2VjcmV0",
     "proxy-secret-token",
+    "cXVvdGVkOnNlY3JldA==",
+    "cHJveHk6cXVvdGVk",
     npmToken,
     jwt,
     "user:password",
@@ -63,6 +67,35 @@ test("retains only a bounded tail of sanitized command output", () => {
   assert.ok(safe.text.length <= 1024);
   assert.ok(safe.text.includes("[truncated"));
   assert.equal(safe.text.includes("secret\n"), false);
+});
+
+test("truncation keeps a UTF-8 character boundary", () => {
+  const safe = sanitizeOutput("x".repeat(100) + "😀".repeat(40), {
+    limit: 80,
+  });
+  assert.equal(safe.truncated, true);
+  assert.equal(safe.text.includes("\uFFFD"), false);
+  assert.ok(safe.retained_bytes <= 80, safe.retained_bytes);
+  assert.ok(safe.text.includes("😀"));
+});
+
+test("failure messages are sanitized and bounded before summaries", () => {
+  const secret = "failure-secret-value";
+  const diagnostics = new SdkDiagnostics({
+    hostTag: "v1.2.3",
+    sdkVersion: "0.1.0",
+    secrets: [secret],
+    log: null,
+  });
+  const failure = new Error(
+    `Authorization: Basic dXNlcjpwYXNz\nhttps://user:pass@example.test/x\n${secret}\n${"x".repeat(70 * 1024)}`,
+  );
+  diagnostics.fail(failure);
+  const summary = diagnostics.summary({ status: "failed", failure });
+  assert.equal(summary.failure_message.includes(secret), false);
+  assert.equal(summary.failure_message.includes("dXNlcjpwYXNz"), false);
+  assert.equal(summary.failure_message.includes("user:pass"), false);
+  assert.ok(Buffer.byteLength(summary.failure_message) <= 64 * 1024);
 });
 
 test("collects only credential-shaped environment values", () => {
@@ -489,4 +522,33 @@ test("runner summary failure does not replace the original release error", async
     ),
     fixture.errors,
   );
+});
+
+test("runner marks source verification failed when source loading fails", async () => {
+  let summary;
+  await assert.rejects(
+    runRelease({
+      mode: "verify",
+      hostTag: "v1.2.3",
+      env: { RELEASE_GPG_FINGERPRINT: "A".repeat(40) },
+      makeRepository: () => ({
+        loadSource: async () => {
+          throw new Error("source load failed");
+        },
+      }),
+      makeDirectory: async () => "/tmp/sdk-runner-source-failure",
+      removeDirectory: async () => {},
+      summaryWriter: async (value) => {
+        summary = value;
+      },
+      verifyToolsImpl: () => {},
+      execFileImpl: async (command) => ({
+        stdout: command === "npm" ? "11.21.0" : "",
+      }),
+      diagnosticsLog: null,
+      diagnosticsError: () => {},
+    }),
+    /source load failed/,
+  );
+  assert.equal(summary.phases.source_verification, "failed");
 });

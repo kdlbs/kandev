@@ -432,3 +432,22 @@ test("requires exact workflow and checkout revisions", async () => {
   );
   assert.equal(transport.calls.length, 0);
 });
+
+test("rejects an alternate SDK package name before any request", async () => {
+  const transport = makeTransport();
+  await assert.rejects(
+    runPreflight({
+      packages: ["kandev"],
+      sdkPackage: "@other/plugin-sdk",
+      env: env(),
+      fetchImpl: transport.fetchImpl,
+      checkoutSha: CHECKOUT_SHA,
+    }),
+    (error) => {
+      assert.equal(error.category, "release_context");
+      assert.match(error.message, /canonical SDK package/);
+      return true;
+    },
+  );
+  assert.equal(transport.calls.length, 0);
+});

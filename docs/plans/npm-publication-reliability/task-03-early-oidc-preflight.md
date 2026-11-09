@@ -125,8 +125,9 @@ Completed on 2026-11-09.
 - Added an explicit `prepare` dependency. Normal Stable requires preflight success. Dry run, desktop validation, and backfill may proceed only through the intentional skipped branch. Nightly and scheduled runs keep their existing paths.
 - Recorded workflow and checkout revisions separately in the result. The result names each authenticated or deferred package and provides publisher-configuration guidance without response bodies or credentials.
 - Documented that a successful exchange proves authentication only, not direct-publish or dist-tag permission, and that the publishing jobs still authenticate when they run.
+- PR review follow-up: reject alternate SDK package names before any network request so an existing alternate package cannot be reported as deferred while the canonical SDK is absent.
 - Verification:
-  - `node --test scripts/release/npm-auth-preflight.test.mjs scripts/release/sdk-runtime.test.mjs scripts/release/sdk-registry.test.mjs`: 15 tests passed.
+  - `node --test scripts/release/npm-auth-preflight.test.mjs scripts/release/sdk-runtime.test.mjs scripts/release/sdk-registry.test.mjs`: 17 tests passed.
   - `python3 .github/scripts/release-workflow-contract_test.py`: 78 tests passed.
   - `python3 .github/scripts/lint-action-pinning_test.py`: 9 tests passed.
   - `python3 .github/scripts/lint-action-pinning.py`: all 30 workflow files use SHA-pinned action refs.

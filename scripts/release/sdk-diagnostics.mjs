@@ -65,7 +65,7 @@ function sanitizeText(value, secrets) {
   for (const secret of secrets) text = text.split(secret).join("[redacted]");
   return text
     .replace(
-      /\b((?:proxy-)?authorization)\s*:\s*(?:(?:bearer|basic)\s+)?[^\r\n"',;]+/gi,
+      /\b((?:proxy-)?authorization)["']?\s*:\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|(?:(?:bearer|basic)\s+)?[^\r\n"',;]+)/gi,
       (_match, header) => `${header}: [redacted]`,
     )
     .replace(/\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [redacted]")
@@ -106,9 +106,10 @@ export function sanitizeOutput(
   const marker = `[truncated: showing the last ${limit} bytes]\n`;
   const markerBytes = Buffer.byteLength(marker, "utf8");
   const tailBytes = Math.max(0, limit - markerBytes);
-  const tail = Buffer.from(text, "utf8")
-    .subarray(Math.max(0, bytes - tailBytes))
-    .toString("utf8");
+  const encoded = Buffer.from(text, "utf8");
+  let start = Math.max(0, bytes - tailBytes);
+  while (start < encoded.length && (encoded[start] & 0xc0) === 0x80) start += 1;
+  const tail = encoded.subarray(start).toString("utf8");
   return {
     text: marker + tail,
     truncated: true,
@@ -126,21 +127,25 @@ const CONSUMER_TEXT = /public (?:Go|frontend|consumer)|consumer verification/i;
 const IDENTITY_TEXT =
   /conflict|signature|integrity|no required workflow provenance|provenance is absent|invalid provenance|provenance (?:verification|validation|bundle|attestation)/i;
 
-function failureResult(category, error) {
+function failureResult(category, error, secrets = []) {
+  const message = sanitizeOutput(
+    error?.message ?? "unknown SDK publication failure",
+    { secrets },
+  );
   return {
     category,
-    message: error?.message ?? "unknown SDK publication failure",
+    message: message.text,
     recovery_action: FAILURE_GUIDANCE[category],
   };
 }
 
-export function classifyFailure(error) {
+export function classifyFailure(error, { secrets = [] } = {}) {
   const explicit =
     error?.category === "npm_authentication"
       ? "authentication"
       : error?.category;
   if (explicit && FAILURE_GUIDANCE[explicit])
-    return failureResult(explicit, error);
+    return failureResult(explicit, error, secrets);
   const text = [
     error?.npmCode,
     error?.code,
@@ -160,23 +165,17 @@ export function classifyFailure(error) {
       : error.acceptedUpload
         ? "accepted_upload_awaiting_visibility"
         : "uncertain_upload";
-    return failureResult(category, error);
+    return failureResult(category, error, secrets);
   }
-  if (
-    error?.code === "REGISTRY_READ_FAILURE" ||
-    REGISTRY_TEXT.test(text)
-  )
-    return failureResult("registry_read", error);
-  if (
-    error?.code === "CONSUMER_VERIFICATION" ||
-    CONSUMER_TEXT.test(text)
-  )
-    return failureResult("consumer_verification", error);
+  if (error?.code === "REGISTRY_READ_FAILURE" || REGISTRY_TEXT.test(text))
+    return failureResult("registry_read", error, secrets);
+  if (error?.code === "CONSUMER_VERIFICATION" || CONSUMER_TEXT.test(text))
+    return failureResult("consumer_verification", error, secrets);
   if (AUTH_CODE.test(error?.npmCode ?? "") || AUTH_TEXT.test(text))
-    return failureResult("authentication", error);
+    return failureResult("authentication", error, secrets);
   if (IDENTITY_TEXT.test(text))
-    return failureResult("identity_conflict", error);
-  return failureResult("unknown", error);
+    return failureResult("identity_conflict", error, secrets);
+  return failureResult("unknown", error, secrets);
 }
 
 export class SdkDiagnostics {
@@ -184,11 +183,13 @@ export class SdkDiagnostics {
     hostTag,
     sdkVersion = null,
     packageName: packageName = "@kdlbs/plugin-sdk",
+    secrets = [],
     log = console.log,
   } = {}) {
     this.hostTag = hostTag;
     this.sdkVersion = sdkVersion;
     this.packageName = packageName;
+    this.secrets = secrets;
     this.log = log;
     this.phases = Object.fromEntries(PHASES.map((phase) => [phase, "pending"]));
     this.current = null;
@@ -241,7 +242,7 @@ export class SdkDiagnostics {
     this.publication = state;
   }
   fail(error) {
-    const classification = classifyFailure(error);
+    const classification = classifyFailure(error, { secrets: this.secrets });
     this.failure = classification;
     if (this.current) {
       this.phases[this.current] = "failed";

@@ -2,7 +2,15 @@ import { compareVersions, validateRecord } from "./plugin-sdk.mjs";
 import { packageName } from "./sdk-registry.mjs";
 
 export const REGISTRY_OBSERVATION_WINDOW_MS = 300_000;
+export const REGISTRY_VALUE_LIMIT = 128;
 const REGISTRY_PROBE_WAITS_MS = [10_000, 20_000, 30_000];
+
+export function boundedRegistryValue(value) {
+  if (typeof value !== "string") return null;
+  return value.length > REGISTRY_VALUE_LIMIT
+    ? `${value.slice(0, REGISTRY_VALUE_LIMIT - 3)}...`
+    : value;
+}
 
 function validateContext({ source, fingerprint }) {
   validateRecord(source.record);
@@ -73,7 +81,7 @@ function probeWait(attempt) {
 }
 
 function isDefiniteAuthenticationRejection(error) {
-  const output = [error?.code, error?.stderr, error?.message]
+  const output = [error?.npmCode, error?.code, error?.stderr, error?.message]
     .filter((value) => typeof value === "string")
     .join("\n");
   return /\b(?:ENEEDAUTH|E401|E403)\b|unauthorized|authentication|permission denied|forbidden/i.test(
@@ -84,8 +92,8 @@ function isDefiniteAuthenticationRejection(error) {
 function describeRegistryState(state) {
   return {
     package_exists: state.packageExists,
-    observed_version: state.version?.version ?? null,
-    observed_latest: state.latest ?? null,
+    observed_version: boundedRegistryValue(state.version?.version),
+    observed_latest: boundedRegistryValue(state.latest),
   };
 }
 
@@ -190,9 +198,6 @@ export async function preparePublication(io, context) {
   verifyCandidate(candidate, context);
   verifyRegistry(registry, candidate, source);
   await io.retainCandidate(candidate, source);
-  io.diagnostics?.phase("candidate_verification", "passed", {
-    integrity: candidate.integrity,
-  });
   ({ tag, registry } = await readState(io, context));
   verifyRegistry(registry, candidate, source);
   if (!tag) {
@@ -214,6 +219,9 @@ export async function preparePublication(io, context) {
     );
   }
   await io.finalizeCandidate(candidate, source);
+  io.diagnostics?.phase("candidate_verification", "passed", {
+    integrity: candidate.integrity,
+  });
   io.diagnostics?.setPublication("not_attempted");
   return { status: "prepared", candidate, source };
 }
@@ -263,7 +271,7 @@ async function ensureLatest(io, context) {
     );
     if (registry.latest !== version) await io.verifyNewerLatest(registry.latest);
     io.diagnostics?.phase("channel_promotion", "passed", {
-      observed_latest: registry.latest,
+      observed_latest: boundedRegistryValue(registry.latest),
     });
   } catch (error) {
     error.phase ??= "channel_promotion";
@@ -343,8 +351,8 @@ export async function publishPublication(io, context) {
       write_outcome: writeError ? "uncertain" : "accepted",
     });
     io.diagnostics?.phase("version_visibility", "passed", {
-      observed_version: registry.version?.version ?? null,
-      observed_latest: registry.latest ?? null,
+      observed_version: boundedRegistryValue(registry.version?.version),
+      observed_latest: boundedRegistryValue(registry.latest),
     });
     io.diagnostics?.setPublication("confirmed");
     uploaded = true;
@@ -353,8 +361,8 @@ export async function publishPublication(io, context) {
       reason: "version_already_public",
     });
     io.diagnostics?.phase("version_visibility", "passed", {
-      observed_version: registry.version?.version ?? null,
-      observed_latest: registry.latest ?? null,
+      observed_version: boundedRegistryValue(registry.version?.version),
+      observed_latest: boundedRegistryValue(registry.latest),
     });
     io.diagnostics?.setPublication("confirmed");
   }

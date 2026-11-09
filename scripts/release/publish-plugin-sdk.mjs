@@ -10,8 +10,9 @@ import { assertReleaseContext } from "./sdk-runtime.mjs";
 import {
   preparePublication,
   publishPublication,
+  boundedRegistryValue,
 } from "./sdk-publication-state.mjs";
-import { PHASES, SdkDiagnostics } from "./sdk-diagnostics.mjs";
+import { PHASES, SdkDiagnostics, collectSecrets } from "./sdk-diagnostics.mjs";
 import { verifyTools } from "../pluginsdk/pack-candidate.mjs";
 const exec = promisify(execFile);
 const BOOTSTRAP_INSTRUCTIONS =
@@ -61,7 +62,12 @@ export async function runRelease({
 } = {}) {
   if (!/^v\d+\.\d+\.\d+$/.test(hostTag ?? ""))
     throw new Error("--host-tag requires an exact Stable tag");
-  const diagnostics = new SdkDiagnostics({ hostTag, log: diagnosticsLog });
+  const diagnostics = new SdkDiagnostics({
+    hostTag,
+    secrets: collectSecrets(env),
+    log: diagnosticsLog,
+  });
+  diagnostics.start("source_verification");
   let directory = null;
   let result = null;
   let source = null;
@@ -97,7 +103,6 @@ export async function runRelease({
       for (const phase of PHASES)
         diagnostics.phase(phase, "skipped", { reason: "tools_mode" });
     } else {
-      diagnostics.start("source_verification");
       if (
         (mode === "prepare" || mode === "publish") &&
         (await repository.text("rev-parse", "HEAD")) !== source.currentCommit
@@ -145,6 +150,7 @@ export async function runRelease({
         diagnostics.phase("candidate_verification", "passed", {
           integrity: candidate.integrity,
         });
+        diagnostics.start("version_visibility");
         const registry = await io.readRegistry(source.record.sdk_version);
         if (
           !registry.version ||
@@ -158,8 +164,8 @@ export async function runRelease({
         )
           throw new Error("required npm provenance is absent");
         diagnostics.phase("version_visibility", "passed", {
-          observed_version: registry.version?.version ?? null,
-          observed_latest: registry.latest ?? null,
+          observed_version: boundedRegistryValue(registry.version?.version),
+          observed_latest: boundedRegistryValue(registry.latest),
         });
         diagnostics.phase("channel_promotion", "skipped", {
           reason: "verify_mode",

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   preparePublication,
   publishPublication,
+  boundedRegistryValue,
   REGISTRY_OBSERVATION_WINDOW_MS,
 } from "./sdk-publication-state.mjs";
 import { SdkDiagnostics } from "./sdk-diagnostics.mjs";
@@ -444,9 +445,8 @@ test("rejected latest update keeps immutable publication confirmed", async () =>
   });
   f.io.diagnostics = diagnostics;
   f.io.moveLatest = async () => {
-    throw Object.assign(new Error("dist-tag permission denied"), {
-      code: "E403",
-      stderr: "npm error code E403",
+    throw Object.assign(new Error("dist-tag update failed"), {
+      npmCode: "E403",
     });
   };
   const failure = await publishPublication(f.io, f.context).then(
@@ -516,4 +516,31 @@ test("uncertain latest update that never appears keeps publication confirmed", a
   assert.equal(summary.channel_write_outcome, "uncertain");
   assert.equal(summary.failure_category, "uncertain_channel_update");
   assert.match(summary.recovery_action, /latest dist-tag/);
+});
+test("preparation failure marks candidate verification failed", async () => {
+  const f = fixture();
+  const diagnostics = new SdkDiagnostics({
+    hostTag: "v0.100.0",
+    sdkVersion: "0.1.0",
+    log: null,
+  });
+  f.io.diagnostics = diagnostics;
+  f.io.finalizeCandidate = async () => {
+    throw new Error("candidate finalization failed");
+  };
+  const failure = await preparePublication(f.io, f.context).then(
+    () => null,
+    (error) => error,
+  );
+  assert.match(failure.message, /finalization/);
+  diagnostics.fail(failure);
+  const summary = diagnostics.summary({ status: "failed", failure });
+  assert.equal(summary.phases.candidate_verification, "failed");
+  assert.equal(summary.last_confirmed_phase, "source_verification");
+});
+test("registry diagnostic values are bounded", () => {
+  const bounded = boundedRegistryValue("a".repeat(200));
+  assert.equal(bounded.length, 128);
+  assert.ok(bounded.endsWith("..."));
+  assert.equal(boundedRegistryValue(null), null);
 });

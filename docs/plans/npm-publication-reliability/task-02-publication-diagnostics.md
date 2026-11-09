@@ -104,9 +104,10 @@ Completed on 2026-11-09.
 - Sanitized successful and failed npm output before retention. Known environment secrets, bearer and basic headers, npmrc authentication lines, JWTs, npm and GitHub tokens, and credential-bearing URLs are removed. Each command keeps at most 64 KiB of sanitized tail with explicit truncation.
 - Distinguished authentication, accepted-upload visibility, uncertain upload, registry read, identity or provenance, and consumer-verification failures. A consumer failure preserves confirmed publication and channel promotion.
 - Review follow-up: redacted complete Basic and Proxy-Authorization values, preferred typed npm authentication codes over command-line text such as `--provenance`, and kept confirmed immutable publication when only the `latest` dist-tag fails. Channel write outcomes and channel-specific recovery guidance are reported separately.
+- PR review follow-up: sanitize and bound failure messages, redact quoted authorization values, truncate on UTF-8 boundaries, and report source, candidate, and version-visibility failures under the correct phase.
 - Documented the five-minute propagation window, diagnostics, expired publisher recovery, and same-version recovery in `docs/public/release-process.md`.
 - Verification with Node 24.19.0 and npm 11.21.0:
-  - `node --test scripts/release/sdk-diagnostics.test.mjs scripts/release/publish-plugin-sdk.test.mjs scripts/release/sdk-release-io.test.mjs scripts/release/sdk-runtime.test.mjs`: 44 tests passed.
+  - `node --test scripts/release/sdk-diagnostics.test.mjs scripts/release/publish-plugin-sdk.test.mjs scripts/release/sdk-release-io.test.mjs scripts/release/sdk-runtime.test.mjs`: 49 tests passed.
   - `node --test scripts/validate-public-docs.test.mjs`: 63 tests passed.
   - `node scripts/validate-public-docs.mjs`: 55 published docs pages validated.
   - `git diff --check`: passed.
