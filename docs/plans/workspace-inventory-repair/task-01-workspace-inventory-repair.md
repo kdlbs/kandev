@@ -156,8 +156,9 @@ Disposable overlay checks use real SQLite, Git and dirty staged/untracked
 checkouts. Initial failures were isolated to Windows registration syntax and
 host-global external-filter configuration. Only the registration comparison
 needed production repair; synthetic tests isolate global/system Git config and
-separately prove that configured external filters remain rejected. No permanent
-test files, operating repair, installation or runtime retry were added.
+separately prove that configured external filters remain rejected. No operating
+repair, installation or runtime retry was added; permanent tests were added
+later in the review follow-up below.
 
 Final disposable race checks: executor 83.706s, orchestrator metadata-only API
 5.654s, SQLite repair regressions 7.177s, and Git preservation 22.647s passed.
@@ -177,3 +178,14 @@ rejected the repaired local checkout through the automatic local-source denial.
 Branch continuity now applies the task-scoped local checkout checks to a fenced
 local receipt only. A focused executor test covers repair followed by ordinary
 Resume; it needs the host Git config isolated on this Windows host.
+
+Review follow-up (permanent tests): committed tests now cover the fence
+comparison, fence read with and without a route row, fence drift (task,
+workflow step, session, route) inside the repair transaction and between the
+executor's fence read and that transaction, the environment and repository
+boundary of the metadata-only request, the scoped local-candidate validator,
+the claim that refuses the requesting session's own live runtime, the
+orchestrator `workspace_only` response (`not_started`, no launch) and the
+handler rejection of `workspace_only` with a non-repair action. Same-key retry
+after a fence change is pinned at its current behavior (executor: idempotency
+conflict; store: conflict) pending the owner decision on that contract.

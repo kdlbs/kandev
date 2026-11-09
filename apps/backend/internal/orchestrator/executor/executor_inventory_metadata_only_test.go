@@ -3,12 +3,23 @@ package executor
 import (
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/task/models"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/stretchr/testify/require"
 )
 
-func newLocalMetadataRepairFixture(t *testing.T) (*Executor, *mockAgentManager, *models.TaskSession) {
+// localMetadataRepairState is a real SQLite store plus a real Git checkout
+// whose canonical inventory row carries a stale branch slug.
+type localMetadataRepairState struct {
+	db       *sqlx.DB
+	repo     *tasksqlite.Repository
+	session  *models.TaskSession
+	source   string
+	checkout string
+}
+
+func newLocalMetadataRepairState(t *testing.T) *localMetadataRepairState {
 	t.Helper()
 	db, _ := remoteSelectionSQLiteTemplate.Open(t)
 	repo := tasksqlite.NewWithInitializedDB(db, db, nil)
@@ -36,8 +47,14 @@ func newLocalMetadataRepairFixture(t *testing.T) (*Executor, *mockAgentManager, 
 		State: models.TaskSessionStateFailed, ExecutorID: models.ExecutorIDWorktree, AgentProfileID: "profile-123",
 	}
 	require.NoError(t, repo.CreateTaskSession(ctx, session))
+	return &localMetadataRepairState{db: db, repo: repo, session: session, source: source, checkout: checkout}
+}
+
+func newLocalMetadataRepairFixture(t *testing.T) (*Executor, *mockAgentManager, *models.TaskSession) {
+	t.Helper()
+	state := newLocalMetadataRepairState(t)
 	manager := &mockAgentManager{}
-	return newTestExecutor(t, manager, repo), manager, session
+	return newTestExecutor(t, manager, state.repo), manager, state.session
 }
 
 func TestResumeAfterLocalMetadataRepairAdmitsRepairedCheckout(t *testing.T) {
