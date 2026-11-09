@@ -630,6 +630,11 @@ const (
 	// passthrough agent.running event. It prevents recovery from evaluating
 	// the same on_turn_start transition a second time after restart.
 	SessionMetaKeyInitialCreatePromptPassthrough = "initial_create_prompt_passthrough"
+	// SessionMetaKeyInitialPromptExplicitLaunch marks a matching pending
+	// initial-submission receipt whose launch came from explicit start_created
+	// input. Fresh-start recovery uses it to keep the same preserving
+	// composition; task-description receipts do not carry it.
+	SessionMetaKeyInitialPromptExplicitLaunch = "initial_prompt_explicit_launch"
 )
 
 // InterruptedRecoverySettlement is the durable recovery snapshot used when a

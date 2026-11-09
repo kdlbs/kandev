@@ -104,6 +104,8 @@ The profile picker shows only profiles compatible with the task executor. If non
 
 Prompts support pasted, dropped, or selected attachments. A prompt can contain at most 10 files, with a limit of 10 MiB per file and 20 MiB in total. The prompt itself is required.
 
+When you start a prepared session with an explicit brief, Kandev keeps that brief in the first stored message and in the agent input. A destination step prompt without `{{task_prompt}}` runs before the brief instead of replacing it; a step that uses the placeholder inserts the brief where the placeholder sits. The brief is instruction text, not a permission mode. Use the profile, executor, and workflow controls to restrict what the agent can change.
+
 ## Manage session state
 
 Right-click an agent tab on desktop to manage it. On phones, open **Sessions**, then select the session row's **Session actions** button. Available actions depend on the session's current state.
