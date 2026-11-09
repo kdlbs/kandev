@@ -213,7 +213,7 @@ func (s *providerTurnAllowances) incumbentTurns(ctx context.Context, key string,
 }
 
 func (s *providerTurnAllowances) turnRequestBindingKnown(req agentruntime.ProviderTurnRequest, b snapshotBinding) bool {
-	if req.AgentID == "opencode-acp" && !strings.HasPrefix(req.Model, "opencode-go/") && !strings.HasPrefix(req.Model, "opencode/") {
+	if req.AgentID == openCodeAgentID && !strings.HasPrefix(req.Model, "opencode-go/") && !strings.HasPrefix(req.Model, "opencode/") {
 		return false
 	}
 	return req.AgentID == b.agentType && localAllowanceExecution(req.ExecutorType) && allowanceBindingKnown(b, s.home) && allowanceEnvironmentMatches(req.Environment, b.profile)
@@ -263,7 +263,7 @@ func allowanceProviderFamilies(req agentruntime.ProviderTurnRequest, b snapshotB
 		return []string{"anthropic", "teamclaude"}
 	case snapshotCodexACPAgentID, snapshotCodexAppServerAgentID:
 		return []string{"openai"}
-	case "opencode-acp":
+	case openCodeAgentID:
 		if strings.HasPrefix(req.Model, "opencode-go/") {
 			return []string{accountPrefixOpenCodeGo}
 		}

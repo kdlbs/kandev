@@ -13,6 +13,7 @@ acceptance_criteria:
   - AC-AGENTS-NATIVE-CODE-REVIEW-002.3
   - AC-AGENTS-NATIVE-CODE-REVIEW-002.4
   - AC-AGENTS-NATIVE-CODE-REVIEW-002.5
+  - AC-AGENTS-NATIVE-CODE-REVIEW-002.6
 system_design:
   - ../../specs/agents/system-design/native-code-review-reviewer-exclusion.md
 ---

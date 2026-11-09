@@ -281,6 +281,10 @@ type sessionProfileInferenceRunner interface {
 	ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, profileID, prompt string) (*agentctlutil.PromptResponse, error)
 }
 
+type sessionProfileModelInferenceRunner interface {
+	ExecuteInferenceProfileModelPrompt(ctx context.Context, sessionID, profileID, model, prompt string) (*agentctlutil.PromptResponse, error)
+}
+
 func (r reviewInference) Run(ctx context.Context, identity review.ReviewerIdentity, sessionID, prompt string) (*review.PromptResult, error) {
 	ctx = reviewExecutionContext(ctx)
 	prepared := reviewPromptRoute(identity)
@@ -351,7 +355,7 @@ func (r reviewInference) runConcrete(ctx context.Context, identity review.Review
 	var result *hostutility.PromptResult
 	var err error
 	if identity.ProfileID != "" {
-		result, err = r.host.ExecuteProfilePrompt(ctx, identity.ProfileID, prompt)
+		result, err = r.host.ExecuteProfileModelPrompt(ctx, identity.ProfileID, reviewDispatchModel(ctx, identity), prompt)
 	} else {
 		result, err = r.host.ExecutePrompt(ctx, identity.AgentID, identity.Model, identity.Mode, prompt)
 	}
@@ -372,11 +376,29 @@ func (r reviewInference) runSession(ctx context.Context, identity review.Reviewe
 	if identity.ProfileID == "" {
 		return r.session.ExecuteInferencePrompt(ctx, sessionID, identity.AgentID, identity.Model, prompt)
 	}
+	if model := reviewDispatchModel(ctx, identity); model != "" {
+		modelRunner, ok := r.session.(sessionProfileModelInferenceRunner)
+		if !ok {
+			return nil, fmt.Errorf("%w: review executor cannot run the checked reviewer model", review.ErrAgentUnavailable)
+		}
+		return modelRunner.ExecuteInferenceProfileModelPrompt(ctx, sessionID, identity.ProfileID, model, prompt)
+	}
 	profileRunner, ok := r.session.(sessionProfileInferenceRunner)
 	if !ok {
 		return nil, fmt.Errorf("profile-aware review executor is unavailable")
 	}
 	return profileRunner.ExecuteInferenceProfilePrompt(ctx, sessionID, identity.ProfileID, prompt)
+}
+
+// reviewDispatchModel is the model a profile dispatch must run. Under writer
+// exclusion it is the model that passed the check, which may be the inherited
+// utility default of a profile with no model; a profile dispatch would
+// otherwise run the profile's empty model or the agent's probed default.
+func reviewDispatchModel(ctx context.Context, identity review.ReviewerIdentity) string {
+	if review.OriginExclusionActive(ctx) {
+		return identity.Model
+	}
+	return ""
 }
 
 func reviewResponseFinal(response *agentctlutil.PromptResponse, err error) bool {

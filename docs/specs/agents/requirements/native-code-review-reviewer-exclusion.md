@@ -41,6 +41,7 @@ when no distinct reviewer is available.
 - **AC-AGENTS-NATIVE-CODE-REVIEW-002.3:** When every configured reviewer candidate matches the origin execution, the system shall fail the review with `review_agent_unavailable` and write no findings, and the task shall still enter the step.
 - **AC-AGENTS-NATIVE-CODE-REVIEW-002.4:** When a `run_code_review` step-entry action cannot read the origin session's identity, the system shall fail the review with `review_agent_unavailable` and write no findings rather than reviewing with an unprovable writer model, and the task shall still enter the step.
 - **AC-AGENTS-NATIVE-CODE-REVIEW-002.5:** The built-in workflow template format shall accept a `run_code_review` `on_enter` action with an optional string `agent_profile_id`, and shall reject a non-string `agent_profile_id`.
+- **AC-AGENTS-NATIVE-CODE-REVIEW-002.6:** When a reviewer candidate passes the origin exclusion with an effective model inherited from the utility default, the system shall run the review with exactly that model; when the execution path cannot carry the model, the system shall refuse the candidate with `review_agent_unavailable` rather than run an unchecked model.
 
 ## Out of scope
 

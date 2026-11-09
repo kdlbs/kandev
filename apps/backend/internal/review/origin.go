@@ -183,11 +183,21 @@ func (r *Resolver) resolveDistinct(ctx context.Context, profileID string) (Revie
 }
 
 func (r *Runner) prepareOriginContext(ctx context.Context, req *RunRequest) (context.Context, error) {
-	ex, err := r.resolver.originExclusion(ctx, req.Origin, req.OriginRequired)
+	ctx, err := r.resolver.WithOriginExclusion(ctx, req.Origin, req.OriginRequired)
 	if err != nil {
 		return ctx, err
 	}
-	req.originExclusion = ex
+	req.originExclusion, _ = ctx.Value(originExclusionKey{}).(*originExclusion)
+	return ctx, nil
+}
+
+// WithOriginExclusion returns ctx carrying the writer exclusion for origin.
+// A nil origin leaves ctx unchanged unless required, which fails closed.
+func (r *Resolver) WithOriginExclusion(ctx context.Context, origin *OriginIdentity, required bool) (context.Context, error) {
+	ex, err := r.originExclusion(ctx, origin, required)
+	if err != nil {
+		return ctx, err
+	}
 	return withOriginExclusion(ctx, ex), nil
 }
 

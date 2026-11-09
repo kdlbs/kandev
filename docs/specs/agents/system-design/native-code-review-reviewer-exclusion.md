@@ -34,7 +34,12 @@ candidate order and existing circuit state.
 A candidate with no explicit model uses the existing same-agent utility
 default. The review keeps that selected default through detached execution and
 fallback. An unavailable or different-agent default cannot prove a distinct
-model and is refused; a default matching the writer is excluded.
+model and is refused; a default matching the writer is excluded. A profile
+dispatch otherwise runs the profile's own model, or the agent's probed default
+when the profile has none, so under exclusion the review passes the checked
+model to the session and host profile prompts, which apply it in place of the
+profile's model. A session executor that cannot accept a model refuses the
+candidate.
 
 ## Workflow input
 

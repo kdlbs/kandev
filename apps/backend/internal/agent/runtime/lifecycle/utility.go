@@ -73,9 +73,16 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 // ExecuteInferenceProfilePrompt resolves a profile once at dispatch time and
 // applies its model, mode, config options, environment, flags, prefix, and
 // permission policy to a session-bound utility call.
+func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, profileID, prompt string) (*utility.PromptResponse, error) {
+	return m.ExecuteInferenceProfileModelPrompt(ctx, sessionID, profileID, "", prompt)
+}
+
+// ExecuteInferenceProfileModelPrompt is ExecuteInferenceProfilePrompt with an
+// explicit model. A non-empty model replaces the profile's model, so a caller
+// that already checked a concrete model runs exactly that model.
 //
 //nolint:cyclop // profile execution validates several independent runtime inputs.
-func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, profileID, prompt string) (*utility.PromptResponse, error) {
+func (m *Manager) ExecuteInferenceProfileModelPrompt(ctx context.Context, sessionID, profileID, model, prompt string) (*utility.PromptResponse, error) {
 	if m.profileResolver == nil {
 		return nil, fmt.Errorf("agent profile resolver is not configured")
 	}
@@ -133,9 +140,12 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 	if providerKey != "" && providerKeyEnvVar != "" {
 		env[providerKeyEnvVar] = providerKey // profile-declared provider key wins
 	}
+	if model == "" {
+		model = profile.Model
+	}
 	autoApprove := profile.AutoApprove
 	return m.executeOwnedInference(ctx, execution, client, &utility.PromptRequest{
-		Prompt: prompt, AgentID: agentName, Model: profile.Model, Mode: profile.Mode,
+		Prompt: prompt, AgentID: agentName, Model: model, Mode: profile.Mode,
 		AutoApprovePermissions: &autoApprove,
 		InferenceConfig: &utility.InferenceConfigDTO{
 			Protocol: cfg.Protocol,
