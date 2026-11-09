@@ -620,6 +620,19 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 // StreamUpdatesFrom opens the updates stream after a committed delivery
 // sequence. A zero cursor preserves the original first-connect behavior.
 func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error), after uint64) error {
+	return c.StreamUpdatesFromWithOwner(ctx, handler, mcpHandler, onDisconnect, after, nil)
+}
+
+// StreamUpdatesFromWithOwner opens an update stream and reports its accepted
+// connection owner before the stream starts dispatching agent events.
+func (c *Client) StreamUpdatesFromWithOwner(
+	ctx context.Context,
+	handler func(AgentEvent),
+	mcpHandler MCPHandler,
+	onDisconnect func(err error),
+	after uint64,
+	onConnected func(ownerID uint64),
+) error {
 	attempt, streamCtx, err := c.beginUpdatesStreamDial(ctx)
 	if err != nil {
 		return err
@@ -645,13 +658,16 @@ func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent)
 	}
 
 	c.logger.Info("connected to updates stream", zap.String("path", wsRoute))
-	stage := newUpdateStreamStage()
+	stage := newUpdateStreamStage(attempt.ownerID)
 	stage.connected.Store(true)
 	c.mu.Lock()
 	if c.agentStreamConn == conn {
 		c.updateStage.Store(stage)
 	}
 	c.mu.Unlock()
+	if onConnected != nil {
+		onConnected(attempt.ownerID)
+	}
 
 	// writeMessage uses the shared stream write mutex for thread-safe writes
 	writeMessage := func(data []byte) error {

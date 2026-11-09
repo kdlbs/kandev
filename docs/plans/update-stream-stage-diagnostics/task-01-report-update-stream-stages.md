@@ -51,9 +51,18 @@ stalled turn shows which stage stopped making progress.
 
 ## Verification
 
-Focused existing durable replay, final-wakeup, and projection-batch tests in
-`internal/agentctl/server/api`, `internal/agentctl/server/process`, and
-`internal/agent/runtime/lifecycle`, plus the existing stall diagnostic tests.
+From `apps/backend`, run the focused stream-stage, stream-owner, and projection
+accounting regressions with the existing durable replay, final-wakeup,
+projection-batch, and quiet-transport tests:
+
+```bash
+go test -race ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agentctl/server/process -run '^(TestStallDiagnosticBoundsAndExcludesPrivatePayloads|TestStreamStageCountsAreUnknownWithoutFreshHeartbeat|TestCaptureStreamStagesUsesProjectionAdmissionCount|TestCaptureStreamStagesKeepsPredecessorWorkUnknown|TestNewStreamEventProcessorDoesNotClaimConnectionOrderBeforeDial|TestInstallStreamProgressUsesAcceptedConnectionOrder|TestStreamProjectionWorkerWaitsForEnqueueAccounting|TestStreamUpdatesFromWithOwnerReportsAcceptedConnectionBeforeEvents|TestStreamUpdatesConsumesStageHeartbeatAsMetadata|TestStreamStageWriterIsOptInAndCountsSuccessfulWrites|TestDeliveryFailureDrainsActualTerminal|TestShutdownDeliveryDrainCountsAdapterUpdates|TestStreamProcessorFailureClosesQuietTransport|TestQuietRecoveredStreamAcknowledgesProjectedCursor|TestCanonicalProjectionBatchNotifiesOnceWithAccumulatedContent|TestCanonicalProjectionBatchSkipsRowsWithoutCommittedMessageID|TestDurableWriterFinalWake)$' -count=1
+```
+
+## Results
+
+Passed the verification command above. All four packages passed under the race
+detector, including the 17 selected regression and compatibility tests.
 
 ## Files likely touched
 

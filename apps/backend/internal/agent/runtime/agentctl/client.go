@@ -107,6 +107,7 @@ type Client struct {
 
 type updatesStreamDial struct {
 	sequence     uint64
+	ownerID      uint64
 	ctx          context.Context
 	streamCtx    context.Context
 	cancel       context.CancelFunc
@@ -484,6 +485,7 @@ func (c *Client) completeUpdatesStreamDial(
 	attempt.retired = true
 	c.updatesDial = nil
 	c.agentStreamConn = conn
+	attempt.ownerID = updateStreamStageOwnerSequence.Add(1)
 	streamCancel := attempt.streamCancel
 	dialCancel := attempt.cancel
 	c.mu.Unlock()

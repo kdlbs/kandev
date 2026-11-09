@@ -1,5 +1,6 @@
 package streams
 
+// UpdateStreamStageAction carries transport progress that is not an agent event.
 const UpdateStreamStageAction = "agent.stream.stage"
 
 // UpdateStreamStageHeartbeat is transport metadata, not an agent turn event.

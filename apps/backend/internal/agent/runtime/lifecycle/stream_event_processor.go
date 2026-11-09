@@ -34,12 +34,17 @@ type streamEventProcessor struct {
 	startupGeneration uint64
 	attempt           *deliveryStartupAttempt
 	progress          *streamProjectionProgress
-	events            chan agentctl.AgentEvent
+	events            chan streamEventAdmission
 	done              chan struct{}
 
 	closeOnce sync.Once
 	errMu     sync.Mutex
 	err       error
+}
+
+type streamEventAdmission struct {
+	event    agentctl.AgentEvent
+	accepted chan struct{}
 }
 
 type streamEventBatch struct {
@@ -68,8 +73,8 @@ func newStreamEventProcessor(
 		delivery:          delivery,
 		startupGeneration: startupGeneration,
 		attempt:           attempt,
-		progress:          &streamProjectionProgress{sequence: execution.streamProgressSequence.Add(1)},
-		events:            make(chan agentctl.AgentEvent, streamProjectionQueueSize),
+		progress:          &streamProjectionProgress{tracker: execution.streamProjectionTracker()},
+		events:            make(chan streamEventAdmission, streamProjectionQueueSize),
 		done:              make(chan struct{}),
 	}
 	go processor.run()
@@ -77,9 +82,20 @@ func newStreamEventProcessor(
 }
 
 func (p *streamEventProcessor) enqueue(event agentctl.AgentEvent) bool {
+	admission := streamEventAdmission{event: event, accepted: make(chan struct{})}
 	select {
-	case p.events <- event:
-		p.progress.enqueued.Add(1)
+	case p.events <- admission:
+		p.progress.enqueued()
+		close(admission.accepted)
+		return true
+	case <-p.ctx.Done():
+		return false
+	}
+}
+
+func (p *streamEventProcessor) waitForAdmission(admission streamEventAdmission) bool {
+	select {
+	case <-admission.accepted:
 		return true
 	case <-p.ctx.Done():
 		return false
@@ -116,12 +132,15 @@ func (p *streamEventProcessor) run() {
 	batch := &streamEventBatch{}
 	for {
 		select {
-		case event, ok := <-p.events:
+		case admission, ok := <-p.events:
 			if !ok {
 				p.fail(p.flushBatch(batch))
 				return
 			}
-			if err := p.handleEvent(batch, event); err != nil {
+			if !p.waitForAdmission(admission) {
+				return
+			}
+			if err := p.handleEvent(batch, admission.event); err != nil {
 				p.fail(err)
 				return
 			}

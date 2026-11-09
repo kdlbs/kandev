@@ -8,7 +8,9 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
+// UpdateStreamStageSnapshot reports observations for the installed updates stream.
 type UpdateStreamStageSnapshot struct {
+	OwnerID              uint64
 	ReadCount            uint64
 	HandledCount         uint64
 	Pending              uint64
@@ -20,6 +22,7 @@ type UpdateStreamStageSnapshot struct {
 }
 
 type updateStreamStage struct {
+	ownerID      uint64
 	readCount    atomic.Uint64
 	handledCount atomic.Uint64
 	readAt       atomic.Int64
@@ -29,7 +32,11 @@ type updateStreamStage struct {
 	connected    atomic.Bool
 }
 
-func newUpdateStreamStage() *updateStreamStage { return &updateStreamStage{} }
+var updateStreamStageOwnerSequence atomic.Uint64
+
+func newUpdateStreamStage(ownerID uint64) *updateStreamStage {
+	return &updateStreamStage{ownerID: ownerID}
+}
 func (s *updateStreamStage) recordRead() {
 	s.readAt.Store(time.Now().UnixNano())
 	s.readCount.Add(1)
@@ -42,6 +49,7 @@ func (s *updateStreamStage) snapshot() UpdateStreamStageSnapshot {
 	read := s.readCount.Load()
 	handled := s.handledCount.Load()
 	snapshot := UpdateStreamStageSnapshot{
+		OwnerID:   s.ownerID,
 		ReadCount: read, HandledCount: handled, Pending: read - min(read, handled),
 		LastReadAgeMillis:    stageAgeMillis(s.readAt.Load()),
 		LastHandledAgeMillis: stageAgeMillis(s.handledAt.Load()),

@@ -449,7 +449,7 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	attachment := sm.startDeliveryHealthMonitor(monitorCtx, monitorCancel, execution, client)
 	// Processor failure cancels only this connection, including when no later
 	// frame arrives. Disconnect handling reports the original processing error.
-	err := client.StreamUpdatesFrom(processor.ctx, func(event agentctl.AgentEvent) {
+	err := client.StreamUpdatesFromWithOwner(processor.ctx, func(event agentctl.AgentEvent) {
 		processor.enqueue(event)
 	}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
 		attachment.close()
@@ -491,11 +491,14 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 			}
 			sm.handleUpdatesDisconnectWithGeneration(execution, disconnectErr, startupGeneration)
 		}
-	}, after)
+	}, after, func(ownerID uint64) {
+		processor.progress.ownerID = ownerID
+		stage, ok := client.UpdateStreamStage()
+		if ok && stage.OwnerID == ownerID {
+			execution.installStreamProgress(processor.progress)
+		}
+	})
 	execution.recordDeliveryStreamFailure(startupGeneration, err)
-	if err == nil {
-		execution.installStreamProgress(processor.progress)
-	}
 	if err != nil {
 		attachment.close()
 		monitorCancel()

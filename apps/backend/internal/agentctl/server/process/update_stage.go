@@ -11,6 +11,7 @@ func (m *Manager) recordAdapterStage() {
 	m.adapterStageSeen.Add(1)
 }
 
+// UpdateStreamStage returns the latest adapter activity observed by the manager.
 func (m *Manager) UpdateStreamStage() streams.UpdateStreamStageHeartbeat {
 	stage := streams.UpdateStreamStageHeartbeat{
 		AdapterSeen: m.adapterStageSeen.Load(), AdapterAgeMillis: -1, WriterAgeMillis: -1,
