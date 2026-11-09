@@ -3175,6 +3175,27 @@ type TaskEnvironment struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// EffectiveExecutorType returns the environment's persisted executor type. A
+// legacy row with no executor identity or runtime handles represents the
+// implicit local executor used before executor profiles existed.
+func (te *TaskEnvironment) EffectiveExecutorType() (ExecutorType, bool) {
+	if te == nil {
+		return "", false
+	}
+	if te.ExecutorType != "" {
+		executorType := ExecutorType(te.ExecutorType)
+		if executorType.Runtime() == agentruntime.RuntimeUnknown {
+			return "", false
+		}
+		return executorType, true
+	}
+	if te.ExecutorID != "" || te.ExecutorProfileID != "" || te.ContainerID != "" || te.SandboxID != "" ||
+		te.ContainerBootstrapNonceSecretID != "" || te.ContainerControlAuthTokenSecretID != "" {
+		return "", false
+	}
+	return ExecutorTypeLocal, true
+}
+
 // RepoFor returns the per-repo environment row for repositoryID, or nil if not present.
 func (te *TaskEnvironment) RepoFor(repositoryID string) *TaskEnvironmentRepo {
 	for _, r := range te.Repos {

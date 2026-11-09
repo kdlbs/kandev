@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-19
-updated: 2026-10-12
+updated: 2026-11-08
 owners:
   - cfl12
 ---
@@ -146,9 +146,13 @@ Terms used below:
   physical evidence, the system shall elect that session as the new owner and run
   full workspace preparation.
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.5:** When a `failed` environment has
-  physical evidence, or belongs to a parent task through `inherit_parent`, a
-  start shall keep failing with `workspace_reuse_unsafe` and shall not change the
-  environment. The existing environment reset action remains its recovery.
+  physical evidence, or is inherited from another task through `inherit_parent`
+  or `shared_group`, a start shall not re-elect or change that environment. A new
+  launch that satisfies
+  `AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5` may instead claim a
+  separate child-owned environment for its different non-Kubernetes executor;
+  all other starts shall keep failing with `workspace_reuse_unsafe`. The existing
+  environment reset action remains the recovery for the failed environment.
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.6:** When several starts re-elect the
   same environment at the same time, exactly one shall become the owner. A launch
   that loses the race shall wait for the new owner like any `creating` sibling or
