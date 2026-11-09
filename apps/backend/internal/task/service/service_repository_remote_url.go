@@ -286,7 +286,11 @@ func (s *Service) validateBuiltInRepositoryRemoteURL(
 	if err := validateBuiltInRepairShape(provider, candidate); err != nil {
 		return repositoryRemoteURLValidation{}, err
 	}
-	if candidate.isSCP && !savedOriginSupportsSCPRepair(repository, candidate.host) {
+	if candidate.isSCP {
+		if !savedOriginSupportsSCPRepair(repository, candidate.host) {
+			return repositoryRemoteURLValidation{}, invalidRemoteURLSetting()
+		}
+	} else if !savedOriginMatchesRepairCandidate(repository, candidate) {
 		return repositoryRemoteURLValidation{}, invalidRemoteURLSetting()
 	}
 	identitySource, identityScheme := candidate.raw, candidate.scheme
@@ -366,6 +370,14 @@ func savedOriginSupportsSCPRepair(repository *models.Repository, scpHost string)
 	}
 	savedHost := normalizeProviderHost(repository.Provider, repository.ProviderHost)
 	return savedHost != "" && savedHost == protocolHTTPS+"://"+strings.ToLower(scpHost)
+}
+
+func savedOriginMatchesRepairCandidate(repository *models.Repository, candidate repositoryRepairCandidate) bool {
+	if strings.TrimSpace(repository.ProviderHost) == "" {
+		return false
+	}
+	savedHost := normalizeProviderHost(repository.Provider, repository.ProviderHost)
+	return savedHost != "" && savedHost == candidate.scheme+"://"+strings.ToLower(candidate.host)
 }
 
 func validateSavedBuiltInIdentity(
@@ -575,7 +587,13 @@ func displayableRemoteURL(raw string) (string, bool) {
 		}
 		return raw, true
 	}
-	if strings.Contains(raw, "%") || strings.IndexFunc(raw, func(character rune) bool {
+	if strings.Contains(raw, "%") {
+		if _, err := parseRepositoryRepairCandidate(raw); err != nil {
+			return "", false
+		}
+		return raw, true
+	}
+	if strings.IndexFunc(raw, func(character rune) bool {
 		return unicode.IsSpace(character) || unicode.IsControl(character)
 	}) >= 0 {
 		return "", false

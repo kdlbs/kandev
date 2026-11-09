@@ -12,6 +12,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type backendRemoteURLResolverStub struct {
+	descriptor taskservice.TaskRepositoryInput
+}
+
+func (r *backendRemoteURLResolverStub) ResolveRepositorySelection(
+	context.Context, string, taskservice.TaskRepositoryInput,
+) (taskservice.TaskRepositoryInput, error) {
+	return r.descriptor, nil
+}
+
+func (r *backendRemoteURLResolverStub) DiscoverRepositorySelections(
+	context.Context, string, taskservice.TaskRepositoryInput,
+) (taskservice.RepositorySelectionDiscoveryResult, error) {
+	return taskservice.RepositorySelectionDiscoveryResult{}, nil
+}
+
+func backendPluginRemoteURLDescriptor(owner string) taskservice.TaskRepositoryInput {
+	return taskservice.TaskRepositoryInput{
+		RemoteURL: "https://bitbucket.example.test/scm/TEAM/fixture.git",
+		Provider:  "fixture-source-control", ProviderHost: "https://bitbucket.example.test",
+		ProviderScope: "workspace-a", ProviderRepoID: "repo-42", ProviderOwner: owner, ProviderName: "fixture",
+		DefaultBranch: "main", TrustedProviderDescriptor: true,
+	}
+}
+
 func seedRemoteURLSettingsRepository(t *testing.T, f *checkoutSettingsFixture) {
 	t.Helper()
 	row, err := f.store.GetRepository(t.Context(), "settings-repo")
@@ -23,6 +48,22 @@ func seedRemoteURLSettingsRepository(t *testing.T, f *checkoutSettingsFixture) {
 	row.ProviderOwner = "acme"
 	row.ProviderName = "widget"
 	row.RemoteURL = "git@github.com:acme/widget.git"
+	require.NoError(t, f.store.UpdateRepository(t.Context(), row))
+}
+
+func seedPluginRemoteURLSettingsRepository(t *testing.T, f *checkoutSettingsFixture) {
+	t.Helper()
+	row, err := f.store.GetRepository(t.Context(), "settings-repo")
+	require.NoError(t, err)
+	row.Name = "TEAM/fixture"
+	row.SourceType = "provider"
+	row.Provider = "fixture-source-control"
+	row.ProviderHost = "https://bitbucket.example.test"
+	row.ProviderScope = "workspace-a"
+	row.ProviderRepoID = "repo-42"
+	row.ProviderOwner = "TEAM"
+	row.ProviderName = "fixture"
+	row.RemoteURL = "https://bitbucket.example.test/scm/TEAM/fixture.git"
 	require.NoError(t, f.store.UpdateRepository(t.Context(), row))
 }
 
@@ -195,6 +236,31 @@ func TestRepositoryRemoteURLGuardedMCP(t *testing.T) {
 		require.Equal(t, "https://github.com/acme/widget.git", stored.RemoteURL)
 		require.Len(t, f.events.rows, 1)
 		require.Equal(t, "https://github.com/acme/widget.git", f.events.rows[0].Data.(map[string]interface{})["remote_url"])
+	})
+
+	t.Run("plugin_descriptor_change_between_preview_and_update_fails_closed", func(t *testing.T) {
+		f := checkoutSettingsHarness(t)
+		seedPluginRemoteURLSettingsRepository(t, f)
+		resolver := &backendRemoteURLResolverStub{descriptor: backendPluginRemoteURLDescriptor("TEAM")}
+		f.api.SetRepositorySelectionResolver(resolver)
+		proposed := "https://bitbucket.example.test/projects/TEAM/fixture"
+
+		previewResponse := f.saveRemoteURL(t, checkoutSettingsContext(t.Context()),
+			map[string]any{"remote_url": proposed}, map[string]any{"validate_only": true})
+		require.Equal(t, ws.MessageTypeResponse, previewResponse.Type, "%s", previewResponse.Payload)
+
+		resolver.descriptor = backendPluginRemoteURLDescriptor("OTHER")
+		updateResponse := f.saveRemoteURL(t, checkoutSettingsContext(t.Context()),
+			map[string]any{"remote_url": proposed}, map[string]any{"validate_only": false})
+		require.Equal(t, ws.MessageTypeError, updateResponse.Type, "%s", updateResponse.Payload)
+		var payload ws.ErrorPayload
+		require.NoError(t, json.Unmarshal(updateResponse.Payload, &payload))
+		require.Equal(t, "repository_selection_invalid", payload.Details["code"])
+		stored, err := f.store.GetRepository(t.Context(), "settings-repo")
+		require.NoError(t, err)
+		require.Equal(t, "https://bitbucket.example.test/scm/TEAM/fixture.git", stored.RemoteURL)
+		require.Equal(t, "TEAM", stored.ProviderOwner)
+		require.Empty(t, f.events.rows)
 	})
 
 	t.Run("validate_only_false_allows_a_combined_binding_repair", func(t *testing.T) {

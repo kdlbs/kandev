@@ -58,17 +58,23 @@ IPv6 and explicit SSH ports require a separately supported URL form. This repair
 
 ## Admission sequence
 
-1. Reject empty input, whitespace, controls, absolute filesystem paths, and raw query/fragment delimiters.
+1. Reject empty input, raw whitespace, controls, absolute filesystem paths, backslashes, and raw query/fragment delimiters.
    Empty query/fragment suffixes also fail.
 2. If the input starts with `git@`, apply the strict SCP parser before `url.Parse`.
    Return success only for a complete match. A failed match is final.
 3. Parse other inputs through `net/url`. Preserve the existing network-scheme set: `https`, `http`, `ssh`, and `git`.
    Reject URL user information, queries, fragments, malformed URLs, and missing hosts.
+   Raw whitespace, controls, backslashes, and empty query/fragment suffixes fail in step 1.
+   Encoded path segments retain the existing URL path behavior.
 4. Reject unsupported schemes and local/file/path locators.
 
 This leaves URL path normalization with the existing URL path.
 It adds no public-host allowlist and no credential or reachability probe.
 Raw query/fragment and whitespace rejection closes ambiguous spellings rather than interpreting them as clone-path content.
+The conventional SCP subset remains ASCII-restricted.
+The [registration repair validator](remote-repository-registration.md#identity-validation) applies the narrower HTTPS
+candidate rules: supported percent-encoded spaces and Unicode segments are allowed, while encoded authority or path
+separators, encoded controls, repeated separators, and traversal after decoding are rejected.
 
 Keep request errors bounded (`invalid repository locator`) and keep locators out of responses and new logs.
 Destination validation and Git's argument separator remain unchanged.

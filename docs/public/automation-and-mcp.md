@@ -1340,10 +1340,12 @@ Repository clone URLs use the same tools. Read the saved value with
 The result carries a `validation` object with the saved and effective URLs,
 provider identity, and `validation_scope`. Repeat the same call without
 `options`, or with `"validate_only": false`, to commit the change. A committed
-update republishes `settings.remote_url` and a `repository.updated` event. The
-option is accepted only for a repository target with exactly one `remote_url`
-change. Unknown options, non-boolean values, mixed preview changes, and null or
-blank URLs are rejected without a write.
+update republishes `settings.remote_url` and a `repository.updated` event. With
+`validate_only` set to `true`, the option accepts only a repository target with
+exactly one `remote_url` change. With `validate_only` set to `false`, ordinary
+repository settings updates and combined URL/settings or binding writes remain
+available. Unknown options, non-boolean values, mixed preview changes, and null
+or blank URLs are rejected without a write.
 
 Built-in GitHub, GitLab, and Azure DevOps providers verify the credential-free
 locator against the saved provider, host, namespace or project, and repository

@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/task/dto"
@@ -117,6 +119,90 @@ func TestRepositoryRemoteURLHTTPPreservesExactIdentity(t *testing.T) {
 	require.Equal(t, "https://github.com", stored.ProviderHost)
 }
 
+type repositoryRemoteURLResolverStub struct {
+	descriptor service.TaskRepositoryInput
+}
+
+func (r *repositoryRemoteURLResolverStub) ResolveRepositorySelection(
+	context.Context, string, service.TaskRepositoryInput,
+) (service.TaskRepositoryInput, error) {
+	return r.descriptor, nil
+}
+
+func (r *repositoryRemoteURLResolverStub) DiscoverRepositorySelections(
+	context.Context, string, service.TaskRepositoryInput,
+) (service.RepositorySelectionDiscoveryResult, error) {
+	return service.RepositorySelectionDiscoveryResult{}, nil
+}
+
+func pluginRemoteURLDescriptor(owner string) service.TaskRepositoryInput {
+	return service.TaskRepositoryInput{
+		RemoteURL: "https://bitbucket.example.test/scm/TEAM/fixture.git",
+		Provider:  "fixture-source-control", ProviderHost: "https://bitbucket.example.test",
+		ProviderScope: "workspace-a", ProviderRepoID: "repo-42", ProviderOwner: owner, ProviderName: "fixture",
+		DefaultBranch: "main", TrustedProviderDescriptor: true,
+	}
+}
+
+func seedPluginRemoteURLRoute(t *testing.T) *checkoutRouteFixture {
+	t.Helper()
+	fixtures := checkoutRoutePair(t)
+	f := fixtures[0]
+	row, err := f.repo.GetRepository(t.Context(), "route-repo")
+	require.NoError(t, err)
+	row.Name = "TEAM/fixture"
+	row.SourceType = "provider"
+	row.Provider = "fixture-source-control"
+	row.ProviderHost = "https://bitbucket.example.test"
+	row.ProviderScope = "workspace-a"
+	row.ProviderRepoID = "repo-42"
+	row.ProviderOwner = "TEAM"
+	row.ProviderName = "fixture"
+	row.RemoteURL = "https://bitbucket.example.test/scm/TEAM/fixture.git"
+	require.NoError(t, f.repo.UpdateRepository(t.Context(), row))
+	return f
+}
+
+func TestRepositoryRemoteURLPluginDescriptorChangeFailsClosed(t *testing.T) {
+	const proposed = "https://bitbucket.example.test/projects/TEAM/fixture"
+
+	t.Run("HTTP", func(t *testing.T) {
+		f := seedPluginRemoteURLRoute(t)
+		resolver := &repositoryRemoteURLResolverStub{descriptor: pluginRemoteURLDescriptor("TEAM")}
+		f.api.SetRepositorySelectionResolver(resolver)
+		response := postRemoteURLValidation(t, f.router, "route-repo", proposed)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+		resolver.descriptor = pluginRemoteURLDescriptor("OTHER")
+		row, code := f.update(t, context.Background(), "HTTP", `{"remote_url":"`+proposed+`"}`)
+		require.Equal(t, http.StatusBadRequest, code)
+		require.Empty(t, row.RemoteURL)
+		stored, err := f.repo.GetRepository(t.Context(), "route-repo")
+		require.NoError(t, err)
+		require.Equal(t, "https://bitbucket.example.test/scm/TEAM/fixture.git", stored.RemoteURL)
+		require.Equal(t, "TEAM", stored.ProviderOwner)
+		require.Empty(t, f.events.records())
+	})
+
+	t.Run("WS", func(t *testing.T) {
+		f := seedPluginRemoteURLRoute(t)
+		resolver := &repositoryRemoteURLResolverStub{descriptor: pluginRemoteURLDescriptor("TEAM")}
+		f.api.SetRepositorySelectionResolver(resolver)
+		response, err := dispatchRemoteURLValidation(t, f, "route-repo", proposed)
+		require.NoError(t, err)
+		require.Equal(t, ws.MessageTypeResponse, response.Type)
+
+		resolver.descriptor = pluginRemoteURLDescriptor("OTHER")
+		row, code := f.update(t, context.Background(), "WS", `{"remote_url":"`+proposed+`"}`)
+		require.Equal(t, http.StatusBadRequest, code)
+		require.Empty(t, row.RemoteURL)
+		stored, err := f.repo.GetRepository(t.Context(), "route-repo")
+		require.NoError(t, err)
+		require.Equal(t, "https://bitbucket.example.test/scm/TEAM/fixture.git", stored.RemoteURL)
+		require.Empty(t, f.events.records())
+	})
+}
+
 func TestRepositoryRemoteURLWS(t *testing.T) {
 	f := seedRemoteURLRoute(t)
 
@@ -191,6 +277,9 @@ func TestRepositoryRemoteURLIdentityConflictHTTP(t *testing.T) {
 	f := seedRemoteURLRoute(t)
 	f.gate.remaining.Store(2)
 	ctx := t.Context()
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(f.gate.release) }) }
+	defer release()
 	done := make(chan int, 1)
 	go func() {
 		request := httptest.NewRequest(http.MethodPatch, "/api/v1/repositories/route-repo",
@@ -200,20 +289,24 @@ func TestRepositoryRemoteURLIdentityConflictHTTP(t *testing.T) {
 		f.router.ServeHTTP(response, request)
 		done <- response.Code
 	}()
+	readCtx, cancelRead := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelRead()
 	select {
 	case <-f.gate.read:
-	case <-ctx.Done():
+	case <-readCtx.Done():
 		t.Fatal("validation snapshot read not observed")
 	}
 	stored, err := f.repo.GetRepository(ctx, "route-repo")
 	require.NoError(t, err)
 	stored.ProviderOwner = "other"
 	require.NoError(t, f.repo.UpdateRepository(ctx, stored))
-	close(f.gate.release)
+	release()
+	doneCtx, cancelDone := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelDone()
 	select {
 	case code := <-done:
 		require.Equal(t, http.StatusConflict, code)
-	case <-ctx.Done():
+	case <-doneCtx.Done():
 		t.Fatal("conflicting update did not finish")
 	}
 	stored, err = f.repo.GetRepository(ctx, "route-repo")

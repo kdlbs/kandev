@@ -131,3 +131,4 @@ Implemented on 2026-11-08.
   `websocket-api.md`, and `automation-and-mcp.md`.
 - No rendered control, localization string, mobile composition, screenshot, or new MCP tool was added.
 - Review follow-up: `options.validate_only` now requires an actual JSON boolean and rejects unknown options at both boundaries, so `null` is rejected without a write. When the option is `false`, ordinary updates and combined repair writes are allowed. Guarded compact MCP tests cover null rejection with unchanged URL, timestamp, bindings, and zero events, plus false with an ordinary change and false with a combined repair.
+  A changed plugin descriptor between preview and update is rejected through the registered HTTP, WS, and guarded MCP paths without a write or success event.

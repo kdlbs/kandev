@@ -64,6 +64,8 @@ func TestRepositoryRemoteURLValidation(t *testing.T) {
 		{name: "different owner", proposed: "https://github.com/other/widget.git"},
 		{name: "different repository", proposed: "https://github.com/acme/other.git"},
 		{name: "different host", proposed: "https://github.example.com/acme/widget.git"},
+		{name: "different port", proposed: "https://github.com:8443/acme/widget.git"},
+		{name: "encoded different port", proposed: "https://github.com:8443/acme/w%69dget.git"},
 		{name: "browser resource path", proposed: "https://github.com/acme/widget/pull/1"},
 		{name: "gitlab style resource suffix", proposed: "https://github.com/acme/widget/-/issues/1"},
 		{name: "embedded credentials", proposed: "https://token@github.com/acme/widget.git"},
@@ -99,7 +101,7 @@ func TestRepositoryRemoteURLValidation(t *testing.T) {
 }
 
 func TestRepositoryRemoteURLEncodedAzurePath(t *testing.T) {
-	svc, _, repo, _ := seedRemoteURLRepository(t)
+	svc, bus, repo, _ := seedRemoteURLRepository(t)
 	azure := &models.Repository{
 		ID: "azure-encoded", WorkspaceID: "remote-url-ws", Name: "project name/widget", SourceType: "provider",
 		Provider: providerAzureDevOps, ProviderHost: "https://dev.azure.com",
@@ -119,6 +121,15 @@ func TestRepositoryRemoteURLEncodedAzurePath(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "https://dev.azure.com/acme/project%20name/_git/widget", updated.RemoteURL)
+	events := bus.GetPublishedEvents()
+	require.Len(t, events, 1)
+	require.Equal(t, "https://dev.azure.com/acme/project%20name/_git/widget", events[0].Data.(map[string]interface{})["remote_url"])
+
+	preview, err = svc.ValidateRepositoryRemoteURLUpdate(t.Context(), azure.ID,
+		"https://dev.azure.com/acme/project%20name/_git/widget")
+	require.NoError(t, err)
+	require.Equal(t, "https://dev.azure.com/acme/project%20name/_git/widget", preview.CurrentRemoteURL)
+	require.False(t, preview.CurrentRemoteURLRedacted)
 }
 
 func TestRepositoryRemoteURLPluginEncodedAndUnicodePath(t *testing.T) {

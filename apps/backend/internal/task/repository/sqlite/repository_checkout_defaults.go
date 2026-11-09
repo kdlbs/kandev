@@ -79,6 +79,9 @@ func (r *Repository) writeRepositoryCheckout(ctx context.Context, row *models.Re
 		return err
 	}
 	if !found {
+		if intent.ObservedIdentity != nil {
+			return repoerrors.ErrTaskVersionConflict
+		}
 		return fmt.Errorf("repository not found: %s", row.ID)
 	}
 	proposed := *row

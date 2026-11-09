@@ -3528,7 +3528,7 @@
           "key": "repository.remote_url",
           "field_path": "remote_url",
           "label": "Remote URL",
-          "description": "Repository setting.",
+          "description": "Credential-free clone locator. A replacement must preserve the saved provider identity, host, namespace, and name.",
           "json_type": "string",
           "support": "supported",
           "classification": "writable",
@@ -3670,7 +3670,17 @@
         {
           "name": "update",
           "binding": "workspace.repository.update",
-          "authority": "workspace.manage"
+          "authority": "workspace.manage",
+          "options": {
+            "additionalProperties": false,
+            "properties": {
+              "validate_only": {
+                "description": "Validate a single remote_url replacement without writing.",
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
         }
       ],
       "settings_href": "/settings"

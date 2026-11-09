@@ -66,6 +66,26 @@ func TestRepositoryRemoteURLStorageIdentityFence(t *testing.T) {
 	require.Equal(t, "git@github.com:acme/widget.git", stored.RemoteURL)
 }
 
+func TestRepositoryRemoteURLMissingFencedRowConflicts(t *testing.T) {
+	t.Run("fenced write conflicts", func(t *testing.T) {
+		r, row := remoteURLStoreFixture(t)
+		fence := models.NewRepositoryIdentityFence(row)
+		require.NoError(t, r.DeleteRepository(t.Context(), row.ID))
+
+		repair := "https://github.com/acme/widget.git"
+		err := r.UpdateRepositoryWithCheckoutIntent(t.Context(), row, models.RepositoryCheckoutIntent{
+			RemoteURL: &repair, ObservedIdentity: fence,
+		})
+		require.ErrorIs(t, err, repoerrors.ErrTaskVersionConflict)
+	})
+	t.Run("unfenced write keeps not-found error", func(t *testing.T) {
+		r, row := remoteURLStoreFixture(t)
+		require.NoError(t, r.DeleteRepository(t.Context(), row.ID))
+		err := r.UpdateRepositoryWithCheckoutIntent(t.Context(), row, models.RepositoryCheckoutIntent{})
+		require.ErrorContains(t, err, "repository not found")
+	})
+}
+
 func TestRepositoryRemoteURLAtomicity(t *testing.T) {
 	r, row := remoteURLStoreFixture(t)
 	_, err := r.db.Exec(`CREATE TRIGGER reject_remote_url_binding BEFORE INSERT ON repository_secret_bindings BEGIN SELECT RAISE(ABORT, 'binding rejected'); END`)
