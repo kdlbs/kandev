@@ -80,13 +80,23 @@ func parseMaterializedAttachmentUpload(c *gin.Context) (materializedAttachmentUp
 }
 
 func (s *Server) persistMaterializedAttachment(upload materializedAttachmentUpload) (materializedAttachmentResponse, error) {
+	var response materializedAttachmentResponse
+	err := s.procMgr.WithAttachmentWorkDir(func(workDir string) error {
+		var err error
+		response, err = s.persistMaterializedAttachmentAt(workDir, upload)
+		return err
+	})
+	return response, err
+}
+
+func (s *Server) persistMaterializedAttachmentAt(workDir string, upload materializedAttachmentUpload) (materializedAttachmentResponse, error) {
 	file, err := upload.fileHeader.Open()
 	if err != nil {
 		return materializedAttachmentResponse{}, newMaterializedAttachmentError(http.StatusBadRequest, "file is unreadable")
 	}
 	defer func() { _ = file.Close() }()
 
-	dir, err := safeAttachmentPath(s.cfg.WorkDir, ".kandev", "attachments", upload.sessionID)
+	dir, err := safeAttachmentPath(workDir, ".kandev", "attachments", upload.sessionID)
 	if err != nil {
 		return materializedAttachmentResponse{}, newMaterializedAttachmentError(http.StatusBadRequest, "attachment identity is invalid")
 	}
