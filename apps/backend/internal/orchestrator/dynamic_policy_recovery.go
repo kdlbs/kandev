@@ -171,9 +171,13 @@ func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string
 	if !ok {
 		return
 	}
-	// Serialize route recovery with manual actions through the durable
-	// projection. Release before lifecycle launch because launch takes the
-	// session lifecycle lock.
+	// Explicit recovery and route actions use the same session lock. Keep the
+	// policy claim, session projection, and successor launch in that ownership
+	// window so a timer cannot reset a session owned by explicit recovery.
+	releaseRouteAction := s.acquireRouteActionOperationLock(sessionID)
+	defer releaseRouteAction()
+	// The cancel guard protects projection writes. Release it before launch,
+	// which takes the session lifecycle lock; keep route-operation ownership.
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	lock.Lock()
 	locked := true
