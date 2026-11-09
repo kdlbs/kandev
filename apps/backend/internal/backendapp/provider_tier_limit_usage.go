@@ -2,11 +2,11 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"math"
 	"strings"
 	"time"
 
-	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
@@ -18,30 +18,47 @@ func (s *providerTierLimitService) readUsage(ctx context.Context, c tierLimitCon
 		return used, err
 	}
 	used.ActiveTurns = active
-	if err := s.readRequestUsage(ctx, c, now, &used); err != nil {
+	// A model-attribution failure is returned only after the account-wide
+	// usage is read, so provenAccountLimit can still apply that evidence.
+	var attribution error
+	if err := s.readRequestUsage(ctx, c, now, &used, &attribution); err != nil {
 		return used, err
 	}
 	for _, budget := range c.effective.Windows {
 		amount, reset, known, err := s.readBudgetUsage(ctx, c, budget, now)
 		if err != nil {
-			return used, err
+			if err := deferAttribution(&attribution, err); err != nil {
+				return used, err
+			}
+			continue
 		}
 		if known {
 			used.Windows[budget.Key()] = amount
 			used.Resets[budget.Key()] = reset
 		}
 	}
-	if err := s.readScopeUsage(ctx, c, now, &used); err != nil {
+	if err := deferAttribution(&attribution, s.readScopeUsage(ctx, c, now, &used)); err != nil {
 		return used, err
 	}
-	return used, nil
+	return used, attribution
 }
 
-func (s *providerTierLimitService) readRequestUsage(ctx context.Context, c tierLimitContext, now time.Time, used *agentusage.LimitUsage) error {
-	ids := s.minuteProfiles(ctx, c)
+// deferAttribution keeps the first model-attribution failure in first and
+// returns every other error unchanged.
+func deferAttribution(first *error, err error) error {
+	if !errors.Is(err, errModelAttributionUnavailable) {
+		return err
+	}
+	if *first == nil {
+		*first = err
+	}
+	return nil
+}
+
+func (s *providerTierLimitService) readRequestUsage(ctx context.Context, c tierLimitContext, now time.Time, used *agentusage.LimitUsage, attribution *error) error {
 	var err error
-	used.RequestsMinute, err = s.readMinuteRequestCount(ctx, c, ids, now.Add(-time.Minute), now)
-	if err != nil {
+	used.RequestsMinute, err = s.readMinuteRequestCount(ctx, c, now.Add(-time.Minute), now)
+	if err := deferAttribution(attribution, err); err != nil {
 		return err
 	}
 	start, reset, err := agentusage.DailyLimitWindow(now, c.effective.DailyReset)
@@ -57,8 +74,8 @@ func (s *providerTierLimitService) readRequestUsage(ctx context.Context, c tierL
 	used.TokensDay = day.TokensTotal
 	used.Resets["day"] = reset
 	if c.effective.RequestWindowSeconds > 0 {
-		used.RequestsWindow, err = s.readMinuteRequestCount(ctx, c, ids, now.Add(-time.Duration(c.effective.RequestWindowSeconds)*time.Second), now)
-		if err != nil {
+		used.RequestsWindow, err = s.readMinuteRequestCount(ctx, c, now.Add(-time.Duration(c.effective.RequestWindowSeconds)*time.Second), now)
+		if err := deferAttribution(attribution, err); err != nil {
 			return err
 		}
 	}
@@ -72,25 +89,14 @@ func (s *providerTierLimitService) readRequestUsage(ctx context.Context, c tierL
 	return nil
 }
 
-func (s *providerTierLimitService) readMinuteRequestCount(ctx context.Context, c tierLimitContext, ids []string, start, end time.Time) (float64, error) {
-	if c.modelOverride && c.effective.RequestsPerModel {
+// readMinuteRequestCount counts a per-model request limit from the recorded
+// model of each request across the account's profiles, never from a
+// profile's current default model.
+func (s *providerTierLimitService) readMinuteRequestCount(ctx context.Context, c tierLimitContext, start, end time.Time) (float64, error) {
+	if c.effective.RequestsPerModel {
 		return s.readModelRequestCount(ctx, c.ids, []string{c.profile.Model}, start, end)
 	}
-	return s.readRequestCount(ctx, ids, start, end)
-}
-
-func (s *providerTierLimitService) minuteProfiles(ctx context.Context, c tierLimitContext) []string {
-	if !c.effective.RequestsPerModel {
-		return c.ids
-	}
-	var ids []string
-	for _, id := range c.ids {
-		p, _, ok := s.usage.loadProfile(ctx, id)
-		if ok && p.Model == c.profile.Model {
-			ids = append(ids, id)
-		}
-	}
-	return ids
+	return s.readRequestCount(ctx, c.ids, start, end)
 }
 
 func (s *providerTierLimitService) readRequestCount(ctx context.Context, ids []string, start, end time.Time) (float64, error) {
@@ -111,15 +117,11 @@ func (s *providerTierLimitService) readBudgetUsage(ctx context.Context, c tierLi
 	if !ok {
 		return 0, time.Time{}, false, nil
 	}
-	if c.modelOverride && budget.Scope != "" {
+	if budget.Scope != "" {
 		amount, known, err := s.readModelBudgetUsage(ctx, c, budget, start, now)
 		return amount, reset, known, err
 	}
-	ids := s.budgetProfileIDs(ctx, c, budget)
-	if len(ids) == 0 {
-		return 0, time.Time{}, false, nil
-	}
-	total, err := s.store.GetManualWindowUsageForProfiles(ctx, ids, start, now)
+	total, err := s.store.GetManualWindowUsageForProfiles(ctx, c.ids, start, now)
 	return budgetAmount(total, budget.Unit), reset, true, err
 }
 
@@ -187,46 +189,6 @@ func budgetAmount(total sqliterepo.ManualWindowUsage, unit string) float64 {
 	}
 }
 
-func (s *providerTierLimitService) budgetProfileIDs(ctx context.Context, c tierLimitContext, b agentusage.LimitBudget) []string {
-	if b.Scope == "" {
-		return c.ids
-	}
-	var ids []string
-	for _, id := range c.ids {
-		if s.profileMatchesScope(ctx, id, b.Scope) {
-			ids = append(ids, id)
-		}
-	}
-	return ids
-}
-
-// profileMatchesScope keeps a model-class budget's usage to the profiles of
-// that class, so one class cannot consume another class's allowance.
-func (s *providerTierLimitService) profileMatchesScope(ctx context.Context, id, scope string) bool {
-	class := s.usage.ProfileUsage(ctx, id).ModelClass
-	model := ""
-	if profile, _, ok := s.usage.loadProfile(ctx, id); ok && profile != nil {
-		model = profile.Model
-	}
-	free := class == agentusage.ModelClassFree || dynamicruntime.IsFreeModel(model)
-	if s.freeModels != nil {
-		if catalogFree, known := s.freeModels.IsFreeModel(ctx, model); known && catalogFree {
-			free = true
-		}
-	}
-	premium := class == agentusage.ModelClassPremium
-	switch scope {
-	case string(agentusage.WindowScopeFreeModels):
-		return free
-	case string(agentusage.WindowScopePremiumModels):
-		return premium
-	case string(agentusage.WindowScopePaidModels):
-		return !free && !premium
-	default:
-		return true
-	}
-}
-
 func (s *providerTierLimitService) windowReset(ctx context.Context, id, period string, now time.Time, exhaustedOnly bool) (time.Time, bool) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -234,8 +196,10 @@ func (s *providerTierLimitService) windowReset(ctx context.Context, id, period s
 	if err != nil {
 		return time.Time{}, false
 	}
+	// An attribution failure leaves only that model-scoped usage unknown; the
+	// windows that were read still give their resets.
 	used, err := s.readUsage(ctx, c, "", now)
-	if err != nil {
+	if err != nil && !errors.Is(err, errModelAttributionUnavailable) {
 		return time.Time{}, false
 	}
 	var latest time.Time

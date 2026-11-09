@@ -1977,6 +1977,26 @@ func (s *Service) startDynamicRelaunchCreatedSession(
 	session *models.TaskSession,
 	prompt capturedPrompt,
 ) (*executor.TaskExecution, error) {
+	return s.startDynamicSuccessorCreatedSession(ctx, taskID, session, prompt, dynamicSuccessorPrompt{})
+}
+
+// dynamicSuccessorPrompt carries the accepted direct-message context that a
+// new user turn hands to the successor launch. A recovery relaunch leaves it
+// empty and replays only the cached prompt text.
+type dynamicSuccessorPrompt struct {
+	references               []v1.EntityReference
+	promptReferenceContext   string
+	promptReferencesPrepared bool
+	deliverySubmissionID     string
+}
+
+func (s *Service) startDynamicSuccessorCreatedSession(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt capturedPrompt,
+	direct dynamicSuccessorPrompt,
+) (*executor.TaskExecution, error) {
 	attempt, owner, err := s.beginResumeAttempt(ctx, taskID, session.ID)
 	if err != nil {
 		return nil, err
@@ -1990,8 +2010,11 @@ func (s *Service) startDynamicRelaunchCreatedSession(
 	launchCtx := cancellableResumeContext(attempt)
 	execution, err := s.startCreatedSession(
 		launchCtx, taskID, session.ID, session.AgentProfileID,
-		prompt.text, true, prompt.planMode, true, prompt.attachments, nil, "", startCreatedSessionOptions{
-			preserveDynamicRoute: true,
+		prompt.text, true, prompt.planMode, true, prompt.attachments,
+		direct.references, direct.promptReferenceContext, startCreatedSessionOptions{
+			preserveDynamicRoute:     true,
+			promptReferencesPrepared: direct.promptReferencesPrepared,
+			deliverySubmissionID:     direct.deliverySubmissionID,
 			beforeInitialPromptDispatch: func() error {
 				if !registry.holdForInitialPrompt(attempt) {
 					return ErrResumeAttemptCancelled
