@@ -6,7 +6,7 @@ requirements:
   - REQ-UI-ADAPTIVE-KANBAN-002
   - REQ-UI-ADAPTIVE-KANBAN-003
 created: 2026-09-05
-updated: 2026-09-16
+updated: 2026-11-06
 owners:
   - kandev
 ---
@@ -53,6 +53,55 @@ The lane grid must not use end padding or margin for this reserve. Padding reduc
 The reserve exists only while a task drag is active. The normal board has no additional end space.
 
 The desktop scroll window hides its native horizontal scrollbar while drag state is active. The window keeps its internal scroll range so pointer-driven and automatic drag scrolling continue to work. Document width remains unchanged.
+
+### Automatic scrolling and anchor space
+
+The [Done-column repair plan](../../../plans/kanban-drag-done-scroll/plan.md)
+implements this clarification of AC-UI-ADAPTIVE-KANBAN-001.4 and
+AC-UI-ADAPTIVE-KANBAN-003.9. Its work order records delivery status.
+
+The trailing reserve supports programmatic source anchoring. It is not a
+destination and must not extend automatic horizontal travel.
+`AdaptiveDesktopKanban` retains the reserve and disables horizontal scroll snap
+while a task drag is active. Normal snap behavior returns after completion or
+cancellation. The existing background-pan behavior also retains its snap opt-out.
+Drag state removes the snap-enabling classes and applies `snap-none`.
+The pan handler may clear its inline override on mouse leave, including when
+the drag overlay appears. That cleanup must not restore snap during a task drag.
+
+`KanbanDragSurface` excludes only the desktop Kanban scroll window from
+dnd-kit's built-in auto-scroller through its supported `canScroll` option.
+Column and outer-container vertical auto-scroll remain with dnd-kit. Tablet
+scrolling retains its existing owner. The library's option accepts an element
+predicate, but it cannot supply a different horizontal extent for each tick.
+Changing its global threshold or disabling all auto-scroll does not meet the
+windowed-board contract.
+
+A local desktop drag-scroll hook owns only horizontal edge scrolling. It runs
+only during an accepted task drag. Its `useDndMonitor` start callback attaches
+input listeners synchronously and seeds coordinates from the activation event.
+This captures fast moves before the active-drag render completes.
+It reads later pointer or touch coordinates from
+the owning document and scrolls only the active lane. A requestAnimationFrame
+loop reads the live viewport and lane-grid geometry, then limits each movement
+to actual column content. The right boundary is the lane grid's content end
+minus the viewport width, with a zero minimum. The reserve is excluded.
+Existing source-anchor adjustments remain programmatic and may use the full
+physical scroll range.
+
+When an anchor starts beyond the automatic boundary, rightward edge input must
+not advance it. Leftward input may reduce the current position. The controller
+must not clamp the anchor merely because a drag starts or columns change.
+Reversing pointer direction must permit reverse scrolling without a new drag.
+Pointer input outside the active lane's vertical bounds stops its horizontal
+travel. The frame loop uses elapsed time and bounded speed rather than a
+distance per rendered frame. Background resumption must not cause a large jump.
+
+Read geometry again after resize or temporary-step changes. Do not persist drag
+coordinates or change task ordering. Drop, cancellation, unmount, and responsive
+layout changes remove listeners and cancel pending frames. Do not replace DOM
+scroll methods, patch library internals, add wheel interception, or create a
+global scrolling service.
 
 ## Drag control flow
 
@@ -198,10 +247,16 @@ Responsive changes do not overwrite saved desktop preferences.
 - The same Chromium scenario covers a board whose minimum track width exceeds the viewport and verifies the added scroll range.
 - The Chromium scenario verifies document containment and the absence of a transient drag-only scrollbar.
 - The same E2E scenario proves temporary destinations, cancellation, and a successful drop.
+- A real pointer drag pauses over the original final-column center at 1440px
+  and 1920px. The column remains under the pointer and the drop persists after
+  reload. A separate overflowing board proves edge access and reverse travel.
+- Hook tests cover actual-content bounds, an anchor beyond those bounds,
+  direction reversal, live geometry changes, and frame/listener cleanup.
 - The `mobile-chrome` scenarios prove menu-based moves, native card scrolling without drag activation, and document-width containment.
 
 ## Implementation plans
 
+- [Done-column drag scrolling repair](../../../plans/kanban-drag-done-scroll/plan.md)
 - [Six-card swimlane scrolling](../../../plans/kanban-swimlane-scrolling/plan.md)
 - [Previous compact-height delivery](../../../plans/kanban-swimlane-height/plan.md)
 

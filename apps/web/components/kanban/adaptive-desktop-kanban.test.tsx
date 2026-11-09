@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { DndContext } from "@dnd-kit/core";
 import { AdaptiveDesktopKanban } from "./adaptive-desktop-kanban";
 
 const blankColumnSpaceTestId = "blank-column-space";
@@ -7,28 +8,30 @@ const grabbingCursorClass = "cursor-grabbing";
 
 function renderBoard(isDragging = false) {
   render(
-    <AdaptiveDesktopKanban
-      steps={[{ id: "backlog", title: "Backlog", color: "bg-blue-500" }]}
-      isDragging={isDragging}
-      renderColumn={() => (
-        <div>
-          <div data-testid={blankColumnSpaceTestId} />
-          <div role="list">
-            <div data-testid="blank-list-space" />
+    <DndContext>
+      <AdaptiveDesktopKanban
+        steps={[{ id: "backlog", title: "Backlog", color: "bg-blue-500" }]}
+        isDragging={isDragging}
+        renderColumn={() => (
+          <div>
+            <div data-testid={blankColumnSpaceTestId} />
+            <div role="list">
+              <div data-testid="blank-list-space" />
+            </div>
+            <div tabIndex={-1}>
+              <div data-testid="blank-focus-container-space" />
+            </div>
+            <button type="button" data-testid="card-action">
+              <svg data-testid="card-action-icon" />
+            </button>
+            <div data-kanban-card="" data-testid="task-card-shell">
+              <span data-testid="task-card-shell-child" />
+            </div>
+            <div data-testid="draggable-card" draggable />
           </div>
-          <div tabIndex={-1}>
-            <div data-testid="blank-focus-container-space" />
-          </div>
-          <button type="button" data-testid="card-action">
-            <svg data-testid="card-action-icon" />
-          </button>
-          <div data-kanban-card="" data-testid="task-card-shell">
-            <span data-testid="task-card-shell-child" />
-          </div>
-          <div data-testid="draggable-card" draggable />
-        </div>
-      )}
-    />,
+        )}
+      />
+    </DndContext>,
   );
 
   return screen.getByTestId("desktop-kanban-scroll-window");
@@ -42,6 +45,27 @@ function startPan(window: HTMLElement, clientX = 200) {
 afterEach(cleanup);
 
 describe("AdaptiveDesktopKanban drag end reserve", () => {
+  it("keeps snap disabled after the drag preview causes mouse leave", () => {
+    const css = document.createElement("style");
+    css.textContent =
+      ".snap-mandatory { scroll-snap-type: x mandatory; } .snap-none { scroll-snap-type: none; }";
+    document.head.append(css);
+    try {
+      const scroll = renderBoard(true);
+      fireEvent.mouseLeave(scroll);
+      expect(getComputedStyle(scroll).scrollSnapType).toBe("none");
+    } finally {
+      css.remove();
+    }
+  });
+
+  it("disables snap during dragging and restores it after cancellation", () => {
+    const scroll = renderBoard(true);
+    expect(scroll.style.scrollSnapType).toBe("none");
+    cleanup();
+    expect(renderBoard(false).style.scrollSnapType).toBe("");
+  });
+
   it("@covers AC-UI-ADAPTIVE-KANBAN-001.9 keeps the reserve outside grid sizing", () => {
     renderBoard(true);
 

@@ -44,12 +44,12 @@ function renderCard(label = "Open task") {
   return { card: view.getByRole("button", { name: label }), open, cancel, unmount: view.unmount };
 }
 
-describe("KanbanDragSurface", () => {
-  afterEach(() => {
-    cleanup();
-    vi.useRealTimers();
-  });
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
+describe("KanbanDragSurface", () => {
   it("leaves horizontal layout compensation to the board anchor", () => {
     render(
       <KanbanDragSurface
@@ -61,6 +61,7 @@ describe("KanbanDragSurface", () => {
 
     expect(KANBAN_AUTO_SCROLL_OPTIONS).toEqual({
       layoutShiftCompensation: { x: false, y: true },
+      canScroll: expect.any(Function),
     });
     expect(dndContextProps).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -152,4 +153,18 @@ describe("KanbanDragSurface", () => {
     fireEvent.click(card, { detail: 1 });
     expect(open).not.toHaveBeenCalled();
   });
+});
+
+it("delegates only the desktop lane to bounded horizontal scrolling", () => {
+  for (const [id, expected] of [
+    ["desktop-kanban-scroll-window", false],
+    ["tablet-kanban-scroll-window", true],
+    ["kanban-column-scroll", true],
+    ["swimlane-container", true],
+  ] as const) {
+    const element = document.createElement("div");
+    element.setAttribute("data-testid", id);
+    expect(KANBAN_AUTO_SCROLL_OPTIONS.canScroll(element)).toBe(expected);
+  }
+  expect(KANBAN_AUTO_SCROLL_OPTIONS.canScroll(document.documentElement)).toBe(true);
 });
