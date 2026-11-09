@@ -154,3 +154,4 @@ Implemented on 2026-11-08.
   The physical PostgreSQL gate remains unexecuted.
 - Review follow-up: repair now requires a nonempty persisted provider origin before normalization, rejects conflicting legacy Azure hosts, preserves exact saved identity bytes when an equivalent padded field is supplied, and accepts supported encoded or Unicode HTTPS paths while rejecting encoded separators, controls, and traversal.
   Repair also compares the proposed URL's exact scheme and authority with the saved origin before retaining raw encoded bytes, and safe encoded paths remain displayable in previews and repository events.
+  Deliberately complete provider-identity updates and local-source metadata round trips remain on the existing full-update path; saved-identity pinning applies to ordinary clone-URL repair.

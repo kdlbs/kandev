@@ -532,6 +532,12 @@ func pluginRepairIdentityMatches(repository *models.Repository, resolved TaskRep
 }
 
 func validateRepositoryIdentityUpdateFields(repository *models.Repository, req *UpdateRepositoryRequest) error {
+	return normalizeRepositoryIdentityUpdateFields(repository, req, true)
+}
+
+func normalizeRepositoryIdentityUpdateFields(
+	repository *models.Repository, req *UpdateRepositoryRequest, rejectDifferent bool,
+) error {
 	if repository == nil || req == nil {
 		return nil
 	}
@@ -560,9 +566,67 @@ func validateRepositoryIdentityUpdateFields(repository *models.Repository, req *
 			supplied = validated
 		}
 		if supplied != *field.saved {
-			return invalidRemoteURLSetting()
+			if rejectDifferent {
+				return invalidRemoteURLSetting()
+			}
+			continue
 		}
 		*field.supplied = *field.saved
+	}
+	return normalizeEquivalentProviderHost(repository, req, rejectDifferent)
+}
+
+func normalizeEquivalentProviderHost(
+	repository *models.Repository, req *UpdateRepositoryRequest, rejectDifferent bool,
+) error {
+	if req.ProviderHost == nil {
+		return nil
+	}
+	provider := repository.Provider
+	if req.Provider != nil {
+		provider = strings.TrimSpace(*req.Provider)
+	}
+	if normalizeProviderHost(provider, *req.ProviderHost) != normalizeProviderHost(repository.Provider, repository.ProviderHost) {
+		if rejectDifferent {
+			return invalidRemoteURLSetting()
+		}
+		return nil
+	}
+	*req.ProviderHost = repository.ProviderHost
+	return nil
+}
+
+func repositoryIdentityUpdateRequested(repository *models.Repository, req *UpdateRepositoryRequest) bool {
+	if repository == nil || req == nil {
+		return false
+	}
+	for _, field := range []struct {
+		name     string
+		supplied *string
+		saved    string
+	}{
+		{name: "source_type", supplied: req.SourceType, saved: repository.SourceType},
+		{name: "local_path", supplied: req.LocalPath, saved: repository.LocalPath},
+		{name: "provider", supplied: req.Provider, saved: repository.Provider},
+		{name: "provider_repo_id", supplied: req.ProviderRepoID, saved: repository.ProviderRepoID},
+		{name: "provider_scope", supplied: req.ProviderScope, saved: repository.ProviderScope},
+		{name: "provider_owner", supplied: req.ProviderOwner, saved: repository.ProviderOwner},
+		{name: "provider_name", supplied: req.ProviderName, saved: repository.ProviderName},
+	} {
+		if field.supplied == nil {
+			continue
+		}
+		supplied := strings.TrimSpace(*field.supplied)
+		if field.name == "provider_scope" {
+			validated, err := validateProviderScope(supplied)
+			if err != nil {
+				return true
+			}
+			supplied = validated
+		}
+		if supplied != field.saved {
+			return true
+		}
 	}
 	if req.ProviderHost != nil {
 		provider := repository.Provider
@@ -570,11 +634,10 @@ func validateRepositoryIdentityUpdateFields(repository *models.Repository, req *
 			provider = strings.TrimSpace(*req.Provider)
 		}
 		if normalizeProviderHost(provider, *req.ProviderHost) != normalizeProviderHost(repository.Provider, repository.ProviderHost) {
-			return invalidRemoteURLSetting()
+			return true
 		}
-		*req.ProviderHost = repository.ProviderHost
 	}
-	return nil
+	return false
 }
 
 func displayableRemoteURL(raw string) (string, bool) {
@@ -624,6 +687,96 @@ func displayableURLUser(scheme string, user *url.Userinfo) bool {
 	return !hasPassword
 }
 
+func (s *Service) applyRepositoryRemoteURLUpdate(
+	ctx context.Context, repository *models.Repository, req *UpdateRepositoryRequest,
+) error {
+	if req == nil || req.RemoteURL == nil {
+		return nil
+	}
+	if repository == nil {
+		return repoerrors.ErrRepositoryNotFound
+	}
+	if err := s.refuseReadOnlyRepositoryWorkspace(ctx, repository.WorkspaceID); err != nil {
+		return err
+	}
+	if repositoryIdentityUpdateRequested(repository, req) {
+		return s.applyFullRepositoryRemoteURLValidation(ctx, repository, req)
+	}
+	return s.applyRepositoryRemoteURLValidation(ctx, repository, req)
+}
+
+// applyFullRepositoryRemoteURLValidation handles a deliberate full repository
+// redefinition. Complete provider identity fields supplied by the caller are
+// validated against the proposed clone URL, while the write fence remains the
+// saved row that this update originally read.
+func (s *Service) applyFullRepositoryRemoteURLValidation(
+	ctx context.Context, repository *models.Repository, req *UpdateRepositoryRequest,
+) error {
+	if err := normalizeRepositoryIdentityUpdateFields(repository, req, false); err != nil {
+		return err
+	}
+	proposed, err := proposedRepositoryIdentity(repository, req)
+	if err != nil {
+		return err
+	}
+	if proposed.Provider == "" {
+		if proposed.SourceType != sourceTypeLocal {
+			return invalidRemoteURLSetting()
+		}
+		effective := strings.TrimSpace(*req.RemoteURL)
+		req.RemoteURL = &effective
+		req.ObservedIdentity = models.NewRepositoryIdentityFence(repository)
+		return nil
+	}
+	candidate, err := parseRepositoryRepairCandidate(*req.RemoteURL)
+	if err != nil {
+		return invalidRemoteURLSetting()
+	}
+	validation, err := s.validateRepositoryRemoteURL(ctx, proposed, candidate.raw)
+	if err != nil {
+		return err
+	}
+	effective := validation.preview.EffectiveRemoteURL
+	req.RemoteURL = &effective
+	req.ObservedIdentity = models.NewRepositoryIdentityFence(repository)
+	return nil
+}
+
+func proposedRepositoryIdentity(
+	repository *models.Repository, req *UpdateRepositoryRequest,
+) (*models.Repository, error) {
+	proposed := *repository
+	if req.SourceType != nil {
+		proposed.SourceType = strings.TrimSpace(*req.SourceType)
+	}
+	if req.LocalPath != nil {
+		proposed.LocalPath = strings.TrimSpace(*req.LocalPath)
+	}
+	if req.Provider != nil {
+		proposed.Provider = strings.TrimSpace(*req.Provider)
+	}
+	if req.ProviderRepoID != nil {
+		proposed.ProviderRepoID = strings.TrimSpace(*req.ProviderRepoID)
+	}
+	if req.ProviderHost != nil {
+		proposed.ProviderHost = normalizeProviderHost(proposed.Provider, *req.ProviderHost)
+	}
+	if req.ProviderScope != nil {
+		scope, err := validateProviderScope(*req.ProviderScope)
+		if err != nil {
+			return nil, err
+		}
+		proposed.ProviderScope = scope
+	}
+	if req.ProviderOwner != nil {
+		proposed.ProviderOwner = strings.TrimSpace(*req.ProviderOwner)
+	}
+	if req.ProviderName != nil {
+		proposed.ProviderName = strings.TrimSpace(*req.ProviderName)
+	}
+	return &proposed, nil
+}
+
 // applyRepositoryRemoteURLValidation copies a validated replacement and its
 // observed identity fence into the ordinary write request. It is only called
 // after authorization and read-only refusal.
@@ -631,6 +784,12 @@ func (s *Service) applyRepositoryRemoteURLValidation(
 	ctx context.Context, repository *models.Repository, req *UpdateRepositoryRequest,
 ) error {
 	if req == nil || req.RemoteURL == nil {
+		return nil
+	}
+	if repository.SourceType == sourceTypeLocal && strings.TrimSpace(repository.Provider) == "" {
+		effective := strings.TrimSpace(*req.RemoteURL)
+		req.RemoteURL = &effective
+		req.ObservedIdentity = models.NewRepositoryIdentityFence(repository)
 		return nil
 	}
 	if err := validateRepositoryIdentityUpdateFields(repository, req); err != nil {

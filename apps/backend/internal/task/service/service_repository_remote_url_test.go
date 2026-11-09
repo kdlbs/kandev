@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"fmt"
+	"os"
+	"os/exec"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -253,6 +255,72 @@ func TestParseRepositoryRepairCandidateUnicodeAndEscapedPaths(t *testing.T) {
 		_, err := parseRepositoryRepairCandidate(raw)
 		require.Error(t, err, raw)
 	}
+}
+
+func localGitDirectory(t *testing.T) string {
+	t.Helper()
+	directory := t.TempDir()
+	command := exec.Command("git", "init", "--initial-branch=main", directory)
+	command.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, string(output))
+	return directory
+}
+
+func TestRepositoryRemoteURLAllowsDeliberateFullIdentityUpdates(t *testing.T) {
+	t.Run("local source conversion", func(t *testing.T) {
+		svc, _, repo, _ := seedRemoteURLRepository(t)
+		local := &models.Repository{
+			ID: "local-repo", WorkspaceID: "remote-url-ws", Name: "local", SourceType: sourceTypeLocal,
+			LocalPath: "/tmp/old-source", DefaultBranch: "main",
+		}
+		require.NoError(t, repo.CreateRepository(t.Context(), local))
+		sourceType, localPath := sourceTypeLocal, localGitDirectory(t)
+		remoteURL := "https://github.com/e2e/widget.git"
+		updated, err := svc.UpdateRepository(t.Context(), local.ID, &UpdateRepositoryRequest{
+			SourceType: &sourceType, LocalPath: &localPath, RemoteURL: &remoteURL,
+		})
+		require.NoError(t, err)
+		require.Equal(t, sourceTypeLocal, updated.SourceType)
+		require.Equal(t, remoteURL, updated.RemoteURL)
+	})
+
+	t.Run("local source full DTO round trip", func(t *testing.T) {
+		svc, _, repo, _ := seedRemoteURLRepository(t)
+		localPath := localGitDirectory(t)
+		local := &models.Repository{
+			ID: "local-roundtrip", WorkspaceID: "remote-url-ws", Name: "local", SourceType: sourceTypeLocal,
+			LocalPath: localPath, RemoteURL: "https://github.com/e2e/widget.git", DefaultBranch: "main",
+		}
+		require.NoError(t, repo.CreateRepository(t.Context(), local))
+		sourceType, remoteURL := sourceTypeLocal, local.RemoteURL
+		updated, err := svc.UpdateRepository(t.Context(), local.ID, &UpdateRepositoryRequest{
+			SourceType: &sourceType, LocalPath: &localPath, RemoteURL: &remoteURL,
+		})
+		require.NoError(t, err)
+		require.Equal(t, remoteURL, updated.RemoteURL)
+		require.Equal(t, sourceTypeLocal, updated.SourceType)
+	})
+
+	t.Run("provider identity switch", func(t *testing.T) {
+		svc, bus, repo, row := seedRemoteURLRepository(t)
+		sourceType, localPath := "provider", localGitDirectory(t)
+		provider, host, owner, name := "github", "https://github.com", "e2e", "relocated"
+		remoteURL := "https://github.com/e2e/relocated.git"
+		updated, err := svc.UpdateRepository(t.Context(), row.ID, &UpdateRepositoryRequest{
+			SourceType: &sourceType, LocalPath: &localPath, Provider: &provider,
+			ProviderHost: &host, ProviderOwner: &owner, ProviderName: &name, RemoteURL: &remoteURL,
+		})
+		require.NoError(t, err)
+		require.Equal(t, remoteURL, updated.RemoteURL)
+		stored, err := repo.GetRepository(t.Context(), row.ID)
+		require.NoError(t, err)
+		require.Equal(t, "github", stored.Provider)
+		require.Equal(t, "e2e", stored.ProviderOwner)
+		require.Equal(t, "relocated", stored.ProviderName)
+		require.Equal(t, remoteURL, stored.RemoteURL)
+		require.Len(t, bus.GetPublishedEvents(), 1)
+	})
 }
 
 func TestRepositoryRemoteURLPreviewIsWriteFree(t *testing.T) {

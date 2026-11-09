@@ -302,6 +302,12 @@ The runtime materialization fix remains provider-neutral and does not need this 
 Compare the verified result to every saved identity field after preflight.
 Plugin inspection currently ignores mutable browser hints, so final comparison to the saved host, namespace, and name is mandatory.
 Scope and immutable ID must also match, including empty versus nonempty scope.
+
+A request that explicitly supplies a different complete provider identity is a separate
+deliberate full repository update, not a repair. It validates the supplied locator against
+that requested identity and keeps the original row fence for concurrency. A local source
+with no provider identity retains its existing metadata-only `remote_url` behavior and
+does not claim provider verification.
 The existing active manifest owner, descriptor checks, generation checks, size limits, and deadline remain mandatory.
 Persist a plugin's exact verified HTTPS clone URL. Never synthesize its path from owner/name.
 

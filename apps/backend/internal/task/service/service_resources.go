@@ -1434,13 +1434,7 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 	}
 	updates := *req
 	if req.RemoteURL != nil {
-		if repository == nil {
-			return nil, repoerrors.ErrRepositoryNotFound
-		}
-		if err := s.refuseReadOnlyRepositoryWorkspace(ctx, repository.WorkspaceID); err != nil {
-			return nil, err
-		}
-		if err := s.applyRepositoryRemoteURLValidation(ctx, repository, &updates); err != nil {
+		if err := s.applyRepositoryRemoteURLUpdate(ctx, repository, &updates); err != nil {
 			return nil, err
 		}
 	} else {
