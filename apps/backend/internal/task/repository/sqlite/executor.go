@@ -671,9 +671,8 @@ func (r *Repository) HasExecutorRunningRow(ctx context.Context, sessionID string
 }
 
 // HasActiveExecutorRunningRow returns true if sessionID has an executors_running
-// row whose runtime may still be writing to the workspace. Terminal rows
-// (stopped, failed, completed) are retained only for resume and inventory, so
-// they do not count as active.
+// row whose runtime may still be writing to the workspace. Failed rows remain
+// active because a stream failure does not confirm that the runtime stopped.
 func (r *Repository) HasActiveExecutorRunningRow(ctx context.Context, sessionID string) (bool, error) {
 	if sessionID == "" {
 		return false, fmt.Errorf("session_id is required")
@@ -681,11 +680,10 @@ func (r *Repository) HasActiveExecutorRunningRow(ctx context.Context, sessionID 
 	var exists int
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT 1 FROM executors_running
-		WHERE session_id = ? AND (status IS NULL OR status NOT IN (?, ?, ?))
+		WHERE session_id = ? AND (status IS NULL OR status NOT IN (?, ?))
 		LIMIT 1
 	`), sessionID,
 		models.ExecutorRunningStatusStopped,
-		models.ExecutorRunningStatusFailed,
 		models.ExecutorRunningStatusComplete,
 	).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -7,7 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-func TestHasActiveExecutorRunningRowIgnoresTerminalRows(t *testing.T) {
+func TestHasActiveExecutorRunningRowKeepsFailedRowsActive(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-active-row", "session-active-row", "turn-active-row")
@@ -32,7 +32,7 @@ func TestHasActiveExecutorRunningRowIgnoresTerminalRows(t *testing.T) {
 		{models.ExecutorRunningStatusRunning, true},
 		{models.ExecutorRunningStatusReady, true},
 		{models.ExecutorRunningStatusStopped, false},
-		{models.ExecutorRunningStatusFailed, false},
+		{models.ExecutorRunningStatusFailed, true},
 		{models.ExecutorRunningStatusComplete, false},
 	}
 	for _, tc := range cases {
