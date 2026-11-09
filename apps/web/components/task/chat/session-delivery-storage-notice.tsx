@@ -8,6 +8,7 @@ import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import type { RuntimeStorageHealth } from "@/lib/types/http";
 import {
   formatStorageUsage,
+  isRuntimeStoragePressureStale,
   isRuntimeStorageStale,
   runtimeStorageUsagePercent,
   storageAdvisoryVisible,
@@ -23,6 +24,7 @@ type NoticeView = {
   executor: string;
   pressure: boolean;
   observedAt: Date | null;
+  pressureObservedAt: Date | null;
 };
 
 const PRESSURE_REASON_KEYS: Record<string, string> = {
@@ -45,12 +47,15 @@ function buildNoticeView(health: RuntimeStorageHealth, t: StorageTranslate): Not
   const usageNumber = formatStorageUsage(runtimeStorageUsagePercent(health));
   const remote = health.location === "executor_runtime";
   const parsed = health.observed_at ? new Date(health.observed_at) : null;
+  const parsedPressure = health.pressure_observed_at ? new Date(health.pressure_observed_at) : null;
   return {
     usage: usageNumber,
     remote,
     executor: health.executor_label?.trim() || t("task:storageAdvisoryExecutorFallback"),
     pressure: health.write_pressure === true,
     observedAt: parsed && !Number.isNaN(parsed.getTime()) ? parsed : null,
+    pressureObservedAt:
+      parsedPressure && !Number.isNaN(parsedPressure.getTime()) ? parsedPressure : null,
   };
 }
 
@@ -126,7 +131,14 @@ function NoticeDetails({ health, view }: { health: RuntimeStorageHealth; view: N
       )}
       {view.observedAt && (
         <p className="min-w-0 break-words">
-          {t("task:storageAdvisoryObserved", { time: formatDateTime(view.observedAt) })}
+          {t("task:storageAdvisoryCapacityObserved", { time: formatDateTime(view.observedAt) })}
+        </p>
+      )}
+      {view.pressureObservedAt && (
+        <p className="min-w-0 break-words">
+          {t("task:storageAdvisoryPressureObserved", {
+            time: formatDateTime(view.pressureObservedAt),
+          })}
         </p>
       )}
     </div>
@@ -138,13 +150,25 @@ export function SessionDeliveryStorageNotice({ health }: { health?: RuntimeStora
   const { t } = useTranslation();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const visible = storageAdvisoryVisible(health);
-  const receiptKey = health
-    ? `${health.epoch}:${health.revision}:${health.write_pressure ? 1 : 0}`
+  const capacityReceiptKey = health
+    ? `${health.epoch}:${health.revision}:${health.observed_at ?? ""}`
     : "";
-  const elapsed = useReceiptElapsed(receiptKey);
+  // Include the accepted age identity. A capacity refresh can carry a larger
+  // pressure age for the same observation timestamp; adding local elapsed time
+  // from the first snapshot would count that interval twice. A detail refresh
+  // at the same revision must also reset the local baseline when its age moves.
+  const pressureReceiptKey = health
+    ? `${health.epoch}:${health.revision}:${health.pressure_observed_at ?? "unknown"}:${
+        health.pressure_age_seconds ?? "unknown"
+      }`
+    : "";
+  const capacityElapsed = useReceiptElapsed(capacityReceiptKey);
+  const pressureElapsed = useReceiptElapsed(pressureReceiptKey);
   if (!health || !visible) return null;
   const view = buildNoticeView(health, t);
-  const stale = isRuntimeStorageStale(health.age_seconds, elapsed);
+  const stale = view.pressure
+    ? isRuntimeStoragePressureStale(health.pressure_age_seconds, pressureElapsed)
+    : isRuntimeStorageStale(health.age_seconds, capacityElapsed);
   const usageLabel = view.usage ? t("task:storageAdvisoryUsage", { usage: view.usage }) : null;
   const primaryLabel = view.pressure ? pressureReasonLabel(health, t) : usageLabel;
   if (!primaryLabel) return null;

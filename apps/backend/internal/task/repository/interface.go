@@ -801,6 +801,19 @@ type AgentDeliverySettlementRepository interface {
 	SettleAgentDeliveryTerminal(ctx context.Context, streamID string, sequence int64, outcome models.DeliverySubmissionState, settledAt time.Time) (bool, error)
 	ListPendingAgentDeliverySettlements(ctx context.Context, sessionID string) ([]*models.AgentDeliveryEffect, error)
 	CompleteAgentDeliveryTerminalSettlement(ctx context.Context, effectKey string, completedAt time.Time) (bool, error)
+	// CorrectSettledAgentDeliverySessionState conditionally repairs a stale
+	// STARTING or RUNNING session from one exact settled terminal. All terminal,
+	// receipt, projection, ownership, and successor evidence is revalidated in
+	// the writer transaction.
+	CorrectSettledAgentDeliverySessionState(ctx context.Context, request models.AgentDeliverySessionStateRequest) (*models.AgentDeliverySessionStateResult, error)
+	// LoadCurrentSettledAgentDeliveryTerminal returns the current persisted
+	// prompt/turn binding for an already-settled session, without scanning
+	// historical event payloads.
+	LoadCurrentSettledAgentDeliveryTerminal(ctx context.Context, sessionID string) (*models.AgentDeliverySessionStateRequest, bool, error)
+	// ListSettledAgentDeliverySessionStateCandidates returns a bounded set of
+	// completed terminals whose sessions still look active. Startup uses it to
+	// repair completed outboxes without scanning historical event payloads.
+	ListSettledAgentDeliverySessionStateCandidates(ctx context.Context, limit int) ([]*models.AgentDeliverySessionStateRequest, error)
 }
 
 // AgentDeliveryWorkflowOutcomeRepository records a guarded workflow no-op for

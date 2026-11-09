@@ -40,6 +40,9 @@ func (s *Service) RetrySessionDelivery(
 	if err != nil {
 		return nil, err
 	}
+	if err := s.convergeSettledDeliverySessionState(ctx, sessionID, nil); err != nil {
+		return nil, err
+	}
 	incarnationID := session.QueueIncarnationID
 	if incarnationID == "" {
 		incarnationID = session.ID

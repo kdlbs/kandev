@@ -5896,7 +5896,8 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	if ok && queuedMsg != nil && completionEffect != nil {
 		hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, queuedMsg)
 		if hasInput && inputErr == nil {
-			if err := s.settleQueuedDeliveryPredecessor(ctx, taskID, sessionID, completionEffect); err != nil {
+			settleCtx := withSettledDeliverySessionStateGuardHeld(ctx)
+			if err := s.settleQueuedDeliveryPredecessor(settleCtx, taskID, sessionID, completionEffect); err != nil {
 				s.logger.Warn("failed to settle delivery before queued successor",
 					zap.String("session_id", sessionID), zap.Error(err))
 				s.requeueMessageForReservation(ctx, &queuedDispatchReservation{identity: queueIdentity}, queuedMsg, queuedMsg.QueuedBy)

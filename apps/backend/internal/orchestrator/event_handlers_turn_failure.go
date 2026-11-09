@@ -68,7 +68,8 @@ func (s *Service) handleAgentTurnFailed(ctx context.Context, data watcher.AgentE
 		return
 	}
 	if s.settleRetainedTurnFailure(ctx, data, session) {
-		s.settleFailedDeliveryWorkflowOutcome(context.WithoutCancel(ctx), data)
+		settleCtx := withSettledDeliverySessionStateGuardHeld(context.WithoutCancel(ctx))
+		s.settleFailedDeliveryWorkflowOutcome(settleCtx, data)
 		releaseGuard()
 		s.acknowledgeRetainedTurnFailure(data)
 	} else {

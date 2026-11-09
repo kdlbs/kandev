@@ -3017,6 +3017,8 @@
   "storageAdvisoryWorkspaceKind": "ワークスペースストレージ",
   "storageAdvisoryJournalKind": "配信ストレージ",
   "storageAdvisoryObserved": "測定時刻 {{time}}",
+  "storageAdvisoryCapacityObserved": "容量の観測時刻 {{time}}",
+  "storageAdvisoryPressureObserved": "配信プレッシャーの観測時刻 {{time}}",
   "storageAdvisoryExecutorFallback": "実行環境",
   "storageOpenSettings": "ストレージ設定を開く",
   "storageRecoveryCapacityTitle": "ディスク容量不足によりセッションが中断されました",

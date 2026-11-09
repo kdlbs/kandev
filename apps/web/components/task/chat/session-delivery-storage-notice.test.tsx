@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeStorageHealth } from "@/lib/types/http";
 import { SessionDeliveryStorageNotice } from "./session-delivery-storage-notice";
@@ -14,13 +14,16 @@ vi.mock("@/lib/i18n/formats", () => ({
   formatDateTime: (date: Date) => date.toISOString(),
 }));
 
+const OBSERVED_AT = "2026-10-27T10:00:00Z";
+const STALE_ATTRIBUTE = "data-stale";
+
 const health: RuntimeStorageHealth = {
   state: "warning",
   location: "local_runtime",
   storage_kind: "journal",
   total_bytes: 1000,
   available_bytes: 100,
-  observed_at: "2026-10-27T10:00:00Z",
+  observed_at: OBSERVED_AT,
   revision: 1,
   epoch: 5,
 };
@@ -45,7 +48,7 @@ describe("SessionDeliveryStorageNotice", () => {
     fireEvent.click(screen.getByTestId(DETAILS_TEST_ID));
     const panel = screen.getByTestId(DETAILS_PANEL_TEST_ID);
     expect(panel.textContent).toContain("task:storageAdvisoryGuidanceLocal");
-    expect(panel.textContent).toContain("task:storageAdvisoryObserved");
+    expect(panel.textContent).toContain("task:storageAdvisoryCapacityObserved");
     const detailsButton = screen.getByTestId(DETAILS_TEST_ID);
     expect(detailsButton.className).toContain("[@media(pointer:coarse)]:h-11");
     expect(detailsButton.className).toContain("cursor-pointer");
@@ -135,5 +138,125 @@ describe("SessionDeliveryStorageNotice", () => {
     cleanup();
     render(<SessionDeliveryStorageNotice health={{ ...health, total_bytes: undefined }} />);
     expect(screen.queryByTestId(NOTICE_TEST_ID)).toBeNull();
+  });
+});
+
+describe("pressure freshness", () => {
+  it("keeps old pressure last reported while capacity stays fresh", () => {
+    render(
+      <SessionDeliveryStorageNotice
+        health={{
+          ...health,
+          state: "normal",
+          available_bytes: 500,
+          age_seconds: 0,
+          observed_at: new Date().toISOString(),
+          write_pressure: true,
+          pressure_observed_at: OBSERVED_AT,
+          pressure_age_seconds: 120,
+          failure_storage: { reason: "disk_quota_exceeded", location: "local_runtime" },
+        }}
+      />,
+    );
+    const row = screen.getByTestId(NOTICE_TEST_ID);
+    expect(row.getAttribute(STALE_ATTRIBUTE)).toBe("true");
+    expect(row.textContent).toContain("task:storageAdvisoryLastReported");
+    fireEvent.click(screen.getByTestId(DETAILS_TEST_ID));
+    const panel = screen.getByTestId(DETAILS_PANEL_TEST_ID);
+    expect(panel.textContent).toContain("task:storageAdvisoryPressureObserved");
+    expect(panel.textContent).toContain("task:storageAdvisoryCapacityObserved");
+  });
+
+  it("does not age fresh pressure from an older capacity sample", () => {
+    render(
+      <SessionDeliveryStorageNotice
+        health={{
+          ...health,
+          state: "warning",
+          age_seconds: 120,
+          observed_at: OBSERVED_AT,
+          write_pressure: true,
+          pressure_observed_at: new Date().toISOString(),
+          pressure_age_seconds: 0,
+          failure_storage: { reason: "disk_quota_exceeded", location: "local_runtime" },
+        }}
+      />,
+    );
+    expect(screen.getByTestId(NOTICE_TEST_ID).getAttribute(STALE_ATTRIBUTE)).toBe("false");
+    fireEvent.click(screen.getByTestId(DETAILS_TEST_ID));
+    const panel = screen.getByTestId(DETAILS_PANEL_TEST_ID);
+    expect(panel.textContent).toContain("task:storageAdvisoryPressureObserved");
+    expect(panel.textContent).toContain("task:storageAdvisoryCapacityObserved");
+  });
+
+  it("keeps unknown pressure age last reported for an older backend", () => {
+    render(
+      <SessionDeliveryStorageNotice
+        health={{
+          ...health,
+          state: "normal",
+          write_pressure: true,
+          age_seconds: 0,
+          observed_at: new Date().toISOString(),
+          failure_storage: { reason: "disk_quota_exceeded", location: "local_runtime" },
+        }}
+      />,
+    );
+    expect(screen.getByTestId(NOTICE_TEST_ID).getAttribute(STALE_ATTRIBUTE)).toBe("true");
+    expect(screen.getByTestId(NOTICE_TEST_ID).textContent).toContain(
+      "task:storageAdvisoryLastReported",
+    );
+  });
+});
+
+describe("pressure age clock", () => {
+  it("does not double-count pressure age after a capacity refresh", () => {
+    vi.useFakeTimers();
+    let now = 0;
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => now);
+    try {
+      const observedAt = "2026-10-27T10:00:00Z";
+      const pressureObservedAt = new Date().toISOString();
+      const base: RuntimeStorageHealth = {
+        ...health,
+        state: "normal",
+        available_bytes: 500,
+        age_seconds: 0,
+        observed_at: observedAt,
+        write_pressure: true,
+        pressure_observed_at: pressureObservedAt,
+        pressure_age_seconds: 0,
+        failure_storage: { reason: "disk_quota_exceeded", location: "local_runtime" },
+      };
+      const { rerender } = render(<SessionDeliveryStorageNotice health={base} />);
+      expect(screen.getByTestId(NOTICE_TEST_ID).getAttribute(STALE_ATTRIBUTE)).toBe("false");
+
+      act(() => {
+        now = 60_000;
+        vi.advanceTimersByTime(60_000);
+      });
+      rerender(
+        <SessionDeliveryStorageNotice
+          health={{ ...base, revision: 2, pressure_age_seconds: 60 }}
+        />,
+      );
+      expect(screen.getByTestId(NOTICE_TEST_ID).getAttribute(STALE_ATTRIBUTE)).toBe("false");
+
+      act(() => {
+        now = 91_000;
+        vi.advanceTimersByTime(31_000);
+      });
+      expect(screen.getByTestId(NOTICE_TEST_ID).getAttribute(STALE_ATTRIBUTE)).toBe("true");
+
+      rerender(
+        <SessionDeliveryStorageNotice
+          health={{ ...base, revision: 2, pressure_age_seconds: 91 }}
+        />,
+      );
+      expect(screen.getByTestId(NOTICE_TEST_ID).getAttribute(STALE_ATTRIBUTE)).toBe("true");
+    } finally {
+      nowSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });

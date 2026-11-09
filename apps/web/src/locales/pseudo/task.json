@@ -3017,6 +3017,8 @@
   "storageAdvisoryWorkspaceKind": "Ŵōŕķśƥàćē śţōŕàĝē",
   "storageAdvisoryJournalKind": "Ďēĺĩvēŕŷ śţōŕàĝē",
   "storageAdvisoryObserved": "Ḿēàśũŕēď {{time}}",
+  "storageAdvisoryCapacityObserved": "Çàƥàçĩţŷ ōƀśēŕvēď {{time}}",
+  "storageAdvisoryPressureObserved": "Ƥŕēśśũŕē ōƀśēŕvēď {{time}}",
   "storageAdvisoryExecutorFallback": "ţĥē ēxēćũţōŕ",
   "storageOpenSettings": "Ōƥēń śţōŕàĝē śēţţĩńĝś",
   "storageRecoveryCapacityTitle": "Śēśśĩōń ĩńţēŕŕũƥţēď ƀŷ ĺōŵ ďĩśķ śƥàćē",

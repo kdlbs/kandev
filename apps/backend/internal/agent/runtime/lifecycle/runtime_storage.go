@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -27,32 +28,43 @@ const (
 	// runtimeStorageMaximumWireEpoch keeps the browser epoch a JavaScript safe
 	// integer. Unix nanoseconds exceed Number.MAX_SAFE_INTEGER in production.
 	runtimeStorageMaximumWireEpoch = uint64(1<<53 - 1)
+	// runtimeStoragePressureRefreshInterval bounds unchanged nonhealthy event
+	// refreshes without changing the two-second observation cadence.
+	runtimeStoragePressureRefreshInterval = 30 * time.Second
 )
 
 // RuntimeStorageObservation is the bounded, runtime-only advisory projection
 // for one session. Measurements remain nil when unknown.
 type RuntimeStorageObservation struct {
-	ExecutionID    string                    `json:"execution_id,omitempty"`
-	TaskID         string                    `json:"task_id"`
-	SessionID      string                    `json:"session_id"`
-	State          string                    `json:"state"`
-	StorageKind    string                    `json:"storage_kind,omitempty"`
-	Location       string                    `json:"location"`
-	ExecutorLabel  string                    `json:"executor_label,omitempty"`
-	TotalBytes     *int64                    `json:"total_bytes,omitempty"`
-	AvailableBytes *int64                    `json:"available_bytes,omitempty"`
-	ObservedAt     *time.Time                `json:"observed_at,omitempty"`
-	AgeSeconds     int64                     `json:"age_seconds"`
-	WritePressure  bool                      `json:"write_pressure,omitempty"`
-	ProducerPaused bool                      `json:"producer_paused,omitempty"`
-	DeliveryState  string                    `json:"delivery_state,omitempty"`
-	FailureStorage *models.AgentErrorStorage `json:"failure_storage,omitempty"`
-	Revision       uint64                    `json:"revision"`
-	Epoch          uint64                    `json:"epoch"`
+	ExecutionID    string     `json:"execution_id,omitempty"`
+	TaskID         string     `json:"task_id"`
+	SessionID      string     `json:"session_id"`
+	State          string     `json:"state"`
+	StorageKind    string     `json:"storage_kind,omitempty"`
+	Location       string     `json:"location"`
+	ExecutorLabel  string     `json:"executor_label,omitempty"`
+	TotalBytes     *int64     `json:"total_bytes,omitempty"`
+	AvailableBytes *int64     `json:"available_bytes,omitempty"`
+	ObservedAt     *time.Time `json:"observed_at,omitempty"`
+	AgeSeconds     int64      `json:"age_seconds"`
+	// PressureObservedAt and PressureAgeSeconds are the independent receipt for
+	// accepted delivery-health observations. They never reuse capacity age.
+	PressureObservedAt *time.Time                `json:"pressure_observed_at,omitempty"`
+	PressureAgeSeconds *int64                    `json:"pressure_age_seconds,omitempty"`
+	WritePressure      bool                      `json:"write_pressure,omitempty"`
+	ProducerPaused     bool                      `json:"producer_paused,omitempty"`
+	DeliveryState      string                    `json:"delivery_state,omitempty"`
+	FailureStorage     *models.AgentErrorStorage `json:"failure_storage,omitempty"`
+	Revision           uint64                    `json:"revision"`
+	Epoch              uint64                    `json:"epoch"`
 
-	// ReceivedAt is the backend receipt time. It is never serialized; freshness
-	// travels as AgeSeconds so browser and executor clocks cannot decide it.
-	ReceivedAt time.Time `json:"-"`
+	// ReceivedAt is the backend receipt time for capacity. It is never
+	// serialized; freshness travels as AgeSeconds so browser and executor
+	// clocks cannot decide it. PressureReceivedAt is its independent sibling.
+	ReceivedAt         time.Time `json:"-"`
+	PressureReceivedAt time.Time `json:"-"`
+	// pressurePublishedAt bounds unchanged nonhealthy event refreshes.
+	pressurePublishedAt time.Time
 	// execution and attachment are the immutable owners that produced this
 	// observation.
 	execution  *AgentExecution           `json:"-"`
@@ -79,7 +91,14 @@ type RuntimeStoragePressure struct {
 	DeliveryState  string
 	FailureStorage *models.AgentErrorStorage
 	Generation     uint64
-	attachment     *deliveryStreamAttachment
+	// SubmissionID and PromptGeneration are the captured observation scope.
+	// SubmissionCaptured distinguishes an explicit idle scope (empty string)
+	// from a caller that supplied no scope. Client is the captured client lease.
+	SubmissionID       string
+	PromptGeneration   uint64
+	SubmissionCaptured bool
+	Client             *agentctl.Client
+	attachment         *deliveryStreamAttachment
 }
 
 type runtimeStorageProbeState struct {
@@ -144,7 +163,7 @@ func (m *Manager) applyRuntimeStorageProbe(
 		state.mu.Unlock()
 		return
 	}
-	observation := buildRuntimeStorageObservation(execution, probe, previous, hadPrevious, state)
+	observation := buildRuntimeStorageObservation(execution, probe, previous, hadPrevious, state, m.runtimeStorageNow())
 	changed := !hadPrevious || previous.State != observation.State
 	refresh := observation.State == RuntimeStorageStateWarning || observation.WritePressure
 	if changed || refresh {
@@ -176,6 +195,7 @@ func (m *Manager) applyRuntimeStoragePressure(
 		return
 	}
 	pressure.FailureStorage = stampStorageEvidence(pressure.FailureStorage, execution)
+	now := m.runtimeStorageNow()
 	state := m.runtimeStorage
 	state.mu.Lock()
 	if !m.runtimeStorageExecutionCurrentLocked(execution) {
@@ -193,14 +213,26 @@ func (m *Manager) applyRuntimeStoragePressure(
 		state.mu.Unlock()
 		return
 	}
-	observation := runtimeStoragePressureObservation(execution, previous, hadPrevious, state, pressure)
+	if !runtimeStoragePressureOwnerCurrent(execution, pressure) {
+		state.mu.Unlock()
+		return
+	}
+	observation := runtimeStoragePressureObservation(execution, previous, hadPrevious, state, pressure, now)
 	changed := !hadPrevious || runtimeStoragePressureChanged(previous, observation)
-	if !changed {
+	refresh := !changed && runtimeStoragePressureSustained(observation) &&
+		(previous.pressurePublishedAt.IsZero() || now.Sub(previous.pressurePublishedAt) >= runtimeStoragePressureRefreshInterval)
+	if !changed && !refresh {
+		// Accepted evidence refreshes the receipt even when the visible values
+		// stay equal. Healthy silence is not republished.
+		observation.Revision = previous.Revision
+		observation.pressurePublishedAt = previous.pressurePublishedAt
+		state.observations[execution.SessionID] = observation
 		state.mu.Unlock()
 		return
 	}
 	state.nextRevision++
 	observation.Revision = state.nextRevision
+	observation.pressurePublishedAt = now
 	state.observations[execution.SessionID] = observation
 	state.mu.Unlock()
 	m.publishRuntimeStorageObservation(ctx, observation)
@@ -212,6 +244,7 @@ func runtimeStoragePressureObservation(
 	hadPrevious bool,
 	state *runtimeStorageProbeState,
 	pressure RuntimeStoragePressure,
+	now time.Time,
 ) RuntimeStorageObservation {
 	observation := previous
 	if !hadPrevious {
@@ -236,7 +269,39 @@ func runtimeStoragePressureObservation(
 	observation.ProducerPaused = pressure.ProducerPaused
 	observation.DeliveryState = pressure.DeliveryState
 	observation.FailureStorage = pressure.FailureStorage
+	observedAt := now.UTC()
+	observation.PressureObservedAt = &observedAt
+	observation.PressureReceivedAt = observedAt
 	return observation
+}
+
+// runtimeStoragePressureOwnerCurrent revalidates the captured idle/active
+// scope after the monitor's precheck. It runs under the cache mutex, never
+// across status I/O or event publication.
+func runtimeStoragePressureOwnerCurrent(execution *AgentExecution, pressure RuntimeStoragePressure) bool {
+	if execution == nil {
+		return false
+	}
+	if pressure.SubmissionCaptured {
+		if currentDeliverySubmissionID(execution) != pressure.SubmissionID ||
+			execution.promptGenerationSnapshot() != pressure.PromptGeneration {
+			return false
+		}
+	}
+	if pressure.Client != nil {
+		client, release := execution.AcquireAgentCtlClient()
+		current := client == pressure.Client
+		release()
+		if !current {
+			return false
+		}
+	}
+	return true
+}
+
+func runtimeStoragePressureSustained(observation RuntimeStorageObservation) bool {
+	return observation.WritePressure || observation.ProducerPaused ||
+		deliveryStateIndicatesStoragePressure(observation.DeliveryState)
 }
 
 func runtimeStoragePressureChanged(previous, next RuntimeStorageObservation) bool {
@@ -252,6 +317,7 @@ func buildRuntimeStorageObservation(
 	previous RuntimeStorageObservation,
 	hadPrevious bool,
 	state *runtimeStorageProbeState,
+	now time.Time,
 ) RuntimeStorageObservation {
 	observation := RuntimeStorageObservation{
 		ExecutionID:   execution.ID,
@@ -264,11 +330,15 @@ func buildRuntimeStorageObservation(
 		execution:     execution,
 		attachment:    probe.attachment,
 	}
-	// Pressure evidence survives a capacity sample.
+	// Pressure evidence and its independent receipt survive a capacity sample.
 	observation.WritePressure = previous.WritePressure
 	observation.ProducerPaused = previous.ProducerPaused
 	observation.DeliveryState = previous.DeliveryState
 	observation.FailureStorage = previous.FailureStorage
+	observation.PressureObservedAt = copyTime(previous.PressureObservedAt)
+	observation.PressureReceivedAt = previous.PressureReceivedAt
+	observation.PressureAgeSeconds = previous.PressureAgeSeconds
+	observation.pressurePublishedAt = previous.pressurePublishedAt
 	if !probe.Available {
 		// A failed sample never invents capacity or clears the last cause.
 		observation.State = previous.State
@@ -287,10 +357,10 @@ func buildRuntimeStorageObservation(
 	observation.AvailableBytes = copyInt64(probe.AvailableBytes)
 	observedAt := probe.ObservedAt.UTC()
 	if observedAt.IsZero() {
-		observedAt = time.Now().UTC()
+		observedAt = now
 	}
 	observation.ObservedAt = &observedAt
-	observation.ReceivedAt = time.Now().UTC()
+	observation.ReceivedAt = now
 	observation.State = runtimeStorageStateAfterProbe(observation, previous, hadPrevious)
 	return observation
 }
@@ -407,6 +477,11 @@ func copyRuntimeStorageObservation(observation RuntimeStorageObservation) Runtim
 	observation.TotalBytes = copyInt64(observation.TotalBytes)
 	observation.AvailableBytes = copyInt64(observation.AvailableBytes)
 	observation.ObservedAt = copyTime(observation.ObservedAt)
+	observation.PressureObservedAt = copyTime(observation.PressureObservedAt)
+	if observation.PressureAgeSeconds != nil {
+		age := *observation.PressureAgeSeconds
+		observation.PressureAgeSeconds = &age
+	}
 	if observation.FailureStorage != nil {
 		copied := *observation.FailureStorage
 		observation.FailureStorage = &copied
@@ -434,10 +509,24 @@ func copyTime(value *time.Time) *time.Time {
 // widening the payload into a map.
 func (o RuntimeStorageObservation) GetSessionID() string { return o.SessionID }
 
-// publishRuntimeStorageObservation stamps receipt age and publishes.
+// publishRuntimeStorageObservation stamps both independent receipt ages and
+// publishes.
 func (m *Manager) publishRuntimeStorageObservation(ctx context.Context, observation RuntimeStorageObservation) {
-	observation.AgeSeconds = runtimeStorageAgeSeconds(observation.ReceivedAt, time.Now().UTC())
+	now := m.runtimeStorageNow()
+	observation.AgeSeconds = runtimeStorageAgeSeconds(observation.ReceivedAt, now)
+	observation.PressureAgeSeconds = nil
+	if !observation.PressureReceivedAt.IsZero() {
+		age := runtimeStorageAgeSeconds(observation.PressureReceivedAt, now)
+		observation.PressureAgeSeconds = &age
+	}
 	m.eventPublisher.PublishRuntimeStorage(ctx, observation)
+}
+
+func (m *Manager) runtimeStorageNow() time.Time {
+	if m.runtimeStorageClock != nil {
+		return m.runtimeStorageClock().UTC()
+	}
+	return time.Now().UTC()
 }
 
 // modelStorageDiagnostic converts validated source evidence into the bounded

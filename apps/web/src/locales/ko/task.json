@@ -3017,6 +3017,8 @@
   "storageAdvisoryWorkspaceKind": "작업 공간 저장소",
   "storageAdvisoryJournalKind": "전달 저장소",
   "storageAdvisoryObserved": "측정 시각 {{time}}",
+  "storageAdvisoryCapacityObserved": "용량 관측 시각 {{time}}",
+  "storageAdvisoryPressureObserved": "전달 압력 관측 시각 {{time}}",
   "storageAdvisoryExecutorFallback": "실행기",
   "storageOpenSettings": "저장소 설정 열기",
   "storageRecoveryCapacityTitle": "디스크 공간 부족으로 세션이 중단되었습니다",

@@ -3017,6 +3017,8 @@
   "storageAdvisoryWorkspaceKind": "Workspace storage",
   "storageAdvisoryJournalKind": "Delivery storage",
   "storageAdvisoryObserved": "Measured {{time}}",
+  "storageAdvisoryCapacityObserved": "Capacity observed {{time}}",
+  "storageAdvisoryPressureObserved": "Pressure observed {{time}}",
   "storageAdvisoryExecutorFallback": "the executor",
   "storageOpenSettings": "Open storage settings",
   "storageRecoveryCapacityTitle": "Session interrupted by low disk space",
