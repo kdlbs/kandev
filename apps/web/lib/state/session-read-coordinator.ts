@@ -10,6 +10,12 @@ export type SessionReadOptions<T> = {
   resource: Resource;
   key: string;
   environmentId: string;
+  /**
+   * Publication identity for resources whose results are not environment-wide
+   * (ordinary task terminals). Request identity stays `key`; this decides
+   * which reader owns the writer slot.
+   */
+  publishKey?: string;
   sessionId?: string;
   fetch: (isCurrent: () => boolean) => Promise<SessionReadResult<T>>;
   isCurrent: () => boolean;
@@ -41,8 +47,9 @@ export class SessionRead<T> {
     return this.listeners.size > 0;
   }
   get group() {
-    const { resource, key, environmentId } = this.options;
-    return JSON.stringify([resource, resource === "diff" ? key : environmentId]);
+    const { resource, key, environmentId, publishKey } = this.options;
+    const publicationID = resource === "diff" ? key : (publishKey ?? environmentId);
+    return JSON.stringify([resource, publicationID]);
   }
   private current = () => this.live && this.scope.current() && this.options.isCurrent();
   private writable = () => this.current() && this.scope.owns(this);

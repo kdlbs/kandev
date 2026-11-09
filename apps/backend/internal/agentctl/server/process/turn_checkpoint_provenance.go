@@ -87,10 +87,11 @@ func (g *GitOperator) applyTurnCheckpointTarget(
 	headCommit string,
 	unborn bool,
 ) {
-	if g.workspaceTracker == nil {
+	tracker := g.currentWorkspaceTracker()
+	if tracker == nil {
 		return
 	}
-	resolution := g.workspaceTracker.ComparisonResolution()
+	resolution := tracker.ComparisonResolution()
 	if resolution.Explicit {
 		provenance.TargetConfigured = true
 		provenance.TargetIdentity = resolution.Display
@@ -102,7 +103,7 @@ func (g *GitOperator) applyTurnCheckpointTarget(
 		}
 		return
 	}
-	g.applyTurnCheckpointStoredBase(ctx, provenance, headCommit, unborn)
+	g.applyTurnCheckpointStoredBase(ctx, tracker, provenance, headCommit, unborn)
 }
 
 // applyTurnCheckpointStoredBase uses the tracker's existing stored-base
@@ -110,11 +111,12 @@ func (g *GitOperator) applyTurnCheckpointTarget(
 // stays unavailable and never falls back to a same-named remote branch.
 func (g *GitOperator) applyTurnCheckpointStoredBase(
 	ctx context.Context,
+	tracker *WorkspaceTracker,
 	provenance *turnchanges.Provenance,
 	headCommit string,
 	unborn bool,
 ) {
-	resolution := g.workspaceTracker.resolveBaseBranchWithReason(ctx)
+	resolution := tracker.resolveBaseBranchWithReason(ctx)
 	switch resolution.reason {
 	case baseBranchStored:
 		provenance.TargetConfigured = true

@@ -495,6 +495,7 @@ func agentctlInstanceRequest(req *ExecutorCreateRequest, workspacePath string) a
 		McpServers:                 req.McpServers,
 		McpMode:                    req.McpMode,
 		PromptSuggestions:          req.PromptSuggestions,
+		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),

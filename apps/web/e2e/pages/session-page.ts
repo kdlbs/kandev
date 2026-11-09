@@ -1440,6 +1440,11 @@ export class SessionPage {
       .waitFor({ state: "hidden", timeout });
   }
 
+  /** Buffer text of the active shell terminal panel. */
+  async readTerminalBuffer(): Promise<string> {
+    return this.readXtermBuffer("terminal-panel");
+  }
+
   /** Wait for the active shell to emit its initial prompt before sending input. */
   async expectTerminalShellReady(timeout = 20_000): Promise<void> {
     await expect

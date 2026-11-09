@@ -27,6 +27,7 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/system/storage"
@@ -80,6 +81,9 @@ type Manager struct {
 	profileContextGenerationOrder *list.List
 	nextProfileContextGeneration  uint64
 	profileGroup                  singleflight.Group
+	profileFlightMu               sync.Mutex
+	profileDiscoveryFlights       map[uint64]profileDiscoveryFlight
+	nextProfileDiscoveryFlight    uint64
 	managedRuntimeSelections      managedruntime.SelectionReader
 	loginMu                       sync.Mutex
 	loginAttempt                  *antigravityLoginAttempt
@@ -178,6 +182,7 @@ func NewManager(
 		profileContextGenerations:     make(map[string]uint64),
 		profileContextGenerationNodes: make(map[string]*list.Element),
 		profileContextGenerationOrder: list.New(),
+		profileDiscoveryFlights:       make(map[uint64]profileDiscoveryFlight),
 	}
 }
 
@@ -324,6 +329,7 @@ func (m *Manager) Stop(ctx context.Context) {
 	if runtimeCancel != nil {
 		runtimeCancel()
 	}
+	m.cancelProfileDiscoveryFlights("")
 	m.runtimeRebindWG.Wait()
 
 	m.loginMu.Lock()
@@ -998,23 +1004,10 @@ func (m *Manager) probeManagedRuntime(
 	req.InferenceConfig.Env = mergeInferenceEnv(req.InferenceConfig.Env, localEnv)
 	resp, err := inst.client.Probe(ctx, req)
 	release()
-	if err != nil || resp.Success || resp.FailureCode != agentctlutil.ProbeFailureManagedRuntimeNPMResolution {
+	if err != nil || !managedRuntimeProbeFailureRecoverable(resp) {
 		return resp, command, err
 	}
-
-	release, err = inst.acquireOperation(ctx, true)
-	if err != nil {
-		return resp, command, nil
-	}
-	defer release()
-	command, localEnv, err = m.resolveInferenceCommand(ctx, inst.agentType, ia, override)
-	if err != nil {
-		m.log.Warn("could not resolve selected runtime for probe recovery", zap.Error(err))
-		return resp, command, nil
-	}
-	req = cloneProbeRequestWithCommand(req, command)
-	req.InferenceConfig.Env = mergeInferenceEnv(req.InferenceConfig.Env, localEnv)
-	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, req, resp), command, nil
+	return m.retryManagedRuntimeProbe(ctx, inst, ia, override, command, req, resp, nil, false), command, nil
 }
 
 func mergeInferenceEnv(env, extra map[string]string) map[string]string {
@@ -1042,6 +1035,9 @@ func (m *Manager) recoverManagedRuntimeProbe(
 	if ctx.Err() != nil {
 		return initial
 	}
+	if !managedRuntimeProbeFailureRecoverable(initial) {
+		return initial
+	}
 	managed, ok := ia.(agents.ManagedNPMRuntimeAgent)
 	if !ok {
 		return initial
@@ -1057,15 +1053,38 @@ func (m *Manager) recoverManagedRuntimeProbe(
 			spec = selected.Spec
 		}
 	}
-	retryCommand, _, ok := managedRuntimeProbeRetry(failedCommand, spec)
+	retryCommand, packageSpec, ok := managedRuntimeProbeRetry(failedCommand, spec)
 	if !ok {
 		return initial
+	}
+	var preparation *agentctltypes.ManagedRuntimePreparationDirective
+	if initial.FailureCode == agentctlutil.ProbeFailureManagedRuntimeCacheIncomplete {
+		config := failedRequest.InferenceConfig
+		if config == nil || config.OperatorDefined || len(config.CommandPrefix) != 0 ||
+			len(config.CLIFlags) != 0 || !config.LaunchWrapper.IsZero() ||
+			initial.CacheEvidence == nil ||
+			initial.CacheEvidence.Condition != agentctltypes.ManagedRuntimeCacheRootManifestMissing ||
+			initial.CacheEvidence.PackageSpec != packageSpec || packageSpec == "" ||
+			initial.CacheEvidence.ProbeAttemptID == "" {
+			return initial
+		}
+		preparation = &agentctltypes.ManagedRuntimePreparationDirective{
+			Condition:      initial.CacheEvidence.Condition,
+			PackageSpec:    packageSpec,
+			ProbeAttemptID: initial.CacheEvidence.ProbeAttemptID,
+		}
+	}
+	recoveryCommand := retryCommand
+	if preparation != nil {
+		recoveryCommand = failedCommand
 	}
 	m.log.Info("recovering managed runtime host capability probe",
 		zap.String("agent_type", inst.agentType),
 		zap.String("recovery_scope", "host_capability_probe"),
 		zap.Int("attempt", 1))
-	response, err := inst.client.Probe(ctx, cloneProbeRequestWithCommand(failedRequest, retryCommand))
+	retryRequest := cloneProbeRequestWithCommand(failedRequest, recoveryCommand)
+	retryRequest.Preparation = preparation
+	response, err := inst.client.Probe(ctx, retryRequest)
 	if err != nil {
 		m.log.Warn("managed runtime host capability probe retry failed",
 			zap.String("agent_type", inst.agentType),
@@ -1079,6 +1098,50 @@ func (m *Manager) recoverManagedRuntimeProbe(
 		zap.String("recovery_scope", "host_capability_probe"),
 		zap.String("outcome", string(capabilityStatus(response))))
 	return response
+}
+
+func managedRuntimeProbeFailureRecoverable(response *agentctlutil.ProbeResponse) bool {
+	return response != nil && !response.Success &&
+		(response.FailureCode == agentctlutil.ProbeFailureManagedRuntimeNPMResolution ||
+			response.FailureCode == agentctlutil.ProbeFailureManagedRuntimeCacheIncomplete)
+}
+
+func (m *Manager) retryManagedRuntimeProbe(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	override agents.Command,
+	failedCommand agents.Command,
+	failedRequest *agentctlutil.ProbeRequest,
+	initial *agentctlutil.ProbeResponse,
+	contextCurrent func() bool,
+	requireSameCommand bool,
+) *agentctlutil.ProbeResponse {
+	if ctx.Err() != nil || !managedRuntimeProbeFailureRecoverable(initial) {
+		return initial
+	}
+	release, err := inst.acquireOperation(ctx, true)
+	if err != nil {
+		return initial
+	}
+	defer release()
+	if ctx.Err() != nil || (contextCurrent != nil && !contextCurrent()) {
+		return initial
+	}
+	command, localEnv, err := m.resolveInferenceCommand(ctx, inst.agentType, ia, override)
+	if err != nil {
+		m.log.Warn("could not resolve selected runtime for probe recovery", zap.Error(err))
+		return initial
+	}
+	if requireSameCommand && !slices.Equal(command.Args(), failedCommand.Args()) {
+		return initial
+	}
+	if ctx.Err() != nil || (contextCurrent != nil && !contextCurrent()) {
+		return initial
+	}
+	retryRequest := cloneProbeRequestWithCommand(failedRequest, command)
+	retryRequest.InferenceConfig.Env = mergeInferenceEnv(retryRequest.InferenceConfig.Env, localEnv)
+	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, retryRequest, initial)
 }
 
 func cloneProbeRequestWithCommand(

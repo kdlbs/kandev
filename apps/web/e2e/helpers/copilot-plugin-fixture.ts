@@ -7,7 +7,10 @@ export const COPILOT_RECOVERY_MODEL_ID = "fixture-copilot-model";
 export const COPILOT_RECOVERY_CONFIG_OPTIONS = { reasoning_effort: "high" };
 
 type CopilotPluginDiscoveryOptions = Partial<
-  Pick<CopilotPluginDiscoveryResponse, "status" | "runtime_version" | "mount_permitted" | "plugins">
+  Pick<
+    CopilotPluginDiscoveryResponse,
+    "status" | "runtime_version" | "mount_permitted" | "plugins" | "reason"
+  >
 >;
 
 export type CopilotPluginFixture = NonNullable<
@@ -75,6 +78,7 @@ export async function installCopilotPluginProbeRoutes(
   const capabilityRequests: ProbeRequest[] = [];
   const modelOptionsRequests: ResolveRequest[] = [];
   const contextRevision = "copilot-policy-recovery-e2e";
+  const pluginLoadingAvailable = scenario !== "capability";
 
   await page.route(`**/api/v1/agents/${fixture.agentId}/plugin-discovery`, async (route) => {
     await route.fulfill({
@@ -82,7 +86,9 @@ export async function installCopilotPluginProbeRoutes(
       contentType: "application/json",
       body: JSON.stringify(
         copilotPluginDiscovery(fixture.agentId, fixture.profileId, {
-          mount_permitted: scenario === "supported",
+          status: pluginLoadingAvailable ? "ready" : "unsupported",
+          ...(pluginLoadingAvailable ? {} : { reason: "plugin_loading_unsupported", plugins: [] }),
+          mount_permitted: pluginLoadingAvailable,
         }),
       ),
     });
@@ -167,6 +173,7 @@ export function copilotPluginDiscovery(
     provider_id: "copilot-acp",
     status: options.status ?? "ready",
     runtime_version: options.runtime_version ?? "1.0.88",
+    ...(options.reason ? { reason: options.reason } : {}),
     mount_permitted: options.mount_permitted ?? true,
     plugins: options.plugins ?? [
       {

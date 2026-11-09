@@ -20,6 +20,7 @@ type captureExecutorRunningWriter struct {
 	running     *models.ExecutorRunning
 	upsertErr   error
 	deleteCalls int
+	repairCalls int
 }
 
 func (w *captureExecutorRunningWriter) GetExecutorRunningBySessionID(
@@ -42,6 +43,7 @@ func (w *captureExecutorRunningWriter) DeleteExecutorRunningBySessionID(_ contex
 }
 
 func (w *captureExecutorRunningWriter) RepairExecutorRunningDead(_ context.Context, _ string) error {
+	w.repairCalls++
 	return nil
 }
 

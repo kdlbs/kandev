@@ -184,11 +184,10 @@ const (
 	// after queue promotion. It prevents duplicate task.queue_promoted events
 	// from repeating on_enter or auto-start behavior.
 	MetaKeyQueuePromotionPending = "queue_promotion_pending"
-	// QueuePromotionEntryTransitionIDKey is the field of the
-	// MetaKeyQueuePromotionPending marker that pins the ledger row of the entry
-	// a same-step promotion admits. That promotion writes no ledger row of its
-	// own, so the delivery carries no transition id; the pinned row lets the
-	// entry guard tell the admitted entry from a later re-entry of the step.
+	// QueuePromotionEntryTransitionIDKey pins the ledger row associated with a
+	// promotion marker. Same-step promotions use it because admission writes no
+	// ledger row; cross-step promotions use it so legacy zero-ID deliveries
+	// cannot consume a newer identified marker.
 	QueuePromotionEntryTransitionIDKey = "entry_transition_id"
 	// MetaKeyWorkflowMovePending carries the one-shot entry options of a direct
 	// (immediately applied) workflow move whose target-step entry has not yet
@@ -607,6 +606,9 @@ const (
 	SessionOriginTaskInitial             = "task_initial"
 	SessionMetaKeyContextWindow          = "context_window"
 	SessionMetaKeyContextCompactionCount = "context_compaction_count"
+	// SessionMetaKeyContextCompactionReporting holds provider-derived collection
+	// availability, coverage, and a monotonic revision next to the lifetime count.
+	SessionMetaKeyContextCompactionReporting = "context_compaction_reporting"
 	// SessionMetaKeyRecoveryResolvedAt stores the server timestamp of the
 	// latest successful agent boot. Recovery cards compare this timestamp with
 	// their own creation time, so the result survives transcript write failures.
@@ -1300,10 +1302,17 @@ func decodeAgentErrorCauses(raw json.RawMessage) []AgentErrorCause {
 		decodeOptionalErrorCauseString(fields, "attempted_model", &cause.AttemptedModel)
 		decodeOptionalErrorCauseString(fields, "requested_mode", &cause.RequestedMode)
 		decodeOptionalErrorCauseString(fields, "effective_mode", &cause.EffectiveMode)
+		decodeOptionalErrorCauseString(fields, "runtime_version", &cause.RuntimeVersion)
 		if value, ok := fields["prompt_not_sent"]; ok {
 			var promptNotSent bool
 			if json.Unmarshal(value, &promptNotSent) == nil {
 				cause.PromptNotSent = &promptNotSent
+			}
+		}
+		if value, ok := fields["exit_code"]; ok {
+			var exitCode *int
+			if json.Unmarshal(value, &exitCode) == nil && exitCode != nil {
+				cause.ExitCode = exitCode
 			}
 		}
 		if value, ok := fields["storage"]; ok {

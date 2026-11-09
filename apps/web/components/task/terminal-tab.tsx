@@ -12,6 +12,11 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import { renameUserShell } from "@/lib/api/domains/user-shell-api";
 import { useTerminalDestroy } from "@/hooks/domains/session/use-terminal-destroy";
+import {
+  makeUserShellScope,
+  userShellScopeKey,
+  type UserShellScope,
+} from "@/lib/state/user-shell-scope";
 import { CloseTerminalConfirmPopover } from "./close-terminal-confirm-popover";
 import { TabRenameInput } from "./tab-rename-input";
 import { markTerminalPanelTerminateClose } from "./dockview-layout-setup";
@@ -63,19 +68,30 @@ function pickDisplayName(
 }
 
 function useTerminalTabState(
-  stampedEnv: string | undefined,
+  scope: UserShellScope | null,
+  environmentId: string | null | undefined,
   terminalId: string,
   apiTitle: string,
   ordinaryLabel: string,
 ) {
+  const scopeKey = scope ? userShellScopeKey(scope) : "";
   const shell = useAppStore((s) => {
-    if (!stampedEnv) return null;
-    const list = s.userShells.byEnvironmentId[stampedEnv] ?? [];
-    return list.find((it) => it.terminalId === terminalId) ?? null;
+    const scoped = scopeKey
+      ? (s.userShells.byScope[scopeKey] ?? []).find((it) => it.terminalId === terminalId)
+      : undefined;
+    if (scoped) return scoped;
+    // Fixed, script, and legacy rows carry environment-scoped metadata
+    // (closability, label) outside byScope.
+    if (!environmentId) return null;
+    return (
+      (s.userShells.byEnvironmentId[environmentId] ?? []).find(
+        (it) => it.terminalId === terminalId,
+      ) ?? null
+    );
   });
   const ordinaryCount = useAppStore((s) => {
-    if (!stampedEnv) return 0;
-    const list = s.userShells.byEnvironmentId[stampedEnv] ?? [];
+    if (!scopeKey) return 0;
+    const list = s.userShells.byScope[scopeKey] ?? [];
     return list.filter((it) => it.kind === "ordinary").length;
   });
   const isOrdinary = shell?.kind === "ordinary";
@@ -89,14 +105,14 @@ function useTerminalTabState(
 function useTerminalTabClose({
   terminalId,
   taskID,
-  stampedEnv,
+  scope,
   closable,
   panelId,
   closePanel,
 }: {
   terminalId: string;
   taskID: string | null;
-  stampedEnv: string | undefined;
+  scope: UserShellScope | null;
   closable: boolean;
   panelId: string;
   closePanel: () => void;
@@ -106,25 +122,25 @@ function useTerminalTabClose({
   const closeAnchorRef = useRef<HTMLElement>(null);
 
   const handleDestroyed = useCallback(() => {
-    if (stampedEnv) {
-      removeUserShellStore(stampedEnv, terminalId);
+    if (scope) {
+      removeUserShellStore(scope, terminalId);
     }
     markTerminalPanelTerminateClose(panelId);
     closePanel();
-  }, [stampedEnv, terminalId, removeUserShellStore, panelId, closePanel]);
+  }, [scope, terminalId, removeUserShellStore, panelId, closePanel]);
   const { destroyTerminal } = useTerminalDestroy({
-    environmentId: stampedEnv,
+    environmentId: scope?.environmentId,
     taskId: taskID,
     onDestroyed: handleDestroyed,
   });
 
   const destroyAndClosePanel = useCallback(async () => {
-    if (!stampedEnv) {
+    if (!scope) {
       closePanel();
       return true;
     }
     return destroyTerminal(terminalId);
-  }, [stampedEnv, terminalId, destroyTerminal, closePanel]);
+  }, [scope, terminalId, destroyTerminal, closePanel]);
 
   const handleCloseTab = useCallback(() => {
     if (!closable) return;
@@ -145,7 +161,9 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
   const { terminalId, taskID: stampedTaskID, environmentId: stampedEnv } = extractParams(props);
   const activeTaskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
   const taskID = stampedTaskID ?? activeTaskID ?? null;
+  const scope = makeUserShellScope(stampedEnv, taskID);
   const { shell, isOrdinary, seq, showBadge, displayName, closable } = useTerminalTabState(
+    scope,
     stampedEnv,
     terminalId,
     props.api.title ?? t("common:terminal"),
@@ -164,14 +182,14 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
     useTerminalTabClose({
       terminalId,
       taskID,
-      stampedEnv,
+      scope,
       closable,
       panelId: props.api.id,
       closePanel: () => props.api.close(),
     });
   const handleCommitRename = useRenameCommitter({
     isOrdinary,
-    stampedEnv,
+    scope,
     terminalId,
     taskID,
     currentCustomName: shell?.customName ?? null,
@@ -233,14 +251,14 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
 
 function useRenameCommitter({
   isOrdinary,
-  stampedEnv,
+  scope,
   terminalId,
   taskID,
   currentCustomName,
   onDone,
 }: {
   isOrdinary: boolean;
-  stampedEnv: string | undefined;
+  scope: UserShellScope | null;
   terminalId: string;
   taskID: string | null;
   currentCustomName: string | null;
@@ -250,17 +268,17 @@ function useRenameCommitter({
   return useCallback(
     async (next: string) => {
       onDone();
-      if (!isOrdinary || !stampedEnv) return;
+      if (!isOrdinary || !scope) return;
       const normalized = next.trim() === "" ? null : next.trim();
       if (currentCustomName === normalized) return;
       try {
         await renameUserShell(terminalId, normalized, taskID ?? undefined);
-        updateUserShell(stampedEnv, terminalId, { customName: normalized });
+        updateUserShell(scope, terminalId, { customName: normalized });
       } catch (error) {
         console.error("rename terminal:", error);
       }
     },
-    [isOrdinary, stampedEnv, terminalId, taskID, currentCustomName, updateUserShell, onDone],
+    [isOrdinary, scope, terminalId, taskID, currentCustomName, updateUserShell, onDone],
   );
 }
 

@@ -3370,8 +3370,8 @@ func (r *Repository) SetSessionMetadataKeyIfState(
 }
 
 // UpdateSessionContextWindow stores a context-window sample and atomically
-// increments the session's inferred compaction count when the new used-token
-// value is lower than the previous persisted sample.
+// increments the session's inferred compaction count when an eligible
+// used-token value is lower than an eligible previous sample.
 func (r *Repository) UpdateSessionContextWindow(
 	ctx context.Context,
 	sessionID string,
@@ -3385,9 +3385,10 @@ func (r *Repository) UpdateSessionContextWindow(
 	if err != nil {
 		return 0, err
 	}
+	disabled := contextWindowCompactionInferenceDisabled(contextWindow)
 	now := time.Now().UTC()
 	var count int64
-	row := r.db.QueryRowxContext(ctx, r.db.Rebind(updateSessionContextWindowQuery(r.db.DriverName())), string(windowJSON), used, now, sessionID)
+	row := r.db.QueryRowxContext(ctx, r.db.Rebind(updateSessionContextWindowQuery(r.db.DriverName())), string(windowJSON), disabled, used, now, sessionID)
 	if err := row.Scan(&count); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, fmt.Errorf("agent session not found: %s", sessionID)
@@ -3395,6 +3396,14 @@ func (r *Repository) UpdateSessionContextWindow(
 		return 0, err
 	}
 	return count, nil
+}
+
+// contextWindowCompactionInferenceDisabled reports whether the sample is
+// excluded from usage-drop compaction inference. A missing or non-boolean
+// marker keeps the legacy eligible behavior.
+func contextWindowCompactionInferenceDisabled(contextWindow map[string]interface{}) bool {
+	disabled, ok := contextWindow["compaction_inference_disabled"].(bool)
+	return ok && disabled
 }
 
 func contextWindowUsed(contextWindow map[string]interface{}) (int64, error) {
@@ -3428,13 +3437,16 @@ func updateSessionContextWindowQuery(driver string) string {
 		base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END"
 		count := "GREATEST(COALESCE(NULLIF((" + base + ") #>> '{context_compaction_count}', '')::bigint, 0), 0)"
 		previousUsed := "(" + base + ") #>> '{context_window,used}'"
+		previousDisabled := "COALESCE((" + base + ") #>> '{context_window,compaction_inference_disabled}', 'false')"
 		return `
 			UPDATE task_sessions
 			SET metadata = jsonb_set(
 				jsonb_set(` + base + `, '{context_window}', ?::jsonb, true),
 				'{context_compaction_count}',
 				to_jsonb(CASE
-					WHEN jsonb_typeof((` + base + `) #> '{context_window,used}') = 'number'
+					WHEN NOT ?::boolean
+						AND ` + previousDisabled + ` = 'false'
+						AND jsonb_typeof((` + base + `) #> '{context_window,used}') = 'number'
 						AND (` + previousUsed + `)::bigint > ?
 					THEN ` + count + ` + 1
 					ELSE ` + count + `
@@ -3449,13 +3461,16 @@ func updateSessionContextWindowQuery(driver string) string {
 	base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END"
 	count := "MAX(COALESCE(CAST(json_extract(" + base + ", '$.context_compaction_count') AS INTEGER), 0), 0)"
 	previousUsed := "json_extract(" + base + ", '$.context_window.used')"
+	previousDisabled := "COALESCE(json_extract(" + base + ", '$.context_window.compaction_inference_disabled'), 0)"
 	return `
 		UPDATE task_sessions
 		SET metadata = json_set(
 			json_set(` + base + `, '$.context_window', json(?)),
 			'$.context_compaction_count',
 			CASE
-				WHEN json_type(` + base + `, '$.context_window.used') IN ('integer', 'real')
+				WHEN ? = 0
+					AND ` + previousDisabled + ` = 0
+					AND json_type(` + base + `, '$.context_window.used') IN ('integer', 'real')
 					AND CAST(` + previousUsed + ` AS INTEGER) > ?
 				THEN ` + count + ` + 1
 				ELSE ` + count + `
@@ -4323,9 +4338,10 @@ func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentP
 	// an old run afterwards fails. That is the accepted trade — see
 	// docs/specs/office/requirements/automations-settings.md.
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT DISTINCT t.id, t.title, t.is_ephemeral
+		SELECT DISTINCT t.id, t.title, t.is_ephemeral, t.workspace_id, COALESCE(w.name, '')
 		FROM task_sessions ts
 		JOIN tasks t ON t.id = ts.task_id
+		LEFT JOIN workspaces w ON w.id = t.workspace_id
 		WHERE ts.agent_profile_id = ? AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		  AND NOT (COALESCE(t.origin, '') = '`+models.TaskOriginAutomationRun+`'
 		           AND ts.state = 'WAITING_FOR_INPUT')
@@ -4337,7 +4353,7 @@ func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentP
 	var result []agentdto.ActiveTaskInfo
 	for rows.Next() {
 		var info agentdto.ActiveTaskInfo
-		if err := rows.Scan(&info.TaskID, &info.TaskTitle, &info.IsEphemeral); err != nil {
+		if err := rows.Scan(&info.TaskID, &info.TaskTitle, &info.IsEphemeral, &info.WorkspaceID, &info.WorkspaceName); err != nil {
 			return nil, err
 		}
 		result = append(result, info)

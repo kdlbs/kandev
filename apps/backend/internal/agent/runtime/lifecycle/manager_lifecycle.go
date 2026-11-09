@@ -346,6 +346,10 @@ func (m *Manager) Start(ctx context.Context) error {
 				// session -- never from a durable/database value, which could be
 				// stale relative to what the instance actually resumed.
 				ACPSessionID: ri.ProviderSessionID,
+				// Native collection state comes from the subscribed instance,
+				// not the current launch request. Peer support alone does not
+				// prove an older retained peer subscribed.
+				CopilotNativeSessionEvents: ri.CopilotNativeSessionEvents,
 			}
 			execution.restoreIdleActivity(ri.Metadata)
 			// AC-EXECUTORS-SURVIVAL-002.14's declared source for task
@@ -1097,6 +1101,15 @@ func (m *Manager) cleanupStaleExecutionWithCheckpoint(
 	m.logger.Info("cleaning up stale agent execution",
 		zap.String("session_id", sessionID),
 		zap.String("execution_id", execution.ID))
+
+	// Release remote project-file claims before stopping the helper, which may
+	// make its endpoint unavailable.
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	cleanupErr := m.cleanupProjectMCPFiles(ctx, execution, client)
+	releaseClient()
+	if cleanupErr != nil {
+		return fmt.Errorf("release stale project MCP files %s: %w", execution.ID, cleanupErr)
+	}
 
 	// Stop the runtime instance (workspace tracker, shell, etc.) to prevent leaked
 	// goroutines. Without this, the old agentctl instance keeps running when a new

@@ -1,0 +1,15 @@
+{
+  "jsonrpc": "2.0",
+  "method": "github.com/copilot/sessionEvent",
+  "params": {
+    "sessionId": "258e12a9-9e5a-4820-9f20-ee43e895e958",
+    "timestamp": "2026-11-05T23:28:14.421Z",
+    "type": "session.compaction_complete",
+    "dataOmitted": "too-large",
+    "data": {
+      "omitted": "too-large",
+      "bytes": 40000,
+      "limit": 32768
+    }
+  }
+}

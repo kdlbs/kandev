@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	inventoryTimeout     = 20 * time.Second
+	pluginProbeTimeout   = 20 * time.Second
 	inventoryStdoutLimit = 2 * 1024 * 1024
 	inventoryStderrLimit = 32 * 1024
 	runnerWaitDelay      = 2 * time.Second

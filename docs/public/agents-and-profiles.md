@@ -46,7 +46,7 @@ Kandev offers **Codex app server** as a separate native Codex profile. It uses t
 
 Enable **Codex app server** in **Settings > System > Feature Toggles**, then restart Kandev. The toggle is off by default and requires a restart. The native profile is hidden from new-session selectors while the toggle is off. Keep it enabled while native sessions need to resume.
 
-Kandev currently uses `@openai/codex` version `0.154.0` as its managed default. Sign in to Codex as the operating-system user that runs Kandev, or provide `OPENAI_API_KEY` to the executor. The profile uses the same workspace and MCP configuration as other structured sessions.
+Kandev currently uses `@openai/codex` version `0.166.0` as its managed default. Sign in to Codex as the operating-system user that runs Kandev, or provide `OPENAI_API_KEY` to the executor. The profile uses the same workspace and MCP configuration as other structured sessions.
 
 Native sessions show response and turn token usage in the chat footer. A provider thread usage estimate may appear when Codex reports one. It is an estimate, not a promise of the billed charge. Kandev keeps provider estimates separate from calculated cost.
 
@@ -377,7 +377,10 @@ Managed runtime startup can retry once when npm reports a strict `ETARGET` for
 the selected exact package or a recognized temporary network or cache error.
 The `ETARGET` retry prefers an online lookup. Kandev can also retry an ordinary
 process exit before ACP initialization when complete, generation-matched
-startup evidence confirms that stderr was empty. Incomplete evidence, other
+startup evidence confirms that stderr was empty. It can also recover an npm
+`ENOENT` when independent inspection verifies an installed exact package whose
+execution-tree root `package.json` is missing. Generic missing-file errors do
+not qualify. Incomplete evidence, other
 permanent or unrecognized npm errors, cancellation, signal termination, and
 failures after ACP initialization do not trigger this automatic retry. Kandev first confirms
 that the failed process has stopped, then waits two to three seconds before the
@@ -393,10 +396,26 @@ and shows one **Retry runtime** action with collapsed technical details.
 This startup recovery applies to managed npm runtimes on a local PC, in a local
 Docker executor, or in a remote SSH executor. It does not establish that an npm
 race caused any particular startup failure. Host capability discovery has a
-separate, narrower recovery: an exact-package `ETARGET` result can retry once
-with an online-preferred lookup. That probe retry also preserves npm execution
+separate recovery: an exact-package `ETARGET` result can retry once with an
+online-preferred lookup. Verified missing execution manifests also recover
+automatically during startup discovery, profile discovery, and model-option
+resolution, including managed Codex app-server profiles. These retries preserve npm execution
 trees and keeps the saved model, fallback model, mode, runtime version, and
 enabled state unchanged.
+
+For a verified missing execution manifest, Kandev prepares the same exact
+package in a private npm cache on the execution host. It validates the package
+and executable before replacement and keeps those files while the process uses
+them. The incomplete shared cache and healthy sessions remain available.
+Preparation and replacement share one retry and a maximum 90-second budget.
+
+After an upgrade or restart, open the affected task normally. Eligible automatic
+resume keeps the saved conversation and transcript. You do not need to clean
+npm caches, change settings, update the runtime, or create another session.
+Archived sessions and sessions that require an explicit start keep those rules.
+Older executor helpers without private-preparation support report the failure
+without deleting cache files. Authentication, permissions, registry policy,
+disk-space failures, and custom launch wrappers do not qualify for this recovery.
 
 Managed `npx` runtimes use a Kandev-owned npm project directory, so an `.npmrc`
 in the task repository does not change the managed runtime's package lookup.
@@ -1093,14 +1112,31 @@ A disabled installed plugin can still be selected for this profile. This
 selection asks Copilot to load the whole plugin for this profile; it does not
 enable the plugin globally.
 
-Kandev supports inventory and plugin-metadata adapters for managed Copilot CLI
-versions **1.0.88** and **1.0.104**. For a supported version and valid local or
-worktree context, Kandev can prepare a native `--plugin-dir` mount without an
-enterprise-policy qualification gate. `mount_permitted` describes that
-preparation eligibility; it is not policy approval, authentication, or a
-guarantee that a plugin component will load. Kandev uses the runtime selected
-for this profile and does not fall back to an unrelated global CLI or change a
-runtime pin.
+When you refresh, Kandev checks the selected interactive CLI's native help for
+the `--plugin-dir` option, then reads and validates its plugin inventory and
+installation metadata. These checks use the exact runtime and launch context
+selected for the profile. Kandev does not use a version or platform list to
+decide whether plugin preparation is available, and it does not fall back to
+an unrelated global CLI or change a runtime pin. A successful check confirms
+the interface and the selected plugin roots; Copilot's own policy remains the
+authority for whether a plugin component loads. The `mount_permitted` field
+reports only observed option support. It does not mean policy approval,
+authentication, or guaranteed plugin execution.
+
+Before a Copilot runtime change, the update preview shows plugin compatibility
+as unchecked because it does not run help or inventory for each saved profile's
+concrete launch context. It also reports how many saved profiles select plugins
+when that count is available. The notice is advisory. It does not block the
+update, change selections, or stop a running process. Successful ACP validation
+does not by itself verify profile plugin loading.
+
+If the selected runtime does not advertise `--plugin-dir`, or its inventory
+cannot be read, the profile keeps its saved selections and shows that plugin
+preparation cannot be completed for the current observation. Remove the
+selection before starting a new process, or repair the runtime and refresh.
+Native enabled status is unknown for a saved plugin that the current successful
+inventory did not observe; Kandev does not report that unknown state as
+disabled.
 
 A selection asks Copilot to load the whole plugin through its native support. A plugin
 can run MCP servers, skills, agents, commands, hooks, and other executable
@@ -1122,6 +1158,14 @@ its selected plugins cannot be prepared; Kandev does not silently omit them.
 If inventory refresh fails, saved choices remain and availability is marked
 unchecked. The profile's normal **Save**, **Reset**, and external-change
 recovery flow applies.
+
+If startup cannot prepare the selected plugins, the task conversation keeps a
+recovery card after reload. It shows the safe failure reason and the exact
+selected runtime version when available. It does not show plugin identities,
+host paths, or native command output. The saved selection stays in place; repair
+the plugin state or review the profile selection, then use the existing
+recovery controls to try again. The same recovery information is available on
+desktop and phone.
 
 Older Kandev backends may return the legacy `policy_unverified` reason for a
 profile capability or model-option probe. This is older-backend recovery, not
@@ -1148,8 +1192,10 @@ observed real calls and successful results from a plugin, a sibling plugin,
 native-config MCP, and an ACP-injected MCP. In the disable observation, the
 target received no traffic while an allowed sibling succeeded, but no
 authoritative denial was captured. Copilot 1.0.88 reached the endpoints, but
-its paired disable case was not reached. Managed policy was not tested. These
-observations are not evidence of enterprise-policy enforcement or
+its paired disable case was not reached. Managed policy was not tested. Copilot
+1.0.105 passed isolated inventory, installation-metadata, manifest, and repeated
+mount checks, but it was not part of the authenticated native diagnostics.
+These observations are not evidence of enterprise-policy enforcement or
 certification.
 
 <details>
@@ -1317,7 +1363,7 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Login required:** use the agent card's login terminal or sign in under Kandev's operating-system user; signing in as another user does not help the service.
 - **Model, mode, or command probe fails:** authenticate first, refresh discovery, and choose a value advertised by the installed version.
 - **Launch fails after editing flags:** inspect the command preview, remove stale arguments, and correct unmatched quotes or trailing escapes. If a queued automatic launch has an invalid built agent or continue command, Kandev drops that launch instead of retrying it. Correct the profile before starting the task again. Temporary provider or environment failures are not command-validation failures.
-- **Managed npm runtime cannot start:** Retry is limited to strict exact-package `ETARGET`, recognized temporary npm errors, and an ordinary pre-ACP exit with complete generation-matched evidence of empty stderr. Other permanent or unclassified errors and incomplete evidence do not retry. Kandev confirms cleanup and keeps the selected package and npm trees. If startup still fails, review the card's technical details and verify the service user's npm configuration and registry. Use **Settings > Agents** to prepare another trusted stable version when needed. Do not start with `npm cache clean --force`.
+- **Managed npm runtime cannot start:** Retry covers strict exact-package `ETARGET`, recognized temporary npm errors, an ordinary pre-initialization exit with complete generation-matched evidence of empty stderr, and independently verified missing npm execution manifests. Other permanent or unclassified errors and incomplete evidence do not retry. Kandev confirms cleanup and keeps the selected package and npm trees. If startup still fails, review the card's technical details and verify the service user's npm configuration and registry. Use **Settings > Agents** to prepare another trusted stable version when needed. Do not start with `npm cache clean --force`.
 - **Environment value is absent:** confirm the secret still exists, the key is not reserved, and an executor/runtime variable is not already taking precedence.
 - **MCP selection cannot save:** the previous saved selection remains in
   effect. A forbidden response explains that the current connection cannot save

@@ -381,7 +381,7 @@ package-capable start.
 
 | Path | Intended support and evidence | Unsupported behavior |
 | --- | --- | --- |
-| Structured ACP/native adapter | Multiple exact injected entries, transport negotiation, per-package observations; wire/adapter tests | Refuse package-mode start if entries cannot be represented |
+| Structured adapter | ACP or [prepared project delivery](builtin-mcp-project-delivery.md); per-package evidence | Refuse any undelivered selected package |
 | CLI passthrough | Extend each supported config builder, quoting and reserved-name handling; config-generation tests | No synthetic connected badge; missing injection strategy is unsupported |
 | Local/worktree and remote executors | Shared manifest plus each launch carrier; round-trip and helper negotiation tests | Old helper fails before fresh start |
 | Retained monolithic agent | Existing routes/catalog and honest legacy evidence | No hot migration or automatic restart |
