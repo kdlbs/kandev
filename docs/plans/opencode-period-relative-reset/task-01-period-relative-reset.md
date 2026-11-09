@@ -8,7 +8,7 @@ plan: "plan.md"
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
 acceptance_criteria:
-  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12
+  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.13
 system_design:
   - ../../specs/agents/system-design/provider-error-signatures.md
 ---

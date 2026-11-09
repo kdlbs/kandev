@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-10-08
-updated: 2026-10-28
+updated: 2026-11-08
 owners:
   - kandev
 ---
@@ -67,7 +67,9 @@ errors does not take its own healthy account out of rotation.
 - **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.6:** For `opencode-acp`, an
   opening `free usage limit reached` line without an error-envelope label shall
   classify as a quota limit. This criterion covers only the unlabelled
-  provider-specific form.
+  provider-specific form and shall not match inside a fenced code example. It
+  is an OpenCode-specific exception to the shared quota signature list in
+  criterion 001.3.
 - **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.10:** OpenCode diagnostics opening
   with `Rate limit exceeded: free-models-per-day...` or
   `Rate limit exceeded: limit_rpd/<model>` shall classify as rate limited even
@@ -93,7 +95,7 @@ errors does not take its own healthy account out of rotation.
   Only integer delays from 1 through 60 seconds qualify.
   Missing, malformed, zero, negative, and larger delays shall provide no hint.
   Classification shall not establish runtime health or authorize another prompt.
-- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12:** For a classified OpenCode
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.13:** For a classified OpenCode
   period usage-limit line with a valid relative reset duration and known
   diagnostic observation time, derive its reset from that observation. An
   explicit or dated reset retains precedence. Missing observation time,
@@ -101,13 +103,30 @@ errors does not take its own healthy account out of rotation.
   line shall not supply a reset. Other classifications and routing policy remain
   unchanged.
 
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12:** For `opencode-acp`, an
+  opening diagnostic line with one of the established `AI_APICallError:`,
+  `Error:`, `Internal error:`, or `API Error:` labels followed by `free usage
+  limit reached` shall classify as a quota limit. Match this form only at the
+  start of a diagnostic line. Ignore this form inside fenced code examples.
+  Matching shall be case-insensitive and shall accept flexible horizontal
+  whitespace within multiword labels and the phrase, and after the label's
+  colon. Whitespace shall not cross a diagnostic line boundary. Quoted prose,
+  unknown labels, split-line signatures, and other providers shall not match.
+  Existing structured status and earlier account-limit rules shall keep
+  precedence. Do not infer a reset hint when the diagnostic gives no reset
+  time. This criterion and criterion 001.6 are OpenCode-specific exceptions to
+  the shared quota signature list in criterion 001.3.
+
 Criterion 001.11 was added by the October 28
 [OpenCode capacity package](../../../plans/opencode-capacity-retry/plan.md).
+
+Criterion 001.12 is described in the
+[provider error signature plan](../../../plans/provider-error-signatures/plan.md).
 
 ## Out of scope
 
 - Changing rule order, confidence levels, or classification flags beyond the
-  narrow additions in criteria 001.6, 001.8, 001.9, 001.10, and 001.11.
+  narrow additions in criteria 001.6, 001.8, 001.9, 001.10, 001.11, and 001.12.
 - Changing unrelated provider-neutral rules or any runtime-environment rules.
 - Changing how classified failures suspend candidates or select a successor.
 

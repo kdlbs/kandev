@@ -129,6 +129,7 @@
   "conflictAutomationsTitle": "自動化：",
   "conflictQuickChatsTitle": "快速聊天：",
   "conflictTasksTitle": "任務：",
+  "conflictUnknownWorkspace": "未知工作區",
   "conflictTierMappingRow": "{{workspace}} 中 {{provider}} 的 <0>{{tier}}</0> 層級",
   "conflictTierMappingsTitle": "工作區層級映射：",
   "conflictUtilityAgentsTitle": "輔助代理程式（將保留失效綁定）：",

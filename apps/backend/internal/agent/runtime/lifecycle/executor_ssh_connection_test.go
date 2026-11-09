@@ -772,7 +772,7 @@ func TestSSHManagedBrokerResumeForcesFreshAgentctlWithNewLease(t *testing.T) {
 		stoppedPID = pid
 		return nil
 	}
-	if err := sshExec.resetManagedBrokerResume(context.Background(), req, "1234", "/remote/session"); err != nil {
+	if err := sshExec.resetManagedBrokerResume(context.Background(), req, 1234, "/remote/session", nil); err != nil {
 		t.Fatalf("resetManagedBrokerResume() error = %v", err)
 	}
 	if probedLease != "fresh-lease-after-backend-restart" {
