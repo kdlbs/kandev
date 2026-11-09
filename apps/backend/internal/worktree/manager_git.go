@@ -516,11 +516,13 @@ func (m *Manager) pullBaseBranchWithPolicy(
 	if localBranch != "" {
 		fetchArgs = append(fetchArgs, localBranch)
 	}
-	output, err, execCtxErr := m.runGitCombinedAfterAcquire(ctx, m.fetchTimeout, repoPath, fetchArgs...)
-	if err != nil {
+	fetchResult := m.runRefreshGitWithLockRetry(
+		ctx, "fetch", repoPath, baseBranch, m.fetchTimeout, fetchArgs...,
+	)
+	if fetchResult.runErr != nil {
 		return m.handleBaseFetchFailure(
 			ctx, repoPath, stepName, baseBranch, fallbackBaseBranch, required,
-			localBaseExists, output, err, execCtxErr, onProgress,
+			localBaseExists, fetchResult, onProgress,
 		)
 	}
 
@@ -547,12 +549,14 @@ func (m *Manager) handleBaseFetchFailure(
 	ctx context.Context,
 	repoPath, stepName, baseBranch, fallbackBaseBranch string,
 	required, localBaseExists bool,
-	output []byte,
-	err, execCtxErr error,
+	result refreshLockRetryResult,
 	onProgress SyncProgressCallback,
 ) (string, string, error) {
-	reason := classifyGitFallbackReason(err, string(output), execCtxErr)
-	m.logRefreshDiagnostic("fetch", repoPath, baseBranch, reason, output, err, execCtxErr)
+	reason := classifyGitFallbackReason(result.runErr, string(result.output), result.execCtxErr)
+	m.logRefreshDiagnostic(
+		"fetch", repoPath, baseBranch, reason, result.output,
+		result.runErr, result.execCtxErr, result.attempts,
+	)
 	if required {
 		fallback := strings.TrimSpace(fallbackBaseBranch)
 		if reason == gitFallbackReasonMissingRemoteRef && fallback != "" && fallback != baseBranch {
@@ -562,7 +566,7 @@ func (m *Manager) handleBaseFetchFailure(
 			}
 			return "", "", fallbackErr
 		}
-		failureCause := syncFailureCause(reason, err, execCtxErr)
+		failureCause := syncFailureCause(reason, result.runErr, result.execCtxErr)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			reason = syncContextFailureReason(ctxErr)
 			failureCause = ctxErr
@@ -575,11 +579,11 @@ func (m *Manager) handleBaseFetchFailure(
 	if localBaseExists {
 		resolved, warningErr := m.completeSyncWithWarning(
 			ctx, stepName, baseBranch, "Fetch", reason, baseBranch, onProgress,
-			syncFailureCause(reason, err, execCtxErr),
+			syncFailureCause(reason, result.runErr, result.execCtxErr),
 		)
 		return resolved, "", warningErr
 	}
-	failureCause := syncFailureCause(reason, err, execCtxErr)
+	failureCause := syncFailureCause(reason, result.runErr, result.execCtxErr)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		reason = syncContextFailureReason(ctxErr)
 		failureCause = ctxErr
@@ -720,10 +724,15 @@ func (m *Manager) pullCurrentBranchOrFallback(
 	onProgress SyncProgressCallback, localBaseExists bool,
 ) (string, error) {
 	// Same Acquire-then-build-execCtx ordering as the fetch path.
-	output, err, execCtxErr := m.runGitCombinedAfterAcquire(ctx, m.pullTimeout, repoPath, "pull", "--ff-only", "origin", baseBranch)
-	if err != nil {
-		reason := classifyGitFallbackReason(err, string(output), execCtxErr)
-		m.logRefreshDiagnostic("pull", repoPath, baseBranch, reason, output, err, execCtxErr)
+	pullResult := m.runRefreshGitWithLockRetry(
+		ctx, "pull", repoPath, baseBranch, m.pullTimeout, "pull", "--ff-only", "origin", baseBranch,
+	)
+	if pullResult.runErr != nil {
+		reason := classifyGitFallbackReason(pullResult.runErr, string(pullResult.output), pullResult.execCtxErr)
+		m.logRefreshDiagnostic(
+			"pull", repoPath, baseBranch, reason, pullResult.output,
+			pullResult.runErr, pullResult.execCtxErr, pullResult.attempts,
+		)
 		resolved, selectErr := m.selectContainingRef(ctx, repoPath, baseBranch, remoteRef)
 		if selectErr != nil {
 			if !localBaseExists {
@@ -735,9 +744,11 @@ func (m *Manager) pullCurrentBranchOrFallback(
 			)
 		}
 		if localBaseExists {
-			return m.completeSyncWithWarning(ctx, stepName, baseBranch, "Pull", reason, resolved, onProgress, err)
+			return m.completeSyncWithWarning(
+				ctx, stepName, baseBranch, "Pull", reason, resolved, onProgress, pullResult.runErr,
+			)
 		}
-		return "", m.failRequiredSync(stepName, baseBranch, onProgress, reason, err)
+		return "", m.failRequiredSync(stepName, baseBranch, onProgress, reason, pullResult.runErr)
 	}
 	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", baseBranch), "")
 	return baseBranch, nil
@@ -794,10 +805,15 @@ func (m *Manager) selectContainingRef(
 
 // syncFailureCause intentionally suppresses cmdErr because Git output can
 // contain credentials. Callers expose only a bounded failure class and never
-// include the command output in errors or progress.
-func syncFailureCause(reason string, _ error, contextErr error) error {
+// include the command output in errors or progress. The exhausted lock error is
+// fixed wording and credential-safe, so it is preserved for required failures.
+func syncFailureCause(reason string, cmdErr error, contextErr error) error {
 	if contextErr != nil {
 		return contextErr
+	}
+	var lockErr *refreshLockExhaustedError
+	if errors.As(cmdErr, &lockErr) {
+		return cmdErr
 	}
 	switch reason {
 	case "timeout":

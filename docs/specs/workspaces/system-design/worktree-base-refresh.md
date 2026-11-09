@@ -39,6 +39,7 @@ change Git commands that an agent runs after launch.
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13` | [Missing-base fallback](#missing-base-fallback) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.14` | [Safe refresh diagnostics](#safe-refresh-diagnostics) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.24` | [Required refresh verification cause](#required-refresh-verification-cause) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.29` through `.34` | [Lock recovery](worktree-base-refresh-recovery.md) |
 
 ## Components and responsibilities
 
@@ -532,11 +533,10 @@ reading its remote URL. Existing failure or fallback logs can carry these fields
 instead of adding a duplicate diagnostic. Cover both required and best-effort
 paths, including a failed configured fallback branch.
 
-Classification is observational. Do not feed new diagnostic categories into
-missing-base fallback eligibility or alter `syncFailureCause` identities.
-Preserve context errors and current progress/error payloads. Correct the
-`syncFailureCause` comment that implies raw output reaches internal logs.
-No new logging configuration, subprocess, retry, or persistence is required.
+Diagnostic categories do not authorize missing-base fallback.
+The [lock recovery design](worktree-base-refresh-recovery.md) adds bounded
+re-execution and fixed lock errors under criteria .29 through .34.
+Context precedence, error identities, and credential exclusion remain authoritative.
 
 Delivery: [Recovery diagnostic fixes](../../../plans/recovery-diagnostics/plan.md).
 
