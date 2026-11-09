@@ -10,11 +10,15 @@ name: Claude Code Review
 #     to bypass the OIDC exchange; findings are issue comments authored by
 #     github-actions[bot].
 # Each job gates on github.event_name AND head.repo so exactly one automatic
-# review runs when a PR is opened. Later reviews are requested by commenting
+# review runs when a PR is opened. GitHub suppresses pull_request workflows
+# while a PR has merge conflicts, so the same-repo job also listens for
+# `synchronize` and admits the missing opening review after the conflict is
+# resolved. A read-only admission step skips later pushes once any retained run
+# has started the review action. Later reviews are requested by commenting
 # `@claude review` on the PR.
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
   pull_request_target:
     # `labeled` lets a maintainer approve the initial review of an untrusted
     # fork by applying `safe-to-review`. Pushes never trigger another review.
@@ -22,7 +26,11 @@ on:
 
 concurrency:
   group: claude-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A same-repo push must not cancel an already-admitted review. GitHub replaces
+  # a pending run with the newest pending event, and that surviving run repeats
+  # admission after the active run releases the group. Fork target runs keep
+  # the current cancellation behavior.
+  cancel-in-progress: ${{ github.event_name != 'pull_request' }}
 
 jobs:
   claude-review-same-repo:
@@ -38,6 +46,8 @@ jobs:
       contents: read
       pull-requests: write
       id-token: write
+      # Read retained workflow-run and job-step history for the admission gate.
+      actions: read
 
     steps:
       - name: Checkout PR head
@@ -46,7 +56,43 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Decide whether to start the initial review
+        id: initial-review
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const {
+              shouldStartInitialReview,
+            } = require('./.github/scripts/claude-initial-review.cjs');
+
+            const pullNumber = context.payload.pull_request.number;
+            const decision = await shouldStartInitialReview({
+              github,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pullNumber,
+              eventHeadSha: context.payload.pull_request.head.sha,
+              currentRunId: context.runId,
+            });
+
+            const runIds = decision.runIds.length > 0
+              ? ` run_ids=${decision.runIds.join(',')}`
+              : '';
+            const line =
+              `initial review admission: pull=#${pullNumber}` +
+              ` decision=${decision.shouldReview ? 'review' : 'skip'}` +
+              ` reason=${decision.reason}${runIds}`;
+            if (decision.shouldReview) {
+              core.info(line);
+            } else {
+              core.notice(line);
+            }
+
+            core.setOutput('should_review', String(decision.shouldReview));
+            core.setOutput('reason', decision.reason);
+
       - name: Run Claude Code Review (App token, inline comments)
+        if: steps.initial-review.outputs.should_review == 'true'
         id: claude-review
         uses: anthropics/claude-code-action@ae68417a745a5df4b2124873632bd73a2255e6f6 # v1.0.259
         with:
