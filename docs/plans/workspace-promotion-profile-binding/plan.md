@@ -32,7 +32,7 @@ selection, and the separate Office profile field.
 
 | Work order | Acceptance criteria | System design |
 | --- | --- | --- |
-| Task 01 | `AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.27` | [Dynamic agent routing part 2](../../specs/agents/system-design/dynamic-agent-routing-02.md#persistence-guarantees) |
+| Task 01 | `AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.31` | [Dynamic agent routing part 2](../../specs/agents/system-design/dynamic-agent-routing-02.md#persistence-guarantees) |
 
 ## Work orders
 

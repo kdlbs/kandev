@@ -249,7 +249,7 @@ require the current exclusive probe lease.
   executor-running row whenever that profile or the acting Office profile
   changes. The Office profile stays in its separate field, so command
   construction, startup, persistence, and restart read the same concrete
-  profile (`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.27`).
+  profile (`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.31`).
 
 ## Scenarios
 
