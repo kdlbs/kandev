@@ -7116,6 +7116,13 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 			return nil, err
 		}
 	}
+	// A dynamic profile that does not keep its model compares candidates at
+	// every new user turn, including one sent to a warm idle runtime.
+	if switchResult, switched, switchErr := s.switchIdleDynamicCandidateForNewTurn(
+		ctx, taskID, sessionID, prompt, model, planMode, attachments, origin, options,
+	); switched {
+		return switchResult, switchErr
+	}
 
 	session, foregroundClaim, err := s.prepareSessionAndForegroundClaimForPrompt(ctx, taskID, sessionID, options)
 	if err != nil {

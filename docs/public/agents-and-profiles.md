@@ -692,8 +692,14 @@ executed as order.
 Use **Preview new selection** to inspect the current saved or unsaved draft.
 Preview does not save, claim a runtime slot or start an agent. Its random result
 is a sample, not a reservation of the next choice; active sessions are unchanged.
-Keep-model reevaluation remains a later increment. Unsupported modes are not
-silently executed as saved order.
+**Keep the chosen model between turns** is on by default. When it is off,
+Kandev compares candidates again before each new message. If an idle session's
+comparison picks another candidate, Kandev restarts the session on that
+candidate, which receives your message with a bounded summary of the
+conversation instead of the previous provider's own history. Kandev does not
+switch during a running turn, while background work is running or unknown, or
+on a non-local runtime, and open terminals keep running. Unsupported modes are
+not silently executed as saved order.
 
 Each candidate has a policy for two shared provider-error classes:
 

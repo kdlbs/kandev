@@ -378,6 +378,19 @@ func newWorkflowDynamicProfileResolverWithCandidates(
 	engineOptions ...dynamicruntime.EngineOption,
 ) *agentruntime.ProfileExecutionResolver {
 	t.Helper()
+	return newWorkflowDynamicProfileResolverWithKeepModel(t, dynamicProfileID, candidates, nil, engineOptions...)
+}
+
+// newWorkflowDynamicProfileResolverWithKeepModel stores the profile-wide
+// keep_model_while_running preference; nil keeps the stored default.
+func newWorkflowDynamicProfileResolverWithKeepModel(
+	t *testing.T,
+	dynamicProfileID string,
+	candidates []workflowDynamicCandidate,
+	keepModelWhileRunning *bool,
+	engineOptions ...dynamicruntime.EngineOption,
+) *agentruntime.ProfileExecutionResolver {
+	t.Helper()
 	db, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -422,7 +435,9 @@ func newWorkflowDynamicProfileResolverWithCandidates(
 		})
 	}
 	if err := repo.CreateDynamicAgentProfile(ctx,
-		&agentsettingsmodels.DynamicAgentProfile{ProfileID: dynamicProfileID, Version: 1},
+		&agentsettingsmodels.DynamicAgentProfile{
+			ProfileID: dynamicProfileID, Version: 1, KeepModelWhileRunning: keepModelWhileRunning,
+		},
 		routes,
 	); err != nil {
 		t.Fatal(err)
