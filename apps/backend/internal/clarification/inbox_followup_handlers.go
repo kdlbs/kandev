@@ -19,16 +19,6 @@ type inboxRecoveryBlockReader interface {
 	ListOpenWorkspaceRecoveryBlocks(ctx context.Context, workspaceID string, limit int) ([]taskmodels.WorkspaceRecoveryBlockSummary, bool, error)
 }
 
-// inboxEarlierListResponse is GET /api/v1/clarification-inbox/earlier-turns's
-// response envelope: questions still marked pending on a turn that is no
-// longer the session's current turn. They cannot be claimed, so the rows are
-// read-only and answered by an ordinary follow-up message.
-type inboxEarlierListResponse struct {
-	Bundles    []inboxBundleView `json:"bundles"`
-	Count      int               `json:"count"`
-	NextCursor string            `json:"next_cursor,omitempty"`
-}
-
 // inboxRecoveryBlockView is one row of GET /api/v1/clarification-inbox/recovery-blocks.
 type inboxRecoveryBlockView struct {
 	BlockID           string `json:"block_id"`
@@ -69,44 +59,6 @@ func (h *Handlers) respondInboxReadFailure(c *gin.Context, requestCtx context.Co
 	}
 	h.logger.Error(message, zap.Error(err))
 	respondInboxError(c, http.StatusInternalServerError, errInboxInternal)
-}
-
-// httpListInboxEarlierTurns backs GET /api/v1/clarification-inbox/earlier-turns.
-func (h *Handlers) httpListInboxEarlierTurns(c *gin.Context) {
-	requestCtx := c.Request.Context()
-	workspaceID, limit, cursorCreatedAt, cursorPendingID, ok := h.parseInboxListQuery(c)
-	if !ok {
-		return
-	}
-	ctx, cancel := context.WithTimeout(requestCtx, inboxReadTimeout)
-	defer cancel()
-	if !h.authorizeInboxWorkspaceRead(c, requestCtx, ctx, workspaceID) {
-		return
-	}
-	page, err := h.inboxBundles.ListUnresolvedClarificationBundles(ctx, taskmodels.ListClarificationBundlesOptions{
-		Unscoped:        true,
-		WorkspaceID:     workspaceID,
-		CursorCreatedAt: cursorCreatedAt,
-		CursorPendingID: cursorPendingID,
-		Limit:           limit,
-		Sidecar:         &taskmodels.ClarificationSidecarFilter{UserID: InboxUserID(ctx), Now: h.now()},
-		EarlierTurns:    true,
-	})
-	if err != nil {
-		h.respondInboxReadFailure(c, requestCtx, err, "failed to list earlier-turn needs-you bundles")
-		return
-	}
-	views, err := h.buildInboxBundleViews(ctx, page.Bundles)
-	if err != nil {
-		h.respondInboxReadFailure(c, requestCtx, err, "failed to hydrate earlier-turn needs-you bundles")
-		return
-	}
-	resp := inboxEarlierListResponse{Bundles: views, Count: len(views)}
-	if page.HasMore && len(page.Bundles) > 0 {
-		last := page.Bundles[len(page.Bundles)-1]
-		resp.NextCursor = encodeInboxCursor(last.CreatedAt, last.PendingID)
-	}
-	c.JSON(http.StatusOK, resp)
 }
 
 // httpListInboxRecoveryBlocks backs GET /api/v1/clarification-inbox/recovery-blocks.

@@ -6,23 +6,10 @@ vi.mock("../client", () => ({
   fetchJson: fetchJsonMock,
 }));
 
-import {
-  listEarlierTurnClarificationInbox,
-  listInboxRecoveryBlocks,
-} from "./clarification-inbox-api";
+import { listInboxRecoveryBlocks } from "./clarification-inbox-api";
 
 describe("clarification inbox follow-up reads", () => {
   beforeEach(() => fetchJsonMock.mockReset());
-
-  it("requests the earlier-turn list scoped and encoded by workspace", async () => {
-    const page = { bundles: [], count: 0 };
-    fetchJsonMock.mockResolvedValue(page);
-    await expect(listEarlierTurnClarificationInbox("ws/1")).resolves.toEqual(page);
-    expect(fetchJsonMock).toHaveBeenCalledWith(
-      "/api/v1/clarification-inbox/earlier-turns?workspace_id=ws%2F1",
-      undefined,
-    );
-  });
 
   it("requests the recovery-block list and forwards options", async () => {
     const options = { cache: "no-store" as const };

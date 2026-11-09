@@ -278,7 +278,6 @@ func RegisterRoutes(
 		inbox.GET("", h.httpListInbox)
 		inbox.GET("/hidden", h.httpListInboxHidden)
 		inbox.GET("/history", h.httpListInboxHistory)
-		inbox.GET("/earlier-turns", h.httpListInboxEarlierTurns)
 		inbox.GET("/recovery-blocks", h.httpListInboxRecoveryBlocks)
 		inbox.PUT("/sidecar/:pendingID", h.httpUpsertInboxSidecar)
 		inbox.DELETE("/sidecar/:pendingID", h.httpDeleteInboxSidecar)

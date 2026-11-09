@@ -1,6 +1,5 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
 import type {
-  ClarificationInboxEarlierPage,
   ClarificationInboxHiddenPage,
   ClarificationInboxPage,
   ClarificationInboxSnoozeDuration,
@@ -28,16 +27,6 @@ export function listHiddenClarificationInbox(
 ): Promise<ClarificationInboxHiddenPage> {
   return fetchJson<ClarificationInboxHiddenPage>(
     `${BASE}/hidden?workspace_id=${encodeURIComponent(workspaceId)}`,
-    options,
-  );
-}
-
-export function listEarlierTurnClarificationInbox(
-  workspaceId: string,
-  options?: ApiRequestOptions,
-): Promise<ClarificationInboxEarlierPage> {
-  return fetchJson<ClarificationInboxEarlierPage>(
-    `${BASE}/earlier-turns?workspace_id=${encodeURIComponent(workspaceId)}`,
     options,
   );
 }

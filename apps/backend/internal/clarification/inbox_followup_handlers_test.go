@@ -27,48 +27,6 @@ func (f *fakeInboxRecoveryStore) ListOpenWorkspaceRecoveryBlocks(
 	return f.blocks, f.hasMore, f.err
 }
 
-func TestHttpListInboxEarlierTurns_ListsEarlierScopeOnly(t *testing.T) {
-	createdAt := testInboxNow.Add(-time.Hour)
-	bundles := &fakeInboxBundleStore{page: &taskmodels.ClarificationBundlePage{
-		Bundles: []taskmodels.ClarificationBundleSummary{{PendingID: "p1", TaskID: "t1", SessionID: "s1", CreatedAt: createdAt}},
-		HasMore: true,
-	}}
-	msgs := map[string][]*taskmodels.Message{
-		"p1": {{ID: "m1", TaskSessionID: "s1", TaskID: "t1", CreatedAt: createdAt, Metadata: map[string]any{"pending_id": "p1"}}},
-	}
-	tasks := &fakeInboxTasks{tasks: map[string]*taskmodels.Task{"t1": {ID: "t1", Title: "Earlier task"}}}
-	h := newInboxTestHandler(t, msgs, alwaysAllowAuthorizer{}, tasks, bundles)
-
-	rec := runInboxGet(h, "/api/v1/clarification-inbox/earlier-turns?workspace_id=w1", h.httpListInboxEarlierTurns)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-	if !bundles.lastOpts.EarlierTurns || bundles.lastOpts.WorkspaceID != "w1" || bundles.lastOpts.Sidecar == nil {
-		t.Fatalf("query opts = %+v, want earlier-turn scope for w1 with the sidecar filter", bundles.lastOpts)
-	}
-	var body inboxEarlierListResponse
-	decodeInboxBody(t, rec, &body)
-	if body.Count != 1 || len(body.Bundles) != 1 || body.Bundles[0].PendingID != "p1" || body.Bundles[0].TaskTitle != "Earlier task" {
-		t.Fatalf("body = %+v, want one enriched p1 bundle", body)
-	}
-	if body.NextCursor == "" {
-		t.Fatalf("next_cursor empty, want truncation reported")
-	}
-}
-
-func TestHttpListInboxEarlierTurns_UnreachableWorkspaceIs404(t *testing.T) {
-	tasks := &fakeInboxTasks{authzErr: repoerrors.ErrWorkspaceNotFound}
-	bundles := &fakeInboxBundleStore{}
-	h := newInboxTestHandler(t, nil, alwaysAllowAuthorizer{}, tasks, bundles)
-	rec := runInboxGet(h, "/api/v1/clarification-inbox/earlier-turns?workspace_id=w1", h.httpListInboxEarlierTurns)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
-	if bundles.lastOpts.WorkspaceID != "" {
-		t.Fatalf("query ran before authorization: %+v", bundles.lastOpts)
-	}
-}
-
 func TestHttpListInboxRecoveryBlocks_ListsBlocks(t *testing.T) {
 	at := testInboxNow.Add(-30 * time.Minute)
 	store := &fakeInboxRecoveryStore{

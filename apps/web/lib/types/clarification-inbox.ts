@@ -58,15 +58,6 @@ export type ClarificationInboxUnansweredPage = {
   next_cursor?: string;
 };
 
-// GET /api/v1/clarification-inbox/earlier-turns: questions still pending on a
-// turn that is no longer the session's current turn. Read-only; answered by an
-// ordinary follow-up message, never through the claim path.
-export type ClarificationInboxEarlierPage = {
-  bundles: ClarificationInboxBundle[];
-  count: number;
-  next_cursor?: string;
-};
-
 // GET /api/v1/clarification-inbox/recovery-blocks: open session recovery
 // blocks waiting on an operator decision. The decision stays on the task chat.
 export type InboxRecoveryBlock = {
