@@ -143,13 +143,16 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 	clearAuthoritativeMetadataKeys(metadata)
 
 	resolved := executorID
+	profileFound := false
 	var defaultExecutorErr error
 	if resolved == "" {
 		// The selected profile's parent executor is the strongest available
 		// selection. Resolve it before the workspace default so a missing or
 		// deleted default cannot turn a profile-only launch into an unresolved
 		// selection.
-		if cfg, handled, err := e.profileParentExecutorConfig(ctx, metadata); handled {
+		cfg, handled, found, err := e.profileParentExecutorConfig(ctx, metadata)
+		profileFound = found
+		if handled {
 			cfg.ResolutionErr = err
 			return cfg
 		}
@@ -168,6 +171,15 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 				cfg.ImplicitSelection = true
 			}
 			return cfg
+		}
+		if !profileFound {
+			// A concrete profile that no longer exists cannot become the
+			// unspecified standalone selection. An existing default executor is
+			// handled above; reaching this branch means nothing else selected one.
+			return executorConfig{
+				Metadata:      metadata,
+				ResolutionErr: fmt.Errorf("executor profile %q was not found", profileID),
+			}
 		}
 		cfg := executorConfig{Metadata: metadata}
 		if err := e.applyProfile(ctx, profileID, &cfg, metadata); err != nil {
@@ -209,30 +221,35 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 
 // profileParentExecutorConfig resolves the executor a selected profile belongs
 // to. handled=false means the metadata has no resolvable profile parent and
-// the caller must continue with the workspace default.
+// the caller must continue with the workspace default; found reports whether
+// the profile row exists at all so a deleted profile cannot silently become an
+// unspecified selection.
 func (e *Executor) profileParentExecutorConfig(
 	ctx context.Context,
 	metadata map[string]interface{},
-) (executorConfig, bool, error) {
+) (executorConfig, bool, bool, error) {
 	profileID, _ := metadata["executor_profile_id"].(string)
 	profileID = strings.TrimSpace(profileID)
 	if profileID == "" {
-		return executorConfig{}, false, nil
+		return executorConfig{}, false, false, nil
 	}
 	profile, err := e.repo.GetExecutorProfile(ctx, profileID)
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
-			return executorConfig{}, false, nil
+			return executorConfig{}, false, false, nil
 		}
-		return executorConfig{Metadata: metadata}, true,
+		return executorConfig{Metadata: metadata}, true, true,
 			fmt.Errorf("executor profile %q could not be loaded", profileID)
 	}
-	if profile == nil || strings.TrimSpace(profile.ExecutorID) == "" {
-		return executorConfig{}, false, nil
+	if profile == nil {
+		return executorConfig{}, false, false, nil
+	}
+	if strings.TrimSpace(profile.ExecutorID) == "" {
+		return executorConfig{}, false, true, nil
 	}
 	executor, err := e.repo.GetExecutor(ctx, profile.ExecutorID)
 	if err != nil || executor == nil {
-		return executorConfig{Metadata: metadata}, true,
+		return executorConfig{Metadata: metadata}, true, true,
 			fmt.Errorf("executor profile %q parent executor %q could not be loaded", profileID, profile.ExecutorID)
 	}
 	cfg := executorConfig{
@@ -244,9 +261,9 @@ func (e *Executor) profileParentExecutorConfig(
 		RuntimeName:  string(executor.Type),
 	}
 	if err := e.applyProfile(ctx, profileID, &cfg, metadata); err != nil {
-		return cfg, true, err
+		return cfg, true, true, err
 	}
-	return cfg, true, nil
+	return cfg, true, true, nil
 }
 
 func metadataHasExecutorSelection(metadata map[string]interface{}) bool {

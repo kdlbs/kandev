@@ -358,3 +358,24 @@ func TestResolveExecutorConfigUsesProfileParentWhenWorkspaceDefaultMissing(t *te
 		t.Fatalf("executor type = %q, want local_docker", cfg.ExecutorType)
 	}
 }
+
+// TestResolveExecutorConfigRefusesDeletedProfileWithoutSelection proves a
+// deleted profile with no workspace default is an unresolved concrete
+// selection, not the unspecified standalone fallback.
+func TestResolveExecutorConfigRefusesDeletedProfileWithoutSelection(t *testing.T) {
+	repo := &executorConfigWorkspaceRepository{mockRepository: newMockRepository()}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	cfg := exec.resolveExecutorConfig(context.Background(), "", "workspace-config", map[string]interface{}{
+		"executor_profile_id": "deleted-profile",
+	})
+	if cfg.ResolutionErr == nil {
+		t.Fatal("resolveExecutorConfig error = nil, want unresolved deleted profile")
+	}
+	if cfg.ImplicitSelection {
+		t.Fatal("deleted profile must not become an implicit selection")
+	}
+	if err := exec.admitConcreteExecutorRuntime(cfg); !errors.Is(err, ErrExecutorRuntimeSelectionUnresolved) {
+		t.Fatalf("admission error = %v, want unresolved selection", err)
+	}
+}
