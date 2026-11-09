@@ -25,7 +25,7 @@ func TestManagedRuntimeProbeOwnerScopeSeparatesActors(t *testing.T) {
 		t.Fatalf("profile scope = %q, want the authorized profile scope", profile)
 	}
 	internal := manager.managedRuntimeProbeOwnerScope(context.Background(), "")
-	if internal != managedruntime.RepairOwnerScopeAgentWide("system") {
+	if internal != managedruntime.RepairOwnerScopeAgentWide(managedRuntimeSystemOwnerUserID) {
 		t.Fatalf("internal scope = %q, want system", internal)
 	}
 }
@@ -33,21 +33,21 @@ func TestManagedRuntimeProbeOwnerScopeSeparatesActors(t *testing.T) {
 // @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-007.18
 func TestManagedRuntimeProbeOwnerScopeModeParity(t *testing.T) {
 	manager := &Manager{}
-	manager.SetManagedRuntimeSingleUserOwner(func() (string, bool) { return "system", true })
+	manager.SetManagedRuntimeSingleUserOwner(func() (string, bool) { return managedRuntimeSystemOwnerUserID, true })
 	startup := manager.managedRuntimeProbeOwnerScope(context.Background(), "")
 	interactive := manager.managedRuntimeProbeOwnerScope(
-		authn.WithIdentity(context.Background(), authn.Identity{UserID: "system", Synthetic: true}), "",
+		authn.WithIdentity(context.Background(), authn.Identity{UserID: managedRuntimeSystemOwnerUserID, Synthetic: true}), "",
 	)
-	if startup != interactive || startup != managedruntime.RepairOwnerScopeAgentWide("system") {
+	if startup != interactive || startup != managedruntime.RepairOwnerScopeAgentWide(managedRuntimeSystemOwnerUserID) {
 		t.Fatalf("disabled-mode startup/interactive scopes = (%q, %q), want the same single-user owner", startup, interactive)
 	}
 
-	manager.SetManagedRuntimeSingleUserOwner(func() (string, bool) { return "system", false })
+	manager.SetManagedRuntimeSingleUserOwner(func() (string, bool) { return managedRuntimeSystemOwnerUserID, false })
 	enabledInternal := manager.managedRuntimeProbeOwnerScope(context.Background(), "")
 	enabledUser := manager.managedRuntimeProbeOwnerScope(
 		authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-a"}), "",
 	)
-	if enabledInternal != managedruntime.RepairOwnerScopeAgentWide("system") ||
+	if enabledInternal != managedruntime.RepairOwnerScopeAgentWide(managedRuntimeSystemOwnerUserID) ||
 		enabledUser != managedruntime.RepairOwnerScopeAgentWide("user-a") ||
 		enabledInternal == enabledUser {
 		t.Fatalf("enabled-mode scopes = (%q, %q), want system/user separation", enabledInternal, enabledUser)

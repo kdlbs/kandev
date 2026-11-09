@@ -140,6 +140,8 @@ type (
 
 // Shared probes and prompts each take one slot. Repair takes every slot so it
 // cannot remove an npm execution tree while another utility process uses it.
+const managedRuntimeSystemOwnerUserID = "system"
+
 const hostUtilityOperationCapacity int64 = 1 << 20
 
 func (i *instance) acquireOperation(ctx context.Context, exclusive bool) (func(), error) {
@@ -1035,7 +1037,7 @@ func (m *Manager) managedRuntimeProbeOwnerScope(ctx context.Context, profileScop
 	}
 	owner := managedruntime.ResolveRepairOwner(input)
 	if owner == "" {
-		owner = "system"
+		owner = managedRuntimeSystemOwnerUserID
 	}
 	return managedruntime.RepairOwnerScopeAgentWide(owner)
 }
