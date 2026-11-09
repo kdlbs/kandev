@@ -8,6 +8,7 @@ export type ReviewDiffResult = {
   changed: number;
   total: number;
   mask: Uint8ClampedArray;
+  bounds: { x: number; y: number; width: number; height: number } | null;
 };
 
 export type ReviewDiffState =
@@ -68,10 +69,17 @@ export function useReviewDiff(
         setState({ status: "unavailable" });
         return;
       }
-      const { width, height, changed, total } = response;
+      const { width, height, changed, total, bounds } = response;
       setState({
         status: "ready",
-        result: { width, height, changed, total, mask: new Uint8ClampedArray(response.mask) },
+        result: {
+          width,
+          height,
+          changed,
+          total,
+          bounds: bounds ?? null,
+          mask: new Uint8ClampedArray(response.mask),
+        },
       });
     };
     const onError = () => {

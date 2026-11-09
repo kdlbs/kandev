@@ -273,7 +273,10 @@ illustrated choice retains its label and a **Show images** control.
 ### Ask for a visual comparison
 
 For before and after reviews, put one screen in each question. List the baseline
-image first and the candidates after it, up to four images per question. A bundle
+image first and the candidates after it, up to four images per question. Give
+each image a short `label`, one word such as `before`, `after`, or `alt`, so the
+image pickers show names instead of numbers. Labels must be unique within a
+question. A bundle
 can carry up to 16 distinct images, so four questions can each have their own set.
 
 The operator can select **Review images** to open a large view. It shows the

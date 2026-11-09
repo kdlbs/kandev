@@ -1,4 +1,4 @@
-import { diffPixels, type RasterImage } from "./pixel-diff";
+import { diffPixels, type PixelDiff, type RasterImage } from "./pixel-diff";
 
 export type DiffRequest = { id: number; pairKey: string; a: Blob; b: Blob; tolerance: number };
 export type DiffResponse =
@@ -10,6 +10,7 @@ export type DiffResponse =
       changed: number;
       total: number;
       mask: ArrayBuffer;
+      bounds: PixelDiff["bounds"];
     }
   | { id: number; ok: false };
 
@@ -54,6 +55,7 @@ async function handle(request: DiffRequest) {
         changed: result.changed,
         total: result.total,
         mask,
+        bounds: result.bounds,
       },
       [mask],
     );

@@ -69,9 +69,19 @@ export const CHANGED_PIXELS = 40;
 export const REVIEW_IMAGE_SIZE = { width: 160, height: 100 };
 
 export const reviewImages = {
-  before: { id: "before", path: "review-before.png", alt: "Settings header before" },
-  after: { id: "after", path: "review-after.png", alt: "Settings header after" },
-  taller: { id: "taller", path: "review-taller.png", alt: "Settings header with taller page" },
+  before: {
+    id: "before",
+    path: "review-before.png",
+    alt: "Settings header before",
+    label: "before",
+  },
+  after: { id: "after", path: "review-after.png", alt: "Settings header after", label: "after" },
+  taller: {
+    id: "taller",
+    path: "review-taller.png",
+    alt: "Settings header with taller page",
+    label: "taller",
+  },
   spacing: { id: "spacing", path: "review-spacing.png", alt: "Settings spacing" },
 };
 
@@ -95,7 +105,10 @@ const options = [
   { label: "Revise", description: "Request changes" },
 ];
 
-export function reviewScript(firstImages = [reviewImages.before, reviewImages.after]) {
+export function reviewScript(
+  firstImages: object[] = [reviewImages.before, reviewImages.after],
+  secondImages: object[] = [reviewImages.spacing],
+) {
   const questions = [
     {
       id: "header",
@@ -108,7 +121,7 @@ export function reviewScript(firstImages = [reviewImages.before, reviewImages.af
       id: "spacing",
       title: "Spacing",
       prompt: "Does the settings spacing look right?",
-      images: [reviewImages.spacing],
+      images: secondImages,
       options,
     },
   ];
@@ -196,4 +209,36 @@ export async function touchDrag(page: Page, target: Locator, toX: number) {
   }
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await cdp.detach();
+}
+
+/** Phone: picks a comparison mode from the mode sheet. */
+export async function choosePhoneMode(page: Page, dialog: Locator, mode: string) {
+  await dialog.getByTestId("question-review-mode-button").tap();
+  const sheet = page.getByTestId("question-review-mode-sheet");
+  await sheet.getByText(mode, { exact: true }).tap();
+  await expect(sheet).toHaveCount(0);
+}
+
+/** Phone: opens the More sheet and returns it. */
+export async function openPhoneMore(page: Page, dialog: Locator) {
+  await dialog.getByTestId("question-review-more").tap();
+  const sheet = page.getByTestId("question-review-more-sheet");
+  await expect(sheet).toBeVisible();
+  return sheet;
+}
+
+/** Every visible control in `scope` measures at least 44px in both dimensions. */
+export async function expectTouchTargets(scope: Locator) {
+  const buttons = scope.getByRole("button");
+  const count = await buttons.count();
+  for (let index = 0; index < count; index++) {
+    const button = buttons.nth(index);
+    if (!(await button.isVisible())) continue;
+    const box = (await button.boundingBox())!;
+    expect(
+      box.height,
+      (await button.getAttribute("data-testid")) ?? "button",
+    ).toBeGreaterThanOrEqual(44);
+    expect(box.width).toBeGreaterThanOrEqual(44);
+  }
 }

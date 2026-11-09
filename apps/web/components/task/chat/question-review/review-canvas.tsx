@@ -8,7 +8,13 @@ import { cn } from "@/lib/utils";
 type Props = {
   stageRef?: RefObject<HTMLDivElement | null>;
   view: ReviewView;
-  onStageKey: (event: { key: string; shiftKey: boolean; altKey: boolean }) => boolean;
+  onStageKey: (event: {
+    key: string;
+    shiftKey: boolean;
+    altKey: boolean;
+    repeat: boolean;
+  }) => boolean;
+  onStageKeyUp?: (event: { key: string }) => boolean;
   pointerHandlers: React.HTMLAttributes<HTMLDivElement>;
   children: ReactNode;
   className?: string;
@@ -41,6 +47,9 @@ export function ReviewCanvas(props: Props) {
       data-testid={props.testId ?? "question-review-stage"}
       data-review-pane=""
       onKeyDown={onKeyDown}
+      onKeyUp={(event) => {
+        if (props.onStageKeyUp?.(event)) event.preventDefault();
+      }}
       {...props.pointerHandlers}
       className={cn(
         "relative min-h-0 flex-1 cursor-grab touch-none select-none overflow-hidden overscroll-contain rounded-md bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring active:cursor-grabbing",

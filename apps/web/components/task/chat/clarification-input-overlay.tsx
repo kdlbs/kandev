@@ -42,6 +42,7 @@ import { ClarificationStatusBanner } from "./clarification-status-banner";
 import { ClarificationAnswerAttachments } from "./clarification-answer-attachments";
 import { useClarificationAnswerAttachments } from "./use-clarification-answer-attachments";
 import { QuestionImages } from "./question-images";
+import { QuestionImageGallery } from "./question-image-gallery";
 import { buildReviewSegments } from "@/lib/question-review/segments";
 import { regionCommentsReady } from "@/lib/question-review/regions";
 import {
@@ -240,75 +241,77 @@ function ClarificationCard(props: CardProps) {
   } = props;
   const { question, metadata } = meta;
   return (
-    <div
-      data-testid="clarification-question-card"
-      data-question-id={meta.questionId}
-      data-question-index={String(index)}
-      className="px-4 pt-1 pb-4"
-    >
-      {(total > 1 || metadata.question.title) && (
-        <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
-          {total > 1 && (
-            <span data-testid="clarification-progress-chip">
-              {t("task:questionOfTotal", { index: index + 1, total })}
-            </span>
-          )}
-          {metadata.question.title && (
-            <span data-testid="clarification-question-title" className="text-muted-foreground/70">
-              {total > 1 ? "· " : ""}
-              <ClarificationMarkdown variant="inline">
-                {metadata.question.title}
-              </ClarificationMarkdown>
-            </span>
-          )}
-        </div>
-      )}
-      <ClarificationMarkdown
-        variant="block"
-        className="mb-3 max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+    <QuestionImageGallery question={question}>
+      <div
+        data-testid="clarification-question-card"
+        data-question-id={meta.questionId}
+        data-question-index={String(index)}
+        className="px-4 pt-1 pb-4"
       >
-        {question.prompt}
-      </ClarificationMarkdown>
-      {!props.stageOwnsImages && (
-        <QuestionImages
-          pendingId={metadata.pending_id}
-          questionId={meta.questionId}
-          sessionId={meta.message.session_id}
-          images={question.images}
-          enabled={props.previewsEnabled}
-          onInspectionChange={props.onInspectionChange}
-        />
-      )}
-      <ClarificationOptions
-        options={question.options}
-        selectedOption={selectedOption}
-        isSubmitting={isSubmitting}
-        customActive={customActive}
-        onSelectOption={onSelectOption}
-        renderOptionPreview={(option) => renderCardOptionPreview(props, option)}
-      />
-      {showAgentDisconnected && (
-        <div
-          data-testid="clarification-deferred-notice"
-          className="mt-2 flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400"
+        {(total > 1 || metadata.question.title) && (
+          <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
+            {total > 1 && (
+              <span data-testid="clarification-progress-chip">
+                {t("task:questionOfTotal", { index: index + 1, total })}
+              </span>
+            )}
+            {metadata.question.title && (
+              <span data-testid="clarification-question-title" className="text-muted-foreground/70">
+                {total > 1 ? "· " : ""}
+                <ClarificationMarkdown variant="inline">
+                  {metadata.question.title}
+                </ClarificationMarkdown>
+              </span>
+            )}
+          </div>
+        )}
+        <ClarificationMarkdown
+          variant="block"
+          className="mb-3 max-w-none text-sm font-medium [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
         >
-          <IconInfoCircle className="h-3.5 w-3.5 flex-shrink-0" />
-          {t("task:theAgentHasMovedOn")}
-        </div>
-      )}
-      {question.allow_custom_text !== false && (
-        <ClarificationCustomInput
-          draft={customDraft}
+          {question.prompt}
+        </ClarificationMarkdown>
+        {!props.stageOwnsImages && (
+          <QuestionImages
+            pendingId={metadata.pending_id}
+            questionId={meta.questionId}
+            sessionId={meta.message.session_id}
+            images={question.images}
+            enabled={props.previewsEnabled}
+            onInspectionChange={props.onInspectionChange}
+          />
+        )}
+        <ClarificationOptions
+          options={question.options}
+          selectedOption={selectedOption}
           isSubmitting={isSubmitting}
-          committedText={customCommittedText}
-          active={customActive}
-          onChange={onCustomDraftChange}
-          onSubmit={onSubmitCustom}
-          onRequestFinalSubmit={onRequestFinalSubmit}
-          {...clarificationAttachmentInputProps(props)}
+          customActive={customActive}
+          onSelectOption={onSelectOption}
+          renderOptionPreview={(option) => renderCardOptionPreview(props, option)}
         />
-      )}
-    </div>
+        {showAgentDisconnected && (
+          <div
+            data-testid="clarification-deferred-notice"
+            className="mt-2 flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400"
+          >
+            <IconInfoCircle className="h-3.5 w-3.5 flex-shrink-0" />
+            {t("task:theAgentHasMovedOn")}
+          </div>
+        )}
+        {question.allow_custom_text !== false && (
+          <ClarificationCustomInput
+            draft={customDraft}
+            isSubmitting={isSubmitting}
+            committedText={customCommittedText}
+            active={customActive}
+            onChange={onCustomDraftChange}
+            onSubmit={onSubmitCustom}
+            onRequestFinalSubmit={onRequestFinalSubmit}
+            {...clarificationAttachmentInputProps(props)}
+          />
+        )}
+      </div>
+    </QuestionImageGallery>
   );
 }
 
@@ -511,7 +514,8 @@ type CarouselBodyProps = {
 type QuestionHandlerCtx = {
   meta: SingleQuestionMeta;
   group: ReturnType<typeof useClarificationGroup>;
-  isSingleQuestion: boolean;
+  /** True when answering should not move to the next question. */
+  stayOnAnswer: boolean;
   activeIndex: number;
   total: number;
   setActiveIndex: (idx: number) => void;
@@ -561,15 +565,14 @@ function deriveSelectionState(
 }
 
 function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
-  const { meta, group, isSingleQuestion, activeIndex, total, setActiveIndex, setCustomDrafts } =
-    ctx;
+  const { meta, group, stayOnAnswer, activeIndex, total, setActiveIndex, setCustomDrafts } = ctx;
 
   // Every answer now records a draft. Single-question bundles submit only
   // through the explicit trailing Send action, so files can be attached after
   // a choice is made.
   const commitAnswer = (answer: ClarificationAnswer) => {
     group.recordAnswer(meta.questionId, answer);
-    if (isSingleQuestion) return;
+    if (stayOnAnswer) return;
     if (activeIndex < total - 1) setActiveIndex(activeIndex + 1);
   };
 
@@ -659,7 +662,8 @@ function ClarificationCarouselBody({
   const { onSelectOption, onCustomDraftChange, onSubmitCustom } = buildQuestionHandlers({
     meta,
     group,
-    isSingleQuestion,
+    // The review view keeps the images of the answered question on screen.
+    stayOnAnswer: isSingleQuestion || Boolean(stageOwnsImages),
     activeIndex,
     total,
     setActiveIndex,
@@ -696,6 +700,7 @@ function ClarificationCarouselBody({
           activeIndex={activeIndex}
           total={total}
           isSubmitting={isSubmitting}
+          emphasizeNext={Boolean(stageOwnsImages) && Boolean(group.answers[meta.questionId])}
           onPrev={() => setActiveIndex(Math.max(0, activeIndex - 1))}
           onNext={() => setActiveIndex(Math.min(total - 1, activeIndex + 1))}
         />

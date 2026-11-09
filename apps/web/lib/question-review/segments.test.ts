@@ -4,6 +4,7 @@ import {
   buildReviewSegments,
   buildSegmentImages,
   hasReviewImages,
+  imageShortName,
   segmentImageIndex,
 } from "./segments";
 
@@ -99,5 +100,29 @@ describe("segmentImageIndex", () => {
     const images = buildSegmentImages(question({ images: [before, after] }));
     expect(segmentImageIndex(images, "after")).toBe(2);
     expect(segmentImageIndex(images, "missing")).toBe(0);
+  });
+});
+
+describe("imageShortName", () => {
+  // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-009.1
+  it("uses the agent label and falls back to the stage number", () => {
+    const images = buildSegmentImages(
+      question({ images: [{ ...before, label: "before" }, after] }),
+    );
+    expect(images[0].label).toBe("before");
+    expect(imageShortName(images[0], 0)).toBe("before");
+    expect(imageShortName(images[1], 1)).toBe("2");
+  });
+
+  it("ignores labels that are not one short word", () => {
+    const images = buildSegmentImages(
+      question({
+        images: [
+          { ...before, label: "two words" },
+          { ...after, label: "x".repeat(17) },
+        ],
+      }),
+    );
+    expect(images.map((image) => image.label)).toEqual([undefined, undefined]);
   });
 });

@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import {
   actualSizeView,
+  clampPinnedView,
   clampView,
   fitView,
   minScaleFor,
+  pinnedViewForFraction,
+  pinnedWipeFraction,
+  rectView,
+  swipeDirection,
   nextZoomStep,
   panBy,
   zoomAt,
@@ -44,24 +49,45 @@ function distance(a: Point, b: Point): number {
  * Owns zoom and pan for the review stage. The view is measured in image pixels,
  * so every layer that shares it stays aligned across mode switches.
  */
+export type ReviewViewportOptions = {
+  /** Wheel events anywhere in this element zoom the view (Side by side panes). */
+  areaRef?: RefObject<HTMLElement | null>;
+  /** False while drawing owns one-finger drags; pinch still zooms. */
+  panEnabled?: boolean;
+  /** Pinned-wipe pan range: either image edge may reach the center line. */
+  pinned?: boolean;
+  /** Called for a horizontal swipe that starts while the view is at Fit. */
+  onSwipe?: (direction: 1 | -1) => void;
+};
+
+function sameView(a: ReviewView, b: ReviewView): boolean {
+  return (
+    Math.abs(a.scale - b.scale) < 1e-6 && Math.abs(a.x - b.x) < 1e-3 && Math.abs(a.y - b.y) < 1e-3
+  );
+}
+
+// eslint-disable-next-line max-lines-per-function -- one owner for every zoom and pan input keeps the layers aligned.
 export function useReviewViewport(
   stageRef: RefObject<HTMLElement | null>,
   image: Size,
-  areaRef?: RefObject<HTMLElement | null>,
-  panEnabled = true,
+  options: ReviewViewportOptions = {},
 ) {
+  const { areaRef, panEnabled = true, pinned = false } = options;
   const stage = useElementSize(stageRef);
   const [manual, setManual] = useState<ReviewView | null>(null);
   const fit = fitView(stage, image);
   const minScale = minScaleFor(fit.scale);
-  const view = manual ? clampView(manual, stage, image) : fit;
-  const latest = useRef({ view, stage, image, minScale });
-  latest.current = { view, stage, image, minScale };
+  const clamp = pinned ? clampPinnedView : clampView;
+  const view = manual ? clamp(manual, stage, image) : fit;
+  const latest = useRef({ view, stage, image, minScale, fit, clamp, atFit: manual === null });
+  latest.current = { view, stage, image, minScale, fit, clamp, atFit: manual === null };
   const pointers = useRef(new Map<number, Point>());
 
   const apply = useCallback((next: (current: ReviewView) => ReviewView) => {
-    const { view: current, stage: s, image: i } = latest.current;
-    setManual(clampView(next(current), s, i));
+    const { view: current, stage: s, image: i, fit: f, clamp: c, atFit } = latest.current;
+    const result = c(next(current), s, i);
+    // A drag that cannot move a fitted image keeps the view fitted.
+    setManual(atFit && sameView(result, f) ? null : result);
   }, []);
   const center = useCallback(
     (): Point => ({ x: latest.current.stage.width / 2, y: latest.current.stage.height / 2 }),
@@ -82,6 +108,17 @@ export function useReviewViewport(
   const pan = useCallback((dx: number, dy: number) => apply((v) => panBy(v, dx, dy)), [apply]);
 
   useWheelZoom(areaRef ?? stageRef, apply, latest);
+  const zoomToRect = useCallback(
+    (rect: { x: number; y: number; width: number; height: number }) => {
+      const { stage: s, image: i, minScale: min, clamp: c } = latest.current;
+      setManual(c(rectView(s, rect, min), s, i));
+    },
+    [],
+  );
+  const setPinnedFraction = useCallback((fraction: number) => {
+    const { view: v, stage: s, image: i } = latest.current;
+    setManual(clampPinnedView(pinnedViewForFraction(v, s, i, fraction), s, i));
+  }, []);
 
   const handleKey = useCallback(
     (event: { key: string; shiftKey: boolean }): boolean => {
@@ -110,9 +147,28 @@ export function useReviewViewport(
   panEnabledRef.current = panEnabled;
   const minScaleRef = useRef(minScale);
   minScaleRef.current = minScale;
-  const pointerHandlers = usePointerPanZoom(pointers, apply, panEnabledRef, minScaleRef);
+  const swipeRef = useRef(options.onSwipe);
+  swipeRef.current = options.onSwipe;
+  const pointerHandlers = useSwipe(
+    usePointerPanZoom(pointers, apply, panEnabledRef, minScaleRef),
+    pointers,
+    swipeRef,
+    latest,
+  );
 
-  return { view, stage, zoomStep, fit: fitToStage, actual, handleKey, pointerHandlers };
+  return {
+    view,
+    stage,
+    zoomStep,
+    fit: fitToStage,
+    actual,
+    handleKey,
+    pointerHandlers,
+    zoomToRect,
+    atFit: manual === null,
+    pinnedFraction: pinnedWipeFraction(view, stage, image),
+    setPinnedFraction,
+  };
 }
 
 /** Focal points are measured in the pane under the pointer, so Side by side panes agree. */
@@ -192,5 +248,40 @@ function usePointerPanZoom(
     onPointerMove,
     onPointerUp: onPointerEnd,
     onPointerCancel: onPointerEnd,
+  };
+}
+
+type PointerHandlers = ReturnType<typeof usePointerPanZoom>;
+
+/** Adds swipe detection for a single pointer that starts while the view is at Fit. */
+function useSwipe(
+  handlers: PointerHandlers,
+  pointers: RefObject<Map<number, Point>>,
+  onSwipe: RefObject<((direction: 1 | -1) => void) | undefined>,
+  latest: RefObject<{ atFit: boolean }>,
+): PointerHandlers {
+  const start = useRef<{ id: number; x: number; y: number } | null>(null);
+  return {
+    ...handlers,
+    onPointerDown: (event) => {
+      handlers.onPointerDown(event);
+      const single = pointers.current.size <= 1;
+      start.current =
+        single && latest.current.atFit && onSwipe.current
+          ? { id: event.pointerId, x: event.clientX, y: event.clientY }
+          : null;
+    },
+    onPointerUp: (event) => {
+      handlers.onPointerUp(event);
+      const origin = start.current;
+      start.current = null;
+      if (!origin || origin.id !== event.pointerId) return;
+      const direction = swipeDirection(event.clientX - origin.x, event.clientY - origin.y);
+      if (direction !== 0) onSwipe.current?.(direction);
+    },
+    onPointerCancel: (event) => {
+      handlers.onPointerCancel(event);
+      start.current = null;
+    },
   };
 }

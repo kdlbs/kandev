@@ -4,6 +4,8 @@ import type { ClarificationQuestion, QuestionImage } from "@/lib/types/http";
 export type ReviewImage = {
   id: string;
   alt: string;
+  /** The agent's one-word label, when it is valid. */
+  label?: string;
   choiceLabel?: string;
   ref: QuestionImage;
 };
@@ -18,6 +20,7 @@ export type ReviewSegment = {
 
 const MAX_SEGMENT_IMAGES = 4;
 const MAX_LABEL_LENGTH = 48;
+const IMAGE_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,15}$/;
 
 function isImage(value: unknown): value is QuestionImage {
   if (!value || typeof value !== "object") return false;
@@ -36,11 +39,12 @@ export function buildSegmentImages(question: ClarificationQuestion): ReviewImage
   const add = (image: QuestionImage, choiceLabel?: string) => {
     if (seen.has(image.id) || result.length >= MAX_SEGMENT_IMAGES) return;
     seen.add(image.id);
-    result.push(
-      choiceLabel === undefined
-        ? { id: image.id, alt: image.alt, ref: image }
-        : { id: image.id, alt: image.alt, choiceLabel, ref: image },
-    );
+    const entry: ReviewImage = { id: image.id, alt: image.alt, ref: image };
+    if (typeof image.label === "string" && IMAGE_LABEL_PATTERN.test(image.label)) {
+      entry.label = image.label;
+    }
+    if (choiceLabel !== undefined) entry.choiceLabel = choiceLabel;
+    result.push(entry);
   };
   validImages(question.images).forEach((image) => add(image));
   for (const option of Array.isArray(question.options) ? question.options : []) {
@@ -73,4 +77,9 @@ export function hasReviewImages(questions: readonly ClarificationQuestion[]): bo
 /** One-based stage position of an image, or 0 when the image is not in the segment. */
 export function segmentImageIndex(images: readonly ReviewImage[], imageId: string): number {
   return images.findIndex((image) => image.id === imageId) + 1;
+}
+
+/** Short picker name: the agent's label, or the one-based stage number. */
+export function imageShortName(image: ReviewImage, index: number): string {
+  return image.label ?? String(index + 1);
 }

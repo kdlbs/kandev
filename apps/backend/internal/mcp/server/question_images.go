@@ -25,6 +25,8 @@ func buildQuestionImageSchema(maxItems int) map[string]any {
 			"path": map[string]any{typeKey: stringType, "minLength": 1, descriptionArg: "Canonical relative PNG/JPEG path, at most 4096 UTF-8 bytes."},
 			"repo": map[string]any{typeKey: stringType, descriptionArg: "Optional attached repository path relative to the workspace, at most 4096 UTF-8 bytes."},
 			"alt":  map[string]any{typeKey: stringType, "minLength": 1, "maxLength": 300, descriptionArg: "Description that identifies this image without seeing it."},
+			"label": map[string]any{typeKey: stringType, "pattern": protocol.ImageLabelPattern,
+				descriptionArg: "Optional one-word name shown in the image picker instead of a number, such as before, after, or alt. Unique within a question."},
 		}},
 	}
 }

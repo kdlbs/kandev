@@ -1,11 +1,12 @@
 "use client";
 
-import type { RefObject } from "react";
+import { useRef, type RefObject } from "react";
 import type { ReviewSegment } from "@/lib/question-review/segments";
 import type { ReviewView, Size } from "@/lib/question-review/viewport";
 import { RegionCommentPopover } from "./region-comment-popover";
 import { useReviewImageLabel } from "./review-image-picker";
-import { AnnotateButton, RegionOverlay } from "./review-regions";
+import { useReviewLayout } from "./review-layout";
+import { AnnotateButton, AnnotateHint, RegionOverlay } from "./review-regions";
 import type { ReviewAnnotationController } from "./use-review-annotations";
 import { useRegionDrawing } from "./use-region-drawing";
 
@@ -36,6 +37,8 @@ export function useStageAnnotations(args: Args) {
   const { controller, segment } = args;
   const questionId = segment.questionId;
   const imageLabel = useReviewImageLabel();
+  const { touch } = useReviewLayout();
+  const marking = stageAnnotating(controller, args.allowed);
   const drawing = useRegionDrawing({
     active: stageAnnotating(controller, args.allowed),
     questionId,
@@ -75,7 +78,13 @@ export function useStageAnnotations(args: Args) {
     ) : null;
   return {
     popover,
-    pointerHandlers: drawing.pointerHandlers,
+    marking,
+    hint: marking ? (
+      <AnnotateHint touch={touch} onDone={() => controller.setAnnotating(false)} />
+    ) : null,
+    pointerHandlers: useRegionClick(drawing.pointerHandlers, (index) =>
+      controller.editComment(questionId, index),
+    ),
     handleKey: drawing.handleKey,
     overlay: (
       <RegionOverlay
@@ -94,5 +103,40 @@ export function useStageAnnotations(args: Args) {
         onToggle={() => controller.setAnnotating((value) => !value)}
       />
     ),
+  };
+}
+
+const CLICK_SLOP_PX = 5;
+
+/** Opens a region when a press starts and ends on it without moving. */
+function useRegionClick(
+  handlers: PointerHandlers,
+  onOpen: (index: number) => void,
+): PointerHandlers {
+  const press = useRef<{ id: number; x: number; y: number; index: number } | null>(null);
+  return {
+    ...handlers,
+    onPointerDown: (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const region = target?.closest<HTMLElement>("[data-region-index]");
+      press.current = region
+        ? {
+            id: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+            index: Number(region.dataset.regionIndex),
+          }
+        : null;
+      handlers.onPointerDown(event);
+    },
+    onPointerUp: (event) => {
+      handlers.onPointerUp(event);
+      const origin = press.current;
+      press.current = null;
+      if (!origin || origin.id !== event.pointerId) return;
+      if (Math.hypot(event.clientX - origin.x, event.clientY - origin.y) <= CLICK_SLOP_PX) {
+        onOpen(origin.index);
+      }
+    },
   };
 }

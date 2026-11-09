@@ -27,20 +27,49 @@ export type CompareAction =
   | { type: "opacity"; value: number }
   | { type: "tolerance"; value: number }
   | { type: "nudge"; direction: 1 | -1 }
-  | { type: "show"; id: string };
+  | { type: "show"; id: string }
+  | { type: "step"; direction: 1 | -1; ids: readonly string[] };
+
+/** The parts of a comparison that carry over to the next segment. */
+export type CompareSettings = Pick<CompareState, "mode" | "wipe" | "opacity" | "tolerance">;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-export function initialCompareState(imageIds: readonly string[]): CompareState {
+export function initialCompareState(
+  imageIds: readonly string[],
+  settings?: CompareSettings,
+): CompareState {
   return {
-    mode: "toggle",
+    mode: settings?.mode ?? "toggle",
     aId: imageIds[0] ?? "",
     bId: imageIds[1] ?? imageIds[0] ?? "",
     showB: false,
-    wipe: 0.5,
-    opacity: 0.5,
-    tolerance: DEFAULT_TOLERANCE,
+    wipe: settings?.wipe ?? 0.5,
+    opacity: settings?.opacity ?? 0.5,
+    tolerance: settings?.tolerance ?? DEFAULT_TOLERANCE,
   };
+}
+
+export function compareSettings(state: CompareState): CompareSettings {
+  return { mode: state.mode, wipe: state.wipe, opacity: state.opacity, tolerance: state.tolerance };
+}
+
+/** Candidates are every image except A, in segment order. */
+function candidates(state: CompareState, ids: readonly string[]): string[] {
+  return ids.filter((id) => id !== state.aId);
+}
+
+/** Zero-based position of B among the candidates. */
+export function candidatePosition(state: CompareState, ids: readonly string[]) {
+  const list = candidates(state, ids);
+  return { index: list.indexOf(state.bId), total: list.length };
+}
+
+function step(state: CompareState, direction: 1 | -1, ids: readonly string[]): CompareState {
+  const list = candidates(state, ids);
+  const next = list[list.indexOf(state.bId) + direction];
+  if (!next) return state;
+  return { ...state, bId: next, showB: state.mode === "toggle" ? true : state.showB };
 }
 
 function pick(state: CompareState, slot: "a" | "b", id: string): CompareState {
@@ -84,5 +113,7 @@ export function compareReducer(state: CompareState, action: CompareAction): Comp
       return nudge(state, action.direction);
     case "show":
       return show(state, action.id);
+    case "step":
+      return step(state, action.direction, action.ids);
   }
 }

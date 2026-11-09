@@ -9,6 +9,7 @@ import {
 } from "@/lib/types/http";
 import { ClarificationInputOverlay } from "../clarification-input-overlay";
 import { ClarificationDraftProvider } from "../clarification-draft-context";
+import { clearAnswerDrafts } from "@/lib/clarification/answer-draft-cache";
 
 /* eslint-disable max-lines -- review view regressions share one overlay harness. */
 
@@ -139,7 +140,11 @@ beforeEach(() => {
   );
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  // Retained answer drafts are keyed by the store; reset them so tests stay independent.
+  clearAnswerDrafts(mockStore);
+});
 
 describe("question image review control", () => {
   // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-001.1
@@ -244,9 +249,9 @@ describe("question image review keyboard and stage", () => {
     const dialog = openReview();
     const card = within(dialog).getByTestId(QUESTION_CARD);
     fireEvent.keyDown(card, { key: "2" });
-    expect(within(dialog).getByTestId(QUESTION_CARD).getAttribute(DATA_QUESTION_ID)).toBe("q2");
-    fireEvent.click(within(dialog).getAllByTestId(SEGMENT)[0]);
     expect(within(dialog).getAllByTestId(OPTION)[1].getAttribute(DATA_SELECTED)).toBe("true");
+    fireEvent.keyDown(card, { key: "ArrowRight" });
+    expect(within(dialog).getByTestId(QUESTION_CARD).getAttribute(DATA_QUESTION_ID)).toBe("q2");
   });
 
   // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-004.1
@@ -511,5 +516,123 @@ describe("question image review regions", () => {
         comment: "Label contrast too low",
       }),
     ]);
+  });
+});
+
+describe("answering in the review view", () => {
+  // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-001.3
+  it("records a choice without moving on, and emphasizes Next", () => {
+    renderOverlay(imageBundle());
+    const dialog = openReview();
+    fireEvent.click(within(dialog).getAllByTestId(OPTION)[0]);
+    expect(within(dialog).getByTestId(QUESTION_CARD).getAttribute(DATA_QUESTION_ID)).toBe("q1");
+    expect(within(dialog).getAllByTestId(OPTION)[0].getAttribute(DATA_SELECTED)).toBe("true");
+    const next = within(dialog).getByTestId("clarification-next");
+    expect(next.getAttribute("data-emphasized")).toBe("true");
+    fireEvent.click(next);
+    expect(within(dialog).getByTestId(QUESTION_CARD).getAttribute(DATA_QUESTION_ID)).toBe("q2");
+  });
+
+  it("still moves on after a choice in the compact panel", () => {
+    renderOverlay(imageBundle());
+    fireEvent.click(screen.getAllByTestId(OPTION)[0]);
+    expect(screen.getByTestId(QUESTION_CARD).getAttribute(DATA_QUESTION_ID)).toBe("q2");
+  });
+});
+
+const labelled = [
+  { ...before, label: "before" },
+  { ...after, label: "after" },
+  { id: "alt", path: "alt.png", alt: "Alternative", label: "alt" },
+];
+
+async function openThree() {
+  renderOverlay([
+    message(0, 2, { images: labelled }),
+    message(1, 2, { images: [spacing, { id: "spacing2", path: "s2.png", alt: "Spacing 2" }] }),
+  ]);
+  const dialog = openReview();
+  await waitFor(() => expect(within(dialog).getAllByTestId(IMAGE)).toHaveLength(2));
+  return dialog;
+}
+
+describe("review usability round", () => {
+  // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-009.1
+  it("shows agent labels in the pickers", async () => {
+    const dialog = await openThree();
+    expect(
+      within(within(dialog).getByTestId("question-review-pick-a")).getByText("before"),
+    ).toBeTruthy();
+    expect(
+      within(within(dialog).getByTestId("question-review-pick-b")).getByText("alt"),
+    ).toBeTruthy();
+  });
+
+  // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-005.11
+  it("steps B through the candidates by button and key", async () => {
+    const dialog = await openThree();
+    const label = within(dialog).getByTestId("question-review-step-label");
+    expect(label.textContent).toBe("B: after (1 of 2)");
+    fireEvent.click(within(dialog).getByTestId("question-review-step-next"));
+    expect(label.textContent).toBe("B: alt (2 of 2)");
+    expect(within(dialog).getByTestId("question-review-step-next")).toHaveProperty(
+      "disabled",
+      true,
+    );
+    fireEvent.keyDown(within(dialog).getByTestId(STAGE), { key: "[" });
+    expect(within(dialog).getByTestId("question-review-step-label").textContent).toBe(
+      "B: after (1 of 2)",
+    );
+  });
+
+  // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-005.12
+  it("keeps the comparison mode when moving to another question", async () => {
+    const dialog = await openThree();
+    pickMode(dialog, "Onion skin");
+    fireEvent.click(within(dialog).getAllByTestId(SEGMENT)[1]);
+    await waitFor(() =>
+      expect(within(dialog).getByTestId(QUESTION_CARD).getAttribute(DATA_QUESTION_ID)).toBe("q2"),
+    );
+    expect(within(dialog).getByTestId("question-review-opacity")).toBeTruthy();
+  });
+
+  it("shows A while Space is held", async () => {
+    const dialog = await openThree();
+    fireEvent.click(within(dialog).getByTestId("question-review-flip"));
+    const announcement = within(dialog).getByTestId("question-review-announcement");
+    expect(announcement.textContent).toBe("Showing B: After");
+    const stage = within(dialog).getByTestId(STAGE);
+    fireEvent.keyDown(stage, { key: " " });
+    expect(announcement.textContent).toBe("Showing A: Before");
+    fireEvent.keyUp(stage, { key: " " });
+    expect(announcement.textContent).toBe("Showing B: After");
+  });
+
+  // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-007.1
+  it("makes marking obvious and leaves it on Escape before closing the view", async () => {
+    const dialog = await openAnnotatable();
+    const button = within(dialog).getByTestId(ANNOTATE);
+    expect(button.textContent).toBe("Mark area");
+    fireEvent.click(button);
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(button.textContent).toBe("Marking areas");
+    expect(within(dialog).getByTestId("question-review-annotate-hint")).toBeTruthy();
+    expect(within(dialog).getByTestId("question-review-regions-panel")).toBeTruthy();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(button.getAttribute("aria-pressed")).toBe("false"));
+    expect(screen.getByTestId(REVIEW_DIALOG)).toBeTruthy();
+  });
+
+  it("opens a region for editing when it is clicked", async () => {
+    const dialog = await openAnnotatable();
+    drawRegionByKeyboard(dialog);
+    commentRegion(dialog, "Too tight");
+    fireEvent.click(within(dialog).getByTestId("question-review-annotate-done"));
+    const region = within(dialog).getByTestId("question-review-region");
+    fireEvent.pointerDown(region, { pointerId: 1, clientX: 10, clientY: 10, isPrimary: true });
+    fireEvent.pointerUp(region, { pointerId: 1, clientX: 11, clientY: 10, isPrimary: true });
+    expect((within(dialog).getByTestId(REGION_INPUT) as HTMLTextAreaElement).value).toBe(
+      "Too tight",
+    );
   });
 });

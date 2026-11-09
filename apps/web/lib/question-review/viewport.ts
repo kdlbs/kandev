@@ -83,3 +83,70 @@ export function clampView(view: ReviewView, stage: Size, image: Size): ReviewVie
 export function actualSizeView(stage: Size, image: Size, view: ReviewView): ReviewView {
   return clampView(zoomAt(view, 1, { x: stage.width / 2, y: stage.height / 2 }), stage, image);
 }
+
+const RECT_PADDING = 0.1;
+
+/** A view that fits `rect` (image pixels) with 10% padding, centered in the stage. */
+export function rectView(stage: Size, rect: RegionLike, minScale = MIN_SCALE): ReviewView {
+  const width = rect.width * (1 + RECT_PADDING * 2);
+  const height = rect.height * (1 + RECT_PADDING * 2);
+  const scale = clampScale(Math.min(stage.width / width, stage.height / height), minScale);
+  return {
+    scale,
+    x: rect.x + rect.width / 2 - stage.width / (2 * scale),
+    y: rect.y + rect.height / 2 - stage.height / (2 * scale),
+  };
+}
+
+type RegionLike = { x: number; y: number; width: number; height: number };
+
+/** Image x under the stage's vertical center line. */
+function centerLineX(view: ReviewView, stage: Size): number {
+  return view.x + stage.width / (2 * view.scale);
+}
+
+/**
+ * Pinned-wipe pan range: either image edge may reach the center line, so the
+ * operator can scrub from all B to all A without moving the line.
+ */
+export function clampPinnedView(view: ReviewView, stage: Size, image: Size): ReviewView {
+  if (!hasSize(stage) || !hasSize(image)) return view;
+  const half = stage.width / (2 * view.scale);
+  return {
+    scale: view.scale,
+    x: Math.min(image.width - half, Math.max(-half, view.x)),
+    y: clampAxis(view.y, image.height, stage.height / view.scale),
+  };
+}
+
+/** Where the pinned center line falls on the image, from 0 (all B) to 1 (all A). */
+export function pinnedWipeFraction(view: ReviewView, stage: Size, image: Size): number {
+  if (!hasSize(image)) return 0.5;
+  return Math.min(1, Math.max(0, centerLineX(view, stage) / image.width));
+}
+
+/** Moves the image horizontally so the center line lands on `fraction`. */
+export function pinnedViewForFraction(
+  view: ReviewView,
+  stage: Size,
+  image: Size,
+  fraction: number,
+): ReviewView {
+  return { ...view, x: fraction * image.width - stage.width / (2 * view.scale) };
+}
+
+const SWIPE_DISTANCE = 50;
+const SWIPE_DRIFT = 40;
+
+/** 1 for a swipe left (next), -1 for a swipe right (previous), 0 otherwise. */
+export function swipeDirection(dx: number, dy: number): 1 | -1 | 0 {
+  const horizontal = Math.abs(dx);
+  if (
+    horizontal < SWIPE_DISTANCE ||
+    Math.abs(dy) >= SWIPE_DRIFT ||
+    horizontal < Math.abs(dy) * 1.5
+  ) {
+    return 0;
+  }
+  return dx < 0 ? 1 : -1;
+}

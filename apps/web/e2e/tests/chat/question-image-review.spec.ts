@@ -218,6 +218,9 @@ test("marks a region on an image and delivers it with the answer", async ({
 
   const card = dialog.getByTestId("clarification-question-card");
   await card.getByTestId("clarification-option").nth(1).click();
+  await expect(card).toHaveAttribute("data-question-id", "header");
+  await expect(dialog.getByTestId("clarification-next")).toHaveAttribute("data-emphasized", "true");
+  await dialog.getByTestId("clarification-next").click();
   await expect(card).toHaveAttribute("data-question-id", "spacing");
   await card.getByTestId("clarification-option").first().click();
   await dialog.getByTestId("question-review-submit").click();
@@ -240,4 +243,141 @@ test("marks a region on an image and delivers it with the answer", async ({
   await expect(session.chat.getByTestId("clarification-answer-regions").first()).toContainText(
     `Region 1 on ${reviewImages.after.alt}: Label contrast too low`,
   );
+});
+
+test("steps candidates, keeps the mode, zooms to changes, and holds to compare", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(180_000);
+  seedReviewImages(seedData.repositoryPath);
+  const { session } = await openReviewQuestions(
+    testPage,
+    apiClient,
+    seedData,
+    reviewScript(
+      [reviewImages.before, reviewImages.after, reviewImages.taller],
+      [reviewImages.before, reviewImages.after],
+    ),
+  );
+  await session.clarificationOverlay().getByTestId("question-review-open").click();
+  const dialog = testPage.getByTestId("question-review-dialog");
+  await expect(dialog.getByRole("img", { name: reviewImages.before.alt })).toBeVisible();
+  await expect(dialog.getByTestId("question-review-pick-b")).toContainText("after");
+
+  const stepLabel = dialog.getByTestId("question-review-step-label");
+  await expect(stepLabel).toHaveText("B: after (1 of 2)");
+  await dialog.getByTestId("question-review-step-next").click();
+  await expect(stepLabel).toHaveText("B: taller (2 of 2)");
+  await expect(dialog.getByRole("img", { name: reviewImages.taller.alt })).toBeVisible();
+  const stage = dialog.getByTestId("question-review-stage");
+  await stage.focus();
+  await stage.press("[");
+  await expect(stepLabel).toHaveText("B: after (1 of 2)");
+
+  await stage.focus();
+  await testPage.keyboard.down(" ");
+  await expect(dialog.getByRole("img", { name: reviewImages.before.alt })).toBeVisible();
+  await expect(dialog.getByRole("img", { name: reviewImages.after.alt })).toBeHidden();
+  await testPage.keyboard.up(" ");
+  await expect(dialog.getByRole("img", { name: reviewImages.after.alt })).toBeVisible();
+
+  await dialog
+    .getByTestId("question-review-modes")
+    .getByText("Difference", { exact: true })
+    .click();
+  await expect(dialog.getByTestId("question-review-diff-status")).toHaveText(
+    `${CHANGED_PIXELS} pixels changed (0.25%)`,
+  );
+  await expect(dialog.getByTestId("question-review-change-outline")).toBeVisible();
+  const level = dialog.getByTestId("question-review-zoom-level");
+  const fitLevel = Number.parseInt((await level.textContent())!, 10);
+  await dialog.getByTestId("question-review-zoom-changes").click();
+  await expect
+    .poll(async () => Number.parseInt((await level.textContent())!, 10))
+    .toBeGreaterThan(fitLevel);
+
+  await dialog.getByTestId("question-review-segment").nth(1).click();
+  await expect(dialog.getByTestId("clarification-question-card")).toHaveAttribute(
+    "data-question-id",
+    "spacing",
+  );
+  await expect(dialog.getByTestId("question-review-tolerance")).toBeVisible();
+  await expect(dialog.getByTestId("question-review-diff-status")).toHaveText(
+    `${CHANGED_PIXELS} pixels changed (0.25%)`,
+  );
+});
+
+test("marking is obvious, regions open on click, and Escape leaves marking first", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(180_000);
+  seedReviewImages(seedData.repositoryPath);
+  const { session } = await openReviewQuestions(testPage, apiClient, seedData, reviewScript());
+  await session.clarificationOverlay().getByTestId("question-review-open").click();
+  const dialog = testPage.getByTestId("question-review-dialog");
+  await expect(dialog.getByRole("img", { name: reviewImages.before.alt })).toBeVisible();
+  const mark = dialog.getByTestId("question-review-annotate");
+  await expect(mark).toHaveText("Mark area");
+  await mark.click();
+  await expect(mark).toHaveAttribute("aria-pressed", "true");
+  await expect(mark).toHaveText("Marking areas");
+  await expect(dialog.getByTestId("question-review-annotate-hint")).toBeVisible();
+  await expect(dialog.getByTestId("question-review-regions-panel")).toBeVisible();
+
+  const stage = dialog.getByTestId("question-review-stage");
+  const box = (await stage.boundingBox())!;
+  await testPage.mouse.move(box.x + box.width * 0.35, box.y + box.height * 0.35);
+  await testPage.mouse.down();
+  await testPage.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.6, { steps: 4 });
+  await testPage.mouse.up();
+  await dialog.getByTestId("question-review-region-input").fill("Label too faint");
+  await dialog.getByTestId("question-review-region-add").click();
+  await testPage.keyboard.press("Escape");
+  await expect(mark).toHaveAttribute("aria-pressed", "false");
+  await expect(dialog).toBeVisible();
+
+  await dialog.getByTestId("question-review-region").click();
+  await expect(dialog.getByTestId("question-review-region-input")).toHaveValue("Label too faint");
+  await testPage.keyboard.press("Escape");
+  await expect(dialog.getByTestId("question-review-region-popover")).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await testPage.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+});
+
+test("the thumbnail inspector steps between a question's images", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(180_000);
+  seedReviewImages(seedData.repositoryPath);
+  const { session } = await openReviewQuestions(
+    testPage,
+    apiClient,
+    seedData,
+    reviewScript([reviewImages.before, reviewImages.after, reviewImages.taller]),
+  );
+  const overlay = session.clarificationOverlay();
+  const second = overlay.getByRole("button", { name: new RegExp(reviewImages.after.alt) });
+  await second.click();
+  const viewer = testPage.getByRole("dialog");
+  const counter = viewer.getByTestId("question-image-counter");
+  await expect(counter).toHaveText("after, 2 of 3");
+  await viewer.getByTestId("question-image-next").click();
+  await expect(counter).toHaveText("taller, 3 of 3");
+  await expect(viewer.getByTestId("question-image-next")).toBeDisabled();
+  await viewer.getByTestId("question-image-canvas").focus();
+  await testPage.keyboard.press("ArrowLeft");
+  await testPage.keyboard.press("ArrowLeft");
+  await expect(counter).toHaveText("before, 1 of 3");
+  await testPage.keyboard.press("Escape");
+  await expect(viewer).toHaveCount(0);
+  await expect(
+    overlay.getByRole("button", { name: new RegExp(reviewImages.before.alt) }),
+  ).toBeFocused();
 });

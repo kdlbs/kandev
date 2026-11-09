@@ -291,7 +291,9 @@ single-question completion behavior.
 
 Desktop keeps the current clarification panel and question carousel. A question's
 thumbnails flow in a wrapping row (`question-images-row`); each caption takes its
-thumbnail's width instead of widening the row. Each image has a visible description, an uncropped thumbnail bounded to 128px high on desktop
+thumbnail's width instead of widening the row. `QuestionImageGallery` collects the
+loaded thumbnails of one question in review order, and the inspector steps
+through them with Previous and Next, arrow keys, and a swipe at Fit. Each image has a visible description, an uncropped thumbnail bounded to 128px high on desktop
 and 96px high below 768px, and an explicit inspection button. Express these bounds
 in rem units so root-font scaling remains available. The image and Inspect label
 form one button. The label does not need a separate control-height row. Keep the

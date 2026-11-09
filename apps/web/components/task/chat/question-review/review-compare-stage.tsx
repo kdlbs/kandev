@@ -1,155 +1,250 @@
 "use client";
 
-import { useEffect, useRef, type Dispatch, type RefObject } from "react";
-import type { CompareAction } from "@/lib/question-review/compare";
+import { IconArrowsExchange } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
-import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import type { QuestionImageState } from "@/hooks/domains/session/use-question-images";
-import type { ReviewImage as ReviewImageRef, ReviewSegment } from "@/lib/question-review/segments";
-import type { Size } from "@/lib/question-review/viewport";
 import { cn } from "@/lib/utils";
 import { ReviewCanvas, ReviewImage } from "./review-canvas";
+import { CandidateStepper, PinnedWipeLine, ZoomToChangesButton } from "./review-compare-controls";
 import { CompareLayers, WipeHandle, type LoadedReviewImage } from "./review-compare-layers";
 import { ReviewCompareStatus } from "./review-compare-status";
-import { ReviewCompareToolbar } from "./review-compare-toolbar";
-import { ReviewZoomControls, reviewToolbarRow } from "./review-zoom-controls";
-import { ImageState, stopStageKeys, useStageImages } from "./review-stage-shared";
-import { useReviewCompare } from "./use-review-compare";
-import { useReviewDiff } from "./use-review-diff";
-import type { ReviewAnnotationController } from "./use-review-annotations";
-import { stageAnnotating, useStageAnnotations } from "./use-stage-annotations";
-import { useReviewViewport } from "./use-review-viewport";
+import { ModeControls, ReviewCompareToolbar } from "./review-compare-toolbar";
+import { ReviewBottomBar } from "./review-layout";
+import {
+  ImagePickerSheetButton,
+  ModeSheetButton,
+  MoreSheetButton,
+  StatusChips,
+  ZoomChip,
+} from "./review-phone-controls";
+import { RegionsButton } from "./review-region-panel";
+import { ImageState, stopStageKeys } from "./review-stage-shared";
+import { ReviewZoomControls, reviewControlSize, reviewToolbarRow } from "./review-zoom-controls";
+import {
+  useCompareStage,
+  type CompareStageModel,
+  type CompareStageProps,
+} from "./use-compare-stage";
 
-type Props = {
-  pendingId: string;
-  sessionId: string;
-  segment: ReviewSegment;
-  annotations: ReviewAnnotationController;
-  popoverContainer: RefObject<HTMLElement | null>;
-};
-
-const EMPTY_SIZE: Size = { width: 0, height: 0 };
-
-/** Selecting a region in the list shows the image it was drawn on. */
-function useShowSelectedRegion(
-  annotations: ReviewAnnotationController,
-  segment: ReviewSegment,
-  dispatch: Dispatch<CompareAction>,
-) {
-  const { selected, list } = annotations;
-  const imageId =
-    selected?.questionId === segment.questionId
-      ? list(segment.questionId)[selected.index]?.image_id
-      : undefined;
-  useEffect(() => {
-    if (imageId && segment.images.some((image) => image.id === imageId)) {
-      dispatch({ type: "show", id: imageId });
-    }
-  }, [dispatch, imageId, segment.images]);
-}
-
-function loaded(image: ReviewImageRef | undefined, state: QuestionImageState | undefined) {
-  if (!image || state?.kind !== "loaded") return undefined;
-  return { id: image.id, alt: image.alt, url: state.url, blob: state.blob };
-}
-
-export function unionSize(a: Size | undefined, b: Size | undefined): Size {
-  return {
-    width: Math.max(a?.width ?? 0, b?.width ?? 0),
-    height: Math.max(a?.height ?? 0, b?.height ?? 0),
-  };
-}
-
-function firstPending(
-  pairs: [ReviewImageRef | undefined, QuestionImageState | undefined][],
-): QuestionImageState | undefined | null {
-  for (const [image, state] of pairs) if (image && state?.kind !== "loaded") return state;
-  return null;
-}
+export { unionSize } from "./use-compare-stage";
 
 /** Compares a baseline (A) with a candidate (B) on bytes already loaded for the segment. */
-// eslint-disable-next-line max-lines-per-function -- composes the stage's images, view, comparison, and regions.
-export function ReviewCompareStage({
-  pendingId,
-  sessionId,
-  segment,
-  annotations,
-  popoverContainer,
-}: Props) {
+export function ReviewCompareStage(props: CompareStageProps) {
   const { t } = useTranslation();
-  const { isMobile } = useResponsiveBreakpoint();
-  const { states, retry, sizes, setSize } = useStageImages(pendingId, sessionId, segment);
-  const compare = useReviewCompare(segment.images);
-  const { state } = compare;
-  const aRef = segment.images.find((image) => image.id === state.aId);
-  const bRef = segment.images.find((image) => image.id === state.bId);
-  const a = loaded(aRef, states[state.aId]);
-  const b = loaded(bRef, states[state.bId]);
-  const stageRef = useRef<HTMLDivElement>(null);
-  const areaRef = useRef<HTMLDivElement>(null);
-  const toggle = state.mode === "toggle";
-  const viewport = useReviewViewport(
-    stageRef,
-    unionSize(sizes[state.aId], sizes[state.bId]),
-    areaRef,
-    !stageAnnotating(annotations, toggle),
-  );
-  const shown = state.showB ? b : a;
-  const regions = useStageAnnotations({
-    controller: annotations,
-    segment,
-    stageRef,
-    popoverContainer,
-    imageId: toggle ? shown?.id : undefined,
-    image: (shown && sizes[shown.id]) || EMPTY_SIZE,
-    view: viewport.view,
-    stage: viewport.stage,
-    allowed: toggle,
-    viewportHandlers: viewport.pointerHandlers,
-  });
-  useShowSelectedRegion(annotations, segment, compare.dispatch);
-  const diff = useReviewDiff(state.mode === "diff", a?.blob, b?.blob, state.tolerance);
-  const pending = firstPending([
-    [aRef, states[state.aId]],
-    [bRef, states[state.bId]],
-  ]);
-  const onStageKey = (event: { key: string; shiftKey: boolean; altKey: boolean }) =>
-    regions.handleKey(event) || viewport.handleKey(event) || compare.handleKey(event);
-  const overlay = pending === null ? null : <ImageState state={pending} onRetry={retry} />;
-  const canvas = (pane: "a" | "b" | "both", image?: LoadedReviewImage) => (
-    <ReviewCanvas
-      stageRef={pane === "b" ? undefined : stageRef}
-      view={viewport.view}
-      onStageKey={onStageKey}
-      pointerHandlers={pane === "both" ? regions.pointerHandlers : viewport.pointerHandlers}
-      className={
-        pane === "both" && stageAnnotating(annotations, toggle) ? "cursor-crosshair" : undefined
-      }
-      testId={pane === "b" ? "question-review-stage-b" : undefined}
-      overlay={
-        <>
-          {pane === "both" && state.mode === "wipe" && a && b && (
-            <WipeHandle
-              value={state.wipe}
-              onChange={(value) => compare.dispatch({ type: "wipe", value })}
-            />
-          )}
-          {overlay}
-        </>
-      }
+  const model = useCompareStage(props);
+  return (
+    <section
+      className="flex min-h-0 flex-1 flex-col gap-2"
+      aria-label={t("task:questionReviewStage")}
+      onKeyDown={stopStageKeys}
     >
-      {pane === "both" ? (
+      {model.layout.phone ? <PhoneTopRow model={model} /> : <DesktopToolbar model={model} />}
+      <CanvasArea model={model} />
+      {model.layout.phone && <PhoneBottomBar model={model} />}
+      {model.regions.popover}
+    </section>
+  );
+}
+
+function zoomToChanges(model: CompareStageModel) {
+  const bounds = model.diff.status === "ready" ? model.diff.result.bounds : null;
+  return bounds ? () => model.viewport.zoomToRect(bounds) : null;
+}
+
+function DesktopToolbar({ model }: { model: CompareStageModel }) {
+  const toChanges = zoomToChanges(model);
+  return (
+    <>
+      <ReviewCompareToolbar
+        compare={model.compare}
+        images={model.segment.images}
+        wipe={model.wipe}
+      />
+      <div className={reviewToolbarRow}>
+        <ReviewZoomControls
+          scale={model.viewport.view.scale}
+          onZoom={model.viewport.zoomStep}
+          onFit={model.viewport.fit}
+          onActual={model.viewport.actual}
+        />
+        {model.canStep && (
+          <CandidateStepper
+            images={model.segment.images}
+            bId={model.state.bId}
+            position={model.compare.position}
+            onStep={model.compare.step}
+          />
+        )}
+        {toChanges && <ZoomToChangesButton onClick={toChanges} />}
+        {model.regions.button}
+        <ReviewCompareStatus
+          state={model.effective}
+          a={model.aRef}
+          b={model.bRef}
+          sizes={model.images.sizes}
+          diff={model.diff}
+        />
+      </div>
+    </>
+  );
+}
+
+function PhoneTopRow({ model }: { model: CompareStageModel }) {
+  const toChanges = zoomToChanges(model);
+  return (
+    <div className="flex items-center gap-2">
+      <ModeSheetButton
+        mode={model.state.mode}
+        onChange={(mode) => model.compare.dispatch({ type: "mode", mode })}
+      />
+      {toChanges && <ZoomToChangesButton onClick={toChanges} />}
+      <div className="ml-auto flex items-center gap-2">
+        {(model.marking || model.annotations.list(model.segment.questionId).length > 0) && (
+          <RegionsButton controller={model.annotations} questionId={model.segment.questionId} />
+        )}
+        <MoreSheetButton>
+          {(close) => (
+            <>
+              <ReviewZoomControls
+                scale={model.viewport.view.scale}
+                onZoom={model.viewport.zoomStep}
+                onFit={model.viewport.fit}
+                onActual={model.viewport.actual}
+              />
+              <div onClickCapture={close}>{model.regions.button}</div>
+            </>
+          )}
+        </MoreSheetButton>
+      </div>
+    </div>
+  );
+}
+
+function SwapButton({ model }: { model: CompareStageModel }) {
+  const { t } = useTranslation();
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="icon"
+      className="h-11 w-11 shrink-0 cursor-pointer"
+      aria-label={t("task:questionReviewSwap")}
+      data-testid="question-review-swap"
+      onClick={() => model.compare.dispatch({ type: "swap" })}
+    >
+      <IconArrowsExchange className="h-4 w-4" aria-hidden="true" />
+    </Button>
+  );
+}
+
+function PhoneBottomBar({ model }: { model: CompareStageModel }) {
+  const { t } = useTranslation();
+  const { state, compare } = model;
+  const stepping = state.mode === "toggle" || state.mode === "side";
+  const urls = Object.fromEntries(
+    Object.entries(model.images.states).map(([id, image]) => [
+      id,
+      image.kind === "loaded" ? image.url : undefined,
+    ]),
+  );
+  return (
+    <ReviewBottomBar>
+      <SwapButton model={model} />
+      {stepping && model.canStep && (
+        <CandidateStepper
+          images={model.segment.images}
+          bId={state.bId}
+          position={compare.position}
+          onStep={compare.step}
+          compact
+        />
+      )}
+      {state.mode === "toggle" && (
+        <Button
+          type="button"
+          className={cn(reviewControlSize, "min-w-0 flex-1")}
+          aria-pressed={state.showB}
+          data-testid="question-review-flip"
+          onClick={() => compare.dispatch({ type: "flip" })}
+        >
+          {t("task:questionReviewFlip")}
+        </Button>
+      )}
+      {!stepping && (
+        <div className="min-w-0 flex-1">
+          <ModeControls compare={compare} wipe={model.wipe} />
+        </div>
+      )}
+      {stepping && (
+        <div className={cn(state.mode === "side" && "ml-auto")}>
+          <ImagePickerSheetButton
+            images={model.segment.images}
+            urls={urls}
+            aId={state.aId}
+            bId={state.bId}
+            onPick={(slot, id) => compare.dispatch({ type: "pick", slot, id })}
+            onSwap={() => compare.dispatch({ type: "swap" })}
+          />
+        </div>
+      )}
+    </ReviewBottomBar>
+  );
+}
+
+function CanvasArea({ model }: { model: CompareStageModel }) {
+  const side = model.effective.mode === "side";
+  return (
+    <div
+      ref={model.areaRef}
+      className={cn("flex min-h-0 flex-1 gap-2", model.layout.phone ? "flex-col" : "flex-row")}
+    >
+      {side ? (
+        <>
+          <Pane model={model} pane="a" image={model.a} />
+          <Pane model={model} pane="b" image={model.hold.holding ? model.a : model.b} />
+        </>
+      ) : (
+        <Pane model={model} pane="both" />
+      )}
+    </div>
+  );
+}
+
+function Pane({
+  model,
+  pane,
+  image,
+}: {
+  model: CompareStageModel;
+  pane: "a" | "b" | "both";
+  image?: LoadedReviewImage;
+}) {
+  const both = pane === "both";
+  const { viewport } = model;
+  return (
+    <ReviewCanvas
+      stageRef={pane === "b" ? undefined : model.stageRef}
+      view={viewport.view}
+      onStageKey={model.onStageKey}
+      onStageKeyUp={model.onStageKeyUp}
+      pointerHandlers={both ? model.pointerHandlers : combinePane(model)}
+      className={cn(both && model.marking && "cursor-crosshair ring-2 ring-primary ring-inset")}
+      testId={pane === "b" ? "question-review-stage-b" : undefined}
+      overlay={<PaneOverlay model={model} pane={pane} />}
+    >
+      {both ? (
         <>
           <CompareLayers
-            state={state}
-            a={a}
-            b={b}
+            state={model.effective}
+            a={model.a}
+            b={model.b}
             view={viewport.view}
             stageWidth={viewport.stage.width}
-            diff={diff}
-            onSize={setSize}
+            diff={model.diff}
+            onSize={model.images.setSize}
+            wipeAt={model.pinned ? 0.5 : undefined}
           />
-          {toggle && regions.overlay}
+          {model.effective.mode === "toggle" && model.regions.overlay}
         </>
       ) : (
         image && (
@@ -158,43 +253,69 @@ export function ReviewCompareStage({
             src={image.url}
             alt={image.alt}
             scale={viewport.view.scale}
-            onSize={(size) => setSize(image.id, size)}
+            onSize={(size) => model.images.setSize(image.id, size)}
           />
         )
       )}
     </ReviewCanvas>
   );
+}
+
+function combinePane(model: CompareStageModel) {
+  const view = model.viewport.pointerHandlers;
+  const hold = model.hold.pointer;
+  return {
+    onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
+      hold.onPointerDown(event);
+      view.onPointerDown(event);
+    },
+    onPointerMove: (event: React.PointerEvent<HTMLElement>) => {
+      hold.onPointerMove(event);
+      view.onPointerMove(event);
+    },
+    onPointerUp: (event: React.PointerEvent<HTMLElement>) => {
+      hold.onPointerUp(event);
+      view.onPointerUp(event);
+    },
+    onPointerCancel: (event: React.PointerEvent<HTMLElement>) => {
+      hold.onPointerCancel(event);
+      view.onPointerCancel(event);
+    },
+  };
+}
+
+function PaneOverlay({ model, pane }: { model: CompareStageModel; pane: "a" | "b" | "both" }) {
+  const both = pane === "both";
+  const wipe = both && model.effective.mode === "wipe" && model.a && model.b;
+  const primary = pane !== "b";
   return (
-    <section
-      className="flex min-h-0 flex-1 flex-col gap-2"
-      aria-label={t("task:questionReviewStage")}
-      onKeyDown={stopStageKeys}
-    >
-      <ReviewCompareToolbar compare={compare} images={segment.images} />
-      <div className={reviewToolbarRow}>
-        <ReviewZoomControls
-          scale={viewport.view.scale}
-          onZoom={viewport.zoomStep}
-          onFit={viewport.fit}
-          onActual={viewport.actual}
-        />
-        {regions.button}
-        <ReviewCompareStatus state={state} a={aRef} b={bRef} sizes={sizes} diff={diff} />
-      </div>
-      <div
-        ref={areaRef}
-        className={cn("flex min-h-0 flex-1 gap-2", isMobile ? "flex-col" : "flex-row")}
-      >
-        {state.mode === "side" ? (
-          <>
-            {canvas("a", a)}
-            {canvas("b", b)}
-          </>
-        ) : (
-          canvas("both")
-        )}
-      </div>
-      {regions.popover}
-    </section>
+    <>
+      {wipe && model.pinned && (
+        <PinnedWipeLine value={model.wipe.value} onChange={model.wipe.onChange} />
+      )}
+      {wipe && !model.pinned && (
+        <WipeHandle value={model.wipe.value} onChange={model.wipe.onChange} />
+      )}
+      {primary && model.regions.hint}
+      {model.pending !== null && <ImageState state={model.pending} onRetry={model.images.retry} />}
+      {primary && model.layout.phone && (
+        <>
+          <ZoomChip
+            scale={model.viewport.view.scale}
+            onToggle={model.viewport.atFit ? model.viewport.actual : model.viewport.fit}
+          />
+          <StatusChips>
+            <ReviewCompareStatus
+              state={model.effective}
+              a={model.aRef}
+              b={model.bRef}
+              sizes={model.images.sizes}
+              diff={model.diff}
+              chips
+            />
+          </StatusChips>
+        </>
+      )}
+    </>
   );
 }

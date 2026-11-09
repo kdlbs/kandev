@@ -48,3 +48,12 @@ func TestQuestionImagesSchemaStatesBundleLimit(t *testing.T) {
 	require.Contains(t, description, "A question accepts at most 4 references")
 	require.Equal(t, protocol.MaxQuestionImageReferences, schema["maxItems"])
 }
+
+// @covers AC-TASKS-QUESTION-IMAGE-REVIEW-009.1
+func TestQuestionImagesSchemaOffersLabels(t *testing.T) {
+	items := buildQuestionImageSchema(1)["items"].(map[string]any)
+	label, ok := items[propsKey].(map[string]any)["label"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, protocol.ImageLabelPattern, label["pattern"])
+	require.Contains(t, label[descriptionArg], "before")
+}

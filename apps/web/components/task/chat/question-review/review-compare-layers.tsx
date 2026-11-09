@@ -6,6 +6,7 @@ import type { CompareState } from "@/lib/question-review/compare";
 import type { ReviewView, Size } from "@/lib/question-review/viewport";
 import { wipeFromPointer } from "@/lib/question-review/wipe";
 import { ReviewImage } from "./review-canvas";
+import { ChangeOutline } from "./review-compare-controls";
 import type { ReviewDiffResult, ReviewDiffState } from "./use-review-diff";
 
 export type LoadedReviewImage = { id: string; alt: string; url: string };
@@ -18,6 +19,8 @@ type Props = {
   stageWidth: number;
   diff: ReviewDiffState;
   onSize: (id: string, size: Size) => void;
+  /** Wipe line as a fraction of the stage width; the pinned touch line is 0.5. */
+  wipeAt?: number;
 };
 
 /** Image-pixel x of the wipe divider, so the clip follows zoom and pan. */
@@ -28,7 +31,8 @@ export function wipeClipLeft(view: ReviewView, stageWidth: number, wipe: number)
 function candidateStyle(props: Props): CSSProperties | undefined {
   const { state, view, stageWidth } = props;
   if (state.mode === "wipe") {
-    return { clipPath: `inset(0 0 0 ${wipeClipLeft(view, stageWidth, state.wipe)}px)` };
+    const at = props.wipeAt ?? state.wipe;
+    return { clipPath: `inset(0 0 0 ${wipeClipLeft(view, stageWidth, at)}px)` };
   }
   if (state.mode === "onion") return { opacity: state.opacity };
   return undefined;
@@ -68,7 +72,12 @@ export function CompareLayers(props: Props) {
         />
       )}
       {state.mode === "diff" && props.diff.status === "ready" && (
-        <DiffMask result={props.diff.result} scale={view.scale} />
+        <>
+          <DiffMask result={props.diff.result} scale={view.scale} />
+          {props.diff.result.bounds && (
+            <ChangeOutline bounds={props.diff.result.bounds} scale={view.scale} />
+          )}
+        </>
       )}
     </div>
   );

@@ -112,6 +112,12 @@ not yet describe a released version.
   Image descriptions shall remain agent-authored content. Reduced-motion and
   forced-colors preferences shall remain usable.
 
+- **AC-TASKS-QUESTION-IMAGES-003.6:** When a question has two or more loaded images,
+  the image inspector shall offer Previous and Next, the left and right arrow keys,
+  and a horizontal swipe at Fit to step through them in review order (question
+  images, then choice images), with a counter and without wrapping. Closing shall
+  return focus to the thumbnail of the image that was showing.
+
 ### REQ-TASKS-QUESTION-IMAGES-004: Durable references and lifecycle compatibility
 
 **Intent:** Recover the question and its associations without changing ownership.

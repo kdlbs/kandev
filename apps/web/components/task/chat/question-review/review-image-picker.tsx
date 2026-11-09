@@ -2,15 +2,15 @@
 
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { useTranslation } from "react-i18next";
-import type { ReviewImage } from "@/lib/question-review/segments";
+import { imageShortName, type ReviewImage } from "@/lib/question-review/segments";
 
 export function useReviewImageLabel() {
   const { t } = useTranslation();
   return (image: ReviewImage, index: number) =>
     image.choiceLabel === undefined
-      ? t("task:questionReviewImageLabel", { index: index + 1, alt: image.alt })
+      ? t("task:questionReviewImageLabel", { index: imageShortName(image, index), alt: image.alt })
       : t("task:questionReviewChoiceImageLabel", {
-          index: index + 1,
+          index: imageShortName(image, index),
           alt: image.alt,
           choice: image.choiceLabel,
         });
@@ -51,7 +51,7 @@ export function ReviewImagePicker({ label, images, value, onChange, testId }: Pr
             title={imageLabel(image, index)}
             className="h-7 min-w-7 cursor-pointer [@media(pointer:coarse)]:h-12 [@media(pointer:coarse)]:min-w-12 max-md:h-12 max-md:min-w-12"
           >
-            {index + 1}
+            <span className="max-w-24 truncate">{imageShortName(image, index)}</span>
           </ToggleGroupItem>
         ))}
       </ToggleGroup>

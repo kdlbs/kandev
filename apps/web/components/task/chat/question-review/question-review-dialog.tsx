@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import {
+  useCallback,
+  useMemo,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
+import type { CompareSettings } from "@/lib/question-review/compare";
 import { IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@kandev/ui/dialog";
@@ -12,7 +20,8 @@ import type { ReviewSegment } from "@/lib/question-review/segments";
 import { cn } from "@/lib/utils";
 import { QuestionReviewSegments } from "./question-review-segments";
 import { QuestionReviewStage } from "./question-review-stage";
-import { ReviewRegionList } from "./review-region-list";
+import { ReviewLayoutProvider } from "./review-layout";
+import { RegionsSheet, RegionsSidePanel } from "./review-region-panel";
 import type { QuestionReviewController } from "./use-question-review";
 import { useReviewAnnotations, type ReviewAnnotations } from "./use-review-annotations";
 
@@ -40,13 +49,38 @@ type Props = {
 
 const touchSize = "max-md:h-12 [@media(pointer:coarse)]:h-12";
 
+function isTextEntry(target: EventTarget | null): boolean {
+  if (target instanceof HTMLTextAreaElement) return true;
+  if (!(target instanceof HTMLInputElement)) return false;
+  return !["range", "checkbox", "radio", "button", "submit", "file"].includes(target.type);
+}
+
+/** Hides the phone bottom bar while a text field has focus, so it never covers the keyboard. */
+function useTextEntryFocus() {
+  const [typing, setTyping] = useState(false);
+  return {
+    typing,
+    onFocusCapture: (event: React.FocusEvent) => setTyping(isTextEntry(event.target)),
+    onBlurCapture: (event: React.FocusEvent) => {
+      if (isTextEntry(event.target) && !isTextEntry(event.relatedTarget)) setTyping(false);
+    },
+  };
+}
+
 export function QuestionReviewDialog(props: Props) {
-  const { t } = useTranslation();
-  const { isMobile } = useResponsiveBreakpoint();
+  const breakpoint = useResponsiveBreakpoint();
+  const phone = breakpoint.isMobile;
   const { review } = props;
   const guard = useCallback(() => true, []);
   useClarificationEscapeGuard(guard);
   const annotations = useReviewAnnotations(props.annotations, props.setAnnotations);
+  const [bottomBar, setBottomBar] = useState<HTMLDivElement | null>(null);
+  const [compareSettings, setCompareSettings] = useState<CompareSettings>();
+  const focus = useTextEntryFocus();
+  const layout = useMemo(
+    () => ({ phone, touch: phone || !breakpoint.isFinePointer, bottomBar }),
+    [bottomBar, breakpoint.isFinePointer, phone],
+  );
   const segment = props.segments[props.activeIndex] ?? props.segments[0];
   const stage = segment ? (
     <QuestionReviewStage
@@ -56,12 +90,16 @@ export function QuestionReviewDialog(props: Props) {
       segment={segment}
       annotations={annotations}
       popoverContainer={review.scopeRef}
+      compareSettings={compareSettings}
+      onCompareSettings={setCompareSettings}
     />
   ) : null;
   const form = (
-    <div className="min-h-0 overflow-y-auto overscroll-contain" data-testid="question-review-form">
+    <div
+      className={cn("min-h-0 overflow-y-auto overscroll-contain", phone && "pb-2")}
+      data-testid="question-review-form"
+    >
       {props.form}
-      {segment && <ReviewRegionList segment={segment} controller={annotations} />}
     </div>
   );
   return (
@@ -72,45 +110,90 @@ export function QuestionReviewDialog(props: Props) {
         data-testid="question-review-dialog"
         overlayClassName="data-open:animate-none data-closed:animate-none"
         onEscapeKeyDown={(event) => {
-          // Escape closes an open region comment first, not the whole view.
+          // Escape closes an open comment, then leaves marking, then closes the view.
           if (annotations.commenting) event.preventDefault();
+          else if (annotations.annotating) {
+            event.preventDefault();
+            annotations.setAnnotating(false);
+          }
         }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           review.triggerRef.current?.focus();
         }}
+        onFocusCapture={focus.onFocusCapture}
+        onBlurCapture={focus.onBlurCapture}
         className={cn(
           "flex max-w-none flex-col gap-0 overflow-hidden p-0 data-open:animate-none data-closed:animate-none sm:max-w-none",
-          isMobile
+          phone
             ? "h-dvh w-screen rounded-none border-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
             : "h-[min(94dvh,1200px)] w-[min(96vw,1800px)]",
         )}
       >
-        <div
-          ref={review.scopeRef}
-          tabIndex={-1}
-          className="relative flex min-h-0 flex-1 flex-col outline-none"
-        >
-          <ReviewHeader {...props} />
-          {isMobile ? (
-            <div className="flex min-h-0 flex-1 flex-col">
-              <div className="flex h-[min(55dvh,32rem)] shrink-0 flex-col px-3 pb-2">{stage}</div>
-              <div className="flex min-h-0 flex-1 flex-col border-t border-border">{form}</div>
-            </div>
-          ) : (
-            <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
-              <ResizablePanel defaultSize="62%" minSize="30%" className="flex flex-col px-4 pb-3">
-                {stage}
-              </ResizablePanel>
-              <ResizableHandle withHandle aria-label={t("task:questionReviewResize")} />
-              <ResizablePanel defaultSize="38%" minSize="25%" className="flex flex-col">
-                {form}
-              </ResizablePanel>
-            </ResizablePanelGroup>
-          )}
-        </div>
+        <ReviewLayoutProvider value={layout}>
+          <div
+            ref={review.scopeRef}
+            tabIndex={-1}
+            className="relative flex min-h-0 flex-1 flex-col outline-none"
+          >
+            <ReviewHeader {...props} />
+            {phone ? (
+              <PhoneBody
+                stage={stage}
+                form={form}
+                hideBar={focus.typing}
+                barRef={setBottomBar}
+                regions={segment && <RegionsSheet segment={segment} controller={annotations} />}
+              />
+            ) : (
+              <DesktopBody
+                stage={stage}
+                form={form}
+                regions={segment && <RegionsSidePanel segment={segment} controller={annotations} />}
+              />
+            )}
+          </div>
+        </ReviewLayoutProvider>
       </DialogContent>
     </Dialog>
+  );
+}
+
+type BodyProps = { stage: ReactNode; form: ReactNode; regions: ReactNode };
+
+function PhoneBody(
+  props: BodyProps & { hideBar: boolean; barRef: (element: HTMLDivElement | null) => void },
+) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex h-[min(55dvh,32rem)] shrink-0 flex-col px-3 pb-2">{props.stage}</div>
+      <div className="flex min-h-0 flex-1 flex-col border-t border-border">{props.form}</div>
+      <div
+        ref={props.barRef}
+        className={cn(
+          "flex shrink-0 items-center gap-2 border-t border-border bg-background px-3 py-2",
+          props.hideBar && "hidden",
+        )}
+        data-testid="question-review-bottom-bar"
+      />
+      {props.regions}
+    </div>
+  );
+}
+
+function DesktopBody(props: BodyProps) {
+  const { t } = useTranslation();
+  return (
+    <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
+      <ResizablePanel defaultSize="62%" minSize="30%" className="flex flex-row gap-3 px-4 pb-3">
+        <div className="flex min-w-0 flex-1 flex-col">{props.stage}</div>
+        {props.regions}
+      </ResizablePanel>
+      <ResizableHandle withHandle aria-label={t("task:questionReviewResize")} />
+      <ResizablePanel defaultSize="38%" minSize="25%" className="flex flex-col">
+        {props.form}
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }
 

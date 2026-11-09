@@ -3,12 +3,17 @@ import {
   MAX_SCALE,
   MIN_SCALE,
   actualSizeView,
+  clampPinnedView,
   clampView,
   fitView,
   formatZoom,
   minScaleFor,
   nextZoomStep,
   panBy,
+  pinnedViewForFraction,
+  pinnedWipeFraction,
+  rectView,
+  swipeDirection,
   zoomAt,
 } from "./viewport";
 
@@ -103,5 +108,49 @@ describe("fit below the manual zoom range", () => {
     expect(nextZoomStep(0.1, -1, 0.1)).toBe(0.1);
     expect(nextZoomStep(0.1, 1, 0.1)).toBe(0.25);
     expect(zoomAt({ scale: 0.2, x: 0, y: 0 }, 0.01, { x: 0, y: 0 }, 0.1).scale).toBe(0.1);
+  });
+});
+
+describe("zoom to a rectangle", () => {
+  // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-005.13
+  it("centers the rectangle with padding, within the zoom limits", () => {
+    const view = rectView(
+      { width: 400, height: 300 },
+      { x: 100, y: 100, width: 80, height: 60 },
+      0.1,
+    );
+    expect(view.scale).toBeCloseTo(400 / 96);
+    expect(view.x + 200 / view.scale).toBeCloseTo(140);
+    expect(view.y + 150 / view.scale).toBeCloseTo(130);
+    expect(
+      rectView({ width: 400, height: 300 }, { x: 0, y: 0, width: 1, height: 1 }, 0.1).scale,
+    ).toBe(MAX_SCALE);
+  });
+});
+
+describe("pinned wipe", () => {
+  const pinStage = { width: 300, height: 200 };
+  const pinImage = { width: 600, height: 400 };
+  // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-005.3
+  it("lets either image edge reach the center line", () => {
+    const left = clampPinnedView({ scale: 0.5, x: -9999, y: 0 }, pinStage, pinImage);
+    expect(pinnedWipeFraction(left, pinStage, pinImage)).toBe(0);
+    const right = clampPinnedView({ scale: 0.5, x: 9999, y: 0 }, pinStage, pinImage);
+    expect(pinnedWipeFraction(right, pinStage, pinImage)).toBe(1);
+  });
+
+  it("moves the image so the line lands on a given fraction", () => {
+    const view = pinnedViewForFraction({ scale: 0.5, x: 0, y: 0 }, pinStage, pinImage, 0.25);
+    expect(pinnedWipeFraction(view, pinStage, pinImage)).toBeCloseTo(0.25);
+    expect(view.y).toBe(0);
+  });
+});
+
+describe("swipeDirection", () => {
+  it("detects a deliberate horizontal swipe", () => {
+    expect(swipeDirection(-80, 10)).toBe(1);
+    expect(swipeDirection(80, -5)).toBe(-1);
+    expect(swipeDirection(30, 0)).toBe(0);
+    expect(swipeDirection(80, 70)).toBe(0);
   });
 });

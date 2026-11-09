@@ -26,9 +26,11 @@ export function useCompareModeLabel() {
 
 const toggleItemSize = "h-7 cursor-pointer px-2 text-xs [@media(pointer:coarse)]:h-12 max-md:h-12";
 
-type Props = { compare: ReviewCompare; images: readonly ReviewImage[] };
+type WipeControl = { value: number; onChange: (value: number) => void };
 
-export function ReviewCompareToolbar({ compare, images }: Props) {
+type Props = { compare: ReviewCompare; images: readonly ReviewImage[]; wipe: WipeControl };
+
+export function ReviewCompareToolbar({ compare, images, wipe }: Props) {
   const { t } = useTranslation();
   const modeLabel = useCompareModeLabel();
   const { state, dispatch } = compare;
@@ -74,12 +76,12 @@ export function ReviewCompareToolbar({ compare, images }: Props) {
         <IconArrowsExchange className="h-3.5 w-3.5" aria-hidden="true" />
         {t("task:questionReviewSwap")}
       </Button>
-      <ModeControls compare={compare} />
+      <ModeControls compare={compare} wipe={wipe} />
     </div>
   );
 }
 
-function ModeControls({ compare }: { compare: ReviewCompare }) {
+export function ModeControls({ compare, wipe }: { compare: ReviewCompare; wipe: WipeControl }) {
   const { t } = useTranslation();
   const { state, dispatch } = compare;
   if (state.mode === "toggle") {
@@ -100,10 +102,10 @@ function ModeControls({ compare }: { compare: ReviewCompare }) {
     return (
       <LabelledSlider
         label={t("task:questionReviewWipe")}
-        value={Math.round(state.wipe * 100)}
+        value={Math.round(wipe.value * 100)}
         max={100}
-        valueText={t("task:questionReviewPercent", { value: Math.round(state.wipe * 100) })}
-        onChange={(value) => dispatch({ type: "wipe", value: value / 100 })}
+        valueText={t("task:questionReviewPercent", { value: Math.round(wipe.value * 100) })}
+        onChange={(value) => wipe.onChange(value / 100)}
         testId="question-review-wipe-slider"
       />
     );

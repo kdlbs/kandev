@@ -94,6 +94,7 @@ function QuestionImagesContent(props: Props) {
                 {state?.kind === "loaded" ? (
                   <QuestionImageViewer
                     key={state.url}
+                    imageId={image.id}
                     src={state.url}
                     alt={image.alt}
                     onInspectionChange={props.onInspectionChange}

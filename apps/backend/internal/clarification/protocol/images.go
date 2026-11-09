@@ -18,6 +18,8 @@ type QuestionImage struct {
 	Path string `json:"path"`
 	Repo string `json:"repo,omitempty"`
 	Alt  string `json:"alt"`
+	// Label is an optional one-word name shown in image pickers instead of a number.
+	Label string `json:"label,omitempty"`
 }
 
 // QuestionImages distinguishes an omitted attachment list from an invalid null list.
@@ -71,6 +73,11 @@ const MaxQuestionImageReferences = 4
 const MaxChoiceImages = 1
 
 var imageIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+
+// ImageLabelPattern accepts one word of 1-16 letters, digits, underscores, or hyphens.
+const ImageLabelPattern = `^[A-Za-z0-9][A-Za-z0-9_-]{0,15}$`
+
+var imageLabelPattern = regexp.MustCompile(ImageLabelPattern)
 var imageSchemePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*:`)
 
 // ValidateImagePath accepts canonical workspace-relative paths without expansion.
@@ -87,6 +94,9 @@ func (image QuestionImage) Validate() error {
 	}
 	if strings.TrimSpace(image.Alt) == "" || utf8.RuneCountInString(image.Alt) > 300 {
 		return fmt.Errorf("image alt must contain 1-300 characters")
+	}
+	if image.Label != "" && !imageLabelPattern.MatchString(image.Label) {
+		return fmt.Errorf("image label must be one word of 1-16 letters, digits, underscores, or hyphens, starting with a letter or digit")
 	}
 	if image.Path == "" {
 		return fmt.Errorf("image path is required")
@@ -123,6 +133,9 @@ func ValidateQuestionImages(questions []Question) error {
 			if err := validateImageGroup(images, shared); err != nil {
 				return err
 			}
+		}
+		if err := validateUniqueLabels(q.ImageReferences()); err != nil {
+			return err
 		}
 	}
 	if len(shared) > MaxBundleImages {
@@ -165,4 +178,20 @@ func HasQuestionImages(questions []Question) bool {
 		}
 	}
 	return false
+}
+
+// validateUniqueLabels keeps labels unambiguous within one question. The same
+// image repeated across placements carries the same label and is not a conflict.
+func validateUniqueLabels(refs QuestionImages) error {
+	owners := map[string]string{}
+	for _, image := range refs {
+		if image.Label == "" {
+			continue
+		}
+		if owner, exists := owners[image.Label]; exists && owner != image.ID {
+			return fmt.Errorf("image label %q is used by more than one image in a question", image.Label)
+		}
+		owners[image.Label] = image.ID
+	}
+	return nil
 }

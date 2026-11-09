@@ -18,6 +18,8 @@ export function useReviewAnnotations(
   const [selected, setSelected] = useState<RegionSelection>(null);
   const [annotating, setAnnotating] = useState(false);
   const [commenting, setCommentingState] = useState<RegionCommenting>(null);
+  /** Phone regions sheet. */
+  const [listOpen, setListOpen] = useState(false);
   // Read synchronously: the comment popover saves and then closes in one tick.
   const commentingRef = useRef<RegionCommenting>(null);
   const setCommenting = useCallback((next: RegionCommenting) => {
@@ -110,6 +112,8 @@ export function useReviewAnnotations(
     editComment,
     saveComment,
     closeComment,
+    listOpen,
+    setListOpen,
   };
 }
 

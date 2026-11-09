@@ -68,3 +68,19 @@ describe("diffPixels", () => {
     expect(maskAt(result, 2, 1)[3]).toBe(0);
   });
 });
+
+describe("changed bounds", () => {
+  // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-005.13
+  it("reports the box around all changed pixels, or null when nothing changed", () => {
+    const b = raster(20, 10, WHITE);
+    setPixel(b, 3, 2, [0, 0, 0, 255]);
+    setPixel(b, 11, 7, [0, 0, 0, 255]);
+    expect(diffPixels(raster(20, 10, WHITE), b, 16).bounds).toEqual({
+      x: 3,
+      y: 2,
+      width: 9,
+      height: 6,
+    });
+    expect(diffPixels(raster(2, 2, WHITE), raster(2, 2, WHITE), 0).bounds).toBeNull();
+  });
+});

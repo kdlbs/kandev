@@ -5,7 +5,11 @@ import { IconPhoto } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import type { ClarificationOption, ClarificationQuestion } from "@/lib/types/http";
-import { buildSegmentImages, segmentImageIndex } from "@/lib/question-review/segments";
+import {
+  buildSegmentImages,
+  imageShortName,
+  segmentImageIndex,
+} from "@/lib/question-review/segments";
 
 /** Opens the large review view from the compact question panel. */
 export function QuestionReviewButton({
@@ -59,11 +63,14 @@ export function ChoiceStageImageRef({
 }) {
   const { t } = useTranslation();
   const imageId = option.images?.find((image) => typeof image?.id === "string")?.id;
-  const index = imageId ? segmentImageIndex(buildSegmentImages(question), imageId) : 0;
+  const images = buildSegmentImages(question);
+  const index = imageId ? segmentImageIndex(images, imageId) : 0;
   if (index === 0) return null;
   return (
     <p className="mt-1 text-xs text-muted-foreground" data-testid="question-review-choice-image">
-      {t("task:questionReviewChoiceImageRef", { index })}
+      {t("task:questionReviewChoiceImageRef", {
+        index: imageShortName(images[index - 1], index - 1),
+      })}
     </p>
   );
 }

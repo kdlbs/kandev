@@ -64,6 +64,10 @@ so that small questions stay quick and visual questions stay reviewable.
   submitting stale answers. Escape and Close shall close the view without
   dismissing or collapsing the question, and focus shall return to the Review
   images control.
+- **AC-TASKS-QUESTION-IMAGE-REVIEW-001.6:** Choosing an answer in the review view
+  shall record it without moving to the next question, so the compared images stay
+  on screen. The Next control shall then be the emphasized action. The compact panel
+  keeps its existing advance-on-answer behavior.
 
 ### REQ-TASKS-QUESTION-IMAGE-REVIEW-002: Stage above a visible answer form
 
@@ -80,10 +84,13 @@ so that small questions stay quick and visual questions stay reviewable.
   split with a pointer or keyboard, and each part shall keep a usable minimum height.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-002.3:** Below the 768px phone breakpoint, the
   review view shall use the full dynamic viewport height with safe-area clearance.
-  The stage shall stay fixed above a separately scrolling form. Stage toolbars
-  shall scroll horizontally instead of wrapping, so they do not take the stage's
-  height. Controls shall measure at least 44px in both dimensions, and the
-  document shall not overflow horizontally.
+  The stage shall stay fixed above a separately scrolling form. The comparison mode
+  and rarely used actions shall sit in one row above the image, and the frequently
+  repeated actions (flip, candidate stepping, image choice, swap, mode sliders)
+  shall sit in a fixed bottom bar within thumb reach, hidden while a text field has
+  focus. Zoom level and status shall appear as chips on the image. No toolbar shall
+  scroll horizontally. Controls shall measure at least 44px in both dimensions, and
+  the document shall not overflow horizontally.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-002.4:** While the review view is open, the
   form shall keep the existing option and submit shortcuts when focus is in the
   form. Stage shortcuts shall apply only when focus is in the stage, and shall not
@@ -100,6 +107,9 @@ so that small questions stay quick and visual questions stay reviewable.
   title or prompt summary, image count, and answered state. The operator can move to
   any segment by pointer, touch, or keyboard. Questions without images remain
   segments and show an image-free stage state.
+- **AC-TASKS-QUESTION-IMAGE-REVIEW-003.5:** Moving to another segment shall keep the
+  comparison mode and its slider values (wipe position, opacity, tolerance). Image
+  choices and zoom shall start fresh for the new segment.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-003.2:** A segment's images shall be its question
   images in authored order, then its choice images in option order. Each image
   shall show its agent-authored description, and each choice image shall also show
@@ -144,7 +154,10 @@ so that small questions stay quick and visual questions stay reviewable.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-005.3:** Wipe shall show A and B divided by a
   slider that the operator can move by pointer, touch, or keyboard. A drag shall
   reach 0% and 100% without the pointer reaching the screen edge, the handle
-  shall stay fully visible, and a toolbar slider shall set the same position.
+  shall stay fully visible, and a toolbar slider shall set the same position. On
+  touch-first devices the line shall stay pinned at the center of the stage and a
+  drag shall scrub both images beneath it, far enough for either image edge to
+  reach the line.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-005.4:** Side by side shall show A and B with
   synchronized zoom and pan. Below the phone breakpoint, the images shall stack vertically.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-005.5:** Onion skin shall show B over A with an
@@ -166,6 +179,15 @@ so that small questions stay quick and visual questions stay reviewable.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-005.10:** Comparison shall use only image bytes
   already loaded through the authorized question-image read. It shall not add a
   server-side image transformation, image archive, or new file-read route.
+- **AC-TASKS-QUESTION-IMAGE-REVIEW-005.11:** In Toggle and Side by side with three
+  or more images, Previous and Next controls, the `[` and `]` keys, and a horizontal
+  swipe at Fit shall step B through the other images while A stays fixed, without
+  wrapping. A label shall show B's name and position.
+- **AC-TASKS-QUESTION-IMAGE-REVIEW-005.12:** Pressing and holding the image, or
+  holding Space while it has focus, shall show A until released. A press that
+  moves shall pan instead.
+- **AC-TASKS-QUESTION-IMAGE-REVIEW-005.13:** Difference shall outline the area that
+  contains every changed pixel and offer Zoom to changes, which fits that area.
 
 ### REQ-TASKS-QUESTION-IMAGE-REVIEW-006: Larger image galleries
 
@@ -197,8 +219,11 @@ so that small questions stay quick and visual questions stay reviewable.
   regions, and regions shall be numbered in creation order. Finishing a region
   shall open a comment popover next to it (a bottom drawer on touch screens), the
   same comment control chat uses for selected text. Cancelling the comment of a
-  new region shall discard the region; selecting an existing region shall reopen
-  the popover to edit or delete it.
+  new region shall discard the region; clicking or tapping an existing region, or
+  pressing Enter on a selected one, shall reopen the popover to edit or delete it.
+  The Mark area control shall look active while on, a hint with Done shall show on
+  the image, and Escape shall close an open comment, then leave marking, and only
+  then close the view.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-007.2:** Each region shall record the image ID,
   an integer pixel rectangle within the image, the image width and height observed
   when it was drawn, and a comment of 1 to 500 characters.
@@ -217,9 +242,9 @@ so that small questions stay quick and visual questions stay reviewable.
   answer and appear in answered question history with their number, image
   description, and comment.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-007.7:** Keyboard and touch users shall be able
-  to create, adjust, and delete regions. Regions shall be listed in the form as
-  read-only text with Edit and Delete controls, so screen-reader users can review
-  and change them.
+  to create, adjust, and delete regions. Regions shall be listed as read-only text
+  with Edit and Delete controls, in a side panel next to the image on wider screens
+  and in a sheet on phones, so screen-reader users can review and change them.
 
 ### REQ-TASKS-QUESTION-IMAGE-REVIEW-008: Compatibility
 
@@ -235,6 +260,24 @@ so that small questions stay quick and visual questions stay reviewable.
   clients can omit regions and answer through the existing contract.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-008.4:** All application copy shall be localized.
   Reduced-motion and forced-colors preferences shall keep every control usable.
+
+### REQ-TASKS-QUESTION-IMAGE-REVIEW-009: Image labels
+
+**Intent:** Let the agent name images so pickers read before, after, alt.
+
+#### Acceptance criteria
+
+- **AC-TASKS-QUESTION-IMAGE-REVIEW-009.1:** An agent can give each question or choice
+  image an optional one-word label of 1 to 16 letters, digits, underscores, or
+  hyphens. Pickers, choice references, candidate labels, and the thumbnail
+  inspector counter shall show the label instead of the image number, and fall
+  back to the number without one. Labels are agent data and are not translated.
+- **AC-TASKS-QUESTION-IMAGE-REVIEW-009.2:** Malformed labels, and the same label on
+  two different images of one question, shall fail validation before the bundle is
+  accepted. A repeated image ID shall carry the same label.
+- **AC-TASKS-QUESTION-IMAGE-REVIEW-009.3:** Labels shall persist with the question
+  and survive reload, history, and exact retries; a changed label shall change the
+  request identity.
 
 ## Out of scope
 

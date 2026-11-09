@@ -44,6 +44,7 @@ committed and was lost with its worktree. This package recreates it.
 | 3 | [04 Annotation contract](task-04-annotation-contract.md) | none technically; scheduled after 03 | Answers carry validated regions to persistence and the agent. |
 | 4 | [05 Annotation interface](task-05-annotation-interface.md) | 03, 04 | Draw, edit, list, submit, and view regions in history. |
 | 5 | [06 Test feedback](task-06-test-feedback.md) | 05 | Wipe reach, Fit on phones, region comment popover, wrapping thumbnails. |
+| 6 | [07 Usability round](task-07-usability-round.md) | 06 | Ten usability changes from the second test round, including agent image labels. |
 
 Wave 1 work orders touch separate files and can run in either order. Work
 order 04 is backend-only and could start early, but the user asked for
@@ -104,30 +105,30 @@ the form panel only. Maps to AC-002.1, AC-002.2, AC-003.1, AC-004.1, AC-005.4.
 
 ### UI-03: Phone review view
 
-Fixed: header and stage, 55% of the dynamic viewport at most. Scrolling: form.
-Every control is at least 44px. Maps to AC-002.3, AC-005.4.
+Fixed: header, top row, and image area (55% of the dynamic viewport at most).
+Scrolling: form. Fixed: bottom bar, hidden while a text field has focus. Every
+control is at least 44px; nothing scrolls sideways. Maps to AC-002.3, AC-005.3,
+AC-005.11, and AC-007.7.
 
 ```text
-+-------------------------------+
-| [Close]   Review 2 of 4       |
-| [1 ✓][2*][3][4]   (scrolls)   |
-| [Toggle|Wipe|Side|Onion|Diff] |
-| A [1|2]  B [1|2]  [Swap]      |
-| [-] 100% [+] [Fit] [Flip A/B] |
-|                               |
-|   stage: pinch and drag       |
-|   "Showing A: Before"         |
-|                               |
-|-------------------------------|
-| Is the new spacing ...        |  <- scrolls separately
-| (1) Approve                   |
-| (2) Revise                    |
-| [custom answer.............]  |
-| [< Prev]            [Next >]  |
-+-------------------------------+
++--------------------------------------+
+| [Close]   Review 2 of 4    [Submit]  |
+| [1 ✓] [2*] [3] [4]                   |  segment strip
+| [Mode: Toggle v]  [Regions (1)] [...]|  set once: mode, regions, More
+|  +--------------------------------+  |
+|  |  [Drag to mark an area. Done]  |  |  hint while marking
+|  |      image area         [100%] |  |  zoom chip: tap for Fit / 100%
+|  | [Sizes differ] [3,214 changed] |  |  status chips
+|  +--------------------------------+  |
+|--------------------------------------|
+| question and answers (scrolls)       |
+|--------------------------------------|
+| [Swap] [<] [  Flip A/B  ] [>] [A: before, B: after v] |  thumb-zone bar
++--------------------------------------+
 ```
 
-Side by side on phones stacks A above B inside the stage.
+Wipe, Onion skin, and Difference put their slider in the bar instead of Flip and
+stepping. On touch, Wipe pins its line at the center and a drag scrubs the images.
 
 ### UI-04: Difference and annotation states
 

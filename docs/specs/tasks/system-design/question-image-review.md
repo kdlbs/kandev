@@ -11,6 +11,7 @@ requirements:
   - REQ-TASKS-QUESTION-IMAGE-REVIEW-006
   - REQ-TASKS-QUESTION-IMAGE-REVIEW-007
   - REQ-TASKS-QUESTION-IMAGE-REVIEW-008
+  - REQ-TASKS-QUESTION-IMAGE-REVIEW-009
 ---
 
 # Question image review system design
@@ -41,6 +42,7 @@ authoritative for answer files. All new symbols below are proposed interfaces.
 | REQ-TASKS-QUESTION-IMAGE-REVIEW-006 | Gallery capacity |
 | REQ-TASKS-QUESTION-IMAGE-REVIEW-007 | Annotation contract, Annotation interface |
 | REQ-TASKS-QUESTION-IMAGE-REVIEW-008 | Compatibility |
+| REQ-TASKS-QUESTION-IMAGE-REVIEW-009 | Image labels |
 
 ## Current integration points
 
@@ -364,6 +366,44 @@ region is waiting for its comment.
 
 History: `AnswerSummary` lists `metadata.response.annotations` as
 "Region N on <image alt>: <comment>", rendered as plain text, below the selection.
+
+## Usability round (2026-11-09)
+
+- **Answering:** `buildQuestionHandlers` takes `stayOnAnswer`; the review view
+  passes it, so choosing an answer stays on the question, and
+  `ClarificationCarouselNav` emphasizes Next (`data-emphasized`).
+- **Phone composition:** `ReviewLayoutProvider` gives stages `phone`, `touch`, and the
+  dialog's bottom bar element. Stages render the mode sheet button and More above
+  the image, `ZoomChip` and `StatusChips` on it, and frequent actions through
+  `ReviewBottomBar` (a portal into the bar). The dialog hides the bar while a text
+  field has focus (`onFocusCapture`).
+- **Carried-over settings:** the dialog keeps `CompareSettings` (mode, wipe,
+  opacity, tolerance); `useReviewCompare` starts each segment from it and reports
+  changes.
+- **Candidate stepping:** `compareReducer` `step` moves B through the images other
+  than A without wrapping; `CandidateStepper` renders it; `[`/`]` step in Toggle and
+  Side by side; `useReviewViewport` `onSwipe` steps on a swipe that starts at Fit.
+- **Hold to compare:** `useHoldToCompare` shows A after a 300ms still press or while
+  Space is held; the stage renders an effective Toggle-on-A state.
+- **Pinned wipe:** on touch, Wipe uses `clampPinnedView`, which lets either image
+  edge reach the center line, and `pinnedWipeFraction`; `PinnedWipeLine` replaces
+  the draggable handle.
+- **Zoom to changes:** `diffPixels` returns `bounds`; `ChangeOutline` marks them and
+  `rectView` fits them.
+- **Marking:** **Mark area** (pen icon, solid primary when on), `AnnotateHint` with
+  Done, a primary ring on the stage, Escape order in the dialog's
+  `onEscapeKeyDown`, and `useRegionClick`, which opens a region on a still press.
+  `RegionsSidePanel` lists regions beside the image on wider screens and
+  `RegionsSheet` on phones.
+
+## Image labels
+
+`QuestionImage.Label` is an optional one-word label matching
+`protocol.ImageLabelPattern`. `ValidateQuestionImages` rejects a malformed label
+and the same label on two different images of a question. The label is part of the
+struct, so persistence, `questionsEqual`, and the request hash include it. The tool
+schema offers it. The web keeps only valid labels (`buildSegmentImages`) and
+`imageShortName` shows the label or the stage number.
 
 ## Accessibility and motion
 

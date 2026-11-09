@@ -9,13 +9,18 @@ import { useReviewImageLabel } from "./review-image-picker";
 import { reviewControlSize } from "./review-zoom-controls";
 import type { ReviewAnnotationController } from "./use-review-annotations";
 
-type Props = { segment: ReviewSegment; controller: ReviewAnnotationController };
+type Props = {
+  segment: ReviewSegment;
+  controller: ReviewAnnotationController;
+  /** Called before a comment opens, so a phone sheet can close first. */
+  onBeforeEdit?: () => void;
+};
 
 /**
  * Read-only list of the active question's regions, so keyboard and screen-reader
  * users can review every region. Edit opens the same comment popover.
  */
-export function ReviewRegionList({ segment, controller }: Props) {
+export function ReviewRegionList({ segment, controller, onBeforeEdit }: Props) {
   const { t } = useTranslation();
   const imageLabel = useReviewImageLabel();
   const regions = controller.list(segment.questionId);
@@ -27,7 +32,7 @@ export function ReviewRegionList({ segment, controller }: Props) {
   return (
     <section
       aria-labelledby={headingId}
-      className="mx-4 mb-4 space-y-2 border-t border-border pt-3"
+      className="space-y-2"
       data-testid="question-review-regions"
     >
       <h3 id={headingId} className="text-xs font-medium">
@@ -61,7 +66,10 @@ export function ReviewRegionList({ segment, controller }: Props) {
                   variant="outline"
                   className={reviewControlSize}
                   data-testid="question-review-region-edit"
-                  onClick={() => controller.editComment(segment.questionId, index)}
+                  onClick={() => {
+                    onBeforeEdit?.();
+                    controller.editComment(segment.questionId, index);
+                  }}
                 >
                   {t("task:questionReviewRegionEdit", { number: index + 1 })}
                 </Button>

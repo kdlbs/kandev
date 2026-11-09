@@ -385,6 +385,8 @@ export type QuestionImage = {
   path: string;
   repo?: string;
   alt: string;
+  /** Optional one-word name the agent chose for pickers, such as "before". */
+  label?: string;
 };
 
 export type ClarificationQuestion = {

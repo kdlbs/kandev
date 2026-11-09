@@ -8,6 +8,8 @@ export type PixelDiff = {
   total: number;
   /** RGBA mask over the union of both images: changed pixels are opaque magenta. */
   mask: Uint8ClampedArray;
+  /** Smallest rectangle containing every changed pixel, or null when none changed. */
+  bounds: { x: number; y: number; width: number; height: number } | null;
 };
 
 const MARK = [255, 0, 255, 255] as const;
@@ -32,12 +34,26 @@ export function diffPixels(a: RasterImage, b: RasterImage, tolerance: number): P
   const height = Math.max(a.height, b.height);
   const mask = new Uint8ClampedArray(width * height * 4);
   let changed = 0;
+  const box = { minX: width, minY: height, maxX: -1, maxY: -1 };
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       if (!pixelChanged(a, b, x, y, tolerance)) continue;
       changed++;
       mask.set(MARK, (y * width + x) * 4);
+      box.minX = Math.min(box.minX, x);
+      box.minY = Math.min(box.minY, y);
+      box.maxX = Math.max(box.maxX, x);
+      box.maxY = Math.max(box.maxY, y);
     }
   }
-  return { width, height, changed, total: width * height, mask };
+  const bounds =
+    changed === 0
+      ? null
+      : {
+          x: box.minX,
+          y: box.minY,
+          width: box.maxX - box.minX + 1,
+          height: box.maxY - box.minY + 1,
+        };
+  return { width, height, changed, total: width * height, mask, bounds };
 }

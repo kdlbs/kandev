@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { compareReducer, initialCompareState, type CompareState } from "./compare";
+import {
+  candidatePosition,
+  compareReducer,
+  compareSettings,
+  initialCompareState,
+  type CompareState,
+} from "./compare";
 
 const ids = ["before", "after", "other"];
 const start = initialCompareState(ids);
@@ -64,5 +70,40 @@ describe("showing an image for a selected region", () => {
       bId: "after",
       showB: false,
     });
+  });
+});
+
+describe("candidate stepping", () => {
+  const four = ["base", "c1", "c2", "c3"];
+  // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-005.11
+  it("steps B through the other images with A fixed, without wrapping", () => {
+    let state = initialCompareState(four);
+    expect(state.bId).toBe("c1");
+    state = compareReducer(state, { type: "step", direction: 1, ids: four });
+    expect(state).toMatchObject({ aId: "base", bId: "c2", showB: true });
+    state = compareReducer(state, { type: "step", direction: 1, ids: four });
+    expect(state.bId).toBe("c3");
+    expect(compareReducer(state, { type: "step", direction: 1, ids: four }).bId).toBe("c3");
+    expect(candidatePosition(state, four)).toEqual({ index: 2, total: 3 });
+  });
+
+  it("skips A when stepping", () => {
+    const state = { ...initialCompareState(four), aId: "c1", bId: "base" };
+    expect(compareReducer(state, { type: "step", direction: 1, ids: four }).bId).toBe("c2");
+    expect(compareReducer(state, { type: "step", direction: -1, ids: four }).bId).toBe("base");
+  });
+});
+
+describe("settings across segments", () => {
+  // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-005.12
+  it("starts a new segment with the previous mode and slider values but its own images", () => {
+    const settings = { mode: "diff" as const, wipe: 0.3, opacity: 0.7, tolerance: 40 };
+    expect(initialCompareState(["x", "y"], settings)).toMatchObject({
+      ...settings,
+      aId: "x",
+      bId: "y",
+      showB: false,
+    });
+    expect(compareSettings(initialCompareState(["x", "y"], settings))).toEqual(settings);
   });
 });

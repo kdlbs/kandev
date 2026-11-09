@@ -30,6 +30,8 @@ type Args = {
   viewportHandlers: PointerHandlers;
 };
 
+const MIN_DRAG_PX = 5;
+
 const ARROWS: Record<string, [number, number]> = {
   ArrowLeft: [-1, 0],
   ArrowRight: [1, 0],
@@ -43,7 +45,12 @@ const ARROWS: Record<string, [number, number]> = {
  * pinch and cancels the region being drawn.
  */
 export function useRegionDrawing(args: Args) {
-  const start = useRef<{ pointerId: number; point: Point } | null>(null);
+  const start = useRef<{
+    pointerId: number;
+    point: Point;
+    clientX: number;
+    clientY: number;
+  } | null>(null);
   const [draft, setDraft] = useState<RegionRect | null>(null);
   const ready = args.active && Boolean(args.imageId) && args.image.width > 0;
   const toImage = (event: React.PointerEvent<HTMLElement>) =>
@@ -57,7 +64,12 @@ export function useRegionDrawing(args: Args) {
     onPointerDown: (event) => {
       args.viewportHandlers.onPointerDown(event);
       if (!ready || !event.isPrimary) return cancel();
-      start.current = { pointerId: event.pointerId, point: toImage(event) };
+      start.current = {
+        pointerId: event.pointerId,
+        point: toImage(event),
+        clientX: event.clientX,
+        clientY: event.clientY,
+      };
     },
     onPointerMove: (event) => {
       args.viewportHandlers.onPointerMove(event);
@@ -66,9 +78,13 @@ export function useRegionDrawing(args: Args) {
     },
     onPointerUp: (event) => {
       args.viewportHandlers.onPointerUp(event);
-      if (start.current?.pointerId !== event.pointerId || !args.imageId) return cancel();
-      const rect = rectFromPoints(start.current.point, toImage(event), args.image);
+      const origin = start.current;
+      if (origin?.pointerId !== event.pointerId || !args.imageId) return cancel();
       cancel();
+      // A press without a real drag is a click, which may open an existing region.
+      const dragged = Math.hypot(event.clientX - origin.clientX, event.clientY - origin.clientY);
+      if (dragged < MIN_DRAG_PX) return;
+      const rect = rectFromPoints(origin.point, toImage(event), args.image);
       if (rect) args.controller.add(args.questionId, args.imageId, rect, args.image);
     },
     onPointerCancel: (event) => {
