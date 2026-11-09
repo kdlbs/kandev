@@ -193,6 +193,7 @@ function readAgentErrorCause(record: Record<string, unknown>): AgentErrorCause {
     ...(boundedString(record.detail, 1024) ? { detail: boundedString(record.detail, 1024) } : {}),
   };
   if (cause.code === "plugin_preparation_failed") return readPluginPreparationCause(cause, record);
+  if (cause.code === "process_exited") return readProcessExitCause(cause, record);
   readCleanupPromptEvidence(cause, record);
   const storage = readStorageCauseValue(record.storage);
   if (storage) cause.storage = storage;
@@ -211,6 +212,25 @@ function readPluginPreparationCause(
   const runtimeVersion = safeAgentErrorRuntimeVersion(record.runtime_version);
   if (runtimeVersion) cause.runtime_version = runtimeVersion;
   return cause;
+}
+
+function readProcessExitCause(
+  cause: AgentErrorCause,
+  record: Record<string, unknown>,
+): AgentErrorCause {
+  // i18n-exempt: mirrors the safe persisted backend detail; the UI renders localized guidance.
+  cause.detail = "The agent exited before startup completed.";
+  cause.reason =
+    record.reason === "mise_config_untrusted" ? "mise_config_untrusted" : "unclassified";
+  const exitCode = readProcessExitCode(record.exit_code);
+  if (exitCode !== undefined) cause.exit_code = exitCode;
+  return cause;
+}
+
+function readProcessExitCode(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value)) return undefined;
+  if (value < 0 || value > 4294967295) return undefined;
+  return value;
 }
 
 function readSelectionCause(

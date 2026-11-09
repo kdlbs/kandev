@@ -30,6 +30,9 @@ type childLogRecordFields struct {
 	Runtime       json.RawMessage `json:"runtime,omitempty"`
 	PollMode      json.RawMessage `json:"poll_mode,omitempty"`
 	ExitCode      json.RawMessage `json:"exit_code,omitempty"`
+	ExitReason    json.RawMessage `json:"process_reason,omitempty"`
+	ExitState     json.RawMessage `json:"exit_disposition,omitempty"`
+	Generation    json.RawMessage `json:"process_generation,omitempty"`
 	RetainedBytes json.RawMessage `json:"retained_bytes,omitempty"`
 	LimitBytes    json.RawMessage `json:"limit_bytes,omitempty"`
 }
@@ -52,6 +55,9 @@ var childLogRecordFieldTargets = map[string]func(*childLogRecordFields) *json.Ra
 	"runtime":              func(f *childLogRecordFields) *json.RawMessage { return &f.Runtime },
 	"poll_mode":            func(f *childLogRecordFields) *json.RawMessage { return &f.PollMode },
 	"exit_code":            func(f *childLogRecordFields) *json.RawMessage { return &f.ExitCode },
+	"process_reason":       func(f *childLogRecordFields) *json.RawMessage { return &f.ExitReason },
+	"exit_disposition":     func(f *childLogRecordFields) *json.RawMessage { return &f.ExitState },
+	"process_generation":   func(f *childLogRecordFields) *json.RawMessage { return &f.Generation },
 	"retained_bytes":       func(f *childLogRecordFields) *json.RawMessage { return &f.RetainedBytes },
 	"limit_bytes":          func(f *childLogRecordFields) *json.RawMessage { return &f.LimitBytes },
 }
@@ -148,6 +154,12 @@ var childLogOperations = stringSet(
 
 var childLogTriggers = stringSet("manual_refresh", "user_select", "turn_complete", "startup_grace", "poll")
 
+var childLogProcessReasons = stringSet("mise_config_untrusted", "unclassified")
+
+var childLogExitDispositions = stringSet(
+	"ordinary_exit", "intentional_stop", "signal_exit", "unknown",
+)
+
 var childLogContextValidators = map[string]func(json.RawMessage) bool{
 	childLogComponentField: childLogAllowedString(childLogComponents, 64),
 	"task_id":              childLogUUID,
@@ -164,6 +176,9 @@ var childLogContextValidators = map[string]func(json.RawMessage) bool{
 	"runtime":              childLogAllowedString(stringSet("desktop", "server"), 16),
 	"poll_mode":            childLogAllowedString(stringSet("fast", "slow", "paused"), 16),
 	"exit_code":            childLogInteger(-1, 4294967295),
+	"process_reason":       childLogAllowedString(childLogProcessReasons, 40),
+	"exit_disposition":     childLogAllowedString(childLogExitDispositions, 32),
+	"process_generation":   childLogInteger(1, math.MaxInt64),
 	"retained_bytes":       childLogInteger(0, math.MaxInt64),
 	"limit_bytes":          childLogInteger(0, math.MaxInt64),
 }

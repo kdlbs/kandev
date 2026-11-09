@@ -54,6 +54,35 @@ The connection test's **Docker daemon** step reports which of three different pr
 
 Choose Remote Docker over a single-node Kubernetes cluster when you want a container per task on one machine and do not otherwise run Kubernetes. Kubernetes covers the same ground and adds resource limits, admission control, and scheduling, but it asks for a storage provisioner, a namespace, RBAC, and a worker image built and pushed to a registry by digest. Remote Docker keeps the Docker executor's Dockerfile-and-build loop, with no registry in the basic case.
 
+## Docker log and temporary storage limits
+
+New containers created by the Docker client use rotating `json-file` logs with
+`max-size=100m` and `max-file=3`. This applies to normal and interactive creation,
+including a remote Docker daemon. Existing containers keep their storage
+configuration when Kandev reconnects to them.
+
+This per-container choice overrides the daemon's default logging driver and
+rotation limits. Collectors that require another driver do not receive these
+containers' output through that driver.
+
+The default `/tmp` is a 2 GiB executable tmpfs with mode 1777, `nosuid`, and
+`nodev`. Agents and package managers can run temporary launchers from this
+directory. An explicit task mount at `/tmp`, including an equivalent path such
+as `/tmp/`, keeps its own storage policy. The tmpfs hides files that the image
+supplies under `/tmp`.
+
+Tmpfs uses host memory and swap. Its use counts against the container's memory
+limit. The 2 GiB capacity does not increase that limit, so temporary writes can
+cause an out-of-memory termination before the tmpfs is full.
+
+Tmpfs contents disappear when the container stops, including before a restart
+of that same container. A session stop that leaves the container running does
+not clear its tmpfs. Write required outputs and evidence to persistent task
+storage.
+
+These limits do not bound the writable layer, workspaces, other bind mounts, or
+evidence archives; those still need their own retention and cleanup.
+
 ## Plugin-managed remote executors
 
 Plugin remote providers appear in **Settings > Executors** when an installed, active plugin declares a compatible `executor_providers` contract. No separate feature flag or restart is required. Disabled, incompatible, or unavailable providers remain ineligible for new launches, and built-in executors continue to work when no provider plugin is installed.
@@ -627,6 +656,42 @@ The runtime preflights the selected agent command and reports an installation hi
 
 Stop attempts to kill the session's remote `agentctl` and remove only the remote session-runtime directory, then closes forwarding and SSH. Terminal archive/delete stops run the profile cleanup script first; cleanup is best-effort, so a failure does not block controller teardown. Plain Stop skips cleanup and preserves the task workspace for resume. The task directory always remains and no background sweeper currently removes it. The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` also remain for later sessions. Periodically audit the remote process list, session directories, and `<workdir-root>/tasks/` after confirming no session needs the data. An explicit resume re-dials SSH and reuses a live recorded PID when possible; otherwise Kandev starts a fresh remote controller and re-runs preparation.
 
+#### Controller recovery after session-directory loss
+
+A managed Linux SSH launch records the controller's own process identity during
+its authenticated handshake. Kandev stores that receipt with the session's
+runtime record, outside the remote session directory, so it survives a backend
+restart and the loss of that directory. Each launch attempt receives a new
+generation, and a replacement controller never inherits a predecessor's
+receipt. macOS launches keep the guarded pidfile stop because the race-safe
+pidfd operation is Linux-only.
+
+When a stop on a Linux host finds the recorded controller still alive but its
+session directory gone, Kandev runs a private `agentctl ssh-reconcile` helper on
+the host before any signal. The helper opens a Linux pidfd, verifies the recorded process birth
+identity, launch generation, user, command, and workdir, confirms the directory
+is still absent, and sends SIGTERM only through that handle. It never removes a
+path, escalates to SIGKILL, or falls back to a numeric PID signal. A replaced
+process, replaced directory, or unreadable evidence leaves the recorded runtime
+and its cleanup inventory intact.
+
+Outcomes of that recovery:
+
+- **Stopped, or already absent:** cleanup settles the recorded owner.
+- **Legacy launch with no recorded receipt, or a receipt that conflicts with
+  the runtime record:** unresolved. Start the session again to record proof, or
+  inspect the original host and stop that exact process under your own change
+  control, then retry the same cleanup.
+- **Unsupported pidfd kernel, permission failure, or unreadable process
+  evidence:** unresolved. Fix host policy or SSH permissions and retry the same
+  cleanup.
+- **Controller still alive after SIGTERM:** unresolved. Kandev does not
+  force-kill it. Confirm the process on the host before any manual action.
+
+Reconciliation never publishes a bare-PID kill instruction. A directory that
+reappears during recovery is preserved untouched, and one completed target
+never erases another target that is still unresolved.
+
 If a settled session’s remote controller dies while its SSH connection still answers, idle reclaim can release its runtime reservation after confirming the recorded process is absent. An unreachable SSH connection or inconclusive process check leaves the reservation unchanged; idle reclaim does not reconnect to establish absence.
 
 Backend shutdown closes forwarding and SSH without killing remote processes or running cleanup.
@@ -684,6 +749,7 @@ Before deleting any environment, push or otherwise preserve uncommitted work. Pr
 - **Sprite cannot resume:** check provider token, quota, sandbox existence, expiration, and network policy; a missing sandbox triggers fresh provisioning.
 - **SSH handshake fails:** test ssh-agent/key access, host fingerprint, bastion trust, SFTP, TCP forwarding, and remote OS/architecture.
 - **SSH agent is missing:** run the reported `command -v` check through the configured login shell and install the agent on that host.
+- **SSH cleanup is unresolved after the session directory disappeared:** inspect the recorded controller on the original host. Linux launches that recorded launch proof are reconciled automatically. Legacy controllers, unsupported pidfd kernels, permission failures, and controllers still alive after SIGTERM stay unresolved and keep the cleanup inventory. Do not kill by bare PID; confirm the controller's command, workdir, and launch generation first, then retry the same cleanup.
 - **Disk usage grows:** inspect **Settings > System > Disk usage**, Docker containers, provider sandboxes, host worktrees, and retained SSH task directories before removal.
 
 Related guides: [Docker](docker.md), [Git Operations](git-operations.md), [Operations](operations.md), and [Windows Support](windows-support.md).

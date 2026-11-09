@@ -29,6 +29,7 @@ import (
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/sshlaunch"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -187,6 +188,12 @@ type Config struct {
 	// launch, copied from the managed startup contract. An unmanaged/direct
 	// launch resolves it to false and keeps the legacy launch.
 	OpenCodePluginEnabled bool
+
+	// SSHLaunchBinding is the backend-issued owner and generation for a managed
+	// SSH launch attempt. It is copied from the private startup contract and is
+	// nil for every other launch shape. When set, the control server must
+	// self-capture a launch receipt during the handshake.
+	SSHLaunchBinding *sshlaunch.Binding
 
 	// mu protects BootstrapNonce from concurrent access during handshake.
 	mu sync.Mutex
@@ -391,6 +398,12 @@ type InstanceConfig struct {
 	// McpProfile is the backend-owned typed MCP tool profile.
 	McpProfile *mcpprofile.Context
 
+	// ProjectMCPDelivery is execution-bound evidence that the host materialized
+	// the bound built-in packages into a project configuration file. It is
+	// accepted only through the authenticated configure request and is never
+	// persisted or serialized.
+	ProjectMCPDelivery *agentctltypes.ProjectMCPDelivery `json:"-"`
+
 	// NamespacesMCPToolsByServer enables the per-instance MCP name adapter for
 	// clients that append the injected server name to every tool.
 	NamespacesMCPToolsByServer bool
@@ -524,6 +537,7 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 	agentSurvivalEnabled := false
 	agentBackgroundWorkEnabled := false
 	openCodePluginEnabled := false
+	var sshLaunchBinding *sshlaunch.Binding
 	if startup != nil {
 		idleTimeout = startup.IdleTimeout
 		idleReaperInterval = startup.IdleReaperInterval
@@ -545,6 +559,7 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		agentSurvivalEnabled = startup.AgentSurvivalEnabled
 		agentBackgroundWorkEnabled = startup.AgentBackgroundWorkEnabled
 		openCodePluginEnabled = startup.OpenCodePluginEnabled
+		sshLaunchBinding = startup.SSHLaunch
 	}
 
 	cfg := &Config{
@@ -581,6 +596,7 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		AgentSurvivalEnabled:       agentSurvivalEnabled,
 		AgentBackgroundWorkEnabled: agentBackgroundWorkEnabled,
 		OpenCodePluginEnabled:      openCodePluginEnabled,
+		SSHLaunchBinding:           sshLaunchBinding,
 	}
 
 	// Bootstrap nonce mode: agentctl generates its own token and the backend
