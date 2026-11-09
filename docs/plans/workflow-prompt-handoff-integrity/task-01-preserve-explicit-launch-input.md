@@ -187,6 +187,7 @@ Verification run from the repository root:
 
 ```bash
 (cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^TestLaunchStartCreated_' -count=1)
+(cd apps/backend && go test -trimpath -race ./internal/mcp/handlers -run '^TestHandleCreateTask_InitialPromptUsesRequestedWorkflowStepMode$' -count=1)
 (cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^(TestLaunchSessionRequest_DescriptionOriginIsServerOnly|TestStartCreatedSession_InitialTaskBrief|TestWorkflowAutoStartCreatedNonEmptyPromptPreservesQueuedHandoff|TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt)$' -count=1)
 (cd apps/backend && go test -trimpath -race ./internal/task/handlers -run '^(TestTaskCreateDispatch_MarksDescriptionPrompt|TestTaskCreateDispatch_QuickChatPromptIsNotADescription|TestDispatchTaskSessionMarksExplicitCreationPrompt|TestStartAgentForNewTask_SetsDeferredStart)$' -count=1)
 (cd apps/backend && go test -trimpath ./internal/orchestrator ./internal/task/handlers ./internal/prompts/service ./internal/sysprompt ./internal/task/models -count=1)
@@ -205,13 +206,15 @@ git diff --check
 All commands passed. The focused launch matrix also covers workflow-level
 instructions, plan mode, canvas guidance allowed and absent, saved-prompt
 expansion, a valid attachment identity, a matching pending initial-submission
-receipt, and a forced pre-provider CAS failure with no native dispatch. The
-desktop E2E project ran both replacing and placeholder cases; the mobile project
-ran the reload case. The trace required one native `session_new`, one prompt with
-matching session/process/connection identity, and exact equality between that
-prompt and the stored structured raw prompt. The public pages were updated in
-`docs/public/websocket-api.md`, `docs/public/sessions-and-review.md`, and
-`docs/public/workflow-tips.md`.
+receipt, a forced pre-provider CAS failure with no native dispatch, and the
+recovery marker that keeps the explicit brief during fresh-start recomposition.
+MCP initial creation marks its description prompt. The desktop E2E project ran
+both replacing and placeholder cases; the mobile project ran the reload case.
+The trace required one native `session_new`, one prompt with matching
+session/process/connection identity, and exact equality between that prompt and
+the stored structured raw prompt; reload rechecks kept the count at one. The
+public pages were updated in `docs/public/websocket-api.md`,
+`docs/public/sessions-and-review.md`, and `docs/public/workflow-tips.md`.
 
 Known limits: the mock ACP trace proves local dispatch, not real-provider
 obedience, remote executors, or PostgreSQL behavior. No PostgreSQL variant was

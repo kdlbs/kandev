@@ -202,11 +202,19 @@ Origin is never guessed from stored text.
 
 The initial-submission callbacks still compare the original raw content and
 attachments before provider admission. This repair neither creates new recovery
-receipts nor replays accepted or uncertain submissions. Task-creation receipt
-recovery keeps the replacement semantics in the
+receipts nor replays accepted or uncertain submissions. When an explicit launch
+matches a pending receipt, a server-only session marker records that origin so
+fresh-start recovery composes with the same preserving rule. Task-description
+receipts do not carry the marker and keep replacement semantics. Task-creation
+receipt recovery keeps the replacement semantics in the
 [initial recovery design](prompt-attachments.md#workflow-context-during-initial-recovery).
 Test matching pending receipts and rejection/error callbacks without converting
 raw receipt data into composed prompt authority.
+
+Legacy `start_created` payloads created before this behavior was introduced
+have no origin marker. They retain the old false default and may replace an
+explicit brief on replay; the backend does not infer provenance from stored
+text. The public launch reference records that upgrade exception.
 
 Use the existing server-owned saved-prompt and canvas capability channels.
 Preserve a previously prepared expansion, including an empty snapshot, without

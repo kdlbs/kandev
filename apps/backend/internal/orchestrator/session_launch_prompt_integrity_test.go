@@ -325,6 +325,14 @@ func TestLaunchStartCreated_PendingSubmissionReceiptAdmission(t *testing.T) {
 				require.Error(t, startErr)
 				require.Zero(t, nativeDispatches.Load(), "the admission failure must block native dispatch")
 				require.Equal(t, models.InitialPromptSubmissionPending, stored.State)
+				require.Equal(t, true, session.Metadata[models.SessionMetaKeyInitialPromptExplicitLaunch])
+				recovery, recoveryErr := f.svc.prepareInitialRecoveryPrompt(ctx, f.taskID, session, stored)
+				require.NoError(t, recoveryErr)
+				require.NotNil(t, recovery)
+				require.NotNil(t, recovery.receipt)
+				require.Contains(t, recovery.receipt.content, prompt)
+				require.Equal(t, 1, strings.Count(recovery.receipt.content, prompt))
+				require.Contains(t, recovery.receipt.content, stepPrompt)
 				return
 			}
 			require.NoError(t, startErr)

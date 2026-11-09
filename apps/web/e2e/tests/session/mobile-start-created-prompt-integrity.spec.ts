@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import {
   assertExplicitLaunchACPTrace,
   assertExplicitLaunchMessage,
@@ -43,6 +44,12 @@ test("mobile: explicit launch brief remains reachable once after reload", async 
     await testPage.reload();
     await session.waitForLoad();
     await expectExplicitLaunchVisible(session, BRIEF);
+    await dwell(
+      1000,
+      "negative-assertion",
+      "reload must not dispatch the native launch prompt again",
+    );
+    assertExplicitLaunchACPTrace(fixture, message, BRIEF, REPLACING_STEP);
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
     ).toBe(true);

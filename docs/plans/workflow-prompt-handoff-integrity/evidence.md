@@ -283,9 +283,12 @@ New tests:
   deferred round trip and replay consumer. It also covers one real
   `LaunchSession` with a replacing template plus workflow-level instructions,
   plan mode, canvas guidance allowed and absent, saved-prompt expansion, and a
-  valid attachment identity; and a matching pending initial-submission receipt
+  valid attachment identity; a matching pending initial-submission receipt
   that transitions after provider admission plus a forced CAS failure that
-  blocks native dispatch.
+  blocks native dispatch and proves recovery keeps the explicit brief; and a
+  server-only explicit-launch recovery marker.
+- `apps/backend/internal/mcp/handlers/create_task_initial_prompt_workflow_test.go`:
+  MCP initial task creation marks its description prompt as description-origin.
 - `apps/backend/internal/task/handlers/task_create_prompt_origin_test.go`:
   ordinary creation marks the description origin; Quick Chat does not.
 - `apps/web/e2e/helpers/start-created-prompt-integrity.ts` and the two session
@@ -331,13 +334,15 @@ rather than replacing the first-signal rule.
 
 Review follow-up completed on the same base. The E2E helper now waits for exactly
 one stored user message, requires its structured raw prompt, compares that raw
-prompt byte-for-byte with the native ACP prompt, and matches the prompt's
+prompt byte-for-byte with the native ACP prompt, matches the prompt's
 session/process/connection IDs to the `session_new` event before asserting
-content. The Go matrix gained a real `LaunchSession` mixed-context case
-(workflow instructions, plan mode, canvas allowed/absent, saved-prompt
-expansion, attachment identity) and a pending-submission receipt case with both
-admission success and a forced pre-provider CAS failure that proves native
-dispatch stays at zero. Focused commands passed:
+content, and rechecks the trace after reload. The Go matrix gained a real
+`LaunchSession` mixed-context case (workflow instructions, plan mode, canvas
+allowed/absent, saved-prompt expansion, attachment identity), a pending
+submission receipt case with both admission success and a forced pre-provider
+CAS failure that proves native dispatch stays at zero, and a recovery marker
+that keeps the explicit brief during fresh-start recomposition. MCP initial
+creation also marks its task-description prompt. Focused commands passed:
 
 ```text
 go test -race ./internal/orchestrator -run '^TestLaunchStartCreated_'

@@ -1072,6 +1072,16 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 		}
 		options.beforeProviderAdmission = beforeAdmission
 		options.onInitialPromptAccepted = accepted
+		if options.preserveDirectPrompt && beforeAdmission != nil {
+			// A matching pending receipt can outlive a failed launch and drive
+			// fresh-start recovery. Persist the explicit origin next to the
+			// receipt so recovery uses the same preserving composer.
+			if err := s.repo.SetSessionMetadataKey(
+				ctx, req.SessionID, models.SessionMetaKeyInitialPromptExplicitLaunch, true,
+			); err != nil {
+				return nil, fmt.Errorf("record explicit initial prompt origin: %w", err)
+			}
+		}
 	}
 	if req.NoInitialPrompt {
 		options.skipTaskDescriptionFallback = true

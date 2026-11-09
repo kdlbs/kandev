@@ -1,4 +1,5 @@
 import { test } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import {
   assertExplicitLaunchACPTrace,
   assertExplicitLaunchMessage,
@@ -43,6 +44,12 @@ test("desktop: explicit launch brief survives a replacing step template", async 
     await testPage.reload();
     await session.waitForLoad();
     await expectExplicitLaunchVisible(session, BRIEF);
+    await dwell(
+      1000,
+      "negative-assertion",
+      "reload must not dispatch the native launch prompt again",
+    );
+    assertExplicitLaunchACPTrace(fixture, message, BRIEF, REPLACING_STEP);
   } finally {
     await fixture.dispose();
   }

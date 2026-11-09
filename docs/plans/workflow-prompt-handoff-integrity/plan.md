@@ -1,6 +1,6 @@
 ---
 created: 2026-11-08
-status: implemented
+status: partial
 requirements:
   - REQ-TASKS-INITIAL-TASK-BRIEF-001
   - REQ-TASKS-SAVED-PROMPT-DELIVERY-001
@@ -59,7 +59,6 @@ heads, exact commands, probe setup limits, and observations.
 
 The probe did not launch a provider or exercise a live operator case.
 Task 01 added the retained-plan, API raw-content and native ACP evidence.
-There is no implemented after-result yet.
 
 ### Assumption check
 
@@ -183,14 +182,21 @@ Do not extract trusted provenance from prompt-looking strings.
 
 The ceiling payload already contains `preserve_direct_prompt`.
 Test its producer, repository round trip, replay consumer, and Send Now path.
-Old payloads without the flag retain false. no historical inference or backfill.
-Entry-binding failure, changed recipient, cancellation and supersession remain
-admission failures, with no prompt sent to a new owner.
+Old payloads without the flag retain false; no historical inference or backfill.
+A legacy queued explicit launch created before this upgrade can therefore still
+be replaced by a destination step template on replay. Rejecting every unflagged
+payload would also break legitimate task-description launches, so operators must
+review pending launches; the public launch reference records this upgrade
+exception. Entry-binding failure, changed recipient, cancellation and
+supersession remain admission failures, with no prompt sent to a new owner.
 
 The initial-submission callback still sees raw content and original attachment
 identities. The prompt-origin repair must not create or overwrite that receipt.
-Accepted or uncertain submissions retain the existing replay refusal.
-The merged #5198 recovery path keeps its distinct task-creation semantics.
+When an explicit launch matches a pending receipt, persist a server-only
+explicit-launch marker and use it during fresh-start recovery composition.
+Task-description receipts do not carry the marker and keep replacement semantics.
+Accepted or uncertain submissions retain the existing replay refusal. The merged
+#5198 recovery path keeps its distinct task-creation semantics.
 
 Inspect `postLaunchCreated`, the message `ToAPI` projection, the executor
 launch request and native mock ACP trace. The manager boundary is necessary
@@ -303,7 +309,7 @@ Coordinate the final workflow wording with open #3420.
 ## Work orders
 
 - [x] [Task 01: Preserve explicit prepared-session launch input](task-01-preserve-explicit-launch-input.md) (`done`)
-- [x] [Task 02: Reproduce same-entry correction and handoff ordering](task-02-reproduce-correction-handoff.md) (`done`, bounded investigation; no patch)
+- [ ] [Task 02: Reproduce same-entry correction and handoff ordering](task-02-reproduce-correction-handoff.md) (`in_progress`, partial bounded investigation; no patch)
 
 Both have no blocking dependency on each other. Default order is 01, then 02.
 No concurrent agents or new persistent tasks/sessions are authorized.
@@ -340,14 +346,17 @@ Implementation results:
   Desktop and phone E2E compare the complete stored raw prompt with the native
   ACP prompt and correlate its native identity. Public launch, session, and
   workflow guidance was updated.
-- Task 02: bounded investigation only. Existing duplicate, stale-entry,
+- Task 02: partial bounded investigation only. Existing duplicate, stale-entry,
   concurrent-transition, and later-reset controls pass. No failing invariant was
-  found, so no production change or issue assignment was made.
+  found, but the three-turn route matrix and both deterministic race barriers
+  remain unrun, so the work order remains in progress and no production change
+  or issue assignment was made.
 
 Verification passed:
 
 ```bash
 (cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^TestLaunchStartCreated_' -count=1)
+(cd apps/backend && go test -trimpath -race ./internal/mcp/handlers -run '^TestHandleCreateTask_InitialPromptUsesRequestedWorkflowStepMode$' -count=1)
 (cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^(TestLaunchSessionRequest_DescriptionOriginIsServerOnly|TestStartCreatedSession_InitialTaskBrief|TestWorkflowAutoStartCreatedNonEmptyPromptPreservesQueuedHandoff|TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt)$' -count=1)
 (cd apps/backend && go test -trimpath -race ./internal/task/handlers -run '^(TestTaskCreateDispatch_(MarksDescriptionPrompt|QuickChatPromptIsNotADescription)|TestDispatchTaskSessionMarksExplicitCreationPrompt|TestStartAgentForNewTask_SetsDeferredStart)$' -count=1)
 (cd apps/backend && go test -trimpath ./internal/orchestrator ./internal/task/handlers ./internal/prompts/service ./internal/sysprompt ./internal/task/models -count=1)

@@ -1,7 +1,7 @@
 ---
 id: "02-reproduce-correction-handoff"
 title: "Reproduce same-entry correction and handoff ordering"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -147,7 +147,9 @@ evidence gaps, not permission to read a live deployment.
 
 ## Results
 
-Completed on 2026-11-08 as a bounded investigation, not a patch.
+Started on 2026-11-08 as a bounded investigation, not a patch. The planned
+three-turn route matrix and both deterministic race barriers remain unrun, so
+this work order is incomplete rather than done.
 
 The existing controls ran with the race detector:
 
