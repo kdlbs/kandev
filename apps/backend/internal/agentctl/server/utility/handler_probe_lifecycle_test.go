@@ -25,7 +25,7 @@ func (*drainingProbeExecutor) Execute(context.Context, *PromptRequest) (*PromptR
 
 func TestManagedRuntimeProbeTeardownCancelsAndDrainsBeforeCleanup(t *testing.T) {
 	e := &drainingProbeExecutor{make(chan struct{}), make(chan struct{}), make(chan struct{})}
-	h := NewHandler("", zap.NewNop())
+	h := NewHandler("", nil, zap.NewNop())
 	h.acpExecutor = e
 	router := newProbeDiagnosticRouter(t, h)
 	ctx, cancel := context.WithCancel(context.Background())

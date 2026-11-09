@@ -30,9 +30,11 @@ type Handler struct {
 	probes               probeLifecycle
 }
 
-// NewHandler creates a new inference handler.
-func NewHandler(_ string, logger *zap.Logger) *Handler {
-	preparation := newManagedRuntimePreparationState()
+// NewHandler creates a new inference handler. homeDir enables the
+// executor-local reusable repair store; an empty or unsafe root keeps the
+// existing private preparation path.
+func NewHandler(homeDir string, excludedRoots []string, logger *zap.Logger) *Handler {
+	preparation := newManagedRuntimePreparationStateWithHome(homeDir, excludedRoots, logger)
 	return &Handler{
 		acpExecutor:   NewACPInferenceExecutor(logger, preparation),
 		codexExecutor: NewCodexAppServerInferenceExecutor(logger, preparation),
@@ -76,6 +78,10 @@ func (h *Handler) handleProbe(c *gin.Context) {
 	}
 	if req.Preparation != nil && (h.authenticatedControl == nil || !h.authenticatedControl(c)) {
 		c.AbortWithStatusJSON(http.StatusForbidden, ProbeResponse{Success: false, Error: "authenticated control is required for managed runtime preparation"})
+		return
+	}
+	if req.InstallContext != nil && (h.authenticatedControl == nil || !h.authenticatedControl(c) || !req.InstallContext.Valid()) {
+		c.AbortWithStatusJSON(http.StatusForbidden, ProbeResponse{Success: false, Error: "authenticated installer provenance is required for reusable repairs"})
 		return
 	}
 

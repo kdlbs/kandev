@@ -210,6 +210,7 @@ func (m *Manager) ensureCachedWorkspaceExecutionAdmitted(ctx context.Context, ex
 	}
 	info := &WorkspaceInfo{
 		TaskID:            execution.TaskID,
+		OwnerUserID:       m.managedRuntimeWorkspaceOwnerUserID(ctx, nil),
 		SessionID:         execution.SessionID,
 		TaskEnvironmentID: execution.TaskEnvironmentID,
 	}

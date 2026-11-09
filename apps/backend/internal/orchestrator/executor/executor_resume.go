@@ -1666,7 +1666,7 @@ func (e *Executor) requestedResumeExecutorType(
 ) (string, error) {
 	requestSession := *session
 	requestSession.Metadata = cloneMetadata(session.Metadata)
-	req, metadata := newResumeLaunchRequest(task, &requestSession, startAgent, options)
+	req, metadata := newResumeLaunchRequest(task, &requestSession, startAgent, options, e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID))
 	running, err := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
 	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
 		return "", fmt.Errorf("load runtime inventory for session %q: %w", session.ID, err)
@@ -2092,7 +2092,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 	beforeCredentialLease func() error,
 	options ResumeOptions,
 ) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
-	req, metadata := newResumeLaunchRequest(task, session, startAgent, options)
+	req, metadata := newResumeLaunchRequest(task, session, startAgent, options, e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID))
 	if err := e.applyDeliveryIdentity(ctx, req, session); err != nil {
 		return nil, "", executorConfig{}, nil, nil, err
 	}
@@ -2200,7 +2200,12 @@ func newResumeLaunchRequest(
 	session *models.TaskSession,
 	startAgent bool,
 	options ResumeOptions,
+	ownerUserIDs ...string,
 ) (*LaunchAgentRequest, map[string]interface{}) {
+	ownerUserID := ""
+	if len(ownerUserIDs) > 0 {
+		ownerUserID = ownerUserIDs[0]
+	}
 	executionProfileID := session.ExecutionProfileID
 	if executionProfileID == "" {
 		executionProfileID = session.AgentProfileID
@@ -2209,6 +2214,7 @@ func newResumeLaunchRequest(
 		WorkspaceLayout:              task.InitialWorkspaceLayout,
 		ResumePassthrough:            startAgent && session.IsPassthrough && !options.ForceContextContinuation,
 		TaskID:                       task.ID,
+		OwnerUserID:                  ownerUserID,
 		SessionSettingsPolicy:        options.SettingsPolicy,
 		RequiredNativeConversationID: options.RequiredNativeConversationID,
 		ACPSessionID:                 options.RequiredNativeConversationID,
