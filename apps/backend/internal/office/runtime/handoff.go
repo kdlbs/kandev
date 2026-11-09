@@ -491,10 +491,16 @@ func (a *Actions) validateHandoffRepository(
 		return nil, newHandoffValidationError("repository_id does not exist in target_workspace_id")
 	}
 	resolvedBaseBranch := baseBranch
+	selectionSource := taskmodels.BaseBranchSelectionSourceExplicit
 	if resolvedBaseBranch == "" {
 		resolvedBaseBranch = repo.DefaultBranch
+		selectionSource = taskmodels.BaseBranchSelectionSourceRepositoryDefault
 	}
-	return []service.TaskRepositoryInput{{RepositoryID: repositoryID, BaseBranch: resolvedBaseBranch}}, nil
+	return []service.TaskRepositoryInput{{
+		RepositoryID:              repositoryID,
+		BaseBranch:                resolvedBaseBranch,
+		BaseBranchSelectionSource: selectionSource,
+	}}, nil
 }
 
 // executeHandoff is D3a step 7 (idempotency resolution and the create

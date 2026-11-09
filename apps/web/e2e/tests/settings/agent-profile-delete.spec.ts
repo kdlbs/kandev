@@ -101,13 +101,33 @@ test.describe("Agent profile deletion", () => {
     const confirmDialog = await openInitialDeleteConfirmation(testPage);
 
     // Confirm the initial deletion
+    const conflictResponse = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "DELETE" &&
+        response.url().includes(profile.id) &&
+        response.status() === 409,
+    );
     await confirmDialog.getByTestId("agent-profile-delete-confirm").click();
+    // The 409 body itself must carry the workspace name: the UI label could
+    // otherwise pass through the store fallback with the backend silent.
+    const conflictBody = (await (await conflictResponse).json()) as {
+      active_sessions: Array<{ workspace_name?: string }>;
+    };
+    expect(conflictBody.active_sessions.map((s) => s.workspace_name)).toEqual(["E2E Workspace"]);
 
     // The conflict dialog should appear with active session info
     const conflictDialog = testPage.getByRole("alertdialog");
     await expect(conflictDialog).toBeVisible({ timeout: 10_000 });
     await expect(conflictDialog.getByText("Active Task For Profile")).toBeVisible();
     await expect(conflictDialog.getByText("This profile is currently in use")).toBeVisible();
+
+    // The task is listed under the workspace that contains it.
+    const workspaceGroup = conflictDialog.getByTestId("profile-conflict-workspace-group");
+    await expect(workspaceGroup).toHaveCount(1);
+    await expect(workspaceGroup.getByTestId("profile-conflict-workspace-name")).toHaveText(
+      "E2E Workspace",
+    );
+    await expect(workspaceGroup.getByText("Active Task For Profile")).toBeVisible();
 
     // Cancel the deletion
     await conflictDialog.getByRole("button", { name: "Cancel" }).click();

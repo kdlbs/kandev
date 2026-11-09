@@ -329,16 +329,3 @@ func resolveRescanPath(newPath, currentWorkDir string) (string, bool) {
 	}
 	return "", false
 }
-
-// snapshotSubscribers returns a copy of the current workspace-stream
-// subscribers so rescan callers can attach new trackers without holding the
-// subscriber lock during git-status replays.
-func (m *Manager) snapshotSubscribers() []types.WorkspaceStreamSubscriber {
-	m.streamSubscribersMu.Lock()
-	defer m.streamSubscribersMu.Unlock()
-	out := make([]types.WorkspaceStreamSubscriber, 0, len(m.streamSubscribers))
-	for s := range m.streamSubscribers {
-		out = append(out, s)
-	}
-	return out
-}
