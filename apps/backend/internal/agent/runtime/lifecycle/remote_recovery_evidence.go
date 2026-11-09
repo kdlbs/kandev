@@ -24,6 +24,17 @@ func recordedAgentctlInstanceID(runtime agentruntime.Runtime, backendExecutionID
 			return id, nil
 		}
 		return "", errors.New("kubernetes agentctl instance identity is missing")
+	case agentruntime.RuntimeDocker, agentruntime.RuntimeRemoteDocker:
+		// The shared Docker reconnect path can adopt a live agentctl process
+		// whose instance ID predates the backend execution ID. The recorded
+		// adopted identity is authoritative for both Docker runtimes.
+		if id := strings.TrimSpace(getMetadataString(metadata, MetadataKeyRemoteDockerAgentctlInstanceID)); id != "" {
+			return id, nil
+		}
+		if strings.TrimSpace(backendExecutionID) == "" {
+			return "", errors.New("docker agentctl instance identity is missing")
+		}
+		return backendExecutionID, nil
 	default:
 		if strings.TrimSpace(backendExecutionID) == "" {
 			return "", errors.New("backend execution identity is missing")

@@ -333,7 +333,7 @@ func TestUpdateStepMalformedJSON(t *testing.T) {
 // does not offer the user a download of nothing.
 func TestExportSingleWorkflowFailureIs500(t *testing.T) {
 	h := setupStepRouter(t)
-	h.service.SetWorkflowProvider(&fakeWorkflowProvider{})
+	h.setWorkflowProvider(&fakeWorkflowProvider{})
 	rec := doJSON(t, h.router, http.MethodGet, "/api/v1/workflows/nope/export", nil)
 	requireJSONError(t, rec, http.StatusInternalServerError, "Failed to export workflow")
 }

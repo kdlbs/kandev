@@ -18,6 +18,7 @@ func TestClassifySyncErr_NilIsNone(t *testing.T) {
 }
 
 func TestClassifySyncErr_NotConfiguredIsConfig(t *testing.T) {
+	assert.Equal(t, authcircuit.FailureClassConfig, classifySyncErr(github.ErrGitHubHostMismatch))
 	assert.Equal(t, authcircuit.FailureClassConfig, classifySyncErr(errGitHubClientNotConfigured))
 	assert.Equal(t, authcircuit.FailureClassConfig, classifySyncErr(errGitLabClientNotConfigured))
 	// Wrapped sentinels must still classify correctly — fetchFiles/list

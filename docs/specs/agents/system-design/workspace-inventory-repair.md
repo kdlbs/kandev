@@ -28,6 +28,18 @@ resume and additional-session launch. Zero rows and non-empty mismatches both
 return `ErrWorkspaceReuseUnsafe`; neither state falls through to materialize a
 new checkout.
 
+A canonical row's `branch_slug` records the branch identity requested when the
+slot was materialized, usually the base branch. A later `checkout_branch` on
+the task repository, such as the branch restored by unarchive, names the
+branch the preserved worktree already holds. Before matching, the guard binds
+such a request to the canonical row whose `worktree_branch` equals the
+requested checkout branch, because Git admits a branch in only one worktree.
+The binding applies only to worktree launches without an exact slot match,
+requires exactly one active holder in the same repository whose adopted
+identity matches that row alone, and refuses a row another requested slot
+already matches. The adopted slot then drives worktree reuse; the checkout
+branch is unchanged.
+
 The explicit recovery request names only a task, session, action, and
 idempotency key. The orchestrator authorizes the task/session pair before any
 environment, repository, runtime, or filesystem read. It then derives the

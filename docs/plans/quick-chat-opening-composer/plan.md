@@ -10,6 +10,10 @@ legacy_specs: []
 
 # Implementation plan: Quick Chat opening composer
 
+The [startup acceptance repair](../quick-chat-startup-acceptance/plan.md) extends
+this baseline. Its acceptance criteria, work orders, and local checks are complete.
+The implementation results recorded here remain historical evidence.
+
 ## Overview
 
 Replace the separate Quick Chat setup form with the approved opening composer.

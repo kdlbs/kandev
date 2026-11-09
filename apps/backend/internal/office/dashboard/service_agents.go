@@ -54,13 +54,13 @@ func (s *DashboardService) GetLiveRuns(ctx context.Context, wsID string, limit i
 		taskMap[t.ID] = t
 	}
 
-	// Collect unique agent_execution_ids referenced by sessions and fetch
+	// Collect unique agent_profile_ids referenced by sessions and fetch
 	// only those agent rows (batched), instead of loading every agent in
 	// the workspace.
 	agentIDSet := make(map[string]struct{}, len(sessions))
 	for _, s := range sessions {
-		if s.AgentExecID != "" {
-			agentIDSet[s.AgentExecID] = struct{}{}
+		if s.AgentProfileID != "" {
+			agentIDSet[s.AgentProfileID] = struct{}{}
 		}
 	}
 	agentIDs := make([]string, 0, len(agentIDSet))
@@ -68,7 +68,7 @@ func (s *DashboardService) GetLiveRuns(ctx context.Context, wsID string, limit i
 		agentIDs = append(agentIDs, id)
 	}
 	agentInstances, _ := s.agents.ListAgentInstancesByIDs(ctx, agentIDs)
-	agentByExecID := buildAgentByExecID(agentInstances)
+	agentByProfileID := buildAgentByProfileID(agentInstances)
 
 	now := time.Now().UTC()
 	runs := make([]LiveRun, 0, len(sessions))
@@ -77,9 +77,9 @@ func (s *DashboardService) GetLiveRuns(ctx context.Context, wsID string, limit i
 			break
 		}
 		task := taskMap[sess.TaskID]
-		agent := agentByExecID[sess.AgentExecID]
+		agent := agentByProfileID[sess.AgentProfileID]
 		run := LiveRun{
-			AgentID:        sess.AgentExecID,
+			AgentID:        sess.AgentProfileID,
 			AgentName:      agent,
 			TaskID:         sess.TaskID,
 			TaskTitle:      task.Title,
@@ -96,9 +96,9 @@ func (s *DashboardService) GetLiveRuns(ctx context.Context, wsID string, limit i
 	return runs, nil
 }
 
-// buildAgentByExecID builds a map from agent_execution_id to agent name using
-// the AgentInstance.ID as the execution ID key (matching task_sessions.agent_execution_id).
-func buildAgentByExecID(agents []*models.AgentInstance) map[string]string {
+// buildAgentByProfileID maps the persistent Office agent IDs stored in
+// task_sessions.agent_profile_id to their current names.
+func buildAgentByProfileID(agents []*models.AgentInstance) map[string]string {
 	m := make(map[string]string, len(agents))
 	for _, a := range agents {
 		m[a.ID] = a.Name

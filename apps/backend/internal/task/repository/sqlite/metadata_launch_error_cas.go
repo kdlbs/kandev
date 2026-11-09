@@ -298,6 +298,75 @@ func (r *Repository) CommitBootstrapFailureIfCurrentAttempt(
 	)
 }
 
+func (r *Repository) CommitQuickChatStartFailureIfCurrentAttempt(
+	ctx context.Context,
+	taskID, sessionID, quickChatAttemptID, agentAttemptID string,
+	expectedState models.TaskSessionState,
+	errorValue models.LastAgentError,
+) (bool, time.Time, error) {
+	if quickChatAttemptID == "" {
+		return false, time.Time{}, nil
+	}
+	payload, err := json.Marshal(errorValue)
+	if err != nil {
+		return false, time.Time{}, fmt.Errorf("failed to serialize Quick Chat launch failure: %w", err)
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := lockTaskSessionRow(ctx, tx, sessionID); err != nil {
+		return false, time.Time{}, err
+	}
+	now := r.nowUTC()
+	query, args := quickChatStartFailureCommitQuery(
+		r.db.DriverName(), string(payload), errorValue.Message, now,
+		taskID, sessionID, string(expectedState), quickChatAttemptID, agentAttemptID,
+	)
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, time.Time{}, err
+	}
+	return rows > 0, now, nil
+}
+
+func quickChatStartFailureCommitQuery(
+	driver, payload, errorMessage string,
+	now time.Time,
+	taskID, sessionID, expectedState, quickChatAttemptID, agentAttemptID string,
+) (string, []interface{}) {
+	if dialect.IsPostgres(driver) {
+		base := postgresMetadataObject
+		return `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(` + base + `, '{last_agent_error}', ?::jsonb, true)::text,
+				state = ?, error_message = ?, completed_at = ?, updated_at = ?
+			WHERE id = ? AND task_id = ? AND state = ?
+				AND jsonb_extract_path_text(` + base + `, 'quick_chat_start_attempt_id') = ?
+				AND COALESCE(jsonb_extract_path_text(` + base + `, 'agent_start_attempt_id'), '') = ?
+		`, []interface{}{payload, models.TaskSessionStateFailed, errorMessage, now, now,
+				sessionID, taskID, expectedState, quickChatAttemptID, agentAttemptID}
+	}
+	base := sqliteMetadataObject
+	return `
+		UPDATE task_sessions
+		SET metadata = json_set(` + base + `, '$.last_agent_error', json(?)),
+			state = ?, error_message = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND task_id = ? AND state = ?
+			AND json_extract(` + base + `, '$.quick_chat_start_attempt_id') = ?
+			AND COALESCE(json_extract(` + base + `, '$.agent_start_attempt_id'), '') = ?
+	`, []interface{}{payload, models.TaskSessionStateFailed, errorMessage, now, now,
+			sessionID, taskID, expectedState, quickChatAttemptID, agentAttemptID}
+}
+
 func (r *Repository) commitBootstrapFailureIfCurrentExecution(
 	ctx context.Context,
 	taskID, sessionID, agentExecutionID string,

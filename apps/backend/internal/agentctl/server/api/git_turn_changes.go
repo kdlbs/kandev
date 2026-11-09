@@ -100,6 +100,20 @@ func (s *Server) handleGitTurnCheckpointExport(c *gin.Context) {
 		})
 }
 
+func (s *Server) handleGitTurnCheckpointArchive(c *gin.Context) {
+	handleAcceptedTurnCheckpointQuery(s, c, &turnchanges.ArchiveRequest{},
+		func(request *turnchanges.ArchiveRequest) acceptedTurnCheckpointQuery {
+			return acceptedTurnCheckpointQuery{
+				changeSetID: request.ChangeSetID, checkoutID: request.CheckoutID, repo: request.Repo,
+				hashAlgorithm: request.HashAlgorithm, startCommitOID: request.StartCommitOID,
+				startTreeOID: request.StartTreeOID, endCommitOID: request.EndCommitOID, endTreeOID: request.EndTreeOID,
+			}
+		},
+		func(operator *process.GitOperator, request *turnchanges.ArchiveRequest) (any, error) {
+			return operator.ArchiveTurnCheckpoint(c.Request.Context(), *request)
+		})
+}
+
 type acceptedTurnCheckpointQuery struct {
 	changeSetID, checkoutID, repo string
 	hashAlgorithm                 string

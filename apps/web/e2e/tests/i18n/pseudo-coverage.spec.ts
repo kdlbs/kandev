@@ -2,6 +2,9 @@ import { type Page } from "@playwright/test";
 
 import pseudoSettings from "../../../src/locales/pseudo/settings.json";
 import { test, expect } from "../../fixtures/test-base";
+import { installRuntimeUpdateFixture } from "../settings/agent-runtime-update-helpers";
+
+test.use({ trace: "retain-on-failure" });
 
 /**
  * Pseudo-locale coverage oracle.
@@ -497,19 +500,50 @@ const ALLOWED = [
  */
 const ACCENTED = /[À-ɏ]/;
 
-async function activatePseudo(page: Page, url: string) {
-  await page.goto(url);
-  await page.evaluate(() => {
-    document.cookie = "kandev_locale=pseudo; path=/; max-age=31536000; SameSite=Lax";
-  });
-  await page.reload();
+async function activatePseudo(page: Page, url: string, frontendUrl: string) {
+  // The shell reads this cookie for both the HTML language and boot locale.
+  await page
+    .context()
+    .addCookies([{ name: "kandev_locale", value: "pseudo", url: frontendUrl, sameSite: "Lax" }]);
+  const assignedCookie = (await page.context().cookies(frontendUrl)).find(
+    (cookie) => cookie.name === "kandev_locale",
+  )?.value;
+  const response = await page.goto(new URL(url, frontendUrl).href);
+  if (!response) throw new Error("Pseudo-locale navigation returned no response");
+  expect(response.ok()).toBe(true);
+  const initialHeaders = await response.request().allHeaders();
+  expect(initialHeaders.cookie ?? "").toMatch(/(?:^|;\s*)kandev_locale=pseudo(?:;|$)/);
   // `<html lang>` proves the SHELL is on the pseudo locale and nothing more: the
   // Go shell writes it from the cookie, so it is already correct in the HTML the
   // browser parses, before any script has run. Every stronger fact — the route
   // rendered, and the catalog reached its copy — is `waitForScreen`'s job, and
   // it is per-screen precisely because anything generic enough to assert here is
   // something the app shell alone satisfies.
-  await expect(page.locator("html")).toHaveAttribute("lang", "pseudo", { timeout: 15_000 });
+  try {
+    await expect(page.locator("html")).toHaveAttribute("lang", "pseudo", { timeout: 15_000 });
+  } catch (error) {
+    const html = response ? await response.text().catch(() => null) : null;
+    const actualLanguage = await page
+      .locator("html")
+      .getAttribute("lang")
+      .catch(() => null);
+    await test
+      .info()
+      .attach("pseudo-locale-navigation", {
+        body: JSON.stringify({
+          requestedUrl: url,
+          currentUrl: page.url(),
+          assignedCookie,
+          navigationUrl: response?.url(),
+          navigationStatus: response?.status(),
+          serverLanguage: html?.match(/<html\b[^>]*\blang=["']([^"']+)["']/i)?.[1] ?? null,
+          actualLanguage,
+        }),
+        contentType: "application/json",
+      })
+      .catch(() => undefined);
+    throw error;
+  }
 }
 
 /**
@@ -843,16 +877,49 @@ async function findUnlocalizedCopy(
 }
 
 test.describe("i18n pseudo-locale coverage", () => {
+  test("localizes a Kandev update notification received from the backend", async ({
+    testPage,
+    backend,
+  }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage);
+    const screen = SCREENS.find((item) => item.url === "/settings/preferences/appearance");
+    if (!screen) throw new Error("The appearance screen is missing");
+    // prettier-ignore
+    await activatePseudo(testPage, new URL(screen.url, backend.frontendUrl).href, backend.frontendUrl);
+    await waitForScreen(testPage, screen);
+    await runtime.emit("system.update_available", {
+      version: "v9.8.7",
+      occurrence_id: "pseudo-update-v9.8.7",
+      title: "Kandev update available",
+      body: "Kandev v9.8.7 is available. Open Settings > System > Updates to review it.",
+    });
+    await runtime.emit("system.update_available", {
+      version: "v1.2.3",
+      occurrence_id: "pseudo-update-v1.2.3",
+      title: "Kandev update available",
+      body: "Kandev v1.2.3 is available. Open Settings > System > Updates to review it.",
+    });
+    await expect(testPage.getByTestId("toast-message").filter({ hasText: "v9.8.7" })).toBeVisible();
+    await expect(testPage.getByTestId("toast-message").filter({ hasText: "v1.2.3" })).toBeVisible();
+    const toast = testPage.getByTestId("toast-message").filter({ hasText: /\bv1\.2\.3\b/ });
+    await expect(toast).toHaveCount(1);
+    await expect(toast).toContainText("Ķàńďēv ũƥďàţē àvàĩĺàƀĺē");
+    await expect(toast).toContainText(
+      "Ķàńďēv v1.2.3 ĩś àvàĩĺàƀĺē. Ōƥēń Śēţţĩńĝś > Śŷśţēḿ > Ũƥďàţēś ţō ŕēvĩēŵ ĩţ.",
+    );
+  });
+
   for (const name of ["Untranslated action", "elete"]) {
     test(`distinguishes stored secret name ${name} from untranslated action labels`, async ({
       testPage,
       apiClient,
+      backend,
     }) => {
       const screen = SCREENS.find((item) => item.url === "/settings/secrets");
       if (!screen) throw new Error("The secrets screen is missing");
       const secret = await apiClient.createSecret(name, "synthetic-pseudo-test-value");
       try {
-        await activatePseudo(testPage, screen.url);
+        await activatePseudo(testPage, screen.url, backend.frontendUrl);
         await waitForScreen(testPage, screen);
         await waitForTransientLoadingToFinish(testPage);
         const row = testPage.getByTestId(`secret-row-${secret.id}`);
@@ -893,8 +960,8 @@ test.describe("i18n pseudo-locale coverage", () => {
   }
 
   for (const screen of SCREENS) {
-    test(`no un-externalized copy on ${screen.name}`, async ({ testPage, apiClient }) => {
-      await activatePseudo(testPage, screen.url);
+    test(`no un-externalized copy on ${screen.name}`, async ({ testPage, apiClient, backend }) => {
+      await activatePseudo(testPage, screen.url, backend.frontendUrl);
       await waitForScreen(testPage, screen);
       await waitForTransientLoadingToFinish(testPage);
 
@@ -950,11 +1017,11 @@ test.describe("i18n pseudo-locale coverage", () => {
    * terminal and sprites legitimately render no fully-accented attribute at all,
    * so it fired on three screens that were fine.
    */
-  test("the attribute pass recognizes migrated attribute copy", async ({ testPage }) => {
+  test("the attribute pass recognizes migrated attribute copy", async ({ testPage, backend }) => {
     const appearance = SCREENS.find((screen) => screen.url === "/settings/preferences/appearance");
     if (!appearance) throw new Error("the appearance screen is no longer in SCREENS");
 
-    await activatePseudo(testPage, appearance.url);
+    await activatePseudo(testPage, appearance.url, backend.frontendUrl);
     await waitForScreen(testPage, appearance);
     await waitForTransientLoadingToFinish(testPage);
 

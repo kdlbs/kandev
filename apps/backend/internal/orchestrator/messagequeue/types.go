@@ -50,6 +50,12 @@ const MetadataCoalesceKey = "coalesce_key"
 // queued message.
 const MetadataEntityReferences = "entity_references"
 
+// MetadataObservedTurnErrorStamp records the task turn-error stamp the client
+// had rendered when it submitted this prompt. It is acknowledgement intent
+// only: dispatch, drain, retry, and queue maintenance never sample a newer
+// stamp in its place.
+const MetadataObservedTurnErrorStamp = "observed_turn_error_stamp"
+
 // MetadataQueueAdmissionIDs carries the client admission IDs that contributed
 // to a queued message. Unlike plan-comment admission metadata, this key does
 // not affect ordinary queue merge eligibility and is retained in the user

@@ -85,7 +85,7 @@ owns wrapping plugin content. Maps to
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps && pnpm --filter @kandev/web test -- --run components/task/task-top-bar-plugin-actions.test.tsx components/task/mobile/session-mobile-top-bar.test.tsx components/plugins/mobile-plugin-nav-section.test.tsx components/navigation/app-nav-sheet.test.tsx lib/plugins/sdk-contract.test.ts)
-(cd apps && pnpm --filter @kandev/plugin-sdk typecheck)
+(cd apps && pnpm --filter @kdlbs/plugin-sdk typecheck)
 (cd apps && pnpm --filter @kandev/web exec eslint components/task/task-top-bar-plugin-actions.tsx components/task/task-top-bar-plugin-actions.test.tsx components/task/mobile/session-mobile-top-bar.tsx components/task/mobile/session-mobile-top-bar.test.tsx components/plugins/mobile-plugin-nav-section.tsx components/plugins/mobile-plugin-nav-section.test.tsx components/navigation/app-nav-sheet.tsx components/navigation/app-nav-sheet.test.tsx components/navigation/app-nav-sections.tsx lib/plugins/types.ts lib/plugins/sdk-contract.test.ts)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && CAPTURE_PR_ASSETS=true pnpm e2e:run --project mobile-chrome e2e/tests/plugins/mobile-plugin-topbar.spec.ts)

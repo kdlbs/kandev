@@ -58,6 +58,7 @@ func buildPendingInteractionQuery(
 	filter models.PendingInteractionFilter,
 ) (string, []interface{}) {
 	statusExpr := dialect.JSONExtract(driverName, "m.metadata", "status")
+	presentationExpr := dialect.JSONExtract(driverName, "m.metadata", models.PermissionPresentationMetadataKey)
 	pendingIDExpr := dialect.JSONExtract(driverName, "m.metadata", "pending_id")
 	scopedSessions, args := pendingInteractionSessionScope(filter)
 	kindConditions, kindArgs := pendingInteractionKindClauses(filter.Kinds)
@@ -71,6 +72,7 @@ func buildPendingInteractionQuery(
 		pendingIDExpr:               pendingIDExpr,
 		clarificationMessageType:    string(models.MessageTypeClarificationRequest),
 		statusExpr:                  statusExpr,
+		presentationExpr:            presentationExpr,
 		pendingStatus:               string(models.InteractionStatusPending),
 		pendingInteractionColumns:   pendingInteractionColumns,
 		permissionOrder:             pendingActionMessageOrder(driverName, "m"),
@@ -95,6 +97,7 @@ type pendingInteractionQueryParts struct {
 	pendingIDExpr               string
 	clarificationMessageType    string
 	statusExpr                  string
+	presentationExpr            string
 	pendingStatus               string
 	pendingInteractionColumns   string
 	permissionOrder             string
@@ -110,6 +113,7 @@ func renderPendingInteractionQuery(parts pendingInteractionQueryParts) string {
 		"{{pending_id_expr}}", parts.pendingIDExpr,
 		"{{clarification_message_type}}", parts.clarificationMessageType,
 		"{{status_expr}}", parts.statusExpr,
+		"{{presentation_expr}}", parts.presentationExpr,
 		"{{pending_status}}", parts.pendingStatus,
 		"{{pending_interaction_columns}}", parts.pendingInteractionColumns,
 		"{{permission_order}}", parts.permissionOrder,
@@ -166,6 +170,7 @@ const pendingInteractionQueryTemplate = `
 		ranked_permissions AS (
 			SELECT {{pending_interaction_columns}},
 			       COALESCE({{status_expr}}, '') AS permission_status,
+			       COALESCE({{presentation_expr}}, '') AS permission_presentation,
 			       ROW_NUMBER() OVER (
 			         PARTITION BY m.task_session_id
 			         ORDER BY m.created_at DESC, {{permission_order}} DESC
@@ -184,6 +189,7 @@ const pendingInteractionQueryTemplate = `
 		       content, requests_input, type, metadata, created_at, updated_at
 		FROM ranked_permissions
 		WHERE rn = 1 AND permission_status IN ('', '{{pending_status}}')
+		  AND permission_presentation NOT IN ('automatic', 'unavailable')
 	`
 
 // pendingInteractionSessionScope builds the scoped_sessions subquery. Session

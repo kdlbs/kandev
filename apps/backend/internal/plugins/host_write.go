@@ -22,7 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -226,6 +226,7 @@ type exactTaskWriter interface {
 
 type exactTaskCreateWriter interface {
 	CreateTaskExact(ctx context.Context, in ExactTaskCreateInput) (*taskmodels.Task, bool, error)
+	FindTaskByExternalID(ctx context.Context, workspaceID, externalID string) (*taskmodels.Task, bool, error)
 }
 
 type exactTaskMoveWriter interface {
@@ -303,6 +304,9 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 	if err != nil {
 		return nil, err
 	}
+	if err := r.host.validateTaskLaunch(ctx, launch); err != nil {
+		return nil, err
+	}
 	created, err := r.host.taskWriter.CreateTask(ctx, prepared)
 	if err != nil {
 		return nil, err
@@ -334,11 +338,6 @@ func (r taskReader) prepareCreate(ctx context.Context, in pluginsdk.CreateTaskIn
 	launch, err := taskLaunchInput(in.Launch)
 	if err != nil {
 		return TaskCreateInput{}, TaskLaunchInput{}, err
-	}
-	if in.StartAgent {
-		if err := r.host.validateTaskLaunch(ctx, launch); err != nil {
-			return TaskCreateInput{}, TaskLaunchInput{}, err
-		}
 	}
 	workspaceID, workflowID, err := r.host.resolveCreatePlacement(ctx, in)
 	if err != nil {
@@ -608,10 +607,10 @@ func taskLaunchInput(launch *pluginsdk.PluginTaskLaunchOptions) (TaskLaunchInput
 	return TaskLaunchInput{}, invalidArgument("launch.plan_mode must be one of: off, on, replace")
 }
 
-// validateTaskLaunch confirms that auto-start profile references exist before
-// the task is created. This avoids a plugin creating a task that is guaranteed
-// to fail its requested launch, while keeping launch failures after creation
-// best-effort as documented by taskStarter.
+// validateTaskLaunch confirms that launch profile references exist before the
+// task is created, whether the plugin starts the agent now or leaves the task
+// for a workflow step to start later: either way the task keeps the profiles.
+// Launch failures after creation stay best-effort as documented by taskStarter.
 func (h *pluginHost) validateTaskLaunch(ctx context.Context, launch TaskLaunchInput) error {
 	if err := h.validateLaunchAgentProfile(ctx, launch.AgentProfileID); err != nil {
 		return err

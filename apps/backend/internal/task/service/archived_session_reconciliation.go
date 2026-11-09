@@ -58,31 +58,12 @@ func (s *Service) StartSessionReconciliationLoop(ctx context.Context) {
 				s.runOrphanedSessionReconciliation(ctx)
 				s.runActiveSessionSweep(ctx, now)
 				s.runTurnChangeRetentionSweep(ctx, now)
+				s.runTurnChangePreservationRetry(ctx)
+				s.runTurnHistoryDeletionCleanup(ctx)
 			}
 		}
 	}()
 	s.logger.Info("session reconciliation loop started (every 1 minute)")
-}
-
-func (s *Service) runTurnChangeRetentionSweep(ctx context.Context, now time.Time) {
-	if s.turnChanges == nil {
-		return
-	}
-	result, err := s.turnChanges.ApplyTurnChangeRetention(ctx, models.TurnChangeRetentionPolicy{
-		RetainFor:         30 * 24 * time.Hour,
-		TaskBytes:         128 << 20,
-		InstallationBytes: 1 << 30,
-	}, now.UTC())
-	if err != nil {
-		s.logger.Warn("turn-change retention sweep failed", zap.Error(err))
-		return
-	}
-	if result.ExpiredChangeSets > 0 || result.DeletedContents > 0 {
-		s.logger.Info("turn-change retention sweep expired historical content",
-			zap.Int64("change_sets", result.ExpiredChangeSets),
-			zap.Int64("content_objects", result.DeletedContents),
-			zap.Int64("freed_payload_bytes", result.FreedPayloadBytes))
-	}
 }
 
 // StartArchivedSessionReconciliationLoop keeps the pre-stall-sweep entry
@@ -654,4 +635,32 @@ func (s *Service) markTaskInterrupted(ctx context.Context, recovered *models.Tas
 	// without a reload.
 	s.PublishTaskUpdated(ctx, task)
 	return changed, nil
+}
+
+func (s *Service) runTurnChangePreservationRetry(ctx context.Context) {
+	if s.turnChangePreservationRetrier == nil {
+		return
+	}
+	result, err := s.turnChangePreservationRetrier.RetryPending(ctx)
+	if err != nil {
+		s.logger.Warn("turn-change preservation retry failed", zap.Error(err))
+	}
+	if result.Ready > 0 || result.Settled > 0 {
+		s.logger.Info("turn-change preservation retry settled work",
+			zap.Int("retried", result.Retried), zap.Int("ready", result.Ready),
+			zap.Int("settled", result.Settled), zap.Int("waiting", result.Waiting))
+	}
+}
+
+func (s *Service) runTurnHistoryDeletionCleanup(ctx context.Context) {
+	if s.turnHistoryCleanup == nil {
+		return
+	}
+	count, err := s.turnHistoryCleanup.CleanupDeletionIntents(ctx)
+	if err != nil {
+		s.logger.Warn("turn history deletion cleanup failed", zap.Error(err))
+	}
+	if count > 0 {
+		s.logger.Info("turn history deletion cleanup removed owned refs", zap.Int64("refs", count))
+	}
 }

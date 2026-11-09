@@ -31,6 +31,11 @@ system_design:
 
 ## Summary
 
+Extend the common incomplete-cache retry integration when that package lands.
+Do not create another private installer or replacement budget.
+The common integration is supplied by
+[cache-recovery Task 02](../managed-npm-cache-recovery/task-02-automatic-runtime-recovery.md).
+
 Connect verified missing-dependency evidence to the existing lifecycle startup
 owner. Recover a new task or retained conversation once without replay,
 changes to the selected ACP bridge, saved runtime selection, or package

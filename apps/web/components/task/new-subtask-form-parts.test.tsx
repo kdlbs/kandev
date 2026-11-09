@@ -52,6 +52,12 @@ vi.mock("./session-dialog-shared", () => ({
 
 import { PromptZone, SubtaskFormBody } from "./new-subtask-form-parts";
 
+vi.mock("@/components/task-create-dialog-relationship-selectors", () => ({
+  TaskCreateRelatedSelector: ({ value }: { value: string[] }) => (
+    <div data-testid="subtask-related-selector">{value.length ? value.join(",") : "none"}</div>
+  ),
+}));
+
 const GENERATED_RESULT = {
   content: "improved prompt",
   callId: "call-123",
@@ -88,6 +94,9 @@ function createFormProps(workspaceMode: FormProps["workspaceMode"]): FormProps {
     executorProfileOptions: [],
     agentProfileId: "agent-profile",
     workspaceMode,
+    relatedTaskIds: [],
+    onRelatedTaskIdsChange: vi.fn(),
+    parentTaskId: "parent",
     onWorkspaceModeChange: vi.fn(),
     contextValue: "blank",
     onContextChange: vi.fn(),

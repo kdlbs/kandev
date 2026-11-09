@@ -94,7 +94,7 @@ func (s *AppRegistrationImporter) Import(
 	if duplicate, err := s.findDuplicate(ctx, validated); err != nil || duplicate != nil {
 		return nil, duplicateOrPersistenceError(duplicate, err)
 	}
-	verifier, err := s.verifierFactory()(validated.AppID, []byte(validated.PrivateKey))
+	verifier, err := s.verifierFactory(validated.GitHubHost)(validated.AppID, []byte(validated.PrivateKey))
 	if err != nil {
 		return nil, importError(AppRegistrationImportVerificationFailed)
 	}
@@ -142,6 +142,11 @@ func (s *AppRegistrationImporter) validateRequest(
 	if s == nil || s.repository == nil || s.repository.store == nil || s.repository.secrets == nil {
 		return request, DeploymentAppManifestSubmission{}, importError(AppRegistrationImportPersistenceFailed)
 	}
+	host, err := connectionHost(request.GitHubHost)
+	if err != nil {
+		return request, DeploymentAppManifestSubmission{}, importError(AppRegistrationImportInvalidRequest)
+	}
+	request.GitHubHost = host.String()
 	if !validImportScalarFields(request) {
 		return request, DeploymentAppManifestSubmission{}, importError(AppRegistrationImportInvalidRequest)
 	}
@@ -165,7 +170,8 @@ func (s *AppRegistrationImporter) validateRequest(
 }
 
 func validImportScalarFields(request AppRegistrationImportRequest) bool {
-	return request.GitHubHost == defaultGitHubAppHost && request.AppID > 0 &&
+	_, hostErr := connectionHost(request.GitHubHost)
+	return hostErr == nil && request.AppID > 0 &&
 		boundedTrimmed(request.WorkspaceID, maxAppRegistrationWorkspaceID) &&
 		boundedTrimmed(request.DisplayName, maxAppRegistrationDisplayName) &&
 		boundedTrimmed(request.ClientID, maxAppRegistrationClientID) &&
@@ -207,12 +213,16 @@ func (s *AppRegistrationImporter) findDuplicate(
 	return s.repository.store.GetAppRegistrationByGitHubApp(ctx, request.GitHubHost, request.AppID)
 }
 
-func (s *AppRegistrationImporter) verifierFactory() AppRegistrationVerifierFactory {
+func (s *AppRegistrationImporter) verifierFactory(hostname string) AppRegistrationVerifierFactory {
 	if s.verifier != nil {
 		return s.verifier
 	}
 	return func(appID int64, privateKey []byte) (AppRegistrationVerifier, error) {
-		return NewAppClient(appID, privateKey)
+		host, err := connectionHost(hostname)
+		if err != nil {
+			return nil, err
+		}
+		return NewAppClientForHost(appID, privateKey, host)
 	}
 }
 

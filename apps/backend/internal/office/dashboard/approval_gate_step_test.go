@@ -2,14 +2,55 @@ package dashboard_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
+
+func TestUpdateTaskStatus_RequiredRoutineAssignmentsBlockOfficeCompletion(t *testing.T) {
+	deps := newTestDeps(t)
+	ctx := context.Background()
+	taskRepo, err := tasksqlite.NewWithDB(deps.db, deps.db, nil)
+	if err != nil {
+		t.Fatalf("task repo: %v", err)
+	}
+	deps.svc.SetTaskStateWriter(taskRepo)
+	metadata, err := json.Marshal(map[string]int{taskmodels.MetaKeyRequiredSubtaskCount: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deps.db.Exec(`INSERT INTO workflows (id, workspace_id, name, created_at, updated_at) VALUES ('wf-required', 'ws-g', 'Routine', datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("insert workflow: %v", err)
+	}
+	if _, err := deps.db.Exec(`INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at) VALUES ('step-required', 'wf-required', 'Done', 0, datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("insert terminal step: %v", err)
+	}
+	if _, err := deps.db.Exec(`
+		INSERT INTO tasks (id, workspace_id, title, state, priority, identifier, workflow_id, workflow_step_id, metadata, created_at, updated_at)
+		VALUES ('required-office-task', 'ws-g', 'Routine task', 'IN_PROGRESS', 'medium', 'ROT-1', 'wf-required', 'step-required', ?, datetime('now'), datetime('now'))
+	`, string(metadata)); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	err = deps.svc.UpdateTaskStatus(ctx, dashboard.TaskStatusUpdateRequest{
+		TaskID:    "required-office-task",
+		NewStatus: "done",
+	})
+	if err == nil || !strings.Contains(err.Error(), "required subtask assignments") {
+		t.Fatalf("UpdateTaskStatus error = %v, want assignment guard error", err)
+	}
+	if state := readTaskState(t, deps, "required-office-task"); state != "IN_PROGRESS" {
+		t.Fatalf("state = %q, want IN_PROGRESS", state)
+	}
+}
 
 // insertTestTaskAtNonTerminalStep creates a two-step workflow (stepID at
 // position 0, named stepName; a later step at position 1) and a task
@@ -161,6 +202,7 @@ func TestUpdateTaskStatus_TerminalStepLookupError_AbortsWithoutPersistingRedirec
 	wrapped := &erroringTerminalStepRepo{Repository: deps.repo, err: errors.New("database is locked")}
 	log := logger.Default()
 	svc := dashboard.NewDashboardService(wrapped, log, shared.NewActivityLogger(deps.repo, log), deps.agents, &stubCostChecker{})
+	svc.SetTaskStateWriter(directTaskStateWriter{db: deps.db})
 
 	err := svc.UpdateTaskStatus(context.Background(), dashboard.TaskStatusUpdateRequest{
 		TaskID:    "lookup-err",
@@ -176,5 +218,98 @@ func TestUpdateTaskStatus_TerminalStepLookupError_AbortsWithoutPersistingRedirec
 	}
 	if state := readTaskState(t, deps, "lookup-err"); state != "in_progress" {
 		t.Errorf("state = %q, want unchanged in_progress (no redirect and no completion persisted)", state)
+	}
+}
+
+// The automatic-completion tests below pin the #4889 state-plus-step
+// compare-and-set. A stale automatic write must fail closed before any
+// status, activity, task.updated, or reactivity side effect runs.
+
+func TestUpdateTaskStatus_AutomaticCompletionRejectsStateMismatch(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "auto-state", "ws-auto", "Auto state", "IN_PROGRESS", 0)
+	pub := &recordingTaskLifecyclePublisher{}
+	deps.svc.SetTaskLifecyclePublisher(pub)
+	reactivity := &recordingReactivity{result: &dashboard.TaskReactivityResult{}}
+	deps.svc.SetReactivityApplier(reactivity)
+
+	err := deps.svc.UpdateTaskStatus(context.Background(), dashboard.TaskStatusUpdateRequest{
+		TaskID:                 "auto-state",
+		NewStatus:              "done",
+		SuppressStatusActivity: true,
+		ExpectedCurrentState:   "TODO",
+		ExpectedWorkflowStepID: "step-auto-state",
+	})
+	if !errors.Is(err, dashboard.ErrAutomaticCompletionStale) {
+		t.Fatalf("err = %v, want ErrAutomaticCompletionStale", err)
+	}
+	if state := readTaskState(t, deps, "auto-state"); state != "IN_PROGRESS" {
+		t.Fatalf("state = %q, want IN_PROGRESS unchanged", state)
+	}
+	if len(pub.published) != 0 {
+		t.Fatalf("task.updated published = %v, want none for a stale automatic write", pub.published)
+	}
+	if len(reactivity.calls) != 0 {
+		t.Fatalf("reactivity calls = %d, want none for a stale automatic write", len(reactivity.calls))
+	}
+	if hasStatusChangeActivity(t, deps, "auto-state", "ws-auto") {
+		t.Fatal("stale automatic write logged a task_status_changed activity")
+	}
+}
+
+// TestUpdateTaskStatus_AutomaticCompletionRejectsGateStepMismatch pins the
+// approval-step edge: the gate may observe a different step than the caller's
+// snapshot, and the automatic write must fail closed instead of using that
+// newer step.
+func TestUpdateTaskStatus_AutomaticCompletionRejectsGateStepMismatch(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "auto-step", "ws-auto", "Auto step", "IN_PROGRESS", 0)
+	pub := &recordingTaskLifecyclePublisher{}
+	deps.svc.SetTaskLifecyclePublisher(pub)
+	reactivity := &recordingReactivity{result: &dashboard.TaskReactivityResult{}}
+	deps.svc.SetReactivityApplier(reactivity)
+
+	err := deps.svc.UpdateTaskStatus(context.Background(), dashboard.TaskStatusUpdateRequest{
+		TaskID:                 "auto-step",
+		NewStatus:              "done",
+		SuppressStatusActivity: true,
+		ExpectedCurrentState:   "IN_PROGRESS",
+		ExpectedWorkflowStepID: "step-observed-before-the-gate",
+	})
+	if !errors.Is(err, dashboard.ErrAutomaticCompletionStale) {
+		t.Fatalf("err = %v, want ErrAutomaticCompletionStale", err)
+	}
+	if state := readTaskState(t, deps, "auto-step"); state != "IN_PROGRESS" {
+		t.Fatalf("state = %q, want IN_PROGRESS unchanged", state)
+	}
+	if len(pub.published) != 0 {
+		t.Fatalf("task.updated published = %v, want none when the gate step differs", pub.published)
+	}
+	if len(reactivity.calls) != 0 {
+		t.Fatalf("reactivity calls = %d, want none when the gate step differs", len(reactivity.calls))
+	}
+}
+
+func TestUpdateTaskStatus_AutomaticCompletionAppliesWhenStateAndStepMatch(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "auto-match", "ws-auto", "Auto match", "TODO", 0)
+	pub := &recordingTaskLifecyclePublisher{}
+	deps.svc.SetTaskLifecyclePublisher(pub)
+
+	err := deps.svc.UpdateTaskStatus(context.Background(), dashboard.TaskStatusUpdateRequest{
+		TaskID:                 "auto-match",
+		NewStatus:              "done",
+		SuppressStatusActivity: true,
+		ExpectedCurrentState:   "TODO",
+		ExpectedWorkflowStepID: "step-auto-match",
+	})
+	if err != nil {
+		t.Fatalf("UpdateTaskStatus: %v", err)
+	}
+	if state := readTaskState(t, deps, "auto-match"); state != "COMPLETED" {
+		t.Fatalf("state = %q, want COMPLETED", state)
+	}
+	if len(pub.published) != 1 || pub.published[0] != "auto-match" {
+		t.Fatalf("task.updated published = %v, want exactly one for auto-match", pub.published)
 	}
 }

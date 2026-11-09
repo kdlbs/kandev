@@ -153,7 +153,11 @@ func (s *Service) buildDeploymentAppRuntime(
 	if err != nil {
 		return nil, fmt.Errorf("load GitHub App private key: %w", err)
 	}
-	appClient, err := NewAppClient(resolved.Config.AppID, privateKey)
+	host, err := connectionHost(resolved.Registration.GitHubHost)
+	if err != nil {
+		return nil, err
+	}
+	appClient, err := NewAppClientForHost(resolved.Config.AppID, privateKey, host)
 	if err != nil {
 		return nil, fmt.Errorf("initialize GitHub App client: %w", err)
 	}
@@ -171,16 +175,22 @@ func (s *Service) buildDeploymentAppRuntimeWithClient(
 		return nil, errors.New("GitHub App runtime configuration is incomplete")
 	}
 	flows := NewOAuthFlowManager(s.store)
-	oauth := NewGitHubOAuthClient(config.ClientID, config.ClientSecret)
+	host, err := connectionHost(resolved.Registration.GitHubHost)
+	if err != nil {
+		return nil, err
+	}
+	oauth := NewGitHubOAuthClientForHost(config.ClientID, config.ClientSecret, host)
 	personalRepo := s.personalConnections
 	if personalRepo == nil {
 		personalRepo = NewStorePersonalConnectionRepository(s.store, s.connectionSecrets)
 	}
 	connectionStore := &serviceAppConnectionStore{service: s}
 	personal := NewPersonalAuthService(PersonalAuthConfig{
-		RegistrationID: resolved.Registration.ID,
-		ClientID:       config.ClientID,
-		CallbackURL:    baseURL + "/api/v1/github/app/registrations/" + resolved.Registration.ID + "/personal/callback",
+		RegistrationID:          resolved.Registration.ID,
+		GitHubHost:              host.String(),
+		AppCredentialGeneration: resolved.Registration.CredentialGeneration,
+		ClientID:                config.ClientID,
+		CallbackURL:             baseURL + "/api/v1/github/app/registrations/" + resolved.Registration.ID + "/personal/callback",
 	}, flows, personalRepo, oauth)
 	personal.SetWorkspaceMutationLock(s.workspaceConnectionMutationLock)
 	registrationID := resolved.Registration.ID
@@ -192,7 +202,9 @@ func (s *Service) buildDeploymentAppRuntimeWithClient(
 		installationProvider: NewCachedInstallationCredentialProvider(tokens),
 		appInstallationAuth: NewAppInstallationService(AppInstallationConfig{
 			RegistrationID: registrationID, Slug: config.Slug,
-			CallbackURL: baseURL + "/api/v1/github/app/registrations/" + registrationID + "/install/callback",
+			GitHubHost:              host.String(),
+			AppCredentialGeneration: generation,
+			CallbackURL:             baseURL + "/api/v1/github/app/registrations/" + registrationID + "/install/callback",
 		}, flows, connectionStore, appClient, oauth),
 		personalAuth: personal,
 		webhookAuth: NewAppRegistrationWebhookService(

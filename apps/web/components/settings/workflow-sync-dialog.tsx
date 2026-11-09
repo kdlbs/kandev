@@ -26,7 +26,7 @@ import type {
   WorkflowSyncController,
   WorkflowSyncFormState,
 } from "@/hooks/domains/settings/use-workflow-sync";
-import type { WorkflowSyncProvider } from "@/lib/types/workflow-sync";
+import type { WorkflowSyncConfig, WorkflowSyncProvider } from "@/lib/types/workflow-sync";
 import {
   useWorkflowSyncLifetime,
   type WorkflowSyncLifetime,
@@ -215,7 +215,7 @@ function PollFields({ form, update }: FieldsProps) {
   );
 }
 
-function resolvedTarget(t: TFunction, form: WorkflowSyncFormState): string {
+function resolvedTarget(t: TFunction, form: WorkflowSyncFormState | WorkflowSyncConfig): string {
   const directory = form.path || t("workflows:repositoryRoot");
   // `main` is git's default branch name, not copy.
   const branch = form.branch || "main";
@@ -511,9 +511,10 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
 }
 
 function workflowSyncConfirmationTarget(sync: WorkflowSyncController) {
-  const fields = (config: WorkflowSyncFormState | null) =>
+  const fields = (config: WorkflowSyncFormState | WorkflowSyncConfig | null) =>
     config && [
       config.provider,
+      config.github_host ?? "github.com",
       config.repo_owner,
       config.repo_name,
       config.project_path,

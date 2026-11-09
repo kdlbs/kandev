@@ -1,9 +1,11 @@
 import type { FileTreeNode } from "@/lib/types/backend";
 
-/** Sort comparator: directories first, then alphabetical by name. */
+const naturalNameCollator = new Intl.Collator(undefined, { numeric: true });
+
+/** Sort comparator: directories first, then naturally by name. */
 export const compareTreeNodes = (a: FileTreeNode, b: FileTreeNode): number => {
   if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
-  return a.name.localeCompare(b.name);
+  return naturalNameCollator.compare(a.name, b.name) || a.name.localeCompare(b.name);
 };
 
 /**

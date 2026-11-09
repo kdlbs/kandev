@@ -1,3 +1,4 @@
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import type { TaskSessionState } from "@/lib/types/http";
 
 /**
@@ -84,4 +85,18 @@ export function shouldShowComposerAgentStartHint({
     (sessionState === "WAITING_FOR_INPUT" || sessionState === "IDLE") &&
     sessionId !== null
   );
+}
+
+/** Ignore session snapshots read before a newer state landed. */
+export function isStaleSessionStateEvent(
+  existing: { updated_at?: string } | null | undefined,
+  payloadUpdatedAt: string | undefined,
+): boolean {
+  if (!payloadUpdatedAt || !existing?.updated_at) return false;
+  const payloadTime = parseStrictRfc3339Timestamp(payloadUpdatedAt);
+  const existingTime = parseStrictRfc3339Timestamp(existing.updated_at);
+  if (payloadTime === null || existingTime === null) return false;
+  // Strict less-than: equal timestamps are treated as not-stale so identical
+  // events upsert idempotently rather than being silently dropped.
+  return payloadTime < existingTime;
 }

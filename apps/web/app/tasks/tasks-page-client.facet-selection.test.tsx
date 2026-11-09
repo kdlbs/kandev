@@ -131,6 +131,7 @@ function renderPage(
 
 beforeEach(() => {
   listTasksByWorkspace.mockReset().mockResolvedValue({ tasks, total: tasks.length });
+  updateUserSettings.mockReset().mockResolvedValue({});
 });
 
 afterEach(() => {
@@ -273,5 +274,39 @@ describe("TasksPageClient facet selection lifecycle", () => {
     expect(capturedStore.getState().userSettings.tasksListGroup).toBe(key);
     expect(updateUserSettings).not.toHaveBeenCalled();
     expect(replace).not.toHaveBeenCalled();
+  });
+});
+
+describe("TasksPageClient list preference persistence", () => {
+  it("keeps rapid sort and group writes in selection order", async () => {
+    pluginRegistry.forPlugin("plugin").registerTaskListFacet({
+      id: "tags",
+      label: "Tag",
+      getValues: () => [{ value: "same", label: "Same" }],
+    });
+    window.history.replaceState({}, "", "/tasks");
+    renderPage();
+    updateUserSettings.mockClear();
+    const releases: Array<() => void> = [];
+    updateUserSettings.mockImplementation(
+      () =>
+        new Promise<Record<string, never>>((resolve) => {
+          releases.push(() => resolve({}));
+        }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose facet" }));
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Choose facet group" }));
+    await act(async () => {});
+    expect(updateUserSettings).toHaveBeenCalledTimes(1);
+
+    await act(async () => releases[0]?.());
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(2));
+    expect(updateUserSettings).toHaveBeenLastCalledWith(
+      { tasks_list_sort: key, tasks_list_group: key },
+      { cache: "no-store" },
+    );
+    await act(async () => releases[1]?.());
   });
 });

@@ -20,6 +20,7 @@ type SendMessagePayload = {
   planCommentRefs?: TaskPlanCommentRef[];
   previewFeedbackRefs?: TaskPreviewFeedbackRef[];
   requirePrimarySession?: boolean;
+  observedTurnErrorStamp?: string;
 };
 
 type MessageListResponse = { messages?: Message[] };
@@ -119,6 +120,7 @@ function buildMessageRequestPayload(payload: SendMessagePayload, stableMessageId
     planCommentRefs,
     previewFeedbackRefs,
     requirePrimarySession,
+    observedTurnErrorStamp,
   } = payload;
   return {
     task_id: taskId,
@@ -134,6 +136,7 @@ function buildMessageRequestPayload(payload: SendMessagePayload, stableMessageId
     ...(planCommentRefs?.length && { plan_comment_refs: planCommentRefs }),
     ...(previewFeedbackRefs?.length && { preview_feedback_refs: previewFeedbackRefs }),
     ...(requirePrimarySession && { require_primary_session: true }),
+    ...(observedTurnErrorStamp && { observed_turn_error_stamp: observedTurnErrorStamp }),
   };
 }
 

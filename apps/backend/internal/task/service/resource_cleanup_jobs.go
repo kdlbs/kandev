@@ -1573,7 +1573,7 @@ func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.T
 	}
 	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
 	defer cancel()
-	_, err := s.resourceCleanups.CompleteClaimedTaskResourceCleanupJob(
+	updated, err := s.resourceCleanups.CompleteClaimedTaskResourceCleanupJob(
 		transitionCtx, job.ID, job.Attempts, state, cleanupErr.Error(), nextAttempt,
 	)
 	if err != nil {
@@ -1581,6 +1581,16 @@ func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.T
 			zap.String("job_id", job.ID), zap.String("task_id", job.TaskID),
 			zap.Int("attempt", job.Attempts), zap.Error(err), zap.String("cleanup_error", cleanupErr.Error()))
 		return errors.Join(cleanupErr, err)
+	}
+	if !updated {
+		// A stale attempt did not commit this result, so it cannot publish
+		// attributed reconciliation diagnostics for a job another attempt owns.
+		s.logger.Warn("task resource cleanup retry transition was not claimed",
+			zap.String("job_id", job.ID),
+			zap.String("task_id", job.TaskID),
+			zap.Int("attempt", job.Attempts),
+			zap.String("state", string(state)))
+		return cleanupErr
 	}
 	fields := []zap.Field{
 		zap.String("job_id", job.ID),
@@ -1597,6 +1607,7 @@ func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.T
 		)
 	}
 	s.logger.Warn("task resource cleanup job entered retry wait or failed", fields...)
+	s.logCleanupConflictDiagnostics(job, state, nextAttempt, cleanupErr)
 	return cleanupErr
 }
 
@@ -1845,6 +1856,25 @@ func (s *Service) activatePreparedTaskResourceCleanupJob(
 	return nil
 }
 func (s *Service) CancelPreparedTaskResourceCleanup(ctx context.Context, operationID string) error {
+	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
+	defer cancel()
+	return s.cancelPreparedTaskResourceCleanup(transitionCtx, operationID)
+}
+
+// CancelPreparedTaskResourceCleanupWithinDeadline bounds request-owned
+// compensation while preserving the existing cleanup transition cap.
+func (s *Service) CancelPreparedTaskResourceCleanupWithinDeadline(ctx context.Context, operationID string) error {
+	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
+	defer cancel()
+	if deadline, ok := ctx.Deadline(); ok {
+		var cancelDeadline context.CancelFunc
+		transitionCtx, cancelDeadline = context.WithDeadline(transitionCtx, deadline)
+		defer cancelDeadline()
+	}
+	return s.cancelPreparedTaskResourceCleanup(transitionCtx, operationID)
+}
+
+func (s *Service) cancelPreparedTaskResourceCleanup(transitionCtx context.Context, operationID string) error {
 	if s.resourceCleanups == nil {
 		return nil
 	}
@@ -1852,8 +1882,6 @@ func (s *Service) CancelPreparedTaskResourceCleanup(ctx context.Context, operati
 	if !ok {
 		return errors.New("cleanup repository lacks fenced cancellation")
 	}
-	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
-	defer cancel()
 	job, err := s.resourceCleanups.GetTaskResourceCleanupJobByOperationID(transitionCtx, operationID)
 	if err != nil {
 		return err

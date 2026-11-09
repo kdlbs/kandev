@@ -14,10 +14,12 @@ import (
 	agentkubernetes "github.com/kandev/kandev/internal/agent/kubernetes"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/sshlaunch"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	agenttypes "github.com/kandev/kandev/pkg/agent"
@@ -216,6 +218,7 @@ const (
 	MetadataKeyContributionDestinations = "contribution_destinations"
 	MetadataKeyComparisonTargets        = "comparison_targets"
 	MetadataKeyExecutorType             = "executor_type"
+	MetadataKeyTaskEnvironmentID        = "task_environment_id"
 	MetadataKeyIsRemote                 = "is_remote"
 	MetadataKeyRemoteAuthHome           = "remote_auth_target_home"
 	MetadataKeyAgentConfigBundles       = "agent_config_bundles"
@@ -295,6 +298,8 @@ const (
 	MetadataKeyOfficeAgentProfileID = "office_agent_profile_id"
 	// MetadataKeyCausingRunID keeps the Office cause across a lifecycle restart.
 	MetadataKeyCausingRunID = "causing_run_id"
+	// MetadataKeyTerminalCausingRunID preserves the launch identity for terminal events.
+	MetadataKeyTerminalCausingRunID = "terminal_causing_run_id"
 	// MetadataKeyOriginalWorkspacePath preserves the first agent-visible CWD
 	// across runtime and backend restarts so restore policy can distinguish a
 	// relocation from an unchanged workspace.
@@ -320,6 +325,11 @@ const (
 	MetadataKeySSHProxyJump            = "ssh_proxy_jump"
 	MetadataKeySSHIdentitySource       = "ssh_identity_source"
 	MetadataKeySSHIdentityFile         = "ssh_identity_file"
+	// MetadataKeyRemoteDockerAgentctlInstanceID is the actual agentctl
+	// instance ID inside the remote container. It can differ from the backend
+	// execution ID when a live same-session process is adopted, so recovery
+	// must use it for control lookups and ownership checks.
+	MetadataKeyRemoteDockerAgentctlInstanceID = "remote_docker_agentctl_instance_id"
 	// MetadataKeySSHShell names the login shell used when running commands
 	// over SSH on the remote (probe, agentctl launch, install, setup
 	// scripts). Empty / unset falls back to "bash" at runtime — see
@@ -341,6 +351,11 @@ const (
 	// task-supplied metadata can never enable it, because that would let a
 	// task arm a destructive remote operation its profile never approved.
 	MetadataKeySSHReclaimTaskDir = "ssh_reclaim_task_dir"
+	// MetadataKeySSHLaunchReceipt carries the immutable launch proof a managed
+	// SSH controller self-reported during its authenticated handshake. It is
+	// the only durable evidence that survives session-directory loss, so it
+	// must be cleared by every replacement/reset path rather than merged.
+	MetadataKeySSHLaunchReceipt = sshlaunch.MetadataKey
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -348,6 +363,8 @@ const (
 // (e.g., task_description, session_id) are treated as launch-time-only and
 // are NOT copied on resume.
 var persistentMetadataKeys = map[string]bool{
+	MetadataKeyResourceCircuitIdentity:   true,
+	"kandev.builtin_mcp_binding":         true,
 	idleActivityMetadataKey:              true,
 	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
@@ -378,6 +395,10 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHIdentityFile:         true,
 	MetadataKeySSHShell:                true,
 	MetadataKeySSHReclaimTaskDir:       true,
+	MetadataKeySSHLaunchReceipt:        true,
+
+	// Remote Docker adopted agentctl identity.
+	MetadataKeyRemoteDockerAgentctlInstanceID: true,
 
 	// Kubernetes connection and exact resource inventory.
 	MetadataKeyKubernetesAuthMode:               true,
@@ -412,8 +433,9 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyKubernetesInventoryState:         true,
 
 	// Executor type marker
-	MetadataKeyExecutorType: true,
-	MetadataKeyIsRemote:     true,
+	MetadataKeyExecutorType:      true,
+	MetadataKeyTaskEnvironmentID: true,
+	MetadataKeyIsRemote:          true,
 
 	// Executor profile / auth config
 	MetadataKeyCleanupScript:            true,
@@ -441,6 +463,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyContributionDestinations: true,
 	MetadataKeyOfficeAgentProfileID:     true,
 	MetadataKeyCausingRunID:             true,
+	MetadataKeyTerminalCausingRunID:     true,
 	MetadataKeyOriginalWorkspacePath:    true,
 	metadataKeyPassthroughMCPClaims:     true,
 }
@@ -460,6 +483,8 @@ var persistentMetadataPrefixes = []string{
 // the second session would try to attach to the first session's agentctl
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
+	MetadataKeyResourceCircuitIdentity:   true,
+	"kandev.builtin_mcp_binding":         true,
 	idleActivityMetadataKey:              true,
 	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
@@ -472,9 +497,11 @@ var sessionScopedMetadataKeys = map[string]bool{
 	// must not be inherited by a sibling session sharing the environment.
 	MetadataKeyOfficeAgentProfileID:  true,
 	MetadataKeyCausingRunID:          true,
+	MetadataKeyTerminalCausingRunID:  true,
 	MetadataKeyOriginalWorkspacePath: true,
 
 	MetadataKeySSHRemoteSessionDir:              true,
+	MetadataKeySSHLaunchReceipt:                 true,
 	MetadataKeySSHRemoteAgentctlPort:            true,
 	MetadataKeySSHRemoteAgentctlPID:             true,
 	MetadataKeySSHAgentctlInstanceID:            true,
@@ -482,6 +509,8 @@ var sessionScopedMetadataKeys = map[string]bool{
 	MetadataKeySSHRemoteAgentctlURL:             true,
 	MetadataKeySSHRuntimeAPILocalURL:            true,
 	MetadataKeySSHRuntimeAPIRemotePort:          true,
+	MetadataKeyRemoteDockerAgentctlInstanceID:   true,
+	MetadataKeyTaskEnvironmentID:                true,
 	MetadataKeyKubernetesAuthMode:               true,
 	MetadataKeyKubernetesKubeconfigPath:         true,
 	MetadataKeyKubernetesKubeContext:            true,
@@ -681,10 +710,24 @@ type ExecutorCreateRequest struct {
 	DeliveryStreamID          string
 	DeliveryIncarnationID     string
 	DeliveryHarnessGeneration uint64
-	WorkspaceSourceRoots      []string
-	Protocol                  string
-	CodexAppServerEnabled     bool
-	Env                       map[string]string
+	// CopilotNativeSessionEvents is the manager-resolved opt-in after checking
+	// the provider, durable delivery, canonical projector, and authenticated
+	// peer capability. Executors only forward it; they never re-derive it.
+	CopilotNativeSessionEvents bool
+	WorkspaceSourceRoots       []string
+	Protocol                   string
+	CodexAppServerEnabled      bool
+	// Env is the launch request environment. Executors that adopt a retained
+	// process keep the peer's own environment instead (see ExecutorInstance.Env).
+	Env map[string]string
+	// RetainedBuiltinBinding is the exact persisted built-in MCP binding of the
+	// previous execution, captured before fresh-helper launch metadata strips it.
+	// Only a retained-peer adoption may restore it; fresh helpers never inherit it.
+	RetainedBuiltinBinding any
+	// RetainedResourceCircuitIdentity is the exact persisted resource-circuit
+	// identity of the previous execution. Adoption restores only this value and
+	// leaves the resource unknown when it is unavailable.
+	RetainedResourceCircuitIdentity any
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string
@@ -704,7 +747,12 @@ type ExecutorCreateRequest struct {
 	// OpenAI-compatible gateway right after initialize. Resolved from the
 	// launching profile's OpenAI-compatible provider fields.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
-	AgentConfig         agents.Agent // Agent type info needed by runtimes
+	// AuthPolicy is the internal child-process authentication contract for an
+	// eligible host-local provider. Nil preserves existing behavior.
+	AuthPolicy *acpcompat.AuthPolicy
+	// LocalRuntimeEnv pins a validated host-local helper after environment merge.
+	LocalRuntimeEnv map[string]string
+	AgentConfig     agents.Agent // Agent type info needed by runtimes
 	// ManagedRuntimeVersion is the effective exact version resolved for this
 	// launch. Remote executors use it during preflight before agentctl receives
 	// the final command.
@@ -712,8 +760,12 @@ type ExecutorCreateRequest struct {
 	ManagedRuntimeFamily  managedruntime.OpenCodeFamily
 	ManagedRuntimeSource  managedruntime.OpenCodeSource
 	NativeRuntimeVersion  string
+	// OpenCodePluginRuntime is the typed resolved runtime evidence for the
+	// Kandev integration plugin. Nil keeps the integration off.
+	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime
 	PreviousExecutionID   string   // Non-empty when reconnecting to a previous execution
 	McpMode               string   // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
+	PromptSuggestions     bool     // Ask a native-suggestion agent to emit next-prompt suggestions
 	McpProviders          []string // Normalized provider capabilities attached to the task
 	McpProfile            *mcpprofile.Context
 	AuthToken             string // Previously handshaken agentctl token for reconnects
@@ -763,6 +815,11 @@ type ExecutorInstance struct {
 	// Runtime name (e.g., "docker", "standalone") - set by the runtime that created this instance
 	RuntimeName agentruntime.Runtime
 
+	// ReusedWorkspace reports that this instance attached to compute that
+	// already existed instead of allocating it. It is process-local launch
+	// provenance and is never inferred from a container ID alone.
+	ReusedWorkspace bool
+
 	// Agentctl client for communicating with this instance
 	Client                    *agentctl.Client
 	remotePassthroughSnapshot *agentctltypes.PassthroughSnapshot
@@ -802,6 +859,11 @@ type ExecutorInstance struct {
 	// identity, read back rather than pushed (AC-EXECUTORS-SURVIVAL-002.14's
 	// "provider session identity" row). Same recovery-only shape as Env above.
 	ProviderSessionID string
+
+	// CopilotNativeSessionEvents reports the adopted instance's actual vendor
+	// subscription state. Recovery must not infer it from the launch request:
+	// an older peer may have ignored the opt-in.
+	CopilotNativeSessionEvents bool
 
 	// DeliveryStatus is the authenticated recovery descriptor captured from the
 	// surviving instance before lifecycle re-tracking. It is nil for legacy
@@ -858,6 +920,23 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	for k, v := range ri.Metadata {
 		metadata[k] = v
 	}
+	adoptedPeer := ri.RuntimeName == agentruntime.RuntimeStandalone && instanceReusesExistingProcess(ri)
+	if adoptedPeer {
+		// Only the retained execution's persisted resource identity may charge
+		// that process. Leave the resource unknown when the evidence is absent;
+		// the requested execution's current-policy identity must not apply.
+		if value, ok := ri.Metadata[MetadataKeyResourceCircuitIdentity]; ok {
+			metadata[MetadataKeyResourceCircuitIdentity] = value
+		} else {
+			delete(metadata, MetadataKeyResourceCircuitIdentity)
+		}
+	}
+	// The adopted agentctl identity is process/runtime provenance, not a
+	// request preference. A fresh allocation must not inherit a stale adopted
+	// ID from the previous execution's metadata.
+	if _, ok := ri.Metadata[MetadataKeyRemoteDockerAgentctlInstanceID]; !ok {
+		delete(metadata, MetadataKeyRemoteDockerAgentctlInstanceID)
+	}
 	executorType := req.ExecutorType
 	if executorType != "" {
 		metadata[MetadataKeyExecutorType] = executorType
@@ -868,6 +947,20 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	workspacePath := ri.WorkspacePath
 	if workspacePath == "" {
 		workspacePath = req.WorkspacePath
+	}
+	workspaceSourceRoots := req.WorkspaceSourceRoots
+	if adoptedPeer || ri.WorkspaceSourceRoots != nil {
+		// A retained instance's own live allowlist is authoritative for
+		// adoption, including an explicitly empty list; request roots describe
+		// the replacement launch.
+		workspaceSourceRoots = ri.WorkspaceSourceRoots
+	}
+	runtimeEnv := req.Env
+	if adoptedPeer || ri.Env != nil {
+		// An adopted instance keeps the environment it was created with,
+		// including an empty one; a launch request's overrides must not be
+		// pushed into a surviving peer.
+		runtimeEnv = ri.Env
 	}
 	originalWorkspacePath := req.OriginalWorkspacePath
 	if originalWorkspacePath == "" {
@@ -888,12 +981,19 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	if causingRunID == "" && req.Metadata != nil {
 		causingRunID, _ = req.Metadata[MetadataKeyCausingRunID].(string)
 	}
+	terminalCausingRunID := causingRunID
+	if req.Metadata != nil {
+		if persisted, ok := req.Metadata[MetadataKeyTerminalCausingRunID].(string); ok {
+			terminalCausingRunID = persisted
+		}
+	}
 	historyEnabled = historyEnabled || req.ForceContextContinuation
 
 	execution := &AgentExecution{
 		startupDisposition:         startupDispositionFromMetadata(metadata),
 		ID:                         ri.InstanceID,
 		CausingRunID:               causingRunID,
+		TerminalCausingRunID:       terminalCausingRunID,
 		ExecutorType:               executorType,
 		RunID:                      req.Env["KANDEV_RUN_ID"],
 		TaskID:                     req.TaskID,
@@ -905,17 +1005,19 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		OfficeAgentProfileID:       req.OfficeAgentProfileID,
 		promptTurnID:               req.PromptTurnID,
 		AgentID:                    agentID,
+		AuthPolicy:                 req.AuthPolicy,
 		ContainerID:                ri.ContainerID,
 		ContainerIP:                ri.ContainerIP,
 		WorkspacePath:              workspacePath,
 		OriginalWorkspacePath:      originalWorkspacePath,
-		WorkspaceSourceRoots:       append([]string(nil), req.WorkspaceSourceRoots...),
+		WorkspaceSourceRoots:       append([]string(nil), workspaceSourceRoots...),
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 		ForceContextContinuation:   req.ForceContextContinuation,
 		ReplacesNativeConversation: req.ReplacesNativeConversation,
 		RuntimeName:                ri.RuntimeName,
+		attachedExistingCompute:    ri.ReusedWorkspace,
 		Status:                     v1.AgentStatusRunning,
 		StartedAt:                  time.Now(),
 		metadata:                   metadata,
@@ -927,7 +1029,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		historyEnabled:             historyEnabled,
 		promptDoneCh:               make(chan PromptCompletionSignal, 1),
 	}
-	execution.setRuntimeEnvironment(req.Env)
+	execution.setRuntimeEnvironment(runtimeEnv)
 	execution.sshApprovedEnvKeys = append([]string(nil), req.ApprovedSecretEnvKeys...)
 	return execution
 }

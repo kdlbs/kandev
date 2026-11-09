@@ -15,6 +15,19 @@ type Trace = {
   prompt?: string;
 };
 
+export function hasAttestedContinuationRefusal(
+  message: Message,
+  reason: string,
+  attemptsStarted = 0,
+) {
+  return (
+    message.metadata?.runtime_retained === true &&
+    message.metadata.recovery_disposition === "refused" &&
+    message.metadata.recovery_reason === reason &&
+    (message.metadata.attempts_started ?? 0) === attemptsStarted
+  );
+}
+
 export async function createContinuationFixture(
   backend: BackendContext,
   apiClient: ApiClient,

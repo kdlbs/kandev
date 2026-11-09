@@ -29,6 +29,20 @@ var providerNeutralRules = []rule{
 		CodeNetworkUnavailable,
 		ConfHigh,
 	),
+	// An AI-SDK error envelope carries the provider's own classification in a
+	// structured "error_type" field. The underscore-joined "provider_unavailable"
+	// never matches the space-separated prose in provider.unavailable.v1. The
+	// error label is required: an assistant chunk is classified on its own, so a
+	// bare JSON object that merely carries the field is not a provider
+	// diagnostic. It sits before the generic rule so the structured signal
+	// outranks bare prose. The line may open with the "Agent encountered an
+	// error:" status prefix.
+	mustRule(
+		"provider.structured_error_type.v1",
+		`(?im)^\s*(?:Agent\s+encountered\s+an\s+error:\s*)?(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)\{[^\n]*"error_type"\s*:\s*"provider_unavailable"`,
+		CodeProviderUnavailable,
+		ConfHigh,
+	),
 	mustRule(
 		"provider.unavailable.v1",
 		`(?i)(?:\b(?:provider|service|upstream|gateway)\b[^\n]{0,64}\b(?:temporarily\s+)?unavailable\b|\btemporarily\s+unavailable\b)`,

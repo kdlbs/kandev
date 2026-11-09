@@ -118,11 +118,13 @@ function commentMetadata(comment: ChangeRequestDetailComment, reply = false) {
 
 function CommentThreadBlock({
   thread,
+  contextThread,
   props,
   detail,
   replyAction,
 }: {
   thread: CommentThread;
+  contextThread: CommentThread;
   props: ChangeRequestDetailProps;
   detail: ChangeRequestDetailModel;
   replyAction?: ChangeRequestDetailAction;
@@ -146,13 +148,15 @@ function CommentThreadBlock({
             }
           />
         </div>
-        {thread.replies.length > 0 && props.onAddContext ? (
+        {contextThread.replies.length > 0 && props.onAddContext ? (
           <div data-testid={`change-request-thread-context-${thread.root.id}`}>
             <AddToContextButton
               onClick={() =>
-                props.onAddContext?.("comment", buildThreadContext(thread, detail.url))
+                props.onAddContext?.("comment", buildThreadContext(contextThread, detail.url))
               }
               tooltip={t("integrations:addWholeThreadToChatContext")}
+              ariaLabel={t("integrations:addWholeThreadToChatContext")}
+              className="max-md:h-11 max-md:w-11 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
             />
           </div>
         ) : null}
@@ -204,6 +208,14 @@ export function ChangeRequestComments({
   );
   const threads = useMemo(() => commentThreads(humanComments), [humanComments]);
   const botThreads = useMemo(() => commentThreads(botComments), [botComments]);
+  const contextThreads = useMemo(() => {
+    const byComment = new Map<string, CommentThread>();
+    for (const thread of commentThreads(detail.comments)) {
+      byComment.set(thread.root.id, thread);
+      for (const reply of thread.replies) byComment.set(reply.id, thread);
+    }
+    return byComment;
+  }, [detail.comments]);
   const replyAction = props.actions?.find((action) => action.placement === "thread");
   const commentAction = props.actions?.find((action) => action.placement === "comment");
   return (
@@ -226,6 +238,7 @@ export function ChangeRequestComments({
         <CommentThreadBlock
           key={thread.root.id}
           thread={thread}
+          contextThread={contextThreads.get(thread.root.id) ?? thread}
           props={props}
           detail={detail}
           replyAction={replyAction}
@@ -250,6 +263,7 @@ export function ChangeRequestComments({
             <CommentThreadBlock
               key={thread.root.id}
               thread={thread}
+              contextThread={contextThreads.get(thread.root.id) ?? thread}
               props={props}
               detail={detail}
               replyAction={replyAction}

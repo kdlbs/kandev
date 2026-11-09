@@ -142,6 +142,7 @@ type profileContextIdentity struct {
 	Command           []string           `json:"command"`
 	OperatorDefined   bool               `json:"operator_defined"`
 	CLIFlags          []string           `json:"cli_flags"`
+	CopilotPlugins    []string           `json:"copilot_selected_plugins"`
 	LaunchWrapper     launchwrapper.Spec `json:"launch_wrapper,omitzero"`
 	Env               []profileEnvValue  `json:"env"`
 	StripEnv          []string           `json:"strip_env"`
@@ -167,8 +168,9 @@ func profileContextRevision(key []byte, context ProfileProbeContext, agentType, 
 	identity := profileContextIdentity{
 		Scope: context.Scope, AgentType: agentType, Protocol: protocol,
 		Command: append([]string(nil), command...), OperatorDefined: operatorDefined,
-		CLIFlags:      append([]string(nil), context.CLIFlags...),
-		LaunchWrapper: launchwrapper.Profile(context.CommandPrefix), Env: env,
+		CLIFlags:       append([]string(nil), context.CLIFlags...),
+		CopilotPlugins: append([]string(nil), context.CopilotSelectedPlugins...),
+		LaunchWrapper:  launchwrapper.Profile(context.CommandPrefix), Env: env,
 		StripEnv:          append([]string(nil), stripEnv...),
 		RuntimeGeneration: runtimeGeneration, ContextGeneration: contextGeneration,
 	}

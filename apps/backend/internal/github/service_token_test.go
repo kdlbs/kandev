@@ -173,7 +173,8 @@ func TestGetStatus_WithTokenConfigured(t *testing.T) {
 	svc := &Service{
 		secrets:    provider,
 		logger:     log,
-		authMethod: AuthMethodNone,
+		client:     NewMockClient(),
+		authMethod: AuthMethodPAT,
 	}
 
 	status, err := svc.GetStatus(context.Background())
@@ -294,6 +295,21 @@ func TestClearToken_NoSecretManager(t *testing.T) {
 
 // Unverified PAT clients retain observations without borrowing another identity.
 func TestService_NewPATClient_AttachesRateTracker(t *testing.T) {
+	original := http.DefaultTransport
+	requests := 0
+	http.DefaultTransport = legacyIdentityRoundTripper(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if req.URL.Path != "/user" {
+			t.Errorf("unexpected identity request: %s", req.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"message":"Bad credentials"}`)),
+			Request:    req,
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = original })
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	svc := &Service{
 		logger:      log,
@@ -301,6 +317,9 @@ func TestService_NewPATClient_AttachesRateTracker(t *testing.T) {
 	}
 
 	c := svc.newPATClient(context.Background(), "ghp_x")
+	if requests != 1 {
+		t.Fatalf("identity requests = %d, want 1", requests)
+	}
 	if c == nil {
 		t.Fatalf("newPATClient returned nil")
 	}

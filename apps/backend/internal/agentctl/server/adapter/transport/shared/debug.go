@@ -25,6 +25,15 @@ const ProtocolACP = "acp"
 // ACPDebugEnabled reports whether agent-message debug logging is on.
 func ACPDebugEnabled() bool { return debugMode }
 
+// SetDebugLogDirForTest redirects the process-wide debug-log registry to dir.
+// Adapter tests call it from TestMain so frames never reach the host's real ACP
+// log directory when the developer's shell enables debug logging.
+func SetDebugLogDirForTest(dir string) {
+	acpLog.mu.Lock()
+	defer acpLog.mu.Unlock()
+	acpLog.cfg.dir = dir
+}
+
 // ACPLogDir returns the directory debug log files are written to. Exported so
 // the debug reader (internal/debug) can discover per-session files. It
 // resolves live from the environment: the reader runs in the backend process

@@ -40,6 +40,8 @@ Teams whose source code and planning work live in Azure DevOps cannot use Kandev
 - **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.17:** When the initial saved-view read is pending across an admitted action, the system shall preserve the loaded views that action does not change, and shall not publish the initial read over the pending action. If the read fails, the system shall send no saved-view write, reject actions admitted against that read, and reload the server list when the user retries an action.
 - **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.18:** Desktop and phone shall apply the same saved-view ordering and recovery behavior. Save failures shall retain the existing dialog feedback, and delete failures shall show localized feedback without an unhandled rejection.
 
+- **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.19:** Assignment and Move completion shall not reopen closed detail or replace a later work-item selection. Closing, reopening, changing scope, or unmounting shall invalidate the old opening's local completion, error, and busy state. Confirmed board data shall still update while its originating workspace, project, team, and board remain current. Desktop and phone shall preserve the same ownership rules.
+
 ## Exclusions
 
 Linked-task display does not change association validation or stored identities,

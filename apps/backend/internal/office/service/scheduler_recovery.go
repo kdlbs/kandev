@@ -54,6 +54,12 @@ func (h *OfficeRecoveryHandler) Tick(ctx context.Context) error {
 		}
 		h.logger.Error("recovery sweep: replay deferred assignments failed", zap.Error(err))
 	}
+	if err := h.scheduler.svc.ReplayPendingHandoffCompletionOutbox(ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		h.logger.Error("recovery sweep: replay handoff completion outbox failed", zap.Error(err))
+	}
 	return nil
 }
 

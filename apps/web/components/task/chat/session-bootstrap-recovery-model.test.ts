@@ -66,6 +66,48 @@ function error(
   };
 }
 
+describe("plugin recovery card model", () => {
+  it("localizes plugin startup guidance and shows only the validated runtime identity", () => {
+    const translatePlugin = vi.fn((key: string, options?: { reason?: string; runtime?: string }) =>
+      options ? `${key}:${options.reason ?? ""}:${options.runtime ?? ""}` : key,
+    ) as unknown as TFunction;
+    const model = buildRecoveryCardModel({
+      error: error([
+        {
+          operation: "start",
+          code: "plugin_preparation_failed",
+          detail: "private output /Users/alice/.config/copilot/plugins",
+          reason: "invalid_inventory",
+          runtime_version: "1.2.3+build.4",
+        } as NonNullable<TaskStatusSummaryActiveError["causes"]>[number],
+      ]),
+      manualFailure: null,
+      manualError: null,
+      recoveryNotice: null,
+      translate: translatePlugin,
+    });
+
+    expect(model).toMatchObject({
+      titleKey: "task:sessionBootstrapPluginFailureTitle",
+      summary:
+        "task:sessionBootstrapPluginFailureSummaryWithRuntime:task:sessionBootstrapPluginReasonInventory:1.2.3+build.4",
+      primaryCause: {
+        code: "plugin_preparation_failed",
+        reason: "invalid_inventory",
+        runtime_version: "1.2.3+build.4",
+      },
+      hasTypedPluginCause: true,
+      freshStartWarning: false,
+    });
+    expect(JSON.stringify(model)).not.toContain("private output");
+    expect(model.summary).not.toContain("invalid_inventory");
+    expect(model.summary).not.toContain("plugin_preparation_failed");
+    expect(model.detailFields.map((field) => field.value).join(" ")).not.toContain(
+      "invalid_inventory",
+    );
+  });
+});
+
 describe("buildRecoveryCardModel", () => {
   it("makes typed model evidence the primary cause without opening details", () => {
     const translateCause = vi.fn((key: string) => key) as unknown as TFunction;

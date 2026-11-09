@@ -2,7 +2,7 @@ import { fetchJson } from "@/lib/api/client";
 import type {
   PluginHumanInteractionResponseInput,
   PluginHostInteractionsApi,
-} from "@kandev/plugin-sdk";
+} from "@kdlbs/plugin-sdk";
 
 type ReceiptResponse = {
   id: string;

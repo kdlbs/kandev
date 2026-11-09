@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -12,17 +13,24 @@ import (
 )
 
 type mcpSelectionRequest struct {
-	WorkspaceID   string   `json:"workspace_id"`
-	DefinitionIDs []string `json:"definition_ids"`
-	MCPServerIDs  []string `json:"mcp_server_ids"`
+	WorkspaceID                   string          `json:"workspace_id"`
+	ExpectedDefinitionIDs         json.RawMessage `json:"expected_definition_ids"`
+	ExcludedDefinitionIDs         json.RawMessage `json:"excluded_definition_ids"`
+	ExpectedRevision              json.RawMessage `json:"expected_revision"`
+	ExpectedExcludedDefinitionIDs json.RawMessage `json:"expected_excluded_definition_ids"`
+	DefinitionIDs                 []string        `json:"definition_ids"`
+	MCPServerIDs                  []string        `json:"mcp_server_ids"`
 }
 
 type mcpSelectionResponse struct {
-	WorkspaceID   string                              `json:"workspace_id"`
-	Scope         mcpconfig.SelectionScope            `json:"scope"`
-	OwnerID       string                              `json:"owner_id"`
-	DefinitionIDs []string                            `json:"definition_ids"`
-	MCPState      *mcpconfig.SessionMCPSelectionState `json:"mcp_state,omitempty"`
+	LegacyImportStatus    string                              `json:"legacy_import_status,omitempty"`
+	WorkspaceID           string                              `json:"workspace_id"`
+	Scope                 mcpconfig.SelectionScope            `json:"scope"`
+	OwnerID               string                              `json:"owner_id"`
+	DefinitionIDs         []string                            `json:"definition_ids"`
+	ExcludedDefinitionIDs *[]string                           `json:"excluded_definition_ids,omitempty"`
+	SelectionRevision     *int64                              `json:"selection_revision,omitempty"`
+	MCPState              *mcpconfig.SessionMCPSelectionState `json:"mcp_state,omitempty"`
 }
 
 func (h *Handlers) httpListProfileMCPSelections(c *gin.Context) {
@@ -67,12 +75,12 @@ func (h *Handlers) listMCPSelections(c *gin.Context, scope mcpconfig.SelectionSc
 		return
 	}
 	ownerID := c.Param("id")
-	definitionIDs, err := h.selections.List(c.Request.Context(), scope, workspaceID, ownerID)
+	snapshot, err := h.selections.ReadSnapshot(c.Request.Context(), mcpconfig.SelectionOrigin{Scope: scope, WorkspaceID: workspaceID, OwnerID: ownerID})
 	if err != nil {
 		h.writeMCPSelectionError(c, err)
 		return
 	}
-	h.writeMCPSelectionResponse(c, workspaceID, scope, ownerID, definitionIDs)
+	h.writeMCPSelectionResponse(c, workspaceID, scope, ownerID, snapshot)
 }
 
 func (h *Handlers) replaceMCPSelections(c *gin.Context, scope mcpconfig.SelectionScope) {
@@ -98,16 +106,17 @@ func (h *Handlers) replaceMCPSelections(c *gin.Context, scope mcpconfig.Selectio
 		return
 	}
 	ownerID := c.Param("id")
-	if err := h.selections.Replace(c.Request.Context(), scope, workspaceID, ownerID, definitionIDs); err != nil {
-		h.writeMCPSelectionError(c, err)
-		return
-	}
-	definitionIDs, err = h.selections.List(c.Request.Context(), scope, workspaceID, ownerID)
+	condition, err := selectionCondition(body, scope)
 	if err != nil {
 		h.writeMCPSelectionError(c, err)
 		return
 	}
-	h.writeMCPSelectionResponse(c, workspaceID, scope, ownerID, definitionIDs)
+	snapshot, err := h.selections.ReplaceConditional(c.Request.Context(), mcpconfig.SelectionOrigin{Scope: scope, WorkspaceID: workspaceID, OwnerID: ownerID}, definitionIDs, condition)
+	if err != nil {
+		h.writeMCPSelectionError(c, err)
+		return
+	}
+	h.writeMCPSelectionResponse(c, workspaceID, scope, ownerID, snapshot)
 }
 
 func selectionIDs(body mcpSelectionRequest) ([]string, error) {
@@ -128,25 +137,59 @@ func (h *Handlers) requireMCPSelections(c *gin.Context) bool {
 	return false
 }
 
-func (h *Handlers) writeMCPSelectionResponse(c *gin.Context, workspaceID string, scope mcpconfig.SelectionScope, ownerID string, definitionIDs []string) {
-	response := mcpSelectionResponse{
-		WorkspaceID: workspaceID, Scope: scope, OwnerID: ownerID,
-		DefinitionIDs: definitionIDs,
+func selectionCondition(body mcpSelectionRequest, scope mcpconfig.SelectionScope) (mcpconfig.SelectionCondition, error) {
+	condition := mcpconfig.SelectionCondition{}
+	if body.ExpectedExcludedDefinitionIDs != nil {
+		return condition, mcpconfig.ErrMCPInvalidSelection
+	}
+	if body.ExpectedDefinitionIDs != nil {
+		var ids []string
+		if err := json.Unmarshal(body.ExpectedDefinitionIDs, &ids); err != nil || ids == nil {
+			return condition, mcpconfig.ErrMCPInvalidSelection
+		}
+		condition.ExpectedDefinitionIDs = &ids
+	}
+	if body.ExpectedRevision != nil {
+		var revision *int64
+		if err := json.Unmarshal(body.ExpectedRevision, &revision); err != nil || revision == nil {
+			return condition, mcpconfig.ErrMCPInvalidSelection
+		}
+		condition.ExpectedRevision = revision
+	}
+	if body.ExcludedDefinitionIDs != nil {
+		var ids []string
+		if err := json.Unmarshal(body.ExcludedDefinitionIDs, &ids); err != nil || ids == nil {
+			return condition, mcpconfig.ErrMCPInvalidSelection
+		}
+		condition.ExcludedDefinitionIDs = &ids
+	}
+	return condition, condition.Validate(scope)
+}
+
+func (h *Handlers) writeMCPSelectionResponse(c *gin.Context, workspaceID string, scope mcpconfig.SelectionScope, ownerID string, snapshot mcpconfig.SelectionSnapshot) {
+	response := mcpSelectionResponse{WorkspaceID: workspaceID, Scope: scope, OwnerID: ownerID, DefinitionIDs: snapshot.DefinitionIDs, MCPState: snapshot.State}
+	if scope == mcpconfig.SelectionScopeProfile {
+		response.LegacyImportStatus = h.selections.ProfileImportStatus(c.Request.Context(), workspaceID, ownerID)
 	}
 	if scope == mcpconfig.SelectionScopeTaskSession {
-		state, err := h.selections.SessionState(c.Request.Context(), workspaceID, ownerID)
-		if err == nil {
-			response.MCPState = &state
-		} else if !errors.Is(err, mcpconfig.ErrMCPSelectionStateNotFound) {
-			h.writeMCPSelectionError(c, err)
-			return
+		revision := int64(0)
+		if snapshot.State != nil {
+			revision = snapshot.State.DesiredRevision
 		}
+		response.SelectionRevision = &revision
+		ids := snapshot.ExcludedDefinitionIDs
+		if ids == nil {
+			ids = []string{}
+		}
+		response.ExcludedDefinitionIDs = &ids
 	}
 	c.JSON(http.StatusOK, response)
 }
 
 func (h *Handlers) writeMCPSelectionError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, mcpconfig.ErrMCPSelectionConflict):
+		c.JSON(http.StatusConflict, gin.H{"error": "MCP selections changed", "code": "mcp_selection_conflict"})
 	case errors.Is(err, mcpconfig.ErrMCPWorkspaceAccess), errors.Is(err, mcpconfig.ErrMCPSelectionOwnerAccess):
 		c.JSON(http.StatusNotFound, gin.H{"error": "MCP selection owner not found"})
 	case errors.Is(err, mcpconfig.ErrMCPSelectionWorkspaceMismatch), errors.Is(err, mcpconfig.ErrMCPDefinitionDisabled), errors.Is(err, mcpconfig.ErrMCPInvalidSelection):

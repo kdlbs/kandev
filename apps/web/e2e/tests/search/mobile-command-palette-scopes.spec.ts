@@ -2,6 +2,8 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
+test.use({ trace: "retain-on-failure" });
+
 /**
  * The palette's scope strip does not shrink. With four scopes it no longer fits
  * beside the search field on a phone, so it has to wrap onto its own row rather
@@ -42,9 +44,11 @@ test("@search the palette scope strip wraps below the field on a phone", async (
   const tablist = dialog.getByRole("tablist", { name: "Command palette mode" });
   await expect(tablist.getByRole("tab")).toHaveCount(4);
 
-  const inputBox = (await input.boundingBox())!;
-  const tablistBox = (await tablist.boundingBox())!;
-  const dialogBox = (await dialog.boundingBox())!;
+  const { inputBox, tablistBox, dialogBox } = await dialog.evaluate((element) => ({
+    inputBox: element.querySelector('[role="combobox"]')!.getBoundingClientRect().toJSON(),
+    tablistBox: element.querySelector('[role="tablist"]')!.getBoundingClientRect().toJSON(),
+    dialogBox: element.getBoundingClientRect().toJSON(),
+  }));
 
   // The strip is on a row of its own, under the field.
   expect(tablistBox.y).toBeGreaterThanOrEqual(inputBox.y + inputBox.height);

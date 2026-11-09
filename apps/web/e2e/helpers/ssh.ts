@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import type { SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -303,20 +304,26 @@ export function generateKeypair(identityFile: string): void {
  * to seed/clear remote state that the SSH executor would normally manage —
  * e.g. wiping ~/.kandev/bin/agentctl to force a re-upload on the next
  * launch. Throws when the command exits non-zero.
+ * An optional per-attempt timeout force-stops stalled diagnostic commands.
  */
-export function execInContainer(handle: SSHServerHandle, argv: string[]): string {
-  let res = spawnSync("docker", ["exec", handle.containerName, ...argv], {
-    encoding: "utf8",
-  });
+export function execInContainer(
+  handle: SSHServerHandle,
+  argv: string[],
+  timeoutMs?: number,
+): string {
+  const options: SpawnSyncOptionsWithStringEncoding = { encoding: "utf8" };
+  if (timeoutMs !== undefined) {
+    options.timeout = timeoutMs;
+    options.killSignal = "SIGKILL";
+  }
+  let res = spawnSync("docker", ["exec", handle.containerName, ...argv], options);
   const transientUpgradeFailure =
     res.status !== 0 &&
     (res.stderr || res.stdout).includes("unable to upgrade to tcp") &&
     (res.stderr || res.stdout).includes("409");
   if (transientUpgradeFailure) {
     sleep(500);
-    res = spawnSync("docker", ["exec", handle.containerName, ...argv], {
-      encoding: "utf8",
-    });
+    res = spawnSync("docker", ["exec", handle.containerName, ...argv], options);
   }
   if (res.status !== 0) {
     throw new Error(

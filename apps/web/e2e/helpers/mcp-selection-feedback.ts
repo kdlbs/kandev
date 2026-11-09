@@ -77,7 +77,8 @@ export async function checkMCPSelectionRejection({
     await expect(surface.getByRole("alert")).toHaveCount(0);
   } else {
     const row = surface.locator("label").filter({ hasText: server.display_name });
-    await expect(row.getByRole("checkbox")).not.toBeChecked();
+    await expect(row.getByRole("checkbox")).toBeChecked();
+    await expect(row.getByRole("checkbox")).toBeDisabled();
     await expect(surface.getByRole("alert")).toHaveText(
       "This connection cannot save MCP selections. Your previous choices are unchanged.",
     );

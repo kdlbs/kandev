@@ -244,6 +244,29 @@ func (r *PluginRemoteExecutor) uploadPluginExecutorAgentCredentials(ctx context.
 	}
 }
 
+// pluginExecutorGitIdentityCommand sets the global Git identity from the
+// environment, so the name and email never appear in the command line.
+const pluginExecutorGitIdentityCommand = `git config --global user.name "$KANDEV_GIT_USER_NAME" && git config --global user.email "$KANDEV_GIT_USER_EMAIL"`
+
+// applyPluginExecutorGitIdentity writes the profile's Git identity into the
+// effective global Git configuration used by the agent, as the prepare scripts
+// of the other remote executors do, and only when both name and email are set.
+// A failure is logged and does not fail the launch.
+func (r *PluginRemoteExecutor) applyPluginExecutorGitIdentity(ctx context.Context, client agentctlCommandClient, req *ExecutorCreateRequest) {
+	name := getMetadataString(req.Metadata, MetadataKeyGitUserName)
+	email := getMetadataString(req.Metadata, MetadataKeyGitUserEmail)
+	if name == "" || email == "" {
+		return
+	}
+	uploader := agentctlFileUploader{client: client, sessionID: req.SessionID}
+	// The process inherits the agent's HOME and Git config overrides. Do not use
+	// the credential-copy target home here: it can differ from the agent's home.
+	env := map[string]string{"KANDEV_GIT_USER_NAME": name, "KANDEV_GIT_USER_EMAIL": email}
+	if _, err := uploader.run(ctx, pluginExecutorGitIdentityCommand, env); err != nil {
+		r.logger.Warn("plugin executor git identity was not applied", zap.Error(err))
+	}
+}
+
 // selectedSetupScriptMethods returns the environment-variable methods whose
 // variable was resolved for this launch and that declare a setup script.
 func selectedSetupScriptMethods(catalog remoteauth.Catalog, env map[string]string) []remoteauth.Method {

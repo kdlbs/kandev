@@ -79,3 +79,8 @@ A mandatory adapter method would break unrelated protocols; a frontend-only flag
 ## Results
 
 Pending.
+
+This work order records the initial all-off rollout contract. The later
+[default-on work order](../opencode-background-continuity/task-07-default-on-rollout.md)
+owns promotion after feature verification. It does not change this original
+work order's implementation status or historical verification requirements.

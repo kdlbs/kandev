@@ -13,6 +13,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -24,15 +25,16 @@ import (
 // This allows users of the adapter package to access these types without
 // importing the types package directly.
 type (
-	PermissionRequest  = types.PermissionRequest
-	PermissionResponse = types.PermissionResponse
-	PermissionOption   = streams.PermissionOption
-	PermissionHandler  = types.PermissionHandler
-	UserInputOption    = types.UserInputOption
-	UserInputQuestion  = types.UserInputQuestion
-	UserInputRequest   = types.UserInputRequest
-	UserInputAnswer    = types.UserInputAnswer
-	UserInputResponse  = types.UserInputResponse
+	PermissionRequest   = types.PermissionRequest
+	PermissionResponse  = types.PermissionResponse
+	PermissionOption    = streams.PermissionOption
+	PermissionHandler   = types.PermissionHandler
+	UserInputOption     = types.UserInputOption
+	UserInputQuestion   = types.UserInputQuestion
+	UserInputRequest    = types.UserInputRequest
+	UserInputAnswer     = types.UserInputAnswer
+	UserInputAttachment = types.UserInputAttachment
+	UserInputResponse   = types.UserInputResponse
 )
 
 // UserInputRequestHandler creates a clarification request and waits for its
@@ -161,6 +163,12 @@ type SessionModelStateProvider interface {
 // support ACP authentication (session/authenticate).
 type AuthenticatableAdapter interface {
 	Authenticate(ctx context.Context, methodID string) error
+}
+
+// AuthStatusProvider exposes a transient provider authentication snapshot for
+// the dedicated operator sign-in instance.
+type AuthStatusProvider interface {
+	AuthStatus() streams.AuthStatus
 }
 
 // ProviderErrorContextProvider exposes the adapter state a generic ACP
@@ -329,6 +337,11 @@ type Config struct {
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
 
+	// ProjectMCPDelivery is execution-bound evidence that the host materialized
+	// the bound built-in packages into a project configuration file. It is
+	// accepted only from the authenticated configure request.
+	ProjectMCPDelivery *types.ProjectMCPDelivery
+
 	// AgentID is the agent identifier from the registry (e.g., "auggie", "amp", "claude-code").
 	// Used for logging and debug capture. Adapters should use this instead of hardcoded names.
 	AgentID string
@@ -367,12 +380,29 @@ type Config struct {
 	// NotificationQueueCapacity is the server-resolved ACP inbound queue size.
 	NotificationQueueCapacity int
 
+	// AgentBackgroundWorkEnabled is the effective shared background-work
+	// feature value resolved by the backend for this launch. Adapters use it
+	// to gate provider background attestation; false preserves the existing
+	// provider-neutral behavior.
+	AgentBackgroundWorkEnabled bool
+
 	// PromptCancelJoinTimeout is an optional per-adapter ACP cancellation join bound.
 	PromptCancelJoinTimeout time.Duration
 
 	// ProviderGatewayAuth authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
+
+	// AuthPolicy selects a provider-specific authentication method after
+	// initialize. It is an internal child-process contract.
+	AuthPolicy *acpcompat.AuthPolicy
+
+	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
+	PromptSuggestions bool
+
+	// CopilotNativeSessionEvents enables Copilot's opt-in native compaction and
+	// attributed usage notifications for this launch.
+	CopilotNativeSessionEvents bool
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -392,22 +422,27 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		}
 	}
 	return &shared.Config{
-		WorkDir:                   c.WorkDir,
-		AutoApprove:               c.AutoApprove,
-		McpServers:                mcpServers,
-		AgentID:                   c.AgentID,
-		AgentName:                 c.AgentName,
-		BaseURL:                   c.BaseURL,
-		AuthHeader:                c.AuthHeader,
-		AuthValue:                 c.AuthValue,
-		Headers:                   c.Headers,
-		Extra:                     c.Extra,
-		AssumeMcpSse:              c.AssumeMcpSse,
-		AssumeMcpHttp:             c.AssumeMcpHttp,
-		RequiresProcessKill:       c.RequiresProcessKill,
-		NotificationQueueCapacity: c.NotificationQueueCapacity,
-		PromptCancelJoinTimeout:   c.PromptCancelJoinTimeout,
-		ProviderGatewayAuth:       c.ProviderGatewayAuth,
+		WorkDir:                    c.WorkDir,
+		AutoApprove:                c.AutoApprove,
+		McpServers:                 mcpServers,
+		ProjectMCPDelivery:         c.ProjectMCPDelivery.Clone(),
+		AgentID:                    c.AgentID,
+		AgentName:                  c.AgentName,
+		BaseURL:                    c.BaseURL,
+		AuthHeader:                 c.AuthHeader,
+		AuthValue:                  c.AuthValue,
+		Headers:                    c.Headers,
+		Extra:                      c.Extra,
+		AssumeMcpSse:               c.AssumeMcpSse,
+		AssumeMcpHttp:              c.AssumeMcpHttp,
+		RequiresProcessKill:        c.RequiresProcessKill,
+		NotificationQueueCapacity:  c.NotificationQueueCapacity,
+		AgentBackgroundWorkEnabled: c.AgentBackgroundWorkEnabled,
+		PromptCancelJoinTimeout:    c.PromptCancelJoinTimeout,
+		ProviderGatewayAuth:        c.ProviderGatewayAuth,
+		AuthPolicy:                 c.AuthPolicy,
+		PromptSuggestions:          c.PromptSuggestions,
+		CopilotNativeSessionEvents: c.CopilotNativeSessionEvents,
 	}
 }
 

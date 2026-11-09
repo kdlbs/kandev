@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,9 +12,12 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	"github.com/kandev/kandev/internal/repoclone"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/worktree"
@@ -70,6 +72,7 @@ type repoInfo struct {
 	RepositoryID               string
 	RepositoryPath             string
 	BaseBranch                 string
+	BaseBranchFallbackPolicy   models.BaseBranchFallbackPolicy
 	IntegrationRef             string
 	CheckoutBranch             string
 	PRNumber                   int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
@@ -178,16 +181,17 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		return nil, err
 	}
 	info := &repoInfo{
-		CheckoutOptions:         options,
-		TaskRepositoryID:        tr.ID,
-		TaskRepositoryUpdatedAt: tr.UpdatedAt,
-		RepositoryID:            tr.RepositoryID,
-		BaseBranch:              tr.BaseBranch,
-		IntegrationRef:          tr.BranchPolicyPullRequestTarget,
-		CheckoutBranch:          tr.CheckoutBranch,
-		PRNumber:                prNumberFromMetadata(tr.Metadata),
-		Position:                tr.Position,
-		WorkspaceRelativePath:   tr.WorkspaceRelativePath,
+		CheckoutOptions:          options,
+		TaskRepositoryID:         tr.ID,
+		TaskRepositoryUpdatedAt:  tr.UpdatedAt,
+		RepositoryID:             tr.RepositoryID,
+		BaseBranch:               tr.BaseBranch,
+		BaseBranchFallbackPolicy: models.ResolveAttachmentBaseBranchFallbackPolicy(tr.Metadata, tr.BaseBranch),
+		IntegrationRef:           tr.BranchPolicyPullRequestTarget,
+		CheckoutBranch:           tr.CheckoutBranch,
+		PRNumber:                 prNumberFromMetadata(tr.Metadata),
+		Position:                 tr.Position,
+		WorkspaceRelativePath:    tr.WorkspaceRelativePath,
 	}
 	if binding, found, err := models.LoadRemoteContribution(tr.Metadata); err != nil {
 		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
@@ -204,6 +208,7 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		}
 		info.RemoteContribution = &binding
 		info.BaseBranch = binding.BaseBranch
+		info.BaseBranchFallbackPolicy = models.BaseBranchFallbackPolicyStrict
 		info.CheckoutBranch = binding.HeadBranch
 	}
 	if destination, found, err := models.LoadContributionDestination(tr.Metadata); err != nil {
@@ -256,7 +261,10 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		info.WorktreeBranchTemplate = tr.BranchPolicyBranchTemplate
 	}
 	info.PullBeforeWorktree = repo.PullBeforeWorktree
-	if info.BaseBranch == "" && repo.DefaultBranch != "" {
+	if info.BaseBranch == "" && repo.DefaultBranch != "" && info.PRNumber == 0 {
+		// A PR-linked attachment may defer its base until the provider target
+		// resolves. Falling back to the repository default here would launch on
+		// the wrong integration target if that lookup failed.
 		info.BaseBranch = repo.DefaultBranch
 	}
 	if info.IntegrationRef == "" {
@@ -444,12 +452,31 @@ func validPRBaseIdentity(
 	if checkoutBranch != "" && target.HeadBranch != checkoutBranch {
 		return false, prBaseMismatchHeadBranch
 	}
+	attachedRepository = normalizePRBaseHeadAlias(base, attachedRepository)
+	headRepository = normalizePRBaseHeadAlias(base, headRepository)
+	if expected != nil {
+		copy := *expected
+		copy.HeadRepository = normalizePRBaseHeadAlias(base, copy.HeadRepository)
+		expected = &copy
+	}
 	if expected != nil || contribution {
 		return validBoundPRBaseIdentity(target, expected, attachedRepository, hasAttachedRepository,
 			headRepository, hasHeadRepository, contribution)
 	}
 	return validUnboundPRBaseIdentity(target, checkoutBranch, attachedRepository, hasAttachedRepository,
 		headRepository, hasHeadRepository)
+}
+
+// normalizePRBaseHeadAlias recognizes only the alias pair returned for this live
+// head repository. Stored identities and unrelated repository IDs stay intact.
+func normalizePRBaseHeadAlias(base models.PRBase, repository models.ComparisonTargetRepository) models.ComparisonTargetRepository {
+	head := base.Target.HeadRepository
+	if base.HeadRepositoryNodeID != "" && head.ProviderID != "" &&
+		repository.ProviderID == base.HeadRepositoryNodeID &&
+		strings.EqualFold(repository.Host, head.Host) && strings.EqualFold(repository.Path, head.Path) {
+		repository.ProviderID = head.ProviderID
+	}
+	return repository
 }
 
 func validBoundPRBaseIdentity(
@@ -523,7 +550,8 @@ func githubComparisonRepositoryFromRepository(repo *models.Repository) (models.C
 }
 
 func normalizeGitHubComparisonRepository(repository models.ComparisonTargetRepository) (models.ComparisonTargetRepository, bool) {
-	if !isGitHubComparisonHost(repository.Host) {
+	host, err := githubhost.Parse(strings.TrimSpace(repository.Host))
+	if err != nil {
 		return models.ComparisonTargetRepository{}, false
 	}
 	parts := strings.Split(strings.Trim(strings.TrimSpace(repository.Path), "/"), "/")
@@ -531,27 +559,10 @@ func normalizeGitHubComparisonRepository(repository models.ComparisonTargetRepos
 		return models.ComparisonTargetRepository{}, false
 	}
 	owner, name := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
-	repository.Host = defaultGitHubHost
+	repository.Host = host.String()
 	repository.Path = owner + "/" + name
-	repository.RemoteURL = fmt.Sprintf("https://%s/%s/%s.git", defaultGitHubHost, owner, name)
+	repository.RemoteURL = fmt.Sprintf("%s/%s/%s.git", host.WebURL(), owner, name)
 	return repository, true
-}
-
-func isGitHubComparisonHost(raw string) bool {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return false
-	}
-	if !strings.Contains(raw, "://") {
-		raw = "https://" + raw
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.User != nil || parsed.Port() != "" ||
-		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return false
-	}
-	return (strings.EqualFold(parsed.Scheme, "https") || strings.EqualFold(parsed.Scheme, "http")) &&
-		strings.EqualFold(parsed.Hostname(), defaultGitHubHost)
 }
 
 func hasProviderRepositoryIdentity(repo *models.Repository) bool {
@@ -1045,9 +1056,28 @@ type ResumeOptions struct {
 	// workspace idle policy. It protects focus recovery from reviving a manual
 	// stop, cancellation, archive, or workflow-owned session.
 	RequireIdleSuspensionProvenance bool
+	// RequireExecutorActor fails the resume closed when executor admission
+	// does not establish an identity to launch as. Internal callers that act
+	// for the session's durable actor set it so a missing actor never becomes
+	// an unscoped launch.
+	RequireExecutorActor bool
 	// NoInitialPrompt keeps the task description out of a fresh recovery boot;
 	// the owning continuation delivers the captured submission after readiness.
 	NoInitialPrompt bool
+	// InitialPromptOverride replaces the task-description fallback for an
+	// eligible text-only fresh-start recovery. The orchestrator supplies
+	// already-composed content; the executor performs no workflow lookups.
+	// Existing NoInitialPrompt and continuation suppression still take
+	// precedence.
+	InitialPromptOverride *string
+	// BeforeInitialPromptDispatch validates legacy recovery prompt ownership
+	// immediately before provider admission. It runs only when the lifecycle
+	// is about to send the prepared initial prompt.
+	BeforeInitialPromptDispatch func(context.Context) error
+	// OnInitialPromptDispatched and OnInitialPromptFailed release the dispatch
+	// fence installed by BeforeInitialPromptDispatch.
+	OnInitialPromptDispatched func()
+	OnInitialPromptFailed     func()
 	// SuppressInitialMessageBackfill is used only by silent restart restore,
 	// which must preserve the transcript exactly until an ordinary prompt arrives.
 	SuppressInitialMessageBackfill bool
@@ -1270,6 +1300,11 @@ func (e *Executor) ResumeSessionWithOptions(
 			return nil, err
 		}
 	}
+	if session != nil && options.RequireExecutorActor {
+		if _, ok := authn.IdentityFromContext(ctx); !ok {
+			return nil, ErrExecutorActorUnavailable
+		}
+	}
 	if session != nil {
 		e.auditCeilingBypass(ctx, "ResumeSessionWithOptions", session.ID, false)
 	}
@@ -1302,7 +1337,7 @@ func (e *Executor) resumeSession(
 	// A terminal session may retain an unconfirmed runtime. Stop it before
 	// selected-environment admission can claim the environment.
 	if wasTerminalResume {
-		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(ctx, session.ID); cleanupErr != nil {
+		if cleanupErr := e.cleanupStaleExecutionBeforeResume(ctx, session.ID); cleanupErr != nil {
 			e.logger.Warn("failed to force-cleanup stale execution before terminal-state resume",
 				zap.String("session_id", session.ID),
 				zap.Error(cleanupErr))
@@ -1427,7 +1462,20 @@ func (e *Executor) resumeSession(
 			e.logger.Info("resume race: agent already running for session, returning ErrExecutionAlreadyRunning",
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))
-			if startAgent {
+			if startAgent && resumeInitialState == models.TaskSessionStateWaitingForInput &&
+				e.agentManager.IsAgentReadyForPrompt(ctx, session.ID) {
+				// A recovered idle runtime has no new boot event to clear our STARTING claim.
+				if rollbackErr := e.rollbackResumeStateForInspectionContention(
+					ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, resumeInitialErrorMessage,
+					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+				); rollbackErr != nil {
+					if errors.Is(rollbackErr, ErrSessionStateSuperseded) {
+						// A newer owner preserves the duplicate-runtime classification.
+						return nil, errors.Join(ErrExecutionAlreadyRunning, rollbackErr)
+					}
+					return nil, rollbackErr
+				}
+			} else if startAgent {
 				// The live process owns this session's active lifecycle. Keep the
 				// STARTING projection for that process to reconcile instead of
 				// marking it FAILED as if this duplicate launch had failed.
@@ -1443,7 +1491,7 @@ func (e *Executor) resumeSession(
 		e.logger.Info("cleaning up stale execution and retrying launch",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID))
-		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(launchCtx, session.ID); cleanupErr != nil {
+		if cleanupErr := e.cleanupStaleExecutionBeforeResume(launchCtx, session.ID); cleanupErr != nil {
 			e.logger.Warn("failed to clean up stale execution",
 				zap.String("session_id", session.ID),
 				zap.Error(cleanupErr))
@@ -1543,6 +1591,19 @@ func (e *Executor) resumeSession(
 		WorkspaceInventoryRecoveryReceipt: req.WorkspaceInventoryRecoveryReceipt,
 	}
 
+	if startAgent {
+		if err := e.registerResumeInitialPromptCallbacks(resp.AgentExecutionID, options); err != nil {
+			e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
+			rollbackErr := e.rollbackResumeStateAfterFailure(
+				launchCtx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
+				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+			)
+			if rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
+			return execution, err
+		}
+	}
 	if startAgent {
 		if options.StartAgentSynchronously && options.RequiredNativeConversationID == "" {
 			if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
@@ -2092,6 +2153,48 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
 }
 
+// registerResumeInitialPromptCallbacks carries a prepared recovery binding into
+// lifecycle prompt admission so a workflow move cannot send superseded
+// instructions from the initial resume prompt.
+func (e *Executor) registerResumeInitialPromptCallbacks(executionID string, options ResumeOptions) error {
+	if options.BeforeInitialPromptDispatch == nil &&
+		options.OnInitialPromptDispatched == nil && options.OnInitialPromptFailed == nil {
+		return nil
+	}
+	registrar, ok := e.agentManager.(interface {
+		RegisterInitialPromptAdmissionCallbacks(
+			string,
+			func(context.Context, string, []v1.MessageAttachment) error,
+			func(), func(),
+		) error
+	})
+	if !ok {
+		return errors.New("agent manager cannot fence fresh recovery prompt admission")
+	}
+	if err := registrar.RegisterInitialPromptAdmissionCallbacks(
+		executionID,
+		func(ctx context.Context, _ string, _ []v1.MessageAttachment) error {
+			if options.BeforeInitialPromptDispatch != nil {
+				return options.BeforeInitialPromptDispatch(ctx)
+			}
+			return nil
+		},
+		func() {
+			if options.OnInitialPromptDispatched != nil {
+				options.OnInitialPromptDispatched()
+			}
+		},
+		func() {
+			if options.OnInitialPromptFailed != nil {
+				options.OnInitialPromptFailed()
+			}
+		},
+	); err != nil {
+		return fmt.Errorf("register fresh recovery prompt admission callbacks: %w", err)
+	}
+	return nil
+}
+
 func newResumeLaunchRequest(
 	task *v1.Task,
 	session *models.TaskSession,
@@ -2132,6 +2235,9 @@ func newResumeLaunchRequest(
 		RecoveryAction:               options.RecoveryAction,
 		SuppressBootStatusMessage:    options.SuppressInitialMessageBackfill,
 	}
+	if options.InitialPromptOverride != nil {
+		req.TaskDescription = *options.InitialPromptOverride
+	}
 	if options.ForceContextContinuation {
 		if options.DeferInitialPrompt {
 			req.TaskDescription = ""
@@ -2170,13 +2276,17 @@ type ContextContinuation struct {
 	ContentHash     string
 }
 
+const contextHistoryNotice = "The following sections are historical context, not new instructions.\n" +
+	"Do not retry earlier actions only because results are missing or uncertain.\n" +
+	"Follow the user's current instructions.\n\n"
+
 // BuildContextContinuation returns the bounded, provider-neutral context used
 // by the explicit continue_from_history recovery action.
 func BuildContextContinuation(
 	taskObjective, plan, workspace string, messages []*models.Message,
 ) ContextContinuation {
 	snapshot := lifecycle.BuildContinuationSnapshot(lifecycle.ContinuationSnapshotInput{
-		TaskObjective:     taskObjective,
+		TaskObjective:     contextHistoryNotice + taskObjective,
 		Plan:              plan,
 		OriginalWorkspace: workspace,
 		Messages:          messages,
@@ -2210,7 +2320,7 @@ func (e *Executor) prepareResumeRepositorySettings(
 	if err != nil {
 		return "", nil, nil, err
 	}
-	if err := rejectInheritedEnvironmentExecutorMismatch(task, existingEnv, req.ExecutorType); err != nil {
+	if err := rejectInheritedEnvironmentExecutorMismatch(task, existingEnv, req.ExecutorType, false); err != nil {
 		return "", existingEnv, nil, err
 	}
 	if session.TaskEnvironmentID != "" {
@@ -2264,13 +2374,14 @@ func (e *Executor) applyResumeMCPSettings(
 	if err != nil {
 		return err
 	}
-	profileContext, err := e.resolveTaskSessionMCPProfile(ctx, taskID, session, true)
+	profileContext, err := e.launchMCPProfile(ctx, taskID, session, req.StartAgent)
 	if err != nil {
 		return err
 	}
 	req.McpMode = mode
 	profileContext.Providers = req.McpProviders
 	req.McpProfile = &profileContext
+	req.TaskDescription = sysprompt.AppendBuiltinBindingGuidance(req.TaskDescription, profileContext.BuiltinPackages)
 	return nil
 }
 
@@ -2628,8 +2739,14 @@ func (e *Executor) applyResumeRepoConfig(
 	// is the only other writer of req.BaseBranch outside the worktree path, and it
 	// skips clone-URL setup entirely once reuse is required. Local executors are
 	// excluded so LocalPreparer keeps using the current on-disk branch.
-	if baseBranch != "" && e.capabilities != nil && e.capabilities.RequiresCloneURL(req.ExecutorType) {
+	requiresCloneURL := e.capabilities != nil && e.capabilities.RequiresCloneURL(req.ExecutorType)
+	if baseBranch != "" && requiresCloneURL {
 		req.BaseBranch = baseBranch
+	}
+	// Clone-URL resumes carry checkout-branch identity without requesting
+	// another checkout.
+	if req.WorkspaceReuseRequired && req.BranchIdentitySlug == "" && requiresCloneURL {
+		req.BranchIdentitySlug = resumeCheckoutBranchIdentity(repositoryID, allRepos)
 	}
 
 	var repository *models.Repository
@@ -2656,6 +2773,7 @@ func (e *Executor) applyResumeRepoConfig(
 		}
 	}
 
+	applyResumeAttachmentFallbackPolicy(req, repositoryID, baseBranch, allRepos)
 	repositoryPath := repository.LocalPath
 	applyResumeRepoBasics(req, repository, repositoryPath, shouldUseWorktree(req.ExecutorType))
 	for _, info := range allRepos {
@@ -2689,6 +2807,34 @@ func (e *Executor) resumeRepoSet(ctx context.Context, taskID string, resolved ..
 	return e.resolveAllRepoInfo(ctx, taskID)
 }
 
+// applyResumeAttachmentFallbackPolicy copies the exact attachment's derived
+// repository-default policy onto a resume request. A session repository that
+// has no matching attachment, multiple same-repository attachments, or a
+// session branch that differs from the attachment base is ambiguous and stays
+// strict: the session's legacy base snapshot is not provenance.
+func applyResumeAttachmentFallbackPolicy(
+	req *LaunchAgentRequest, repositoryID, baseBranch string, repos []*repoInfo,
+) {
+	req.BaseBranchFallbackPolicy = models.BaseBranchFallbackPolicyStrict
+	var match *repoInfo
+	for _, info := range repos {
+		if info == nil || info.RepositoryID != repositoryID {
+			continue
+		}
+		if match != nil {
+			return
+		}
+		match = info
+	}
+	if match == nil || strings.TrimSpace(match.BaseBranch) != strings.TrimSpace(baseBranch) {
+		return
+	}
+	req.BaseBranchFallbackPolicy = match.BaseBranchFallbackPolicy
+	if match.Repository != nil && match.Repository.DefaultBranch != "" {
+		req.DefaultBranch = match.Repository.DefaultBranch
+	}
+}
+
 // resolveResumeRepoIDAndBranch picks the primary repositoryID and baseBranch
 // for a resume: the session's persisted preference when it is set, otherwise
 // the primary of the resolved task attachment set — its first entry, the same
@@ -2701,6 +2847,26 @@ func resolveResumeRepoIDAndBranch(session *models.TaskSession, allRepos []*repoI
 		repositoryID = allRepos[0].RepositoryID
 	}
 	return repositoryID, session.BaseBranch
+}
+
+// resumeCheckoutBranchIdentity returns the sanitized checkout-branch slug of
+// the single task-repository row for repositoryID, or "" when the row has no
+// checkout branch or the repository is attached more than once (ambiguous).
+func resumeCheckoutBranchIdentity(repositoryID string, repos []*repoInfo) string {
+	var match *repoInfo
+	for _, info := range repos {
+		if info == nil || info.RepositoryID != repositoryID {
+			continue
+		}
+		if match != nil {
+			return ""
+		}
+		match = info
+	}
+	if match == nil || strings.TrimSpace(match.CheckoutBranch) == "" {
+		return ""
+	}
+	return worktree.SanitizeBranchSlug(match.CheckoutBranch)
 }
 
 // resolveResumeBaseBranch prefers the current task-repository row when a
@@ -2738,6 +2904,9 @@ func applyResumeRepoBasics(req *LaunchAgentRequest, repository *models.Repositor
 	if repositoryPath != "" {
 		req.RepositoryURL = repositoryPath
 		req.RepositoryPath = repositoryPath
+	}
+	if repository != nil && repository.DefaultBranch != "" {
+		req.DefaultBranch = repository.DefaultBranch
 	}
 	if useWorktree {
 		req.RepoName = repository.Name

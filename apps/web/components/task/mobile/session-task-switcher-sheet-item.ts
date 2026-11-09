@@ -5,7 +5,12 @@ import {
   type TaskState,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
-import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
+import { resolveWaitReason } from "@/lib/ui/waiting-reason";
+import {
+  statusSummaryRowErrorPreview,
+  statusSummaryTurnError,
+  statusSummaryUnreadSessionIds,
+} from "@/lib/task-status-summary";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
 import { effectiveTaskPendingAction } from "../task-select-helpers";
@@ -67,6 +72,18 @@ function sheetHasRunningSession(task: KanbanState["tasks"][number]) {
   return task.statusSummary?.has_running_session;
 }
 
+function sheetWaitStatus(task: KanbanState["tasks"][number]) {
+  return {
+    quotaWait: task.statusSummary?.quota_wait,
+    waitReason: resolveWaitReason({
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: sheetLaunchQueue(task),
+      quotaWait: task.statusSummary?.quota_wait,
+    }),
+  };
+}
+
 function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
   const summary = task.statusSummary;
   const hasSummary = summary != null;
@@ -88,12 +105,20 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
     hasPendingClarification: pending.clarification,
     hasPendingPermission: pending.permission,
     prInfo: taskPRInfoFromSummary(summary),
-    agentErrorMessage: statusSummaryActiveErrorPreview(
+    agentErrorMessage: statusSummaryRowErrorPreview(
       summary,
       ctx.acknowledgedAgentErrors,
       ctx.dismissedAgentErrors,
     ),
+    turnError: sheetTurnError(summary),
+    unreadSessionIds: statusSummaryUnreadSessionIds(summary),
   };
+}
+
+function sheetTurnError(summary: Parameters<typeof statusSummaryTurnError>[0]) {
+  const value = statusSummaryTurnError(summary);
+  if (!value) return null;
+  return { stamp: value.stamp, preview: value.preview, sessionId: value.session_id };
 }
 
 export function toSheetItem(
@@ -143,6 +168,7 @@ export function toSheetItem(
     effectiveColorToken: color.effectiveColorToken,
     queuedCount: task.statusSummary?.queued_prompt_count,
     launchQueue: sheetLaunchQueue(task),
+    ...sheetWaitStatus(task),
     wipQueue: ctx.wipQueueByTaskId?.get(task.id),
   };
 }

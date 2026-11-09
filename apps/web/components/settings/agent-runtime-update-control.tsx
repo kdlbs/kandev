@@ -22,6 +22,7 @@ import type {
 } from "@/lib/api";
 import type { RuntimeUpdate } from "@/lib/types/http";
 import { AgentRuntimeUpdateSurface } from "./agent-runtime-update-surface";
+import { CopilotRuntimeCompatibilityNotice } from "./copilot-runtime-compatibility";
 import { RuntimeVersionPicker } from "./runtime-version-picker";
 import { RuntimeVersionSummary } from "./runtime-version-summary";
 import { useAgentUpdateDialogState } from "./use-agent-update-dialog-state";
@@ -148,6 +149,10 @@ function RuntimeUpdatePreviewDetails({
   return (
     <>
       <RuntimeVersionSummary agentName={agentName} preview={preview} job={job} />
+      <CopilotRuntimeCompatibilityNotice
+        agentName={agentName}
+        compatibility={preview.copilot_plugin_compatibility}
+      />
       {preview.migration_available && (
         <div
           className="flex flex-wrap gap-2"

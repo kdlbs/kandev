@@ -35,7 +35,14 @@ func (g *GitOperator) ExportTurnCheckpoint(ctx context.Context, request turnchan
 }
 
 func (g *GitOperator) exportTurnCheckpointLocked(ctx context.Context, request turnchanges.ExportRequest, hashAlgorithm string) (turnchanges.CheckpointExport, error) {
-	compareRequest := turnchanges.CompareRequest(request)
+	if request.ExportBatchVersion == turnchanges.ExportBatchVersion1 {
+		return g.exportTurnCheckpointBatch(ctx, request, hashAlgorithm)
+	}
+	if request.ExportBatchVersion != 0 {
+		return turnchanges.CheckpointExport{}, turnCheckpointFailure(
+			turnchanges.ReasonHistoryUnsupported, errors.New("unsupported export batch version"))
+	}
+	compareRequest := compareRequestForTurnCheckpointExport(request)
 	start, end, err := g.turnCheckpointPair(ctx, compareRequest, hashAlgorithm)
 	if err != nil {
 		return turnchanges.CheckpointExport{}, err
@@ -54,6 +61,9 @@ func (g *GitOperator) exportTurnCheckpointLocked(ctx context.Context, request tu
 		HashAlgorithm: request.HashAlgorithm, StartCommitOID: request.StartCommitOID,
 		StartTreeOID: request.StartTreeOID, EndCommitOID: request.EndCommitOID, EndTreeOID: request.EndTreeOID,
 		Files: make([]turnchanges.CheckpointExportFile, 0, len(files)), Complete: true,
+		ComparisonVersion: turnchanges.ComparisonVersionLegacy, ComparisonBasis: turnchanges.ComparisonLegacyRaw,
+		EffectiveStartCommitOID: start.CommitOID, EffectiveStartTreeOID: start.TreeOID,
+		EffectiveEndCommitOID: end.CommitOID, EffectiveEndTreeOID: end.TreeOID,
 	}
 	for _, file := range files {
 		item, itemBytes, complete := g.exportTurnCheckpointFile(ctx, view, start.TreeOID, file, turnCheckpointExportLimit-export.ExportBytes)
@@ -63,6 +73,8 @@ func (g *GitOperator) exportTurnCheckpointLocked(ctx context.Context, request tu
 		export.ExportBytes += itemBytes
 		export.Files = append(export.Files, item)
 	}
+	export.NextCursor = int64(len(export.Files))
+	export.TotalFiles = int64(len(files))
 	return export, nil
 }
 
@@ -247,4 +259,13 @@ func exportFailureReason(err error) turnchanges.ReasonCode {
 		return checkpointErr.Reason
 	}
 	return turnchanges.ReasonContentUnavailable
+}
+
+func compareRequestForTurnCheckpointExport(request turnchanges.ExportRequest) turnchanges.CompareRequest {
+	return turnchanges.CompareRequest{
+		ChangeSetID: request.ChangeSetID, CheckoutID: request.CheckoutID, Repo: request.Repo,
+		HashAlgorithm: request.HashAlgorithm, StartCommitOID: request.StartCommitOID,
+		StartTreeOID: request.StartTreeOID, EndCommitOID: request.EndCommitOID, EndTreeOID: request.EndTreeOID,
+		ComparisonVersion: request.ComparisonVersion,
+	}
 }

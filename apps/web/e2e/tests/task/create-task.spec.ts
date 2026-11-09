@@ -117,6 +117,7 @@ test.describe("Task creation", () => {
 
   test("dialog pre-selects repository, branch, and agent profile from seed data", async ({
     testPage,
+    apiClient,
   }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -125,45 +126,65 @@ test.describe("Task creation", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
-    // Fill title + description to trigger the "Start task" split button (showStartTask)
-    await testPage.getByTestId("task-title-input").fill("Pre-select Test");
-    await testPage.getByTestId("task-description-input").fill("testing pre-selections");
+    const repository = dialog.getByTestId("repo-chip").first();
+    await expect(repository).toHaveAttribute("data-repository-id", /.+/);
+    const repositoryId = await repository.getAttribute("data-repository-id");
+    const policy = await apiClient.createRepositoryBranchPolicy(repositoryId!, {
+      name: `Preselection policy ${Date.now()}`,
+      base_branch: "main",
+      branch_template: "feature/{title}-{suffix}",
+      pull_request_target: "main",
+    });
+    try {
+      await testPage.reload();
+      await kanban.createTaskButton.first().click();
+      await expect(dialog).toBeVisible();
 
-    // Wait for the submit button to be enabled — confirms all selections resolved
-    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
-    await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
+      // Fill title + description to trigger the "Start task" split button (showStartTask)
+      await testPage.getByTestId("task-title-input").fill("Pre-select Test");
+      await testPage.getByTestId("task-description-input").fill("testing pre-selections");
 
-    // Verify the pre-seeded selections are displayed in the dialog selectors.
-    // The dialog uses chip-style repo/branch pills since the multi-repo refactor.
-    await expect(testPage.getByTestId("repo-chip-trigger").first()).toContainText("E2E Repo");
-    await expect(testPage.getByTestId("branch-chip-trigger").first()).toContainText("main");
-    // Agent profile name varies — just verify it's not the empty placeholder
-    await expect(testPage.getByTestId("agent-profile-selector")).not.toContainText(
-      "Select agent...",
-    );
+      // Wait for the submit button to be enabled — confirms all selections resolved
+      const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
+      await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
 
-    const repositorySelector = testPage.getByTestId("repo-chip-trigger").first();
-    await repositorySelector.click();
-    const repositoryListbox = testPage.getByRole("listbox");
-    const repositoryOptions = repositoryListbox.getByRole("option");
-    await expect(repositoryOptions.first()).toHaveAttribute("aria-selected", "true");
-    await expect(repositoryOptions.first()).toHaveClass(/bg-card/);
-    await testPage.keyboard.press("Escape");
+      // Verify the pre-seeded selections are displayed in the dialog selectors.
+      // The dialog uses chip-style repo/branch pills since the multi-repo refactor.
+      await expect(testPage.getByTestId("repo-chip-trigger").first()).toContainText("E2E Repo");
+      await expect(testPage.getByTestId("branch-chip-trigger").first()).toContainText("main");
+      // Agent profile name varies — just verify it's not the empty placeholder
+      await expect(testPage.getByTestId("agent-profile-selector")).not.toContainText(
+        "Select agent...",
+      );
 
-    const agentSelector = testPage.getByTestId("agent-profile-selector");
-    await agentSelector.click();
-    const agentListbox = testPage.getByRole("listbox");
-    const agentOptions = agentListbox.getByRole("option");
-    await expect(agentOptions.first()).toHaveAttribute("aria-selected", "true");
-    await expect(agentOptions.first()).toHaveClass(/bg-card/);
-    await testPage.keyboard.press("Escape");
+      const repositorySelector = testPage.getByTestId("repo-chip-trigger").first();
+      await repositorySelector.click();
+      const repositoryListbox = testPage.getByRole("listbox");
+      const repositoryOptions = repositoryListbox.getByRole("option");
+      await expect(repositoryOptions.first()).toHaveAttribute("aria-selected", "true");
+      await expect(repositoryOptions.first()).toHaveClass(/bg-card/);
+      await testPage.keyboard.press("Escape");
 
-    const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
-    await branchSelector.click();
-    const branchListbox = testPage.getByRole("listbox");
-    const branchOptions = branchListbox.getByRole("option");
-    await expect(branchOptions.first()).toHaveAttribute("aria-selected", "true");
-    await expect(branchOptions.first()).toHaveClass(/bg-card/);
+      const agentSelector = testPage.getByTestId("agent-profile-selector");
+      await agentSelector.click();
+      const agentListbox = testPage.getByRole("listbox");
+      const agentOptions = agentListbox.getByRole("option");
+      await expect(agentOptions.first()).toHaveAttribute("aria-selected", "true");
+      await expect(agentOptions.first()).toHaveClass(/bg-card/);
+      await testPage.keyboard.press("Escape");
+
+      const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
+      await branchSelector.click();
+      const branchListbox = testPage.getByRole("listbox");
+      const branchOptions = branchListbox.getByRole("option");
+      await expect(branchOptions.first()).toHaveAttribute("aria-selected", "true");
+      await expect(branchListbox.locator(`[data-value="policy:${policy.id}"]`)).toBeVisible();
+      const selectedMain = branchListbox.locator('[data-value="main"]');
+      await expect(selectedMain).toHaveClass(/bg-card/);
+      await expect(selectedMain).toHaveClass(/border-primary\/50/);
+    } finally {
+      await apiClient.deleteRepositoryBranchPolicy(policy.id);
+    }
   });
 
   test("dialog remembers selections after creating a task", async ({ testPage }) => {

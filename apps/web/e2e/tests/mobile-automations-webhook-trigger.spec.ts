@@ -22,9 +22,9 @@ test.describe("Webhook alert ingest trigger on mobile", () => {
     await testPage.getByText("Or use a webhook instead").tap();
     await automations.selectWorkflow("E2E Workflow");
 
-    await testPage.locator("button", { hasText: "Webhook" }).tap();
     const triggerCard = testPage.getByTestId("trigger-card-webhook");
     await expect(triggerCard).toBeVisible();
+    await triggerCard.getByRole("button", { name: "Webhook", exact: true }).tap();
 
     // Dedup key.
     await triggerCard.getByPlaceholder("issue.id").fill("issue.id");
@@ -72,8 +72,9 @@ test.describe("Webhook alert ingest trigger on mobile", () => {
     await automations.table.getByText(automationName, { exact: true }).tap();
     await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 10_000 });
     await expect(automations.editor).toBeVisible();
-    await testPage.locator("button", { hasText: "Webhook" }).tap();
     const reopened = testPage.getByTestId("trigger-card-webhook");
+    await expect(reopened).toBeVisible();
+    await reopened.getByRole("button", { name: "Webhook", exact: true }).tap();
 
     await expect(reopened.getByPlaceholder("issue.id")).toHaveValue("issue.id");
     await expect(reopened.getByPlaceholder("severity")).toHaveValue("severity");

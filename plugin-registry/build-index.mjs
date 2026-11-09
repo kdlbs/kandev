@@ -413,6 +413,23 @@ function humanize(pluginId) {
 }
 
 /**
+ * The reviewed registry pointer's owner segment is the native catalog
+ * identity. Manifest declarations and GitHub metadata never replace it.
+ */
+function curatedOwner(repo) {
+  return repo.split("/", 1)[0];
+}
+
+/**
+ * Correct a retained native record's attribution without mutating the prior
+ * document, preserving its release evidence.
+ */
+function attributeRetainedRecord(prior, spec) {
+  if ((spec.kind || "plugin") !== "plugin") return prior;
+  return { ...prior, author: curatedOwner(spec.repo) };
+}
+
+/**
  * Resolve a single plugins.yaml spec into a full index.json record.
  * @returns {Promise<{record?: object, error?: string}>}
  */
@@ -507,11 +524,13 @@ export async function buildEntry(
   const record = {
     id: pluginId,
     kind,
-    // Canvas presentation comes from the inspected archive. Plugins retain
-    // the existing manifest-first projection and fallback behavior.
+    // Canvas presentation comes from the inspected archive and keeps its
+    // metadata-owner fallback. Native plugins take their identity from the
+    // curated pointer, not the package manifest or GitHub metadata, so a
+    // manifest author cannot spoof the catalog owner.
     name: presentation.display_name || humanize(pluginId),
     description: presentation.description || release.name || "",
-    author: presentation.author || meta.author,
+    author: kind === "canvas" ? presentation.author || meta.author : curatedOwner(repo),
     categories: manifest.categories || spec.categories || [],
     icon_url: iconUrl,
     repo_url: presentation.repo_url || canonicalRepoURL,
@@ -704,13 +723,13 @@ async function fetchRepoMeta(repo, pluginId) {
         ? repoMeta.stargazers_count
         : null,
       updatedAt: repoMeta.pushed_at || null,
-      author: repoMeta.owner?.login || repo.split("/", 1)[0],
+      author: repoMeta.owner?.login || curatedOwner(repo),
     };
   } catch (error) {
     console.error(
       `warning: ${pluginId}: star/metadata lookup failed, emitting stars=null (${error.message})`,
     );
-    return { stars: null, updatedAt: null, author: repo.split("/", 1)[0] };
+    return { stars: null, updatedAt: null, author: curatedOwner(repo) };
   }
 }
 
@@ -733,7 +752,7 @@ export async function buildIndex(
       if ((spec.kind || "plugin") === "canvas") canvasErrors.push(error);
       const prior = trustedPriorRecord(priorDocument, spec);
       if (prior) {
-        records.push(prior);
+        records.push(attributeRetainedRecord(prior, spec));
         retained.push(spec.id);
         console.error(`retain: ${error}`);
       } else {

@@ -75,8 +75,7 @@ func buildLinuxBinaries(ctx context.Context, outDir string) error {
 }
 
 // buildKandevDocker builds kandev inside a linux/amd64 Docker container.
-// apps/backend is mounted at /work; the output is written to /work/bin/kandev
-// then copied to the host out path.
+// Mounts preserve the backend-to-SDK relative path. The SDK mount is read-only.
 func buildKandevDocker(ctx context.Context, out string) error {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -87,17 +86,18 @@ func buildKandevDocker(ctx context.Context, out string) error {
 	if err := os.MkdirAll(filepath.Join(wd, "bin"), 0o755); err != nil {
 		return fmt.Errorf("mkdir bin: %w", err)
 	}
-	// Output inside the container (relative to /work mount).
-	containerOut := "/work/bin/kandev-preview-build"
+	// Output stays inside the writable backend mount.
+	containerOut := "/work/apps/backend/bin/kandev-preview-build"
 	goCache := filepath.Join(os.Getenv("HOME"), ".cache", "go-build-linux")
 	goModCache := filepath.Join(os.Getenv("HOME"), "go", "pkg", "mod")
 
 	cmd := exec.CommandContext(ctx, "docker", "run", "--rm",
 		"--platform", "linux/amd64",
-		"-v", wd+":/work",
+		"-v", wd+":/work/apps/backend",
+		"-v", filepath.Join(wd, "../../pluginsdk")+":/work/pluginsdk:ro",
 		"-v", goCache+":/root/.cache/go-build",
 		"-v", goModCache+":/go/pkg/mod",
-		"-w", "/work",
+		"-w", "/work/apps/backend",
 		goDockerImage,
 		"go", "build", "-trimpath", "-ldflags", "-s -w",
 		"-o", containerOut,
@@ -109,7 +109,7 @@ func buildKandevDocker(ctx context.Context, out string) error {
 		return fmt.Errorf("docker build kandev: %w", err)
 	}
 
-	// Copy from temp path (inside /work mount) to the desired output path.
+	// Copy from the backend mount to the desired output path.
 	// os.Rename fails with EXDEV when hostTmp and out are on different filesystems
 	// (e.g. the repo is on a regular disk and out is under os.TempDir() on tmpfs).
 	hostTmp := filepath.Join(wd, "bin", "kandev-preview-build")

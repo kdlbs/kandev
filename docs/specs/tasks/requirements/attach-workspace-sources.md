@@ -28,6 +28,10 @@ providing atomic validation and materialization.
 - **AC-TASKS-ATTACH-WORKSPACE-SOURCES-001.4:** When any source in a multi-source submission fails during materialization, the system shall roll back all new attachments and restore any pre-existing Kandev-owned entry that the submission repointed.
 - **AC-TASKS-ATTACH-WORKSPACE-SOURCES-001.5:** When attachment changes the effective task root, the system shall preserve task state, plans, conversations, sessions, and existing attachments, publish the updated workspace projection, and retain the native provider session when compatible. If native resume is incompatible, recorded-history continuation shall require an explicit user action.
 - **AC-TASKS-ATTACH-WORKSPACE-SOURCES-001.6:** When an agent uses the legacy worktree-only add-branch action, the system shall create the new worktree as a task-root sibling, return its exact paths, refresh task projections, and leave the running agent working directory unchanged.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-001.7:** When attachment expands the Files root without changing the agent working directory, existing and subsequent repository-relative chat links shall retain their originating checkout. Desktop and phone shall open the same file before attachment, after attachment, and after reload.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-001.8:** Absolute and explicitly workspace-qualified chat links shall retain their selected source after attachment. Identical filenames in other repositories shall not redirect a link. Unknown or ambiguous source identity shall not authorize a guessed repository or an outside-workspace read.
+
+The [chat file-link context design](../system-design/chat-file-link-context.md) defines criteria `.7` and `.8`.
 
 
 ### REQ-TASKS-ATTACH-WORKSPACE-SOURCES-002: Complete repository association replacement

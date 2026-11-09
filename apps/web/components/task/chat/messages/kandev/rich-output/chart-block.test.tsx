@@ -79,6 +79,7 @@ function installIntersectionObserver() {
     readonly root = null;
     readonly rootMargin = "0px";
     readonly thresholds: readonly number[] = [];
+    readonly scrollMargin = "0px";
     private readonly record: ObserverRecord;
 
     constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {

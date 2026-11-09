@@ -82,7 +82,7 @@ func (s *Service) checkoutOptionsProvider(ctx context.Context, workspaceID strin
 		}
 		return repo.Provider, nil
 	}
-	provider, _, _, _, err := parseRemoteRepositoryURL(effectiveRemoteURL(input), input.Provider)
+	provider, _, _, _, err := parseRemoteRepositoryURL(effectiveRemoteURL(input), effectiveRemoteProvider(input))
 	return provider, err
 }
 

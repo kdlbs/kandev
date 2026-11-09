@@ -163,6 +163,19 @@ describe("getMarkdownText", () => {
 });
 
 describe("textToEditorContent", () => {
+  it("preserves blank paragraphs during draft restoration", () => {
+    const content = textToEditorContent("first paragraph\n\nsecond paragraph");
+
+    expect(content).toEqual({
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "first paragraph" }] },
+        { type: "paragraph" },
+        { type: "paragraph", content: [{ type: "text", text: "second paragraph" }] },
+      ],
+    });
+  });
+
   it("restores known slash commands as slash command nodes", () => {
     const content = textToEditorContent("/slow 1s", [slowCommand]);
 

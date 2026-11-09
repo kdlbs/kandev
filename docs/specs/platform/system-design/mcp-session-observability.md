@@ -262,10 +262,17 @@ The list uses these display states:
 - **Active** in green when `tools/list` succeeded for the current execution;
 - **Connected** in amber when initialize succeeded but tools have not been
   listed;
-- **Delivered · connection unverified** in amber when configuration reached
+- **Delivered, connection unverified** in neutral gray when configuration reached
   the agent but Kandev has no connection observation;
 - **Failed** in red only for an explicit server-specific attachment error;
-- **Filtered** or **Unavailable** in gray with the reason.
+- **Filtered** or **Unavailable** in gray with the reason;
+- **Unknown** in neutral gray when current server-specific evidence is absent.
+  A configured name does not establish delivery, even beside an observed server.
+
+Delivery and unknown styling is independent of saved-selection application
+state. Pending, deferred, failed, or applied selections do not upgrade or
+downgrade connection evidence. Previous attempts do not promote the current
+attempt. Shared tooltip, list, and detail presentation uses these same rules.
 
 An unscoped ACP session error appears as a report-level diagnostic and does not
 incorrectly mark every delivered server as failed. Tool use is shown as detail

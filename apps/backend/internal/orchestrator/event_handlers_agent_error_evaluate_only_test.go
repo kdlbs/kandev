@@ -611,9 +611,12 @@ func (r *agentErrorBlockingCommitRepo) sessionCallCount() int {
 	return r.sessionCalls
 }
 
-func (r *agentErrorBlockingCommitRepo) UpdateTaskWithWorkflowStepAdmission(
-	ctx context.Context, task *models.Task, sourceStepID, targetStepID string, limit int,
-) (bool, error) {
+// enterCommit counts a commit call and blocks the first one until the test
+// releases it. The automatic-transition path commits through the
+// applied-reporting variant, so this wrapper must intercept that method too;
+// intercepting only the plain admission would let the real commit run
+// unblocked and the entered channel would never close.
+func (r *agentErrorBlockingCommitRepo) enterCommit() {
 	r.commitMu.Lock()
 	r.commitCalls++
 	first := r.commitCalls == 1
@@ -622,7 +625,20 @@ func (r *agentErrorBlockingCommitRepo) UpdateTaskWithWorkflowStepAdmission(
 		close(r.entered)
 		<-r.release
 	}
+}
+
+func (r *agentErrorBlockingCommitRepo) UpdateTaskWithWorkflowStepAdmission(
+	ctx context.Context, task *models.Task, sourceStepID, targetStepID string, limit int,
+) (bool, error) {
+	r.enterCommit()
 	return r.Repository.UpdateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit)
+}
+
+func (r *agentErrorBlockingCommitRepo) UpdateTaskWithWorkflowStepAdmissionReportingApplied(
+	ctx context.Context, task *models.Task, sourceStepID, targetStepID string, limit int,
+) (bool, bool, error) {
+	r.enterCommit()
+	return r.Repository.UpdateTaskWithWorkflowStepAdmissionReportingApplied(ctx, task, sourceStepID, targetStepID, limit)
 }
 
 // TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationLockSpansThroughCommit

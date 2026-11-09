@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -876,6 +877,9 @@ func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Me
 	select {
 	case r := <-ch:
 		if r.Err != nil {
+			if errors.Is(r.Err, models.ErrTaskSessionNotFound) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "not found", nil)
+			}
 			return nil, r.Err
 		}
 		return ws.NewResponse(msg.ID, msg.Action, r.Val)
@@ -966,6 +970,9 @@ func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*w
 	select {
 	case r := <-ch:
 		if r.Err != nil {
+			if errors.Is(r.Err, models.ErrTaskSessionNotFound) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "not found", nil)
+			}
 			return nil, r.Err
 		}
 		return ws.NewResponse(msg.ID, msg.Action, r.Val)

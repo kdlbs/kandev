@@ -23,6 +23,22 @@ func TestContinuationSafetySnapshotRemoteRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(rawV2), `"completed_tools":2`)
 	require.True(t, dataV2.ContinuationSafety.SafeFor(7))
+
+	const inputV3 = `{"session_id":"s1","agent_execution_id":"e1","prompt_generation":7,"continuation_safety":{"support":"native_history_agent_managed_tools_v3","prompt_generation":7,"known":true,"unsafe":false,"pending":true,"permissions_resolved":true,"completed_tools":1}}`
+	var dataV3 AgentEventData
+	require.NoError(t, json.Unmarshal([]byte(inputV3), &dataV3))
+	require.True(t, dataV3.ContinuationSafety.SafeFor(7))
+	rawV3, err := json.Marshal(dataV3)
+	require.NoError(t, err)
+	require.Contains(t, string(rawV3), `"permissions_resolved":true`)
+	var decodedV3 AgentEventData
+	require.NoError(t, json.Unmarshal(rawV3, &decodedV3))
+	require.True(t, decodedV3.ContinuationSafety.Pending)
+	require.True(t, decodedV3.ContinuationSafety.SafeFor(7))
+
+	var oldHelper AgentEventData
+	require.NoError(t, json.Unmarshal([]byte(`{"prompt_generation":7,"continuation_safety":{"support":"native_history_agent_managed_tools_v3","prompt_generation":7,"known":true,"pending":true}}`), &oldHelper))
+	require.False(t, oldHelper.ContinuationSafety.SafeFor(7), "missing V3 permission attestation fails closed")
 }
 
 func TestCapacityContinuationSnapshotRemoteRoundTrip(t *testing.T) {
@@ -42,4 +58,14 @@ func TestCapacityContinuationSnapshotRemoteRoundTrip(t *testing.T) {
 	var omitted AgentEventData
 	require.NoError(t, json.Unmarshal([]byte(`{"session_id":"s1","agent_execution_id":"e1"}`), &omitted))
 	require.Nil(t, omitted.CapacityContinuation)
+
+	const v2 = `{"session_id":"s1","agent_execution_id":"e1","prompt_generation":8,"capacity_continuation":{"support":"codex_live_session_v2","prompt_generation":8,"evidence_complete":true,"pending_tools":false,"failed_tools":false,"unknown_outcomes":false,"permission_pending":false,"unaccounted_background":false,"completed_tools":1,"known_failed_shell_tools":2}}`
+	require.NoError(t, json.Unmarshal([]byte(v2), &data))
+	require.Equal(t, uint16(2), data.CapacityContinuation.KnownFailedShellTools)
+	require.True(t, data.CapacityContinuation.SafeFor(8))
+	require.True(t, data.CapacityContinuation.SupportsKnownFailedShellTools())
+
+	var unknown AgentEventData
+	require.NoError(t, json.Unmarshal([]byte(`{"session_id":"s1","agent_execution_id":"e1","prompt_generation":8,"capacity_continuation":{"support":"future_live_session_v3","prompt_generation":8,"evidence_complete":true,"completed_tools":1,"known_failed_shell_tools":2}}`), &unknown))
+	require.False(t, unknown.CapacityContinuation.SafeFor(8), "unknown support must keep the conservative policy")
 }

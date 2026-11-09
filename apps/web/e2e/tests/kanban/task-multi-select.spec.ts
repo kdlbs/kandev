@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
+import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
 test.describe("Multi-select bulk actions", () => {
   test("toolbar appears when a task is selected via checkbox", async ({
@@ -294,4 +295,45 @@ test.describe("Multi-select bulk actions", () => {
       )
       .toEqual(["MS Order 1", "MS Order 2", "MS Order 3", "MS Order 4"]);
   });
+});
+
+// @covers AC-TASKS-BOARD-BULK-MOVE-SCOPE-001.1
+test("All Workflows bulk move keeps the selected workflow", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Bulk move B", "simple");
+  const steps = (await apiClient.listWorkflowSteps(workflow.id)).steps;
+  const start = steps.find((step) => step.is_start_step) ?? steps[0];
+  const target =
+    steps.find((step) => step.id !== start.id) ??
+    (await apiClient.createWorkflowStep(workflow.id, "Destination B", 1));
+  const selected = await apiClient.createTask(seedData.workspaceId, "Bulk scope B", {
+    workflow_id: workflow.id,
+    workflow_step_id: start.id,
+  });
+  await apiClient.saveUserSettings({
+    workspace_id: seedData.workspaceId,
+    workflow_filter_id: seedData.workflowId,
+  });
+  const board = new KanbanPage(testPage);
+  await board.goto();
+  await testPage.getByTestId("display-button").click();
+  await expandDisplaySettingsGroup(testPage, "filters");
+  await testPage.getByTestId("display-workflow-filter").click();
+  await testPage
+    .getByRole("listbox")
+    .getByRole("option", { name: "All Workflows", exact: true })
+    .click();
+  await testPage.getByTestId("display-button").click({ force: true });
+  await board.selectTask(selected.id);
+  await board.bulkMoveButton.click();
+  await board.bulkMoveStepOption(target.id).click();
+  await expect
+    .poll(async () => {
+      const current = await apiClient.getTask(selected.id);
+      return { workflow: current.workflow_id, step: current.workflow_step_id };
+    })
+    .toEqual({ workflow: workflow.id, step: target.id });
 });

@@ -268,7 +268,8 @@ type TaskDTO struct {
 	DependsOn []TaskDependencyRefDTO `json:"depends_on,omitempty"`
 	// Blocks lists direct dependents so the dependency chip can render both
 	// directions without a second round trip.
-	Blocks []TaskDependencyRefDTO `json:"blocks,omitempty"`
+	Blocks  []TaskDependencyRefDTO `json:"blocks,omitempty"`
+	Related []TaskDependencyRefDTO `json:"related,omitempty"`
 	// StartWhenUnblocked reports that a launch intent is waiting on dependency
 	// resolution. Read-only here; set through the create request or the picker.
 	StartWhenUnblocked bool `json:"start_when_unblocked,omitempty"`
@@ -296,6 +297,9 @@ type TaskDTO struct {
 	// idempotency (docs/specs/tasks/requirements/external-id-idempotency.md). Omitted
 	// when the task holds none.
 	ExternalID string `json:"external_id,omitempty"`
+	// QuickChatCreationID is the exact retry token carried by lifecycle
+	// projections for an internally keyed Quick Chat creation.
+	QuickChatCreationID string `json:"quick_chat_creation_id,omitempty"`
 	// IsFromOffice is the authoritative "this task is owned by office"
 	// flag. Computed by the task repo at read time as
 	// (project_id != '' OR workflow_id == workspace.office_workflow_id).
@@ -433,6 +437,9 @@ type TaskSessionDTO struct {
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
+	// AgentWorkspacePath is the confirmed native-session working directory used
+	// as the base for repository-relative chat links. Null means unknown.
+	AgentWorkspacePath *string `json:"agent_workspace_path"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for backward
 	// compatibility. Entries use the stable session-worktree wire shape
@@ -471,6 +478,9 @@ type TaskSessionDTO struct {
 	// generation that produced CancellationPending. It is always serialized so
 	// clients can reject delayed snapshots from older generations.
 	CancellationRevision uint64 `json:"cancellation_revision"`
+	// RuntimeStorageHealth mirrors the lifecycle-owned advisory capacity
+	// projection. It is never persisted and stays absent for older sources.
+	RuntimeStorageHealth *RuntimeStorageHealthDTO `json:"runtime_storage_health,omitempty"`
 	// SupportsSteering is true when a send right now would be delivered into the
 	// still-generating turn (mid-turn steering) rather than blocked/queued.
 	// Derived live at serialization from the connected agent's negotiated
@@ -630,6 +640,9 @@ type TaskSessionSummaryDTO struct {
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
+	// AgentWorkspacePath is the confirmed native-session working directory used
+	// as the base for repository-relative chat links. Null means unknown.
+	AgentWorkspacePath *string `json:"agent_workspace_path"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for backward
 	// compatibility. Entries use the stable session-worktree wire shape.
@@ -653,6 +666,9 @@ type TaskSessionSummaryDTO struct {
 	// CancellationRevision identifies the process-local cancellation transition
 	// generation represented by CancellationPending.
 	CancellationRevision uint64 `json:"cancellation_revision"`
+	// RuntimeStorageHealth mirrors the lifecycle-owned advisory capacity
+	// projection. It is never persisted and stays absent for older sources.
+	RuntimeStorageHealth *RuntimeStorageHealthDTO `json:"runtime_storage_health,omitempty"`
 	// SupportsSteering mirrors TaskSessionDTO.SupportsSteering for list endpoints.
 	SupportsSteering bool `json:"supports_steering,omitempty"`
 	// PendingAction is the compact per-session projection used when the
@@ -1210,8 +1226,18 @@ func FromTaskWithSessionInfo(
 		Labels:                 task.Labels,
 		Identifier:             task.Identifier,
 		ExternalID:             task.ExternalID,
+		QuickChatCreationID:    service.QuickChatCreationIDFromExternalID(task.ExternalID),
 		IsFromOffice:           task.IsFromOffice,
 	}
+}
+
+// agentWorkspacePathPtr projects an empty native-workspace projection as an
+// explicit null so a full response can clear a stale client value.
+func agentWorkspacePathPtr(path string) *string {
+	if path == "" {
+		return nil
+	}
+	return &path
 }
 
 // FromTaskSessionSummary converts a session model to a summary DTO (no snapshot fields).
@@ -1235,6 +1261,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		BaseBranch:         session.BaseBranch,
 		BaseCommitSHA:      session.BaseCommitSHA,
 		WorkspacePath:      session.WorkspacePath,
+		AgentWorkspacePath: agentWorkspacePathPtr(session.AgentWorkspacePath),
 		State:              session.State,
 		ErrorMessage:       session.ErrorMessage,
 		Metadata:           session.Metadata,
@@ -1282,6 +1309,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		BaseBranch:           session.BaseBranch,
 		BaseCommitSHA:        session.BaseCommitSHA,
 		WorkspacePath:        session.WorkspacePath,
+		AgentWorkspacePath:   agentWorkspacePathPtr(session.AgentWorkspacePath),
 		State:                session.State,
 		ErrorMessage:         session.ErrorMessage,
 		Metadata:             session.Metadata,

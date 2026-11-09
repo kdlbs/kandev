@@ -4,6 +4,7 @@ import { t } from "@/lib/i18n";
 import { PlanCommentMigrationNotice } from "@/components/task/plan-comment-migration-notice";
 import { ComposerAgentStartHint } from "./composer-agent-start-hint";
 import { DynamicRouteRecovery } from "./dynamic-route-recovery";
+import { SessionDeliveryStorageNotice } from "./session-delivery-storage-notice";
 import type { ChatPanelState } from "./use-chat-panel-state";
 
 /** Announces restart progress without showing the competing agent-start hint. */
@@ -29,6 +30,7 @@ export function ComposerStatusNotices({
           {t("task:sessionActionRestart")}
         </p>
       )}
+      <SessionDeliveryStorageNotice health={panelState.session?.runtime_storage_health} />
       <DynamicRouteRecovery session={panelState.session} />
       <ComposerAgentStartHint
         show={showAgentStartHint && !isRestarting}

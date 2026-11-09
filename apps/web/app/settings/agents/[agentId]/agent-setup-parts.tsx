@@ -52,6 +52,9 @@ function profileFormData(
     cli_passthrough: profile.cliPassthrough ?? false,
     cursor_mcp_auth_enabled: profile.cursorMcpAuthEnabled ?? true,
     cursor_plugins_mcp_enabled: profile.cursorPluginsMcpEnabled ?? true,
+    mcp_selection_mode: profile.mcpSelectionMode ?? "inherit",
+    mcp_selected_servers: profile.mcpSelectedServers ?? [],
+    copilot_selected_plugins: profile.copilotSelectedPlugins ?? [],
     cli_flags: profile.cliFlags ?? [],
     env_vars: profile.envVars ?? [],
     command_prefix: profile.commandPrefix ?? "",
@@ -189,6 +192,8 @@ export function ProfileCardItem({
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
           agentName={draftAgent.name}
+          agentId={draftAgent.id}
+          copilotDiscoveryDisabled={Boolean(draftAgent.isNew)}
           capabilityProfileId={savedProfile?.id}
           cursorMcpAuthSupported={
             draftAgent.name === "cursor-acp" || draftAgent.tui_config?.mcp_strategy === "cursor"

@@ -47,12 +47,19 @@ func BackupSQLite(ctx context.Context, source *sql.DB, path string) (err error) 
 	return copySQLiteConnections(ctx, source, destination)
 }
 
-func copySQLiteConnections(ctx context.Context, source, destination *sql.DB) error {
+func copySQLiteConnections(ctx context.Context, source, destination *sql.DB) (err error) {
 	src, err := source.Conn(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = src.Close() }()
+	releaseSnapshot, err := pinSQLiteWALSnapshot(ctx, src)
+	if err != nil {
+		return err
+	}
+	if releaseSnapshot != nil {
+		defer func() { err = errors.Join(err, releaseSnapshot()) }()
+	}
 	dst, err := destination.Conn(ctx)
 	if err != nil {
 		return err
@@ -78,6 +85,47 @@ func copySQLiteConnections(ctx context.Context, source, destination *sql.DB) err
 			return copySQLitePages(ctx, sourceSQLite, destinationSQLite, max(1, (4<<20)/pageSize))
 		})
 	})
+}
+
+// A committed write on another connection restarts an incremental backup unless
+// its WAL reader already holds a snapshot. Keep that read point across steps;
+// WAL writers can still commit while the copy runs. Leave caller transactions
+// and other journal modes under their existing ownership and locking semantics.
+func pinSQLiteWALSnapshot(ctx context.Context, source *sql.Conn) (func() error, error) {
+	var autocommit bool
+	if err := source.Raw(func(driver any) error {
+		connection, ok := driver.(*sqlite3.SQLiteConn)
+		if !ok {
+			return errors.New("backup source is not a SQLite connection")
+		}
+		autocommit = connection.AutoCommit()
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if !autocommit {
+		return nil, nil
+	}
+	var journalMode string
+	if err := source.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&journalMode); err != nil {
+		return nil, err
+	}
+	if journalMode != "wal" {
+		return nil, nil
+	}
+	if _, err := source.ExecContext(ctx, `BEGIN DEFERRED`); err != nil {
+		return nil, err
+	}
+	release := func() error {
+		_, err := source.ExecContext(context.Background(), `ROLLBACK`)
+		return err
+	}
+	// BEGIN alone is deferred; the read establishes the snapshot before Backup.
+	var schemaEntries int
+	if err := source.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema`).Scan(&schemaEntries); err != nil {
+		return nil, errors.Join(err, release())
+	}
+	return release, nil
 }
 
 func copySQLitePages(ctx context.Context, source, destination *sqlite3.SQLiteConn, pages int) (err error) {

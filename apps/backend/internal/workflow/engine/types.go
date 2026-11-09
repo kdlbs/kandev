@@ -269,14 +269,7 @@ func ValidParticipantRole(role string) bool {
 // ValidStageType reports whether the supplied string matches the schema's
 // CHECK constraint for workflow_steps.stage_type.
 func ValidStageType(stage string) bool {
-	switch wfmodels.StageType(stage) {
-	case wfmodels.StageTypeWork,
-		wfmodels.StageTypeReview,
-		wfmodels.StageTypeApproval,
-		wfmodels.StageTypeCustom:
-		return true
-	}
-	return false
+	return wfmodels.StageType(stage).IsValid()
 }
 
 // ValidWorkflowStyle reports whether the supplied string matches the schema's

@@ -14,6 +14,7 @@ func bootDependencyProjection(view taskservice.DependencyView) taskdto.TaskDepen
 		BlockedReason: view.BlockedReason,
 		DependsOn:     bootDependencyRefs(view.DependsOn),
 		Blocks:        bootDependencyRefs(view.Blocks),
+		Related:       bootDependencyRefs(view.Related),
 	}
 }
 

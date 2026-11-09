@@ -9,7 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/state"
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	_ "github.com/mattn/go-sqlite3"
 )
 

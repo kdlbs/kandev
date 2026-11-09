@@ -14,44 +14,53 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 
 const (
 	CurrentVersion                     uint32 = 2
-	DefaultMaxEventBytes                      = 1 << 20
-	DefaultReserveBytes                       = 1 << 20
+	DefaultMaxEventBytes                      = deliverylimits.MaxEventBytes
+	DefaultMaxSubmissionBytes                 = deliverylimits.MaxSubmissionBytes
+	DefaultMaxReplayBytes                     = deliverylimits.ReplayResponseBytes
+	DefaultReserveBytes                       = deliverylimits.MiB
 	DefaultDiskReserveBytes                   = 32 << 20
 	DefaultDiskAllocationHeadroomBytes        = 16 << 20
-	DefaultDiskWriteHeadroomBytes             = DefaultDiskAllocationHeadroomBytes + (4 << 20) + 2*DefaultMaxEventBytes
+	DefaultDiskWriteHeadroomBytes             = DefaultDiskAllocationHeadroomBytes + (4 << 20) + 3*DefaultMaxEventBytes
 	MaxStreamSubmissions                      = 10000
+	replayEnvelopeAllowanceBytes              = 4 << 10
+	replayRecordOverheadBytes                 = 512
 	defaultDiskCapacityReadTimeout            = 2 * time.Second
 )
 
 var (
-	ErrJournalCorrupt       = errors.New("agent delivery journal is corrupt")
-	ErrJournalClosed        = bolt.ErrDatabaseNotOpen
-	ErrJournalNewerVersion  = errors.New("agent delivery journal uses a newer version")
-	ErrJournalFull          = errors.New("agent delivery journal is full")
-	ErrStreamFull           = errors.New("agent delivery stream is full")
-	ErrStreamNotFound       = errors.New("agent delivery stream not found")
-	ErrCursorExpired        = errors.New("agent delivery cursor expired")
-	ErrSequenceConflict     = errors.New("agent delivery sequence conflict")
-	ErrSubmissionConflict   = errors.New("agent delivery submission conflict")
-	ErrSubmissionNotFound   = errors.New("agent delivery submission not found")
-	ErrSubmissionState      = errors.New("invalid agent delivery submission transition")
-	ErrSubmissionGeneration = errors.New("agent delivery submission requires a newer harness generation")
-	ErrOwnerMismatch        = errors.New("agent delivery owner mismatch")
+	ErrJournalCorrupt        = errors.New("agent delivery journal is corrupt")
+	ErrJournalClosed         = bolt.ErrDatabaseNotOpen
+	ErrJournalNewerVersion   = errors.New("agent delivery journal uses a newer version")
+	ErrJournalFull           = errors.New("agent delivery journal is full")
+	ErrStreamFull            = errors.New("agent delivery stream is full")
+	ErrEventTooLarge         = fmt.Errorf("%w: event payload exceeds the maximum event size", ErrStreamFull)
+	ErrReplayPageTooLarge    = errors.New("agent delivery replay page exceeds the byte budget")
+	ErrStreamNotFound        = errors.New("agent delivery stream not found")
+	ErrCursorExpired         = errors.New("agent delivery cursor expired")
+	ErrSequenceConflict      = errors.New("agent delivery sequence conflict")
+	ErrSubmissionConflict    = errors.New("agent delivery submission conflict")
+	ErrSubmissionNotFound    = errors.New("agent delivery submission not found")
+	ErrSubmissionState       = errors.New("invalid agent delivery submission transition")
+	ErrSubmissionGeneration  = errors.New("agent delivery submission requires a newer harness generation")
+	ErrOwnerMismatch         = errors.New("agent delivery owner mismatch")
+	ErrEventIdentityConflict = errors.New("agent delivery event identity conflicts with a committed event")
 )
 
 var (
-	bucketMeta        = []byte("meta")
-	bucketEvents      = []byte("events")
-	bucketStreamMeta  = []byte("stream_meta")
-	bucketSubmissions = []byte("submissions")
-	keyVersion        = []byte("version")
-	keyJournalBytes   = []byte("journal_bytes")
+	bucketMeta            = []byte("meta")
+	bucketEvents          = []byte("events")
+	bucketStreamMeta      = []byte("stream_meta")
+	bucketSubmissions     = []byte("submissions")
+	bucketEventIdentities = []byte("event_identities")
+	keyVersion            = []byte("version")
+	keyJournalBytes       = []byte("journal_bytes")
 )
 
 type Config struct {
@@ -59,6 +68,8 @@ type Config struct {
 	ExistingOnly           bool
 	Path                   string
 	MaxEventBytes          int64
+	MaxSubmissionBytes     int64
+	MaxReplayBytes         int64
 	MaxStreamBytes         int64
 	MaxJournalBytes        int64
 	ReserveBytes           int64
@@ -73,6 +84,12 @@ type Config struct {
 func (c Config) withDefaults() Config {
 	if c.MaxEventBytes <= 0 {
 		c.MaxEventBytes = DefaultMaxEventBytes
+	}
+	if c.MaxSubmissionBytes <= 0 {
+		c.MaxSubmissionBytes = deliverylimits.SubmissionLimitFor(c.MaxEventBytes)
+	}
+	if c.MaxReplayBytes <= 0 {
+		c.MaxReplayBytes = DefaultMaxReplayBytes
 	}
 	if c.ReserveBytes <= 0 {
 		c.ReserveBytes = DefaultReserveBytes
@@ -99,16 +116,19 @@ func (c Config) withDefaults() Config {
 }
 
 type Event struct {
-	SessionID         string    `json:"session_id"`
-	IncarnationID     string    `json:"incarnation_id"`
-	HarnessGeneration uint64    `json:"harness_generation"`
-	StreamID          string    `json:"stream_id"`
-	Sequence          uint64    `json:"sequence"`
-	SubmissionID      string    `json:"submission_id,omitempty"`
-	Type              string    `json:"type"`
-	Payload           []byte    `json:"payload"`
-	Terminal          bool      `json:"terminal,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
+	SessionID         string `json:"session_id"`
+	IncarnationID     string `json:"incarnation_id"`
+	HarnessGeneration uint64 `json:"harness_generation"`
+	StreamID          string `json:"stream_id"`
+	Sequence          uint64 `json:"sequence"`
+	SubmissionID      string `json:"submission_id,omitempty"`
+	// Identity is an optional stable producer identity. A retry with the same
+	// identity returns the committed event without a second projection.
+	Identity  string    `json:"identity,omitempty"`
+	Type      string    `json:"type"`
+	Payload   []byte    `json:"payload"`
+	Terminal  bool      `json:"terminal,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Stream struct {
@@ -166,6 +186,7 @@ type Journal struct {
 }
 
 func Open(config Config) (journal *Journal, err error) {
+	started := time.Now()
 	defer func() {
 		if err != nil {
 			RecordJournalError(classifyJournalError(err))
@@ -179,10 +200,10 @@ func Open(config Config) (journal *Journal, err error) {
 		config.ExistingOnly = true
 	} else {
 		if err := os.MkdirAll(filepath.Dir(config.Path), 0o700); err != nil {
-			return nil, fmt.Errorf("create journal directory: %w", err)
+			return nil, newOpenError(config.Path, config.OpenTimeout, time.Since(started), fmt.Errorf("create journal directory: %w", err))
 		}
 		if err := os.Chmod(filepath.Dir(config.Path), 0o700); err != nil {
-			return nil, fmt.Errorf("secure journal directory: %w", err)
+			return nil, newOpenError(config.Path, config.OpenTimeout, time.Since(started), fmt.Errorf("secure journal directory: %w", err))
 		}
 	}
 	options := &bolt.Options{Timeout: config.OpenTimeout, NoSync: false, ReadOnly: config.ReadOnly}
@@ -193,7 +214,7 @@ func Open(config Config) (journal *Journal, err error) {
 	}
 	db, err := bolt.Open(config.Path, 0o600, options)
 	if err != nil {
-		return nil, fmt.Errorf("open delivery journal: %w", err)
+		return nil, newOpenError(config.Path, config.OpenTimeout, time.Since(started), fmt.Errorf("open delivery journal: %w", err))
 	}
 	// Page size is immutable; Info also reads the mapping, so capture it before concurrent writes.
 	journal = &Journal{db: db, pageSize: int64(db.Info().PageSize), config: config}
@@ -204,7 +225,7 @@ func Open(config Config) (journal *Journal, err error) {
 	}
 	if err != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, newOpenError(config.Path, config.OpenTimeout, time.Since(started), err)
 	}
 	journal.refreshMetrics()
 	return journal, nil
@@ -245,7 +266,8 @@ func (j *Journal) validateReadOnly() error {
 }
 
 func initializeFreshJournal(tx *bolt.Tx, meta *bolt.Bucket) error {
-	if meta.Stats().KeyN != 0 || tx.Bucket(bucketEvents) != nil || tx.Bucket(bucketStreamMeta) != nil || tx.Bucket(bucketSubmissions) != nil {
+	if meta.Stats().KeyN != 0 || tx.Bucket(bucketEvents) != nil || tx.Bucket(bucketStreamMeta) != nil ||
+		tx.Bucket(bucketSubmissions) != nil || tx.Bucket(bucketEventIdentities) != nil {
 		return ErrJournalCorrupt
 	}
 	var encoded [4]byte
@@ -349,7 +371,7 @@ func calculateJournalAccounting(tx *bolt.Tx) (total, legacyEventOnly int64, err 
 }
 
 func createJournalBuckets(tx *bolt.Tx) error {
-	for _, name := range [][]byte{bucketEvents, bucketStreamMeta, bucketSubmissions} {
+	for _, name := range [][]byte{bucketEvents, bucketStreamMeta, bucketSubmissions, bucketEventIdentities} {
 		if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 			return err
 		}
@@ -493,13 +515,28 @@ func (j *Journal) CompactIfNeeded(ctx context.Context) error {
 	return j.Compact(ctx)
 }
 
-// MaxEventBytes returns the configured logical payload limit shared by event
-// and submission admission.
+// MaxEventBytes returns the configured encoded event payload limit.
 func (j *Journal) MaxEventBytes() int64 {
 	if j == nil {
 		return 0
 	}
 	return j.config.MaxEventBytes
+}
+
+// MaxSubmissionBytes returns the independent prompt submission limit.
+func (j *Journal) MaxSubmissionBytes() int64 {
+	if j == nil {
+		return 0
+	}
+	return j.config.MaxSubmissionBytes
+}
+
+// MaxReplayBytes returns the encoded replay response budget.
+func (j *Journal) MaxReplayBytes() int64 {
+	if j == nil {
+		return 0
+	}
+	return j.config.MaxReplayBytes
 }
 
 func (j *Journal) Append(ctx context.Context, event Event) (Event, error) {
@@ -575,8 +612,12 @@ func prepareAppendEvents(events []Event, maxEventBytes int64) error {
 		if event.StreamID == "" || event.SessionID == "" || event.Type == "" {
 			return fmt.Errorf("event stream, session, and type are required")
 		}
+		if len(event.Identity) > maxEventIdentityBytes {
+			return fmt.Errorf("event identity exceeds the maximum length")
+		}
 		if len(event.Payload) > int(maxEventBytes) {
-			return fmt.Errorf("%w: %d bytes", ErrStreamFull, len(event.Payload))
+			return NewStorageError(StorageReasonEventTooLarge, ErrEventTooLarge,
+				WithEventBytes(int64(len(event.Payload))), withLimitBytes(maxEventBytes))
 		}
 		if event.CreatedAt.IsZero() {
 			event.CreatedAt = time.Now().UTC()
@@ -588,6 +629,20 @@ func prepareAppendEvents(events []Event, maxEventBytes int64) error {
 func (j *Journal) appendEventTx(ctx context.Context, tx *bolt.Tx, event *Event) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if event.Identity != "" {
+		receipt, found, err := lookupEventIdentityTx(tx, event.Identity)
+		if err != nil {
+			return err
+		}
+		if found {
+			if receipt.StreamID != event.StreamID || receipt.Type != event.Type || receipt.PayloadHash != eventPayloadHash(*event) {
+				return ErrEventIdentityConflict
+			}
+			event.Sequence = receipt.Sequence
+			event.CreatedAt = receipt.CreatedAt
+			return nil
+		}
 	}
 	stream, err := appendStream(tx, *event)
 	if err != nil {
@@ -615,6 +670,11 @@ func (j *Journal) appendEventTx(ctx context.Context, tx *bolt.Tx, event *Event) 
 	}
 	if err := writeAppendedEvent(tx, stream, *event, encoded, journalBytes+newBytes); err != nil {
 		return err
+	}
+	if event.Identity != "" {
+		if err := putEventIdentityTx(tx, *event); err != nil {
+			return err
+		}
 	}
 	if event.Terminal && event.SubmissionID != "" {
 		return markSubmissionTerminalTx(ctx, tx, *event, j.config.MaxJournalBytes)
@@ -669,20 +729,31 @@ func validateAppendCapacity(j *Journal, stream Stream, journalBytes, eventBytes 
 	journalLimit := logicalLimit(j.config.MaxJournalBytes, j.config.ReserveBytes)
 	if !terminal {
 		if streamLimit > 0 && stream.Bytes+eventBytes > streamLimit {
-			return ErrStreamFull
+			return NewStorageError(StorageReasonStreamLimitReached, ErrStreamFull,
+				storageLimitMeasurements(stream.Bytes, streamLimit, eventBytes))
 		}
 		if journalLimit > 0 && journalBytes+eventBytes > journalLimit {
-			return ErrJournalFull
+			return NewStorageError(StorageReasonJournalLimitReached, ErrJournalFull,
+				storageLimitMeasurements(journalBytes, journalLimit, eventBytes))
 		}
 		return nil
 	}
 	if j.config.MaxStreamBytes > 0 && stream.Bytes+eventBytes > j.config.MaxStreamBytes {
-		return ErrStreamFull
+		return NewStorageError(StorageReasonStreamLimitReached, ErrStreamFull,
+			storageLimitMeasurements(stream.Bytes, j.config.MaxStreamBytes, eventBytes))
 	}
 	if j.config.MaxJournalBytes > 0 && journalBytes+eventBytes > j.config.MaxJournalBytes {
-		return ErrJournalFull
+		return NewStorageError(StorageReasonJournalLimitReached, ErrJournalFull,
+			storageLimitMeasurements(journalBytes, j.config.MaxJournalBytes, eventBytes))
 	}
 	return nil
+}
+
+func storageLimitMeasurements(retained, limit, eventBytes int64) func(*StorageError) {
+	return func(e *StorageError) {
+		WithLogicalMeasurements(retained, limit)(e)
+		WithEventBytes(eventBytes)(e)
+	}
 }
 
 func logicalLimit(maxBytes, reserveBytes int64) int64 {
@@ -761,7 +832,7 @@ func (j *Journal) Replay(ctx context.Context, streamID string, after uint64, lim
 		if stream.FirstRetained != 0 && after+1 < stream.FirstRetained {
 			return ErrCursorExpired
 		}
-		events, replayErr := replayEvents(tx, streamID, after, limit)
+		events, replayErr := replayEvents(tx, streamID, after, limit, replayPageBytes(stream, j.config.MaxReplayBytes))
 		out = events
 		return replayErr
 	})
@@ -777,7 +848,7 @@ func (j *Journal) Replay(ctx context.Context, streamID string, after uint64, lim
 	return out, stream, err
 }
 
-func replayEvents(tx *bolt.Tx, streamID string, after uint64, limit int) ([]Event, error) {
+func replayEvents(tx *bolt.Tx, streamID string, after uint64, limit int, maxBytes int64) ([]Event, error) {
 	if after == ^uint64(0) {
 		return nil, nil
 	}
@@ -786,15 +857,42 @@ func replayEvents(tx *bolt.Tx, streamID string, after uint64, limit int) ([]Even
 		return nil, nil
 	}
 	var out []Event
+	pageBytes := int64(0)
 	cursor := bucket.Cursor()
 	for key, value := cursor.Seek(sequenceKey(after + 1)); key != nil && len(out) < limit; key, value = cursor.Next() {
+		recordBytes := int64(len(value)) + replayRecordOverheadBytes
+		if maxBytes > 0 && pageBytes+recordBytes > maxBytes {
+			if len(out) == 0 {
+				return nil, fmt.Errorf("%w: record after sequence %d is %d bytes", ErrReplayPageTooLarge, after, recordBytes)
+			}
+			break
+		}
 		var event Event
 		if err := json.Unmarshal(value, &event); err != nil {
 			return nil, ErrJournalCorrupt
 		}
 		out = append(out, event)
+		pageBytes += recordBytes
 	}
 	return out, nil
+}
+
+// replayPageBytes reserves the stream metadata envelope before the record
+// budget is applied. An unset or non-positive budget keeps the historical
+// count-only behavior for explicit callers.
+func replayPageBytes(stream Stream, maxBytes int64) int64 {
+	if maxBytes <= 0 {
+		return 0
+	}
+	encoded, err := json.Marshal(stream)
+	if err != nil {
+		return maxBytes
+	}
+	remaining := maxBytes - int64(len(encoded)) - replayEnvelopeAllowanceBytes
+	if remaining < replayEnvelopeAllowanceBytes {
+		return replayEnvelopeAllowanceBytes
+	}
+	return remaining
 }
 
 func (j *Journal) Acknowledge(ctx context.Context, streamID string, sequence uint64) error {

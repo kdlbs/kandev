@@ -105,3 +105,12 @@ func TestForwardMessageAsPrompt_RuntimeUnavailableQueueFailureSurfacesError(t *t
 	require.Len(t, repo.createdMessages, 1, "a failed queue attempt must fall back to surfacing the error")
 	assert.Contains(t, repo.createdMessages[0].Content, "Failed to send message to agent")
 }
+
+func TestForwardMessageAsPrompt_QueuesCircuitSuspension(t *testing.T) {
+	repo := &resumeRetryRepo{sessionStateSequencer: sessionStateSequencer{states: []models.TaskSessionState{models.TaskSessionStateWaitingForInput}}}
+	orch := &resumeRetryOrchestrator{promptErr: &orchestrator.FixedProfileSuspendedError{}}
+	h := newTestMessageHandlersWithOrchestrator(t, repo, orch)
+	h.forwardMessageAsPrompt(context.Background(), "task-1", "session-1", "profile-1", "continue", "", false, nil, nil, false, "")
+	assert.Equal(t, 1, orch.queuePromptCalls)
+	assert.Empty(t, repo.createdMessages)
+}

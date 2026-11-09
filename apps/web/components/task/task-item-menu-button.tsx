@@ -11,6 +11,7 @@ export function TaskMenuButton({
   buttonRef,
   touchTarget = false,
   popup = "menu",
+  alwaysVisibleOnTouch = false,
 }: {
   visible: boolean;
   expanded: boolean;
@@ -19,13 +20,15 @@ export function TaskMenuButton({
   buttonRef?: Ref<HTMLButtonElement>;
   touchTarget?: boolean;
   popup?: "menu" | "dialog";
+  /** Coarse-pointer surfaces have no hover, so the row needs a visible trigger. */
+  alwaysVisibleOnTouch?: boolean;
 }) {
   const { t } = useTranslation();
   return (
     <div
       className={cn(
         "mobile-task-actions self-center shrink-0 flex items-center transition-opacity duration-100",
-        !visible && "[@media(hover:none)]:hidden",
+        !visible && !alwaysVisibleOnTouch && "[@media(hover:none)]:hidden",
         visible
           ? "opacity-100"
           : cn(
@@ -33,6 +36,8 @@ export function TaskMenuButton({
               rowFocus
                 ? "group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
                 : "focus-within:opacity-100 focus-within:pointer-events-auto",
+              alwaysVisibleOnTouch &&
+                "[@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
             ),
       )}
     >
@@ -40,7 +45,7 @@ export function TaskMenuButton({
         ref={buttonRef}
         type="button"
         className={cn(
-          "mobile-task-actions-button flex size-6 items-center justify-center rounded-md cursor-pointer touch-manipulation",
+          "mobile-task-actions-button flex size-6 items-center justify-center rounded-md cursor-pointer touch-manipulation [@media(pointer:coarse)]:size-11!",
           "text-muted-foreground hover:text-foreground hover:bg-foreground/10",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors",
           touchTarget && "size-11!",

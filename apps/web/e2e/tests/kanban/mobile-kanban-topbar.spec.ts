@@ -4,6 +4,8 @@ import { waitForHttp } from "../../helpers/causal-waits";
 import { createStandardProfile, openTaskSession } from "../../helpers/git-helper";
 import { waitForLatestSessionDone } from "../../helpers/session";
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe("Shared phone listing topbar", () => {
   test("returns focus to the menu button when search is hidden", async ({ testPage }) => {
     await testPage.goto("/tasks");

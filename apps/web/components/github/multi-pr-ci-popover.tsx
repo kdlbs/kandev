@@ -59,7 +59,7 @@ function PRTab({
   return (
     <div
       className={cn(
-        "group flex shrink-0 items-center rounded-md border transition-colors [@media(pointer:coarse)]:min-h-12 [@media(max-width:767px)]:min-h-12",
+        "group flex shrink-0 items-center rounded-md border transition-colors [@media(pointer:coarse)]:min-h-12 [@media(max-width:767px)]:min-h-12 max-md:min-w-0 max-md:max-w-full max-md:flex-1 max-md:basis-32",
         active
           ? "border-primary/50 bg-card text-foreground"
           : "border-transparent text-muted-foreground hover:border-border/70 hover:bg-muted focus-within:border-border/70 focus-within:bg-muted",
@@ -78,13 +78,14 @@ function PRTab({
         data-active={active ? "true" : "false"}
         onClick={() => onSelect(pr)}
         className={cn(
-          "flex min-h-6 cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset [@media(pointer:coarse)]:min-h-12 [@media(max-width:767px)]:min-h-12",
+          "flex min-h-6 cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset [@media(pointer:coarse)]:min-h-12 [@media(max-width:767px)]:min-h-12 max-md:min-w-0 max-md:flex-1",
           active ? "text-foreground" : "text-muted-foreground",
         )}
       >
-        <IconGitPullRequest className={cn("h-3.5 w-3.5", getPRStatusColor(pr))} />
-        <span className="font-medium">
-          {pr.repo} #{pr.pr_number}
+        <IconGitPullRequest className={cn("h-3.5 w-3.5 shrink-0", getPRStatusColor(pr))} />
+        <span className="flex min-w-0 gap-1 font-medium">
+          <span className="max-md:truncate">{pr.repo}</span>{" "}
+          <span className="shrink-0">#{pr.pr_number}</span>
         </span>
       </button>
       {canRemove && (
@@ -116,6 +117,15 @@ function PRTab({
   );
 }
 
+type MultiPRCIPopoverProps = {
+  prs: TaskPR[];
+  enabled: boolean;
+  onOpenDetailPanel?: (pr: TaskPR) => void;
+  refreshTaskPR?: () => void | Promise<void>;
+  onRemovePR?: (pr: TaskPR) => Promise<void>;
+  onCollapseFocus?: (remainingPR: TaskPR) => void;
+};
+
 /**
  * Multi-PR variant of the CI popover. A segmented header lists every PR linked
  * to the task (one chip per PR, coloured by its status); the body reuses the
@@ -129,14 +139,7 @@ export function MultiPRCIPopover({
   refreshTaskPR,
   onRemovePR,
   onCollapseFocus,
-}: {
-  prs: TaskPR[];
-  enabled: boolean;
-  onOpenDetailPanel?: (pr: TaskPR) => void;
-  refreshTaskPR?: () => void | Promise<void>;
-  onRemovePR?: (pr: TaskPR) => Promise<void>;
-  onCollapseFocus?: (remainingPR: TaskPR) => void;
-}) {
+}: MultiPRCIPopoverProps) {
   const { t } = useTranslation();
   // `overrideId` is only set when the user activates a tab. The displayed PR is
   // derived: honour the override while it still exists, otherwise fall back to
@@ -200,7 +203,7 @@ export function MultiPRCIPopover({
   };
 
   return (
-    <div data-testid="pr-multi-popover" className="flex flex-col gap-2">
+    <div data-testid="pr-multi-popover" className="flex min-h-0 flex-1 flex-col gap-2">
       {prs
         .filter((p) => p.state === "open")
         .map((pr) => (
@@ -210,7 +213,7 @@ export function MultiPRCIPopover({
         role="tablist"
         aria-label={t("github:pullRequests")}
         data-testid="pr-multi-popover-tabs"
-        className="flex gap-1 overflow-x-auto border-b border-border/50 pb-2"
+        className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/50 pb-2 max-md:h-[min(8rem,20dvh)] max-md:flex-wrap max-md:content-start max-md:overflow-y-auto max-md:overscroll-contain"
         onKeyDown={onTablistKeyDown}
       >
         {prs.map((pr) => (
@@ -227,7 +230,12 @@ export function MultiPRCIPopover({
           />
         ))}
       </div>
-      <div role="tabpanel" id={panelId} aria-labelledby={prTabDomId(uid, selected)}>
+      <div
+        role="tabpanel"
+        id={panelId}
+        aria-labelledby={prTabDomId(uid, selected)}
+        className="flex min-h-0 flex-1 flex-col"
+      >
         <PRCIPopover
           pr={selected}
           enabled={enabled}

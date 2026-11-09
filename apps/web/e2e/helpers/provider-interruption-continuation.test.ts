@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createContinuationFixture } from "./provider-interruption-continuation";
+import {
+  createContinuationFixture,
+  hasAttestedContinuationRefusal,
+} from "./provider-interruption-continuation";
 import type { BackendContext } from "../fixtures/backend";
 import type { ApiClient } from "./api-client";
 import type { SeedData } from "../fixtures/test-base";
@@ -7,6 +10,35 @@ import type { SeedData } from "../fixtures/test-base";
 vi.mock("@playwright/test", () => ({ expect: vi.fn() }));
 
 describe("continuation fixture cleanup", () => {
+  it("requires the persisted refusal reason and actual attempt count", () => {
+    expect(
+      hasAttestedContinuationRefusal(
+        {
+          metadata: {
+            runtime_retained: true,
+            recovery_disposition: "refused",
+            recovery_reason: "unsafe_work",
+            attempts_started: 0,
+          },
+        } as Parameters<typeof hasAttestedContinuationRefusal>[0],
+        "unsafe_work",
+      ),
+    ).toBe(true);
+    expect(
+      hasAttestedContinuationRefusal(
+        {
+          metadata: {
+            runtime_retained: true,
+            recovery_disposition: "refused",
+            recovery_reason: "unsafe_work",
+            attempts_started: 1,
+          },
+        } as Parameters<typeof hasAttestedContinuationRefusal>[0],
+        "unsafe_work",
+      ),
+    ).toBe(false);
+  });
+
   it("prepares a stable session without submitting the interruption before browser readiness", async () => {
     const backend = { tmpDir: "/tmp", restart: vi.fn().mockResolvedValue(undefined) };
     const api = {

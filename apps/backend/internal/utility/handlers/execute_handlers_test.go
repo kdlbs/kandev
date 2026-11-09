@@ -171,7 +171,7 @@ func TestExecutePromptRejections(t *testing.T) {
 		// No agent_id on the row and no user default to fall back on, so the
 		// request cannot name an agent to run.
 		f := newUtilityFixture(t, utilityFixtureOptions{noSettings: true})
-		seedUtilityAgent(f, &models.UtilityAgent{ID: "custom-1", Name: "Reviewer", Prompt: "Review"})
+		seedUtilityAgent(f, &models.UtilityAgent{ID: "custom-1", Name: "Reviewer", Prompt: "Review", Enabled: true})
 
 		status, got := executePrompt(t, f, `{"utility_agent_id":"custom-1","session_id":"session-1"}`)
 		if status != http.StatusBadRequest {

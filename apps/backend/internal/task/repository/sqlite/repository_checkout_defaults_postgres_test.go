@@ -304,3 +304,33 @@ func TestRepositoryCheckoutDefaultsPostgresFailures(t *testing.T) {
 		require.True(t, loaded.PullBeforeWorktree)
 	})
 }
+
+func TestRepositoryCheckoutDefaultsPhysicalPostgresVersionFloor(t *testing.T) {
+	a, b, observer := pgCheckoutSeed(t)
+	future := time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC)
+	_, err := observer.ExecContext(t.Context(), `UPDATE repositories SET updated_at = $1 WHERE id = 'pg-checkout'`, future)
+	require.NoError(t, err)
+	first, err := a.GetRepository(t.Context(), "pg-checkout")
+	require.NoError(t, err)
+	overlap, err := b.GetRepository(t.Context(), "pg-checkout")
+	require.NoError(t, err)
+
+	first.Name = "first"
+	require.NoError(t, a.UpdateRepositoryWithCheckoutIntent(t.Context(), first, models.RepositoryCheckoutIntent{}))
+	require.True(t, first.UpdatedAt.After(future))
+	overlap.Name = "second"
+	require.NoError(t, b.UpdateRepositoryWithCheckoutIntent(t.Context(), overlap, models.RepositoryCheckoutIntent{}))
+	require.True(t, overlap.UpdatedAt.After(first.UpdatedAt))
+	stored, err := a.GetRepository(t.Context(), "pg-checkout")
+	require.NoError(t, err)
+	require.Equal(t, overlap.UpdatedAt, stored.UpdatedAt)
+
+	exact := *stored
+	exact.Name = "exact"
+	require.NoError(t, a.UpdateRepositoryIfUnchanged(t.Context(), &exact, stored.UpdatedAt))
+	require.True(t, exact.UpdatedAt.After(stored.UpdatedAt))
+	legacy := exact
+	legacy.Name = "legacy"
+	require.NoError(t, a.UpdateRepository(t.Context(), &legacy))
+	require.True(t, legacy.UpdatedAt.After(exact.UpdatedAt))
+}

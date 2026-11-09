@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import type { StepType, TaskCreateWorkflowStepsResult } from "./task-create-dialog-types";
 import { buildWorkflowAgentOverrideValidation } from "./task-create-dialog-workflow-agent-override-validation";
-
-const WORKFLOW_ID = "workflow-1";
-const WORKSPACE_ID = "workspace-1";
 
 const profiles = [
   {
@@ -24,9 +22,36 @@ const profiles = [
   },
 ] satisfies AgentProfileOption[];
 
+const implementedSteps: StepType[] = [
+  {
+    id: "analysis",
+    title: "Analysis",
+    position: 0,
+    is_start_step: true,
+  },
+  {
+    id: "implement",
+    title: "Implement",
+    position: 1,
+    agent_profile_id: "source",
+  },
+  {
+    id: "pr",
+    title: "PR",
+    position: 2,
+    session_target: { kind: "step", step_id: "implement" },
+    prompt: "Ship {{task_prompt}}",
+  },
+];
+
+function selected(
+  status: TaskCreateWorkflowStepsResult["status"],
+  steps: StepType[] = [],
+): TaskCreateWorkflowStepsResult {
+  return { status, steps, retry: () => undefined };
+}
+
 const base = {
-  effectiveWorkflowId: WORKFLOW_ID,
-  workspaceId: WORKSPACE_ID,
   profiles,
   replacementOptions: profiles.map((profile) => ({
     value: profile.id,
@@ -38,92 +63,72 @@ const base = {
 };
 
 describe("workflow agent override submit validation", () => {
-  it("treats an omitted snapshot read as an in-flight read", () => {
+  it("groups fixed profiles and step recipients from successful metadata", () => {
     const result = buildWorkflowAgentOverrideValidation({
       ...base,
-      snapshots: {
-        [WORKFLOW_ID]: {
-          workflowId: WORKFLOW_ID,
-          workflowName: "Workflow",
-          steps: [],
-          tasks: [],
-          isPlaceholder: true,
-        },
-      },
+      selectedWorkflowSteps: selected("success", implementedSteps),
     });
 
-    expect(result.loading).toBe(true);
-    expect(result.blockedReason).toBeTruthy();
+    expect(result.loading).toBe(false);
+    expect(result.error).toBe(false);
+    expect(result.invalid).toBe(false);
+    expect(result.blockedReason).toBeUndefined();
+    expect(result.rows).toEqual([
+      expect.objectContaining({
+        sourceProfileId: "source",
+        stepIds: ["implement", "pr"],
+        stepNames: ["Implement", "PR"],
+        replacementProfileId: "replacement",
+        replacementAvailable: true,
+      }),
+    ]);
   });
 
-  it("blocks create while the workflow snapshot is loading or failed", () => {
+  it("treats loading and error metadata as unresolved selected replacements", () => {
     const loading = buildWorkflowAgentOverrideValidation({
       ...base,
-      snapshots: {
-        [WORKFLOW_ID]: {
-          workflowId: WORKFLOW_ID,
-          workflowName: "Workflow",
-          steps: [],
-          tasks: [],
-          isPlaceholder: true,
-        },
-      },
-      workspaceSnapshotRead: { workspaceId: WORKSPACE_ID, error: false },
+      selectedWorkflowSteps: selected("loading"),
     });
+    expect(loading.loading).toBe(true);
+    expect(loading.error).toBe(false);
     expect(loading.blockedReason).toBeTruthy();
 
     const failed = buildWorkflowAgentOverrideValidation({
       ...base,
-      snapshots: {},
-      workspaceSnapshotRead: { workspaceId: WORKSPACE_ID, error: true },
+      selectedWorkflowSteps: selected("error"),
     });
+    expect(failed.loading).toBe(false);
+    expect(failed.error).toBe(true);
+    expect(failed.rows).toEqual([]);
     expect(failed.blockedReason).toBeTruthy();
   });
 
-  it("does not block ordinary create while an unused workflow snapshot is loading or failed", () => {
+  it("does not block ordinary creation while metadata is idle, loading, or failed", () => {
     const ordinary = { ...base, overrides: {} };
-    const loading = buildWorkflowAgentOverrideValidation({
-      ...ordinary,
-      snapshots: {
-        [WORKFLOW_ID]: {
-          workflowId: WORKFLOW_ID,
-          workflowName: "Workflow",
-          steps: [],
-          tasks: [],
-          isPlaceholder: true,
-        },
-      },
-      workspaceSnapshotRead: { workspaceId: WORKSPACE_ID, error: false },
+    for (const status of ["idle", "loading", "error"] as const) {
+      const result = buildWorkflowAgentOverrideValidation({
+        ...ordinary,
+        selectedWorkflowSteps: selected(status),
+      });
+      expect(result.blockedReason).toBeUndefined();
+    }
+  });
+
+  it("treats a successful empty step result as authoritative", () => {
+    const result = buildWorkflowAgentOverrideValidation({
+      ...base,
+      selectedWorkflowSteps: selected("success"),
     });
-    const failed = buildWorkflowAgentOverrideValidation({
-      ...ordinary,
-      snapshots: {},
-      workspaceSnapshotRead: { workspaceId: WORKSPACE_ID, error: true },
-    });
-    expect(loading.blockedReason).toBeUndefined();
-    expect(failed.blockedReason).toBeUndefined();
+    expect(result.loading).toBe(false);
+    expect(result.error).toBe(false);
+    expect(result.rows).toEqual([]);
+    expect(result.blockedReason).toBeUndefined();
   });
 
   it("blocks an unavailable replacement in create mode and leaves edit mode unblocked", () => {
     const args = {
       ...base,
-      snapshots: {
-        [WORKFLOW_ID]: {
-          workflowId: WORKFLOW_ID,
-          workflowName: "Workflow",
-          steps: [
-            {
-              id: "implement",
-              title: "Implement",
-              color: "blue",
-              position: 1,
-              agent_profile_id: "source",
-            },
-          ],
-          tasks: [],
-        },
-      },
-      workspaceSnapshotRead: { workspaceId: WORKSPACE_ID, error: false },
+      selectedWorkflowSteps: selected("success", implementedSteps),
       replacementOptions: base.replacementOptions.filter(
         (option) => option.value !== "replacement",
       ),

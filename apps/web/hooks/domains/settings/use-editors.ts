@@ -18,9 +18,9 @@ export function useEditors() {
 
   useEffect(() => {
     const client = getWebSocketClient();
-    if (client) {
-      client.subscribeUser();
-    }
+    if (!client) return;
+    client.subscribeUser();
+    return () => client.unsubscribeUser();
   }, []);
 
   useEffect(() => {

@@ -20,7 +20,6 @@ func ensureSessionTables(t *testing.T, repo *sqlite.Repository) {
 		`CREATE TABLE IF NOT EXISTS task_sessions (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
-			agent_execution_id TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT,
 			state TEXT NOT NULL DEFAULT 'CREATED',
 			started_at TIMESTAMP NOT NULL,
@@ -240,13 +239,13 @@ func TestQueryRecentSessions_ScopesByWorkspaceAndOrders(t *testing.T) {
 	}
 	if _, err := repo.ExecRaw(ctx, `
 		INSERT INTO task_sessions
-			(id, task_id, agent_execution_id, state, started_at, completed_at, updated_at)
+			(id, task_id, agent_profile_id, state, started_at, completed_at, updated_at)
 		VALUES
-			('s-1', 't-live',  'exec-1', 'COMPLETED', '2026-01-01 00:00:00', '2026-01-01 01:00:00', '2026-01-01 01:00:00'),
+			('s-1', 't-live',  'profile-1', 'COMPLETED', '2026-01-01 00:00:00', '2026-01-01 01:00:00', '2026-01-01 01:00:00'),
 			('s-2', 't-live',  '',       'RUNNING',   '2026-01-02 00:00:00', NULL,                  '2026-01-02 00:00:00'),
-			('s-3', 't-eph',   'exec-3', 'COMPLETED', '2026-01-03 00:00:00', NULL,                  '2026-01-03 00:00:00'),
-			('s-4', 't-auto',  'exec-4', 'COMPLETED', '2026-01-04 00:00:00', NULL,                  '2026-01-04 00:00:00'),
-			('s-5', 't-other', 'exec-5', 'COMPLETED', '2026-01-05 00:00:00', NULL,                  '2026-01-05 00:00:00')
+			('s-3', 't-eph',   'profile-3', 'COMPLETED', '2026-01-03 00:00:00', NULL,                  '2026-01-03 00:00:00'),
+			('s-4', 't-auto',  'profile-4', 'COMPLETED', '2026-01-04 00:00:00', NULL,                  '2026-01-04 00:00:00'),
+			('s-5', 't-other', 'profile-5', 'COMPLETED', '2026-01-05 00:00:00', NULL,                  '2026-01-05 00:00:00')
 	`); err != nil {
 		t.Fatalf("seed sessions: %v", err)
 	}
@@ -264,8 +263,8 @@ func TestQueryRecentSessions_ScopesByWorkspaceAndOrders(t *testing.T) {
 	if rows[0].TaskID != "t-live" {
 		t.Errorf("TaskID = %q, want t-live", rows[0].TaskID)
 	}
-	if rows[0].AgentExecID != "" {
-		t.Errorf("AgentExecID = %q, want empty for the NULL-ish column", rows[0].AgentExecID)
+	if rows[0].AgentProfileID != "" {
+		t.Errorf("AgentProfileID = %q, want empty for the NULL-ish column", rows[0].AgentProfileID)
 	}
 	if rows[0].State != "RUNNING" {
 		t.Errorf("State = %q, want RUNNING", rows[0].State)
@@ -276,8 +275,8 @@ func TestQueryRecentSessions_ScopesByWorkspaceAndOrders(t *testing.T) {
 	if rows[0].CompletedAt != nil {
 		t.Errorf("CompletedAt = %v, want nil for an in-flight session", *rows[0].CompletedAt)
 	}
-	if rows[1].AgentExecID != "exec-1" {
-		t.Errorf("AgentExecID = %q, want exec-1", rows[1].AgentExecID)
+	if rows[1].AgentProfileID != "profile-1" {
+		t.Errorf("AgentProfileID = %q, want profile-1", rows[1].AgentProfileID)
 	}
 	if rows[1].CompletedAt == nil || *rows[1].CompletedAt != "2026-01-01T01:00:00Z" {
 		t.Errorf("CompletedAt = %v, want 2026-01-01T01:00:00Z", rows[1].CompletedAt)

@@ -254,3 +254,31 @@ an isolated task cache completed the build and browser checks without retries.
 Evidence: `/tmp/pr3830-merge2-unit.log`, `/tmp/pr3830-merge2-types.log`,
 `/tmp/pr3830-merge2-lint.log`, `/tmp/pr3830-merge2-docs.log`, and
 `/tmp/pr3830-merge2-e2e-retry.log`.
+
+## Manual recovery fixture correction (2026-10-27)
+
+SDK integration head `d62c643512a` exposed a fixture race in the 503 workspace
+read scenario. The failure snapshot already contains the recovered task and no
+Retry control, while the test is still attempting its first Retry tap. The
+failed attempt has no trace; the retained trace belongs to its successful retry.
+
+A controlled foreground refresh after the old fixture enabled successful reads
+but before its tap recovers the real data and removes Retry. Keep the outage
+active until the actual Retry click instead. The owning menu captures that
+click before React handles it, records permission on the document, and removes
+its listener. Delegation from the menu survives child replacement during a
+failed refresh. A listener attached only to the old Retry node fails the
+controlled refresh case; the menu-owned listener passes. The workflow success
+wait is armed before the original single tap. Existing error, permission,
+navigation, and task-visibility assertions remain unchanged.
+
+The controlled success case requires the pre-click foreground read to remain
+503 and the later real Retry request to succeed. No production retry policy,
+error rendering, assertion timeout, or tap retry changes. First-failure tracing
+is retained. Full repeated navigation coverage and fresh CI remain delivery
+checks; controlled evidence does not establish the original CI event order.
+
+Local validation: all 21 cases in three full-spec repetitions passed with
+retries disabled. The foreground-before-tap control passed with the menu-owned
+latch. Scoped lint passed; independent read-only review found no actionable
+findings in the test correction.

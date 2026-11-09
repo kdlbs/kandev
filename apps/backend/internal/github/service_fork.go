@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/githubhost"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -67,6 +68,7 @@ func (s *Service) ResolveContributionForkForWorkspace(
 	if err != nil {
 		return ContributionForkResolution{}, err
 	}
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
 	client, ok := resolved.Client.(contributionForkClient)
 	if !ok {
 		return ContributionForkResolution{}, ErrContributionForkUnsupported
@@ -76,6 +78,12 @@ func (s *Service) ResolveContributionForkForWorkspace(
 	result, err := resolveContributionFork(prepareCtx, client, resolved.Principal, owner, repo, create)
 	if err != nil || result.Destination == nil {
 		return result, err
+	}
+	if err := s.requireCurrentHost(ctx, workspaceID, resolved); err != nil {
+		return ContributionForkResolution{}, err
+	}
+	if result.Destination.SourceRepository.Host != resolved.host().String() || result.Destination.TargetRepository.Host != resolved.host().String() {
+		return ContributionForkResolution{}, ErrGitHubHostMismatch
 	}
 	if err := bindContributionDestinationCredential(result.Destination, resolved); err != nil {
 		return ContributionForkResolution{}, err
@@ -388,8 +396,16 @@ func repositoryBinding(repository *GitHubRepository) (taskmodels.RemoteContribut
 	if remoteURL == "" {
 		remoteURL = "https://github.com/" + fullName + ".git"
 	}
+	host := githubhost.Public()
+	if remoteURL != "" {
+		parsed, err := providerGitHubURLHost(remoteURL)
+		if err != nil {
+			return taskmodels.RemoteContributionRepository{}, err
+		}
+		host = parsed
+	}
 	return taskmodels.RemoteContributionRepository{
-		Host:       "github.com",
+		Host:       host.String(),
 		Path:       fullName,
 		ProviderID: strconv.FormatInt(repository.ID, 10),
 		RemoteURL:  remoteURL,

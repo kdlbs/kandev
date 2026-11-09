@@ -110,3 +110,62 @@ it("closes the mobile actions sheet when selection becomes empty", async () => {
 
   expect(screen.queryByRole("dialog")).toBeNull();
 });
+
+function mountMoveToolbar() {
+  const move = vi.fn().mockResolvedValue(undefined);
+  render(
+    <StateProvider>
+      <ToastProvider>
+        <TaskMultiSelectToolbar
+          selectedIds={new Set(["task"])}
+          steps={[{ id: "done", title: "Done", color: "" } as never]}
+          isProcessing={false}
+          getEligibleSelectedIds={(ids) => ids}
+          onClearSelection={vi.fn()}
+          onBulkDelete={vi.fn()}
+          onBulkArchive={vi.fn()}
+          onBulkMove={move}
+        />
+      </ToastProvider>
+    </StateProvider>,
+  );
+  return move;
+}
+
+// @covers AC-TASKS-BOARD-BULK-MOVE-SCOPE-001.1
+it("opens phone destinations after the touch click without moving a task", async () => {
+  responsive.isMobile = true;
+  const move = mountMoveToolbar();
+  fireEvent.click(screen.getByTestId("bulk-actions-button"));
+  const trigger = await screen.findByTestId("bulk-move-button");
+  fireEvent.pointerDown(trigger, { pointerType: "touch", button: 0, ctrlKey: false });
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  expect(move).not.toHaveBeenCalled();
+  fireEvent.click(trigger);
+  expect(await screen.findByTestId("bulk-move-step-done")).not.toBeNull();
+  expect(move).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByTestId("bulk-move-step-done"));
+  expect(move).toHaveBeenCalledExactlyOnceWith("done");
+});
+
+it("does not open the phone menu after a cancelled touch", async () => {
+  responsive.isMobile = true;
+  const move = mountMoveToolbar();
+  fireEvent.click(screen.getByTestId("bulk-actions-button"));
+  const trigger = await screen.findByTestId("bulk-move-button");
+  fireEvent.pointerDown(trigger, { pointerType: "touch", button: 0, ctrlKey: false });
+  fireEvent.pointerCancel(trigger, { pointerType: "touch" });
+  fireEvent.click(trigger);
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  expect(move).not.toHaveBeenCalled();
+});
+
+it.each(["mouse", "keyboard"])("opens and moves with desktop %s", async (input) => {
+  const move = mountMoveToolbar();
+  const trigger = screen.getByTestId("bulk-move-button");
+  if (input === "mouse")
+    fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0, ctrlKey: false });
+  else fireEvent.keyDown(trigger, { key: "Enter" });
+  fireEvent.click(await screen.findByTestId("bulk-move-step-done"));
+  expect(move).toHaveBeenCalledExactlyOnceWith("done");
+});

@@ -46,7 +46,7 @@ function createHarness(getStorage: () => RecoveryStorage = () => createMemorySto
 }
 
 function defineRetryTests() {
-  it("marks, prevents, and reloads the first preload failure", () => {
+  it("marks and reloads the first failure without swallowing its rejection", () => {
     const memory = createMemoryStorage();
     const harness = createHarness(() => memory.storage);
 
@@ -58,7 +58,7 @@ function defineRetryTests() {
       reloadCalls: harness.reload.mock.calls.length,
     }).toEqual({
       marker: JSON.stringify({ attemptedAt: NOW, href: HREF }),
-      defaultPrevented: true,
+      defaultPrevented: false,
       reloadCalls: 1,
     });
   });
@@ -99,7 +99,7 @@ function defineRetryTests() {
       reloadCalls: harness.reload.mock.calls.length,
     }).toEqual({
       marker: JSON.stringify({ attemptedAt: NOW, href: HREF }),
-      defaultPrevented: true,
+      defaultPrevented: false,
       reloadCalls: 1,
     });
   });

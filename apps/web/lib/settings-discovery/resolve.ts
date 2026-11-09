@@ -202,6 +202,7 @@ function dynamicDefinitions(context: SettingsDiscoveryContext): SettingsDiscover
 }
 
 function isVisible(entry: SettingsDiscoveryDefinition, context: SettingsDiscoveryContext) {
+  if (entry.requires === "office") return context.officeEnabled ?? false;
   if (entry.requires === "account") return context.showAccount;
   if (entry.requires === "users") return context.showUsers;
   if (entry.requires === "organizations") return context.showOrganizations;

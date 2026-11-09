@@ -15,6 +15,7 @@ import { getDestinationQueue, type WipQueueStatus } from "@/lib/kanban/wip-queue
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import { pickFreshestStatusSummary } from "@/lib/task-status-summary";
 import { useShallow } from "zustand/react/shallow";
+import { pendingTaskRemovalAction } from "@/lib/state/task-removal";
 
 export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
   pendingRemovalTaskIds: ReadonlySet<string>;
@@ -320,16 +321,10 @@ export function useWorkspaceSidebarTasks(
   const pendingRemovalTaskIds = useMemo(() => {
     const pending = new Set<string>();
     for (const task of allTasks) {
-      const token = taskRemoval.pendingTokenByTaskId[task.id];
-      if (!token) continue;
-      const operation = taskRemoval.operationsByToken[token];
-      if (
-        operation?.workspaceId === workspaceId &&
-        (operation?.action === "delete" ||
-          (operation?.action === "archive" && task.isArchived !== true))
-      ) {
-        pending.add(task.id);
-      }
+      const action = pendingTaskRemovalAction(taskRemoval, task.id, workspaceId);
+      if (action === null) continue;
+      if (action === "archive" && task.isArchived === true) continue;
+      pending.add(task.id);
     }
     return pending;
   }, [allTasks, taskRemoval, workspaceId]);

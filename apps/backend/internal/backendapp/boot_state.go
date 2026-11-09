@@ -538,6 +538,7 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 		}
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichCancellationPending(&sessionDTO, b.p.orchestratorSvc)
+			taskdto.EnrichRuntimeStorageHealth(&sessionDTO, b.p.orchestratorSvc)
 			taskdto.EnrichParkedProjection(&sessionDTO, b.p.orchestratorSvc)
 		}
 		taskSessions[item.SessionID] = sessionDTO
@@ -588,6 +589,9 @@ func mapQuickChatSessionState(item taskservice.QuickChatSession) map[string]any 
 	}
 	if item.AgentProfileID != "" {
 		state["agentProfileId"] = item.AgentProfileID
+	}
+	if item.CreationID != "" {
+		state["creationId"] = item.CreationID
 	}
 	return state
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import { AppNavSheet } from "@/components/navigation/app-nav-sheet";
 import { PageTopbar, type ParentCrumb } from "@/components/page-topbar";
 import { useHomeAffordance } from "@/hooks/use-home-affordance";
@@ -41,6 +41,7 @@ type PageShellProps = {
   /** "none" for children that own their own scrolling (dockview, full-bleed). */
   scroll?: "auto" | "none";
   contentClassName?: string;
+  contentRef?: RefObject<HTMLDivElement | null>;
   /** `data-testid` on the scroll container (e2e anchors like `settings-scroll-container`). */
   contentTestId?: string;
   children: ReactNode;
@@ -63,6 +64,7 @@ export function PageShell({
   scroll = "auto",
   contentClassName,
   contentTestId,
+  contentRef,
   children,
   ...topbarProps
 }: PageShellProps) {
@@ -89,6 +91,7 @@ export function PageShell({
         children
       ) : (
         <div
+          ref={contentRef}
           data-testid={contentTestId}
           className={cn("min-h-0 min-w-0 flex-1 overflow-y-auto", contentClassName)}
         >

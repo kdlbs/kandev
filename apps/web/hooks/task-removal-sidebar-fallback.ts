@@ -12,6 +12,10 @@ export type SidebarFallbackSelectionOptions = {
   excludedTaskIds?: ReadonlySet<string>;
   workspaceId?: string | null;
   validateTaskAncestry?: boolean;
+  /** Re-reads accepted local removals after each awaited check. */
+  isTaskPendingRemoval?: (taskId: string) => boolean;
+  /** Live ancestry check, including cascades observed mid-attempt. */
+  isTaskAncestrySafe?: (taskId: string) => Promise<boolean>;
 };
 
 type SidebarFallbackSelector = (
@@ -27,6 +31,8 @@ export async function findSidebarFallbackTask(params: {
   cachedTasks: KanbanState["tasks"];
   excludedTaskIds?: ReadonlySet<string>;
   validateTaskAncestry?: boolean;
+  isTaskPendingRemoval?: (taskId: string) => boolean;
+  isTaskAncestrySafe?: (taskId: string) => Promise<boolean>;
   isLive: (taskId: string) => Promise<boolean>;
   selectCandidate: SidebarFallbackSelector;
 }): Promise<KanbanState["tasks"][number] | null> {
@@ -36,10 +42,18 @@ export async function findSidebarFallbackTask(params: {
     cachedTasks,
     excludedTaskIds,
     validateTaskAncestry,
+    isTaskPendingRemoval,
+    isTaskAncestrySafe,
     isLive,
     selectCandidate,
   } = params;
-  const selectionOptions = { excludedTaskIds, workspaceId, validateTaskAncestry };
+  const selectionOptions = {
+    excludedTaskIds,
+    workspaceId,
+    validateTaskAncestry,
+    isTaskPendingRemoval,
+    isTaskAncestrySafe,
+  };
   const liveByTaskId = new Map<string, Promise<boolean>>();
   const memoizedIsLive = (candidateTaskId: string) => {
     let result = liveByTaskId.get(candidateTaskId);

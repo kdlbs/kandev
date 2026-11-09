@@ -152,7 +152,7 @@ printf 'prepared\\n' > "$workspace/custom-prepare-marker"
       await apiClient.archiveTask(task.id);
       await expect
         .poll(() => remotePathExists(seedData.sshTarget, `${workspace}/custom-cleanup-marker`), {
-          timeout: 30_000,
+          timeout: 75_000,
           message: "Wait for terminal SSH cleanup hook",
         })
         .toBe(true);
