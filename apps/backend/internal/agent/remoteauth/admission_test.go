@@ -285,6 +285,58 @@ func TestRemoteAuthAdmissionAllowsMethodsLessAgent(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestRemoteAuthAdmissionValidatesMethodsLessEnvironments(t *testing.T) {
+	err := ValidateCredentialAdmission(context.Background(), AdmissionInput{
+		AgentID: "mock-agent",
+		ProfileEnvVars: []models.ProfileEnvVar{
+			{Key: "DUPLICATE", Value: "one"},
+			{Key: "DUPLICATE", Value: "two"},
+		},
+		Catalog: BuildCatalogForHost([]agents.Agent{agents.NewMockAgent()}, "linux", ""),
+	})
+
+	require.ErrorIs(t, err, ErrAdmissionRefused)
+}
+
+func TestRemoteAuthAdmissionRejectsConflictingAuthenticationBindings(t *testing.T) {
+	store := newAdmissionSecretStore(t)
+	ctx := admissionTestActor()
+	profileSecretID := createAdmissionSecret(t, store, ctx, secrets.ScopeGlobal, admissionTestSecretValue)
+	executorSecretID := createAdmissionSecret(t, store, ctx, secrets.ScopeGlobal, "another-synthetic-value")
+	methodID := "agent:claude-acp:env:ANTHROPIC_API_KEY"
+	config := map[string]string{
+		"remote_auth_secrets": `{"` + methodID + `":"` + executorSecretID + `"}`,
+	}
+
+	err := ValidateCredentialAdmission(ctx, claudeInput(apiKeyProfileEnv(profileSecretID), config, store))
+	require.ErrorIs(t, err, ErrAdmissionRefused)
+	require.NotContains(t, err.Error(), profileSecretID)
+	require.NotContains(t, err.Error(), executorSecretID)
+
+	sharedConfig := map[string]string{
+		"remote_auth_secrets": `{"` + methodID + `":"` + profileSecretID + `"}`,
+	}
+	require.NoError(t, ValidateCredentialAdmission(ctx, claudeInput(apiKeyProfileEnv(profileSecretID), sharedConfig, store)))
+}
+
+func TestRemoteAuthAdmissionRejectsNULSecretValues(t *testing.T) {
+	store := newAdmissionSecretStore(t)
+	ctx := admissionTestActor()
+	secretID := createAdmissionSecret(t, store, ctx, secrets.ScopeGlobal, "sk-ant-\x00invalid")
+	methodID := "agent:claude-acp:env:ANTHROPIC_API_KEY"
+
+	for _, input := range []AdmissionInput{
+		claudeInput(apiKeyProfileEnv(secretID), nil, store),
+		claudeInput(nil, map[string]string{
+			"remote_auth_secrets": `{"` + methodID + `":"` + secretID + `"}`,
+		}, store),
+	} {
+		err := ValidateCredentialAdmission(ctx, input)
+		require.ErrorIs(t, err, ErrAdmissionRefused)
+		require.NotContains(t, err.Error(), secretID)
+	}
+}
+
 func TestRemoteAuthAdmissionRejectsUnusableBindings(t *testing.T) {
 	ownerCtx := admissionTestActor()
 	store := newAdmissionSecretStore(t)
@@ -336,6 +388,7 @@ func TestRemoteAuthAdmissionRejectsBrokenRequiredProfileBinding(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrAdmissionRefused)
 	require.NotContains(t, err.Error(), apiKeyID)
+	require.NotContains(t, err.Error(), "missing-proxy-secret")
 }
 
 func TestRemoteAuthAdmissionRejectsMalformedOrUnknownConfiguration(t *testing.T) {

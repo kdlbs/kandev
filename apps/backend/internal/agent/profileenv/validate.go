@@ -68,11 +68,15 @@ func validateKey(key string, i int, seen map[string]int) error {
 }
 
 func validateValue(entry models.ProfileEnvVar, i int) error {
-	if entry.SecretID != "" && entry.Value != "" {
+	secretID := strings.TrimSpace(entry.SecretID)
+	if secretID == "" && entry.Value == "" {
+		return fmt.Errorf("env_vars[%d]: must set either value or secret_id", i)
+	}
+	if secretID != "" && entry.Value != "" {
 		return fmt.Errorf("env_vars[%d]: set value or secret_id, not both", i)
 	}
-	if entry.SecretID == "" && entry.Value == "" {
-		return fmt.Errorf("env_vars[%d]: must set either value or secret_id", i)
+	if entry.SecretID != "" && entry.SecretID != secretID {
+		return fmt.Errorf("env_vars[%d].secret_id must not have surrounding whitespace", i)
 	}
 	if entry.Value != "" {
 		if len(entry.Value) > MaxValueLen {

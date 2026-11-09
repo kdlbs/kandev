@@ -31,14 +31,10 @@ The design uses, but does not change, four adjacent contracts:
   [Install and upgrade ownership](#install-and-upgrade-ownership).
 
 Session launches never use the host CLI. A model selected from the CLI list or
-typed as a custom ID remains the saved request under the
-[runtime model policy](no-silent-model-fallback-01.md).
-Kandev never sends an unadvertised model ID. Strict profiles require exact
-advertisement and application before inference. A bridge's internal alias or
-family matching does not prove equivalence for an unadvertised strict request.
-Host discovery remains advisory and custom IDs remain savable.
-The [Claude admission package](../../../plans/claude-profile-admission/plan.md)
-records the separate model repair decision prerequisite.
+typed as a custom ID is passed to the bridge exactly as any other profile
+model. Whether the bridge accepts an identifier it does not advertise is the
+bridge's own behavior; the Claude bridge resolves aliases and family names,
+and rejects unrelated identifiers at session start with its existing error.
 
 ## Requirement mapping
 

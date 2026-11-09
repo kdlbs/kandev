@@ -78,6 +78,7 @@ Quantifiers are deliberate:
 Recognized profile env methods can satisfy the third condition without duplicating a secret on the executor profile.
 Existing authorized literals remain ordinary profile inputs. New UI copy must recommend stored secret bindings for credentials.
 Repository-only credentials and arbitrary env names do not qualify through this profile-only compatibility interface.
+SSH forwards every catalog env credential name, including `CURSOR_API_KEY`, so an accepted profile credential reaches the child.
 The final launch resolver remains authoritative for complete task/repository composition and managed runtime values.
 
 ## Actor and authorization boundary
@@ -112,7 +113,7 @@ No successful decision is reusable across actors or requests.
 `ValidateWorkflowChange` and `MoveTaskWithOptions` continue to use the shared candidate-map preparation.
 Preview does not persist that candidate. Apply repeats validation against current bindings.
 Existing source workflow/step/timestamp guards and transactional writes remain intact.
-The runtime separately revalidates credentials after a queued or deferred launch.
+SSH launch repeats selected-secret resolution and aborts when a selected env binding can no longer be revealed.
 
 An API key's presence changes no routing decision.
 Empty `agent_overrides` retains destination defaults. Explicit replacements remain task-owned.

@@ -6,8 +6,8 @@
 
 ## Context
 
-Workflow compatibility ignores agent-profile authentication and accepts nonempty executor secret IDs without resolving them.
-Issue [#5180](https://github.com/kdlbs/kandev/issues/5180) demonstrates a working SSH API-key route rejected by that gate.
+Before this change, workflow compatibility ignored agent-profile authentication and accepted nonempty executor secret IDs without resolving them.
+Issue [#5180](https://github.com/kdlbs/kandev/issues/5180) demonstrated a working SSH API-key route rejected by that gate.
 Admission must reflect authorized configuration without creating new secret-sharing authority.
 
 ## Decision
@@ -22,8 +22,10 @@ API-key and OAuth methods retain separate catalog identities and provisioning.
 The caller's existing authority is the limit. Shared profiles do not grant access to their owners' private keys.
 This proposal does not depend on unmerged owner-grant or prepared-actor work in PR #5184.
 
-The proposal remains unaccepted until the user reviews the design package.
-Implementation is pending.
+The decision remains proposed pending review.
+The admission checker and Claude API-key catalog method are implemented.
+The previous validator and OAuth-only Claude catalog are historical.
+Browser and SSH end-to-end checks remain pending.
 
 ## Consequences
 

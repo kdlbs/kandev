@@ -62,6 +62,27 @@ func TestWorkflowCredentialAdmission(t *testing.T) {
 	require.NotEmpty(t, fixture.validator.profiles)
 }
 
+func TestWorkflowCredentialAdmissionRequiresActorForOwnerlessRemoteExecutor(t *testing.T) {
+	fixture := newClaudeWorkflowAdmissionFixture(t)
+	executor, err := fixture.repo.GetExecutor(fixture.actor, "executor-task")
+	require.NoError(t, err)
+	executor.OwnerUserID = ""
+	require.NoError(t, fixture.repo.UpdateExecutor(fixture.actor, executor))
+	profile, err := fixture.repo.GetExecutorProfile(fixture.actor, "claude-ssh-profile")
+	require.NoError(t, err)
+	profile.OwnerUserID = ""
+	require.NoError(t, fixture.repo.UpdateExecutorProfile(fixture.actor, profile))
+
+	recording := &workflowChangeExecutorValidator{executorID: "executor-task"}
+	fixture.svc.agentProfileExecutorValidator = recording
+
+	_, err = fixture.svc.ValidateWorkflowChange(
+		context.Background(), fixture.task.ID, "workflow-target", "target-analysis", fixture.request,
+	)
+	require.ErrorIs(t, err, ErrInvalidWorkflowChange)
+	require.Empty(t, recording.profiles, "validator must not run without an established actor")
+}
+
 type scopedClaudeProfileValidator struct {
 	agent agents.Agent
 	store secrets.SecretStore

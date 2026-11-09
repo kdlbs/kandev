@@ -50,9 +50,6 @@ func ValidateCredentialAdmission(ctx context.Context, input AdmissionInput) erro
 	if !ok {
 		return refuse("agent family has no remote credential specification")
 	}
-	if len(spec.Methods) == 0 {
-		return nil
-	}
 	profileEnvVars := admissionEnvVars(input.ProfileEnvVars)
 	executorEnvVars := admissionEnvVars(input.ExecutorEnvVars)
 	if err := profileenv.Validate(profileEnvVars); err != nil {
@@ -62,6 +59,14 @@ func ValidateCredentialAdmission(ctx context.Context, input AdmissionInput) erro
 		return refuse("invalid executor profile environment: " + err.Error())
 	}
 
+	definitions := admissionDefinitions(profileEnvVars, executorEnvVars)
+	if err := runtimeenv.Validate(definitions); err != nil {
+		return refuse("invalid effective environment: " + err.Error())
+	}
+	if len(spec.Methods) == 0 {
+		return validateMethodsLessAdmission(ctx, definitions, input.SecretStore)
+	}
+
 	configuredFiles, configuredSecrets, err := decodeSelectedCredentials(input.ExecutorConfig)
 	if err != nil {
 		return err
@@ -69,18 +74,11 @@ func ValidateCredentialAdmission(ctx context.Context, input AdmissionInput) erro
 	if err := validateSelectedMethodReferences(spec, configuredFiles, configuredSecrets); err != nil {
 		return err
 	}
-
-	definitions := admissionDefinitions(profileEnvVars, executorEnvVars)
-	if err := runtimeenv.Validate(definitions); err != nil {
-		return refuse("invalid effective environment: " + err.Error())
+	if err := validateAuthenticationBindingConflicts(definitions, spec, configuredSecrets); err != nil {
+		return err
 	}
-	if needsCredentialReads(definitions, configuredSecrets) {
-		if !credentialActorAvailable(ctx) {
-			return refuse("current actor is unavailable for credential admission")
-		}
-		if input.SecretStore == nil {
-			return refuse("secret store is unavailable")
-		}
+	if err := ensureCredentialReader(ctx, definitions, configuredSecrets, input.SecretStore); err != nil {
+		return err
 	}
 	if err := validateAuthenticationBindings(ctx, spec, configuredSecrets, input.SecretStore); err != nil {
 		return err
@@ -103,6 +101,32 @@ func refuse(reason string) error {
 func admissionCanceled(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("%w: admission canceled: %w", ErrAdmissionRefused, err)
+	}
+	return nil
+}
+
+func validateMethodsLessAdmission(ctx context.Context, definitions []runtimeenv.Definition, store secrets.SecretStore) error {
+	if err := ensureCredentialReader(ctx, definitions, nil, store); err != nil {
+		return err
+	}
+	_, err := resolveAdmissionEnvironment(ctx, definitions, store)
+	return err
+}
+
+func ensureCredentialReader(
+	ctx context.Context,
+	definitions []runtimeenv.Definition,
+	configuredSecrets map[string]string,
+	store secrets.SecretStore,
+) error {
+	if !needsCredentialReads(definitions, configuredSecrets) {
+		return nil
+	}
+	if !credentialActorAvailable(ctx) {
+		return refuse("current actor is unavailable for credential admission")
+	}
+	if store == nil {
+		return refuse("secret store is unavailable")
 	}
 	return nil
 }
@@ -219,6 +243,40 @@ func credentialActorAvailable(ctx context.Context) bool {
 	return identity.Synthetic || strings.TrimSpace(identity.UserID) != ""
 }
 
+func validateAuthenticationBindingConflicts(
+	definitions []runtimeenv.Definition,
+	spec *Spec,
+	configuredSecrets map[string]string,
+) error {
+	if len(configuredSecrets) == 0 {
+		return nil
+	}
+	envVarByMethod := make(map[string]string, len(spec.Methods))
+	for _, method := range spec.Methods {
+		if method.Type == methodTypeEnv && method.EnvVar != "" {
+			envVarByMethod[method.MethodID] = method.EnvVar
+		}
+	}
+	for methodID, secretID := range configuredSecrets {
+		if secretID == "" || strings.TrimSpace(secretID) != secretID {
+			continue
+		}
+		envVar, ok := envVarByMethod[methodID]
+		if !ok {
+			continue
+		}
+		for _, definition := range definitions {
+			if definition.Key != envVar {
+				continue
+			}
+			if definition.SecretID != secretID || definition.Literal != "" {
+				return refuse("conflicting authentication bindings for the selected agent")
+			}
+		}
+	}
+	return nil
+}
+
 func validateAuthenticationBindings(ctx context.Context, spec *Spec, configuredSecrets map[string]string, store secrets.SecretStore) error {
 	if len(configuredSecrets) == 0 {
 		return nil
@@ -254,7 +312,7 @@ func validateAuthenticationBindings(ctx context.Context, spec *Spec, configuredS
 			}
 			return refuse("configured authentication binding is empty or unreadable")
 		}
-		if strings.TrimSpace(value) == "" {
+		if strings.TrimSpace(value) == "" || strings.Contains(value, "\x00") {
 			return refuse("configured authentication binding is empty or unreadable")
 		}
 	}
@@ -273,8 +331,8 @@ func resolveAdmissionEnvironment(ctx context.Context, definitions []runtimeenv.D
 		if err != nil {
 			return "", err
 		}
-		if definition.SecretID != "" && strings.TrimSpace(value) == "" {
-			return "", fmt.Errorf("secret value is empty")
+		if definition.SecretID != "" && (strings.TrimSpace(value) == "" || strings.Contains(value, "\x00")) {
+			return "", fmt.Errorf("secret value is empty or invalid")
 		}
 		return value, nil
 	})
