@@ -58,12 +58,6 @@ type resetHintParts struct {
 	location *time.Location
 }
 
-// parseResetHint extracts an explicitly zoned, dated provider retry time from
-// free text. Clock-only reset notices use their provider-specific parser.
-func parseResetHint(text string) *time.Time {
-	return parseResetHintAt(text, time.Now())
-}
-
 func parseResetHintAt(text string, now time.Time) *time.Time {
 	parts, ok := parseResetHintParts(text)
 	if ok {

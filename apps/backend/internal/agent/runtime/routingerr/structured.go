@@ -17,16 +17,16 @@ func structuredProviderCode(in Input) (Code, string) {
 	if in.ACPCode == -32000 {
 		return CodeAuthRequired, "acp.authentication_required"
 	}
-	if in.ProviderID == "opencode-acp" && in.ErrorKind == "ProviderAuthError" {
+	if in.ProviderID == providerOpenCodeACP && in.ErrorKind == "ProviderAuthError" {
 		return CodeAuthRequired, "opencode.kind.provider_auth"
 	}
 	// Error kinds are adapter/provider namespaced. Do not interpret an opaque
 	// ProviderCode or another provider's identically named kind as this API.
-	if in.ProviderID == "claude-acp" {
+	if in.ProviderID == providerClaudeACP {
 		switch in.ErrorKind {
 		case "authentication_error":
 			return CodeAuthRequired, "anthropic.kind.authentication"
-		case "rate_limit_error":
+		case errKindRateLimitError:
 			return CodeRateLimited, "anthropic.kind.rate_limit"
 		case "overloaded_error":
 			return CodeProviderOverloaded, "anthropic.kind.overloaded"
