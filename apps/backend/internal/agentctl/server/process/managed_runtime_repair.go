@@ -228,23 +228,29 @@ func (m *Manager) scheduleManagedRuntimePublicationExpiry(
 // expireManagedRuntimeRepair retires an uninitialized publication ticket at
 // its original recovery deadline and reaps only the exact owned process.
 func (m *Manager) expireManagedRuntimeRepair(prepared *managedruntime.PreparedRuntime, revision uint64) {
+	if m.repairExpiryBeforeLock != nil {
+		m.repairExpiryBeforeLock()
+	}
+	m.startOperationMu.Lock()
+	defer m.startOperationMu.Unlock()
+	m.repairPublicationMu.Lock()
+	defer m.repairPublicationMu.Unlock()
+
 	m.startMu.Lock()
 	owned := m.preparedRuntime == prepared && m.preparedRuntimeRevision == revision &&
-		!m.repairInitialized
+		!m.repairInitialized && !prepared.RepairPublished()
 	generation := m.ProcessGeneration()
+	if owned {
+		prepared.RetireRepairPublication()
+	}
 	m.startMu.Unlock()
-	if !owned || prepared.RepairPublished() {
+	if !owned {
 		return
 	}
-	prepared.RetireRepairPublication()
 	m.logger.Warn("managed runtime repair publication window expired",
 		zap.Uint64("process_generation", generation))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	// The timer callback is already asynchronous. Serialize with starts so the
-	// generation cannot change between the check and the stop.
-	m.startOperationMu.Lock()
-	defer m.startOperationMu.Unlock()
 	if current := m.ProcessGeneration(); current != generation {
 		return
 	}
@@ -263,6 +269,8 @@ func (m *Manager) expireManagedRuntimeRepair(prepared *managedruntime.PreparedRu
 // the publication itself is a bounded record write, not an installer or
 // protocol call.
 func (m *Manager) ManagedRuntimeInitialized(ctx context.Context, generation uint64) {
+	m.repairPublicationMu.Lock()
+	defer m.repairPublicationMu.Unlock()
 	prepared, repairInput, stopGeneration, ok := m.beginManagedRuntimePublication(generation)
 	if !ok {
 		return

@@ -516,3 +516,61 @@ func TestManagedRuntimeRepairStaleExpiryDoesNotStopSuccessor(t *testing.T) {
 		t.Fatal("stale expiry detached the successor generation")
 	}
 }
+
+// @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-007.12
+func TestManagedRuntimeRepairExpiryDoesNotStopInitializedAgent(t *testing.T) {
+	home := t.TempDir()
+	packageSpec := "@agentclientprotocol/claude-agent-acp@1.2.3"
+	command := agents.NewClaudeACP().ManagedNPMRuntime().RuntimeCommand("1.2.3").Args()
+	env, digest := repairReuseEnvironment(t, home)
+	manager := newRepairReuseManager(t, home, command, env, digest)
+	t.Cleanup(func() { _ = manager.StopForTeardown(context.Background()) })
+	store := openManagedRuntimeRepairStoreForTest(t, home)
+	repairContext, ok := storeRepairContext(store, packageSpec, env, digest)
+	if !ok {
+		t.Fatal("build repair context")
+	}
+	lease, err := store.BeginRecovery(context.Background(), repairContext)
+	if err != nil {
+		t.Fatalf("begin recovery: %v", err)
+	}
+	prepared, err := lease.Prepare(context.Background(), env, populateManagedRuntimeRepairCache(packageSpec))
+	if err != nil {
+		t.Fatalf("prepare generation: %v", err)
+	}
+	if err := manager.installPreparedRuntime(prepared); err != nil {
+		t.Fatalf("install candidate: %v", err)
+	}
+	manager.startupEvidenceMu.Lock()
+	manager.startupGeneration = 5
+	manager.startupEvidenceMu.Unlock()
+	manager.status.Store(StatusRunning)
+
+	expiryWaiting := make(chan struct{})
+	continueExpiry := make(chan struct{})
+	manager.repairExpiryBeforeLock = func() {
+		close(expiryWaiting)
+		<-continueExpiry
+	}
+	expired := make(chan struct{})
+	go func() {
+		manager.expireManagedRuntimeRepair(prepared, manager.configRevision)
+		close(expired)
+	}()
+	<-expiryWaiting
+	manager.startOperationMu.Lock()
+	manager.ManagedRuntimeInitialized(context.Background(), 5)
+	manager.startOperationMu.Unlock()
+	close(continueExpiry)
+	select {
+	case <-expired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expiry did not settle")
+	}
+	if !prepared.RepairPublished() {
+		t.Fatal("initialization publication was retired by the expiry race")
+	}
+	if manager.Status() == StatusStopped {
+		t.Fatal("expiry stopped a healthy initialized agent")
+	}
+}

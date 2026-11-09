@@ -395,6 +395,10 @@ type Manager struct {
 	// repairPublicationContext is a deterministic test seam for publication
 	// revalidation. Production leaves it nil and uses the repair store.
 	repairPublicationContext func(context.Context, managedruntime.RepairContextInput) (managedruntime.RepairContext, error)
+	// repairExpiryBeforeLock is a deterministic test seam for the publication
+	// expiry race. Production leaves it nil.
+	repairExpiryBeforeLock func()
+	repairPublicationMu    sync.Mutex
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
 	// created so the flag always describes the current channel — a Start that

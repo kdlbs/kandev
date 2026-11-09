@@ -453,12 +453,15 @@ func repairEphemeralEnvironmentKey(key string) bool {
 }
 
 func repairNPMConfigDigest(home string, env []string, npmFingerprint string) (string, error) {
-	paths := []string{
+	userConfigs := []string{
 		filepath.Join(home, ".npmrc"),
 		filepath.Join(home, ".config", "npm", "npmrc"),
 	}
 	if path := repairNPMConfigPath(env, "NPM_CONFIG_USERCONFIG"); path != "" {
-		paths = append(paths, path)
+		userConfigs = append(userConfigs, path)
+	}
+	paths := append([]string(nil), userConfigs...)
+	for _, path := range userConfigs {
 		if globalConfig := repairUserGlobalConfigPath(path); globalConfig != "" {
 			paths = append(paths, globalConfig)
 		}

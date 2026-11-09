@@ -331,3 +331,31 @@ func TestRepairNPMConfigPathAcceptsLowercaseOverrides(t *testing.T) {
 		t.Fatalf("relative npm config path = %q, want empty", got)
 	}
 }
+
+func TestRepairContextFollowsDefaultUserGlobalConfig(t *testing.T) {
+	store, home := openTestRepairStore(t)
+	globalConfig := filepath.Join(t.TempDir(), "global.npmrc")
+	if err := os.WriteFile(globalConfig, []byte("registry=https://one.example.test/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".npmrc"), []byte("globalconfig="+globalConfig+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
+	first, err := store.Context(context.Background(), input)
+	if err != nil {
+		t.Fatalf("complete context with default global config: %v", err)
+	}
+	if err := os.WriteFile(globalConfig, []byte("registry=https://two.example.test/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.Context(context.Background(), input)
+	if err != nil {
+		t.Fatalf("complete context after global config change: %v", err)
+	}
+	firstDigest := mustRepairContextDigest(t, store, first)
+	secondDigest := mustRepairContextDigest(t, store, second)
+	if firstDigest == secondDigest {
+		t.Fatal("default ~/.npmrc globalconfig change did not invalidate the repair context")
+	}
+}
