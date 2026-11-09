@@ -432,6 +432,10 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 			postCommitErr = errors.Join(postCommitErr, err)
 		}
 	}
+	// The edge tables have no foreign key to tasks, so the cascade leaves them behind.
+	for _, task := range deletedTasks {
+		s.deleteDependencyEdgesForTask(ctx, task.ID)
+	}
 	var lateCleanupErr error
 	cleanups, lateCleanupErr = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
 	postCommitErr = errors.Join(postCommitErr, lateCleanupErr)
