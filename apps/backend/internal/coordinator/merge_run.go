@@ -2,6 +2,8 @@ package coordinator
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 
 	"go.uber.org/zap"
 
@@ -15,6 +17,7 @@ const (
 	noteNotAdmitted       = "Not admitted"
 	notePolicyChange      = "Policy changed; a manager will decide"
 	reasonLoweringPending = "lowering_pending"
+	reasonPaused          = "paused"
 )
 
 // mergeRun is one claimed merge attempt.
@@ -184,6 +187,14 @@ func (r *mergeRun) dispatchLocked(ctx context.Context, tx coordinatorExec, depRe
 // order: a policy revision that moved, a pending lowering of the repository and
 // the daily limit counted at dispatch.
 func (r *mergeRun) automaticStop(ctx context.Context, tx coordinatorExec, row RepoPolicyRow) (note, reason string, err error) {
+	var raw *string
+	var pausedAt sql.NullTime
+	if err := tx.QueryRowContext(ctx, r.svc.store.db.Rebind(`SELECT policy_json, paused_at FROM coordinators WHERE id = ?`), r.c.ID).Scan(&raw, &pausedAt); err != nil {
+		return "", "", fmt.Errorf("read coordinator policy: %w", err)
+	}
+	if pausedAt.Valid {
+		return notePausedMerge, reasonPaused, nil
+	}
 	if row.AutomaticSinceRevision != *r.m.AutomaticRevision {
 		return notePolicyChange, reasonPolicyChanged, nil
 	}
@@ -191,7 +202,8 @@ func (r *mergeRun) automaticStop(ctx context.Context, tx coordinatorExec, row Re
 	if err != nil || pending {
 		return "", reasonLoweringPending, err
 	}
-	note, err = r.dailyLimitNote(ctx, tx)
+	stored, _ := ParsePolicy(raw)
+	note, err = r.dailyLimitNote(ctx, tx, stored)
 	if note != "" {
 		return note, "gate", err
 	}
@@ -200,13 +212,13 @@ func (r *mergeRun) automaticStop(ctx context.Context, tx coordinatorExec, row Re
 
 // dailyLimitNote returns the note of an exhausted daily limit counted at
 // dispatch, or "".
-func (r *mergeRun) dailyLimitNote(ctx context.Context, tx coordinatorExec) (string, error) {
+func (r *mergeRun) dailyLimitNote(ctx context.Context, tx coordinatorExec, stored Policy) (string, error) {
 	s := r.svc
 	used, err := s.dailyMergeCountTx(ctx, tx, r.c.ID)
 	if err != nil {
 		return "", err
 	}
-	if used >= s.policyFor(r.c).EffectiveEligibility().DailyLimit {
+	if used >= stored.EffectiveEligibility().DailyLimit {
 		return noteDailyLimit, nil
 	}
 	return "", nil

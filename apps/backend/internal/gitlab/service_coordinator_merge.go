@@ -25,6 +25,9 @@ func (s *Service) ReadMRLiveForAutomation(ctx context.Context, workspaceID, host
 		if status == nil || status.MR == nil {
 			return fmt.Errorf("merge request %s!%d: provider returned no merge request", projectPath, mrIID)
 		}
+		if err := requireHeadPipeline(ctx, client, projectPath, status); err != nil {
+			return err
+		}
 		discussions, err := client.ListMRDiscussions(ctx, projectPath, mrIID, nil)
 		if err != nil {
 			return err
@@ -93,4 +96,21 @@ func (s *Service) ListBranchCommitsForAutomation(ctx context.Context, workspaceI
 		return listErr
 	})
 	return commits, len(commits) >= 100, err
+}
+
+// requireHeadPipeline downgrades a pipeline state that does not belong to the
+// merge request head: the newest pipeline of the branch must carry the head
+// SHA, otherwise the state reads as pending.
+func requireHeadPipeline(ctx context.Context, client Client, projectPath string, status *MRStatus) error {
+	if status.PipelineState == "" || status.MR.HeadSHA == "" {
+		return nil
+	}
+	pipelines, err := client.ListPipelines(ctx, projectPath, status.MR.HeadBranch)
+	if err != nil {
+		return err
+	}
+	if len(pipelines) == 0 || pipelines[0].SHA != status.MR.HeadSHA {
+		status.PipelineState = "pending"
+	}
+	return nil
 }

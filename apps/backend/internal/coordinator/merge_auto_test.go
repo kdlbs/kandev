@@ -500,3 +500,53 @@ func TestManagerRejectsAPendingMergeAndFreesTheChange(t *testing.T) {
 		t.Fatalf("re-propose = %+v", res)
 	}
 }
+
+func TestAutomaticPauseDuringProviderReadStopsDispatch(t *testing.T) {
+	e := newMergeExec(t)
+	id := e.autoProposal(t, "h1")
+	var seen int
+	e.merger.set(func(f *fakeMerger) {
+		f.onRead = func(int) {
+			seen++
+			if seen == recheckRead {
+				if _, err := e.store.SetPaused(context.Background(), e.fix.c.ID, true, "u-1"); err != nil {
+					t.Error(err)
+				}
+			}
+		}
+	})
+	e.duties(t)
+	m := e.detail(t, id)
+	if e.merger.mergeCalls() != 0 || !m.ManagerOnly || m.Note != pausedNote {
+		t.Fatalf("merge calls = %d, manager_only = %v, note = %q", e.merger.mergeCalls(), m.ManagerOnly, m.Note)
+	}
+}
+
+func TestAutomaticDailyLimitLoweredDuringProviderReadHolds(t *testing.T) {
+	e := newMergeExec(t)
+	first := e.autoProposal(t, "h1")
+	e.duties(t)
+	if st, _ := e.status(t, first); st != "approved" {
+		t.Fatalf("first status = %s", st)
+	}
+	e.merger.set(func(f *fakeMerger) { f.snap = greenSnapshot("h5") })
+	second := *e.propose(t, "h5").ProposalID
+	var seen int
+	e.merger.set(func(f *fakeMerger) {
+		f.snap.Key.Number = 43
+		f.onRead = func(int) {
+			seen++
+			if seen == recheckRead {
+				e.dailyLimit(t, 1)
+			}
+		}
+	})
+	e.duties(t)
+	m := e.detail(t, second)
+	if e.merger.mergeCalls() != 1 || !m.ManagerOnly || m.Note != noteDailyLimit {
+		t.Fatalf("merge calls = %d, manager_only = %v, note = %q", e.merger.mergeCalls(), m.ManagerOnly, m.Note)
+	}
+}
+
+// recheckRead is the provider read of the recheck, after the evaluation reads.
+const recheckRead = 3

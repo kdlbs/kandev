@@ -165,3 +165,27 @@ func TestProjectSquashOptionIsReadRaw(t *testing.T) {
 		t.Fatalf("squash option = %q, err = %v", got, err)
 	}
 }
+
+func TestRequireHeadPipelineDowngradesStalePipeline(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		pipelines []Pipeline
+		want      string
+	}{
+		{"head pipeline kept", []Pipeline{{SHA: mergeHeadSHA, Status: "success"}}, "success"},
+		{"older pipeline pending", []Pipeline{{SHA: "old", Status: "success"}}, "pending"},
+		{"no pipeline pending", nil, "pending"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewMockClient("https://gitlab.example.com")
+			mock.SeedPipelines("g/p", tc.pipelines)
+			status := &MRStatus{MR: &MR{HeadSHA: mergeHeadSHA, HeadBranch: "b"}, PipelineState: "success"}
+			if err := requireHeadPipeline(context.Background(), mock, "g/p", status); err != nil {
+				t.Fatal(err)
+			}
+			if status.PipelineState != tc.want {
+				t.Errorf("PipelineState = %q, want %q", status.PipelineState, tc.want)
+			}
+		})
+	}
+}

@@ -79,6 +79,7 @@ func deleteCoordinatorPhase3Rows(ctx context.Context, tx *sqlx.Tx, scope string,
 		`DELETE FROM coordinator_note_versions WHERE note_id IN (SELECT id FROM coordinator_notes WHERE coordinator_id ` + scope + `)`,
 		`DELETE FROM coordinator_notes WHERE coordinator_id ` + scope,
 		`DELETE FROM coordinator_note_snapshots WHERE coordinator_id ` + scope,
+		`DELETE FROM coordinator_merge_dispatches WHERE proposal_id IN (SELECT proposal_id FROM coordinator_merge_proposals WHERE coordinator_id ` + scope + `)`,
 		`DELETE FROM coordinator_turn_calls WHERE turn_id IN (SELECT id FROM coordinator_turns WHERE coordinator_id ` + scope + `)`,
 		`DELETE FROM coordinator_unattended_denials WHERE turn_id IN (SELECT id FROM coordinator_unattended_turns WHERE coordinator_id ` + scope + `)`,
 	}
@@ -87,6 +88,7 @@ func deleteCoordinatorPhase3Rows(ctx context.Context, tx *sqlx.Tx, scope string,
 		"coordinator_class_reviews", "coordinator_pending_changes", "coordinator_turns",
 		"coordinator_outcomes", "coordinator_feedback", "coordinator_moveback_seen",
 		"coordinator_replay_results",
+		"coordinator_merge_proposals", "coordinator_merge_repos", "coordinator_merge_deps", "coordinator_merge_audit",
 	} {
 		stmts = append(stmts, `DELETE FROM `+table+` WHERE coordinator_id `+scope)
 	}
