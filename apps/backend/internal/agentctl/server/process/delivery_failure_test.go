@@ -89,6 +89,9 @@ func TestDeliveryFailureDrainsActualTerminal(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("delivery forwarding did not finish after the next instruction")
 	}
+	if got := manager.UpdateStreamStage().AdapterSeen; got != 5 {
+		t.Fatalf("adapter updates seen across failure drain = %d, want 5", got)
+	}
 
 	events, _, err := manager.deliveryJournal.Replay(context.Background(), "stream", 0, 10)
 	require.NoError(t, err)
@@ -110,6 +113,20 @@ func TestDeliveryFailureDrainsActualTerminal(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, journal.SubmissionCompleted, next.State)
 	require.True(t, next.TerminalEventRetained)
+}
+
+func TestShutdownDeliveryDrainCountsAdapterUpdates(t *testing.T) {
+	manager := newAllToolManager(t, 1024)
+	updates := make(chan adapter.AgentEvent, 2)
+	updates <- adapter.AgentEvent{Type: adapter.EventTypeMessageChunk, Text: "first"}
+	updates <- adapter.AgentEvent{Type: adapter.EventTypeMessageChunk, Text: "second"}
+	close(updates)
+
+	manager.drainDeliveryUpdates(updates)
+
+	if got := manager.UpdateStreamStage().AdapterSeen; got != 2 {
+		t.Fatalf("adapter updates seen during shutdown drain = %d, want 2", got)
+	}
 }
 
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-001.3

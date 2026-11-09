@@ -72,15 +72,76 @@ func TestTaskDTOEnrichmentReconcilesWithSessionsReadAfterStatusSummary(t *testin
 				[]*models.Task{{ID: "task-b", WorkspaceID: "ws-b", Title: "Task"}},
 			)
 			require.NoError(t, err)
-			require.GreaterOrEqual(t, len(calls), 3)
-			require.Equal(t, []string{"sessions", "status-summary", "sessions"}, calls[:3],
-				"the repair observation must follow the summary revision it may replace")
+			require.Equal(t, []string{"status-summary", "sessions"}, calls,
+				"one authoritative observation batch, captured after the summary revision it may replace")
 			require.Equal(t, uint64(2), summaries.current.Revision,
-				"the handler must not publish a repair based on the earlier session batch")
+				"the handler must not publish a repair based on an earlier session batch")
 			require.Equal(t, testCase.afterRunning, *summaries.current.HasRunningSession)
 			require.Zero(t, summaries.writeCalls)
 		})
 	}
+}
+
+// TestTaskDTOEnrichmentRepairDoesNotRegressConcurrentProjectorRevision is the
+// concurrency proof for the consolidated fence: the observation batch is
+// captured after the summary revision read, and a projector write that lands
+// after that read is protected by the revision-gated summary write, so the
+// repair reloads and converges on the projector's row instead of regressing it.
+func TestTaskDTOEnrichmentRepairDoesNotRegressConcurrentProjectorRevision(t *testing.T) {
+	calls := []string{}
+	repo := &statusSummarySessionOrderRepo{
+		httpTaskRepo: &httpTaskRepo{},
+		calls:        &calls,
+		session: &models.TaskSession{
+			ID: "secondary", TaskID: "task-b", State: models.TaskSessionStateRunning,
+		},
+	}
+	summaries := &statusSummarySessionOrderStore{
+		calls: &calls,
+		// Stale projection: the projector has not yet observed the running
+		// session this batch will return.
+		current: statussummary.TaskStatusSummary{
+			Revision: 1, HasRunningSession: boolPointer(false),
+		},
+	}
+	// The projector wins the race while the single post-fence observation batch
+	// is read: its revision-2 row is durable before the repair persists.
+	repo.beforeObservations = func() {
+		summaries.current = statussummary.TaskStatusSummary{
+			Revision: 2, HasRunningSession: boolPointer(true),
+		}
+	}
+
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo, ResourceCleanups: repo, StatusSummaries: summaries,
+	}, nil, newTestLogger(t), service.RepositoryDiscoveryConfig{})
+
+	dtOs, err := buildTaskDTOsWithSessionInfo(
+		context.Background(), svc, newTestLogger(t), nil, nil,
+		[]*models.Task{{ID: "task-b", WorkspaceID: "ws-b", Title: "Task"}},
+	)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(calls), 2)
+	require.Equal(t, []string{"status-summary", "sessions"}, calls[:2],
+		"one observation batch, captured after the summary revision it may replace")
+	require.Equal(t, 1, countCalls(calls, "sessions"),
+		"exactly one observation batch backs DTO construction and repair")
+	require.Equal(t, []string{"status-summary", "sessions", "status-summary", "reload-sessions"}, calls,
+		"the rejected repair reloads the summary and the task's sessions once before converging")
+	require.Equal(t, 1, summaries.writeCalls,
+		"the stale repair attempt must be rejected exactly once by the revision gate")
+	require.Equal(t, uint64(2), summaries.current.Revision,
+		"the projector's newer revision must survive the repair")
+	require.True(t, *summaries.current.HasRunningSession,
+		"the projector's running-session state must not be regressed")
+	require.NotNil(t, dtOs[0].StatusSummary)
+	require.Equal(t, uint64(2), dtOs[0].StatusSummary.Revision,
+		"the response must carry the projector's row, not the rejected repair")
+	require.True(t, *dtOs[0].StatusSummary.HasRunningSession)
 }
 
 func TestTaskSummaryProjectionCombinesPrimaryAndSessionListReads(t *testing.T) {
@@ -121,7 +182,7 @@ func TestTaskSummaryProjectionCombinesPrimaryAndSessionListReads(t *testing.T) {
 	require.Equal(t, "Local runner", *got[0].PrimaryExecutorName)
 	require.Equal(t, "Coding agent", *got[0].PrimaryAgentName)
 	require.Equal(t, "/workspace/project", *got[0].PrimaryWorkingDirectory)
-	require.Equal(t, 2, repo.summaryCalls, "the post-status-summary observation must use the same narrow projection")
+	require.Equal(t, 1, repo.summaryCalls, "one authoritative projection batch backs DTO construction and repair")
 	require.Zero(t, repo.fullSessionBatchCalls, "navigation must not decode full session rows")
 	require.Zero(t, repo.primaryInfoCalls, "primary information must come from the existing summary batch")
 }
@@ -171,8 +232,9 @@ func (r *taskSummaryProjectionNavigationRepo) GetPrimarySessionInfoByTaskIDs(
 
 type statusSummarySessionOrderRepo struct {
 	*httpTaskRepo
-	calls   *[]string
-	session *models.TaskSession
+	calls              *[]string
+	session            *models.TaskSession
+	beforeObservations func()
 }
 
 func boolPointer(value bool) *bool {
@@ -184,6 +246,10 @@ func (r *statusSummarySessionOrderRepo) BatchGetSessionsByTaskIDs(
 	taskIDs []string,
 ) (map[string][]*models.TaskSession, error) {
 	*r.calls = append(*r.calls, "sessions")
+	if r.beforeObservations != nil {
+		r.beforeObservations()
+		r.beforeObservations = nil
+	}
 	for _, taskID := range taskIDs {
 		if taskID == r.session.TaskID {
 			copy := *r.session
@@ -191,6 +257,30 @@ func (r *statusSummarySessionOrderRepo) BatchGetSessionsByTaskIDs(
 		}
 	}
 	return map[string][]*models.TaskSession{}, nil
+}
+
+// ListTaskSessions answers the compare-and-set rejection reload with the same
+// current session row the batch returned.
+func (r *statusSummarySessionOrderRepo) ListTaskSessions(
+	_ context.Context,
+	taskID string,
+) ([]*models.TaskSession, error) {
+	*r.calls = append(*r.calls, "reload-sessions")
+	if taskID != r.session.TaskID {
+		return nil, nil
+	}
+	copy := *r.session
+	return []*models.TaskSession{&copy}, nil
+}
+
+func countCalls(calls []string, name string) int {
+	count := 0
+	for _, call := range calls {
+		if call == name {
+			count++
+		}
+	}
+	return count
 }
 
 type statusSummarySessionOrderStore struct {

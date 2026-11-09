@@ -1,5 +1,5 @@
 ---
-id: "07-cold-resume-admission"
+id: "08-cold-resume-admission"
 title: "Run executor admission on workflow cold resume"
 status: in_progress
 wave: 2
@@ -15,7 +15,7 @@ system_design:
   - ../../specs/executors/system-design/per-user-ownership.md
 ---
 
-# Task 07: Run executor admission on workflow cold resume
+# Task 08: Run executor admission on workflow cold resume
 
 A workflow move that re-enters a step whose session has no live agent reaches
 `attemptColdResume`, which relaunched the session through the plain

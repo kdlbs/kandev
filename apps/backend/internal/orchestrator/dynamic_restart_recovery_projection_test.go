@@ -8,6 +8,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -71,5 +72,69 @@ func TestResumeAdmissionWaitsForPersistedActiveRouteProjection(t *testing.T) {
 	}
 	if len(manager.stopAgentArgs) != 0 || len(manager.stopAgentWithReasonArgs) != 0 || len(manager.startAgentProcessCalls) != 0 {
 		t.Fatal("projection recovery stopped or replaced the live execution")
+	}
+}
+
+func TestDynamicPolicyResumeErrorMirrorsActionRequiredRoute(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name        string
+		routeStatus string
+		wantMirror  bool
+	}{
+		{name: "action required route", routeStatus: dynamicRouteStatusActionRequired, wantMirror: true},
+		{name: "route still waiting", routeStatus: "retry_wait"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "task-recovery-projection", "session-recovery-projection", "step-1")
+			session, err := repo.GetTaskSession(ctx, "session-recovery-projection")
+			if err != nil {
+				t.Fatal(err)
+			}
+			session.State = models.TaskSessionStateWaitingForInput
+			session.AgentProfileID = "dynamic-profile"
+			session.RouteGeneration = 4
+			session.RouteState = "retry_wait"
+			session.RouteReason = "quota_limited"
+			if err := repo.UpdateTaskSession(ctx, session); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.SaveRouteState(ctx, dynamicruntime.RouteState{
+				SessionID: "session-recovery-projection", LogicalProfileID: "dynamic-profile",
+				Generation: 4, Status: test.routeStatus,
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			eventBus := &recordingEventBus{}
+			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+			svc.eventBus = eventBus
+			if !svc.handleDynamicPolicyResumeError(ctx, repo, session.ID, session.RouteGeneration, dynamicruntime.ErrRecoveryPending) {
+				t.Fatal("resume error was not handled")
+			}
+
+			persisted, err := repo.GetTaskSession(ctx, session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.wantMirror {
+				if persisted.RouteState != dynamicRouteStatusActionRequired {
+					t.Fatalf("session route state = %q, want action_required", persisted.RouteState)
+				}
+				if len(eventBus.events) != 1 || eventBus.events[0].subject != events.TaskSessionStateChanged {
+					t.Fatalf("published events = %#v, want one task-session state event", eventBus.events)
+				}
+				data := eventBus.events[0].event.Data.(map[string]interface{})
+				if data["route_state"] != dynamicRouteStatusActionRequired {
+					t.Fatalf("published route state = %#v, want action_required", data["route_state"])
+				}
+				return
+			}
+			if persisted.RouteState != "retry_wait" || len(eventBus.events) != 0 {
+				t.Fatalf("non-terminal route was changed or published: session=%+v events=%#v", persisted, eventBus.events)
+			}
+		})
 	}
 }

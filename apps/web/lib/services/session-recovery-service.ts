@@ -1,4 +1,5 @@
 import type { AgentErrorCause } from "@/lib/types/task-status-summary";
+import { normalizeAgentErrorCauses } from "@/lib/session-last-agent-error";
 import { buildRestoreWorkspaceRequest } from "./session-launch-helpers";
 import { launchSession, type LaunchSessionResponse } from "./session-launch-service";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -74,6 +75,13 @@ export type ContextContinuationDetails = WebSocketRequestErrorDetails & {
 
 export type RecoveryInspectionBusyDetails = WebSocketRequestErrorDetails & {
   kind: "recovery_inspection_busy";
+};
+
+export type SessionRecoveryFailureDetails = WebSocketRequestErrorDetails & {
+  kind: "session_recovery_failed";
+  session_id?: string;
+  error_stamp?: string;
+  causes?: unknown;
 };
 
 type WorkspaceRecoveryStatusResponse = {
@@ -208,6 +216,33 @@ export function runtimeCleanupFailureDetails(error: unknown, sessionId?: string)
     sessionId: details.session_id,
     errorStamp: typeof details.error_stamp === "string" ? details.error_stamp : undefined,
   };
+}
+
+/** Returns only safe causes correlated to this failed recovery attempt. */
+export function sessionRecoveryFailureDetails(
+  error: unknown,
+  sessionId?: string,
+): SessionRecoveryFailureDetails | null {
+  if (!(error instanceof WebSocketRequestError) || !isRecord(error.details)) return null;
+  const details = error.details;
+  if (details.kind !== "session_recovery_failed") return null;
+  if (sessionId && details.session_id !== sessionId) return null;
+  return details as SessionRecoveryFailureDetails;
+}
+
+export function sessionRecoveryFailureCauses(
+  error: unknown,
+  sessionId?: string,
+): AgentErrorCause[] {
+  const details = sessionRecoveryFailureDetails(error, sessionId);
+  return details ? normalizeAgentErrorCauses(details.causes) : [];
+}
+
+/** Copy only host-owned recovery evidence; transport detail remains absent. */
+export function recoveryFailureCauses(error: unknown, sessionId?: string): AgentErrorCause[] {
+  const cleanup = runtimeCleanupFailureCauses(error, sessionId);
+  if (cleanup.length > 0) return cleanup;
+  return sessionRecoveryFailureCauses(error, sessionId);
 }
 
 /** Copy only host-owned cleanup evidence; transport detail remains absent. */

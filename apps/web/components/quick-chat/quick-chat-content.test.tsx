@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const useSubmitHandlerSpy = vi.hoisted(() => vi.fn());
 const useQuickChatInitialDraftSpy = vi.hoisted(() => vi.fn());
+const messageListPropsSpy = vi.hoisted(() => vi.fn());
 const panelState = vi.hoisted(
   () =>
     ({
@@ -47,7 +48,10 @@ vi.mock("@/components/task/chat/clarification-panel-section", () => ({
 }));
 
 vi.mock("@/components/task/chat/message-list", () => ({
-  MessageList: () => <div data-testid="message-list" />,
+  MessageList: (props: Record<string, unknown>) => {
+    messageListPropsSpy(props);
+    return <div data-testid="message-list" />;
+  },
 }));
 
 vi.mock("@/lib/session-workspace-path", () => ({
@@ -110,6 +114,29 @@ describe("QuickChatContent initialDraft", () => {
         draft: "why is KAN-418 here?",
         initialPrompt: undefined,
         chatInputRef: expect.objectContaining({ current: null }),
+      }),
+    );
+  });
+});
+
+describe("QuickChatContent history readiness", () => {
+  it("keeps Quick Chat placement pending during cached history refresh", () => {
+    panelState.historyRefreshPending = true;
+    const view = render(<QuickChatContent sessionId="session-1" placeholderOverride="first" />);
+
+    expect(messageListPropsSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messagesLoading: false,
+        historyRefreshPending: true,
+      }),
+    );
+
+    panelState.historyRefreshPending = false;
+    view.rerender(<QuickChatContent sessionId="session-1" placeholderOverride="settled" />);
+    expect(messageListPropsSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messagesLoading: false,
+        historyRefreshPending: false,
       }),
     );
   });

@@ -17,6 +17,7 @@ import (
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeroutines "github.com/kandev/kandev/internal/office/routines"
+	officeshared "github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -102,7 +103,7 @@ func TestTaskCreatorAdapterPersistsOriginByCreationPath(t *testing.T) {
 	ctx := context.Background()
 
 	agentTaskID, err := adapter.CreateOfficeTaskAsAgent(
-		ctx, "ws-1", "project-1", "agent-worker", "Agent task", "Created at runtime", nil,
+		ctx, "ws-1", "project-1", "agent-worker", "Agent task", "Created at runtime", nil, officeshared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeTaskAsAgent: %v", err)
@@ -382,7 +383,7 @@ func TestTaskCreatorAdapterCreateOfficeSubtaskPassesMetadataThrough(t *testing.T
 	ctx := context.Background()
 
 	parentTaskID, err := adapter.CreateOfficeTaskAsAgent(
-		ctx, "ws-1", "project-1", "agent-worker", "Parent task", "Parent", nil,
+		ctx, "ws-1", "project-1", "agent-worker", "Parent task", "Parent", nil, officeshared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("create parent task: %v", err)
@@ -406,7 +407,7 @@ func TestTaskCreatorAdapterCreateOfficeSubtaskPassesMetadataThrough(t *testing.T
 	wantMetadata[models.MetaKeyOfficeCarrierCausationDepth] = float64(1)
 
 	childTaskID, err := adapter.CreateOfficeSubtask(
-		ctx, parentTaskID, "agent-assignee", "Child task", "A subtask", carrier,
+		ctx, parentTaskID, "agent-assignee", "Child task", "A subtask", carrier, officeshared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeSubtask: %v", err)

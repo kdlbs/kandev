@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-02
-updated: 2026-11-05
+updated: 2026-11-07
 owners:
   - kandev
 ---
@@ -46,6 +46,8 @@ The [system design](../system-design/context-compaction-count.md) defines persis
 - **AC-UI-CONTEXT-COMPACTION-COUNT-001.11:** An eligible sample immediately after an excluded sample shall establish a new baseline without incrementing the count.
 - **AC-UI-CONTEXT-COMPACTION-COUNT-001.12:** Refresh, backend restart, and execution recovery shall retain the stored count and exclusion state. Duplicate deliveries shall not create additional increments.
 - **AC-UI-CONTEXT-COMPACTION-COUNT-001.13:** The correction shall preserve existing lifetime counts. It shall not subtract historical false positives without attributable evidence.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.14:** For inferred counts, the explanation shall describe usage-drop inference and its accuracy limits. It shall omit Copilot-specific behavior.
+- **AC-UI-CONTEXT-COMPACTION-COUNT-001.15:** Every supported locale shall provide the same provider-neutral explanation. The compaction label and count shall remain visible.
 
 ## Compatibility and accuracy
 
@@ -58,6 +60,9 @@ The ordinary usage stream remains excluded from inference.
 Other provider streams retain their existing inference behavior unless evidence establishes the same ambiguity.
 Missing observations and provider resets can still cause undercounts or overcounts in eligible streams.
 The lifetime aggregate can include older inferred values and missed events. It does not represent a complete provider-confirmed history.
+
+Generic inferred-count help explains the active counting method without details about another provider.
+Native Copilot help retains its distinct source and coverage explanations under the provider contract.
 
 A fresh session starts at zero.
 An existing session can retain a non-zero historical count after the correction.
@@ -77,3 +82,4 @@ A persistence failure shall expose neither a new baseline nor a derived incremen
 - [Original implementation](../../../plans/context-compaction-count/plan.md).
 - [Copilot inference correction](../../../plans/copilot-compaction-inference/plan.md).
 - [Native Copilot evidence](../../../plans/copilot-native-compaction-count/plan.md).
+- [Generic compaction help](../../../plans/generic-compaction-help/plan.md).

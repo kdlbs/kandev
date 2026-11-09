@@ -1249,7 +1249,13 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 	}
 	ctx = withUnclassifiedFallbackLaunchClaim(ctx, claim)
 	ctx = withCancelInFlightGuardHeldForSession(ctx, data.SessionID)
-	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, executionProfileID, launchOriginAutomatic) {
+	// Resume-attempt contexts clear general guard ownership, but this worker
+	// keeps the session guard until its synchronous replacement claim completes.
+	ctx = withExecutionReplacementStopOwnerGuardHeldForSession(ctx, data.SessionID)
+	outcome, launchErr := s.relaunchDynamicTaskAfterFailureOutcomeWithBinding(
+		ctx, data, executionProfileID, launchOriginAutomatic, ceilingEntryBindingFromContext(ctx),
+	)
+	switch outcome {
 	case dynamicRelaunchSucceeded:
 		return
 	case dynamicRelaunchDeferred:
@@ -1275,7 +1281,8 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID),
-		zap.String("execution_profile_id", executionProfileID))
+		zap.String("execution_profile_id", executionProfileID),
+		zap.Error(launchErr))
 	s.settleDetachedDynamicSuccessorFailure(context.WithoutCancel(ctx), data, executionProfileID)
 }
 
@@ -1385,7 +1392,8 @@ func (s *Service) stopDynamicSuccessorWorkers() {
 // the backend route-action handler has claimed the successor generation. It
 // owns the predecessor shutdown, continuation persistence, successor launch,
 // and final launch error surface so the UI never has to issue a second launch
-// request.
+// request. An unresolved recovery fence retains the selected generation for
+// explicit session recovery instead of replaying the predecessor prompt.
 func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string) error {
 	return s.launchDynamicRouteAction(ctx, sessionID, launchOriginManual)
 }
@@ -1420,6 +1428,18 @@ func (s *Service) launchDynamicRouteAction(ctx context.Context, sessionID string
 			s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, string(origin)+" dynamic route action failed")
 		}
 	}()
+	if origin == launchOriginManual && isPendingRecoveryRouteClaim(session) {
+		block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if block != nil {
+			// Selection is accepted, but the fence still owns prompt admission.
+			// Keep the claim for explicit recovery without replaying old work.
+			succeeded = true
+			return nil
+		}
+	}
 	task, err := s.scheduler.GetTask(ctx, session.TaskID)
 	if err != nil {
 		return err
