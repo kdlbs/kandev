@@ -82,3 +82,20 @@ func TestACPProbe_DoesNotMutateResolverArgv(t *testing.T) {
 		t.Fatalf("resolver slice mutated: %v", shared)
 	}
 }
+
+func TestACPProbe_PrefixPreparationFailureDoesNotSpawn(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TMPDIR", "relative-tmp")
+	marker := filepath.Join(dir, "spawned")
+	bin := writeShellBin(t, dir, "fake-npx", "#!/bin/sh\ntouch "+marker+"\n")
+	argv := []string{bin, "--prefix", managednpm.NPMProjectPrefix, "pkg"}
+
+	got := NewACPProbe(staticResolver(argv), nil).Probe(context.Background(), ProbeInput{ProviderID: "claude-acp"})
+
+	if got == nil {
+		t.Fatal("expected a classified error when the prefix cannot be prepared")
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("process was spawned despite prefix preparation failure")
+	}
+}
