@@ -1116,10 +1116,41 @@ func (m *Manager) cleanupLiveExecutionLocked(ctx context.Context, reader executo
 	if err != nil || current == nil || current.AgentExecutionID != executionID || !current.UpdatedAt.Equal(updatedAt) {
 		return false, err
 	}
+	// Deleting the standalone instance also stops the workspace processes it
+	// hosts (dev servers, scripts and shell commands). Leave the owner live
+	// while any of them may still be running; a later reconcile retries.
+	if m.liveExecutionHasWorkspaceProcesses(ctx, execution) {
+		return false, nil
+	}
 	if err := m.cleanupStaleExecution(ctx, execution); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// liveExecutionHasWorkspaceProcesses reports whether the execution's agentctl
+// instance hosts a process that has not reached a terminal status. An
+// unavailable client or an unreadable process list counts as active work.
+func (m *Manager) liveExecutionHasWorkspaceProcesses(ctx context.Context, execution *AgentExecution) bool {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return true
+	}
+	processes, err := client.ListProcesses(ctx, "")
+	if err != nil {
+		m.logger.Debug("cannot read workspace processes; keeping live terminal runtime",
+			zap.String("session_id", execution.SessionID),
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+		return true
+	}
+	for i := range processes {
+		if !isTerminalProcessStatus(processes[i].Status) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExecution) error {

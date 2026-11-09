@@ -50,6 +50,7 @@ type ProcessHandlers struct {
 	cursorMCPRecovery          cursorMCPRecoveryManager
 	terminalSvc                cursorMCPRecoveryTerminalService
 	cursorMCPRecoveryMu        sync.Mutex
+	sessionAdmissionFence      func(string) func()
 	logger                     *logger.Logger
 }
 
@@ -99,6 +100,13 @@ func RegisterProcessRoutes(
 	session.POST("/mcp/retry", handlers.httpRetryCursorMCP)
 	session.POST("/html-previews", handlers.httpPublishWorkspacePreview)
 	return handlers
+}
+
+// SetSessionAdmissionFence wires the per-session lifecycle fence that idle
+// runtime reclaim holds. Process start admission takes it so a command cannot
+// start between reclaim's workspace-process check and its instance stop.
+func (h *ProcessHandlers) SetSessionAdmissionFence(acquire func(string) func()) {
+	h.sessionAdmissionFence = acquire
 }
 
 // SetTerminalService wires first-class ordinary task terminals used by native
@@ -326,6 +334,10 @@ func (h *ProcessHandlers) startSessionProcess(
 	sessionID, repoID, kind, scriptName, command, workingDir string,
 	portEnv map[string]string,
 ) {
+	if h.sessionAdmissionFence != nil {
+		release := h.sessionAdmissionFence(sessionID)
+		defer release()
+	}
 	if streams.ProcessKind(kind) == streams.ProcessKindDev {
 		if proc := h.getRunningDevProcess(c.Request.Context(), sessionID); proc != nil {
 			c.JSON(http.StatusOK, gin.H{"process": proc})

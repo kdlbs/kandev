@@ -17,7 +17,8 @@ func (s *Service) SetLSPLeaseLifecycle(lifecycle LSPLeaseLifecycle) {
 }
 
 // AcquireSessionLifecycleFence exposes the existing per-session lifecycle
-// lock to LSP admission so a retained lease cannot race idle cleanup.
+// lock to LSP and workspace-process admission so a retained lease or a newly
+// started command cannot race idle cleanup.
 func (s *Service) AcquireSessionLifecycleFence(sessionID string) func() {
 	return s.acquireSessionLifecycleLock(sessionID)
 }

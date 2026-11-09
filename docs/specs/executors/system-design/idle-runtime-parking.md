@@ -115,6 +115,11 @@ identity, identity-checked cleanup and row repair, and no known or unreadable qu
 clarifications, permissions, background work, or active turn. Live resumable sessions remain excluded.
 The current live-terminal cleanup requires a tracked standalone instance and a
 confirmed lifecycle stop; an unavailable or changed owner leaves the row intact.
+Deleting that instance also stops the workspace processes it hosts, so a
+non-terminal process on the instance, an unavailable agentctl client, or an
+unreadable process list blocks the stop until a later reconcile. Process start
+admission holds the same session lifecycle fence as the reclaim, so a command is
+either visible to that check or admitted after the stop.
 When agentctl status fails, lifecycle may consult an optional runtime capability for positive agentctl process-absence evidence. SSH uses only the remote PID and existing connection of the tracked execution instance. A completed remote probe must confirm absence, and the instance and answering transport must remain current after the probe. Missing PID, missing instance/client, a live process, permission/probe errors, cancellation, transport loss, and unsupported runtimes retain the original status error and skip reclaim. This path never redials SSH and never treats UI remote-status values as process-absence evidence. Existing lifecycle cleanup, execution-identity checks, active-turn guards, and resume-record preservation still apply.
 For `WAITING_FOR_INPUT` and `IDLE` it also requires a stored resume token or row status `running`.
 
