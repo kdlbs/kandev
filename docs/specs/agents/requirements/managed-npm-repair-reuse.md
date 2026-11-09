@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-11-08
-updated: 2026-11-08
+updated: 2026-11-09
 owners:
   - kandev
 ---
@@ -51,6 +51,10 @@ incomplete shared installation while compatible executor storage remains availab
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-007.14:** Older peers shall retain their existing private recovery behavior. Compatibility shall not require stopping a healthy retained agent or changing its runtime selection.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-007.15:** Desktop and phone shall show the existing attempt-2 progress during actual recovery. A later successful first attempt shall use ordinary startup or resume presentation.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-007.16:** Reuse shall require no new setting, runtime-update click, terminal command, startup-wide scan, or saved profile change. Existing automatic-start restrictions shall remain effective.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-007.17:** A rejected Start request shall preserve the current process, pending publication, deadline, repair ownership, and physical-cache evidence. It shall not consume another recovery attempt.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-007.18:** With authentication disabled and no explicit workspace owner, compatible interactive and background launches shall resolve the same default repair owner. Equivalent startup and interactive agent-wide discovery shall share that owner. Enabled or unknown authentication shall not permit this fallback or merge distinct authorized owners.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-007.19:** Toolchain metadata lookup shall obey caller cancellation and the existing recovery deadline. Stop shall remain operable during that lookup.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-007.20:** Maintenance guidance shall identify the execution-host repair store and require stopped consumers before explicit removal. The next eligible launch shall retain ordinary recovery without changes to shared npm caches.
 
 ## Out of scope
 
@@ -65,3 +69,4 @@ incomplete shared installation while compatible executor storage remains availab
 
 - [System design](../system-design/managed-npm-repair-reuse.md)
 - [Implementation plan](../../../plans/managed-npm-repair-reuse/plan.md)
+- [PR #5208 review corrections](../../../plans/managed-npm-review-fixes/plan.md)

@@ -45,18 +45,11 @@ func managedRuntimeCacheEvidenceForFailure(
 }
 
 func exactManagedRuntimePackage(agentID string, command []string) (string, bool) {
-	for _, candidate := range command {
-		spec, ok := agents.BuiltinManagedNPMRuntimeForPackage(agentID, candidate)
-		if !ok || managedruntime.ValidateExactPackageSpec(candidate) != nil {
-			continue
-		}
-		prefix := spec.Package + "@"
-		version := strings.TrimPrefix(candidate, prefix)
-		if sameManagedCommand(command, spec.RuntimeCommand(version).Args()) {
-			return candidate, true
-		}
+	_, invocation, ok := agents.MatchBuiltinManagedNPMRuntime(agentID, command)
+	if !ok {
+		return "", false
 	}
-	return "", false
+	return invocation.PackageSpec, true
 }
 
 func sameManagedCommand(left, right []string) bool {

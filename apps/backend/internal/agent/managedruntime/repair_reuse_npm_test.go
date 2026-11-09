@@ -137,7 +137,7 @@ func TestManagedRuntimeRepairReuseNPM(t *testing.T) {
 
 func npmRepairContext(t *testing.T, store *RepairStore, packageSpec string, env []string) RepairContext {
 	t.Helper()
-	repairContext, err := store.Context(RepairContextInput{
+	repairContext, err := store.Context(context.Background(), RepairContextInput{
 		OwnerScope:         RepairOwnerScopeTask("owner-a"),
 		InstallerEnvDigest: InstallerEnvironmentDigest(map[string]string{"NPM_CONFIG_REGISTRY": repairEnvValue(env, "NPM_CONFIG_REGISTRY")}),
 		PackageSpec:        packageSpec,

@@ -4,7 +4,6 @@ import { test, expect } from "../../fixtures/docker-test-base";
 import { randomUUID } from "node:crypto";
 import { dockerFileContent, dockerPathExists } from "../../helpers/docker";
 import { waitForLatestSessionDone, waitForSessionState } from "../../helpers/session";
-import { dwell } from "../../helpers/causal-waits";
 import {
   MANAGED_RUNTIME_CACHE_ROOT,
   managedRuntimeStartupAttemptFile,
@@ -12,10 +11,25 @@ import {
   prepareManagedRuntimeProfile,
   prepareIncompleteManagedRuntimeProfile,
   restoreE2EAgentRegistry,
+  countInstallerCalls,
+  killOwnedProviderPID,
+  parseProviderArgvLog,
+  parseProviderPIDLog,
 } from "../../helpers/managed-runtime-recovery";
+import {
+  readManagedRuntimeNativeID,
+  readManagedRuntimeResumeToken,
+} from "../../helpers/managed-runtime-session-tokens";
 import { SessionPage } from "../../pages/session-page";
 
-test.describe("Docker executor - managed npm runtime recovery", () => {
+function expectProviderPermissionFlag(invocations: string[][]): void {
+  expect(invocations.length).toBeGreaterThan(0);
+  for (const args of invocations) {
+    expect(args.filter((arg) => arg === "--dangerously-skip-permissions")).toHaveLength(1);
+  }
+}
+
+test.describe("managed npm review fixes: Docker executor - managed npm runtime recovery", () => {
   test.afterEach(async ({ backend }, testInfo) => {
     if (testInfo.status !== testInfo.expectedStatus) {
       await testInfo
@@ -40,6 +54,7 @@ test.describe("Docker executor - managed npm runtime recovery", () => {
       const { profile, packageSpec } = await prepareManagedRuntimeProfile(apiClient, backend, {
         startupMode: "transient",
         launchId,
+        cliFlags: ["--dangerously-skip-permissions"],
       });
       profileId = profile.id;
       const task = await apiClient.createTaskWithAgent(
@@ -89,7 +104,7 @@ test.describe("Docker executor - managed npm runtime recovery", () => {
   });
 });
 
-test("privately prepares the exact runtime on the execution host after a missing manifest", async ({
+test("managed npm review fixes: privately prepares the exact runtime on the execution host after a missing manifest", async ({
   apiClient,
   backend,
   seedData,
@@ -108,6 +123,7 @@ test("privately prepares the exact runtime on the execution host after a missing
   const fixture = await prepareIncompleteManagedRuntimeProfile(apiClient, backend, {
     launchId,
     registryHost: gateway,
+    cliFlags: ["--dangerously-skip-permissions"],
   });
   try {
     const task = await apiClient.createTaskWithAgent(
@@ -158,7 +174,7 @@ test("privately prepares the exact runtime on the execution host after a missing
   }
 });
 
-test("reusable verified cache repair keeps the published runtime across an agent process exit", async ({
+test("managed npm review fixes: reusable verified cache repair keeps the published runtime across an agent process exit", async ({
   apiClient,
   backend,
   seedData,
@@ -177,6 +193,7 @@ test("reusable verified cache repair keeps the published runtime across an agent
   const fixture = await prepareIncompleteManagedRuntimeProfile(apiClient, backend, {
     launchId,
     registryHost: gateway,
+    cliFlags: ["--dangerously-skip-permissions"],
   });
   try {
     const task = await apiClient.createTaskWithAgent(
@@ -195,6 +212,33 @@ test("reusable verified cache repair keeps the published runtime across an agent
     const environment = await apiClient.getTaskEnvironment(task.id);
     const containerID = environment?.container_id;
     expect(containerID).toBeTruthy();
+    if (!task.session_id) throw new Error("managed runtime task did not return a session ID");
+    const sessionId = task.session_id;
+    const nativeID = readManagedRuntimeNativeID(backend, sessionId);
+    const resumeToken = readManagedRuntimeResumeToken(backend, sessionId);
+    expect(resumeToken).toBeTruthy();
+    if (!fixture.npmArgvCapture || !fixture.npmInvocationLog) {
+      throw new Error("executor provider argv and installer capture are required");
+    }
+    const providerArgv = parseProviderArgvLog(
+      dockerFileContent(containerID!, fixture.npmArgvCapture),
+    );
+    expect(providerArgv).toHaveLength(1);
+    expectProviderPermissionFlag(providerArgv);
+    const installerCalls = countInstallerCalls(
+      dockerFileContent(containerID!, fixture.npmInvocationLog),
+      fixture.packageSpec,
+    );
+    expect(installerCalls).toBeGreaterThan(0);
+    const selectedSentinel = dockerFileContent(containerID!, fixture.sentinels.selected);
+    const siblingSentinel = dockerFileContent(containerID!, fixture.sentinels.sibling);
+    expect(selectedSentinel).toBe("preserved\n");
+    expect(siblingSentinel).toBe("preserved\n");
+    if (!fixture.npmPidCapture) throw new Error("provider PID capture is required");
+    const initialPIDs = parseProviderPIDLog(dockerFileContent(containerID!, fixture.npmPidCapture));
+    expect(initialPIDs).toHaveLength(1);
+    const providerPID = initialPIDs[0];
+    expect(providerPID).not.toBe("");
     const privateProject = dockerFileContent(
       containerID!,
       `${fixture.cacheRoot}/kandev-e2e-private-roots`,
@@ -207,31 +251,64 @@ test("reusable verified cache repair keeps the published runtime across an agent
     );
     const requestsAfterRecovery = fixture.registry.archiveRequests();
     expect(requestsAfterRecovery).toBeGreaterThan(0);
-    execFileSync("docker", [
-      "exec",
-      containerID!,
-      "sh",
-      "-c",
-      'for p in /proc/[0-9]*; do if grep -qa "mock[-]agent" "$p/cmdline" 2>/dev/null; then kill -9 "${p#/proc/}"; fi; done',
-    ]);
-    await dwell(
-      2_000,
-      "poll-interval",
-      "wait for the killed agent process to settle before resume",
-    );
-    if (!task.session_id) throw new Error("managed runtime task did not return a session ID");
-    await apiClient.launchSession(
-      { task_id: task.id, session_id: task.session_id, intent: "resume" },
-      120_000,
-    );
+    killOwnedProviderPID(containerID!, providerPID);
+    let autoRestarted = false;
+    try {
+      await expect
+        .poll(
+          () => parseProviderPIDLog(dockerFileContent(containerID!, fixture.npmPidCapture)).length,
+          {
+            timeout: 15_000,
+            message: "wait for a replacement fixture-owned provider",
+          },
+        )
+        .toBeGreaterThan(initialPIDs.length);
+      autoRestarted = true;
+    } catch {
+      autoRestarted = false;
+    }
+    if (!autoRestarted) {
+      await apiClient.launchSession(
+        { task_id: task.id, session_id: sessionId, intent: "resume" },
+        120_000,
+      );
+    }
     await waitForSessionState(apiClient, {
       taskId: task.id,
-      sessionId: task.session_id,
+      sessionId,
       expectedState: "WAITING_FOR_INPUT",
       message: "agent process restart should reuse the published executor repair",
       timeout: 120_000,
     });
     expect(fixture.registry.archiveRequests()).toBe(requestsAfterRecovery);
+    if (nativeID) expect(readManagedRuntimeNativeID(backend, sessionId)).toBe(nativeID);
+    expect(readManagedRuntimeResumeToken(backend, sessionId)).toBe(resumeToken);
+    expect(
+      countInstallerCalls(
+        dockerFileContent(containerID!, fixture.npmInvocationLog),
+        fixture.packageSpec,
+      ),
+    ).toBe(installerCalls);
+    const resumedProviderArgv = parseProviderArgvLog(
+      dockerFileContent(containerID!, fixture.npmArgvCapture),
+    );
+    expect(resumedProviderArgv).toHaveLength(2);
+    expectProviderPermissionFlag(resumedProviderArgv);
+    expect(dockerFileContent(containerID!, fixture.sentinels.selected)).toBe(selectedSentinel);
+    expect(dockerFileContent(containerID!, fixture.sentinels.sibling)).toBe(siblingSentinel);
+    await expect
+      .poll(
+        () => parseProviderPIDLog(dockerFileContent(containerID!, fixture.npmPidCapture)).length,
+        {
+          timeout: 60_000,
+          message: "replacement provider should reappear on retained storage",
+        },
+      )
+      .toBeGreaterThan(initialPIDs.length);
+    const resumedPIDs = parseProviderPIDLog(dockerFileContent(containerID!, fixture.npmPidCapture));
+    const resumedPID = resumedPIDs.at(-1) ?? "";
+    expect(resumedPID).not.toBe("");
+    expect(resumedPID).not.toBe(providerPID);
     expect(
       dockerFileContent(
         containerID!,
@@ -242,6 +319,20 @@ test("reusable verified cache repair keeps the published runtime across an agent
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForDirectInput();
+    const beforeFollowup = await apiClient.listSessionMessages(sessionId);
+    const beforeCount = beforeFollowup.messages.filter(
+      (message) =>
+        message.author_type === "user" && message.content?.trim() === "/e2e:simple-message",
+    ).length;
+    await session.sendMessageViaButton("/e2e:simple-message");
+    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 60_000 });
+    const afterFollowup = await apiClient.listSessionMessages(sessionId);
+    expect(
+      afterFollowup.messages.filter(
+        (message) =>
+          message.author_type === "user" && message.content?.trim() === "/e2e:simple-message",
+      ),
+    ).toHaveLength(beforeCount + 1);
 
     const secondTask = await apiClient.createTaskWithAgent(
       seedData.workspaceId,

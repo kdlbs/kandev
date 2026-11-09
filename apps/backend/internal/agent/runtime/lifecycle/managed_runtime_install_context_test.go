@@ -107,16 +107,57 @@ func TestManagedRuntimePreparationRemainingBudget(t *testing.T) {
 }
 
 func TestManagedRuntimeWorkspaceOwnerResolution(t *testing.T) {
+	manager := &Manager{}
 	info := &WorkspaceInfo{OwnerUserID: "workspace-owner"}
-	if got := managedRuntimeWorkspaceOwnerUserID(context.Background(), info); got != "workspace-owner" {
+	if got := manager.managedRuntimeWorkspaceOwnerUserID(context.Background(), info); got != "workspace-owner" {
 		t.Fatalf("workspace owner = %q, want the recorded owner", got)
 	}
 	identity := authn.WithIdentity(context.Background(), authn.Identity{UserID: "actor-a"})
-	if got := managedRuntimeWorkspaceOwnerUserID(identity, &WorkspaceInfo{}); got != "actor-a" {
+	if got := manager.managedRuntimeWorkspaceOwnerUserID(identity, info); got != "actor-a" {
 		t.Fatalf("actor owner = %q, want the authenticated actor", got)
 	}
-	if got := managedRuntimeWorkspaceOwnerUserID(context.Background(), &WorkspaceInfo{}); got != "" {
+	if got := manager.managedRuntimeWorkspaceOwnerUserID(context.Background(), &WorkspaceInfo{}); got != "" {
 		t.Fatalf("missing owner = %q, want empty", got)
+	}
+	manager.SetManagedRuntimeSingleUserOwner(func() (string, bool) { return "system", true })
+	if got := manager.managedRuntimeWorkspaceOwnerUserID(context.Background(), &WorkspaceInfo{}); got != "system" {
+		t.Fatalf("disabled-mode fallback = %q, want system", got)
+	}
+	manager.SetManagedRuntimeSingleUserOwner(func() (string, bool) { return "system", false })
+	if got := manager.managedRuntimeWorkspaceOwnerUserID(context.Background(), &WorkspaceInfo{}); got != "" {
+		t.Fatalf("enabled-mode fallback = %q, want empty", got)
+	}
+	synthetic := authn.WithIdentity(context.Background(), authn.Identity{UserID: "system", Synthetic: true})
+	if got := manager.managedRuntimeWorkspaceOwnerUserID(synthetic, &WorkspaceInfo{OwnerUserID: "workspace-owner"}); got != "workspace-owner" {
+		t.Fatalf("synthetic actor with owned workspace = %q, want the workspace owner", got)
+	}
+}
+
+// @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-007.18
+func TestManagedRuntimeBackgroundOwnerReuse(t *testing.T) {
+	manager := &Manager{}
+	manager.SetManagedRuntimeSingleUserOwner(func() (string, bool) { return "system", true })
+	background := manager.managedRuntimeWorkspaceOwnerUserID(context.Background(), &WorkspaceInfo{})
+	interactive := manager.managedRuntimeWorkspaceOwnerUserID(
+		authn.WithIdentity(context.Background(), authn.Identity{UserID: "system", Synthetic: true}),
+		&WorkspaceInfo{},
+	)
+	if background != interactive || background != "system" {
+		t.Fatalf("background/interactive owners = (%q, %q), want the same single-user owner", background, interactive)
+	}
+	if managedruntime.RepairOwnerScopeTask(background) != managedruntime.RepairOwnerScopeTask(interactive) {
+		t.Fatal("interactive and background disabled-mode launches used different task scopes")
+	}
+	workspaceOwned := manager.managedRuntimeWorkspaceOwnerUserID(context.Background(), &WorkspaceInfo{OwnerUserID: "workspace-owner"})
+	if workspaceOwned != "workspace-owner" {
+		t.Fatalf("owned workspace background owner = %q, want workspace owner", workspaceOwned)
+	}
+	syntheticOwned := manager.managedRuntimeWorkspaceOwnerUserID(
+		authn.WithIdentity(context.Background(), authn.Identity{UserID: "system", Synthetic: true}),
+		&WorkspaceInfo{OwnerUserID: "workspace-owner"},
+	)
+	if syntheticOwned != workspaceOwned {
+		t.Fatalf("synthetic owned-workspace owner = %q, want %q", syntheticOwned, workspaceOwned)
 	}
 }
 

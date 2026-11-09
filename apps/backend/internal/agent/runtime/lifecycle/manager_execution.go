@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -1188,14 +1189,19 @@ func (m *Manager) prepareExecutionCreateRequestForPurpose(
 	return preparation, nil
 }
 
-func managedRuntimeWorkspaceOwnerUserID(ctx context.Context, info *WorkspaceInfo) string {
-	if info != nil && info.OwnerUserID != "" {
-		return info.OwnerUserID
+func (m *Manager) managedRuntimeWorkspaceOwnerUserID(ctx context.Context, info *WorkspaceInfo) string {
+	input := managedruntime.RepairOwnerInput{}
+	if identity, ok := authn.IdentityFromContext(ctx); ok {
+		input.ActorUserID = identity.UserID
+		input.ActorSynthetic = identity.Synthetic
 	}
-	if identity, ok := authn.IdentityFromContext(ctx); ok && identity.UserID != "" {
-		return identity.UserID
+	if info != nil {
+		input.WorkspaceOwnerUserID = info.OwnerUserID
 	}
-	return ""
+	if m.managedRuntimeSingleUserOwner != nil {
+		input.SingleUserFallbackUserID, input.SingleUserFallbackAllowed = m.managedRuntimeSingleUserOwner()
+	}
+	return managedruntime.ResolveRepairOwner(input)
 }
 
 func (m *Manager) resolveWorkspaceExecutionProfile(ctx context.Context, profileID string) *AgentProfileInfo {
@@ -1225,7 +1231,7 @@ func (m *Manager) prepareExecutionEnvironment(
 	managedReq := &LaunchRequest{
 		TaskID:                    taskID,
 		WorkspaceID:               info.WorkspaceID,
-		ManagedRuntimeOwnerUserID: managedRuntimeWorkspaceOwnerUserID(ctx, info),
+		ManagedRuntimeOwnerUserID: m.managedRuntimeWorkspaceOwnerUserID(ctx, info),
 		SessionID:                 info.SessionID,
 		AgentProfileID:            officeAgentProfileID,
 		ExecutionProfileID:        executionProfileID,
@@ -1259,7 +1265,7 @@ func (m *Manager) prepareExecutionEnvironment(
 		approvedSecretEnvKeys:            managedReq.ApprovedSecretEnvKeys,
 		managedGoCachePath:               managedReq.managedGoCachePath,
 		managedRuntimeInstallerEnvDigest: managedReq.ManagedRuntimeInstallerEnvDigest,
-		managedRuntimeOwnerUserID:        managedRuntimeWorkspaceOwnerUserID(ctx, info),
+		managedRuntimeOwnerUserID:        m.managedRuntimeWorkspaceOwnerUserID(ctx, info),
 	}, nil
 }
 

@@ -17,7 +17,7 @@ import (
 func TestRepairStorePublication(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	repairContext, err := store.Context(input)
+	repairContext, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatalf("complete repair context: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestRepairStorePublication(t *testing.T) {
 func TestRepairStoreUnpublishedCleanup(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	repairContext, err := store.Context(input)
+	repairContext, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatalf("complete repair context: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestRepairStoreUnpublishedCleanup(t *testing.T) {
 func TestRepairStoreCancellationRemovesCandidate(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	repairContext, err := store.Context(input)
+	repairContext, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatalf("complete repair context: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestRepairStoreCancellationRemovesCandidate(t *testing.T) {
 func TestRepairStoreInvalidation(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	repairContext, err := store.Context(input)
+	repairContext, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatalf("complete repair context: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestRepairStoreInvalidation(t *testing.T) {
 func TestRepairStoreOldConsumerSurvivesSuccessor(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	repairContext, err := store.Context(input)
+	repairContext, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatalf("complete repair context: %v", err)
 	}
@@ -259,11 +259,11 @@ func TestRepairStoreConcurrency(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	firstInput := testRepairContextInput(t, home, "managed-acp@1.2.3")
 	secondInput := testRepairContextInput(t, home, "managed-acp@1.2.4")
-	first, err := store.Context(firstInput)
+	first, err := store.Context(context.Background(), firstInput)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := store.Context(secondInput)
+	second, err := store.Context(context.Background(), secondInput)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestRepairStoreLockAcrossProcesses(t *testing.T) {
 	}
 	store, home := openTestRepairStore(t)
 	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	repairContext, err := store.Context(input)
+	repairContext, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestRepairStoreLockHelperProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("helper open store: %v", err)
 	}
-	repairContext, err := store.Context(payload.Input)
+	repairContext, err := store.Context(context.Background(), payload.Input)
 	if err != nil {
 		t.Fatalf("helper complete context: %v", err)
 	}
@@ -443,7 +443,7 @@ func publishTestRepair(t *testing.T, store *RepairStore, input RepairContextInpu
 func TestManagedRuntimeRepairReuseLifetime(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	repairContext, err := store.Context(input)
+	repairContext, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatalf("complete repair context: %v", err)
 	}
@@ -534,7 +534,7 @@ func TestRepairStoreRejectsUnsafeRootsAndIdentityFiles(t *testing.T) {
 func TestRepairStoreRejectsTamperedSelectionMAC(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	repairContext, err := store.Context(input)
+	repairContext, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatalf("complete repair context: %v", err)
 	}
@@ -568,7 +568,7 @@ func TestRepairStoreRejectsTamperedSelectionMAC(t *testing.T) {
 func TestRepairStorePublicationFailureIsTerminal(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	repairContext, err := store.Context(input)
+	repairContext, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatalf("complete repair context: %v", err)
 	}
@@ -609,7 +609,7 @@ func TestRepairStorePublicationFailureIsTerminal(t *testing.T) {
 func TestRepairStoreOwnerBoundaries(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	firstInput := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	first, err := store.Context(firstInput)
+	first, err := store.Context(context.Background(), firstInput)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -617,7 +617,7 @@ func TestRepairStoreOwnerBoundaries(t *testing.T) {
 
 	secondInput := firstInput
 	secondInput.OwnerScope = RepairOwnerScopeTask("owner-b")
-	second, err := store.Context(secondInput)
+	second, err := store.Context(context.Background(), secondInput)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,7 +627,7 @@ func TestRepairStoreOwnerBoundaries(t *testing.T) {
 
 	compatible := firstInput
 	compatible.Env = append(compatible.Env, "KANDEV_TASK_ID=another-task", "KANDEV_SESSION_ID=another-session")
-	shared, err := store.Context(compatible)
+	shared, err := store.Context(context.Background(), compatible)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,7 +646,7 @@ func TestRepairStoreOwnerBoundaries(t *testing.T) {
 func TestRepairPublishedConcurrentObservation(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	repairContext, err := store.Context(input)
+	repairContext, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -677,7 +677,7 @@ func TestRepairPublishedConcurrentObservation(t *testing.T) {
 func TestRepairLeasePreservesHandleWhenCleanupCannotFinish(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	repairContext, err := store.Context(input)
+	repairContext, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,7 +710,7 @@ func TestRepairLeasePreservesHandleWhenCleanupCannotFinish(t *testing.T) {
 func TestRepairStoreRejectsCanceledWaiterWithFreeLock(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	repairContext, err := store.Context(input)
+	repairContext, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}

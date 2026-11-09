@@ -17,6 +17,10 @@ legacy_specs: []
 
 ## Overview
 
+Follow-on corrections are planned in [managed npm review fixes](../managed-npm-review-fixes/plan.md).
+They cover PR #5208 review findings and profile CLI-argument recovery.
+The completed work orders and evidence below remain historical records.
+
 Recover a verified incomplete installation once, then reuse the validated
 repair during later compatible cold launches. Preserve the selected version,
 native conversation, running agents, and single replacement limit.

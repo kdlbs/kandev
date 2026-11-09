@@ -224,48 +224,33 @@ func (p *PreparedRuntime) RewriteNpxCommand(command []string) ([]string, error) 
 	if err := ValidateExactPackageSpec(p.packageSpec); err != nil {
 		return nil, err
 	}
-	packageIndex, err := preparedPackageIndex(command, p.packageSpec)
-	if err != nil {
-		return nil, err
+	packageName, ok := PackageNameFromExactSpec(p.packageSpec)
+	if !ok {
+		return nil, errors.New("prepared managed runtime package is invalid")
+	}
+	invocation, err := ParseManagedNPMInvocation(command, packageName, nil)
+	if err != nil || invocation.PackageSpec != p.packageSpec {
+		return nil, errors.New("managed runtime command does not select the prepared package")
 	}
 	args := append([]string(nil), command...)
-	prefixIndex, err := preparedNpmOptionIndex(args, packageIndex, "--prefix", p.project)
+	prefixIndex, err := preparedNpmOptionIndex(args, invocation.PackageIndex, "--prefix", p.project)
 	if err != nil {
 		return nil, err
 	}
-	cacheIndex, err := preparedNpmOptionIndex(args, packageIndex, "--cache", p.cache)
+	cacheIndex, err := preparedNpmOptionIndex(args, invocation.PackageIndex, "--cache", p.cache)
 	if err != nil {
 		return nil, err
 	}
 	if prefixIndex < 0 {
-		args = append(args[:packageIndex], append([]string{"--prefix", p.project}, args[packageIndex:]...)...)
-	} else {
-		args[prefixIndex+1] = p.project
+		return nil, errors.New("managed runtime command omits its npm project prefix")
 	}
+	args[prefixIndex+1] = p.project
 	if cacheIndex >= 0 {
 		args[cacheIndex+1] = p.cache
 	} else {
-		packageIndex = packageArgIndex(args, p.packageSpec)
-		args = append(args[:packageIndex], append([]string{"--cache", p.cache}, args[packageIndex:]...)...)
+		args = append(args[:invocation.PackageIndex], append([]string{"--cache", p.cache}, args[invocation.PackageIndex:]...)...)
 	}
 	return args, nil
-}
-
-func preparedPackageIndex(command []string, packageSpec string) (int, error) {
-	index := -1
-	for position, arg := range command[1:] {
-		if arg != packageSpec {
-			continue
-		}
-		if index >= 0 {
-			return 0, errors.New("managed runtime command repeats its package spec")
-		}
-		index = position + 1
-	}
-	if index < 0 {
-		return 0, errors.New("managed runtime command does not select the prepared package")
-	}
-	return index, nil
 }
 
 func preparedNpmOptionIndex(args []string, packageIndex int, option, ownedValue string) (int, error) {
@@ -284,15 +269,6 @@ func preparedNpmOptionIndex(args []string, packageIndex int, option, ownedValue 
 		index++
 	}
 	return found, nil
-}
-
-func packageArgIndex(args []string, packageSpec string) int {
-	for index, arg := range args {
-		if arg == packageSpec {
-			return index
-		}
-	}
-	return len(args)
 }
 
 // Close removes only this verified owner root. Callers retain the owner after

@@ -2,7 +2,7 @@
 status: current
 system: agents
 created: 2026-11-08
-updated: 2026-11-08
+updated: 2026-11-09
 requirements:
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-004
@@ -48,7 +48,8 @@ Consequently, a later cold launch can select the same incomplete shared entry.
 
 ## Components and integration points
 
-Proposed additions are named explicitly here. They do not exist yet.
+The store and integration points below exist in PR #5208.
+The [review-fix package](../../../plans/managed-npm-review-fixes/plan.md) tracks the pending 2026-11-09 corrections.
 
 - Add `RepairStore`, `RepairContext`, and a generation handle under `internal/agent/managedruntime/`.
 - Extend `PreparedRuntime` with an owned-store allocation path and an explicit publication lifetime.
@@ -102,6 +103,30 @@ runtime values from installer inputs. If provenance is absent, do not reuse.
 This is necessary for reuse across different tasks without merging user contexts.
 Derive the owner scope from trusted task/profile authorization, never from task
 IDs or a caller-provided environment variable. System utility work has a distinct scope.
+
+### Canonical application owner
+
+Apply the [launch-identity decision](../../../decisions/2026-11-09-managed-npm-launch-identity.md) through one pure repair-owner policy.
+A proposed helper under `agent/managedruntime` receives trusted actor, workspace-owner, and single-user fallback inputs.
+It does not perform authorization or read child environment values.
+Backend composition supplies the established default user only when the live auth service explicitly reports disabled authentication.
+An unavailable service, setup mode, or enabled authentication supplies no single-user fallback.
+
+Resolve a real actor first, then an explicit workspace owner, then that permitted fallback.
+Synthetic HTTP identity and background work use the same default when the workspace is unowned.
+Hydrate workspace ownership from the workspace record.
+`WorkspaceInfo.OwnerUserID` currently contains a caller-derived value and cannot independently establish that ownership.
+Resolve once at admission and propagate the accepted owner through fresh launch and resume.
+
+Use the same policy for agent-wide boot and interactive discovery.
+Keep authorized profile scopes separate from agent-wide scopes.
+Internal discovery under enabled authentication retains its explicit system scope.
+Do not rewrite workspace ownership, enable authentication, or migrate saved repair records.
+Older owner keys become ordinary misses and their generation files remain available.
+
+Profile CLI arguments use the [registered launcher boundary](managed-npm-cache-recovery.md#registered-launcher-and-agent-argument-boundary).
+Identical installation inputs can share a generation despite different authorized agent arguments.
+Process and probe evidence still fence the full argv and configuration revision.
 
 Agentctl completes the snapshot with its inherited environment and npm inputs.
 The normal isolated prefix continues to exclude repository `.npmrc` effects.
@@ -185,8 +210,43 @@ owned root after all installer and provider descendants stop.
 After an unproven crash boundary, retain files rather than guessing that consumers stopped.
 Automatic garbage collection and orphan sweeping are excluded from this package.
 Explicit maintenance requires stopped consumers and exact owned-generation validation.
+Public guidance identifies the execution-host store and all provider, utility, installer, and agentctl consumers.
+Backend shutdown alone is insufficient when remote or surviving agents remain live.
+Maintenance prevents concurrent relaunch and removes only the verified store, preserving shared npm caches and provider state.
 
 ## Cancellation and concurrency
+
+### Start admission and publication ownership
+
+Reject duplicate/running, passthrough, closed-admission, and stale-revision starts before changing any prepared handle.
+The pending handle, physical-cache evidence, publication timer, and retained-owner list belong to the current generation.
+A rejected request cannot detach that owner or consume its deadline.
+Only an admitted stopped-process transition can replace or detach an incompatible handle.
+Keep these two cases as separate regressions.
+
+### Cancellable context completion and version facts
+
+Require the operation context as the first argument to `RepairStore.Context` and the probe context helper.
+Pass it through npm version lookup without an implicit background fallback.
+Capture immutable inputs and the publication ticket under `startMu`, then release it before context filesystem/subprocess work.
+Reacquire it only to validate revision, process generation, owner handle, admission, and the completed context.
+Initialization success retires the uninitialized expiry authority before slow publication validation.
+A late validation result cannot publish or mutate a stopped or successor generation.
+Stop also retires a pending start ticket before a process exists.
+An unchanged configuration revision alone cannot authorize a late start after Stop.
+An initialized agent remains usable when publication fails.
+
+Memoize successful npm version facts in a bounded process-local cache.
+Use resolved npm/node executable identity, `NODE_OPTIONS`, and `NODE_PATH` as its key.
+Task configuration and npm registry values do not invalidate the version fact.
+They still participate in fresh installation-context validation.
+Executable changes, failures, and cancellation cannot preserve an obsolete fact.
+Keep npmrc/environment and publication checks fresh.
+Do not hold either manager state or memo mutexes during subprocess work.
+Concurrent cold misses can use independent cancellable reads.
+Cancellation must not silently become a cache miss followed by a new provider start.
+
+### Existing recovery coordination
 
 Use a cancellable OS file lock per context across local agentctl processes.
 Reuse the platform lock patterns under `common/passthroughconfig` without

@@ -503,13 +503,18 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	// default model and the complete availableModels list.
 	args := buildACPCommand(cfg, "")
 	var prepared *managedruntime.PreparedRuntime
-	if selected, _ := e.preparation.selectProbeRuntime(ctx, req, cfg); selected != nil {
-		rewritten, rewriteErr := selected.RewriteNpxCommand(args)
-		if rewriteErr != nil {
-			_ = selected.Close()
-			return &ProbeResponse{Success: false, Error: "selected managed runtime repair is unusable"}, nil
+	// A remembered failure owns the replacement decision. Selecting a repair
+	// before prepareProbeRepair would rewrite the prefix/cache and then force a
+	// second rewrite when another caller publishes in between.
+	if req.Preparation == nil {
+		if selected, _ := e.preparation.selectProbeRuntime(ctx, req, cfg); selected != nil {
+			rewritten, rewriteErr := selected.RewriteNpxCommand(args)
+			if rewriteErr != nil {
+				_ = selected.Close()
+				return &ProbeResponse{Success: false, Error: "selected managed runtime repair is unusable"}, nil
+			}
+			prepared, args = selected, rewritten
 		}
-		prepared, args = selected, rewritten
 	}
 	var cleanup func()
 	defer func() {
@@ -604,7 +609,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		if prepared == nil || prepared.RepairPublished() {
 			return
 		}
-		if publishErr := e.preparation.publishProbeRepair(prepared, req, cfg); publishErr != nil {
+		if publishErr := e.preparation.publishProbeRepair(ctx, prepared, req, cfg); publishErr != nil {
 			e.logger.Warn("managed runtime ACP probe repair publication failed", zap.Error(publishErr))
 		}
 	}
@@ -690,16 +695,18 @@ func managedRuntimeProbeFailureCode(command []string, stderr string) ProbeFailur
 }
 
 func managedRuntimeProbePackageSpec(command []string) (string, bool) {
-	// Accept only npx --yes --prefer-offline --prefix <fixed-prefix> <exact-spec>.
-	if len(command) < 6 || command[0] != "npx" || command[1] != "--yes" || command[2] != "--prefer-offline" ||
-		command[3] != "--prefix" || command[4] != managedruntime.NPMProjectPrefix {
+	if len(command) < 6 || command[2] != codexNpmPreferOfflineFlag {
 		return "", false
 	}
-	packageSpec := command[5]
-	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
+	packageName, ok := managedruntime.PackageNameFromExactSpec(command[5])
+	if !ok {
 		return "", false
 	}
-	return packageSpec, true
+	invocation, err := managedruntime.ParseManagedNPMInvocation(command, packageName, nil)
+	if err != nil {
+		return "", false
+	}
+	return invocation.PackageSpec, true
 }
 
 // isOpenCodeACPCommand reports whether the configured ACP probe command is

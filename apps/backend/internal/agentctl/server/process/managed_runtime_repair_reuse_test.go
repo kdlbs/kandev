@@ -56,6 +56,40 @@ func TestManagedRuntimeRepairReuseSelection(t *testing.T) {
 	}
 }
 
+func TestManagedRuntimeRepairReuseWithCLIArgs(t *testing.T) {
+	home := t.TempDir()
+	packageSpec := "@agentclientprotocol/claude-agent-acp@0.100.0"
+	command := agents.NewClaudeACP().ManagedNPMRuntime().RuntimeCommand("0.100.0").Args()
+	command = append(command, "--dangerously-skip-permissions")
+	env, digest := repairReuseEnvironment(t, home)
+	published := publishManagedRuntimeRepair(t, home, packageSpec, env, digest)
+
+	manager := newRepairReuseManager(t, home, command, env, digest)
+	selected, outcome := manager.selectManagedRuntimeRepair(context.Background())
+	if outcome != managedruntime.RepairOutcomeHit || selected == nil {
+		t.Fatalf("flagged command selection = (%v, %s), want a hit", selected, outcome)
+	}
+	if err := manager.installPreparedRuntime(selected); err != nil {
+		t.Fatalf("install selected repair: %v", err)
+	}
+	rewritten, err := manager.prepareManagedRuntimeCommand(append([]string(nil), command...))
+	if err != nil {
+		t.Fatalf("rewrite flagged command: %v", err)
+	}
+	if got := rewritten[len(rewritten)-1]; got != "--dangerously-skip-permissions" {
+		t.Fatalf("rewritten command tail = %q, want the original permission flag", got)
+	}
+	if prefix, _ := runtimeCommandArgument(rewritten, "--prefix"); prefix != selected.ProjectPrefix() {
+		t.Fatalf("rewritten prefix = %q, want %q", prefix, selected.ProjectPrefix())
+	}
+	if cache, _ := runtimeCommandArgument(rewritten, "--cache"); cache != published.CacheDirectory() {
+		t.Fatalf("rewritten cache = %q, want %q", cache, published.CacheDirectory())
+	}
+	if err := manager.StopForTeardown(context.Background()); err != nil {
+		t.Fatalf("teardown flagged manager: %v", err)
+	}
+}
+
 func TestManagedRuntimeRepairRejectsInvalidBudget(t *testing.T) {
 	manager := NewManager(&config.InstanceConfig{WorkDir: t.TempDir()}, newTestLogger(t))
 	t.Cleanup(func() { _ = manager.StopForTeardown(context.Background()) })
@@ -141,11 +175,11 @@ func TestManagedRuntimeRepairPublicationAfterInitialization(t *testing.T) {
 	manager.startupGeneration = 7
 	manager.startupEvidenceMu.Unlock()
 
-	manager.ManagedRuntimeInitialized(6)
+	manager.ManagedRuntimeInitialized(context.Background(), 6)
 	if prepared.RepairPublished() {
 		t.Fatal("stale process generation published the repair")
 	}
-	manager.ManagedRuntimeInitialized(7)
+	manager.ManagedRuntimeInitialized(context.Background(), 7)
 	if !prepared.RepairPublished() {
 		t.Fatal("successful protocol initialization did not publish the repair")
 	}
@@ -186,7 +220,7 @@ func TestManagedRuntimeRepairRetirementKeepsCurrentProcessUsable(t *testing.T) {
 	manager.startupEvidenceMu.Lock()
 	manager.startupGeneration = 9
 	manager.startupEvidenceMu.Unlock()
-	manager.ManagedRuntimeInitialized(9)
+	manager.ManagedRuntimeInitialized(context.Background(), 9)
 	if prepared.RepairPublished() {
 		t.Fatal("retired publication window published the repair")
 	}
@@ -234,7 +268,7 @@ func storeRepairContext(
 	env []string,
 	digest string,
 ) (managedruntime.RepairContext, bool) {
-	repairContext, err := store.Context(managedruntime.RepairContextInput{
+	repairContext, err := store.Context(context.Background(), managedruntime.RepairContextInput{
 		OwnerScope: managedruntime.RepairOwnerScopeTask("owner-a"), InstallerEnvDigest: digest,
 		PackageSpec: packageSpec, Protocol: string(agent.ProtocolACP), Env: env,
 		InheritedEnv: os.Environ(),
@@ -318,26 +352,6 @@ func populateManagedRuntimeRepairCache(packageSpec string) managedruntime.Manage
 
 const preparedRuntimeWindowsOSForTest = "windows"
 
-func TestManagedRuntimeRepairNormalMissDetachesStaleHandle(t *testing.T) {
-	home := t.TempDir()
-	packageSpec := "@agentclientprotocol/claude-agent-acp@1.2.3"
-	command := agents.NewClaudeACP().ManagedNPMRuntime().RuntimeCommand("1.2.3").Args()
-	env, digest := repairReuseEnvironment(t, home)
-	published := publishManagedRuntimeRepair(t, home, packageSpec, env, digest)
-	manager := newRepairReuseManager(t, home, command, env, digest)
-	manager.preparedRuntime = published
-	manager.CloseAdmission()
-	if _, err := manager.startWithGeneration(context.Background(), nil, nil, nil); err == nil {
-		t.Fatal("start succeeded after admission closed")
-	}
-	if manager.preparedRuntime != nil {
-		t.Fatal("a normal miss retained the previous reusable handle")
-	}
-	if _, err := os.Stat(published.CacheDirectory()); err != nil {
-		t.Fatalf("detaching removed published files: %v", err)
-	}
-}
-
 func TestManagedRuntimeRepairRejectsConfigurationChangeDuringRecovery(t *testing.T) {
 	home := t.TempDir()
 	packageSpec := "@agentclientprotocol/claude-agent-acp@1.2.3"
@@ -350,7 +364,7 @@ func TestManagedRuntimeRepairRejectsConfigurationChangeDuringRecovery(t *testing
 	manager.configRevision++
 	if _, err := manager.startWithGeneration(context.Background(), &types.ManagedRuntimePreparationDirective{
 		Condition: types.ManagedRuntimeCacheRootManifestMissing, PackageSpec: packageSpec, FailedProcessGeneration: 1,
-	}, published, &revision); err == nil {
+	}, published, &revision, nil, nil); err == nil {
 		t.Fatal("started a replacement after its recovery configuration changed")
 	}
 	if _, err := os.Stat(published.CacheDirectory()); err != nil {
@@ -443,7 +457,7 @@ func TestManagedRuntimeRepairRevalidationRejectsChangedNPMRC(t *testing.T) {
 	if err := os.WriteFile(userConfig, []byte("registry=https://two.example.test/\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	manager.ManagedRuntimeInitialized(3)
+	manager.ManagedRuntimeInitialized(context.Background(), 3)
 	if prepared.RepairPublished() {
 		t.Fatal("published a repair under a changed npm configuration")
 	}

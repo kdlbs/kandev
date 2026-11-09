@@ -309,12 +309,13 @@ func repairHMACHex(key, value []byte) (string, error) {
 }
 
 // Context completes one trusted installation input with the executor-local
-// environment used to identify a compatible generation.
-func (s *RepairStore) Context(input RepairContextInput) (RepairContext, error) {
+// environment used to identify a compatible generation. The operation context
+// bounds npm version lookup and cancellation.
+func (s *RepairStore) Context(ctx context.Context, input RepairContextInput) (RepairContext, error) {
 	if s == nil {
 		return RepairContext{}, errors.New("managed runtime repair store is unavailable")
 	}
-	local, err := resolveRepairLocalEnvironment(input.Env, input.InheritedEnv)
+	local, err := resolveRepairLocalEnvironment(ctx, input.Env, input.InheritedEnv)
 	if err != nil {
 		return RepairContext{}, err
 	}

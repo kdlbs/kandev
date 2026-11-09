@@ -23,26 +23,47 @@ const (
 	managedRuntimeRepairUnavailable = "unavailable"
 )
 
-// repairContextForStart builds the installation identity from a snapshot of
-// the trusted effective command and authenticated installer provenance.
-func (m *Manager) repairContextForStart() (managedruntime.RepairContext, bool) {
-	m.startMu.Lock()
-	defer m.startMu.Unlock()
-	return m.repairContextLocked()
+// repairContextForStart completes the installation identity from a snapshot
+// of the trusted command and authenticated installer provenance. The mutable
+// state lock is released before executor-local version lookup.
+func (m *Manager) repairContextForStart(ctx context.Context) (managedruntime.RepairContext, bool) {
+	repairContext, ok, err := m.repairContextForStartWithError(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			m.logger.Warn("managed runtime repair context is unavailable", zap.Error(err))
+		}
+		return managedruntime.RepairContext{}, false
+	}
+	return repairContext, ok
 }
 
-// repairContextLocked builds the installation identity while the start mutex
-// fences the mutable configuration snapshot.
-func (m *Manager) repairContextLocked() (managedruntime.RepairContext, bool) {
+func (m *Manager) repairContextForStartWithError(ctx context.Context) (managedruntime.RepairContext, bool, error) {
+	m.startMu.Lock()
+	input, ok := m.repairContextInputLocked()
+	m.startMu.Unlock()
+	if !ok {
+		return managedruntime.RepairContext{}, false, nil
+	}
+	repairContext, err := m.repairStore.Context(ctx, input)
+	if err != nil {
+		return managedruntime.RepairContext{}, false, err
+	}
+	return repairContext, true, nil
+}
+
+// repairContextInputLocked captures the mutable installation inputs while the
+// start mutex fences the current configuration snapshot. It performs no
+// filesystem or subprocess work.
+func (m *Manager) repairContextInputLocked() (managedruntime.RepairContextInput, bool) {
 	if m.repairStore == nil {
-		return managedruntime.RepairContext{}, false
+		return managedruntime.RepairContextInput{}, false
 	}
 	installContext := m.cfg.ManagedRuntimeInstallContext
 	if !installContext.Valid() {
-		return managedruntime.RepairContext{}, false
+		return managedruntime.RepairContextInput{}, false
 	}
 	if m.cfg.LaunchWrapperRequired || !m.cfg.LaunchWrapper.IsZero() {
-		return managedruntime.RepairContext{}, false
+		return managedruntime.RepairContextInput{}, false
 	}
 	command := m.managedRuntimeCommand
 	if len(command) == 0 {
@@ -50,39 +71,41 @@ func (m *Manager) repairContextLocked() (managedruntime.RepairContext, bool) {
 	}
 	packageSpec, ok := exactManagedRuntimePackage(m.cfg.AgentType, command)
 	if !ok {
-		return managedruntime.RepairContext{}, false
+		return managedruntime.RepairContextInput{}, false
 	}
-	repairContext, err := m.repairStore.Context(managedruntime.RepairContextInput{
+	return managedruntime.RepairContextInput{
 		OwnerScope:         installContext.OwnerScope,
 		InstallerEnvDigest: installContext.InstallerEnvDigest,
 		PackageSpec:        packageSpec,
 		Protocol:           string(m.cfg.Protocol),
-		Env:                m.cfg.AgentEnv,
+		Env:                append([]string(nil), m.cfg.AgentEnv...),
 		InheritedEnv:       os.Environ(),
-	})
-	if err != nil {
-		m.logger.Warn("managed runtime repair context is unavailable", zap.Error(err))
-		return managedruntime.RepairContext{}, false
-	}
-	return repairContext, true
+	}, true
 }
 
 // selectManagedRuntimeRepair reads an already published compatible generation
 // before a normal first attempt. It never installs and never creates a lock.
 func (m *Manager) selectManagedRuntimeRepair(ctx context.Context) (*managedruntime.PreparedRuntime, managedruntime.RepairOutcome) {
-	repairContext, ok := m.repairContextForStart()
+	prepared, outcome, _, _ := m.selectManagedRuntimeRepairWithContext(ctx)
+	return prepared, outcome
+}
+
+func (m *Manager) selectManagedRuntimeRepairWithContext(
+	ctx context.Context,
+) (*managedruntime.PreparedRuntime, managedruntime.RepairOutcome, managedruntime.RepairContext, bool) {
+	repairContext, ok := m.repairContextForStart(ctx)
 	if !ok {
-		return nil, managedruntime.RepairOutcomeMiss
+		return nil, managedruntime.RepairOutcomeMiss, managedruntime.RepairContext{}, false
 	}
 	prepared, outcome, err := m.repairStore.Lookup(ctx, repairContext)
 	if err != nil {
 		if ctx.Err() == nil {
 			m.logger.Warn("managed runtime repair lookup failed", zap.Error(err))
 		}
-		return nil, managedruntime.RepairOutcomeMiss
+		return nil, managedruntime.RepairOutcomeMiss, managedruntime.RepairContext{}, false
 	}
 	m.logger.Info("managed runtime repair selected", zap.String("outcome", string(outcome)))
-	return prepared, outcome
+	return prepared, outcome, repairContext, true
 }
 
 // prepareManagedRuntimeRepair prepares the single replacement through the
@@ -153,6 +176,8 @@ func (m *Manager) managedRuntimeRepairRunner(snapshot managedRuntimeStartupSnaps
 // stops. Published generations keep their files and selection.
 func (m *Manager) retireManagedRuntimeRepair() {
 	m.startMu.Lock()
+	m.stopGeneration++
+	m.repairInitialized = false
 	prepared := m.preparedRuntime
 	timer := m.repairPublicationTimer
 	m.repairPublicationTimer = nil
@@ -237,12 +262,25 @@ func (m *Manager) expireManagedRuntimeRepair(prepared *managedruntime.PreparedRu
 // mutex fences the mutable process snapshot against a concurrent replacement;
 // the publication itself is a bounded record write, not an installer or
 // protocol call.
-func (m *Manager) ManagedRuntimeInitialized(generation uint64) {
+func (m *Manager) ManagedRuntimeInitialized(ctx context.Context, generation uint64) {
+	prepared, repairInput, stopGeneration, ok := m.beginManagedRuntimePublication(generation)
+	if !ok {
+		return
+	}
+	if repairInput != nil && !m.revalidateManagedRuntimePublication(ctx, prepared, *repairInput, generation) {
+		return
+	}
+	m.finishManagedRuntimePublication(ctx, prepared, generation, stopGeneration)
+}
+
+func (m *Manager) beginManagedRuntimePublication(
+	generation uint64,
+) (*managedruntime.PreparedRuntime, *managedruntime.RepairContextInput, uint64, bool) {
 	m.startMu.Lock()
-	defer m.startMu.Unlock()
 	prepared := m.preparedRuntime
 	if prepared == nil || generation == 0 || generation != m.ProcessGeneration() {
-		return
+		m.startMu.Unlock()
+		return nil, nil, 0, false
 	}
 	// Initialization success is the publication boundary. Disarm expiry before
 	// any publication attempt so a file or context failure keeps the healthy
@@ -253,29 +291,74 @@ func (m *Manager) ManagedRuntimeInitialized(generation uint64) {
 		m.repairPublicationTimer = nil
 	}
 	if prepared.RepairPublished() {
-		return
+		m.startMu.Unlock()
+		return nil, nil, 0, false
 	}
 	if m.preparedRuntimeRevision != m.configRevision {
+		m.startMu.Unlock()
 		prepared.RetireRepairPublication()
 		m.logger.Warn("managed runtime repair retired after configuration changed",
 			zap.Uint64("process_generation", generation))
-		return
+		return nil, nil, 0, false
 	}
+	var repairInput *managedruntime.RepairContextInput
 	if m.preparedRepairContext != nil && m.repairStore != nil {
-		revalidated, revalidateErr := m.repairStore.Context(managedruntime.RepairContextInput{
+		repairInput = &managedruntime.RepairContextInput{
 			OwnerScope:         m.preparedRepairContext.OwnerScope,
 			InstallerEnvDigest: m.preparedRepairContext.InstallerEnvDigest,
 			PackageSpec:        m.preparedRepairContext.PackageSpec,
 			Protocol:           m.preparedRepairContext.Protocol,
-			Env:                m.preparedRepairEnv,
-			InheritedEnv:       m.preparedRepairInherited,
-		})
-		if revalidateErr != nil || !m.repairStore.MatchesRepairContext(prepared, revalidated) {
-			prepared.RetireRepairPublication()
-			m.logger.Warn("managed runtime repair retired after its installer context changed",
-				zap.Uint64("process_generation", generation))
-			return
+			Env:                append([]string(nil), m.preparedRepairEnv...),
+			InheritedEnv:       append([]string(nil), m.preparedRepairInherited...),
 		}
+	}
+	stopGeneration := m.stopGeneration
+	m.startMu.Unlock()
+	return prepared, repairInput, stopGeneration, true
+}
+
+func (m *Manager) revalidateManagedRuntimePublication(
+	ctx context.Context,
+	prepared *managedruntime.PreparedRuntime,
+	repairInput managedruntime.RepairContextInput,
+	generation uint64,
+) bool {
+	revalidateCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	revalidated, revalidateErr := m.completeRepairPublicationContext(revalidateCtx, repairInput)
+	cancel()
+	if revalidateErr != nil || !m.repairStore.MatchesRepairContext(prepared, revalidated) {
+		prepared.RetireRepairPublication()
+		m.logger.Warn("managed runtime repair retired after its installer context changed",
+			zap.Uint64("process_generation", generation))
+		return false
+	}
+	return true
+}
+
+func (m *Manager) completeRepairPublicationContext(
+	ctx context.Context,
+	input managedruntime.RepairContextInput,
+) (managedruntime.RepairContext, error) {
+	if m.repairPublicationContext != nil {
+		return m.repairPublicationContext(ctx, input)
+	}
+	return m.repairStore.Context(ctx, input)
+}
+
+func (m *Manager) finishManagedRuntimePublication(
+	ctx context.Context,
+	prepared *managedruntime.PreparedRuntime,
+	generation uint64,
+	expectedStopGeneration uint64,
+) {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+	if ctx.Err() != nil || m.lifetimeCtx.Err() != nil ||
+		m.preparedRuntime != prepared || generation != m.ProcessGeneration() ||
+		!m.repairInitialized || m.preparedRuntimeRevision != m.configRevision ||
+		m.stopGeneration != expectedStopGeneration {
+		prepared.RetireRepairPublication()
+		return
 	}
 	if err := prepared.PublishRepair(); err != nil {
 		m.logger.Warn("managed runtime repair publication failed",

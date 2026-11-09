@@ -1,7 +1,7 @@
 ---
 status: draft
 system: agents
-updated: 2026-11-08
+updated: 2026-11-09
 requirements:
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-001
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002
@@ -78,9 +78,11 @@ same prefix and effective environment as that launch; otherwise a repository
 `.npmrc` can direct repair to a different cache. A prefix preparation failure
 stops startup with a sanitized runtime error before launching npm.
 
-Keep exact-command recognition in lifecycle recovery, host utility recovery,
-and agentctl probe classification aligned with the new argument shape. Their
-trusted package and version checks continue to reject arbitrary commands.
+Keep lifecycle, hostutility, and agentctl recognition aligned with the
+[registered launcher and agent argument boundary](managed-npm-cache-recovery.md#registered-launcher-and-agent-argument-boundary).
+Validate the trusted npm prefix, package/version, and required runtime arguments.
+Preserve authorized profile arguments while rejecting arbitrary launchers.
+The [review-fix package](../../../plans/managed-npm-review-fixes/plan.md) owns this correction.
 
 ## Probe failure contract
 

@@ -3,6 +3,7 @@ package utility
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -35,7 +36,7 @@ func TestManagedRuntimeRepairReuseProbe(t *testing.T) {
 		},
 		InferenceConfig: cfg,
 	}
-	repairContext, ok := state.probeRepairContext(req, cfg)
+	repairContext, ok := state.probeRepairContext(context.Background(), req, cfg)
 	if !ok {
 		t.Fatal("probe repair context was not built")
 	}
@@ -67,6 +68,158 @@ func TestManagedRuntimeRepairReuseProbe(t *testing.T) {
 	changedReq.InferenceConfig = changed
 	if _, changedOutcome := state.selectProbeRuntime(context.Background(), &changedReq, changed); changedOutcome == managedruntime.RepairOutcomeHit {
 		t.Fatal("changed npm configuration reused an incompatible repair")
+	}
+}
+
+// @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-006.11
+// @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-006.12
+func TestManagedRuntimeProbeRepairWithCLIArgs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("reusable repair requires native ACL verification on Windows")
+	}
+	home := t.TempDir()
+	packageSpec := "@agentclientprotocol/claude-agent-acp@1.2.3"
+	cfg := repairProbeConfig(t, packageSpec)
+	cfg.CLIFlags = []string{"--dangerously-skip-permissions"}
+	state := newManagedRuntimePreparationStateWithHome(home, nil, zap.NewNop())
+	req := &ProbeRequest{
+		AgentID: "claude-acp",
+		InstallContext: &agentctltypes.ManagedRuntimeInstallContext{
+			InstallerEnvDigest: managedruntime.InstallerEnvironmentDigest(cfg.Env),
+			OwnerScope:         managedruntime.RepairOwnerScopeAgentWide("owner-a"),
+		},
+		InferenceConfig: cfg,
+	}
+	repairContext, ok := state.probeRepairContext(context.Background(), req, cfg)
+	if !ok {
+		t.Fatal("flagged probe repair context was not built")
+	}
+	lease, err := state.store.BeginRecovery(context.Background(), repairContext)
+	if err != nil {
+		t.Fatalf("begin flagged probe recovery: %v", err)
+	}
+	prepared, err := lease.Prepare(context.Background(), sanitizeEnvForAgent(cfg), repairProbeCacheFixture(packageSpec))
+	if err != nil {
+		t.Fatalf("prepare flagged probe repair: %v", err)
+	}
+	if err := prepared.PublishRepair(); err != nil {
+		t.Fatalf("publish flagged probe repair: %v", err)
+	}
+	selected, outcome := state.selectProbeRuntime(context.Background(), req, cfg)
+	if outcome != managedruntime.RepairOutcomeHit || selected == nil {
+		t.Fatalf("flagged probe selection = (%v, %s), want a hit", selected, outcome)
+	}
+	rewritten, err := selected.RewriteNpxCommand(buildACPCommand(cfg, ""))
+	if err != nil {
+		t.Fatalf("rewrite flagged probe command: %v", err)
+	}
+	launch, err := prepareACPLaunch(cfg, "npx", rewritten, sanitizeEnvForAgent(cfg))
+	if err != nil {
+		t.Fatalf("compose flagged probe command: %v", err)
+	}
+	if got := strings.Join(launch, "\x00"); strings.Count(got, "--dangerously-skip-permissions") != 1 {
+		t.Fatalf("launched flagged command = %#v, want the profile flag exactly once", launch)
+	}
+	if launch[len(launch)-1] != "--dangerously-skip-permissions" {
+		t.Fatalf("launched flagged command tail = %#v, want the original flag", launch)
+	}
+}
+
+// @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-007.2
+func TestManagedRuntimeProbeRetryReusesConcurrentPublication(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("reusable repair requires native ACL verification on Windows")
+	}
+	home := t.TempDir()
+	packageSpec := "@agentclientprotocol/claude-agent-acp@1.2.3"
+	cfg := repairProbeConfig(t, packageSpec)
+	cfg.CLIFlags = []string{"--dangerously-skip-permissions"}
+	argvCapture := filepath.Join(t.TempDir(), "argv")
+	cfg.Env["ARGV_CAPTURE"] = argvCapture
+	cfg.Env["PATH"] = cfg.Env["PATH"] + string(os.PathListSeparator) + os.Getenv("PATH")
+	t.Setenv("PATH", cfg.Env["PATH"])
+	pathParts := strings.Split(cfg.Env["PATH"], string(os.PathListSeparator))
+	agentScript := `#!/bin/sh
+printf '%s\n' "$@" > "$ARGV_CAPTURE"
+while IFS= read -r request; do
+  id=$(printf '%s\n' "$request" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$request" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test","configOptions":[]}}\n' "$id"
+      ;;
+  esac
+done
+`
+	if err := os.WriteFile(filepath.Join(pathParts[0], "npx"), []byte(agentScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	state := newManagedRuntimePreparationStateWithHome(home, nil, zap.NewNop())
+	req := &ProbeRequest{
+		AgentID: "claude-acp",
+		InstallContext: &agentctltypes.ManagedRuntimeInstallContext{
+			InstallerEnvDigest: managedruntime.InstallerEnvironmentDigest(cfg.Env),
+			OwnerScope:         managedruntime.RepairOwnerScopeAgentWide("owner-a"),
+		},
+		InferenceConfig: cfg,
+	}
+	evidence := state.rememberProbeFailure(packageSpec, "claude-acp", "acp", cfg)
+	if evidence == nil || evidence.ProbeAttemptID == "" {
+		t.Fatal("probe failure was not remembered")
+	}
+	repairContext, ok := state.probeRepairContext(context.Background(), req, cfg)
+	if !ok {
+		t.Fatal("probe repair context was not built")
+	}
+	lease, err := state.store.BeginRecovery(context.Background(), repairContext)
+	if err != nil {
+		t.Fatalf("begin concurrent probe recovery: %v", err)
+	}
+	prepared, err := lease.Prepare(context.Background(), sanitizeEnvForAgent(cfg), repairProbeCacheFixture(packageSpec))
+	if err != nil {
+		t.Fatalf("prepare concurrent probe repair: %v", err)
+	}
+	if err := prepared.PublishRepair(); err != nil {
+		t.Fatalf("publish concurrent probe repair: %v", err)
+	}
+	if err := prepared.Close(); err != nil {
+		t.Fatalf("close concurrent probe repair: %v", err)
+	}
+	generationsBefore, err := filepath.Glob(filepath.Join(state.store.RepairRoot(), "generations", "*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Preparation = &agentctltypes.ManagedRuntimePreparationDirective{
+		Condition:      agentctltypes.ManagedRuntimeCacheRootManifestMissing,
+		PackageSpec:    packageSpec,
+		ProbeAttemptID: evidence.ProbeAttemptID,
+	}
+	response, err := NewACPInferenceExecutor(zap.NewNop(), state).Probe(context.Background(), req)
+	if err != nil {
+		t.Fatalf("probe returned error: %v", err)
+	}
+	if !response.Success {
+		t.Fatalf("probe failed: %s", response.Error)
+	}
+	generationsAfter, err := filepath.Glob(filepath.Join(state.store.RepairRoot(), "generations", "*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(generationsAfter) != len(generationsBefore) {
+		t.Fatalf("concurrent reuse installed another generation: before=%d after=%d", len(generationsBefore), len(generationsAfter))
+	}
+	raw, err := os.ReadFile(argvCapture)
+	if err != nil {
+		t.Fatalf("read launched argv: %v", err)
+	}
+	launched := strings.Fields(string(raw))
+	if strings.Count(strings.Join(launched, "\x00"), "--dangerously-skip-permissions") != 1 {
+		t.Fatalf("launched argv = %#v, want the permission flag exactly once", launched)
+	}
+	if launched[len(launched)-1] != "--dangerously-skip-permissions" {
+		t.Fatalf("launched argv tail = %#v, want the profile flag", launched)
 	}
 }
 
@@ -167,7 +320,7 @@ func TestPublishProbeRepairRevalidatesContext(t *testing.T) {
 		},
 		InferenceConfig: cfg,
 	}
-	repairContext, ok := state.probeRepairContext(req, cfg)
+	repairContext, ok := state.probeRepairContext(context.Background(), req, cfg)
 	if !ok {
 		t.Fatal("probe repair context was not built")
 	}
@@ -179,7 +332,7 @@ func TestPublishProbeRepairRevalidatesContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare probe repair: %v", err)
 	}
-	if err := state.publishProbeRepair(prepared, req, cfg); err != nil {
+	if err := state.publishProbeRepair(context.Background(), prepared, req, cfg); err != nil {
 		t.Fatalf("publish unchanged probe repair: %v", err)
 	}
 	if _, outcome, _ := state.store.Lookup(context.Background(), repairContext); outcome != managedruntime.RepairOutcomeHit {
@@ -191,7 +344,7 @@ func TestPublishProbeRepairRevalidatesContext(t *testing.T) {
 	changedReq := *req
 	changedReq.InferenceConfig = changedCfg
 	state2 := newManagedRuntimePreparationStateWithHome(t.TempDir(), nil, zap.NewNop())
-	changedContext, ok := state2.probeRepairContext(&changedReq, changedCfg)
+	changedContext, ok := state2.probeRepairContext(context.Background(), &changedReq, changedCfg)
 	if !ok {
 		t.Fatal("changed probe context was not built")
 	}
@@ -203,10 +356,27 @@ func TestPublishProbeRepairRevalidatesContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare changed probe repair: %v", err)
 	}
-	if err := state2.publishProbeRepair(candidate, req, cfg); err == nil {
+	if err := state2.publishProbeRepair(context.Background(), candidate, req, cfg); err == nil {
 		t.Fatal("published a probe repair under a changed installer context")
 	}
 	if candidate.RepairPublished() {
 		t.Fatal("changed probe context published a generation")
+	}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	freshLease, err := state.store.BeginRecovery(context.Background(), repairContext)
+	if err != nil {
+		t.Fatalf("begin cancelled probe recovery: %v", err)
+	}
+	cancelledCandidate, err := freshLease.Prepare(context.Background(), sanitizeEnvForAgent(cfg), repairProbeCacheFixture(packageSpec))
+	if err != nil {
+		t.Fatalf("prepare cancelled probe repair: %v", err)
+	}
+	if err := state.publishProbeRepair(cancelled, cancelledCandidate, req, cfg); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled publication error = %v, want context cancellation", err)
+	}
+	if cancelledCandidate.RepairPublished() {
+		t.Fatal("cancelled probe context published a generation")
 	}
 }

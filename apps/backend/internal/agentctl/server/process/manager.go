@@ -391,6 +391,10 @@ type Manager struct {
 	preparedRepairEnv        []string
 	preparedRepairInherited  []string
 	repairInitialized        bool
+	stopGeneration           uint64
+	// repairPublicationContext is a deterministic test seam for publication
+	// revalidation. Production leaves it nil and uses the repair store.
+	repairPublicationContext func(context.Context, managedruntime.RepairContextInput) (managedruntime.RepairContext, error)
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
 	// created so the flag always describes the current channel — a Start that
@@ -475,7 +479,11 @@ func (m *Manager) BeginOwnedOperation(parent context.Context) (context.Context, 
 		return nil, nil, err
 	}
 	operationCtx, cancel := context.WithCancel(parent)
-	stopLifetimeCancel := context.AfterFunc(m.lifetimeCtx, cancel)
+	lifetimeCtx := m.lifetimeCtx
+	if lifetimeCtx == nil {
+		lifetimeCtx = context.Background()
+	}
+	stopLifetimeCancel := context.AfterFunc(lifetimeCtx, cancel)
 	var once sync.Once
 	release := func() {
 		once.Do(func() {
@@ -1960,10 +1968,30 @@ func (m *Manager) Start(ctx context.Context) error {
 // created by this call while startup remains serialized against replacement.
 // A compatible published repair is selected before the first attempt.
 func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
+	operationCtx, release, err := m.BeginOwnedOperation(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+	ctx = operationCtx
 	m.startOperationMu.Lock()
 	defer m.startOperationMu.Unlock()
-	prepared, _ := m.selectManagedRuntimeRepair(ctx)
-	generation, startErr := m.startWithGeneration(ctx, nil, prepared, nil)
+	m.startMu.Lock()
+	revision := m.configRevision
+	stopGeneration := m.stopGeneration
+	m.startMu.Unlock()
+	prepared, _, repairContext, contextOK := m.selectManagedRuntimeRepairWithContext(ctx)
+	if err := ctx.Err(); err != nil {
+		if prepared != nil {
+			_ = prepared.Close()
+		}
+		return 0, err
+	}
+	var expectedRepairContext *managedruntime.RepairContext
+	if contextOK {
+		expectedRepairContext = &repairContext
+	}
+	generation, startErr := m.startWithGeneration(ctx, nil, prepared, &revision, &stopGeneration, expectedRepairContext)
 	if prepared != nil && !m.ownsPreparedRuntime(prepared) {
 		if closeErr := prepared.Close(); closeErr != nil {
 			m.retainPreparedRuntime(prepared)
@@ -1997,19 +2025,29 @@ func (m *Manager) StartWithManagedRuntimePreparation(
 	m.startOperationMu.Lock()
 	defer m.startOperationMu.Unlock()
 
+	prepareCtx, cancelPrepare := context.WithDeadline(ctx, deadline)
+	defer cancelPrepare()
 	m.startMu.Lock()
 	snapshot, err := m.validateManagedRuntimePreparationDirective(directive)
 	revision := m.configRevision
-	repairContext, contextOK := m.repairContextLocked()
+	stopGeneration := m.stopGeneration
+	repairInput, contextOK := m.repairContextInputLocked()
 	m.startMu.Unlock()
 	if err != nil {
 		return 0, err
 	}
-	if !contextOK {
-		repairContext = managedruntime.RepairContext{}
+	repairContext := managedruntime.RepairContext{}
+	if contextOK {
+		repairContext, err = m.repairStore.Context(prepareCtx, repairInput)
+		if err != nil {
+			if prepareCtx.Err() != nil {
+				return 0, prepareCtx.Err()
+			}
+			m.logger.Warn("managed runtime repair context is unavailable", zap.Error(err))
+			contextOK = false
+			repairContext = managedruntime.RepairContext{}
+		}
 	}
-	prepareCtx, cancelPrepare := context.WithDeadline(ctx, deadline)
-	defer cancelPrepare()
 	prepared, outcome, err := m.prepareManagedRuntimeRepair(prepareCtx, directive, snapshot, repairContext, contextOK)
 	if err != nil {
 		if prepared != nil {
@@ -2024,7 +2062,11 @@ func (m *Manager) StartWithManagedRuntimePreparation(
 		return 0, errors.New("managed runtime recovery deadline expired before start")
 	}
 
-	generation, startErr := m.startWithGeneration(ctx, &directive, prepared, &revision)
+	var expectedRepairContext *managedruntime.RepairContext
+	if contextOK {
+		expectedRepairContext = &repairContext
+	}
+	generation, startErr := m.startWithGeneration(ctx, &directive, prepared, &revision, &stopGeneration, expectedRepairContext)
 	if contextOK && startErr == nil && prepared != nil && !prepared.RepairPublished() {
 		m.startMu.Lock()
 		snapshotContext := repairContext
@@ -2048,12 +2090,11 @@ func (m *Manager) startWithGeneration(
 	preparation *types.ManagedRuntimePreparationDirective,
 	prepared *managedruntime.PreparedRuntime,
 	expectedRevision *uint64,
+	expectedStopGeneration *uint64,
+	expectedRepairContext *managedruntime.RepairContext,
 ) (uint64, error) {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
-	if prepared == nil && preparation == nil {
-		m.detachPreparedRuntimeLocked()
-	}
 	release, err := m.admitStart()
 	if err != nil {
 		return 0, err
@@ -2072,8 +2113,15 @@ func (m *Manager) startWithGeneration(
 		}
 		return 0, errors.New("managed runtime configuration changed during recovery")
 	}
+	if expectedStopGeneration != nil && m.stopGeneration != *expectedStopGeneration {
+		if prepared != nil {
+			_ = prepared.Close()
+		}
+		return 0, errors.New("managed runtime start was retired by a concurrent stop")
+	}
 	if prepared != nil && preparation == nil {
-		if repairContext, ok := m.repairContextLocked(); !ok || !m.repairStore.MatchesRepairContext(prepared, repairContext) {
+		if expectedRepairContext == nil || m.repairStore == nil ||
+			!m.repairStore.MatchesRepairContext(prepared, *expectedRepairContext) {
 			if err := prepared.Close(); err != nil {
 				m.retainPreparedRuntime(prepared)
 			}
@@ -2084,6 +2132,12 @@ func (m *Manager) startWithGeneration(
 	if m.cfg.DurableJournalPath != "" && m.deliveryJournalErr != nil {
 		m.status.Store(StatusError)
 		return 0, fmt.Errorf("durable delivery journal unavailable: %w", m.deliveryJournalErr)
+	}
+	// Only an admitted stopped-process start may release an incompatible
+	// selected or pending handle. Every earlier rejection keeps the current
+	// process, publication ticket, deadline, and ledger ownership intact.
+	if prepared == nil && preparation == nil {
+		m.detachPreparedRuntimeLocked()
 	}
 
 	// A previous lifecycle may still be live: an agent that exited on its own

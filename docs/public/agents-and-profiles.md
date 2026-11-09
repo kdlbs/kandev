@@ -412,11 +412,11 @@ Preparation and replacement share one retry and a maximum 90-second budget.
 After the replacement reaches protocol initialization, Kandev publishes it in
 an execution-host repair store. Later compatible cold launches use that
 validated installation on their first attempt, including saved-session resume
-and startup, profile, and profile-model discovery. Reuse does not install the
-package again, contact the registry, change the saved profile, or restart a
-running agent. The store keeps each published installation on disk until you
-remove it explicitly, so disk use follows distinct repairs rather than session
-count.
+and startup, profile, and profile-model discovery. Reuse does not run a package
+installation, change the saved profile, or restart a running agent. Normal npm
+freshness behavior still applies, so a later launch can make ordinary metadata
+requests. The store keeps each published installation on disk until you remove
+it explicitly, so disk use follows distinct repairs rather than session count.
 
 Reuse requires the same runtime owner, execution-host user, platform, exact
 package, npm toolchain and configuration, and authorized installer environment.
@@ -448,6 +448,26 @@ Do not use `npm cache clean --force` as the normal recovery step. It removes
 unrelated npm data and does not target the stale execution tree. If the
 specialized retry cannot resolve the runtime, check that the Kandev service
 uses the expected npm installation and configured registry. Run `npm config get registry` as the Kandev service user to inspect the registry used by that process. Then use the runtime update controls to select and prepare another trusted stable version.
+
+#### Remove published managed runtime repairs
+
+Published repairs live under
+`<KANDEV_HOME_DIR>/managed-runtime-repairs/v1/` on each execution host. Without
+a home-directory override, the path is `~/.kandev/managed-runtime-repairs/v1/`
+under the operating-system user that runs Kandev or agentctl. A Docker
+container, SSH host, or other remote executor has its own store.
+
+Kandev does not remove this store automatically. Before you remove it, stop
+every process that can use it: agent provider processes, npm installers,
+host-utility probes, retained or remote agentctl instances, and any service
+that would relaunch an agent automatically. Stopping the backend alone is not
+enough while a surviving or remote agent is still running.
+
+Remove only the exact repair store after those consumers are stopped. Preserve
+`.npm`, provider credentials and state, task workspaces, and the rest of the
+Kandev home directory. The next eligible launch uses ordinary preparation and
+recovery. If you are not sure whether a consumer still owns the store, keep the
+store instead of deleting it.
 
 ### Refresh profile models after a runtime update
 

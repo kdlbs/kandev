@@ -9,22 +9,47 @@ import (
 )
 
 func TestManagedRuntimeProbeOwnerScopeSeparatesActors(t *testing.T) {
+	manager := &Manager{}
 	actorA := authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-a"})
 	actorB := authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-b"})
-	scopeA := managedRuntimeProbeOwnerScope(actorA, "")
-	scopeB := managedRuntimeProbeOwnerScope(actorB, "")
+	scopeA := manager.managedRuntimeProbeOwnerScope(actorA, "")
+	scopeB := manager.managedRuntimeProbeOwnerScope(actorB, "")
 	if scopeA == scopeB {
-		t.Fatalf("agent-wide scopes = %q and %q, want actor-separated values", scopeA, scopeB)
+		t.Fatalf("distinct actors shared repair scope %q", scopeA)
 	}
 	if scopeA != managedruntime.RepairOwnerScopeAgentWide("user-a") {
-		t.Fatalf("agent-wide scope = %q, want the actor-bound form", scopeA)
+		t.Fatalf("actor scope = %q", scopeA)
 	}
-	profile := managedRuntimeProbeOwnerScope(actorA, "user-a:profile-1")
+	profile := manager.managedRuntimeProbeOwnerScope(actorA, "user-a:profile-1")
 	if profile != managedruntime.RepairOwnerScopeProfile("user-a:profile-1") {
-		t.Fatalf("profile scope = %q, want the profile-owner form", profile)
+		t.Fatalf("profile scope = %q, want the authorized profile scope", profile)
 	}
-	internal := managedRuntimeProbeOwnerScope(context.Background(), "")
+	internal := manager.managedRuntimeProbeOwnerScope(context.Background(), "")
 	if internal != managedruntime.RepairOwnerScopeAgentWide("system") {
-		t.Fatalf("internal scope = %q, want the system owner", internal)
+		t.Fatalf("internal scope = %q, want system", internal)
+	}
+}
+
+// @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-007.18
+func TestManagedRuntimeProbeOwnerScopeModeParity(t *testing.T) {
+	manager := &Manager{}
+	manager.SetManagedRuntimeSingleUserOwner(func() (string, bool) { return "system", true })
+	startup := manager.managedRuntimeProbeOwnerScope(context.Background(), "")
+	interactive := manager.managedRuntimeProbeOwnerScope(
+		authn.WithIdentity(context.Background(), authn.Identity{UserID: "system", Synthetic: true}), "",
+	)
+	if startup != interactive || startup != managedruntime.RepairOwnerScopeAgentWide("system") {
+		t.Fatalf("disabled-mode startup/interactive scopes = (%q, %q), want the same single-user owner", startup, interactive)
+	}
+
+	manager.SetManagedRuntimeSingleUserOwner(func() (string, bool) { return "system", false })
+	enabledInternal := manager.managedRuntimeProbeOwnerScope(context.Background(), "")
+	enabledUser := manager.managedRuntimeProbeOwnerScope(
+		authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-a"}), "",
+	)
+	if enabledInternal != managedruntime.RepairOwnerScopeAgentWide("system") ||
+		enabledUser != managedruntime.RepairOwnerScopeAgentWide("user-a") ||
+		enabledInternal == enabledUser {
+		t.Fatalf("enabled-mode scopes = (%q, %q), want system/user separation", enabledInternal, enabledUser)
 	}
 }

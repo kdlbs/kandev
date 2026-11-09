@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-11-07
-updated: 2026-11-08
+updated: 2026-11-09
 owners:
   - kandev
 ---
@@ -42,6 +42,8 @@ upgrade or restart.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-006.8:** Successful recovery shall publish matching capabilities or continue the original conversation without a terminal failure notice. Desktop and phone shall provide the same outcome. Failed preparation or replacement shall retain the existing failure controls and sanitized final cause.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-006.9:** Authentication, policy, permissions, disk-space, invalid-command, and intentional-termination failures shall retain precedence. Unreadable or ambiguous inventory shall not establish a missing file. Arbitrary modules, external binaries, custom launch wrappers, passthrough, and post-initialization failures shall not qualify.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-006.10:** Peers without private-preparation support shall fail visibly without deleting shared files. Healthy launches shall retain their normal path. Recovery shall not scan all caches or tasks at startup, change user npm settings, or create an unbounded retry loop.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-006.11:** Valid profile CLI arguments shall preserve recovery eligibility for a registered managed launcher. Recovery shall preserve their values, order, and permission effects across all entry points in criterion 006.2.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-006.12:** Custom launchers, wrappers, unsupported npm structures, and changed required protocol arguments shall remain ineligible. Agent arguments shall not supply installation authority.
 
 ## Out of scope
 
@@ -55,3 +57,4 @@ upgrade or restart.
 
 - [Incomplete npm cache recovery](../../../plans/managed-npm-cache-recovery/plan.md)
 - [Reusable repair extension](../../../plans/managed-npm-repair-reuse/plan.md)
+- [PR #5208 review corrections](../../../plans/managed-npm-review-fixes/plan.md)

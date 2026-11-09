@@ -250,16 +250,16 @@ type repairLocalEnvironment struct {
 	npmConfigDigest string
 }
 
-func resolveRepairLocalEnvironment(env, inheritedEnv []string) (repairLocalEnvironment, error) {
+func resolveRepairLocalEnvironment(ctx context.Context, env, inheritedEnv []string) (repairLocalEnvironment, error) {
 	local := repairLocalEnvironment{
 		platform: runtime.GOOS + "/" + runtime.GOARCH,
 		user:     repairLocalUserIdentity(),
 	}
 	var err error
-	if local.node, err = repairToolchainFingerprint(env, "node"); err != nil {
+	if local.node, err = repairToolchainFingerprint(ctx, env, "node"); err != nil {
 		return repairLocalEnvironment{}, err
 	}
-	if local.npm, err = repairToolchainFingerprint(env, repairNPMExecutableName); err != nil {
+	if local.npm, err = repairToolchainFingerprint(ctx, env, repairNPMExecutableName); err != nil {
 		return repairLocalEnvironment{}, err
 	}
 	home, err := repairHomeDirectory(env)
@@ -290,7 +290,7 @@ func repairNPMExecutable(env []string) string {
 	return repairNPMExecutableName
 }
 
-func repairToolchainFingerprint(env []string, name string) (string, error) {
+func repairToolchainFingerprint(ctx context.Context, env []string, name string) (string, error) {
 	searchPath := repairEnvValue(env, "PATH")
 	if searchPath == "" {
 		searchPath = os.Getenv("PATH")
@@ -308,7 +308,7 @@ func repairToolchainFingerprint(env []string, name string) (string, error) {
 	}
 	fingerprint := fmt.Sprintf("%s|%d|%d", executable, info.Size(), info.ModTime().UnixNano())
 	if name == repairNPMExecutableName {
-		version, versionErr := repairNPMVersion(executable, env)
+		version, versionErr := repairNPMVersion(ctx, executable, env)
 		if versionErr != nil {
 			return "", versionErr
 		}
@@ -317,8 +317,18 @@ func repairToolchainFingerprint(env []string, name string) (string, error) {
 	return fingerprint, nil
 }
 
-func repairNPMVersion(executable string, env []string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func repairNPMVersion(parent context.Context, executable string, env []string) (string, error) {
+	if err := parent.Err(); err != nil {
+		return "", err
+	}
+	key, err := repairNPMVersionFactKey(executable, env)
+	if err != nil {
+		return "", fmt.Errorf("resolve npm version for managed runtime repair context: %w", err)
+	}
+	if version, ok := readRepairNPMVersionFact(key); ok {
+		return version, nil
+	}
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, executable, "--version")
 	command.Env = append(append([]string(nil), env...),
@@ -329,12 +339,16 @@ func repairNPMVersion(executable string, env []string) (string, error) {
 	)
 	output, err := command.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		return "", fmt.Errorf("resolve npm version for managed runtime repair context: %w", err)
 	}
 	version := strings.TrimSpace(string(output))
 	if version == "" || len(version) > 128 || strings.ContainsAny(version, "\x00\r\n") {
 		return "", errors.New("npm version for managed runtime repair context is invalid")
 	}
+	writeRepairNPMVersionFact(key, version)
 	return version, nil
 }
 

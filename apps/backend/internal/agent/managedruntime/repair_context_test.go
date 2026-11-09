@@ -15,7 +15,7 @@ import (
 func TestRepairContextSeparatesTrustedInputs(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	base := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	repairCtx, err := store.Context(base)
+	repairCtx, err := store.Context(context.Background(), base)
 	if err != nil {
 		t.Fatalf("complete repair context: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestRepairContextSeparatesTrustedInputs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			changedInput := base
 			mutate(&changedInput)
-			changed, contextErr := store.Context(changedInput)
+			changed, contextErr := store.Context(context.Background(), changedInput)
 			if contextErr != nil {
 				t.Fatalf("complete changed repair context: %v", contextErr)
 			}
@@ -58,7 +58,7 @@ func TestRepairContextSeparatesTrustedInputs(t *testing.T) {
 
 	missingProvenance := base
 	missingProvenance.InstallerEnvDigest = ""
-	if _, err := store.Context(missingProvenance); err == nil {
+	if _, err := store.Context(context.Background(), missingProvenance); err == nil {
 		t.Fatal("accepted a repair context without installer environment provenance")
 	}
 	tampered := repairCtx
@@ -68,11 +68,22 @@ func TestRepairContextSeparatesTrustedInputs(t *testing.T) {
 	}
 }
 
+// @covers AC-AGENTS-MANAGED-RUNTIME-RECOVERY-007.19
+func TestRepairContextCancellation(t *testing.T) {
+	store, home := openTestRepairStore(t)
+	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := store.Context(ctx, input); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled context completion error = %v, want context cancellation", err)
+	}
+}
+
 func TestRepairContextBoundsAndSecrets(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	input := testRepairContextInput(t, home, "managed-acp@1.2.3")
 	input.InstallerEnvDigest = InstallerEnvironmentDigest(map[string]string{"NPM_TOKEN": "repair-secret-value"})
-	repairCtx, err := store.Context(input)
+	repairCtx, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatalf("complete repair context: %v", err)
 	}
@@ -217,13 +228,13 @@ func mustRepairContextDigest(t *testing.T, store *RepairStore, repairContext Rep
 func TestRepairContextBindsOwnerAndInheritedEnvironment(t *testing.T) {
 	store, home := openTestRepairStore(t)
 	base := testRepairContextInput(t, home, "managed-acp@1.2.3")
-	first, err := store.Context(base)
+	first, err := store.Context(context.Background(), base)
 	if err != nil {
 		t.Fatalf("complete first owner context: %v", err)
 	}
 	secondInput := base
 	secondInput.OwnerScope = RepairOwnerScopeTask("owner-b")
-	second, err := store.Context(secondInput)
+	second, err := store.Context(context.Background(), secondInput)
 	if err != nil {
 		t.Fatalf("complete second owner context: %v", err)
 	}
@@ -235,7 +246,7 @@ func TestRepairContextBindsOwnerAndInheritedEnvironment(t *testing.T) {
 
 	inheritedChanged := base
 	inheritedChanged.InheritedEnv = []string{"HOME=" + home, "NPM_CONFIG_REGISTRY=https://changed.example.test/"}
-	changed, err := store.Context(inheritedChanged)
+	changed, err := store.Context(context.Background(), inheritedChanged)
 	if err != nil {
 		t.Fatalf("complete inherited environment context: %v", err)
 	}
@@ -260,7 +271,7 @@ func TestRepairContextTracksEffectiveNPMConfigFiles(t *testing.T) {
 		"NPM_CONFIG_USERCONFIG="+userConfig,
 		"NPM_CONFIG_GLOBALCONFIG="+globalConfig,
 	)
-	first, err := store.Context(input)
+	first, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatalf("complete custom npm config context: %v", err)
 	}
@@ -268,7 +279,7 @@ func TestRepairContextTracksEffectiveNPMConfigFiles(t *testing.T) {
 	if err := os.WriteFile(userConfig, []byte("registry=https://two.example.test/\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	second, err := store.Context(input)
+	second, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatalf("complete changed custom npm config context: %v", err)
 	}
@@ -279,7 +290,7 @@ func TestRepairContextTracksEffectiveNPMConfigFiles(t *testing.T) {
 	if err := os.WriteFile(globalConfig, []byte("audit=true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	third, err := store.Context(input)
+	third, err := store.Context(context.Background(), input)
 	if err != nil {
 		t.Fatalf("complete changed global npm config context: %v", err)
 	}

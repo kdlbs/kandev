@@ -75,30 +75,11 @@ func (s *managedRuntimePreparationState) rememberProbeFailure(
 }
 
 func managedRuntimeProbePackageForAgent(agentID string, command []string) (string, bool) {
-	for _, candidate := range command {
-		runtimeSpec, ok := agents.BuiltinManagedNPMRuntimeForPackage(agentID, candidate)
-		if !ok || managedruntime.ValidateExactPackageSpec(candidate) != nil {
-			continue
-		}
-		prefix := runtimeSpec.Package + "@"
-		version := strings.TrimPrefix(candidate, prefix)
-		if sameUtilityCommand(command, runtimeSpec.RuntimeCommand(version).Args()) {
-			return candidate, true
-		}
+	_, invocation, ok := agents.MatchBuiltinManagedNPMRuntime(agentID, command)
+	if !ok {
+		return "", false
 	}
-	return "", false
-}
-
-func sameUtilityCommand(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for index := range left {
-		if left[index] != right[index] {
-			return false
-		}
-	}
-	return true
+	return invocation.PackageSpec, true
 }
 
 func (s *managedRuntimePreparationState) managedRuntimeCacheEvidenceForProbe(
@@ -272,7 +253,7 @@ func managedRuntimeProbeFingerprint(agentID, protocol string, cfg *InferenceConf
 }
 
 func eligibleManagedRuntimeProbeConfig(cfg *InferenceConfigDTO) bool {
-	return cfg != nil && !cfg.OperatorDefined && len(cfg.CommandPrefix) == 0 && len(cfg.CLIFlags) == 0 && cfg.LaunchWrapper.IsZero()
+	return cfg != nil && !cfg.OperatorDefined && len(cfg.CommandPrefix) == 0 && cfg.LaunchWrapper.IsZero()
 }
 
 // newManagedRuntimePreparationStateWithHome opens the executor-local reusable
@@ -301,6 +282,7 @@ func newManagedRuntimePreparationStateWithHome(
 // probe. The probe DTO's Env is already the complete authorized child
 // environment, so it carries installer provenance without name guessing.
 func (s *managedRuntimePreparationState) probeRepairContext(
+	ctx context.Context,
 	req *ProbeRequest,
 	cfg *InferenceConfigDTO,
 ) (managedruntime.RepairContext, bool) {
@@ -318,7 +300,7 @@ func (s *managedRuntimePreparationState) probeRepairContext(
 	if protocol == "" {
 		protocol = "acp"
 	}
-	repairContext, err := s.store.Context(managedruntime.RepairContextInput{
+	repairContext, err := s.store.Context(ctx, managedruntime.RepairContextInput{
 		OwnerScope:         req.InstallContext.OwnerScope,
 		InstallerEnvDigest: req.InstallContext.InstallerEnvDigest,
 		PackageSpec:        packageSpec,
@@ -338,7 +320,7 @@ func (s *managedRuntimePreparationState) selectProbeRuntime(
 	req *ProbeRequest,
 	cfg *InferenceConfigDTO,
 ) (*managedruntime.PreparedRuntime, managedruntime.RepairOutcome) {
-	repairContext, ok := s.probeRepairContext(req, cfg)
+	repairContext, ok := s.probeRepairContext(ctx, req, cfg)
 	if !ok {
 		return nil, managedruntime.RepairOutcomeMiss
 	}
@@ -359,7 +341,7 @@ func (s *managedRuntimePreparationState) prepareProbeRepair(
 	env []string,
 	logger *zap.Logger,
 ) (*managedruntime.PreparedRuntime, error) {
-	repairContext, ok := s.probeRepairContext(req, cfg)
+	repairContext, ok := s.probeRepairContext(ctx, req, cfg)
 	if !ok {
 		return preparePrivateProbeRuntime(ctx, req.Preparation.PackageSpec, env, logger)
 	}
@@ -398,6 +380,7 @@ func (s *managedRuntimePreparationState) prepareProbeRepair(
 // publishes at protocol-initialization success. A changed context retires the
 // candidate instead of publishing under an obsolete identity.
 func (s *managedRuntimePreparationState) publishProbeRepair(
+	ctx context.Context,
 	prepared *managedruntime.PreparedRuntime,
 	req *ProbeRequest,
 	cfg *InferenceConfigDTO,
@@ -405,7 +388,13 @@ func (s *managedRuntimePreparationState) publishProbeRepair(
 	if prepared == nil || !prepared.HasRepairOwner() || prepared.RepairPublished() {
 		return nil
 	}
-	repairContext, ok := s.probeRepairContext(req, cfg)
+	if err := ctx.Err(); err != nil {
+		prepared.RetireRepairPublication()
+		return err
+	}
+	publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	repairContext, ok := s.probeRepairContext(publishCtx, req, cfg)
 	if !ok || !s.store.MatchesRepairContext(prepared, repairContext) {
 		prepared.RetireRepairPublication()
 		return errors.New("probe installer context changed before publication")

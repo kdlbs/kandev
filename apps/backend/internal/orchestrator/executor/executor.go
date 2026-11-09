@@ -1166,6 +1166,7 @@ type Executor struct {
 	repo                          executorStore
 	secretStore                   secrets.SecretStore
 	shellPrefs                    ShellPreferenceProvider
+	managedRuntimeSingleUserOwner func() (string, bool)
 	capabilities                  ExecutorTypeCapabilities
 	gitlabCredentials             GitLabCredentialResolver
 	logger                        *logger.Logger
