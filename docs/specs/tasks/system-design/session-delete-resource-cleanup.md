@@ -475,6 +475,18 @@ resource handles that cannot be safely rebound stop startup without deleting
 those rows. PostgreSQL uses the existing ownership-cutover advisory lock and
 exclusive table locks. Retired environments are outside this healing.
 
+## Retired environment checkouts
+
+Task cleanup inventory lists only checkouts of environments the task owns, and
+the active owner is captured separately. A captured checkout of another
+environment of the same task therefore belongs to a retired environment. When
+its captured session is still bound to that environment, cleanup treats the
+capture as ownership proof. Retired rows are never transferred or inherited and
+cascade with the task, so the post-delete environment lookup is not consulted.
+The active owner keeps its existing transfer and shared-use checks. Removing a
+checkout whose environment has no bound session marks its inventory row
+deleted by worktree ID.
+
 ## Out of Scope
 
 - Reclaiming workspaces merely because their session reference count reaches

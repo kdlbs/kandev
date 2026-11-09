@@ -212,19 +212,44 @@ func (r *Repository) ReserveTaskEnvironmentReplacement(
 	if err != nil {
 		return nil, err
 	}
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE task_sessions SET task_environment_id = ?, updated_at = ?
-		WHERE id = ? AND task_id = ? AND COALESCE(task_environment_id, '') = ? AND state = ?`),
-		selected.ID, r.nowUTC(), session.ID, session.TaskID, session.TaskEnvironmentID, string(session.State))
-	if err != nil {
+	if err := r.bindReplacementSessionTx(ctx, tx, session, selected.ID); err != nil {
 		return nil, err
-	}
-	if n, err := result.RowsAffected(); err != nil || n != 1 {
-		return nil, fmt.Errorf("replacement session binding changed: %w", models.ErrWorkspaceReuseUnsafe)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return r.GetTaskEnvironment(ctx, selected.ID)
+	reloaded, err := r.GetTaskEnvironment(ctx, selected.ID)
+	if err != nil {
+		return nil, errors.Join(err, r.releaseUnpublishedReplacement(ctx, selected, session.ID))
+	}
+	return reloaded, nil
+}
+
+func (r *Repository) bindReplacementSessionTx(ctx context.Context, tx *sqlx.Tx, session *models.TaskSession, environmentID string) error {
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE task_sessions SET task_environment_id = ?, updated_at = ?
+		WHERE id = ? AND task_id = ? AND COALESCE(task_environment_id, '') = ? AND state = ?`),
+		environmentID, r.nowUTC(), session.ID, session.TaskID, session.TaskEnvironmentID, string(session.State))
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		return fmt.Errorf("replacement session binding changed: %w", models.ErrWorkspaceReuseUnsafe)
+	}
+	return nil
+}
+
+// The committed reservation is invisible to a caller whose reload failed, so
+// the caller cannot arm its own failure release. Release the reservation this
+// session owns through the ordinary owner-checked failure path; a joined ready
+// environment is left unchanged.
+func (r *Repository) releaseUnpublishedReplacement(ctx context.Context, selected *models.TaskEnvironment, sessionID string) error {
+	if selected.Status != models.TaskEnvironmentStatusCreating || selected.MaterializationSessionID != sessionID {
+		return nil
+	}
+	if _, err := r.FailTaskEnvironmentMaterialization(context.WithoutCancel(ctx), sessionID); err != nil {
+		return fmt.Errorf("release unpublished replacement %s: %w", selected.ID, err)
+	}
+	return nil
 }
 
 func (r *Repository) validateReplacementSessionTx(ctx context.Context, tx *sqlx.Tx, expected *models.TaskEnvironment, session *models.TaskSession) error {

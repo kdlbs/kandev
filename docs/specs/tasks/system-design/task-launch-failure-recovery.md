@@ -529,9 +529,9 @@ the task lock. The request uses the saved root and environment ID so inventory
 and ready publication share an owner. An already-retired retry joins or reserves
 a replacement; failed successors use the consumer guard. Retired-only starts
 reserve fresh roots. Cached or explicit-ID worktrees must match a specified
-environment; checkouts remain. Existing materialization failure release applies
-to its reserved row. No file reset, inherited-owner mutation, or historical
-outcome settlement occurs.
+environment; checkouts remain. Failure release, also after a failed post-commit
+reload, applies to its reserved row. No file reset, inherited-owner mutation, or
+historical outcome settlement occurs.
 
 ### Interaction with workspace election waits
 

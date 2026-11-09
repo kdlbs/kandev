@@ -14,6 +14,7 @@ acceptance_criteria:
   - AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.11
 system_design:
   - ../../specs/tasks/system-design/task-launch-failure-recovery.md
+  - ../../specs/tasks/system-design/session-delete-resource-cleanup.md
 ---
 
 # fix(task): retain failed environments before reserving replacements
@@ -32,7 +33,7 @@ Out of scope: Deletion or resetting of old files, broad discovery, live-consumer
 
 ## Files and dependencies
 
-The source files are the existing PR #4713 diff. This work order adds its delivery record and links existing requirements and system design; it introduces no runtime gate or permanent test.
+The source files are the existing PR #4713 diff. This work order adds its delivery record and links existing requirements and system design; it introduces no runtime gate. The review follow-up below adds focused committed tests.
 
 - [System design](../../specs/tasks/system-design/task-launch-failure-recovery.md)
 - [Plan](plan.md)
@@ -57,3 +58,15 @@ Validation:
 Documentation-only correction: git diff --check and the existing .github/scripts/pr-docs.cjs validateCoverage entrypoint with the candidate changed paths and the linked candidate documents supplied on stdin. No GitHub status is synthesized locally.
 
 The follow-up passed real SQLite binding/election/retention checks with -race (9.427s), actual Git preparation/cache checks with -race (16.539s), existing selected reuse controls (17.158s), and SQL guard. The additional native SQLite-to-cold-manager legacy-input control passed with -race (1.976s), reusing the same persisted checkout and preserving its marker file. Live PostgreSQL and live provider E2E remain unexecuted. Normal commit hooks must pass before publication.
+
+Review follow-up (retained-environment cleanup and reservation): a failed reload
+after the replacement commit now releases the reservation the requesting session
+owns, task cleanup removes a retired environment's checkout whose terminal
+session is still bound to it, and removing a checkout with no bound session
+marks its inventory row deleted. Committed tests cover each case and fail
+without the change: `TestReplacementReloadFailureReleasesOwnedReservation`,
+`TestCleanupDestructiveTaskResourcesRemovesRetiredEnvironmentCheckout`,
+`TestCleanupWorktrees_MarksSessionlessRetainedWorktreeDeleted`. Env-gated
+PostgreSQL tests `TestPostgresReplacementElectsOneReservationAndRetainsInventory`
+and `TestPostgresReplacementRefusesConsumerAfterLockWait` passed with -race on a
+local PostgreSQL 16 container; PostgreSQL 18 was not run locally.

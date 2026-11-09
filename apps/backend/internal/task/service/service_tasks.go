@@ -4379,11 +4379,29 @@ func (s *Service) filterOwnedWorktreesForTaskCleanup(
 			continue
 		}
 		sess, sessionLoaded := bySession[wt.SessionID]
-		if s.taskOwnsSessionWorktree(ctx, taskID, wt.SessionID, sess, sessionLoaded, ownedEnv, skipOwnedEnvironment, envCache) {
+		if retainedEnvironmentWorktreeOwnedByTask(taskID, wt, sess, ownedEnv) ||
+			s.taskOwnsSessionWorktree(ctx, taskID, wt.SessionID, sess, sessionLoaded, ownedEnv, skipOwnedEnvironment, envCache) {
 			filtered = append(filtered, wt)
 		}
 	}
 	return filtered
+}
+
+// retainedEnvironmentWorktreeOwnedByTask uses the ownership captured with the
+// cleanup inventory. That inventory lists only checkouts whose environment
+// belonged to taskID, and the active owner is captured separately as
+// ownedEnv, so any other captured environment is one of the task's retired
+// environments. Retired environments are never transferred or inherited, and
+// their rows cascade with the task, so a post-delete lookup cannot prove what
+// the capture already did.
+func retainedEnvironmentWorktreeOwnedByTask(
+	taskID string, wt *worktree.Worktree, session *models.TaskSession, ownedEnv *models.TaskEnvironment,
+) bool {
+	if session == nil || wt.TaskID != taskID || wt.TaskEnvironmentID == "" ||
+		session.TaskEnvironmentID != wt.TaskEnvironmentID {
+		return false
+	}
+	return ownedEnv == nil || wt.TaskEnvironmentID != ownedEnv.ID
 }
 
 func (s *Service) taskOwnsSessionWorktree(
