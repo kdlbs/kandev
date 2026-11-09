@@ -43,10 +43,19 @@ var freeUsageQuotaRules = map[string]bool{
 // OpenCode Zen candidate. It never relabels a paid model or another provider.
 func isFreeUsageQuota(candidate Candidate, failure *routingerr.Error) bool {
 	provider := ProviderOf(candidate.ModelID)
-	return failure != nil && failure.Code == routingerr.CodeQuotaLimited &&
-		(provider == "opencode" || provider == "opencode-zen") &&
-		(candidate.CatalogFree || IsFreeModel(candidate.ModelID)) &&
-		freeUsageQuotaRules[failure.ClassifierRule]
+	if failure == nil || failure.Code != routingerr.CodeQuotaLimited ||
+		(provider != "opencode" && provider != "opencode-zen") ||
+		(!candidate.CatalogFree && !IsFreeModel(candidate.ModelID)) {
+		return false
+	}
+	if freeUsageQuotaRules[failure.ClassifierRule] {
+		return true
+	}
+	// A period usage-limit line outranks the Free notice in classification.
+	// The Free notice in the same local diagnostic still marks the model's
+	// daily allowance; remote diagnostics keep the classified scope.
+	return failure.ClassifierRule == "opencode.stderr.usage_limit.v1" && !candidate.RemoteExecution &&
+		routingerr.HasOpenCodeFreeUsageNotice(failure.RawExcerpt)
 }
 
 // ProviderLimit is the operator-entered limit setting of one provider, keyed by
