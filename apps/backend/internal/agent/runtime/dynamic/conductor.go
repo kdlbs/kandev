@@ -344,7 +344,7 @@ func (c *Conductor) nextAfterLaunchFailure(
 	if !classified.FallbackAllowed {
 		return RouteDecision{}, false, nil
 	}
-	if c.engine.ActionFor(profile, decision.ExecutionProfileID, classified.Code) != ActionTryNext {
+	if c.engine.ActionForFailure(profile, decision.ExecutionProfileID, classified) != ActionTryNext {
 		return RouteDecision{}, false, nil
 	}
 	next, err := c.engine.ApplyFailureContext(

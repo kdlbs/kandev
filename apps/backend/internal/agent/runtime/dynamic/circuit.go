@@ -163,6 +163,38 @@ func (r *CircuitRegistry) Open(key string, until time.Time, code routingerr.Code
 	_ = r.persistSnapshotLocked(key)
 }
 
+// OpenPreservingDeadline opens key without shortening an active timed circuit.
+// A model-change hold and an owner-release hold keep their existing semantics.
+// A live probe lease remains exclusive until it expires, even when a concurrent
+// failure reopens the circuit. The updated snapshot is persisted atomically.
+func (r *CircuitRegistry) OpenPreservingDeadline(key string, until time.Time, code routingerr.Code) {
+	if key == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.flushPendingLocked(key)
+	now := r.now()
+	previous := r.circuits[key]
+	if previous.held() {
+		return
+	}
+	isModelChangeHold := code == routingerr.CodeModelUnavailable && until.IsZero()
+	if !isModelChangeHold &&
+		previous.state != CircuitClosed && previous.until.After(now) && previous.until.After(until) {
+		until = previous.until
+	}
+	probeUntil := time.Time{}
+	if previous.state == CircuitHalfOpen && previous.probeUntil.After(now) {
+		probeUntil = previous.probeUntil
+	}
+	r.circuits[key] = circuit{
+		state: CircuitOpen, until: until, code: code,
+		probeUntil: probeUntil, updatedAt: now.UTC(),
+	}
+	_ = r.persistSnapshotLocked(key)
+}
+
 // Hold opens a circuit that has no expiry and admits no probe. Only
 // ReleaseHold closes it. The hold applies in memory even when its save fails;
 // the error is returned and the save stays pending, so holding the key again

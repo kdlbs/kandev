@@ -363,6 +363,19 @@ func (e *Engine) ActionFor(profile Profile, candidateID string, code routingerr.
 	return ActionStop
 }
 
+// ActionForFailure resolves the saved action and any admitted keyword default
+// through one path so callers cannot disagree about whether to advance.
+func (e *Engine) ActionForFailure(profile Profile, candidateID string, failure *routingerr.Error) Action {
+	if failure == nil {
+		return ActionStop
+	}
+	action := e.ActionFor(profile, candidateID, failure.Code)
+	if candidate, ok := candidateByID(profile, candidateID); ok {
+		return keywordDefaultAction(candidate, failure, action)
+	}
+	return action
+}
+
 func actionForCandidate(candidate Candidate, code routingerr.Code) Action {
 	if candidate.Policies.Version == 0 {
 		action := actionForRules(candidate.Rules, code)
@@ -419,10 +432,7 @@ func (e *Engine) ApplyFailureContext(
 	if candidate, ok := candidateByID(profile, currentCandidateID); ok && candidate.Policies.Version != 0 {
 		return e.applyPolicyFailure(ctx, sessionID, profile, expectedGeneration, currentCandidateID, candidate, failure)
 	}
-	action := e.ActionFor(profile, currentCandidateID, failure.Code)
-	if candidate, ok := candidateByID(profile, currentCandidateID); ok {
-		action = keywordDefaultAction(candidate, failure, action)
-	}
+	action := e.ActionForFailure(profile, currentCandidateID, failure)
 	switch action {
 	case ActionRetrySame:
 		return e.selectContext(ctx, sessionID, profile, expectedGeneration, "", currentCandidateID, "retry")
@@ -1397,7 +1407,7 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 			return
 		}
 		until := keywordCircuitUntil(candidate, failure, e.now())
-		e.circuits.Open(keywordCircuitKey(candidate, failure), until, failure.Code)
+		e.circuits.OpenPreservingDeadline(keywordCircuitKey(candidate, failure), until, failure.Code)
 		return
 	}
 }

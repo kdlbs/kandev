@@ -20,18 +20,29 @@ type keywordObservation struct {
 
 func (s *Service) previousKeywordHistory(sessionID string) []keywordObservation {
 	if !s.config.ProviderKeywordContext {
+		s.clearKeywordFailureHistory(sessionID)
 		return nil
 	}
-	previous, ok := s.promptAttemptForSession(sessionID)
-	if !ok {
-		return nil
+	if previous, ok := s.promptAttemptForSession(sessionID); ok {
+		previous.mu.Lock()
+		invalidated := previous.effect || (previous.output && previous.providerDiagnosticText == "")
+		previous.mu.Unlock()
+		if invalidated {
+			return nil
+		}
 	}
-	previous.mu.Lock()
-	defer previous.mu.Unlock()
-	if previous.effect || (previous.output && previous.providerDiagnosticText == "") {
-		return nil
+	s.keywordFailureHistoryMu.Lock()
+	defer s.keywordFailureHistoryMu.Unlock()
+	return append([]keywordObservation(nil), s.keywordFailureHistory[sessionID]...)
+}
+
+func (s *Service) clearKeywordFailureHistory(sessionID string) {
+	if sessionID == "" {
+		return
 	}
-	return append([]keywordObservation(nil), previous.keywordHistory...)
+	s.keywordFailureHistoryMu.Lock()
+	delete(s.keywordFailureHistory, sessionID)
+	s.keywordFailureHistoryMu.Unlock()
 }
 
 func (s *Service) refineKeywordFailure(ctx context.Context, data watcher.AgentEventData, failure *routingerr.Error) *routingerr.Error {
@@ -67,36 +78,53 @@ func (s *Service) observeKeywordFailure(data watcher.AgentEventData, c routinger
 	}
 	attempt.mu.Lock()
 	defer attempt.mu.Unlock()
+	currentAttempt, ok := s.promptAttemptForSession(data.SessionID)
+	if !ok || currentAttempt != attempt {
+		return c
+	}
 	if !attempt.promptIdentityMatchesLocked(data.AgentExecutionID, data.PromptGeneration) {
 		return c
 	}
 	text := normalizeDiagnosticText(data.ProviderError.Message)
-	paths, models := map[string]bool{}, map[string]bool{}
+	current := keywordObservation{group: group, candidate: data.ExecutionProfileID, text: text, path: c.PathID, model: c.ModelID, execution: data.AgentExecutionID, generation: data.PromptGeneration}
+	s.keywordFailureHistoryMu.Lock()
+	defer s.keywordFailureHistoryMu.Unlock()
+	if s.keywordFailureHistory == nil {
+		s.keywordFailureHistory = make(map[string][]keywordObservation)
+	}
+	history := s.keywordFailureHistory[data.SessionID]
+	seen, otherPaths, otherModels := summarizeKeywordHistory(history, current)
+	if !seen {
+		if len(history) == 16 {
+			history = history[1:]
+		}
+		history = append(history, current)
+	}
+	s.keywordFailureHistory[data.SessionID] = history
+	attempt.keywordHistory = append(attempt.keywordHistory[:0], history...)
+	c.ConsecutiveFailures = consecutiveKeywordCount(history, current)
+	c.OtherPaths, c.OtherModels = otherPaths, otherModels
+	return c
+}
+
+func summarizeKeywordHistory(history []keywordObservation, current keywordObservation) (bool, int, int) {
+	paths, models := map[string]struct{}{}, map[string]struct{}{}
 	seen := false
-	for _, observation := range attempt.keywordHistory {
-		if observation.execution == data.AgentExecutionID && observation.generation == data.PromptGeneration {
+	for _, observation := range history {
+		if observation.execution == current.execution && observation.generation == current.generation {
 			seen = true
 		}
-		if observation.text != text || observation.group != group {
+		if observation.text != current.text || observation.group != current.group {
 			continue
 		}
-		if observation.path != c.PathID && observation.path != "" {
-			paths[observation.path] = true
+		if observation.path != current.path && observation.path != "" {
+			paths[observation.path] = struct{}{}
 		}
-		if observation.model != c.ModelID && observation.model != "" {
-			models[observation.model] = true
+		if observation.model != current.model && observation.model != "" {
+			models[observation.model] = struct{}{}
 		}
 	}
-	current := keywordObservation{group: group, candidate: data.ExecutionProfileID, text: text, path: c.PathID, model: c.ModelID, execution: data.AgentExecutionID, generation: data.PromptGeneration}
-	if !seen {
-		if len(attempt.keywordHistory) == 16 {
-			attempt.keywordHistory = attempt.keywordHistory[1:]
-		}
-		attempt.keywordHistory = append(attempt.keywordHistory, current)
-	}
-	c.ConsecutiveFailures = consecutiveKeywordCount(attempt.keywordHistory, current)
-	c.OtherPaths, c.OtherModels = len(paths), len(models)
-	return c
+	return seen, len(paths), len(models)
 }
 
 func consecutiveKeywordCount(history []keywordObservation, current keywordObservation) int {

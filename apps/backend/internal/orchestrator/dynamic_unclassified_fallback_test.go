@@ -75,6 +75,70 @@ func TestKeywordObservationHistoryBoundaries(t *testing.T) {
 	}
 }
 
+func TestKeywordHistorySurvivesPromptEvidenceCleanup(t *testing.T) {
+	svc := &Service{config: ServiceConfig{ProviderKeywordContext: true}}
+	data := watcher.AgentEventData{
+		SessionID: "keyword-cleanup-session", AgentExecutionID: "execution",
+		PromptGeneration: 1, ExecutionProfileID: "candidate",
+		ProviderError: &streams.ProviderError{Message: "Error: capacity busy"},
+	}
+	c := routingerr.KeywordContext{PathID: "path", ModelID: "model"}
+	svc.beginPromptAttempt(data.SessionID, data.AgentExecutionID, data.PromptGeneration, true)
+	if got := svc.observeKeywordFailure(data, c, "capacity"); got.ConsecutiveFailures != 1 {
+		t.Fatalf("first failure count=%d, want 1", got.ConsecutiveFailures)
+	}
+	svc.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+	if _, ok := svc.promptAttemptForSession(data.SessionID); ok {
+		t.Fatal("terminal cleanup retained prompt authorization evidence")
+	}
+
+	data.PromptGeneration = 2
+	svc.beginPromptAttempt(data.SessionID, data.AgentExecutionID, data.PromptGeneration, true)
+	if history := svc.previousKeywordHistory(data.SessionID); len(history) != 1 {
+		t.Fatalf("successor history length=%d, want 1", len(history))
+	}
+	if got := svc.observeKeywordFailure(data, c, "capacity"); got.ConsecutiveFailures != 2 {
+		t.Fatalf("successor failure count=%d, want 2", got.ConsecutiveFailures)
+	}
+}
+
+func TestKeywordHistoryClearsAfterOutputOrEffect(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		output bool
+		effect bool
+	}{
+		{name: "output", output: true},
+		{name: "effect", effect: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &Service{config: ServiceConfig{ProviderKeywordContext: true}}
+			data := watcher.AgentEventData{
+				SessionID: "keyword-output-session", AgentExecutionID: "execution",
+				PromptGeneration: 1, ExecutionProfileID: "candidate",
+				ProviderError: &streams.ProviderError{Message: "Error: capacity busy"},
+			}
+			c := routingerr.KeywordContext{PathID: "path", ModelID: "model"}
+			svc.beginPromptAttempt(data.SessionID, data.AgentExecutionID, data.PromptGeneration, true)
+			svc.observeKeywordFailure(data, c, "capacity")
+			svc.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+
+			data.PromptGeneration = 2
+			svc.beginPromptAttempt(data.SessionID, data.AgentExecutionID, data.PromptGeneration, true)
+			svc.observePromptAttempt(data.SessionID, data.AgentExecutionID, data.PromptGeneration, tc.output, tc.effect)
+			svc.keywordFailureHistoryMu.Lock()
+			remaining := len(svc.keywordFailureHistory[data.SessionID])
+			svc.keywordFailureHistoryMu.Unlock()
+			if remaining != 0 {
+				t.Fatalf("history after %s remains stored with %d entries", tc.name, remaining)
+			}
+			if history := svc.previousKeywordHistory(data.SessionID); len(history) != 0 {
+				t.Fatalf("history after %s = %+v, want empty", tc.name, history)
+			}
+		})
+	}
+}
+
 func TestConsecutiveKeywordCountIdentityBoundaries(t *testing.T) {
 	current := keywordObservation{group: "capacity", candidate: "candidate", text: "diagnostic", path: "path", model: "model"}
 	for _, change := range []string{"group", "candidate", "text", "path", "model"} {

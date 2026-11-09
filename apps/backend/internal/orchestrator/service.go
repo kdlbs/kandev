@@ -1609,6 +1609,10 @@ type Service struct {
 	// from a predecessor. Automatic recovery requires an explicit no-output,
 	// no-effect result from this map.
 	dynamicAttemptEvidence sync.Map
+	// keywordFailureHistory survives prompt-evidence retirement so a routed
+	// successor can use bounded failure context without reusing stale auth data.
+	keywordFailureHistoryMu sync.Mutex
+	keywordFailureHistory   map[string][]keywordObservation
 	// pendingDynamicStreakResets coalesces ordinary output/effect observations
 	// until a semantic boundary can persist the reset outside the raw stream
 	// callback. Each entry retains the prompt and route identity that authorized

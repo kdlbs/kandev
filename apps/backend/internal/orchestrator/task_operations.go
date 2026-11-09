@@ -6008,6 +6008,7 @@ func (s *Service) deleteSessionAndCleanAttachments(ctx context.Context, session 
 	if err != nil {
 		return err
 	}
+	s.clearKeywordFailureHistory(session.ID)
 	if remover, ok := s.attachmentReader.(attachmentBytesRemover); ok {
 		remover.RemoveBytes(deletedAttachments)
 	}

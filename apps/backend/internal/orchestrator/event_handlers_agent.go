@@ -2862,6 +2862,7 @@ func (s *Service) finishAgentCompleted(
 	session *models.TaskSession,
 	guard *lockedCancelInFlightGuard,
 ) {
+	s.clearKeywordFailureHistory(data.SessionID)
 	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
 	s.clearDynamicUnclassifiedStreakForCompletion(ctx, data)
 	s.resetDynamicCircuitFailuresForCompletion(ctx, data, session)
@@ -3100,6 +3101,9 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 		return nil
 	}
 	data = s.withPromptAttemptEvidence(data)
+	if data.OutputObserved || data.EffectObserved {
+		s.clearKeywordFailureHistory(data.SessionID)
+	}
 	defer s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),

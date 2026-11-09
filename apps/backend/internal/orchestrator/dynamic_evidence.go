@@ -289,8 +289,8 @@ func (s *Service) observePromptAttempt(
 		return
 	}
 	evidence.mu.Lock()
-	defer evidence.mu.Unlock()
 	if !evidence.promptIdentityMatchesLocked(executionID, promptGeneration) {
+		evidence.mu.Unlock()
 		return
 	}
 	evidence.output = evidence.output || output
@@ -300,6 +300,10 @@ func (s *Service) observePromptAttempt(
 		// diagnostic is recorded only by observeProviderDiagnostic below.
 		evidence.providerDiagnosticCode = ""
 		evidence.providerDiagnosticText = ""
+	}
+	evidence.mu.Unlock()
+	if output || effect {
+		s.clearKeywordFailureHistory(sessionID)
 	}
 }
 
@@ -841,9 +845,14 @@ func (s *Service) clearPromptAttemptEvidence(sessionID, executionID string, prom
 	}
 	evidence.mu.Lock()
 	matches := evidence.promptIdentityMatchesForClearLocked(executionID, promptGeneration)
+	clearHistory := matches && (evidence.effect || (evidence.output && evidence.providerDiagnosticText == ""))
 	evidence.mu.Unlock()
+	deleted := false
 	if matches {
-		s.dynamicAttemptEvidence.CompareAndDelete(sessionID, evidence)
+		deleted = s.dynamicAttemptEvidence.CompareAndDelete(sessionID, evidence)
+	}
+	if clearHistory && deleted {
+		s.clearKeywordFailureHistory(sessionID)
 	}
 }
 
@@ -990,6 +999,7 @@ func (s *Service) taskAllowsUnclassifiedStreakClear(ctx context.Context, taskID 
 }
 
 func (s *Service) clearDynamicUnclassifiedStreakForStop(ctx context.Context, sessionID string) {
+	s.clearKeywordFailureHistory(sessionID)
 	if s.repo == nil || s.profileExecutionResolver == nil || sessionID == "" {
 		return
 	}
