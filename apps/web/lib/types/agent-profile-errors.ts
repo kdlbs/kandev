@@ -2,6 +2,9 @@ export type ActiveSessionInfo = {
   task_id: string;
   task_title: string;
   is_ephemeral: boolean;
+  // Optional so a conflict body from an older backend still renders.
+  workspace_id?: string;
+  workspace_name?: string;
 };
 
 // WatcherReference points at one issue/PR watcher row that uses the agent

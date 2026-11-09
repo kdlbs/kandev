@@ -1,6 +1,10 @@
 package launchwrapper
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/kandev/kandev/internal/common/sshlaunch"
+)
 
 // StripControlCredentials removes control-plane credentials from child environments.
 // These values belong to the host process and cannot be restored by profile overrides.
@@ -9,7 +13,8 @@ func StripControlCredentials(env []string) []string {
 	for _, entry := range env {
 		key, _, _ := strings.Cut(entry, "=")
 		switch strings.ToUpper(key) {
-		case "AGENTCTL_BOOTSTRAP_NONCE", "AGENTCTL_AUTH_TOKEN", "KANDEV_DESKTOP_HEALTH_TOKEN":
+		case "AGENTCTL_BOOTSTRAP_NONCE", "AGENTCTL_AUTH_TOKEN", "KANDEV_DESKTOP_HEALTH_TOKEN",
+			sshlaunch.GenerationEnv:
 			continue
 		}
 		result = append(result, entry)

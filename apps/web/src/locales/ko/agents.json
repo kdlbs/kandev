@@ -146,6 +146,7 @@
   "conflictAutomationsTitle": "자동화:",
   "conflictQuickChatsTitle": "빠른 채팅:",
   "conflictTasksTitle": "작업:",
+  "conflictUnknownWorkspace": "알 수 없는 워크스페이스",
   "conflictTierMappingRow": "{{provider}}의 {{workspace}}에서 <0>{{tier}}</0> 티어",
   "conflictTierMappingsTitle": "워크스페이스 티어 매핑:",
   "conflictWatchersTitle": "감시자 (비활성화됨):",
