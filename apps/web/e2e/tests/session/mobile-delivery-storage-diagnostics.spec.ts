@@ -96,6 +96,9 @@ test("keeps the phone advisory compact with 44px controls", async ({
     "Capacity observed",
   );
   await expect(editor).toHaveText("Phone draft survives guidance updates");
+  await prCapture.screenshot(`delivery-storage-pressure-stale-${testInfo.project.name}`, {
+    caption: "Phone keeps old pressure last reported while capacity is fresh.",
+  });
 
   await notify!({
     ...base,

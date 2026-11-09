@@ -93,6 +93,9 @@ test("shows a live 90% advisory above the composer and clears below 85%", async 
     "Capacity observed",
   );
   await expect(editor).toHaveText("Keep this draft while storage guidance changes");
+  await prCapture.screenshot(`delivery-storage-pressure-stale-${testInfo.project.name}`, {
+    caption: "Old pressure stays last reported while capacity is fresh.",
+  });
 
   notify?.({
     ...base,
