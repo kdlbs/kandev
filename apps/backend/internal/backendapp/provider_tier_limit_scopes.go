@@ -3,8 +3,6 @@ package backendapp
 import (
 	"context"
 	"fmt"
-	"sort"
-	"strings"
 	"time"
 
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
@@ -14,16 +12,16 @@ import (
 // model's request scope, never the account-wide daily allowance.
 const limitDimensionModelDaily = "model_daily"
 
-// readScopeUsage counts each scope's requests since its daily reset over the
-// tier's account profiles whose model the scope covers.
+// readScopeUsage counts each covering scope's requests since its daily reset
+// by the model recorded for each request across the tier's account profiles,
+// so a profile's current default model never attributes another model's use.
 func (s *providerTierLimitService) readScopeUsage(ctx context.Context, c tierLimitContext, now time.Time, used *agentusage.LimitUsage) error {
 	if len(c.effective.Scopes) == 0 {
 		return nil
 	}
 	used.Scopes = make(map[string]float64, len(c.effective.Scopes))
-	models := s.profileModels(ctx, c.ids)
 	for _, scope := range c.effective.Scopes {
-		if c.modelOverride && !scope.Covers(c.profile.Model) {
+		if !scope.Covers(c.profile.Model) {
 			continue
 		}
 		start, reset, err := agentusage.DailyLimitWindow(now, scope.DailyReset)
@@ -31,47 +29,13 @@ func (s *providerTierLimitService) readScopeUsage(ctx context.Context, c tierLim
 			return err
 		}
 		used.Resets[agentusage.ScopeUsageKey(scope.ID)] = reset
-		if c.modelOverride {
-			count, err := s.readModelRequestCount(ctx, c.ids, scope.Models, start, now)
-			if err != nil {
-				return fmt.Errorf("read overridden model scope: %w", err)
-			}
-			used.Scopes[scope.ID] = count
-			continue
-		}
-		ids := scopeProfileIDs(models, scope)
-		if len(ids) == 0 {
-			used.Scopes[scope.ID] = 0
-			continue
-		}
-		count, err := s.readRequestCount(ctx, ids, start, now)
+		count, err := s.readModelRequestCount(ctx, c.ids, scope.Models, start, now)
 		if err != nil {
-			return err
+			return fmt.Errorf("read model scope: %w", err)
 		}
 		used.Scopes[scope.ID] = count
 	}
 	return nil
-}
-
-func (s *providerTierLimitService) profileModels(ctx context.Context, ids []string) map[string]string {
-	models := make(map[string]string, len(ids))
-	for _, id := range ids {
-		if p, _, ok := s.usage.loadProfile(ctx, id); ok {
-			models[id] = p.Model
-		}
-	}
-	return models
-}
-
-func scopeProfileIDs(models map[string]string, scope agentusage.RequestScope) []string {
-	var ids []string
-	for id, model := range models {
-		if scope.Covers(model) {
-			ids = append(ids, id)
-		}
-	}
-	sort.Strings(ids)
-	return ids
 }
 
 // sameMinuteWindow bounds how far apart two per-model daily blocks may be to
@@ -82,9 +46,8 @@ const sameMinuteWindow = time.Minute
 // profile's model as that scope's learned value. A model without a scope gets
 // a learned model scope of its own; same-minute blocks of unconfigured models
 // form a provisional group instead.
-func (s *providerTierLimitService) learnModelScope(ctx context.Context, c tierLimitContext, used agentusage.LimitUsage, at time.Time) error {
-	models := s.profileModels(ctx, c.ids)
-	scope, counted, err := s.scopeToLearn(ctx, c, models, used, at)
+func (s *providerTierLimitService) learnModelScope(ctx context.Context, c tierLimitContext, at time.Time) error {
+	scope, counted, err := s.scopeToLearn(ctx, c, at)
 	if err != nil || counted <= 0 {
 		return err
 	}
@@ -97,80 +60,47 @@ func (s *providerTierLimitService) learnModelScope(ctx context.Context, c tierLi
 	return s.store.SaveAccountTierLearned(ctx, c.key, c.learned)
 }
 
-func (s *providerTierLimitService) scopeToLearn(ctx context.Context, c tierLimitContext, models map[string]string, used agentusage.LimitUsage, at time.Time) (agentusage.RequestScope, float64, error) {
-	if c.modelOverride {
-		scope, ok, _ := s.sameMinuteGroup(ctx, c, models, at)
-		if !ok {
-			scope, ok = agentusage.CoveringScope(c.effective.Scopes, c.profile.Model)
-		}
-		if !ok {
-			model := agentusage.ScopeModelID(c.profile.Model)
-			scope = agentusage.RequestScope{ID: agentusage.ModelScopeID(model), Kind: agentusage.ScopeKindModel, Models: []string{model}}
-		}
-		start, _, err := agentusage.DailyLimitWindow(at, scope.DailyReset)
-		if err != nil {
-			return scope, 0, err
-		}
-		counted, err := s.readModelRequestCount(ctx, c.ids, scope.Models, start, at)
-		return scope, counted, err
+// scopeToLearn counts the learned scope's requests by recorded model, like
+// readScopeUsage, so the learned value matches what admission counts.
+func (s *providerTierLimitService) scopeToLearn(ctx context.Context, c tierLimitContext, at time.Time) (agentusage.RequestScope, float64, error) {
+	scope, ok := s.sameMinuteGroup(ctx, c, at)
+	if !ok {
+		scope, ok = agentusage.CoveringScope(c.effective.Scopes, c.profile.Model)
 	}
-	if group, ok, usesActualModels := s.sameMinuteGroup(ctx, c, models, at); ok {
-		if usesActualModels {
-			start, _, err := agentusage.DailyLimitWindow(at, group.DailyReset)
-			if err != nil {
-				return group, 0, err
-			}
-			counted, err := s.readModelRequestCount(ctx, c.ids, group.Models, start, at)
-			return group, counted, err
-		}
-		counted, err := s.countScope(ctx, models, group, at)
-		return group, counted, err
+	if !ok {
+		model := agentusage.ScopeModelID(c.profile.Model)
+		scope = agentusage.RequestScope{ID: agentusage.ModelScopeID(model), Kind: agentusage.ScopeKindModel, Models: []string{model}}
 	}
-	if scope, ok := agentusage.CoveringScope(c.effective.Scopes, c.profile.Model); ok {
-		return scope, used.Scopes[scope.ID], nil
-	}
-	model := agentusage.ScopeModelID(c.profile.Model)
-	scope := agentusage.RequestScope{ID: agentusage.ModelScopeID(model), Kind: agentusage.ScopeKindModel, Models: []string{model}}
-	counted, err := s.countScope(ctx, models, scope, at)
-	return scope, counted, err
-}
-
-func (s *providerTierLimitService) countScope(ctx context.Context, models map[string]string, scope agentusage.RequestScope, at time.Time) (float64, error) {
 	start, _, err := agentusage.DailyLimitWindow(at, scope.DailyReset)
 	if err != nil {
-		return 0, err
+		return scope, 0, err
 	}
-	return s.readRequestCount(ctx, scopeProfileIDs(models, scope), start, at)
+	counted, err := s.readModelRequestCount(ctx, c.ids, scope.Models, start, at)
+	return scope, counted, err
 }
 
 // sameMinuteGroup finds other unconfigured models of the account whose
 // per-model daily block was observed within a minute of this one. Observation
 // read errors fall back to model learning.
-func (s *providerTierLimitService) sameMinuteGroup(ctx context.Context, c tierLimitContext, models map[string]string, at time.Time) (agentusage.RequestScope, bool, bool) {
+func (s *providerTierLimitService) sameMinuteGroup(ctx context.Context, c tierLimitContext, at time.Time) (agentusage.RequestScope, bool) {
 	configured := configuredScopes(c)
 	if agentusage.ConfiguredScopeCovers(configured, c.profile.Model) {
-		return agentusage.RequestScope{}, false, false
+		return agentusage.RequestScope{}, false
 	}
 	observations, err := s.store.ListUsageLimitObservationsSince(ctx, at.Add(-sameMinuteWindow))
 	if err != nil {
-		return agentusage.RequestScope{}, false, false
+		return agentusage.RequestScope{}, false
 	}
 	var partners []string
-	usesActualModels := false
 	for _, o := range observations {
 		if o.AccountKey != c.key || o.Dimension != limitDimensionModelDaily || o.ObservedAt.After(at.Add(sameMinuteWindow)) {
 			continue
 		}
-		model := o.ModelID
-		if model != "" && !agentusage.ConfiguredScopeCovers(configured, model) {
-			partners = append(partners, model)
-			if o.ModelID != "" && !strings.EqualFold(agentusage.ScopeModelID(o.ModelID), agentusage.ScopeModelID(models[o.ExecutionProfileID])) {
-				usesActualModels = true
-			}
+		if o.ModelID != "" && !agentusage.ConfiguredScopeCovers(configured, o.ModelID) {
+			partners = append(partners, o.ModelID)
 		}
 	}
-	group, ok := agentusage.ProvisionalGroupFor(c.learned.Tiers[c.tier].Scopes, c.profile.Model, partners)
-	return group, ok, usesActualModels
+	return agentusage.ProvisionalGroupFor(c.learned.Tiers[c.tier].Scopes, c.profile.Model, partners)
 }
 
 // configuredScopes are catalog defaults and every scope the owner set. An

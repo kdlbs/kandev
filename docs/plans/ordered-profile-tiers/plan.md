@@ -54,5 +54,8 @@ The task/session RR increment follows actual committed selection ordinals.
 Utility and taskless Office advance the same history through the native owner
 bridge; review-run ownership remains with the existing review lane. Provider-usage
 modes use only the last observed provider usage snapshot and never fetch during
-selection or preview. Cross-backend choice and keep-model persistence/idle-boundary
-behavior remain original feature work; saved opaque metadata is retained.
+selection or preview. Keep-model reevaluation at launch and at a warm idle
+turn is covered by focused orchestrator tests, including the candidate handover
+with its continuation package and the cases that keep the current candidate.
+Cross-backend choice remains original feature work; saved opaque metadata is
+retained.
