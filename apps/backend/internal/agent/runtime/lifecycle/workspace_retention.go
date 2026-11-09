@@ -62,6 +62,9 @@ func rollbackPreservesRuntime(execInstance *ExecutorInstance, execution *AgentEx
 	if execution != nil && retainsRuntimeOnLaunchRollback(execution) {
 		return true
 	}
+	if adoptionPreservesPeer(execInstance, execution) {
+		return true
+	}
 	if execInstance == nil || !execInstance.ReusedWorkspace {
 		return false
 	}
@@ -87,6 +90,12 @@ func (m *Manager) stopLaunchRuntimeOnRollback(
 	}
 	if !rollbackPreservesRuntime(instance, execution) {
 		return m.stopWorkspaceRuntimeAndRelease(ctx, backend, instance, true)
+	}
+	if adoptionPreservesPeer(instance, execution) {
+		// A failed adoption owns only the transport client it opened. Keep the
+		// selected peer process, journal handle, and MCP claims for retry and
+		// explicit Stop.
+		return nil
 	}
 	if instance.RuntimeName == agentruntime.RuntimeRemoteDocker {
 		// Preserve the retained container even if an earlier stop attempt was

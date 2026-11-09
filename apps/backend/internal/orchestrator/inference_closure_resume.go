@@ -74,7 +74,7 @@ func (s *Service) finishInferenceClosureAdoption(ctx context.Context, store infe
 }
 
 func (s *Service) authorizeInferenceClosureResume(ctx context.Context, taskID, sid, action string) error {
-	if action != "resume" {
+	if action != recoveryActionResume {
 		return models.ErrInferenceClosureConflict
 	}
 	if err := s.authorizeTaskSessionPair(ctx, taskID, sid); err != nil {

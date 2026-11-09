@@ -25,6 +25,10 @@ func Capture(pid int) (Identity, error) {
 	return Identity{PID: pid, BirthToken: fmt.Sprintf("windows:%d", creationTime)}, nil
 }
 
+func InspectProcStat(Identity, string, []byte) (State, error) {
+	return StateUnknown, ErrUnverifiableIdentity
+}
+
 func Inspect(identity Identity) (State, error) {
 	if err := identity.Validate(); err != nil {
 		return StateUnknown, err
@@ -77,6 +81,12 @@ func parseWindowsBirthToken(token string) (uint64, error) {
 	}
 	return created, nil
 }
+
+// BirthBootMatches fails closed where no kernel boot identity is available.
+func BirthBootMatches(Identity) (bool, error) { return false, ErrUnverifiableIdentity }
+
+// SessionMembersRemain fails closed where POSIX sessions do not exist.
+func SessionMembersRemain(Identity) (bool, error) { return false, ErrUnverifiableIdentity }
 
 // OwnedSessionTerminated fails closed when descendant ownership cannot be inspected.
 func OwnedSessionTerminated(Identity) (bool, error) { return false, ErrUnverifiableIdentity }
