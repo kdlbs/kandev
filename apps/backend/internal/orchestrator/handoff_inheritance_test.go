@@ -125,6 +125,7 @@ func TestPrepareSessionForStart_PropagatesInheritedEnvironment(t *testing.T) {
 
 func TestPrepareSessionForStart_InheritedWorkspaceMissingCompensatesSession(t *testing.T) {
 	repo := setupTestRepo(t)
+	seedExecutorRow(t, repo, "exec-1", models.ExecutorTypeLocal)
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
 	ctx := context.Background()
 	now := time.Now().UTC()

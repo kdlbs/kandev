@@ -1323,6 +1323,19 @@ func (e *Executor) resumeSession(
 	completedResume := options.AllowCompletedSessionResume &&
 		resumeInitialState == models.TaskSessionStateCompleted
 	wasTerminalResume := isTerminalSessionState(resumeInitialState) || completedResume
+	// Required-runtime admission runs before stale-runtime cleanup, credential
+	// leases, and environment retirement. A runtime refusal must not destroy
+	// retained evidence or unrelated work.
+	requestedExecutorType, err := e.requestedResumeExecutorType(ctx, task, session, startAgent, options)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.admitExecutorRuntime(requestedExecutorType); err != nil {
+		return nil, err
+	}
+	if err := e.admitRetainedExecutionRuntime(ctx, session, requestedExecutorType); err != nil {
+		return nil, err
+	}
 	// A terminal session may retain an unconfirmed runtime. Stop it before
 	// selected-environment admission can claim the environment.
 	if wasTerminalResume {
@@ -1334,10 +1347,6 @@ func (e *Executor) resumeSession(
 		}
 	}
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
-		return nil, err
-	}
-	requestedExecutorType, err := e.requestedResumeExecutorType(ctx, task, session, startAgent, options)
-	if err != nil {
 		return nil, err
 	}
 	preflight := &resumePreflight{ctx: ctx, persistedEnvironmentID: session.TaskEnvironmentID}
@@ -1666,9 +1675,20 @@ func (e *Executor) requestedResumeExecutorType(
 		); err != nil {
 			return "", err
 		}
-		return req.ExecutorType, nil
+		return e.requireResolvedResumeExecutorType(req.ExecutorType, requestSession.ExecutorID)
 	}
-	return e.resolveExecutorConfig(ctx, requestSession.ExecutorID, task.WorkspaceID, metadata).ExecutorType, nil
+	config := e.resolveExecutorConfig(ctx, requestSession.ExecutorID, task.WorkspaceID, metadata)
+	if config.ResolutionErr != nil {
+		return "", fmt.Errorf("%w: %v", ErrExecutorRuntimeSelectionUnresolved, config.ResolutionErr)
+	}
+	return e.requireResolvedResumeExecutorType(config.ExecutorType, config.ExecutorID)
+}
+
+func (e *Executor) requireResolvedResumeExecutorType(executorType, executorID string) (string, error) {
+	if strings.TrimSpace(executorID) != "" && strings.TrimSpace(executorType) == "" {
+		return "", fmt.Errorf("%w: executor %q", ErrExecutorRuntimeSelectionUnresolved, executorID)
+	}
+	return executorType, nil
 }
 
 func (e *Executor) prepareResumePreflight(
@@ -2110,7 +2130,17 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 				fmt.Errorf("validate recorded Kubernetes runtime for resume: %w", err)
 		}
 	} else {
-		execConfig = e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+		var configErr error
+		execConfig, configErr = e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+		if configErr != nil {
+			return nil, "", executorConfig{}, nil, existingRunning, configErr
+		}
+		// A retained binding is selection evidence even when the persisted
+		// session omits its executor type. Resolve it through current provider
+		// rules and compare the recorded runtime before reuse.
+		if err := e.admitRetainedExecutionRuntime(ctx, session, execConfig.ExecutorType); err != nil {
+			return nil, "", execConfig, nil, existingRunning, err
+		}
 	}
 	repositoryID, existingEnv, allRepos, err := e.prepareResumeRepositorySettings(
 		ctx, task, session, req, options,
@@ -2537,9 +2567,14 @@ func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task
 
 // applyExecutorConfigToResumeRequest resolves executor config and applies it to the
 // resume request, persisting executor assignment if newly resolved.
-func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, metadata map[string]interface{}) executorConfig {
+func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, metadata map[string]interface{}) (executorConfig, error) {
 	executorWasEmpty := session.ExecutorID == ""
 	execConfig := e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, metadata)
+	// Required-runtime admission precedes credential leases, environment
+	// retirement, and any session mutation for this resume attempt.
+	if err := e.admitConcreteExecutorRuntime(execConfig); err != nil {
+		return execConfig, err
+	}
 	session.ExecutorID = execConfig.ExecutorID
 	req.ExecutorType = execConfig.ExecutorType
 	req.ExecutorConfig = execConfig.ExecutorCfg
@@ -2557,7 +2592,7 @@ func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *
 		req.Metadata = execConfig.Metadata
 	}
 
-	return execConfig
+	return execConfig, nil
 }
 
 // isRecoverableCancelledResumeSession reports whether session was cancelled by

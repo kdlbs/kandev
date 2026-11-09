@@ -669,6 +669,17 @@ func (a *lifecycleAdapter) ShouldApplyPreferredShell(executorType string) bool {
 	return a.mgr.ShouldApplyPreferredShell(executorType)
 }
 
+// ValidateExecutorRuntime implements executor.ExecutorTypeCapabilities. It is
+// the required production runtime-admission wiring.
+func (a *lifecycleAdapter) ValidateExecutorRuntime(executorType string) error {
+	return a.mgr.ValidateExecutorRuntime(executorType)
+}
+
+// ValidateExecutionRuntime implements executor.ExecutorExecutionRuntimeAdmission.
+func (a *lifecycleAdapter) ValidateExecutionRuntime(ctx context.Context, sessionID, taskEnvironmentID, executorType string) error {
+	return a.mgr.ValidateExecutionRuntime(ctx, sessionID, taskEnvironmentID, executorType)
+}
+
 // SetExecutionEnv updates per-run env vars in an existing execution.
 func (a *lifecycleAdapter) SetExecutionEnv(ctx context.Context, agentExecutionID string, env map[string]string) error {
 	return a.mgr.SetExecutionEnv(ctx, agentExecutionID, env)

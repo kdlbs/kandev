@@ -1945,6 +1945,12 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	if err := m.admitExecutionOwner(ctx, req); err != nil {
 		return nil, err
 	}
+	// Required-runtime admission runs after actor/ownership authorization and
+	// before preparation credentials, scripts, workspace mutation, or runtime
+	// allocation.
+	if err := m.ValidateExecutorRuntime(req.ExecutorType); err != nil {
+		return nil, err
+	}
 	// AC-EXECUTORS-SURVIVAL-002.8/002.16: refuse rather than queue or block a
 	// launch for a session whose recovery guard is currently held. Checked
 	// first, before any activity lease or singleflight coalescing, so a
@@ -1979,6 +1985,12 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		return nil, err
 	}
 	execution := value.(*AgentExecution)
+	// Both owners and waiters of the coalesced ensure/launch operation compare
+	// the returned execution with the admitted selection before any promotion
+	// or agent start.
+	if err := m.ValidateExecutionRuntime(ctx, req.SessionID, req.TaskEnvironmentID, req.ExecutorType); err != nil {
+		return nil, err
+	}
 	// If this Launch call joined a workspace-only ensure peer's singleflight
 	// slot (EnsureWorkspaceExecutionForSession / GetOrEnsureExecution), the
 	// returned execution has no AgentCommand and the orchestrator's subsequent
@@ -2038,6 +2050,12 @@ func (m *Manager) markAgentStartPending(execution *AgentExecution) {
 func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *AgentExecution, req *LaunchRequest) error {
 	_, err := m.doSerializedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
 		if err := m.ensureLaunchSessionStillActive(sharedCtx, req.SessionID, executionAdmissionAgent); err != nil {
+			return nil, err
+		}
+		// Promotion mutates MCP/profile state and admits an authenticated agent
+		// process, so the retained execution must satisfy the selected runtime
+		// before any of that work.
+		if err := m.ValidateExecutionRuntime(sharedCtx, req.SessionID, req.TaskEnvironmentID, req.ExecutorType); err != nil {
 			return nil, err
 		}
 		current, exists := m.executionStore.GetBySessionID(req.SessionID)
@@ -2173,6 +2191,20 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 // launchInternal is the body of Launch run inside the per-session singleflight
 // slot. Callers must not invoke this directly except via Launch.
 func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
+	// Required-runtime admission is repeated before profile resolution so a
+	// sibling launch path cannot prepare credentials or workspaces for an
+	// unavailable required backend.
+	if err := m.ValidateExecutorRuntime(req.ExecutorType); err != nil {
+		return nil, err
+	}
+	// Cold Launch has no cached execution to compare, but a durable row can
+	// still describe a retained worker. Refuse a mismatch before profile
+	// resolution, workspace mutation, or runtime allocation.
+	if err := m.ensureDurableExecutionSelectionCompatible(
+		ctx, req.SessionID, req.TaskEnvironmentID, req.ExecutorType, false,
+	); err != nil {
+		return nil, err
+	}
 	m.logger.Debug("launching agent",
 		zap.String("task_id", req.TaskID),
 		zap.String("agent_profile_id", req.AgentProfileID),
@@ -2316,6 +2348,12 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	}
 	execReq, execInstance, rt, err := m.launchBuildExecutorRequest(ctx, executionID, &reqWithWorktree, agentConfig, profileInfo, mainRepoGitDir, worktreeID, worktreeBranch, runtimeProgress)
 	if err != nil {
+		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
+		return nil, err
+	}
+	if identityErr := validateCreatedExecutionIdentity(reqWithWorktree.ExecutorType, rt, execInstance); identityErr != nil {
+		rollbackErr := m.stopLaunchRuntimeOnRollback(context.WithoutCancel(ctx), rt, execInstance, nil)
+		err = errors.Join(identityErr, rollbackErr)
 		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 		return nil, err
 	}

@@ -1703,6 +1703,12 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	if err != nil {
 		return "", err
 	}
+	// Required-runtime admission runs after the actor authorization above and
+	// before any credential resolution, session persistence, script, or
+	// workspace work.
+	if err := e.admitConcreteExecutorRuntime(execConfig); err != nil {
+		return "", err
+	}
 
 	if execConfig.ExecutorID != "" {
 		session.ExecutorID = execConfig.ExecutorID
@@ -2062,6 +2068,12 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			// connection config reaches lifecycle instead of falling back to the
 			// workspace default (or an empty config).
 			executorID = strings.TrimSpace(session.ExecutorID)
+		}
+		// Request-scoped retained-runtime admission must precede profile
+		// replacement cleanup, environment recovery, credential resolution, the
+		// existing-workspace success path, and agent/MCP/env updates.
+		if err := e.admitPreparedLaunchRuntime(ctx, task, session, executorID); err != nil {
+			return nil, err
 		}
 		if opts.McpMode == "" {
 			opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, opts.StartAgent)
@@ -2863,6 +2875,20 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	// Required-runtime admission precedes credential resolution, remote secret
+	// resolution, environment transitions, and workspace mutation. The
+	// retained check repeats at this boundary for callers that did not use
+	// launchPreparedSession.
+	if err := e.admitConcreteExecutorRuntime(execConfig); err != nil {
+		return nil, executorConfig{}, err
+	}
+	retainedType := strings.TrimSpace(execConfig.ExecutorType)
+	if retainedType == "" && existingEnv != nil {
+		retainedType = strings.TrimSpace(existingEnv.ExecutorType)
+	}
+	if err := e.admitRetainedExecutionRuntime(ctx, session, retainedType); err != nil {
+		return nil, executorConfig{}, err
+	}
 	if execConfig.ExecutorID != "" {
 		metadata = execConfig.Metadata
 		req.ExecutorType = execConfig.ExecutorType

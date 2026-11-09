@@ -46,6 +46,10 @@ type mockAgentManager struct {
 	resolvePassthroughConfigFunc       func(ctx context.Context, sessionID string) (agents.PassthroughConfig, error)
 	launchAgentCallCount               int
 	cleanupStaleExecutionCallCount     int
+	setExecutionEnvCallCount           int
+	setMcpModeCallCount                int
+	startAgentProcessCallCount         int
+	stopAgentCallCount                 int
 	isAgentRunningForSessionCallArgs   []string
 	promptAgentCallCount               int
 	writePassthroughStdinCalls         []passthroughStdinCall
@@ -84,6 +88,7 @@ func (m *mockAgentManager) SetInitialDeliverySubmissionID(ctx context.Context, a
 	return nil
 }
 func (m *mockAgentManager) SetExecutionEnv(ctx context.Context, executionID string, env map[string]string) error {
+	m.setExecutionEnvCallCount++
 	if m.setExecutionEnvFunc != nil {
 		return m.setExecutionEnvFunc(ctx, executionID, env)
 	}
@@ -98,10 +103,12 @@ func (m *mockAgentManager) ExecutorProfileEnvForSession(ctx context.Context, ses
 }
 
 func (m *mockAgentManager) SetMcpMode(_ context.Context, _ string, _ string) error {
+	m.setMcpModeCallCount++
 	return nil
 }
 
 func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecutionID string) error {
+	m.startAgentProcessCallCount++
 	if m.startAgentProcessFunc != nil {
 		return m.startAgentProcessFunc(ctx, agentExecutionID)
 	}
@@ -123,6 +130,7 @@ func (m *mockAgentManager) IsAgentCommandConfigured(agentExecutionID string) boo
 }
 
 func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
+	m.stopAgentCallCount++
 	if m.stopAgentFunc != nil {
 		return m.stopAgentFunc(ctx, agentExecutionID, force)
 	}
@@ -331,6 +339,7 @@ type mockRepository struct {
 	getTaskEnvironmentFunc         func(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	getTaskEnvironmentByTaskIDFunc func(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	getExecutorRunningFunc         func(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	getExecutorFunc                func(ctx context.Context, id string) (*models.Executor, error)
 	deleteExecutorRunningFunc      func(ctx context.Context, sessionID string) error
 	hasExecutorRunningFunc         func(ctx context.Context, sessionID string) (bool, error)
 	createTaskEnvironmentRepoErr   error
@@ -880,10 +889,29 @@ func (m *mockRepository) UpdateTaskSessionBaseCommit(ctx context.Context, sessio
 }
 
 func (m *mockRepository) GetExecutor(ctx context.Context, id string) (*models.Executor, error) {
+	if m.getExecutorFunc != nil {
+		return m.getExecutorFunc(ctx, id)
+	}
 	if exec, ok := m.executors[id]; ok {
 		return exec, nil
 	}
-	return nil, nil
+	// Launch fixtures reference arbitrary executor IDs without seeding a row.
+	// Model the host-local executor those selections resolved to; a test that
+	// needs an unresolved selection installs getExecutorFunc.
+	return &models.Executor{ID: id, Type: mockExecutorTypeForID(id)}, nil
+}
+
+// mockExecutorTypeForID keeps the well-known built-in executor IDs aligned
+// with their real types; arbitrary fixture IDs resolve to local.
+func mockExecutorTypeForID(id string) models.ExecutorType {
+	switch id {
+	case models.ExecutorIDLocalDocker:
+		return models.ExecutorTypeLocalDocker
+	case models.ExecutorIDWorktree:
+		return models.ExecutorTypeWorktree
+	default:
+		return models.ExecutorTypeLocal
+	}
 }
 
 func (m *mockRepository) UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error {
@@ -1824,6 +1852,14 @@ func (m *mockCapabilities) ShouldApplyPreferredShell(executorType string) bool {
 	default:
 		return false
 	}
+}
+
+func (m *mockCapabilities) ValidateExecutorRuntime(executorType string) error {
+	return nil
+}
+
+func (m *mockCapabilities) ValidateExecutionRuntime(context.Context, string, string, string) error {
+	return nil
 }
 
 // Helper to create a test executor

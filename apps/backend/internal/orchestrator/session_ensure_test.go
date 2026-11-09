@@ -317,6 +317,7 @@ func TestAcquireEnsureLock_AllowsConcurrencyAcrossTaskIDs(t *testing.T) {
 func TestPrepareTaskSession_UsesExecutorIDFromTaskMetadata(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
+	seedExecutorRow(t, repo, "exec-special", models.ExecutorTypeLocal)
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
 

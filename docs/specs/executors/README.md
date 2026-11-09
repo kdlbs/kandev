@@ -20,6 +20,11 @@ This system owns executor profiles, environment construction, SSH lifecycle,
 runtime resource admission, plugin-provided remote environments, process and port safety, control-credential containment at executor proxies, agent process lifetime
 across a backend restart, and executor-specific failure and recovery contracts.
 
+Required runtime admission and observed execution identity belong here. The
+[requirements](requirements/runtime-selection.md) and
+[design](system-design/runtime-selection.md) distinguish configured selection
+from actual execution, including retained workers and authorized Stop.
+
 ## Exclusions
 
 - Agent identity and provider capabilities belong to the [agent

@@ -145,6 +145,21 @@ func classifyLaunchFailure(err error) launchFailureClassification {
 		}
 	}
 	switch {
+	case isExecutorRuntimeUnavailable(err):
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryGenericLaunchFailure,
+			message: "The selected executor runtime is unavailable. Choose an available runtime or ask an operator to enable it.",
+		}
+	case isExecutorRuntimeMismatch(err), isExecutorIdentityUnverified(err):
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryGenericLaunchFailure,
+			message: "The retained execution does not satisfy the selected executor runtime. Stop it or start a new session on the selected runtime.",
+		}
+	case errors.Is(err, ErrExecutorRuntimeSelectionUnresolved):
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryGenericLaunchFailure,
+			message: "The selected executor could not be resolved. Choose an available executor.",
+		}
 	case errors.Is(err, worktree.ErrWorkspaceCheckoutFailed):
 		return launchFailureClassification{
 			code:    models.LaunchErrorCategoryWorkspaceCheckoutFailed,

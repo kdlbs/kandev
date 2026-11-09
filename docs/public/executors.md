@@ -40,6 +40,33 @@ or updater is not available. Containers and npm Nightlies include all remote hel
 
 `mock_remote` also exists in backend models for tests. It is not a product executor.
 
+## Runtime selection is required
+
+A saved executor or executor profile is an execution boundary, not a preference. When a launch
+resolves to a concrete executor, Kandev requires that executor's runtime:
+
+- If the required runtime is disabled or not registered, the launch fails before credential
+  resolution, preparation scripts, workspace mutation, or worker allocation. Kandev does not run
+  the task on Local or Worktree instead. For example, a Local Docker profile fails while the global
+  Docker runtime is disabled.
+- A registered runtime that then fails to start (unreachable daemon, failed image build, or failed
+  container creation) reports the provider error. Kandev never retries the task on a different
+  runtime, and a retry keeps the same selection.
+- An empty selection keeps the existing default. Local, legacy `local_pc`, and Worktree all use the
+  standalone host runtime. An unknown or uninstalled plugin executor is refused.
+- A retained session is reused only when its recorded runtime satisfies the current selection.
+  A worker that actually runs standalone does not satisfy Local Docker, even if Docker later becomes
+  available. Refused reuse preserves the workspace, history, and runtime inventory, and an
+  authorized operator can still stop that exact worker.
+- Session detail and session summary responses include `execution_runtime`, the observed runtime
+  recorded for the same execution as `container_id`. `null` means unknown; the selected executor is
+  never used as a substitute. A successful Local Docker launch reports a separate container and its
+  daemon-verifiable container ID.
+
+Use **Stop** and start a new session on the intended runtime when a retained worker no longer matches
+the selection. Changing the saved selection is a deliberate operator action; Kandev never migrates a
+retained environment automatically.
+
 Only administrators can create, edit, or test a Remote Docker executor, and only administrators can build its image. A saved profile grants effective root on the remote host, and a build runs Dockerfile instructions with that daemon's authority.
 
 Remote Docker reaches its daemon over SSH, not over a daemon URL. The profile stores an SSH target, and Kandev rejects any value carrying a scheme, so `tcp://` is excluded by construction. An unsecured daemon port is remote root; `ssh://` needs no extra setup because Docker's SSH transport runs `docker system dial-stdio` over the connection you already have. The older stored fields `docker_host`, `docker_tls_verify`, and `docker_cert_path` are not used by this runtime.

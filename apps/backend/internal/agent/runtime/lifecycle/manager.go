@@ -29,15 +29,22 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
-// ExecutorFallbackPolicy controls behavior when a requested runtime is unavailable.
+// ExecutorFallbackPolicy is retained for internal source compatibility only.
+// A concrete executor selection is always required: an unavailable mapped
+// backend is refused instead of replaced, regardless of this value. The
+// constants remain so existing wiring and tests can migrate independently of
+// the required-runtime correction.
 type ExecutorFallbackPolicy string
 
 const (
-	// ExecutorFallbackAllow silently falls back to the default runtime (current behavior).
+	// ExecutorFallbackAllow is retained for compatibility; it no longer
+	// authorizes replacing a concrete selection with the default runtime.
 	ExecutorFallbackAllow ExecutorFallbackPolicy = "allow"
-	// ExecutorFallbackWarn falls back but logs a warning (current behavior, explicit).
+	// ExecutorFallbackWarn is retained for compatibility; it no longer
+	// authorizes replacing a concrete selection with the default runtime.
 	ExecutorFallbackWarn ExecutorFallbackPolicy = "warn"
-	// ExecutorFallbackDeny returns an error if the requested runtime is unavailable.
+	// ExecutorFallbackDeny expresses the required-runtime intent. Production
+	// wiring uses it, although selection admission no longer depends on it.
 	ExecutorFallbackDeny ExecutorFallbackPolicy = "deny"
 )
 

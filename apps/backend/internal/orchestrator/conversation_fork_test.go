@@ -68,6 +68,7 @@ func newForkTestService(t *testing.T, manager executor.AgentManagerClient, activ
 	} else {
 		repo = existing[0]
 	}
+	seedExecutorRow(t, repo, "executor-local", models.ExecutorTypeLocal)
 	seedSession(t, repo, "task-fork", "session-fork", "step1")
 	source, err := repo.GetTaskSession(ctx, "session-fork")
 	require.NoError(t, err)

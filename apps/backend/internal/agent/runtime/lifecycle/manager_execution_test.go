@@ -1177,6 +1177,10 @@ func TestCreateExecutionRunsRemoteResumePreflightBeforeCreatingWorkspaceExecutio
 	)
 	cleanupManagerStopCh(t, mgr)
 
+	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{prior: &models.ExecutorRunning{
+		ID: "running-session-1", SessionID: "session-1", TaskID: "task-1",
+		AgentExecutionID: "previous-execution", Runtime: agentruntime.RuntimeStandalone,
+	}})
 	metadata := map[string]interface{}{"ssh_host": "recovery.example", "ssh_port": 2222}
 	_, err := mgr.createExecution(context.Background(), "task-1", &WorkspaceInfo{
 		SessionID:        "session-1",
@@ -1344,11 +1348,21 @@ func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *Execut
 		TaskID:         req.TaskID,
 		SessionID:      req.SessionID,
 		RuntimeName:    e.Name(),
+		ContainerID:    dockerTestContainerID(e.Name(), req.InstanceID),
 		Client:         e.client,
 		WorkspacePath:  req.WorkspacePath,
 		AuthToken:      e.authToken,
 		BootstrapNonce: e.nonce,
 	}, nil
+}
+
+// dockerTestContainerID models the separately identified runner a real Docker
+// backend returns. Non-Docker backends have no container identity.
+func dockerTestContainerID(name executor.Name, instanceID string) string {
+	if name != executor.NameDocker {
+		return ""
+	}
+	return "container-" + instanceID
 }
 
 func (e *createInstanceExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {

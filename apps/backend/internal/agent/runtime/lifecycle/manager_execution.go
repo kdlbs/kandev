@@ -197,10 +197,16 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 			if err := m.ensureWorkspaceSessionAdmitted(sharedCtx, info.TaskID, info); err != nil {
 				return nil, err
 			}
+			if err := m.ensureRetainedExecutionSelection(sharedCtx, execution, info); err != nil {
+				return nil, err
+			}
 			return execution, nil
 		}
 		if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
 			if err := m.ensureWorkspaceSessionAdmitted(sharedCtx, info.TaskID, info); err != nil {
+				return nil, err
+			}
+			if err := m.ensureRetainedExecutionSelection(sharedCtx, execution, info); err != nil {
 				return nil, err
 			}
 			return execution, nil
@@ -362,6 +368,9 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 	if info.TaskEnvironmentID != "" {
 		if execution, exists := m.executionStore.GetByTaskEnvironmentID(info.TaskEnvironmentID); exists {
 			if err := m.ensureWorkspaceSessionAdmitted(ctx, taskID, info); err != nil {
+				return nil, err
+			}
+			if err := m.ensureRetainedExecutionSelection(ctx, execution, info); err != nil {
 				return nil, err
 			}
 			m.logger.Info("reusing existing execution for task environment",
@@ -670,6 +679,9 @@ func (m *Manager) EnsurePassthroughExecution(ctx context.Context, sessionID stri
 	// otherwise a fast-failed resume launch would keep returning the dead ID
 	// and the WS handler's IsProcessReadyOrPending check would 503 forever.
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+		if err := m.requireExecutionSelectionCompatibility(ctx, execution); err != nil {
+			return nil, err
+		}
 		if execution.PassthroughProcessID != "" {
 			if runner := m.passthroughRunnerForExecution(execution); runner != nil && runner.IsProcessReadyOrPending(execution.PassthroughProcessID) {
 				return execution, nil
@@ -868,12 +880,22 @@ func (m *Manager) prepareExecutionCreation(
 	if err := m.ensureExecutionAdmission(ctx, taskID, info, agentLaunch, ""); err != nil {
 		return nil, err
 	}
-	if err := m.reconcileExecutionWorkspace(ctx, taskID, info); err != nil {
+	// A cold ensure (no in-memory execution) still has to satisfy any durable
+	// retained record before workspace reconciliation, preparation secrets, or
+	// backend allocation. A genuinely fresh session has no row and passes.
+	effectiveExecutorType := firstNonEmpty(info.ExecutorType, info.ValidatedExecutorType, string(info.RuntimeName))
+	retainedEvidence := info.AgentExecutionID != "" || info.RuntimeName != ""
+	if err := m.ensureDurableExecutionSelectionCompatible(
+		ctx, info.SessionID, info.TaskEnvironmentID, effectiveExecutorType, retainedEvidence,
+	); err != nil {
 		return nil, err
 	}
 	rt, err := m.getExecutorBackend(info.ExecutorType)
 	if err != nil {
 		return nil, fmt.Errorf("no runtime configured: %w", err)
+	}
+	if err := m.reconcileExecutionWorkspace(ctx, taskID, info); err != nil {
+		return nil, err
 	}
 	executionID := uuid.New().String()
 	preparation, err := m.prepareExecutionCreateRequest(ctx, taskID, info, executionID)
@@ -954,6 +976,13 @@ func (m *Manager) createExecutionWithMode(
 	runtimeInstance, err := inputs.runtime.CreateInstance(launchCtx, inputs.preparation.request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
+	}
+	if err := validateCreatedExecutionIdentity(
+		inputs.preparation.request.ExecutorType, inputs.runtime, runtimeInstance,
+	); err != nil {
+		// This attempt created the instance, so an exact rollback is owned.
+		rollbackErr := m.stopLaunchRuntimeOnRollback(operationCtx, inputs.runtime, runtimeInstance, nil)
+		return nil, errors.Join(err, rollbackErr)
 	}
 
 	execution := m.initializeCreatedExecution(
