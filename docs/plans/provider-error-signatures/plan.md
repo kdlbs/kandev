@@ -1,6 +1,7 @@
 ---
 created: 2026-10-08
 status: implemented
+updated: 2026-11-08
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
 system_design:
@@ -26,12 +27,18 @@ topic-word patterns with provider error signatures. A bounded follow-up now
 text forms and one labeled JSON error envelope; it
 does not reopen task 01's completed prose-safety change.
 
+The prefixed OpenCode free-usage form has a separate
+([task 03](task-03-prefixed-free-usage-followup.md)) work order. It adds
+regression coverage for established error labels and records the signature's
+provider scope, prose boundary, precedence, and reset-hint behavior.
+
 ## Scope
 
 ### In scope
 
 - The provider rule patterns in `apps/backend/internal/agent/runtime/routingerr/rules.go`.
 - Table tests for prose that must not classify and signatures that must.
+- The sanitized provider-message projection in `apps/backend/internal/agentctl/types/streams/provider_error.go`.
 - Narrow coverage of the remaining signatures, using existing tests and
   disposable overlays outside the repository's automatic test collection.
 - The shared provider catalogue in
@@ -97,6 +104,17 @@ scope, line-opening evidence, sanitized excerpts, typed/normalized precedence,
 and existing credit/payment/quota ordering. Do not duplicate the already
 submitted shared catalogue or context-length work. The original-source reproduction and focused candidate race result are recorded
 in task 02; hosted CI and combined-source validation after the merge are separate.
+
+### Prefixed free-usage follow-up
+
+Cover the established OpenCode error labels that can prefix `free usage limit
+reached`. Keep the signature limited to OpenCode, outside fenced examples, and
+to one diagnostic line. Preserve line boundaries in the sanitized ACP message
+so a later diagnostic line remains classifiable. Preserve structured and
+earlier account-limit precedence, and do not infer a reset time. The production
+rule was already present in the PR; task 03 adds regression tests for accepted
+labels, rejected prose and provider cases, sanitized ACP projection, and
+precedence.
 
 ## Catalog consolidation follow-up
 

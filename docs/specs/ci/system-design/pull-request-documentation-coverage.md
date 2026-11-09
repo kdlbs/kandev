@@ -1,6 +1,6 @@
 ---
-status: draft
-last_updated: 2026-09-27
+status: current
+last_updated: 2026-11-05
 system: ci
 requirements:
   - REQ-CI-PR-DOCS-001

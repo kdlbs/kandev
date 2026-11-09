@@ -25,6 +25,18 @@ export type MarkdownFileTarget = { kind: "file"; path: string } | { kind: "block
 
 export type ResolveMarkdownFileTargetOptions = {
   workspaceRoot?: string | null;
+  /**
+   * Confirmed native-session working directory. Relative links resolve from
+   * this checkout, then convert to a Files-root-relative target. It can differ
+   * from workspaceRoot after live attachment promotes the task root.
+   */
+  relativeBasePath?: string | null;
+  /**
+   * Files-root-relative checkout directories. They preserve explicit source
+   * prefixes even when the repository has no host source path (remote
+   * executors) or the workspace repository list has not refreshed yet.
+   */
+  sourcePrefixes?: readonly string[];
   fileRootAliases?: readonly MarkdownFileRootAlias[];
 };
 
@@ -239,6 +251,113 @@ function resolveAbsoluteTarget(
   return createFileTarget(normalizedPath.replace(/^\/+/, ""));
 }
 
+/** Builds explicit source prefixes from exact session worktree placement. */
+export function buildMarkdownWorkspaceSourcePrefixes({
+  workspaceRoot,
+  sessionWorktrees = [],
+}: {
+  workspaceRoot?: string | null;
+  sessionWorktrees?: readonly MarkdownAliasWorktree[];
+}): string[] {
+  const root = normalizeOptionalPath(workspaceRoot);
+  if (!root) return [];
+  return uniqueNormalizedPaths(
+    sessionWorktrees.map((worktree) => {
+      const worktreePath = normalizeOptionalPath(worktree.path);
+      if (!worktreePath) return null;
+      return relativePathFromRoot(worktreePath, root);
+    }),
+  );
+}
+
+/**
+ * Preserves a link that already names one of the current source prefixes,
+ * such as `master/docs/guide.md` after a root promotion. Prefixes come from
+ * exact session worktree placement, so nested and remote layouts stay valid
+ * without probing a repository for a matching filename.
+ */
+function matchesSourcePrefix(path: string, prefix: string, caseInsensitive: boolean): boolean {
+  const comparablePath = caseInsensitive ? path.toLowerCase() : path;
+  const comparablePrefix = caseInsensitive ? prefix.toLowerCase() : prefix;
+  return comparablePath === comparablePrefix || comparablePath.startsWith(`${comparablePrefix}/`);
+}
+
+function resolveExplicitSourcePrefixTarget(
+  path: string,
+  aliases: readonly MarkdownFileRootAlias[],
+  sourcePrefixes: readonly string[],
+  caseInsensitive: boolean,
+): MarkdownFileTarget | null {
+  const matches = aliases.flatMap((alias) => {
+    const relativeRoot = normalizeOptionalPath(alias.workspaceRelativeRoot);
+    if (!relativeRoot || !matchesSourcePrefix(path, relativeRoot, caseInsensitive)) return [];
+    return [{ alias, relativeRoot }];
+  });
+  if (matches.length > 0) {
+    const longestRootLength = Math.max(...matches.map(({ relativeRoot }) => relativeRoot.length));
+    const targetIdentities = new Set(
+      matches
+        .filter(({ relativeRoot }) => relativeRoot.length === longestRootLength)
+        .map(
+          ({ alias }) => `${alias.repositoryId}\u0000${normalizePath(alias.workspaceRelativeRoot)}`,
+        ),
+    );
+    if (targetIdentities.size !== 1) return { kind: "blocked" };
+  } else {
+    const matchesPrefix = sourcePrefixes.some((prefix) =>
+      matchesSourcePrefix(path, prefix, caseInsensitive),
+    );
+    if (!matchesPrefix) return null;
+  }
+  return createFileTarget(path) ?? { kind: "blocked" };
+}
+
+function hasExpandedWorkspaceRoots(
+  aliases: readonly MarkdownFileRootAlias[],
+  sourcePrefixes: readonly string[],
+): boolean {
+  return (
+    sourcePrefixes.length > 0 ||
+    aliases.some((alias) => normalizeOptionalPath(alias.workspaceRelativeRoot) !== null)
+  );
+}
+
+/**
+ * Resolves an unqualified relative href beneath the confirmed native
+ * workspace. The result is Files-root-relative, so a link emitted from
+ * `<task>/master` still opens `<task>/master/...` after the root moves to
+ * `<task>`. Without a confirmed base, the established root-relative behavior
+ * survives only for a single known root; an expanded workspace cannot choose
+ * a checkout safely.
+ */
+function resolveRelativeTarget(
+  path: string,
+  workspaceRoot: string | null,
+  relativeBasePath: string | null,
+  aliases: readonly MarkdownFileRootAlias[],
+  sourcePrefixes: readonly string[],
+): MarkdownFileTarget | null {
+  const explicitPrefix = resolveExplicitSourcePrefixTarget(
+    path,
+    aliases,
+    sourcePrefixes,
+    isWindowsDriveAbsolutePath(workspaceRoot ?? ""),
+  );
+  if (explicitPrefix) return explicitPrefix;
+
+  if (!relativeBasePath) {
+    return hasExpandedWorkspaceRoots(aliases, sourcePrefixes)
+      ? { kind: "blocked" }
+      : createFileTarget(path);
+  }
+  if (!workspaceRoot) return createFileTarget(path);
+
+  const baseRelativeToRoot = relativePathFromRoot(relativeBasePath, workspaceRoot);
+  if (baseRelativeToRoot === null) return { kind: "blocked" };
+  const target = baseRelativeToRoot ? `${baseRelativeToRoot}/${path}` : path;
+  return createFileTarget(target) ?? { kind: "blocked" };
+}
+
 type ParsedMarkdownFileHref =
   | { kind: "path"; path: string; isAbsolute: boolean }
   | { kind: "blocked" }
@@ -264,7 +383,12 @@ function parseMarkdownFileHref(href: string): ParsedMarkdownFileHref {
 /** Resolves a file href to a workspace alias or an absolute current-file read target. */
 export function resolveMarkdownFileTarget(
   href: string | undefined,
-  { workspaceRoot, fileRootAliases = [] }: ResolveMarkdownFileTargetOptions = {},
+  {
+    workspaceRoot,
+    relativeBasePath,
+    sourcePrefixes = [],
+    fileRootAliases = [],
+  }: ResolveMarkdownFileTargetOptions = {},
 ): MarkdownFileTarget | null {
   if (!href || href.startsWith("#")) return null;
 
@@ -276,5 +400,14 @@ export function resolveMarkdownFileTarget(
 
   const normalizedPath = parsedHref.path.replace(/^\.\//, "");
   if (normalizedPath.startsWith("../")) return null;
-  return createFileTarget(normalizedPath);
+  return resolveRelativeTarget(
+    normalizedPath,
+    normalizeOptionalPath(workspaceRoot),
+    normalizeOptionalPath(relativeBasePath),
+    fileRootAliases,
+    sourcePrefixes.flatMap((prefix) => {
+      const normalized = normalizeOptionalPath(prefix);
+      return normalized ? [normalized] : [];
+    }),
+  );
 }

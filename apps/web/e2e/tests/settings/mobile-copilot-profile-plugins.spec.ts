@@ -205,7 +205,8 @@ test("phone users can remove a saved selection when the runtime is unsupported",
         body: JSON.stringify(
           copilotPluginDiscovery(fixture.agentId, fixture.profileId, {
             status: "unsupported",
-            runtime_version: "unsupported-fixture",
+            reason: "plugin_loading_unsupported",
+            runtime_version: "9.9.9",
             mount_permitted: false,
             plugins: [],
           }),
@@ -218,6 +219,13 @@ test("phone users can remove a saved selection when the runtime is unsupported",
     const spark = selector.getByRole("checkbox", { name: "Select spark" });
     await expect(selector).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByTestId("copilot-plugins-unsupported")).toBeVisible();
+    await expect(testPage.getByTestId("copilot-plugins-unsupported")).toContainText(
+      "Selected runtime: Copilot 9.9.9",
+    );
+    await expect(testPage.getByTestId("copilot-plugins-unsupported")).toContainText(
+      "This selected Copilot runtime does not advertise profile plugin loading.",
+    );
+    await expect(selector.getByText("Native status: unknown")).toBeVisible();
     await expect(selector.getByTestId("copilot-plugins-start-blocked")).toBeVisible();
     await expect(spark).toHaveCount(1);
     await expect(spark).toBeChecked();
@@ -303,7 +311,7 @@ test("phone users can recover a policy-blocked profile capability probe", async 
     ).toBe(true);
 
     await spark.tap();
-    await expect(spark).not.toBeChecked();
+    await expect(pluginSection.getByRole("checkbox", { name: "Select spark" })).toHaveCount(0);
     const actions = copilotProfileSaveActions(testPage);
     await expect(actions.surface).toHaveCount(1);
     await expect(actions.save).toHaveCount(1);
@@ -318,7 +326,7 @@ test("phone users can recover a policy-blocked profile capability probe", async 
     recovery.allowRecovery();
     await testPage.reload();
     await expect(pluginSection).toBeVisible({ timeout: 15_000 });
-    await expect(spark).not.toBeChecked();
+    await expect(pluginSection.getByRole("checkbox", { name: "Select spark" })).toHaveCount(0);
     await expect(capabilityStatus).toHaveAttribute("data-status", "ready", { timeout: 20_000 });
     await expect(modelPicker).toContainText(COPILOT_RECOVERY_MODEL_ID);
     await expect(modelPicker).not.toHaveClass(/text-destructive/);

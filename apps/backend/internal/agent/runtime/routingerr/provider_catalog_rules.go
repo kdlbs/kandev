@@ -8,8 +8,6 @@ var providerCatalogRules = []rule{
 	mustRule("provider.catalog.quota_notice.v1",
 		`(?im)^\s*(?:(?:AI_APICallError|Internal\s+error|Error):\s*)?usage\s+limit\s+reached\s+you\s+have\s+reached\s+your\s+current\s+quota\s+for\s+this\s+period\b`,
 		CodeQuotaLimited, ConfHigh),
-	mustRule("provider.catalog.free_usage.v1",
-		catalogErrorEnvelope+`free\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
 	mustRule("provider.rate_limit.v1",
 		`(?i)temporarily\s+rate[-_\s]limited\s+upstream[^\n]*please\s+retry\s+shortly`,
 		CodeRateLimited, ConfHigh),

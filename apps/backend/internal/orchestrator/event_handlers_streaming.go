@@ -294,6 +294,14 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case streams.EventTypeUsageObservation:
 		s.publishNativeUsageObservation(ctx, payload)
 
+	case streams.EventTypeContextCompactionObservation:
+		if payload != nil && payload.Data != nil {
+			s.publishCommittedContextCompaction(
+				ctx, payload.TaskID, payload.SessionID,
+				payload.Data.CanonicalProjection, payload.Data.Data,
+			)
+		}
+
 	case "plan":
 		s.handleSessionTodosEvent(ctx, payload)
 

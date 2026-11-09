@@ -118,6 +118,11 @@ const (
 	// contain multiple model responses.
 	EventTypeUsageObservation = "usage_observation"
 
+	// EventTypeContextCompactionObservation carries provider-attributed native
+	// compaction evidence. The authoritative count is committed only by durable
+	// canonical projection.
+	EventTypeContextCompactionObservation = "context_compaction_observation"
+
 	// EventTypeBackgroundWorkUpdated carries an update for an agent background workload.
 	EventTypeBackgroundWorkUpdated = "background_work_updated"
 
@@ -367,6 +372,10 @@ type AgentEvent struct {
 	// MCPAttachmentAttempt starts a new backend-owned evidence timeline. It is
 	// present only on the first EventTypeMCPAttachment event for an attempt.
 	MCPAttachmentAttempt *MCPAttachmentAttempt `json:"mcp_attachment_attempt,omitempty"`
+
+	// ContextCompaction carries validated native compaction evidence when Type
+	// is EventTypeContextCompactionObservation.
+	ContextCompaction *ContextCompactionObservation `json:"context_compaction,omitempty"`
 
 	// --- Permission request fields (for "permission_request" type) ---
 	// RequestID is the Kandev-generated identity for this exact request

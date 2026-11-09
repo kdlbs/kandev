@@ -535,6 +535,22 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 	return result, nil
 }
 
+// taskSessionAgentWorkspaceSelect projects the confirmed native workspace from
+// the current incarnation's latest committed harness generation. The raw
+// task_sessions.workspace_path column is mutable and can be overwritten with
+// the effective environment root, so it is not durable evidence of the
+// agent's checkout. The correlated subquery reuses the existing
+// (session_id, incarnation_id, generation DESC) index and stays portable
+// across SQLite and PostgreSQL.
+const taskSessionAgentWorkspaceSelect = `COALESCE((
+		SELECT NULLIF(hg.current_workspace, '')
+		FROM harness_session_generations hg
+		WHERE hg.session_id = ts.id
+		  AND hg.incarnation_id = COALESCE(NULLIF(ts.queue_incarnation_id, ''), ts.id)
+		ORDER BY hg.generation DESC
+		LIMIT 1
+	), '')`
+
 // taskSessionSelectCols is the column list used by every SELECT that scans
 // into a *models.TaskSession via scanTaskSession / scanTaskSessionRow. Centralised
 // so columns can be added in one place. Order MUST match the scan helpers.
@@ -554,6 +570,7 @@ const taskSessionSelectCols = `ts.id, ts.task_id, ts.queue_incarnation_id,
 	ts.executor_id, ts.executor_profile_id, ts.environment_id,
 	ts.repository_id, ts.base_branch, ts.base_commit_sha,
 	COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path),
+	` + taskSessionAgentWorkspaceSelect + `,
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
 	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id,
@@ -1612,6 +1629,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&session.ExecutionProfileID, &session.RouteGeneration, &session.RouteState, &session.RouteReason, &session.DownstreamACPSessionID,
 		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
+		&session.AgentWorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
@@ -3352,8 +3370,8 @@ func (r *Repository) SetSessionMetadataKeyIfState(
 }
 
 // UpdateSessionContextWindow stores a context-window sample and atomically
-// increments the session's inferred compaction count when the new used-token
-// value is lower than the previous persisted sample.
+// increments the session's inferred compaction count when an eligible
+// used-token value is lower than an eligible previous sample.
 func (r *Repository) UpdateSessionContextWindow(
 	ctx context.Context,
 	sessionID string,
@@ -3367,9 +3385,10 @@ func (r *Repository) UpdateSessionContextWindow(
 	if err != nil {
 		return 0, err
 	}
+	disabled := contextWindowCompactionInferenceDisabled(contextWindow)
 	now := time.Now().UTC()
 	var count int64
-	row := r.db.QueryRowxContext(ctx, r.db.Rebind(updateSessionContextWindowQuery(r.db.DriverName())), string(windowJSON), used, now, sessionID)
+	row := r.db.QueryRowxContext(ctx, r.db.Rebind(updateSessionContextWindowQuery(r.db.DriverName())), string(windowJSON), disabled, used, now, sessionID)
 	if err := row.Scan(&count); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, fmt.Errorf("agent session not found: %s", sessionID)
@@ -3377,6 +3396,14 @@ func (r *Repository) UpdateSessionContextWindow(
 		return 0, err
 	}
 	return count, nil
+}
+
+// contextWindowCompactionInferenceDisabled reports whether the sample is
+// excluded from usage-drop compaction inference. A missing or non-boolean
+// marker keeps the legacy eligible behavior.
+func contextWindowCompactionInferenceDisabled(contextWindow map[string]interface{}) bool {
+	disabled, ok := contextWindow["compaction_inference_disabled"].(bool)
+	return ok && disabled
 }
 
 func contextWindowUsed(contextWindow map[string]interface{}) (int64, error) {
@@ -3410,13 +3437,16 @@ func updateSessionContextWindowQuery(driver string) string {
 		base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END"
 		count := "GREATEST(COALESCE(NULLIF((" + base + ") #>> '{context_compaction_count}', '')::bigint, 0), 0)"
 		previousUsed := "(" + base + ") #>> '{context_window,used}'"
+		previousDisabled := "COALESCE((" + base + ") #>> '{context_window,compaction_inference_disabled}', 'false')"
 		return `
 			UPDATE task_sessions
 			SET metadata = jsonb_set(
 				jsonb_set(` + base + `, '{context_window}', ?::jsonb, true),
 				'{context_compaction_count}',
 				to_jsonb(CASE
-					WHEN jsonb_typeof((` + base + `) #> '{context_window,used}') = 'number'
+					WHEN NOT ?::boolean
+						AND ` + previousDisabled + ` = 'false'
+						AND jsonb_typeof((` + base + `) #> '{context_window,used}') = 'number'
 						AND (` + previousUsed + `)::bigint > ?
 					THEN ` + count + ` + 1
 					ELSE ` + count + `
@@ -3431,13 +3461,16 @@ func updateSessionContextWindowQuery(driver string) string {
 	base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END"
 	count := "MAX(COALESCE(CAST(json_extract(" + base + ", '$.context_compaction_count') AS INTEGER), 0), 0)"
 	previousUsed := "json_extract(" + base + ", '$.context_window.used')"
+	previousDisabled := "COALESCE(json_extract(" + base + ", '$.context_window.compaction_inference_disabled'), 0)"
 	return `
 		UPDATE task_sessions
 		SET metadata = json_set(
 			json_set(` + base + `, '$.context_window', json(?)),
 			'$.context_compaction_count',
 			CASE
-				WHEN json_type(` + base + `, '$.context_window.used') IN ('integer', 'real')
+				WHEN ? = 0
+					AND ` + previousDisabled + ` = 0
+					AND json_type(` + base + `, '$.context_window.used') IN ('integer', 'real')
 					AND CAST(` + previousUsed + ` AS INTEGER) > ?
 				THEN ` + count + ` + 1
 				ELSE ` + count + `
@@ -4305,9 +4338,10 @@ func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentP
 	// an old run afterwards fails. That is the accepted trade — see
 	// docs/specs/office/requirements/automations-settings.md.
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT DISTINCT t.id, t.title, t.is_ephemeral
+		SELECT DISTINCT t.id, t.title, t.is_ephemeral, t.workspace_id, COALESCE(w.name, '')
 		FROM task_sessions ts
 		JOIN tasks t ON t.id = ts.task_id
+		LEFT JOIN workspaces w ON w.id = t.workspace_id
 		WHERE ts.agent_profile_id = ? AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		  AND NOT (COALESCE(t.origin, '') = '`+models.TaskOriginAutomationRun+`'
 		           AND ts.state = 'WAITING_FOR_INPUT')
@@ -4319,7 +4353,7 @@ func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentP
 	var result []agentdto.ActiveTaskInfo
 	for rows.Next() {
 		var info agentdto.ActiveTaskInfo
-		if err := rows.Scan(&info.TaskID, &info.TaskTitle, &info.IsEphemeral); err != nil {
+		if err := rows.Scan(&info.TaskID, &info.TaskTitle, &info.IsEphemeral, &info.WorkspaceID, &info.WorkspaceName); err != nil {
 			return nil, err
 		}
 		result = append(result, info)
@@ -4561,6 +4595,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&session.ExecutionProfileID, &session.RouteGeneration, &session.RouteState, &session.RouteReason, &session.DownstreamACPSessionID,
 		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
+		&session.AgentWorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,

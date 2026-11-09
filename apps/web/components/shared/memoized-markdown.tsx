@@ -69,6 +69,8 @@ type MemoizedMarkdownProps = Omit<MarkdownFileLinkContextValue, "sessionId"> & {
 export const MemoizedMarkdown = memo(function MemoizedMarkdown({
   content,
   worktreePath,
+  relativeBasePath,
+  sourcePrefixes,
   onOpenFile,
   fileRootAliases,
   components,
@@ -80,6 +82,8 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
     () => ({
       sessionId: inheritedContext.sessionId,
       worktreePath: worktreePath ?? inheritedContext.worktreePath,
+      relativeBasePath: relativeBasePath ?? inheritedContext.relativeBasePath,
+      sourcePrefixes: sourcePrefixes ?? inheritedContext.sourcePrefixes,
       onOpenFile: onOpenFile ?? inheritedContext.onOpenFile,
       fileRootAliases: fileRootAliases ?? inheritedContext.fileRootAliases,
     }),
@@ -88,8 +92,12 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
       inheritedContext.sessionId,
       inheritedContext.fileRootAliases,
       inheritedContext.onOpenFile,
+      inheritedContext.relativeBasePath,
+      inheritedContext.sourcePrefixes,
       inheritedContext.worktreePath,
       onOpenFile,
+      relativeBasePath,
+      sourcePrefixes,
       worktreePath,
     ],
   );

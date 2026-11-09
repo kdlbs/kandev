@@ -158,6 +158,50 @@ function useSessionBackgroundWorkState(sessionId: string | null, enabled: boolea
   return { workloads, activeWorkId, isLoading };
 }
 
+/** An HTTP snapshot can omit observations accepted after its request began. */
+function preserveLiveWorkloads(
+  snapshot: WorkloadRunObservation[],
+  baseline: WorkloadRunObservation[],
+  current: WorkloadRunObservation[],
+): WorkloadRunObservation[] {
+  const beforeRead = new Map(baseline.map((work) => [work.work_id, work]));
+  const snapshotIds = new Set(snapshot.map((work) => work.work_id));
+  return [
+    ...snapshot,
+    ...current.filter(
+      (work) => !snapshotIds.has(work.work_id) && beforeRead.get(work.work_id) !== work,
+    ),
+  ];
+}
+
+async function readBackgroundWorkloads(
+  store: ReturnType<typeof useAppStoreApi>,
+  sessionId: string,
+): Promise<boolean> {
+  const generation = store.getState().beginBackgroundWorkRead(sessionId);
+  const baseline =
+    store.getState().backgroundWork.workloadsBySessionId[sessionId] ?? EMPTY_WORKLOADS;
+  const ownsRead = () =>
+    store.getState().backgroundWork.readGenerationBySessionId[sessionId] === generation;
+  try {
+    const response = await listBackgroundWorkloads(sessionId);
+    if (!ownsRead()) return false;
+    const current =
+      store.getState().backgroundWork.workloadsBySessionId[sessionId] ?? EMPTY_WORKLOADS;
+    store
+      .getState()
+      .setBackgroundWorkloads(
+        sessionId,
+        preserveLiveWorkloads(response.workloads ?? [], baseline, current),
+      );
+    return false;
+  } catch {
+    if (!ownsRead()) return false;
+    store.getState().setBackgroundWorkLoading(sessionId, false);
+    return true;
+  }
+}
+
 export function useBackgroundWork(
   sessionId: string | null,
   { detailActive = true }: { detailActive?: boolean } = {},
@@ -177,17 +221,8 @@ export function useBackgroundWork(
   const fetchWorkloads = useCallback(async () => {
     if (!detailActive || !sessionId || !enabled) return;
     const requestId = (latestFetchIdRef.current += 1);
-    let failed = false;
-    try {
-      store.getState().setBackgroundWorkLoading?.(sessionId, true);
-      const response = await listBackgroundWorkloads(sessionId);
-      store.getState().setBackgroundWorkloads(sessionId, response.workloads ?? []);
-    } catch {
-      failed = true;
-      store.getState().setBackgroundWorkLoading?.(sessionId, false);
-    } finally {
-      if (requestId === latestFetchIdRef.current) settle(sessionId, failed);
-    }
+    const failed = await readBackgroundWorkloads(store, sessionId);
+    if (requestId === latestFetchIdRef.current) settle(sessionId, failed);
   }, [detailActive, sessionId, enabled, store, settle]);
 
   useEffect(() => {
@@ -259,7 +294,7 @@ export function useBackgroundWork(
     hasActiveWork,
     hasHistory,
     isLoading,
-    isInitialLoading,
+    isInitialLoading: isInitialLoading || (isLoading && workloads.length === 0),
     loadError,
     executeAction,
     setActiveWorkload,

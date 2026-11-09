@@ -143,7 +143,7 @@ async function checkConsumers(go, cwd, version, record, frontend) {
 
 export async function smokeGo({
   mode = "local",
-  version = "v0.1.0",
+  version = "",
   skipCompatibilityCheck = false,
   frontend = false,
   sourceRoot = repository,
@@ -151,6 +151,12 @@ export async function smokeGo({
   expectedRecordDigest,
   packConfig,
 } = {}) {
+  if (!version) {
+    const record = JSON.parse(
+      await readFile(join(sourceRoot, "pluginsdk/sdk-release.json"), "utf8"),
+    );
+    version = `v${record.sdk_version}`;
+  }
   if (mode === "public") {
     if (!suppliedCandidate || !expectedRecordDigest || skipCompatibilityCheck)
       throw new Error(
@@ -246,7 +252,7 @@ if (
   const { values } = parseArgs({
     options: {
       mode: { type: "string", default: "local" },
-      version: { type: "string", default: "v0.1.0" },
+      version: { type: "string", default: "" },
       "host-tag": { type: "string" },
       "backend-only": { type: "boolean" },
       "skip-compatibility-check": { type: "boolean" },

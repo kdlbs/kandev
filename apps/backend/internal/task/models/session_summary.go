@@ -29,6 +29,7 @@ type TaskSessionSummaryObservation struct {
 	BaseBranch          string
 	BaseCommitSHA       string
 	WorkspacePath       string
+	AgentWorkspacePath  string
 	State               TaskSessionState
 	ErrorMessage        string
 	Metadata            map[string]interface{}
@@ -57,7 +58,8 @@ func (o *TaskSessionSummaryObservation) ToTaskSession() *TaskSession {
 		ExecutorID: o.ExecutorID, ExecutorProfileID: o.ExecutorProfileID,
 		EnvironmentID: o.EnvironmentID, RepositoryID: o.RepositoryID,
 		BaseBranch: o.BaseBranch, BaseCommitSHA: o.BaseCommitSHA, WorkspacePath: o.WorkspacePath,
-		State: o.State, ErrorMessage: o.ErrorMessage, Metadata: o.Metadata,
+		AgentWorkspacePath: o.AgentWorkspacePath,
+		State:              o.State, ErrorMessage: o.ErrorMessage, Metadata: o.Metadata,
 		StartedAt: o.StartedAt, CompletedAt: o.CompletedAt, UpdatedAt: o.UpdatedAt,
 		IsPrimary: o.IsPrimary, IsPassthrough: o.IsPassthrough, ReviewStatus: o.ReviewStatus,
 		TaskEnvironmentID: o.TaskEnvironmentID, LastReadMessageID: o.LastReadMessageID,

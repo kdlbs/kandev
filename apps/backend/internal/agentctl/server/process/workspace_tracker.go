@@ -54,9 +54,15 @@ var workspaceTrackerEpochCounter atomic.Uint64
 type WorkspaceTracker struct {
 	workDir      string
 	gitIndexPath string // Cached, validated path to git index file (works with worktrees)
-	logger       *logger.Logger
-	gitEnv       []string
-	gitEnvMu     sync.RWMutex
+	// suppressGitPublication marks a manager-built bare multi-repository task
+	// root. It owns Files events but no Git scope, so an unavailable capture
+	// must never become the Changes panel's unnamed repository. Standalone
+	// trackers, including repo-less roots, keep publishing their explicit
+	// unavailable status.
+	suppressGitPublication bool
+	logger                 *logger.Logger
+	gitEnv                 []string
+	gitEnvMu               sync.RWMutex
 	// allowedSourceRoots are canonical roots of durable sources explicitly
 	// attached to this workspace. They are deliberately separate from workDir:
 	// a link may point outside the workspace, but only to one of these roots.
@@ -669,6 +675,14 @@ func (wt *WorkspaceTracker) disarmPollModeGraceLocked() {
 		wt.pollModeGraceTimer.Stop()
 		wt.pollModeGraceTimer = nil
 	}
+}
+
+// live reports whether this tracker's lifetime is still open. Stop cancels the
+// lifetime context exactly once and never reopens it, so a stopped tracker can
+// neither serve a later read nor restart its polling loops. A tracker that was
+// built but not started yet is live: it can still be started normally.
+func (wt *WorkspaceTracker) live() bool {
+	return wt != nil && wt.cancelCtx != nil && wt.cancelCtx.Err() == nil
 }
 
 // stopTimeout is the maximum time Stop() will wait for goroutines to exit.

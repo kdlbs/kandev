@@ -134,6 +134,7 @@ type AgentctlEventPayload struct {
 	DeliveryHarnessGeneration uint64                   `json:"delivery_harness_generation,omitempty"`
 	PromptGeneration          uint64                   `json:"prompt_generation,omitempty"`
 	WorktreeID                string                   `json:"worktree_id,omitempty"`
+	WorktreeRepositoryID      string                   `json:"worktree_repository_id,omitempty"`
 	WorktreePath              string                   `json:"worktree_path,omitempty"`
 	WorktreeBranch            string                   `json:"worktree_branch,omitempty"`
 	// TaskWorkspacePath is the task root that contains every per-repo
@@ -142,6 +143,11 @@ type AgentctlEventPayload struct {
 	// than the initial session ready. The frontend uses this to repoint the
 	// file browser at the task root once the task becomes multi-branch.
 	TaskWorkspacePath string `json:"task_workspace_path,omitempty"`
+	// AgentWorkspacePath is the launched execution's confirmed working
+	// directory. It stays stable when attachment promotes the task workspace
+	// root, so the frontend can keep resolving repository-relative chat links
+	// against the checkout the agent still runs in.
+	AgentWorkspacePath string `json:"agent_workspace_path,omitempty"`
 }
 
 // ACPSessionCreatedPayload is the payload when an ACP session is created.
@@ -349,6 +355,10 @@ type AgentStreamEventData struct {
 
 	// MCPAttachment is one safe MCP delivery or observation fact.
 	MCPAttachment *streams.MCPAttachmentEvidence `json:"mcp_attachment,omitempty"`
+
+	// ContextCompaction carries validated native compaction evidence for a
+	// context_compaction_observation event.
+	ContextCompaction *streams.ContextCompactionObservation `json:"context_compaction,omitempty"`
 
 	// MCPAttachmentAttempt starts a new backend-owned MCP evidence timeline.
 	MCPAttachmentAttempt *streams.MCPAttachmentAttempt `json:"mcp_attachment_attempt,omitempty"`
@@ -658,7 +668,16 @@ type ContextWindowEventPayload struct {
 	ContextWindowUsed      int64   `json:"context_window_used"`
 	ContextWindowRemaining int64   `json:"context_window_remaining"`
 	ContextEfficiency      float64 `json:"context_efficiency"`
-	Timestamp              string  `json:"timestamp"`
+	// CompactionInferenceDisabled excludes this sample from usage-drop
+	// compaction inference. It is derived from the trusted provider type, not
+	// from the payload's agent_id execution identifier, and is omitted for
+	// eligible providers.
+	CompactionInferenceDisabled bool `json:"compaction_inference_disabled,omitempty"`
+	// CopilotNativeSessionEvents reports whether this launch negotiated the
+	// Copilot native event stream. False on Copilot means native counting is
+	// unavailable, not that zero compactions occurred.
+	CopilotNativeSessionEvents bool   `json:"copilot_native_session_events,omitempty"`
+	Timestamp                  string `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

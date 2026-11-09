@@ -77,6 +77,11 @@ func TestNativePromptSuggestionSupport(t *testing.T) {
 			want: true, wantWhy: claudeSuggestionEvidenceVerifiedLegacy,
 		},
 		{
+			name: "verified 0.100.0 legacy tuple", agent: verifiedClaudeSuggestionBridgeName,
+			version: "0.100.0", meta: legacyMeta,
+			want: true, wantWhy: claudeSuggestionEvidenceVerifiedLegacy,
+		},
+		{
 			name: "queueing alone with an arbitrary identity", agent: "custom-acp", version: "1.0.0", meta: legacyMeta,
 			wantWhy: claudeSuggestionEvidenceUnsupported,
 		},

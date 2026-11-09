@@ -58,7 +58,6 @@ func TestClassifySharedProviderCatalog(t *testing.T) {
 		code       Code
 	}{
 		{"Usage limit reached You have reached your current quota for this period", "provider.catalog.quota_notice.v1", CodeQuotaLimited},
-		{"Error: free usage limit reached", "provider.catalog.free_usage.v1", CodeQuotaLimited},
 		{"temporarily rate-limited upstream, please retry shortly", "provider.rate_limit.v1", CodeRateLimited},
 		{"Error: Error from provider (Console): Rate limit exceeded", "provider.catalog.console_rate.v1", CodeRateLimited},
 		{"Error: No endpoints found for model", "provider.catalog.model_unavailable.v1", CodeModelUnavailable},
