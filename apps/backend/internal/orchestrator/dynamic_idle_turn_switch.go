@@ -12,15 +12,16 @@ import (
 	"go.uber.org/zap"
 )
 
-// idleTurnCandidateComparisonApplies reports whether a prompt is a plain new
-// user turn that may compare candidates before it reaches a warm runtime.
-// Replays, recovery, queue and lifecycle deliveries, explicit model switches
-// and prompts bound to an existing execution keep their admitted candidate,
-// because they carry ownership that only the ordinary prompt path settles.
+// idleTurnCandidateComparisonApplies reports whether a prompt is a chat user
+// turn that may compare candidates before it reaches a warm runtime.
+// Synchronous callers that read the PromptResult, replays, recovery, queue and
+// lifecycle deliveries, explicit model switches and prompts bound to an
+// existing execution keep their admitted candidate, because they carry
+// ownership or a result that only the ordinary prompt path settles.
 func idleTurnCandidateComparisonApplies(
 	ctx context.Context, model string, origin launchOrigin, options promptTaskOptions,
 ) bool {
-	return origin == launchOriginManual && model == "" && retryLaunchInContext(ctx) == nil &&
+	return options.chatUserTurn && origin == launchOriginManual && model == "" && retryLaunchInContext(ctx) == nil &&
 		!options.internalContinuation && options.recoveryAction == "" && options.claimEntryID == "" &&
 		!options.lifecyclePrompt && options.liveExecutionFence == nil && options.resumeAttempt == nil &&
 		!options.allowRouteActionPrompt && !options.initialTaskBriefDispatchOwner &&

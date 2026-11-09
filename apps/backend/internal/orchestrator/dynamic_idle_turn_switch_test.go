@@ -131,6 +131,15 @@ func newIdleSwitchFixture(t *testing.T, name string, keepModel *bool, probe clie
 	return f
 }
 
+// chatPrompt sends a message the way the chat handler does: synchronous
+// dispatch through the prompt-context entry point, with the result discarded.
+func (f *idleSwitchFixture) chatPrompt(prompt string) error {
+	_, err := f.svc.PromptTaskWithPromptContext(
+		f.ctx, f.taskID, f.session, prompt, "", false, nil, "", false, nil, false,
+	)
+	return err
+}
+
 func (f *idleSwitchFixture) currentSession() *models.TaskSession {
 	f.t.Helper()
 	session, err := f.repo.GetTaskSession(f.ctx, f.session)
@@ -174,8 +183,8 @@ func TestIdleNewTurnSwitchesCandidateWithContinuationWhenKeepModelOff(t *testing
 	f.limitCandidateA()
 	before := f.currentSession().RouteGeneration
 
-	if _, err := f.svc.PromptTask(f.ctx, f.taskID, f.session, "Now add a unit test", "", false, nil, true); err != nil {
-		t.Fatalf("PromptTask: %v", err)
+	if err := f.chatPrompt("Now add a unit test"); err != nil {
+		t.Fatalf("chat prompt: %v", err)
 	}
 
 	// The executor repeats the stop for the replaced profile; both target the
@@ -223,8 +232,8 @@ func TestIdleNewTurnKeepsWarmCandidateWhenComparisonPicksIt(t *testing.T) {
 	f := newIdleSwitchFixture(t, "same", &keep, client.ProbeResultSettled)
 	before := f.currentSession().RouteGeneration
 
-	if _, err := f.svc.PromptTask(f.ctx, f.taskID, f.session, "Continue", "", false, nil, true); err != nil {
-		t.Fatalf("PromptTask: %v", err)
+	if err := f.chatPrompt("Continue"); err != nil {
+		t.Fatalf("chat prompt: %v", err)
 	}
 
 	if stops := f.stops(); len(stops) != 0 {
@@ -251,7 +260,10 @@ func TestIdleNewTurnDoesNotSwitchWhileWorkIsRunningOrKeepModelIsOn(t *testing.T)
 		keepModel *bool
 		probe     client.ProbeResult
 		prepare   func(*idleSwitchFixture)
+		// synchronous sends through PromptTask, whose caller reads the result.
+		synchronous bool
 	}{
+		{name: "synchronous-caller", keepModel: &keep, probe: client.ProbeResultSettled, synchronous: true},
 		{name: "keep-model-default", probe: client.ProbeResultSettled},
 		{name: "background-live", keepModel: &keep, probe: client.ProbeResultLive},
 		{name: "background-unknown", keepModel: &keep, probe: client.ProbeResultUnknown},
@@ -276,11 +288,22 @@ func TestIdleNewTurnDoesNotSwitchWhileWorkIsRunningOrKeepModelIsOn(t *testing.T)
 			}
 			before := f.currentSession()
 			sessionBefore := *before
-			_, handled, err := f.svc.switchIdleDynamicCandidateForNewTurn(
-				f.ctx, f.taskID, f.session, "Next request", "", false, nil, launchOriginManual, promptTaskOptions{},
-			)
-			if err != nil || handled {
-				t.Fatalf("switch handled=%v err=%v, want the ordinary prompt path", handled, err)
+			if tc.synchronous {
+				result, err := f.svc.PromptTask(f.ctx, f.taskID, f.session, "Next request", "", false, nil, false)
+				if err != nil || result == nil {
+					t.Fatalf("PromptTask result=%+v err=%v, want the warm turn's result", result, err)
+				}
+				if prompts := f.warmPrompts(); len(prompts) != 1 || prompts[0].ExecutionID != idleSwitchExecution {
+					t.Fatalf("warm prompts = %+v, want the prompt on the warm execution", prompts)
+				}
+			} else {
+				_, handled, err := f.svc.switchIdleDynamicCandidateForNewTurn(
+					f.ctx, f.taskID, f.session, "Next request", "", false, nil, launchOriginManual,
+					promptTaskOptions{chatUserTurn: true},
+				)
+				if err != nil || handled {
+					t.Fatalf("switch handled=%v err=%v, want the ordinary prompt path", handled, err)
+				}
 			}
 			if stops := f.stops(); len(stops) != 0 {
 				t.Fatalf("stop calls = %+v, want no interruption", stops)

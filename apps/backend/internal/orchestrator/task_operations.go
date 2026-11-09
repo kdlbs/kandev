@@ -6844,6 +6844,7 @@ func (s *Service) promptTaskWithPromptContext(
 	return s.promptTask(
 		ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, launchOriginManual,
 		promptTaskOptions{
+			chatUserTurn:                  true,
 			promptAlreadyComposed:         true,
 			fallbackUsesEffectivePrompt:   true,
 			promptReferenceContext:        promptReferenceContext,
@@ -6856,6 +6857,9 @@ func (s *Service) promptTaskWithPromptContext(
 
 type promptTaskOptions struct {
 	internalContinuation bool
+	// chatUserTurn marks a message the chat delivers without reading the
+	// PromptResult, so the turn may be handed to another dynamic candidate.
+	chatUserTurn bool
 	// recoveryAction is populated only by the explicit context-continuation
 	// path. It allows the already-authorized prompt to cross the recovery block
 	// without reopening the ordinary launch gate.

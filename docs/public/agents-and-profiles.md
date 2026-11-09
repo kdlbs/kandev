@@ -693,7 +693,7 @@ Use **Preview new selection** to inspect the current saved or unsaved draft.
 Preview does not save, claim a runtime slot or start an agent. Its random result
 is a sample, not a reservation of the next choice; active sessions are unchanged.
 **Keep the chosen model between turns** is on by default. When it is off,
-Kandev compares candidates again before each new message. If an idle session's
+Kandev compares candidates again before each new chat message. If an idle session's
 comparison picks another candidate, Kandev restarts the session on that
 candidate, which receives your message with a bounded summary of the
 conversation instead of the previous provider's own history. Kandev does not

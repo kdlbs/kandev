@@ -131,15 +131,19 @@ persisted route. When it is off, a new user turn calls `ReevaluateForNewTurn`,
 the same claiming selection a new launch uses, without an incumbent preference.
 
 - A launch that owns a new turn compares in `dynamicLaunchDecision`.
-- A direct user prompt to a warm runtime compares at the entry of `promptTask`,
+- A chat user message to a warm runtime compares at the entry of `promptTask`,
   before the prompt claims the session, under the route-action lock and the
-  session cancellation guard. It compares only when the session is
-  `WAITING_FOR_INPUT` with an active route, has no active turn and no cancel,
+  session cancellation guard. Only the chat entry points
+  (`PromptTaskWithDeliverySubmissionID`, `PromptTaskWithPromptContext`) mark the
+  turn; their caller discards the `PromptResult`. It compares only when the
+  session is `WAITING_FOR_INPUT` with an active route, has no active turn and no cancel,
   queued dispatch or steer in flight, the background-workload probe answers
   `settled`, the `executors_running` runtime is `standalone`, and the session
   is not passthrough. Otherwise the prompt keeps the current candidate and no
   generation is claimed. Queue, lifecycle, recovery, replay and explicit
-  model-switch deliveries, and prompts fenced to a live execution, never compare.
+  model-switch deliveries, prompts fenced to a live execution, and synchronous
+  `PromptTask` callers that read the result (for example a coordinator) never
+  compare, so they keep the current candidate and receive the turn's result.
 - If the current candidate wins, the claimed generation is marked active and the
   warm runtime receives the prompt in its native conversation.
 - If another candidate wins, the turn uses the dynamic successor handover: stop
