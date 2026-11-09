@@ -199,6 +199,7 @@ function QuickChatMessageSurface({ items, panelState, taskId }: QuickChatMessage
         taskId={taskId ?? undefined}
         sessionId={panelState.resolvedSessionId}
         messagesLoading={panelState.messagesLoading}
+        historyRefreshPending={panelState.historyRefreshPending}
         isWorking={panelState.isWorking}
         sessionState={panelState.session?.state}
         worktreePath={getSessionWorkspacePath(panelState.session)}

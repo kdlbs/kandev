@@ -341,6 +341,12 @@ Product implementation: Tasks 01-02 complete; Tasks 03-06 implementation complet
 The November 4 Settings failure exposed a sign-in configure regression despite the earlier deterministic checks.
 The [sign-in launch repair](../antigravity-sign-in-launch/plan.md) owns the full-argv correction and a real configure-boundary regression.
 That repair is implemented and the permanent regression passes. Task 03 remains `in_progress`; Task 07 remains `blocked`.
+The November 8 failure in [issue #5193](https://github.com/kdlbs/kandev/issues/5193)
+occurs after successful configure and start: the sign-in caller mistakes stream
+setup success for termination. The [stream-startup repair](../antigravity-login-stream/plan.md)
+owns that correction and a real WebSocket caller regression. It is implemented;
+startup/failure regressions and the full hostutility race suite pass. The
+existing browser and native qualification gates remain open.
 Installer completeness was checked again without changing its contract or establishing native readiness.
 Research handshakes and current-code tests do not establish live subscription inference.
 After implementation, record every required command and result in its work order and reconcile the final plan status.

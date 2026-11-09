@@ -3000,6 +3000,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			RepositoryID:               info.RepositoryID,
 			RepositoryPath:             info.RepositoryPath,
 			BaseBranch:                 info.BaseBranch,
+			BaseBranchFallbackPolicy:   info.BaseBranchFallbackPolicy,
 			IntegrationRef:             info.IntegrationRef,
 			CheckoutBranch:             info.CheckoutBranch,
 			PRNumber:                   info.PRNumber,
@@ -3078,6 +3079,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.RepositoryPath = repoInfo.RepositoryPath
 		req.WorkspaceRelativePath = repoInfo.WorkspaceRelativePath
 		req.BaseBranch = repoInfo.BaseBranch
+		req.BaseBranchFallbackPolicy = repoInfo.BaseBranchFallbackPolicy
 		req.IntegrationRef = repoInfo.IntegrationRef
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.PRNumber = repoInfo.PRNumber

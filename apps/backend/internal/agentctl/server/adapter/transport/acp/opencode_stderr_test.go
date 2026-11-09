@@ -66,6 +66,28 @@ func TestProviderErrorFromErrorPreservesUnchangedDailyIdentity(t *testing.T) {
 	}
 }
 
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12
+func TestProviderErrorFromErrorPreservesPrefixedFreeUsageLineBoundary(t *testing.T) {
+	secret := strings.Repeat("z", 48)
+	rawMessage := "Gateway token: " + secret + "\nError: free usage limit reached"
+	projected := ProviderErrorFromError(&sdk.RequestError{Code: -32603, Message: rawMessage}, "opencode-acp", "model")
+	if projected == nil {
+		t.Fatal("missing ACP provider diagnostic")
+	}
+	if strings.Contains(projected.Message, secret) {
+		t.Fatal("sanitized provider diagnostic exposed a credential")
+	}
+	if !strings.Contains(projected.Message, "\nError: free usage limit reached") {
+		t.Fatalf("sanitized provider diagnostic lost its line boundary: %q", projected.Message)
+	}
+	classified := routingerr.Classify(routingerr.Input{
+		Phase: routingerr.PhaseStreaming, ProviderID: projected.ProviderID, Stderr: projected.Message,
+	})
+	if classified.Code != routingerr.CodeQuotaLimited || classified.ClassifierRule != "opencode.stderr.free_usage_prefixed.v1" {
+		t.Fatalf("projected classification = %+v, want prefixed OpenCode quota", classified)
+	}
+}
+
 // @covers AC-AGENTS-CLAUDE-SESSION-LIMIT-001.1, AC-AGENTS-CLAUDE-SESSION-LIMIT-001.2
 func TestProviderErrorFromErrorClaudeSessionLimit(t *testing.T) {
 	const notice = "Internal error: You've hit your session limit · resets 11:10am (Europe/Helsinki)"
