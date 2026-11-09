@@ -121,12 +121,10 @@ func TestRepairWorkspaceInventoryRejectsFenceDriftInsideTransaction(t *testing.T
 	})
 }
 
-// Pins the CURRENT store behavior for a same-key retry after the fence moved:
-// the fence is re-validated before the idempotency lookup, so the retry is a
-// conflict rather than a deduplicated replay of the committed receipt. Whether
-// a same-key retry should behave this way is an open design question; this
-// test documents today's behavior and must be updated with that decision.
-func TestRepairWorkspaceInventorySameKeyRetryAfterFenceChangeConflicts(t *testing.T) {
+// A same-key retry of a committed repair replays the stored receipt even
+// after the fence moved: the idempotency lookup runs before the fence check,
+// which guards only a new write.
+func TestRepairWorkspaceInventorySameKeyRetryAfterFenceChangeReturnsStoredReceipt(t *testing.T) {
 	repo, repair := fencedWorkspaceInventoryRepair(t)
 	ctx := context.Background()
 	first, err := repo.RepairWorkspaceInventory(ctx, repair)
@@ -139,12 +137,15 @@ func TestRepairWorkspaceInventorySameKeyRetryAfterFenceChangeConflicts(t *testin
 	}
 
 	execFenceDrift(t, repo, `UPDATE tasks SET updated_at = ? WHERE id = ?`, time.Now().UTC().Add(time.Hour), fenceTaskID)
-	if _, err := repo.RepairWorkspaceInventory(ctx, repair); !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {
-		t.Fatalf("same-key retry after fence change error = %v, want conflict", err)
+	replay, err = repo.RepairWorkspaceInventory(ctx, repair)
+	if err != nil || replay.ID != first.ID || replay.ResultCode != models.WorkspaceInventoryRecoveryDeduplicated {
+		t.Fatalf("same-key retry after fence change = %+v, %v; want deduplicated receipt", replay, err)
 	}
-	stored, err := repo.GetWorkspaceInventoryRepairReceipt(ctx, fenceTaskID, repair.IdempotencyKey)
-	if err != nil || stored == nil || stored.ID != first.ID {
-		t.Fatalf("committed receipt after rejected retry = %+v, %v", stored, err)
+
+	other := *repair
+	other.RequestHash = "other-request-hash"
+	if _, err := repo.RepairWorkspaceInventory(ctx, &other); !errors.Is(err, models.ErrWorkspaceInventoryRecoveryIdempotencyConflict) {
+		t.Fatalf("same key with another request after fence change error = %v, want idempotency conflict", err)
 	}
 }
 

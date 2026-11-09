@@ -51,15 +51,18 @@ func (r *Repository) RepairWorkspaceInventory(
 		return nil, err
 	}
 
-	if err := r.validateInventoryFenceTx(ctx, tx, repair); err != nil {
-		return nil, err
-	}
 	existing, err := r.loadWorkspaceInventoryReceiptTx(ctx, tx, repair.TaskID, repair.IdempotencyKey)
 	if err != nil {
 		return nil, err
 	}
 	if dedup, dedupErr := dedupedWorkspaceInventoryReceipt(existing, repair.RequestHash); dedup != nil || dedupErr != nil {
 		return dedup, dedupErr
+	}
+	// The fence guards the write only. A same-key retry of an already
+	// committed repair is resolved above and replays the stored receipt even
+	// when the task/session/route state moved after that commit.
+	if err := r.validateInventoryFenceTx(ctx, tx, repair); err != nil {
+		return nil, err
 	}
 	if err := r.validateWorkspaceInventoryRepairTx(ctx, tx, repair); err != nil {
 		return nil, err

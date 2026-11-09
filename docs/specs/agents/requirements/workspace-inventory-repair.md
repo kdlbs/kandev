@@ -58,6 +58,9 @@ shall repair only a proven existing local Git worktree. It shall retain the
 ordinary local-source denial for automatic repair, prove the server-owned
 repository/task/environment/slot and reciprocal Git identity, exclude every live
 writer, and preserve dirty, staged and untracked state. Task entry, session state
-and dynamic route generation shall be fenced and retained in the receipt.
+and dynamic route generation shall be fenced and retained in the receipt. A
+fence change before the repair commits shall conflict without mutation; a change
+after the commit shall not turn the committed repair into a conflict, and a
+same-key retry shall return the stored receipt.
 Metadata-only repair shall never launch, change a primary session or rewrite a
 route. A later ordinary workflow retry remains a separate admission decision.

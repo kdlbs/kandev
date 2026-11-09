@@ -54,15 +54,12 @@ func (e *Executor) RepairWorkspaceInventoryOnly(ctx context.Context, taskID, ses
 		return nil, err
 	}
 	scoped := context.WithValue(ctx, inventoryMetadataKey{}, fence)
-	receipt, err := e.repairReuseEnvironmentInventory(scoped, task.ToAPI(), session, req, env, infos, key)
-	if err != nil {
-		return nil, err
-	}
-	after, err := store.ReadWorkspaceInventoryRepairFence(ctx, taskID, sessionID)
-	if err != nil || !fence.Equal(after) {
-		return nil, models.ErrWorkspaceInventoryRecoveryConflict
-	}
-	return receipt, nil
+	// The repair transaction re-validates this fence before it writes, which
+	// covers every change up to the commit. A lifecycle change after the
+	// commit does not undo the committed repair, so the committed receipt is
+	// returned as is rather than re-reading the fence and reporting a
+	// conflict for a repair that already happened.
+	return e.repairReuseEnvironmentInventory(scoped, task.ToAPI(), session, req, env, infos, key)
 }
 
 func (e *Executor) metadataInventoryTaskSession(ctx context.Context, taskID, sessionID string) (*models.Task, *models.TaskSession, error) {

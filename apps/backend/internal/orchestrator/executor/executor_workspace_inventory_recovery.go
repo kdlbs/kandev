@@ -473,7 +473,11 @@ func workspaceInventoryRetryIdentity(
 	env *models.TaskEnvironment,
 	repositories []*repoInfo,
 ) (string, RepoSpec, *repoInfo, *models.TaskEnvironmentRepo, bool) {
-	if existing == nil || !inventoryMetadataFence(ctx).Equal(existing.Preservation.Fence) {
+	// A committed receipt is replayed even when the fence moved after its
+	// commit: the fence guards the repair write, not the later replay. Only
+	// the repair mode must match, so a fenced metadata-only receipt is never
+	// replayed for an unfenced ordinary request or the other way round.
+	if existing == nil || (inventoryMetadataFence(ctx) == nil) != (existing.Preservation.Fence == nil) {
 		return "", RepoSpec{}, nil, nil, false
 	}
 	if !workspaceInventoryRetryReceiptMatches(existing, task, session, env) ||

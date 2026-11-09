@@ -186,6 +186,14 @@ executor's fence read and that transaction, the environment and repository
 boundary of the metadata-only request, the scoped local-candidate validator,
 the claim that refuses the requesting session's own live runtime, the
 orchestrator `workspace_only` response (`not_started`, no launch) and the
-handler rejection of `workspace_only` with a non-repair action. Same-key retry
-after a fence change is pinned at its current behavior (executor: idempotency
-conflict; store: conflict) pending the owner decision on that contract.
+handler rejection of `workspace_only` with a non-repair action.
+
+Review follow-up (post-commit fence): a fence change after the repair committed
+was reported as a conflict, and the same key then failed as an idempotency
+conflict, so the committed repair could not be confirmed. Per the owner
+decision, the executor now returns the committed receipt without re-reading the
+fence, the executor retry identity requires only the same repair mode (fenced
+or not), and the store resolves a same-key retry before its fence check. Fence
+drift before the commit still conflicts. Tests cover post-commit drift (task,
+workflow step, session, route) followed by a same-key retry, and same-key
+replay after a fence change in the executor and the store.

@@ -297,10 +297,12 @@ The original automatic local-source guard remains in force.
 
 A server-read task/session/route-generation fence is added to the existing JSON
 preservation receipt. The original repair transaction checks that fence before
-writing; existing idempotent receipts and the post-repair observation must match
-it. The existing environment recovery claim excludes the current session runtime
-as well as borrowers. No new schema, ledger, signature or retry scheduler is
-introduced. A changed entry/generation conflicts, and no repair result itself
-authorizes a later launch.
+writing, which covers every change up to the commit. Once the repair commits,
+its receipt is returned even if the fence moves afterwards, and a same-key retry
+replays the stored receipt (same repair mode and request identity) instead of
+re-checking the fence. The existing environment recovery claim excludes the
+current session runtime as well as borrowers. No new schema, ledger, signature or retry scheduler is
+introduced. A changed entry/generation before the commit conflicts, and no
+repair result itself authorizes a later launch.
 A later ordinary launch that attests a fenced local receipt applies the same
 task-scoped local checkout checks instead of the automatic local-source denial.
