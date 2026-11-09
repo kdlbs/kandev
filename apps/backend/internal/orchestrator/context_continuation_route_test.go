@@ -7,12 +7,45 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	agents "github.com/kandev/kandev/internal/agent/agents"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type contextRouteTestProfileStore struct {
+	settingsstore.Repository
+	settingsstore.DynamicProfileRepository
+}
+
+func (contextRouteTestProfileStore) GetAgentProfile(_ context.Context, id string) (*settingsmodels.AgentProfile, error) {
+	agentID := "context-route-concrete-agent"
+	if id == "dynamic-logical" {
+		agentID = "context-route-dynamic-agent"
+	}
+	return &settingsmodels.AgentProfile{ID: id, AgentID: agentID, Enabled: true}, nil
+}
+
+func (contextRouteTestProfileStore) GetAgent(_ context.Context, id string) (*settingsmodels.Agent, error) {
+	name := "claude-acp"
+	if id == "context-route-dynamic-agent" {
+		name = agents.DynamicAgentID
+	}
+	return &settingsmodels.Agent{ID: id, Name: name}, nil
+}
+
+func (contextRouteTestProfileStore) GetDynamicAgentProfile(
+	_ context.Context,
+	profileID string,
+) (*settingsmodels.DynamicAgentProfile, []settingsmodels.DynamicAgentRoute, error) {
+	return &settingsmodels.DynamicAgentProfile{ProfileID: profileID, Version: 1}, []settingsmodels.DynamicAgentRoute{{
+		DynamicProfileID: profileID, ExecutionProfileID: "candidate-1", Enabled: true,
+	}}, nil
+}
 
 func seedRetryingContextRoute(t *testing.T, ctx context.Context, svc *Service, sessionID string) {
 	t.Helper()
@@ -39,7 +72,7 @@ func newContextRouteTestService(t *testing.T, agentManager *mockAgentManager) (*
 	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentManager)
 	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo), dynamicruntime.WithStateLoader(repo))
-	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(contextRouteTestProfileStore{}, engine, true))
 	return svc, sessionID
 }
 
