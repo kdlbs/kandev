@@ -61,6 +61,7 @@ func (m *Manager) repairContextLocked() (managedruntime.RepairContext, bool) {
 		InheritedEnv:       os.Environ(),
 	})
 	if err != nil {
+		m.logger.Warn("managed runtime repair context is unavailable", zap.Error(err))
 		return managedruntime.RepairContext{}, false
 	}
 	return repairContext, true
@@ -213,24 +214,22 @@ func (m *Manager) expireManagedRuntimeRepair(prepared *managedruntime.PreparedRu
 	prepared.RetireRepairPublication()
 	m.logger.Warn("managed runtime repair publication window expired",
 		zap.Uint64("process_generation", generation))
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		// Serialize with starts so the generation cannot change between the
-		// check and the stop. Stop does not acquire startOperationMu.
-		m.startOperationMu.Lock()
-		defer m.startOperationMu.Unlock()
-		if current := m.ProcessGeneration(); current != generation {
-			return
-		}
-		if err := m.Stop(ctx); err != nil {
-			m.logger.Warn("failed to reap uninitialized managed runtime", zap.Error(err))
-			return
-		}
-		if err := prepared.Close(); err != nil {
-			m.logger.Warn("failed to remove uninitialized managed runtime candidate", zap.Error(err))
-		}
-	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// The timer callback is already asynchronous. Serialize with starts so the
+	// generation cannot change between the check and the stop.
+	m.startOperationMu.Lock()
+	defer m.startOperationMu.Unlock()
+	if current := m.ProcessGeneration(); current != generation {
+		return
+	}
+	if err := m.Stop(ctx); err != nil {
+		m.logger.Warn("failed to reap uninitialized managed runtime", zap.Error(err))
+		return
+	}
+	if err := prepared.Close(); err != nil {
+		m.logger.Warn("failed to remove uninitialized managed runtime candidate", zap.Error(err))
+	}
 }
 
 // ManagedRuntimeInitialized publishes the pending repair for the exact

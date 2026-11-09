@@ -207,10 +207,13 @@ test("reusable verified cache repair keeps the published runtime across an agent
     );
     const requestsAfterRecovery = fixture.registry.requests();
     expect(requestsAfterRecovery).toBeGreaterThan(0);
-    const top = execFileSync("docker", ["top", containerID!], { encoding: "utf8" });
-    const agentLine = top.split("\n").find((line) => line.includes("mock-agent"));
-    if (!agentLine) throw new Error("container mock agent process is missing");
-    process.kill(Number(agentLine.trim().split(/\s+/)[1]), "SIGKILL");
+    execFileSync("docker", [
+      "exec",
+      containerID!,
+      "sh",
+      "-c",
+      'for p in /proc/[0-9]*; do if grep -qa "mock[-]agent" "$p/cmdline" 2>/dev/null; then kill -9 "${p#/proc/}"; fi; done',
+    ]);
     await dwell(
       2_000,
       "poll-interval",

@@ -17,6 +17,9 @@ import (
 )
 
 func TestManagedRuntimeRepairReuseProbe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("reusable repair requires native ACL verification on Windows")
+	}
 	home := t.TempDir()
 	packageSpec := "@agentclientprotocol/claude-agent-acp@1.2.3"
 	cfg := repairProbeConfig(t, packageSpec)
@@ -149,6 +152,9 @@ func runtimeCommandValue(args []string, key string) (string, bool) {
 }
 
 func TestPublishProbeRepairRevalidatesContext(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("reusable repair requires native ACL verification on Windows")
+	}
 	home := t.TempDir()
 	packageSpec := "@agentclientprotocol/claude-agent-acp@1.2.3"
 	cfg := repairProbeConfig(t, packageSpec)

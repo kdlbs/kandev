@@ -318,10 +318,15 @@ func repairToolchainFingerprint(env []string, name string) (string, error) {
 }
 
 func repairNPMVersion(executable string, env []string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, executable, "--version")
-	command.Env = append([]string(nil), env...)
+	command.Env = append(append([]string(nil), env...),
+		"NPM_CONFIG_UPDATE_NOTIFIER=false",
+		"npm_config_update_notifier=false",
+		"NPM_CONFIG_OFFLINE=true",
+		"npm_config_offline=true",
+	)
 	output, err := command.Output()
 	if err != nil {
 		return "", fmt.Errorf("resolve npm version for managed runtime repair context: %w", err)

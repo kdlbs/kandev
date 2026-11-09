@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -25,6 +26,9 @@ import (
 // owner stops, and a fresh store reuses the generation without an installer or
 // another registry request.
 func TestManagedRuntimeRepairReuseNPM(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("reusable repair requires native ACL verification on Windows")
+	}
 	if os.Getenv("KANDEV_TEST_REAL_NPM") != "1" {
 		t.Skip("set KANDEV_TEST_REAL_NPM=1 to run the local npm integration test")
 	}

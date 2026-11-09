@@ -118,10 +118,7 @@ func TestManagedRuntimeRepairPublicationAfterInitialization(t *testing.T) {
 	manager := newRepairReuseManager(t, home, command, env, digest)
 	t.Cleanup(func() { _ = manager.StopForTeardown(context.Background()) })
 
-	store, err := managedruntime.OpenRepairStore(home)
-	if err != nil {
-		t.Fatalf("open repair store: %v", err)
-	}
+	store := openManagedRuntimeRepairStoreForTest(t, home)
 	repairContext, ok := storeRepairContext(store, packageSpec, env, digest)
 	if !ok {
 		t.Fatal("build repair context")
@@ -169,10 +166,7 @@ func TestManagedRuntimeRepairRetirementKeepsCurrentProcessUsable(t *testing.T) {
 	manager := newRepairReuseManager(t, home, command, env, digest)
 	t.Cleanup(func() { _ = manager.StopForTeardown(context.Background()) })
 
-	store, err := managedruntime.OpenRepairStore(home)
-	if err != nil {
-		t.Fatalf("open repair store: %v", err)
-	}
+	store := openManagedRuntimeRepairStoreForTest(t, home)
 	repairContext, ok := storeRepairContext(store, packageSpec, env, digest)
 	if !ok {
 		t.Fatal("build repair context")
@@ -253,10 +247,7 @@ func storeRepairContext(
 
 func publishManagedRuntimeRepair(t *testing.T, home, packageSpec string, env []string, digest string) *managedruntime.PreparedRuntime {
 	t.Helper()
-	store, err := managedruntime.OpenRepairStore(home)
-	if err != nil {
-		t.Fatalf("open repair store: %v", err)
-	}
+	store := openManagedRuntimeRepairStoreForTest(t, home)
 	repairContext, ok := storeRepairContext(store, packageSpec, env, digest)
 	if !ok {
 		t.Fatal("build repair context")
@@ -391,10 +382,7 @@ func TestManagedRuntimeRepairExpiryRetiresUninitializedCandidate(t *testing.T) {
 	env, digest := repairReuseEnvironment(t, home)
 	manager := newRepairReuseManager(t, home, command, env, digest)
 	t.Cleanup(func() { _ = manager.StopForTeardown(context.Background()) })
-	store, err := managedruntime.OpenRepairStore(home)
-	if err != nil {
-		t.Fatalf("open repair store: %v", err)
-	}
+	store := openManagedRuntimeRepairStoreForTest(t, home)
 	repairContext, ok := storeRepairContext(store, packageSpec, env, digest)
 	if !ok {
 		t.Fatal("build repair context")
@@ -430,10 +418,7 @@ func TestManagedRuntimeRepairRevalidationRejectsChangedNPMRC(t *testing.T) {
 	env = append(env, "NPM_CONFIG_USERCONFIG="+userConfig)
 	manager := newRepairReuseManager(t, home, command, env, digest)
 	t.Cleanup(func() { _ = manager.StopForTeardown(context.Background()) })
-	store, err := managedruntime.OpenRepairStore(home)
-	if err != nil {
-		t.Fatalf("open repair store: %v", err)
-	}
+	store := openManagedRuntimeRepairStoreForTest(t, home)
 	repairContext, ok := storeRepairContext(store, packageSpec, env, digest)
 	if !ok {
 		t.Fatal("build repair context")
@@ -471,4 +456,16 @@ func TestManagedRuntimeRepairRevalidationRejectsChangedNPMRC(t *testing.T) {
 	if _, outcome, _ := store.Lookup(context.Background(), repairContext); outcome == managedruntime.RepairOutcomeHit {
 		t.Fatal("changed npm configuration selected the candidate")
 	}
+}
+
+func openManagedRuntimeRepairStoreForTest(t *testing.T, home string) *managedruntime.RepairStore {
+	t.Helper()
+	store, err := managedruntime.OpenRepairStore(home)
+	if err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("reusable repair requires native ACL verification on Windows: %v", err)
+		}
+		t.Fatalf("open repair store: %v", err)
+	}
+	return store
 }

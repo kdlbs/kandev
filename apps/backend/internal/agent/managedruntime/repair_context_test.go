@@ -140,6 +140,9 @@ func TestRepairContextRejectsUnsafeStore(t *testing.T) {
 
 func openTestRepairStore(t *testing.T) (*RepairStore, string) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("reusable repair requires native ACL verification on Windows")
+	}
 	home := t.TempDir()
 	store, err := OpenRepairStore(home)
 	if err != nil {
