@@ -142,6 +142,27 @@ chats.
   visible description that explains the order that the option applies.
 - **AC-UI-THREADS-SAVED-VIEWS-003.13:** A new Threads view shall start with a
   limit of five chats. The user can select another valid limit or no limit.
+- **AC-UI-THREADS-SAVED-VIEWS-003.14:** A view with the `selected` task scope
+  shall support a Selection order sort. Ascending order shall follow the
+  order in which the user added each task in the task picker. Descending
+  order shall reverse it.
+- **AC-UI-THREADS-SAVED-VIEWS-003.15:** A view that uses Selection order
+  shall show the same column order after a page reload, a backend restart, or
+  live task changes. Task attention, activity, and state shall not change it.
+  A selected task that becomes eligible while the page is open shall follow
+  the arrival rule in `AC-UI-THREADS-SAVED-VIEWS-003.8` and take its selected
+  position after a reload or Reapply sort.
+- **AC-UI-THREADS-SAVED-VIEWS-003.16:** Clearing a task and selecting it again
+  shall move it to the end of the selection order. Select all shall append
+  newly selected visible tasks in their displayed picker order.
+- **AC-UI-THREADS-SAVED-VIEWS-003.17:** The Selection order option shall appear
+  only when the task scope is `selected`. Changing the scope to `all` while
+  Selection order is active shall change the sort to ascending attention in
+  the same draft edit. A stored Selection order sort with the `all` scope
+  shall order tasks as ascending attention.
+- **AC-UI-THREADS-SAVED-VIEWS-003.18:** While Selection order is active, each
+  selected row in the task picker shall show its one-based position in the
+  selection order.
 
 ### REQ-UI-THREADS-SAVED-VIEWS-004: Responsive editor and recovery
 
@@ -232,3 +253,6 @@ The layout and disclosure interactions are owned by
 - Sharing a Threads view with another user or adding role-based view ownership.
 - Adding a server-side task-query endpoint for this feature.
 - Changing viewport-bounded session-list and transcript subscription limits.
+- Drag-and-drop reordering of selected tasks or deck columns.
+- Persisting the live on-screen column order of a view whose sort is not
+  Selection order.

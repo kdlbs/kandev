@@ -292,6 +292,7 @@ export function firstVisibleSection(flags: {
 
 export type MergedCommit = {
   commit_sha: string;
+  parent_sha?: string;
   commit_message: string;
   insertions: number;
   deletions: number;
@@ -362,6 +363,7 @@ function appendPROnlyCommits(
 
 type LocalCommitForMerge = {
   commit_sha: string;
+  parent_sha?: string;
   commit_message: string;
   insertions: number;
   deletions: number;
@@ -531,6 +533,7 @@ export function mergeCommits(
 
 function mapLocalCheckoutCommit(commit: {
   commit_sha: string;
+  parent_sha?: string;
   commit_message: string;
   insertions: number;
   deletions: number;
@@ -586,6 +589,7 @@ function reverseCommitsByRepository(commits: PRCommitForMerge[]): PRCommitForMer
 export function separateCommitHistories(
   localCommits: {
     commit_sha: string;
+    parent_sha?: string;
     commit_message: string;
     insertions: number;
     deletions: number;

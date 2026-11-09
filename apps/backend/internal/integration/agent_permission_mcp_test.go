@@ -64,7 +64,7 @@ func TestAuthenticatedMCPAgentPermissionListResolveAndReplay(t *testing.T) {
 	ts.AgentManager.SetPendingPermissions(sessionID, []streams.PendingAgentPermission{permission})
 	messageAdapter := &testMessageCreatorAdapter{svc: ts.TaskSvc}
 	_, err := messageAdapter.CreatePermissionRequestMessage(ownerCtx, taskID, sessionID, permission.RequestID, permission.PendingID,
-		permission.ToolCallID, permission.Title, "", []map[string]interface{}{{"option_id": "allow-once"}}, "command", map[string]interface{}{"command": actionDetailsSentinel}, nil)
+		permission.ToolCallID, permission.Title, "", []map[string]interface{}{{"option_id": "allow-once"}}, "command", map[string]interface{}{"command": actionDetailsSentinel}, models.PermissionRequestMessageOptions{})
 	require.NoError(t, err)
 
 	foreign := dispatchPermissionMCP(t, ts, otherCtx, ws.ActionMCPListPendingAgentPermissions, map[string]any{"task_id": taskID, "session_id": sessionID})
@@ -152,7 +152,10 @@ func TestAutoApprovedPermissionDecisionPersistsInSessionReplay(t *testing.T) {
 		[]map[string]interface{}{{"option_id": want.OptionID, "kind": want.OptionKind}},
 		"command",
 		map[string]interface{}{"command": "git status"},
-		&want,
+		models.PermissionRequestMessageOptions{
+			Decision:     &want,
+			Presentation: models.PermissionPresentationAutomatic,
+		},
 	)
 	require.NoError(t, err)
 
@@ -166,6 +169,51 @@ func TestAutoApprovedPermissionDecisionPersistsInSessionReplay(t *testing.T) {
 	var got models.PermissionDecision
 	require.NoError(t, json.Unmarshal(encoded, &got))
 	assert.Equal(t, want, got)
+}
+
+func TestAutomaticPermissionPresentationSurvivesReplay(t *testing.T) {
+	ts := NewOrchestratorTestServer(t)
+	t.Cleanup(func() { ts.Close() })
+	ownerCtx := authn.WithIdentity(context.Background(), authn.Identity{
+		UserID: "owner-user", TokenID: "owner-token", Role: authn.RoleMember,
+	})
+	taskID, sessionID := createOwnedPermissionSession(t, ts, ownerCtx)
+	messageAdapter := &testMessageCreatorAdapter{svc: ts.TaskSvc}
+	create := func() {
+		_, err := messageAdapter.CreatePermissionRequestMessage(
+			ownerCtx, taskID, sessionID, "presentation-request", "presentation-pending",
+			"tool-call-presentation", "Run git status", "",
+			[]map[string]interface{}{{"option_id": "allow-once", "kind": "allow_once"}},
+			"command", map[string]interface{}{"command": "git status"},
+			models.PermissionRequestMessageOptions{Presentation: models.PermissionPresentationAutomatic},
+		)
+		require.NoError(t, err)
+	}
+	create()
+
+	messages, err := ts.TaskSvc.ListMessages(ownerCtx, sessionID)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, string(models.PermissionPresentationAutomatic), messages[0].Metadata[models.PermissionPresentationMetadataKey])
+
+	updated, matched, err := messageAdapter.UpdatePermissionPresentation(ownerCtx, models.PermissionPresentationUpdate{
+		TaskID: taskID, SessionID: sessionID, RequestID: "presentation-request", PendingID: "presentation-pending",
+		Presentation:        models.PermissionPresentationInteractive,
+		RequirePresentation: models.PermissionPresentationAutomatic,
+		RequireUnclaimed:    true,
+	})
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.NotNil(t, updated)
+
+	// A repeated candidate delivery resolves to the existing row and must not
+	// restore the stale automatic presentation.
+	create()
+	messages, err = ts.TaskSvc.ListMessages(ownerCtx, sessionID)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, string(models.PermissionPresentationInteractive), messages[0].Metadata[models.PermissionPresentationMetadataKey])
+	assert.NotContains(t, messages[0].Metadata, "status")
 }
 
 func createOwnedPermissionSession(t *testing.T, ts *OrchestratorTestServer, ctx context.Context) (string, string) {

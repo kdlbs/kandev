@@ -692,6 +692,45 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 	return rows.Scan(&tm.ID, &tm.CreatedAt, &tm.UpdatedAt)
 }
 
+// UpdateTaskMRForSync refreshes an existing association without recreating it
+// if it was unlinked after the workspace list was read. The discussion count
+// stays owned by the automation evaluator, as it does in UpsertTaskMR.
+func (s *Store) UpdateTaskMRForSync(ctx context.Context, tm *TaskMR) (*TaskMR, error) {
+	tm.UpdatedAt = time.Now().UTC()
+	rows, err := s.db.NamedQueryContext(ctx, `
+		UPDATE gitlab_task_mrs SET
+			host = :host, mr_url = :mr_url, mr_title = :mr_title,
+			head_branch = :head_branch, head_sha = :head_sha,
+			base_branch = :base_branch, base_sha = :base_sha,
+			author_username = :author_username, state = :state,
+			approval_state = :approval_state, pipeline_state = :pipeline_state,
+			merge_status = :merge_status, draft = CASE WHEN :draft THEN 1 ELSE 0 END,
+			approval_count = :approval_count, required_approvals = :required_approvals,
+			pipeline_jobs_total = :pipeline_jobs_total, pipeline_jobs_pass = :pipeline_jobs_pass,
+			detailed_merge_status = :detailed_merge_status,
+			reviewer_count = :reviewer_count, unapproved_reviewers = :unapproved_reviewers,
+			merged_at = :merged_at, closed_at = :closed_at,
+			last_synced_at = :last_synced_at, updated_at = :updated_at
+		WHERE id = :id AND task_id = :task_id AND repository_id = :repository_id
+			AND project_path = :project_path AND mr_iid = :mr_iid
+		RETURNING `+taskMRSelectCols, tm)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	var persisted TaskMR
+	if err := rows.StructScan(&persisted); err != nil {
+		return nil, err
+	}
+	return &persisted, nil
+}
+
 // UpdateTaskMRUnresolvedDiscussions sets the unresolved-discussion count for
 // a single task-MR row. Deliberately narrow (single column, by primary key)
 // rather than folded into UpsertTaskMR's ON CONFLICT clause — see the

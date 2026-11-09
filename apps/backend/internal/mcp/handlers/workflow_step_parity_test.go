@@ -78,6 +78,12 @@ func setupParitySurfaces(t *testing.T) (*Handlers, *gin.Engine, *eventbus.Memory
 
 	repo, err := repository.NewWithDB(db, db, nil)
 	require.NoError(t, err)
+	if _, err = db.Exec(`
+		INSERT OR IGNORE INTO workflows (id, workspace_id, name, created_at, updated_at)
+		VALUES ('wf-parity','ws-parity','Parity',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed parity workflow: %v", err)
+	}
 
 	log := testLogger(t)
 	svc := workflowsvc.NewService(repo, log)

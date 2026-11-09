@@ -25,7 +25,11 @@ test.describe("Mobile cancel progress across reloads", () => {
 
     const session = await seedIdleSession(testPage, apiClient, seedData, "Mobile cancel progress");
     // /e2e:cancel-hold keeps an acknowledged backend cancellation pending through reload hydration.
-    await session.sendMessageViaButton("/e2e:cancel-hold");
+    const acceptanceMarker = "Mobile cancel prompt accepted";
+    await session.sendMessageViaButton(`/e2e:cancel-hold ${acceptanceMarker}`);
+    await expect(session.activeChat().getByText(acceptanceMarker, { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
 
     const cancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(cancel).toBeVisible({ timeout: 15_000 });

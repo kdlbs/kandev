@@ -143,4 +143,29 @@ describe("MRMergeButton", () => {
     expect((button as HTMLButtonElement).disabled).toBe(true);
     resolveMerge?.();
   });
+
+  it("shows a disabled Merge with visible hint text for an open draft, even with a failed pipeline", () => {
+    renderButton(makeMR({ draft: true, pipeline_state: "failed" }));
+    const button = screen.getByTestId(MERGE_BUTTON_TESTID) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    const hint = screen.getByTestId("mr-merge-draft-hint");
+    expect(hint.textContent).toContain("draft");
+    expect(button.getAttribute("aria-describedby")).toBe(hint.id);
+    fireEvent.click(button);
+    expect(mergeMR).not.toHaveBeenCalled();
+  });
+
+  it("treats draft_status as a draft and lets it beat mergeable", () => {
+    renderButton(readyMR({ detailed_merge_status: "draft_status" }));
+    expect((screen.getByTestId(MERGE_BUTTON_TESTID) as HTMLButtonElement).disabled).toBe(true);
+    cleanup();
+    renderButton(readyMR({ draft: true }));
+    expect((screen.getByTestId(MERGE_BUTTON_TESTID) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps hiding the button for a closed draft", () => {
+    renderButton(makeMR({ draft: true, state: "closed" }));
+    expect(screen.queryByTestId(MERGE_BUTTON_TESTID)).toBeNull();
+    expect(screen.queryByTestId("mr-merge-draft-hint")).toBeNull();
+  });
 });

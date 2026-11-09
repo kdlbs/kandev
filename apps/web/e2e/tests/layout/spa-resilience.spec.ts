@@ -152,7 +152,13 @@ test.describe("SPA route resilience", () => {
       await route.abort("failed");
     });
 
+    let failedChunks = 0;
+    const failedAgain = testPage.waitForEvent("requestfailed", {
+      predicate: (request) =>
+        SETTINGS_CHUNK_PATH.test(new URL(request.url()).pathname) && ++failedChunks === 2,
+    });
     await testPage.goto(SETTINGS_URL);
+    await failedAgain;
     const recovery = testPage.getByRole("alert").filter({ hasText: "This page couldn’t load." });
     await expect(recovery).toBeVisible();
     await expect(recovery.getByRole("button", { name: "Reload" })).toBeVisible();

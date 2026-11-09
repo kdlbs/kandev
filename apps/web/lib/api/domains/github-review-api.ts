@@ -23,10 +23,14 @@ export async function requestPRReviewers(
   repo: string,
   number: number,
   reviewers: string[],
-  workspaceId: string,
+  context: string | { workspaceId: string; expectedHost?: string },
 ) {
+  const { workspaceId, expectedHost } =
+    typeof context === "string" ? { workspaceId: context } : context;
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  if (expectedHost) query.set("expected_host", expectedHost);
   return fetchJson<{ requested: boolean }>(
-    `/api/v1/github/prs/${owner}/${repo}/${number}/requested-reviewers?workspace_id=${encodeURIComponent(workspaceId)}`,
+    `/api/v1/github/prs/${owner}/${repo}/${number}/requested-reviewers?${query}`,
     {
       init: {
         method: "POST",

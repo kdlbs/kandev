@@ -1,7 +1,12 @@
+import { StateProvider } from "@/components/state-provider";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render as renderBase, screen } from "@testing-library/react";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
+
+function render(ui: ReactNode) {
+  return renderBase(ui, { wrapper: StateProvider });
+}
 
 const useQueueMock = vi.fn();
 

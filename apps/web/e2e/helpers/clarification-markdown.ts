@@ -48,21 +48,22 @@ export async function seedMarkdownHistory(apiClient: ApiClient, seedData: SeedDa
 export async function expectClarificationReferencePopup(
   page: Page,
   activate: () => Promise<unknown>,
+  url = CLARIFICATION_REFERENCE_URL,
 ) {
   const context = page.context();
   const fulfill = (route: Route) =>
     route.fulfill({ contentType: "text/html", body: "<title>Storage guide</title>" });
-  await context.route(CLARIFICATION_REFERENCE_URL, fulfill);
+  await context.route(url, fulfill);
   try {
     const [popup] = await Promise.all([page.waitForEvent("popup"), activate()]);
     try {
-      await expect(popup).toHaveURL(CLARIFICATION_REFERENCE_URL);
+      await expect(popup).toHaveURL(url);
       await expect(popup).toHaveTitle("Storage guide");
     } finally {
       await popup.close();
     }
   } finally {
-    await context.unroute(CLARIFICATION_REFERENCE_URL, fulfill);
+    await context.unroute(url, fulfill);
   }
 }
 

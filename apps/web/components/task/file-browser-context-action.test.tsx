@@ -5,6 +5,10 @@ import type * as FileContextMenu from "./file-context-menu";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+}));
+
 vi.mock("./file-context-menu", async (importOriginal) => {
   const actual = await importOriginal<typeof FileContextMenu>();
   return {

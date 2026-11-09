@@ -117,6 +117,7 @@ func (r *sqliteRepository) initSchema() error {
 		cursor_plugins_mcp_enabled INTEGER NOT NULL DEFAULT 1,
 		mcp_selection_mode TEXT NOT NULL DEFAULT 'inherit',
 		mcp_selected_servers TEXT NOT NULL DEFAULT '[]',
+		copilot_selected_plugins TEXT NOT NULL DEFAULT '[]',
 		sort_order INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 	);
@@ -135,6 +136,15 @@ func (r *sqliteRepository) initSchema() error {
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS workspace_builtin_mcp_policies (
+		workspace_id TEXT PRIMARY KEY,
+		schema_version INTEGER NOT NULL,
+		revision BIGINT NOT NULL CHECK (revision > 0),
+		packages_json TEXT NOT NULL,
+		updated_by TEXT NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS mcp_server_definitions (
@@ -208,6 +218,14 @@ func (r *sqliteRepository) initSchema() error {
 		FOREIGN KEY (mcp_server_id) REFERENCES mcp_server_definitions(id) ON DELETE CASCADE
 	);
 
+	CREATE TABLE IF NOT EXISTS task_session_mcp_exclusions (
+		workspace_id TEXT NOT NULL,
+		task_session_id TEXT NOT NULL,
+		mcp_server_id TEXT NOT NULL REFERENCES mcp_server_definitions(id) ON DELETE CASCADE,
+		PRIMARY KEY (workspace_id, task_session_id, mcp_server_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_session_mcp_exclusions_definition
+		ON task_session_mcp_exclusions(mcp_server_id);
 	CREATE TABLE IF NOT EXISTS mcp_task_session_apply_state (
 		task_session_id TEXT PRIMARY KEY,
 		desired_revision INTEGER NOT NULL DEFAULT 0,
@@ -333,6 +351,7 @@ func (r *sqliteRepository) initSchema() error {
 	_ = r.migrate.Apply("agent_profiles.cursor_plugins_mcp_enabled", `ALTER TABLE agent_profiles ADD COLUMN cursor_plugins_mcp_enabled INTEGER NOT NULL DEFAULT 1`)
 	_ = r.migrate.Apply("agent_profiles.mcp_selection_mode", `ALTER TABLE agent_profiles ADD COLUMN mcp_selection_mode TEXT NOT NULL DEFAULT 'inherit'`)
 	_ = r.migrate.Apply("agent_profiles.mcp_selected_servers", `ALTER TABLE agent_profiles ADD COLUMN mcp_selected_servers TEXT NOT NULL DEFAULT '[]'`)
+	_ = r.migrate.Apply("agent_profiles.copilot_selected_plugins", `ALTER TABLE agent_profiles ADD COLUMN copilot_selected_plugins TEXT NOT NULL DEFAULT '[]'`)
 	// Office identifiers bind the execution profile that owns their launches.
 	// Added after the table-recreation block for the same reason as
 	// command_prefix / provider_kind.
@@ -474,6 +493,7 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	srcHasCursorPluginsMCPEnabled := columnExists(tx, "agent_profiles", "cursor_plugins_mcp_enabled")
 	srcHasMCPSelectionMode := columnExists(tx, "agent_profiles", "mcp_selection_mode")
 	srcHasMCPSelectedServers := columnExists(tx, "agent_profiles", "mcp_selected_servers")
+	srcHasCopilotSelectedPlugins := columnExists(tx, "agent_profiles", "copilot_selected_plugins")
 	srcCols := `id, agent_id, name, agent_display_name, model, mode, migrated_from,
 		auto_approve, dangerously_skip_permissions, allow_indexing,
 		cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at`
@@ -522,6 +542,10 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		srcCols += ", mcp_selected_servers"
 		dstCols += ", mcp_selected_servers"
 	}
+	if srcHasCopilotSelectedPlugins {
+		srcCols += ", copilot_selected_plugins"
+		dstCols += ", copilot_selected_plugins"
+	}
 	if srcHasSortOrder {
 		srcCols += ", sort_order"
 		dstCols += ", sort_order"
@@ -555,6 +579,7 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		cursor_plugins_mcp_enabled INTEGER NOT NULL DEFAULT 1,
 		mcp_selection_mode TEXT NOT NULL DEFAULT 'inherit',
 		mcp_selected_servers TEXT NOT NULL DEFAULT '[]',
+		copilot_selected_plugins TEXT NOT NULL DEFAULT '[]',
 		sort_order INTEGER NOT NULL DEFAULT 0,
 
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
@@ -1048,7 +1073,7 @@ func (r *sqliteRepository) UpdateAgentProfileWithDynamicEnabledIntent(
 	if profile == nil || dynamic == nil || profile.ID == "" || dynamic.ProfileID != profile.ID {
 		return fmt.Errorf("profile and dynamic profile IDs are required")
 	}
-	return r.updateAgentProfileWithMembershipLocks(ctx, profile, enabled, func(tx *sqlx.Tx) error {
+	return r.updateAgentProfileWithMembershipLocks(ctx, profile, enabled, &profile.CopilotSelectedPlugins, func(tx *sqlx.Tx) error {
 		return r.updateDynamicAgentProfileTx(ctx, tx, dynamic, expectedVersion, routes)
 	})
 }
@@ -1202,6 +1227,10 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 	if err != nil {
 		return err
 	}
+	copilotSelectedPluginsJSON, err := copilotSelectedPluginsToJSON(profile.CopilotSelectedPlugins)
+	if err != nil {
+		return err
+	}
 	enrich, err := enrichmentValues(profile)
 	if err != nil {
 		return err
@@ -1221,6 +1250,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			provider_kind, provider_base_url, provider_api_key_secret_id, require_exact_model,
 			cursor_mcp_auth_enabled, cursor_plugins_mcp_enabled,
 			mcp_selection_mode, mcp_selected_servers,
+			copilot_selected_plugins,
 			execution_agent_profile_id
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
@@ -1236,6 +1266,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			?, ?, ?, ?,
 			?, ?,
 			?, ?,
+			?,
 			?
 		)
 	`),
@@ -1259,6 +1290,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 		dialect.BoolToInt(profile.CursorPluginsMCPEnabled),
 		normalizeMCPSelectionMode(profile.MCPSelectionMode),
 		mcpSelectedServersJSON,
+		copilotSelectedPluginsJSON,
 		profile.ExecutionAgentProfileID,
 	)
 	return err
@@ -1476,6 +1508,17 @@ func mcpSelectedServersToJSON(servers []string) (string, error) {
 	return string(data), nil
 }
 
+func copilotSelectedPluginsToJSON(plugins []string) (string, error) {
+	if plugins == nil {
+		plugins = []string{}
+	}
+	data, err := json.Marshal(plugins)
+	if err != nil {
+		return "", fmt.Errorf("marshal copilot_selected_plugins: %w", err)
+	}
+	return string(data), nil
+}
+
 func normalizeMCPSelectionMode(mode string) string {
 	if mode == "" {
 		return "inherit"
@@ -1490,7 +1533,19 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 // UpdateAgentProfileWithEnabledIntent returns the enabled value from this
 // update's statement, so a later toggle cannot alter its response snapshot.
 func (r *sqliteRepository) UpdateAgentProfileWithEnabledIntent(ctx context.Context, profile *models.AgentProfile, enabled *bool) error {
-	return r.updateAgentProfileWithMembershipLocks(ctx, profile, enabled, nil)
+	return r.updateAgentProfileWithMembershipLocks(ctx, profile, enabled, &profile.CopilotSelectedPlugins, nil)
+}
+
+// UpdateAgentProfileWithSelectionIntent preserves the committed Copilot plugin
+// selection when selection is nil and returns the written value in
+// profile.CopilotSelectedPlugins.
+func (r *sqliteRepository) UpdateAgentProfileWithSelectionIntent(
+	ctx context.Context,
+	profile *models.AgentProfile,
+	enabled *bool,
+	selection *[]string,
+) error {
+	return r.updateAgentProfileWithMembershipLocks(ctx, profile, enabled, selection, nil)
 }
 
 // UpdateAgentProfileModelIfEmpty adopts a probed model without replacing any
@@ -1521,7 +1576,13 @@ type profileUpdater interface {
 	Rebind(query string) string
 }
 
-func (r *sqliteRepository) updateAgentProfile(ctx context.Context, updater profileUpdater, profile *models.AgentProfile, enabled *bool) (bool, error) {
+func (r *sqliteRepository) updateAgentProfile(
+	ctx context.Context,
+	updater profileUpdater,
+	profile *models.AgentProfile,
+	enabled *bool,
+	selection *[]string,
+) (bool, error) {
 	profile.UpdatedAt = time.Now().UTC()
 	cliFlagsJSON, err := cliFlagsToJSON(profile.CLIFlags)
 	if err != nil {
@@ -1535,12 +1596,65 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, updater profi
 	if err != nil {
 		return false, err
 	}
+	selectionJSON, selectionProvided, err := selectionIntentJSON(selection)
+	if err != nil {
+		return false, err
+	}
 	enrich, err := enrichmentValues(profile)
 	if err != nil {
 		return false, err
 	}
 	enabledValue := dialect.BoolToInt(enabled != nil && *enabled)
-	row := updater.QueryRowxContext(ctx, updater.Rebind(`
+	row := updater.QueryRowxContext(ctx, updater.Rebind(updateAgentProfileQuery),
+		profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
+		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
+		dialect.BoolToInt(profile.AutoApprove),
+		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing),
+		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(enabled != nil), enabledValue, dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.UpdatedAt,
+		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
+		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
+		enrich.status, enrich.status, enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
+		enrich.maxConcurrentSessions, profile.CooldownSec, dialect.BoolToInt(profile.SkipIdleRuns),
+		profile.ConsecutiveFailures, enrich.failureThreshold,
+		enrich.executorPreference,
+		profile.BudgetMonthlyCents, enrich.settings, enrich.permissions,
+		profile.CommandPrefix,
+		profile.FallbackModel,
+		dialect.BoolToInt(profile.AutoFallback),
+		profile.ProviderKind, profile.ProviderBaseURL, profile.ProviderAPIKeySecretID,
+		dialect.BoolToInt(profile.RequireExactModel),
+		dialect.BoolToInt(profile.CursorMCPAuthEnabled),
+		dialect.BoolToInt(profile.CursorPluginsMCPEnabled),
+		normalizeMCPSelectionMode(profile.MCPSelectionMode),
+		mcpSelectedServersJSON,
+		dialect.BoolToInt(selectionProvided), selectionJSON,
+		profile.ExecutionAgentProfileID,
+		profile.ID)
+	var committedEnabled bool
+	var committedSelectionJSON string
+	if err := row.Scan(&committedEnabled, &committedSelectionJSON); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("agent profile not found: %s", profile.ID)
+		}
+		return false, err
+	}
+	if err := applyCommittedPluginSelection(profile, committedSelectionJSON); err != nil {
+		return false, err
+	}
+	return committedEnabled, nil
+}
+
+func applyCommittedPluginSelection(profile *models.AgentProfile, encoded string) error {
+	if err := json.Unmarshal([]byte(encoded), &profile.CopilotSelectedPlugins); err != nil {
+		return fmt.Errorf("failed to parse committed copilot_selected_plugins for profile %s: %w", profile.ID, err)
+	}
+	if profile.CopilotSelectedPlugins == nil {
+		profile.CopilotSelectedPlugins = []string{}
+	}
+	return nil
+}
+
+const updateAgentProfileQuery = `
 		UPDATE agent_profiles
 		SET agent_id = ?, name = ?, agent_display_name = ?, model = ?, mode = ?, migrated_from = ?,
 			auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?,
@@ -1568,40 +1682,23 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, updater profi
 			provider_kind = ?, provider_base_url = ?, provider_api_key_secret_id = ?, require_exact_model = ?,
 			cursor_mcp_auth_enabled = ?, cursor_plugins_mcp_enabled = ?,
 			mcp_selection_mode = ?, mcp_selected_servers = ?,
+			copilot_selected_plugins = CASE WHEN ? = 1 THEN ? ELSE copilot_selected_plugins END,
 			execution_agent_profile_id = ?
 		WHERE id = ? AND deleted_at IS NULL
-		RETURNING enabled
-	`), profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
-		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
-		dialect.BoolToInt(profile.AutoApprove),
-		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing),
-		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(enabled != nil), enabledValue, dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.UpdatedAt,
-		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
-		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
-		enrich.status, enrich.status, enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
-		enrich.maxConcurrentSessions, profile.CooldownSec, dialect.BoolToInt(profile.SkipIdleRuns),
-		profile.ConsecutiveFailures, enrich.failureThreshold,
-		enrich.executorPreference,
-		profile.BudgetMonthlyCents, enrich.settings, enrich.permissions,
-		profile.CommandPrefix,
-		profile.FallbackModel,
-		dialect.BoolToInt(profile.AutoFallback),
-		profile.ProviderKind, profile.ProviderBaseURL, profile.ProviderAPIKeySecretID,
-		dialect.BoolToInt(profile.RequireExactModel),
-		dialect.BoolToInt(profile.CursorMCPAuthEnabled),
-		dialect.BoolToInt(profile.CursorPluginsMCPEnabled),
-		normalizeMCPSelectionMode(profile.MCPSelectionMode),
-		mcpSelectedServersJSON,
-		profile.ExecutionAgentProfileID,
-		profile.ID)
-	var committedEnabled bool
-	if err := row.Scan(&committedEnabled); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, fmt.Errorf("agent profile not found: %s", profile.ID)
-		}
-		return false, err
+		RETURNING enabled, copilot_selected_plugins
+	`
+
+// selectionIntentJSON distinguishes an omitted selection from an explicit
+// empty list. The SQL uses the boolean to preserve the committed column.
+func selectionIntentJSON(selection *[]string) (string, bool, error) {
+	if selection == nil {
+		return "[]", false, nil
 	}
-	return committedEnabled, nil
+	encoded, err := copilotSelectedPluginsToJSON(*selection)
+	if err != nil {
+		return "", false, err
+	}
+	return encoded, true, nil
 }
 
 // UpdateAgentProfileEnabled changes only the selection flag. Keeping this
@@ -1713,6 +1810,7 @@ const agentProfileSelectColumns = `
 		COALESCE(cursor_plugins_mcp_enabled, 1),
 		COALESCE(mcp_selection_mode, 'inherit'),
 		COALESCE(mcp_selected_servers, '[]'),
+		COALESCE(copilot_selected_plugins, '[]'),
 		COALESCE(execution_agent_profile_id, '')
 	FROM agent_profiles`
 
@@ -1898,6 +1996,7 @@ func scanAgentProfile(scanner interface {
 	var cursorMCPAuthEnabled int
 	var cursorPluginsMCPEnabled int
 	var mcpSelectedServersJSON string
+	var copilotSelectedPluginsJSON string
 	if err := scanner.Scan(
 		&profile.ID,
 		&profile.AgentID,
@@ -1948,6 +2047,7 @@ func scanAgentProfile(scanner interface {
 		&cursorPluginsMCPEnabled,
 		&profile.MCPSelectionMode,
 		&mcpSelectedServersJSON,
+		&copilotSelectedPluginsJSON,
 		&profile.ExecutionAgentProfileID,
 	); err != nil {
 		return nil, err
@@ -1975,6 +2075,12 @@ func scanAgentProfile(scanner interface {
 	}
 	if profile.MCPSelectedServers == nil {
 		profile.MCPSelectedServers = []string{}
+	}
+	if err := json.Unmarshal([]byte(copilotSelectedPluginsJSON), &profile.CopilotSelectedPlugins); err != nil {
+		return nil, fmt.Errorf("failed to parse copilot_selected_plugins for profile %s: %w", profile.ID, err)
+	}
+	if profile.CopilotSelectedPlugins == nil {
+		profile.CopilotSelectedPlugins = []string{}
 	}
 	profile.Role = models.AgentRole(role)
 	profile.Status = models.AgentStatus(status)

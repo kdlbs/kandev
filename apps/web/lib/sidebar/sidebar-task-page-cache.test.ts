@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api/client";
 import { createAppStore } from "@/lib/state/store";
 import { toKanbanTask } from "@/lib/kanban/map-task";
 import { querySidebarTasks } from "@/lib/api/domains/kanban-api";
@@ -133,7 +134,7 @@ it("shares pending reads until the final consumer releases, and ignores late abo
   b.release();
   expect(signal?.aborted).toBe(true);
   resolve(page());
-  await b.promise;
+  await b.promise.catch(() => undefined);
   expect(cache.get("a")).toBeNull();
 });
 
@@ -325,7 +326,7 @@ it("keeps lookups read-only and treats committed workspace changes as hard barri
   store.setState({ workspaceContextGeneration: 1 });
   expect(cache.get("a")).toBeNull();
   resolve(page("b"));
-  await request.promise;
+  await request.promise.catch(() => undefined);
   request.release();
   expect(cache.get("b")).toBeNull();
 });
@@ -401,4 +402,125 @@ it("journals admitted sidebar stages without granting authority to cache reuse o
   expect(store.getState().taskOverview.reads[laterMove].changes).toEqual({});
   store.getState().finishTaskOverviewRead(laterMove);
   expect(store.getState().taskOverview.reads).toEqual({});
+});
+
+describe("sidebar page recovery", () => {
+  const busy = () => new ApiError("busy", 503, { code: "persistence_unavailable" });
+
+  it("shares one bounded cycle and latches exhaustion for background triggers", async () => {
+    const { cache } = setup();
+    vi.mocked(querySidebarTasks).mockRejectedValue(busy());
+    const first = cache.request("ws", query, "view");
+    const second = cache.request("ws", query, "view");
+    const firstError = first.promise.catch((error: unknown) => error);
+    const secondError = second.promise.catch((error: unknown) => error);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(firstError).resolves.toMatchObject({ status: 503 });
+    await expect(secondError).resolves.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(5);
+
+    const latched = cache.request("ws", query, "view");
+    const latchedError = latched.promise.catch((error: unknown) => error);
+    await expect(latchedError).resolves.toMatchObject({ status: 503 });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(5);
+
+    const manual = cache.request("ws", query, "view", { manualRetry: true });
+    const manualError = manual.promise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(manualError).resolves.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(10);
+    first.release();
+    second.release();
+    latched.release();
+    manual.release();
+  });
+
+  it("starts one new cycle per foreground episode after exhaustion", async () => {
+    const { cache } = setup();
+    vi.mocked(querySidebarTasks).mockRejectedValue(busy());
+    const initial = cache.request("ws", query, "view");
+    const initialError = initial.promise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(initialError).resolves.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(5);
+
+    const episode = {};
+    const foreground = cache.request("ws", query, "view", { foregroundRecoveryEpisode: episode });
+    const foregroundError = foreground.promise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+    const repeated = cache.request("ws", query, "view", {
+      foregroundRecoveryEpisode: episode,
+    });
+    const repeatedError = repeated.promise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(foregroundError).resolves.toMatchObject({ status: 503 });
+    await expect(repeatedError).resolves.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(10);
+    initial.release();
+    foreground.release();
+    repeated.release();
+  });
+
+  it("keeps the terminal record until the final consumer releases", async () => {
+    const { cache } = setup();
+    vi.mocked(querySidebarTasks).mockRejectedValue(busy());
+    const first = cache.request("ws", query, "view");
+    const firstError = first.promise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(firstError).resolves.toMatchObject({ status: 503 });
+
+    const latched = cache.request("ws", query, "view");
+    const latchedError = latched.promise.catch((error: unknown) => error);
+    await expect(latchedError).resolves.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(5);
+
+    first.release();
+    latched.release();
+    vi.mocked(querySidebarTasks).mockResolvedValueOnce(page());
+    const fresh = cache.request("ws", query, "view");
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(fresh.promise).resolves.toMatchObject({ page: 1 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+    fresh.release();
+  });
+});
+
+// @covers AC-PLATFORM-INTERACTIVE-READS-007.3, AC-PLATFORM-INTERACTIVE-READS-007.4
+it("does not re-admit a foreground episode claimed by the active cycle", async () => {
+  const { cache } = setup();
+  vi.mocked(querySidebarTasks).mockRejectedValue(
+    new ApiError("busy", 503, { code: "persistence_unavailable" }),
+  );
+  const episode = {};
+  const lease = cache.request("ws", query, "view");
+  lease.claimForegroundEpisode(episode);
+  const firstError = lease.promise.catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(30_000);
+  await expect(firstError).resolves.toMatchObject({ status: 503 });
+  expect(querySidebarTasks).toHaveBeenCalledTimes(5);
+
+  const replay = cache.request("ws", query, "view", { foregroundRecoveryEpisode: episode });
+  const replayError = replay.promise.catch((error: unknown) => error);
+  await expect(replayError).resolves.toMatchObject({ status: 503 });
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(querySidebarTasks).toHaveBeenCalledTimes(5);
+
+  const later = cache.request("ws", query, "view", { foregroundRecoveryEpisode: {} });
+  const laterError = later.promise.catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+  await vi.advanceTimersByTimeAsync(30_000);
+  await expect(laterError).resolves.toMatchObject({ status: 503 });
+  lease.release();
+  replay.release();
+  later.release();
 });

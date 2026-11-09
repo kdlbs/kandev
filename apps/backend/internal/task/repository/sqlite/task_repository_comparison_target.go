@@ -153,12 +153,20 @@ func (r *Repository) UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
 	if manualOverride && !manualSelection {
 		return taskRepo, false, nil
 	}
-	if taskRepo.BaseBranch == baseBranch && !present && (!manualSelection || manualOverride) {
+	currentSelection, selectionPresent, selectionErr := models.LoadBaseBranchSelection(taskRepo.Metadata)
+	desiredSelection := baseBranchSelectionForUpdate(
+		currentSelection, selectionPresent, selectionErr, taskRepo.BaseBranch, baseBranch, manualSelection,
+	)
+	selectionChanged := selectionErr != nil || !selectionPresent || currentSelection != desiredSelection
+	if taskRepo.BaseBranch == baseBranch && !present && !selectionChanged && (!manualSelection || manualOverride) {
 		return taskRepo, false, nil
 	}
 	delete(taskRepo.Metadata, models.ComparisonTargetMetadataKey)
 	if manualSelection {
 		taskRepo.Metadata[models.ManualBaseBranchOverrideMetadataKey] = true
+	}
+	if err := models.PutBaseBranchSelection(taskRepo.Metadata, &desiredSelection); err != nil {
+		return nil, false, err
 	}
 	taskRepo.BaseBranch = baseBranch
 	taskRepo.UpdatedAt = r.nowUTC()
@@ -169,6 +177,38 @@ func (r *Repository) UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
 		return nil, false, err
 	}
 	return taskRepo, true, nil
+}
+
+// baseBranchSelectionForUpdate derives the selection record written by a base
+// branch update. A manual selection is always explicit, including when the
+// branch text is unchanged. A permitted system fallback rebinds an existing
+// inherited/default selection to its resolved base; every explicit, missing,
+// malformed, or mismatched record becomes strict.
+func baseBranchSelectionForUpdate(
+	current models.BaseBranchSelection,
+	present bool,
+	loadErr error,
+	previousBaseBranch, baseBranch string,
+	manualSelection bool,
+) models.BaseBranchSelection {
+	desired := models.BaseBranchSelection{
+		Version: models.BaseBranchSelectionVersion,
+		Branch:  baseBranch,
+		Source:  models.BaseBranchSelectionSourceExplicit,
+	}
+	if manualSelection || loadErr != nil || !present {
+		return desired
+	}
+	switch current.Source {
+	case models.BaseBranchSelectionSourceInherited, models.BaseBranchSelectionSourceRepositoryDefault:
+	default:
+		return desired
+	}
+	if current.Branch != "" && current.Branch != previousBaseBranch {
+		return desired
+	}
+	desired.Source = current.Source
+	return desired
 }
 
 // lockTaskThenGetTaskRepository keeps the task-scoped lock order consistent

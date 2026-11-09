@@ -36,15 +36,6 @@ func TestAuthMethodFields(t *testing.T) {
 			wantID: "term-id", wantName: "Terminal", wantMetaKey: "terminal",
 		},
 		{
-			name: "EnvVar variant",
-			in: acp.AuthMethod{EnvVar: &acp.AuthMethodEnvVarInline{
-				Id:   "env-id",
-				Name: "EnvVar",
-				Meta: map[string]any{"k": "envvar"},
-			}},
-			wantID: "env-id", wantName: "EnvVar", wantMetaKey: "envvar",
-		},
-		{
 			name: "zero-value (no variant set)",
 			in:   acp.AuthMethod{},
 		},

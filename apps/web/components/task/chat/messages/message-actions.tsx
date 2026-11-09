@@ -15,7 +15,7 @@ import {
   IconGitFork,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import { formatMessageTime } from "@/lib/i18n/message-time";
+import { MessageTimestamp } from "./message-timestamp";
 import { formatPromptDuration, messageTurnDurationSeconds } from "@/lib/turn-duration";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useAppStore } from "@/components/state-provider";
@@ -254,56 +254,6 @@ function MessageDebugDialog({
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function MessageTimestamp({ createdAt }: { createdAt: string }) {
-  const { t } = useTranslation();
-  const messageTimeDisplay = useAppStore((state) => state.userSettings.messageTimeDisplay);
-  const usesTouchDrawer = useTouchDrawer();
-  const [open, setOpen] = useState(false);
-  const formatted = formatMessageTime(createdAt, messageTimeDisplay);
-  if (!formatted) return null;
-
-  const timeEl = (
-    <time
-      dateTime={createdAt}
-      title={formatted.counterpart}
-      aria-label={t("task:messageTimestampAriaLabel", {
-        label: formatted.label,
-        counterpart: formatted.counterpart,
-      })}
-      className="min-w-0 text-[10px] text-muted-foreground/60 font-mono"
-    >
-      {formatted.label}
-    </time>
-  );
-  if (!usesTouchDrawer) return timeEl;
-
-  return (
-    <Drawer open={open} onOpenChange={setOpen}>
-      <DrawerTrigger asChild>
-        <button
-          type="button"
-          data-testid="message-timestamp-trigger"
-          className="min-w-0 cursor-pointer border-0 bg-transparent p-0 text-left max-md:min-h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          aria-label={t("task:messageTimestampAriaLabel", {
-            label: formatted.label,
-            counterpart: formatted.counterpart,
-          })}
-        >
-          {timeEl}
-        </button>
-      </DrawerTrigger>
-      <DrawerContent data-testid="message-timestamp-drawer">
-        <DrawerHeader>
-          <DrawerTitle>{t("task:messageTime")}</DrawerTitle>
-          <DrawerDescription>{formatted.counterpart}</DrawerDescription>
-        </DrawerHeader>
-      </DrawerContent>
-    </Drawer>
   );
 }
 

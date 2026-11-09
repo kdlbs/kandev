@@ -1,10 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
+import { closeModelConfigSheetIfOpen } from "../../helpers/model-config-sheet";
 import { assertNoHorizontalOverflow } from "../../helpers/session-stream-overload";
 import { seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import {
   answerLongThreadQuestion,
   expectThreadQuestionSubmitted,
+  reachQuestionTarget,
   seedLongThreadQuestion,
   threadDeckGeometry,
 } from "./threads-clarification-helpers";
@@ -147,6 +149,12 @@ test("keeps required answers reachable above a short mobile viewport", async ({
     const tile = testPage.getByTestId(`thread-column-${task.id}`);
     const question = tile.getByTestId("clarification-overlay-container");
     await expect(question).toBeVisible();
+    const sizeToggle = tile.getByTestId("clarification-panel-size-toggle");
+    await expect(sizeToggle).toBeVisible();
+    const sizeBox = await sizeToggle.boundingBox();
+    if (!sizeBox) throw new Error("phone clarification sizing control is missing");
+    expect(sizeBox.height).toBeGreaterThanOrEqual(44);
+    expect(sizeBox.width).toBeGreaterThanOrEqual(44);
     const answer = question.getByTestId("clarification-option").filter({ hasText: "PostgreSQL" });
     await expect(answer).toBeVisible();
     expect((await answer.boundingBox())!.height).toBeGreaterThanOrEqual(44);
@@ -154,10 +162,157 @@ test("keeps required answers reachable above a short mobile viewport", async ({
       79,
     );
     await answer.tap();
+    await question.getByTestId("clarification-custom-submit").tap();
     await expect(question).toHaveCount(0);
     await expect(tile.getByTestId("chat-input-editor")).toBeVisible();
     await expect(testPage.getByTestId("session-chat")).toHaveCount(1);
     await assertNoHorizontalOverflow(testPage, "short phone required answer");
+  } finally {
+    await apiClient.saveUserSettings(original);
+  }
+});
+
+test("keeps clarification sizing controls touch-sized on a coarse-pointer tablet", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(180_000);
+  const original = await captureThreadSettings(apiClient);
+  try {
+    const task = await seedSecondaryClarificationTask(
+      apiClient,
+      seedData,
+      "Tablet sizing controls",
+    );
+    await seedThreadPresentation(apiClient, { layout: "grid", autoHideComposer: true });
+    await testPage.setViewportSize({ width: 900, height: 1100 });
+    await testPage.goto(`/threads?taskId=${task.id}&sessionId=${task.clarificationSessionId}`);
+    const tile = testPage.getByTestId(`thread-column-${task.id}`);
+    await expect(tile.getByTestId("clarification-overlay-container")).toBeVisible();
+    expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+
+    const sizeToggle = tile.getByTestId("clarification-panel-size-toggle");
+    await expect(sizeToggle).toHaveCount(1);
+    const box = await sizeToggle.boundingBox();
+    if (!box) throw new Error("the size toggle is missing on the coarse-pointer tablet");
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.width).toBeGreaterThanOrEqual(44);
+  } finally {
+    await apiClient.saveUserSettings(original);
+  }
+});
+
+// @covers AC-UI-THREADS-DECK-005.5, AC-UI-THREADS-DECK-005.8
+test("uses the Threads footer as the sole scroll owner when a short phone exhausts the question budget", async ({
+  testPage,
+  apiClient,
+  seedData,
+}, testInfo) => {
+  test.setTimeout(180_000);
+  const original = await captureThreadSettings(apiClient);
+  try {
+    await testPage.setViewportSize({ width: 393, height: 320 });
+    const { task } = await seedLongThreadQuestion(apiClient, seedData);
+    await seedThreadPresentation(apiClient, { layout: "grid", autoHideComposer: true });
+    await testPage.goto(`/threads?taskId=${task.id}`);
+
+    const tile = testPage.getByTestId(`thread-column-${task.id}`);
+    const question = tile.getByTestId("clarification-overlay-container");
+    const footer = tile.getByTestId("thread-footer-allocation");
+    const inner = tile.getByTestId("clarification-scroll-region");
+    await expect(question).toBeVisible();
+    await expect(question).toHaveAttribute("data-scroll-owner", "thread-footer");
+    await expect(inner).toHaveCSS("overflow-y", "visible");
+    await expect
+      .poll(() => footer.evaluate((el) => el.scrollHeight - el.clientHeight))
+      .toBeGreaterThan(0);
+    await inner.scrollIntoViewIfNeeded();
+    await answerLongThreadQuestion(testPage, tile, "touch", testInfo);
+    await expectThreadQuestionSubmitted(apiClient, task.session_id!, tile);
+  } finally {
+    await apiClient.saveUserSettings(original);
+  }
+});
+
+// @covers AC-UI-THREADS-DECK-005.5, AC-UI-THREADS-DECK-005.8
+test("drops expanded height in the footer fallback and restores it with host space", async ({
+  testPage,
+  apiClient,
+  seedData,
+}, testInfo) => {
+  test.setTimeout(180_000);
+  const original = await captureThreadSettings(apiClient);
+  try {
+    await testPage.setViewportSize({ width: 393, height: 1100 });
+    const { task } = await seedLongThreadQuestion(apiClient, seedData);
+    await seedThreadPresentation(apiClient, { layout: "grid", autoHideComposer: true });
+    await testPage.goto(`/threads?taskId=${task.id}`);
+
+    const tile = testPage.getByTestId(`thread-column-${task.id}`);
+    const question = tile.getByTestId("clarification-overlay-container");
+    const footer = tile.getByTestId("thread-footer-allocation");
+    const inner = tile.getByTestId("clarification-scroll-region");
+    await expect(question).toBeVisible();
+    await expect(question).toHaveAttribute("data-scroll-owner", "clarification-panel");
+    const hostBeforeExpand = Number(await question.getAttribute("data-host-max-height"));
+    expect(hostBeforeExpand).toBeGreaterThan(120);
+    const sizeToggle = tile.getByTestId("clarification-panel-size-toggle");
+    await expect(sizeToggle).toBeVisible();
+    await sizeToggle.tap();
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Restore");
+    await expect
+      .poll(() =>
+        question.evaluate((element) => {
+          const host = Number((element as HTMLElement).dataset.hostMaxHeight);
+          return Math.abs(element.getBoundingClientRect().height - host) <= 1;
+        }),
+      )
+      .toBe(true);
+
+    await testPage.setViewportSize({ width: 393, height: 320 });
+    await expect(question).toHaveAttribute("data-scroll-owner", "thread-footer");
+    await expect
+      .poll(() => question.evaluate((element) => (element as HTMLElement).style.height))
+      .toBe("");
+    await expect(inner).toHaveCSS("overflow-y", "visible");
+    await expect
+      .poll(() => footer.evaluate((element) => element.scrollHeight - element.clientHeight))
+      .toBeGreaterThan(0);
+    const questionOptionLabels = testPage.getByTestId("clarification-option-label");
+    const sqliteLabel = questionOptionLabels.getByText("SQLite", { exact: true });
+    const lastOption = tile.getByTestId("clarification-option").filter({ has: sqliteLabel });
+    await reachQuestionTarget(testPage, tile, lastOption, "touch");
+
+    await testPage.setViewportSize({ width: 393, height: 1100 });
+    await expect(question).toHaveAttribute("data-scroll-owner", "clarification-panel");
+    await expect
+      .poll(() =>
+        question.evaluate((element) => {
+          const host = Number((element as HTMLElement).dataset.hostMaxHeight);
+          return Math.abs(element.getBoundingClientRect().height - host) <= 1;
+        }),
+      )
+      .toBe(true);
+
+    await testPage.setViewportSize({ width: 393, height: 320 });
+    await expect(question).toHaveAttribute("data-scroll-owner", "thread-footer");
+    await expect
+      .poll(() => question.evaluate((element) => (element as HTMLElement).style.height))
+      .toBe("");
+    await answerLongThreadQuestion(testPage, tile, "touch", testInfo);
+    await expectThreadQuestionSubmitted(apiClient, task.session_id!, tile);
+    await expect(question).toHaveCount(0);
+    const composer = tile.getByTestId("chat-input-editor");
+    await expect(composer).toBeVisible();
+    await composer.scrollIntoViewIfNeeded();
+    const [composerBox, tileBox] = await Promise.all([composer.boundingBox(), tile.boundingBox()]);
+    expect(composerBox).not.toBeNull();
+    expect(tileBox).not.toBeNull();
+    expect(composerBox!.y).toBeGreaterThanOrEqual(tileBox!.y - 1);
+    expect(composerBox!.y + composerBox!.height).toBeLessThanOrEqual(
+      tileBox!.y + tileBox!.height + 1,
+    );
   } finally {
     await apiClient.saveUserSettings(original);
   }
@@ -176,10 +331,11 @@ test("keeps native model, cancellation and attachment controls usable by touch",
     await seedThreadPresentation(apiClient, { layout: "grid", autoHideComposer: true });
     await testPage.goto("/threads");
     const tile = testPage.getByTestId(`thread-column-${task.id}`);
-    const model = tile.getByRole("button", { name: "Session model settings" });
+    const model = tile.getByTestId("model-config-trigger");
     await model.tap();
     await testPage.getByRole("option", { name: /Mock Smart/ }).tap();
     await expect(model).toContainText("Mock Smart");
+    await closeModelConfigSheetIfOpen(testPage);
     const editor = tile.getByTestId("chat-input-editor");
     await editor.fill("/slow 8s");
     await tile.getByTestId("submit-message-button").tap();

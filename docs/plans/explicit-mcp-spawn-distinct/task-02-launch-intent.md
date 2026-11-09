@@ -24,7 +24,7 @@ MAIN owns spawn_session.go and ProfileExplicit comments in orchestrator/session_
 Mark every explicit MCP spawn, including empty-profile requests, with the existing routing bypass. Preserve normal defaults/errors, ordinary workflow reuse, profile validation and Office ownership guards. No global routing rewrite.
 
 The source-binding correction additionally carries server-only
-`PreserveWorkflowBinding` through the handler, launch request, start options and
+`PreserveWorkflowSourceBinding` through the handler, launch request, start options and
 ceiling persistence/replay. MAIN owns these paths and their regression tests.
 Additional spawns leave pinned source bindings intact; ordinary workflow and
 selector launches retain binding recording. No public field or DB schema change.

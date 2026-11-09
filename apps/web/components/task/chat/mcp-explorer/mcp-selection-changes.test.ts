@@ -91,3 +91,28 @@ describe("saved MCP setup changes", () => {
     expect(mcpSelectionChanges(state, []).status).toBe("known");
   });
 });
+
+it("rejects comparison from a different exclusion set", () => {
+  const state = {
+    desired_revision: 2,
+    applied_revision: 1,
+    apply_state: "pending_idle" as const,
+    comparison: {
+      version: 1 as const,
+      status: "known" as const,
+      desired_revision: 2,
+      applied_revision: 1,
+      selection_ids: [],
+      excluded_definition_ids: [],
+      changes: [],
+    },
+  };
+  expect(mcpSelectionChanges(state, [], ["docs"])).toEqual({ status: "unavailable", changes: [] });
+  expect(
+    mcpSelectionChanges(
+      { ...state, comparison: { ...state.comparison, excluded_definition_ids: ["docs"] } },
+      [],
+      ["docs"],
+    ),
+  ).toEqual({ status: "known", changes: [] });
+});

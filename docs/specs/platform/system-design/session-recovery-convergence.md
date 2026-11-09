@@ -31,6 +31,7 @@ separates historical outcome from current admission.
 | SQL dispatching, exact abandoned journal unknown | Guarded SQL unknown transition, then restore-only |
 | SQL unknown, exact journal unknown | Restore-only and retire exact history |
 | SQL unknown, legacy terminal label without any retained terminal reference | Preserve both labels; retire as historical uncertainty after native load and idle owner proof |
+| SQL completed without any terminal proof, exact abandoned journal unknown | Preserve both labels; apply the guarded unproven-completion assessment below |
 | SQL known terminal, prepared/accepted or independent peer live work | Preserve known result or refuse takeover |
 | SQL inbox covers replay expiry | Project actual inbox; no fabricated receipt |
 | Actually missing history with proven eligible dead source | Existing pinned successor and immutable gap archive |
@@ -52,13 +53,22 @@ a retained terminal wins over a late transport error. Settle with a bounded
 cancellation-independent context. Journal close or failed writes leave retained
 progress for constructor reconciliation, never authorize redispatch.
 
+## Delivery writer failure
+
+The planned [delivery failure extension](durable-delivery-failure.md) adds independent health observation
+without changing disposition precedence or native retirement authority.
+A failed writer keeps the adapter consumer available for bounded cancellation drain.
+Only a real committed terminal, or existing authenticated native recovery proof, can resolve its exact admission fence.
+Idle process state and a coarse waiting session state remain insufficient evidence.
+
 ## Native acknowledgement and SQL convergence
 
 Require native initialized, exact native ID and current session/incarnation/
 generation/stream, authenticated full inventory, and no independent live work.
 Validate receipt/projection coverage before retiring history. Retire only exact
-eligible SQL unknown records and journal unknown records; retain payload/hash,
-state and terminal absence. Re-read owner and inventory after retirement.
+eligible SQL unknown records, eligible unproven SQL completions described below,
+and their matching journal history. Retain payload/hash, state and terminal absence.
+Re-read owner and inventory after retirement.
 
 Carry authenticated stream and exact submission identities into missing-binding
 resolution. Pin session/native generation, block identity and current SQL rows
@@ -137,6 +147,115 @@ no host shutdown, production mutation or local browser testing is authorized.
 
 [Sequential work package](../../../plans/session-recovery-convergence/plan.md).
 
+## Foreground handoff and unproven SQL completion
+
+This extension implements AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.7 and
+002.8. Delivery remains in the
+[foreground handoff fix package](../../../plans/foreground-handoff-durable-recovery/plan.md).
+The existing [outcome/admission decision](../../../decisions/2026-10-12-total-session-recovery.md)
+continues to apply. Historical labels remain immutable, while terminal proof
+determines whether an outcome is known.
+
+### Producer boundary
+
+`handlePromptHandoffEvent` releases the matching lifecycle waiter with
+`streams.EventTypeForegroundIdle`. `SessionManager.waitForPromptDone` returns
+that reason without a terminal delivery event. This release remains valid.
+It does not authorize `finishPromptExecutorDispatch` to call
+`agentDeliverySubmissionRuntime.markCompleted` for that result.
+
+Keep the original SQL submission dispatching after a successful handoff return.
+Do not add a recovery block while the original delivery remains live.
+Do not synthesize a terminal event or change foreground prompt admission.
+A later real terminal follows canonical projection and settles its exact submission.
+If the terminal preceded the handoff return, retain its authoritative outcome.
+Legacy delivery, dispatch-only acknowledgement, deterministic rejection, and
+existing Claude successor admission retain their established behavior.
+
+### Historical completion assessment
+
+For native recovery, inspect SQL metadata for each authenticated interrupted-unknown
+journal submission, including SQL rows omitted from the active-state query.
+A SQL row labeled `completed` can qualify as unproven history only when all
+these conditions hold:
+
+- The SQL outcome is `completed`, and the payload hash is nonempty.
+- Session, incarnation, generation, submission, stream, and immutable hash match
+  the authenticated journal and persisted source binding.
+- Every terminal binding is empty: stream, sequence, and turn.
+- Full-settlement and payload-pruning markers are absent.
+- Neither the SQL inbox nor the effect ledger contains terminal evidence for
+  that exact submission. Check all streams, so conflicting evidence cannot hide
+  outside the expected stream.
+- The journal submission is interrupted-unknown with no terminal reference or
+  retained terminal. Its complete inventory and stream descriptor remain valid.
+- Historical source termination, current idle native identity, and complete
+  received/projected cursor coverage pass the existing recovery guards.
+
+These conditions are conjunctive. Validate every unresolved SQL and journal
+record before retiring any record. A matching candidate cannot override an
+independent live, conflicting, or unverifiable submission. Unknown historical
+process ownership remains blocked. A currently dispatching journal retains the
+ordinary live-owner disposition until existing recovery proves abandonment.
+
+Retained terminal evidence takes precedence over this assessment. Use the
+existing projected-terminal path when its proof is complete. Missing terminal
+bindings alone never authorize recovery. Failed and cancelled SQL labels do not
+enter this new class because deterministic rejection can establish those outcomes.
+Partial bindings and pruned history retain their existing blocked or gap paths.
+
+### Retirement and admission
+
+Add a read-only repository verifier for the SQL predicate. Lifecycle uses it
+without running settlement or changing historical state. Carry an explicit
+`UnprovenCompletion` classification in `NativeResumeSubmissionEvidence`.
+The default value preserves existing unknown and proven-terminal behavior.
+Do not derive a fictitious terminal binding or change the row to unknown.
+
+Use the same assessment in SQL row discovery, native inventory validation,
+retirement selection, and proof creation. After native restoration, retire only
+the exact journal submission through the existing release path. Preserve its
+unknown label and all SQL state, outcome, payload, and terminal fields.
+Re-read the owner, inventory, and retirement result before constructing proof.
+`hasProjectedTerminalRetirement` must not classify this history as proven terminal.
+Its terminal-only path cannot substitute for original-owner termination proof.
+
+`verifyNativeResumeInventoryTx` must count this class separately from proven
+terminals. Under the existing session/turn/delivery admission locks, repeat the
+SQL predicate against the exact proof identities before resolving a matching fence.
+Carry and pin each unproven submission's historical stream cursor, then re-read
+its session, incarnation, generation, stream, received, projected, retired, and
+peer-reported high-water values under those locks. A receipt, projection, or
+high-water change invalidates the proof. A fresh proof is required after
+complete projection and receipt of the authenticated watermark.
+Use the PostgreSQL advisory-lock discipline already required for this transaction.
+A terminal that arrives after assessment invalidates the unproven classification.
+Retry through ordinary terminal reconciliation instead of clearing a stale fence.
+
+A crash after journal retirement but before SQL resolution retains the exact
+retired marker. The next attempt revalidates it and completes the same transaction.
+Automatic already-loaded recovery and explicit Resume use the same proof.
+Ordinary prompt admission consumes their committed disposition and repeats all
+independent gates. Recovery does not dispatch an instruction or drain the queue.
+Repeated adoption must accept retired unproven history without reopening its fence.
+
+No table or column change, public API, journal protocol, configuration, or
+runtime flag changes are required. One replayable partial inbox index supports
+the terminal-absence lookup. Existing recovery revision and publication
+mechanisms restore the ordinary composer on desktop and phone. Existing blocked
+results retain their cause when evidence remains unavailable.
+
+### Verification boundary
+
+Use real SQLite/bbolt fixtures for the historical mismatch, exact retirement,
+SQL resolution, retry after interruption, and later distinct prompt admission.
+Add PostgreSQL tests for the SQL predicate and transaction races.
+Negative cases cover terminal arrival, partial bindings, pruning, foreign owners,
+hash conflicts, projection gaps, and mixed eligible/live inventories.
+The existing desktop and phone recovery suites cover the same resulting controls.
+Their deterministic fixture must exercise the backend proof path, not replace it
+with a successful mocked response.
+
 ## Projected terminal reconciliation
 
 Terminal `error` and `complete` events settle a dispatching journal submission in
@@ -163,6 +282,17 @@ A byte-count change alone is not stream progress. Pruning can decrease bytes whi
 sequence counters advance. Cancellation,
 owner changes, inventory changes, and unresolved work retain the admission
 fence. This wait does not repeat native Resume or dispatch a prompt.
+
+When terminal settlement committed the outcome but not the final submission
+binding, recovery may read the exact retained terminal effect instead. This
+fallback requires all final binding fields and settlement/pruning markers to be
+absent, matching owner, hash, outcome, stream and sequence, a block-resolved or
+completed terminal effect with no newer terminal for that submission/stream,
+and a fully projected cursor. Partial or conflicting bindings fail closed.
+Lifecycle derives only a recovery view; it does not write terminal references,
+settle workflow/queue effects or release a block while authenticating the journal.
+The existing locked admission transaction revalidates the same SQL predicate
+after journal retirement. Full settlement and retention remain separately gated.
 
 ## Prompt readiness after native boot
 

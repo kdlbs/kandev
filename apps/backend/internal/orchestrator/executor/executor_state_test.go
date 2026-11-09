@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -42,6 +43,59 @@ func TestResolveExecutorConfig_PropagatesSSHShell(t *testing.T) {
 	got, _ := cfg.Metadata[lifecycle.MetadataKeySSHShell].(string)
 	if got != "zsh" {
 		t.Fatalf("metadata[%q] = %q, want %q", lifecycle.MetadataKeySSHShell, got, "zsh")
+	}
+}
+
+type executorConfigWorkspaceRepository struct {
+	*mockRepository
+	workspace    *models.Workspace
+	workspaceErr error
+}
+
+func executorTestStringPointer(value string) *string {
+	return &value
+}
+
+func (r *executorConfigWorkspaceRepository) GetWorkspace(context.Context, string) (*models.Workspace, error) {
+	return r.workspace, r.workspaceErr
+}
+
+func TestResolveExecutorConfigUsesImplicitLocalOnlyWithoutSelection(t *testing.T) {
+	tests := []struct {
+		name         string
+		executorID   string
+		metadata     map[string]interface{}
+		workspace    *models.Workspace
+		workspaceErr error
+		wantType     string
+		wantID       string
+		wantImplicit bool
+	}{
+		{name: "no selection stays implicit", wantImplicit: true},
+		{name: "explicit unresolved executor stays unknown", executorID: "missing-executor", wantID: "missing-executor"},
+		{name: "unresolved profile stays unknown", metadata: map[string]interface{}{"executor_profile_id": "missing-profile"}},
+		{name: "metadata executor identity stays unknown", metadata: map[string]interface{}{"executor_id": "missing-executor"}},
+		{
+			name:      "unresolved workspace default stays unknown",
+			workspace: &models.Workspace{DefaultExecutorID: executorTestStringPointer("missing-default")},
+			wantID:    "missing-default",
+		},
+		{name: "workspace default read error stays unknown", workspaceErr: errors.New("workspace read failed")},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &executorConfigWorkspaceRepository{
+				mockRepository: newMockRepository(),
+				workspace:      test.workspace,
+				workspaceErr:   test.workspaceErr,
+			}
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+			cfg := exec.resolveExecutorConfig(context.Background(), test.executorID, "workspace-config", test.metadata)
+			if cfg.ExecutorType != test.wantType || cfg.ExecutorID != test.wantID || cfg.ImplicitSelection != test.wantImplicit {
+				t.Fatalf("resolved executor = type %q ID %q implicit %v; want type %q ID %q implicit %v", cfg.ExecutorType, cfg.ExecutorID, cfg.ImplicitSelection, test.wantType, test.wantID, test.wantImplicit)
+			}
+		})
 	}
 }
 

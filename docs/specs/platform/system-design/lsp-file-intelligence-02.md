@@ -19,8 +19,32 @@ This design preserves the technical source detail for `REQ-PLATFORM-LSP-FILE-INT
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-LSP-FILE-INTELLIGENCE-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-PLATFORM-LSP-FILE-INTELLIGENCE-001` | [Managed npm installation](#managed-npm-installation), [Migrated source detail](#migrated-source-detail) |
 | `REQ-PLATFORM-LSP-FILE-INTELLIGENCE-002` | [Continuity scenarios](#continuity-scenarios) |
+
+## Managed npm installation
+
+For `AC-PLATFORM-LSP-FILE-INTELLIGENCE-001.9`, the LSP installer registry
+selects the shared `NpmStrategy` for TypeScript and Python. Its npm invocation
+explicitly selects local mode with `--global=false` and `--location=project`
+along with its existing managed prefix. The strategy resolves the resulting
+executable in `<prefix>/node_modules/.bin` using task-environment platform extensions.
+Command lookup, runner ownership, working directory, package selection, task
+environment and registry settings remain in force. Local mode overrides only
+the install mode for this invocation; it does not reset npm configuration or
+change the user's global installation. Nonzero exit and cancellation retain
+existing error propagation and process ownership behavior.
+
+An offline fixture package exercised through the strategy and real npm process
+checks the local layout with inherited global mode, alongside the default/local
+control. Runner-boundary coverage checks task environment and error propagation;
+existing Windows shim discovery remains applicable. The real-npm test skips
+Windows after checking npm availability because its runner does not invoke
+`npm.cmd` through an interpreter; it does not prove Windows npm execution.
+
+The task npm save policy remains in force. With `NPM_CONFIG_SAVE=false`, a later
+install into the shared managed prefix can prune an earlier installed server.
+This pre-existing limitation is not repaired by local-mode selection.
 
 ## Migrated source detail
 

@@ -89,10 +89,35 @@ func TestInitializePromptQueueingCanBeDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
-	if response.AgentCapabilities.Meta != nil {
-		if _, advertised := response.AgentCapabilities.Meta["claudeCode"]; advertised {
-			t.Fatal("prompt queueing capability advertised while disabled")
-		}
+	claudeCode, ok := response.AgentCapabilities.Meta["claudeCode"].(map[string]any)
+	if !ok {
+		t.Fatalf("claudeCode meta = %#v, want an advertisement", response.AgentCapabilities.Meta)
+	}
+	if _, advertised := claudeCode["promptQueueing"]; advertised {
+		t.Fatal("prompt queueing capability advertised while disabled")
+	}
+	if claudeCode["promptSuggestions"] != true {
+		t.Fatalf("promptSuggestions = %#v, want the independent default true", claudeCode["promptSuggestions"])
+	}
+}
+
+func TestInitializePromptSuggestionsCanBeDisabled(t *testing.T) {
+	t.Setenv("KANDEV_MOCK_AGENT_PROMPT_SUGGESTIONS", "false")
+
+	agent := &mockAgent{}
+	response, err := agent.Initialize(context.Background(), acp.InitializeRequest{})
+	if err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	claudeCode, ok := response.AgentCapabilities.Meta["claudeCode"].(map[string]any)
+	if !ok {
+		t.Fatalf("claudeCode meta = %#v, want an advertisement", response.AgentCapabilities.Meta)
+	}
+	if claudeCode["promptSuggestions"] != false {
+		t.Fatalf("promptSuggestions = %#v, want explicit false", claudeCode["promptSuggestions"])
+	}
+	if claudeCode["promptQueueing"] != true {
+		t.Fatal("suggestion denial must not change the independent queueing advertisement")
 	}
 }
 

@@ -32,7 +32,8 @@ func (s *SelectionService) sessionSetupComparison(ctx context.Context, workspace
 		unavailable.Reason = "snapshot_changed"
 		return unavailable
 	}
-	comparison := CompareMCPSetups(state, setupFromDefinitions(inputs.Definitions))
+	comparison := CompareMCPSetups(state, setupFromInputs(inputs))
 	comparison.SelectionIDs = inputs.SessionSelectionIDs
+	comparison.ExcludedDefinitionIDs = inputs.ExcludedDefinitionIDs
 	return boundedMCPComparison(comparison)
 }

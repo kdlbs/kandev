@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+)
 
 // AgentDeliveryRetentionBatchOptions bounds one repository-owned retention
 // transaction. Zero values select the default limit; requested limits are
@@ -127,40 +131,59 @@ type AgentDeliverySubmission struct {
 // AgentDeliveryEvent is the normalized event persisted in the backend inbox
 // before agentctl receives an acknowledgment.
 type AgentDeliveryEvent struct {
-	SessionID         string     `json:"session_id"`
-	IncarnationID     string     `json:"incarnation_id"`
-	HarnessGeneration int64      `json:"harness_generation"`
-	TaskID            string     `json:"-"`
-	ExecutionID       string     `json:"-"`
-	OwnerGeneration   int64      `json:"-"`
-	ExpectedStreamID  string     `json:"-"`
-	StreamID          string     `json:"stream_id"`
-	Sequence          int64      `json:"sequence"`
-	SubmissionID      string     `json:"submission_id,omitempty"`
-	EventType         string     `json:"event_type"`
-	Payload           []byte     `json:"payload"`
-	ContentHash       string     `json:"content_hash,omitempty"`
-	HashVersion       int        `json:"hash_version,omitempty"`
-	PayloadPrunedAt   *time.Time `json:"payload_pruned_at,omitempty"`
-	PayloadBytes      int64      `json:"payload_bytes"`
-	Terminal          bool       `json:"terminal,omitempty"`
-	ReceivedAt        time.Time  `json:"received_at"`
-	ProjectedAt       *time.Time `json:"projected_at,omitempty"`
+	SessionID          string     `json:"session_id"`
+	IncarnationID      string     `json:"incarnation_id"`
+	HarnessGeneration  int64      `json:"harness_generation"`
+	TaskID             string     `json:"-"`
+	ExecutionID        string     `json:"-"`
+	OwnerGeneration    int64      `json:"-"`
+	ExpectedStreamID   string     `json:"-"`
+	StreamID           string     `json:"stream_id"`
+	Sequence           int64      `json:"sequence"`
+	SubmissionID       string     `json:"submission_id,omitempty"`
+	EventType          string     `json:"event_type"`
+	Payload            []byte     `json:"payload"`
+	ContentHash        string     `json:"content_hash,omitempty"`
+	HashVersion        int        `json:"hash_version,omitempty"`
+	PayloadPrunedAt    *time.Time `json:"payload_pruned_at,omitempty"`
+	PayloadBytes       int64      `json:"payload_bytes"`
+	CanonicalMessageID string     `json:"-"`
+	Terminal           bool       `json:"terminal,omitempty"`
+	ReceivedAt         time.Time  `json:"received_at"`
+	ProjectedAt        *time.Time `json:"projected_at,omitempty"`
 }
 
 // AgentDeliveryCursor stores the two independent backend watermarks. A
 // received event is safe to acknowledge after its inbox transaction commits;
 // projection may lag and must never move the received cursor backward.
 type AgentDeliveryCursor struct {
-	SessionID         string    `json:"session_id"`
-	IncarnationID     string    `json:"incarnation_id"`
-	HarnessGeneration int64     `json:"harness_generation"`
-	StreamID          string    `json:"stream_id"`
-	ReceivedSequence  int64     `json:"received_sequence"`
-	ProjectedSequence int64     `json:"projected_sequence"`
-	RemoteHighWater   int64     `json:"remote_high_water"`
-	RetiredSequence   int64     `json:"retired_sequence"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	SessionID                      string    `json:"session_id"`
+	IncarnationID                  string    `json:"incarnation_id"`
+	HarnessGeneration              int64     `json:"harness_generation"`
+	StreamID                       string    `json:"stream_id"`
+	ReceivedSequence               int64     `json:"received_sequence"`
+	ProjectedSequence              int64     `json:"projected_sequence"`
+	MessageSegmentBoundarySequence *int64    `json:"message_segment_boundary_sequence,omitempty"`
+	RemoteHighWater                int64     `json:"remote_high_water"`
+	RetiredSequence                int64     `json:"retired_sequence"`
+	UpdatedAt                      time.Time `json:"updated_at"`
+}
+
+// CanonicalAgentDeliveryProjectionResult identifies the message committed for
+// an event and whether projection appended to an existing message.
+type CanonicalAgentDeliveryProjectionResult struct {
+	CanonicalMessageID string
+	Appended           bool
+	// AlreadyProjected reports that the inbox row was projected before this
+	// call. The canonical message identity is still returned so a caller can
+	// acknowledge the cursor without notifying the UI again.
+	AlreadyProjected bool
+	// ContextCompactionCount is the committed lifetime count after applying a
+	// native compaction observation. Nil means this event did not change it.
+	ContextCompactionCount *int64
+	// ContextCompactionReporting is the committed reporting metadata after
+	// applying a native observation. Nil means this event did not change it.
+	ContextCompactionReporting *streams.ContextCompactionReporting
 }
 
 // AgentDeliveryEffect is a durable idempotency key for a projected workflow
@@ -185,4 +208,40 @@ type AgentDeliveryEffect struct {
 	WorkflowID              string     `json:"-"`
 	WorkflowStepID          string     `json:"-"`
 	WorkflowPolicyUpdatedAt *time.Time `json:"-"`
+}
+
+// AgentDeliverySessionStateOutcome is the closed result of one conditional
+// coarse session-state correction. Only changed represents a committed write.
+type AgentDeliverySessionStateOutcome string
+
+const (
+	AgentDeliverySessionStateChanged           AgentDeliverySessionStateOutcome = "changed"
+	AgentDeliverySessionStateAlreadyConsistent AgentDeliverySessionStateOutcome = "already_consistent"
+	AgentDeliverySessionStateSuperseded        AgentDeliverySessionStateOutcome = "superseded"
+	AgentDeliverySessionStateUnavailable       AgentDeliverySessionStateOutcome = "unavailable"
+)
+
+// AgentDeliverySessionStateRequest identifies the exact settled terminal whose
+// stale STARTING or RUNNING session state may be corrected. Every identity is
+// revalidated inside the writer transaction.
+type AgentDeliverySessionStateRequest struct {
+	SessionID         string
+	TaskID            string
+	ExecutionID       string
+	IncarnationID     string
+	HarnessGeneration int64
+	StreamID          string
+	Sequence          int64
+	SubmissionID      string
+	TurnID            string
+	Outcome           string
+}
+
+// AgentDeliverySessionStateResult reports the conditional correction result and
+// the committed state identity. UpdatedAt is set only for changed.
+type AgentDeliverySessionStateResult struct {
+	Outcome   AgentDeliverySessionStateOutcome
+	OldState  TaskSessionState
+	NewState  TaskSessionState
+	UpdatedAt time.Time
 }

@@ -422,3 +422,65 @@ func assertClientReceivesAction(t *testing.T, client *Client, action string) {
 		}
 	}
 }
+
+func TestSessionStreamBroadcaster_SubscribesRuntimeStorageSubject(t *testing.T) {
+	log := testLogger()
+	eventBus := &subscriptionRecordingEventBus{MemoryEventBus: bus.NewMemoryEventBus(log)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	b := RegisterSessionStreamNotifications(ctx, eventBus, NewHub(nil, log), log)
+	_ = b
+	for _, subject := range eventBus.subjects {
+		if subject == events.BuildSessionRuntimeStorageWildcardSubject() {
+			return
+		}
+	}
+	t.Fatalf("session stream broadcaster must subscribe the runtime storage wildcard subject %q",
+		events.BuildSessionRuntimeStorageWildcardSubject())
+}
+
+func TestSessionStreamBroadcaster_BroadcastsRuntimeStorageNotification(t *testing.T) {
+	hub := newAccessTestHub(t)
+	eventBus := bus.NewMemoryEventBus(testLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = RegisterSessionStreamNotifications(ctx, eventBus, hub, testLogger())
+
+	client := registerAccessClient(t, hub, "client-storage", authn.Identity{UserID: "user-1", Role: authn.RoleMember})
+	raw, err := json.Marshal(map[string]interface{}{"session_id": "session-storage-1"})
+	if err != nil {
+		t.Fatalf("marshal subscribe payload: %v", err)
+	}
+	client.handleSessionSubscribe(&ws.Message{
+		ID: "1", Type: ws.MessageTypeRequest, Action: ws.ActionSessionSubscribe, Payload: raw,
+	})
+
+	sessionID := "session-storage-1"
+	_ = eventBus.Publish(ctx, events.BuildSessionRuntimeStorageSubject(sessionID), bus.NewEvent(
+		events.TaskSessionRuntimeStorageChanged,
+		"test",
+		lifecycle.RuntimeStorageObservation{
+			TaskID: "task-1", SessionID: sessionID, State: "warning",
+			Location: "local_runtime", Revision: 1, Epoch: 1,
+		},
+	))
+
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case raw := <-client.send:
+			var msg ws.Message
+			if err := json.Unmarshal(raw, &msg); err == nil && msg.Action == ws.ActionSessionRuntimeStorageChanged {
+				return
+			}
+		case raw := <-client.controlSend:
+			var msg ws.Message
+			if err := json.Unmarshal(raw, &msg); err == nil && msg.Action == ws.ActionSessionRuntimeStorageChanged {
+				return
+			}
+		case <-timeout:
+			t.Fatalf("client did not receive %s", ws.ActionSessionRuntimeStorageChanged)
+		}
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
+	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/stretchr/testify/require"
 )
@@ -40,7 +41,7 @@ func TestBoundedToolResultContinuesToTerminal(t *testing.T) {
 			require.Equal(t, "fetch", retained.ToolCallID)
 			require.Equal(t, "parent", retained.ParentToolCallID)
 			require.Equal(t, true, retained.NormalizedPayload.Generic().Output.(map[string]any)["truncated"])
-			require.Less(t, len(events[0].Payload), 1<<20)
+			require.Less(t, len(events[0].Payload), int(deliverylimits.DisplayBytes)+1)
 			require.Equal(t, adapter.EventTypeComplete, events[2].Type)
 			require.True(t, events[2].Terminal)
 			require.NotEqual(t, deliveryStorageError, manager.DeliveryHealth().State)

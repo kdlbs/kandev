@@ -290,7 +290,7 @@ func TestMigration_LegacyDB_DefaultsProfileMCPSelection(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("iterate profile schema: %v", err)
 	}
-	for _, name := range []string{"mcp_selection_mode", "mcp_selected_servers"} {
+	for _, name := range []string{"mcp_selection_mode", "mcp_selected_servers", "copilot_selected_plugins"} {
 		if _, ok := columns[name]; !ok {
 			t.Errorf("agent_profiles is missing %s after migration", name)
 		}
@@ -305,6 +305,9 @@ func TestMigration_LegacyDB_DefaultsProfileMCPSelection(t *testing.T) {
 	}
 	if profile.MCPSelectedServers == nil || len(profile.MCPSelectedServers) != 0 {
 		t.Errorf("mcp_selected_servers = %#v, want empty", profile.MCPSelectedServers)
+	}
+	if profile.CopilotSelectedPlugins == nil || len(profile.CopilotSelectedPlugins) != 0 {
+		t.Errorf("copilot_selected_plugins = %#v, want empty", profile.CopilotSelectedPlugins)
 	}
 }
 

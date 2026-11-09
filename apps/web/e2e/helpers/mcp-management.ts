@@ -172,6 +172,11 @@ export async function checkGlobalProfileWorkspaceGuard(
     await expect(
       page.getByText("Could not save the MCP selection.", { exact: true }),
     ).toBeVisible();
+    await expect(guard.getByRole("button", { name: "Save and leave", exact: true })).toBeDisabled();
+    await guard.getByRole("button", { name: "Continue editing", exact: true }).click();
+    await page.getByRole("button", { name: "Reload choices", exact: true }).click();
+    await workspace.click();
+    await page.getByRole("option", { name: other.name, exact: true }).click();
     await guard.getByRole("button", { name: "Save and leave", exact: true }).click();
     await expect(workspace).toContainText(other.name);
     expect(

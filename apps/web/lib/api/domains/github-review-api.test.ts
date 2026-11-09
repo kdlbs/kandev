@@ -57,3 +57,14 @@ describe("PR review writes", () => {
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ reviewers: ["octocat"] });
   });
 });
+
+it("binds re-requested reviewers to the historical PR host", async () => {
+  fetchSpy.mockResolvedValueOnce(jsonResponse({ requested: true }));
+  await requestPRReviewers("acme", "site", 42, ["octocat"], {
+    workspaceId: "workspace-1",
+    expectedHost: "git.company.example",
+  });
+  expect(new URL(String(fetchSpy.mock.calls[0]?.[0])).searchParams.get("expected_host")).toBe(
+    "git.company.example",
+  );
+});

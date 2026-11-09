@@ -75,15 +75,13 @@ export function AgentProfilesSubList({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   if (!savedAgent || savedAgent.profiles.length === 0) return null;
-  const rows = savedAgent.profiles.map((profile) => (
-    <ProfileRow key={profile.id} agent={savedAgent} profile={profile} />
-  ));
+  const canReorder = savedAgent.profiles.length > 1;
   return (
     <div
       className="border-t border-border/70 bg-background p-3"
       data-testid={`agent-profiles-${agentName}`}
     >
-      {canManage && savedAgent.profiles.length > 1 ? (
+      {canManage ? (
         <DndContext
           accessibility={profileDragAccessibility(savedAgent.profiles, t)}
           sensors={sensors}
@@ -91,7 +89,7 @@ export function AgentProfilesSubList({
             args.pointerCoordinates ? pointerWithin(args) : closestCenter(args)
           }
           onDragEnd={(event: DragEndEvent) => {
-            if (!event.over || event.active.id === event.over.id) return;
+            if (!canReorder || !event.over || event.active.id === event.over.id) return;
             onReorder(
               savedAgent.id,
               reorderIds(
@@ -108,18 +106,35 @@ export function AgentProfilesSubList({
           >
             <div className="grid gap-2">
               {savedAgent.profiles.map((profile) => (
-                <SortableProfileRow key={profile.id} agent={savedAgent} profile={profile} />
+                <SortableProfileRow
+                  key={profile.id}
+                  agent={savedAgent}
+                  profile={profile}
+                  canReorder={canReorder}
+                />
               ))}
             </div>
           </SortableContext>
         </DndContext>
       ) : (
-        <div className="grid gap-2">{rows}</div>
+        <div className="grid gap-2">
+          {savedAgent.profiles.map((profile) => (
+            <ProfileRow key={profile.id} agent={savedAgent} profile={profile} />
+          ))}
+        </div>
       )}
     </div>
   );
 }
-function SortableProfileRow({ agent, profile }: { agent: Agent; profile: AgentProfile }) {
+function SortableProfileRow({
+  agent,
+  profile,
+  canReorder,
+}: {
+  agent: Agent;
+  profile: AgentProfile;
+  canReorder: boolean;
+}) {
   const { t } = useTranslation();
   const {
     attributes,
@@ -129,7 +144,7 @@ function SortableProfileRow({ agent, profile }: { agent: Agent; profile: AgentPr
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: profile.id });
+  } = useSortable({ id: profile.id, disabled: !canReorder });
   return (
     <div
       ref={setNodeRef}
@@ -140,21 +155,23 @@ function SortableProfileRow({ agent, profile }: { agent: Agent; profile: AgentPr
         agent={agent}
         profile={profile}
         dragHandle={
-          <button
-            ref={setActivatorNodeRef}
-            type="button"
-            className={controlSizingClassName(
-              "icon",
-              "relative z-10 flex shrink-0 cursor-pointer touch-none items-center justify-center rounded-md text-muted-foreground hover:bg-muted",
-            )}
-            data-testid="agent-profile-drag-handle"
-            {...attributes}
-            {...listeners}
-            aria-label={t("agents:dragProfile", { name: profile.name })}
-            aria-roledescription={t("agents:profileSortable")}
-          >
-            <IconGripVertical className="h-4 w-4" aria-hidden="true" />
-          </button>
+          canReorder ? (
+            <button
+              ref={setActivatorNodeRef}
+              type="button"
+              className={controlSizingClassName(
+                "icon",
+                "relative z-10 flex shrink-0 cursor-pointer touch-none items-center justify-center rounded-md text-muted-foreground hover:bg-muted",
+              )}
+              data-testid="agent-profile-drag-handle"
+              {...attributes}
+              {...listeners}
+              aria-label={t("agents:dragProfile", { name: profile.name })}
+              aria-roledescription={t("agents:profileSortable")}
+            >
+              <IconGripVertical className="h-4 w-4" aria-hidden="true" />
+            </button>
+          ) : undefined
         }
       />
     </div>

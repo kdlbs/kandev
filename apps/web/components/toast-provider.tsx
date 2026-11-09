@@ -272,3 +272,8 @@ export function useToast() {
   }
   return context;
 }
+
+/** Returns null outside a provider so optional surfaces can degrade silently. */
+export function useOptionalToast() {
+  return useContext(ToastContext);
+}

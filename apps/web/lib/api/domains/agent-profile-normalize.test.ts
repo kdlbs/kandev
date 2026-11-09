@@ -7,6 +7,7 @@ const SAMPLE_ID = "p1";
 const SAMPLE_PREFIX = "greywall --";
 const WORKSPACE_ID = "workspace-1";
 const dynamicProfileId = "dynamic-profile";
+const harnessPluginId = "live:fixture-market/harness";
 
 const snakeCaseWirePayload = {
   id: SAMPLE_ID,
@@ -24,6 +25,7 @@ const snakeCaseWirePayload = {
   cursor_plugins_mcp_enabled: false,
   mcp_selection_mode: "inherit",
   mcp_selected_servers: [],
+  copilot_selected_plugins: [],
   enabled: false,
   workspace_id: WORKSPACE_ID,
   user_modified: true,
@@ -50,6 +52,7 @@ const expectedCamelCaseProfile = {
   cursorPluginsMcpEnabled: false,
   mcpSelectionMode: "inherit",
   mcpSelectedServers: [],
+  copilotSelectedPlugins: [],
   enabled: false,
   providerSupported: false,
   workspaceId: WORKSPACE_ID,
@@ -322,6 +325,33 @@ describe("normalizeAgentProfile", () => {
     const candidate = result.dynamic?.candidates[0];
     expect(candidate?.policies.transient.retry.maxRetries).toBe(1);
     expect(candidate?.policies.hard.onExhausted).toBe("stop");
+  });
+});
+
+describe("Copilot plugin selection normalization", () => {
+  it("dedupes and sorts saved plugin identities", () => {
+    const profile = normalizeAgentProfile({
+      ...snakeCaseWirePayload,
+      copilot_selected_plugins: [
+        harnessPluginId,
+        "installed:copilot-plugins/spark",
+        harnessPluginId,
+        "",
+      ],
+    });
+    expect(profile.copilotSelectedPlugins).toEqual([
+      "installed:copilot-plugins/spark",
+      harnessPluginId,
+    ]);
+    expect(toAgentProfilePayload(profile).copilot_selected_plugins).toEqual([
+      "installed:copilot-plugins/spark",
+      harnessPluginId,
+    ]);
+  });
+
+  it("omits the field when the draft does not carry it", () => {
+    const payload = toAgentProfilePayload({ id: toAgentProfileId(SAMPLE_ID), name: "x" });
+    expect(payload.copilot_selected_plugins).toBeUndefined();
   });
 });
 

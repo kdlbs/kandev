@@ -118,3 +118,36 @@ Verification: the full pause/resume and desktop pruned-recovery specs passed tog
 using one worker, retries disabled, and a fresh managed production build. Full backend
 lint passed with zero issues. No production behavior or timeout was changed for these
 browser fixture corrections.
+
+
+## Deadline batch-sizing follow-up
+
+This follow-up keeps the bounded-cleanup contract in
+AC-PLATFORM-DELIVERY-RETENTION-005.1, 005.5 and 005.6, with the aggregate
+failure diagnostics in AC-PLATFORM-DELIVERY-RETENTION-006.3. A repository
+deadline reduces only that phase's process-local candidate ceiling by half,
+down to one. Parent cancellation and other errors do not reduce it. Configured
+and background-event ceilings, byte/time budgets, eligibility proofs, rollback,
+failure accounting and retry backoff remain unchanged; a newly constructed
+worker starts from the configured ceilings.
+
+The implementation is in apps/backend/internal/task/deliveryretention/worker.go
+and worker_batches.go. The existing throughput design and public configuration
+and operations wording describe this correction.
+
+The committed worker_batches_test.go cases cover the deadline sequence and
+one-row floor, independent phase limits, unrelated errors and parent
+cancellation, failed-phase backoff and reset on new worker construction:
+
+- TestDeliveryRetentionWorkerDeadlineBatchLimit
+- TestDeliveryRetentionWorkerPhaseBatchLimitsAreIndependent
+- TestDeliveryRetentionWorkerBatchLimitIgnoresOtherErrorsAndParentCancellation
+- TestDeliveryRetentionWorkerBatchRetryBackoffIncludesFailedPhase
+- TestDeliveryRetentionWorkerNewConstructionResetsBatchLimits
+
+The original verification records above remain historical evidence. This
+delivery-record correction links the already committed implementation and cases
+to their existing requirements and design. It changes no production behavior
+and makes no new Go, PostgreSQL, installed-provider or browser execution claim.
+Focused worker and repository results and updated-head CI remain separate
+results; an environment-gated PostgreSQL skip is not an execution pass.

@@ -1,5 +1,6 @@
 "use client";
 
+import { TaskGraphPanel } from "@/components/task-graph/task-graph-panel";
 import React, { useCallback, useEffect } from "react";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { CanvasHostRoute } from "@/components/settings/canvas-host-route";
@@ -138,6 +139,7 @@ function DiffViewerContent({
   panelId: string;
   params: Record<string, unknown>;
 }) {
+  const detailActive = usePanelActive(panelId);
   const selectedDiff = useDockviewStore((s) => s.selectedDiff);
   const setSelectedDiff = useDockviewStore((s) => s.setSelectedDiff);
   const { openFile } = useFileEditors();
@@ -160,6 +162,7 @@ function DiffViewerContent({
 
   return (
     <TaskChangesPanel
+      detailActive={detailActive}
       mode={panelKind as "all" | "file"}
       filePath={selectedPath}
       fileRepositoryName={selectedRepositoryName}
@@ -321,6 +324,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
     />
   ),
   "background-work": (panelId, params) => <BackgroundWorkPanel panelId={panelId} params={params} />,
+  "task-graph": () => <TaskGraphPanel />,
 };
 
 /** Render a dockview panel's portal content by looking up its (alias-resolved)

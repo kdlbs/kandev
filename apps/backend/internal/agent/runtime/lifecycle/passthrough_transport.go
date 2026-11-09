@@ -39,6 +39,9 @@ func isSSHPassthrough(execution *AgentExecution) bool {
 }
 
 func (m *Manager) passthroughRunnerForExecution(execution *AgentExecution) executionPassthroughRunner {
+	if m.passthroughRunnerOverride != nil {
+		return m.passthroughRunnerOverride
+	}
 	if isSSHPassthrough(execution) {
 		return &remotePassthroughRunner{execution: execution, manager: m}
 	}

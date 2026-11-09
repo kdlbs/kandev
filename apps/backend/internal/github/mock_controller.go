@@ -75,6 +75,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 }
 
 type mockWorkspaceConnectionRequest struct {
+	GitHubHost               string                       `json:"github_host"`
 	Source                   ConnectionSource             `json:"source"`
 	Status                   ConnectionStatus             `json:"status"`
 	Login                    string                       `json:"login"`
@@ -109,7 +110,7 @@ func (c *MockController) setWorkspaceConnection(ctx *gin.Context) {
 		return
 	}
 	connection := &WorkspaceConnection{
-		WorkspaceID: workspaceID, Source: req.Source, GitHubHost: defaultGitHubHost,
+		WorkspaceID: workspaceID, Source: req.Source, GitHubHost: req.GitHubHost,
 		Login: req.Login, InstallationID: req.InstallationID,
 		InstallationAccountLogin: req.InstallationAccountLogin,
 		InstallationAccountType:  req.InstallationAccountType,
@@ -130,6 +131,13 @@ func (c *MockController) setWorkspaceConnection(ctx *gin.Context) {
 }
 
 func validateMockWorkspaceConnectionRequest(req *mockWorkspaceConnectionRequest) error {
+	if req != nil {
+		host, err := connectionHost(req.GitHubHost)
+		if err != nil {
+			return err
+		}
+		req.GitHubHost = host.String()
+	}
 	if req == nil || !validMockConnectionSource(req.Source) || !validMockConnectionStatus(req.Status) {
 		return errors.New(errMsgInvalidPayload)
 	}
@@ -224,7 +232,7 @@ func (c *MockController) setPersonalConnection(ctx *gin.Context) {
 		AccessExpiresAt time.Time        `json:"access_expires_at"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Login) == "" ||
-		req.GitHubUserID <= 0 || req.AccessExpiresAt.IsZero() ||
+		req.GitHubUserID <= 0 ||
 		(req.Status != ConnectionStatusActive && req.Status != ConnectionStatusInvalid && req.Status != ConnectionStatusRevoked) {
 		respondInvalidPayload(ctx)
 		return
@@ -293,6 +301,7 @@ func (c *MockController) setCLIAccounts(ctx *gin.Context) {
 
 func (c *MockController) setAppRegistration(ctx *gin.Context) {
 	var req struct {
+		GitHubHost  string `json:"github_host"`
 		DisplayName string `json:"display_name"`
 		AppID       int64  `json:"app_id"`
 	}
@@ -306,10 +315,15 @@ func (c *MockController) setAppRegistration(ctx *gin.Context) {
 		ctx.JSON(http.StatusConflict, gin.H{errKey: "mock GitHub App storage is unavailable"})
 		return
 	}
+	host, err := connectionHost(req.GitHubHost)
+	if err != nil {
+		respondInvalidPayload(ctx)
+		return
+	}
 	now := time.Now().UTC()
 	registration := &AppRegistration{
 		ID: registrationID, Source: AppRegistrationSourceImported, DisplayName: req.DisplayName,
-		GitHubHost: defaultGitHubAppHost, AppID: req.AppID, ClientID: "mock-client-" + registrationID,
+		GitHubHost: host.String(), AppID: req.AppID, ClientID: "mock-client-" + registrationID,
 		Slug: "mock-" + registrationID, OwnerLogin: "mock-owner",
 		OwnerType: AppRegistrationOwnerOrganization, Visibility: AppRegistrationVisibilityPrivate,
 		PublicBaseURL: "https://kandev.example", CredentialGeneration: 1,
@@ -325,10 +339,7 @@ func (c *MockController) setAppRegistration(ctx *gin.Context) {
 		return
 	}
 	c.service.mu.Lock()
-	c.service.appRegistrationRuntimes[registrationID] = &githubAppRuntime{
-		registrationID: registrationID, source: DeploymentAppSourceManaged,
-		generation: 1, appID: req.AppID,
-	}
+	c.service.appRegistrationRuntimes[registrationID] = c.service.mockAppRuntime(registration)
 	c.service.mu.Unlock()
 	ctx.JSON(http.StatusOK, registration)
 }

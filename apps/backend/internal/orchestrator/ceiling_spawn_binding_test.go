@@ -32,9 +32,9 @@ func TestCeilingReplay_PreservesAdditionalSpawnBinding(t *testing.T) {
 				profile = "profile-b"
 			}
 			payload := seam1StartPayload(profile, "", "", "", "independent review", "", false, false, nil,
-				startTaskOptions{ProfileExplicit: true, PreserveWorkflowBinding: preserve})
+				startTaskOptions{ProfileExplicit: true, PreserveWorkflowSourceBinding: preserve})
 			if !preserve {
-				delete(payload, "preserve_workflow_binding")
+				delete(payload, "preserve_workflow_source_binding")
 			}
 			require.NoError(t, f.svc.deferCeilingRefusal(ctx, "t1", "", models.CeilingLaunchStart, payload,
 				ceilingReasonRefused, 1, true, 1))
@@ -71,13 +71,13 @@ func TestCeilingReplay_PreservesAdditionalSpawnBinding(t *testing.T) {
 	}
 }
 
-func TestLaunchSession_PreserveWorkflowBindingIsServerOnly(t *testing.T) {
+func TestLaunchSession_PreserveWorkflowSourceBindingIsServerOnly(t *testing.T) {
 	var req LaunchSessionRequest
-	require.NoError(t, json.Unmarshal([]byte(`{"task_id":"t1","preserve_workflow_binding":true,"PreserveWorkflowBinding":true}`), &req))
-	require.False(t, req.PreserveWorkflowBinding)
-	req.PreserveWorkflowBinding = true
+	require.NoError(t, json.Unmarshal([]byte(`{"task_id":"t1","preserve_workflow_source_binding":true,"PreserveWorkflowSourceBinding":true}`), &req))
+	require.False(t, req.PreserveWorkflowSourceBinding)
+	req.PreserveWorkflowSourceBinding = true
 	encoded, err := json.Marshal(req)
 	require.NoError(t, err)
-	require.NotContains(t, string(encoded), "preserve_workflow_binding")
-	require.NotContains(t, string(encoded), "PreserveWorkflowBinding")
+	require.NotContains(t, string(encoded), "preserve_workflow_source_binding")
+	require.NotContains(t, string(encoded), "PreserveWorkflowSourceBinding")
 }

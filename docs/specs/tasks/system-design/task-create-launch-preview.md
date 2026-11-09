@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001
@@ -31,8 +31,9 @@ workflow-step API.
 
 - A pure task-create helper selects the launch destination and composes the
   step-prompt preview.
-- `useWorkflowStepsEffect` retains each fallback-fetched step prompt with its
-  actions, position, and workflow identity.
+- The [selected metadata observer](workflow-agent-overrides.md#selected-workflow-metadata)
+  retains each selected step prompt with its actions, position, and workflow
+  identity. Launch preview and workflow replacements consume the same result.
 - Workflow-step WebSocket handlers keep loaded workflow snapshots synchronized
   for step create, update, and delete events.
 - `buildDialogFormBodyProps` selects steps for the effective workflow. It passes
@@ -58,16 +59,17 @@ existing fields:
 - `events.on_enter`
 - `is_start_step`
 - `prompt`
-- `workflowId` when the step came from a fallback fetch
+- `workflowId` for both snapshot-backed and lightweight-read selected steps
 
-The dialog uses matching fetched steps when they exist. A successful empty fetch
-is authoritative and produces no destination. If the fetch is unavailable, or
-contains only steps from another workflow, the dialog uses the selected workflow
-snapshot. A fetched step from another workflow is never a candidate. When the
-effective workflow is the visible context workflow, the dialog uses its live
-snapshot; workflow-step WebSocket events keep that snapshot current after edits
-made elsewhere. A different effective workflow is fetched by the existing
-fallback path.
+The dialog uses the current selected metadata result. A successful empty read
+is authoritative and produces no destination. Complete loaded steps from the
+selected workflow's current workspace can supply that result. Workflow-step
+WebSocket events keep loaded snapshot steps current after edits made elsewhere.
+The observer must retain those live updates rather than freeze its initial seed.
+Missing, placeholder, or failed snapshots require the shared lightweight step
+read, including when the effective workflow is the route's workflow. Another
+scope's steps are never candidates. See the selected observer design for request states,
+mapping, cancellation, and Retry. Launch-step projection remains unchanged.
 
 ## Launch-step projection
 
@@ -153,11 +155,11 @@ drawer; this change adds no route, fixed control, or safe-area boundary.
 
 ## Failure and recovery
 
-If workflow steps are unavailable, the dialog keeps the selected workflow
-snapshot as a temporary fallback and the remaining form stays usable. A
-successful empty response omits the destination and preview controls rather
-than retaining stale snapshot steps. Workflow identity filtering prevents
-another workflow's fetched steps from becoming candidates.
+If workflow steps are unavailable and no eligible loaded steps exist, the
+destination and preview controls remain absent. The remaining form stays usable.
+A successful empty response omits these controls rather than retaining stale
+snapshot steps. Scope filtering prevents another workflow's steps from becoming
+candidates. The metadata observer owns recovery for both dialog consumers.
 
 If steps arrive after the dialog opens, the derived model updates from those
 steps. A workflow change removes any prior preview model before new steps can

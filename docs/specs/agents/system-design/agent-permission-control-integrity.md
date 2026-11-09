@@ -33,7 +33,7 @@ to the provider rather than to an unverifiable Kandev claim.
 | --- | --- |
 | `REQ-AGENTS-PERMISSION-CONTROL-INTEGRITY-001` | [CLI flag destination](#cli-flag-destination) |
 | `REQ-AGENTS-PERMISSION-CONTROL-INTEGRITY-002` | [Initial mode delivery](#initial-mode-delivery), [Mode confirmation and attribution](#mode-confirmation-and-attribution) |
-| `REQ-AGENTS-PERMISSION-CONTROL-INTEGRITY-003` | [Auto-approve selection](#auto-approve-selection) |
+| `REQ-AGENTS-PERMISSION-CONTROL-INTEGRITY-003` | [Auto-approve selection](#auto-approve-selection), [Automatic approval presentation](#automatic-approval-presentation) |
 | `REQ-AGENTS-PERMISSION-CONTROL-INTEGRITY-004` | [Configure contract cleanup](#configure-contract-cleanup) |
 | `REQ-AGENTS-PERMISSION-CONTROL-INTEGRITY-005` | [End-to-end evidence](#end-to-end-evidence) |
 | `REQ-AGENTS-PERMISSION-CONTROL-INTEGRITY-006` | [Workspace-seeded agent configuration](#workspace-seeded-agent-configuration) |
@@ -121,7 +121,7 @@ acceptance check can run with a separately supplied test credential.
 
 ### Evidence and correction
 
-Kandev pins Claude ACP to `0.81.2` in
+Kandev pins Claude ACP to `0.100.0` in
 `apps/backend/internal/agent/agents/managed_npm_runtime_versions.json`.
 The npm release identifies upstream commit
 `5dbb453c63a89746627799b2b06b31ba01a1b674`.
@@ -381,6 +381,12 @@ the old agentctl already delivered. Reload and session replay read the durable
 selection. The delivery-timeout auto-cancel in `sendPermissionNotification`
 records a distinct `timed_out` result.
 
+## Automatic approval presentation
+
+[Automatic permission presentation](automatic-permission-presentation.md)
+owns criteria 003.12-003.17 across message creation, failure, replay, attention
+projections, and desktop/phone chat. It preserves the audit ordering above.
+
 ## Mode mismatch presentation
 
 `mode-selector.tsx` shares the current mode, requested mode, and selection
@@ -467,3 +473,5 @@ or on network access. Backend integration coverage asserts the same contract at
   supersedes automatic mode overlays and completes config-option confirmation.
 - [Auggie confirmed-mode startup repair](../../../plans/auggie-confirmed-mode-startup/plan.md)
   adds already satisfied legacy-mode handling without changing silent mutations.
+- [Automatic permission presentation repair](../../../plans/automatic-permission-presentation/plan.md)
+  removes transient input prompts while preserving durable decision ordering.

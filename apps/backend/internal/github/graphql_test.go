@@ -141,11 +141,11 @@ func (e *mixedBatchExecutor) ExecuteGraphQL(_ context.Context, query string, _ m
 	return json.Unmarshal([]byte(e.prResponse), out)
 }
 
-// TestFetchBatchedWatchStatusesKeepsCompletedPhaseAcrossAdmissionDeferral
-// protects mixed numbered/searching batches. A numbered result must remain
-// available when the following branch phase is deferred, otherwise every retry
-// re-runs the numbered query and keeps re-triggering branch pacing forever.
-func TestFetchBatchedWatchStatusesKeepsCompletedPhaseAcrossAdmissionDeferral(t *testing.T) {
+// TestBatchedWatchPhases_NumberedPhaseSurvivesSearchingDeferral protects mixed
+// numbered/searching batches. A numbered result must remain available when the
+// following branch phase is deferred, otherwise every retry re-runs the
+// numbered query and keeps re-triggering branch pacing forever.
+func TestBatchedWatchPhases_NumberedPhaseSurvivesSearchingDeferral(t *testing.T) {
 	exec := &mixedBatchExecutor{
 		prResponse:     batchedPRReviewThreadsResponse(t, 0, nil, false, ""),
 		branchResponse: batchedBranchReviewThreadsResponse(t, 0, nil, false, ""),
@@ -156,38 +156,53 @@ func TestFetchBatchedWatchStatusesKeepsCompletedPhaseAcrossAdmissionDeferral(t *
 	searching := []*PRWatch{{Owner: "o", Repo: "r", Branch: "feat"}}
 	ctx := pollerContext(context.Background())
 
-	if _, err := service.fetchBatchedWatchStatuses(ctx, NewMockClient(), exec, "test-scope", numbered, searching, false); err == nil {
-		t.Fatal("first mixed batch succeeded, want branch admission deferral")
-	} else {
-		var deferred *AdmissionDeferredError
-		if !errors.As(err, &deferred) {
-			t.Fatalf("first mixed batch error = %v, want admission deferral", err)
-		}
+	numberedStatuses, err := service.fetchBatchedNumberedPhase(
+		ctx, NewMockClient(), exec, "test-scope", numbered, false,
+	)
+	if err != nil {
+		t.Fatalf("numbered phase: %v", err)
+	}
+	if numberedStatuses[prStatusCacheKey("o", "r", 42)] == nil {
+		t.Fatal("completed numbered phase was withheld by the deferred branch phase")
+	}
+	searchingStatuses := newTestBatchedWatchStatuses()
+	err = service.fetchBatchedSearchingPhase(
+		ctx, NewMockClient(), exec, "test-scope", searching, searchingStatuses, false,
+	)
+	var deferred *AdmissionDeferredError
+	if !errors.As(err, &deferred) {
+		t.Fatalf("searching phase error = %v, want admission deferral", err)
 	}
 	if exec.prQueries != 1 || exec.branchQueries != 1 {
-		t.Fatalf("first mixed batch queries = PR %d, branch %d; want one each", exec.prQueries, exec.branchQueries)
+		t.Fatalf("first pass queries = PR %d, branch %d; want one each", exec.prQueries, exec.branchQueries)
 	}
 
-	statuses, err := service.fetchBatchedWatchStatuses(ctx, NewMockClient(), exec, "test-scope", numbered, searching, false)
-	if err != nil {
-		t.Fatalf("resume mixed batch: %v", err)
+	// Resume only the unfinished phase, exactly as the monitor continuation does.
+	if err := service.fetchBatchedSearchingPhase(
+		ctx, NewMockClient(), exec, "test-scope", searching, searchingStatuses, false,
+	); err != nil {
+		t.Fatalf("resume searching phase: %v", err)
 	}
 	if exec.prQueries != 1 || exec.branchQueries != 2 {
-		t.Fatalf("resumed mixed batch queries = PR %d, branch %d; want numbered preserved and branch retried", exec.prQueries, exec.branchQueries)
+		t.Fatalf("resumed queries = PR %d, branch %d; want numbered preserved and branch retried", exec.prQueries, exec.branchQueries)
 	}
-	if statuses.byKey[prStatusCacheKey("o", "r", 42)] == nil {
-		t.Fatal("resumed mixed batch omitted numbered result")
-	}
-	if statuses.byKey[graphqlBranchKey("o", "r", "feat")] == nil {
-		t.Fatal("resumed mixed batch omitted searching result")
+	if searchingStatuses.byKey[graphqlBranchKey("o", "r", "feat")] == nil {
+		t.Fatal("resumed searching phase omitted its result")
 	}
 }
 
-// TestFetchBatchedWatchStatusesDiscardsProgressWhenEffectiveRefsChange
-// prevents a completed phase retained for branch pacing from surviving a
-// negative-cache filter. Once the filter is lifted, that watch must fetch a
-// fresh numbered result instead of publishing the retained one.
-func TestFetchBatchedWatchStatusesDiscardsProgressWhenEffectiveRefsChange(t *testing.T) {
+func newTestBatchedWatchStatuses() *batchedWatchStatuses {
+	return &batchedWatchStatuses{
+		byKey:               make(map[string]*PRStatus),
+		branchResolvedEmpty: make(map[string]struct{}),
+	}
+}
+
+// TestBatchedWatchPhases_DiscardProgressWhenEffectiveRefsChange prevents a
+// completed phase retained for branch pacing from surviving a negative-cache
+// filter. Once the filter is lifted, that watch must fetch a fresh numbered
+// result instead of publishing the retained one.
+func TestBatchedWatchPhases_DiscardProgressWhenEffectiveRefsChange(t *testing.T) {
 	exec := &mixedBatchExecutor{
 		prResponse:     batchedPRReviewThreadsResponse(t, 0, nil, false, ""),
 		branchResponse: batchedBranchReviewThreadsResponse(t, 0, nil, false, ""),
@@ -198,24 +213,39 @@ func TestFetchBatchedWatchStatusesDiscardsProgressWhenEffectiveRefsChange(t *tes
 	searching := []*PRWatch{{Owner: "o", Repo: "r", Branch: "feat"}}
 	ctx := pollerContext(context.Background())
 
-	if _, err := service.fetchBatchedWatchStatuses(ctx, NewMockClient(), exec, "test-scope", numbered, searching, false); err == nil {
-		t.Fatal("first mixed batch succeeded, want branch admission deferral")
+	if _, err := service.fetchBatchedNumberedPhase(ctx, NewMockClient(), exec, "test-scope", numbered, false); err != nil {
+		t.Fatalf("first numbered phase: %v", err)
+	}
+	if err := service.fetchBatchedSearchingPhase(
+		ctx, NewMockClient(), exec, "test-scope", searching, newTestBatchedWatchStatuses(), false,
+	); err == nil {
+		t.Fatal("first searching phase succeeded, want branch admission deferral")
 	}
 	service.markRepoAsMissingForScope("test-scope", "o", "r", service.repoErrorGenSnapshot())
-	if _, err := service.fetchBatchedWatchStatuses(ctx, NewMockClient(), exec, "test-scope", numbered, searching, false); err != nil {
-		t.Fatalf("negative-cached mixed batch: %v", err)
+	if _, err := service.fetchBatchedNumberedPhase(ctx, NewMockClient(), exec, "test-scope", numbered, false); err != nil {
+		t.Fatalf("negative-cached numbered phase: %v", err)
+	}
+	if err := service.fetchBatchedSearchingPhase(
+		ctx, NewMockClient(), exec, "test-scope", searching, newTestBatchedWatchStatuses(), false,
+	); err != nil {
+		t.Fatalf("negative-cached searching phase: %v", err)
 	}
 	service.repoErrorCache.clear()
 
-	statuses, err := service.fetchBatchedWatchStatuses(ctx, NewMockClient(), exec, "test-scope", numbered, searching, false)
+	numberedStatuses, err := service.fetchBatchedNumberedPhase(ctx, NewMockClient(), exec, "test-scope", numbered, false)
 	if err != nil {
-		t.Fatalf("mixed batch after negative-cache clear: %v", err)
+		t.Fatalf("numbered phase after negative-cache clear: %v", err)
+	}
+	if err := service.fetchBatchedSearchingPhase(
+		ctx, NewMockClient(), exec, "test-scope", searching, newTestBatchedWatchStatuses(), false,
+	); err != nil {
+		t.Fatalf("searching phase after negative-cache clear: %v", err)
 	}
 	if exec.prQueries != 2 || exec.branchQueries != 2 {
 		t.Fatalf("queries after effective-ref change = PR %d, branch %d; want fresh fetches", exec.prQueries, exec.branchQueries)
 	}
-	if statuses.byKey[prStatusCacheKey("o", "r", 42)] == nil {
-		t.Fatal("fresh mixed batch omitted numbered result")
+	if numberedStatuses[prStatusCacheKey("o", "r", 42)] == nil {
+		t.Fatal("fresh numbered phase omitted its result")
 	}
 }
 

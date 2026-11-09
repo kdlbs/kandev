@@ -1,7 +1,7 @@
 import { waitForSessionDone, waitForSessionGitHydration } from "../../helpers/session";
 import { type Page } from "@playwright/test";
 import path from "node:path";
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import {
   GitHelper,
@@ -49,6 +49,7 @@ test.describe("File tree search", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
     git.createFile("search-alpha.ts", "a");
     // Match lives inside a folder we never expand. Search must still find it.
     git.createFile("deep/nested/needle-target.ts", "needle");
@@ -92,6 +93,7 @@ test.describe("File tree search", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
     git.createFile("clear-alpha.ts", "a");
     git.createFile("clear-bravo.ts", "b");
     git.stageAll();

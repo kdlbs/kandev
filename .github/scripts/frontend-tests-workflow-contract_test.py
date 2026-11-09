@@ -56,6 +56,13 @@ def frontend_gate_job(workflow: str) -> str:
     return remainder
 
 
+def changes_job(workflow: str) -> str:
+    _, separator, remainder = workflow.partition("  changes:\n")
+    if not separator:
+        raise AssertionError("frontend-tests.yml has no changes job")
+    return re.split(r"\n  [\w-]+:\n", remainder)[0]
+
+
 def trigger_block(workflow: str, trigger: str) -> str:
     """Return `trigger`'s block under `on:`, up to the next top-level key."""
     block = re.search(rf"(?m)^  {trigger}:\n(?:^ {{4}}.*\n|^\n)*", workflow)
@@ -152,8 +159,119 @@ class FrontendTestsWorkflowContractTest(unittest.TestCase):
         self.assertIn("if: always()", upload)
         self.assertIn("if-no-files-found: error", upload)
         self.assertIn("name: frontend-test-results-${{ matrix.shard }}", upload)
-        self.assertIn("path: apps/web/test-results-${{ matrix.shard }}.json", upload)
+        self.assertIn("apps/web/test-results-${{ matrix.shard }}.json", upload)
+        self.assertIn("apps/web/frontend-timing-${{ matrix.shard }}.json", upload)
         self.assertNotIn("continue-on-error", upload)
+
+    def test_changes_job_restores_an_optional_profile_and_freezes_one_shared_input(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        changes = changes_job(workflow)
+
+        self.assertIn("timing_digest: ${{ steps.timing-snapshot.outputs.digest }}", changes)
+        self.assertIn("timing_run_id: ${{ steps.timing-snapshot.outputs.run_id }}", changes)
+        self.assertIn("timing_attempt: ${{ steps.timing-snapshot.outputs.attempt }}", changes)
+        self.assertIn("timing_profile_producer_run_id", changes)
+        self.assertIn("actions/cache/restore@", changes)
+        self.assertIn("continue-on-error: true", changes)
+        self.assertIn("node .github/scripts/frontend-timings.mjs snapshot", changes)
+        self.assertIn("actions/upload-artifact@", changes)
+        self.assertIn("name: ${{ steps.timing-snapshot.outputs.artifact_name }}", changes)
+        self.assertIn(".github/scripts/frontend-timings.*", changes)
+        self.assertNotIn("pnpm install", changes)
+
+    def test_frontend_timing_cache_uses_the_same_relative_path_and_compatible_key(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        changes = changes_job(workflow)
+        gate = frontend_gate_job(workflow)
+        restore = changes.split("      - name: Restore frontend timing profile\n", 1)[1].split(
+            "\n      - name:", 1
+        )[0]
+        save = gate.split("      - name: Publish verified frontend timing profile\n", 1)[1].split(
+            "\n      - name:", 1
+        )[0]
+
+        restore_path = re.search(r"(?m)^\s+path: (.+)$", restore)
+        save_path = re.search(r"(?m)^\s+path: (.+)$", save)
+        restore_key = re.search(r"(?m)^\s+key: (.+)$", restore)
+        restore_prefix = re.search(r"(?m)^\s+restore-keys: (.+)$", restore)
+        save_key = re.search(r"(?m)^\s+key: (.+)$", save)
+
+        self.assertIsNotNone(restore_path)
+        self.assertIsNotNone(save_path)
+        self.assertEqual(restore_path.group(1), ".github/cache/frontend-timing-profile")
+        self.assertEqual(save_path.group(1), restore_path.group(1))
+        self.assertIn(".github/cache/frontend-timing-profile/profile.json", changes)
+        self.assertIn(".github/cache/frontend-timing-profile/profile.json", gate)
+        self.assertIsNotNone(restore_key)
+        self.assertIsNotNone(restore_prefix)
+        self.assertIsNotNone(save_key)
+
+        run_identity = "${{ github.run_id }}-${{ github.run_attempt }}"
+        restore_key_prefix = restore_key.group(1).removesuffix(run_identity)
+        save_key_prefix = save_key.group(1).removesuffix(run_identity)
+        self.assertEqual(restore_key_prefix, restore_prefix.group(1))
+        self.assertTrue(restore_key_prefix.endswith("-"))
+        self.assertIn("hashFiles('apps/pnpm-lock.yaml', 'apps/web/vitest.config.ts', 'apps/web/scripts/vitest-project-selection.ts')", restore_key_prefix)
+        self.assertEqual(
+            save_key_prefix,
+            "frontend-timings-v1-${{ runner.os }}-${{ runner.arch }}-${{ needs.changes.outputs.timing_compatibility_hash }}-",
+        )
+
+    def test_frontend_gate_checks_out_source_before_calling_local_actions(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        gate = frontend_gate_job(workflow)
+        checkout_position = gate.find("- name: Checkout source for local actions\n")
+        local_actions = list(re.finditer(r"(?m)^\s+uses: \.\/\.github\/actions\/", gate))
+
+        self.assertGreaterEqual(checkout_position, 0)
+        self.assertTrue(local_actions, "the gate should continue to use its local retry action")
+        self.assertLess(checkout_position, local_actions[0].start())
+        checkout = gate[checkout_position:].split("\n      - name:", 1)[0]
+        relevant_run_condition = (
+            "needs.changes.outputs.run == 'true' && needs.frontend.result == 'success' "
+            "&& needs.frontend_tests.result == 'success'"
+        )
+        checkout_condition = re.search(r"(?m)^\s+if: (.+)$", checkout)
+        self.assertIsNotNone(checkout_condition)
+        self.assertEqual(checkout_condition.group(1), relevant_run_condition)
+        self.assertIn("ref: ${{ github.sha }}", checkout)
+        self.assertIn("persist-credentials: false", checkout)
+        for local_action in local_actions:
+            step_start = gate.rfind("      - name:", 0, local_action.start())
+            step_end = gate.find("\n      - name:", local_action.start())
+            step = gate[step_start:] if step_end < 0 else gate[step_start:step_end]
+            action_condition = re.search(r"(?m)^\s+if: (.+)$", step)
+            self.assertIsNotNone(action_condition)
+            self.assertEqual(action_condition.group(1), relevant_run_condition)
+
+    def test_shards_download_the_same_snapshot_and_keep_native_discovery(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        shards = workflow.split("  frontend_tests:\n", 1)[1].split("  frontend-gate:", 1)[0]
+
+        self.assertIn("needs: [changes]", shards)
+        self.assertIn("needs.changes.outputs.timing_artifact_name", shards)
+        self.assertIn("KANDEV_FRONTEND_TIMINGS_ENABLED: \"1\"", shards)
+        self.assertIn("FRONTEND_TIMING_SNAPSHOT_DIGEST: ${{ needs.changes.outputs.timing_digest }}", shards)
+        self.assertIn("FRONTEND_TIMING_SNAPSHOT_RUN_ID: ${{ needs.changes.outputs.timing_run_id }}", shards)
+        self.assertIn("FRONTEND_TIMING_SNAPSHOT_ATTEMPT: ${{ needs.changes.outputs.timing_attempt }}", shards)
+        self.assertIn("--shard=\"${FRONTEND_TEST_SHARD}/2\"", run_tests_step(workflow))
+        self.assertIn("--reporter=./scripts/vitest-ci-reporter.ts", run_tests_step(workflow))
+        self.assertNotIn("--include", run_tests_step(workflow))
+
+    def test_existing_gate_reconciles_both_reports_before_main_only_profile_publication(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        gate = frontend_gate_job(workflow)
+
+        self.assertIn("needs: [changes, frontend, frontend_tests]", gate)
+        self.assertIn("pattern: frontend-test-results-*", gate)
+        self.assertIn("node \"${TIMING_HELPER}\" reconcile", gate)
+        self.assertIn("--snapshot-digest \"${SNAPSHOT_DIGEST}\"", gate)
+        self.assertIn("Publish verified frontend timing profile", gate)
+        self.assertIn("github.event_name == 'push'", gate)
+        self.assertIn("github.ref == 'refs/heads/main'", gate)
+        self.assertIn("actions/cache/save@", gate)
+        self.assertIn("continue-on-error: true", gate)
+        self.assertNotIn("pnpm install", gate)
 
     def test_required_gate_requires_every_frontend_verification_result(self) -> None:
         gate = frontend_gate_job(WORKFLOW.read_text(encoding="utf-8"))
@@ -244,6 +362,11 @@ class FrontendTestsWorkflowContractTest(unittest.TestCase):
             "lint-action-pinning.yml must run this file, as a live step rather "
             "than a commented-out one. Without it this file is dead code and "
             "every assertion here silently stops guarding.",
+        )
+        self.assertIn(
+            "run: node --test .github/scripts/frontend-timings.test.mjs",
+            lint_workflow,
+            "The timing helper's fixtures must run in the always-on CI contract workflow.",
         )
 
 

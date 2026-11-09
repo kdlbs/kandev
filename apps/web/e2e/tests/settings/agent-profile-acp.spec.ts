@@ -90,15 +90,16 @@ test.describe("Agent profile — ACP-first", () => {
     expect(Math.abs(popoverBox!.x - selectorBox!.x)).toBeLessThanOrEqual(12);
   });
 
-  test("profile name edits persist across reload", async ({ testPage, apiClient }) => {
+  test("profile name edits persist across reload", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(60_000);
 
-    // Use the seeded default profile rather than creating a new one — the
-    // profile editor page reads from the agents list that's hydrated on the
-    // server, and a freshly POSTed profile race-conditions with SSR.
+    // Use the seeded profile independently of catalog order or profileless families.
     const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const agent = agents.find((candidate) =>
+      candidate.profiles.some((profile) => profile.id === seedData.agentProfileId),
+    );
+    const profile = agent?.profiles.find((candidate) => candidate.id === seedData.agentProfileId);
+    if (!agent || !profile) throw new Error("Seeded agent profile is missing from the catalog");
     const originalName = profile.name;
 
     try {

@@ -106,6 +106,15 @@ func TestConfigTaskRiskAnnotationsMatchTaskMode(t *testing.T) {
 	assert.False(t, *deleteTool.OpenWorldHint)
 }
 
+func TestListExecutorsToolIsReadOnly(t *testing.T) {
+	s := New(&testBackend{}, "test-session", "", 10005, newTestLogger(t), "", false, ModeConfig)
+
+	tool, ok := s.mcpServer.ListTools()["list_executors_kandev"]
+	require.True(t, ok)
+	require.NotNil(t, tool.Tool.Annotations.ReadOnlyHint)
+	assert.True(t, *tool.Tool.Annotations.ReadOnlyHint)
+}
+
 func TestAskUserQuestionPublishesAndReturnsStructuredOutput(t *testing.T) {
 	backend := &testBackend{response: map[string]interface{}{
 		"answers": []interface{}{map[string]interface{}{

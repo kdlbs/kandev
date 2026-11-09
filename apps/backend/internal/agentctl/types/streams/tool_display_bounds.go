@@ -7,39 +7,22 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 )
 
 const (
-	toolValueBytes   = 64 << 10
-	toolPreviewBytes = 4 << 10
+	toolValueBytes   = int(deliverylimits.GenericValueBytes)
+	toolPreviewBytes = int(deliverylimits.PreviewBytes)
 	toolValueNodes   = 256
 	toolValueDepth   = 16
 )
 
-// BoundGenericToolEvent limits presentation data before it enters a delivery
-// queue. The existing generic JSON shape carries the truncation marker, so
-// accepted payloads need no new wire fields or replay/hash interpretation.
+// BoundGenericToolEvent is retained for callers that used the generic-only
+// policy. It now delegates to the shared all-category preparation so typed
+// tool reports cannot bypass the display budget.
 func BoundGenericToolEvent(event AgentEvent) AgentEvent {
-	if (event.Type != EventTypeToolCall && event.Type != EventTypeToolUpdate) || event.NormalizedPayload == nil || event.NormalizedPayload.Generic() == nil {
-		return event
-	}
-	payload := *event.NormalizedPayload
-	generic := *payload.generic
-	generic.Input = boundToolValue(generic.Input)
-	generic.Output = boundToolValue(generic.Output)
-	if !toolContentsFit(event.ToolCallContents) {
-		if generic.Output == nil {
-			generic.Output = toolContentsPreview(event.ToolCallContents)
-		}
-		generic.Output = truncatedToolValue(generic.Output)
-		marker, _ := json.Marshal(generic.Output)
-		event.ToolCallContents = []ToolCallContentItem{{Type: "content", Content: &ContentBlock{Type: "text", Text: string(marker)}}}
-	} else {
-		event.ToolCallContents = copyToolContents(event.ToolCallContents)
-	}
-	payload.generic = &generic
-	event.NormalizedPayload = &payload
-	return event
+	return PrepareToolEvent(event)
 }
 
 func boundToolValue(value any) any {

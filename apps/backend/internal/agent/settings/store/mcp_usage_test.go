@@ -35,7 +35,8 @@ func testMCPCatalogUsageStore(t *testing.T, repo *sqliteRepository) {
 		require.NoError(t, repo.ReplaceMCPSelections(ctx, scope, def.WorkspaceID, owner, []string{def.ID}))
 	}
 	// A stale profile association for a different workspace must not leak.
-	require.NoError(t, repo.ReplaceMCPSelections(ctx, mcpconfig.SelectionScopeProfile, "other", profileID, []string{def.ID}))
+	_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`INSERT INTO workspace_agent_profile_mcp_selections (workspace_id, profile_id, mcp_server_id) VALUES (?, ?, ?)`), "other", profileID, def.ID)
+	require.NoError(t, err)
 	usage, ok := any(repo).(mcpconfig.CatalogUsageRepository)
 	require.True(t, ok, "store must expose read-only usage")
 	first, err := usage.ListMCPUsageCandidates(ctx, def.WorkspaceID, def.ID, mcpconfig.UsageReference{}, 2)

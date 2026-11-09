@@ -16,10 +16,11 @@ var (
 	ErrTaskExists = errors.New("task already exists in queue")
 )
 
-// priorityRank converts a text priority label to an integer rank used for
+// PriorityRank converts a text priority label to an integer rank used for
 // heap ordering. Unknown values map to medium (2) so newly-created tasks
-// without a priority still have stable ordering.
-func priorityRank(p string) int {
+// without a priority still have stable ordering. Exported so the session
+// ceiling's message-wait pass can reuse the same ranking as task scheduling.
+func PriorityRank(p string) int {
 	switch p {
 	case "critical":
 		return 4
@@ -112,7 +113,7 @@ func (q *TaskQueue) Enqueue(task *v1.Task) error {
 
 	qt := &QueuedTask{
 		TaskID:   task.ID,
-		Priority: priorityRank(task.Priority),
+		Priority: PriorityRank(task.Priority),
 		QueuedAt: time.Now(),
 		Task:     task,
 	}

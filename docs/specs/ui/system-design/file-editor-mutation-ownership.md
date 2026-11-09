@@ -3,6 +3,7 @@ status: current
 system: ui
 requirements:
   - REQ-UI-FILE-EDITOR-MUTATION-001
+  - REQ-UI-FILE-EDITOR-MUTATION-002
 ---
 
 # File Editor Mutation Ownership System Design
@@ -37,6 +38,7 @@ closure. No common coordinator or responsive layout change is introduced.
 | `AC-UI-FILE-EDITOR-MUTATION-001.8` | Refresh consumer lifetime |
 | `AC-UI-FILE-EDITOR-MUTATION-001.9` | Live refresh reconciliation; Refresh verification and surfaces |
 | `AC-UI-FILE-EDITOR-MUTATION-001.10` | Save receipt and workspace observation reconciliation |
+| `AC-UI-FILE-EDITOR-MUTATION-002.1`–`.5` | Open editor rename continuity |
 
 ## Components and current lifecycle
 
@@ -333,3 +335,128 @@ The requirement/design and regression tests preserve this rationale; no ADR is
 needed. The separate tablet tabs and phone viewer are unchanged. Desktop E2E
 proves Reload after a delayed successful receipt with real disk content; the
 existing mobile file viewer scenario proves the separate Files entry path.
+
+## Open editor rename continuity
+
+### Identity, admission and delivery
+
+Files calls `useFileOperations.renameFile` with canonical workspace-relative
+old/new tree paths and no `repo`; `fetchAndOpenFile` from Files likewise opens
+that tree path without a repo. Other openers pass a repository-relative path
+and `repo`, which the backend's `JoinRepoPath` interprets under the workspace
+root. Compare each open editor by its workspace path: `repo + "/" + path` for
+nonempty repo, otherwise `path`. Require canonical `isWorkspaceTreePath`
+segments for both parts and tree paths; do not use repository display labels or
+substring matches. Exact source or source plus `/` matches; preserve its suffix.
+For the resulting editor, retain its repo only when the resulting tree path is
+strictly inside that same repo root, stripping `repo + "/"`; otherwise use an
+unscoped workspace-relative path. This handles a folder move out of a repo
+without routing a future save into the old repo. Compare destination collisions
+using the same workspace path so repo-scoped and unscoped aliases cannot hide
+one another. Invalid or ambiguous mappings fail before the request with the
+existing `failedToRenameItem` / `common:anUnknownErrorOccurred` feedback.
+
+At admission `useFileOperations` reads the app store's selected session and
+`environmentIdBySessionId`, and captures a committed consumer/visit token. The
+Files request session can be the environment-stable session; accept its mapping
+only when it equals the selected session's environment. When no environment
+mapping exists, require the exact same session ID for request and selected
+session, and retire the capture if either mapping or visit changes. Never treat
+missing IDs from different sessions as equal. Capture the Dockview API, each
+matching panel object and buffer `instanceId`; capture tablet tab instance IDs
+through the owner described below. At settlement require the originating visit,
+environment, host, source key and instance to still match. A switch away and
+back cannot revive an old visit. Failed response or exception publishes nothing.
+
+Use a narrowly scoped app-store reservation for this Files operation, keyed by
+captured environment (or exact session fallback), holding source and destination
+workspace path prefixes and an operation token. Before dispatch, examine all
+open source and destination editor identities in the current host. If any
+open buffer/panel lies at the destination or below its folder prefix and is
+not one of the matching source editors, two source aliases map to one destination,
+or a pending reservation overlaps either path,
+return false before calling `renameFile` and
+show the existing `failedToRenameItem` feedback. Reserve both prefixes synchronously
+before transport; prevent opening or restoring any file at or under them through
+`useFileEditors` and tablet `addFileTab`/restoration while pending, using existing `failedToOpenFile` feedback. Recheck the reservation before both admitting an open
+and publishing its result after an await: a fetch begun before reservation may
+not install a buffer during it. Defer matching saved-tab restoration until
+release, retain its persisted descriptors, and recheck the visit before retrying;
+do not persist a temporary empty list. A source panel whose buffer is not yet
+installed must be rejected before dispatch using the existing generic failure
+feedback; it cannot provide a stable incarnation to retarget. This closes the
+in-flight destination collision window without changing general save ordering.
+Other paths and environments remain available. Release only the matching token in `finally`; a partial move admits
+and settles each independent root separately. The normal browser move failure
+summary remains intact. Recheck destinations at publication as well: if an unanticipated host path
+installs a distinct buffer despite the reservation, preserve both buffers and
+show the existing open-failure feedback. The accepted filesystem rename is not
+rolled back and the old editor still needs user attention. This is a transient
+admission guard for Files rename, not a general filesystem or lifecycle
+coordinator.
+
+`FilesPanel` passes the desktop retarget adapter to `useFileOperations`; it
+reads/captures the Dockview owner synchronously. `SessionTabletLayout` owns a
+ref to an imperative adapter registered by its mounted `TaskCenterPanel` and
+passes it down to `TaskFilesPanel` / `useFilesPanelData` / `useFileOperations`.
+The adapter captures its local tabs and committed selected-session visit and
+returns a settlement function; on success it uses functional tab updates
+matching captured `instanceId`s, changes path/name/repo and selected
+`leftTab`, and lets `usePersistOpenFileTabs` write the new descriptor. Cleanup
+unregisters the exact adapter; a replacement or unmounted center cannot receive
+an earlier result. No component imports from the state layer. Phone has no
+editable tab and supplies no editor adapter.
+
+### Dockview replacement and persistence
+
+Dockview 4.13.1's public `addPanel` supports `position.referenceGroup`,
+`position.index` and `inactive`; `removePanel` removes/disposes the old panel.
+A pinned ID is immutable and path-derived. For each captured pinned panel,
+snapshot group, tab index, active panel, params, `panel.view.contentComponent`,
+`panel.view.tabComponent`, and buffer. Preserve the optional renderer and
+constraints from `panel.toJSON()` when constructing the replacement. Suppress
+editor-tab and active-tab persistence only for the synchronous retarget
+transaction. Atomically move the existing `openFiles` entry to the new
+repo-scoped key, changing path/name/repo while preserving its `instanceId`,
+content, baseline and flags; do not use `setFileState`, which creates a new
+incarnation. Add the replacement with `id: file:<new-key>`, same group and old
+index, `inactive: true`, matching component/tab component and updated params;
+then `api.removePanel(oldPanel)`. Its synchronous `useFileEditors` removal
+listener deletes the old key only, now absent; `setupPortalCleanup` releases
+only the old portal. The replacement keeps the group alive, including floating
+groups. If the old panel was globally active, activate the replacement; if it
+was the selected panel of an inactive group, activate the replacement then
+restore the previously globally active panel. Otherwise retain the previous
+active panel. Ensure panel dirty parameters/title match the captured buffer.
+Resume persistence and write `buildPersistedTabs` and the final active panel ID
+once after the full set settles. The existing debounced layout persistence must
+serialize only the settled layout; guard its immediate/unload flush while this
+synchronous transaction is active, then schedule the normal settled write. The new panel mounts against the already moved
+buffer; `useFileLoader` sees `hasFile` and does not fetch. The existing active
+tab workspace sync can still run under its existing owner checks. Tests must
+verify no fallback loader or removal callback overwrites the buffer.
+The replacement retains text and baseline, but may reset editor undo history.
+Preserving history across Monaco's new document URI and CodeMirror remount is
+outside this bounded ownership change.
+
+For `preview:file-editor`, do not replace the panel: atomically rekey the buffer,
+update path/repo and `previewItemId` through `updateParameters`, preserve
+`promoted`, and update its title. The existing active-preview parameter
+subscription updates `activeFilePath`. Persist once after all affected panels are
+coherent. Old save/refresh completions still fail their old-key owner checks;
+ordinary future saves use the new key and existing baseline. Tests exercise
+pinned, preview, promoted, active/inactive groups, tab order, cleanup and
+persistence. If an unexpected host/API failure occurs, retain the buffer and
+report it; do not silently merge or drop data.
+
+During tab restoration, save the settled current tab list after loading ends,
+only if the originating session visit and Dockview host are still current.
+Absolute editor paths are excluded from collision checks only when the active
+session's known workspace root proves they are outside that workspace; unknown
+or ambiguous paths remain protected by the collision guard.
+
+Tablet `TaskCenterPanel` has separate local tabs and active selection. Phone
+`MobileFileViewerPanel` is read-only and replaces Files while open; its visible
+touch menu contains no rename action. Do not invent a phone editing surface.
+The existing mutation completion and refresh ownership rules remain applicable;
+this change does not establish ordering for saves already in flight at rename.

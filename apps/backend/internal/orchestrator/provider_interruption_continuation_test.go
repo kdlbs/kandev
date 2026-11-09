@@ -48,6 +48,91 @@ func TestInterruptionContinuationAdmissionWithoutOptIn(t *testing.T) {
 	require.Equal(t, "continue", mc.sessionMessages[0].metadata["recovery_mode"])
 }
 
+func TestInterruptionContinuationPendingToolsRequiresRetainedTransport(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*watcher.AgentEventData)
+	}{
+		{"runtime not retained", func(data *watcher.AgentEventData) {
+			data.PromptFailureDisposition = ""
+		}},
+		{"non-transport failure", func(data *watcher.AgentEventData) {
+			data.PromptFailureDisposition = streams.PromptFailureDispositionRetainRuntime
+			data.ErrorMessage = "Error: RetriableError: [resource_exhausted] Error"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, data := continuationFailureFixture(t)
+			t.Cleanup(svc.cancelAllTransientRetries)
+			data.AgentProfileID = "profile-1"
+			data.ErrorMessage = realPeerDisconnected
+			data.ContinuationSafety = &streams.ContinuationSafetySnapshot{
+				Support: streams.ContinuationAgentManagedToolsV3, PromptGeneration: 7,
+				Known: true, Pending: true, PermissionsResolved: true,
+			}
+			tc.mutate(&data)
+			require.False(t, svc.handleTransientFailure(context.Background(), data))
+			_, owned := svc.transientRetries.Load("s1")
+			require.False(t, owned)
+		})
+	}
+}
+
+func TestInterruptionContinuationPendingPolicySticksAfterAcceptedContinue(t *testing.T) {
+	svc, _, data := continuationFailureFixture(t)
+	data.AgentProfileID = "profile-1"
+	data.ErrorMessage = realPeerDisconnected
+	data.PromptFailureDisposition = streams.PromptFailureDispositionRetainRuntime
+	data.ContinuationSafety = &streams.ContinuationSafetySnapshot{
+		Support: streams.ContinuationAgentManagedToolsV3, PromptGeneration: 7,
+		Known: true, Pending: true, PermissionsResolved: true,
+	}
+	first := svc.continuationBindingForFailure(context.Background(), data)
+	require.NotNil(t, first)
+	require.Equal(t, continuationPolicy("agent_managed_pending_live"), first.policy)
+
+	accepted := &transientRetryEntry{
+		mode: recoveryModeContinue, continuationPolicy: first.policy, continuation: first,
+		retainedRuntime: &retainedRuntimeRetry{executionID: data.AgentExecutionID},
+		started:         1, acceptedExecution: data.AgentExecutionID, acceptedGeneration: 8,
+	}
+	next := data
+	next.PromptGeneration = 8
+	next.ContinuationSafety = &streams.ContinuationSafetySnapshot{
+		Support: streams.ContinuationAgentManagedToolsV3, PromptGeneration: 8,
+		Known: true, PermissionsResolved: true,
+	}
+	svc.beginPromptAttempt(next.SessionID, next.AgentExecutionID, next.PromptGeneration, false)
+
+	binding := svc.continuationBindingForFailureWithPrevious(context.Background(), next, accepted)
+	require.NotNil(t, binding)
+	require.Equal(t, first, binding, "a clean later snapshot must not switch the accepted pending-tool episode to restoration")
+}
+
+func TestInterruptionContinuationPendingPolicyFailsClosedWithoutLaterSnapshot(t *testing.T) {
+	svc, _, data := continuationFailureFixture(t)
+	data.AgentProfileID = "profile-1"
+	data.ErrorMessage = realPeerDisconnected
+	data.PromptFailureDisposition = streams.PromptFailureDispositionRetainRuntime
+	data.ContinuationSafety = &streams.ContinuationSafetySnapshot{
+		Support: streams.ContinuationAgentManagedToolsV3, PromptGeneration: 7,
+		Known: true, Pending: true, PermissionsResolved: true,
+	}
+	first := svc.continuationBindingForFailure(context.Background(), data)
+	require.NotNil(t, first)
+	accepted := &transientRetryEntry{
+		mode: recoveryModeContinue, continuationPolicy: first.policy, continuation: first,
+		retainedRuntime: &retainedRuntimeRetry{executionID: data.AgentExecutionID},
+		started:         1, acceptedExecution: data.AgentExecutionID, acceptedGeneration: 8,
+	}
+	next := data
+	next.PromptGeneration = 8
+	next.ContinuationSafety = nil
+	svc.beginPromptAttempt(next.SessionID, next.AgentExecutionID, next.PromptGeneration, false)
+
+	require.Nil(t, svc.continuationBindingForFailureWithPrevious(context.Background(), next, accepted))
+}
+
 // @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-001.3
 func TestInterruptionContinuationDispatchUsesNativeIdentity(t *testing.T) {
 	svc, _, data := continuationFailureFixture(t)

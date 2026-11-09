@@ -946,6 +946,7 @@ export const NativeMessageList = memo(
       childrenByParentToolCallId,
       taskId,
       sessionId,
+      detailActive,
       messagesLoading,
       historyRefreshPending = false,
       historyStatus = "ready",
@@ -975,7 +976,7 @@ export const NativeMessageList = memo(
   ) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const showTurnChangedFiles = useAppStore((state) => state.userSettings.showTurnChangedFiles);
-    const turnChanges = useSessionTurnChanges(sessionId);
+    const turnChanges = useSessionTurnChanges(sessionId, { detailActive });
 
     const visibleItems = useMemo(
       () =>

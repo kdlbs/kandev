@@ -111,7 +111,7 @@ cat >/dev/null
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.GET("/health", func(c *gin.Context) { c.Status(http.StatusOK) })
-	agentctlutil.NewHandler("", zap.NewNop()).RegisterRoutes(router.Group("/api/v1"))
+	agentctlutil.NewHandler("", nil, zap.NewNop()).RegisterRoutes(router.Group("/api/v1"))
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 	log := newTestLogger(t)

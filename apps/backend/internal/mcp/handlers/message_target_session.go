@@ -75,7 +75,7 @@ func (h *Handlers) resolveMessageTargetSession(
 		session, errResp := h.resolveExplicitTargetSession(ctx, msg, taskID, sessionID)
 		return session, true, errResp
 	}
-	primary, err := h.taskSvc.GetPrimarySession(ctx, taskID)
+	primary, err := h.taskSvc.GetPrimarySessionForPrompt(ctx, taskID)
 	if err != nil && !errors.Is(err, taskrepo.ErrNoPrimarySession) {
 		return nil, false, wsError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to get session for task: "+err.Error())
 	}
@@ -113,7 +113,7 @@ func (h *Handlers) resolveMessageTargetSession(
 // can still receive a message, or nil when every session is terminal.
 // ListTaskSessions orders by started_at DESC, so the first match is the newest.
 func (h *Handlers) newestLiveSession(ctx context.Context, taskID string) (*models.TaskSession, error) {
-	sessions, err := h.taskSvc.ListTaskSessions(ctx, taskID)
+	sessions, err := h.taskSvc.ListTaskSessionsForPrompt(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func (h *Handlers) newestLiveSession(ctx context.Context, taskID string) (*model
 // a completed primary remains a dedicated terminal target so FAILED/CANCELLED
 // dispatch behavior is not changed.
 func (h *Handlers) newestCompletedSession(ctx context.Context, taskID string) (*models.TaskSession, error) {
-	sessions, err := h.taskSvc.ListTaskSessions(ctx, taskID)
+	sessions, err := h.taskSvc.ListTaskSessionsForPrompt(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func (h *Handlers) newestCompletedSession(ctx context.Context, taskID string) (*
 // transient DB errors surface as internal so callers keep retrying instead of
 // treating a live session as gone.
 func (h *Handlers) resolveExplicitTargetSession(ctx context.Context, msg *ws.Message, taskID, sessionID string) (*models.TaskSession, *ws.Message) {
-	session, err := h.taskSvc.GetTaskSession(ctx, sessionID)
+	session, err := h.taskSvc.GetTaskSessionForPrompt(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, models.ErrTaskSessionNotFound) {
 			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target session not found: "+sessionID)

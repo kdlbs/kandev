@@ -158,6 +158,11 @@ choice while a feature is unavailable and restores it when the feature is enable
 setting belongs to your account and workspace, so it follows you across clients without changing
 another user's layout.
 
+In regular workspaces, integration plugins, such as YouTrack, appear inside **Integrations** on desktop and phone.
+Their visibility controls remain individual, and their move controls reorder them within that section.
+Hiding Integrations hides its original plugin links without changing each link's visibility choice.
+Explicit shortcuts in custom sections remain independent.
+
 Create named shortcut sections for destinations, canvases, automations, and plugin links. Fold a
 section to keep its header icons visible, or open the labelled list to use a shortcut. Automation
 icons show running, idle, or paused activity. Tasks stays in its fixed navigation area, and hiding a shortcut does not disable the underlying feature.

@@ -1,3 +1,4 @@
+// @covers AC-INTEGRATIONS-GITHUB-ENTERPRISE-003.1
 import { describe, expect, it } from "vitest";
 import { parseGitHubRepoUrl } from "./parse-url";
 
@@ -110,5 +111,17 @@ describe("parseGitHubRepoUrl", () => {
     expect(parseGitHubRepoUrl("some prefix text github.com/owner/repo")).toBeNull();
     expect(parseGitHubRepoUrl("see https://github.com/owner/repo for details")).toBeNull();
     expect(parseGitHubRepoUrl("malicious.com/github.com/owner/repo")).toBeNull();
+  });
+});
+
+it("recognizes GHES only with an explicit configured host", () => {
+  expect(parseGitHubRepoUrl("https://git.company.example/acme/site")).toBeNull();
+  expect(
+    parseGitHubRepoUrl("https://git.company.example/acme/site", "git.company.example"),
+  ).toEqual({ owner: "acme", repo: "site", host: "git.company.example" });
+  expect(parseGitHubRepoUrl("https://tenant.ghe.com/acme/site")).toEqual({
+    owner: "acme",
+    repo: "site",
+    host: "tenant.ghe.com",
   });
 });

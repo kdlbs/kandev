@@ -89,7 +89,8 @@ async function openMenuAndSnapshot() {
  * None of this contract's fixtures seed a workflow move target or wire
  * onEdit/onArchive, so the top-level menu is identical across every fixture:
  * Edit and Archive stay disabled (no handler supplied), Link stays enabled
- * (KanbanCard wires its own link handlers internally), and Delete is the
+ * (KanbanCard wires its own link handlers internally), Show in graph is
+ * always offered for a non-archived task, and Delete is the
  * only destructive, enabled entry. Asserting this exact array per fixture is
  * what proves the menu's identity/order/enablement/destructive styling is
  * unaffected by badge-driving task state (blocked, queued, review, repos,
@@ -100,6 +101,7 @@ function expectedMenuEntries() {
   return [
     { text: t("kanban:priority"), disabled: false, destructive: false },
     { text: t("common:edit"), disabled: true, destructive: false },
+    { text: t("task:taskGraphShowInGraph"), disabled: false, destructive: false },
     { text: t("kanban:link"), disabled: false, destructive: false },
     { text: t("kanban:archive"), disabled: true, destructive: false },
     { text: t("kanban:delete"), disabled: false, destructive: true },

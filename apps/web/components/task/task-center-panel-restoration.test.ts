@@ -173,3 +173,49 @@ describe("task center file restoration", () => {
     expect(tabs?.[0]?.renderedPreview).toBeUndefined();
   });
 });
+
+it("reuses free restoration slots while preserving order and skipping failures", async () => {
+  mockGetWebSocketClient.mockReturnValue(CLIENT);
+  const tabs = Array.from({ length: 6 }, (_, index) => ({
+    path: `file-${index}.md`,
+    name: `file-${index}.md`,
+    repo: "docs",
+    renderedPreview: true,
+  }));
+  const pending = tabs.map(() => {
+    let resolve!: (value: { content: string; is_binary: boolean }) => void;
+    let reject!: (reason: Error) => void;
+    const promise = new Promise<{ content: string; is_binary: boolean }>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    return { promise, resolve, reject };
+  });
+  mockRequestFileContent
+    .mockReset()
+    .mockImplementation(
+      (_client, _session, path) => pending[tabs.findIndex((tab) => tab.path === path)].promise,
+    );
+  const loading = loadSavedFileTabs(SESSION_ID, tabs);
+  const started = mockRequestFileContent.mock.calls.length;
+  await act(async () => {
+    pending[3].resolve({ content: "fourth", is_binary: false });
+  });
+  expect(mockRequestFileContent.mock.calls.length - 1).toBe(4);
+  await act(async () => {
+    pending[2].resolve({ content: "third", is_binary: false });
+    pending[1].reject(new Error("missing"));
+  });
+  const startedWhileFirstIsPending = mockRequestFileContent.mock.calls.length;
+  pending[0].resolve({ content: "first", is_binary: false });
+  pending[5].resolve({ content: "sixth", is_binary: false });
+  pending[4].resolve({ content: "fifth", is_binary: false });
+  const loaded = await loading;
+  expect(started).toBe(4);
+  expect(startedWhileFirstIsPending).toBe(6);
+  expect(loaded?.map((tab) => tab.path)).toEqual([
+    tabs[0].path,
+    ...tabs.slice(2).map((tab) => tab.path),
+  ]);
+  expect(loaded?.every((tab) => tab.repo === "docs" && tab.renderedPreview)).toBe(true);
+});

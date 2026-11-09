@@ -25,7 +25,7 @@ Recovery uses explicit preview, create, and update modes. Automatic reruns and b
 
 #### Acceptance criteria
 
-- **AC-RELEASE-DISCORD-001.1:** A normal Stable release shall automatically send an announcement after GitHub Release, npm, Homebrew, and Scoop publication succeed.
+- **AC-RELEASE-DISCORD-001.1:** A normal Stable release shall automatically send an announcement after GitHub Release, npm, Homebrew, Scoop, and public plugin SDK verification succeed and Stable completion passes.
 - **AC-RELEASE-DISCORD-001.2:** Nightlies, drafts, prereleases, dry runs, validation-only runs, failed publication, and cancellation before notification starts shall send nothing.
 - **AC-RELEASE-DISCORD-001.3:** Announcement failure shall report a separate delivery error without repeating or reverting package publication.
 - **AC-RELEASE-DISCORD-001.4:** Release reruns and backfills shall require the recovery path before sending, so they do not automatically repeat an earlier announcement.

@@ -32,7 +32,17 @@ test("inspects images and submits one keyed question bundle after reload", async
   test.setTimeout(180_000);
   seedQuestionImage(seedData.repositoryPath);
   const { task, session } = await openImageQuestions(testPage, apiClient, seedData);
+  const previewLoaded = waitForHttp(
+    testPage,
+    "GET",
+    /^\/api\/v1\/clarification\/[^/]+\/images\/layout$/,
+    {
+      predicate: (response) =>
+        response.ok() && new URL(response.url()).searchParams.get("question_id") === "layout",
+    },
+  );
   await testPage.reload();
+  await (await previewLoaded).finished();
   await expect(
     session.clarificationOverlay().getByRole("img", { name: "Proposed layout", exact: true }),
   ).toBeVisible();

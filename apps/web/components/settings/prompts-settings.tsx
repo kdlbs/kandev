@@ -9,6 +9,11 @@ import { Input } from "@kandev/ui/input";
 import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
 import { PromptAgentPermission } from "@/components/settings/prompt-agent-permission";
 import { PromptRowActions } from "@/components/settings/prompt-row-actions";
+import {
+  filterSavedPrompts,
+  PromptCreateButton,
+  PromptListSearch,
+} from "@/components/settings/prompt-list-search";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
@@ -17,7 +22,6 @@ import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { createPrompt, deletePrompt, updatePrompt } from "@/lib/api";
-import { settingsActionClassName } from "@/components/settings/settings-control";
 import { useRequest } from "@/lib/http/use-request";
 import { t } from "@/lib/i18n";
 import type { CustomPrompt } from "@/lib/types/http";
@@ -259,6 +263,7 @@ function PromptListItem({
 type PromptListContentProps = {
   promptsLoaded: boolean;
   prompts: CustomPrompt[];
+  hasPrompts: boolean;
   editingId: string | null;
   editingRef: React.RefObject<HTMLDivElement | null>;
   formState: PromptFormState;
@@ -277,6 +282,7 @@ type PromptListContentProps = {
 function PromptListContent({
   promptsLoaded,
   prompts,
+  hasPrompts,
   editingId,
   editingRef,
   formState,
@@ -299,10 +305,17 @@ function PromptListContent({
       </div>
     );
   }
-  if (prompts.length === 0) {
+  if (!hasPrompts) {
     return (
       <div className="rounded-lg border border-dashed border-border/70 p-6 text-sm text-muted-foreground">
         {t("settings:promptsEmpty")}
+      </div>
+    );
+  }
+  if (prompts.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-border/70 p-6 text-sm text-muted-foreground">
+        {t("common:noResults")}
       </div>
     );
   }
@@ -514,6 +527,7 @@ export function getPromptDraftMeta(
 
 export function PromptsSettings() {
   const { t } = useTranslation();
+  const [query, setQuery] = useState("");
   const { isFinePointer } = useResponsiveBreakpoint();
   const state = usePromptsState();
   const {
@@ -538,8 +552,10 @@ export function PromptsSettings() {
     confirmDelete,
     resetForm,
   } = usePromptsActions(state);
-  const isEditing = Boolean(editingId);
   const draft = getPromptDraftMeta(prompts, editingId, showCreate, formState);
+  const deleteTargetId = deleteTarget?.id ?? null;
+  const visiblePrompts = filterSavedPrompts(prompts, query, editingId, deleteTargetId);
+  const searchDisabled = Boolean(editingId || showCreate || deleteTarget || isBusy);
 
   useEffect(() => {
     if (!editingId) return;
@@ -571,14 +587,10 @@ export function PromptsSettings() {
           title={t("settings:promptsCustomHeading")}
           contentClassName="space-y-6 divide-y-0"
           action={
-            <Button
+            <PromptCreateButton
               onClick={startCreate}
-              disabled={isBusy || isEditing || showCreate}
-              className={settingsActionClassName()}
-              data-testid="prompt-create-button"
-            >
-              {t("settings:promptAdd")}
-            </Button>
+              disabled={isBusy || Boolean(editingId) || showCreate}
+            />
           }
         >
           {showCreate && (
@@ -591,9 +603,11 @@ export function PromptsSettings() {
           )}
 
           <div className="space-y-3">
+            <PromptListSearch query={query} onQueryChange={setQuery} disabled={searchDisabled} />
             <PromptListContent
               promptsLoaded={promptsLoaded || prompts.length > 0}
-              prompts={prompts}
+              prompts={visiblePrompts}
+              hasPrompts={prompts.length > 0}
               editingId={editingId}
               editingRef={editingRef}
               formState={formState}
@@ -606,7 +620,7 @@ export function PromptsSettings() {
               isBusy={isBusy}
               showCreate={showCreate}
               isFinePointer={isFinePointer}
-              deleteTargetId={deleteTarget?.id ?? null}
+              deleteTargetId={deleteTargetId}
             />
           </div>
         </SettingsGroup>

@@ -189,6 +189,8 @@ requiring its profile to be known when the workflow is authored.
 
 ## Implementation plans
 
+- [Spawned-session binding isolation](../../../plans/spawn-session-workflow-binding/plan.md)
+
 - [Dynamic workflow completion repair](../../../plans/dynamic-workflow-completion/plan.md)
 
 - [Manual workflow session focus](../../../plans/workflow-session-focus/plan.md)

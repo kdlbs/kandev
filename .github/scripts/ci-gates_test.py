@@ -15,7 +15,11 @@ WORKFLOWS = ROOT / ".github/workflows"
 def gate(workflow, job):
     source = (WORKFLOWS / workflow).read_text().split(f"  {job}:\n", 1)[1]
     source = re.split(r"\n  [\w-]+:\n", source)[0]
-    step = source.rsplit("      - name: ", 1)[1]
+    marker = "      - name: Verify required jobs and evidence\n"
+    if marker in source:
+        step = source.split(marker, 1)[1].split("\n      - name: ", 1)[0]
+    else:
+        step = source.rsplit("      - name: ", 1)[1]
     script = textwrap.dedent(step.split("        run: |\n", 1)[1])
     env = {key: "success" for key in re.findall(r"^          (\w+_RESULT):", step, re.M)}
     return source, script, env

@@ -285,7 +285,7 @@ func TestNativeServiceSelfUpdateRunsSupportedPlans(t *testing.T) {
 			},
 			expected: []string{
 				"brew upgrade kandev",
-				"kandev service install --home-dir /home/alice/.kandev --port 38429 --no-boot-start",
+				"kandev service install --home-dir /home/alice/.kandev --port 38429 --shell=none --no-boot-start",
 				"launchctl kickstart -k gui/" + strconv.Itoa(os.Getuid()) + "/com.kdlbs.kandev",
 			},
 		},

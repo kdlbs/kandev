@@ -17,6 +17,8 @@ func TestWorkspaceRecoveryBlockPreservesPromptAdmission(t *testing.T) {
 			ctx := context.Background()
 			repo := setupTestRepo(t)
 			seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+			// Restoration completes only with this session's own ready execution.
+			seedExecutorRunning(t, repo, "session1", "task1", "exec-session1")
 			manager := &mockAgentManager{repoForExecutionLookup: repo}
 			service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
 			session, err := repo.GetTaskSession(ctx, "session1")

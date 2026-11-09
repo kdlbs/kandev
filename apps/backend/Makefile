@@ -161,7 +161,7 @@ else
   BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' $(NULL_REDIR) || echo unknown)
 endif
 
-VERSION ?= $(shell git describe --tags --always --dirty $(NULL_REDIR) || echo dev)
+VERSION ?= $(shell git describe --tags --match "v[0-9]*" --exclude "*/*" --always --dirty $(NULL_REDIR) || echo dev)
 COMMIT := $(shell git rev-parse HEAD $(NULL_REDIR) || echo unknown)
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
@@ -245,6 +245,11 @@ build: build-runtime build-mock-agent build-acpdbg build-codexdbg build-winjob
 build-e2e-delivery-fixture:
 	@$(call MKDIR,$(BUILD_DIR))
 	$(CGO_LOCALE) $(GO) test -c -trimpath -tags fts5 -o $(BUILD_DIR)/e2e-delivery-fixture$(EXE) ./internal/agent/runtime/lifecycle
+
+.PHONY: build-e2e-send-now-fixture
+build-e2e-send-now-fixture:
+	@$(call MKDIR,$(BUILD_DIR))
+	$(CGO_LOCALE) $(GO) test -c -trimpath -tags fts5 -o $(BUILD_DIR)/e2e-send-now-fixture$(EXE) ./internal/orchestrator
 
 ## Build the lean development binary set. Unlike `build`, this does not build
 ## every cross-platform remote helper; dev needs the host helper and, for a
@@ -451,24 +456,9 @@ test-coverage:
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 
-## Regenerate Go stubs from proto/kandev/plugin/v1/plugin.proto (§3 of
-## docs/plans/plugins/GRPC-CONTRACT.md). Installs protoc-gen-go and
-## protoc-gen-go-grpc into a local .tools/bin (not committed) and drives them
-## via `go run` buf — no system protoc required. Requires network access for
-## the first run (tool + buf module downloads); output is committed so
-## `go build` never needs this target.
-PROTO_TOOLS_BIN := $(CURDIR)/.tools/bin
-BUF_VERSION := v1.47.2
-PROTOC_GEN_GO_VERSION := v1.36.11
-PROTOC_GEN_GO_GRPC_VERSION := v1.5.1
-
 .PHONY: proto
 proto:
-	@echo "Generating proto stubs..."
-	@$(call MKDIR,$(PROTO_TOOLS_BIN))
-	GOBIN=$(PROTO_TOOLS_BIN) $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
-	GOBIN=$(PROTO_TOOLS_BIN) $(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
-	cd proto && PATH="$(PROTO_TOOLS_BIN):$$PATH" $(GO) run github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION) generate
+	$(MAKE) -C ../../pluginsdk proto
 
 ## Run linter (requires golangci-lint)
 lint:

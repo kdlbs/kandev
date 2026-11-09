@@ -17,6 +17,7 @@ const {
   mockAddTodosPanel,
   mockListTaskCanvases,
   mockAddCanvasPanel,
+  mockAddBackgroundWorkPanel,
 } = vi.hoisted(() => ({
   mockAddMRPanel: vi.fn(),
   mockAddPRPanel: vi.fn(),
@@ -24,6 +25,7 @@ const {
   mockAddTodosPanel: vi.fn(),
   mockListTaskCanvases: vi.fn(),
   mockAddCanvasPanel: vi.fn(),
+  mockAddBackgroundWorkPanel: vi.fn(),
 }));
 
 const mockDockviewStore = vi.hoisted(() => ({
@@ -44,6 +46,7 @@ const mockDockviewStore = vi.hoisted(() => ({
   addMRPanel: mockAddMRPanel,
   addReviewPanel: mockAddReviewPanel,
   addTerminalPanel: vi.fn(),
+  addBackgroundWorkPanel: mockAddBackgroundWorkPanel,
 }));
 const CENTER_GROUP_ID = mockDockviewStore.centerGroupId;
 const SECONDARY_GROUP_ID = "group-secondary";
@@ -51,7 +54,7 @@ const SECONDARY_GROUP_ID = "group-secondary";
 const mockNormalizedReviews = vi.hoisted(() => ({
   reviews: [] as ReviewItemSummary[],
 }));
-const mockCanvasFeature = vi.hoisted(() => ({ enabled: true }));
+const mockFeatures = vi.hoisted(() => ({ canvases: true, agentBackgroundWork: true }));
 
 const mockAppState = vi.hoisted(() => ({
   auth: { mode: "disabled", authenticated: false, user: null },
@@ -95,7 +98,8 @@ vi.mock("@/hooks/domains/workspace/use-repository-scripts", () => ({
 }));
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: () => mockCanvasFeature.enabled,
+  useFeature: (name: string) =>
+    name === "agentBackgroundWork" ? mockFeatures.agentBackgroundWork : mockFeatures.canvases,
 }));
 
 vi.mock("@/lib/api/domains/canvas-api", () => ({
@@ -107,6 +111,7 @@ vi.mock("./review-panel-provider", () => ({
 }));
 
 const PR_SUBMENU_TEST_ID = "add-panel-pr-submenu";
+const BACKGROUND_WORK_MENU_ITEM = "add-panel-background-work";
 const INVOKING_GROUP = "group-center";
 const PR_ITEM_TEST_ID_PREFIX = "add-panel-pr-item-";
 const GITLAB_ORIGIN = "https://gitlab.example";
@@ -235,7 +240,8 @@ async function openPRSubmenu() {
 }
 
 beforeEach(() => {
-  mockCanvasFeature.enabled = true;
+  mockFeatures.canvases = true;
+  mockFeatures.agentBackgroundWork = true;
   mockDockviewStore.api = {
     getPanel: () => undefined,
     addPanel: mockAddCanvasPanel,
@@ -249,6 +255,7 @@ beforeEach(() => {
   mockAddPRPanel.mockClear();
   mockAddReviewPanel.mockClear();
   mockAddTodosPanel.mockClear();
+  mockAddBackgroundWorkPanel.mockClear();
 });
 
 afterEach(() => cleanup());
@@ -551,7 +558,7 @@ describe("AddPanelMenuItems — task canvases", () => {
   });
 
   it("does not load or render canvases while the feature is disabled", () => {
-    mockCanvasFeature.enabled = false;
+    mockFeatures.canvases = false;
 
     renderMenu({ taskId: "task-1" });
 
@@ -619,5 +626,35 @@ describe("AddPanelMenuItems — Todos", () => {
     renderMenu({ isPassthrough: true });
     expect(screen.queryByText("Todos")).toBeNull();
     expect(screen.queryByText("Plan")).toBeNull();
+  });
+});
+
+describe("AddPanelMenuItems — Background Work", () => {
+  it("opens the active session's background work overview in the invoking group", () => {
+    renderMenu();
+    const item = screen.getByTestId(BACKGROUND_WORK_MENU_ITEM);
+    fireEvent.click(item);
+
+    expect(mockAddBackgroundWorkPanel).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      groupId: INVOKING_GROUP,
+      inCenter: true,
+    });
+  });
+
+  it("stays available without any background records", () => {
+    renderMenu();
+    expect(screen.getByTestId(BACKGROUND_WORK_MENU_ITEM)).toBeTruthy();
+  });
+
+  it("hides the entry when the feature is disabled or the session is passthrough", () => {
+    mockFeatures.agentBackgroundWork = false;
+    renderMenu();
+    expect(screen.queryByTestId(BACKGROUND_WORK_MENU_ITEM)).toBeNull();
+    cleanup();
+
+    mockFeatures.agentBackgroundWork = true;
+    renderMenu({ isPassthrough: true });
+    expect(screen.queryByTestId(BACKGROUND_WORK_MENU_ITEM)).toBeNull();
   });
 });

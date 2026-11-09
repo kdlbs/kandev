@@ -300,6 +300,7 @@ test.describe("Mobile /github sidebar", () => {
     const page = new MobileGitHubPage(testPage);
     await page.goto();
     await page.mobileMenuButton.tap();
+    await waitForFiniteAnimations(page.mobileSidebar);
     await page.mobileSidebar.getByRole("button", { name: "Issues", exact: true }).tap();
     await page.mobileSidebar.getByRole("button", { name: "Done", exact: true }).tap();
     const queryInput = testPage.getByPlaceholder(/Custom query/);
@@ -308,6 +309,7 @@ test.describe("Mobile /github sidebar", () => {
     await expect(testPage.getByTestId("issue-row")).toHaveCount(2, { timeout: 15_000 });
 
     await page.mobileMenuButton.tap();
+    await waitForFiniteAnimations(page.mobileSidebar);
     await page.mobileSidebar.getByRole("button", { name: "Save current query" }).tap();
     const dialog = testPage.getByRole("dialog", { name: "Save query" });
     await dialog.getByLabel("Name").fill(savedQuery);
@@ -339,7 +341,9 @@ test.describe("Mobile /github sidebar", () => {
     await expect(testPage.getByTestId("issue-row")).toHaveCount(2);
 
     await page.mobileMenuButton.tap();
+    await waitForFiniteAnimations(page.mobileSidebar);
     await page.savedQueryByLabel(savedQuery).tap();
+    await expect(page.mobileSidebar).toBeHidden();
     await expect(page.repoFilterTrigger).toContainText(DEFAULT_REPO);
     await expect(page.issueRowByTitle(DEFAULT_REPO_ISSUE)).toBeVisible();
     await expect(page.issueRowByTitle(OTHER_REPO_ISSUE)).toHaveCount(0);
@@ -347,8 +351,10 @@ test.describe("Mobile /github sidebar", () => {
     await testPage.reload();
     await page.mobileMenuButton.waitFor({ state: "visible" });
     await page.mobileMenuButton.tap();
+    await waitForFiniteAnimations(page.mobileSidebar);
     await page.mobileSidebar.getByRole("button", { name: "Issues", exact: true }).tap();
     await page.savedQueryByLabel(savedQuery).tap();
+    await expect(page.mobileSidebar).toBeHidden();
     await expect(page.repoFilterTrigger).toContainText(DEFAULT_REPO);
     await expect(page.issueRowByTitle(DEFAULT_REPO_ISSUE)).toBeVisible();
     await expect(page.issueRowByTitle(OTHER_REPO_ISSUE)).toHaveCount(0);
@@ -359,6 +365,7 @@ test.describe("Mobile /github sidebar", () => {
     ).toBe(true);
 
     await page.mobileMenuButton.tap();
+    await waitForFiniteAnimations(page.mobileSidebar);
     const deleteAction = page.mobileSidebar.getByRole("button", {
       name: `Delete ${savedQuery} saved query`,
     });

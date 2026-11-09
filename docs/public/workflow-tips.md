@@ -138,7 +138,7 @@ Workflow-level settings include the name and default agent profile. Each step ca
 | Control | Behavior |
 |---------|----------|
 | Name and color | Board label and presentation. Color is stored as a CSS utility class. |
-| Prompt | Step-specific agent prompt. `{{task_prompt}}` inserts the task description. Type `@` to reference a saved prompt by name. |
+| Prompt | Step-specific agent prompt. `{{task_prompt}}` inserts the task description for automatic entries and the explicit launch brief for `start_created` launches. A prompt without the placeholder replaces automatic task content, while an explicit launch brief is appended after it. Type `@` to reference a saved prompt by name. |
 | Start step | Where a task is created when no agent starts with it. The editor keeps at most one. If none is set, task creation falls back to the first step by position. Creating a task that starts an agent immediately uses the first Auto-start agent step instead, including in plan mode. Thus, a Start step with no entry actions is a genuine parking column. |
 | Auto-start agent | Adds `auto_start_agent` to `on_enter`. It still needs a valid agent and executor configuration. |
 | Plan mode | Adds `enable_plan_mode` on entry. Add the matching disable behavior on completion or exit when later steps should edit files. |
@@ -201,7 +201,7 @@ Pull candidates are selected by board position, then priority, queue time, creat
 
 Workflow and step prompt fields use the inline prompt editor. Type `@` after whitespace to select a saved prompt. In a step prompt, type `{{` to select `{{task_prompt}}` and other tokens supported by that step. The completion menu inserts the reference into the draft; it does not save the workflow. Use **Save changes** when the prompt is ready.
 
-The workflow-level prompt supports saved-prompt references but does not expand step-only variables. `{{task_prompt}}` is available in a step prompt because it is replaced with the task description when that step runs.
+The workflow-level prompt supports saved-prompt references but does not expand step-only variables. `{{task_prompt}}` is available in a step prompt because it is replaced with the automatic task description, or with an explicit `start_created` launch brief, when that step runs. An explicit launch brief is also preserved after a step prompt that does not use the placeholder.
 
 Both step prompts and the workflow-level prompt also accept these single-brace placeholders. Type them directly; the completion menu does not offer them.
 

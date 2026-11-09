@@ -50,16 +50,21 @@ function sameSelections(comparisonIds: string[], selectedIds: string[]): boolean
 export function mcpSelectionChanges(
   state: MCPSessionSelectionState | null | undefined,
   selectedIds: string[],
+  excludedIds: string[] = [],
 ): MCPSelectionChanges {
   if (!state || state.apply_state === "applied") return { status: "hidden", changes: [] };
   const comparison = state.comparison;
   const changes = comparison?.changes ?? [];
-  if (!matchingComparison(state, selectedIds) || !validChanges(changes))
+  if (!matchingComparison(state, selectedIds, excludedIds) || !validChanges(changes))
     return { status: "unavailable", changes: [] };
   return { status: "known", changes };
 }
 
-function matchingComparison(state: MCPSessionSelectionState, selectedIds: string[]): boolean {
+function matchingComparison(
+  state: MCPSessionSelectionState,
+  selectedIds: string[],
+  excludedIds: string[],
+): boolean {
   const comparison = state.comparison;
   return Boolean(
     comparison?.version === 1 &&
@@ -67,7 +72,8 @@ function matchingComparison(state: MCPSessionSelectionState, selectedIds: string
     comparison.desired_revision === state.desired_revision &&
     comparison.applied_revision === state.applied_revision &&
     (comparison.attachment_attempt_id ?? "") === (state.attachment_attempt_id ?? "") &&
-    sameSelections(comparison.selection_ids ?? [], selectedIds),
+    sameSelections(comparison.selection_ids ?? [], selectedIds) &&
+    sameSelections(comparison.excluded_definition_ids ?? [], excludedIds),
   );
 }
 

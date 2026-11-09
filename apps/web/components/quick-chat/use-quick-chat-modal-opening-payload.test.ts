@@ -17,6 +17,8 @@ vi.mock("@/lib/quick-chat/rename", () => ({
 import { useAgentSelection } from "./use-quick-chat-modal";
 
 const WORKSPACE_ID = "workspace-1";
+const SESSION_ID = "session-1";
+const CREATION_ID = "creation-1";
 const openingPayload: QuickChatOpeningPayload = {
   message: "Explain this file",
   clientMessageId: "opening-payload",
@@ -42,6 +44,7 @@ function makeStore() {
     agentGeneratedTaskTitles: false,
     closeQuickChatSession: vi.fn(),
     openQuickChat: vi.fn(),
+    upsertQuickChatSessionFromEvent: vi.fn(),
     setQuickChatInitialPrompt: vi.fn(),
     renameQuickChatSession: vi.fn(),
     applyAgentProfileRecentUse: vi.fn(),
@@ -84,5 +87,54 @@ describe("Quick Chat opening payload routing", () => {
     expect(structuredRequest).not.toHaveProperty("prompt");
     expect(structuredRequest).not.toHaveProperty("attachments");
     expect(store.setQuickChatInitialPrompt).toHaveBeenCalledWith("session-2", openingPayload);
+  });
+
+  it("keeps the creation and message identities when an incomplete creation is retried", async () => {
+    const store = makeStore();
+    startQuickChatMock
+      .mockReset()
+      .mockResolvedValueOnce({
+        task_id: "task-1",
+        session_id: SESSION_ID,
+        creation_id: CREATION_ID,
+        creation_complete: false,
+      })
+      .mockResolvedValueOnce({
+        task_id: "task-1",
+        session_id: SESSION_ID,
+        creation_id: CREATION_ID,
+        creation_complete: true,
+      });
+    const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
+
+    await act(async () => {
+      expect(
+        await result.current.handleSelectAgent("structured", [], openingPayload, CREATION_ID),
+      ).toBe(false);
+    });
+    await act(async () => {
+      expect(
+        await result.current.handleSelectAgent("structured", [], openingPayload, CREATION_ID),
+      ).toBe(true);
+    });
+
+    expect(startQuickChatMock).toHaveBeenNthCalledWith(
+      1,
+      WORKSPACE_ID,
+      expect.objectContaining({ creation_id: CREATION_ID }),
+    );
+    expect(startQuickChatMock).toHaveBeenNthCalledWith(
+      2,
+      WORKSPACE_ID,
+      expect.objectContaining({ creation_id: CREATION_ID }),
+    );
+    expect(store.setQuickChatInitialPrompt).toHaveBeenCalledWith(SESSION_ID, openingPayload);
+    expect(store.openQuickChat).toHaveBeenCalledWith(
+      SESSION_ID,
+      WORKSPACE_ID,
+      "structured",
+      "chat",
+      "task-1",
+    );
   });
 });

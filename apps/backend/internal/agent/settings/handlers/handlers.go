@@ -136,6 +136,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agents/available", h.httpListAvailableAgents)
 	api.GET("/agents", h.httpListAgents)
 	api.GET("/agents/:id/mcp-discovery", h.httpDiscoverAgentMCP)
+	api.POST("/agents/:id/plugin-discovery", cfg, h.httpDiscoverCopilotPlugins)
 	api.POST("/agents", cfg, h.interlock, h.httpCreateAgent)
 	api.POST("/agents/tui", cfg, h.interlock, h.httpCreateCustomTUIAgent)
 	api.GET("/agents/tui/mcp-strategies", h.httpListMCPStrategies)
@@ -187,6 +188,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	// The owner release is the only way to lift a provider account-block hold;
 	// profile edits and enablement never release it.
 	api.POST("/agent-profiles/:id/account-block/release", cfg, h.interlock, h.httpReleaseAccountBlock)
+	api.GET("/routing/circuits", h.httpListRoutingCircuits)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
@@ -564,6 +566,7 @@ type createAgentProfileRequest struct {
 	Mode                    string                 `json:"mode,omitempty"`
 	CLIFlags                []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars                 []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	DevinSandboxInherited   bool                   `json:"devin_sandbox_inherited,omitempty"`
 	CommandPrefix           string                 `json:"command_prefix,omitempty"`
 }
 
@@ -594,6 +597,7 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			Mode:                    profile.Mode,
 			CLIFlags:                profile.CLIFlags,
 			EnvVars:                 profile.EnvVars,
+			DevinSandboxInherited:   profile.DevinSandboxInherited,
 			CommandPrefix:           profile.CommandPrefix,
 		})
 	}
@@ -604,7 +608,7 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 	})
 	if err != nil {
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
-			errors.Is(err, controller.ErrInvalidProviderConfig) ||
+			errors.Is(err, controller.ErrInvalidProviderConfig) || errors.Is(err, controller.ErrInvalidDevinPermissionIntent) ||
 			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -676,11 +680,12 @@ func (h *Handlers) httpDeleteAgent(c *gin.Context) {
 }
 
 type commandPreviewRequest struct {
-	Model              string           `json:"model"`
-	PermissionSettings map[string]bool  `json:"permission_settings"`
-	CLIPassthrough     bool             `json:"cli_passthrough"`
-	CLIFlags           []dto.CLIFlagDTO `json:"cli_flags"`
-	CommandPrefix      string           `json:"command_prefix,omitempty"`
+	Model                  string           `json:"model"`
+	PermissionSettings     map[string]bool  `json:"permission_settings"`
+	CLIPassthrough         bool             `json:"cli_passthrough"`
+	CLIFlags               []dto.CLIFlagDTO `json:"cli_flags"`
+	CommandPrefix          string           `json:"command_prefix,omitempty"`
+	CopilotSelectedPlugins []string         `json:"copilot_selected_plugins,omitempty"`
 }
 
 func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
@@ -697,11 +702,12 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 	}
 
 	resp, err := h.controller.PreviewAgentCommand(c.Request.Context(), agentName, controller.CommandPreviewRequest{
-		Model:              body.Model,
-		PermissionSettings: body.PermissionSettings,
-		CLIPassthrough:     body.CLIPassthrough,
-		CLIFlags:           body.CLIFlags,
-		CommandPrefix:      body.CommandPrefix,
+		Model:                  body.Model,
+		PermissionSettings:     body.PermissionSettings,
+		CLIPassthrough:         body.CLIPassthrough,
+		CLIFlags:               body.CLIFlags,
+		CommandPrefix:          body.CommandPrefix,
+		CopilotSelectedPlugins: body.CopilotSelectedPlugins,
 	})
 	if err != nil {
 		h.logger.Error("failed to preview agent command", zap.Error(err))

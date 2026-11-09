@@ -135,6 +135,32 @@ func (s *Service) SetLaunchCredentialReminter(r LaunchCredentialReminter) {
 	s.launchCredentialReminter = r
 }
 
+// CeilingDeferredLaunchSettler observes the terminal outcome of a deferred
+// launch the ceiling owned. The caller that queued the launch settles its own
+// durable record from the recorded Office run identity; it must not launch,
+// retry, or otherwise replace the ceiling's single launch.
+type CeilingDeferredLaunchSettler interface {
+	// CeilingDeferredLaunchReplayed reports that the ceiling replay admitted
+	// the launch. sessionID and turnID are empty when the replayed kind does
+	// not create them.
+	CeilingDeferredLaunchReplayed(ctx context.Context, taskID, causingRunID, sessionID, turnID string) error
+	// CeilingDeferredLaunchDropped reports that the ceiling terminally
+	// dropped the launch, so no session will ever be created for it.
+	CeilingDeferredLaunchDropped(ctx context.Context, taskID, causingRunID, reasonCode, detail string) error
+}
+
+// SetCeilingDeferredLaunchSettler wires the caller-owned settlement observer.
+// See CeilingDeferredLaunchSettler.
+func (s *Service) SetCeilingDeferredLaunchSettler(v CeilingDeferredLaunchSettler) {
+	s.ceilingDeferredLaunchSettler = v
+}
+
+// ceilingPayloadCausingRunIDKey holds the caller's trusted run identity in a
+// ceiling "start" replay payload. startTaskOptions is rebuilt from the payload
+// on replay, so the identity has to round-trip or the replayed launch loses
+// its caller attribution.
+const ceilingPayloadCausingRunIDKey = "causing_run_id"
+
 // seam1StartPayload builds the AC-42 "start" replay row from startTask's own
 // frame, at the point the gate is consulted — before any workflow-step profile
 // resolution, so the recorded profile is the one the caller actually chose.
@@ -145,23 +171,25 @@ func seam1StartPayload(
 	opts startTaskOptions,
 ) map[string]interface{} {
 	payload := map[string]interface{}{
-		metaKeyAgentProfileID:       agentProfileID,
-		"executor_id":               executorID,
-		metaKeyExecutorProfile:      executorProfileID,
-		"priority":                  priority,
-		metaKeyPrompt:               prompt,
-		metaKeyWorkflowStepID:       workflowStepID,
-		metaKeyPlanMode:             planMode,
-		metaKeyAttachments:          attachments,
-		"env":                       redactedCeilingLaunchEnv(opts.Env),
-		"route":                     opts.Route,
-		"profile_explicit":          opts.ProfileExplicit,
-		"preserve_workflow_binding": opts.PreserveWorkflowBinding,
-		"auto_start":                autoStart,
-		"additional_skill_slugs":    opts.AdditionalSkillSlugs,
-		"entry_options":             opts.EntryOptions,
-		"workflow_entry_id":         opts.WorkflowEntryID,
-		"origin":                    string(opts.Origin),
+		metaKeyAgentProfileID:    agentProfileID,
+		"executor_id":            executorID,
+		metaKeyExecutorProfile:   executorProfileID,
+		"priority":               priority,
+		metaKeyPrompt:            prompt,
+		metaKeyWorkflowStepID:    workflowStepID,
+		metaKeyPlanMode:          planMode,
+		metaKeyAttachments:       attachments,
+		"env":                    redactedCeilingLaunchEnv(opts.Env),
+		"route":                  opts.Route,
+		"profile_explicit":       opts.ProfileExplicit,
+		"auto_start":             autoStart,
+		"additional_skill_slugs": opts.AdditionalSkillSlugs,
+		"entry_options":          opts.EntryOptions,
+		"workflow_entry_id":      opts.WorkflowEntryID,
+		"origin":                 string(opts.Origin),
+		// Retain the spawn-only binding policy so a deferred replay creates the
+		// helper without rebinding the source step it was spawned from.
+		"preserve_workflow_source_binding": opts.PreserveWorkflowSourceBinding,
 	}
 	if opts.SpawnOrigin != nil {
 		payload["spawn_origin"] = map[string]interface{}{
@@ -175,6 +203,9 @@ func seam1StartPayload(
 	}
 	if opts.AutomationRun != nil {
 		payload[ceilingPayloadAutomationRunKey] = automationRunForCeilingPayload(opts.AutomationRun)
+	}
+	if opts.CausingRunID != "" {
+		payload[ceilingPayloadCausingRunIDKey] = opts.CausingRunID
 	}
 	return payload
 }

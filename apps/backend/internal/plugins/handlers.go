@@ -20,7 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
 	"github.com/kandev/kandev/internal/plugins/store"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // maxWebhookBodyBytes caps the request body the webhook relay
@@ -483,7 +483,7 @@ func (c *Controller) webhook(ctx *gin.Context) {
 		Body:       body,
 	}
 
-	leasedRecord, release, err := c.svc.beginPluginDispatch(id, dispatchGeneration(record))
+	leasedRecord, release, err := c.svc.beginPluginDispatchContext(ctx.Request.Context(), id, dispatchGeneration(record))
 	if err != nil {
 		c.logWebhookFailure(id, http.StatusServiceUnavailable, webhookOriginHostLifecycle, err)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})

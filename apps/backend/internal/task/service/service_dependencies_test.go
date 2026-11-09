@@ -329,6 +329,32 @@ func TestBuildDependencyViews_ReportsBothDirections(t *testing.T) {
 	}
 }
 
+func TestBuildDependencyViewsIncludesRelatedIDs(t *testing.T) {
+	ctx := context.Background()
+	svc, _, repo := createTestService(t)
+	setupTestTask(t, repo)
+	if err := repo.CreateTask(ctx, &models.Task{ID: "related-peer", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Peer", Priority: "medium"}); err != nil {
+		t.Fatal(err)
+	}
+	relations := newMockRelationRepo()
+	if err := relations.AddRelation(ctx, "task-123", "related-peer"); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetRelationRepository(relations)
+	svc.SetBlockerRepository(&mockBlockerRepo{})
+	views := svc.BuildDependencyViews(ctx, []*models.Task{{ID: "task-123"}})
+	got := views["task-123"].Related
+	if len(got) != 1 || got[0].ID != "related-peer" {
+		t.Fatalf("related IDs = %+v", got)
+	}
+	if got[0].Title != "Peer" {
+		t.Errorf("related entry should carry the title for the chip, got %q", got[0].Title)
+	}
+	if got[0].Status != "" {
+		t.Errorf("related entry should not carry a resolution status, got %q", got[0].Status)
+	}
+}
+
 // BuildDependencyViews must fail closed too: the board reads dependency state
 // through it, and a task reported unblocked on a read failure could be launched.
 func TestBuildDependencyViews_FailsClosedOnReadError(t *testing.T) {
@@ -460,16 +486,15 @@ func TestResolveStartWhenUnblocked(t *testing.T) {
 	}
 }
 
-func TestDependencyStatusForTask_ArchivedIsPendingNotResolved(t *testing.T) {
-	// Archival is neither success nor failure: an archived predecessor must not
-	// release a dependent, and must not be reported as a failed chain either.
+func TestDependencyStatusForTask_ArchivedCompletionRemainsResolved(t *testing.T) {
+	// Archival preserves successful completion without resolving unfinished work.
 	if got := DependencyStatusForTask(&models.Task{State: v1.TaskStateCompleted}); got != DependencyResolved {
 		t.Errorf("completed = %q; want %q", got, DependencyResolved)
 	}
 	archivedAt := time.Now().UTC()
 	archived := &models.Task{State: v1.TaskStateCompleted, ArchivedAt: &archivedAt}
-	if got := DependencyStatusForTask(archived); got != DependencyPending {
-		t.Errorf("archived+completed = %q; want %q", got, DependencyPending)
+	if got := DependencyStatusForTask(archived); got != DependencyResolved {
+		t.Errorf("archived+completed = %q; want %q", got, DependencyResolved)
 	}
 	if got := DependencyStatusForTask(nil); got != DependencyPending {
 		t.Errorf("nil task = %q; want %q", got, DependencyPending)

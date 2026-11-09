@@ -253,9 +253,29 @@ test.describe("Code walkthrough", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
+    // @covers AC-TASKS-WALKTHROUGH-TIME-001.1, AC-TASKS-WALKTHROUGH-TIME-001.2
+    const ws = watchWs(testPage);
     await seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-basic", "5-step tour");
+    const savedWalkthrough = ws.waitForResponse("task.walkthrough.get");
     const card = await openWalkthrough(testPage);
+    const savedAt = (await savedWalkthrough).payload.updated_at;
+    expect(typeof savedAt).toBe("string");
+    const generatedAt = card.getByTestId("walkthrough-generated-at");
+    await expect(generatedAt).toHaveAttribute("datetime", savedAt as string);
+    await expect(generatedAt).toContainText("Generated");
+    await expect(generatedAt).toHaveCSS("text-align", "left");
+    const timeBounds = await generatedAt.boundingBox();
+    const badgeTextLeft = await card.getByTestId("walkthrough-badge").evaluate((badge) => {
+      const range = document.createRange();
+      range.selectNodeContents(badge);
+      return range.getBoundingClientRect().x;
+    });
+    expect(timeBounds!.x).toBeCloseTo(badgeTextLeft, 0);
+    await prCapture.screenshot("walkthrough-generation-time", {
+      caption: "Left-aligned generation time with timezone available on hover",
+    });
     const header = card.getByTestId("walkthrough-step-header");
     const body = card.getByTestId("walkthrough-step-body");
 
@@ -285,6 +305,7 @@ test.describe("Code walkthrough", () => {
     await expectStep(4, "WALKTHROUGH_CHANGE_C");
     await expectStep(5, "WALKTHROUGH_UNCHANGED");
     await expect(card.getByTestId("walkthrough-next")).toBeDisabled();
+    await expect(generatedAt).toHaveAttribute("datetime", savedAt as string);
 
     // The unchanged/base file is opened in an editor tab, but it does not belong
     // in the Review diff because it was not changed by this task.
@@ -300,6 +321,12 @@ test.describe("Code walkthrough", () => {
     await expect(
       dialog.getByTestId("changes-repo-group").getByText("walkthrough_base.txt"),
     ).toHaveCount(0);
+    await testPage.reload();
+    const reloadedCard = await openWalkthrough(testPage);
+    await expect(reloadedCard.getByTestId("walkthrough-generated-at")).toHaveAttribute(
+      "datetime",
+      savedAt as string,
+    );
   });
 
   test("editor walkthrough shows range marker, connector, and supports dragging", async ({
@@ -517,6 +544,7 @@ test.describe("Code walkthrough", () => {
       seedData,
     }) => {
       test.setTimeout(180_000);
+      const ws = watchWs(testPage);
       const walkthroughStep = await apiClient.createWorkflowStep(
         seedData.workflowId,
         "Walkthrough Re-emission",
@@ -585,19 +613,31 @@ test.describe("Code walkthrough", () => {
         const card = await openWalkthrough(testPage);
         await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 2");
         await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_FIRST");
+        const generatedAt = card.getByTestId("walkthrough-generated-at");
+        const firstGeneration = await generatedAt.getAttribute("datetime");
+        expect(firstGeneration).toBeTruthy();
         await card.getByTestId("walkthrough-comment-trigger").click();
         await card.getByRole("textbox").fill("Feedback for the original revision");
         await card.getByRole("button", { name: "Add", exact: true }).click();
         await expect(card.getByTestId("walkthrough-comment")).toHaveCount(1);
+        await expect(generatedAt).toHaveAttribute("datetime", firstGeneration!);
 
+        const replacementSaved = ws.waitForEvent("task.walkthrough.updated", {
+          timeout: 45_000,
+          where: (payload) => payload.task_id === task.id,
+        });
         await apiClient.addUserMessage(
           task.id,
           primarySession.id,
           "/e2e:walkthrough-reemit-second",
         );
+        const replacementTimestamp = (await replacementSaved).payload.updated_at;
+        expect(typeof replacementTimestamp).toBe("string");
         await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 3");
         await expect(testPage.getByTestId("walkthrough-launcher")).toHaveCount(1);
         await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_SECOND");
+        await expect(generatedAt).not.toHaveAttribute("datetime", firstGeneration!);
+        await expect(generatedAt).toHaveAttribute("datetime", replacementTimestamp as string);
         await expect(card.getByTestId("walkthrough-step-body")).not.toContainText("REEMIT_FIRST");
         await expect(card.getByTestId("walkthrough-comment")).toHaveCount(0);
         await expect(card.getByTestId("walkthrough-comment-trigger")).toContainText("(0)");

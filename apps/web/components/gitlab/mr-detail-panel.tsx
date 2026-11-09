@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import {
   IconBrandGitlab,
   IconCheck,
@@ -30,11 +30,13 @@ import { useAppStore } from "@/components/state-provider";
 import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useAddMRFeedbackAsContext, useMRFeedback } from "@/hooks/domains/gitlab/use-mr-feedback";
 import { useMRActions } from "@/hooks/domains/gitlab/use-mr-actions";
+import { usePostReadyWait } from "@/hooks/domains/gitlab/use-post-ready-wait";
 import { useGitLabStatus } from "@/hooks/domains/gitlab/use-gitlab-status";
 import {
   approveMR,
   createMRDiscussionNote,
   deleteTaskMR,
+  markMRReady,
   mergeMR,
   resolveMRDiscussion,
   setMRAssignees,
@@ -44,6 +46,7 @@ import {
 } from "@/lib/api/domains/gitlab-api";
 import type { GitLabMRIdentity } from "@/lib/api/domains/gitlab-api";
 import { normalizeGitLabOrigin } from "@/lib/gitlab-identity";
+import { isMRDraft } from "@/lib/gitlab-merge-state";
 import { openExternalLink } from "@/lib/desktop/external-links";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -190,22 +193,75 @@ function PanelHeader({
   );
 }
 
-function MRActionButtons({
+type MergeGate = { draft: boolean; holding: boolean; blocked: boolean };
+
+/** Runs Mark as ready and the bounded wait that follows it. */
+function useMarkReady(
+  identity: GitLabMRIdentity & { host: string },
+  revision: number,
+  reload: Parameters<typeof usePostReadyWait>[1],
+  run: RunMRAction,
+) {
+  const identityKey = `${identity.workspaceId}\0${identity.host}\0${identity.project}\0${identity.iid}`;
+  const { holding, trackReady } = usePostReadyWait({ identityKey, revision }, reload);
+  const markReady = () =>
+    void trackReady(() => run("ready", () => markMRReady(identity), { skipRefresh: true }));
+  return { holding, markReady };
+}
+
+/** The conditions that disable Merge and its confirmation, in one place. */
+export function mergeGate(
+  mr: { state: string; has_conflicts: boolean; draft: boolean; detailed_merge_status?: string },
+  busy: boolean,
+  holding: boolean,
+): MergeGate {
+  const open = isOpenMRState(mr.state);
+  const draft = open && isMRDraft(mr);
+  return { draft, holding, blocked: busy || !open || mr.has_conflicts || draft || holding };
+}
+
+function MergeHint({ id, gate }: { id: string; gate: MergeGate }) {
+  const { t } = useTranslation();
+  if (gate.draft) {
+    return (
+      <p id={id} data-testid="mr-merge-draft-hint" className="w-full text-xs text-muted-foreground">
+        {t("gitlab:draftMergeHint")}
+      </p>
+    );
+  }
+  if (gate.holding) {
+    return (
+      <p
+        id={id}
+        data-testid="mr-merge-checking-hint"
+        className="w-full text-xs text-muted-foreground"
+      >
+        {t("gitlab:checkingMergeStatus")}
+      </p>
+    );
+  }
+  return null;
+}
+
+export function MRActionButtons({
   identity,
   state,
-  hasConflicts,
+  gate,
   busy,
   run,
   onMerge,
+  onMarkReady,
 }: {
   identity: GitLabMRIdentity & { host: string };
   state: string;
-  hasConflicts: boolean;
+  gate: MergeGate;
   busy: boolean;
   run: RunMRAction;
   onMerge: () => void;
+  onMarkReady: () => void;
 }) {
   const { t } = useTranslation();
+  const hintId = useId();
   const disabled = busy || !isOpenMRState(state);
   return (
     <div className="flex flex-wrap gap-2">
@@ -230,12 +286,24 @@ function MRActionButtons({
       <Button
         variant="outline"
         className={controlSizingClassName("standard", "cursor-pointer gap-1.5")}
-        disabled={disabled || hasConflicts}
+        disabled={gate.blocked}
+        aria-describedby={gate.draft || gate.holding ? hintId : undefined}
         onClick={onMerge}
       >
         <IconGitMerge className="h-4 w-4" /> {t("gitlab:merge")}
       </Button>
+      {gate.draft ? (
+        <Button
+          className={controlSizingClassName("standard", "cursor-pointer gap-1.5")}
+          disabled={busy}
+          data-testid="mr-mark-ready-button"
+          onClick={onMarkReady}
+        >
+          {t("gitlab:markAsReady")}
+        </Button>
+      ) : null}
       <SubscriptionToggle {...identity} />
+      <MergeHint id={hintId} gate={gate} />
     </div>
   );
 }
@@ -289,6 +357,7 @@ function MergeConfirmation({
   baseBranch,
   identity,
   run,
+  blocked,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -296,6 +365,7 @@ function MergeConfirmation({
   baseBranch: string;
   identity: GitLabMRIdentity;
   run: RunMRAction;
+  blocked: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -314,6 +384,7 @@ function MergeConfirmation({
           <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
             className="cursor-pointer"
+            disabled={blocked}
             onClick={() => void run("merge", () => mergeMR({ ...identity, squash: false }))}
           >
             {t("gitlab:merge")}
@@ -391,7 +462,7 @@ function MRDetailContent({
   const { t } = useTranslation();
   const [mergeOpen, setMergeOpen] = useState(false);
   const removeTaskMR = useAppStore((state) => state.removeTaskMR);
-  const { feedback, files, commits, loading, error, refresh } = useMRFeedback(
+  const { feedback, files, commits, loading, error, revision, refresh, reload } = useMRFeedback(
     workspaceId,
     taskMR.project_path,
     taskMR.mr_iid,
@@ -404,8 +475,10 @@ function MRDetailContent({
     [workspaceId, taskMR.project_path, taskMR.mr_iid, taskMR.host],
   );
   const busy = pendingAction !== null;
+  const { holding, markReady } = useMarkReady(identity, revision, reload, run);
   if (!feedback) return <FeedbackPlaceholder error={error} onRetry={refresh} />;
   const mr = feedback.mr;
+  const gate = mergeGate(mr, busy, holding);
   const { reply, resolve } = discussionHandlers(identity, run);
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="mr-detail-panel">
@@ -428,10 +501,11 @@ function MRDetailContent({
           <MRActionButtons
             identity={identity}
             state={mr.state}
-            hasConflicts={mr.has_conflicts}
+            gate={gate}
             busy={busy}
             run={run}
             onMerge={() => setMergeOpen(true)}
+            onMarkReady={markReady}
           />
           <Separator />
           <MRPeopleControls
@@ -469,6 +543,7 @@ function MRDetailContent({
         baseBranch={mr.base_branch}
         identity={identity}
         run={run}
+        blocked={gate.blocked}
       />
     </div>
   );

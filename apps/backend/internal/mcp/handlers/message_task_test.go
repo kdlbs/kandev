@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -497,6 +498,59 @@ func senderPayloadWithMode(targetTaskID, prompt, senderTaskID, deliveryMode stri
 // TestHandleMessageTask_SameTaskWithoutSessionID_Rejected pins the self-message
 // guard: a task can only message itself when it names a specific sibling
 // session — without session_id the old "cannot message itself" rejection holds.
+type promptOnlyCollaborationBoundary struct {
+	sourceWorkspace string
+	targetWorkspace string
+}
+
+func (*promptOnlyCollaborationBoundary) Enabled() bool                       { return true }
+func (*promptOnlyCollaborationBoundary) IsConversation(context.Context) bool { return true }
+func (*promptOnlyCollaborationBoundary) CallerTaskID(context.Context) string { return "" }
+
+func (b *promptOnlyCollaborationBoundary) Authorize(
+	_ context.Context, workspaceID string, action models.WorkspaceCollaborationAction,
+) error {
+	if workspaceID == b.sourceWorkspace {
+		return nil
+	}
+	if workspaceID == b.targetWorkspace && action == models.CollaborationPrompt {
+		return nil
+	}
+	return service.ErrForbidden
+}
+
+func TestHandleMessageTask_PromptOnlyCrossWorkspaceIdleDispatch(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, _, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateCreated)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Target"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "Board"}))
+	targetResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-2", WorkflowID: "wf-2", Title: "Target task",
+	})
+	require.NoError(t, err)
+	target := targetResult.Task
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "sess-2", TaskID: target.ID, AgentProfileID: "agent-profile-1",
+		IsPrimary: true, State: models.TaskSessionStateCreated,
+	}))
+	svc.SetWorkspaceCollaboration(&promptOnlyCollaborationBoundary{
+		sourceWorkspace: "ws-1", targetWorkspace: "ws-2",
+	}, nil)
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	principalCtx := mcpscope.WithPrincipal(ctx, mcpscope.Principal{
+		WorkspaceID: "ws-1", CallerTaskID: sender.ID, CallerSessionID: "sender-sess-1",
+	})
+
+	resp, err := h.handleMessageTask(principalCtx, makeWSMessage(t, ws.ActionMCPMessageTask,
+		senderPayload(target.ID, "prompt only", sender.ID)))
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type, "prompt-only idle dispatch must not require a read grant")
+	require.NotEmpty(t, orch.startCreatedCalls, "the prompt should start the idle target session")
+}
+
 func TestHandleMessageTask_SameTaskWithoutSessionID_Rejected(t *testing.T) {
 	h := &Handlers{}
 	payload := senderPayload("task-1", "hello", "task-1")

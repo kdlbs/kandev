@@ -25,7 +25,7 @@ The examples below use canonical MCP protocol names ending in `_kandev`. An agen
 
 An agent typically learns a peer's task ID in one of three ways:
 
-**From related tasks.** `list_related_tasks_kandev` returns parent, children, siblings, blockers, and blocked-by tasks for the current task. Each entry includes the full task UUID, title, lifecycle state, and associated pull requests, but not the workflow step (kanban column). To check which column a related task currently sits in, look it up with `list_tasks_kandev` on its workflow.
+**From related tasks.** `list_related_tasks_kandev` returns parent, children, siblings, blockers, and blocked-by tasks for the current task. `task_id` defaults to the current task; another target must be an ancestor, a descendant, a sibling with a shared non-empty parent, or a blocker of the caller in the same workspace. An unrelated task is denied, even in the same workspace. The compact output option is not a permission: `verbose` adds descriptions and never widens access. Each entry includes the full task UUID, title, lifecycle state, and associated pull requests, but not the workflow step (kanban column). To check which column a related task currently sits in, look it up with `list_tasks_kandev` on its workflow.
 
 ```
 list_related_tasks_kandev()
@@ -158,6 +158,34 @@ distinguish options with identical labels. If the ID cannot identify exactly
 one offered option with a nonempty label, `selected_label` is omitted.
 Free-text-only answers return `custom_text` without a selected label.
 Selections can also retain accompanying `custom_text`.
+
+An answer may also include an `attachments` array when the operator attaches
+evidence. Each entry has `attachment_id`, `type`, `name`, `mime_type`,
+`size_bytes`, `delivery_mode`, and a `path` that is readable in the current
+execution:
+
+```json
+{
+  "layout": {
+    "selected_option": "q1_opt1",
+    "selected_label": "Approve",
+    "attachments": [{
+      "attachment_id": "opaque-id",
+      "type": "image",
+      "name": "screenshot.png",
+      "mime_type": "image/png",
+      "size_bytes": 123,
+      "delivery_mode": "path",
+      "path": "/workspace/.kandev/attachments/<session>/screenshot.png"
+    }]
+  }
+}
+```
+
+Read the path with your file tools. The file is not returned as an inline image
+block or base64 data. An answer bundle accepts up to 10 files and 100 MiB in
+total, with a 100 MiB per-file limit. Files belong to the question whose answer
+carries them. A rejection has no attachments.
 
 ## Show an image with an operator question
 

@@ -359,5 +359,19 @@
   "runStatusRetrySchedulingFailed": "无法安排重试",
   "retryAttempt": "第 {{attempt}} 次尝试",
   "retryDue": "计划于 {{when}}",
-  "stopRetry": "停止重试"
+  "stopRetry": "停止重试",
+  "pluginToolsTitle": "插件工具（可选）",
+  "pluginToolsDescription": "选择此自动化可以使用的工具。",
+  "pluginToolsLoading": "正在加载插件工具...",
+  "pluginToolsLoadError": "无法加载插件工具。已保存的选择未更改。",
+  "pluginToolsRetry": "重试",
+  "pluginToolsEmpty": "当前没有已安装的插件为私有自动化提供工具。",
+  "pluginToolsReviewRequired": "需要审核：插件配置已更改。",
+  "pluginToolsPreviouslySelected": "之前选择：{{names}}",
+  "pluginToolsReselect": "请重新选择工具并保存以恢复访问。",
+  "pluginToolsClear": "清除",
+  "pluginToolsRead": "读取",
+  "pluginToolsWrite": "写入",
+  "pluginToolsClearedHint": "保存以移除插件工具访问权限。",
+  "pluginToolsUnavailable": "插件不可用"
 }

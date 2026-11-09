@@ -15,6 +15,7 @@ export type WorkflowSyncProvider = "github" | "gitlab";
  * is no host field here.
  */
 export interface WorkflowSyncConfig {
+  github_host?: string;
   workspace_id: string;
   provider: WorkflowSyncProvider;
   repo_owner: string;
@@ -42,6 +43,7 @@ export interface WorkflowSyncConfig {
  * `repo_owner`/`repo_name`; GitLab requires `project_path` instead.
  */
 export interface WorkflowSyncSetConfigRequest {
+  github_host?: string;
   provider?: WorkflowSyncProvider;
   repo_owner?: string;
   repo_name?: string;

@@ -170,6 +170,9 @@ func (s *Service) validateRequestedExecutorAdmission(ctx context.Context, req *C
 	}
 	launchRequested := req.StartAgent || req.DeferredLaunch != nil || (req.StartWhenUnblocked != nil && *req.StartWhenUnblocked)
 	if !launchRequested {
+		if req.ExecutorProfileID != "" && req.ExecutorProfileIDExplicit {
+			return s.AuthorizeExecutorProfile(ctx, req.ExecutorProfileID)
+		}
 		return nil
 	}
 	if req.ExecutorProfileID != "" {

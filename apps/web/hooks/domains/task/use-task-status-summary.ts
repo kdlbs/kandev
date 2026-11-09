@@ -17,6 +17,7 @@ export type TaskStatusSummaryState = {
   sidebarArchivedTasks: {
     itemsByWorkspaceId: Record<string, StatusSummaryTask[]>;
   };
+  sidebarStatusSummaryByWorkspaceId?: Record<string, Record<string, TaskStatusSummary>>;
 };
 
 export function collectTaskStatusSummaryCandidates(
@@ -27,15 +28,24 @@ export function collectTaskStatusSummaryCandidates(
   const addCandidate = (candidate: StatusSummaryTask) => {
     if (candidate.id === taskId) candidates.push(candidate.statusSummary);
   };
-  const canonical = state.taskOverview.byId[taskId];
+  // Focused test harnesses and early boot may hydrate only part of the store;
+  // a missing collection is an empty candidate source, not a crash.
+  const canonical = state.taskOverview?.byId?.[taskId];
   if (canonical) addCandidate(canonical);
-  state.kanban.tasks.forEach(addCandidate);
-  Object.values(state.kanbanMulti.snapshots).forEach((snapshot) =>
-    snapshot.tasks.forEach(addCandidate),
+  state.kanban?.tasks?.forEach(addCandidate);
+  Object.values(state.kanbanMulti?.snapshots ?? {}).forEach((snapshot) =>
+    snapshot.tasks?.forEach(addCandidate),
   );
-  Object.values(state.sidebarArchivedTasks.itemsByWorkspaceId).forEach((items) =>
-    items.forEach(addCandidate),
+  Object.values(state.sidebarArchivedTasks?.itemsByWorkspaceId ?? {}).forEach((items) =>
+    items?.forEach(addCandidate),
   );
+  // Ephemeral Quick Chat tasks are intentionally absent from board/overview
+  // collections. The bounded live summary cache is their retained authoritative
+  // source after a summary event, and is also hydrated on reopen.
+  Object.values(state.sidebarStatusSummaryByWorkspaceId ?? {}).forEach((summaries) => {
+    const candidate = summaries?.[taskId];
+    if (candidate) candidates.push(candidate);
+  });
   return candidates;
 }
 

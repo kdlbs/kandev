@@ -36,7 +36,7 @@ deployment requirement.
    identity, name, profile, source binding and committed workflow route remain
    intact.
 
-Additional MCP spawns also carry server-only `PreserveWorkflowBinding` intent,
+Additional MCP spawns also carry server-only `PreserveWorkflowSourceBinding` intent,
 separate from `ProfileExplicit`, through the launch request and start options.
 It prevents a sibling session from replacing a pinned source step's binding.
 Ordinary workflow and selector-backed launches still record their source session.

@@ -35,6 +35,25 @@ const (
 // shared with another namespace.
 var usageEventIDNamespace = uuid.MustParse("2f6a6f8c-6c1b-4b8a-9e3e-7a6d2c5b9f10")
 
+// continuationActivityEventFrom copies the bounded stream fields the
+// continuation-activity observer needs without leaking runtime payload types
+// into the orchestrator's neutral activity record.
+func continuationActivityEventFrom(data *lifecycle.AgentStreamEventData) continuationActivityEvent {
+	if data == nil {
+		return continuationActivityEvent{}
+	}
+	return continuationActivityEvent{
+		Type:                        data.Type,
+		PromptGeneration:            data.PromptGeneration,
+		Text:                        data.Text,
+		Role:                        data.Role,
+		ProviderDiagnosticCandidate: data.ProviderDiagnosticCandidate,
+		ToolCallID:                  data.ToolCallID,
+		ParentToolCallID:            data.ParentToolCallID,
+		Normalized:                  data.Normalized,
+	}
+}
+
 // handleAgentStreamEvent handles agent stream events (tool calls, message chunks, etc.)
 func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if payload == nil || payload.Data == nil {
@@ -158,6 +177,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			true,
 		)
 	}
+	if eventType != agentEventToolCall {
+		s.observeContinuationActivity(ctx, taskID, sessionID, eventExecutionID, continuationActivityEventFrom(payload.Data))
+	}
 	if observedOutput || observedEffect {
 		resetEvent := watcher.AgentEventData{
 			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
@@ -211,6 +233,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case agentEventToolCall:
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
+		// Observe after the handler records the finalized tool ownership. This
+		// prevents an unclassified or background call from confirming recovery.
+		s.observeContinuationActivity(ctx, taskID, sessionID, eventExecutionID, continuationActivityEventFrom(payload.Data))
 
 	case agentEventToolUpdate:
 		s.handleToolUpdateEvent(ctx, payload)
@@ -247,6 +272,8 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case streams.EventTypeSessionInfo:
 		s.handleSessionInfoEvent(ctx, payload)
+	case streams.EventTypePromptSuggestion:
+		s.handlePromptSuggestionEvent(ctx, payload)
 	case streams.EventTypeBackgroundWorkUpdated:
 		s.handleBackgroundWorkUpdatedEvent(ctx, payload)
 
@@ -270,6 +297,14 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case streams.EventTypeUsageObservation:
 		s.publishNativeUsageObservation(ctx, payload)
+
+	case streams.EventTypeContextCompactionObservation:
+		if payload != nil && payload.Data != nil {
+			s.publishCommittedContextCompaction(
+				ctx, payload.TaskID, payload.SessionID,
+				payload.Data.CanonicalProjection, payload.Data.Data,
+			)
+		}
 
 	case "plan":
 		s.handleSessionTodosEvent(ctx, payload)
@@ -306,6 +341,15 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	if sessionID != "" && (eventType == agentEventComplete || eventType == agentEventError) {
 		settlementCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		if streamGuard != nil && streamGuard.locked {
+			settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
+		}
+		if eventType == agentEventComplete {
+			// The streaming completion path defers the running->waiting
+			// decision to agent.ready. Changing it here would make that ready
+			// event look stale and skip its workflow and queue work.
+			settlementCtx = withSettledDeliverySessionStateConvergenceSkipped(settlementCtx)
+		}
 		if err := s.reconcileAgentDeliverySettlements(settlementCtx, sessionID); err != nil {
 			s.logger.Warn("failed to finish durable delivery terminal settlement",
 				zap.String("task_id", taskID),
@@ -475,11 +519,14 @@ func (s *Service) completeTurnForStreamEvent(
 			s.completeTurnForTaskSessionWithSuccessorPolicy(ctx, payload.TaskID, payload.SessionID, true)
 			return
 		}
+		fixedResourceKey := s.fixedResourceForCleanStreamCompletion(ctx, payload, capturedTurnID)
 		if err := s.completeTurnForTaskSessionCheckedOwned(ctx, payload.TaskID, payload.SessionID, capturedTurnID); err != nil {
 			s.logger.Warn("failed to complete stream event's captured turn",
 				zap.String("session_id", payload.SessionID),
 				zap.String("turn_id", capturedTurnID),
 				zap.Error(err))
+		} else {
+			s.profileExecutionResolver.ResetFixedProfileCircuitFailures(ctx, fixedResourceKey)
 		}
 		if successorTurnID == capturedTurnID {
 			s.clearAcceptedQueuedDispatch(payload.SessionID)
@@ -503,14 +550,20 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		executionID = payload.AgentID
 	}
 	if sessionID != "" {
+		// Opt-in diagnostics use the transport type; OFF retains legacy attribution.
+		agentType := payload.AgentID
+		if s.config.ProviderKeywordContext && payload.AgentType != "" {
+			agentType = payload.AgentType
+		}
 		failure := watcher.AgentEventData{
 			TaskID:             taskID,
 			SessionID:          sessionID,
 			OwnerKind:          string(payload.OwnerKind),
 			AgentExecutionID:   executionID,
-			AgentID:            payload.AgentID,
+			AgentID:            agentType,
 			AgentProfileID:     payload.AgentProfileID,
 			ExecutionProfileID: payload.ExecutionProfileID,
+			ResourceCircuitKey: payload.ResourceCircuitKey,
 			PromptGeneration:   payload.Data.PromptGeneration,
 			ErrorMessage:       payload.Data.Error,
 			ProviderError:      payload.Data.ProviderError,
@@ -520,7 +573,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		}
 		failure = s.withPromptAttemptEvidence(failure)
 		result := s.routeDynamicAgentFailureWithEvidence(
-			ctx, failure, classifyKanbanFailure(failure), nil, true,
+			ctx, failure, s.classifyKanbanFailure(failure), nil, true,
 		)
 		if result.handled && !result.manualRecovery {
 			return
@@ -558,7 +611,7 @@ func (s *Service) handleSessionStatusEvent(ctx context.Context, payload *lifecyc
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	if sessionID != "" && payload.Data.ACPSessionID != "" {
-		s.storeResumeToken(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
+		s.storeResumeTokenFromAgentEvent(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
 	}
 	if sessionID == "" || s.messageCreator == nil {
 		return
@@ -1055,8 +1108,16 @@ func (s *Service) trackBackgroundToolUpdate(
 		// signal arrives. Monitor terminal payloads are no longer classified as
 		// active, and synchronous subagents do not carry IsAsync.
 		if normalizedIsDetachedLaunch(payload.Data.Normalized) {
+			// Only the original async-launch result attests a new child.
+			// Settlement and resume updates describe its card, not liveness.
+			if isSubagentPresentationUpdate(payload) {
+				return
+			}
 			kind := backgroundWorkKind(payload.Data.Normalized)
-			if kind == streams.BackgroundWorkKindShell {
+			// Only attest the parked projection for a workload whose provider
+			// can confirm later liveness on this connection. An identified but
+			// unverified launch stays inspectable without claiming to be live.
+			if kind == streams.BackgroundWorkKindShell && payload.Data.Normalized.IsVerifiedBackgroundWork() {
 				// Waiting-attribution spec (docs/specs/disambiguate-waiting):
 				// this is the recognised condition for "a detached
 				// background-shell launch happened during this turn" — the
@@ -1148,7 +1209,30 @@ func (s *Service) resolveToolUpdateOwnership(payload *lifecycle.AgentStreamEvent
 		)
 		return toolOwnershipBackground
 	}
+	if terminalBackgroundWorkToolUpdate(payload) {
+		s.recordToolOwnership(
+			payload.SessionID,
+			payload.Data.ToolCallID,
+			payload.ExecutionID,
+			toolOwnershipBackground,
+		)
+		return toolOwnershipBackground
+	}
 	return s.toolOwnership(payload.SessionID, payload.Data.ToolCallID, payload.ExecutionID)
+}
+
+// terminalBackgroundWorkToolUpdate reports whether a tool update carries a
+// typed terminal workload observation for its own call. The launch tool's
+// earlier terminal result clears ownership, so the later job-end frame needs
+// this explicit evidence to reach the registration that still holds the turn
+// open. The source-call check keeps a mismatched observation from retiring a
+// different job.
+func terminalBackgroundWorkToolUpdate(payload *lifecycle.AgentStreamEventPayload) bool {
+	observation := payload.Data.BackgroundWork
+	if observation == nil || !observation.State.IsTerminal() || payload.Data.ToolCallID == "" {
+		return false
+	}
+	return observation.SourceCallID == "" || observation.SourceCallID == payload.Data.ToolCallID
 }
 
 func backgroundWorkID(payload *streams.NormalizedPayload) string {
@@ -1172,6 +1256,25 @@ func backgroundWorkKind(payload *streams.NormalizedPayload) streams.BackgroundWo
 		return ""
 	}
 	return payload.BackgroundWork().Kind
+}
+
+// subagentStatusAsyncLaunched is the subagent status carried only by the
+// original launch result of a detached Claude subagent.
+const subagentStatusAsyncLaunched = "async_launched"
+
+// isSubagentPresentationUpdate reports whether a terminal tool update only
+// re-presents a detached subagent card (settlement or resume) rather than
+// attesting its launch. Such updates must not record or publish background
+// work, because they carry no tool title and describe an existing child.
+func isSubagentPresentationUpdate(payload *lifecycle.AgentStreamEventPayload) bool {
+	if !isTerminalToolStatus(payload.Data.ToolStatus) || !normalizedIsDetachedLaunch(payload.Data.Normalized) {
+		return false
+	}
+	if backgroundWorkKind(payload.Data.Normalized) != streams.BackgroundWorkKindSubagent {
+		return false
+	}
+	subagent := payload.Data.Normalized.SubagentTask()
+	return subagent == nil || subagent.Status != subagentStatusAsyncLaunched
 }
 
 // isTerminalToolStatus reports whether a tool_update status marks the tool call
@@ -3373,7 +3476,7 @@ func (s *Service) storeCompleteEventResumeToken(ctx context.Context, payload *li
 			lastMsgUUID = uuid
 		}
 	}
-	s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
+	s.storeResumeTokenFromAgentEvent(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
 }
 
 func (s *Service) resolveCompleteEventTurnID(
@@ -4180,6 +4283,7 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	defer settingsLock.Unlock()
 	identity := sessionSettingsEventIdentity{
 		AttemptID: payload.AttemptID, ExecutionID: payload.ExecutionID,
+		ExecutionProfileID: payload.ExecutionProfileID,
 		SourceGeneration:   payload.SessionSettingsSourceGeneration,
 		SettingsGeneration: payload.Data.SessionSettingsGeneration,
 	}
@@ -4241,25 +4345,39 @@ func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lif
 	if sessionID == "" {
 		return
 	}
+	// A capability event from an obsolete execution or resume attempt must not
+	// restore a native suggestion source. The stream dispatcher filters this
+	// too; the check stays here because recording is admission state, not only
+	// a broadcast.
+	if !s.resumeAttemptAllowsExecution(sessionID, payload.ExecutionID, payload.AttemptID) {
+		s.logger.Debug("ignoring agent capabilities from a stale resume attempt",
+			zap.String("session_id", sessionID),
+			zap.String("execution_id", payload.ExecutionID),
+			zap.String("attempt_id", payload.AttemptID))
+		return
+	}
 	// Record the negotiated prompt-queueing advertisement before the event-bus
 	// guard. It gates prompt handoff and mid-turn steering, so it must land as
 	// soon as the agent advertises it — recording is admission state, whereas the
 	// bus below is only broadcast. Skipping it when no bus is configured would
 	// silently make a capable agent ineligible.
 	s.recordSessionPromptQueueing(sessionID, payload.Data.SupportsPromptQueueing)
+	s.recordPromptSuggestionSource(ctx, sessionID, payload.Data.SupportsPromptSuggestions)
 	if s.eventBus == nil {
 		return
 	}
 	eventPayload := lifecycle.AgentCapabilitiesEventPayload{
-		TaskID:                  payload.TaskID,
-		SessionID:               sessionID,
-		AgentID:                 payload.AgentID,
-		SupportsImage:           payload.Data.SupportsImage,
-		SupportsAudio:           payload.Data.SupportsAudio,
-		SupportsEmbeddedContext: payload.Data.SupportsEmbeddedContext,
-		SupportsPromptQueueing:  payload.Data.SupportsPromptQueueing,
-		AuthMethods:             payload.Data.AuthMethods,
-		Timestamp:               time.Now().UTC().Format(time.RFC3339),
+		TaskID:                           payload.TaskID,
+		SessionID:                        sessionID,
+		AgentID:                          payload.AgentID,
+		SupportsImage:                    payload.Data.SupportsImage,
+		SupportsAudio:                    payload.Data.SupportsAudio,
+		SupportsEmbeddedContext:          payload.Data.SupportsEmbeddedContext,
+		SupportsPromptQueueing:           payload.Data.SupportsPromptQueueing,
+		SupportsPromptSuggestions:        payload.Data.SupportsPromptSuggestions,
+		NativePromptSuggestionsSupported: payload.Data.NativePromptSuggestionsSupported,
+		AuthMethods:                      payload.Data.AuthMethods,
+		Timestamp:                        time.Now().UTC().Format(time.RFC3339),
 	}
 	subject := events.BuildAgentCapabilitiesSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.AgentCapabilitiesUpdated, "orchestrator", eventPayload))
@@ -4278,6 +4396,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	defer settingsLock.Unlock()
 	identity := sessionSettingsEventIdentity{
 		AttemptID: payload.AttemptID, ExecutionID: payload.ExecutionID,
+		ExecutionProfileID: payload.ExecutionProfileID,
 		SourceGeneration:   payload.SessionSettingsSourceGeneration,
 		SettingsGeneration: payload.Data.SessionSettingsGeneration,
 	}
@@ -4378,6 +4497,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 type sessionSettingsEventIdentity struct {
 	AttemptID          string
 	ExecutionID        string
+	ExecutionProfileID string
 	SourceGeneration   uint64
 	SettingsGeneration uint64
 }
@@ -4436,6 +4556,12 @@ func sessionSettingsEventIsStale(
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		return false
+	}
+	// A dynamic session that switched concrete candidates must not accept
+	// settings reported by the previous candidate's execution.
+	if identity.ExecutionProfileID != "" && session.ExecutionProfileID != "" &&
+		identity.ExecutionProfileID != session.ExecutionProfileID {
+		return true
 	}
 	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
 	if !ok {

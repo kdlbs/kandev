@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useContext, useEffect } from "react";
 import { IconExternalLink, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Spinner } from "@kandev/ui/spinner";
@@ -11,13 +11,32 @@ import { GitHubAppImportForm } from "./github-app-import-form";
 import { GitHubAppRegistrationList } from "./github-app-registration-list";
 import { useTranslation } from "react-i18next";
 
+import {
+  GitHubConnectionDraftContext,
+  useConnectionFormState,
+  useConnectionRequestGuard,
+} from "./github-connection-draft";
+
 type AppView = "choose" | "import" | "create";
 type RegistrationHook = ReturnType<typeof useGitHubAppRegistrations>;
 
-export function GitHubAppConnectionPanel({ workspaceId }: { workspaceId: string }) {
+export function GitHubAppConnectionPanel({
+  workspaceId,
+  githubHost = "github.com",
+}: {
+  workspaceId: string;
+  githubHost?: string;
+}) {
   const { t } = useTranslation();
-  const registrations = useGitHubAppRegistrations(workspaceId);
-  const [view, setView] = useState<AppView>("choose");
+  const sharedDraft = useContext(GitHubConnectionDraftContext);
+  const captureRequest = useConnectionRequestGuard(`${workspaceId}:${githubHost}`);
+  const catalog = useGitHubAppRegistrations(workspaceId);
+  const registrations = {
+    ...catalog,
+    registrations: catalog.registrations.filter((item) => item.github_host === githubHost),
+    selected: catalog.selected?.github_host === githubHost ? catalog.selected : null,
+  };
+  const [view, setView] = useConnectionFormState<AppView>("app-view", "choose");
   const { selectedId, setSelectedId, selectedRegistration } = useAppRegistrationSelection(
     workspaceId,
     registrations,
@@ -25,18 +44,22 @@ export function GitHubAppConnectionPanel({ workspaceId }: { workspaceId: string 
   const { toast } = useToast();
 
   useEffect(() => {
+    if (sharedDraft) return;
     setView("choose");
-  }, [workspaceId]);
+  }, [workspaceId, githubHost, sharedDraft]);
 
   async function install() {
+    const isCurrent = captureRequest();
     if (!selectedRegistration || selectedRegistration.status !== "active") return;
     try {
       const response = await registrations.startInstall(selectedRegistration.id);
+      if (!isCurrent()) return;
       const url = response.url ?? response.URL;
       // Surfaced to the user by the catch below, so it is copy.
       if (!url) throw new Error(t("github:githubDidNotReturnAnInstallationUrl"));
       window.location.assign(url);
     } catch (error) {
+      if (!isCurrent()) return;
       toast({
         description: error instanceof Error ? error.message : t("github:appInstallationFailed"),
         variant: "error",
@@ -49,6 +72,7 @@ export function GitHubAppConnectionPanel({ workspaceId }: { workspaceId: string 
       <div className="space-y-4">
         <BackButton onClick={() => setView("choose")} />
         <GitHubAppImportForm
+          githubHost={githubHost}
           workspaceId={workspaceId}
           registrations={registrations}
           onImported={(registrationId) => {
@@ -63,10 +87,42 @@ export function GitHubAppConnectionPanel({ workspaceId }: { workspaceId: string 
     return (
       <div className="space-y-4">
         <BackButton onClick={() => setView("choose")} />
-        <GitHubAppCreateForm workspaceId={workspaceId} registrations={registrations} />
+        <GitHubAppCreateForm
+          githubHost={githubHost}
+          workspaceId={workspaceId}
+          registrations={registrations}
+        />
       </div>
     );
   }
+  return (
+    <AppCatalogChoices
+      registrations={registrations}
+      selectedId={selectedId}
+      setSelectedId={setSelectedId}
+      selectedRegistration={selectedRegistration}
+      install={install}
+      setView={setView}
+    />
+  );
+}
+
+function AppCatalogChoices({
+  registrations,
+  selectedId,
+  setSelectedId,
+  selectedRegistration,
+  install,
+  setView,
+}: {
+  registrations: RegistrationHook;
+  selectedId: string;
+  setSelectedId: (value: string) => void;
+  selectedRegistration?: RegistrationHook["registrations"][number];
+  install: () => Promise<void>;
+  setView: (value: AppView) => void;
+}) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4">
       <div className="space-y-1">
@@ -77,7 +133,7 @@ export function GitHubAppConnectionPanel({ workspaceId }: { workspaceId: string 
       </div>
       {registrations.loading ? (
         <div className="flex min-h-11 items-center gap-2 text-sm text-muted-foreground">
-          <Spinner className="h-4 w-4" /> {t("github:loadingRegisteredApps")}
+          <Spinner aria-hidden="true" className="h-4 w-4" /> {t("github:loadingRegisteredApps")}
         </div>
       ) : (
         <GitHubAppRegistrationList
@@ -94,7 +150,7 @@ export function GitHubAppConnectionPanel({ workspaceId }: { workspaceId: string 
           className="cursor-pointer"
           data-testid="github-app-install-button"
         >
-          {registrations.mutating && <Spinner className="mr-2 h-4 w-4" />}
+          {registrations.mutating && <Spinner aria-hidden="true" className="mr-2 h-4 w-4" />}
           {t("github:installForThisWorkspace")}
           <IconExternalLink className="ml-2 h-4 w-4" />
         </Button>
@@ -113,8 +169,11 @@ export function GitHubAppConnectionPanel({ workspaceId }: { workspaceId: string 
 }
 
 function useAppRegistrationSelection(workspaceId: string, registrations: RegistrationHook) {
-  const [selectedId, setSelectedId] = useState("");
-  useEffect(() => setSelectedId(""), [workspaceId]);
+  const sharedDraft = useContext(GitHubConnectionDraftContext);
+  const [selectedId, setSelectedId] = useConnectionFormState("app-selection", "");
+  useEffect(() => {
+    if (!sharedDraft) setSelectedId("");
+  }, [workspaceId, sharedDraft]);
   useEffect(() => {
     if (!registrations.loaded) return;
     setSelectedId((current) => {

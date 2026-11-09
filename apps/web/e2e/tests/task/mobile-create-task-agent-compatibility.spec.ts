@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { seedIncompatibleAgentScenario, seedLockedWorkflow } from "./agent-compatibility-helpers";
@@ -130,11 +131,17 @@ test.describe("Task creation agent compatibility on mobile", () => {
       await expect(executorSelector).toBeVisible();
       await expect(executorSelector).toBeEnabled();
       await executorSelector.tap();
+      const executorDrawer = testPage
+        .getByRole("dialog")
+        .filter({ has: testPage.getByTestId("executor-profile-selector-dropdown") });
+      await expect(executorDrawer).toBeVisible();
+      await waitForFiniteAnimations(executorDrawer);
       const executorOption = testPage.getByRole("option", {
         name: /Mobile Docker Codex Only/i,
       });
       await expect(executorOption).toBeVisible();
       await executorOption.tap();
+      await expect(executorSelector).toHaveAttribute("aria-expanded", "false");
       await expect(executorSelector).toContainText("Mobile Docker Codex Only");
 
       await expect(agentSelector).toContainText(scenario.secondAgentDisplayName);

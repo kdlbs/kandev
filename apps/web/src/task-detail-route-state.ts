@@ -24,5 +24,6 @@ export type TaskDetailRouteState =
       routeKey: string;
       status: "error";
       data: null;
+      temporary?: boolean;
       sessionAdmission?: "unavailable" | "read_failed";
     };

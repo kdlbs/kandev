@@ -52,7 +52,7 @@ Local reproduction used `validateCoverage` from the trusted CI checkout against 
 An additional spawn at a step pinned to profile A could replace that step's
 original source binding with the new session, even when the new session used
 profile B. The original reuse-target fixture did not exercise a pinned source
-step. A separate server-only `PreserveWorkflowBinding` intent now prevents this
+step. A separate server-only `PreserveWorkflowSourceBinding` intent now prevents this
 replacement without changing ordinary workflow or selector-backed recording.
 The ceiling start payload persists the intent and restores it on replay.
 

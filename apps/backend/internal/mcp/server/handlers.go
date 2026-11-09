@@ -251,6 +251,9 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
 		}
+		if priority := req.GetString("priority", ""); priority != "" {
+			payload["priority"] = priority
+		}
 		if s.sessionID != "" && s.taskID != "" {
 			payload["source_session_id"] = s.sessionID
 		}
@@ -269,6 +272,9 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		// never declared the parameter, so no agent could reach it.
 		if blockedBy := stringArrayArg(req, "blocked_by"); len(blockedBy) > 0 {
 			payload["blocked_by"] = blockedBy
+		}
+		if relatedTaskIDs := stringArrayArg(req, "related_task_ids"); len(relatedTaskIDs) > 0 {
+			payload["related_task_ids"] = relatedTaskIDs
 		}
 		// Omitted means "derive": with blocked_by set, a start request becomes a
 		// start-when-unblocked intent. start_agent defaults to true and agents
@@ -335,6 +341,9 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 		}
 		if desc := req.GetString("description", ""); desc != "" {
 			payload["description"] = desc
+		}
+		if priority := req.GetString("priority", ""); priority != "" {
+			payload["priority"] = priority
 		}
 		if state := req.GetString("state", ""); state != "" {
 			payload["state"] = state
@@ -1146,6 +1155,9 @@ func simplifyAnswer(ans map[string]interface{}, rejected bool) map[string]interf
 	}
 	if customText, ok := ans["custom_text"].(string); ok && customText != "" {
 		out["custom_text"] = customText
+	}
+	if attachments, ok := ans["attachments"].([]interface{}); ok && len(attachments) > 0 {
+		out["attachments"] = attachments
 	}
 	if rejected && len(out) == 0 {
 		return map[string]interface{}{answeredFieldKey: false, rejectedFieldKey: true}
