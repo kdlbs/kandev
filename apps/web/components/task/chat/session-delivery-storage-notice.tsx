@@ -219,12 +219,12 @@ function StorageNoticeRow({
           )}
           {view.remote && health.executor_label && (
             <>
-              <span className="min-w-0 truncate" title={health.executor_label}>
+              <span className="max-w-[45%] shrink-0 truncate" title={health.executor_label}>
                 {t("task:storageAdvisoryRemotePrefix", { executor: health.executor_label })}
               </span>{" "}
             </>
           )}
-          <span className="shrink-0 truncate font-medium">{primaryLabel}</span>
+          <span className="min-w-0 font-medium break-words">{primaryLabel}</span>
           {view.pressure && usageLabel && (
             <span className="text-muted-foreground hidden shrink-0 tabular-nums md:inline">
               {usageLabel}
