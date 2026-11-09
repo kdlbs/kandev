@@ -61,3 +61,27 @@ func TestConvertMessageChunk_ProviderDiagnosticCandidateUsesAdapterProviderID(t 
 		t.Fatal("an adapter with no provider identity must not match claude-acp's provider-scoped rule")
 	}
 }
+
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12
+func TestConvertMessageChunk_FencedFreeUsageExampleIsNotDiagnosticCandidate(t *testing.T) {
+	const fencedExample = "Example:\n```text\nError: free usage limit reached\n```"
+	adapter := newTestAdapterForAgent("opencode-acp")
+
+	fencedEvent := adapter.convertMessageChunk("session-1", acp.TextBlock(fencedExample), "assistant")
+	if fencedEvent == nil {
+		t.Fatal("expected converted fenced example")
+	}
+	if fencedEvent.ProviderDiagnosticCandidate {
+		t.Fatal("fenced assistant example must not be marked as a provider diagnostic")
+	}
+
+	diagnosticEvent := adapter.convertMessageChunk(
+		"session-1", acp.TextBlock(fencedExample+"\nError: free usage limit reached"), "assistant",
+	)
+	if diagnosticEvent == nil {
+		t.Fatal("expected converted assistant diagnostic")
+	}
+	if !diagnosticEvent.ProviderDiagnosticCandidate {
+		t.Fatal("diagnostic after the closed fence must retain the provider diagnostic marker")
+	}
+}
