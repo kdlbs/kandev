@@ -74,11 +74,25 @@ func applyDynamicRouteAction(
 	if err != nil {
 		return handleDynamicRouteActionError(ctx, repo, session, expectedState, err)
 	}
+	candidateSwitch := orchestrator.DynamicCandidateRuntimeResetRequired(
+		session.ExecutionProfileID, decision.ExecutionProfileID,
+	)
 	changed, err := persistDynamicRouteSelection(ctx, repo, session, expectedState, decision, persistCandidateSwitch)
 	if err != nil {
 		return nil, err
 	}
 	if !changed {
+		if candidateSwitch {
+			// The route claim is already durable, so a failed projection must
+			// return that generation to manual recovery before reporting conflict.
+			if _, err := resolver.MarkRouteActionRequired(
+				ctx, session.ID, decision.Generation, session.RouteReason,
+			); err != nil {
+				wrappedErr := fmt.Errorf("settle unpersisted dynamic route selection: %w", err)
+				return nil, routeActionPersistenceError(ctx, repo, session, wrappedErr)
+			}
+			return nil, routeActionError(ctx, repo, session, dynamicruntime.ErrStaleGeneration)
+		}
 		return reloadRouteActionResult(ctx, repo, session.ID)
 	}
 	if request.Action == orchestrator.RouteActionCancelWait || request.Action == orchestrator.RouteActionStop {
