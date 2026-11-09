@@ -152,7 +152,7 @@ type InstanceInfo struct {
 	Status          string            `json:"status"`
 	WorkspacePath   string            `json:"workspace_path"`
 	AgentCommand    string            `json:"agent_command"`
-	Env             map[string]string `json:"env,omitempty"`
+	Env             map[string]string `json:"env"`
 	CreatedAt       time.Time         `json:"created_at"`
 	// SessionID is the task session ID this instance was created for, if any.
 	SessionID string `json:"session_id,omitempty"`
@@ -161,7 +161,7 @@ type InstanceInfo struct {
 	// WorkspaceSourceRoots is the instance's live, current source-root
 	// allowlist, read back rather than pushed (AC-EXECUTORS-SURVIVAL-002.14's
 	// "workspace source roots" reconstruction row).
-	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	WorkspaceSourceRoots []string `json:"workspace_source_roots"`
 	// ProviderSessionID is the live agent CLI's own session identity, read
 	// back from the adopted instance (AC-EXECUTORS-SURVIVAL-002.14's
 	// "provider session identity" reconstruction row).

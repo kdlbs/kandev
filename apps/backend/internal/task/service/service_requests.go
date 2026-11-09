@@ -70,6 +70,12 @@ type TaskRepositoryInput struct {
 	// active plugin's provider ownership and clone origin.
 	TrustedProviderDescriptor bool                           `json:"-"`
 	BranchPolicySnapshot      *models.RepositoryBranchPolicy `json:"-"`
+
+	// BaseBranchSelectionSource records who selected BaseBranch. It is
+	// internal-only so public transports cannot request permissive
+	// repository-default recovery. An empty value is resolved from whether
+	// BaseBranch was supplied; unknown values stay strict.
+	BaseBranchSelectionSource models.BaseBranchSelectionSource `json:"-"`
 }
 
 // CreateTaskRequest contains the data for creating a new task
