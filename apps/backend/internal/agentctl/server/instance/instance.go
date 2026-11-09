@@ -294,7 +294,7 @@ type InstanceInfo struct {
 	AgentCommand string `json:"agent_command"`
 
 	// Env contains environment variables passed to the agent process
-	Env map[string]string `json:"env,omitempty"`
+	Env map[string]string `json:"env"`
 
 	// CreatedAt is the timestamp when this instance was created
 	CreatedAt time.Time `json:"created_at"`
@@ -310,7 +310,7 @@ type InstanceInfo struct {
 	// after creation, so this always reflects that, not a creation-time
 	// snapshot (AC-EXECUTORS-SURVIVAL-002.14's "workspace source roots"
 	// reconstruction row: read back, never pushed).
-	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	WorkspaceSourceRoots []string `json:"workspace_source_roots"`
 
 	// ProviderSessionID is the live agent CLI's own session identity, held by
 	// the adapter (AC-EXECUTORS-SURVIVAL-002.14's "provider session identity"

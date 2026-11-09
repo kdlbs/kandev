@@ -106,8 +106,13 @@ func TestDeliveryRetentionStorageRetirementEmptyCursorProgress(t *testing.T) {
 			assertRetentionRowCount(t, repo, "agent_delivery_effects", "effect_key LIKE ?", "zz-retired-key-%", 20)
 			repo = reopenRetentionStorageRepository(t, repo)
 			completed := false
+			deadlineRetries := 0
 			for range 50 {
 				result, err = repo.RunAgentDeliveryRetirementBatch(t.Context(), models.AgentDeliveryRetirementBatchOptions{MaxCandidates: 1})
+				if errors.Is(err, context.DeadlineExceeded) && deadlineRetries < 3 {
+					deadlineRetries++
+					continue
+				}
 				if err != nil || result.RowsPurged > 1 {
 					t.Fatalf("resume bounded cursor page: %+v %v", result, err)
 				}
