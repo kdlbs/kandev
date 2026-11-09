@@ -47,7 +47,7 @@ Empty values show unknown or inherited values. Load/save failures use existing l
 
 ## Verification and risks
 
-Use source-adjacent companion units and existing focused package tests. Capture the real settings components with synthetic data in a disposable component preview. No provider or operating-runtime call is needed. Request estimates cannot enforce every HTTP request inside an already running turn. Unknown subscription windows keep their recovery ladder and visibly provisional learning.
+Use source-adjacent companion units and existing focused package tests. Committed unit tests in `agent/usage` (`tier_limits_test.go`) and `backendapp` (`provider_tier_limits_test.go`) cover allowance boundaries, owner/learned/default merge precedence, model and group scope counts, reset windows, candidate admission and the per-model request count. Capture the real settings components with synthetic data in a disposable component preview. No provider or operating-runtime call is needed. Request estimates cannot enforce every HTTP request inside an already running turn. Unknown subscription windows keep their recovery ladder and visibly provisional learning.
 
 ## Delivery boundary
 
