@@ -47,12 +47,16 @@ function scrollTowardPointer(
   }
 }
 
-function startDragScroll(viewport: HTMLDivElement, grid: HTMLDivElement, activatorEvent: Event) {
+function startDragScroll(
+  viewport: HTMLDivElement,
+  grid: HTMLDivElement,
+  initialPointer: PointerPosition | null,
+) {
   const owner = viewport.ownerDocument;
   const view = owner.defaultView;
   if (!view) return () => {};
 
-  let pointer: PointerPosition | null = getEventCoordinates(activatorEvent);
+  let pointer = initialPointer;
   let pendingFrame: number | null = null;
   let previousTime: number | null = null;
   const tick = (time: number) => {
@@ -104,21 +108,29 @@ export function useKanbanHorizontalDragScroll({
   laneGridRef,
 }: DragScrollOptions) {
   const dispose = useRef<(() => void) | null>(null);
+  const latestPointer = useRef<PointerPosition | null>(null);
+  const capturePointer = useCallback(({ nativeEvent }: { nativeEvent: Event }) => {
+    if ("isPrimary" in nativeEvent && nativeEvent.isPrimary === false) return;
+    latestPointer.current = getEventCoordinates(nativeEvent);
+  }, []);
   const stop = useCallback(() => {
     dispose.current?.();
     dispose.current = null;
+    latestPointer.current = null;
   }, []);
   useDndMonitor(
     useMemo(
       () => ({
         onDragStart: ({ activatorEvent }) => {
+          const initialPointer = latestPointer.current ?? getEventCoordinates(activatorEvent);
           stop();
           const viewport = scrollWindowRef.current;
           const grid = laneGridRef.current;
-          if (viewport && grid) dispose.current = startDragScroll(viewport, grid, activatorEvent);
+          if (viewport && grid) dispose.current = startDragScroll(viewport, grid, initialPointer);
         },
         onDragEnd: stop,
         onDragCancel: stop,
+        onDragAbort: stop,
       }),
       [scrollWindowRef, laneGridRef, stop],
     ),
@@ -127,4 +139,5 @@ export function useKanbanHorizontalDragScroll({
     if (!isDragging) stop();
   }, [isDragging, stop]);
   useEffect(() => stop, [stop]);
+  return capturePointer;
 }

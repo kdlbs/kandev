@@ -81,7 +81,10 @@ windowed-board contract.
 
 A local desktop drag-scroll hook owns only horizontal edge scrolling. It runs
 only during an accepted task drag. Its `useDndMonitor` start callback attaches
-input listeners synchronously and seeds coordinates from the activation event.
+input listeners synchronously. Viewport capture handlers retain pointer/touch
+coordinates before the sensor activates, so one movement into an edge seeds
+the controller with that current position. The activation event is a fallback
+when capture coordinates are unavailable.
 This captures fast moves before the active-drag render completes.
 It reads later pointer or touch coordinates from
 the owning document and scrolls only the active lane. A requestAnimationFrame

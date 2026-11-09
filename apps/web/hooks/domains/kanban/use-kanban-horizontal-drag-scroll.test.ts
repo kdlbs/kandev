@@ -83,6 +83,22 @@ afterEach(() => {
 });
 
 describe("desktop horizontal drag scrolling", () => {
+  it("uses the capture-phase edge position when one move activates dragging", () => {
+    const { scroll, result } = board();
+    act(() =>
+      result.current({
+        nativeEvent: new PointerEvent("pointermove", {
+          clientX: 499,
+          clientY: 150,
+          isPrimary: true,
+        }),
+      }),
+    );
+    startDrag(300);
+    frame();
+    expect(scroll.scrollLeft).toBeGreaterThan(0);
+  });
+
   // @covers AC-UI-ADAPTIVE-KANBAN-001.4, AC-UI-ADAPTIVE-KANBAN-003.9
   it("starts edge travel from the accepted activation event before another move", () => {
     const { scroll } = board();

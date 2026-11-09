@@ -214,3 +214,5 @@ No ADR is required for this local correction within the existing board ownership
 ## PR review follow-up
 
 Replaced test-ID-based scroll ownership with a dedicated production data attribute. Added a rename regression and vertical-owner geometry checks. Post-review validation passed: 47 focused tests, seven affected desktop browser cases on a fresh production build, typecheck, scoped lint, and specification checks. Remote CI and automated reviews remain pending for the follow-up head.
+
+CodeRabbit follow-up retains capture-phase coordinates across sensor activation and completes the registry-ordering monitor stub. Local verification passed: 50 focused tests, all 12 desktop/tablet browser tests, typecheck, and scoped lint. Exact-head remote CI and review evidence remain pending after the follow-up push.

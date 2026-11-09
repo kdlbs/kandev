@@ -26,7 +26,11 @@ export function AdaptiveDesktopKanban({
 }: AdaptiveDesktopKanbanProps) {
   const scrollWindowRef = useRef<HTMLDivElement | null>(null);
   const laneGridRef = useRef<HTMLDivElement | null>(null);
-  useKanbanHorizontalDragScroll({ isDragging, scrollWindowRef, laneGridRef });
+  const capturePointer = useKanbanHorizontalDragScroll({
+    isDragging,
+    scrollWindowRef,
+    laneGridRef,
+  });
   const { t } = useTranslation();
   const { cancelPan, handleMouseDown, handleMouseMove, isPanCandidate, isPanning } =
     useDesktopKanbanPan(scrollWindowRef);
@@ -59,6 +63,10 @@ export function AdaptiveDesktopKanban({
           containerType: "inline-size",
           scrollSnapType: isDragging || isPanning ? "none" : undefined,
         }}
+        onPointerDownCapture={capturePointer}
+        onPointerMoveCapture={capturePointer}
+        onTouchStartCapture={capturePointer}
+        onTouchMoveCapture={capturePointer}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={cancelPan}

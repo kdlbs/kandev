@@ -391,14 +391,20 @@ test("reaches real columns in both directions within one drag", async ({
     const scroll = testPage.getByTestId("desktop-kanban-scroll-window");
     const box = await scroll.boundingBox();
     if (!box) throw new Error("scroll window has no layout box");
-    await beginPointerDrag(testPage, kanban.taskCard(task.id));
+    const sourceBox = await kanban.taskCard(task.id).boundingBox();
+    if (!sourceBox) throw new Error("source card has no layout box");
+    await testPage.mouse.move(
+      sourceBox.x + sourceBox.width / 2,
+      sourceBox.y + sourceBox.height / 2,
+    );
+    await testPage.mouse.down();
     const realMaximum = await scroll.evaluate(
       (element) =>
         element.querySelector<HTMLElement>('[data-testid="desktop-kanban-lane-grid"]')!
           .scrollWidth - element.clientWidth,
     );
     expect(realMaximum).toBeGreaterThan(0);
-    await testPage.mouse.move(box.x + box.width - 4, box.y + 140, { steps: 20 });
+    await testPage.mouse.move(box.x + box.width - 4, box.y + 140, { steps: 1 });
     await expect
       .poll(() => scroll.evaluate((element) => element.scrollLeft))
       .toBeCloseTo(realMaximum, 0);
