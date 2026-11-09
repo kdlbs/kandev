@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { DndContext } from "@dnd-kit/core";
 import { AdaptiveDesktopKanban } from "./adaptive-desktop-kanban";
+import { KANBAN_BOUNDED_DRAG_SCROLL_ATTRIBUTE } from "@/hooks/domains/kanban/use-kanban-horizontal-drag-scroll";
 
 const blankColumnSpaceTestId = "blank-column-space";
 const grabbingCursorClass = "cursor-grabbing";
@@ -65,6 +66,7 @@ describe("AdaptiveDesktopKanban drag end reserve", () => {
   it("disables snap during dragging and restores it after cancellation", () => {
     const { rerender } = render(<Board isDragging />);
     const scroll = screen.getByTestId("desktop-kanban-scroll-window");
+    expect(scroll.hasAttribute(KANBAN_BOUNDED_DRAG_SCROLL_ATTRIBUTE)).toBe(true);
     expect(scroll.style.scrollSnapType).toBe("none");
     expect(scroll.classList.contains("snap-none")).toBe(true);
     expect(scroll.classList.contains("snap-mandatory")).toBe(false);

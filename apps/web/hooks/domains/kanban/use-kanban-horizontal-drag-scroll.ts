@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
 import { useDndMonitor } from "@dnd-kit/core";
 import { getEventCoordinates } from "@dnd-kit/utilities";
 
+export const KANBAN_BOUNDED_DRAG_SCROLL_ATTRIBUTE = "data-kanban-bounded-drag-scroll";
+
 type PointerPosition = { x: number; y: number };
 type DragScrollOptions = {
   isDragging: boolean;

@@ -4,7 +4,10 @@ import { useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { useDesktopKanbanPan } from "@/hooks/domains/kanban/use-desktop-kanban-pan";
-import { useKanbanHorizontalDragScroll } from "@/hooks/domains/kanban/use-kanban-horizontal-drag-scroll";
+import {
+  KANBAN_BOUNDED_DRAG_SCROLL_ATTRIBUTE,
+  useKanbanHorizontalDragScroll,
+} from "@/hooks/domains/kanban/use-kanban-horizontal-drag-scroll";
 import { useKanbanOverflow } from "@/hooks/domains/kanban/use-kanban-overflow";
 import { getKanbanColumnGridTemplate, KANBAN_COLUMN_MIN_PX } from "./kanban-grid-template";
 import { KanbanOverflowFades } from "./kanban-overflow-fades";
@@ -48,7 +51,7 @@ export function AdaptiveDesktopKanban({
     >
       <div
         ref={scrollWindowRef}
-        data-kanban-bounded-drag-scroll=""
+        {...{ [KANBAN_BOUNDED_DRAG_SCROLL_ATTRIBUTE]: "" }}
         aria-label={t("kanban:columns")}
         data-testid="desktop-kanban-scroll-window"
         className={`kanban-scroll-region h-full min-h-0 min-w-0 overflow-x-auto overscroll-y-auto ${

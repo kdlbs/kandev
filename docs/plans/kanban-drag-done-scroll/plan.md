@@ -218,3 +218,5 @@ Replaced test-ID-based scroll ownership with a dedicated production data attribu
 CodeRabbit follow-up retains capture-phase coordinates across sensor activation and completes the registry-ordering monitor stub. Local verification passed: 50 focused tests, all 12 desktop/tablet browser tests, typecheck, and scoped lint. Exact-head remote CI and review evidence remain pending after the follow-up push.
 
 Summary-review follow-up: the snap-restoration test rerenders the same board and checks its inline style and snap classes. Secondary touch end/cancel events no longer stop horizontal scrolling while another touch remains. Both touch regressions failed before the correction. Local verification passed: 52 focused tests, all 12 desktop/tablet browser cases on a fresh build, typecheck, and scoped lint. Remote results remain pending for this follow-up head.
+
+Claude follow-up: the bounded-scroll attribute name is exported by the controller and shared by the desktop viewport and drag surface. The desktop test verifies that the rendered viewport carries this attribute. This preserves the existing DOM contract.
