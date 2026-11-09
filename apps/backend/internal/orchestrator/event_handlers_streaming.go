@@ -4278,6 +4278,7 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	defer settingsLock.Unlock()
 	identity := sessionSettingsEventIdentity{
 		AttemptID: payload.AttemptID, ExecutionID: payload.ExecutionID,
+		ExecutionProfileID: payload.ExecutionProfileID,
 		SourceGeneration:   payload.SessionSettingsSourceGeneration,
 		SettingsGeneration: payload.Data.SessionSettingsGeneration,
 	}
@@ -4390,6 +4391,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	defer settingsLock.Unlock()
 	identity := sessionSettingsEventIdentity{
 		AttemptID: payload.AttemptID, ExecutionID: payload.ExecutionID,
+		ExecutionProfileID: payload.ExecutionProfileID,
 		SourceGeneration:   payload.SessionSettingsSourceGeneration,
 		SettingsGeneration: payload.Data.SessionSettingsGeneration,
 	}
@@ -4490,6 +4492,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 type sessionSettingsEventIdentity struct {
 	AttemptID          string
 	ExecutionID        string
+	ExecutionProfileID string
 	SourceGeneration   uint64
 	SettingsGeneration uint64
 }
@@ -4548,6 +4551,12 @@ func sessionSettingsEventIsStale(
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		return false
+	}
+	// A dynamic session that switched concrete candidates must not accept
+	// settings reported by the previous candidate's execution.
+	if identity.ExecutionProfileID != "" && session.ExecutionProfileID != "" &&
+		identity.ExecutionProfileID != session.ExecutionProfileID {
+		return true
 	}
 	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
 	if !ok {
