@@ -36,6 +36,7 @@ existing behavior.
 - `apps/backend/internal/orchestrator/task_operations.go`
 - `apps/backend/internal/orchestrator/executor/executor.go`
 - `apps/backend/internal/orchestrator/executor/executor_resume.go`
+- `apps/backend/internal/orchestrator/executor/executor_resume_actor_test.go`
 - `apps/backend/internal/orchestrator/cold_resume_admission_test.go`
 - The associated ownership requirement and design.
 
@@ -53,6 +54,13 @@ cd apps/backend
 go test -trimpath ./internal/orchestrator -run '^TestColdResumeAdmission_' -count=1
 ```
 
+An executor-level regression also verifies that `RequireExecutorActor` fails
+closed when no admission callback is installed:
+
+```bash
+go test -trimpath ./internal/orchestrator/executor -run '^TestResumeSessionWithOptionsRequiresExecutorActorWithoutAdmission$' -count=1
+```
+
 The source session and an independent QA run both reported this suite
 passing with exit 0. QA additionally passed mutation controls that undo only
 the `task_operations.go` re-point or remove only the fail-closed check, and
@@ -63,3 +71,5 @@ run. A pre-existing gap next to this seam, where a CREATED session with a
 prepared workspace can relaunch without an actor, is tracked separately in
 [#5181](https://github.com/kdlbs/kandev/issues/5181) and is out of scope
 here.
+
+The maintainer follow-up ran both focused commands above. Both passed.

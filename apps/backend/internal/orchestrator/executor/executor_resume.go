@@ -1279,7 +1279,9 @@ func (e *Executor) ResumeSessionWithOptions(
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := authn.IdentityFromContext(ctx); options.RequireExecutorActor && !ok {
+	}
+	if session != nil && options.RequireExecutorActor {
+		if _, ok := authn.IdentityFromContext(ctx); !ok {
 			return nil, ErrExecutorActorUnavailable
 		}
 	}
