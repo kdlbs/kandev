@@ -242,7 +242,7 @@ func (m *Manager) GetByID(ctx context.Context, worktreeID string) (*Worktree, er
 	if err != nil {
 		return nil, err
 	}
-	if wt == nil {
+	if wt == nil || wt.ID == "" {
 		return nil, ErrWorktreeNotFound
 	}
 	return wt, nil

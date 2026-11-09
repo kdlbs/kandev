@@ -123,12 +123,14 @@ func TestCopilotPluginSupportedPassthroughRetainedProcessSkipsPluginWork(t *test
 }
 
 func TestCopilotPluginPassthroughResetPreflightPreservesProcess(t *testing.T) {
-	t.Run("unsupported runtime does not stop local process", func(t *testing.T) {
+	t.Run("missing plugin loading capability does not stop local process", func(t *testing.T) {
 		manager, execution, pty, runner, _, _ := newCopilotPassthroughResetFixture(t, "1.0.200", "local")
+		runner.helpOutputSet = true
+		runner.helpOutput = []byte("Usage: copilot [options]\n")
 		err := manager.restartPassthroughProcess(context.Background(), execution)
 		var pluginErr *copilotplugins.Error
-		if !errors.As(err, &pluginErr) || pluginErr.Reason != copilotplugins.ReasonRuntimeUnsupported {
-			t.Fatalf("reset error = %#v, want typed runtime-unsupported error", err)
+		if !errors.As(err, &pluginErr) || pluginErr.Reason != copilotplugins.ReasonPluginLoadingUnsupported {
+			t.Fatalf("reset error = %#v, want typed plugin-loading-unsupported error", err)
 		}
 		if pty.stopCalls != 0 || pty.startCalls != 0 || execution.PassthroughProcessID != "pty-old" {
 			t.Fatalf("rejected reset changed process: stops=%d starts=%d identity=%q",

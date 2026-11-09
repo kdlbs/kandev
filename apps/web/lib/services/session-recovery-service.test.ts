@@ -8,8 +8,10 @@ import {
   resumeSession,
   recoveryInspectionBusyDetails,
   recoveryInspectionBusyMessage,
+  recoveryFailureCauses,
   resolveRequestErrorMessage,
   runtimeCleanupFailureCauses,
+  sessionRecoveryFailureCauses,
   sessionRecoveryGuardDetails,
   sessionDeliveryRecoveryResponse,
   sessionDeliveryRecoveryMessage,
@@ -41,6 +43,50 @@ it("localizes typed cleanup responses without inspecting transport prose", () =>
     { operation: "resume", code: "runtime_cleanup_failed", prompt_not_sent: true },
   ]);
   expect(runtimeCleanupFailureCauses(failure, "another-session")).toEqual([]);
+});
+
+it("keeps only correlated safe process-exit causes from a recovery response", () => {
+  const failure = new WebSocketRequestError(
+    "Failed to recover session: session failed: generic",
+    "INTERNAL_ERROR",
+    {
+      kind: "session_recovery_failed",
+      session_id: "session-1",
+      error_stamp: "failure-1",
+      causes: [
+        {
+          operation: "resume",
+          code: "process_exited",
+          reason: "mise_config_untrusted",
+          exit_code: 1,
+          detail: "/private/workspace/mise.toml",
+        },
+        {
+          operation: "resume",
+          code: "process_exited",
+          reason: "private_reason",
+          exit_code: "1",
+        },
+      ],
+    },
+  );
+  expect(sessionRecoveryFailureCauses(failure, "session-1")).toEqual([
+    {
+      operation: "resume",
+      code: "process_exited",
+      reason: "mise_config_untrusted",
+      exit_code: 1,
+      detail: "The agent exited before startup completed.",
+    },
+    {
+      operation: "resume",
+      code: "process_exited",
+      reason: "unclassified",
+      detail: "The agent exited before startup completed.",
+    },
+  ]);
+  expect(sessionRecoveryFailureCauses(failure, "another-session")).toEqual([]);
+  expect(recoveryFailureCauses(failure, "session-1")).toHaveLength(2);
 });
 const recoveryAction = "session.recover";
 

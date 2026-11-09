@@ -2,12 +2,23 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"testing"
+
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
-	"testing"
 )
+
+func nextPatchVersion(t *testing.T, version string) string {
+	t.Helper()
+	parsed, err := managedruntime.ParseStableVersion(version)
+	if err != nil {
+		t.Fatalf("unexpected stable version %q: %v", version, err)
+	}
+	return fmt.Sprintf("%d.%d.%d", parsed.Major(), parsed.Minor(), parsed.Patch()+2)
+}
 
 func TestOpenCodeAutomaticUpdateKeepsSelectedFamily(t *testing.T) {
 	for _, family := range []managedruntime.OpenCodeFamily{managedruntime.OpenCodeFamilyV1, managedruntime.OpenCodeFamilyV2} {
@@ -18,10 +29,7 @@ func TestOpenCodeAutomaticUpdateKeepsSelectedFamily(t *testing.T) {
 				t.Fatal(err)
 			}
 			previous := spec.DefaultVersionOrPinned()
-			target := "1.19.0"
-			if family == managedruntime.OpenCodeFamilyV2 {
-				target = "2.0.20"
-			}
+			target := nextPatchVersion(t, previous)
 			selection := newMigrationTestState(&migrationEventLog{})
 			selection.selection.Family, selection.selection.Package = family, spec.Package
 			selection.selection.SelectedVersion, selection.selection.AppliedDefaultVersion = previous, previous

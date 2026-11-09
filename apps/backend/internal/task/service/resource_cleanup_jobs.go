@@ -1856,6 +1856,25 @@ func (s *Service) activatePreparedTaskResourceCleanupJob(
 	return nil
 }
 func (s *Service) CancelPreparedTaskResourceCleanup(ctx context.Context, operationID string) error {
+	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
+	defer cancel()
+	return s.cancelPreparedTaskResourceCleanup(transitionCtx, operationID)
+}
+
+// CancelPreparedTaskResourceCleanupWithinDeadline bounds request-owned
+// compensation while preserving the existing cleanup transition cap.
+func (s *Service) CancelPreparedTaskResourceCleanupWithinDeadline(ctx context.Context, operationID string) error {
+	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
+	defer cancel()
+	if deadline, ok := ctx.Deadline(); ok {
+		var cancelDeadline context.CancelFunc
+		transitionCtx, cancelDeadline = context.WithDeadline(transitionCtx, deadline)
+		defer cancelDeadline()
+	}
+	return s.cancelPreparedTaskResourceCleanup(transitionCtx, operationID)
+}
+
+func (s *Service) cancelPreparedTaskResourceCleanup(transitionCtx context.Context, operationID string) error {
 	if s.resourceCleanups == nil {
 		return nil
 	}
@@ -1863,8 +1882,6 @@ func (s *Service) CancelPreparedTaskResourceCleanup(ctx context.Context, operati
 	if !ok {
 		return errors.New("cleanup repository lacks fenced cancellation")
 	}
-	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
-	defer cancel()
 	job, err := s.resourceCleanups.GetTaskResourceCleanupJobByOperationID(transitionCtx, operationID)
 	if err != nil {
 		return err

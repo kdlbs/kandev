@@ -69,6 +69,7 @@ func (s *Service) handleAgentTurnFailed(ctx context.Context, data watcher.AgentE
 	}
 	if s.settleRetainedTurnFailure(ctx, data, session) {
 		s.settleFailedDeliveryWorkflowOutcome(context.WithoutCancel(ctx), data)
+		releaseGuard()
 		s.acknowledgeRetainedTurnFailure(data)
 	} else {
 		s.logger.Warn("retained turn failure settlement did not complete; successor admission remains fenced",

@@ -2,7 +2,8 @@
 
 Date: 2026-10-28 (initial checks 2026-10-27)
 Owner: work order 00
-Status: diagnostic investigation and supported process preparation complete
+Status: diagnostic investigation and supported process preparation complete;
+managed Copilot 1.0.105 adapter qualified on Linux x64
 
 This record supports the implementation in
 [plan.md](plan.md). It does not claim behavior that this machine could not
@@ -24,6 +25,100 @@ a managed macOS policy source. Before completion WO-04, production code retained
 the empty policy gate. WO-04 removed that gate and delivered supported native
 process preparation. Native policy and component activation remain Copilot's
 responsibility.
+
+## Issue 5064 planning investigation, 2026-11-05
+
+The [repair package](../copilot-runtime-plugin-compatibility/plan.md) starts at
+`a8b8ac18e0f08cafc48f303eafc88ffd546f31f4`, the issue's reported commit.
+A temporary Go overlay called production `Discover` and
+`ResolveLaunchSelection` with version `1.0.105` and a recording runner.
+Both rejected the nonempty profile before native execution. Empty selection
+succeeded; the runner observed zero commands. The existing
+`TestRuntimeSupportedVersions` also passed. No production or permanent test
+file changed during this diagnostic.
+
+Command from `apps/backend`:
+
+```bash
+go test -trimpath -overlay /tmp/kandev-issue-5064-74yathfy/overlay.json \
+  ./internal/agent/copilotplugins \
+  -run '^(TestIssue5064Diagnostic|TestRuntimeSupportedVersions)$' -count=1 -v
+```
+
+Observed diagnostic:
+
+```text
+runtime=1.0.105 discovery=unsupported reason=runtime_unsupported mounts_permitted=false nonempty_launch=runtime_unsupported empty_launch=ok native_commands=0
+```
+
+Both tests passed as diagnostic assertions of the existing rejection. This
+is not the future regression test's Red/Green record.
+
+At planning time, the configured npm lookup, `npm view
+@github/copilot@1.0.105 version dist.tarball optionalDependencies --json`,
+returned E404. The official
+[GitHub release](https://github.com/github/copilot-cli/releases/tag/v1.0.105)
+existed, but that fact did not qualify the managed npm package or its adapter.
+No native `1.0.105` inventory, installation metadata, plugin mount, authenticated
+tool call, or enterprise-policy behavior was exercised in that investigation.
+Repair work order 02 qualified the package later; see the next section.
+The published [plugin reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference)
+describes native inventory, but cannot establish version-specific private
+installation evidence on its own.
+
+## Native adapter qualification for Copilot 1.0.105, 2026-11-05
+
+The exact npm package became available after the planning investigation. The
+configured lookup `npm view @github/copilot@1.0.105 version dist.tarball
+optionalDependencies --json` returned version `1.0.105`, its npm tarball, and
+matching optional platform dependencies. Native evidence used Linux x64,
+disposable `HOME`, `COPILOT_HOME`, npm cache, npm project prefix, and work
+directories under `/tmp/opencode`. No developer home, authentication store,
+model prompt, or enterprise-policy fixture was used. Inherited proxy and CA
+variables were preserved.
+
+Command from `apps/backend`:
+
+```bash
+KANDEV_COPILOT_NATIVE_VERSION=1.0.105 \
+  go test -trimpath -tags copilot_native ./internal/agent/copilotplugins \
+  -run '^TestCopilotPluginNativeAdapterAcceptance$' -count=1 -timeout=8m -v
+```
+
+Observed sanitized results:
+
+```text
+case=package-identity status=PASS version=1.0.105
+case=fresh-production-inventory status=PASS rows=1
+case=native-installed-metadata status=PASS source=installed row=build-perf-cpp live_control=harness
+case=production-installed-admission status=PASS installed=build-perf-cpp live=harness
+case=native-live-and-repeated-mounts status=PASS live=harness external=2 installed=build-perf-cpp special_paths=2
+```
+
+The exact package reported `GitHub Copilot CLI 1.0.105.` and the npx cache
+contained `@github/copilot` package metadata at `1.0.105`. A fresh native state
+returned only the built-in `browser-use` row through production `Discover`.
+
+Two native-written fixture shapes were exercised. A remote marketplace
+(`github/copilot-plugins`) installed `build-perf-cpp` into native
+`config.json` with `installedPlugins`, `version`, and `cache_path`. Production
+`Discover` then reported an available `source=installed` row, and
+`ResolveLaunchSelection` resolved `installed:copilot-plugins/build-perf-cpp` to
+the native cache directory with a matching root manifest. A disposable local
+directory marketplace with a space and shell-special characters in its path
+provided the `source=live` control; production admission resolved
+`live:fixture-market/harness` to the same manifest root. Native `settings.json`
+also recorded the directory marketplace and enabled plugin.
+
+Repeated `--plugin-dir` arguments produced two external rows through production
+inventory parsing while the installed and live rows remained visible, including
+paths with special characters.
+
+This qualifies the inventory, cached-install metadata, live control, root
+resolution, admission, and repeated-mount contracts for exactly `1.0.105`. It
+does not claim authenticated tool behavior, enterprise-policy enforcement, or
+support for any other version. Production admission for `1.0.105` was added only
+after these checks passed.
 
 ## Environment
 
@@ -163,7 +258,8 @@ decision; absence of a privileged test is not such a demonstration.
 ## Inventory-qualified subset
 
 This table preserves the original Linux results, not the later macOS
-observations or the revised target admission contract.
+observations, the 1.0.105 qualification above, or the revised target admission
+contract.
 
 | Capability | 1.0.88 | 1.0.103 | 1.0.104 |
 | --- | --- | --- | --- |
@@ -176,18 +272,18 @@ observations or the revised target admission contract.
 | Authenticated plugin/MCP use | Not observed | Supplied only | Not observed |
 | Native policy veto | Not observed | Not observed | Not observed |
 
-Inventory qualification: `1.0.88` and `1.0.104`. `1.0.103` remains unqualified
-because only supplied observations exist. Other versions return
-`runtime_unsupported`; Kandev does not fall back to a global CLI.
+The intermediate version gate admitted `1.0.88` and `1.0.104` on supported
+hosts and `1.0.105` on `linux/amd64`. The later contract-admission change
+removed that gate. Current admission checks the selected runtime's capabilities
+and inventory rather than its version or platform.
 
 At the original baseline, mount permission was empty: `policyVerifiedVersions`
 rejected nonempty starts with `policy_unverified` before inventory/start.
 That AC-AGENTS-COPILOT-PLUGINS-007.2 gate is superseded by 007.6 and 005.8.
-Completion WO-04 removed it under native authority. Current preparation admits
-valid local/worktree selections for `1.0.88` and `1.0.104`, while retaining
-root, identity, executor, wrapper, and argument-conflict validation. Unknown
-versions remain unsupported. Preparation eligibility is not native policy
-approval or enterprise certification.
+Completion WO-04 removed it under native authority. Current preparation retains
+root, identity, executor, wrapper, and argument-conflict validation, and checks
+the selected runtime's native capabilities. Preparation eligibility is not
+native policy approval or enterprise certification.
 
 ## Not exercised
 
@@ -289,3 +385,65 @@ Copilot regression or an initial process-start denial. Do not describe the
 extended race command as passing. Unrelated process-group cleanup was not
 changed. The disposable baseline archive was removed and raw results remain
 private.
+
+## Inventory qualification: 1.0.105 (2026-11-05)
+
+The scheduled managed runtime pin refresh selected `@github/copilot@1.0.105`.
+A bounded inventory test recorded adapter-format observations for this version:
+
+```bash
+(cd apps/backend && KANDEV_COPILOT_NATIVE_VERSION=1.0.105 go test -trimpath -tags 'copilot_native fts5' -count=1 -timeout 5m ./internal/agent/copilotplugins -run '^TestCopilotPluginNativeInventoryCompatibility$' -v)
+```
+
+Observed on Linux x64 with disposable `HOME`, `COPILOT_HOME`, npm prefix, npm
+cache, plugin roots, and local marketplace fixtures:
+
+- Exact package metadata and `copilot --version` reported `1.0.105`.
+- `plugin list --json` returned the flat array format consumed by the adapter.
+- Two separate `--plugin-dir` values, including a path with spaces and
+  shell-like characters, produced external rows with the expected names and
+  versions.
+- A local marketplace install created `settings.json` metadata containing the
+  marketplace and enabled plugin. The inventory reported a `live` row with
+  `installedFrom`, and the adapter resolved its manifest at the expected source
+  directory.
+
+Limit: this run did not authenticate, start an ACP session, call a plugin tool,
+or exercise managed policy. It establishes inventory and installation-metadata
+compatibility only. It does not certify enterprise enforcement or authenticated
+component behavior for `1.0.105`.
+
+## Contract admission implementation evidence, 2026-11-05 (WO-04)
+
+The historical qualification and diagnostic sections above are retained as
+records of earlier observations. Current admission no longer consults their
+version or platform subsets.
+
+The causal Red was established before production changes:
+
+```bash
+(cd apps/backend && go test -trimpath ./internal/agent/copilotplugins -run '^TestCopilotPluginCompatibleUnknownRuntime$' -count=1)
+```
+
+It failed as expected: runtime `9.9.9` returned `unsupported` with
+`runtime_unsupported` before native capability evidence was observed. After the
+change, the final provider package run passed the same production-shaped test on
+the host's Linux/amd64 platform. The test used the exact selected runtime for
+help, inventory, root validation, and launch admission. No platform override
+was used.
+
+The final focused contract checks passed:
+
+```bash
+(cd apps/backend && go test -trimpath ./internal/agent/copilotplugins ./internal/agent/settings/controller ./internal/agent/settings/handlers -count=1)
+(cd apps/backend && go test -trimpath ./internal/agent/runtime/lifecycle ./internal/agent/hostutility -run '^TestCopilotPlugin' -count=1)
+(cd apps/backend && KANDEV_COPILOT_NATIVE_VERSION=1.0.105 go test -trimpath -tags copilot_native ./internal/agent/copilotplugins -run '^TestCopilotPluginNativeAdapterAcceptance$' -count=1 -timeout=8m)
+```
+
+The provider tests cover absent `--plugin-dir` evidence, malformed inventory,
+invalid installation metadata, a mixed valid/invalid selected set, an invalid
+unselected control, cancellation, the shared bounded help/inventory deadline,
+and isolated managed-NPM prefix preparation. The real native adapter acceptance
+command passed for `@github/copilot@1.0.105` on Linux/amd64. It is host-native
+adapter evidence only. A native Darwin run was not performed; this does not
+imply that Darwin is incompatible. Native Copilot policy remains authoritative.

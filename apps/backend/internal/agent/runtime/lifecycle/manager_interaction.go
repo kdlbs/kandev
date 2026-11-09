@@ -1331,6 +1331,10 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 
 // StopAgentWithReason stops an agent execution and passes a semantic reason to runtime teardown.
 func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, reason string, force bool) error {
+	stopWatch := newStopWaitWatch(30*time.Second, func(phase stopWaitPhase) {
+		reportStopWaitDiagnostic(m.logger, executionID, phase)
+	})
+	defer stopWatch.finish()
 	var pendingRecovery *remoteRecoveryRetry
 	var attemptDone <-chan struct{}
 	if reason == StopReasonBackendShutdown || reason == StopReasonRecoverableAgentFailure {
@@ -1355,7 +1359,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 				return errors.New("pending remote recovery is already being reconciled")
 			}
 			defer m.finishRemoteRecoveryAttempt(pendingRecovery)
-			stopped, err := m.stopPendingRemoteRecovery(ctx, pendingRecovery, reason, force)
+			stopped, err := m.stopPendingRemoteRecovery(ctx, pendingRecovery, reason, force, stopWatch)
 			if err != nil {
 				return err
 			}
@@ -1364,16 +1368,32 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 			}
 			return nil
 		}
-		if handled, err := m.stopPersistedKubernetesExecution(ctx, executionID, reason, force); handled {
+		stopWatch.advance(stopWaitPersistence)
+		if handled, err := m.stopPersistedKubernetesExecution(ctx, executionID, reason, force, stopWatch); handled {
 			return err
 		}
-		if handled, err := m.stopPersistedSSHExecution(ctx, executionID, reason, force); handled {
+		if handled, err := m.stopPersistedSSHExecution(ctx, executionID, reason, force, stopWatch); handled {
+			return err
+		}
+		if handled, err := m.stopPersistedStandaloneExecution(ctx, executionID, reason, force, stopWatch); handled {
 			return err
 		}
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
 	execution.cancelStartupRecovery()
-	execution.remoteInstanceLifecycleMu.Lock()
+	stopCtx := ctx
+	preserveRuntime := shouldPreserveRecoverableRuntime(execution, reason)
+	preserveAdoptedPeer := adoptionPreservesPeer(nil, execution) && !execution.isSessionInitialized() &&
+		(reason == StopReasonRecoverableAgentFailure || reason == StopReasonAgentBootstrapFailed)
+	if force || preserveRuntime {
+		var cancelStop context.CancelFunc
+		stopCtx, cancelStop = kubernetesDurableContext(ctx)
+		defer cancelStop()
+	}
+	stopWatch.advance(stopWaitRemoteLock)
+	if err := execution.remoteInstanceLifecycleMu.LockContext(stopCtx); err != nil {
+		return err
+	}
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
@@ -1384,15 +1404,21 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	if m.streamManager != nil {
 		m.streamManager.cancelDeliveryReconciliation(executionID)
 	}
+	if preserveAdoptedPeer {
+		// A failed adoption owns only its attempt-local transport. Keep the
+		// selected peer process, journal handle, durable inventory, and MCP
+		// claims for the next authenticated attempt. This is a nonterminal
+		// detach: no status/finished mark, row repair, removal, or agent.stopped
+		// event. An explicit user Stop still runs the normal termination path.
+		stopWatch.advance(stopWaitDetachClient)
+		releaseAdoptedPeerTransport(execution)
+		return m.detachAgentExecution(executionID, execution, stopWatch)
+	}
 	backendForce := force
-	stopCtx := ctx
-	preserveRuntime := shouldPreserveRecoverableRuntime(execution, reason)
 	if preserveRuntime {
 		backendForce = false
-		var cancelStop context.CancelFunc
-		stopCtx, cancelStop = kubernetesDurableContext(ctx)
-		defer cancelStop()
 	}
+	stopWatch.advance(stopWaitActivity)
 	activityLease, err := m.acquireActivity(stopCtx, activity.KindExecutionStopping)
 	if err != nil {
 		return err
@@ -1416,11 +1442,11 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// detaching would leave an executors_running row claiming a live agent
 	// with no agent.stopped published. See isPassthroughExecution.
 	if reason == StopReasonBackendShutdown && isRemoteRecoveryBackendShutdown(execution.RuntimeName) {
-		return m.detachAgentExecution(executionID, execution)
+		return m.detachAgentExecution(executionID, execution, stopWatch)
 	}
 	if m.agentSurvivalEnabled && reason == StopReasonBackendShutdown &&
 		execution.RuntimeName == executor.NameStandalone && !isPassthroughExecution(execution) {
-		return m.detachAgentExecution(executionID, execution)
+		return m.detachAgentExecution(executionID, execution, stopWatch)
 	}
 
 	m.logger.Info("stopping agent",
@@ -1434,8 +1460,15 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// A retained runtime gets a bounded non-cancelled opportunity to
 	// stop the failed process before its environment is preserved for another retry.
 	if reason != StopReasonBackendShutdown {
-		m.preserveTurnChangesBeforeStop(stopCtx, execution, reason)
+		stopWatch.advance(stopWaitCheckpoint)
+		if err := m.preserveTurnChangesBeforeStop(stopCtx, execution, reason); err != nil {
+			if m.streamManager != nil {
+				m.streamManager.restoreDeliveryReconciliation(executionID)
+			}
+			return fmt.Errorf("preserve turn changes for execution %q: %w", executionID, err)
+		}
 	}
+	stopWatch.advance(stopWaitAgentctl)
 	agentStopFailed := m.stopExecutionAgentctl(stopCtx, executionID, execution, backendForce)
 	// A preserved runtime must not fall through to the executor's
 	// AgentStopFailed cleanup, which stops the container and can turn a
@@ -1447,15 +1480,31 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// Backend shutdown retains interrupted delivery outcomes. Its terminal
 	// checkpoint follows confirmed process termination, before runtime cleanup.
 	if reason == StopReasonBackendShutdown && !backendForce && !agentStopFailed {
-		m.preserveTurnChangesBeforeStop(stopCtx, execution, reason)
+		stopWatch.advance(stopWaitCheckpoint)
+		if err := m.preserveTurnChangesBeforeStop(stopCtx, execution, reason); err != nil {
+			return fmt.Errorf("preserve shutdown turn changes for execution %q: %w", executionID, err)
+		}
+	}
+
+	// Release remote project-file claims while the helper is still reachable.
+	// A failed release keeps the execution and client retryable rather than
+	// orphaning the files behind a torn-down runtime.
+	stopWatch.advance(stopWaitFileCleanup)
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	cleanupErr := m.cleanupProjectMCPFiles(ctx, execution, client)
+	releaseClient()
+	if cleanupErr != nil {
+		return fmt.Errorf("release project MCP files for execution %q: %w", executionID, cleanupErr)
 	}
 
 	// Stop the agent execution via the runtime that created it. A failed stop
 	// must remain tracked: removing it here would turn a retryable cleanup into
 	// an unobservable orphan process.
+	stopWatch.advance(stopWaitRuntime)
 	if err := m.stopAgentViaBackend(stopCtx, executionID, execution, reason, backendForce, agentStopFailed); err != nil {
 		return fmt.Errorf("stop runtime for execution %q: %w", executionID, err)
 	}
+	stopWatch.advance(stopWaitRuntimeCleanup)
 	if execution.RuntimeName == executor.NameKubernetes && (backendForce || shouldRunExecutorCleanup(reason)) {
 		cleanupCtx, cancelCleanup := kubernetesDurableContext(ctx)
 		err := m.deleteKubernetesRuntimeSecrets(cleanupCtx, execution.MetadataSnapshot())
@@ -1469,6 +1518,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// section before any cleanup or event snapshot can acquire prompt state.
 	// Failed runtime stops intentionally retain the closed-but-reusable client so
 	// a later retry can issue the agentctl stop request again.
+	stopWatch.advance(stopWaitDetachClient)
 	execution.agentctlLifecycleMu.Lock()
 	execution.detachAgentctlClient()
 	execution.agentctlLifecycleMu.Unlock()
@@ -1485,6 +1535,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// environment recovery cannot mistake a stopped resumable session for a
 	// live consumer. A passthrough TUI also needs its stopped execution ID to
 	// resume the same conversation after a graceful backend restart.
+	stopWatch.advance(stopWaitPersistence)
 	if execution.Owner.Kind == ExecutionOwnerRun || preservePassthroughConversation {
 		if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
 			return err
@@ -1493,6 +1544,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// End session trace span
 	execution.EndSessionSpan()
 
+	stopWatch.advance(stopWaitRemove)
 	m.RemoveExecution(executionID)
 	if execution.Owner.Kind != ExecutionOwnerRun && !preservePassthroughConversation {
 		m.deleteExecutorRunning(ctx, executionInventorySessionID(execution), execution.ID)
@@ -1507,6 +1559,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		zap.String("task_id", execution.TaskID))
 
 	// Publish stopped event
+	stopWatch.advance(stopWaitPublish)
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
 
 	return nil
@@ -1540,11 +1593,13 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 // local reference lets this backend's process exit (moments later, in the
 // same shutdown) reclaim the socket without disturbing the still-running
 // agentctl instance or its live stream.
-func (m *Manager) detachAgentExecution(executionID string, execution *AgentExecution) error {
+func (m *Manager) detachAgentExecution(executionID string, execution *AgentExecution, stopWatch *stopWaitWatch) error {
+	stopWatch.advance(stopWaitDetachClient)
 	execution.agentctlLifecycleMu.Lock()
 	execution.detachAgentctlClient()
 	execution.agentctlLifecycleMu.Unlock()
 
+	stopWatch.advance(stopWaitRemove)
 	execution.EndSessionSpan()
 	m.RemoveExecution(executionID)
 	m.clearRemoteStatus(execution.SessionID)
@@ -1556,6 +1611,20 @@ func (m *Manager) detachAgentExecution(executionID string, execution *AgentExecu
 		zap.Stringer("runtime", execution.RuntimeName))
 
 	return nil
+}
+
+// releaseAdoptedPeerTransport closes only the client this attempt opened. It
+// never sends Stop, so the selected peer keeps its process, journal, and MCP
+// claims for the next authenticated attempt or an explicit Stop.
+func releaseAdoptedPeerTransport(execution *AgentExecution) {
+	if execution == nil {
+		return
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client != nil {
+		client.Close()
+	}
+	releaseClient()
 }
 
 func (m *Manager) stopExecutionAgentctl(
@@ -1596,6 +1665,9 @@ func (m *Manager) StopBySessionID(ctx context.Context, sessionID string, force b
 	}
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
+		if row := m.liveStandaloneExecutionRow(ctx, sessionID); row != nil {
+			return m.StopAgent(ctx, row.AgentExecutionID, force)
+		}
 		return fmt.Errorf("no agent running for session %q", sessionID)
 	}
 
@@ -2472,12 +2544,16 @@ func (m *Manager) OwnsPromptActivity(
 // active prompt for sessionID. Orchestrator cancellation uses this together
 // with the execution and turn IDs to reject stale terminal events while the
 // lifecycle manager waits for an acknowledged cancel to settle.
-func (m *Manager) GetPromptGenerationForSession(_ context.Context, sessionID string) (uint64, error) {
+func (m *Manager) GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error) {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		return 0, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
-	return execution.promptGenerationSnapshot(), nil
+	if err := execution.promptLifecycleMu.LockContext(ctx); err != nil {
+		return 0, err
+	}
+	defer execution.promptLifecycleMu.Unlock()
+	return execution.promptGeneration, nil
 }
 
 // AcknowledgeRetainedPromptFailure releases successor admission only after the

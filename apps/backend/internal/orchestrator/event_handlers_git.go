@@ -707,11 +707,12 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 	}
 
 	contextWindowData := map[string]interface{}{
-		"size":       size,
-		"used":       data.ContextWindowUsed,
-		"remaining":  remaining,
-		"efficiency": efficiency,
-		"source":     source,
+		"size":                          size,
+		"used":                          data.ContextWindowUsed,
+		"remaining":                     remaining,
+		"efficiency":                    efficiency,
+		"source":                        source,
+		"compaction_inference_disabled": data.CompactionInferenceDisabled,
 	}
 
 	// Persist synchronously using json_set to atomically set one key without
@@ -721,6 +722,7 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 	// samples and produce an incorrect compaction count.
 	persisted, err := s.persistAndPublishContextWindowUpdate(
 		context.Background(), data.TaskID, data.TaskSessionID, generation, contextWindowData,
+		data.CompactionInferenceDisabled && !data.CopilotNativeSessionEvents,
 	)
 	switch {
 	case err != nil:
@@ -739,27 +741,75 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 	}
 }
 
+// compactionAvailabilitySetter is implemented by the task repository that owns
+// the native compaction reporting metadata. Kept optional so lightweight
+// orchestrator test doubles do not need to implement it.
+type compactionAvailabilitySetter interface {
+	SetSessionCompactionAvailability(
+		ctx context.Context,
+		sessionID string,
+		availability string,
+		coverage string,
+	) (*streams.ContextCompactionReporting, error)
+}
+
 func (s *Service) persistAndPublishContextWindowUpdate(
 	ctx context.Context,
 	taskID, sessionID string,
 	generation uint64,
 	contextWindowData map[string]interface{},
+	nativeCountingUnavailable bool,
 ) (bool, error) {
 	persisted, count, err := s.persistContextWindowUpdate(ctx, sessionID, generation, contextWindowData)
 	if !persisted || err != nil || s.eventBus == nil {
 		return persisted, err
 	}
+	if !s.contextWindowGenerationCurrent(sessionID, generation) {
+		return false, nil
+	}
+	session, readErr := s.repo.GetTaskSession(ctx, sessionID)
+	if readErr != nil || session == nil {
+		s.logger.Warn("cannot publish context window metadata without the authoritative session",
+			zap.String("session_id", sessionID),
+			zap.Error(readErr))
+		return true, readErr
+	}
+	metadata := map[string]interface{}{
+		contextWindowMetadataKey:                    contextWindowData,
+		models.SessionMetaKeyContextCompactionCount: count,
+	}
+	if reporting, ok := session.Metadata[models.SessionMetaKeyContextCompactionReporting]; ok {
+		metadata[models.SessionMetaKeyContextCompactionReporting] = reporting
+	}
+	if nativeCountingUnavailable &&
+		!compactionReportingUnavailablePartial(compactionReportingFromMetadata(session.Metadata)) {
+		if setter, ok := s.repo.(compactionAvailabilitySetter); ok {
+			reporting, reportErr := setter.SetSessionCompactionAvailability(
+				ctx, sessionID,
+				streams.ContextCompactionAvailabilityUnavailable,
+				streams.ContextCompactionCoveragePartial,
+			)
+			if reportErr != nil {
+				s.logger.Warn("failed to persist unavailable compaction reporting",
+					zap.String("session_id", sessionID),
+					zap.Error(reportErr))
+			} else if reporting != nil {
+				metadata[models.SessionMetaKeyContextCompactionReporting] = reporting
+			}
+		}
+	}
+	eventData := map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"metadata":   metadata,
+	}
+	if !session.UpdatedAt.IsZero() {
+		eventData["updated_at"] = session.UpdatedAt.Format(time.RFC3339Nano)
+	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 		events.TaskSessionStateChanged,
 		"orchestrator",
-		map[string]interface{}{
-			"task_id":    taskID,
-			"session_id": sessionID,
-			"metadata": map[string]interface{}{
-				contextWindowMetadataKey:                    contextWindowData,
-				models.SessionMetaKeyContextCompactionCount: count,
-			},
-		},
+		eventData,
 	))
 	return true, nil
 }

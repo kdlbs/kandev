@@ -274,14 +274,21 @@ func capacityContinuationEvidenceBound(
 }
 
 func capacityContinuationHasUnsafeWork(snapshot *streams.CapacityContinuationSnapshot) bool {
-	return snapshot.PendingTools || snapshot.FailedTools || snapshot.UnknownOutcomes ||
-		snapshot.PermissionPending || snapshot.UnaccountedBackground
+	if snapshot.PendingTools || snapshot.FailedTools || snapshot.UnknownOutcomes ||
+		snapshot.PermissionPending || snapshot.UnaccountedBackground {
+		return true
+	}
+	// Known failed commands are evidence only for the version that defines
+	// them. An older or unknown support value must fail closed.
+	return snapshot.KnownFailedShellTools > 0 && !snapshot.SupportsKnownFailedShellTools()
 }
 
 func supportsCapacityContinuation(support streams.CapacityContinuationSupport) bool {
 	return support == streams.CapacityContinuationCodexLiveSessionV1 ||
+		support == streams.CapacityContinuationCodexLiveSessionV2 ||
 		support == streams.CapacityContinuationOpenCodeLiveSessionV1 ||
-		support == streams.CapacityContinuationMockLiveSessionV1
+		support == streams.CapacityContinuationMockLiveSessionV1 ||
+		support == streams.CapacityContinuationMockLiveSessionV2
 }
 
 func capacityContinuationAdmissionMatches(

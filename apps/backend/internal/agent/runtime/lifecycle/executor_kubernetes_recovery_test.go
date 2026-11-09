@@ -38,6 +38,7 @@ func TestKubernetesRecoveryAttachesSavedPodAndIdleInitializedInstance(t *testing
 	require.Equal(t, fixture.created.Metadata[MetadataKeyKubernetesResourceInstanceID], got.Metadata[MetadataKeyKubernetesResourceInstanceID])
 	require.Equal(t, fixture.created.AuthToken, got.AuthToken)
 	require.Equal(t, "native-session", got.ProviderSessionID)
+	require.True(t, got.CopilotNativeSessionEvents, "recovery must preserve the adopted subscription state")
 	require.Equal(t, map[string]string{"LIVE_ENV": "preserved"}, got.Env)
 	require.Equal(t, []string{"/workspace", "/workspace/src"}, got.WorkspaceSourceRoots)
 	require.NotNil(t, got.Client)
@@ -435,8 +436,9 @@ func (s *kubernetesRecoveryAgentctlServers) serveControl(w http.ResponseWriter, 
 		_ = json.NewEncoder(w).Encode(agentctl.InstanceInfo{
 			ID: id, Port: 41001, WorkspacePath: kubernetesWorkspacePath,
 			SessionID: sessionID, TaskID: "task-1", ProviderSessionID: "native-session",
-			Env:                  map[string]string{"LIVE_ENV": "preserved"},
-			WorkspaceSourceRoots: []string{"/workspace", "/workspace/src"},
+			CopilotNativeSessionEvents: true,
+			Env:                        map[string]string{"LIVE_ENV": "preserved"},
+			WorkspaceSourceRoots:       []string{"/workspace", "/workspace/src"},
 		})
 	default:
 		http.NotFound(w, request)

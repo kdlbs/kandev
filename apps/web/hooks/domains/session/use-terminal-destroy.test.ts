@@ -116,7 +116,10 @@ describe("task terminal destroy lifecycle", () => {
 
     expect(mockDestroyUserShell).toHaveBeenCalledTimes(1);
     expect(result.current.terminals.map((terminal) => terminal.id)).toEqual(["shell-2"]);
-    expect(mockRemoveUserShell).toHaveBeenCalledWith("env-1", "shell-1");
+    expect(mockRemoveUserShell).toHaveBeenCalledWith(
+      { environmentId: "env-1", taskId: "task-1" },
+      "shell-1",
+    );
 
     await expect(duplicate).resolves.toBe(false);
     request.resolve();
@@ -125,7 +128,10 @@ describe("task terminal destroy lifecycle", () => {
     });
 
     expect(result.current.terminals.map((terminal) => terminal.id)).toEqual(["shell-2"]);
-    expect(mockRemoveUserShell).toHaveBeenCalledWith("env-1", "shell-1");
+    expect(mockRemoveUserShell).toHaveBeenCalledWith(
+      { environmentId: "env-1", taskId: "task-1" },
+      "shell-1",
+    );
     expect(mockToastError).not.toHaveBeenCalled();
   });
 
@@ -145,7 +151,10 @@ describe("task terminal destroy lifecycle", () => {
     });
 
     expect(result.current.terminals.map((terminal) => terminal.id)).toEqual(["shell-2"]);
-    expect(mockRemoveUserShell).toHaveBeenCalledWith("env-1", "shell-1");
+    expect(mockRemoveUserShell).toHaveBeenCalledWith(
+      { environmentId: "env-1", taskId: "task-1" },
+      "shell-1",
+    );
     expect(mockToastError).toHaveBeenCalledTimes(1);
     expect(mockToastError).toHaveBeenCalledWith("Failed to close terminal");
   });

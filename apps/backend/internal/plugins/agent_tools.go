@@ -424,6 +424,9 @@ func (s *Service) invokeDeclaredAgentTool(
 	if err != nil {
 		return nil, err
 	}
+	if err := validateDispatchSurfaceDeclaration(*declaration, invocation); err != nil {
+		return nil, err
+	}
 	arguments, err = validateAgentToolArguments(pluginID, localName, declaration, arguments)
 	if err != nil {
 		return nil, err
@@ -558,25 +561,57 @@ func findAgentTool(tools []manifest.AgentTool, localName, surface string) (*mani
 		if !containsString(tools[i].Surfaces, surface) {
 			return nil, fmt.Errorf("plugins: agent tool %q is not available on surface %q", localName, surface)
 		}
-		if err := validateInstanceSurfaceDeclaration(tools[i], surface); err != nil {
-			return nil, err
-		}
 		return &tools[i], nil
 	}
 	return nil, fmt.Errorf("plugins: agent tool %q is not declared", localName)
 }
 
-// validateInstanceSurfaceDeclaration re-checks the eligibility that manifest
-// validation promises for the instance-only contexts at dispatch time.
-func validateInstanceSurfaceDeclaration(tool manifest.AgentTool, surface string) error {
-	if surface != manifest.AgentToolSurfaceCoordinator && surface != manifest.AgentToolSurfaceExternal {
+// validateDispatchSurfaceDeclaration re-checks the eligibility that manifest
+// validation promises for context-bound surfaces at dispatch time. The caller
+// owns the workspace authorization decision; this gate only requires the
+// invocation context to match the descriptor scope.
+func validateDispatchSurfaceDeclaration(tool manifest.AgentTool, invocation AgentToolInvocationContext) error {
+	switch invocation.Surface {
+	case manifest.AgentToolSurfaceCoordinator:
+		return validateCoordinatorDispatchDeclaration(tool)
+	case manifest.AgentToolSurfaceExternal:
+		return validateExternalDispatchDeclaration(tool, invocation.WorkspaceID)
+	default:
 		return nil
 	}
+}
+
+func validateCoordinatorDispatchDeclaration(tool manifest.AgentTool) error {
 	if tool.NormalizedInvocationScope() != manifest.AgentToolInvocationScopeInstance {
-		return fmt.Errorf("plugins: agent tool %q requires instance invocation scope on surface %q", tool.Name, surface)
+		return fmt.Errorf("plugins: agent tool %q requires instance invocation scope on surface %q",
+			tool.Name, manifest.AgentToolSurfaceCoordinator)
 	}
 	if tool.Annotations.ReadOnlyHint == nil || !*tool.Annotations.ReadOnlyHint {
-		return fmt.Errorf("plugins: agent tool %q requires a true read-only hint on surface %q", tool.Name, surface)
+		return fmt.Errorf("plugins: agent tool %q requires a true read-only hint on surface %q",
+			tool.Name, manifest.AgentToolSurfaceCoordinator)
+	}
+	return nil
+}
+
+func validateExternalDispatchDeclaration(tool manifest.AgentTool, workspaceID string) error {
+	switch tool.NormalizedInvocationScope() {
+	case manifest.AgentToolInvocationScopeInstance:
+		if workspaceID != "" {
+			return fmt.Errorf("plugins: agent tool %q does not accept a workspace on surface %q",
+				tool.Name, manifest.AgentToolSurfaceExternal)
+		}
+	case manifest.AgentToolInvocationScopeWorkspace:
+		if workspaceID == "" {
+			return fmt.Errorf("plugins: agent tool %q requires a verified workspace on surface %q",
+				tool.Name, manifest.AgentToolSurfaceExternal)
+		}
+	default:
+		return fmt.Errorf("plugins: agent tool %q requires instance or workspace invocation scope on surface %q",
+			tool.Name, manifest.AgentToolSurfaceExternal)
+	}
+	if tool.Annotations.ReadOnlyHint == nil || !*tool.Annotations.ReadOnlyHint {
+		return fmt.Errorf("plugins: agent tool %q requires a true read-only hint on surface %q",
+			tool.Name, manifest.AgentToolSurfaceExternal)
 	}
 	return nil
 }
