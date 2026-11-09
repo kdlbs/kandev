@@ -243,6 +243,7 @@ Implementation evidence on 2026-11-08:
 - Full affected Go packages passed: `./internal/task/handlers`, `./internal/task/service`, `./internal/task/repository/sqlite`, `./internal/backendapp`, `./internal/mcp/handlers`, `./internal/mcp/server`, and `./internal/settingscatalog`.
   Scoped Go lint reported zero issues, and `go build ./...` passed.
 - Review follow-up fixes are covered by targeted service, handler, and guarded compact MCP tests: strict boolean and unknown-option parsing at both boundaries, missing/conflicting saved origins, exact identity preservation, `validate_only: false` ordinary updates, and encoded/Unicode HTTPS paths with hostile escape controls.
+- Fixup review also added exact proposed-origin and port comparison before retaining encoded bytes, safe display of encoded paths in previews and events, missing-row identity-fence conflicts, independent conflict-test deadlines, changed-plugin-descriptor coverage across HTTP/WS/MCP, a refreshed settings discovery snapshot, and aligned locator admission documentation.
 
 Planning evidence remains in the investigation section. Validation of generated documentation, links, anchors, and coverage is repeated below.
 
