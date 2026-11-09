@@ -37,6 +37,8 @@ Keep the current same-repository checkout and App-token review action. Add a
 read-only admission step before the action, plus `actions: read` for its history
 queries. Do not grant the model any additional tools or permissions. The review
 action runs only when the admission step explicitly returns `should_review=true`.
+Bind that action to the event head with `CLAUDE_REVIEW_HEAD_SHA`; before
+reviewing or posting, it rechecks the current PR head and stops if it differs.
 
 ## Admission evidence
 
@@ -74,10 +76,12 @@ review action is not prior review evidence. A mixed history with skipped runs
 and one started action denies admission. Active or malformed evidence that
 cannot distinguish these cases fails closed.
 
-Bound run and job pagination to 20 pages each, with 100 records per page. If
-another page exists at the bound, fail rather than treating partial history as
-empty. Propagate API and schema errors before the model step. Use API numeric
-IDs for matching. Do not evaluate PR metadata as JavaScript or shell code.
+Bound job pagination to 20 pages of 100 records. The workflow-runs endpoint
+exposes at most 1,000 results, so bound it to 10 pages and fail when the declared
+total exceeds 1,000. If another page exists at the bound, fail rather than
+treating partial history as empty. Propagate API and schema errors before the
+model step. Use API numeric IDs for matching. Do not evaluate PR metadata as
+JavaScript or shell code.
 
 ## Persistence and compatibility
 
@@ -118,10 +122,12 @@ their single-attempt policy with one read-only gate.
 
 Use Node's built-in test runner for the real admission module with injected
 Octokit responses. Cover cross-head history, all attempts, multiple pages,
-skipped jobs, mixed histories, API errors, and ambiguous evidence. Execute the
+skipped jobs, mixed histories, API errors, ambiguous evidence, the 1,000-result
+workflow-run API limit, and final head/state revalidation. Execute the
 opening-conflict, resolution-push, and later-push sequence with a stub model
 invocation and a shared run history. Assert exactly one invocation.
 
 Extend the existing Python workflow contract for event types, action-step
-gating, same-repository serialization, and unchanged fork/manual routes. Register
-the new Node suite in `.github/workflows/lint-action-pinning.yml`.
+gating, same-repository serialization, admission arguments, event-head binding,
+and unchanged fork/manual routes. Register the new Node suite in
+`.github/workflows/lint-action-pinning.yml`.

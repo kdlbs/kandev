@@ -106,7 +106,7 @@ Implemented on 2026-11-09.
   job had no admission step, gate, or `actions: read`.
 - Green: `python3 .github/scripts/claude-code-review-workflow-contract_test.py`
   passed 14 tests.
-- Green: `node --test .github/scripts/claude-initial-review.test.cjs` passed 44
+- Green: `node --test .github/scripts/claude-initial-review.test.cjs` passed 45
   tests, including regressions for skipped-step classification, final-page
   completeness, final head/state revalidation, and pending-rerun evidence. The
   four remediation areas were verified red against the prior behavior before

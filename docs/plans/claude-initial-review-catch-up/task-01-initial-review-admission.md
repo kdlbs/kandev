@@ -116,10 +116,16 @@ Implemented automatic catch-up for the initial same-repository review.
   real review.
 - Verifies history completeness against the declared `total_count`; a short or
   empty final page fails closed for both runs and jobs instead of admitting a
-  duplicate.
+  duplicate. Workflow-run history is bounded to GitHub's 1,000-result API limit
+  (10 pages); a larger declared total fails closed. Job pagination remains 20
+  pages.
 - Re-reads the PR immediately before a positive decision, so a head change or
   closure during history scanning skips the obsolete event. Regressions cover
   deferred head and state changes and the old-event-before-new-head ordering.
+- Binds the same-repository review action to `CLAUDE_REVIEW_HEAD_SHA` and
+  requires a head recheck before reviewing or posting, complementing the final
+  admission read. Contract tests assert the admission call arguments and the
+  head binding.
 - Inspects completed attempts of a pending rerun before ignoring it, so a
   rerun cannot hide an earlier consumed invocation.
 - Wired `synchronize` admission into `claude-code-review.yml` and made the
@@ -131,7 +137,7 @@ Implemented automatic catch-up for the initial same-repository review.
   identity, and the model tool policy. Only `actions: read` was added to the
   same-repository job.
 - Registered the Node suite in `.github/workflows/lint-action-pinning.yml`.
-- Verification: 14 Python contract tests, 44 Node admission tests, 9 action
+- Verification: 14 Python contract tests, 45 Node admission tests, 9 action
   pinning tests, catalog validation, all-spec lint, and `git diff --check`
   passed. The four remediation areas were red-verified against the prior
   behavior before the fix. `zizmor` reported only the existing workflow

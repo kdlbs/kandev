@@ -16,6 +16,10 @@ const REVIEW_JOB_NAME = 'claude-review-same-repo';
 const REVIEW_STEP_NAME = 'Run Claude Code Review (App token, inline comments)';
 const HISTORY_PAGE_SIZE = 100;
 const MAX_HISTORY_PAGES = 20;
+// The workflow-runs endpoint exposes at most 1,000 results per query. A larger
+// declared total cannot prove which runs were omitted, so admission fails.
+const MAX_WORKFLOW_RUN_RESULTS = 1000;
+const MAX_WORKFLOW_RUN_PAGES = MAX_WORKFLOW_RUN_RESULTS / HISTORY_PAGE_SIZE;
 const MAX_REPORTED_RUN_IDS = 5;
 
 // Concurrency admits one run at a time per pull request. A newer push can
@@ -42,6 +46,7 @@ const REASON = Object.freeze({
   INVALID_INPUT: 'invalid_input',
 });
 
+/** Raised when admission cannot safely decide to start a review. */
 class AdmissionError extends Error {
   constructor(reason, detail) {
     const suffix = detail ? ` (${detail})` : '';
@@ -51,10 +56,12 @@ class AdmissionError extends Error {
   }
 }
 
+/** Return true for plain objects that are not arrays. */
 function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Bound an error message for a workflow diagnostic. */
 function boundedErrorText(error) {
   const message =
     error instanceof Error && typeof error.message === 'string'
@@ -63,12 +70,14 @@ function boundedErrorText(error) {
   return message.length > 200 ? `${message.slice(0, 197)}...` : message;
 }
 
+/** Require a positive integer input. */
 function requirePositiveInteger(value, label) {
   if (!Number.isInteger(value) || value <= 0) {
     throw new AdmissionError(REASON.INVALID_INPUT, label);
   }
 }
 
+/** Require a nonempty event head SHA. */
 function requireHeadSha(value) {
   if (typeof value !== 'string' || value.length === 0) {
     throw new AdmissionError(REASON.INVALID_INPUT, 'event head');
@@ -87,6 +96,7 @@ async function collectHistoryPages({
   selectItems,
   pageSize = HISTORY_PAGE_SIZE,
   maxPages = MAX_HISTORY_PAGES,
+  maxResults = null,
 }) {
   const items = [];
   for (let page = 1; page <= maxPages; page += 1) {
@@ -117,6 +127,16 @@ async function collectHistoryPages({
       throw new AdmissionError(
         REASON.MALFORMED_HISTORY,
         `${label} total_count`,
+      );
+    }
+    if (
+      Number.isInteger(total) &&
+      maxResults !== null &&
+      total > maxResults
+    ) {
+      throw new AdmissionError(
+        REASON.HISTORY_INCOMPLETE,
+        `${label} exceeds the ${maxResults}-result API limit`,
       );
     }
 
@@ -156,6 +176,7 @@ async function collectHistoryPages({
   return items;
 }
 
+/** Validate the fields required to associate a workflow run with a PR. */
 function validateRun(run) {
   if (!isRecord(run) || run.id === undefined || run.id === null) {
     throw new AdmissionError(REASON.MALFORMED_HISTORY, 'workflow run');
@@ -182,12 +203,14 @@ function validateRun(run) {
   }
 }
 
+/** Return true when a run is associated with the pull request number. */
 function isAssociatedWithPullRequest(run, pullNumber) {
   return run.pull_requests.some(
     (association) => association.number === pullNumber,
   );
 }
 
+/** Read associated workflow runs for a pull request, bounded by the API limit. */
 async function listAssociatedRuns({ github, owner, repo, pullNumber, createdAt }) {
   const created = `>=${createdAt.slice(0, 10)}`;
   const runs = await collectHistoryPages({
@@ -205,6 +228,8 @@ async function listAssociatedRuns({ github, owner, repo, pullNumber, createdAt }
         exclude_pull_requests: false,
       }),
     selectItems: (data) => data.workflow_runs,
+    maxPages: MAX_WORKFLOW_RUN_PAGES,
+    maxResults: MAX_WORKFLOW_RUN_RESULTS,
   });
 
   for (const run of runs) {
@@ -238,6 +263,7 @@ function stepInvoked(step) {
   return false;
 }
 
+/** Return true when a job's review step started and was not skipped. */
 function jobInvokedAttempt(job) {
   if (!isRecord(job) || typeof job.name !== 'string') {
     throw new AdmissionError(REASON.MALFORMED_HISTORY, 'workflow job');
@@ -267,6 +293,7 @@ function jobInvokedAttempt(job) {
   return false;
 }
 
+/** Read every job attempt for one workflow run. */
 async function listRunJobs({ github, owner, repo, runId }) {
   return collectHistoryPages({
     label: `jobs for run ${runId}`,
@@ -311,6 +338,7 @@ async function pendingRerunInvoked({
   return false;
 }
 
+/** Find the first retained run that started the review action. */
 async function findPriorAttempt({ github, owner, repo, runs, currentRunId }) {
   for (const run of runs) {
     if (String(run.id) === String(currentRunId)) {
@@ -358,6 +386,7 @@ async function findPriorAttempt({ github, owner, repo, runs, currentRunId }) {
   return null;
 }
 
+/** Build a bounded admission decision. */
 function decision(shouldReview, reason, runIds = []) {
   return {
     shouldReview,
@@ -366,6 +395,7 @@ function decision(shouldReview, reason, runIds = []) {
   };
 }
 
+/** Read the current pull request with a bounded diagnostic on failure. */
 async function readPullRequest({ github, owner, repo, pullNumber }) {
   let response;
   try {

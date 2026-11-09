@@ -432,11 +432,23 @@ test('reads every page of job history with filter all', async () => {
   }
 });
 
-test('fails closed when run history exceeds the page bound', async () => {
-  const github = fakeGithub({ runs: fillerRuns(2001) });
+test('fails closed when run history exceeds the API result limit', async () => {
+  const github = fakeGithub({ runs: fillerRuns(1001) });
 
   await expectAdmissionError(decide(github), REASON.HISTORY_INCOMPLETE);
-  assert.equal(github.calls.runs.length, 20);
+  assert.equal(github.calls.runs.length, 1);
+});
+
+test('fails closed when the run page bound is reached without a total', async () => {
+  const github = fakeGithub();
+  let pages = 0;
+  github.rest.actions.listWorkflowRuns = async () => {
+    pages += 1;
+    return { data: { workflow_runs: fillerRuns(100) } };
+  };
+
+  await expectAdmissionError(decide(github), REASON.HISTORY_INCOMPLETE);
+  assert.equal(pages, 10);
 });
 
 test('fails closed when job history exceeds the page bound', async () => {
@@ -451,13 +463,13 @@ test('fails closed when job history exceeds the page bound', async () => {
 });
 
 test('accepts a full final page when total_count proves completeness', async () => {
-  const github = fakeGithub({ runs: fillerRuns(2000) });
+  const github = fakeGithub({ runs: fillerRuns(1000) });
 
   const result = await decide(github);
 
   assert.equal(result.shouldReview, true);
   assert.equal(result.reason, REASON.NO_PRIOR_ATTEMPT);
-  assert.equal(github.calls.runs.length, 20);
+  assert.equal(github.calls.runs.length, 10);
 });
 
 test('fails closed when a page disagrees with total_count', async () => {

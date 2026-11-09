@@ -93,6 +93,14 @@ class ClaudeCodeReviewWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn("claude-initial-review.cjs", admission)
         self.assertIn("shouldStartInitialReview({", admission)
+        self.assertIn("owner: context.repo.owner,", admission)
+        self.assertIn("repo: context.repo.repo,", admission)
+        self.assertIn("pullNumber,", admission)
+        self.assertIn(
+            "eventHeadSha: context.payload.pull_request.head.sha,",
+            admission,
+        )
+        self.assertIn("currentRunId: context.runId,", admission)
         review = workflow_step(
             block,
             "Run Claude Code Review (App token, inline comments)",
@@ -122,6 +130,12 @@ class ClaudeCodeReviewWorkflowContractTest(unittest.TestCase):
         )
         self.assertNotIn("\n          github_token:", review)
         self.assertIn("track_progress: true", review)
+        self.assertIn(
+            "CLAUDE_REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}",
+            review,
+        )
+        self.assertIn("CLAUDE_REVIEW_HEAD_SHA", review)
+        self.assertIn("headRefOid", review)
         self.assertIn(
             '--allowedTools "mcp__github_inline_comment__create_inline_comment,'
             'Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"',
