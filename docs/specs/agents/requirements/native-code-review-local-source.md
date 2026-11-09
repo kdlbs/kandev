@@ -42,9 +42,11 @@ review of that checkout, with results in the same task review readback.
 - **AC-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-002.2:** A writer SHALL be able to save or clear one review source per task in `task.metadata.review_source`. The target task SHALL be authorized for write before the path is examined. Clearing SHALL NOT be combined with source fields and SHALL leave other metadata unchanged.
 - **AC-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-002.3:** A manual or workflow-step review without explicit source fields SHALL use the saved source only when workspace collection returns no changes or is unavailable. A source saved on the task SHALL take precedence over one carried by the writer session's metadata.
 - **AC-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-002.4:** Runs and findings from an explicit or saved source SHALL stay in the existing task review service and readback. Changing or clearing a source SHALL NOT erase earlier results.
+- **AC-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-002.5:** A `worktree_path` supplied by an agent through the MCP review tools, for an explicit run or a saved source, SHALL resolve, after symlinks and (on Windows) case, to the target task's registered local repository checkout or a workspace or worktree path of one of its sessions on a `local`, `worktree`, or `local_pc` executor, or to a directory inside one. Any other path, including a sibling that only shares a prefix, SHALL be rejected as forbidden before Git validation, and no run or saved source SHALL be created. A path sent by a person through the authenticated WebSocket API, without an MCP caller principal, SHALL keep the 002.1 and 002.2 rules and MAY name any backend-local Git worktree.
 
 AC-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-001.2 continues to govern the
 task-bound fallback reader. A writer-supplied path is accepted only through
 REQ-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-002 and its task-write
-authorization. The design is
+authorization; an agent-supplied path is further limited to the task's own
+local checkouts by AC-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-002.5. The design is
 [Native Code Review Local Sources](../system-design/native-code-review-local-source.md).

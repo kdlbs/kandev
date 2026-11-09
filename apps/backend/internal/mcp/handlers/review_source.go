@@ -28,6 +28,9 @@ func (h *Handlers) handleSetReviewSource(ctx context.Context, msg *ws.Message) (
 	if err := h.taskSvc.AuthorizeTaskScope(ctx, req.TaskID, authz.ScopeTaskWrite); err != nil {
 		return reviewLaunchError(msg, err)
 	}
+	if denied := h.admitAgentReviewSource(ctx, msg, req.TaskID, req.WorktreePath); denied != nil {
+		return denied, nil
+	}
 	var value any
 	if req.Clear {
 		if req.WorktreePath != "" || req.BaseRef != "" || req.HeadRef != "" {

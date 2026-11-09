@@ -21,6 +21,7 @@ review pipeline or persistence table. The task-bound fallback reader of
 | `AC-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-002.2` | Saved source |
 | `AC-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-002.3` | Saved source |
 | `AC-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-002.4` | Results |
+| `AC-AGENTS-NATIVE-CODE-REVIEW-LOCAL-SOURCE-002.5` | Agent-supplied paths |
 
 ## Explicit source
 
@@ -47,6 +48,25 @@ cannot be combined with source fields.
 The runner reads the saved source only after workspace collection returns no
 files or fails. Task metadata takes precedence over a `review_source` carried by
 the writer session's metadata.
+
+## Agent-supplied paths
+
+The MCP review tools run with a server-derived caller principal. When
+`task.review.run` or `task.review.source.set` carries that principal and a
+`worktree_path`, the handler first lists the target task's admitted roots: the
+`local_path` of each registered task repository, plus the workspace path and
+worktree paths of each session whose executor is `local`, `worktree`, or
+`local_pc`. A Docker, SSH, or other remote session's paths name another machine
+and admit nothing. `review.SourceWithinRoots` resolves symlinks on both the
+supplied path and each root, lower-cases on Windows, and accepts only a root or
+a directory below one by path components, so a link that leaves a root or a
+sibling such as `repo-evil` is rejected. A rejection is a forbidden error before
+Git validation; no run starts and no source is saved.
+
+A request without the principal comes from a person's authenticated WebSocket
+client and keeps the explicit and saved source rules above, including any
+backend-local checkout. The browser UI itself sends no source fields. A source saved that way is a person's choice, so a later
+agent-triggered review may read it.
 
 ## Results
 

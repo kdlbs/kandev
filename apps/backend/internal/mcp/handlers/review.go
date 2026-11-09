@@ -187,6 +187,9 @@ func (h *Handlers) handleRunTaskReview(ctx context.Context, msg *ws.Message) (*w
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task is not writable", nil)
 		}
 	}
+	if denied := h.admitAgentReviewSource(ctx, msg, req.TaskID, req.WorktreePath); denied != nil {
+		return denied, nil
+	}
 	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok {
 		if h.taskSvc == nil || h.taskSvc.AuthorizeTaskScope(ctx, req.TaskID, authz.ScopeTaskWrite) != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task is not writable", nil)
