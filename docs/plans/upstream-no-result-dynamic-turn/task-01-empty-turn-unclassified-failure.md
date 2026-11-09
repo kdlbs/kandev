@@ -32,6 +32,7 @@ Produce the `empty_turn_completion` origin at stream completion and admit it in 
 - `apps/backend/internal/orchestrator/dynamic_empty_turn.go`: the producer, its evidence, and the counted-turn record keyed by session, execution ID, and prompt generation.
 - `apps/backend/internal/orchestrator/event_handlers_streaming.go`: call the producer while the stream guard is held, before the ordinary completion follow-up; retire the counted-turn record at turn start.
 - `apps/backend/internal/orchestrator/dynamic_evidence.go` and `service.go`: consume the counted-turn record in the completion-clear path; hold the record map.
+- `apps/backend/internal/orchestrator/dynamic_empty_turn_reasoning_test.go`: committed tests for the reasoning-only boundary (counted at normal completion, not counted with answer/plan/tool effect, lifecycle output preserved, reasoning still fences other origins, stale identity, missing record fails closed).
 - Public sentence in `docs/public/agents-and-profiles.md`.
 
 ## Out of scope
@@ -55,7 +56,7 @@ Produce the `empty_turn_completion` origin at stream completion and admit it in 
 cd apps/backend
 go test ./internal/agent/runtime/dynamic -count=1
 go test ./internal/agent/runtime -run 'Resolver|Unclassified|Dynamic' -count=1
-go test ./internal/orchestrator -run 'Unclassified|EmptyTurn|Streak|CompleteStream|CompleteEvent|DynamicFailure|DynamicRoute' -count=1
+go test ./internal/orchestrator -run 'Unclassified|EmptyTurn|Reasoning|StaleIdentity|Streak|CompleteStream|CompleteEvent|DynamicFailure|DynamicRoute' -count=1
 go build ./... && go vet ./internal/agent/runtime/... ./internal/orchestrator/...
 ```
 
