@@ -563,14 +563,17 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		(!state.quotaWaitObserved || isQuotaWaitRefreshEvent(event.Type)) {
 		nextWait, loadErr := p.loadQuotaWait(ctx, taskID)
 		if loadErr != nil {
-			return fmt.Errorf("load quota wait for task status summary %q: %w", taskID, loadErr)
+			p.logger.Warn("failed to refresh task quota wait",
+				zap.String("task_id", taskID),
+				zap.Error(loadErr))
+		} else {
+			// Compare with the persisted summary too: a restored observation can
+			// already match the new read while the stored row still differs.
+			quotaWaitChanged = state.current == nil || !state.quotaWaitObserved ||
+				!equalQuotaWait(state.quotaWait, nextWait) || !equalQuotaWait(state.current.QuotaWait, nextWait)
+			state.quotaWait = cloneQuotaWait(nextWait)
+			state.quotaWaitObserved = true
 		}
-		// Compare with the persisted summary too: a restored observation can
-		// already match the new read while the stored row still differs.
-		quotaWaitChanged = state.current == nil || !state.quotaWaitObserved ||
-			!equalQuotaWait(state.quotaWait, nextWait) || !equalQuotaWait(state.current.QuotaWait, nextWait)
-		state.quotaWait = cloneQuotaWait(nextWait)
-		state.quotaWaitObserved = true
 	}
 
 	if event.Type == events.MessageQueueStatusChanged {

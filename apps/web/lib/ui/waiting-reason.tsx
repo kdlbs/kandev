@@ -1,10 +1,21 @@
-import type { ComponentType } from "react";
+import { useState, type ComponentType } from "react";
 import { IconClockHour4, IconGauge, IconHourglass, IconMessageQuestion } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@kandev/ui/button";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { formatDateTime, formatTime } from "@/lib/i18n/formats";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { Task } from "@/lib/types/http";
 import type {
   TaskStatusSummaryLaunchQueue,
@@ -108,19 +119,19 @@ export function waitReasonClass(reason: TaskWaitReason): string {
   return WAIT_REASON_CLASS[reason];
 }
 
-type WaitReasonTooltipCopy = { label: string; help: string };
+type WaitReasonCopy = { label: string; help: string };
 
 /**
  * The one line a wait explains itself with. A capacity wait names the occupancy
- * it is queued behind and a limit wait names the instant the limit lifts,
- * because those are the two facts a reader cannot get from the icon alone. Both
+ * it is queued behind and a quota wait names its next scheduled retry, because
+ * those are facts a reader cannot get from the icon alone. Both
  * come from measured values; nothing here formats an absent value into a guess.
  */
 function useWaitReasonCopy(
   reason: TaskWaitReason,
   launchQueue: TaskStatusSummaryLaunchQueue | null | undefined,
   quotaWait: TaskStatusSummaryQuotaWait | null | undefined,
-): WaitReasonTooltipCopy {
+): WaitReasonCopy {
   const { t } = useTranslation();
   const label = t(WAIT_REASON_LABEL_KEY[reason]);
   const capacity = launchQueue?.capacity;
@@ -135,13 +146,13 @@ function useWaitReasonCopy(
   }
   if (reason === "quota" && quotaWait) {
     const time = formatQuotaDeadline(quotaWait.deadline);
-    if (time) return { label, help: t("task:waitingReasonQuotaClearsAt", { time }) };
+    if (time) return { label, help: t("task:waitingReasonQuotaNextRetry", { time }) };
   }
   return { label, help: t(WAIT_REASON_HELP_KEY[reason]) };
 }
 
 /**
- * Formats a strict RFC3339 reset instant, naming the day unless it is today.
+ * Formats a strict RFC3339 retry instant, naming the day unless it is today.
  * A malformed wire value returns null so the caller keeps the generic help.
  */
 export function formatQuotaDeadline(value: string, now: Date = new Date()): string | null {
@@ -171,7 +182,54 @@ export function WaitingReasonTaskIcon({
   className?: string;
 }) {
   const { label, help } = useWaitReasonCopy(reason, launchQueue, quotaWait);
+  const { t } = useTranslation();
+  const touch = useTouchDrawer();
+  const [open, setOpen] = useState(false);
   const Icon = WAIT_REASON_ICON[reason];
+
+  if (touch) {
+    return (
+      <Drawer open={open} onOpenChange={setOpen}>
+        <DrawerTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={label}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            data-testid={`task-state-waiting-${reason}-details-trigger`}
+            className={cn(
+              "size-11 min-h-11 min-w-11 shrink-0 p-0 focus-visible:ring-2 focus-visible:ring-offset-1",
+              WAIT_REASON_CLASS[reason],
+              className,
+            )}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <Icon
+              aria-hidden="true"
+              data-testid={`task-state-waiting-${reason}`}
+              className="h-3.5 w-3.5 shrink-0"
+            />
+          </Button>
+        </DrawerTrigger>
+        <DrawerContent className="pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <DrawerHeader>
+            <DrawerTitle>{label}</DrawerTitle>
+            <DrawerDescription>{help}</DrawerDescription>
+          </DrawerHeader>
+          <div className="p-4">
+            <DrawerClose asChild>
+              <Button variant="outline" className="h-11 w-full">
+                {t("common:close")}
+              </Button>
+            </DrawerClose>
+          </div>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
