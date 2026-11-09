@@ -36,6 +36,16 @@ var ErrTaskReviewFindingNotFound = errors.New("task review finding not found")
 // surface from the same lookup.
 var ErrExecutorNotFound = errors.New("executor not found")
 
+// ErrExecutorMutationDenied marks an edit refused because the caller is not
+// eligible for executor compute that the edited source would launch on.
+var ErrExecutorMutationDenied = errors.New("executor mutation denied")
+
+// ErrWorkspaceDefaultExecutorUnavailable marks a workflow edit blocked by a
+// workspace default executor that no longer resolves.
+var ErrWorkspaceDefaultExecutorUnavailable = errors.New("workspace default executor is unavailable")
+
+const WorkspaceDefaultExecutorUnavailableErrorCode = "workspace_default_executor_unavailable"
+
 // ErrExecutionRotated is returned by CAS-style updates on executors_running when the
 // row's agent_execution_id has rotated since the caller observed it. Indicates the
 // caller's write target a now-defunct execution and should be discarded — typically
