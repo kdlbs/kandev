@@ -93,28 +93,32 @@ func (e *Executor) MarkCompletedBySession(ctx context.Context, sessionID string,
 	}
 }
 
-func (e *Executor) defaultExecutorID(ctx context.Context, workspaceID string) string {
+func (e *Executor) defaultExecutorID(ctx context.Context, workspaceID string) (string, error) {
 	if workspaceID == "" {
-		return ""
+		return "", nil
 	}
 	workspace, err := e.repo.GetWorkspace(ctx, workspaceID)
-	if err != nil || workspace == nil || workspace.DefaultExecutorID == nil {
-		return ""
+	if err != nil {
+		return "", err
 	}
-	return strings.TrimSpace(*workspace.DefaultExecutorID)
+	if workspace == nil || workspace.DefaultExecutorID == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(*workspace.DefaultExecutorID), nil
 }
 
 // executorConfig holds resolved executor configuration.
 type executorConfig struct {
-	ExecutorID     string
-	ExecutorType   string
-	ExecutorCfg    map[string]string // The executor record's Config map (docker_host, etc.)
-	Metadata       map[string]interface{}
-	SetupScript    string                 // Setup script from profile
-	CleanupScript  string                 // Cleanup script from profile (terminal teardown)
-	ProfileEnvVars []models.ProfileEnvVar // Source definitions resolved at launch checkpoint.
-	Resumable      bool                   // Whether the executor supports session resume
-	RuntimeName    string                 // Runtime name from the executor type (e.g. "local_pc")
+	ExecutorID        string
+	ExecutorType      string
+	ImplicitSelection bool
+	ExecutorCfg       map[string]string // The executor record's Config map (docker_host, etc.)
+	Metadata          map[string]interface{}
+	SetupScript       string                 // Setup script from profile
+	CleanupScript     string                 // Cleanup script from profile (terminal teardown)
+	ProfileEnvVars    []models.ProfileEnvVar // Source definitions resolved at launch checkpoint.
+	Resumable         bool                   // Whether the executor supports session resume
+	RuntimeName       string                 // Runtime name from the executor type (e.g. "local_pc")
 	// ResolutionErr records a failed concrete executor/profile lookup. The
 	// resulting config must never be treated as an unspecified selection.
 	ResolutionErr error
@@ -125,8 +129,9 @@ type executorConfig struct {
 // Returns the resolved config with executor ID, type, and metadata.
 func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, workspaceID string, existingMetadata map[string]interface{}) executorConfig {
 	resolved := executorID
+	var defaultExecutorErr error
 	if resolved == "" {
-		resolved = e.defaultExecutorID(ctx, workspaceID)
+		resolved, defaultExecutorErr = e.defaultExecutorID(ctx, workspaceID)
 	}
 
 	metadata := existingMetadata
@@ -150,7 +155,11 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 	if resolved == "" {
 		profileID, _ := metadata["executor_profile_id"].(string)
 		if profileID == "" {
-			return executorConfig{Metadata: metadata}
+			cfg := executorConfig{Metadata: metadata}
+			if defaultExecutorErr == nil && !metadataHasExecutorSelection(metadata) {
+				cfg.ImplicitSelection = true
+			}
+			return cfg
 		}
 		cfg := executorConfig{Metadata: metadata}
 		if err := e.applyProfile(ctx, profileID, &cfg, metadata); err != nil {
@@ -188,6 +197,23 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 	}
 
 	return cfg
+}
+
+func metadataHasExecutorSelection(metadata map[string]interface{}) bool {
+	for _, key := range []string{"executor_id", "executor_profile_id"} {
+		value, ok := metadata[key]
+		if !ok || value == nil {
+			continue
+		}
+		if text, ok := value.(string); ok {
+			if strings.TrimSpace(text) != "" {
+				return true
+			}
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // applyProfile loads an executor profile and applies its settings to the config.

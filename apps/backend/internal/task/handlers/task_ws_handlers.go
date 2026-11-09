@@ -384,6 +384,9 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	})
 	if err != nil {
 		h.logger.Error("failed to update task", zap.Error(err))
+		if errors.Is(err, models.ErrExecutorMutationDenied) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, models.ErrExecutorMutationDenied.Error(), nil)
+		}
 		if code, ok := repositorySelectionWSCode(err); ok {
 			return ws.NewError(msg.ID, msg.Action, code, err.Error(), taskErrorDetails(err))
 		}

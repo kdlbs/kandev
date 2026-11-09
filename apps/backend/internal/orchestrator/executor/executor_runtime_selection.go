@@ -58,6 +58,29 @@ func (e *Executor) admitPreparedLaunchRuntime(
 	session *models.TaskSession,
 	executorID string,
 ) error {
+	config, environment, err := e.resolvePreparedLaunchConfig(ctx, task, session, executorID)
+	if err != nil {
+		return err
+	}
+	executorType := strings.TrimSpace(config.ExecutorType)
+	if executorType == "" && environment != nil {
+		executorType = strings.TrimSpace(environment.ExecutorType)
+	}
+	if err := e.admitConcreteExecutorRuntime(config); err != nil {
+		return err
+	}
+	if err := e.admitAdditionalExecutorRuntime(config.ExecutorType, executorType); err != nil {
+		return err
+	}
+	return e.admitRetainedPreparedSelection(ctx, task, session, executorType)
+}
+
+func (e *Executor) resolvePreparedLaunchConfig(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	executorID string,
+) (executorConfig, *models.TaskEnvironment, error) {
 	metadata := cloneMetadata(task.Metadata)
 	if session.ExecutorProfileID != "" {
 		if metadata == nil {
@@ -67,23 +90,55 @@ func (e *Executor) admitPreparedLaunchRuntime(
 	}
 	config := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
 	if config.ResolutionErr != nil {
-		return fmt.Errorf("%w: %v", ErrExecutorRuntimeSelectionUnresolved, config.ResolutionErr)
+		return executorConfig{}, nil, fmt.Errorf("%w: %v", ErrExecutorRuntimeSelectionUnresolved, config.ResolutionErr)
 	}
-	executorType := strings.TrimSpace(config.ExecutorType)
-	if executorType == "" && session.TaskEnvironmentID != "" {
-		// Environment resolution is best-effort here: the launch path below
-		// owns inherited-environment failure classification and will repeat
-		// runtime admission with the resolved environment type.
-		if environment, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID); err == nil && environment != nil {
-			executorType = strings.TrimSpace(environment.ExecutorType)
+	var environment *models.TaskEnvironment
+	if session.TaskEnvironmentID != "" {
+		resolved, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+		if err != nil && taskUsesInheritedWorkspace(task) {
+			return executorConfig{}, nil, fmt.Errorf("%w: load inherited environment executor identity", models.ErrWorkspaceReuseUnsafe)
+		}
+		if err == nil {
+			environment = resolved
 		}
 	}
-	if err := e.admitConcreteExecutorRuntime(config); err != nil {
-		return err
+	if config.ImplicitSelection {
+		var err error
+		config, err = e.resolveImplicitExecutorForEnvironment(ctx, environment, config)
+		if err != nil {
+			return executorConfig{}, nil, err
+		}
 	}
-	if executorType != "" && executorType != config.ExecutorType {
-		if err := e.admitExecutorRuntime(executorType); err != nil {
+	return config, environment, nil
+}
+
+func (e *Executor) admitAdditionalExecutorRuntime(configuredType, effectiveType string) error {
+	if effectiveType == "" || effectiveType == configuredType {
+		return nil
+	}
+	return e.admitExecutorRuntime(effectiveType)
+}
+
+// admitRetainedPreparedSelection skips retained-runtime comparison for an
+// authorized inherited-environment transition. The predecessor is not a
+// reuse candidate for the selected environment; lifecycle admission still
+// validates the selected runtime after the transition.
+func (e *Executor) admitRetainedPreparedSelection(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	executorType string,
+) error {
+	if inheritedTransitionClaimed(ctx) {
+		return nil
+	}
+	if taskUsesInheritedWorkspace(task) {
+		willRebind, err := e.inheritedTransitionWillRebind(ctx, task, session, executorType)
+		if err != nil {
 			return err
+		}
+		if willRebind {
+			return nil
 		}
 	}
 	return e.admitRetainedExecutionRuntime(ctx, session, executorType)

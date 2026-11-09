@@ -36,6 +36,16 @@ var ErrTaskReviewFindingNotFound = errors.New("task review finding not found")
 // surface from the same lookup.
 var ErrExecutorNotFound = errors.New("executor not found")
 
+// ErrExecutorMutationDenied marks an edit refused because the caller is not
+// eligible for executor compute that the edited source would launch on.
+var ErrExecutorMutationDenied = errors.New("executor mutation denied")
+
+// ErrWorkspaceDefaultExecutorUnavailable marks a workflow edit blocked by a
+// workspace default executor that no longer resolves.
+var ErrWorkspaceDefaultExecutorUnavailable = errors.New("workspace default executor is unavailable")
+
+const WorkspaceDefaultExecutorUnavailableErrorCode = "workspace_default_executor_unavailable"
+
 // ErrExecutionRotated is returned by CAS-style updates on executors_running when the
 // row's agent_execution_id has rotated since the caller observed it. Indicates the
 // caller's write target a now-defunct execution and should be discarded — typically
@@ -630,6 +640,11 @@ const (
 	// passthrough agent.running event. It prevents recovery from evaluating
 	// the same on_turn_start transition a second time after restart.
 	SessionMetaKeyInitialCreatePromptPassthrough = "initial_create_prompt_passthrough"
+	// SessionMetaKeyInitialPromptExplicitLaunch marks a matching pending
+	// initial-submission receipt whose launch came from explicit start_created
+	// input. Fresh-start recovery uses it to keep the same preserving
+	// composition; task-description receipts do not carry it.
+	SessionMetaKeyInitialPromptExplicitLaunch = "initial_prompt_explicit_launch"
 )
 
 // InterruptedRecoverySettlement is the durable recovery snapshot used when a
@@ -3187,6 +3202,27 @@ type TaskEnvironment struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// EffectiveExecutorType returns the environment's persisted executor type. A
+// legacy row with no executor identity or runtime handles represents the
+// implicit local executor used before executor profiles existed.
+func (te *TaskEnvironment) EffectiveExecutorType() (ExecutorType, bool) {
+	if te == nil {
+		return "", false
+	}
+	if te.ExecutorType != "" {
+		executorType := ExecutorType(te.ExecutorType)
+		if executorType.Runtime() == agentruntime.RuntimeUnknown {
+			return "", false
+		}
+		return executorType, true
+	}
+	if te.ExecutorID != "" || te.ExecutorProfileID != "" || te.ContainerID != "" || te.SandboxID != "" ||
+		te.ContainerBootstrapNonceSecretID != "" || te.ContainerControlAuthTokenSecretID != "" {
+		return "", false
+	}
+	return ExecutorTypeLocal, true
 }
 
 // RepoFor returns the per-repo environment row for repositoryID, or nil if not present.

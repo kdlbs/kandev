@@ -1981,15 +1981,16 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 				return
 			}
 			launchReq = &orchestrator.LaunchSessionRequest{
-				TaskID:              task.ID,
-				Intent:              orchestrator.IntentStartCreated,
-				SessionID:           prepResp.SessionID,
-				AgentProfileID:      config.AgentProfileID,
-				ExecutorID:          config.ExecutorID,
-				ExecutorProfileID:   config.ExecutorProfileID,
-				WorkflowStepID:      task.WorkflowStepID,
-				Prompt:              task.Description,
-				InitialCreatePrompt: true,
+				TaskID:                  task.ID,
+				Intent:                  orchestrator.IntentStartCreated,
+				SessionID:               prepResp.SessionID,
+				AgentProfileID:          config.AgentProfileID,
+				ExecutorID:              config.ExecutorID,
+				ExecutorProfileID:       config.ExecutorProfileID,
+				WorkflowStepID:          task.WorkflowStepID,
+				Prompt:                  task.Description,
+				PromptIsTaskDescription: true,
+				InitialCreatePrompt:     true,
 			}
 		}
 

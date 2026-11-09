@@ -23,6 +23,10 @@ const (
 	silentRestartRestoredCreationReason = "silent_restart_restored"
 )
 
+type contextContinuationRecoveryVerifier interface {
+	HasResolvedContextContinuationRecovery(context.Context, models.AgentDeliveryRecovery) (bool, error)
+}
+
 func (s *Service) RetrySessionDelivery(
 	ctx context.Context,
 	taskID, sessionID string,
@@ -127,6 +131,14 @@ func (s *Service) retryRecoverySuccessor(
 		generation.Generation == recovery.HarnessGeneration && generation.NativeSessionID != "" {
 		if verifier, ok := s.repo.(nativeResumeRecoveryVerifier); ok {
 			matches, err = verifier.HasResolvedNativeResumeRecovery(ctx, recovery)
+			if err != nil {
+				return nil, true, err
+			}
+		}
+	}
+	if !matches && recovery.Phase == models.AgentDeliveryRecoveryContinued {
+		if verifier, ok := s.repo.(contextContinuationRecoveryVerifier); ok {
+			matches, err = verifier.HasResolvedContextContinuationRecovery(ctx, recovery)
 			if err != nil {
 				return nil, true, err
 			}

@@ -37,6 +37,8 @@ export async function createDisabledDockerRefusal(
     env_vars: [],
   });
 
+  const logOffset = fs.existsSync(backend.logPath) ? fs.statSync(backend.logPath).size : 0;
+
   try {
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -50,11 +52,21 @@ export async function createDisabledDockerRefusal(
       },
     );
 
-    // The refusal is causal: wait for the backend to record it before
-    // asserting that no worker identity exists.
+    // The refusal is causal: wait for a new backend record for this exact task
+    // before asserting that no worker identity exists. Reading from the
+    // pre-launch offset prevents an earlier test's refusal from satisfying it.
     await expect
-      .poll(() => fs.readFileSync(backend.logPath, "utf8"), { timeout: 30_000 })
-      .toMatch(/executor runtime .*unavailable|executor_runtime_unavailable/);
+      .poll(
+        () => {
+          const chunk = readLogSince(backend.logPath, logOffset);
+          return (
+            chunk.includes(task.id) &&
+            /executor runtime .*unavailable|executor_runtime_unavailable/.test(chunk)
+          );
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
 
     const { sessions } = await apiClient.listTaskSessions(task.id);
     expect(sessions, "a refused Docker launch must not create a session").toHaveLength(0);
@@ -75,5 +87,21 @@ export async function createDisabledDockerRefusal(
   } catch (error) {
     await apiClient.deleteExecutorProfile(profile.id).catch(() => {});
     throw error;
+  }
+}
+
+function readLogSince(filePath: string, offset: number): string {
+  if (!fs.existsSync(filePath)) return "";
+  const size = fs.statSync(filePath).size;
+  const start = size >= offset ? offset : 0;
+  const length = size - start;
+  if (length <= 0) return "";
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(length);
+    fs.readSync(fd, buffer, 0, length, start);
+    return buffer.toString("utf8");
+  } finally {
+    fs.closeSync(fd);
   }
 }

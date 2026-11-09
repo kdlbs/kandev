@@ -1598,6 +1598,7 @@ func (sm *SessionManager) waitForPromptDone(
 			neverStarted := !agentEventSeen
 
 			if elapsed >= stallThreshold && !stallReported {
+				snapshot.diagnostic.StreamStages = captureStreamStages(execution)
 				snapshot.diagnostic.ElapsedMillis = elapsed.Milliseconds()
 				sm.logger.Warn("agent stall detected: no events received",
 					zap.Any("stall", snapshot.diagnostic))

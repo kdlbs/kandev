@@ -1,5 +1,6 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskPriority } from "@/lib/types/http";
+import { t } from "@/lib/i18n";
 
 const DEFAULT_SESSION_LAUNCH_TIMEOUT_MS = 60_000;
 
@@ -64,7 +65,21 @@ export async function launchSession(
   const client = getWebSocketClient();
   if (!client) throw new Error("WebSocket client not available");
   const effectiveTimeout = timeout ?? DEFAULT_SESSION_LAUNCH_TIMEOUT_MS;
-  return client.request<LaunchSessionResponse>("session.launch", request, effectiveTimeout);
+  const response = await client.request<LaunchSessionResponse>(
+    "session.launch",
+    request,
+    effectiveTimeout,
+  );
+  if (
+    request.intent === "restore_workspace" &&
+    response.success &&
+    response.activation_disposition !== "queued" &&
+    response.activation_disposition !== "suppressed" &&
+    !response.agent_execution_id?.trim()
+  ) {
+    throw new Error(t("task:failedToRestoreWorkspace"));
+  }
+  return response;
 }
 
 export type ForkConversationResponse = {

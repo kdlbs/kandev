@@ -442,12 +442,26 @@ func repositoryDomain() DomainDescriptor {
 	fields := make([]FieldDescriptor, 0, len(paths))
 	for _, item := range paths {
 		field := domainWritable("repository", item.path, item.label, "Repository setting.", item.typ, owner, "workspace.manage")
+		if item.path == "remote_url" {
+			field.Description = "Credential-free clone locator. A replacement must preserve the saved provider identity, host, namespace, and name."
+		}
 		if item.path == "secret_bindings" {
 			field.Sensitive = true
 		}
 		fields = append(fields, field)
 	}
-	return supportedDomain("workspaces", "repository", "Repositories", "Workspace repository settings.", owner, ScopeResource, targetRulesResourceWorkspace(), fields...)
+	domain := supportedDomain("workspaces", "repository", "Repositories", "Workspace repository settings.", owner, ScopeResource, targetRulesResourceWorkspace(), fields...)
+	domain.Operations[0].Options = map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"validate_only": map[string]any{
+				"type":        "boolean",
+				"description": "Validate a single remote_url replacement without writing.",
+			},
+		},
+	}
+	return domain
 }
 
 func repositoryScriptDomain() DomainDescriptor {

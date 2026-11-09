@@ -477,3 +477,45 @@ func TestColdLaunchRefusesRetainedMismatch(t *testing.T) {
 		t.Fatalf("cold Launch created %d runtimes, want 0", got)
 	}
 }
+
+// TestColdLegacyStandaloneWorkspaceUsesObservedRuntime proves an unspecified
+// legacy session with empty executor-type fields does not map the observed
+// runtime name as though it were an executor type.
+func TestColdLegacyStandaloneWorkspaceUsesObservedRuntime(t *testing.T) {
+	info := &WorkspaceInfo{
+		TaskID: "task-legacy", SessionID: "session-legacy", TaskEnvironmentID: "env-legacy",
+		WorkspacePath: "/workspace/legacy", AgentID: "auggie",
+		RuntimeName: agentruntime.RuntimeStandalone,
+	}
+	backend := &createInstanceExecutor{
+		MockExecutor: MockExecutor{name: executor.NameStandalone},
+		client:       newReadyAgentctlClient(t, newTestLogger()),
+	}
+	mgr, _ := newRuntimeSelectionManager(t, backend)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{"session-legacy": info},
+	}
+	reader := &fakeExecutorProfileReader{
+		session: &models.TaskSession{
+			ID: "session-legacy", TaskID: "task-legacy", TaskEnvironmentID: "env-legacy",
+		},
+		env: &models.TaskEnvironment{ID: "env-legacy", TaskID: "task-legacy"},
+	}
+	mgr.SetExecutorProfileReader(reader)
+	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{prior: &models.ExecutorRunning{
+		ID: "running-session-legacy", SessionID: "session-legacy", TaskID: "task-legacy",
+		AgentExecutionID: "exec-legacy", Runtime: agentruntime.RuntimeStandalone,
+		Status: models.ExecutorRunningStatusRunning,
+	}})
+
+	execution, err := mgr.GetOrEnsureExecution(context.Background(), "session-legacy")
+	if err != nil {
+		t.Fatalf("legacy standalone ensure error = %v", err)
+	}
+	if execution == nil || execution.RuntimeName != agentruntime.RuntimeStandalone {
+		t.Fatalf("legacy standalone execution = %+v", execution)
+	}
+	if got := backend.createCount.Load(); got != 1 {
+		t.Fatalf("runtime creations = %d, want 1", got)
+	}
+}

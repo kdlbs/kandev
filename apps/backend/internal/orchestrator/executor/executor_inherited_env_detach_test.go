@@ -2,10 +2,10 @@ package executor
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -98,7 +98,13 @@ func TestLaunchPreparedSession_DetachesInheritedEnvironmentOnExecutorMismatch(t 
 	}
 }
 
-func TestLaunchPreparedSession_RejectsInheritedEnvironmentExecutorMismatch(t *testing.T) {
+// An inherit_parent child whose inherited environment lives on a different
+// executor than the one the launch selected cannot attach to it. Rejecting the
+// launch strands the child, so it detaches and materializes a fresh environment
+// on the selected executor, leaving the inherited environment untouched. The
+// Kubernetes unsupported-reuse refusal is covered separately.
+// @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5
+func TestLaunchPreparedSession_DetachesInheritedPolicyEnvironmentOnExecutorMismatch(t *testing.T) {
 	repo := newMockRepository()
 	repo.tasks["task-parent"] = &models.Task{ID: "task-parent"}
 	parent := &models.TaskEnvironment{
@@ -109,6 +115,11 @@ func TestLaunchPreparedSession_RejectsInheritedEnvironmentExecutorMismatch(t *te
 		WorkspacePath: "/parent/workspace",
 	}
 	repo.taskEnvironments[parent.ID] = parent
+	repo.executors[models.ExecutorIDLocalDocker] = &models.Executor{
+		ID:     models.ExecutorIDLocalDocker,
+		Type:   models.ExecutorTypeLocalDocker,
+		Status: models.ExecutorStatusActive,
+	}
 	session := &models.TaskSession{
 		ID:                "session-child",
 		TaskID:            "task-child",
@@ -120,14 +131,52 @@ func TestLaunchPreparedSession_RejectsInheritedEnvironmentExecutorMismatch(t *te
 		UpdatedAt:         time.Now(),
 	}
 	repo.sessions[session.ID] = session
-
-	launched := false
-	exec := newTestExecutor(t, &mockAgentManager{
-		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
-			launched = true
-			return nil, nil
+	runningUpdatedAt := time.Date(2026, 11, 8, 18, 0, 0, 0, time.UTC)
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		ID:               "runtime-child",
+		SessionID:        session.ID,
+		TaskID:           session.TaskID,
+		AgentExecutionID: "execution-parent-runtime",
+		Status:           models.ExecutorRunningStatusPrepared,
+		UpdatedAt:        runningUpdatedAt,
+		Metadata: map[string]interface{}{
+			lifecycle.MetadataKeyTaskEnvironmentID: parent.ID,
 		},
-	}, repo)
+	}
+
+	var launchedExecutorType, launchedTaskEnvironmentID string
+	var launchedWorkspaceReuseRequired bool
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			claimed, claimErr := repo.GetTaskEnvironmentByTaskID(ctx, session.TaskID)
+			if claimErr != nil {
+				t.Errorf("load child environment before physical launch: %v", claimErr)
+			} else if claimed == nil || claimed.Status != models.TaskEnvironmentStatusCreating || claimed.MaterializationSessionID != session.ID {
+				t.Errorf("child environment before physical launch = %+v, want a creating claim owned by %q", claimed, session.ID)
+			}
+			bound, bindErr := repo.GetTaskSession(ctx, session.ID)
+			if bindErr != nil {
+				t.Errorf("load child session before physical launch: %v", bindErr)
+			} else if bound == nil || bound.TaskEnvironmentID == "" || (claimed != nil && bound.TaskEnvironmentID != claimed.ID) || bound.WorkspacePath != "" {
+				t.Errorf("child session before physical launch = %+v, want its child environment and no inherited workspace path", bound)
+			}
+			launchedExecutorType = req.ExecutorType
+			launchedTaskEnvironmentID = req.TaskEnvironmentID
+			launchedWorkspaceReuseRequired = req.WorkspaceReuseRequired
+			return &LaunchAgentResponse{AgentExecutionID: "exec-child", Status: v1.AgentStatusStarting}, nil
+		},
+	}
+	agentManager.getExecutionIDForSessionFunc = func(context.Context, string) (string, error) {
+		return "", ErrExecutionNotFound
+	}
+	agentManager.cleanupStaleExecutionIfCurrentFunc = func(_ context.Context, sessionID, executionID string, updatedAt time.Time) error {
+		if sessionID != session.ID || executionID != "execution-parent-runtime" || !updatedAt.Equal(runningUpdatedAt) {
+			t.Fatalf("identity-aware runtime cleanup got session=%q execution=%q updated_at=%s", sessionID, executionID, updatedAt)
+		}
+		delete(repo.executorsRunning, session.ID)
+		return nil
+	}
+	exec := newTestExecutor(t, agentManager, repo)
 	task := &v1.Task{
 		ID:          session.TaskID,
 		WorkspaceID: "ws-1",
@@ -138,19 +187,31 @@ func TestLaunchPreparedSession_RejectsInheritedEnvironmentExecutorMismatch(t *te
 
 	_, err := exec.LaunchPreparedSession(context.Background(), task, session.ID,
 		LaunchOptions{AgentProfileID: session.AgentProfileID, ExecutorID: models.ExecutorIDLocalDocker, Prompt: "test"})
-	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
-		t.Fatalf("LaunchPreparedSession() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession() error = %v, want nil after detaching inherited policy environment", err)
 	}
-	if launched {
-		t.Fatal("LaunchAgent was called for an inherited environment on a different executor")
+	if launchedExecutorType != string(models.ExecutorTypeLocalDocker) {
+		t.Fatalf("launched executor type = %q, want %q", launchedExecutorType, models.ExecutorTypeLocalDocker)
 	}
-	if len(repo.createTaskEnvironmentCalls) != 0 {
-		t.Fatalf("created %d task environments, want none", len(repo.createTaskEnvironmentCalls))
+	if launchedTaskEnvironmentID == "" || launchedTaskEnvironmentID == parent.ID {
+		t.Fatalf("launched task environment ID = %q, want a fresh child environment", launchedTaskEnvironmentID)
+	}
+	if launchedWorkspaceReuseRequired {
+		t.Fatal("detached child launch must not require reuse of the inherited environment")
+	}
+	if len(repo.createTaskEnvironmentCalls) != 1 {
+		t.Fatalf("created %d task environments, want 1 fresh environment for the detached child", len(repo.createTaskEnvironmentCalls))
+	}
+	if created := repo.createTaskEnvironmentCalls[0]; created.TaskID != session.TaskID || created.ExecutorType != string(models.ExecutorTypeLocalDocker) {
+		t.Fatalf("created environment = %+v, want a fresh local_docker environment owned by the child", created)
 	}
 	if got := repo.taskEnvironments[parent.ID]; got.TaskID != parent.TaskID || got.ExecutorType != parent.ExecutorType || got.WorkspacePath != parent.WorkspacePath {
-		t.Fatalf("parent environment changed after rejected launch: %+v", got)
+		t.Fatalf("parent environment changed after detached launch: %+v", got)
 	}
-	if got := repo.sessions[session.ID]; got.TaskEnvironmentID != parent.ID || got.WorkspacePath != parent.WorkspacePath {
-		t.Fatalf("child session changed after rejected launch: %+v", got)
+	if agentManager.cleanupStaleExecutionCallCount != 1 {
+		t.Fatalf("retired stale runtime %d times, want exactly once", agentManager.cleanupStaleExecutionCallCount)
+	}
+	if _, ok := repo.executorsRunning[session.ID]; ok {
+		t.Fatal("old inherited runtime row survived the executor transition")
 	}
 }

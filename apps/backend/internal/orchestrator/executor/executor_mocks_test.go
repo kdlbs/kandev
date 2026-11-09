@@ -39,6 +39,7 @@ type mockAgentManager struct {
 	isAgentCommandConfiguredFunc       func(agentExecutionID string) bool
 	isAgentRunningForSessionFunc       func(ctx context.Context, sessionID string) bool
 	cleanupStaleExecutionFunc          func(ctx context.Context, sessionID string) error
+	cleanupStaleExecutionIfCurrentFunc func(ctx context.Context, sessionID, executionID string, updatedAt time.Time) error
 	promptAgentFunc                    func(ctx context.Context, agentExecutionID, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error)
 	isPassthroughSessionFunc           func(ctx context.Context, sessionID string) bool
 	writePassthroughStdinFunc          func(ctx context.Context, sessionID, data string) error
@@ -254,6 +255,20 @@ func (m *mockAgentManager) CleanupStaleExecutionBySessionID(ctx context.Context,
 	}
 	return nil
 }
+func (m *mockAgentManager) CleanupStaleExecutionBySessionIDIfCurrent(
+	ctx context.Context,
+	sessionID, executionID string,
+	updatedAt time.Time,
+) error {
+	m.cleanupStaleExecutionCallCount++
+	if m.cleanupStaleExecutionIfCurrentFunc != nil {
+		return m.cleanupStaleExecutionIfCurrentFunc(ctx, sessionID, executionID, updatedAt)
+	}
+	if m.cleanupStaleExecutionFunc != nil {
+		return m.cleanupStaleExecutionFunc(ctx, sessionID)
+	}
+	return nil
+}
 func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
 	return nil
 }
@@ -261,7 +276,7 @@ func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, session
 	if m.getExecutionIDForSessionFunc != nil {
 		return m.getExecutionIDForSessionFunc(ctx, sessionID)
 	}
-	return "", fmt.Errorf("no execution found for session %s", sessionID)
+	return "", lifecycle.ErrNoExecutionForSession
 }
 func (m *mockAgentManager) ListExecutionsForTask(taskID string) []lifecycle.ExecutionReference {
 	if m.listExecutionsForTaskFunc != nil {
@@ -469,11 +484,31 @@ type setSessionMetadataKeyCall struct {
 
 func newMockRepository() *mockRepository {
 	return &mockRepository{
-		sessions:                       make(map[string]*models.TaskSession),
-		tasks:                          make(map[string]*models.Task),
-		taskRepositories:               make(map[string]*models.TaskRepository),
-		repositories:                   make(map[string]*models.Repository),
-		executors:                      make(map[string]*models.Executor),
+		sessions:         make(map[string]*models.TaskSession),
+		tasks:            make(map[string]*models.Task),
+		taskRepositories: make(map[string]*models.TaskRepository),
+		repositories:     make(map[string]*models.Repository),
+		executors: map[string]*models.Executor{
+			"executor-123":            {ID: "executor-123", Type: models.ExecutorTypeLocal},
+			"executor":                {ID: "executor", Type: models.ExecutorTypeLocal},
+			"exec-local":              {ID: "exec-local", Type: models.ExecutorTypeLocal},
+			"exec-1":                  {ID: "exec-1", Type: models.ExecutorTypeLocal},
+			"exec-special":            {ID: "exec-special", Type: models.ExecutorTypeLocal},
+			"executor-local":          {ID: "executor-local", Type: models.ExecutorTypeLocal},
+			"exec-worktree":           {ID: "exec-worktree", Type: models.ExecutorTypeWorktree},
+			"exec-local-docker":       {ID: "exec-local-docker", Type: models.ExecutorTypeLocalDocker},
+			"executor-1":              {ID: "executor-1", Type: models.ExecutorTypeLocal},
+			"executor-runner":         {ID: "executor-runner", Type: models.ExecutorTypeLocal},
+			"local-executor":          {ID: "local-executor", Type: models.ExecutorTypeLocal},
+			"executor-worktree":       {ID: "executor-worktree", Type: models.ExecutorTypeWorktree},
+			"executor-home":           {ID: "executor-home", Type: models.ExecutorTypeLocal},
+			"projection-executor":     {ID: "projection-executor", Type: models.ExecutorTypeLocal},
+			"workspace-same-executor": {ID: "workspace-same-executor", Type: models.ExecutorTypeLocal},
+			"stale-executor":          {ID: "stale-executor", Type: models.ExecutorTypeLocal},
+			"repointed-executor":      {ID: "repointed-executor", Type: models.ExecutorTypeLocal},
+			"executor-transition-ssh": {ID: "executor-transition-ssh", Type: models.ExecutorTypeSSH},
+			"executor-k8s":            {ID: "executor-k8s", Type: models.ExecutorTypeKubernetes},
+		},
 		executorProfiles:               make(map[string]*models.ExecutorProfile),
 		executorsRunning:               make(map[string]*models.ExecutorRunning),
 		taskEnvironments:               make(map[string]*models.TaskEnvironment),
@@ -531,6 +566,106 @@ func (m *mockRepository) CreateTaskSessionWithSharedGroupWorkspaceBinding(ctx co
 	m.taskEnvironments[environment.ID] = environment
 	m.mu.Unlock()
 	return m.CreateTaskSession(ctx, session)
+}
+
+func (m *mockRepository) ClaimInheritedTaskEnvironmentTransition(
+	_ context.Context,
+	taskID, sessionID, inheritedEnvironmentID, executorType, executorID, executorProfileID string,
+) (*models.TaskEnvironment, bool, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var canonical *models.TaskEnvironment
+	for _, environment := range m.taskEnvironments {
+		if environment != nil && environment.TaskID == taskID {
+			canonical = environment
+			break
+		}
+	}
+	session := m.sessions[sessionID]
+	if session == nil || session.TaskID != taskID {
+		return nil, false, false, fmt.Errorf("transition session not found")
+	}
+	if canonical == nil {
+		return m.claimMockInheritedEnvironmentTransition(
+			taskID, sessionID, inheritedEnvironmentID, executorType, executorID, executorProfileID, session,
+		)
+	}
+	return m.attachMockCanonicalTransitionEnvironment(sessionID, executorType, executorID, executorProfileID, canonical, session)
+}
+
+func (m *mockRepository) claimMockInheritedEnvironmentTransition(
+	taskID, sessionID, inheritedEnvironmentID, executorType, executorID, executorProfileID string,
+	session *models.TaskSession,
+) (*models.TaskEnvironment, bool, bool, error) {
+	inherited := m.taskEnvironments[inheritedEnvironmentID]
+	if inherited == nil || inherited.TaskID == taskID {
+		return nil, false, false, nil
+	}
+	inheritedExecutorType, known := inherited.EffectiveExecutorType()
+	if !known {
+		return nil, false, false, models.ErrWorkspaceReuseUnsafe
+	}
+	if string(inheritedExecutorType) == executorType || executorType == string(models.ExecutorTypeKubernetes) {
+		return nil, false, false, nil
+	}
+	if inheritedExecutorType == models.ExecutorTypeKubernetes {
+		return nil, false, false, models.ErrWorkspaceReuseUnsafe
+	}
+	canonical := &models.TaskEnvironment{
+		ID: "env-" + taskID, TaskID: taskID, ExecutorType: executorType,
+		ExecutorID: executorID, ExecutorProfileID: executorProfileID,
+		Status: models.TaskEnvironmentStatusCreating, MaterializationSessionID: sessionID,
+	}
+	m.taskEnvironments[canonical.ID] = canonical
+	m.createTaskEnvironmentCalls = append(m.createTaskEnvironmentCalls, canonical)
+	changed := session.TaskEnvironmentID != canonical.ID
+	session.TaskEnvironmentID = canonical.ID
+	session.WorkspacePath = ""
+	return canonical, true, changed, nil
+}
+
+func (m *mockRepository) attachMockCanonicalTransitionEnvironment(
+	sessionID, executorType, executorID, executorProfileID string,
+	canonical *models.TaskEnvironment,
+	session *models.TaskSession,
+) (*models.TaskEnvironment, bool, bool, error) {
+	canonicalExecutorType, known := canonical.EffectiveExecutorType()
+	if !known {
+		return nil, false, false, models.ErrWorkspaceReuseUnsafe
+	}
+	if string(canonicalExecutorType) != executorType {
+		session.TaskEnvironmentID = canonical.ID
+		session.WorkspacePath = canonical.WorkspacePath
+		return nil, false, false, fmt.Errorf("%w: canonical task environment uses executor %q; selected executor is %q",
+			models.ErrWorkspaceExecutorMismatch, canonicalExecutorType, executorType)
+	}
+	if err := m.recoverMockCanonicalTransitionEnvironment(sessionID, executorID, executorProfileID, canonical); err != nil {
+		return nil, false, false, err
+	}
+	changed := session.TaskEnvironmentID != canonical.ID
+	session.TaskEnvironmentID = canonical.ID
+	session.WorkspacePath = canonical.WorkspacePath
+	return canonical, true, changed, nil
+}
+
+func (m *mockRepository) recoverMockCanonicalTransitionEnvironment(
+	sessionID, executorID, executorProfileID string,
+	canonical *models.TaskEnvironment,
+) error {
+	switch canonical.Status {
+	case models.TaskEnvironmentStatusFailed:
+		if canonical.WorkspacePath != "" || canonical.ContainerID != "" || canonical.SandboxID != "" || len(canonical.Repos) != 0 {
+			return models.ErrTaskEnvironmentResetRequired
+		}
+		canonical.Status = models.TaskEnvironmentStatusCreating
+		canonical.MaterializationSessionID = sessionID
+		canonical.ExecutorID = executorID
+		canonical.ExecutorProfileID = executorProfileID
+	case models.TaskEnvironmentStatusCreating, models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
+	default:
+		return fmt.Errorf("%w: canonical task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+	return nil
 }
 
 func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
@@ -895,23 +1030,7 @@ func (m *mockRepository) GetExecutor(ctx context.Context, id string) (*models.Ex
 	if exec, ok := m.executors[id]; ok {
 		return exec, nil
 	}
-	// Launch fixtures reference arbitrary executor IDs without seeding a row.
-	// Model the host-local executor those selections resolved to; a test that
-	// needs an unresolved selection installs getExecutorFunc.
-	return &models.Executor{ID: id, Type: mockExecutorTypeForID(id)}, nil
-}
-
-// mockExecutorTypeForID keeps the well-known built-in executor IDs aligned
-// with their real types; arbitrary fixture IDs resolve to local.
-func mockExecutorTypeForID(id string) models.ExecutorType {
-	switch id {
-	case models.ExecutorIDLocalDocker:
-		return models.ExecutorTypeLocalDocker
-	case models.ExecutorIDWorktree:
-		return models.ExecutorTypeWorktree
-	default:
-		return models.ExecutorTypeLocal
-	}
+	return nil, nil
 }
 
 func (m *mockRepository) UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error {
@@ -1463,6 +1582,7 @@ func (m *mockRepository) DeleteExecutorRunningBySessionID(ctx context.Context, s
 	if m.deleteExecutorRunningFunc != nil {
 		return m.deleteExecutorRunningFunc(ctx, sessionID)
 	}
+	delete(m.executorsRunning, sessionID)
 	return nil
 }
 func (m *mockRepository) HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error) {
