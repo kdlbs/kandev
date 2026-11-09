@@ -77,7 +77,9 @@ func TestACPProbe_DoesNotMutateResolverArgv(t *testing.T) {
 	bin := writeShellBin(t, dir, "fake-acp-ok", fakeBinaryOK)
 	shared := []string{bin, "--prefix", managednpm.NPMProjectPrefix}
 	probe := NewACPProbe(staticResolver(shared), nil)
-	_ = probe.Probe(context.Background(), ProbeInput{ProviderID: "claude-acp"})
+	if got := probe.Probe(context.Background(), ProbeInput{ProviderID: "claude-acp"}); got != nil {
+		t.Fatalf("probe failed before preserving resolver argv: %+v", got)
+	}
 	if shared[2] != managednpm.NPMProjectPrefix {
 		t.Fatalf("resolver slice mutated: %v", shared)
 	}
@@ -94,6 +96,9 @@ func TestACPProbe_PrefixPreparationFailureDoesNotSpawn(t *testing.T) {
 
 	if got == nil {
 		t.Fatal("expected a classified error when the prefix cannot be prepared")
+	}
+	if got.Phase != PhaseAuthCheck {
+		t.Fatalf("phase = %q, want %q", got.Phase, PhaseAuthCheck)
 	}
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("process was spawned despite prefix preparation failure")
