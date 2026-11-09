@@ -1758,6 +1758,7 @@ func constructOfficeServices(
 	// below. Wiring it after left a Kanban-only install with no dependency store
 	// at all: blocked_by on create failed and list_related_tasks reported nothing.
 	services.Task.SetBlockerRepository(repos.Office)
+	services.Task.SetRelationRepository(repos.Office)
 
 	// office-costs Wave B: lazy models.dev pricing lookup. The Client
 	// allocates no resources at startup — the first non-claude-acp cost

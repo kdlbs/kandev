@@ -87,6 +87,7 @@ vi.mock("@/components/task/workflow-move-proceed-button", () => ({
 vi.mock("@/components/github/pr-status-chip", () => ({ PRStatusChip: () => null }));
 vi.mock("@/components/gitlab/mr-status-chip", () => ({ MRStatusChip: () => null }));
 vi.mock("@/components/task/task-dependency-chip", () => ({ TaskDependencyChip: () => null }));
+vi.mock("@/components/task-graph/task-graph-button", () => ({ TaskGraphButton: () => null }));
 vi.mock("@/components/azure-devops/azure-devops-task-pull-request-chip", () => ({
   AzureDevOpsTaskPullRequestChip: () => null,
 }));

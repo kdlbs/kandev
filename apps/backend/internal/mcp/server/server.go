@@ -1668,6 +1668,7 @@ func (s *Server) registerCreateTaskTool() {
 				mcp.Description(blockedByParamDesc),
 				mcp.Items(map[string]any{"type": "string"}),
 			),
+			mcp.WithArray("related_task_ids", mcp.Description("Task IDs to associate with this task without blocking or ordering them."), mcp.Items(map[string]any{"type": "string"})),
 			mcp.WithBoolean("start_when_unblocked", mcp.Description(startWhenUnblockedParamDesc)),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
