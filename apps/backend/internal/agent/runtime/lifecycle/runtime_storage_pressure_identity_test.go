@@ -22,9 +22,6 @@ func TestDeliveryStorageRejectsStaleIdlePressureAfterSuccessorStarts(t *testing.
 		{name: "changed prompt generation", mutate: func(execution *AgentExecution) {
 			execution.promptGeneration++
 		}},
-		{name: "changed client", mutate: func(execution *AgentExecution) {
-			execution.replaceAgentctlClient(agentctl.NewClient("127.0.0.1", 2, newTestLogger()))
-		}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -80,5 +77,39 @@ func TestDeliveryStorageRejectsStaleIdlePressureAfterSuccessorStarts(t *testing.
 				t.Fatalf("stale idle observation changed successor pressure: before=%+v after=%+v", before, after)
 			}
 		})
+	}
+}
+
+// @covers AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002.17
+func TestDeliveryStorageRejectsPressureForReplacedClient(t *testing.T) {
+	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	manager := pressureAgeTestManager(&now)
+	manager.eventPublisher = &EventPublisher{}
+	execution := pressureAgeTestExecution()
+	execution.setDeliverySubmissionID("submission-1")
+	captured := agentctl.NewClient("127.0.0.1", 1, newTestLogger())
+	replacement := agentctl.NewClient("127.0.0.1", 2, newTestLogger())
+	t.Cleanup(captured.Close)
+	t.Cleanup(replacement.Close)
+	execution.replaceAgentctlClient(captured)
+	manager.applyRuntimeStoragePressure(context.Background(), execution, RuntimeStoragePressure{
+		WritePressure: true, ProducerPaused: true, DeliveryState: deliveryFailedHealthState,
+		SubmissionID: "submission-1", PromptGeneration: execution.promptGenerationSnapshot(),
+		SubmissionCaptured: true, Client: captured,
+	})
+	before, ok := manager.RuntimeStorageObservation("session")
+	if !ok || !before.WritePressure {
+		t.Fatalf("initial observation = %+v, ok = %v", before, ok)
+	}
+	execution.replaceAgentctlClient(replacement)
+	manager.applyRuntimeStoragePressure(context.Background(), execution, RuntimeStoragePressure{
+		WritePressure: false, DeliveryState: deliveryHealthyHealthState,
+		SubmissionID: "submission-1", PromptGeneration: execution.promptGenerationSnapshot(),
+		SubmissionCaptured: true, Client: captured,
+	})
+	after, ok := manager.RuntimeStorageObservation("session")
+	if !ok || !after.WritePressure || after.PressureReceivedAt != before.PressureReceivedAt ||
+		after.Revision != before.Revision {
+		t.Fatalf("replaced-client pressure changed observation: before=%+v after=%+v", before, after)
 	}
 }

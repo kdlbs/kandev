@@ -195,6 +195,20 @@ func (m *Manager) applyRuntimeStoragePressure(
 		return
 	}
 	pressure.FailureStorage = stampStorageEvidence(pressure.FailureStorage, execution)
+	releaseClient := runtimeStoragePressureClientLease(execution, pressure)
+	if pressure.Client != nil && releaseClient == nil {
+		return
+	}
+	clientReleased := false
+	releaseClientOnce := func() {
+		if releaseClient != nil && !clientReleased {
+			releaseClient()
+			clientReleased = true
+		}
+	}
+	if releaseClient != nil {
+		defer releaseClientOnce()
+	}
 	now := m.runtimeStorageNow()
 	state := m.runtimeStorage
 	state.mu.Lock()
@@ -228,6 +242,7 @@ func (m *Manager) applyRuntimeStoragePressure(
 		observation.pressurePublishedAt = previous.pressurePublishedAt
 		state.observations[execution.SessionID] = observation
 		state.mu.Unlock()
+		releaseClientOnce()
 		return
 	}
 	state.nextRevision++
@@ -235,6 +250,7 @@ func (m *Manager) applyRuntimeStoragePressure(
 	observation.pressurePublishedAt = now
 	state.observations[execution.SessionID] = observation
 	state.mu.Unlock()
+	releaseClientOnce()
 	m.publishRuntimeStorageObservation(ctx, observation)
 }
 
@@ -275,9 +291,10 @@ func runtimeStoragePressureObservation(
 	return observation
 }
 
-// runtimeStoragePressureOwnerCurrent revalidates the captured idle/active
+// runtimeStoragePressureOwnerCurrent revalidates the captured submission
 // scope after the monitor's precheck. It runs under the cache mutex, never
-// across status I/O or event publication.
+// across status I/O or event publication. The client lease is taken before the
+// cache mutex, matching the capacity sampler's lock order.
 func runtimeStoragePressureOwnerCurrent(execution *AgentExecution, pressure RuntimeStoragePressure) bool {
 	if execution == nil {
 		return false
@@ -288,15 +305,24 @@ func runtimeStoragePressureOwnerCurrent(execution *AgentExecution, pressure Runt
 			return false
 		}
 	}
-	if pressure.Client != nil {
-		client, release := execution.AcquireAgentCtlClient()
-		current := client == pressure.Client
-		release()
-		if !current {
-			return false
-		}
-	}
 	return true
+}
+
+// runtimeStoragePressureClientLease pins the captured client before the cache
+// mutex is taken. The capacity sampler holds the same client read lease while
+// it takes the cache mutex, so this order prevents a replacement write lock
+// from closing a sampler-to-cache cycle. The lease is released before event
+// publication.
+func runtimeStoragePressureClientLease(execution *AgentExecution, pressure RuntimeStoragePressure) func() {
+	if pressure.Client == nil {
+		return nil
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	if client != pressure.Client {
+		release()
+		return nil
+	}
+	return release
 }
 
 func runtimeStoragePressureSustained(observation RuntimeStorageObservation) bool {
