@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/remoteauth"
 )
 
@@ -52,6 +53,41 @@ func TestRemoteExecutorsResolveExplicitGitHubTokenSecret(t *testing.T) {
 				t.Fatalf("GITHUB_TOKEN = %q, want selected stored secret", got)
 			}
 		})
+	}
+}
+
+func TestClaudeAPIKeySSHProvisioning(t *testing.T) {
+	const (
+		anthropicKey = "sk-ant-ssh-synthetic"
+		secretID     = "secret-claude-api-key"
+	)
+	store := &mockSecretStore{store: map[string]string{secretID: anthropicKey}}
+	catalog := remoteauth.BuildCatalogForHost([]agents.Agent{agents.NewClaudeACP()}, "linux", "")
+	methodID := "agent:claude-acp:env:ANTHROPIC_API_KEY"
+
+	req := &ExecutorCreateRequest{
+		Metadata: map[string]interface{}{
+			"remote_auth_secrets": `{"` + methodID + `":"` + secretID + `"}`,
+		},
+		Env: map[string]string{},
+	}
+	(&SSHExecutor{secretStore: store, logger: newTestLogger()}).resolveAuthSecrets(context.Background(), req, catalog)
+
+	if got := req.Env["ANTHROPIC_API_KEY"]; got != anthropicKey {
+		t.Fatalf("ANTHROPIC_API_KEY = %q, want selected API-key secret", got)
+	}
+	if _, ok := req.Env["CLAUDE_CODE_OAUTH_TOKEN"]; ok {
+		t.Fatal("API-key provisioning must not create an OAuth token variable")
+	}
+	for _, spec := range catalog.Specs {
+		if spec.ID != "claude-acp" {
+			continue
+		}
+		for _, method := range spec.Methods {
+			if method.MethodID == methodID && method.SetupScript != "" {
+				t.Fatal("Claude API-key method must not run the OAuth setup script")
+			}
+		}
 	}
 }
 

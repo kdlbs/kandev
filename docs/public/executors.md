@@ -606,6 +606,10 @@ The profile editor exposes remote shell and agent-readiness checks. Backend/API 
 
 The remote-auth card is built from the currently enabled agents. Depending on an agent's declared methods, it can copy selected local credential files, resolve a stored secret into that agent's authentication environment variable, or run an agent-specific setup script on the remote host. GitHub can use an explicitly selected `GITHUB_TOKEN` secret as an unmanaged profile override; Kandev does not copy the host-active `gh` token.
 
+For Claude, the card offers two independent stored-secret choices: `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`. Select the route that matches the account on the remote host. You can save both choices independently; clearing one does not convert or clear the other. The API-key route sets `ANTHROPIC_API_KEY` for the child process and does not create an OAuth credential file. The OAuth route keeps the existing remote credentials-file setup.
+
+Kandev checks the selected binding when it previews or applies a guarded workflow change, using the current user's Global secret visibility. A missing, deleted, workspace-scoped, unreadable, or empty binding blocks the change before the task moves. An agent-profile `ANTHROPIC_API_KEY` binding satisfies this check without a duplicate executor binding. This check validates configuration only. It does not contact Anthropic and does not prove that the provider accepts the credential.
+
 OpenCode credential copies merge top-level provider entries with the existing remote `auth.json`. Remote-only providers remain, and the selected host entry replaces the same provider on the remote. If either file is unreadable or is not a JSON object, Kandev leaves the remote file unchanged and reports the credential-copy error.
 
 These transfers write sensitive material under the remote user's home and are best-effort. Verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.

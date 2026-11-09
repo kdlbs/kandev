@@ -60,6 +60,7 @@ func (r *workflowChangePreflightRecorder) PreflightWorkflowStepChange(
 
 type workflowChangeFixture struct {
 	svc       *Service
+	bus       *MockEventBus
 	repo      *sqliterepo.Repository
 	task      *models.Task
 	request   *models.WorkflowChangeRequest
@@ -107,7 +108,7 @@ func (r *workflowChangeCleanupRaceRepository) UpdateTaskWithWorkflowChangeAdmiss
 func newWorkflowChangeFixture(t *testing.T) workflowChangeFixture {
 	t.Helper()
 	ctx := context.Background()
-	svc, _, repo := createTestService(t)
+	svc, bus, repo := createTestService(t)
 	workspaceDefaultExecutor := "executor-workspace-default"
 	for _, executorID := range []string{workspaceDefaultExecutor, "executor-task"} {
 		if err := repo.CreateExecutor(ctx, &models.Executor{
@@ -188,7 +189,7 @@ func newWorkflowChangeFixture(t *testing.T) workflowChangeFixture {
 	}}
 	svc.agentProfileExecutorValidator = validator
 	return workflowChangeFixture{
-		svc: svc, repo: repo, task: task, validator: validator,
+		svc: svc, bus: bus, repo: repo, task: task, validator: validator,
 		request: &models.WorkflowChangeRequest{
 			ExpectedWorkflowID: task.WorkflowID,
 			ExpectedStepID:     task.WorkflowStepID,

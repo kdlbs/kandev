@@ -184,9 +184,13 @@ free-text entry, useful the day a vendor ships a model (for example a new
 Opus release) before Kandev's own build catches up. A profile's saved model
 that is missing from every list still shows up as a selectable entry with
 its exact identifier, and saving without changing it leaves it unchanged.
-Whether the running session actually accepts a typed identifier is up to
-that session; an identifier it does not recognize fails with its own error
-at the start of the next turn, the same as for a listed model.
+Kandev applies a model only when the running session advertises that exact
+identifier. A compatible profile can continue on the provider default with a
+warning when the saved identifier is absent. A profile with exact model
+identity enabled refuses before the prompt and does not substitute a similar
+name. Select the full advertised identifier when a short name is unavailable;
+for example, a session that advertises `claude-sonnet-5-5` does not prove that
+`sonnet` names the same model.
 
 The Codex catalogue can be bundled or cached by the CLI. Listing a model does
 not confirm account entitlement or availability in a profile that uses a
@@ -959,6 +963,8 @@ API clients can explicitly force deletion. This leaves broken references and blo
 Repositories can bind an environment key to a Global secret or to a Workspace secret from the same workspace under **Settings > Workspaces > _workspace_ > Repositories**. A task inherits bindings from every attached repository. Repository bindings are secret references, never values, and a repository binding to a deleted or unreadable secret blocks that task's launch. If two sources provide the same key, Kandev deduplicates an identical secret reference and rejects every other collision; repository order never chooses a winner.
 
 Literal values remain in profile configuration. A secret reference avoids copying a token there, but the selected agent and its child processes still receive the plaintext at runtime. Use narrowly scoped credentials, and keep read-only review profiles separate from profiles allowed to publish, merge, deploy, or administer external systems.
+
+For Claude on a remote executor, an `ANTHROPIC_API_KEY` entry in the agent profile is enough. You do not need to select the same secret again on the executor profile. `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` are separate routes: the API-key route does not write an OAuth credential file, and the OAuth route keeps its existing setup script. Both bindings can be saved independently in executor settings. A guarded workflow preview or apply resolves every required profile environment entry and rejects a missing, deleted, workspace-scoped, unreadable, or empty binding for the current user. This admission checks configuration only; the provider still decides at execution time whether it accepts the credential.
 
 ## Permissions and unattended work
 
