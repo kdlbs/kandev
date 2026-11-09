@@ -22,6 +22,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	p "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -60,6 +61,7 @@ type mockAgentServer struct {
 	taskSessionID        string
 	nativeSessionID      string
 	deliveryStatus       *agentctl.DeliveryStatus
+	processGeneration    uint64
 	upgrader             websocket.Upgrader
 	handler              func(msg ws.Message) *ws.Message
 	afterResponse        func(msg ws.Message)
@@ -68,6 +70,8 @@ type mockAgentServer struct {
 	failMaterialize      bool
 	materializedName     string
 	promptAttachments    [][]v1.MessageAttachment
+	builtinBinding       *p.Context
+	builtinRequests      []string
 }
 
 type mockAgentConfigureRequest struct {
@@ -126,9 +130,10 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 	mux.HandleFunc("/api/v1/start", func(w http.ResponseWriter, _ *http.Request) {
 		m.mu.Lock()
 		m.httpActionLog = append(m.httpActionLog, "start")
+		generation := m.processGeneration
 		m.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"success":true,"command":"cursor-agent acp"}`)
+		_, _ = fmt.Fprintf(w, `{"success":true,"command":"cursor-agent acp","process_generation":%d}`, generation)
 	})
 	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
 		m.mu.Lock()
@@ -172,6 +177,18 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(status)
+	})
+	mux.HandleFunc("/api/v1/mcp/builtin-binding", func(w http.ResponseWriter, r *http.Request) {
+		m.mu.Lock()
+		binding := m.builtinBinding
+		m.builtinRequests = append(m.builtinRequests, r.Method)
+		m.mu.Unlock()
+		if binding == nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(binding)
 	})
 
 	// Agent stream WebSocket endpoint

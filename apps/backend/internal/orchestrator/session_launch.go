@@ -239,7 +239,14 @@ type LaunchSessionRequest struct {
 	// InitialPromptSubmission is persisted during task-session preparation and
 	// is only set by the server for the explicit fresh-start replay path.
 	InitialPromptSubmission *models.InitialPromptSubmission `json:"-"`
-	Attachments             []v1.MessageAttachment          `json:"attachments,omitempty"`
+	// InitialPromptOverride replaces the description fallback for an eligible
+	// text-only fresh-start recovery. It is composed by the server before
+	// provider identity is cleared and is never accepted from a client.
+	InitialPromptOverride *string `json:"-"`
+	// InitialPromptRecovery carries the current workflow composition for an
+	// owned receipt replay. The raw receipt remains the transcript source.
+	initialPromptRecovery *initialRecoveryPrompt
+	Attachments           []v1.MessageAttachment `json:"attachments,omitempty"`
 	// SpawnOrigin identifies the agent session that requested this launch via
 	// spawn_session_kandev, so the new session's first turn can carry spawner
 	// attribution and reply instructions. Like DeferredStart it is kept off the
@@ -1117,8 +1124,12 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		ContinuationPrompt:               req.ContinuationPrompt,
 		DeferInitialPrompt:               req.DeferRecoveryResolution,
 		RecoveryAction:                   req.RecoveryAction,
+		InitialPromptOverride:            req.InitialPromptOverride,
 		StartAgentSynchronously: req.DeferRecoveryResolution &&
 			(req.ForceContextContinuation || req.RecoveryAction == recoveryActionResume),
+	}
+	if resumeOptions.InitialPromptOverride != nil {
+		s.installLegacyRecoveryPromptGuard(ctx, req.TaskID, &resumeOptions)
 	}
 	var execution *executor.TaskExecution
 	var err error
@@ -1130,7 +1141,8 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 			resumeCtx, req.TaskID, req.SessionID, resumeOptions,
 			func(promptCtx context.Context, attempt *resumeAttempt, _ *executor.TaskExecution) error {
 				return s.replayInitialPromptSubmission(
-					promptCtx, req.TaskID, req.SessionID, req.InitialPromptSubmission, attempt,
+					promptCtx, req.TaskID, req.SessionID, req.InitialPromptSubmission,
+					req.initialPromptRecovery, attempt,
 				)
 			},
 		)
@@ -1170,6 +1182,25 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		s.clearWorkflowParkingForSession(ctx, req.SessionID, parkingStamp)
 	}
 	return executionToLaunchResponse(req.TaskID, execution), nil
+}
+
+// installLegacyRecoveryPromptGuard binds a text-only fresh-start launch to the
+// workflow entry captured before reset. The resume dispatch fence remains held
+// until the executor reports prompt acceptance or failure.
+func (s *Service) installLegacyRecoveryPromptGuard(
+	ctx context.Context,
+	taskID string,
+	options *executor.ResumeOptions,
+) {
+	binding := ceilingEntryBindingFromContext(ctx)
+	if binding == nil {
+		return
+	}
+	options.BeforeInitialPromptDispatch = func(dispatchCtx context.Context) error {
+		guardCtx := withCeilingEntryBinding(dispatchCtx, binding)
+		guardCtx = withCeilingEntryKind(guardCtx, models.CeilingLaunchResume)
+		return s.validateClaimedCeilingBinding(guardCtx, taskID, binding)
+	}
 }
 
 func (s *Service) sessionOpenRecoveryWaitingResponse(
@@ -1548,10 +1579,28 @@ func (s *Service) RecoverSessionWithOptions(
 		launchCtx = worktree.WithRecoveryAdmission(launchCtx, recoveryAdmission)
 	}
 	var initialSubmission *models.InitialPromptSubmission
+	var initialRecoveryPlan *initialRecoveryPromptPlan
 	if action == recoveryActionFreshStart {
 		initialSubmission, err = s.initialSubmissionForFreshStart(launchCtx, taskID, session)
 		if err != nil {
 			return nil, err
+		}
+		initialRecoveryPlan, err = s.prepareInitialRecoveryPrompt(launchCtx, taskID, session, initialSubmission)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var initialPromptRecovery *initialRecoveryPrompt
+	var initialPromptOverride *string
+	if initialRecoveryPlan != nil {
+		initialPromptRecovery = initialRecoveryPlan.receipt
+		initialPromptOverride = initialRecoveryPlan.legacyOverride
+		if initialRecoveryPlan.binding != nil {
+			launchCtx = withCeilingEntryBinding(launchCtx, initialRecoveryPlan.binding)
+			launchCtx = withCeilingEntryKind(launchCtx, models.CeilingLaunchResume)
+			if err := s.validateClaimedCeilingBinding(launchCtx, taskID, initialRecoveryPlan.binding); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -1578,6 +1627,8 @@ func (s *Service) RecoverSessionWithOptions(
 		RecoveryAction:                   action,
 		DeferRecoveryResolution:          checkpoint != nil || action == recoveryActionResume,
 		InitialPromptSubmission:          initialSubmission,
+		InitialPromptOverride:            initialPromptOverride,
+		initialPromptRecovery:            initialPromptRecovery,
 	})
 	if err == nil && action == recoveryActionResume {
 		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)

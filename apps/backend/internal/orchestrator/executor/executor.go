@@ -629,26 +629,27 @@ type LaunchAgentRequest struct {
 	CopyFiles string
 
 	// Worktree configuration for concurrent agent execution
-	UseWorktree             bool   // Whether to use a Git worktree for isolation
-	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
-	RepositoryID            string // Repository ID for worktree tracking
-	TaskRepositoryID        string // Exact task_repositories row for worktree recovery
-	RepositoryPath          string // Path to the main repository (for worktree creation)
-	BaseBranch              string // Base branch for the worktree (e.g., "main")
-	IntegrationRef          string // Verified terminal integration target for managed branch compaction
-	DefaultBranch           string // Repository's default_branch, used as a fallback when BaseBranch is missing
-	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
-	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution      *models.RemoteContribution
-	CheckoutOptions         *models.RepositoryCheckoutOptions
-	ContributionDestination *models.ContributionDestination
-	ComparisonTarget        *models.ComparisonTarget
-	QualifiedPRBase         *models.PRBase
-	WorktreeBranchPrefix    string // Branch prefix for worktree branches
-	WorktreeBranchTemplate  string // Branch name template for worktree branches
-	WorktreeBranchTicket    string // External ticket value for branch templates
-	PullBeforeWorktree      bool   // Whether to pull from remote before creating the worktree
-	RemoteSyncHandled       bool   // Provider-authenticated origin refresh already completed
+	UseWorktree              bool   // Whether to use a Git worktree for isolation
+	WorktreeID               string // Existing worktree ID to reuse (skip creation if set)
+	RepositoryID             string // Repository ID for worktree tracking
+	TaskRepositoryID         string // Exact task_repositories row for worktree recovery
+	RepositoryPath           string // Path to the main repository (for worktree creation)
+	BaseBranch               string // Base branch for the worktree (e.g., "main")
+	BaseBranchFallbackPolicy models.BaseBranchFallbackPolicy
+	IntegrationRef           string // Verified terminal integration target for managed branch compaction
+	DefaultBranch            string // Repository's default_branch, used as a fallback when BaseBranch is missing
+	CheckoutBranch           string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber                 int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution       *models.RemoteContribution
+	CheckoutOptions          *models.RepositoryCheckoutOptions
+	ContributionDestination  *models.ContributionDestination
+	ComparisonTarget         *models.ComparisonTarget
+	QualifiedPRBase          *models.PRBase
+	WorktreeBranchPrefix     string // Branch prefix for worktree branches
+	WorktreeBranchTemplate   string // Branch name template for worktree branches
+	WorktreeBranchTicket     string // External ticket value for branch templates
+	PullBeforeWorktree       bool   // Whether to pull from remote before creating the worktree
+	RemoteSyncHandled        bool   // Provider-authenticated origin refresh already completed
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
 	RefreshRepository func(context.Context) error
@@ -691,22 +692,23 @@ type WorkspaceFolderSpec struct {
 // the orchestrator package does not need to import lifecycle types into its
 // public API.
 type RepoSpec struct {
-	TaskRepositoryID        string
-	RepositoryID            string
-	RepositoryPath          string
-	RepositoryURL           string
-	RepoName                string
-	BaseBranch              string
-	IntegrationRef          string
-	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch          string
-	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution      *models.RemoteContribution
-	CheckoutOptions         *models.RepositoryCheckoutOptions
-	ContributionDestination *models.ContributionDestination
-	ComparisonTarget        *models.ComparisonTarget
-	QualifiedPRBase         *models.PRBase
-	WorktreeID              string
+	TaskRepositoryID         string
+	RepositoryID             string
+	RepositoryPath           string
+	RepositoryURL            string
+	RepoName                 string
+	BaseBranch               string
+	BaseBranchFallbackPolicy models.BaseBranchFallbackPolicy
+	IntegrationRef           string
+	DefaultBranch            string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch           string
+	PRNumber                 int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution       *models.RemoteContribution
+	CheckoutOptions          *models.RepositoryCheckoutOptions
+	ContributionDestination  *models.ContributionDestination
+	ComparisonTarget         *models.ComparisonTarget
+	QualifiedPRBase          *models.PRBase
+	WorktreeID               string
 	// AllowBranchReplacement permits explicit branch replacement for this repo.
 	AllowBranchReplacement bool
 	WorktreeBranchPrefix   string
@@ -1038,6 +1040,13 @@ type CancelledResumeExecutionCleanupFunc func(
 // stop still runs, while orphan cleanup uses the record to avoid duplicating it.
 type ExecutionStopOwnerRegistrationFunc func(sessionID, agentExecutionID string, force bool)
 
+// ExecutionReplacementStopOwnerRegistrationFunc requires an exact-execution
+// teardown claim before a profile replacement stops the old execution.
+type ExecutionReplacementStopOwnerRegistrationFunc func(
+	ctx context.Context,
+	sessionID, agentExecutionID string,
+) bool
+
 // TaskReviewStateReconcileFunc is called when runtime work stopped and the
 // parent task should move to REVIEW only if no session is still STARTING/RUNNING.
 type TaskReviewStateReconcileFunc func(ctx context.Context, taskID, completedSessionID string)
@@ -1211,6 +1220,8 @@ type Executor struct {
 	// Callback for registering explicit exact-execution teardown ownership before
 	// a legacy stop persists CANCELLED. The requested stop always runs.
 	onExecutionStopOwnerRegistration ExecutionStopOwnerRegistrationFunc
+	// Profile replacements abort when the exact stop cannot be coordinated with cancellation.
+	onExecutionReplacementStopOwnerRegistration ExecutionReplacementStopOwnerRegistrationFunc
 
 	// Callback for REVIEW reconciliation after runtime start failures. Set by the
 	// orchestrator so failed-start writes share the same serialized guard as
@@ -1621,6 +1632,13 @@ func (e *Executor) SetOnCancelledResumeExecutionCleanup(fn CancelledResumeExecut
 // SetOnExecutionStopOwnerRegistration sets the explicit-stop ownership registrar.
 func (e *Executor) SetOnExecutionStopOwnerRegistration(fn ExecutionStopOwnerRegistrationFunc) {
 	e.onExecutionStopOwnerRegistration = fn
+}
+
+// SetOnExecutionReplacementStopOwnerRegistration sets the required replacement-stop claim.
+func (e *Executor) SetOnExecutionReplacementStopOwnerRegistration(
+	fn ExecutionReplacementStopOwnerRegistrationFunc,
+) {
+	e.onExecutionReplacementStopOwnerRegistration = fn
 }
 
 // SetOnTaskReviewStateReconcile sets the guarded task REVIEW reconciliation

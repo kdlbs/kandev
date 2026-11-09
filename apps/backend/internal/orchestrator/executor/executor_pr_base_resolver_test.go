@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 type recordingPRBaseResolver struct {
@@ -282,5 +283,42 @@ func TestResolveTaskRepoInfo_ReconcilesRetargetedRemoteContributionBase(t *testi
 	}
 	if info.RemoteContribution == nil || info.RemoteContribution.BaseBranch != "main" {
 		t.Fatalf("remote contribution base = %#v, want main", info.RemoteContribution)
+	}
+}
+
+// TestResolveTaskRepoInfo_DeferredPRBaseLookupFailureLeavesBaseUnresolved
+// pins strict PR-linked intent: when a provider lookup cannot supply the
+// deferred target, resolution must not adopt the repository default.
+func TestResolveTaskRepoInfo_DeferredPRBaseLookupFailureLeavesBaseUnresolved(t *testing.T) {
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{
+		ID: "repo-1", WorkspaceID: "workspace-1", SourceType: sourceTypeLocal,
+		LocalPath: t.TempDir(), Provider: "github", ProviderOwner: "acme",
+		ProviderName: "widgets", DefaultBranch: "main",
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	exec.SetPRBaseResolver(&recordingPRBaseResolver{err: errors.New("GitHub unavailable")})
+
+	metadata := map[string]interface{}{models.TaskRepositoryPRNumberMetadataKey: 42}
+	info, err := exec.resolveTaskRepoInfo(context.Background(), &models.TaskRepository{
+		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1",
+		CheckoutBranch: "feature/head", Metadata: metadata,
+	})
+	if err != nil {
+		t.Fatalf("resolveTaskRepoInfo() error: %v", err)
+	}
+	if info.BaseBranch != "" {
+		t.Fatalf("BaseBranch = %q, want unresolved deferred base", info.BaseBranch)
+	}
+	if info.BaseBranchFallbackPolicy.PermitsRepositoryDefaultSubstitution() {
+		t.Fatalf("policy = %q, want strict", info.BaseBranchFallbackPolicy)
+	}
+	request := &worktree.CreateRequest{
+		TaskID: "task-1", RepositoryPath: "/tmp/repo",
+		BaseBranch: info.BaseBranch, FallbackBaseBranch: "main",
+		BaseBranchFallbackPolicy: info.BaseBranchFallbackPolicy,
+	}
+	if !errors.Is(request.Validate(), worktree.ErrInvalidBaseBranch) {
+		t.Fatalf("Validate() = %v, want ErrInvalidBaseBranch", request.Validate())
 	}
 }

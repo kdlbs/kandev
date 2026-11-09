@@ -38,6 +38,12 @@ func RegisterAllRoutes(
 	crossWorkspace ...officeruntime.CrossWorkspaceGateway,
 ) {
 	agents.RegisterRoutes(router, svcs.Agents, log)
+	// A typed-nil *HandoffService must not reach the TaskReadRelation
+	// interface: the runtime's nil check would miss it and dereference it.
+	var taskReads officeruntime.TaskReadRelation
+	if handoff != nil {
+		taskReads = handoff
+	}
 	runtimeHandler := officeruntime.NewHandler(
 		svcs.Agents,
 		officeruntime.NewActions(officeruntime.ActionDependencies{
@@ -51,6 +57,7 @@ func RegisterAllRoutes(
 			AgentModifier: svcs.Agents,
 			Skills:        svcs.Skills,
 			Handoff:       handoffDeps,
+			TaskReads:     taskReads,
 		}),
 		svcs.Skills,
 		svcs.Workspaces,
