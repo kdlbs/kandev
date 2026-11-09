@@ -214,3 +214,10 @@ Desktop and phone PNG evidence is retained under the ignored `.playwright-cli/ka
 
 Temporary tracing was removed before final verification. Managed E2E backends and browsers were stopped by their fixtures.
 Native desktop webviews and browsers outside Chromium remain unverified. There are no remaining implementation blockers.
+
+## PR review remediation
+
+The auto-scroll exclusion now uses `data-kanban-bounded-drag-scroll`, independent of test IDs.
+A new regression renames the test ID while retaining the marker. The vertical-drag browser case confirms that the column scrolls while its lane has no vertical overflow and remains at scrollTop zero.
+Post-review local verification passed: 47 focused tests, all seven affected desktop browser cases on a fresh production build, typecheck, scoped lint, catalog validation, specification lint, and diff whitespace.
+Historical counts above describe the original implementation. Remote CI and review completion remain pending for the remediation head. The marker does not change rendered geometry or the captured composition.
