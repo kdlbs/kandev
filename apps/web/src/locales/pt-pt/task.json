@@ -3175,7 +3175,7 @@
   "questionReviewZoomOut": "Reduzir",
   "questionReviewZoomStatus": "Ampliação {{level}}",
   "questionReviewStage": "Área de imagem",
-  "questionReviewStageHelp": "Arraste para deslocar. Mantenha Ctrl ou Command premido e use a roda do rato para fazer zoom, ou junte os dedos num ecrã tátil. Teclas: mais e menos fazem zoom, 0 ajusta, 1 mostra o tamanho real, as setas deslocam e Shift com uma seta move um píxel. Mantenha Espaço premido, ou prima e mantenha a imagem, para ver A. Em Alternar e Lado a lado, [ e ] percorrem as candidatas para B. Ao marcar áreas, N adiciona uma região; as setas movem a região selecionada, Alt com uma seta redimensiona-a, Enter edita o comentário e Delete remove-a.",
+  "questionReviewStageHelp": "Arraste para deslocar. Mantenha Ctrl ou Command premido e use a roda do rato para fazer zoom, ou junte os dedos num ecrã tátil. Teclas: mais e menos fazem zoom, 0 ajusta, 1 mostra o tamanho real, um duplo clique alterna entre Ajustar e 100%, as setas deslocam e Shift com uma seta move um píxel. Mantenha Espaço premido, ou prima e mantenha a imagem, para ver A. Em Alternar e Lado a lado, [ e ] percorrem as candidatas para B. Ao marcar áreas, N adiciona uma região; as setas movem a região selecionada, Alt com uma seta redimensiona-a, Enter edita o comentário e Delete remove-a.",
   "questionReviewImageSize": "{{width}} × {{height}} píxeis",
   "questionReviewResize": "Redimensionar as áreas da imagem e da pergunta",
   "questionReviewCompareModes": "Modo de comparação",
@@ -3236,5 +3236,10 @@
   "questionImagePrevious": "Imagem anterior",
   "questionImageNext": "Imagem seguinte",
   "questionImageCounter": "{{index}} de {{total}}",
-  "questionImageCounterNamed": "{{name}}, {{index}} de {{total}}"
+  "questionImageCounterNamed": "{{name}}, {{index}} de {{total}}",
+  "questionReviewFindingChanges": "A procurar alterações…",
+  "questionReviewNoChanges": "Nenhuma alteração encontrada",
+  "questionReviewShortcuts": "Atalhos de teclado e gestos",
+  "questionReviewSlotImage": "{{slot}}: {{image}}",
+  "questionReviewCandidateCount": "{{index}}/{{total}}"
 }

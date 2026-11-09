@@ -3177,7 +3177,7 @@
   "questionReviewZoomOut": "Zoom out",
   "questionReviewZoomStatus": "Zoom {{level}}",
   "questionReviewStage": "Image stage",
-  "questionReviewStageHelp": "Drag to pan. Hold Ctrl or Command and scroll to zoom, or pinch on a touch screen. Keys: plus and minus zoom, 0 fits, 1 shows actual size, arrow keys pan, Shift with an arrow key moves one pixel. Hold Space, or press and hold the image, to show A. In Toggle and Side by side, [ and ] step through the candidates for B. While marking areas, N adds a region; arrow keys move the selected region, Alt with an arrow key resizes it, Enter edits its comment, and Delete removes it.",
+  "questionReviewStageHelp": "Drag to pan. Hold Ctrl or Command and scroll to zoom, or pinch on a touch screen. Keys: plus and minus zoom, 0 fits, 1 shows actual size, double-click switches between Fit and 100%, arrow keys pan, Shift with an arrow key moves one pixel. Hold Space, or press and hold the image, to show A. In Toggle and Side by side, [ and ] step through the candidates for B. While marking areas, N adds a region; arrow keys move the selected region, Alt with an arrow key resizes it, Enter edits its comment, and Delete removes it.",
   "questionReviewImageSize": "{{width}} × {{height}} px",
   "questionReviewResize": "Resize the image and question areas",
   "questionReviewCompareModes": "Comparison mode",
@@ -3238,5 +3238,10 @@
   "questionImagePrevious": "Previous image",
   "questionImageNext": "Next image",
   "questionImageCounter": "{{index}} of {{total}}",
-  "questionImageCounterNamed": "{{name}}, {{index}} of {{total}}"
+  "questionImageCounterNamed": "{{name}}, {{index}} of {{total}}",
+  "questionReviewFindingChanges": "Finding changes…",
+  "questionReviewNoChanges": "No changes found",
+  "questionReviewShortcuts": "Keyboard and gesture shortcuts",
+  "questionReviewSlotImage": "{{slot}}: {{image}}",
+  "questionReviewCandidateCount": "{{index}}/{{total}}"
 }

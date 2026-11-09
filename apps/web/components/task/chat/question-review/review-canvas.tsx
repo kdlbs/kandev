@@ -21,6 +21,7 @@ type Props = {
   overlay?: ReactNode;
   testId?: string;
   label?: string;
+  onDoubleClick?: () => void;
 };
 
 /**
@@ -47,6 +48,11 @@ export function ReviewCanvas(props: Props) {
       data-testid={props.testId ?? "question-review-stage"}
       data-review-pane=""
       onKeyDown={onKeyDown}
+      onDoubleClick={(event) => {
+        if (!props.onDoubleClick) return;
+        event.preventDefault();
+        props.onDoubleClick();
+      }}
       onKeyUp={(event) => {
         if (props.onStageKeyUp?.(event)) event.preventDefault();
       }}

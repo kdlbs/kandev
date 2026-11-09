@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import {
   CHANGED_PIXELS,
+  chooseZoom,
   expectThumbnailsShareRow,
   REVIEW_IMAGE_SIZE,
   expectNoHorizontalOverflow,
@@ -55,7 +56,7 @@ test("reviews images in a large view that shares the answer form", async ({
     "true",
   );
 
-  await dialog.getByTestId("question-review-actual").click();
+  await chooseZoom(testPage, dialog, "question-review-actual");
   await expect(dialog.getByTestId("question-review-zoom-level")).toHaveText("100%");
   await stage.press("+");
   await expect(dialog.getByTestId("question-review-zoom-level")).toHaveText("200%");
@@ -109,7 +110,7 @@ test("compares a baseline and a candidate in all five modes", async ({
   await expect(dialog.getByRole("img", { name: reviewImages.after.alt })).toBeVisible();
   await expect(dialog.getByRole("img", { name: reviewImages.before.alt })).toBeHidden();
 
-  await dialog.getByTestId("question-review-actual").click();
+  await chooseZoom(testPage, dialog, "question-review-actual");
   await dialog.getByTestId("question-review-zoom-in").click();
   const level = dialog.getByTestId("question-review-zoom-level");
   await expect(level).toHaveText("200%");
@@ -283,6 +284,15 @@ test("steps candidates, keeps the mode, zooms to changes, and holds to compare",
   await testPage.keyboard.up(" ");
   await expect(dialog.getByRole("img", { name: reviewImages.after.alt })).toBeVisible();
 
+  const level = dialog.getByTestId("question-review-zoom-level");
+  const fitLevel = Number.parseInt((await level.textContent())!, 10);
+  await dialog.getByTestId("question-review-zoom-changes").click();
+  await expect
+    .poll(async () => Number.parseInt((await level.textContent())!, 10))
+    .toBeGreaterThan(fitLevel);
+  await expect(dialog.getByTestId("question-review-change-outline")).toBeVisible();
+  await expect(dialog.getByTestId("question-review-change-outline")).toHaveCount(0);
+
   await dialog
     .getByTestId("question-review-modes")
     .getByText("Difference", { exact: true })
@@ -291,12 +301,6 @@ test("steps candidates, keeps the mode, zooms to changes, and holds to compare",
     `${CHANGED_PIXELS} pixels changed (0.25%)`,
   );
   await expect(dialog.getByTestId("question-review-change-outline")).toBeVisible();
-  const level = dialog.getByTestId("question-review-zoom-level");
-  const fitLevel = Number.parseInt((await level.textContent())!, 10);
-  await dialog.getByTestId("question-review-zoom-changes").click();
-  await expect
-    .poll(async () => Number.parseInt((await level.textContent())!, 10))
-    .toBeGreaterThan(fitLevel);
 
   await dialog.getByTestId("question-review-segment").nth(1).click();
   await expect(dialog.getByTestId("clarification-question-card")).toHaveAttribute(
@@ -368,6 +372,10 @@ test("the thumbnail inspector steps between a question's images", async ({
   const viewer = testPage.getByRole("dialog");
   const counter = viewer.getByTestId("question-image-counter");
   await expect(counter).toHaveText("after, 2 of 3");
+  const canvasBox = (await viewer.getByTestId("question-image-canvas").boundingBox())!;
+  const nextBox = (await viewer.getByTestId("question-image-next").boundingBox())!;
+  expect(nextBox.x + nextBox.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width + 1);
+  expect(nextBox.x).toBeGreaterThan(canvasBox.x + canvasBox.width / 2);
   await viewer.getByTestId("question-image-next").click();
   await expect(counter).toHaveText("taller, 3 of 3");
   await expect(viewer.getByTestId("question-image-next")).toBeDisabled();

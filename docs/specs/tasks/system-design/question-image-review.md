@@ -396,6 +396,22 @@ History: `AnswerSummary` lists `metadata.response.annotations` as
   `RegionsSidePanel` lists regions beside the image on wider screens and
   `RegionsSheet` on phones.
 
+## Toolbar round (2026-11-09)
+
+- **Desktop toolbar:** `ReviewCompareToolbar` is one row: the mode `ToggleGroup`,
+  `ImagePairControl` (A and B popover pickers, swap, and a count-only
+  `CandidateStepper`), and `ModeControls`. `ZoomCluster` sits on the image (zoom to
+  changes, minus, a zoom level popover with Fit and fixed levels via
+  `useReviewViewport().zoomTo`, plus, and shortcut help), with Mark area at the
+  top right and `StatusChips` at the bottom left. `ReviewCanvas` `onDoubleClick`
+  switches between Fit and 100%. Phones keep their composition.
+- **Zoom to changes:** `useChangesZoom` wraps `useReviewDiff`. Difference keeps its
+  always-on diff; other modes enable it only for the requested pair key
+  (`aId:bId:tolerance`), zoom when bounds arrive, flash the outline for 1.5s, and
+  report `none` when nothing changed.
+- **Inspector:** gallery handles sit over the image edges inside the canvas
+  wrapper; the bottom row keeps the counter.
+
 ## Image labels
 
 `QuestionImage.Label` is an optional one-word label matching

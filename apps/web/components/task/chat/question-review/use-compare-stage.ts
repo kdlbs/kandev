@@ -7,7 +7,7 @@ import { useReviewLayout } from "./review-layout";
 import { useStageImages } from "./review-stage-shared";
 import type { ReviewAnnotationController } from "./use-review-annotations";
 import { useReviewCompare } from "./use-review-compare";
-import { useReviewDiff } from "./use-review-diff";
+import { useChangesZoom } from "./use-changes-zoom";
 import { useHoldToCompare } from "./use-hold-to-compare";
 import { stageAnnotating, useStageAnnotations } from "./use-stage-annotations";
 import { useReviewViewport } from "./use-review-viewport";
@@ -154,7 +154,15 @@ export function useCompareStage(props: CompareStageProps) {
     viewportHandlers: viewport.pointerHandlers,
   });
   useShowSelectedRegion(annotations, segment, compare.dispatch);
-  const diff = useReviewDiff(state.mode === "diff", a?.blob, b?.blob, state.tolerance);
+  const changes = useChangesZoom({
+    mode: state.mode,
+    pairKey: `${state.aId}:${state.bId}:${state.tolerance}`,
+    a: a?.blob,
+    b: b?.blob,
+    tolerance: state.tolerance,
+    zoomToRect: viewport.zoomToRect,
+  });
+  const diff = changes.diff;
   const effective: CompareState = hold.holding ? { ...state, mode: "toggle", showB: false } : state;
   const wipe = {
     value: pinned ? viewport.pinnedFraction : state.wipe,
@@ -181,6 +189,7 @@ export function useCompareStage(props: CompareStageProps) {
     viewport,
     regions,
     diff,
+    changes,
     wipe,
     pending: firstPending([
       [aRef, images.states[state.aId]],

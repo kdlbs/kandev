@@ -3175,7 +3175,7 @@
   "questionReviewZoomOut": "缩小",
   "questionReviewZoomStatus": "缩放 {{level}}",
   "questionReviewStage": "图像区",
-  "questionReviewStageHelp": "拖动可平移。按住 Ctrl 或 Command 并滚动可缩放，在触摸屏上可双指缩放。按键：加号和减号缩放，0 适应窗口，1 显示实际大小，方向键平移，Shift 加方向键移动一个像素。按住空格键或长按图像可显示 A。在“切换”和“并排”模式下，[ 和 ] 可切换 B 的候选图像。标记区域时，按 N 添加区域；方向键移动所选区域，Alt 加方向键调整其大小，Enter 编辑评论，Delete 删除区域。",
+  "questionReviewStageHelp": "拖动可平移。按住 Ctrl 或 Command 并滚动可缩放，在触摸屏上可双指缩放。按键：加号和减号缩放，0 适应窗口，1 显示实际大小，双击可在适应窗口和 100% 之间切换，方向键平移，Shift 加方向键移动一个像素。按住空格键或长按图像可显示 A。在“切换”和“并排”模式下，[ 和 ] 可切换 B 的候选图像。标记区域时，按 N 添加区域；方向键移动所选区域，Alt 加方向键调整其大小，Enter 编辑评论，Delete 删除区域。",
   "questionReviewImageSize": "{{width}} × {{height}} 像素",
   "questionReviewResize": "调整图像区和问题区的大小",
   "questionReviewCompareModes": "对比模式",
@@ -3236,5 +3236,10 @@
   "questionImagePrevious": "上一张图像",
   "questionImageNext": "下一张图像",
   "questionImageCounter": "第 {{index}} 张，共 {{total}} 张",
-  "questionImageCounterNamed": "{{name}}，第 {{index}} 张，共 {{total}} 张"
+  "questionImageCounterNamed": "{{name}}，第 {{index}} 张，共 {{total}} 张",
+  "questionReviewFindingChanges": "正在查找更改…",
+  "questionReviewNoChanges": "未发现更改",
+  "questionReviewShortcuts": "键盘和手势快捷方式",
+  "questionReviewSlotImage": "{{slot}}：{{image}}",
+  "questionReviewCandidateCount": "{{index}}/{{total}}"
 }

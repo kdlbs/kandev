@@ -5,7 +5,8 @@ import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { ReviewCanvas, ReviewImage } from "./review-canvas";
-import { CandidateStepper, PinnedWipeLine, ZoomToChangesButton } from "./review-compare-controls";
+import { CandidateStepper, PinnedWipeLine } from "./review-compare-controls";
+import { ChangesButton, StageOverlayControl, ZoomCluster } from "./review-desktop-controls";
 import { CompareLayers, WipeHandle, type LoadedReviewImage } from "./review-compare-layers";
 import { ReviewCompareStatus } from "./review-compare-status";
 import { ModeControls, ReviewCompareToolbar } from "./review-compare-toolbar";
@@ -19,7 +20,7 @@ import {
 } from "./review-phone-controls";
 import { RegionsButton } from "./review-region-panel";
 import { ImageState, stopStageKeys } from "./review-stage-shared";
-import { ReviewZoomControls, reviewControlSize, reviewToolbarRow } from "./review-zoom-controls";
+import { ReviewZoomControls, reviewControlSize } from "./review-zoom-controls";
 import {
   useCompareStage,
   type CompareStageModel,
@@ -46,58 +47,22 @@ export function ReviewCompareStage(props: CompareStageProps) {
   );
 }
 
-function zoomToChanges(model: CompareStageModel) {
-  const bounds = model.diff.status === "ready" ? model.diff.result.bounds : null;
-  return bounds ? () => model.viewport.zoomToRect(bounds) : null;
-}
-
 function DesktopToolbar({ model }: { model: CompareStageModel }) {
-  const toChanges = zoomToChanges(model);
   return (
-    <>
-      <ReviewCompareToolbar
-        compare={model.compare}
-        images={model.segment.images}
-        wipe={model.wipe}
-      />
-      <div className={reviewToolbarRow}>
-        <ReviewZoomControls
-          scale={model.viewport.view.scale}
-          onZoom={model.viewport.zoomStep}
-          onFit={model.viewport.fit}
-          onActual={model.viewport.actual}
-        />
-        {model.canStep && (
-          <CandidateStepper
-            images={model.segment.images}
-            bId={model.state.bId}
-            position={model.compare.position}
-            onStep={model.compare.step}
-          />
-        )}
-        {toChanges && <ZoomToChangesButton onClick={toChanges} />}
-        {model.regions.button}
-        <ReviewCompareStatus
-          state={model.effective}
-          a={model.aRef}
-          b={model.bRef}
-          sizes={model.images.sizes}
-          diff={model.diff}
-        />
-      </div>
-    </>
+    <ReviewCompareToolbar compare={model.compare} images={model.segment.images} wipe={model.wipe} />
   );
 }
 
 function PhoneTopRow({ model }: { model: CompareStageModel }) {
-  const toChanges = zoomToChanges(model);
   return (
     <div className="flex items-center gap-2">
       <ModeSheetButton
         mode={model.state.mode}
         onChange={(mode) => model.compare.dispatch({ type: "mode", mode })}
       />
-      {toChanges && <ZoomToChangesButton onClick={toChanges} />}
+      {model.a && model.b && (
+        <ChangesButton status={model.changes.status} onClick={model.changes.trigger} />
+      )}
       <div className="ml-auto flex items-center gap-2">
         {(model.marking || model.annotations.list(model.segment.questionId).length > 0) && (
           <RegionsButton controller={model.annotations} questionId={model.segment.questionId} />
@@ -230,6 +195,7 @@ function Pane({
       pointerHandlers={both ? model.pointerHandlers : combinePane(model)}
       className={cn(both && model.marking && "cursor-crosshair ring-2 ring-primary ring-inset")}
       testId={pane === "b" ? "question-review-stage-b" : undefined}
+      onDoubleClick={viewport.atFit ? viewport.actual : viewport.fit}
       overlay={<PaneOverlay model={model} pane={pane} />}
     >
       {both ? (
@@ -243,6 +209,7 @@ function Pane({
             diff={model.diff}
             onSize={model.images.setSize}
             wipeAt={model.pinned ? 0.5 : undefined}
+            outline={model.changes.outline}
           />
           {model.effective.mode === "toggle" && model.regions.overlay}
         </>
@@ -285,37 +252,60 @@ function combinePane(model: CompareStageModel) {
 }
 
 function PaneOverlay({ model, pane }: { model: CompareStageModel; pane: "a" | "b" | "both" }) {
-  const both = pane === "both";
-  const wipe = both && model.effective.mode === "wipe" && model.a && model.b;
   const primary = pane !== "b";
   return (
     <>
-      {wipe && model.pinned && (
-        <PinnedWipeLine value={model.wipe.value} onChange={model.wipe.onChange} />
-      )}
-      {wipe && !model.pinned && (
-        <WipeHandle value={model.wipe.value} onChange={model.wipe.onChange} />
-      )}
+      {pane === "both" && <WipeOverlay model={model} />}
       {primary && model.regions.hint}
       {model.pending !== null && <ImageState state={model.pending} onRetry={model.images.retry} />}
-      {primary && model.layout.phone && (
+      {primary && <ViewOverlays model={model} />}
+    </>
+  );
+}
+
+function WipeOverlay({ model }: { model: CompareStageModel }) {
+  if (model.effective.mode !== "wipe" || !model.a || !model.b) return null;
+  return model.pinned ? (
+    <PinnedWipeLine value={model.wipe.value} onChange={model.wipe.onChange} />
+  ) : (
+    <WipeHandle value={model.wipe.value} onChange={model.wipe.onChange} />
+  );
+}
+
+/** Zoom, Mark area, and status on the image: a chip on phones, a cluster on desktop. */
+function ViewOverlays({ model }: { model: CompareStageModel }) {
+  const { viewport } = model;
+  const toggleZoom = viewport.atFit ? viewport.actual : viewport.fit;
+  return (
+    <>
+      {model.layout.phone ? (
+        <ZoomChip scale={viewport.view.scale} onToggle={toggleZoom} />
+      ) : (
         <>
-          <ZoomChip
-            scale={model.viewport.view.scale}
-            onToggle={model.viewport.atFit ? model.viewport.actual : model.viewport.fit}
+          <ZoomCluster
+            scale={viewport.view.scale}
+            onZoom={viewport.zoomStep}
+            onFit={viewport.fit}
+            onScale={viewport.zoomTo}
+            changes={
+              model.a && model.b
+                ? { status: model.changes.status, onClick: model.changes.trigger }
+                : undefined
+            }
           />
-          <StatusChips>
-            <ReviewCompareStatus
-              state={model.effective}
-              a={model.aRef}
-              b={model.bRef}
-              sizes={model.images.sizes}
-              diff={model.diff}
-              chips
-            />
-          </StatusChips>
+          <StageOverlayControl>{model.regions.button}</StageOverlayControl>
         </>
       )}
+      <StatusChips>
+        <ReviewCompareStatus
+          state={model.effective}
+          a={model.aRef}
+          b={model.bRef}
+          sizes={model.images.sizes}
+          diff={model.diff}
+          chips
+        />
+      </StatusChips>
     </>
   );
 }

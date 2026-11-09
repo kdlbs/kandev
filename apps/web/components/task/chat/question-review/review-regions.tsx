@@ -109,7 +109,7 @@ export function AnnotateHint({ touch, onDone }: { touch: boolean; onDone: () => 
   const { t } = useTranslation();
   return (
     <div
-      className="pointer-events-auto absolute top-2 left-1/2 z-10 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-primary/40 bg-background/95 py-1 pr-1 pl-3 text-xs shadow-sm"
+      className="pointer-events-auto absolute top-2 left-2 z-10 flex max-w-[calc(100%-12rem)] items-center gap-2 rounded-full border border-primary/40 bg-background/95 py-1 pr-1 pl-3 text-xs shadow-sm max-md:max-w-[calc(100%-1rem)]"
       data-testid="question-review-annotate-hint"
       onPointerDown={(event) => event.stopPropagation()}
     >

@@ -113,7 +113,8 @@ not yet describe a released version.
   forced-colors preferences shall remain usable.
 
 - **AC-TASKS-QUESTION-IMAGES-003.6:** When a question has two or more loaded images,
-  the image inspector shall offer Previous and Next, the left and right arrow keys,
+  the image inspector shall offer Previous and Next handles over the image's left
+  and right edges, the left and right arrow keys,
   and a horizontal swipe at Fit to step through them in review order (question
   images, then choice images), with a counter and without wrapping. Closing shall
   return focus to the thumbnail of the image that was showing.

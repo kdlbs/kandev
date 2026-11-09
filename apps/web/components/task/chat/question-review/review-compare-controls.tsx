@@ -1,11 +1,10 @@
 "use client";
 
-import { IconChevronLeft, IconChevronRight, IconFocusCentered } from "@tabler/icons-react";
+import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { imageShortName, type ReviewImage } from "@/lib/question-review/segments";
 import { cn } from "@/lib/utils";
-import { reviewControlSize } from "./review-zoom-controls";
 
 const iconSize =
   "h-7 w-7 cursor-pointer [@media(pointer:coarse)]:h-12 [@media(pointer:coarse)]:w-12 max-md:h-12 max-md:w-12";
@@ -16,10 +15,19 @@ type StepProps = {
   position: { index: number; total: number };
   onStep: (direction: 1 | -1) => void;
   compact?: boolean;
+  /** Shows "2/3" while the full label stays available to screen readers. */
+  countOnly?: boolean;
 };
 
 /** Previous and Next step image B through the candidates while A stays fixed. */
-export function CandidateStepper({ images, bId, position, onStep, compact = false }: StepProps) {
+export function CandidateStepper({
+  images,
+  bId,
+  position,
+  onStep,
+  compact = false,
+  countOnly = false,
+}: StepProps) {
   const { t } = useTranslation();
   const bIndex = images.findIndex((image) => image.id === bId);
   const name = bIndex >= 0 ? imageShortName(images[bIndex], bIndex) : "";
@@ -37,9 +45,17 @@ export function CandidateStepper({ images, bId, position, onStep, compact = fals
       >
         <IconChevronLeft className="h-4 w-4" aria-hidden="true" />
       </Button>
-      {!compact && (
+      {countOnly && (
+        <span className="text-xs text-muted-foreground tabular-nums" aria-hidden="true">
+          {t("task:questionReviewCandidateCount", {
+            index: position.index + 1,
+            total: position.total,
+          })}
+        </span>
+      )}
+      {(!compact || countOnly) && (
         <span
-          className="min-w-0 truncate text-xs tabular-nums"
+          className={cn("min-w-0 truncate text-xs tabular-nums", countOnly && "sr-only")}
           data-testid="question-review-step-label"
         >
           {t("task:questionReviewCandidatePosition", {
@@ -62,22 +78,6 @@ export function CandidateStepper({ images, bId, position, onStep, compact = fals
         <IconChevronRight className="h-4 w-4" aria-hidden="true" />
       </Button>
     </div>
-  );
-}
-
-export function ZoomToChangesButton({ onClick }: { onClick: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      className={reviewControlSize}
-      data-testid="question-review-zoom-changes"
-      onClick={onClick}
-    >
-      <IconFocusCentered className="h-3.5 w-3.5" aria-hidden="true" />
-      {t("task:questionReviewZoomToChanges")}
-    </Button>
   );
 }
 

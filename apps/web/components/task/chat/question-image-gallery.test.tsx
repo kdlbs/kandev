@@ -42,6 +42,16 @@ function renderGallery() {
 }
 
 describe("thumbnail inspector gallery", () => {
+  it("puts the Previous and Next handles over the image edges", () => {
+    renderGallery();
+    fireEvent.click(screen.getByRole("button", { name: /After/ }));
+    const canvas = within(screen.getByRole("dialog")).getByTestId("question-image-canvas");
+    const stage = canvas.parentElement!;
+    expect(within(stage).getByTestId("question-image-previous").className).toContain("left-");
+    expect(within(stage).getByTestId(NEXT).className).toContain("right-");
+    expect(within(screen.getByRole("dialog")).getByTestId(COUNTER).textContent).toBe("2 of 3");
+  });
+
   // @covers AC-TASKS-QUESTION-IMAGES-003.6
   it("steps through the question's images with buttons and arrow keys, without wrapping", async () => {
     renderGallery();

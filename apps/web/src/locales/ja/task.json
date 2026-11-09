@@ -3175,7 +3175,7 @@
   "questionReviewZoomOut": "縮小",
   "questionReviewZoomStatus": "ズーム {{level}}",
   "questionReviewStage": "画像エリア",
-  "questionReviewStageHelp": "ドラッグで移動します。Ctrl または Command を押しながらスクロールするか、タッチ画面でピンチするとズームします。キー：プラスとマイナスでズーム、0 で全体表示、1 で実寸表示、矢印キーで移動、Shift と矢印キーで 1 ピクセル移動します。Space を押し続けるか画像を長押しすると A を表示します。切り替えと左右に並べる表示では、[ と ] で B の候補を切り替えます。範囲を指定中は、N で領域を追加し、矢印キーで選択した領域を移動、Alt と矢印キーでサイズを変更、Enter でコメントを編集、Delete で削除します。",
+  "questionReviewStageHelp": "ドラッグで移動します。Ctrl または Command を押しながらスクロールするか、タッチ画面でピンチするとズームします。キー：プラスとマイナスでズーム、0 で全体表示、1 で実寸表示、ダブルクリックで全体表示と 100% を切り替え、矢印キーで移動、Shift と矢印キーで 1 ピクセル移動します。Space を押し続けるか画像を長押しすると A を表示します。切り替えと左右に並べる表示では、[ と ] で B の候補を切り替えます。範囲を指定中は、N で領域を追加し、矢印キーで選択した領域を移動、Alt と矢印キーでサイズを変更、Enter でコメントを編集、Delete で削除します。",
   "questionReviewImageSize": "{{width}} × {{height}} ピクセル",
   "questionReviewResize": "画像エリアと質問エリアのサイズを変更",
   "questionReviewCompareModes": "比較モード",
@@ -3236,5 +3236,10 @@
   "questionImagePrevious": "前の画像",
   "questionImageNext": "次の画像",
   "questionImageCounter": "{{index}} / {{total}} 枚目",
-  "questionImageCounterNamed": "{{name}}、{{index}} / {{total}} 枚目"
+  "questionImageCounterNamed": "{{name}}、{{index}} / {{total}} 枚目",
+  "questionReviewFindingChanges": "変更箇所を探しています…",
+  "questionReviewNoChanges": "変更箇所は見つかりませんでした",
+  "questionReviewShortcuts": "キーボードとジェスチャーのショートカット",
+  "questionReviewSlotImage": "{{slot}}：{{image}}",
+  "questionReviewCandidateCount": "{{index}}/{{total}}"
 }

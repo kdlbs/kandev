@@ -121,6 +121,11 @@ function openReview() {
   return screen.getByTestId(REVIEW_DIALOG);
 }
 
+function chooseZoom(dialog: HTMLElement, testId: string) {
+  fireEvent.click(within(dialog).getByTestId(ZOOM_LEVEL));
+  fireEvent.click(screen.getByTestId(testId));
+}
+
 function respondCalls() {
   return fetchMock.mock.calls.filter(([url]) => String(url).includes("/respond"));
 }
@@ -259,7 +264,7 @@ describe("question image review keyboard and stage", () => {
     renderOverlay(imageBundle());
     const dialog = openReview();
     const level = within(dialog).getByTestId(ZOOM_LEVEL);
-    fireEvent.click(within(dialog).getByTestId("question-review-actual"));
+    chooseZoom(dialog, "question-review-actual");
     expect(level.textContent).toBe("100%");
     fireEvent.click(within(dialog).getByTestId("question-review-zoom-in"));
     expect(level.textContent).toBe("200%");
@@ -350,7 +355,7 @@ describe("question image review comparison", () => {
   it("keeps zoom when switching among Toggle, Wipe, Side by side, and Onion skin", async () => {
     const dialog = await openCompare();
     const level = within(dialog).getByTestId(ZOOM_LEVEL);
-    fireEvent.click(within(dialog).getByTestId("question-review-actual"));
+    chooseZoom(dialog, "question-review-actual");
     fireEvent.click(within(dialog).getByTestId("question-review-zoom-in"));
     expect(level.textContent).toBe("200%");
     for (const mode of ["Wipe", "Side by side", "Onion skin", "Toggle"]) {
@@ -564,8 +569,30 @@ describe("review usability round", () => {
       within(within(dialog).getByTestId("question-review-pick-a")).getByText("before"),
     ).toBeTruthy();
     expect(
+      within(within(dialog).getByTestId("question-review-pick-b")).getByText("after"),
+    ).toBeTruthy();
+    fireEvent.click(within(dialog).getByTestId("question-review-pick-b"));
+    const options = screen.getAllByTestId("question-review-pick-b-option");
+    expect(options.map((option) => option.firstChild?.textContent)).toEqual([
+      "before",
+      "after",
+      "alt",
+    ]);
+    fireEvent.click(options[2]);
+    expect(
       within(within(dialog).getByTestId("question-review-pick-b")).getByText("alt"),
     ).toBeTruthy();
+  });
+
+  // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-002.5
+  it("keeps zoom on the image and offers Zoom to changes outside Difference", async () => {
+    const dialog = await openThree();
+    const stage = within(dialog).getByTestId(STAGE);
+    expect(within(stage).getByTestId("question-review-zoom")).toBeTruthy();
+    expect(within(stage).getByTestId("question-review-zoom-changes")).toBeTruthy();
+    expect(within(stage).getByTestId(ANNOTATE)).toBeTruthy();
+    fireEvent.doubleClick(stage);
+    expect(within(dialog).getByTestId(ZOOM_LEVEL).textContent).toBe("100%");
   });
 
   // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-005.11

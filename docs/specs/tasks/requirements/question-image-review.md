@@ -91,6 +91,10 @@ so that small questions stay quick and visual questions stay reviewable.
   focus. Zoom level and status shall appear as chips on the image. No toolbar shall
   scroll horizontally. Controls shall measure at least 44px in both dimensions, and
   the document shall not overflow horizontally.
+- **AC-TASKS-QUESTION-IMAGE-REVIEW-002.5:** On wider screens, the stage toolbar
+  shall be one row holding only the comparison controls: the mode, an image-pair
+  control (A, B, swap, and candidate stepping), and the current mode's action.
+  Zoom, Mark area, and status shall sit on the image.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-002.4:** While the review view is open, the
   form shall keep the existing option and submit shortcuts when focus is in the
   form. Stage shortcuts shall apply only when focus is in the stage, and shall not
@@ -131,6 +135,8 @@ so that small questions stay quick and visual questions stay reviewable.
   (100%), and zoom steps from 25% to 800%, with the current zoom level visible.
   Fit shall be the default and shall always contain the whole image, even when
   that needs less than 25%. Zooming out shall stop at the smaller of Fit and 25%.
+  A zoom level menu shall offer Fit, 100%, 200%, 400%, and 800%, and a double-click
+  on the image shall switch between Fit and 100%.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-004.2:** The operator can pan and zoom with mouse
   drag and modified wheel input, with touch drag and pinch, and with documented
   keyboard keys while the stage has focus. Zooming with a pointer shall keep the
@@ -187,7 +193,10 @@ so that small questions stay quick and visual questions stay reviewable.
   holding Space while it has focus, shall show A until released. A press that
   moves shall pan instead.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-005.13:** Difference shall outline the area that
-  contains every changed pixel and offer Zoom to changes, which fits that area.
+  contains every changed pixel. Zoom to changes shall fit that area in every mode;
+  outside Difference it shall compute the area only when asked, keep it for the
+  image pair and tolerance, outline it briefly after zooming, and report when no
+  pixels changed.
 
 ### REQ-TASKS-QUESTION-IMAGE-REVIEW-006: Larger image galleries
 

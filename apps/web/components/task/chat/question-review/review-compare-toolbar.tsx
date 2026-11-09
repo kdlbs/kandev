@@ -1,13 +1,12 @@
 "use client";
 
-import { IconArrowsExchange } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Slider } from "@kandev/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { useTranslation } from "react-i18next";
 import { COMPARE_MODES, MAX_TOLERANCE, type CompareMode } from "@/lib/question-review/compare";
 import type { ReviewImage } from "@/lib/question-review/segments";
-import { ReviewImagePicker } from "./review-image-picker";
+import { ImagePairControl } from "./review-desktop-controls";
 import { reviewControlSize, reviewToolbarRow } from "./review-zoom-controls";
 import type { ReviewCompare } from "./use-review-compare";
 
@@ -52,30 +51,18 @@ export function ReviewCompareToolbar({ compare, images, wipe }: Props) {
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
-      <ReviewImagePicker
-        label={t("task:questionReviewPickA")}
+      <ImagePairControl
         images={images}
-        value={state.aId}
-        onChange={(id) => dispatch({ type: "pick", slot: "a", id })}
-        testId="question-review-pick-a"
+        aId={state.aId}
+        bId={state.bId}
+        onPick={(slot, id) => dispatch({ type: "pick", slot, id })}
+        onSwap={() => dispatch({ type: "swap" })}
+        stepper={
+          state.mode === "toggle" || state.mode === "side"
+            ? { position: compare.position, onStep: compare.step }
+            : undefined
+        }
       />
-      <ReviewImagePicker
-        label={t("task:questionReviewPickB")}
-        images={images}
-        value={state.bId}
-        onChange={(id) => dispatch({ type: "pick", slot: "b", id })}
-        testId="question-review-pick-b"
-      />
-      <Button
-        type="button"
-        variant="outline"
-        className={reviewControlSize}
-        data-testid="question-review-swap"
-        onClick={() => dispatch({ type: "swap" })}
-      >
-        <IconArrowsExchange className="h-3.5 w-3.5" aria-hidden="true" />
-        {t("task:questionReviewSwap")}
-      </Button>
       <ModeControls compare={compare} wipe={wipe} />
     </div>
   );

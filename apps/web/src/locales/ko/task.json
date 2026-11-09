@@ -3175,7 +3175,7 @@
   "questionReviewZoomOut": "축소",
   "questionReviewZoomStatus": "확대/축소 {{level}}",
   "questionReviewStage": "이미지 영역",
-  "questionReviewStageHelp": "드래그하여 이동합니다. Ctrl 또는 Command를 누른 채 스크롤하거나 터치 화면에서 손가락을 오므리면 확대/축소합니다. 키: 더하기와 빼기로 확대/축소, 0은 화면에 맞추기, 1은 실제 크기, 화살표 키로 이동, Shift와 화살표 키로 1픽셀 이동합니다. Space를 누르고 있거나 이미지를 길게 누르면 A가 표시됩니다. 전환과 나란히 모드에서는 [ 와 ]로 B의 후보를 바꿉니다. 영역을 표시하는 동안 N으로 영역을 추가하고, 화살표 키로 선택한 영역을 이동하며, Alt와 화살표 키로 크기를 조정하고, Enter로 의견을 편집하며, Delete로 삭제합니다.",
+  "questionReviewStageHelp": "드래그하여 이동합니다. Ctrl 또는 Command를 누른 채 스크롤하거나 터치 화면에서 손가락을 오므리면 확대/축소합니다. 키: 더하기와 빼기로 확대/축소, 0은 화면에 맞추기, 1은 실제 크기, 두 번 클릭하면 화면에 맞추기와 100% 사이를 전환, 화살표 키로 이동, Shift와 화살표 키로 1픽셀 이동합니다. Space를 누르고 있거나 이미지를 길게 누르면 A가 표시됩니다. 전환과 나란히 모드에서는 [ 와 ]로 B의 후보를 바꿉니다. 영역을 표시하는 동안 N으로 영역을 추가하고, 화살표 키로 선택한 영역을 이동하며, Alt와 화살표 키로 크기를 조정하고, Enter로 의견을 편집하며, Delete로 삭제합니다.",
   "questionReviewImageSize": "{{width}} × {{height}}픽셀",
   "questionReviewResize": "이미지 영역과 질문 영역의 크기 조정",
   "questionReviewCompareModes": "비교 모드",
@@ -3236,5 +3236,10 @@
   "questionImagePrevious": "이전 이미지",
   "questionImageNext": "다음 이미지",
   "questionImageCounter": "{{index}}/{{total}}번째",
-  "questionImageCounterNamed": "{{name}}, {{index}}/{{total}}번째"
+  "questionImageCounterNamed": "{{name}}, {{index}}/{{total}}번째",
+  "questionReviewFindingChanges": "변경 부분을 찾는 중…",
+  "questionReviewNoChanges": "변경 부분이 없습니다",
+  "questionReviewShortcuts": "키보드 및 제스처 단축키",
+  "questionReviewSlotImage": "{{slot}}: {{image}}",
+  "questionReviewCandidateCount": "{{index}}/{{total}}"
 }

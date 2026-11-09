@@ -242,3 +242,9 @@ export async function expectTouchTargets(scope: Locator) {
     expect(box.width).toBeGreaterThanOrEqual(44);
   }
 }
+
+/** Desktop: picks a zoom level from the on-image zoom level menu. */
+export async function chooseZoom(page: Page, dialog: Locator, testId: string) {
+  await dialog.getByTestId("question-review-zoom-level").click();
+  await page.getByTestId(testId).click();
+}

@@ -45,6 +45,7 @@ committed and was lost with its worktree. This package recreates it.
 | 4 | [05 Annotation interface](task-05-annotation-interface.md) | 03, 04 | Draw, edit, list, submit, and view regions in history. |
 | 5 | [06 Test feedback](task-06-test-feedback.md) | 05 | Wipe reach, Fit on phones, region comment popover, wrapping thumbnails. |
 | 6 | [07 Usability round](task-07-usability-round.md) | 06 | Ten usability changes from the second test round, including agent image labels. |
+| 7 | [08 Toolbar round](task-08-toolbar-round.md) | 07 | Inspector side handles, zoom to changes in every mode, one-row desktop toolbar. |
 
 Wave 1 work orders touch separate files and can run in either order. Work
 order 04 is backend-only and could start early, but the user asked for
@@ -79,29 +80,29 @@ While the view is open, the compact panel body is replaced by one status row:
 | Reviewing in the large view.                                            |
 ```
 
-### UI-02: Desktop review view, Side by side
+### UI-02: Desktop review view
 
-Fixed: header, toolbar. Resizable: the split between stage and form. Scrolling:
-the form panel only. Maps to AC-002.1, AC-002.2, AC-003.1, AC-004.1, AC-005.4.
+Fixed: header and one toolbar row. Resizable: the split between stage and form.
+Scrolling: the form panel only. Maps to AC-002.1, AC-002.2, AC-002.5, AC-003.1,
+AC-004.1, AC-005.11, and AC-005.13.
 
 ```text
-+--------------------------------------------------------------------------+
-| Review images  [1 Header ✓] [2 Spacing] [3 Colors] [4 Copy]      [Close] |
-| [Toggle|Wipe|Side|Onion|Diff]  Image A [1|2]  Image B [1|2]  [Swap]      |
-|                 [-] 100% [+] [Fit] [Actual size] A 1440×900  B 1440×912    |
-|------------------------------------+-------------------------------------|
-|  A: Before                         |  B: After                           |
-|                                    |                                     |
-|   (zoom and pan stay in sync)      |   (zoom and pan stay in sync)       |
-|                                    |                                     |
-|============================ drag to resize ==============================|
-| Question 2 of 4 · Spacing                                                |
-| Is the new spacing in the settings header acceptable?                    |
-| (1) Approve   (2) Revise  [Image 2]   (3) Revert                          |
-| [custom answer.........................................] [clip]          |
-| [< Prev]                                         [Next >] / [Submit]     |
-+--------------------------------------------------------------------------+
++------------------------------------------------------------------------------+
+| Review images  [1 Header ✓] [2 Spacing] [3 Colors] [4 Copy]  [Submit][Close] |
+| [Toggle|Wipe|Side|Onion|Diff]   A [before v] ⇄ B [after v] ‹ 1/2 ›   [Flip]  |
+|  +------------------------------------------------------------+ +---------+  |
+|  | [Drag to mark an area. Done]                   [✎ Mark area] | Regions |  |
+|  |                     image area                               | 1 after |  |
+|  | [Sizes differ] [3,214 changed]        [⌖] [-] [100% v] [+] [?]| [Edit]  |  |
+|  +------------------------------------------------------------+ +---------+  |
+|============================== drag to resize ================================|
+| Is the new spacing in the settings header acceptable?                        |
+| (1) Approve   (2) Revise   (3) Revert   [custom answer.........]             |
+| [< Back]                                                    [Next >]          |
++------------------------------------------------------------------------------+
 ```
+
+The regions panel appears while marking or once the question has regions.
 
 ### UI-03: Phone review view
 

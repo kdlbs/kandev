@@ -21,6 +21,8 @@ type Props = {
   onSize: (id: string, size: Size) => void;
   /** Wipe line as a fraction of the stage width; the pinned touch line is 0.5. */
   wipeAt?: number;
+  /** Changed-area outline: always in Difference, briefly after Zoom to changes. */
+  outline?: { x: number; y: number; width: number; height: number } | null;
 };
 
 /** Image-pixel x of the wipe divider, so the clip follows zoom and pan. */
@@ -72,13 +74,9 @@ export function CompareLayers(props: Props) {
         />
       )}
       {state.mode === "diff" && props.diff.status === "ready" && (
-        <>
-          <DiffMask result={props.diff.result} scale={view.scale} />
-          {props.diff.result.bounds && (
-            <ChangeOutline bounds={props.diff.result.bounds} scale={view.scale} />
-          )}
-        </>
+        <DiffMask result={props.diff.result} scale={view.scale} />
       )}
+      {props.outline && <ChangeOutline bounds={props.outline} scale={view.scale} />}
     </div>
   );
 }

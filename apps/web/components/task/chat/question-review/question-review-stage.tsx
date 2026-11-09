@@ -10,7 +10,8 @@ import { ReviewBottomBar, useReviewLayout } from "./review-layout";
 import { MoreSheetButton, ZoomChip } from "./review-phone-controls";
 import { RegionsButton } from "./review-region-panel";
 import { ImageState, stopStageKeys, useStageImages } from "./review-stage-shared";
-import { ReviewZoomControls, reviewToolbarRow } from "./review-zoom-controls";
+import { StageOverlayControl, ZoomCluster } from "./review-desktop-controls";
+import { ReviewZoomControls } from "./review-zoom-controls";
 import type { CompareStageProps } from "./use-compare-stage";
 import { useStageAnnotations } from "./use-stage-annotations";
 import { useReviewViewport } from "./use-review-viewport";
@@ -78,20 +79,12 @@ function SingleImageStage(props: CompareStageProps) {
           <MoreSheetButton>{() => zoom}</MoreSheetButton>
         </div>
       ) : (
-        <>
-          <div className={reviewToolbarRow}>
-            {zoom}
-            {regions.button}
-            {size && (
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {t("task:questionReviewImageSize", size)}
-              </span>
-            )}
-          </div>
-          <p className="min-w-0 truncate text-xs text-muted-foreground" title={selected.alt}>
-            {selected.alt}
-          </p>
-        </>
+        <p className="min-w-0 truncate text-xs text-muted-foreground" title={selected.alt}>
+          {selected.alt}
+          {size && (
+            <span className="ml-2 tabular-nums">{t("task:questionReviewImageSize", size)}</span>
+          )}
+        </p>
       )}
       <ReviewCanvas
         stageRef={stageRef}
@@ -99,15 +92,26 @@ function SingleImageStage(props: CompareStageProps) {
         onStageKey={(event) => regions.handleKey(event) || viewport.handleKey(event)}
         pointerHandlers={regions.pointerHandlers}
         className={cn(regions.marking && "cursor-crosshair ring-2 ring-primary ring-inset")}
+        onDoubleClick={viewport.atFit ? viewport.actual : viewport.fit}
         overlay={
           <>
             {regions.hint}
             {state?.kind !== "loaded" && <ImageState state={state} onRetry={images.retry} />}
-            {phone && (
+            {phone ? (
               <ZoomChip
                 scale={viewport.view.scale}
                 onToggle={viewport.atFit ? viewport.actual : viewport.fit}
               />
+            ) : (
+              <>
+                <ZoomCluster
+                  scale={viewport.view.scale}
+                  onZoom={viewport.zoomStep}
+                  onFit={viewport.fit}
+                  onScale={viewport.zoomTo}
+                />
+                <StageOverlayControl>{regions.button}</StageOverlayControl>
+              </>
             )}
           </>
         }

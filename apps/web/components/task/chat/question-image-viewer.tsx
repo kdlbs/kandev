@@ -18,8 +18,6 @@ import {
 const imageOutline = "rounded-md outline -outline-offset-1 outline-black/10 dark:outline-white/10";
 const controlSize =
   "h-7 [@media(pointer:coarse)]:h-12 [@media(pointer:coarse)]:min-w-12 max-md:h-12 max-md:min-w-12";
-const iconControlSize =
-  "h-7 w-7 [@media(pointer:coarse)]:h-12 [@media(pointer:coarse)]:w-12 max-md:h-12 max-md:w-12";
 
 type Props = {
   src: string;
@@ -54,6 +52,7 @@ export function QuestionImageViewer({ src, alt, imageId, onInspectionChange }: P
     onInspectionChange?.(true);
     return () => onInspectionChange?.(false);
   }, [open, onInspectionChange]);
+  const gallery = position.items.length > 1 && position.index >= 0;
   const go = (direction: 1 | -1) => {
     const next = position.items[position.index + direction];
     if (!next) return;
@@ -122,17 +121,18 @@ export function QuestionImageViewer({ src, alt, imageId, onInspectionChange }: P
             </Button>
           </DialogClose>
         </div>
-        <ImageCanvas
-          src={position.current.url}
-          alt={position.current.alt}
-          actualSize={actualSize}
-          onSwipe={actualSize ? undefined : go}
-        />
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <ImageCanvas
+            src={position.current.url}
+            alt={position.current.alt}
+            actualSize={actualSize}
+            onSwipe={actualSize ? undefined : go}
+          />
+          {gallery && <GalleryHandles items={position.items} index={position.index} onStep={go} />}
+        </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <SizeButtons actualSize={actualSize} onChange={setActualSize} />
-          {position.items.length > 1 && position.index >= 0 && (
-            <GalleryNav items={position.items} index={position.index} onStep={go} />
-          )}
+          {gallery && <GalleryCounter items={position.items} index={position.index} />}
         </div>
       </DialogContent>
     </Dialog>
@@ -171,7 +171,11 @@ function SizeButtons({
   );
 }
 
-function GalleryNav({
+const handleClass =
+  "absolute top-1/2 z-10 flex h-16 w-11 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-border/60 bg-background/70 text-foreground shadow-sm backdrop-blur-sm transition-opacity opacity-70 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-0 max-md:h-12 max-md:w-12";
+
+/** Large Previous and Next handles over the image edges. */
+function GalleryHandles({
   items,
   index,
   onStep,
@@ -180,6 +184,34 @@ function GalleryNav({
   index: number;
   onStep: (direction: 1 | -1) => void;
 }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <button
+        type="button"
+        className={cn(handleClass, "left-2")}
+        disabled={index === 0}
+        aria-label={t("task:questionImagePrevious")}
+        data-testid="question-image-previous"
+        onClick={() => onStep(-1)}
+      >
+        <IconChevronLeft className="h-6 w-6" aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        className={cn(handleClass, "right-2")}
+        disabled={index === items.length - 1}
+        aria-label={t("task:questionImageNext")}
+        data-testid="question-image-next"
+        onClick={() => onStep(1)}
+      >
+        <IconChevronRight className="h-6 w-6" aria-hidden="true" />
+      </button>
+    </>
+  );
+}
+
+function GalleryCounter({ items, index }: { items: readonly GalleryItem[]; index: number }) {
   const { t } = useTranslation();
   const item = items[index];
   const counter = item.hasLabel
@@ -190,39 +222,13 @@ function GalleryNav({
       })
     : t("task:questionImageCounter", { index: index + 1, total: items.length });
   return (
-    <div className="ml-auto flex items-center gap-2">
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        className={iconControlSize}
-        disabled={index === 0}
-        aria-label={t("task:questionImagePrevious")}
-        data-testid="question-image-previous"
-        onClick={() => onStep(-1)}
-      >
-        <IconChevronLeft className="h-4 w-4" aria-hidden="true" />
-      </Button>
-      <span
-        className="text-xs tabular-nums"
-        aria-live="polite"
-        data-testid="question-image-counter"
-      >
-        {counter}
-      </span>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        className={iconControlSize}
-        disabled={index === items.length - 1}
-        aria-label={t("task:questionImageNext")}
-        data-testid="question-image-next"
-        onClick={() => onStep(1)}
-      >
-        <IconChevronRight className="h-4 w-4" aria-hidden="true" />
-      </Button>
-    </div>
+    <span
+      className="ml-auto text-xs tabular-nums"
+      aria-live="polite"
+      data-testid="question-image-counter"
+    >
+      {counter}
+    </span>
   );
 }
 

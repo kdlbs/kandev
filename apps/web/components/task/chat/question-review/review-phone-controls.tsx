@@ -239,6 +239,7 @@ export function ZoomChip({ scale, onToggle }: { scale: number; onToggle: () => v
       aria-label={t("task:questionReviewZoomChip", { level: formatZoom(scale) })}
       data-testid="question-review-zoom-chip"
       onPointerDown={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
       onClick={onToggle}
     >
       {formatZoom(scale)}
