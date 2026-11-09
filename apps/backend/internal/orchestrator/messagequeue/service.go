@@ -3418,6 +3418,28 @@ func (s *Service) PurgeDeletedSession(ctx context.Context, identity QueueSession
 	})
 }
 
+// ListEntries returns the current queue entries for a session. Unlike
+// GetStatus, it preserves storage and admission errors so callers can fail
+// closed when queue ownership must be proven.
+func (s *Service) ListEntries(ctx context.Context, sessionID string) ([]QueuedMessage, error) {
+	if s == nil {
+		return nil, errors.New("message queue is unavailable")
+	}
+	var entries []QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		listed, listErr := s.repo.ListBySession(admittedCtx, sessionID)
+		if listErr != nil {
+			return listErr
+		}
+		entries = listed
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
 // GetStatus returns the full pending list and capacity info for a session.
 func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus {
 	maxPerSession := s.MaxPerSession()

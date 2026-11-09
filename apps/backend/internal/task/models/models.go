@@ -184,11 +184,10 @@ const (
 	// after queue promotion. It prevents duplicate task.queue_promoted events
 	// from repeating on_enter or auto-start behavior.
 	MetaKeyQueuePromotionPending = "queue_promotion_pending"
-	// QueuePromotionEntryTransitionIDKey is the field of the
-	// MetaKeyQueuePromotionPending marker that pins the ledger row of the entry
-	// a same-step promotion admits. That promotion writes no ledger row of its
-	// own, so the delivery carries no transition id; the pinned row lets the
-	// entry guard tell the admitted entry from a later re-entry of the step.
+	// QueuePromotionEntryTransitionIDKey pins the ledger row associated with a
+	// promotion marker. Same-step promotions use it because admission writes no
+	// ledger row; cross-step promotions use it so legacy zero-ID deliveries
+	// cannot consume a newer identified marker.
 	QueuePromotionEntryTransitionIDKey = "entry_transition_id"
 	// MetaKeyWorkflowMovePending carries the one-shot entry options of a direct
 	// (immediately applied) workflow move whose target-step entry has not yet
@@ -1308,6 +1307,12 @@ func decodeAgentErrorCauses(raw json.RawMessage) []AgentErrorCause {
 			var promptNotSent bool
 			if json.Unmarshal(value, &promptNotSent) == nil {
 				cause.PromptNotSent = &promptNotSent
+			}
+		}
+		if value, ok := fields["exit_code"]; ok {
+			var exitCode *int
+			if json.Unmarshal(value, &exitCode) == nil && exitCode != nil {
+				cause.ExitCode = exitCode
 			}
 		}
 		if value, ok := fields["storage"]; ok {
@@ -3168,6 +3173,27 @@ type TaskEnvironment struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// EffectiveExecutorType returns the environment's persisted executor type. A
+// legacy row with no executor identity or runtime handles represents the
+// implicit local executor used before executor profiles existed.
+func (te *TaskEnvironment) EffectiveExecutorType() (ExecutorType, bool) {
+	if te == nil {
+		return "", false
+	}
+	if te.ExecutorType != "" {
+		executorType := ExecutorType(te.ExecutorType)
+		if executorType.Runtime() == agentruntime.RuntimeUnknown {
+			return "", false
+		}
+		return executorType, true
+	}
+	if te.ExecutorID != "" || te.ExecutorProfileID != "" || te.ContainerID != "" || te.SandboxID != "" ||
+		te.ContainerBootstrapNonceSecretID != "" || te.ContainerControlAuthTokenSecretID != "" {
+		return "", false
+	}
+	return ExecutorTypeLocal, true
 }
 
 // RepoFor returns the per-repo environment row for repositoryID, or nil if not present.

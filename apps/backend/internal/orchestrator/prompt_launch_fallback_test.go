@@ -228,6 +228,14 @@ func (failedPromptReferenceExpander) AppendReferenceExpansionsToTrustedContext(
 	return trustedContext
 }
 
+func (failedPromptReferenceExpander) AppendReferenceExpansionsWithContextStrict(
+	_ context.Context,
+	prompt string,
+	_ *zap.Logger,
+) (string, string, error) {
+	return prompt, "", errors.New("prompt reference read failed")
+}
+
 func newPromptServiceForLaunchFallbackTest(t *testing.T) *promptservice.Service {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "prompts.db"))

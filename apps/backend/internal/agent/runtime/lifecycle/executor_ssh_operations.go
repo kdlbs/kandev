@@ -25,6 +25,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/sshlaunch"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -149,6 +150,105 @@ func runSSHCommandStdin(ctx context.Context, client *ssh.Client, cmd string, std
 		return outBuf.String(), errBuf.String(), ctx.Err()
 	case err := <-done:
 		return outBuf.String(), errBuf.String(), err
+	}
+}
+
+// boundedSSHOutput retains at most limit bytes of one remote stream while
+// always draining the channel. Overflow is reported once through onOverflow so
+// the command can be torn down instead of letting a faulty remote grow backend
+// memory until the context deadline.
+type boundedSSHOutput struct {
+	mu         sync.Mutex
+	buf        bytes.Buffer
+	limit      int
+	overflow   bool
+	onOverflow func()
+}
+
+func newBoundedSSHOutput(limit int, onOverflow func()) *boundedSSHOutput {
+	if limit < 0 {
+		limit = 0
+	}
+	return &boundedSSHOutput{limit: limit, onOverflow: onOverflow}
+}
+
+func (b *boundedSSHOutput) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	remaining := b.limit - b.buf.Len()
+	if remaining > 0 {
+		writeLen := len(p)
+		if writeLen > remaining {
+			writeLen = remaining
+		}
+		_, _ = b.buf.Write(p[:writeLen])
+	}
+	overflowed := len(p) > remaining
+	if overflowed {
+		b.overflow = true
+	}
+	onOverflow := b.onOverflow
+	b.mu.Unlock()
+	if overflowed && onOverflow != nil {
+		onOverflow()
+	}
+	// Consume the whole chunk so the SSH channel keeps draining.
+	return len(p), nil
+}
+
+func (b *boundedSSHOutput) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func (b *boundedSSHOutput) Overflowed() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.overflow
+}
+
+// runSSHCommandStdinBounded is the bounded form used for private helper
+// responses. Both streams are capped while every chunk is still drained; any
+// overflow tear down the session and is reported to the caller.
+func runSSHCommandStdinBounded(
+	ctx context.Context,
+	client *ssh.Client,
+	cmd string,
+	stdin io.Reader,
+	limit int,
+) (stdout, stderr string, overflow bool, err error) {
+	session, err := openSSHSession(ctx, client)
+	if err != nil {
+		return "", "", false, fmt.Errorf("ssh: new session: %w", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	var overflowOnce sync.Once
+	overflowCh := make(chan struct{})
+	signalOverflow := func() { overflowOnce.Do(func() { close(overflowCh) }) }
+	outBuf := newBoundedSSHOutput(limit, signalOverflow)
+	errBuf := newBoundedSSHOutput(limit, signalOverflow)
+	session.Stdout = outBuf
+	session.Stderr = errBuf
+	if stdin != nil {
+		session.Stdin = stdin
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- session.Run(cmd) }()
+	select {
+	case <-ctx.Done():
+		_ = session.Signal(ssh.SIGTERM)
+		return outBuf.String(), errBuf.String(), outBuf.Overflowed() || errBuf.Overflowed(), ctx.Err()
+	case <-overflowCh:
+		_ = session.Close()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+		}
+		return outBuf.String(), errBuf.String(), true, nil
+	case err := <-done:
+		return outBuf.String(), errBuf.String(), outBuf.Overflowed() || errBuf.Overflowed(), err
 	}
 }
 
@@ -846,42 +946,51 @@ func setSSHControlAuthorization(req *http.Request, token string) {
 // retrying, as opposed to a transport failure or a malformed response.
 var errSSHAgentctlHandshakeRejected = errors.New("ssh: agentctl handshake rejected")
 
-func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort int, nonce string) (string, error) {
+// sshControlHandshakeResult is the authenticated launch response. Token is
+// always present; Launch carries the controller's self-captured proof for a
+// managed SSH launch that requested one.
+type sshControlHandshakeResult struct {
+	Token  string
+	Launch *sshlaunch.Receipt
+}
+
+func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort int, nonce string) (sshControlHandshakeResult, error) {
 	body, err := json.Marshal(map[string]string{"nonce": nonce})
 	if err != nil {
-		return "", err
+		return sshControlHandshakeResult{}, err
 	}
 	httpClient := remoteControlHTTPClient(client, controlPort)
 	defer httpClient.CloseIdleConnections()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/auth/handshake", controlPort), bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return sshControlHandshakeResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("ssh: agentctl handshake: %w", err)
+		return sshControlHandshakeResult{}, fmt.Errorf("ssh: agentctl handshake: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusForbidden {
 		// 403 is exactly ConsumeNonce rejecting the nonce (control_server.go) —
 		// the one case worth a fresh instance and a retry.
-		return "", fmt.Errorf("%w: status %d", errSSHAgentctlHandshakeRejected, resp.StatusCode)
+		return sshControlHandshakeResult{}, fmt.Errorf("%w: status %d", errSSHAgentctlHandshakeRejected, resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
 		// Any other non-200 (400/404/500/...) is not the nonce rejection and
 		// must not trigger retryAgentctlHandshake's retry — that would cost
 		// up to sshAgentctlHandshakeAttempts full start-agentctl-and-tear-down
 		// cycles for a failure a fresh instance can't fix.
-		return "", fmt.Errorf("ssh: agentctl handshake: unexpected status %d", resp.StatusCode)
+		return sshControlHandshakeResult{}, fmt.Errorf("ssh: agentctl handshake: unexpected status %d", resp.StatusCode)
 	}
 	var result struct {
-		Token string `json:"token"`
+		Token  string             `json:"token"`
+		Launch *sshlaunch.Receipt `json:"launch"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || result.Token == "" {
-		return "", errors.New("ssh: agentctl handshake returned no token")
+		return sshControlHandshakeResult{}, errors.New("ssh: agentctl handshake returned no token")
 	}
-	return result.Token, nil
+	return sshControlHandshakeResult{Token: result.Token, Launch: result.Launch}, nil
 }
 
 // readRemoteAgentctlLogTail best-effort reads the tail of the current
@@ -918,21 +1027,22 @@ const sshAgentctlHandshakeRetryDelay = 15 * time.Second
 // delay is called between attempts (not after the last one) and is injectable
 // so tests can run the retry loop without waiting on the real backoff; ctx
 // cancellation during the wait aborts the retry immediately.
-func retryAgentctlHandshake(
+func retryAgentctlHandshake[T any](
 	ctx context.Context,
-	attempt func() (port, pid int, token string, err error),
+	attempt func() (port, pid int, value T, err error),
 	teardown func(port, pid int) error,
 	delay func(ctx context.Context, d time.Duration) error,
-) (port, pid int, token string, err error) {
+) (port, pid int, value T, err error) {
 	var lastErr error
+	var zero T
 	for i := range sshAgentctlHandshakeAttempts {
-		port, pid, token, err = attempt()
+		port, pid, value, err = attempt()
 		if err == nil {
-			return port, pid, token, nil
+			return port, pid, value, nil
 		}
 		if pid > 0 {
 			if teardownErr := teardown(port, pid); teardownErr != nil {
-				return 0, 0, "", fmt.Errorf(
+				return 0, 0, zero, fmt.Errorf(
 					"ssh: agentctl teardown after attempt %d: %w",
 					i+1, errors.Join(teardownErr, err))
 			}
@@ -940,16 +1050,16 @@ func retryAgentctlHandshake(
 		// teardown removes sessionDir. startRemoteAgentctl recreates it before
 		// each new pid/log pair, so every retry starts with a clean directory.
 		if !errors.Is(err, errSSHAgentctlHandshakeRejected) {
-			return 0, 0, "", err
+			return 0, 0, zero, err
 		}
 		lastErr = err
 		if i < sshAgentctlHandshakeAttempts-1 {
 			if derr := delay(ctx, sshAgentctlHandshakeRetryDelay); derr != nil {
-				return 0, 0, "", fmt.Errorf("ssh: agentctl handshake retry cancelled: %w", derr)
+				return 0, 0, zero, fmt.Errorf("ssh: agentctl handshake retry cancelled: %w", derr)
 			}
 		}
 	}
-	return 0, 0, "", fmt.Errorf(
+	return 0, 0, zero, fmt.Errorf(
 		"ssh: agentctl exhausted %d handshake attempts: %w",
 		sshAgentctlHandshakeAttempts, lastErr,
 	)
@@ -993,6 +1103,11 @@ const (
 	envKeyOpenAIAPIKey         = "OPENAI_API_KEY"
 	envKeyGeminiAPIKey         = "GEMINI_API_KEY"
 	envKeyGoogleAPIKey         = "GOOGLE_API_KEY"
+	envKeyCursorAPIKey         = "CURSOR_API_KEY"
+	envKeyAugmentSessionAuth   = "AUGMENT_SESSION_AUTH"
+	envKeyMetaAPIKey           = "META_API_KEY"
+	envKeyWindsurfAPIKey       = "WINDSURF_API_KEY"
+	envKeyXAIAPIKey            = "XAI_API_KEY"
 	envKeyGitHubToken          = "GITHUB_TOKEN"
 	envKeyGHToken              = "GH_TOKEN"
 	envKeyGitLabToken          = "GITLAB_TOKEN"
@@ -1020,6 +1135,11 @@ var sshRemoteAgentCredentialEnvKeys = []string{
 	envKeyOpenAIAPIKey,
 	envKeyGeminiAPIKey,
 	envKeyGoogleAPIKey,
+	envKeyCursorAPIKey,
+	envKeyAugmentSessionAuth,
+	envKeyMetaAPIKey,
+	envKeyWindsurfAPIKey,
+	envKeyXAIAPIKey,
 	envKeyGitHubToken,
 	envKeyGHToken,
 	envKeyGitLabToken,
@@ -1310,7 +1430,7 @@ func remoteAgentctlPidFileConfirms(ctx context.Context, client *ssh.Client, sess
 		return err
 	}
 	if !present {
-		return fmt.Errorf("remote agentctl session directory %s disappeared before pidfile verification", sessionDir)
+		return fmt.Errorf("%w: %s", errSSHRemoteSessionDirectoryMissing, sessionDir)
 	}
 	if filePID != pid {
 		return fmt.Errorf("remote pidfile %s/agentctl.pid names pid %d, not %d", sessionDir, filePID, pid)
