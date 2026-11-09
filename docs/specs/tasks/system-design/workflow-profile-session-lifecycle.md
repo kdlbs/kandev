@@ -141,11 +141,14 @@ If runtime stop fails after parking is committed, Kandev reports the error and
 retains the stamped intent. A retry can stop the same execution. A delayed
 callback cannot advance the destination step.
 
-A reuse candidate that becomes terminal before promotion is not revived. The
-orchestrator creates a new destination when the start setting is `reuse`.
-Completed sessions remain excluded from automatic workflow reuse. Explicit
-conversation follow-ups use [task completion](task-completion.md) and do not
-promote the historical session or advance the current workflow.
+A reuse candidate that becomes terminal before promotion is not revived. If a
+prepared route has recorded that candidate for the accepted profile entry, the
+orchestrator does not create a replacement for the same entry, even when the
+start setting is `reuse`. A distinct accepted entry may allocate a fresh
+destination under its start setting. Completed sessions remain excluded from
+automatic workflow reuse. Explicit conversation follow-ups use
+[task completion](task-completion.md). They do not promote the historical
+session or advance the current workflow.
 
 Changing a step setting affects later transitions only.
 

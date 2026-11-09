@@ -75,3 +75,31 @@ Run changed-file lint from the repository root:
 ```sh
 bash scripts/lint-go-changed apps/backend/internal/task/repository/sqlite/workflow_allocation.go apps/backend/internal/task/repository/sqlite/workflow_allocation_test.go
 ```
+
+## Post-review verification
+
+The parking-failure tests now assert the injected metadata-write error. Their
+repository wrapper preserves transition reads, so the accepted step reaches
+the parking path. A focused regression confirms that a reusable destination
+which becomes terminal after route preparation cannot be replaced by the same
+entry. The system design now states this allocation boundary.
+
+Run the affected orchestrator tests from `apps/backend`:
+
+```sh
+go test -trimpath -tags fts5 ./internal/orchestrator \
+  -run '^TestSwitchSessionForStep_(ParkOnEndPreservesSourceWhenIntentWriteFails|ParkOnEndRestoresQueueAfterReuseParkingFails|TerminalReuseBeforePromotionDoesNotAllocateReplacement)$' \
+  -count=1
+```
+
+The command passed on the fix-up changes. Specification validation also passed:
+`python3 scripts/list-docs.py validate` (431 decisions, 1,920 specifications)
+and `python3 scripts/lint-spec-files.py --all`.
+
+Changed-file Go lint:
+
+```sh
+bash scripts/lint-go-changed apps/backend/internal/orchestrator/event_handlers_workflow_profile_session_policy_test.go
+```
+
+Changed-file Go lint passed with 0 issues.

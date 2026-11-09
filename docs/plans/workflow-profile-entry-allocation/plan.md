@@ -20,3 +20,8 @@ does not recover a failed runtime, resume an unknown owner, or replay a prompt.
 The backend repository owns the transactional gate. Its existing route record
 and accepted transition identity supply the durable comparison; no schema,
 public API, provider, or deployment change is needed.
+
+The same-entry fence also applies when a reusable destination becomes terminal
+after its prepared route is recorded but before promotion. That entry cannot
+allocate a replacement; a distinct accepted entry may follow the configured
+start policy. A focused orchestrator regression covers this boundary.
