@@ -62,10 +62,11 @@ const maxStartupTransferReconcileAttempts = 30
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
-	RetryClock RetryClock
-	Scheduler  scheduler.SchedulerConfig
-	QueueSize  int
-	QueueGroup string
+	ProviderKeywordContext bool
+	RetryClock             RetryClock
+	Scheduler              scheduler.SchedulerConfig
+	QueueSize              int
+	QueueGroup             string
 	// CodexAppServerEnabled controls native-only lifecycle actions such as
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
@@ -1611,6 +1612,10 @@ type Service struct {
 	// from a predecessor. Automatic recovery requires an explicit no-output,
 	// no-effect result from this map.
 	dynamicAttemptEvidence sync.Map
+	// keywordFailureHistory survives prompt-evidence retirement so a routed
+	// successor can use bounded failure context without reusing stale auth data.
+	keywordFailureHistoryMu sync.Mutex
+	keywordFailureHistory   map[string][]keywordObservation
 	// pendingDynamicStreakResets coalesces ordinary output/effect observations
 	// until a semantic boundary can persist the reset outside the raw stream
 	// callback. Each entry retains the prompt and route identity that authorized
@@ -1746,6 +1751,9 @@ func (s *Service) SetRouteActionHandler(handler func(context.Context, RouteActio
 // task and workflow launches.
 func (s *Service) SetProfileExecutionResolver(resolver *agentruntime.ProfileExecutionResolver) {
 	s.profileExecutionResolver = resolver
+	if resolver != nil {
+		resolver.SetKeywordContextEnabled(s.config.ProviderKeywordContext)
+	}
 }
 
 func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionRequest) (*RouteActionResult, error) {

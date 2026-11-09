@@ -163,7 +163,7 @@ func (s *Service) settleRetainedTurnFailure(
 	data watcher.AgentEventData,
 	session *models.TaskSession,
 ) bool {
-	priorRetry, priorAttempt, priorStarted, priorStop := s.retainedRetryProgress(data.SessionID, classifyKanbanFailure(data).Code)
+	priorRetry, priorAttempt, priorStarted, priorStop := s.retainedRetryProgress(data.SessionID, s.classifyKanbanFailure(data).Code)
 	if s.handleTransientFailure(ctx, data) {
 		// handleTransientFailure has already accepted durable ownership of this
 		// generation. Its timer can finish and retire the entry before this call
@@ -182,7 +182,7 @@ func (s *Service) settleRetainedTurnFailure(
 		}
 	} else if routingerr.Decide(
 		routingerr.ContextKanban,
-		classifyKanbanFailure(data),
+		s.classifyKanbanFailure(data),
 		time.Now().UTC(),
 	) == routingerr.DecisionShortRetry {
 		data.RecoveryDisposition = recoveryDispositionRefused

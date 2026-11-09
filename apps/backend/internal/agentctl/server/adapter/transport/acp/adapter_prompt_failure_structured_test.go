@@ -21,6 +21,7 @@ func TestRetainedACPApplicationErrorPreservesStructuredProviderSignals(t *testin
 		{name: "claude rate limit kind", provider: claudeAgentID, data: map[string]any{"errorKind": "rate_limit_error"}, wantCapacity: true},
 		{name: "claude overloaded kind", provider: claudeAgentID, data: map[string]any{"errorKind": "overloaded_error"}, wantCapacity: true},
 		{name: "explicit http 429", provider: codexAgentID, data: map[string]any{"statusCode": float64(429), "errorCode": "rate_limit"}, wantCapacity: true},
+		{name: "explicit http status alias", provider: codexAgentID, data: map[string]any{"httpStatus": float64(429)}, wantCapacity: true},
 		{name: "explicit http 529", provider: claudeAgentID, data: map[string]any{"statusCode": float64(529)}, wantCapacity: true},
 		{name: "kind outside its provider namespace", provider: codexAgentID, data: map[string]any{"errorKind": "rate_limit_error"}},
 		{name: "generic wrapper kind", provider: claudeAgentID, data: map[string]any{"errorKind": "AI_APICallError"}},
