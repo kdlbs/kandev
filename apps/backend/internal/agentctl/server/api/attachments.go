@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
@@ -86,6 +87,9 @@ func (s *Server) persistMaterializedAttachment(upload materializedAttachmentUplo
 		response, err = s.persistMaterializedAttachmentAt(workDir, upload)
 		return err
 	})
+	if errors.Is(err, process.ErrManagerStopping) || errors.Is(err, process.ErrAttachmentAgentUnavailable) {
+		return response, newMaterializedAttachmentError(http.StatusServiceUnavailable, "attachment agent unavailable")
+	}
 	return response, err
 }
 

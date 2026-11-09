@@ -127,3 +127,17 @@ Implemented on 2026-11-06 after the user requested the fix.
 The tests use temporary repositories, synthetic files, and a scripted ACP peer.
 They do not establish every provider's decoder behavior. No live instance was
 changed. This package has not been deployed.
+
+### Review remediation
+
+Resolved the base-document date conflict without dropping either design section.
+Review found an inverse shell-startup lock order and an agent-state error reported
+as storage failure. Added failing regressions, aligned shell startup with
+attachment installation, and mapped typed agent-unavailable errors to HTTP 503.
+The rescan regression now captures the actual manager-owned adapter through a
+scripted subprocess, rather than a separately constructed adapter.
+
+Focused verification includes `TestMaterializeAttachment`, `TestAttachmentWorkDir`,
+`TestManager_StartShell`, `TestBuildPromptContentBlocks`, and
+`TestAttachmentDelivery` across API, process, and ACP packages with `-trimpath -race`. All passed.
+Remote CI and review evidence remain pending until checks for the new head finish.

@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/stretchr/testify/require"
@@ -67,4 +68,23 @@ func TestAttachmentWorkDir_InstallationDrainsBeforeTeardown(t *testing.T) {
 			return nil
 		}), ErrManagerStopping)
 	})
+}
+
+func TestAttachmentWorkDir_ShellStartupUsesCompatibleLockOrder(t *testing.T) {
+	manager := NewManager(&config.InstanceConfig{WorkDir: t.TempDir()}, newTestLogger(t))
+	manager.mu.Lock()
+	done := make(chan error, 1)
+	go func() { done <- manager.StartShell() }()
+	defer func() {
+		manager.mu.Unlock()
+		require.NoError(t, <-done)
+		require.NoError(t, manager.Stop(context.Background()))
+	}()
+	require.Eventually(t, func() bool {
+		if manager.startMu.TryLock() {
+			manager.startMu.Unlock()
+			return false
+		}
+		return true
+	}, time.Second, time.Millisecond, "shell startup must reserve startup before waiting for the process lock")
 }

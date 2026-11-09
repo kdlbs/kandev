@@ -98,7 +98,10 @@ directory through `WithAttachmentWorkDir`, using the active adapter configuratio
 It holds startup and stop synchronization only during local installation, after
 multipart parsing. Before the first adapter exists, the configured root remains
 available for compatible pre-start materialization. A stopped former adapter
-cannot receive another installation.
+cannot receive another installation. Agent-state rejection returns HTTP 503 with
+an agent-unavailable diagnosis; storage failures retain their storage diagnosis.
+Shell startup and attachment installation acquire the startup lock before the
+process lock. Shell environment construction must not reacquire the startup lock.
 The endpoint must not derive it from the mutable workspace tracking root.
 
 A live repository rescan can promote the tracking root to the parent task

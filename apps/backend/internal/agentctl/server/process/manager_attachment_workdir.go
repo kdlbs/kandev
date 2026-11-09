@@ -1,6 +1,9 @@
 package process
 
-import "fmt"
+import "errors"
+
+// ErrAttachmentAgentUnavailable indicates that a former adapter cannot accept files.
+var ErrAttachmentAgentUnavailable = errors.New("attachment delivery requires a running agent")
 
 // WithAttachmentWorkDir pins the active adapter directory during local file
 // installation. The callback must not perform network reads or lifecycle calls.
@@ -16,7 +19,7 @@ func (m *Manager) WithAttachmentWorkDir(install func(string) error) error {
 	defer m.mu.RUnlock()
 	if m.adapterCfg != nil {
 		if m.adapter == nil || m.Status() != StatusRunning {
-			return fmt.Errorf("attachment delivery requires a running agent")
+			return ErrAttachmentAgentUnavailable
 		}
 		return install(m.adapterCfg.WorkDir)
 	}
