@@ -46,8 +46,9 @@ picker, save/conflict ownership and failure editors retain their existing flows.
 
 Reuse relevant existing dynamic/runtime/settings/editor/feature contract checks.
 Disposable probes outside normal collection demonstrate chain restart/no-revisit,
-counter separation, metadata omission and UI mutations. No permanent tests or
-new validation framework. Results belong in the work order.
+counter separation, metadata omission and UI mutations. No new validation
+framework; the native route owner migration has committed replay and rollback
+tests as required for schema cutovers. Results belong in the work order.
 
 The task/session RR increment follows actual committed selection ordinals.
 Utility and taskless Office advance the same history through the native owner
