@@ -163,10 +163,9 @@ func (s *HandoffService) evaluateWorkspaceGroupCleanup(ctx context.Context, grou
 }
 
 // hasActiveExecutionsForGroup walks every task that ever belonged to
-// the group (active + released) and checks whether any of its sessions
-// still has an executors_running row. Returns true on the first hit so
-// cleanup state machine can short-circuit. Missing session evidence is an
-// error, never proof of inactivity.
+// the group (active + released) and checks whether any session row fails to
+// confirm runtime termination. Returns true on the first hit so cleanup can
+// short-circuit. Missing session evidence is an error, never proof of inactivity.
 func (s *HandoffService) hasActiveExecutionsForGroup(ctx context.Context, groupID string) (bool, error) {
 	if s.wsGroups == nil {
 		return false, errors.New("workspace group repository unavailable for workspace cleanup")
@@ -187,7 +186,7 @@ func (s *HandoffService) hasActiveExecutionsForGroup(ctx context.Context, groupI
 			return false, err
 		}
 		for _, sess := range sessions {
-			running, err := s.sessions.HasExecutorRunningRow(ctx, sess.ID)
+			running, err := s.sessions.HasActiveExecutorRunningRow(ctx, sess.ID)
 			if err != nil {
 				return false, err
 			}

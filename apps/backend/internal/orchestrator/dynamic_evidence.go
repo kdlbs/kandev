@@ -729,7 +729,11 @@ func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) w
 		data.DynamicRouteAttempt = true
 	}
 	if lifecycleEvidenceKnown && lifecycleDiagnosticCandidate && !evidence.output && !evidence.effect {
-		s.observeLifecycleProviderDiagnosticLocked(evidence, data.AgentID, lifecycleDiagnosticText)
+		var diagnostic *streams.ProviderError
+		if data.ProviderError != nil && normalizeDiagnosticText(data.ProviderError.Message) == normalizeDiagnosticText(lifecycleDiagnosticText) {
+			diagnostic = data.ProviderError
+		}
+		s.observeLifecycleProviderDiagnosticLocked(evidence, data.AgentID, lifecycleDiagnosticText, diagnostic)
 	}
 	outputObserved := evidence.outputObservedLocked(data)
 	if lifecycleEvidenceKnown {
@@ -749,7 +753,7 @@ func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) w
 // event may arrive after the terminal failure because those events use
 // separate subscriptions, so an absent or unclassifiable diagnostic fails
 // closed as ordinary output.
-func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, providerID, message string) {
+func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, providerID, message string, diagnostic *streams.ProviderError) {
 	message = normalizeDiagnosticText(message)
 	if message == "" {
 		evidence.output = true
@@ -757,11 +761,22 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 		evidence.providerDiagnosticText = ""
 		return
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhasePromptSend,
-		ProviderID: providerID,
-		Stderr:     message,
-	})
+	input := diagnostic.RoutingInput(routingerr.PhasePromptSend, providerID, message)
+	classified := routingerr.Classify(input)
+	if diagnostic != nil {
+		textClassified := routingerr.Classify(routingerr.Input{
+			Phase:      routingerr.PhasePromptSend,
+			ProviderID: providerID,
+			Stderr:     message,
+		})
+		if textClassified.Code != classified.Code ||
+			textClassified.Confidence != routingerr.ConfHigh || !textClassified.FallbackAllowed {
+			evidence.output = true
+			evidence.providerDiagnosticCode = ""
+			evidence.providerDiagnosticText = ""
+			return
+		}
+	}
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
 		evidence.output = true
 		evidence.providerDiagnosticCode = ""
@@ -782,7 +797,7 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 // itself. Callers must hold e.mu.
 func (e *promptAttemptEvidence) outputObservedLocked(data watcher.AgentEventData) bool {
 	if e.providerDiagnosticCode != "" && e.providerDiagnosticText != "" &&
-		matchingProviderFailureCode(data) == e.providerDiagnosticCode &&
+		providerFailureCodeMatches(data, e.providerDiagnosticCode) &&
 		strings.Contains(normalizeDiagnosticText(matchingProviderFailureMessage(data)), e.providerDiagnosticText) {
 		// Claude ACP emits a human-readable agent_message_chunk immediately
 		// before returning the same provider error from session/prompt. The
@@ -805,11 +820,23 @@ func matchingProviderFailureCode(data watcher.AgentEventData) routingerr.Code {
 	if message == "" {
 		return ""
 	}
-	return routingerr.Classify(routingerr.Input{
+	return routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhasePromptSend, data.AgentID, message)).Code
+}
+
+// providerFailureCodeMatches requires both terminal classifications to match
+// the recorded diagnostic code. Structured metadata cannot be ignored when it
+// conflicts with the diagnostic text.
+func providerFailureCodeMatches(data watcher.AgentEventData, recorded routingerr.Code) bool {
+	message := matchingProviderFailureMessage(data)
+	if message == "" || matchingProviderFailureCode(data) != recorded {
+		return false
+	}
+	textClassified := routingerr.Classify(routingerr.Input{
 		Phase:      routingerr.PhasePromptSend,
 		ProviderID: data.AgentID,
 		Stderr:     message,
-	}).Code
+	})
+	return textClassified.Code == recorded && textClassified.Confidence == routingerr.ConfHigh && textClassified.FallbackAllowed
 }
 
 func (s *Service) withDynamicAttemptEvidence(data watcher.AgentEventData) watcher.AgentEventData {

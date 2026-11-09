@@ -2542,8 +2542,12 @@ func (s *Service) resolveDynamicLaunchExecution(
 		}
 		return resolved.ExecutionProfileID, nil
 	}
+	previousExecutionProfileID := session.ExecutionProfileID
+	expectedState, expectedUpdatedAt := session.State, session.UpdatedAt
 	applyResolvedExecution(session, resolved)
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := s.persistDynamicRouteProjection(
+		ctx, session, previousExecutionProfileID, expectedState, expectedUpdatedAt,
+	); err != nil {
 		return "", fmt.Errorf("persist dynamic route attribution: %w", err)
 	}
 	return resolved.ExecutionProfileID, nil
@@ -4018,9 +4022,12 @@ func (s *Service) loadResumeSessionCandidate(
 		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
 	}
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return nil, fmt.Errorf("load runtime inventory for session: %w", err)
+	}
 	if resumeRequiresExecutorRecord(session, running, err, options, allowCompletedResume) {
-		// Cancelled/failed and explicit completed resumes can outlive cleanup of
-		// the executor record. Other sessions require that record.
+		// Passive resume requires retained inventory. Explicit recovery can
+		// reconstruct it through the executor's workspace admission path.
 		return nil, fmt.Errorf("session is not resumable: no executor record")
 	}
 	return &resumeSessionCandidate{session: session, options: options, running: running}, nil
@@ -4038,6 +4045,7 @@ func resumeRequiresExecutorRecord(
 		session.State != models.TaskSessionStateFailed &&
 		!models.HasInterruptedRecoveryPending(session.Metadata) &&
 		options.RequiredNativeConversationID == "" &&
+		options.RecoveryAction == "" &&
 		!allowCompletedResume
 }
 
@@ -4723,7 +4731,9 @@ func (s *Service) attemptColdResume(
 	if err != nil {
 		return false, err
 	}
-	execution, launchErr := s.executor.ResumeSession(dispatchCtx, session, true)
+	execution, launchErr := s.executor.ResumeSessionWithOptions(
+		dispatchCtx, session, true, executor.ResumeOptions{RequireExecutorActor: true},
+	)
 	releaseCeilingDispatch()
 	if execution != nil && resumeAttempt != nil {
 		resumeAttempt.setExecutionID(execution.AgentExecutionID)

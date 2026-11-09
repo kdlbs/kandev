@@ -8,17 +8,7 @@ func providerHTTPStatusFromData(data any) int {
 		return 0
 	}
 	for _, key := range []string{"statusCode", "httpStatus"} {
-		var status int
-		switch value := fields[key].(type) {
-		case float64:
-			if value < 100 || value > 599 || value != float64(int(value)) {
-				continue
-			}
-			status = int(value)
-		case int:
-			status = value
-		}
-		if status >= 100 && status <= 599 {
+		if status := providerHTTPStatus(fields[key]); status != 0 {
 			return status
 		}
 	}

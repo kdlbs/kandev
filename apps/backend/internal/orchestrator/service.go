@@ -768,6 +768,9 @@ type Service struct {
 	repo                      sessionExecutorStore
 	promptTargets             taskPullRequestTargetStore
 	agentManager              executor.AgentManagerClient
+	// deliverySessionStateTestHook pauses the correction between its pre-guard
+	// proof and guarded recheck in deterministic race tests.
+	deliverySessionStateTestHook func()
 	// ACP mode and model reports mutate one selector snapshot per session.
 	sessionSettingsSnapshotLocks [64]sync.Mutex
 
@@ -4078,6 +4081,16 @@ func (s *Service) reconcileActiveSessionOnStartup(
 			} else {
 				s.publishTaskUpdated(ctx, task)
 			}
+		}
+	}
+
+	// An adopted runtime can still belong to a turn whose terminal settled
+	// before a coarse state write failed. Correct only that exact evidence; a
+	// genuine in-flight turn is rejected by the idle runtime proof.
+	if retracked {
+		if err := s.convergeSettledDeliverySessionState(ctx, sessionID, nil); err != nil {
+			s.logger.Warn("failed to converge settled delivery session state on adoption",
+				zap.String("session_id", sessionID), zap.Error(err))
 		}
 	}
 

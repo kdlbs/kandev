@@ -319,7 +319,9 @@ type Manager struct {
 	createAdapterFn func() error
 
 	// Agent event notifications (protocol-agnostic)
-	updatesCh chan adapter.AgentEvent
+	updatesCh        chan adapter.AgentEvent
+	adapterStageSeen atomic.Uint64
+	adapterStageAt   atomic.Int64
 
 	// Pending permission requests waiting for user response
 	pendingPermissions       map[string]*PendingPermission
@@ -2522,12 +2524,6 @@ func (m *Manager) startAgentShell() {
 	m.logger.Info("shell session auto-created")
 }
 
-// buildShellConfig creates the embedded shell configuration with the same
-// effective instance environment used by agent and terminal processes.
-func (m *Manager) buildShellConfig() (shell.Config, error) {
-	return m.buildShellConfigWithAgentEnv(m.agentEnvSnapshot())
-}
-
 func (m *Manager) buildShellConfigWithAgentEnv(agentEnv []string) (shell.Config, error) {
 	shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
 	shellCfg.ShellCommand = preferredShellCommand(agentEnv)
@@ -2842,6 +2838,9 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 		} else {
 			select {
 			case update, ok = <-updatesCh:
+				if ok {
+					m.recordAdapterStage()
+				}
 			case <-stopCh:
 				m.drainDeliveryUpdates(updatesCh)
 				return
@@ -2906,6 +2905,7 @@ func (m *Manager) drainDeliveryUpdates(updates <-chan adapter.AgentEvent) {
 			if !ok {
 				return
 			}
+			m.recordAdapterStage()
 			update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
 			persisted, err := m.persistDeliveryEvent(update)
 			if err != nil {
@@ -4658,6 +4658,8 @@ func (m *Manager) ShellManager() *shell.Manager {
 // but we still need shell access for the workspace.
 // Returns nil if shell is already started or if ShellEnabled is false.
 func (m *Manager) StartShell() error {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
 	release, err := m.admitStart()
 	if err != nil {
 		return err
@@ -4675,7 +4677,7 @@ func (m *Manager) StartShell() error {
 	if !m.cfg.ShellEnabled {
 		return nil
 	}
-	shellCfg, err := m.buildShellConfig()
+	shellCfg, err := m.buildShellConfigWithAgentEnv(m.cfg.AgentEnv)
 	if err != nil {
 		return fmt.Errorf("prepare shell environment: %w", err)
 	}

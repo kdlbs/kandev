@@ -86,6 +86,22 @@ func TestBuildRunningFromExecutionPersistsFreshExecutorIdentity(t *testing.T) {
 	}
 }
 
+func TestBuildRunningFromExecutionPersistsTaskEnvironmentIdentity(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-env-identity", TaskID: "task-env-identity", SessionID: "session-env-identity",
+		TaskEnvironmentID: "environment-original",
+	}, nil)
+	if got := getMetadataString(running.Metadata, "task_environment_id"); got != "environment-original" {
+		t.Fatalf("persisted task environment identity = %q, want environment-original", got)
+	}
+	if !ShouldPersistMetadataKey(MetadataKeyTaskEnvironmentID) {
+		t.Fatal("task environment identity is not retained in executor runtime inventory")
+	}
+	if !IsSessionScopedMetadataKey(MetadataKeyTaskEnvironmentID) {
+		t.Fatal("task environment identity is not scoped to the runtime session")
+	}
+}
+
 func TestBuildRunningFromExecutionPersistsOfficeAgentIdentity(t *testing.T) {
 	running := buildRunningFromExecution(&AgentExecution{
 		ID:                   "exec-1",

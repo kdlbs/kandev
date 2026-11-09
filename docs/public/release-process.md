@@ -41,7 +41,7 @@ The workflow has four mutually exclusive operating modes:
 2. Confirm required checks are green on `main` and no release or release PR is active.
 3. Confirm merged PR titles/commits use the conventional categories consumed by `cliff.toml`. The workflow generates `CHANGELOG.md` and release notes.
 4. Verify platform-sensitive launcher, agentctl, container, and desktop changes on affected targets.
-5. Check GitHub/GHCR access, npm trusted publishing, `RELEASE_PR_BYPASS_TOKEN`, signing keys, the Discord webhook secret, and configured desktop signing or notarization secrets.
+5. Check GitHub/GHCR access, npm trusted publishing, `RELEASE_PR_BYPASS_TOKEN`, signing keys, the Discord webhook secret, and configured desktop signing or notarization secrets. A normal Stable dispatch verifies package-scoped npm authentication before release preparation.
 6. Update public docs for behavior that is about to ship.
 
 ## Configure the release PR bypass
@@ -85,6 +85,7 @@ For release automation changes, run:
 
 ```bash
 python3 .github/scripts/release-workflow-contract_test.py
+node --test scripts/release/npm-auth-preflight.test.mjs scripts/release/sdk-diagnostics.test.mjs
 bash scripts/release-desktop.test.sh
 make test-cli
 ```
@@ -117,11 +118,19 @@ repository secret `CLOUDFLARE_API_TOKEN` and repository Actions variable
 A successful dispatch does not prove that the subsequent landing deployment
 succeeded. Inspect the landing workflow separately.
 
+## Early npm authentication
+
+Normal Stable dispatches run a read-only `npm-auth-preflight` job before `prepare`. The job requests a fresh GitHub OIDC token for each package, exchanges it for a package-scoped npm token at the public registry, and discards both tokens. It checks the `kandev` launcher, all five `@kdlbs/runtime-*` packages, and `@kdlbs/plugin-sdk` when that package exists. Dry runs, desktop validation, Nightly releases, and existing-tag backfills skip the job and keep their existing validation or repair path.
+
+A rejected or unreadable package stops the run before release branch creation, release PR creation, host tagging, or builds. The result names the package and directs the maintainer to its trusted publisher configuration. A confirmed whole-package SDK absence is deferred to the existing first-package bootstrap. A registry read failure or a missing runtime package is an error, never a bootstrap state.
+
+The exchange proves package-scoped authentication only. It does not prove direct-publish or dist-tag permission, and a trusted publisher can still expire before publication. The publishing jobs remain responsible for their own authentication and allowed actions.
+
 ## Normal release flow
 
 Normal mode performs these stages:
 
-1. **Preflight and prepare version.** Compute the next version from packages and tags, then verify that the committed public key matches the `release` environment fingerprint before changing release files. Update the CLI package/lock, desktop package and Tauri/Cargo manifests, and `CHANGELOG.md`.
+1. **Verify npm authentication and prepare version.** Verify package-scoped OIDC authentication for the `kandev` launcher, the five `@kdlbs/runtime-*` packages, and the SDK publisher when it exists. Then compute the next version from packages and tags, and verify that the committed public key matches the `release` environment fingerprint before changing release files. Update the CLI package/lock, desktop package and Tauri/Cargo manifests, and `CHANGELOG.md`.
 2. **Merge and tag.** Open a release branch and PR. Use the protected administrator token to squash-merge the exact head without queue or CI latency. Select GitHub's reported merge commit, then revalidate the public key before importing the protected signing key. Verify the signed `vX.Y.Z` tag locally before the push.
 3. **Build web and runtimes.** Build the SPA and five runtime targets: Linux x64/arm64, macOS x64/arm64, and Windows x64. Stable standard archives contain `kandev`, host `agentctl`, and `remote-helpers.json`. Stable `-full` archives add all four remote helpers. Windows also gets standard and full ZIP archives. The workflow publishes checksums for every archive and helper asset.
 4. **Build desktop.** Embed the matching runtime and package the same five platform/architecture targets into macOS, Linux, and Windows installer formats.
@@ -211,12 +220,25 @@ host record and signed SDK tag, checks the receipt and public archive, and
 rejects inherited local registries, Go proxies, and checksum exemptions before
 using isolated caches. A local archive/proxy smoke test proves packaging only.
 
+### Registry propagation and diagnostics
+
+After one SDK upload or dist-tag mutation, the release observes the public registry for up to five minutes. It probes immediately and then waits 10, 20, and at most 30 seconds between reads. It never repeats the write. A version that appears after 30 seconds remains recoverable within that window. A version or channel update that is still absent at the deadline leaves the run incomplete but preserves the signed candidate and version.
+
+Logs and the job summary identify the package, SDK version, phase, observation attempt, elapsed time, and next wait. A visibility timeout after a successful upload or dist-tag command states which write npm accepted. An uncertain command stays uncertain until a registry read confirms the immutable identity. Failures distinguish authentication or authorization, registry read, visibility timeout, identity conflict, and public consumer verification. Captured npm output is sanitized and limited to 64 KiB before it reaches logs or summaries.
+
+If the immutable version is already confirmed, a later dist-tag failure leaves publication confirmed and reports the channel write and promotion state separately. Follow the channel-specific recovery guidance instead of treating the release as an unpublished upload.
+
+If npm accepted the upload but the version is not visible, check the package on npmjs.com and rerun the failed job in the same release. Do not publish again. If the command response was uncertain, inspect the exact public version before any recovery write. An expired or rejected trusted publisher must be reconfigured for that package, then reuse the same release and signed candidate. Never rebuild or replace the SDK bytes to recover a visibility delay.
+
 ### First-package bootstrap
 
 `bootstrap_required` is an incomplete release state. It is returned only after
 confirmed whole-package absence and retained, signed first-release evidence.
 An existing package with a missing version, an authentication failure, malformed
-registry response, or network failure does not qualify.
+registry response, or network failure does not qualify. The normal Stable early
+authentication gate defers its SDK check only after the same confirmed
+whole-package absence; that deferral does not claim ownership, approve
+bootstrap, or complete SDK publication.
 
 The run summary provides exact asset links, SDK version, and integrity. Use
 these links because SDK tag slashes can be URL-encoded. A

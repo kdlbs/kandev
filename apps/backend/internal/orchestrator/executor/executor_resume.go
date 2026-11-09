@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/integrations/cloneauth"
@@ -1055,6 +1056,11 @@ type ResumeOptions struct {
 	// workspace idle policy. It protects focus recovery from reviving a manual
 	// stop, cancellation, archive, or workflow-owned session.
 	RequireIdleSuspensionProvenance bool
+	// RequireExecutorActor fails the resume closed when executor admission
+	// does not establish an identity to launch as. Internal callers that act
+	// for the session's durable actor set it so a missing actor never becomes
+	// an unscoped launch.
+	RequireExecutorActor bool
 	// NoInitialPrompt keeps the task description out of a fresh recovery boot;
 	// the owning continuation delivers the captured submission after readiness.
 	NoInitialPrompt bool
@@ -1292,6 +1298,11 @@ func (e *Executor) ResumeSessionWithOptions(
 		ctx, err = e.executorAdmission(ctx, session.ID, session.ExecutorID, session.ExecutorProfileID)
 		if err != nil {
 			return nil, err
+		}
+	}
+	if session != nil && options.RequireExecutorActor {
+		if _, ok := authn.IdentityFromContext(ctx); !ok {
+			return nil, ErrExecutorActorUnavailable
 		}
 	}
 	if session != nil {
@@ -2309,7 +2320,7 @@ func (e *Executor) prepareResumeRepositorySettings(
 	if err != nil {
 		return "", nil, nil, err
 	}
-	if err := rejectInheritedEnvironmentExecutorMismatch(task, existingEnv, req.ExecutorType); err != nil {
+	if err := rejectInheritedEnvironmentExecutorMismatch(task, existingEnv, req.ExecutorType, false); err != nil {
 		return "", existingEnv, nil, err
 	}
 	if session.TaskEnvironmentID != "" {

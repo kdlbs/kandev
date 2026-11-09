@@ -175,6 +175,8 @@ feature/{title}-{suffix}
 `{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When registering a repository, an omitted `pull_before_worktree` defaults to `true`: Kandev attempts to refresh and verify the base branch before creating or recreating the worktree. Later repository settings saves preserve the current default branch and refresh choice when those fields are omitted, including when another save changes them before a rename finishes. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. When a usable local base exists, authentication, network, timeout, missing-ref, divergent-ref, and uncertain-ancestry errors produce a credential-safe warning and Kandev creates the worktree from that local base. The warning states that remote changes may be missing. When no usable local base exists, Kandev must materialize the requested branch from the remote; a failed refresh or missing remote ref stops task preparation with a repository-specific launch error. Explicit remote-only refs and remote executors keep this strict materialization behavior.
 Without an explicit cross-repository target, Kandev uses the current base branch for a numbered GitHub PR. If Git proves that the requested base branch was deleted, Kandev can use a configured fallback branch, often the repository default, only for an inherited or automatically selected base. It refreshes and verifies that fallback first, and shows a warning with both branch names. An explicit or manually changed PR base remains strict. Other PR refresh errors stop preparation.
 
+When a backend refresh fetch or fast-forward pull fails because Git reports recognized repository-lock contention, Kandev retries that command up to four attempts within the same execution deadline and with short increasing delays. Unrecognized or localized lock wording may not trigger a retry. A pull that updated files but could not move the branch ref can complete on retry, and independent staged or unstaged changes are preserved. A permission error that prevents creating a lock is not treated as retryable contention. If the execution deadline expires during backoff, a required refresh reports a timeout instead. Otherwise persistent contention remains visible: a required refresh stops preparation with a launch error that names lock contention and the attempt count, and a best-effort local refresh still uses the verified local base with its warning. Kandev never deletes an unknown lock, resets the checkout, or force-updates a branch to recover. Retry the launch after the lock becomes available.
+
 An explicit fork target has no default fallback. Kandev stops preparation if it cannot fetch or verify that target. Kandev does not create a worktree from an unverified local or remote-tracking branch.
 
 If the repository is intentionally offline, open its workspace repository settings and disable
@@ -204,6 +206,62 @@ stops for the whole task and rolls back only the checkouts created by that
 attempt. Earlier attachments may already have created their checkouts and run
 repository setup scripts; rollback is best effort and cannot undo effects
 outside those checkouts.
+
+### Repair a registered clone URL
+
+A workspace repository stores its provider identity separately from its clone URL.
+If the saved URL is wrong, for example after a repository moved between HTTPS and
+SSH transports, repair the registration without deleting the repository or
+changing its attached tasks.
+
+Inspect the current value with `GET /api/v1/repositories/{id}`. Preview a
+replacement without writing:
+
+```bash
+curl -X POST "$KANDEV_URL/api/v1/repositories/$REPOSITORY_ID/remote-url/validate" \
+  -H "Authorization: Bearer $KANDEV_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"remote_url":"git@github.com:acme/widget.git"}'
+```
+
+The response reports the saved and effective URLs, provider identity, and
+`validation_scope`. `locator_identity` means Kandev checked the locator syntax
+and provider identity only. `provider_inspection` means the active plugin
+provider verified the repository descriptor. Neither scope proves that the
+remote is currently reachable or that the current credentials can fetch it.
+
+Apply the replacement, then inspect again:
+
+```bash
+curl -X PATCH "$KANDEV_URL/api/v1/repositories/$REPOSITORY_ID" \
+  -H "Authorization: Bearer $KANDEV_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"remote_url":"git@github.com:acme/widget.git"}'
+```
+
+The WebSocket surface is equivalent. Send `repository.get` to inspect,
+`repository.remote_url.validate` with `id` and `remote_url` to preview, and
+`repository.update` with the supplied field to apply. The compact MCP settings
+tools also expose the field. Use one `remote_url` change with
+`options.validate_only: true` to preview, then repeat the update without the
+option or with `validate_only: false` to write.
+
+A replacement must preserve the saved provider, host, namespace or project, and
+repository name. Credentials, local paths, browser resource URLs, queries,
+fragments, and ambiguous separators are refused. GitHub and GitLab accept a
+conventional `git@host:path` locator when the saved origin is the matching
+default-port HTTPS host. Other SSH ports and IPv6 forms require an explicitly
+supported URL form. HTTPS provider paths keep supported percent-encoded or
+Unicode segments; encoded separators, controls, and traversal remain invalid.
+Plugin providers must return their exact HTTPS clone URL. A missing saved
+provider origin or a legacy locator with a conflicting host fails closed
+instead of guessing a replacement.
+
+Repair changes registration data only. It does not rewrite an existing checkout's
+Git origin, fetch, clone, restart a session, or discard local commits. A
+materialized checkout can still fail exact-origin reuse checks after the repair.
+Recover such a checkout deliberately with the existing worktree recovery actions
+after preserving its local work.
 
 ### Branch names in executor scripts
 

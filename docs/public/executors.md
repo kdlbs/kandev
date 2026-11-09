@@ -162,6 +162,15 @@ If a selected profile becomes unavailable, choose an accessible replacement
 before starting. Ownership changes apply to subsequent operations and do not
 terminate work already admitted.
 
+A deleted executor or profile can remain in a task's saved selection. These
+unavailable selections do not prevent task or workflow edits. The edit does not
+restore the deleted resource or authorize a launch. A live private selection
+still requires access, and new selections must exist and be accessible. Task
+and workflow edits return 403 (`FORBIDDEN` over WebSocket) when a live private
+selection is not accessible. A workflow edit returns 409 (`CONFLICT` over
+WebSocket) with `workspace_default_executor_unavailable` when the configured
+workspace default no longer resolves.
+
 The HTTP and MCP profile APIs accept `owner_user_id`. Omit it on creation for a
 shared resource. On update, omission preserves ownership; `null` or an empty
 string clears it. Invalid users and conflicting parent/profile owners are
@@ -571,6 +580,8 @@ Plain Stop preserves the sandbox and workspace for resume. Archive/delete termin
 
 ## SSH
 
+Guarded workflow changes require a usable selected credential for the destination agent profile. The check uses the current user's Global secret visibility. An agent-profile `ANTHROPIC_API_KEY` binding satisfies the check without a duplicate executor binding. See [Agents and profiles](agents-and-profiles.md#environment-variables-and-secrets) for profile environment guidance.
+
 > **Trust boundary:** Verify the target host fingerprint before saving. Kandev pins the target key, but unknown ProxyJump bastion keys may be accepted on first use; remote credential transfers write sensitive material under the remote user's home.
 
 <details>
@@ -605,6 +616,10 @@ Run **Test Connection**, independently verify the observed SHA256 host fingerpri
 The profile editor exposes remote shell and agent-readiness checks. Backend/API configuration also recognizes `ssh_workdir_root` (default `~/.kandev`) and `ssh_shell`; the current profile UI exposes `ssh_shell` but not a workdir-root field.
 
 The remote-auth card is built from the currently enabled agents. Depending on an agent's declared methods, it can copy selected local credential files, resolve a stored secret into that agent's authentication environment variable, or run an agent-specific setup script on the remote host. GitHub can use an explicitly selected `GITHUB_TOKEN` secret as an unmanaged profile override; Kandev does not copy the host-active `gh` token.
+
+For Claude, the card offers two independent stored-secret choices: `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`. Select the route that matches the account on the remote host. You can save both choices independently; clearing one does not convert or clear the other. The API-key route sets `ANTHROPIC_API_KEY` for the child process and does not create an OAuth credential file. The OAuth route keeps the existing remote credentials-file setup.
+
+Kandev checks the selected binding when it previews or applies a guarded workflow change, using the current user's Global secret visibility. A missing, deleted, workspace-scoped, unreadable, or empty binding blocks the change before the task moves. An agent-profile `ANTHROPIC_API_KEY` binding satisfies this check without a duplicate executor binding. This check validates configuration only. It does not contact Anthropic and does not prove that the provider accepts the credential.
 
 OpenCode credential copies merge top-level provider entries with the existing remote `auth.json`. Remote-only providers remain, and the selected host entry replaces the same provider on the remote. If either file is unreadable or is not a JSON object, Kandev leaves the remote file unchanged and reports the credential-copy error.
 
@@ -652,7 +667,7 @@ support, update Kandev and start a fresh session.
 
 SSH materializes the primary attached repository at the remote task-workspace root and additional repository sources in direct child directories. The default prepare script initializes or reuses the root checkout, verifies the configured origin, fetches the base branch, runs repository setup, and lets Kandev's managed postlude select the task branch. A stored profile script replaces that default and must leave the same verified primary checkout before `agentctl` starts. Existing matching checkouts retain local commits and untracked files; a different origin, missing checkout, failed script, timeout, or cancellation fails the launch before a controller is started. Ensure the remote host has the required Git credentials and can reach every selected remote; folders cannot be attached to SSH tasks.
 
-The runtime preflights the selected agent command and reports an installation hint when missing; it does not install the agent or its toolchain. Only these resolved credential environment names are forwarded to the remote agent: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GITHUB_TOKEN`, and `GH_TOKEN`. Arbitrary profile variables and control-plane process variables are not forwarded to that agent process. Agent-specific auth setup scripts can still consume a selected stored secret and materialize their own remote login state.
+The runtime preflights the selected agent command and reports an installation hint when missing; it does not install the agent or its toolchain. Only these resolved credential environment names are forwarded to the remote agent: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `CURSOR_API_KEY`, `AUGMENT_SESSION_AUTH`, `META_API_KEY`, `WINDSURF_API_KEY`, `XAI_API_KEY`, `GITHUB_TOKEN`, and `GH_TOKEN`. Arbitrary profile variables and control-plane process variables are not forwarded to that agent process. Agent-specific auth setup scripts can still consume a selected stored secret and materialize their own remote login state.
 
 Stop attempts to kill the session's remote `agentctl` and remove only the remote session-runtime directory, then closes forwarding and SSH. Terminal archive/delete stops run the profile cleanup script first; cleanup is best-effort, so a failure does not block controller teardown. Plain Stop skips cleanup and preserves the task workspace for resume. The task directory always remains and no background sweeper currently removes it. The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` also remain for later sessions. Periodically audit the remote process list, session directories, and `<workdir-root>/tasks/` after confirming no session needs the data. An explicit resume re-dials SSH and reuses a live recorded PID when possible; otherwise Kandev starts a fresh remote controller and re-runs preparation.
 

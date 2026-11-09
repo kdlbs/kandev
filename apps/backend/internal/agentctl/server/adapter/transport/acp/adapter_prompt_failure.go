@@ -95,9 +95,7 @@ func (a *Adapter) sendRetainedPromptError(
 	providerError *streams.ProviderError,
 ) {
 	var capacityContinuation *streams.CapacityContinuationSnapshot
-	if classified := routingerr.Classify(routingerr.Input{
-		Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: providerError.Message,
-	}); classified.Code == routingerr.CodeModelCapacity {
+	if classified := routingerr.Classify(providerError.RoutingInput(routingerr.PhasePromptSend, a.agentID, providerError.Message)); classified.Code == routingerr.CodeModelCapacity {
 		capacityContinuation = a.capacityContinuationSnapshot(turn, notificationsDrained)
 	}
 	a.cancelAsyncTurnComplete(sessionID)
