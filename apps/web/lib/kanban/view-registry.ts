@@ -9,6 +9,8 @@ import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 
 export type ViewContentProps = {
   compactHeight?: boolean;
+  /** True when this is the sole rendered workflow lane and should fill the available height. */
+  fillHeight?: boolean;
   workflowId: string;
   steps: WorkflowStep[];
   moveTargetSteps: WorkflowStep[];

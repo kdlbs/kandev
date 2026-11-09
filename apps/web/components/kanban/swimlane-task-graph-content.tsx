@@ -10,7 +10,12 @@ const BoardGraph = lazy(() =>
 );
 
 /** Board Graph view for one workflow lane, next to Pipeline. */
-export function SwimlaneTaskGraphContent({ tasks, onPreviewTask, onOpenTask }: ViewContentProps) {
+export function SwimlaneTaskGraphContent({
+  tasks,
+  onPreviewTask,
+  onOpenTask,
+  fillHeight,
+}: ViewContentProps) {
   const focusParam = useSearchParams().get(BOARD_GRAPH_FOCUS_PARAM);
   const focusId = focusParam && tasks.some((task) => task.id === focusParam) ? focusParam : null;
   const withTask = useCallback(
@@ -34,6 +39,7 @@ export function SwimlaneTaskGraphContent({ tasks, onPreviewTask, onOpenTask }: V
         focusId={focusId}
         onOpen={withTask(onOpenTask)}
         onPreview={withTask(onPreviewTask)}
+        fillHeight={fillHeight}
       />
     </Suspense>
   );

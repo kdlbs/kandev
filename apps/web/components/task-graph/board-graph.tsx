@@ -140,11 +140,14 @@ export function BoardGraph({
   focusId,
   onOpen,
   onPreview,
+  fillHeight = false,
 }: {
   tasks: BoardGraphTask[];
   focusId: string | null;
   onOpen: (taskId: string) => void;
   onPreview: (taskId: string) => void;
+  /** Stretch the canvas to the lane's full height instead of sizing to content. */
+  fillHeight?: boolean;
 }) {
   const [parallel, setParallel] = useTaskGraphParallelSteps();
   const graph = useBoardGraphData(tasks, focusId, parallel);
@@ -158,9 +161,20 @@ export function BoardGraph({
     if (focusId) containerRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [focusId]);
 
-  const height = Math.min(MAX_HEIGHT_PX, Math.max(MIN_HEIGHT_PX, graph.height * 0.75 + CHROME_PX));
+  const contentHeight = Math.min(
+    MAX_HEIGHT_PX,
+    Math.max(MIN_HEIGHT_PX, graph.height * 0.75 + CHROME_PX),
+  );
   return (
-    <div ref={containerRef} data-testid="board-graph" className="flex flex-col gap-2 px-2 pb-2">
+    <div
+      ref={containerRef}
+      data-testid="board-graph"
+      className={
+        fillHeight
+          ? "flex h-full min-h-0 flex-col gap-2 px-2 pb-2"
+          : "flex flex-col gap-2 px-2 pb-2"
+      }
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <SelectionBar
           title={selected?.title ?? null}
@@ -169,7 +183,14 @@ export function BoardGraph({
         />
         <TaskGraphParallelToggle pressed={parallel} onPressedChange={setParallel} />
       </div>
-      <div className="overflow-hidden rounded-md border" style={{ height }}>
+      <div
+        className={
+          fillHeight
+            ? "min-h-0 flex-1 overflow-hidden rounded-md border"
+            : "overflow-hidden rounded-md border"
+        }
+        style={fillHeight ? undefined : { height: contentHeight }}
+      >
         <TaskGraphCanvas
           model={graph.model}
           layout={graph.layout}

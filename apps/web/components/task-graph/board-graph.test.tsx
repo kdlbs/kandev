@@ -145,4 +145,23 @@ describe("BoardGraph", () => {
     expect(layoutGroupedTaskGraph).toHaveBeenCalledTimes(2);
     expect(screen.getByTestId("frame").textContent).toBe("Renamed parent");
   });
+
+  it("stretches the canvas to the lane height instead of a content-sized cap when fillHeight", () => {
+    render(
+      <BoardGraph tasks={tasks} focusId={null} onOpen={vi.fn()} onPreview={vi.fn()} fillHeight />,
+    );
+    const board = screen.getByTestId("board-graph");
+    expect(board.className).toContain("h-full");
+    const canvasWrapper = board.lastElementChild?.previousElementSibling as HTMLElement;
+    expect(canvasWrapper.className).toContain("flex-1");
+    expect(canvasWrapper.style.height).toBe("");
+  });
+
+  it("sizes the canvas to its content by default", () => {
+    render(<BoardGraph tasks={tasks} focusId={null} onOpen={vi.fn()} onPreview={vi.fn()} />);
+    const board = screen.getByTestId("board-graph");
+    expect(board.className).not.toContain("h-full");
+    const canvasWrapper = board.lastElementChild?.previousElementSibling as HTMLElement;
+    expect(canvasWrapper.style.height).not.toBe("");
+  });
 });
