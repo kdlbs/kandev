@@ -273,3 +273,27 @@ func TestSQLiteDeliverySessionStateListsCompletedCandidates(t *testing.T) {
 		t.Fatalf("candidate = %+v", candidate)
 	}
 }
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-005.3
+func TestSQLiteDeliverySessionStateIgnoresObsoletePredecessorSubmission(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	fixture := seedSettledSessionStateFixture(t, repo, "obsolete-predecessor")
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO agent_delivery_submissions
+			(id, session_id, incarnation_id, harness_generation, owner_generation,
+			 dispatch_attempt_id, payload_hash, payload, state, outcome, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		"submission-session-state-obsolete-predecessor-old", fixture.sessionID,
+		"incarnation-session-state-obsolete-predecessor-old", 1, 1, "", "hash-obsolete-predecessor",
+		[]byte("old prompt"), models.DeliverySubmissionPrepared, "", time.Now().UTC(), time.Now().UTC(),
+	); err != nil {
+		t.Fatalf("insert obsolete predecessor: %v", err)
+	}
+	result, err := repo.CorrectSettledAgentDeliverySessionState(context.Background(), fixture.request)
+	if err != nil || result.Outcome != models.AgentDeliverySessionStateChanged {
+		t.Fatalf("obsolete predecessor correction = %+v, %v", result, err)
+	}
+	if got := deliverySessionStateOf(t, repo, fixture.sessionID); got != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("obsolete predecessor session state = %s", got)
+	}
+}

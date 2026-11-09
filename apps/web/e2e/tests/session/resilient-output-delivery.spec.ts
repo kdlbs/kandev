@@ -192,7 +192,6 @@ test("a settled cancellation keeps the conversation and accepts one distinct nex
   const sessionBefore = await apiClient.getTaskSession(sessionId);
 
   await session.cancelAgentButton().click();
-  await session.waitForDirectInput(90_000);
   await expect
     .poll(
       async () =>
@@ -201,6 +200,7 @@ test("a settled cancellation keeps the conversation and accepts one distinct nex
       { timeout: 30_000 },
     )
     .toBe("WAITING_FOR_INPUT");
+  await session.waitForDirectInput(90_000);
   const sessionAfter = await apiClient.getTaskSession(sessionId);
   expect(sessionAfter.session.agent_execution_id).toBe(sessionBefore.session.agent_execution_id);
   expect(sessionAfter.session.downstream_acp_session_id).toBe(

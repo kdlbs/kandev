@@ -240,6 +240,33 @@ func (sm *StreamManager) probeDeliveryHealth(
 		zap.String("outcome", string(result.Outcome)))
 }
 
+// deliveryFailureMatchesPressureScope keeps the specific failure cause on idle
+// pressure observations, where the active submission is intentionally empty.
+// Execution identity remains mandatory; a recorded submission or prompt
+// generation must still match the captured scope when both sides know it.
+func deliveryFailureMatchesPressureScope(
+	owner deliveryHealthOwner,
+	failure *types.DeliveryFailureSnapshot,
+	submissionID string,
+	promptGeneration uint64,
+) bool {
+	execution := owner.execution
+	if execution == nil || failure == nil {
+		return false
+	}
+	if failure.SessionID != execution.SessionID || failure.IncarnationID != execution.DeliveryIncarnationID ||
+		failure.HarnessGeneration != execution.DeliveryHarnessGeneration || failure.StreamID != execution.DeliveryStreamID {
+		return false
+	}
+	if submissionID != "" && failure.SubmissionID != "" && failure.SubmissionID != submissionID {
+		return false
+	}
+	if promptGeneration != 0 && failure.PromptGeneration != 0 && failure.PromptGeneration != promptGeneration {
+		return false
+	}
+	return true
+}
+
 func deliveryFailureCorrelates(
 	owner deliveryHealthOwner,
 	failure *types.DeliveryFailureSnapshot,
@@ -375,7 +402,7 @@ func runtimeStoragePressureFromStatus(
 		attachment:         owner.attachment,
 	}
 	if failure != nil && failure.Storage != nil &&
-		deliveryFailureCorrelates(owner, failure, submissionID, promptGeneration) {
+		deliveryFailureMatchesPressureScope(owner, failure, submissionID, promptGeneration) {
 		pressure.FailureStorage = modelStorageDiagnostic(failure.Storage)
 	}
 	return pressure

@@ -363,10 +363,11 @@ func countCurrentOwnerSuccessorsTx(
 	var successors int64
 	err := tx.QueryRowxContext(ctx, db.Rebind(`
 		SELECT COUNT(*) FROM agent_delivery_submissions
-		WHERE session_id = ? AND id <> ? AND state IN (?, ?, ?)`),
-		request.SessionID, request.SubmissionID,
-		models.DeliverySubmissionPrepared, models.DeliverySubmissionAccepted,
-		models.DeliverySubmissionDispatching).Scan(&successors)
+		WHERE session_id = ? AND incarnation_id = ? AND harness_generation = ?
+		  AND id <> ? AND state IN (?, ?, ?)`),
+		request.SessionID, request.IncarnationID, request.HarnessGeneration,
+		request.SubmissionID, models.DeliverySubmissionPrepared,
+		models.DeliverySubmissionAccepted, models.DeliverySubmissionDispatching).Scan(&successors)
 	return successors, err
 }
 

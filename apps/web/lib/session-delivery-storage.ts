@@ -303,17 +303,34 @@ function readRuntimeStorageMeasurements(
  * Merge runtime-only storage state at the shared session boundary. Incoming
  * snapshots with an older epoch or revision never replace a newer live update.
  */
+function runtimeStorageSnapshotIdentity(health: RuntimeStorageHealth): string {
+  return `${health.epoch}:${health.revision}:${health.pressure_observed_at ?? ""}:${
+    health.pressure_age_seconds ?? ""
+  }`;
+}
+
 export function mergeRuntimeStorageHealth(
   existing: RuntimeStorageHealth | null | undefined,
   incoming: RuntimeStorageHealth | null | undefined,
 ): RuntimeStorageHealth | undefined {
   if (incoming === undefined) return existing ?? undefined;
   if (incoming === null) return undefined;
+  const priorReceivedAt = existing?.client_received_at_ms;
   const next = normalizeRuntimeStorageHealth(incoming);
   const prior = existing ? normalizeRuntimeStorageHealth(existing) : null;
+  if (prior && priorReceivedAt !== undefined) prior.client_received_at_ms = priorReceivedAt;
   if (!next) return prior ?? existing ?? undefined;
-  if (!prior) return next;
-  return shouldAcceptRuntimeStorageHealth(prior, next) ? next : prior;
+  if (!prior) {
+    next.client_received_at_ms = Date.now();
+    return next;
+  }
+  if (!shouldAcceptRuntimeStorageHealth(prior, next)) return prior;
+  next.client_received_at_ms =
+    runtimeStorageSnapshotIdentity(prior) === runtimeStorageSnapshotIdentity(next) &&
+    prior.client_received_at_ms !== undefined
+      ? prior.client_received_at_ms
+      : Date.now();
+  return next;
 }
 
 export function formatStorageUsage(value: number | null): string | null {

@@ -56,7 +56,7 @@ func (s *Service) reconcileAgentDeliverySettlements(ctx context.Context, session
 }
 
 func (s *Service) settleQueuedDeliveryPredecessor(ctx context.Context, taskID, sessionID string, effect *models.AgentDeliveryEffect) error {
-	ctx = context.WithoutCancel(ctx)
+	ctx = withSettledDeliverySessionStateConvergenceSkipped(context.WithoutCancel(ctx))
 	// The queue owns the successor, so this terminal intentionally has no workflow transition.
 	if err := s.recordNotRequiredDeliveryWorkflowOutcome(ctx, taskID, effect); err != nil {
 		return err

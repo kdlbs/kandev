@@ -259,4 +259,24 @@ describe("pressure age clock", () => {
       vi.useRealTimers();
     }
   });
+
+  it("uses the cached browser receipt age after a remount", () => {
+    const stale = {
+      ...health,
+      state: "normal" as const,
+      available_bytes: 500,
+      age_seconds: 0,
+      observed_at: new Date().toISOString(),
+      write_pressure: true,
+      pressure_observed_at: new Date().toISOString(),
+      pressure_age_seconds: 0,
+      client_received_at_ms: Date.now() - 120_000,
+      failure_storage: { reason: "disk_quota_exceeded", location: "local_runtime" as const },
+    };
+    render(<SessionDeliveryStorageNotice health={stale} />);
+    expect(screen.getByTestId(NOTICE_TEST_ID).getAttribute(STALE_ATTRIBUTE)).toBe("true");
+    cleanup();
+    render(<SessionDeliveryStorageNotice health={stale} />);
+    expect(screen.getByTestId(NOTICE_TEST_ID).getAttribute(STALE_ATTRIBUTE)).toBe("true");
+  });
 });

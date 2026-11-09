@@ -8408,6 +8408,10 @@ func (s *Service) recoverCompletedTurnAfterWorkflowPreflightFailure(
 		return
 	}
 	s.setSessionWaitingForInput(ctx, taskID, currentSession.ID, currentSession)
+	// Early settled-state convergence may already have moved the session to
+	// WAITING, which makes the helper above a no-op. Reconcile REVIEW here so
+	// the failed workflow preflight cannot leave an idle task IN_PROGRESS.
+	s.writeTaskReviewState(ctx, taskID, currentSession.ID)
 }
 
 // applyEngineTransitionWithCommitMode adapts bool-only commit callbacks to the

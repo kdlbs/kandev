@@ -723,6 +723,8 @@ export type RuntimeStorageHealth = {
   pressure_observed_at?: string;
   /** Backend receipt age for accepted delivery-health reports. Missing means unknown. */
   pressure_age_seconds?: number;
+  /** Browser receipt time for this local cache entry. Never sent by the backend. */
+  client_received_at_ms?: number;
   write_pressure?: boolean;
   producer_paused?: boolean;
   delivery_state?: string;

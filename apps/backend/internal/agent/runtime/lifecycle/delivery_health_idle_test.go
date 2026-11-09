@@ -6,6 +6,8 @@ import (
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func idleDeliveryPressureOwner(
@@ -171,5 +173,33 @@ func TestDeliveryHealthIdleObservationStopsWithOwner(t *testing.T) {
 	sm.monitorDeliveryHealth(ctx, owner)
 	if probes != 0 || applied != 0 {
 		t.Fatalf("stale owner probed %d times and applied %d observations", probes, applied)
+	}
+}
+
+// @covers AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002.17
+func TestDeliveryStorageIdlePressureKeepsOwnerFailureStorage(t *testing.T) {
+	execution := newDeliveryReconciliationTestExecution()
+	failure := correlatedFailure(execution)
+	failure.Storage = &streams.DeliveryStorageDiagnostic{
+		Version: streams.DeliveryStorageDiagnosticVersion,
+		Reason:  streams.DeliveryStorageReasonEventTooLarge,
+	}
+	status := deliveryFailureStatus(failure)
+	owner := deliveryHealthOwner{
+		execution:        execution,
+		submission:       func() string { return "" },
+		promptGeneration: execution.promptGenerationSnapshot,
+	}
+	pressure := runtimeStoragePressureFromStatus(owner, status, "", execution.promptGenerationSnapshot())
+	if pressure.FailureStorage == nil || pressure.FailureStorage.Reason != models.AgentStorageReasonEventTooLarge {
+		t.Fatalf("idle pressure dropped owner failure storage: %+v", pressure.FailureStorage)
+	}
+	other := newDeliveryReconciliationTestExecution()
+	other.SessionID = "other-session"
+	other.DeliveryStreamID = "other-stream"
+	other.DeliveryIncarnationID = "other-incarnation"
+	otherOwner := deliveryHealthOwner{execution: other}
+	if got := runtimeStoragePressureFromStatus(otherOwner, status, "", 0); got.FailureStorage != nil {
+		t.Fatalf("idle pressure attached a sibling failure: %+v", got.FailureStorage)
 	}
 }

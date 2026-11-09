@@ -10,6 +10,7 @@ import (
 )
 
 type settledDeliverySessionStateGuardContextKey struct{}
+type settledDeliverySessionStateConvergenceSkipContextKey struct{}
 
 func withSettledDeliverySessionStateGuardHeld(ctx context.Context) context.Context {
 	return context.WithValue(ctx, settledDeliverySessionStateGuardContextKey{}, true)
@@ -23,6 +24,18 @@ func settledDeliverySessionStateGuardHeld(ctx context.Context) bool {
 	return held
 }
 
+func withSettledDeliverySessionStateConvergenceSkipped(ctx context.Context) context.Context {
+	return context.WithValue(ctx, settledDeliverySessionStateConvergenceSkipContextKey{}, true)
+}
+
+func settledDeliverySessionStateConvergenceSkipped(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	skipped, _ := ctx.Value(settledDeliverySessionStateConvergenceSkipContextKey{}).(bool)
+	return skipped
+}
+
 // convergeSettledDeliverySessionState repairs only a stale STARTING or RUNNING
 // session row from one exact settled terminal and current idle runtime proof.
 // It never creates a terminal, repeats a completion effect, or dispatches work.
@@ -31,6 +44,9 @@ func (s *Service) convergeSettledDeliverySessionState(
 	sessionID string,
 	terminal *models.AgentDeliverySessionStateRequest,
 ) error {
+	if settledDeliverySessionStateConvergenceSkipped(ctx) {
+		return nil
+	}
 	settlements, terminal, err := s.settledDeliverySessionStateTerminal(ctx, sessionID, terminal)
 	if err != nil || terminal == nil || terminal.SessionID != sessionID {
 		return err
@@ -105,9 +121,10 @@ func (s *Service) correctSettledDeliverySessionState(
 	if current == nil || !deliverySessionStateCandidate(current, terminal) {
 		return nil, nil
 	}
-	if !s.deliverySessionStateRuntimeIdle(ctx, current) {
-		return nil, nil
-	}
+	// The pre-guard proof established current idle runtime ownership. The
+	// writer transaction revalidates the execution and harness generation,
+	// and the open-turn fence catches a successor claim that completed while
+	// this call waited for the guard. Runtime methods stay outside the guard.
 	return settlements.CorrectSettledAgentDeliverySessionState(ctx, *terminal)
 }
 

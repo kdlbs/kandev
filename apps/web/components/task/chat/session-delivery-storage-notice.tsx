@@ -60,9 +60,12 @@ function buildNoticeView(health: RuntimeStorageHealth, t: StorageTranslate): Not
 }
 
 /** Local monotonic elapsed time since this revision entered the browser. */
-function useReceiptElapsed(key: string): number {
-  const receipt = useRef({ key, at: performance.now() });
-  if (receipt.current.key !== key) receipt.current = { key, at: performance.now() };
+function useReceiptElapsed(key: string, initialElapsedMs = 0): number {
+  const initial = Number.isFinite(initialElapsedMs) && initialElapsedMs > 0 ? initialElapsedMs : 0;
+  const receipt = useRef({ key, at: performance.now() - initial });
+  if (receipt.current.key !== key) {
+    receipt.current = { key, at: performance.now() - initial };
+  }
   const [, setTick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setTick((tick) => tick + 1), 10_000);
@@ -145,6 +148,11 @@ function NoticeDetails({ health, view }: { health: RuntimeStorageHealth; view: N
   );
 }
 
+function cachedReceiptElapsed(health?: RuntimeStorageHealth | null): number {
+  if (health?.client_received_at_ms === undefined) return 0;
+  return Math.max(0, Date.now() - health.client_received_at_ms);
+}
+
 /** One compact advisory or blocked-output row. It never offers Resume. */
 export function SessionDeliveryStorageNotice({ health }: { health?: RuntimeStorageHealth | null }) {
   const { t } = useTranslation();
@@ -162,8 +170,9 @@ export function SessionDeliveryStorageNotice({ health }: { health?: RuntimeStora
         health.pressure_age_seconds ?? "unknown"
       }`
     : "";
-  const capacityElapsed = useReceiptElapsed(capacityReceiptKey);
-  const pressureElapsed = useReceiptElapsed(pressureReceiptKey);
+  const cachedElapsed = cachedReceiptElapsed(health);
+  const capacityElapsed = useReceiptElapsed(capacityReceiptKey, cachedElapsed);
+  const pressureElapsed = useReceiptElapsed(pressureReceiptKey, cachedElapsed);
   if (!health || !visible) return null;
   const view = buildNoticeView(health, t);
   const stale = view.pressure
