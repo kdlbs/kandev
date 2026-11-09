@@ -197,7 +197,7 @@ func TestPromptAfterIdleReclaimLaunchesPreparedSession(t *testing.T) {
 		repo: repo,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
+	svc.executor = withTestExecutorActor(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &inactiveTurnService{}
 
 	if err := svc.reclaimIdleSession(ctx, "session-prepared"); err != nil {

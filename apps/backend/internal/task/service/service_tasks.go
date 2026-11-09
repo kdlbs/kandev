@@ -470,6 +470,9 @@ func (s *Service) resolveTaskCreationReferences(
 	if err := s.validateBlockerReferences(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.validateRelationReferences(ctx, req); err != nil {
+		return nil, err
+	}
 	repositories, err := s.resolveTaskRepositoryRowsWithResolvedIdentityDedup(
 		ctx, req.WorkspaceID, req.Repositories, req.projectRepositoryDefaults,
 	)
@@ -536,6 +539,15 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 		if err := s.AddBlocker(ctx, task.ID, blockerID); err != nil {
 			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, fmt.Errorf("add blocker %s: %w", blockerID, err))
 		}
+	}
+	for _, relatedID := range req.RelatedTaskIDs {
+		if err := s.relations.AddRelation(ctx, task.ID, relatedID); err != nil {
+			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, fmt.Errorf("add related task %s: %w", relatedID, err))
+		}
+		// The peer already exists and may be open in another client; its own
+		// task.created already fired, so it only learns about this edge via an
+		// explicit refresh. publishDependencyChange covers both ends.
+		s.publishDependencyChange(ctx, task.ID, relatedID)
 	}
 
 	if err := s.persistTaskRepositoryRows(ctx, task.ID, prepared.repositories); err != nil {

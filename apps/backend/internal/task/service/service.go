@@ -603,6 +603,7 @@ type Service struct {
 	gitHubRepositoryOriginVerifier GitHubRepositoryOriginVerifier
 	repoCloneLocation              RepoCloneLocation
 	blockers                       BlockerRepository
+	relations                      RelationRepository
 	comments                       CommentRepository
 	taskStateActivity              TaskStateActivityLogger
 	secretStore                    secrets.SecretStore

@@ -39,7 +39,7 @@ func TestQueueUserPrompt_RuntimeUnavailableSurvivesFastPathRedispatch(t *testing
 	// by a workflow step move whose runtime has not launched yet.
 	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	svc.executor = withTestCapabilities(executor.NewExecutor(&mockAgentManager{repoForExecutionLookup: repo}, repo, testLogger(), executor.ExecutorConfig{}))
+	svc.executor = withTestExecutorActor(executor.NewExecutor(&mockAgentManager{repoForExecutionLookup: repo}, repo, testLogger(), executor.ExecutorConfig{}))
 
 	workerDone := make(chan struct{})
 	svc.onQueuedMessageExecutionComplete = func() { close(workerDone) }
@@ -129,7 +129,7 @@ func TestQueueUserPrompt_RetryableRecoveryGuardRetainsPersistedTurnAndMessage(t 
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
+	svc.executor = withTestExecutorActor(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &repoTurnService{repo: repo}
 
 	workerDone := make(chan struct{}, 2)
@@ -208,7 +208,7 @@ func TestPromptTask_SessionAwaitingLaunchClassifiedRuntimeUnavailable(t *testing
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	svc.executor = withTestCapabilities(executor.NewExecutor(&mockAgentManager{repoForExecutionLookup: repo}, repo, testLogger(), executor.ExecutorConfig{}))
+	svc.executor = withTestExecutorActor(executor.NewExecutor(&mockAgentManager{repoForExecutionLookup: repo}, repo, testLogger(), executor.ExecutorConfig{}))
 
 	_, err := svc.PromptTask(ctx, "t1", "s1", "hello", "", false, nil, false)
 	if err == nil {
@@ -282,7 +282,7 @@ func TestPromptTask_ExhaustedColdResumeNotClassifiedRuntimeUnavailable(t *testin
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
+	svc.executor = withTestExecutorActor(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	_, err = svc.PromptTask(ctx, "t1", "s1", "hello", "", false, nil, false)
 	if err == nil {
@@ -318,7 +318,7 @@ func TestPromptTask_ExecutorLookupErrorNotClassifiedRuntimeUnavailable(t *testin
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	svc.executor = withTestCapabilities(executor.NewExecutor(&mockAgentManager{repoForExecutionLookup: repo}, repo, testLogger(), executor.ExecutorConfig{}))
+	svc.executor = withTestExecutorActor(executor.NewExecutor(&mockAgentManager{repoForExecutionLookup: repo}, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.repo = &executorLookupErrorRepo{Repository: repo, err: errors.New("db unavailable")}
 
 	_, err := svc.PromptTask(ctx, "t1", "s1", "hello", "", false, nil, false)
@@ -357,7 +357,7 @@ func TestPromptTask_NonRetryableRecoveryGuardRemainsVisible(t *testing.T) {
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
+	svc.executor = withTestExecutorActor(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	_, err = svc.PromptTask(ctx, "t1", "s1", "prompt", "", false, nil, false)
 	if err == nil {
@@ -402,7 +402,7 @@ func TestQueueUserPrompt_RecoveryWinsResumeRace(t *testing.T) {
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
+	svc.executor = withTestExecutorActor(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.executor.SetOnResumeFailureRollback(svc.rollbackResumeFailureIfCurrentAttempt)
 	workerDone := make(chan struct{})
 	svc.onQueuedMessageExecutionComplete = func() { close(workerDone) }

@@ -140,6 +140,9 @@ type Manager struct {
 	// runtimeStorage holds the latest owner-verified advisory capacity per
 	// session. It is runtime-only and never persisted.
 	runtimeStorage *runtimeStorageProbeState
+	// runtimeStorageClock is a test seam for independent capacity and pressure
+	// receipt ages.
+	runtimeStorageClock func() time.Time
 
 	// retrackedSessionsMu guards retrackedSessions.
 	retrackedSessionsMu sync.RWMutex

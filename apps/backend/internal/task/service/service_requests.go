@@ -171,6 +171,7 @@ type CreateTaskRequest struct {
 	ProjectID              string   `json:"project_id,omitempty"`
 	Labels                 string   `json:"labels,omitempty"`
 	BlockedBy              []string `json:"blocked_by,omitempty"`
+	RelatedTaskIDs         []string `json:"related_task_ids,omitempty"`
 
 	// RequireAssigneeAgentProfileValidation opts this request into create-time
 	// validation of AssigneeAgentProfileID (must name an Office agent instance

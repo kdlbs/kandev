@@ -24,7 +24,7 @@ func TestQueueAndInterruptForPeerMessage_StoppedSessionResumesAgent(t *testing.T
 	agentMgr := &mockAgentManager{isAgentRunning: false, promptDone: make(chan struct{})}
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
+	svc.executor = withTestExecutorActor(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	msgCreator := &mockMessageCreator{}
 	svc.messageCreator = msgCreator
 	// Mirrors real agentctl bootstrap timing: LaunchAgent fires

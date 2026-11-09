@@ -1077,6 +1077,7 @@ type httpCreateTaskRequest struct {
 	ParentID               string                 `json:"parent_id,omitempty"`
 	WorkspacePath          string                 `json:"workspace_path,omitempty"`
 	BlockedBy              []string               `json:"blocked_by,omitempty"`
+	RelatedTaskIDs         []string               `json:"related_task_ids,omitempty"`
 	InitialWorkspaceLayout string                 `json:"initial_workspace_layout,omitempty"`
 	// StartWhenUnblocked records the agent start as an intent consumed by
 	// dependency resolution. nil derives it from StartAgent when BlockedBy is set.
@@ -1309,6 +1310,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		ParentID:                              body.ParentID,
 		WorkspacePath:                         body.WorkspacePath,
 		BlockedBy:                             body.BlockedBy,
+		RelatedTaskIDs:                        body.RelatedTaskIDs,
 		StartWhenUnblocked:                    body.StartWhenUnblocked,
 		ProjectID:                             body.ProjectID,
 		Labels:                                labels,

@@ -68,7 +68,8 @@ func (s *Service) handleAgentTurnFailed(ctx context.Context, data watcher.AgentE
 		return
 	}
 	if s.settleRetainedTurnFailure(ctx, data, session) {
-		s.settleFailedDeliveryWorkflowOutcome(context.WithoutCancel(ctx), data)
+		settleCtx := withSettledDeliverySessionStateGuardHeld(context.WithoutCancel(ctx))
+		s.settleFailedDeliveryWorkflowOutcome(settleCtx, data)
 		releaseGuard()
 		s.acknowledgeRetainedTurnFailure(data)
 	} else {
@@ -327,9 +328,7 @@ func (s *Service) persistRetainedTurnFailureMessage(
 		return "", fmt.Errorf("turn failure message creator is unavailable")
 	}
 	message := retainedTurnFailureMessage(data)
-	classified := routingerr.Classify(routingerr.Input{
-		Phase: routingerr.PhasePromptSend, ProviderID: data.AgentID, Stderr: message,
-	})
+	classified := routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhasePromptSend, data.AgentID, message))
 	metadata := map[string]interface{}{
 		"variant":           "error",
 		"scope":             "turn",

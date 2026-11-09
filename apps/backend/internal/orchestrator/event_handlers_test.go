@@ -1968,7 +1968,7 @@ func TestExecuteQueuedMessage_NoOnTurnStart_StepUnchanged(t *testing.T) {
 
 func createTestServiceWithScheduler(repo *sqliterepo.Repository, stepGetter *mockStepGetter, taskRepo *mockTaskRepo, agentMgr executor.AgentManagerClient) *Service {
 	log := testLogger()
-	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
+	exec := withTestExecutorActor(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
 	svc := &Service{
 		logger:             log,
