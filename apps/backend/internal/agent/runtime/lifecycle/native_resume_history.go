@@ -12,8 +12,8 @@ type contextContinuedSubmissionReader interface {
 	ListContextContinuedSubmissionIDs(context.Context, string, string, string, int64) ([]string, error)
 }
 
-// A consumed context continuation changes the active native scope, while the
-// old SQL outcome remains unknown. Retained peer records still require their
+// A consumed context continuation changes the active native scope without
+// marking the predecessor complete. Retained peer records still require their
 // ordinary exact validation; ancestry never hides contradictory peer evidence.
 func contextContinuedNativeResumeHistory(ctx context.Context, execution *AgentExecution, status *agentctl.DeliveryStatus, repository AgentDeliveryRepository, peer []journal.Submission, rows []*models.AgentDeliverySubmission) ([]*models.AgentDeliverySubmission, error) {
 	reader, supported := repository.(contextContinuedSubmissionReader)
@@ -61,6 +61,7 @@ func hasMissingHistoricalNativeSubmission(status *agentctl.DeliveryStatus, retai
 }
 
 func missingHistoricalNativeSubmission(status *agentctl.DeliveryStatus, retained map[string]bool, row *models.AgentDeliverySubmission) bool {
-	return row.State == models.DeliverySubmissionInterruptedUnknown && row.IncarnationID == status.IncarnationID &&
+	return (row.State == models.DeliverySubmissionInterruptedUnknown || row.State == models.DeliverySubmissionDispatching) &&
+		row.IncarnationID == status.IncarnationID &&
 		row.HarnessGeneration > 0 && row.HarnessGeneration < int64(status.HarnessGeneration) && !retained[row.ID]
 }

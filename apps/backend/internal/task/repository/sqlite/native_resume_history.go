@@ -31,7 +31,7 @@ func (r *Repository) contextContinuedSubmissionIDsTx(ctx context.Context, tx *sq
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, r.db.Rebind(`SELECT id, harness_generation FROM agent_delivery_submissions
- WHERE session_id = ? AND incarnation_id = ? AND state = 'interrupted_unknown' AND harness_generation > 0 AND harness_generation < ?
+	 WHERE session_id = ? AND incarnation_id = ? AND state IN ('interrupted_unknown', 'dispatching') AND harness_generation > 0 AND harness_generation < ?
  AND terminal_sequence = 0 AND terminal_stream_id = ''`), sessionID, incarnationID, generation)
 	if err != nil {
 		return nil, err

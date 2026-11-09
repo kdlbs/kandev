@@ -41,16 +41,18 @@ func TestContextContinuedHistoryClassifiesBeforeReplayAdvancesCursor(t *testing.
 	repository := &continuedHistoryRepository{
 		cursor: &models.AgentDeliveryCursor{SessionID: "session-1", IncarnationID: "inc-1", HarnessGeneration: 2,
 			StreamID: "stream-2", ReceivedSequence: 3, ProjectedSequence: 2},
-		continued: []string{"predecessor"},
+		continued: []string{"predecessor", "dispatching-predecessor"},
 	}
 	execution := &AgentExecution{SessionID: "session-1", ACPSessionID: "native-2"}
 	predecessor := &models.AgentDeliverySubmission{ID: "predecessor", IncarnationID: "inc-1", HarnessGeneration: 1,
 		State: models.DeliverySubmissionInterruptedUnknown}
+	dispatchingPredecessor := &models.AgentDeliverySubmission{ID: "dispatching-predecessor", IncarnationID: "inc-1", HarnessGeneration: 1,
+		State: models.DeliverySubmissionDispatching}
 	current := &models.AgentDeliverySubmission{ID: "current", IncarnationID: "inc-1", HarnessGeneration: 2,
 		State: models.DeliverySubmissionDispatching}
 
 	rows, err := contextContinuedNativeResumeHistory(context.Background(), execution, status, repository, nil,
-		[]*models.AgentDeliverySubmission{predecessor, current})
+		[]*models.AgentDeliverySubmission{predecessor, dispatchingPredecessor, current})
 
 	require.NoError(t, err)
 	require.Equal(t, []*models.AgentDeliverySubmission{current}, rows)

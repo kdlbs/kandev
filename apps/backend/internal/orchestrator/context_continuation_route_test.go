@@ -10,6 +10,7 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -91,4 +92,71 @@ func TestRetainedContextContinuationRouteRequiresNoLiveAgent(t *testing.T) {
 	agentManager.isAgentRunning = false
 	session.RouteState = dynamicRouteStatusActionRequired
 	require.False(t, svc.retainedContextContinuationRoute(ctx, session))
+}
+
+func TestClaimContextContinuationRouteRejectsStaleGenerationAndRunningAgent(t *testing.T) {
+	ctx := context.Background()
+	for _, test := range []struct {
+		name         string
+		stale        bool
+		agentRunning bool
+	}{
+		{name: "stale generation", stale: true},
+		{name: "agent still running", agentRunning: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			agentManager := &mockAgentManager{isAgentRunning: test.agentRunning}
+			svc, sessionID := newContextRouteTestService(t, agentManager)
+			seedRetryingContextRoute(t, ctx, svc, sessionID)
+			svc.markDynamicRouteActionRequired(ctx, sessionID, 1, "test recovery")
+			session, err := svc.repo.GetTaskSession(ctx, sessionID)
+			require.NoError(t, err)
+			if test.stale {
+				session.RouteGeneration++
+			}
+
+			claimed, err := svc.claimContextContinuationRoute(ctx, session)
+			require.False(t, claimed)
+			if test.stale {
+				require.ErrorIs(t, err, dynamicruntime.ErrStaleGeneration)
+			} else {
+				require.Error(t, err)
+			}
+			state, err := svc.repo.(dynamicRouteStateLoader).LoadRouteState(ctx, sessionID)
+			require.NoError(t, err)
+			require.Equal(t, dynamicRouteStatusActionRequired, state.Status)
+		})
+	}
+}
+
+type rejectContextContinuationRouteProjection struct {
+	*sqliterepo.Repository
+}
+
+func (r *rejectContextContinuationRouteProjection) UpdateTaskSessionIfCurrentSnapshot(
+	context.Context,
+	*models.TaskSession,
+	models.TaskSessionState,
+	time.Time,
+	map[string]interface{},
+) (bool, error) {
+	return false, nil
+}
+
+func TestClaimContextContinuationRouteRestoresActionRequiredWhenProjectionLoses(t *testing.T) {
+	ctx := context.Background()
+	svc, sessionID := newContextRouteTestService(t, &mockAgentManager{})
+	repo := svc.repo.(*sqliterepo.Repository)
+	seedRetryingContextRoute(t, ctx, svc, sessionID)
+	svc.markDynamicRouteActionRequired(ctx, sessionID, 1, "test recovery")
+	svc.repo = &rejectContextContinuationRouteProjection{Repository: repo}
+	session, err := svc.repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+
+	claimed, err := svc.claimContextContinuationRoute(ctx, session)
+	require.False(t, claimed)
+	require.ErrorIs(t, err, dynamicruntime.ErrStaleGeneration)
+	state, err := svc.repo.(dynamicRouteStateLoader).LoadRouteState(ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, dynamicRouteStatusActionRequired, state.Status)
 }
