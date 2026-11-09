@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -23,17 +24,27 @@ const refreshLockFixtureOutput = "fatal: Unable to create '.git/refs/heads/main.
 
 func writeRefreshLockFakeGit(t *testing.T, body string) (callCountPath string) {
 	t.Helper()
+	return writeRefreshLockFakeGitForCommand(t, "", body)
+}
+
+// writeRefreshLockFakeGitForCommand counts only invocations of command, so an
+// operation-specific retry can include unrelated inspection commands.
+func writeRefreshLockFakeGitForCommand(t *testing.T, command, body string) (callCountPath string) {
+	t.Helper()
 
 	callCountPath = filepath.Join(t.TempDir(), "calls")
 	t.Setenv("KD_LOCK_CALLS", callCountPath)
+	t.Setenv("KD_LOCK_COUNT_COMMAND", command)
 	scriptDir := writeFakeGitScript(t, `
 count_file="${KD_LOCK_CALLS:?}"
 count=0
 if [ -f "$count_file" ]; then
   count=$(cat "$count_file")
 fi
-count=$((count + 1))
-printf '%s' "$count" > "$count_file"
+if [ -z "${KD_LOCK_COUNT_COMMAND:-}" ] || [ "${1:-}" = "${KD_LOCK_COUNT_COMMAND}" ]; then
+  count=$((count + 1))
+  printf '%s' "$count" > "$count_file"
+fi
 `+body)
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return callCountPath
@@ -64,36 +75,36 @@ func runRefreshLockHelper(
 	)
 }
 
-// cancelOnRefreshRetryCore cancels the helper exactly when it enters backoff.
-// The log write happens before the timer starts, so the cancellation state is
-// deterministic and does not depend on subprocess or scheduler timing.
-type cancelOnRefreshRetryCore struct {
+// onRefreshRetryCore runs a callback exactly when the helper enters backoff.
+// The log write happens before the timer starts, so test state changes are
+// deterministic and do not depend on subprocess or scheduler timing.
+type onRefreshRetryCore struct {
 	zapcore.Core
-	cancel context.CancelFunc
+	onRetry func()
 }
 
-func (c *cancelOnRefreshRetryCore) With(fields []zapcore.Field) zapcore.Core {
-	return &cancelOnRefreshRetryCore{Core: c.Core.With(fields), cancel: c.cancel}
+func (c *onRefreshRetryCore) With(fields []zapcore.Field) zapcore.Core {
+	return &onRefreshRetryCore{Core: c.Core.With(fields), onRetry: c.onRetry}
 }
 
-func (c *cancelOnRefreshRetryCore) Check(entry zapcore.Entry, checked *zapcore.CheckedEntry) *zapcore.CheckedEntry {
+func (c *onRefreshRetryCore) Check(entry zapcore.Entry, checked *zapcore.CheckedEntry) *zapcore.CheckedEntry {
 	if c.Enabled(entry.Level) {
 		return checked.AddCore(entry, c)
 	}
 	return checked
 }
 
-func (c *cancelOnRefreshRetryCore) Write(entry zapcore.Entry, fields []zapcore.Field) error {
+func (c *onRefreshRetryCore) Write(entry zapcore.Entry, fields []zapcore.Field) error {
 	if entry.Message == "retrying git refresh after lock contention" {
-		c.cancel()
+		c.onRetry()
 	}
 	return c.Core.Write(entry, fields)
 }
 
-func newCancelOnRetryManager(t *testing.T, cancel context.CancelFunc) *Manager {
+func newOnRetryManager(t *testing.T, onRetry func()) *Manager {
 	t.Helper()
 	core, _ := observer.New(zapcore.DebugLevel)
-	log, err := commonlogger.NewFromZap(zap.New(&cancelOnRefreshRetryCore{Core: core, cancel: cancel}))
+	log, err := commonlogger.NewFromZap(zap.New(&onRefreshRetryCore{Core: core, onRetry: onRetry}))
 	if err != nil {
 		t.Fatalf("create observed logger: %v", err)
 	}
@@ -149,7 +160,11 @@ exit 0
 	})
 
 	t.Run("pull retries once", func(t *testing.T) {
-		calls := writeRefreshLockFakeGit(t, `
+		calls := writeRefreshLockFakeGitForCommand(t, "pull", `
+if [ "${1:-}" = "rev-parse" ]; then
+  echo "main"
+  exit 0
+fi
 if [ "${1:-}" = "pull" ] && [ "$count" -eq 1 ]; then
   echo "`+refreshLockFixtureOutput+`" >&2
   exit 128
@@ -259,6 +274,15 @@ exit 128
 		{
 			name: "authentication failure",
 			body: `
+echo "fatal: Authentication failed for 'https://user:secret@example.invalid/repo.git'" >&2
+exit 128
+`,
+			wantCalls: 1,
+		},
+		{
+			name: "lock and authentication failure in one output",
+			body: `
+echo "` + refreshLockFixtureOutput + `" >&2
 echo "fatal: Authentication failed for 'https://user:secret@example.invalid/repo.git'" >&2
 exit 128
 `,
@@ -427,7 +451,7 @@ exit 128
 	defer cancel()
 	// The hook cancels when the helper logs its backoff entry, so the test
 	// always observes cancellation in the intended state.
-	mgr := newCancelOnRetryManager(t, cancel)
+	mgr := newOnRetryManager(t, cancel)
 	repoPath := t.TempDir()
 	results := make(chan refreshLockRetryResult, 1)
 	go func() {
@@ -450,11 +474,74 @@ exit 128
 	}
 }
 
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.30
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.32
+func TestRefreshLockRetryAbortsOnCheckoutSwitch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX Git wrapper fixture is unavailable on Windows")
+	}
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("resolve real git: %v", err)
+	}
+	repoPath, _ := initGitRepoWithRemoteAhead(t)
+	runGit(t, repoPath, "branch", "other")
+
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("KD_REAL_GIT", realGit)
+	t.Setenv("KD_LOCK_CALLS", calls)
+	scriptDir := writeFakeGitScript(t, `
+if [ "${1:-}" = "pull" ]; then
+  count_file="${KD_LOCK_CALLS:?}"
+  count=0
+  if [ -f "$count_file" ]; then
+    count=$(cat "$count_file")
+  fi
+  count=$((count + 1))
+  printf '%s' "$count" > "$count_file"
+  echo "`+refreshLockFixtureOutput+`" >&2
+  exit 128
+fi
+exec "$KD_REAL_GIT" "$@"
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var switchErr error
+	mgr := newOnRetryManager(t, func() {
+		cmd := exec.Command(realGit, "checkout", "--quiet", "other")
+		cmd.Dir = repoPath
+		switchErr = cmd.Run()
+	})
+	result := mgr.runRefreshGitWithLockRetry(
+		context.Background(), "pull", repoPath, "main", 5*time.Second,
+		"pull", "--ff-only", "origin", "main",
+	)
+	if switchErr != nil {
+		t.Fatalf("switch checkout during backoff: %v", switchErr)
+	}
+	if result.runErr == nil || !strings.Contains(result.runErr.Error(), "checkout moved") {
+		t.Fatalf("error = %v, want a checkout-switch abort", result.runErr)
+	}
+	if result.attempts != 1 {
+		t.Fatalf("attempts = %d, want no pull attempt on another branch", result.attempts)
+	}
+	if got := refreshLockCallCount(t, calls); got != 1 {
+		t.Fatalf("pull calls = %d, want 1", got)
+	}
+	if branch := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "--abbrev-ref", "HEAD")); branch != "other" {
+		t.Fatalf("checkout branch = %q, want other", branch)
+	}
+}
+
 // @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.33
 // @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.14
 // @covers AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-002.5
 func TestRefreshLockRetryExhaustion(t *testing.T) {
-	calls := writeRefreshLockFakeGit(t, `
+	calls := writeRefreshLockFakeGitForCommand(t, "pull", `
+if [ "${1:-}" = "rev-parse" ]; then
+  echo "main"
+  exit 0
+fi
 echo "`+refreshLockFixtureOutput+`" >&2
 exit 128
 `)

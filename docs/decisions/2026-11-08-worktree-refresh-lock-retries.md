@@ -12,7 +12,7 @@ A disposable Git reproduction showed the same state and recovered through a norm
 
 The platform prohibits generic retries after authentication or service failure.
 Known lock contention needs a narrower rule without weakening required refresh or credential selection.
-Delivery remains pending in the [plan](../plans/git-refresh-lock-recovery/plan.md).
+Delivery is complete; the [plan](../plans/git-refresh-lock-recovery/plan.md) records the results.
 
 ## Decision
 

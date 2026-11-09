@@ -28,6 +28,7 @@ type refreshLockExhaustedError struct {
 	cause     error
 }
 
+// Error returns fixed, credential-safe wording with the operation and attempts.
 func (e *refreshLockExhaustedError) Error() string {
 	return fmt.Sprintf(
 		"git %s failed after %d attempts: repository lock contention persisted; retry the launch after the lock becomes available",
@@ -35,8 +36,10 @@ func (e *refreshLockExhaustedError) Error() string {
 	)
 }
 
+// Unwrap preserves the safe sentinel and final process error for inspection.
 func (e *refreshLockExhaustedError) Unwrap() error { return e.cause }
 
+// refreshLockRetryResult is one refresh command's final result after bounded retries.
 type refreshLockRetryResult struct {
 	output     []byte
 	runErr     error
@@ -44,6 +47,7 @@ type refreshLockRetryResult struct {
 	attempts   int
 }
 
+// refreshLockAttempt is one admitted Git command's result and execution deadline.
 type refreshLockAttempt struct {
 	output      []byte
 	runErr      error
@@ -78,6 +82,13 @@ func (m *Manager) runRefreshGitWithLockRetry(
 				result.runErr = waitErr
 				result.execCtxErr = waitErr
 				return result
+			}
+			if operation == "pull" {
+				if guardErr := m.verifyRefreshPullCheckout(retryCtx, repoPath, branch); guardErr != nil {
+					result.runErr = guardErr
+					result.execCtxErr = retryCtx.Err()
+					return result
+				}
 			}
 		}
 		attemptResult := m.runRefreshGitAttempt(retryCtx, repoPath, execTimeout, args...)
@@ -120,6 +131,8 @@ func (m *Manager) runRefreshGitWithLockRetry(
 	return result
 }
 
+// runRefreshGitAttempt runs one classified Git command and captures the
+// post-admission deadline that later retries and backoff share.
 func (m *Manager) runRefreshGitAttempt(
 	ctx context.Context, repoPath string, execTimeout time.Duration, args ...string,
 ) refreshLockAttempt {
@@ -137,6 +150,22 @@ func (m *Manager) runRefreshGitAttempt(
 	return attempt
 }
 
+// verifyRefreshPullCheckout prevents a delayed retry from fast-forwarding a
+// different branch after an external checkout switch.
+func (m *Manager) verifyRefreshPullCheckout(ctx context.Context, repoPath, branch string) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	current := m.currentBranch(ctx, repoPath)
+	if current == branch {
+		return nil
+	}
+	return fmt.Errorf(
+		"git pull retry aborted because the checkout moved from %q to %q: %w",
+		branch, current, ErrGitCommandFailed,
+	)
+}
+
 // refreshLockRetryContext derives retries from the caller lifetime and the
 // first post-admission deadline, never from the completed attempt's context.
 func refreshLockRetryContext(ctx context.Context, attempt refreshLockAttempt) (context.Context, context.CancelFunc) {
@@ -146,6 +175,7 @@ func refreshLockRetryContext(ctx context.Context, attempt refreshLockAttempt) (c
 	return context.WithCancel(ctx)
 }
 
+// refreshLockBackoff returns the delay before the numbered retry.
 func refreshLockBackoff(attempt int) time.Duration {
 	if attempt <= 2 {
 		return refreshLockInitialBackoff
@@ -153,6 +183,7 @@ func refreshLockBackoff(attempt int) time.Duration {
 	return refreshLockInitialBackoff * time.Duration(1<<(attempt-2))
 }
 
+// waitRefreshLockBackoff waits for the retry delay or the shared deadline.
 func waitRefreshLockBackoff(ctx context.Context, delay time.Duration) error {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -165,12 +196,17 @@ func waitRefreshLockBackoff(ctx context.Context, delay time.Duration) error {
 }
 
 // isRetryableRefreshLockFailure separates real contention causes from
-// permission, read-only, namespace, and incidental lock-filename failures.
+// permission, read-only, namespace, authentication, and incidental
+// lock-filename failures.
 func isRetryableRefreshLockFailure(output string, contextErr, runErr error) bool {
 	if classifyRefreshDiagnostic(output, runErr, contextErr).code != refreshDiagnosticLock {
 		return false
 	}
-	for line := range strings.SplitSeq(strings.ToLower(output), "\n") {
+	lower := strings.ToLower(output)
+	if hasNonRetryableRefreshFailure(lower) {
+		return false
+	}
+	for line := range strings.SplitSeq(lower, "\n") {
 		if isRetryableRefreshLockLine(line) {
 			return true
 		}
@@ -178,6 +214,32 @@ func isRetryableRefreshLockFailure(output string, contextErr, runErr error) bool
 	return false
 }
 
+// hasNonRetryableRefreshFailure checks the permanent categories that can share
+// combined output with a lock message. These mirror the diagnostic classifier's
+// authentication, transport, repository, invalid-ref, and permission cases.
+func hasNonRetryableRefreshFailure(lower string) bool {
+	for _, fragment := range []string{
+		"authentication failed",
+		"terminal prompts disabled",
+		"could not read username",
+		"permission denied",
+		"host key verification failed",
+		"could not resolve host",
+		"connection refused",
+		"certificate verify failed",
+		"repository not found",
+		"read-only file system",
+		"operation not permitted",
+		"fatal: bad ref ",
+	} {
+		if strings.Contains(lower, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+// isRetryableRefreshLockLine recognizes one concrete contention cause.
 func isRetryableRefreshLockLine(line string) bool {
 	if strings.Contains(line, "another git process seems to be running") {
 		return true

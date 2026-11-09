@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -52,6 +54,9 @@ func initGitRepoWithRemoteAhead(t *testing.T) (string, string) {
 func installGitPullLockFixture(t *testing.T) (pullCountPath, statePrefix string) {
 	t.Helper()
 
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX Git wrapper fixture is unavailable on Windows")
+	}
 	realGit, err := exec.LookPath("git")
 	if err != nil {
 		t.Fatalf("resolve real git: %v", err)
@@ -194,6 +199,74 @@ func TestCreateWorktree_RefreshLockPreservesEdits(t *testing.T) {
 	if readFixtureFile(t, pullCountPath) != "2" {
 		t.Fatalf("pull count = %q, want one failed and one successful pull",
 			readFixtureFile(t, pullCountPath))
+	}
+}
+
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.30
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.33
+func TestPullCurrentBranch_RetryTimeoutPreservesDeadline(t *testing.T) {
+	calls := writeRefreshLockFakeGitForCommand(t, "pull", `
+if [ "${1:-}" = "rev-parse" ]; then
+  if [ "${2:-}" = "--abbrev-ref" ]; then
+    echo "main"
+  fi
+  exit 0
+fi
+if [ "${1:-}" = "pull" ] && [ "$count" -eq 1 ]; then
+  echo "`+refreshLockFixtureOutput+`" >&2
+  exit 128
+fi
+if [ "${1:-}" = "pull" ]; then
+  sleep 1
+  exit 0
+fi
+exit 0
+`)
+	mgr := newRecreateTestManager(t)
+	mgr.pullTimeout = 300 * time.Millisecond
+
+	_, err := mgr.pullCurrentBranchOrFallback(
+		context.Background(), t.TempDir(), "main", "origin/main", "Sync base branch", nil, false,
+	)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want context.DeadlineExceeded", err)
+	}
+	if got := refreshLockCallCount(t, calls); got != 2 {
+		t.Fatalf("pull calls = %d, want the failed first attempt and timed-out retry", got)
+	}
+}
+
+// @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.33
+func TestPullCurrentBranch_ExhaustedLockPreservedWithRefSelectionFailure(t *testing.T) {
+	writeRefreshLockFakeGitForCommand(t, "pull", `
+if [ "${1:-}" = "rev-parse" ]; then
+  if [ "${2:-}" = "--abbrev-ref" ]; then
+    echo "main"
+    exit 0
+  fi
+  exit 1
+fi
+if [ "${1:-}" = "pull" ]; then
+  echo "`+refreshLockFixtureOutput+`" >&2
+  exit 128
+fi
+exit 0
+`)
+	mgr := newRecreateTestManager(t)
+
+	_, err := mgr.pullCurrentBranchOrFallback(
+		context.Background(), t.TempDir(), "main", "origin/main", "Sync base branch", nil, false,
+	)
+	if err == nil {
+		t.Fatal("pullCurrentBranchOrFallback() error = nil, want a required failure")
+	}
+	if !errors.Is(err, ErrGitCommandFailed) {
+		t.Fatalf("error = %v, want exhausted lock identity preserved", err)
+	}
+	for _, want := range []string{"lock contention", "origin/main"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want %q", err, want)
+		}
 	}
 }
 

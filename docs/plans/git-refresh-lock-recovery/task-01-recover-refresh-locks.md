@@ -175,10 +175,16 @@ Implemented on 2026-11-08.
 - Review fixes: retry recognition now requires a concrete `File exists`,
   running-process, or ref compare-and-swap cause in a Git error line, so wrapped
   permission, read-only, and ref-namespace failures keep their original cause
-  and single-attempt behavior. Exhausted wording is ownership-neutral.
-  Cancellation is triggered deterministically at the backoff log barrier, and
-  the budget test holds a Git slot, observes queued admission, and proves the
-  first command still receives its full post-admission budget.
+  and single-attempt behavior. Mixed authentication or other permanent failures
+  also reject the retry. Exhausted wording is ownership-neutral. Cancellation is
+  triggered deterministically at the backoff log barrier, and the budget test
+  holds a Git slot, observes queued admission, and proves the first command still
+  receives its full post-admission budget.
+- PR fixup: preserved exhausted-lock and execution-deadline identities when ref
+  selection also fails, aborted delayed pull retries after a checkout switch,
+  skipped the POSIX wrapper recovery tests on Windows, and qualified the public
+  retry and timeout guidance. Added timeout, ref-selection, checkout-switch, and
+  mixed-failure regressions.
 - `(cd apps/backend && go test -trimpath -race ./internal/worktree -count=1)`:
   passed.
 - `bash scripts/lint-go-changed ...` for the five changed Go files: no issues.

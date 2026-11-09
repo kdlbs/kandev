@@ -118,10 +118,11 @@ All new test names are proposed.
 | .30; platform 002.3, 002.4 | Same file: `TestRefreshLockRetryBudget`, `TestRefreshLockRetryCancellation`. Hold initial admission, then prove one deadline across attempts and backoff. Assert slot release and no command after cancellation. |
 | .31, .34 | `manager_refresh_lock_test.go`: `TestCreateWorktree_RefreshLockReleased`, `TestCreateWorktree_RefreshLockPreservesEdits`. Use a real partial fast-forward and fixture-owned lock. |
 | .33, .14; platform 002.5 | `refresh_lock_retry_test.go`: `TestRefreshLockRetryExhaustion`, `TestRefreshLockRetrySafeDiagnostics`. Assert attempt count, fixed text, cause identity, and credential exclusion. |
+| .30, .32, .33 | `refresh_lock_retry_test.go` and `manager_refresh_lock_test.go`: `TestRefreshLockRetryAbortsOnCheckoutSwitch`, `TestPullCurrentBranch_RetryTimeoutPreservesDeadline`, `TestPullCurrentBranch_ExhaustedLockPreservedWithRefSelectionFailure`. Assert no pull on a switched checkout, preserved deadline identity, and combined selection plus lock failure. |
 | .6, .10, .13, .32; platform 002.6 | `manager_refresh_lock_test.go`: `TestCreateWorktree_RefreshLockPolicy`. Include required PR and remote-only failure, best-effort warning, and cancellation. Retain the existing policy tests. |
 
 The transient-retry and real partial-fast-forward tests must fail before implementation.
-Current code returns the first lock failure instead of attempting recovery.
+Before implementation, the refresh commands returned the first lock failure instead of attempting recovery.
 
 ## End-to-end evidence
 

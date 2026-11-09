@@ -735,23 +735,46 @@ func (m *Manager) pullCurrentBranchOrFallback(
 		)
 		resolved, selectErr := m.selectContainingRef(ctx, repoPath, baseBranch, remoteRef)
 		if selectErr != nil {
+			failureCause := pullRefreshFailureCause(pullResult, selectErr)
 			if !localBaseExists {
-				return "", m.failRequiredSync(stepName, baseBranch, onProgress, reason, selectErr)
+				return "", m.failRequiredSync(stepName, baseBranch, onProgress, reason, failureCause)
 			}
 			return m.completeSyncWithWarning(
 				ctx, stepName, baseBranch, "Pull", classifyBaseRefSelectionFailure(selectErr),
-				baseBranch, onProgress, selectErr,
+				baseBranch, onProgress, failureCause,
 			)
 		}
+		failureCause := pullRefreshFailureCause(pullResult, nil)
 		if localBaseExists {
 			return m.completeSyncWithWarning(
-				ctx, stepName, baseBranch, "Pull", reason, resolved, onProgress, pullResult.runErr,
+				ctx, stepName, baseBranch, "Pull", reason, resolved, onProgress, failureCause,
 			)
 		}
-		return "", m.failRequiredSync(stepName, baseBranch, onProgress, reason, pullResult.runErr)
+		return "", m.failRequiredSync(stepName, baseBranch, onProgress, reason, failureCause)
 	}
 	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", baseBranch), "")
 	return baseBranch, nil
+}
+
+// pullRefreshFailureCause preserves execution-context and exhausted-lock
+// identities alongside a ref-selection failure. It keeps the selection error
+// when neither richer cause exists.
+func pullRefreshFailureCause(result refreshLockRetryResult, selectErr error) error {
+	cause := result.runErr
+	if result.execCtxErr != nil {
+		cause = result.execCtxErr
+	}
+	if selectErr == nil {
+		return cause
+	}
+	if result.execCtxErr != nil {
+		return errors.Join(selectErr, result.execCtxErr)
+	}
+	var lockErr *refreshLockExhaustedError
+	if errors.As(result.runErr, &lockErr) {
+		return errors.Join(selectErr, result.runErr)
+	}
+	return selectErr
 }
 
 func classifyBaseRefSelectionFailure(err error) string {
