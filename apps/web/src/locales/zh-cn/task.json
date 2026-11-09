@@ -3028,6 +3028,8 @@
   "storageAdvisoryWorkspaceKind": "工作区存储",
   "storageAdvisoryJournalKind": "交付存储",
   "storageAdvisoryObserved": "测量时间 {{time}}",
+  "storageAdvisoryCapacityObserved": "容量观测时间 {{time}}",
+  "storageAdvisoryPressureObserved": "投递压力观测时间 {{time}}",
   "storageAdvisoryExecutorFallback": "执行器",
   "storageOpenSettings": "打开存储设置",
   "storageRecoveryCapacityTitle": "会话因磁盘空间不足而中断",

@@ -3028,6 +3028,8 @@
   "storageAdvisoryWorkspaceKind": "工作區存儲",
   "storageAdvisoryJournalKind": "交付存儲",
   "storageAdvisoryObserved": "測量時間 {{time}}",
+  "storageAdvisoryCapacityObserved": "容量觀測時間 {{time}}",
+  "storageAdvisoryPressureObserved": "投遞壓力觀測時間 {{time}}",
   "storageAdvisoryExecutorFallback": "執行器",
   "storageOpenSettings": "開啟存儲設定",
   "storageRecoveryCapacityTitle": "工作階段因磁碟空間不足而中斷",

@@ -341,6 +341,15 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	if sessionID != "" && (eventType == agentEventComplete || eventType == agentEventError) {
 		settlementCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		if streamGuard != nil && streamGuard.locked {
+			settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
+		}
+		if eventType == agentEventComplete {
+			// The streaming completion path defers the running->waiting
+			// decision to agent.ready. Changing it here would make that ready
+			// event look stale and skip its workflow and queue work.
+			settlementCtx = withSettledDeliverySessionStateConvergenceSkipped(settlementCtx)
+		}
 		if err := s.reconcileAgentDeliverySettlements(settlementCtx, sessionID); err != nil {
 			s.logger.Warn("failed to finish durable delivery terminal settlement",
 				zap.String("task_id", taskID),
