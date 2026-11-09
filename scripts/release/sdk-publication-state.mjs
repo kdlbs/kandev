@@ -1,4 +1,8 @@
 import { compareVersions, validateRecord } from "./plugin-sdk.mjs";
+import { packageName } from "./sdk-registry.mjs";
+
+export const REGISTRY_OBSERVATION_WINDOW_MS = 300_000;
+const REGISTRY_PROBE_WAITS_MS = [10_000, 20_000, 30_000];
 
 function validateContext({ source, fingerprint }) {
   validateRecord(source.record);
@@ -62,10 +66,122 @@ async function observe(io, read, valid, label, writeError) {
   );
 }
 
+function probeWait(attempt) {
+  return REGISTRY_PROBE_WAITS_MS[
+    Math.min(attempt, REGISTRY_PROBE_WAITS_MS.length - 1)
+  ];
+}
+
+function isDefiniteAuthenticationRejection(error) {
+  const output = [error?.code, error?.stderr, error?.message]
+    .filter((value) => typeof value === "string")
+    .join("\n");
+  return /\b(?:ENEEDAUTH|E401|E403)\b|unauthorized|authentication|permission denied|forbidden/i.test(
+    output,
+  );
+}
+
+function describeRegistryState(state) {
+  return {
+    package_exists: state.packageExists,
+    observed_version: state.version?.version ?? null,
+    observed_latest: state.latest ?? null,
+  };
+}
+
+function reportObservation(io, event) {
+  if (typeof io.diagnostics?.observation === "function")
+    io.diagnostics.observation({
+      package: packageName,
+      ...(event.phase === "version_visibility"
+        ? { write_outcome: io.diagnostics.writeOutcome }
+        : {}),
+      ...event,
+    });
+}
+
+function visibilityTimeoutError(label, writeError, phase) {
+  const minutes = REGISTRY_OBSERVATION_WINDOW_MS / 60_000;
+  const error = writeError
+    ? new Error(
+        `${label} did not become visible within ${minutes} minutes after an uncertain npm response (${writeError.message}). Check the public registry identity before any recovery write.`,
+      )
+    : new Error(
+        `${label} was accepted by npm but did not become publicly visible within ${minutes} minutes. Check https://www.npmjs.com/package/${packageName} and rerun the failed job in the same release.`,
+      );
+  error.code = "VISIBILITY_TIMEOUT";
+  error.acceptedUpload = !writeError;
+  error.phase = phase;
+  error.operation = phase === "channel_promotion" ? "dist-tag" : "upload";
+  error.writeError = writeError;
+  return error;
+}
+
+async function observeRegistry(
+  io,
+  read,
+  valid,
+  { label, phase, version, describe = () => ({}) },
+  writeError,
+) {
+  const started = io.now();
+  const deadline = started + REGISTRY_OBSERVATION_WINDOW_MS;
+  let attempt = 0;
+  for (;;) {
+    if (attempt > 0 && io.now() >= deadline) break;
+    const value = await read();
+    attempt += 1;
+    if (valid(value)) {
+      reportObservation(io, {
+        phase,
+        version,
+        attempt,
+        elapsed_ms: Math.round(io.now() - started),
+        next_wait_ms: 0,
+        visible: true,
+        ...describe(value),
+      });
+      return value;
+    }
+    if (
+      writeError &&
+      attempt === 1 &&
+      isDefiniteAuthenticationRejection(writeError)
+    ) {
+      writeError.phase = phase;
+      writeError.operation =
+        phase === "channel_promotion" ? "dist-tag" : "upload";
+      throw writeError;
+    }
+    const now = io.now();
+    const remaining = deadline - now;
+    const nextWait =
+      remaining > 0 ? Math.min(probeWait(attempt - 1), remaining) : 0;
+    reportObservation(io, {
+      phase,
+      version,
+      attempt,
+      elapsed_ms: Math.round(now - started),
+      next_wait_ms: nextWait,
+      visible: false,
+      ...describe(value),
+    });
+    if (nextWait <= 0) break;
+    await io.registryWait(nextWait);
+  }
+  throw visibilityTimeoutError(label, writeError, phase);
+}
+
 export async function preparePublication(io, context) {
   validateContext(context);
   const { source } = context;
+  io.diagnostics?.start("source_verification");
   let { tag, registry } = await readState(io, context);
+  io.diagnostics?.phase("source_verification", "passed", {
+    source_commit: source.commit,
+    host_tag: source.hostTag,
+  });
+  io.diagnostics?.start("candidate_verification");
   const candidate = await io.obtainCandidate(source, {
     allowCreate: !tag && !registry.version,
     bootstrapAllowed:
@@ -74,6 +190,9 @@ export async function preparePublication(io, context) {
   verifyCandidate(candidate, context);
   verifyRegistry(registry, candidate, source);
   await io.retainCandidate(candidate, source);
+  io.diagnostics?.phase("candidate_verification", "passed", {
+    integrity: candidate.integrity,
+  });
   ({ tag, registry } = await readState(io, context));
   verifyRegistry(registry, candidate, source);
   if (!tag) {
@@ -95,41 +214,76 @@ export async function preparePublication(io, context) {
     );
   }
   await io.finalizeCandidate(candidate, source);
+  io.diagnostics?.setPublication("not_attempted");
   return { status: "prepared", candidate, source };
 }
 
 async function ensureLatest(io, context) {
   const version = context.source.record.sdk_version;
-  let registry = await io.readRegistry(version);
-  if (registry.latest === version) return;
-  if (registry.latest && compareVersions(registry.latest, version) > 0) {
-    await io.verifyNewerLatest(registry.latest);
-    return;
-  }
-  let writeError;
+  io.diagnostics?.start("channel_promotion");
   try {
-    await io.moveLatest(version);
+    let registry = await io.readRegistry(version);
+    io.diagnostics?.setChannelWriteOutcome("not_attempted");
+    if (registry.latest === version) {
+      io.diagnostics?.phase("channel_promotion", "skipped", {
+        reason: "already_current",
+      });
+      return;
+    }
+    if (registry.latest && compareVersions(registry.latest, version) > 0) {
+      await io.verifyNewerLatest(registry.latest);
+      io.diagnostics?.phase("channel_promotion", "skipped", {
+        reason: "newer_channel_preserved",
+      });
+      return;
+    }
+    let writeError;
+    try {
+      await io.moveLatest(version);
+      io.diagnostics?.setChannelWriteOutcome("accepted");
+    } catch (error) {
+      writeError = error;
+      io.diagnostics?.setChannelWriteOutcome(
+        isDefiniteAuthenticationRejection(error) ? "rejected" : "uncertain",
+      );
+    }
+    registry = await observeRegistry(
+      io,
+      () => io.readRegistry(version),
+      (state) =>
+        state.latest === version ||
+        (state.latest && compareVersions(state.latest, version) > 0),
+      {
+        label: "npm latest dist-tag",
+        phase: "channel_promotion",
+        version,
+        describe: describeRegistryState,
+      },
+      writeError,
+    );
+    if (registry.latest !== version) await io.verifyNewerLatest(registry.latest);
+    io.diagnostics?.phase("channel_promotion", "passed", {
+      observed_latest: registry.latest,
+    });
   } catch (error) {
-    writeError = error;
+    error.phase ??= "channel_promotion";
+    error.operation ??= "dist-tag";
+    throw error;
   }
-  registry = await observe(
-    io,
-    () => io.readRegistry(version),
-    (state) =>
-      state.latest === version ||
-      (state.latest && compareVersions(state.latest, version) > 0),
-    "npm latest dist-tag",
-    writeError,
-  );
-  if (registry.latest !== version) await io.verifyNewerLatest(registry.latest);
 }
 
 export async function publishPublication(io, context) {
   validateContext(context);
   const { source } = context;
+  io.diagnostics?.start("source_verification");
   let { tag, registry } = await readState(io, context);
   if (!tag)
     throw new Error("signed SDK tag is missing; run SDK preparation first");
+  io.diagnostics?.phase("source_verification", "passed", {
+    source_commit: source.commit,
+    host_tag: source.hostTag,
+  });
+  io.diagnostics?.start("candidate_verification");
   const candidate = await io.obtainCandidate(source, {
     allowCreate: false,
     bootstrapAllowed: false,
@@ -137,30 +291,72 @@ export async function publishPublication(io, context) {
   verifyCandidate(candidate, context);
   verifyRegistry(registry, candidate, source);
   await io.verifyFinalizedCandidate(candidate, source);
+  io.diagnostics?.phase("candidate_verification", "passed", {
+    integrity: candidate.integrity,
+  });
   let uploaded = false;
   if (!registry.version) {
     if (!registry.packageExists && !context.firstPublishOIDCReady) {
       if (!candidate.receipt.bootstrap_allowed)
         throw new Error("absent package is not an approved initial bootstrap");
+      io.diagnostics?.phase("npm_upload", "skipped", {
+        reason: "bootstrap_required",
+      });
+      io.diagnostics?.setPublication("not_attempted");
       return { status: "bootstrap_required", candidate, source };
     }
+    io.diagnostics?.start("npm_upload");
     let writeError;
     try {
       await io.publish(candidate);
+      io.diagnostics?.setWriteOutcome("accepted");
+      io.diagnostics?.phase("npm_upload", "passed", {
+        write_outcome: "accepted",
+      });
     } catch (error) {
       writeError = error;
+      const rejected = isDefiniteAuthenticationRejection(error);
+      const outcome = rejected ? "rejected" : "uncertain";
+      io.diagnostics?.setWriteOutcome(outcome);
+      if (rejected)
+        io.diagnostics?.phase("npm_upload", "failed", {
+          write_outcome: outcome,
+        });
     }
-    registry = await observe(
+    io.diagnostics?.start("version_visibility");
+    registry = await observeRegistry(
       io,
       () => io.readRegistry(source.record.sdk_version),
       (value) => {
         verifyRegistry(value, candidate, source);
         return value.version !== null;
       },
-      "npm publication",
+      {
+        label: "npm publication",
+        phase: "version_visibility",
+        version: source.record.sdk_version,
+        describe: describeRegistryState,
+      },
       writeError,
     );
+    io.diagnostics?.phase("npm_upload", "passed", {
+      write_outcome: writeError ? "uncertain" : "accepted",
+    });
+    io.diagnostics?.phase("version_visibility", "passed", {
+      observed_version: registry.version?.version ?? null,
+      observed_latest: registry.latest ?? null,
+    });
+    io.diagnostics?.setPublication("confirmed");
     uploaded = true;
+  } else {
+    io.diagnostics?.phase("npm_upload", "skipped", {
+      reason: "version_already_public",
+    });
+    io.diagnostics?.phase("version_visibility", "passed", {
+      observed_version: registry.version?.version ?? null,
+      observed_latest: registry.latest ?? null,
+    });
+    io.diagnostics?.setPublication("confirmed");
   }
   if (
     !registry.version.provenance &&
@@ -169,7 +365,9 @@ export async function publishPublication(io, context) {
     throw new Error("npm upload has no required workflow provenance");
   const origin = registry.version.provenance ? "oidc" : "manual_bootstrap";
   await ensureLatest(io, context);
+  io.diagnostics?.start("public_consumers");
   await io.verifyConsumers(candidate, origin);
+  io.diagnostics?.phase("public_consumers", "passed", { origin });
   return {
     status: "verified",
     origin,

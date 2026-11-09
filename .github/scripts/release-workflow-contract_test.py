@@ -1893,5 +1893,165 @@ class PluginSDKReleaseTests(unittest.TestCase):
             self.assertIn(path, step_block("Create release PR"))
 
 
+class NpmAuthPreflightWorkflowTests(unittest.TestCase):
+    def evaluate_condition(
+        self,
+        job_name: str,
+        *,
+        cancelled: bool = False,
+        event: str = "workflow_dispatch",
+        channel: str = "stable",
+        dry_run: bool = False,
+        desktop_validation_only: bool = False,
+        backfill_tag: str = "",
+        preflight: str = "success",
+    ) -> bool:
+        condition = job_condition(job_name)
+        expression = condition.split("${{", 1)[1].rsplit("}}", 1)[0]
+        replacements = {
+            "needs.npm-auth-preflight.result": repr(preflight),
+            "github.event_name": repr(event),
+            "inputs.channel": repr(channel),
+            "inputs.dry_run": repr(dry_run),
+            "inputs.desktop_validation_only": repr(desktop_validation_only),
+            "inputs.backfill_tag": repr(backfill_tag),
+            "cancelled()": repr(cancelled),
+        }
+        for token, value in sorted(
+            replacements.items(), key=lambda item: len(item[0]), reverse=True
+        ):
+            expression = expression.replace(token, value)
+        expression = expression.replace("!=", " __NE__ ")
+        expression = (
+            expression.replace("&&", " and ")
+            .replace("||", " or ")
+            .replace("!", " not ")
+        )
+        expression = expression.replace("__NE__", "!=")
+        return bool(eval(expression, {"__builtins__": {}}, {}))
+
+    def test_preflight_job_is_protected_read_only_and_trusted(self):
+        job = job_block("npm-auth-preflight")
+        step = job_step_block(
+            "npm-auth-preflight", "Verify package-scoped npm authentication"
+        )
+        self.assertIn("runs-on: ubuntu-latest", job)
+        self.assertIn("environment: release", job)
+        self.assertIn("      contents: read\n      id-token: write", job)
+        self.assertRegex(
+            job, r"uses: actions/checkout@[0-9a-f]{40} # v\d+"
+        )
+        self.assertRegex(
+            job, r"uses: actions/setup-node@[0-9a-f]{40} # v\d+"
+        )
+        self.assertIn("ref: ${{ github.workflow_sha }}", job)
+        self.assertIn("persist-credentials: false", job)
+        self.assertIn("GITHUB_WORKFLOW_SHA: ${{ github.workflow_sha }}", job)
+        self.assertIn('node-version: "24"', job)
+        self.assertIn("package-manager-cache: false", job)
+        self.assertIn("source scripts/release/npm-packages.sh", step)
+        self.assertIn('"${NIGHTLY_PACKAGES[@]}"', step)
+        self.assertIn("node scripts/release/npm-auth-preflight.mjs", step)
+        self.assertIn('--sdk-package "@kdlbs/plugin-sdk"', step)
+        self.assertIn('--checkout-sha "$(git rev-parse HEAD)"', step)
+        self.assertIn(
+            "SDK_SCOPE_OWNERSHIP_CONFIRMED: ${{ vars.SDK_SCOPE_OWNERSHIP_CONFIRMED }}",
+            step,
+        )
+        for forbidden in (
+            "secrets.",
+            "contents: write",
+            "pull-requests: write",
+            "RELEASE_GPG",
+            "npm publish",
+            "npm dist-tag",
+            "persist-credentials: true",
+        ):
+            self.assertNotIn(forbidden, job)
+
+    def test_preflight_runs_only_for_normal_stable_releases(self):
+        cases = (
+            ("normal", dict(), True),
+            ("dry run", dict(dry_run=True), False),
+            ("desktop validation", dict(desktop_validation_only=True), False),
+            ("backfill", dict(backfill_tag="v1.2.3"), False),
+            ("nightly", dict(channel="nightly"), False),
+            ("scheduled", dict(event="schedule"), False),
+        )
+        for label, overrides, expected in cases:
+            with self.subTest(mode=label):
+                self.assertEqual(
+                    self.evaluate_condition("npm-auth-preflight", **overrides),
+                    expected,
+                )
+
+    def test_prepare_gate_requires_success_and_permits_only_mode_skips(self):
+        cases = (
+            ("normal success", dict(preflight="success"), True),
+            ("normal rejected", dict(preflight="failure"), False),
+            ("normal unexpected skip", dict(preflight="skipped"), False),
+            ("dry run", dict(dry_run=True, preflight="skipped"), True),
+            (
+                "desktop validation",
+                dict(desktop_validation_only=True, preflight="skipped"),
+                True,
+            ),
+            ("backfill", dict(backfill_tag="v1.2.3", preflight="skipped"), True),
+            ("nightly", dict(channel="nightly", preflight="skipped"), False),
+            ("scheduled", dict(event="schedule", preflight="skipped"), False),
+            (
+                "cancelled",
+                dict(cancelled=True, preflight="skipped"),
+                False,
+            ),
+        )
+        for label, overrides, expected in cases:
+            with self.subTest(mode=label):
+                self.assertEqual(
+                    self.evaluate_condition("prepare", **overrides), expected
+                )
+        prepare = job_block("prepare")
+        self.assertIn("needs: [npm-auth-preflight]", prepare)
+
+    def test_prepare_dependency_reaches_every_build_and_publication_job(self):
+        for name in (
+            "build-web",
+            "build-remote-helpers",
+            "build-bundles",
+            "build-desktop",
+            "docker-amd64",
+            "docker-arm64",
+            "docker-manifest",
+            "docker-universal-amd64",
+            "docker-universal-arm64",
+            "docker-universal-manifest",
+            "verify-release-assets",
+            "publish-release",
+            "publish-npm",
+            "update-homebrew-tap",
+            "update-scoop-bucket",
+            "prepare-plugin-sdk",
+            "publish-plugin-sdk",
+            "stable-complete",
+            "notify-contributors",
+            "announce-discord",
+            "discord-recovery-notice",
+        ):
+            with self.subTest(job=name):
+                needs = re.search(
+                    r"(?ms)^    needs:.*?(?=\n    [a-z])", job_block(name)
+                )
+                self.assertIsNotNone(needs, f"{name} has no needs block")
+                self.assertIn("prepare", needs.group())
+                if name == "stable-complete":
+                    self.assertIn(
+                        "needs.prepare.result == 'success'", job_block(name)
+                    )
+                else:
+                    self.assertIn(
+                        "needs.prepare.result == 'success'", job_condition(name)
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()

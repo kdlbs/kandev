@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   preparePublication,
   publishPublication,
+  REGISTRY_OBSERVATION_WINDOW_MS,
 } from "./sdk-publication-state.mjs";
+import { SdkDiagnostics } from "./sdk-diagnostics.mjs";
 
 const fingerprint = "A".repeat(40);
 const source = {
@@ -40,6 +42,7 @@ const candidate = () => ({
   },
 });
 const npmVersion = () => ({
+  version: source.record.sdk_version,
   integrity: "sha512-example",
   recordDigest: source.recordDigest,
   provenance: true,
@@ -49,6 +52,10 @@ function fixture({
   published = false,
   packageExists = true,
   latest = null,
+  versionVisibleAt = 0,
+  latestVisibleAt = 0,
+  publishError = null,
+  latestError = null,
 } = {}) {
   const state = {
     tag: tagged ? tag() : null,
@@ -59,10 +66,30 @@ function fixture({
     },
     candidate: candidate(),
   };
+  const clock = { now: 0, waits: [], reads: [] };
+  let pendingVersionAt = null;
+  let pendingLatestAt = null;
+  let pendingLatestVersion = null;
   const events = [];
   const io = {
     readTag: async () => structuredClone(state.tag),
-    readRegistry: async () => structuredClone(state.registry),
+    readRegistry: async () => {
+      clock.reads.push(clock.now);
+      if (pendingVersionAt !== null && clock.now >= pendingVersionAt) {
+        state.registry.version = npmVersion();
+        pendingVersionAt = null;
+      }
+      if (pendingLatestAt !== null && clock.now >= pendingLatestAt) {
+        state.registry.latest = pendingLatestVersion;
+        pendingLatestAt = null;
+      }
+      return structuredClone(state.registry);
+    },
+    now: () => clock.now,
+    registryWait: async (milliseconds) => {
+      clock.waits.push(milliseconds);
+      clock.now += milliseconds;
+    },
     obtainCandidate: async (_, options) => {
       events.push(["obtain", options]);
       return state.candidate;
@@ -77,11 +104,14 @@ function fixture({
     publish: async () => {
       events.push(["publish"]);
       state.registry.packageExists = true;
-      state.registry.version = npmVersion();
+      pendingVersionAt = versionVisibleAt;
+      if (publishError) throw publishError;
     },
     moveLatest: async (version) => {
       events.push(["latest", version]);
-      state.registry.latest = version;
+      pendingLatestVersion = version;
+      pendingLatestAt = latestVisibleAt;
+      if (latestError) throw latestError;
     },
     verifyNewerLatest: async () => events.push(["verify-newer"]),
     verifyConsumers: async () => events.push(["consumers"]),
@@ -91,6 +121,7 @@ function fixture({
     io,
     state,
     events,
+    clock,
     context: { source, fingerprint, firstPublishOIDCReady: true },
   };
 }
@@ -281,4 +312,208 @@ test("unapproved manual upload and failed public consumers leave publication inc
     publishPublication(broken.io, broken.context),
     /public Go/,
   );
+});
+test("npm version visible after 90 seconds completes without a second upload", async () => {
+  const f = fixture({ tagged: true, versionVisibleAt: 90_000 });
+  const result = await publishPublication(f.io, f.context);
+  assert.equal(result.status, "verified");
+  assert.equal(f.events.filter(([event]) => event === "publish").length, 1);
+  assert.equal(f.clock.now, 90_000);
+  assert.deepEqual(f.clock.waits, [10_000, 20_000, 30_000, 30_000]);
+  assert.equal(f.events.at(-1)[0], "consumers");
+});
+test("delayed latest dist-tag visibility uses the same observation window", async () => {
+  const f = fixture({
+    tagged: true,
+    published: true,
+    latestVisibleAt: 90_000,
+  });
+  const result = await publishPublication(f.io, f.context);
+  assert.equal(result.status, "verified");
+  assert.equal(f.events.filter(([event]) => event === "latest").length, 1);
+  assert.equal(f.clock.now, 90_000);
+  assert.deepEqual(f.clock.waits, [10_000, 20_000, 30_000, 30_000]);
+  assert.equal(f.events.at(-1)[0], "consumers");
+});
+test("permanent absence exhausts the five-minute window with bounded waits and one upload", async () => {
+  const f = fixture({ tagged: true, versionVisibleAt: Infinity });
+  await assert.rejects(
+    publishPublication(f.io, f.context),
+    /accepted by npm.*5 minutes/,
+  );
+  assert.equal(f.events.filter(([event]) => event === "publish").length, 1);
+  assert.ok(
+    f.clock.waits.every((wait) => wait > 0 && wait <= 30_000),
+    f.clock.waits,
+  );
+  assert.equal(
+    f.clock.waits.reduce((total, wait) => total + wait, 0),
+    REGISTRY_OBSERVATION_WINDOW_MS,
+  );
+  assert.equal(f.clock.reads.length, f.clock.waits.length + 1);
+});
+test("no registry probe starts after the five-minute deadline", async () => {
+  const f = fixture({ tagged: true, versionVisibleAt: Infinity });
+  await assert.rejects(publishPublication(f.io, f.context), /5 minutes/);
+  assert.ok(
+    Math.max(...f.clock.reads) < REGISTRY_OBSERVATION_WINDOW_MS,
+    f.clock.reads,
+  );
+  assert.equal(f.clock.now, REGISTRY_OBSERVATION_WINDOW_MS);
+});
+test("registry read errors during observation fail distinctly from confirmed absence", async () => {
+  const f = fixture({ tagged: true });
+  const readRegistry = f.io.readRegistry;
+  let reads = 0;
+  f.io.readRegistry = async () => {
+    reads += 1;
+    if (reads > 1) throw new Error("registry read failed with HTTP 500");
+    return readRegistry();
+  };
+  await assert.rejects(
+    publishPublication(f.io, f.context),
+    /registry read failed with HTTP 500/,
+  );
+  assert.equal(f.events.filter(([event]) => event === "publish").length, 1);
+  assert.deepEqual(f.clock.waits, []);
+});
+test("definite authentication rejection stops after one reconciliation read", async () => {
+  const f = fixture({
+    tagged: true,
+    versionVisibleAt: Infinity,
+    publishError: Object.assign(new Error("npm error code ENEEDAUTH"), {
+      code: "ENEEDAUTH",
+      stderr: "npm error code ENEEDAUTH",
+    }),
+  });
+  await assert.rejects(publishPublication(f.io, f.context), /ENEEDAUTH/);
+  assert.equal(f.events.filter(([event]) => event === "publish").length, 1);
+  assert.equal(f.clock.reads.length, 2);
+  assert.deepEqual(f.clock.waits, []);
+});
+test("uncertain delayed write is reconciled by registry reads without another upload", async () => {
+  const f = fixture({
+    tagged: true,
+    versionVisibleAt: 90_000,
+    publishError: new Error("connection lost"),
+  });
+  const result = await publishPublication(f.io, f.context);
+  assert.equal(result.status, "verified");
+  assert.equal(f.events.filter(([event]) => event === "publish").length, 1);
+  assert.deepEqual(f.clock.waits, [10_000, 20_000, 30_000, 30_000]);
+});
+test("uncertain latest write is reconciled without repeating the dist-tag mutation", async () => {
+  const f = fixture({
+    tagged: true,
+    published: true,
+    latestVisibleAt: 60_000,
+    latestError: new Error("connection lost"),
+  });
+  const result = await publishPublication(f.io, f.context);
+  assert.equal(result.status, "verified");
+  assert.equal(f.events.filter(([event]) => event === "latest").length, 1);
+  assert.equal(f.clock.now, 60_000);
+  assert.equal(f.events.at(-1)[0], "consumers");
+});
+test("verified registry version appears in observation and success summary", async () => {
+  const f = fixture({ tagged: true });
+  const diagnostics = new SdkDiagnostics({
+    hostTag: "v0.100.0",
+    sdkVersion: "0.1.0",
+    log: null,
+  });
+  f.io.diagnostics = diagnostics;
+  await preparePublication(f.io, f.context);
+  const result = await publishPublication(f.io, f.context);
+  const summary = diagnostics.summary({ status: result.status, result });
+  const visible = summary.observations.filter(
+    (event) => event.phase === "version_visibility" && event.visible,
+  );
+  assert.equal(visible.length, 1);
+  assert.equal(visible[0].observed_version, "0.1.0");
+  assert.equal(visible[0].write_outcome, "accepted");
+  assert.equal(summary.phases.version_visibility, "passed");
+  assert.equal(summary.publication, "confirmed");
+});
+test("rejected latest update keeps immutable publication confirmed", async () => {
+  const f = fixture({ tagged: true, published: true });
+  const diagnostics = new SdkDiagnostics({
+    hostTag: "v0.100.0",
+    sdkVersion: "0.1.0",
+    log: null,
+  });
+  f.io.diagnostics = diagnostics;
+  f.io.moveLatest = async () => {
+    throw Object.assign(new Error("dist-tag permission denied"), {
+      code: "E403",
+      stderr: "npm error code E403",
+    });
+  };
+  const failure = await publishPublication(f.io, f.context).then(
+    () => null,
+    (error) => error,
+  );
+  assert.ok(failure);
+  assert.match(failure.message, /dist-tag/);
+  diagnostics.fail(failure);
+  const summary = diagnostics.summary({ status: "failed", failure });
+  assert.equal(summary.publication, "confirmed");
+  assert.equal(summary.channel_promotion, "failed");
+  assert.equal(summary.channel_write_outcome, "rejected");
+  assert.equal(summary.last_confirmed_phase, "version_visibility");
+  assert.equal(summary.failure_category, "authentication");
+  assert.match(summary.recovery_action, /trusted publisher/);
+});
+test("accepted latest update that never appears keeps publication confirmed", async () => {
+  const f = fixture({
+    tagged: true,
+    published: true,
+    latestVisibleAt: Infinity,
+  });
+  const diagnostics = new SdkDiagnostics({
+    hostTag: "v0.100.0",
+    sdkVersion: "0.1.0",
+    log: null,
+  });
+  f.io.diagnostics = diagnostics;
+  const failure = await publishPublication(f.io, f.context).then(
+    () => null,
+    (error) => error,
+  );
+  assert.match(failure.message, /5 minutes/);
+  diagnostics.fail(failure);
+  const summary = diagnostics.summary({ status: "failed", failure });
+  assert.equal(summary.publication, "confirmed");
+  assert.equal(summary.channel_promotion, "failed");
+  assert.equal(summary.channel_write_outcome, "accepted");
+  assert.equal(
+    summary.failure_category,
+    "accepted_channel_awaiting_visibility",
+  );
+  assert.match(summary.recovery_action, /latest dist-tag/);
+});
+test("uncertain latest update that never appears keeps publication confirmed", async () => {
+  const f = fixture({
+    tagged: true,
+    published: true,
+    latestVisibleAt: Infinity,
+    latestError: new Error("connection lost"),
+  });
+  const diagnostics = new SdkDiagnostics({
+    hostTag: "v0.100.0",
+    sdkVersion: "0.1.0",
+    log: null,
+  });
+  f.io.diagnostics = diagnostics;
+  const failure = await publishPublication(f.io, f.context).then(
+    () => null,
+    (error) => error,
+  );
+  assert.match(failure.message, /5 minutes/);
+  diagnostics.fail(failure);
+  const summary = diagnostics.summary({ status: "failed", failure });
+  assert.equal(summary.publication, "confirmed");
+  assert.equal(summary.channel_write_outcome, "uncertain");
+  assert.equal(summary.failure_category, "uncertain_channel_update");
+  assert.match(summary.recovery_action, /latest dist-tag/);
 });

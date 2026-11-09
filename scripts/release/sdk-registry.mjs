@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 
 export const packageName = "@kdlbs/plugin-sdk";
 export const registryURL = "https://registry.npmjs.org";
+function registryFailure(message) {
+  const error = new Error(message);
+  error.code = "REGISTRY_READ_FAILURE";
+  return error;
+}
 export function publicRegistryURL(raw) {
   const url = new URL(raw);
   if (url.origin !== registryURL || url.username || url.password)
@@ -16,20 +21,20 @@ export async function readPackage(version, fetchImpl = fetch) {
   });
   publicRegistryURL(response.url);
   if (!response.headers.get("content-type")?.includes("application/json"))
-    throw new Error("registry returned a non-JSON response");
+    throw registryFailure("registry returned a non-JSON response");
   const text = await response.text();
   if (text.length > 5 * 1024 * 1024)
-    throw new Error("registry metadata exceeds size limit");
+    throw registryFailure("registry metadata exceeds size limit");
   let document;
   try {
     document = JSON.parse(text);
   } catch {
-    throw new Error("registry returned malformed JSON");
+    throw registryFailure("registry returned malformed JSON");
   }
   if (response.status === 404 && document?.error === "Not found")
     return { packageExists: false, version: null, latest: null };
   if (!response.ok)
-    throw new Error(`registry read failed with HTTP ${response.status}`);
+    throw registryFailure(`registry read failed with HTTP ${response.status}`);
   if (
     document?.name !== packageName ||
     !document.versions ||
@@ -38,7 +43,7 @@ export async function readPackage(version, fetchImpl = fetch) {
     !document["dist-tags"] ||
     typeof document["dist-tags"] !== "object"
   )
-    throw new Error("registry returned invalid package metadata");
+    throw registryFailure("registry returned invalid package metadata");
   const selected = document.versions[version] ?? null;
   if (selected) {
     if (
@@ -51,7 +56,7 @@ export async function readPackage(version, fetchImpl = fetch) {
   }
   const latest = document["dist-tags"].latest ?? null;
   if (latest !== null && typeof latest !== "string")
-    throw new Error("registry latest dist-tag is malformed");
+    throw registryFailure("registry latest dist-tag is malformed");
   return { packageExists: true, version: selected, latest };
 }
 export async function downloadArchive(
@@ -69,7 +74,7 @@ export async function downloadArchive(
     !response.ok ||
     /(?:html|json)/i.test(response.headers.get("content-type") ?? "")
   )
-    throw new Error(
+    throw registryFailure(
       `registry archive download failed: HTTP ${response.status}`,
     );
   const bytes = Buffer.from(await response.arrayBuffer());
