@@ -175,3 +175,125 @@ func TestRecoveredAvailabilityRetriesTransientInventoryRead(t *testing.T) {
 		t.Fatalf("mismatch inventory reads = %d, want 1", mismatch.reads)
 	}
 }
+
+// TestInMemoryStandaloneExecutionWithoutInventoryRowStaysCompatible proves a
+// live standalone execution remains usable while a local runtime replacement
+// has removed its durable row. A Docker boundary still requires the row.
+func TestInMemoryStandaloneExecutionWithoutInventoryRowStaysCompatible(t *testing.T) {
+	mgr, _ := newRuntimeSelectionManager(t, &MockExecutor{name: executor.NameStandalone})
+	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{})
+	execution := &AgentExecution{
+		ID: "execution-standalone", SessionID: "session-standalone", TaskID: "task-1",
+		TaskEnvironmentID: "env-1", ExecutorType: string(models.ExecutorTypeWorktree),
+		RuntimeName: agentruntime.RuntimeStandalone,
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	if err := mgr.ValidateExecutionRuntime(
+		context.Background(), execution.SessionID, execution.TaskEnvironmentID,
+		string(models.ExecutorTypeWorktree),
+	); err != nil {
+		t.Fatalf("standalone execution without inventory row error = %v, want nil", err)
+	}
+
+	docker := &AgentExecution{
+		ID: "execution-docker", SessionID: "session-docker", TaskID: "task-1",
+		TaskEnvironmentID: "env-1", ExecutorType: string(models.ExecutorTypeLocalDocker),
+		RuntimeName: agentruntime.RuntimeDocker, ContainerID: "container-1",
+	}
+	if err := mgr.executionStore.Add(docker); err != nil {
+		t.Fatalf("add docker execution: %v", err)
+	}
+	if err := mgr.ValidateExecutionRuntime(
+		context.Background(), docker.SessionID, docker.TaskEnvironmentID,
+		string(models.ExecutorTypeLocalDocker),
+	); !errors.Is(err, ErrExecutorIdentityUnverified) {
+		t.Fatalf("docker execution without inventory row error = %v, want identity unverified", err)
+	}
+}
+
+// TestStandaloneEmptyRuntimeRowStaysCompatible proves an empty durable runtime
+// row does not block a standalone execution whose in-memory evidence maps to
+// standalone. A Docker boundary still refuses the missing identity.
+func TestStandaloneEmptyRuntimeRowStaysCompatible(t *testing.T) {
+	execution := &AgentExecution{
+		ID: "execution-empty-row", SessionID: "session-empty-row", TaskID: "task-1",
+		TaskEnvironmentID: "env-1", ExecutorType: string(models.ExecutorTypeWorktree),
+		RuntimeName: agentruntime.RuntimeStandalone,
+	}
+	mgr, _ := newRuntimeSelectionManager(t, &MockExecutor{name: executor.NameStandalone})
+	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{prior: &models.ExecutorRunning{
+		ID: "session-empty-row", SessionID: "session-empty-row", TaskID: "task-1",
+		Status: models.ExecutorRunningStatusReady,
+	}})
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	if err := mgr.ValidateExecutionRuntime(
+		context.Background(), execution.SessionID, execution.TaskEnvironmentID,
+		string(models.ExecutorTypeWorktree),
+	); err != nil {
+		t.Fatalf("standalone empty runtime row error = %v, want nil", err)
+	}
+
+	docker := &AgentExecution{
+		ID: "execution-empty-docker", SessionID: "session-empty-docker", TaskID: "task-1",
+		TaskEnvironmentID: "env-1", ExecutorType: string(models.ExecutorTypeLocalDocker),
+		RuntimeName: agentruntime.RuntimeDocker, ContainerID: "container-1",
+	}
+	if err := mgr.executionStore.Add(docker); err != nil {
+		t.Fatalf("add docker execution: %v", err)
+	}
+	if err := mgr.ValidateExecutionRuntime(
+		context.Background(), docker.SessionID, docker.TaskEnvironmentID,
+		string(models.ExecutorTypeLocalDocker),
+	); !errors.Is(err, ErrExecutorIdentityUnverified) {
+		t.Fatalf("docker empty runtime row error = %v, want identity unverified", err)
+	}
+}
+
+// TestEnsureDurableSelectionAllowsMissingStandaloneRow proves a local runtime
+// replacement can re-persist a missing inventory row for a standalone
+// selection, while a Docker selection still refuses the missing boundary.
+func TestEnsureDurableSelectionAllowsMissingStandaloneRow(t *testing.T) {
+	mgr, _ := newRuntimeSelectionManager(t, &MockExecutor{name: executor.NameStandalone})
+	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{})
+
+	if err := mgr.ensureDurableExecutionSelectionCompatible(
+		context.Background(), "session-missing-row", "env-1",
+		string(models.ExecutorTypeWorktree), true,
+	); err != nil {
+		t.Fatalf("missing standalone row error = %v, want nil", err)
+	}
+	if err := mgr.ensureDurableExecutionSelectionCompatible(
+		context.Background(), "session-missing-row", "env-1",
+		string(models.ExecutorTypeLocalDocker), true,
+	); !errors.Is(err, ErrExecutorIdentityUnverified) {
+		t.Fatalf("missing docker row error = %v, want identity unverified", err)
+	}
+}
+
+// TestLaunchRequestCarriesRetainedEvidence covers every cold-launch signal
+// that must fail closed when durable inventory cannot be read.
+func TestLaunchRequestCarriesRetainedEvidence(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *LaunchRequest
+		want bool
+	}{
+		{name: "nil", req: nil, want: false},
+		{name: "fresh", req: &LaunchRequest{}, want: false},
+		{name: "acp resume", req: &LaunchRequest{ACPSessionID: "acp-1"}, want: true},
+		{name: "previous execution", req: &LaunchRequest{PreviousExecutionID: "exec-1"}, want: true},
+		{name: "passthrough resume", req: &LaunchRequest{IsPassthrough: true, ResumePassthrough: true}, want: true},
+		{name: "passthrough without resume", req: &LaunchRequest{IsPassthrough: true}, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := launchRequestCarriesRetainedEvidence(test.req); got != test.want {
+				t.Fatalf("retained evidence = %v, want %v", got, test.want)
+			}
+		})
+	}
+}

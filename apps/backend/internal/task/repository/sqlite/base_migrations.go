@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/task/models"
@@ -1346,10 +1347,13 @@ func (r *Repository) backfillExecutorRunningRuntime() error {
 		if executorType == "" {
 			continue
 		}
-		runtimeName := models.ExecutorType(executorType).Runtime()
-		if runtimeName == "" {
+		// Only types that cannot have fallen back to standalone are safe to
+		// backfill from the selected executor. Docker/SSH/Kubernetes rows may
+		// describe a legacy fallback execution and must stay fail-closed.
+		if models.ExecutorType(executorType).Runtime() != agentruntime.RuntimeStandalone {
 			continue
 		}
+		runtimeName := agentruntime.RuntimeStandalone
 		if _, err := r.db.ExecContext(r.migrationContext(),
 			r.db.Rebind(`UPDATE executors_running SET runtime = ? WHERE id = ? AND COALESCE(runtime, '') = ''`),
 			string(runtimeName), legacy.ID,

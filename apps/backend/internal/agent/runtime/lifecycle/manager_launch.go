@@ -2201,6 +2201,18 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 	return err
 }
 
+// launchRequestCarriesRetainedEvidence reports whether a cold launch asks to
+// reconnect to or resume existing execution state, even when no session cache
+// or inventory row is available to prove it.
+func launchRequestCarriesRetainedEvidence(req *LaunchRequest) bool {
+	if req == nil {
+		return false
+	}
+	return strings.TrimSpace(req.ACPSessionID) != "" ||
+		strings.TrimSpace(req.PreviousExecutionID) != "" ||
+		(req.IsPassthrough && req.ResumePassthrough)
+}
+
 // launchInternal is the body of Launch run inside the per-session singleflight
 // slot. Callers must not invoke this directly except via Launch.
 func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
@@ -2214,9 +2226,9 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	// still describe a retained worker. A resume request is retained evidence
 	// even when the row cannot be read; refuse that uncertainty before profile
 	// resolution, workspace mutation, or runtime allocation.
-	retainedEvidence := strings.TrimSpace(req.ACPSessionID) != ""
 	if err := m.ensureDurableExecutionSelectionCompatible(
-		ctx, req.SessionID, req.TaskEnvironmentID, req.ExecutorType, retainedEvidence,
+		ctx, req.SessionID, req.TaskEnvironmentID, req.ExecutorType,
+		launchRequestCarriesRetainedEvidence(req),
 	); err != nil {
 		return nil, err
 	}

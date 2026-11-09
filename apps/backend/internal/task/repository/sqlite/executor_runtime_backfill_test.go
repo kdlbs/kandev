@@ -22,10 +22,13 @@ func TestBackfillExecutorRunningRuntimeRepairsLegacyRows(t *testing.T) {
 			t.Fatalf("CreateTask: %v", err)
 		}
 	}
-	if err := repo.CreateExecutor(ctx, &models.Executor{
-		ID: "executor-docker", Name: "Docker", Type: models.ExecutorTypeLocalDocker,
-	}); err != nil {
-		t.Fatalf("CreateExecutor: %v", err)
+	for _, executor := range []*models.Executor{
+		{ID: "executor-worktree", Name: "Worktree", Type: models.ExecutorTypeWorktree},
+		{ID: "executor-ssh", Name: "SSH", Type: models.ExecutorTypeSSH},
+	} {
+		if err := repo.CreateExecutor(ctx, executor); err != nil {
+			t.Fatalf("CreateExecutor(%s): %v", executor.ID, err)
+		}
 	}
 	for _, session := range []*models.TaskSession{
 		{ID: "session-executor-evidence", TaskID: "task-runtime-backfill", State: models.TaskSessionStateRunning},
@@ -35,6 +38,7 @@ func TestBackfillExecutorRunningRuntimeRepairsLegacyRows(t *testing.T) {
 		},
 		{ID: "session-no-evidence", TaskID: "task-runtime-backfill", State: models.TaskSessionStateRunning},
 		{ID: "session-existing-runtime", TaskID: "task-runtime-backfill", State: models.TaskSessionStateRunning},
+		{ID: "session-untrusted-fallback", TaskID: "task-runtime-backfill", State: models.TaskSessionStateRunning},
 	} {
 		if err := repo.CreateTaskSession(ctx, session); err != nil {
 			t.Fatalf("CreateTaskSession(%s): %v", session.ID, err)
@@ -45,10 +49,11 @@ func TestBackfillExecutorRunningRuntimeRepairsLegacyRows(t *testing.T) {
 		id       string
 		executor string
 	}{
-		{id: "session-executor-evidence", executor: "executor-docker"},
+		{id: "session-executor-evidence", executor: "executor-worktree"},
 		{id: "session-snapshot-evidence", executor: "missing-executor"},
 		{id: "session-no-evidence", executor: "missing-executor"},
 		{id: "session-existing-runtime", executor: "missing-executor"},
+		{id: "session-untrusted-fallback", executor: "executor-ssh"},
 	}
 	for _, legacy := range legacyRows {
 		if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
@@ -82,8 +87,11 @@ func TestBackfillExecutorRunningRuntimeRepairsLegacyRows(t *testing.T) {
 			t.Fatalf("runtime for %s = %q, want %q", sessionID, got, want)
 		}
 	}
-	assertRuntime("session-executor-evidence", agentruntime.RuntimeDocker)
+	assertRuntime("session-executor-evidence", agentruntime.RuntimeStandalone)
 	assertRuntime("session-snapshot-evidence", agentruntime.RuntimeStandalone)
 	assertRuntime("session-no-evidence", "")
 	assertRuntime("session-existing-runtime", agentruntime.RuntimeStandalone)
+	// SSH could have fallen back to standalone before this change. Its selected
+	// type is not independent runtime evidence, so the row stays fail-closed.
+	assertRuntime("session-untrusted-fallback", "")
 }

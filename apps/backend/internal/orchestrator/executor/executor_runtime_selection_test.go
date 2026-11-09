@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -309,5 +310,24 @@ func TestEmptyResolvedTypeStillValidatesRetainedBinding(t *testing.T) {
 	}
 	if len(admission.calls) != 1 || admission.calls[0] != "" {
 		t.Fatalf("retained admission calls = %v, want one empty type", admission.calls)
+	}
+}
+
+// TestClassifyLaunchFailureEnvironmentMismatch keeps the runtime-mismatch
+// classification while giving an environment-binding refusal its own message.
+func TestClassifyLaunchFailureEnvironmentMismatch(t *testing.T) {
+	err := &lifecycle.ExecutorRuntimeError{
+		Reason:              lifecycle.ExecutorRuntimeReasonMismatch,
+		Runtime:             agentruntime.RuntimeStandalone,
+		Observed:            agentruntime.RuntimeStandalone,
+		Detail:              `retained execution belongs to task environment "env-old", not "env-new"`,
+		EnvironmentMismatch: true,
+	}
+	classification := classifyLaunchFailure(err)
+	if classification.code != models.LaunchErrorCategoryGenericLaunchFailure {
+		t.Fatalf("category = %q, want generic launch failure", classification.code)
+	}
+	if !strings.Contains(classification.message, "different task environment") {
+		t.Fatalf("message = %q, want environment-specific guidance", classification.message)
 	}
 }

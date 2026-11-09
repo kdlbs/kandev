@@ -472,3 +472,15 @@ func isExecutorRuntimeMismatch(err error) bool {
 func isExecutorIdentityUnverified(err error) bool {
 	return errors.Is(err, lifecycle.ErrExecutorIdentityUnverified)
 }
+
+type executorEnvironmentMismatch interface {
+	IsEnvironmentMismatch() bool
+}
+
+// isExecutorEnvironmentMismatch reports a retained execution bound to a
+// different task environment. It stays a runtime-mismatch refusal but gets its
+// own actionable message.
+func isExecutorEnvironmentMismatch(err error) bool {
+	var mismatch executorEnvironmentMismatch
+	return errors.As(err, &mismatch) && mismatch.IsEnvironmentMismatch()
+}

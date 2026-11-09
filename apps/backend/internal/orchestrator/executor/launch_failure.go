@@ -150,6 +150,11 @@ func classifyLaunchFailure(err error) launchFailureClassification {
 			code:    models.LaunchErrorCategoryGenericLaunchFailure,
 			message: "The selected executor runtime is unavailable. Choose an available runtime or ask an operator to enable it.",
 		}
+	case isExecutorEnvironmentMismatch(err):
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryGenericLaunchFailure,
+			message: "The retained execution belongs to a different task environment. Start a new session for the selected workspace.",
+		}
 	case isExecutorRuntimeMismatch(err), isExecutorIdentityUnverified(err):
 		return launchFailureClassification{
 			code:    models.LaunchErrorCategoryGenericLaunchFailure,

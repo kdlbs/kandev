@@ -42,6 +42,15 @@ type ExecutorRuntimeError struct {
 	Runtime      executor.Name
 	Observed     executor.Name
 	Detail       string
+	// EnvironmentMismatch distinguishes a retained execution bound to another
+	// task environment from a runtime-versus-runtime contradiction.
+	EnvironmentMismatch bool
+}
+
+// IsEnvironmentMismatch reports whether this refusal is an environment-binding
+// mismatch rather than an observed-runtime mismatch.
+func (e *ExecutorRuntimeError) IsEnvironmentMismatch() bool {
+	return e != nil && e.EnvironmentMismatch
 }
 
 func (e *ExecutorRuntimeError) Error() string {
@@ -65,6 +74,12 @@ func (e *ExecutorRuntimeError) Error() string {
 			selected, string(e.Observed),
 		)
 	case ExecutorRuntimeReasonIdentityUnverified:
+		if e.Detail != "" {
+			return fmt.Sprintf(
+				"selected executor runtime %q has no verifiable runner identity: %s",
+				selected, e.Detail,
+			)
+		}
 		return fmt.Sprintf("selected executor runtime %q has no verifiable runner identity", selected)
 	default:
 		if e.Detail != "" {
@@ -191,22 +206,37 @@ func (m *Manager) validateRetainedExecutionRuntime(
 				"retained execution belongs to task environment %q, not %q",
 				execution.TaskEnvironmentID, taskEnvironmentID,
 			),
+			EnvironmentMismatch: true,
 		}
 	}
 	if err := validateObservedRuntime(execution.ExecutorType, selected, execution.RuntimeName); err != nil {
 		if !errors.Is(err, ErrExecutorIdentityUnverified) {
 			return err
 		}
-		row, available, readErr := m.readRetainedInventory(ctx, execution.SessionID)
-		if readErr != nil {
-			return identityUnverifiedError(execution.ExecutorType, selected, "retained runtime inventory could not be read")
-		}
-		if !available || row == nil {
-			return identityUnverifiedError(execution.ExecutorType, selected, "retained runtime identity is unavailable")
-		}
-		return validateRetainedRow(execution, selected, row)
+		return m.validateFallbackRetainedIdentity(ctx, execution, selected)
 	}
 	return m.validateRetainedIdentity(ctx, execution, selected)
+}
+
+// validateFallbackRetainedIdentity resolves an in-memory execution whose
+// observed runtime is empty through its durable row when that row can supply
+// independent identity.
+func (m *Manager) validateFallbackRetainedIdentity(
+	ctx context.Context,
+	execution *AgentExecution,
+	selected executor.Name,
+) error {
+	row, available, readErr := m.readRetainedInventory(ctx, execution.SessionID)
+	if readErr != nil {
+		return identityUnverifiedError(execution.ExecutorType, selected, "retained runtime inventory could not be read")
+	}
+	if !available || row == nil {
+		if !identityRequiredForSelection(selected, execution) {
+			return nil
+		}
+		return identityUnverifiedError(execution.ExecutorType, selected, "retained runtime identity is unavailable")
+	}
+	return validateRetainedRow(execution, selected, row)
 }
 
 // readRetainedInventory distinguishes authoritative not-found from a failed
@@ -238,8 +268,30 @@ func identityUnverifiedError(executorType string, selected executor.Name, detail
 	}
 }
 
+// identityRequiredForSelection keeps a Docker boundary fail-closed while
+// allowing a live standalone execution to recover when its local runtime row
+// was removed during process replacement and its observed runtime is missing.
+func identityRequiredForSelection(selected executor.Name, execution *AgentExecution) bool {
+	if selected == executor.NameDocker {
+		return true
+	}
+	if selected != executor.NameStandalone {
+		return true
+	}
+	// A standalone boundary has no container identity to prove. A missing
+	// runtime on a live execution is expected while its local process is
+	// replaced. A container ID is contradictory evidence and stays refused.
+	if execution == nil {
+		return false
+	}
+	return strings.TrimSpace(execution.ContainerID) != ""
+}
+
 func validateRetainedRow(execution *AgentExecution, selected executor.Name, row *models.ExecutorRunning) error {
 	if row == nil || row.Runtime == "" {
+		if !identityRequiredForSelection(selected, execution) {
+			return nil
+		}
 		return identityUnverifiedError(execution.ExecutorType, selected, "retained runtime identity is unavailable")
 	}
 	if row.Runtime != selected {
@@ -297,6 +349,9 @@ func validateDurableRow(selected executor.Name, row *models.ExecutorRunning, tas
 		return nil
 	}
 	if row == nil || row.Runtime == "" {
+		if selected == executor.NameStandalone && row != nil && strings.TrimSpace(row.ContainerID) == "" {
+			return nil
+		}
 		return identityUnverifiedError("", selected, "retained runtime identity is unavailable")
 	}
 	if row.Runtime != selected {
@@ -362,6 +417,13 @@ func (m *Manager) ensureDurableExecutionSelectionCompatible(
 	}
 	if row == nil {
 		if evidenceRetained {
+			selected, required := normalizeExecutorSelection(executorType)
+			if !required || selected == executor.NameStandalone {
+				// A local runtime replacement removes its inventory row while the
+				// execution stays in memory. A standalone selection has no container
+				// boundary to re-establish and can proceed to re-persist the row.
+				return nil
+			}
 			return identityUnverifiedError(executorType, selected, "retained runtime identity is unavailable")
 		}
 		return nil
@@ -373,6 +435,9 @@ func (m *Manager) ensureDurableExecutionSelectionCompatible(
 		// A durable row stores the normalized backend name, not an executor
 		// type. It is retained selection evidence when the request omits one.
 		if row.Runtime == "" {
+			if strings.TrimSpace(row.ContainerID) == "" {
+				return nil
+			}
 			return identityUnverifiedError(executorType, executor.NameUnknown, "retained runtime identity is unavailable")
 		}
 		selected, required = row.Runtime, true
@@ -415,7 +480,13 @@ func (m *Manager) validateRetainedIdentity(ctx context.Context, execution *Agent
 		return nil
 	}
 	if row == nil {
-		return identityUnverifiedError(execution.ExecutorType, selected, "retained runtime identity is unavailable")
+		// An in-memory execution already carries its observed runtime. A missing
+		// inventory row is expected while a local runtime is replaced; require
+		// durable evidence only when the selected boundary needs it.
+		if identityRequiredForSelection(selected, execution) {
+			return identityUnverifiedError(execution.ExecutorType, selected, "retained runtime identity is unavailable")
+		}
+		return nil
 	}
 	return validateRetainedRow(execution, selected, row)
 }
