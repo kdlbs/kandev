@@ -689,7 +689,22 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 		evidence.providerDiagnosticText = ""
 		return
 	}
-	classified := routingerr.Classify(diagnostic.RoutingInput(routingerr.PhasePromptSend, providerID, message))
+	input := diagnostic.RoutingInput(routingerr.PhasePromptSend, providerID, message)
+	classified := routingerr.Classify(input)
+	if diagnostic != nil {
+		textClassified := routingerr.Classify(routingerr.Input{
+			Phase:      routingerr.PhasePromptSend,
+			ProviderID: providerID,
+			Stderr:     message,
+		})
+		if textClassified.Code != classified.Code ||
+			textClassified.Confidence != routingerr.ConfHigh || !textClassified.FallbackAllowed {
+			evidence.output = true
+			evidence.providerDiagnosticCode = ""
+			evidence.providerDiagnosticText = ""
+			return
+		}
+	}
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
 		evidence.output = true
 		evidence.providerDiagnosticCode = ""
@@ -736,26 +751,20 @@ func matchingProviderFailureCode(data watcher.AgentEventData) routingerr.Code {
 	return routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhasePromptSend, data.AgentID, message)).Code
 }
 
-// providerFailureCodeMatches reports whether the terminal failure classifies to
-// the recorded diagnostic code at either fidelity. A stream chunk is recorded
-// from its text alone, while the terminal failure may carry structured signals
-// that refine the code (Codex usage-limit prose is quota_limited, HTTP 429 is
-// rate_limited). Comparing the text-only classification too keeps recovery
-// independent of whether the chunk or the terminal failure arrives first; the
-// text-containment check in outputObservedLocked still ties the two together.
+// providerFailureCodeMatches requires both terminal classifications to match
+// the recorded diagnostic code. Structured metadata cannot be ignored when it
+// conflicts with the diagnostic text.
 func providerFailureCodeMatches(data watcher.AgentEventData, recorded routingerr.Code) bool {
 	message := matchingProviderFailureMessage(data)
-	if message == "" {
+	if message == "" || matchingProviderFailureCode(data) != recorded {
 		return false
 	}
-	if matchingProviderFailureCode(data) == recorded {
-		return true
-	}
-	return routingerr.Classify(routingerr.Input{
+	textClassified := routingerr.Classify(routingerr.Input{
 		Phase:      routingerr.PhasePromptSend,
 		ProviderID: data.AgentID,
 		Stderr:     message,
-	}).Code == recorded
+	})
+	return textClassified.Code == recorded && textClassified.Confidence == routingerr.ConfHigh && textClassified.FallbackAllowed
 }
 
 func (s *Service) withDynamicAttemptEvidence(data watcher.AgentEventData) watcher.AgentEventData {

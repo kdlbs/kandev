@@ -29,8 +29,10 @@ verbatim from Part 1 when Part 1 reached its file-size limit; Part 1's
 [Replay and effect-safety gate](provider-error-recovery.md#replay-and-effect-safety-gate)
 remains the authoritative gate bullet list and cross-references it here.
 
-It does not change classification rules, policy values, retry ownership, or
-candidate ordering.
+Structured fields add only allowlisted, namespace-aware classifier mappings.
+High-confidence hard-quota signatures retain their meaning when a generic HTTP
+429 status is also present. These mappings do not change policy values, retry
+ownership, or candidate ordering.
 
 ## Requirement mapping
 
@@ -65,12 +67,13 @@ prompt-delivery failure. The dynamic and concrete recovery gates may disregard
 the recorded diagnostic as output only if the terminal failure classifies to
 the identical semantic code and the same generation has no later assistant
 output, thought output, partial utility result, or tool activity. A chunk
-recorded from text alone is compared with the terminal failure at both
-fidelities: its structured classification (`http_status`, `rpc_code`,
-`error_kind`) and its text-only classification. Structured signals may refine
-the code (a Codex usage-limit message is `quota_limited` by text and
-`rate_limited` with HTTP 429), and recovery must not depend on whether the
-chunk or the terminal failure is delivered first.
+recorded from text alone must match the terminal failure's structured-aware
+classification. When lifecycle imports the diagnostic before the stream chunk
+arrives, its structured-aware and text-only classifications must also agree.
+Known hard-quota text remains `quota_limited` when the terminal error carries
+HTTP 429; a 429 without hard-quota evidence remains `rate_limited`. Recovery
+must not depend on whether the chunk or the terminal failure is delivered
+first.
 
 This is a correlation rule, not broad error-text suppression. A changed code
 (for example, a 529 diagnostic followed by a 500 failure), a stale generation,
@@ -427,7 +430,7 @@ current-turn, connection, cancellation, or effect gates.
 ## Out of scope
 
 Carried from the requirement's `## Out of scope` and owned by this part:
-classifier rules keyed on `errorKind` or the JSON-RPC code, tightening the
+interpretation of unrecognized `errorKind` or JSON-RPC codes, tightening the
 overloaded signature, UI rendering of the marker, retry policy changes, and the
 remaining gateway usage adapters. Fixture and capture exclusions live in
 [Part 2](provider-error-recovery-02.md#out-of-scope).

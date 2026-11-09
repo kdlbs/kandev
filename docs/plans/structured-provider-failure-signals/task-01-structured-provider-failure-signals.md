@@ -20,7 +20,9 @@ system_design:
 
 Carry an explicitly supplied HTTP error status and opaque provider code on the
 provider error projection, and feed the known structured signals to the shared
-classifier from every consumer that classifies a provider diagnostic.
+classifier from every consumer that classifies a provider diagnostic. Preserve
+known hard-quota meaning when a structured rate-limit signal is also present,
+and fail closed when structured and text classifications conflict.
 
 ## In scope
 
@@ -35,11 +37,16 @@ classifier from every consumer that classifies a provider diagnostic.
   from `RequestError.Data`.
 - ACP, Kanban, Office, retained turn-failure, quota-metadata, and lifecycle
   diagnostic consumers build their classifier input through `RoutingInput`.
+- A high-confidence hard-quota signature remains `quota_limited` with HTTP
+  429; a metadata-only 429 remains `rate_limited`.
+- Diagnostic correlation rejects a code conflict in both chunk-first and
+  terminal-first event order.
 
 ## Out of scope
 
-New text rules, retry policy, candidate ordering, response body or header
-parsing, and changes to recovery gates.
+New text rules, retry policy values, candidate ordering, response body or
+header parsing, new replay routes, and changes to identity, output, or effect
+gates.
 
 ## Acceptance
 
@@ -52,6 +59,9 @@ parsing, and changes to recovery gates.
    opaque provider code alone do not change classification.
 3. ACP `-32000` classifies as authentication required; `-32603` does not.
 4. Metadata is lent only to a diagnostic whose normalized text matches.
+5. A known usage quota with HTTP 429 remains hard and does not enter the
+   interactive retry path. A matching 529 text diagnostic paired with an HTTP
+   500 terminal status remains ordinary output in both event orders.
 
 ## Verification
 
@@ -68,6 +78,11 @@ continuity tests. The original pre-continuity verification below is historical.
 - `go test ./internal/agent/runtime/routingerr/ -run 'TestClassifyStructuredProviderSignals|TestClassifyKeepsAlreadyNormalizedError'`.
 - Existing `routingerr`, `agentctl/...`, `office/scheduler`, `office/service`,
   and `orchestrator` package tests.
+
+Fixup regressions, run from `apps/backend`, passed:
+
+- `go test ./internal/agent/runtime/routingerr -count=1`
+- `go test ./internal/orchestrator -run '^(TestPromptAttemptEvidence(KnownQuotaWith429IsOrderIndependent|RejectsConflictingStructuredFailureBothOrders)|TestDynamicAttemptEvidence.*)$' -count=1`
 
 ## Files likely touched
 

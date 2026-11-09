@@ -23,23 +23,29 @@ projection and feeds them to the shared classifier.
 
 ## Scope
 
-In scope: the `routingerr` classifier input and structured mapping, the
-`streams.ProviderError` HTTP status and opaque provider code fields with a
-`RoutingInput` helper, the ACP scalar metadata extractor, and the existing
-consumers that classify a provider diagnostic (ACP retained-turn and capacity
-continuation, Kanban, Office scheduler and failure handling, retained turn
-failure messages, provider quota metadata, and lifecycle diagnostic
-correlation).
+In scope: the `routingerr` classifier input and structured mapping, preserving
+high-confidence hard-quota classification when structured evidence says only
+`rate_limited`, and rejecting diagnostic/terminal code conflicts in either
+event order. It also includes the `streams.ProviderError` HTTP status and
+opaque provider code fields with a `RoutingInput` helper, the ACP scalar
+metadata extractor, and the existing consumers that classify a provider
+diagnostic (ACP retained-turn and capacity continuation, Kanban, Office
+scheduler and failure handling, retained turn failure messages, provider
+quota metadata, and lifecycle diagnostic correlation).
 
 Excluded: new provider text rules, retry policy values, candidate ordering,
-parsing of response bodies or headers, and any change to the identity,
-diagnostic-correlation, output, or effect gates.
+parsing response bodies or headers, new replay routes, and changes to attempt
+identity, ordinary-output, or effect gates.
 
 ## Technical approach
 
 `routingerr.Input` gains the ACP code, error kind, and opaque provider code.
 `classifyStructured` maps only signals with known semantics: an HTTP error
 status, the ACP authentication-required code, and adapter-namespaced kinds.
+Before accepting a structured `rate_limited` result, the shared classifier
+retains any matching high-confidence hard-quota signature. Diagnostic
+correlation requires the structured-aware and text-only classifications to
+agree, including when the lifecycle failure arrives before the stream chunk.
 `ProviderError.RoutingInput` builds the input from a valid projection so every
 consumer passes the same fields, and diagnostic correlation lends metadata only
 to the diagnostic whose normalized text matches.
@@ -64,6 +70,13 @@ allowlisted-metadata section of
 - `routingerr/structured_test.go` covers the classifier mapping and the
   normalized-error passthrough.
 - Existing `routingerr`, `agentctl`, Office, and orchestrator package tests.
+
+## Fixup verification
+
+Run from `apps/backend`:
+
+- `go test ./internal/agent/runtime/routingerr -count=1` — passed.
+- `go test ./internal/orchestrator -run '^(TestPromptAttemptEvidence(KnownQuotaWith429IsOrderIndependent|RejectsConflictingStructuredFailureBothOrders)|TestDynamicAttemptEvidence.*)$' -count=1` — passed.
 
 ## Risks
 

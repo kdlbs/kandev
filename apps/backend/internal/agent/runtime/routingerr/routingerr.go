@@ -227,7 +227,16 @@ func classify(in Input) *Error {
 		return e
 	}
 	if e := classifyStructured(in, excerpt); e != nil {
+		if e.Code == CodeRateLimited {
+			if quota, ok := matchProviderRules(in.ProviderID, excerpt, rawText); ok &&
+				quota.Code == CodeQuotaLimited && quota.Confidence == ConfHigh {
+				e = quota
+			}
+		}
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
+		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
 	if e := classifyManagedRuntimeNpmPolicy(in, rawText); e != nil {

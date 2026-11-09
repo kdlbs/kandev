@@ -3,6 +3,7 @@ package routingerr
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 // @covers AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.32
@@ -65,6 +66,33 @@ func TestClassifyStructuredProviderSignals(t *testing.T) {
 				t.Fatalf("rule = %q, want %q", got.ClassifierRule, test.wantRule)
 			}
 		})
+	}
+}
+
+// @covers AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.32
+// @covers AC-PLATFORM-RATE-THROTTLE-RETRY-001.3
+func TestClassifyHTTP429PreservesKnownHardQuota(t *testing.T) {
+	quota := Classify(Input{
+		ProviderID: "codex-acp",
+		HTTPStatus: 429,
+		Stderr:     "You've hit your usage limit.",
+	})
+	if quota.Code != CodeQuotaLimited || quota.Class != ClassHard {
+		t.Fatalf("known usage quota = %q/%q, want %q/%q", quota.Code, quota.Class, CodeQuotaLimited, ClassHard)
+	}
+	if quota.ResetHint != nil {
+		t.Fatalf("known usage quota reset hint = %v, want none", quota.ResetHint)
+	}
+	if got := Decide(ContextKanban, quota, time.Now()); got != DecisionManual {
+		t.Fatalf("known usage quota decision = %q, want %q", got, DecisionManual)
+	}
+
+	throttle := Classify(Input{ProviderID: "codex-acp", HTTPStatus: 429})
+	if throttle.Code != CodeRateLimited {
+		t.Fatalf("metadata-only HTTP 429 = %q, want %q", throttle.Code, CodeRateLimited)
+	}
+	if got := Decide(ContextKanban, throttle, time.Now()); got != DecisionShortRetry {
+		t.Fatalf("metadata-only HTTP 429 decision = %q, want %q", got, DecisionShortRetry)
 	}
 }
 
