@@ -19,7 +19,9 @@ type executionCreateWorkspaceInputs struct {
 // and control authentication before request assembly reveals the bootstrap nonce.
 func (m *Manager) prepareExecutionWorkspace(ctx context.Context, info *WorkspaceInfo, inputs executionCreateWorkspaceInputs) (*ExecutorCreateRequest, error) {
 	metadata := copyExecutionCreateMetadata(info.Metadata)
+	retainedResourceCircuitIdentity, hasRetainedResourceCircuitIdentity := metadata[MetadataKeyResourceCircuitIdentity]
 	captureResourceCircuitIdentity(metadata, inputs.executionID, inputs.profileInfo)
+	retainedBuiltinBinding, hasRetainedBuiltinBinding := metadata[mcpprofile.BuiltinBindingMetadataKey]
 	delete(metadata, mcpprofile.BuiltinBindingMetadataKey)
 	m.seedExecutionBaseBranches(ctx, inputs.taskID, inputs.executionID, metadata)
 	if inputs.managedGoCachePath != "" {
@@ -65,12 +67,19 @@ func (m *Manager) prepareExecutionWorkspace(ctx context.Context, info *Workspace
 			authToken = controlToken
 		}
 	}
-	return &ExecutorCreateRequest{
+	request := &ExecutorCreateRequest{
 		Metadata: metadata, RemoteContributions: remoteContributions,
 		ContributionDestinations: contributionDestinations, ComparisonTargets: comparisonTargets,
 		AutoApprovePermissions: autoApprove, AutoApprovePermissionsOverride: autoApproveOverride,
 		AuthToken: authToken,
-	}, nil
+	}
+	if hasRetainedBuiltinBinding {
+		request.RetainedBuiltinBinding = retainedBuiltinBinding
+	}
+	if hasRetainedResourceCircuitIdentity {
+		request.RetainedResourceCircuitIdentity = retainedResourceCircuitIdentity
+	}
+	return request, nil
 }
 
 // A recreated execution receives the retained metadata except for the managed
@@ -82,4 +91,11 @@ func copyExecutionCreateMetadata(source map[string]interface{}) map[string]inter
 	}
 	delete(metadata, managedGoCacheMetadataKey)
 	return metadata
+}
+
+func workspaceJournalOwnerID(info *WorkspaceInfo) string {
+	if info.SessionID != "" {
+		return info.SessionID
+	}
+	return info.TaskEnvironmentID
 }

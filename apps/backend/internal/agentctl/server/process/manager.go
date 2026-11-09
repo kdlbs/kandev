@@ -37,6 +37,7 @@ import (
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/common/securityutil"
+	"github.com/kandev/kandev/internal/common/startupdiag"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -196,14 +197,15 @@ type Manager struct {
 	exitErr            atomic.Value // error
 
 	// Stderr buffering for error context
-	stderrBuffer          []string
-	stderrBufferTruncated bool
-	stderrMu              sync.RWMutex
-	managedNPMRawLines    []string
-	managedNPMRawBytes    int
-	managedNPMRawOverflow bool
-	stderrConsumer        adapter.StderrLineConsumer
-	stderrSanitizer       adapter.StderrLineSanitizer
+	stderrBuffer            []string
+	stderrBufferTruncated   bool
+	startupDiagnosticReason string
+	stderrMu                sync.RWMutex
+	managedNPMRawLines      []string
+	managedNPMRawBytes      int
+	managedNPMRawOverflow   bool
+	stderrConsumer          adapter.StderrLineConsumer
+	stderrSanitizer         adapter.StderrLineSanitizer
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
@@ -290,6 +292,10 @@ type Manager struct {
 	// never reach the UI.
 	streamSubscribers   map[types.WorkspaceStreamSubscriber]struct{}
 	streamSubscribersMu sync.Mutex
+	// workspaceGraphAfterPublish is an optional test synchronization hook. It
+	// runs with streamSubscribersMu held, after a replacement graph is
+	// published and before subscribers move to it. Nil in production.
+	workspaceGraphAfterPublish func()
 
 	// Script/process runner (dev server, setup, cleanup, custom)
 	processRunner *ProcessRunner
@@ -308,6 +314,9 @@ type Manager struct {
 	adapter                 adapter.AgentAdapter
 	adapterCfg              *adapter.Config
 	userInputRequestHandler adapter.UserInputRequestHandler
+	// createAdapterFn is an optional test seam for adapter construction. Nil
+	// uses createAdapter.
+	createAdapterFn func() error
 
 	// Agent event notifications (protocol-agnostic)
 	updatesCh chan adapter.AgentEvent
@@ -1052,7 +1061,7 @@ func (m *Manager) SetUserInputRequestHandler(handler adapter.UserInputRequestHan
 func (m *Manager) currentWorkspaceSourceRoots() []string {
 	m.repoTrackersMu.RLock()
 	defer m.repoTrackersMu.RUnlock()
-	return append([]string(nil), m.workspaceSourceRoots...)
+	return append([]string{}, m.workspaceSourceRoots...)
 }
 
 // WorkspaceSourceRoots returns the live, current source-root allowlist
@@ -1296,14 +1305,18 @@ func (m *Manager) stopWorkspaceTrackers() {
 // For single-repo workspaces this is equivalent to
 // GetWorkspaceTracker().SubscribeWorkspaceStream() — the per-repo list is
 // empty and only the root tracker fires events.
+//
+// Registration and attachment happen under streamSubscribersMu so a graph
+// handoff cannot snapshot the old tracker set, then attach this channel after
+// that set was retired.
 func (m *Manager) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
 	sub := make(types.WorkspaceStreamSubscriber, 100)
 	m.streamSubscribersMu.Lock()
+	defer m.streamSubscribersMu.Unlock()
 	if m.streamSubscribers == nil {
 		m.streamSubscribers = make(map[types.WorkspaceStreamSubscriber]struct{})
 	}
 	m.streamSubscribers[sub] = struct{}{}
-	m.streamSubscribersMu.Unlock()
 	root, trackers := m.snapshotTrackers()
 	root.AttachWorkspaceStreamSubscriber(sub)
 	for _, t := range trackers {
@@ -1313,11 +1326,13 @@ func (m *Manager) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
 }
 
 // UnsubscribeWorkspaceStream detaches the subscriber from every tracker and
-// closes the channel exactly once.
+// closes the channel exactly once. Deregistration, detachment and closure share
+// streamSubscribersMu with graph handoff so a retired tracker cannot keep a
+// channel that is about to close.
 func (m *Manager) UnsubscribeWorkspaceStream(sub types.WorkspaceStreamSubscriber) {
 	m.streamSubscribersMu.Lock()
+	defer m.streamSubscribersMu.Unlock()
 	delete(m.streamSubscribers, sub)
-	m.streamSubscribersMu.Unlock()
 	root, trackers := m.snapshotTrackers()
 	root.DetachWorkspaceStreamSubscriber(sub)
 	for _, t := range trackers {
@@ -1342,18 +1357,40 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 		return nil, err
 	}
 	if cleaned == "" {
-		return m.workspaceTracker, nil
+		return m.GetWorkspaceTracker(), nil
 	}
 	if tracker := m.findRepositoryTracker(cleaned); tracker != nil {
 		return tracker, nil
 	}
 
 	m.workspaceTrackersMu.Lock()
+	if tracker, ok := m.workspaceTrackersBySubpath[cleaned]; ok {
+		if tracker.live() {
+			m.workspaceTrackersMu.Unlock()
+			return tracker, nil
+		}
+		// Stop is terminal; a cached tracker from a previous lifecycle cannot
+		// serve a later read. Drop it and build a live replacement below.
+		delete(m.workspaceTrackersBySubpath, cleaned)
+	}
+	m.workspaceTrackersMu.Unlock()
+
+	// Lazy creation is instance-owned work. Permanent teardown admission must
+	// reject it before a replacement tracker or its first observation starts
+	// outside the teardown cancellation and drain. A cached live tracker above
+	// remains reusable without admission.
+	release, err := m.admitStart()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	m.workspaceTrackersMu.Lock()
 	defer m.workspaceTrackersMu.Unlock()
 	if m.workspaceTrackersBySubpath == nil {
 		m.workspaceTrackersBySubpath = make(map[string]*WorkspaceTracker)
 	}
-	if t, ok := m.workspaceTrackersBySubpath[cleaned]; ok {
+	if t, ok := m.workspaceTrackersBySubpath[cleaned]; ok && t.live() {
 		return t, nil
 	}
 	t := NewWorkspaceTrackerForRepo(full, cleaned, m.logger)
@@ -1665,7 +1702,7 @@ func (m *Manager) GitOperator() *GitOperator {
 	defer m.gitOperatorMu.Unlock()
 
 	if m.gitOperator == nil {
-		m.gitOperator = NewGitOperator(m.cfg.WorkDir, m.logger, m.workspaceTracker)
+		m.gitOperator = NewGitOperator(m.cfg.WorkDir, m.logger, m.GetWorkspaceTracker())
 		m.gitOperator.setEnvironmentProvider(m.gitEnvironment)
 		if binding, ok := m.cfg.RemoteContributions[""]; ok {
 			m.gitOperator.setRemoteContribution(&binding)
@@ -1675,6 +1712,33 @@ func (m *Manager) GitOperator() *GitOperator {
 		}
 	}
 	return m.gitOperator
+}
+
+// rebindGitOperatorTrackers points cached operators at the replacement graph so
+// later stage, commit, reset, and refresh work reaches the live workspace
+// stream. Operators keep their operation locks and other cached state.
+func (m *Manager) rebindGitOperatorTrackers(root *WorkspaceTracker, trackers []*WorkspaceTracker) {
+	m.gitOperatorMu.Lock()
+	defer m.gitOperatorMu.Unlock()
+	if m.gitOperator != nil {
+		m.gitOperator.setWorkspaceTracker(root)
+	}
+	if len(m.gitOperatorsBySubpath) == 0 {
+		return
+	}
+	byRepository := make(map[string]*WorkspaceTracker, len(trackers))
+	for _, tracker := range trackers {
+		if tracker != nil && tracker.RepositoryName() != "" {
+			byRepository[tracker.RepositoryName()] = tracker
+		}
+	}
+	for subpath, operator := range m.gitOperatorsBySubpath {
+		tracker := byRepository[subpath]
+		if tracker == nil {
+			tracker = root
+		}
+		operator.setWorkspaceTracker(tracker)
+	}
 }
 
 // GitOperatorFor returns a git operator scoped to a sub-directory of the
@@ -1949,6 +2013,10 @@ func (m *Manager) startWithGeneration(
 			return 0, err
 		}
 	}
+	// Stop leaves every workspace tracker terminal. A retained manager that
+	// starts a replacement agent must replace them before the process reads or
+	// streams workspace state again.
+	m.renewWorkspaceTrackersForStart(ctx)
 
 	m.logger.Info("starting agent process",
 		zap.String("protocol", string(m.cfg.Protocol)),
@@ -2202,7 +2270,11 @@ func (m *Manager) buildAdapterConfig() error {
 			zap.String("command", srv.Command))
 	}
 
-	if err := m.createAdapter(); err != nil {
+	createAdapter := m.createAdapter
+	if m.createAdapterFn != nil {
+		createAdapter = m.createAdapterFn
+	}
+	if err := createAdapter(); err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
 
@@ -3762,6 +3834,14 @@ func (m *Manager) readStderr(stderrDone chan<- stderrReadResult) {
 			m.stderrConsumer.ConsumeStderrLine(rawLine)
 		}
 
+		// Recognized toolchain signatures project to a fixed safe marker before
+		// a launch wrapper can discard the otherwise-untrusted raw line.
+		if marker, reason := startupdiag.ProjectLine(rawLine); marker != "" {
+			m.recordStartupDiagnostic(reason)
+			m.appendStderr(marker)
+			continue
+		}
+
 		line, keep := safeManagedNpmStderrLine(rawLine)
 		if !keep && m.cfg != nil && !m.cfg.LaunchWrapper.IsZero() {
 			continue
@@ -3847,12 +3927,32 @@ func (m *Manager) managedStartupStderrSnapshot() ([]string, bool) {
 	return result, !m.stderrBufferTruncated
 }
 
+// managedStartupDiagnosticSnapshot returns the recognized reason with the
+// current retention completeness. Ring eviction invalidates attribution.
+func (m *Manager) managedStartupDiagnosticSnapshot() (string, bool) {
+	m.stderrMu.RLock()
+	defer m.stderrMu.RUnlock()
+	return m.startupDiagnosticReason, !m.stderrBufferTruncated
+}
+
+func (m *Manager) recordStartupDiagnostic(reason string) {
+	if reason == "" {
+		return
+	}
+	m.stderrMu.Lock()
+	defer m.stderrMu.Unlock()
+	if m.startupDiagnosticReason == "" {
+		m.startupDiagnosticReason = reason
+	}
+}
+
 // ClearStderrBuffer clears the stderr buffer (e.g., after successful operation)
 func (m *Manager) ClearStderrBuffer() {
 	m.stderrMu.Lock()
 	defer m.stderrMu.Unlock()
 	m.stderrBuffer = nil
 	m.stderrBufferTruncated = false
+	m.startupDiagnosticReason = ""
 	m.managedNPMRawLines = nil
 	m.managedNPMRawBytes = 0
 	m.managedNPMRawOverflow = false
@@ -3878,14 +3978,17 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 	_ = m.closeStderrReader()
 	intentionalStop := m.Status() == StatusStopping
 	recentStderr, stderrRetainedComplete := m.managedStartupStderrSnapshot()
-	evidence := newManagedStartupEvidence(generation, err, intentionalStop, stderrComplete, stderrRetainedComplete, stderrPresent, recentStderr)
+	diagnosticReason, diagnosticRetained := m.managedStartupDiagnosticSnapshot()
+	evidence := newManagedStartupEvidence(generation, err, intentionalStop, stderrComplete, stderrRetainedComplete, stderrPresent, recentStderr, diagnosticReason, diagnosticRetained)
 	evidence.CacheEvidence = m.managedRuntimeCacheEvidence(generation, evidence)
 	m.recordManagedStartupEvidence(evidence)
 
 	switch {
 	case intentionalStop:
 		m.exitCode.Store(0)
-		m.logger.Info("agent process exited during intentional stop")
+		m.logger.Info("agent process exited during intentional stop",
+			zap.String("exit_disposition", string(evidence.ExitDisposition)),
+			zap.Uint64("process_generation", generation))
 	case err != nil:
 		m.exitErr.Store(errorWrapper{err: err})
 		exitCode := -1
@@ -3897,6 +4000,9 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 		m.logger.Error("agent process exited with error",
 			zap.Error(err),
 			zap.Int("exit_code", exitCode),
+			zap.String("exit_disposition", string(evidence.ExitDisposition)),
+			zap.Uint64("process_generation", generation),
+			zap.String("process_reason", evidence.DiagnosticReason),
 			zap.Strings("recent_stderr", recentStderr))
 
 		// Send error event to the updates channel so UI can display it. This is
@@ -3931,7 +4037,11 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 		}
 	default:
 		m.exitCode.Store(0)
-		m.logger.Info("agent process exited successfully")
+		m.logger.Info("agent process exited successfully",
+			zap.Int("exit_code", 0),
+			zap.String("exit_disposition", string(evidence.ExitDisposition)),
+			zap.Uint64("process_generation", generation),
+			zap.String("process_reason", evidence.DiagnosticReason))
 	}
 
 	if !intentionalStop {

@@ -14,16 +14,32 @@ import (
 // the fallback instead of returning ErrInvalidBaseBranch.
 func TestCreateRequest_Validate_FallsBackToFallbackBaseBranch(t *testing.T) {
 	r := &CreateRequest{
-		TaskID:             "task-1",
-		RepositoryPath:     "/tmp/repo",
-		BaseBranch:         "",
-		FallbackBaseBranch: "main",
+		TaskID:                   "task-1",
+		RepositoryPath:           "/tmp/repo",
+		BaseBranch:               "",
+		FallbackBaseBranch:       "main",
+		BaseBranchFallbackPolicy: models.BaseBranchFallbackPolicyRepositoryDefault,
 	}
 	if err := r.Validate(); err != nil {
 		t.Fatalf("Validate with fallback should succeed: %v", err)
 	}
 	if r.BaseBranch != "main" {
 		t.Errorf("expected BaseBranch promoted from fallback, got %q", r.BaseBranch)
+	}
+}
+
+func TestCreateRequest_ValidateRejectsStrictEmptyBaseWithFallback(t *testing.T) {
+	r := &CreateRequest{
+		TaskID:             "task-1",
+		RepositoryPath:     "/tmp/repo",
+		BaseBranch:         "",
+		FallbackBaseBranch: "main",
+	}
+	if err := r.Validate(); !errors.Is(err, ErrInvalidBaseBranch) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidBaseBranch", err)
+	}
+	if r.BaseBranch != "" {
+		t.Fatalf("strict request adopted fallback base %q", r.BaseBranch)
 	}
 }
 

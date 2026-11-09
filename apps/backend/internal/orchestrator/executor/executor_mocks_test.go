@@ -331,6 +331,7 @@ type mockRepository struct {
 	getTaskEnvironmentFunc         func(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	getTaskEnvironmentByTaskIDFunc func(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	getExecutorRunningFunc         func(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	deleteExecutorRunningFunc      func(ctx context.Context, sessionID string) error
 	hasExecutorRunningFunc         func(ctx context.Context, sessionID string) (bool, error)
 	createTaskEnvironmentRepoErr   error
 	finalizeTaskEnvironmentErr     error
@@ -1431,6 +1432,9 @@ func (m *mockRepository) ListExecutorsRunningByTaskID(ctx context.Context, taskI
 	return result, nil
 }
 func (m *mockRepository) DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error {
+	if m.deleteExecutorRunningFunc != nil {
+		return m.deleteExecutorRunningFunc(ctx, sessionID)
+	}
 	return nil
 }
 func (m *mockRepository) HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error) {

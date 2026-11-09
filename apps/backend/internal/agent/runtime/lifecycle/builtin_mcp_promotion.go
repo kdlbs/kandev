@@ -8,6 +8,18 @@ import (
 )
 
 func (m *Manager) prepareBuiltinWorkspaceExecution(ctx context.Context, execution *AgentExecution, req *LaunchRequest) error {
+	if adoptionPreservesPeer(nil, execution) {
+		// A retained helper already owns its binding. Verify the persisted
+		// profile instead of running fresh-helper preparation, which rejects a
+		// configured or started helper.
+		if _, bound := execution.metadataValue(p.BuiltinBindingMetadataKey); bound {
+			return m.verifyBuiltinExecution(ctx, execution)
+		}
+		if req.McpProfile != nil && req.McpProfile.BuiltinPackages != nil {
+			return errors.New("retained agent has no persisted built-in MCP binding for the requested workspace")
+		}
+		return nil
+	}
 	if req.McpProfile == nil || req.McpProfile.BuiltinPackages == nil {
 		if _, bound := execution.metadataValue(p.BuiltinBindingMetadataKey); bound {
 			return errors.New("cannot discard a prepared built-in MCP binding")

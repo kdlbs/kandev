@@ -13,7 +13,7 @@ import {
 } from "./session-delivery-recovery-view";
 import {
   asRecoveryError,
-  runtimeCleanupFailureCauses,
+  recoveryFailureCauses,
   runtimeCleanupFailureDetails,
   resolveRequestErrorMessage,
   branchRecoveryDetails,
@@ -300,7 +300,7 @@ export function useSessionRecoveryActions({
       setRecoveryNoticeKind(null);
       setManualRecoveryFailure({
         operation: "resume",
-        causes: runtimeCleanupFailureCauses(cause, sessionId),
+        causes: recoveryFailureCauses(cause, sessionId),
         sessionId,
         errorStamp: associatedStamp,
         requestKey,
