@@ -366,6 +366,7 @@ func buildHostConfig(cfg ContainerConfig, mounts []mount.Mount, portBindings net
 	if len(cfg.SecurityOpt) > 0 {
 		hc.SecurityOpt = cfg.SecurityOpt
 	}
+	applyContainerStorageBounds(hc, mounts)
 	return hc
 }
 

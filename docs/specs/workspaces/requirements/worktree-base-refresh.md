@@ -157,6 +157,43 @@ global event ordering, or freshness at the time a response is received.
   URLs, or raw command output. A verified refreshed ref and every existing
   fallback decision shall keep their current behavior.
 
+#### Selected base identity
+
+The following criteria clarify missing-base substitution under criteria .6,
+.8, .13, and .19. Refresh fallback to the same selected local branch remains
+subject to criteria .1 through .5.
+
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.25:** When a caller explicitly
+  selects a base for new worktree materialization, Kandev shall use that base
+  or fail preparation. A missing selection shall not become a repository
+  default, including when the caller explicitly selects the configured default.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.26:** When preparation cannot
+  resolve that selection, its error shall identify the requested ref and
+  repository. It shall create no worktree or runnable workspace from another
+  base and shall not start the agent. With refresh disabled, this failure
+  shall perform no automatic remote-default lookup or additional fetch.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.27:** Automatic repository-default
+  substitution shall require a separately recorded inherited or automatic
+  default selection. An absent, invalid, or stale selection record for a
+  non-empty base shall grant no substitution permission. A later explicit
+  selection, including the same branch name, shall remove that permission.
+  Eligible inherited/default recovery shall retain its existing warnings and
+  refresh restrictions. A repository-qualified PR target shall remain strict.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.28:** Every required attachment
+  shall satisfy its own selection policy before agent startup. One available
+  base shall not hide an unresolved explicit base on another attachment,
+  including two attachments of the same repository. A failed attempt shall
+  preserve valid reused checkouts. After deliberate repository repair, retry
+  shall use the original selection without requiring a replacement task.
+
+These criteria apply when materialization needs a new source base. They do not
+revalidate an already valid reused checkout or discard its local changes.
+Authenticated empty-remote bootstrap retains criterion .9.
+Older attachments with ambiguous non-empty bases can now require deliberate
+repair instead of automatic branch substitution.
+
+Delivery: [Explicit worktree base selection](../../../plans/explicit-worktree-base-selection/plan.md).
+
 ## Compatibility
 
 This requirement replaces the universal fail-closed refresh behavior from
@@ -174,3 +211,4 @@ Kandev v0.92.1. Remote-only executors and branches keep strict materialization.
 ## System design
 
 - [Worktree Base Refresh System Design](../system-design/worktree-base-refresh.md)
+- [Worktree base selection](../system-design/worktree-base-selection.md)
