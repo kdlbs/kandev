@@ -40,6 +40,15 @@ func sessionSummaryModelLabelCases() []sessionSummaryModelLabelCase {
 			wantID: "model-b", wantName: "Model B",
 		},
 		{
+			name: "runtime override takes precedence",
+			metadata: map[string]interface{}{
+				models.SessionMetaKeyACPModelState: map[string]interface{}{"current_model_id": "model-a", "models": catalog},
+				"runtime_config_overrides":         map[string]interface{}{"model": "model-b"},
+				"runtime_config":                   map[string]interface{}{"model": "model-c"},
+			},
+			wantID: "model-b", wantName: "Model B",
+		},
+		{
 			name: "current model used without runtime config",
 			metadata: map[string]interface{}{
 				models.SessionMetaKeyACPModelState: map[string]interface{}{"current_model_id": "model-c", "models": catalog},
