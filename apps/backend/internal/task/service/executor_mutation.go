@@ -22,6 +22,9 @@ func (s *Service) AuthorizeWorkflowExecutorMutation(ctx context.Context, workflo
 	}
 	_, err = s.PrepareAutonomousExecutor(models.WithExecutorWorkspace(ctx, workflow.WorkspaceID), workflow.CreatedByUserID, "")
 	if err != nil {
+		if errors.Is(err, models.ErrExecutorNotFound) {
+			return fmt.Errorf("%w: %w", models.ErrWorkspaceDefaultExecutorUnavailable, err)
+		}
 		return executorMutationDenial(err)
 	}
 	tasks, err := s.tasks.ListTasks(ctx, workflowID)

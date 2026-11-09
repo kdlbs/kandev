@@ -57,6 +57,10 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
 		return
 	}
+	if errors.Is(err, models.ErrWorkspaceDefaultExecutorUnavailable) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
+		return
+	}
 	if errors.Is(err, models.ErrExecutorMutationDenied) {
 		c.JSON(http.StatusForbidden, gin.H{"error": models.ErrExecutorMutationDenied.Error()})
 		return
@@ -103,6 +107,12 @@ func cleanupInspectionFields(err error) []zap.Field {
 }
 
 func taskErrorBody(err error) gin.H {
+	if errors.Is(err, models.ErrWorkspaceDefaultExecutorUnavailable) {
+		return gin.H{
+			"error":      models.ErrWorkspaceDefaultExecutorUnavailable.Error(),
+			"error_code": models.WorkspaceDefaultExecutorUnavailableErrorCode,
+		}
+	}
 	body := gin.H{"error": err.Error()}
 	for key, value := range taskErrorDetails(err) {
 		body[key] = value

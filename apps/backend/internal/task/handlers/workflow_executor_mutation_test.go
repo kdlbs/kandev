@@ -18,13 +18,25 @@ import (
 
 type workflowMutationExecutorRepo struct {
 	*workflowRepo
+	missing bool
 }
 
 func (r *workflowMutationExecutorRepo) GetExecutor(context.Context, string) (*models.Executor, error) {
+	if r.missing {
+		return nil, models.ErrExecutorNotFound
+	}
 	return &models.Executor{ID: "private-executor", OwnerUserID: "alice"}, nil
 }
 
 func newExecutorMutationWorkflowHandlers(t *testing.T) (*WorkflowHandlers, *workflowRepo) {
+	return newWorkflowMutationHandlers(t, false)
+}
+
+func newMissingDefaultExecutorWorkflowHandlers(t *testing.T) (*WorkflowHandlers, *workflowRepo) {
+	return newWorkflowMutationHandlers(t, true)
+}
+
+func newWorkflowMutationHandlers(t *testing.T, missingDefault bool) (*WorkflowHandlers, *workflowRepo) {
 	t.Helper()
 	repo := workflowFixture()
 	executorID := "private-executor"
@@ -35,7 +47,8 @@ func newExecutorMutationWorkflowHandlers(t *testing.T) (*WorkflowHandlers, *work
 		Workspaces: repo, Tasks: repo, TaskRepos: repo,
 		Workflows: repo, Messages: repo, Turns: repo,
 		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
-		Executors: &workflowMutationExecutorRepo{repo}, Environments: repo, TaskEnvironments: repo,
+		Executors:    &workflowMutationExecutorRepo{workflowRepo: repo, missing: missingDefault},
+		Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
 	return NewWorkflowHandlers(svc, &stubStepLister{}, log), repo
@@ -92,4 +105,45 @@ func TestWSWorkflowExecutorMutationDenial(t *testing.T) {
 			require.Equal(t, "Kanban", repo.workflows["wf-1"].Name)
 		})
 	}
+}
+
+func TestHTTPWorkflowMissingDefaultExecutorConflict(t *testing.T) {
+	h, repo := newMissingDefaultExecutorWorkflowHandlers(t)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	h.registerHTTP(router)
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/workflows/wf-1", strings.NewReader(`{"name":"Renamed"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(authn.WithIdentity(t.Context(), authn.Identity{UserID: "bob", Role: authn.RoleMember}))
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusConflict, response.Code)
+	require.JSONEq(t,
+		`{"error":"workspace default executor is unavailable","error_code":"workspace_default_executor_unavailable"}`,
+		response.Body.String(),
+	)
+	require.Empty(t, repo.updated)
+	require.Equal(t, "Kanban", repo.workflows["wf-1"].Name)
+}
+
+func TestWSWorkflowMissingDefaultExecutorConflict(t *testing.T) {
+	h, repo := newMissingDefaultExecutorWorkflowHandlers(t)
+	ctx := authn.WithIdentity(t.Context(), authn.Identity{UserID: "bob", Role: authn.RoleMember})
+	request, err := ws.NewRequest("edit", ws.ActionWorkflowUpdate, map[string]string{"id": "wf-1", "name": "Renamed"})
+	require.NoError(t, err)
+
+	response, err := h.wsUpdateWorkflow(ctx, request)
+
+	require.NoError(t, err)
+	payload := wsWorkflowError(t, response)
+	require.Equal(t, ws.ErrorCodeConflict, payload.Code)
+	require.Equal(t, models.ErrWorkspaceDefaultExecutorUnavailable.Error(), payload.Message)
+	require.Equal(t,
+		map[string]interface{}{"error_code": models.WorkspaceDefaultExecutorUnavailableErrorCode},
+		payload.Details,
+	)
+	require.Empty(t, repo.updated)
+	require.Equal(t, "Kanban", repo.workflows["wf-1"].Name)
 }

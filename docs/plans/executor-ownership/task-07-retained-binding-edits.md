@@ -41,6 +41,10 @@ still returned.
   `models.ErrExecutorMutationDenied`. Step handlers and workflow HTTP updates
   report `403 executor mutation denied`. Workflow WebSocket updates report
   `FORBIDDEN` with the same message. The response names no executor or profile.
+- A missing workspace default executor has a separate sanitized conflict
+  response with the `workspace_default_executor_unavailable` error code.
+- Task updates wrap executor eligibility refusals in the same denial marker.
+  HTTP updates report 403 and WebSocket updates report `FORBIDDEN`.
 - Retained metadata, session, and environment rows are not rewritten, and no
   deleted or retired resource is revived.
 
@@ -51,12 +55,12 @@ still returned.
   compute.
 - Workspace visibility and roles are unchanged: non-members and other
   workspaces still see not-found, and viewers are still refused.
-- The workflow creator check (`PrepareAutonomousExecutor`) is unchanged. A
-  deleted workspace-default executor still blocks step edits for that
-  workflow; the refusal is now 403 rather than 404.
+- The workflow creator check (`PrepareAutonomousExecutor`) still blocks step
+  edits when a configured workspace default executor no longer resolves. The
+  response now identifies the workspace configuration problem without naming
+  the executor.
 - Independent QA observed that a collaborator's HTTP step PUT on this path
   returns 500. That response predates this change and is not addressed here.
-- Task handlers keep their existing status mapping for executor refusals.
 - A profile ID recreated with the same value is treated as live again and is
   checked strictly.
 - The 403 body does not identify the blocking dependency.
@@ -121,14 +125,28 @@ Nothing was validated against a live deployment.
   runs after the external-ID lookup and before task allocation or persistence.
   New regression cases cover foreign and missing metadata selections, plus
   successful owner and shared-profile selections.
-- Workflow HTTP and WebSocket updates now report the existing denial marker
-  through their forbidden response channels. New route and service tests cover
-  denial, safe response content, unchanged stored workflow, and successful owner
-  updates. Direct private-profile lookups and task error mapping stay unchanged.
-- The missing workspace-default diagnosis remains outside this correction.
-  The repository has no dedicated missing-default error contract to reuse here.
-- Tests, builds, linters, documentation validators, and commit hooks were not
-  run, as requested for this review. The new regression tests remain unexecuted.
+- Workflow HTTP and WebSocket updates report the existing denial marker
+  through their forbidden response channels. Workflow edits with a missing
+  workspace default return a separate sanitized conflict code.
+- Task updates wrap executor eligibility refusals in the denial marker, and
+  their HTTP and WebSocket handlers report sanitized forbidden responses.
+- The first focused follow-up test run found a missing test import. After the
+  import was added, the same command passed in all three packages.
+- The full backend suite remains unrun for this follow-up.
+- `bash scripts/lint-go-changed` passed for the ten changed Go files (0 issues).
+- `node --test scripts/validate-public-docs.test.mjs` passed all 63 tests.
+- `node scripts/validate-public-docs.mjs` validated 55 published pages.
+- `python3 scripts/list-docs.py validate` validated 437 decisions and 1937
+  specifications.
+- `python3 scripts/lint-spec-files.py --all` passed.
+
+Focused maintainer follow-up command:
+
+```bash
+cd apps/backend
+go test -trimpath -race -count=1 ./internal/task/service/ ./internal/task/handlers/ ./internal/workflow/handlers/ \
+  -run 'TestRetainedExecutor|TestExecutorMetadataSelection|TestHTTPWorkflowExecutorMutation|TestWSWorkflowExecutorMutation|TestHTTPWorkflowMissingDefaultExecutorConflict|TestWSWorkflowMissingDefaultExecutorConflict|TestStepMutationExecutor|TestStepMutationMissingWorkspaceDefaultHasConflictCode|TestHTTPUpdateTaskExecutorMutationDenialIsForbidden|TestWSUpdateTaskExecutorMutationDenialIsForbidden'
+```
 
 Targeted checks for a later validation step:
 

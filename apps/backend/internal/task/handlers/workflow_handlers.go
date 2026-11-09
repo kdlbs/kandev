@@ -533,6 +533,11 @@ func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message
 		AgentProfileID: req.AgentProfileID,
 	})
 	if err != nil {
+		if errors.Is(err, models.ErrWorkspaceDefaultExecutorUnavailable) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, models.ErrWorkspaceDefaultExecutorUnavailable.Error(), map[string]interface{}{
+				errorDetailKeyErrorCode: models.WorkspaceDefaultExecutorUnavailableErrorCode,
+			})
+		}
 		if errors.Is(err, models.ErrExecutorMutationDenied) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, models.ErrExecutorMutationDenied.Error(), nil)
 		}

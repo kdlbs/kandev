@@ -227,8 +227,11 @@ admission refuses for every caller (a deleted profile, a retired executor, or a
 missing environment) confers no compute and does not block content edits; every
 binding that still resolves, and every newly written executor selection, keeps
 the strict check, and lookup failures fail closed. A later editor never becomes creator
-implicitly. Persist a separate trusted executor actor on tasks created before a
-session exists, and on admitted sessions. WIP queues and recovery restore that
+implicitly. If a configured workspace default executor no longer resolves,
+workflow edits remain blocked. HTTP returns 409, and WebSocket returns
+`CONFLICT`. Both return `workspace_default_executor_unavailable` without an
+executor ID or ownership details. Persist a separate trusted executor actor on
+tasks created before a session exists, and on admitted sessions. WIP queues and recovery restore that
 actor without reading caller-writable metadata. Preserve it in both the task
 repository and Office legacy table rebuilds. Unknown task actors cannot borrow
 a workspace or workflow owner. Check run authorization before starting a task/session runtime;

@@ -235,6 +235,13 @@ func (h *Handlers) writeStepMutationError(c *gin.Context, err error) {
 	if writeNotVisible(c, err, "Step not found") {
 		return
 	}
+	if errors.Is(err, taskmodels.ErrWorkspaceDefaultExecutorUnavailable) {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":      taskmodels.ErrWorkspaceDefaultExecutorUnavailable.Error(),
+			"error_code": taskmodels.WorkspaceDefaultExecutorUnavailableErrorCode,
+		})
+		return
+	}
 	if errors.Is(err, taskmodels.ErrExecutorMutationDenied) {
 		c.JSON(http.StatusForbidden, gin.H{"error": taskmodels.ErrExecutorMutationDenied.Error()})
 		return
