@@ -201,7 +201,7 @@ test("reusable verified cache repair keeps the published runtime across an agent
     expect(privateProject).toMatch(
       /(?:\/kandev-managed-runtime-[^/]+|\/managed-runtime-repairs\/v1\/generations\/[a-f0-9]{32})\/project$/,
     );
-    const requestsAfterRecovery = fixture.registry.requests();
+    const requestsAfterRecovery = fixture.registry.packageRequests();
     expect(requestsAfterRecovery).toBeGreaterThan(0);
     execFileSync("docker", [
       "exec",
@@ -227,7 +227,7 @@ test("reusable verified cache repair keeps the published runtime across an agent
       message: "remote agent process restart should reuse the published repair",
       timeout: 120_000,
     });
-    expect(fixture.registry.requests()).toBe(requestsAfterRecovery);
+    expect(fixture.registry.packageRequests()).toBe(requestsAfterRecovery);
     expect(
       readRemoteFile(
         seedData.sshTarget,

@@ -37,7 +37,7 @@ export function registerManagedNpmProbeRecoveryTests() {
       await testPage.keyboard.press("Escape");
       expect(fixture.registry.requests()).toBeGreaterThan(0);
       expect(fs.existsSync(`${fixture.sharedRoot}/package.json`)).toBe(false);
-      const requestsAfterRecovery = fixture.registry.requests();
+      const requestsAfterRecovery = fixture.registry.packageRequests();
       const refreshedProbe = testPage.waitForResponse(
         (response) =>
           response.url().includes("/api/v1/agent-models/opencode-acp/") &&
@@ -55,7 +55,7 @@ export function registerManagedNpmProbeRecoveryTests() {
         "ready",
         { timeout: 60_000 },
       );
-      expect(fixture.registry.requests()).toBe(requestsAfterRecovery);
+      expect(fixture.registry.packageRequests()).toBe(requestsAfterRecovery);
       await assertNoDocumentHorizontalOverflow(testPage);
       expect((await apiClient.getAgentProfile(fixture.profile.id)).model).toBe(
         fixture.profile.model,

@@ -205,7 +205,7 @@ test("reusable verified cache repair keeps the published runtime across an agent
     expect(privateProject).toMatch(
       /(?:\/kandev-managed-runtime-[^/]+|\/managed-runtime-repairs\/v1\/generations\/[a-f0-9]{32})\/project$/,
     );
-    const requestsAfterRecovery = fixture.registry.requests();
+    const requestsAfterRecovery = fixture.registry.packageRequests();
     expect(requestsAfterRecovery).toBeGreaterThan(0);
     execFileSync("docker", [
       "exec",
@@ -231,7 +231,7 @@ test("reusable verified cache repair keeps the published runtime across an agent
       message: "agent process restart should reuse the published executor repair",
       timeout: 120_000,
     });
-    expect(fixture.registry.requests()).toBe(requestsAfterRecovery);
+    expect(fixture.registry.packageRequests()).toBe(requestsAfterRecovery);
     expect(
       dockerFileContent(
         containerID!,
@@ -256,7 +256,7 @@ test("reusable verified cache repair keeps the published runtime across an agent
       },
     );
     await waitForLatestSessionDone(apiClient, secondTask.id, 1, "new container storage lifetime");
-    expect(fixture.registry.requests()).toBeGreaterThan(requestsAfterRecovery);
+    expect(fixture.registry.packageRequests()).toBeGreaterThan(requestsAfterRecovery);
   } finally {
     await testPage.goto("/");
     await fixture.releaseBackendEnv();

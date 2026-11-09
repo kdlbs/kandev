@@ -327,7 +327,7 @@ export function registerManagedNpmCacheRecoveryTests() {
       await expect.poll(() => fs.existsSync(npmLog)).toBe(true);
       const installerInvocations = countInstallerInvocations(npmLog, fixture.packageSpec);
       expect(installerInvocations).toBeGreaterThan(0);
-      const registryRequests = fixture.registry.requests();
+      const registryRequests = fixture.registry.packageRequests();
       const firstSession = (await apiClient.listTaskSessions(taskId)).sessions.find(
         (row) => row.id === sessionId,
       );
@@ -360,7 +360,7 @@ export function registerManagedNpmCacheRecoveryTests() {
         timeout: 60_000,
       });
       expect(countInstallerInvocations(npmLog, fixture.packageSpec)).toBe(installerInvocations);
-      expect(fixture.registry.requests()).toBe(registryRequests);
+      expect(fixture.registry.packageRequests()).toBe(registryRequests);
       if (firstNativeID) {
         expect(readSessionNativeID(backend, sessionId)).toBe(firstNativeID);
       }
