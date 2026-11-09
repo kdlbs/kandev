@@ -40,6 +40,14 @@ variable, so a copied auth file wins over a selected secret for the same
 provider. `models.json` can hold inline `apiKey` values; the bundle copies the
 file as it is.
 
+## Bundle lifecycle
+
+Fresh provisioning and environment reset copy the selected `pi.config` files.
+A warm reconnect refreshes credentials and session environment values, but it
+does not upload the bundle again. The session home can outlive an agentctl
+instance, so a missing instance does not prove that the home is fresh. This
+keeps remote edits to Pi settings and models across reconnects.
+
 ## SSH forwarding
 
 The SSH executor forwards only `sshRemoteAgentCredentialEnvKeys` from the
@@ -52,4 +60,6 @@ already present.
 `pi_acp_test.go` pins the declarations, the merge policy, the missing label
 and the bundle's exclusion of `auth.json`.
 `executor_ssh_pi_env_test.go` derives Pi's env variables from its declaration
-and checks that SSH forwards each one.
+and checks that SSH forwards each one. Kubernetes lifecycle tests cover fresh
+bundle copy, warm-resume preservation, and credential merging through the
+Kubernetes file uploader.

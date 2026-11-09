@@ -52,3 +52,6 @@ host, separately from credentials.
   on the remote, and shall not contain `auth.json`.
 - **AC-AGENTS-PI-REMOTE-AUTH-002.2:** The bundle label shall be localized in
   every shipped locale.
+- **AC-AGENTS-PI-REMOTE-AUTH-002.3:** Kandev shall copy selected bundle files
+  during fresh provisioning or reset, and a warm resume shall preserve remote
+  edits to those files.
