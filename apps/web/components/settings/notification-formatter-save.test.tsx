@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   getNotificationFormatter,
@@ -12,7 +12,10 @@ import {
   useSettingsSaveCoordinator,
 } from "./settings-save-provider";
 
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+  Trans: ({ children }: { children?: ReactNode }) => children,
+}));
 vi.mock("@/lib/api/domains/notification-formatters-api", () => ({
   getNotificationFormatter: vi.fn(),
   selectNotificationFormatter: vi.fn(),
@@ -30,25 +33,28 @@ const choice = {
 };
 const selected = JSON.stringify([choice.plugin_id, choice.installation_id, choice.key]);
 const providers = [{ id: "mail", name: "Mail", type: "apprise", events: [] }];
+const providerSettingsId = "provider-settings";
+const notificationSoundId = "notification-sound";
+const floatingSaveId = "settings-floating-save";
 
 function OtherSettings({ save }: { save: (id: string) => void }) {
   const [saved, setSaved] = useState(false);
   useSettingsSaveContributor({
-    id: "provider-settings",
+    id: providerSettingsId,
     revision: 1,
     isDirty: !saved,
     save: () => {
-      save("provider-settings");
+      save(providerSettingsId);
       setSaved(true);
     },
     discard: () => setSaved(true),
   });
   useSettingsSaveContributor({
-    id: "notification-sound",
+    id: notificationSoundId,
     revision: 1,
     isDirty: !saved,
     save: () => {
-      save("notification-sound");
+      save(notificationSoundId);
       setSaved(true);
     },
     discard: () => setSaved(true),
@@ -64,6 +70,45 @@ function SaveProbe({ result }: { result: (value: unknown) => void }) {
     </button>
   );
 }
+
+function UnavailableTemplateEditor() {
+  const [dirty, setDirty] = useState(true);
+  useSettingsSaveContributor({
+    id: "plugin:formatter:templates:mail",
+    order: 40,
+    revision: 1,
+    isDirty: dirty,
+    canSave: true,
+    save: async () => {
+      throw new Error("template editor is not ready");
+    },
+    discard: () => setDirty(false),
+  });
+  return null;
+}
+
+it("keeps a failed template editor dirty while saving independent provider and sound settings", async () => {
+  const save = vi.fn();
+  const result = vi.fn();
+  render(
+    <SettingsSaveProvider>
+      <UnavailableTemplateEditor />
+      <OtherSettings save={save} />
+      <SaveProbe result={result} />
+    </SettingsSaveProvider>,
+  );
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save all" })));
+  expect(save.mock.calls).toEqual([[providerSettingsId], [notificationSoundId]]);
+  expect(result).toHaveBeenCalledWith({
+    canLeave: false,
+    failedIds: new Set(["plugin:formatter:templates:mail"]),
+  });
+  expect(screen.getByTestId(floatingSaveId).dataset.dirtyContributors).toBe(
+    "plugin:formatter:templates:mail",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "settings:reset" }));
+  await waitFor(() => expect(screen.queryByTestId(floatingSaveId)).toBeNull());
+});
 
 it.each([false, true])(
   "saves sibling settings while an explicit formatter activation remains pending (existing=%s)",
@@ -98,17 +143,17 @@ it.each([false, true])(
     fireEvent.change(select, { target: { value: selected } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save all" })));
 
-    expect(save.mock.calls).toEqual([["provider-settings"], ["notification-sound"]]);
+    expect(save.mock.calls).toEqual([[providerSettingsId], [notificationSoundId]]);
     expect(result).toHaveBeenCalledWith({ canLeave: false, failedIds: new Set() });
     expect(selectNotificationFormatter).not.toHaveBeenCalled();
     expect((select as HTMLSelectElement).value).toBe(selected);
-    expect(screen.getByTestId("settings-floating-save").dataset.status).toBe("dirty");
-    expect(screen.getByTestId("settings-floating-save").dataset.dirtyContributors).toBe(
+    expect(screen.getByTestId(floatingSaveId).dataset.status).toBe("dirty");
+    expect(screen.getByTestId(floatingSaveId).dataset.dirtyContributors).toBe(
       "notification-formatter:mail",
     );
 
     fireEvent.click(screen.getByRole("button", { name: "settings:reset" }));
-    await waitFor(() => expect(screen.queryByTestId("settings-floating-save")).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId(floatingSaveId)).toBeNull());
     expect((select as HTMLSelectElement).value).toBe(
       existing ? JSON.stringify(["previous", "previous-installation", "text"]) : "",
     );

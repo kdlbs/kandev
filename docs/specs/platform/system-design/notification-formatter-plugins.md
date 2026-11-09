@@ -197,6 +197,14 @@ revision uses the original default pair and a safe diagnostic, never another
 custom revision. Cancellation prevents late responses or activation acknowledgements
 from silently changing the page baseline.
 
+After external formatting, transport admission rechecks the captured provider's
+owner, type, enabled state, and event subscription. Revocation suppresses delivery
+instead of sending either custom or fallback content. The shared fanout budget
+records whether formatting was attempted, so later providers receive the same
+check even when their binding disappeared or the formatting budget expired.
+The check retains the admitted transport/configuration rather than switching to
+a newer selection, and does not hold a SQL transaction over a transport call.
+
 Keep active and prepared revisions recoverable in the initial release; no automatic
 revision garbage collector is introduced. Uninstall retains its documented data
 removal behavior and therefore requires an export before recovery data is lost.

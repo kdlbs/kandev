@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/notifications/models"
@@ -22,6 +23,11 @@ type FormatterRuntime interface {
 
 type formatterBudgetKey struct{}
 
+type formatterBudget struct {
+	context.Context
+	used atomic.Bool
+}
+
 // withFormatterBudget limits cumulative formatting work without shortening the
 // caller's delivery context. Later providers use defaults after it expires.
 func withFormatterBudget(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -29,11 +35,11 @@ func withFormatterBudget(ctx context.Context) (context.Context, context.CancelFu
 		return ctx, func() {}
 	}
 	budget, cancel := context.WithTimeout(ctx, time.Second)
-	return context.WithValue(ctx, formatterBudgetKey{}, budget), cancel
+	return context.WithValue(ctx, formatterBudgetKey{}, &formatterBudget{Context: budget}), cancel
 }
 
 func formatterContext(ctx context.Context) context.Context {
-	if budget, ok := ctx.Value(formatterBudgetKey{}).(context.Context); ok {
+	if budget, ok := ctx.Value(formatterBudgetKey{}).(*formatterBudget); ok {
 		return budget
 	}
 	return ctx
@@ -73,6 +79,7 @@ func (s *Service) captureFormatter(ctx context.Context, owner string, provider *
 }
 
 func (s *Service) formatNotification(ctx context.Context, owner string, payload notificationPayload) notificationPayload {
+	budget, _ := ctx.Value(formatterBudgetKey{}).(*formatterBudget)
 	ctx = formatterContext(ctx)
 	runtime := s.runtimeFormatter()
 	if payload.formatter == nil || runtime == nil || ctx.Err() != nil {
@@ -84,6 +91,9 @@ func (s *Service) formatNotification(ctx context.Context, owner string, payload 
 	if proto.Size(request) > 128*1024 {
 		return payload
 	}
+	if budget != nil {
+		budget.used.Store(true)
+	}
 	result, err := runtime.FormatNotification(formatCtx, payload.formatter, request)
 	if err != nil || formatCtx.Err() != nil || pluginsdk.ValidateNotificationFormat(result) != nil {
 		s.logger.Warn("notification formatter fallback", zap.String("provider_id", payload.formatter.ProviderID), zap.String("reason", "unavailable_or_invalid_formatter"))
@@ -93,6 +103,33 @@ func (s *Service) formatNotification(ctx context.Context, owner string, payload 
 		payload.Title, payload.Body = result.Title, result.Body
 	}
 	return payload
+}
+
+func formattedFanout(ctx context.Context) bool {
+	budget, ok := ctx.Value(formatterBudgetKey{}).(*formatterBudget)
+	return ok && budget.used.Load()
+}
+
+// Recheck delivery authority after external formatting, without replacing the
+// captured configuration or transport with a newer provider selection.
+func (s *Service) revalidateFormattedDelivery(ctx context.Context, owner string, captured *models.Provider, event string) error {
+	current, err := s.ownedProvider(ctx, owner, captured.ID)
+	if err != nil {
+		return err
+	}
+	if current.UserID != owner || current.Type != captured.Type || !current.Enabled {
+		return ErrProviderNotFound
+	}
+	subscriptions, err := s.repo.ListSubscriptionsByProvider(ctx, captured.ID)
+	if err != nil {
+		return err
+	}
+	for _, subscription := range subscriptions {
+		if subscription.EventType == event && subscription.Enabled {
+			return nil
+		}
+	}
+	return ErrProviderNotFound
 }
 
 func (s *Service) notificationFormatContext(ctx context.Context, owner string, payload notificationPayload) *pluginsdk.NotificationFormatRequest {

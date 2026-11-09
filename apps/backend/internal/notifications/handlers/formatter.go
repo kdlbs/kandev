@@ -5,8 +5,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/notifications/models"
 	"github.com/kandev/kandev/internal/notifications/service"
 	"github.com/kandev/kandev/internal/notifications/store"
@@ -14,6 +16,10 @@ import (
 
 func (h *Handlers) httpFormatter(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
+	if c.Request.Method != http.MethodGet {
+		cancel := httpmw.BoundRequestBody(c, 5*time.Second, 8192)
+		defer cancel()
+	}
 	settings, err := h.controller.FormatterSettings(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		writeFormatterError(c, err)
@@ -23,7 +29,6 @@ func (h *Handlers) httpFormatter(c *gin.Context) {
 		c.JSON(http.StatusOK, settings)
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8192)
 	decoder := json.NewDecoder(c.Request.Body)
 	decoder.DisallowUnknownFields()
 	var body struct {
@@ -63,11 +68,12 @@ func writeFormatterError(c *gin.Context, err error) {
 
 func (h *Handlers) httpFormatterPreview(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
+	cancel := httpmw.BoundRequestBody(c, 5*time.Second, 128*1024)
+	defer cancel()
 	if _, err := h.controller.FormatterSettings(c.Request.Context(), c.Param("id")); err != nil {
 		writeFormatterError(c, err)
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 128*1024)
 	decoder := json.NewDecoder(c.Request.Body)
 	decoder.DisallowUnknownFields()
 	var body struct {

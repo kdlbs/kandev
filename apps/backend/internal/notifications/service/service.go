@@ -544,6 +544,11 @@ type notificationPayload struct {
 // over that user's WebSocket connections.
 func (s *Service) dispatchProvider(ctx context.Context, userID string, provider *models.Provider, payload notificationPayload) error {
 	payload = s.formatNotification(ctx, userID, payload)
+	if payload.formatter != nil || formattedFanout(ctx) {
+		if err := s.revalidateFormattedDelivery(ctx, userID, provider, payload.EventType); err != nil {
+			return err
+		}
+	}
 	adapter := s.providers[provider.Type]
 	if adapter == nil {
 		return fmt.Errorf("unknown provider type: %s", provider.Type)

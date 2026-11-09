@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/notifications/models"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/store"
@@ -16,15 +17,7 @@ func boundFormatterManagement(ctx *gin.Context, scope string) context.CancelFunc
 	if scope != manifest.ActionScopeNotificationProvider {
 		return func() {}
 	}
-	bounded, cancel := context.WithTimeout(ctx.Request.Context(), 5*time.Second)
-	ctx.Request = ctx.Request.WithContext(bounded)
-	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, 128*1024)
-	controller := http.NewResponseController(ctx.Writer)
-	deadline, _ := bounded.Deadline()
-	_ = controller.SetReadDeadline(deadline)
-	// Keep the deadline through net/http's unread-body drain. The server resets
-	// connection deadlines when it admits the next keep-alive request.
-	return cancel
+	return httpmw.BoundRequestBody(ctx, 5*time.Second, 128*1024)
 }
 
 func actionResponseLimit(scope string) int {

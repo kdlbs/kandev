@@ -155,3 +155,19 @@ Public Go/npm SDK `0.1.0` does not implement the formatter extension. Its
 SDK-wide host floor is not support evidence. The source-labeled private lane
 works; standalone released-dependency compatibility remains blocked until a
 supporting SDK is published. No public plugin release is claimed.
+
+### Editor review follow-up (2026-11-09)
+
+The independent plugin now registers loading failures as per-contributor Save
+errors instead of a page-wide `canSave=false` veto. The draft remains guarded and
+resettable while unrelated provider/sound settings save. Load publication merges
+only fields edited during loading over the returned snapshot, preserving untouched
+saved templates and the authoritative Reset baseline. Failed-load retries retain
+those edits; successful import snapshots supersede older configuration responses
+while allowing the event/variable catalog to finish loading.
+
+Each reported editor failure reproduced before its fix. The plugin's controller
+and UI-contract regressions cover field preservation, retry, Reset, binding-read
+delay, and import overtaking load. The host's mounted Save regression covers the
+coordinator side of the contract. See the independent repository's formatter
+validation record for final test and package results.

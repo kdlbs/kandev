@@ -201,3 +201,48 @@ The formatter and coordinator suites passed 35 tests; frontend typecheck and ful
 lint passed. Full Vitest exceeded 600 seconds and reported two failures in
 `plan-comment-migration.test.ts`; the same two failures reproduced on unchanged
 stable-candidate source `c846cf102`. This is not a green full-suite result.
+
+### Review regression follow-up (2026-11-09)
+
+The provider-revocation and HTTP body-deadline findings both reproduced before
+their fixes. Service regressions returned custom content after provider deletion,
+type/owner changes, disable, and unsubscribe during formatting. A follow-up fanout
+case also reproduced fallback delivery to a deleted later provider after its
+binding disappeared, with both live and expired formatting budgets. Transport
+admission now rechecks authority after external formatting, including those later
+providers, without replacing the captured transport/configuration.
+
+Real HTTP tests sent partial JSON and invalid prefixes with unread request bodies
+to binding PUT and preview POST. Both exceeded the caller's earlier deadline before
+the fix. These handlers and provider-scoped plugin actions now share the common
+body/deadline helper, retaining its read deadline through net/http body drain.
+Separate assertions verify the five-second default management budget.
+
+The fanout budget test uses `testing/synctest`, including a quiescence barrier for
+the timeout cancellation tree, instead of waiting for real time. A mounted shared
+Save regression verifies that an unavailable editor reports its own failure,
+retains dirty/navigation/Reset behavior, and still saves provider/sound siblings.
+
+Normal `go test -trimpath -p 2 ./internal/notifications/... ./internal/common/httpmw`
+and the plugin-action body-deadline tests passed. Web typecheck, full web lint,
+Prettier, and 26 shared-Save tests passed. The independent plugin's private-source
+full test target and packaged desktop/Pixel 5 smoke passed, including migration
+and coherent restore; its validation document owns the package evidence.
+
+Broader checks remain limited: race commands did not complete within 600/900-second
+build/link budgets. `make -k test` exceeded 600 seconds during backend execution;
+it reported failures in agentctl, plugin-fixture, hostutility, managedruntime,
+and launcher areas before termination. A separate full web run exceeded 600
+seconds and reported two plan-comment-migration failures and one sidebar archived
+freshness failure. These failures are outside the edited files, but this run did
+not prove their baseline status. Changed-package Go lint initially lacked its
+executable; after building the repository-pinned `golangci-lint` 2.9.0 with Go
+1.26.6 in task-owned temporary storage, package loading exceeded its five-minute
+budget. Direct vet on the notification and common HTTP packages passed. None of
+these results is a full-suite pass.
+
+Final two-axis review found no remaining findings in the requested fix scope.
+Its additional fanout and load/import interleaving findings reproduced in new
+regressions and were fixed before repeating focused notification tests and the
+plugin's full private-source test target and packaged browser smoke. Full core
+suite attempts above preceded these final interleaving corrections.
