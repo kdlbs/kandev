@@ -189,15 +189,27 @@ describe("desktop drag input lifecycle", () => {
     "keeps scrolling when %s leaves the primary touch down",
     (type) => {
       const { scroll } = board();
-      pointer(499);
+      fireEvent.touchMove(document, {
+        touches: [
+          { identifier: 1, clientX: 499, clientY: 150 },
+          { identifier: 2, clientX: 101, clientY: 150 },
+        ],
+      });
       frame();
       const before = scroll.scrollLeft;
+      expect(before).toBeGreaterThan(0);
       fireEvent(
         document,
         new TouchEvent(type, { touches: [{ identifier: 1, clientX: 499, clientY: 150 } as Touch] }),
       );
       frame();
       expect(scroll.scrollLeft).toBeGreaterThan(before);
+      const beforeReverse = scroll.scrollLeft;
+      fireEvent.touchMove(document, {
+        touches: [{ identifier: 1, clientX: 101, clientY: 150 }],
+      });
+      frame();
+      expect(scroll.scrollLeft).toBeLessThan(beforeReverse);
       fireEvent.pointerUp(document, { isPrimary: true });
       expect(frames.size).toBe(0);
     },
