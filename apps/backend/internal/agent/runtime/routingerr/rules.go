@@ -191,7 +191,7 @@ func mustRawRule(id, pat string, code Code, conf Confidence) rule {
 }
 
 // HasProviderRules reports whether providerID is a rules catalogue key (an
-// agent ID such as providerOpenCodeACP). Diagnostics can carry a different
+// agent ID such as "opencode-acp"). Diagnostics can carry a different
 // provider identity, e.g. OpenCode's model-provider ID "opencode-go", which
 // must not be used for rule lookup.
 func HasProviderRules(providerID string) bool {
