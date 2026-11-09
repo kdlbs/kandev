@@ -115,7 +115,8 @@ ordered-tier native-owner path, then update concrete attribution in that same
 existing call. Classified fallback retains the route owner. Review and taskless
 Office use their actual run and run-session identities, not synthetic sessions.
 Preserve existing feature OFF, task generation and caller cancellation semantics.
-No alternate cursor, counter, ledger or permanent tests. The two existing tables
+No alternate cursor, counter or ledger. The native owner cutover has committed
+migration tests (see the verification checkpoint). The two existing tables
 remain the sole route history. No operating database migration or activation.
 
 
@@ -137,7 +138,16 @@ continuation/policy and real task FK/cascade across two replays. A deliberately
 invalid legacy fixture failed the attempt copy after state copy, rolling back the
 entire schema/data cutover. The actual reserved Office-run-session -> native
 resolver -> original attempt ledger passed race1.830s, and task startup recovery
-returned no native starting rows. No permanent tests or fixture fingerprints.
+returned no native starting rows. No fixture fingerprints.
+
+Review follow-up: the cutover now has committed tests in
+`dynamic_route_owner_migration_test.go` and
+`dynamic_route_owner_migration_postgres_test.go`: fresh-schema replay, legacy
+upgrade plus replay preserving every value and stored timestamp text, and a
+rollback matrix that fails after each cutover step (a test-only
+`failNativeRouteOwnerCutoverAfter` failpoint), compares the legacy schema and
+rows byte for byte, then retries. The PostgreSQL matrix is gated by
+`KANDEV_TEST_POSTGRES_DSN`.
 SQL guard passed. Normal hook and store-conformance outcomes remain separately
 recorded; PostgreSQL actual execution is unavailable without a test DSN.
 Review caller composition, distributed choice, pace and keep-model remain open.
