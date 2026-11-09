@@ -134,7 +134,7 @@ func (s *providerTierLimitService) enrichObservation(ctx context.Context, candid
 		return err
 	}
 	if dimension == limitDimensionModelDaily {
-		return s.learnModelScope(ctx, c, used, observation.ObservedAt)
+		return s.learnModelScope(ctx, c, observation.ObservedAt)
 	}
 	used.Windows = learningTokenWindows(windows)
 	base := agentusage.MergeTierLimits(c.defaults, c.learned.Tiers[c.tier])
