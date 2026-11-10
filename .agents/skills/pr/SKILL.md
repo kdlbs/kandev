@@ -279,7 +279,8 @@ required screenshot embedding in step 7 is complete.
 
    After the PR body is verified, delete the temporary upload comment, then
    check that every image still loads in an unauthenticated session. If removal
-   breaks an image, restore the comment and report the duplication and blocker.
+   breaks an image, post a replacement comment with the embeds and report that
+   the duplication remains necessary for anonymous access.
    Never leave a duplicate screenshot comment as routine capture evidence.
 
    **Fork fallback:** If the actor cannot upload against the base repository,
@@ -291,6 +292,7 @@ required screenshot embedding in step 7 is complete.
    attachment uploads may be used when available, but verify anonymous image
    access after publication; do not assume private or unpublished assets are
    accessible to reviewers.
+
    **JSON payloads:** Use `jq` (or an equivalent JSON tool) to build and
    validate payloads without interpolating untrusted Markdown into shell
    syntax. When command output is redirected, piped, or consumed by `jq` or
