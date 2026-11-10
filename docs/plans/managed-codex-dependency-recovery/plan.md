@@ -15,6 +15,10 @@ legacy_specs: []
 
 ## Overview
 
+The [reuse package](../managed-npm-repair-reuse/plan.md) extends the common
+owner for requirement-006 repairs. If it lands first, preserve its ownership
+boundary when this package extends preparation. Requirement 005 remains pending.
+
 Automatically prepare a private copy of the exact selected managed Codex ACP
 runtime after independently confirming a missing bundled platform dependency,
 then retry once. Agents owns this correction because it owns managed runtime
@@ -85,10 +89,25 @@ qualifies the earlier explicit-maintenance-only consequence.
 
 ## Technical approach
 
+### Shared preparation dependency (2026-11-07)
+
+The [incomplete-cache package](../managed-npm-cache-recovery/plan.md) now owns
+the generic private-preparation owner, evidence/directive envelope, and common
+task/probe retry integration. Its Task 01 precedes this package's Task 01.
+Reuse that owner and capability rather than create a second installer.
+This package adds the Codex-specific missing-platform evidence, optional-package
+policy, and validator. Its task/probe work orders extend the same replacement
+budget and publication guards after the common integration exists.
+
+Requirement 005 and all four work orders remain pending. The cache-recovery
+package does not establish missing-dependency acceptance. Existing verification
+results below describe earlier design checks, not this amendment's product tests.
+
 ### Executor-local evidence and prepared-runtime owner
 
-Add shared diagnostic recognition beside `common/npmresolution/matcher.go`,
-and bounded inventory/preparation ownership in `agent/managedruntime`.
+Add shared diagnostic recognition beside `common/npmresolution/matcher.go`.
+Extend the common private owner in `agent/managedruntime` with the dependency
+inventory and validator; do not duplicate preparation ownership.
 Derive package and platform expectations from registered Codex metadata and
 verified installed manifests, never from the diagnostic's install suggestion.
 Use the existing deterministic cache key and runtime-observation inspection

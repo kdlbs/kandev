@@ -1440,6 +1440,11 @@ export class SessionPage {
       .waitFor({ state: "hidden", timeout });
   }
 
+  /** Buffer text of the active shell terminal panel. */
+  async readTerminalBuffer(): Promise<string> {
+    return this.readXtermBuffer("terminal-panel");
+  }
+
   /** Wait for the active shell to emit its initial prompt before sending input. */
   async expectTerminalShellReady(timeout = 20_000): Promise<void> {
     await expect
@@ -1766,7 +1771,10 @@ export class SessionPage {
   /** Open the New Agent dialog from the phone session controls. */
   async openMobileNewSessionDialog(): Promise<void> {
     await this.page.getByTestId("mobile-sessions-pill").tap();
-    await this.page.getByTestId("mobile-launch-session").tap();
+    const launchButton = this.page.getByTestId("mobile-launch-session");
+    await expect(launchButton).toBeVisible();
+    await launchButton.tap();
+    await expect(this.page.getByTestId("task-description-input")).toBeVisible();
   }
 
   /** Session tab in dockview by session label (e.g., "Session 1", "Session 2"). */

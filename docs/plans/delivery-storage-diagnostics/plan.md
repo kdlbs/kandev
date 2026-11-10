@@ -253,7 +253,14 @@ Addressed all eight code-review findings:
 
 Focused regression tests cover production epochs, quota pressure below 90% with paused output, late predecessor and attachment results, deferred snapshot ordering across epochs, bounded sampler identity/capacity deadlines, reason-specific copy and copied details, long executor labels, and stale receipt-age transitions.
 
-## Risks
+## Post-turn recovery follow-up
+
+The [delivery storage recovery package](../delivery-storage-recovery/plan.md) extends the original implemented work.
+It covers idle health observation, independent pressure freshness, and terminal-backed session-state convergence.
+The original work-order statuses and verification results remain historical evidence.
+They do not establish acceptance of the follow-up criteria 002.15 through 002.17.
+
+## Original delivery risks
 
 - A full disk can prevent persistence of its own error. Live status must remain independent of journal and SQL writes.
 - A current healthy sample must not overwrite a recorded failure or resolve prompt uncertainty.

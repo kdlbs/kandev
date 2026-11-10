@@ -18,7 +18,7 @@ export type CopilotPluginDiscoveryResponse = {
   reason?: string;
   context_revision?: string;
   runtime_version?: string;
-  /** False while native mounting still fails closed for this runtime. */
+  /** True only when this runtime's native help output advertises --plugin-dir. */
   mount_permitted?: boolean;
   plugins: CopilotPluginDiscoveryPlugin[];
 };

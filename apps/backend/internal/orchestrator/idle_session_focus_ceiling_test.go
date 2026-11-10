@@ -58,7 +58,7 @@ func newFocusCeilingFixture(t *testing.T, taskID, sessionID string, state models
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &inactiveTurnService{}
 	svc.SetLSPLeaseLifecycle(&activeLSPLeaseForTest{sessionID: sessionID})
 

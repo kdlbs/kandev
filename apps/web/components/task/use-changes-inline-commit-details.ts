@@ -33,7 +33,9 @@ export function useChangesPanelContextIdentity(): ChangesPanelContextIdentity {
 export function useChangesInlineCommitDetails(context: ChangesPanelContextIdentity) {
   const { t } = useTranslation();
   const { toast } = useToast();
-  const { activeTaskId, activeSessionId, contextKey } = context;
+  const { activeTaskId, contextKey } = context;
+  // New requests use the selected session's execution and readiness.
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionTaskId = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId]?.task_id : undefined,
   );

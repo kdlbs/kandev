@@ -1158,11 +1158,15 @@ func validatePluginToolSnapshot(snapshot plugintools.Snapshot) error {
 			return err
 		}
 		if definition.InvocationScope != "" && definition.InvocationScope != plugintools.InvocationScopeTask &&
-			definition.InvocationScope != plugintools.InvocationScopeInstance {
+			definition.InvocationScope != plugintools.InvocationScopeInstance &&
+			definition.InvocationScope != plugintools.InvocationScopeWorkspace {
 			return fmt.Errorf("%s has unsupported invocation scope %q", name, definition.InvocationScope)
 		}
-		if declaresInstanceOnlySurface(definition.Surfaces) && !definition.IsInstanceRead() {
+		if declaresCoordinatorSurface(definition.Surfaces) && !definition.IsInstanceRead() {
 			return fmt.Errorf("%s requires instance scope and a true read-only hint", name)
+		}
+		if declaresExternalSurface(definition.Surfaces) && !definition.IsInstanceRead() && !definition.IsWorkspaceRead() {
+			return fmt.Errorf("%s requires instance or workspace scope and a true read-only hint", name)
 		}
 		if err := validatePluginToolSchema(definition.ExposedName+"/input", definition.InputSchema); err != nil {
 			return fmt.Errorf("%s input schema: %w", name, err)
@@ -1206,9 +1210,18 @@ func validatePluginToolSchema(name string, raw json.RawMessage) error {
 	return nil
 }
 
-func declaresInstanceOnlySurface(surfaces []string) bool {
+func declaresCoordinatorSurface(surfaces []string) bool {
 	for _, surface := range surfaces {
-		if surface == plugintools.SurfaceCoordinator || surface == plugintools.SurfaceExternal {
+		if surface == plugintools.SurfaceCoordinator {
+			return true
+		}
+	}
+	return false
+}
+
+func declaresExternalSurface(surfaces []string) bool {
+	for _, surface := range surfaces {
+		if surface == plugintools.SurfaceExternal {
 			return true
 		}
 	}
@@ -1290,7 +1303,10 @@ func (s *Server) registerPluginTools() {
 				!s.profile.CoordinatorToolPolicy.AllowsPlugin(definition.PluginID, definition.LocalName, definition.InstallationID, definition.PolicyVersion)) {
 			continue
 		}
-		if (surface == mcpprofile.SurfaceCoordinator || surface == mcpprofile.SurfaceExternal) && !definition.IsInstanceRead() {
+		if surface == mcpprofile.SurfaceCoordinator && !definition.IsInstanceRead() {
+			continue
+		}
+		if surface == mcpprofile.SurfaceExternal && !definition.IsInstanceRead() && !definition.IsWorkspaceRead() {
 			continue
 		}
 		tool := mcp.NewToolWithRawSchema(definition.ExposedName, definition.Description, definition.InputSchema)
@@ -1635,7 +1651,7 @@ func (s *Server) registerCreateTaskTool() {
 			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Auto-resolved if only one workspace exists. Defaulted from parent for subtasks when omitted.")),
 			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Auto-resolved if the workspace has only one workflow. Defaulted from parent for subtasks when workspace_id is also omitted; if supplied, it must belong to the effective workspace_id.")),
 			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted; for subtasks, pass only with an explicit workflow_id)")),
-			mcp.WithString("workspace_mode", mcp.Enum("inherit_parent", "new_workspace"), mcp.Description("Optional materialized-workspace mode. Omit for subtasks to inherit the parent's workspace/worktree. inherit_parent requires parent_id and reuses the parent's materialized workspace/worktree; new_workspace requests a separate workspace/worktree.")),
+			mcp.WithString("workspace_mode", mcp.Enum("inherit_parent", "new_workspace"), mcp.Description("Optional materialized-workspace mode. Omit for subtasks to inherit the parent's workspace/worktree. inherit_parent requires parent_id and normally reuses the parent's materialized workspace/worktree. If a new launch selects a different non-Kubernetes executor, Kandev creates a separate child-owned workspace; uncommitted parent changes are not copied. A session still bound to the inherited environment must resume with its original executor, and Kubernetes environments cannot be shared across tasks. new_workspace requests a separate workspace/worktree.")),
 			mcp.WithString("title", mcp.Required(), mcp.MaxLength(taskcontract.TaskTitleMaxLength), mcp.Description("A concise, few-word task title (maximum 60 characters).")),
 			mcp.WithString("prompt", mcp.Description("The initial prompt for the task agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. For auto-started subtasks, provide a specific and detailed prompt; omitting it starts the task agent without task-specific context.")),
 			mcp.WithString("priority", mcp.Enum(models.TaskPriorityCritical, models.TaskPriorityHigh, models.TaskPriorityMedium, models.TaskPriorityLow), mcp.DefaultString(models.TaskPriorityMedium), mcp.Description("Task priority. Defaults to medium when omitted.")),
@@ -1652,6 +1668,7 @@ func (s *Server) registerCreateTaskTool() {
 				mcp.Description(blockedByParamDesc),
 				mcp.Items(map[string]any{"type": "string"}),
 			),
+			mcp.WithArray("related_task_ids", mcp.Description("Task IDs to associate with this task without blocking or ordering them."), mcp.Items(map[string]any{"type": "string"})),
 			mcp.WithBoolean("start_when_unblocked", mcp.Description(startWhenUnblockedParamDesc)),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
@@ -1705,9 +1722,9 @@ Removing the last edge unblocks the task but does NOT start it: an automatic sta
 func (s *Server) registerSpawnSessionTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("spawn_session_kandev",
-			mcp.WithDescription(`Start an additional Kandev session on an existing task. This creates a persistent Kandev session/tab, not a native subagent; call it only when the user explicitly requests another Kandev session or a Kandev workflow requires session coordination. It does not create a task. Returns {task_id, session_id, state, agent_profile_id}; a workflow step may override the requested profile.`),
+			mcp.WithDescription(`Start an additional Kandev session on an existing task. This creates a persistent Kandev session/tab, not a native subagent; call it only when the user explicitly requests another Kandev session or a Kandev workflow requires session coordination. It does not create a task. Returns {task_id, session_id, state, agent_profile_id} for a distinct session; the resolved profile takes precedence over workflow session routing.`),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The Kandev session's initial prompt. This is the ONLY context the new agent receives — be specific and detailed.")),
-			mcp.WithString("agent_profile_id", mcp.Description("Requested agent profile for the new session. Omit to inherit your session's profile; a workflow launch profile may override it.")),
+			mcp.WithString("agent_profile_id", mcp.Description("Requested agent profile takes precedence over workflow profiles. Omit to inherit your same-task session's profile, then the target task's primary-session profile. If neither resolves a profile, normal launch defaults or errors apply.")),
 			mcp.WithString("name", mcp.Description("Optional session name shown on the session tab (e.g. 'reviewer'). Helps the user tell concurrent sessions apart.")),
 			mcp.WithString("task_id", mcp.Description("Task to spawn the session on. Omit to use your current task.")),
 		),
@@ -1908,7 +1925,7 @@ func (s *Server) updateRepositoryBaseBranchHandler() server.ToolHandlerFunc {
 func (s *Server) registerStepCompleteTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("step_complete_kandev",
-			mcp.WithDescription(`Complete the current workflow step as your final action. Do not call before asking the user or during partial work; put blockers in blockers. The signal is idempotent, transitions run asynchronously, and a new user message cancels it. If the response says the workflow step changed, this turn is stale: retries cannot recover. End it and ask the user to resume the session for the current step, then complete it in the new turn. This differs from already_signaled, which means the signal was accepted. Do not move the task solely to bypass a stale-turn error.`),
+			mcp.WithDescription(`Complete the current workflow step as your final action. Do not call before a question or partial work; put blockers in blockers. Signal is idempotent per source turn; a later turn in the same step can replace an unconsumed signal. Response reports signal_id, source, outcome, transition proof, current route. pending means recorded, not committed, and never proves reviewer delivery. If the workflow step changed, retries cannot recover: end the turn, ask the user to resume the session for the current step, then complete it in the new turn. already_signaled returns the retained outcome. Do not move the task solely to bypass a stale-turn error.`),
 			mcp.WithString("summary", mcp.Required(), mcp.Description("One-paragraph plain-text summary of what was done in this step. Shown to the user.")),
 			mcp.WithString("handoff", mcp.Description("Optional context for the immediately-following step's agent, delivered once in that step's first prompt and not carried beyond it. Up to 8,192 bytes; longer values are truncated.")),
 			mcp.WithString("blockers", mcp.Description("Optional list of known unresolved issues. Recorded on this step's transition history, not delivered to the next step's agent — do not use it to pass context forward. Use sparingly, only when you cannot make further progress without input. Up to 8,192 bytes; longer values are truncated.")),

@@ -26,12 +26,28 @@ type taskServiceAdapter struct {
 	svc *taskservice.Service
 }
 
+// CreateMessage binds a trusted worktree script message to a turn without
+// opening a conversational turn. The non-creating lookup keeps this path from
+// reacquiring the task mutation gate that workspace attachment already holds.
 func (a *taskServiceAdapter) CreateMessage(ctx context.Context, req *worktree.CreateMessageRequest) (*models.Message, error) {
+	turnID := req.TurnID
+	completedTurn := false
+	if turnID == "" {
+		active, err := a.svc.GetActiveTurn(ctx, req.TaskSessionID)
+		if err != nil {
+			return nil, err
+		}
+		completedTurn = active == nil
+		if active != nil {
+			turnID = active.ID
+		}
+	}
 	// Convert worktree.CreateMessageRequest to taskservice.CreateMessageRequest
 	return a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,
 		TaskID:        req.TaskID,
-		TurnID:        req.TurnID,
+		TurnID:        turnID,
+		CompletedTurn: completedTurn,
 		Content:       req.Content,
 		AuthorType:    req.AuthorType,
 		AuthorID:      req.AuthorID,

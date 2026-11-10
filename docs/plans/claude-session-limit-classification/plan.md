@@ -156,6 +156,11 @@ The work order includes the exact preflight command for implementation delivery.
 
 ## Documentation impact
 
+Issue #5222 extends the observed limit wording through the separate
+[Office mid-run quota package](../office-midrun-quota-classification/plan.md).
+That package owns the five-hour and generic usage additions and their Office regressions.
+The completed session-limit work and its recorded checks remain this package's scope.
+
 Internal specifications and delivery records change in this package.
 Public recovery guidance already distinguishes quota failures and reset guidance.
 No command, configuration, API, rendered card, or automatic-resume promise changes.

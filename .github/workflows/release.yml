@@ -103,9 +103,58 @@ permissions:
   contents: read
 
 jobs:
+  npm-auth-preflight:
+    name: Verify npm trusted publishing authentication
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        inputs.backfill_tag == ''
+      }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # Required for package-scoped OIDC token exchange
+    env:
+      GITHUB_WORKFLOW_SHA: ${{ github.workflow_sha }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # The helper runs from the trusted workflow revision, not the
+          # selected dispatch ref.
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Verify package-scoped npm authentication
+        env:
+          SDK_SCOPE_OWNERSHIP_CONFIRMED: ${{ vars.SDK_SCOPE_OWNERSHIP_CONFIRMED }}
+        run: |
+          set -euo pipefail
+          source scripts/release/npm-packages.sh
+          args=()
+          for package in "${NIGHTLY_PACKAGES[@]}"; do
+            args+=(--package "$package")
+          done
+          node scripts/release/npm-auth-preflight.mjs "${args[@]}" \
+            --sdk-package "@kdlbs/plugin-sdk" \
+            --checkout-sha "$(git rev-parse HEAD)"
+
   prepare:
     name: Prepare release (bump version, PR, tag)
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' }}
+    needs: [npm-auth-preflight]
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        (needs.npm-auth-preflight.result == 'success' ||
+         (needs.npm-auth-preflight.result == 'skipped' &&
+          (inputs.dry_run || inputs.desktop_validation_only || inputs.backfill_tag != '')))
+      }}
     runs-on: ubuntu-latest
     environment: ${{ (!inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '') && 'release' || 'release-validation' }}
     permissions:
@@ -1079,11 +1128,11 @@ jobs:
             platform: linux-arm64
             goos: linux
             goarch: arm64
-          - os: macos-14
+          - os: macos-15-intel
             platform: macos-x64
             goos: darwin
             goarch: amd64
-          - os: macos-14
+          - os: macos-15
             platform: macos-arm64
             goos: darwin
             goarch: arm64
@@ -1097,6 +1146,8 @@ jobs:
       CGO_ENABLED: 1
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
+      # Keep the runtime deployment target independent of the runner image.
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.goos == 'darwin' && '14.0' || '' }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -2846,10 +2897,28 @@ jobs:
           ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
 
+      - name: Load publication helpers
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$GITHUB_WORKFLOW_SHA"
+          git checkout "$GITHUB_WORKFLOW_SHA" -- scripts/release .github/release-signing-key.asc
+
+      - name: Inspect published release
+        id: existing_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          node scripts/release/existing-release.mjs inspect \
+            --tag "$RELEASE_TAG" \
+            --commit "$(git rev-parse HEAD)" \
+            --output-json "$RUNNER_TEMP/existing-publication.json"
+
       - name: Install updater signature verifier toolchain
         run: rustup toolchain install 1.90.0 --profile minimal
 
       - name: Generate release notes
+        if: steps.existing_release.outputs.reuse != 'true'
         uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
         with:
           config: cliff.toml
@@ -2859,6 +2928,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Add unsigned desktop warning to release notes
+        if: steps.existing_release.outputs.reuse != 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -2957,11 +3027,24 @@ jobs:
           cat "$report"
           ls -lh dist/release-assets
 
+      - name: Verify immutable release assets
+        if: steps.existing_release.outputs.reuse == 'true'
+        env:
+          COMPACT_RUNTIME_CONTRACT: ${{ needs.prepare.outputs.compact_runtime_contract }}
+          RUSTUP_TOOLCHAIN: 1.90.0
+        run: |
+          node scripts/release/existing-release.mjs verify \
+            --release-json "$RUNNER_TEMP/existing-publication.json" \
+            --assets-dir dist/release-assets \
+            --output-dir dist/existing-release-assets \
+            --compact "$COMPACT_RUNTIME_CONTRACT"
+
       - name: Generate and verify updater manifest
+        if: steps.existing_release.outputs.reuse != 'true'
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-          RUSTUP_TOOLCHAIN: 1.88.0
+          RUSTUP_TOOLCHAIN: 1.90.0
         run: |
           set -euo pipefail
           pub_date="$(git show -s --format=%cI "${RELEASE_TAG}^{commit}")"
@@ -2984,6 +3067,7 @@ jobs:
           fi
 
       - name: Publish release
+        if: steps.existing_release.outputs.reuse != 'true'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}

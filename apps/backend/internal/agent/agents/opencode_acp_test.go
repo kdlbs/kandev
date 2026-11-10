@@ -95,10 +95,9 @@ func TestOpenCodeRuntimeFamiliesUseTrustedPackagesAndArguments(t *testing.T) {
 		name        string
 		family      managedruntime.OpenCodeFamily
 		packageName string
-		version     string
 	}{
-		{name: "v1", family: managedruntime.OpenCodeFamilyV1, packageName: "opencode-ai", version: "1.18.32"},
-		{name: "v2", family: managedruntime.OpenCodeFamilyV2, packageName: "@opencode/cli", version: "2.0.18"},
+		{name: "v1", family: managedruntime.OpenCodeFamilyV1, packageName: "opencode-ai"},
+		{name: "v2", family: managedruntime.OpenCodeFamilyV2, packageName: "@opencode/cli"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -106,14 +105,15 @@ func TestOpenCodeRuntimeFamiliesUseTrustedPackagesAndArguments(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ManagedNPMRuntimeForFamily: %v", err)
 			}
-			if spec.Package != tt.packageName || spec.DefaultVersion != tt.version {
+			version := MustDefaultManagedNPMRuntimeVersion(tt.packageName)
+			if spec.Package != tt.packageName || spec.DefaultVersion != version {
 				t.Fatalf("runtime spec = %+v", spec)
 			}
-			want := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", tt.packageName + "@" + tt.version, "acp", "--print-logs"}
+			want := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", tt.packageName + "@" + version, "acp", "--print-logs"}
 			got := NewOpenCodeACP().BuildCommand(CommandOptions{
 				ManagedRuntimeFamily:  tt.family,
 				ManagedRuntimeSource:  managedruntime.OpenCodeSourceManaged,
-				ManagedRuntimeVersion: tt.version,
+				ManagedRuntimeVersion: version,
 				PreferNativeBinary:    true,
 			}).Args()
 			if !slices.Equal(got, want) {

@@ -896,6 +896,8 @@
   "taskCreated": "Ţàśķ ćŕēàţēď",
   "taskDescription": "Ţàśķ ďēśćŕĩƥţĩōń",
   "taskDescriptionTemplate": "Ţàśķ Ďēśćŕĩƥţĩōń Ţēḿƥĺàţē",
+  "taskIdentifierLoadFailed": "Çōũľď ńōţ ľōàď ţħĩś ţàśķ. Çħēćķ ýöũŕ ćōńńēćţĩōń, ţħēń ţŕŷ àğàĩń.",
+  "taskIdentifierWorkspaceUnavailable": "Ńō àćţĩvē ŵōŕķśƥàćē ĩś śēľēćţēď. Śēľēćţ à ŵōŕķśƥàćē, ţħēń ţŕŷ ţħĩś ľĩńķ àğàĩń.",
   "taskNotFound": "Ţàśķ ńōţ ƒōũńď",
   "taskPrefix": "Ţàśķ ƥŕēƒĩx",
   "taskReview": "Ţàśķ Ŕēvĩēŵ",

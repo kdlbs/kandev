@@ -1,13 +1,16 @@
 import type { ComponentType } from "react";
-import { IconLayoutColumns, IconTimeline } from "@tabler/icons-react";
+import { IconHierarchy3, IconLayoutColumns, IconTimeline } from "@tabler/icons-react";
 import { SwimlaneKanbanContent } from "@/components/kanban/swimlane-kanban-content";
 import { SwimlaneGraph2Content } from "@/components/kanban/swimlane-graph2-content";
+import { SwimlaneTaskGraphContent } from "@/components/kanban/swimlane-task-graph-content";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 
 export type ViewContentProps = {
   compactHeight?: boolean;
+  /** True when this is the sole rendered workflow lane and should fill the available height. */
+  fillHeight?: boolean;
   workflowId: string;
   steps: WorkflowStep[];
   moveTargetSteps: WorkflowStep[];
@@ -59,6 +62,14 @@ export const VIEW_REGISTRY: ViewRegistryEntry[] = [
     labelKey: "kanban:pipeline",
     icon: IconTimeline,
     component: SwimlaneGraph2Content,
+    enabled: true,
+  },
+  {
+    id: "graph",
+    storedValue: "graph",
+    labelKey: "kanban:graph",
+    icon: IconHierarchy3,
+    component: SwimlaneTaskGraphContent,
     enabled: true,
   },
 ];

@@ -32,6 +32,8 @@ type ReviewDiffHeaderProps = ReviewExternalLinkContext & {
   onOpenFile?: (filePath: string, repo?: string) => void;
   markdownPreview?: boolean;
   onToggleMarkdownPreview?: () => void;
+  htmlPreview?: boolean;
+  onToggleHtmlPreview?: () => void;
   onToggleCollapse: () => void;
   onToggleExpandUnchanged: () => void;
   onToggleWordWrap: () => void;
@@ -112,6 +114,8 @@ function ReviewDiffToolbarActions(props: ReviewDiffHeaderProps) {
     onOpenFile,
     markdownPreview,
     onToggleMarkdownPreview,
+    htmlPreview,
+    onToggleHtmlPreview,
     onToggleExpandUnchanged,
     onToggleWordWrap,
     baseBranchByRepo,
@@ -144,6 +148,8 @@ function ReviewDiffToolbarActions(props: ReviewDiffHeaderProps) {
       onOpenFile={onOpenFile}
       markdownPreview={markdownPreview}
       onToggleMarkdownPreview={onToggleMarkdownPreview}
+      htmlPreview={htmlPreview}
+      onToggleHtmlPreview={onToggleHtmlPreview}
       onToggleExpandUnchanged={onToggleExpandUnchanged}
       onToggleWordWrap={onToggleWordWrap}
       repo={file.repository_name}

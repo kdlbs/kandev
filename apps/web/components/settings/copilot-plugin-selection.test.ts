@@ -9,6 +9,7 @@ const installed = {
   native_enabled: false,
   availability: "available" as const,
 };
+const sparkId = installed.id;
 const builtin = {
   id: "builtin:/browser-use",
   name: "browser-use",
@@ -33,26 +34,41 @@ describe("buildCopilotPluginSelectionRows", () => {
     const missing = rows.find((row) => row.id === "installed:missing/plugin");
     expect(missing?.missing).toBe(true);
     expect(missing?.availabilityUnchecked).toBe(false);
+    expect(missing?.nativeEnabled).toBeNull();
     expect(missing?.selected).toBe(true);
   });
 
   it("shows saved identities as unchecked after a failed refresh", () => {
-    const rows = buildCopilotPluginSelectionRows({ plugins: [], status: "unavailable" }, [
-      "installed:copilot-plugins/spark",
-    ]);
+    const rows = buildCopilotPluginSelectionRows({ plugins: [], status: "unavailable" }, [sparkId]);
     expect(rows[0].availabilityUnchecked).toBe(true);
     expect(rows[0].missing).toBe(false);
+    expect(rows[0].nativeEnabled).toBeNull();
     expect(rows[0].selected).toBe(true);
   });
 
   it("marks retained rows unchecked when the refresh failed", () => {
     const rows = buildCopilotPluginSelectionRows({ plugins: [installed], status: "unavailable" }, [
-      "installed:copilot-plugins/spark",
+      sparkId,
     ]);
     expect(rows[0].available).toBe(false);
     expect(rows[0].availabilityUnchecked).toBe(true);
     expect(rows[0].reasonCode).toBeNull();
+    expect(rows[0].nativeEnabled).toBeNull();
     expect(rows[0].selected).toBe(true);
+  });
+
+  it("retains native activation from a fresh row even when its root is unavailable", () => {
+    const rows = buildCopilotPluginSelectionRows({ plugins: [builtin], status: "ready" }, []);
+    expect(rows[0].available).toBe(false);
+    expect(rows[0].nativeEnabled).toBe(false);
+  });
+
+  it("does not reuse native activation from a stale observation", () => {
+    const rows = buildCopilotPluginSelectionRows(
+      { plugins: [installed], status: "ready", stale: true },
+      [sparkId],
+    );
+    expect(rows[0].nativeEnabled).toBeNull();
   });
 
   it("keeps unavailable inventory rows visible with their reason", () => {

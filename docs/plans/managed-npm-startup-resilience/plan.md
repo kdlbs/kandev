@@ -14,6 +14,9 @@ legacy_specs: []
 
 ## Overview
 
+The later [managed npm review-fix package](../managed-npm-review-fixes/plan.md) aligns launcher recognition with profile CLI arguments.
+It preserves this package's retry budget, historical completion, and verification results.
+
 Recover temporary managed npm setup failures automatically within the original launch operation.
 This is the primary package for [issue 4152](https://github.com/kdlbs/kandev/issues/4152), following the user's explicit priority change.
 The earlier [failed-session inspection package](../superseded-failed-session-recovery/plan.md) is deferred secondary work.

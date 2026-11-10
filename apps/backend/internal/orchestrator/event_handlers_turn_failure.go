@@ -68,7 +68,9 @@ func (s *Service) handleAgentTurnFailed(ctx context.Context, data watcher.AgentE
 		return
 	}
 	if s.settleRetainedTurnFailure(ctx, data, session) {
-		s.settleFailedDeliveryWorkflowOutcome(context.WithoutCancel(ctx), data)
+		settleCtx := withSettledDeliverySessionStateGuardHeld(context.WithoutCancel(ctx))
+		s.settleFailedDeliveryWorkflowOutcome(settleCtx, data)
+		releaseGuard()
 		s.acknowledgeRetainedTurnFailure(data)
 	} else {
 		s.logger.Warn("retained turn failure settlement did not complete; successor admission remains fenced",
@@ -161,7 +163,7 @@ func (s *Service) settleRetainedTurnFailure(
 	data watcher.AgentEventData,
 	session *models.TaskSession,
 ) bool {
-	priorRetry, priorAttempt, priorStarted, priorStop := s.retainedRetryProgress(data.SessionID, classifyKanbanFailure(data).Code)
+	priorRetry, priorAttempt, priorStarted, priorStop := s.retainedRetryProgress(data.SessionID, s.classifyKanbanFailure(data).Code)
 	if s.handleTransientFailure(ctx, data) {
 		// handleTransientFailure has already accepted durable ownership of this
 		// generation. Its timer can finish and retire the entry before this call
@@ -180,7 +182,7 @@ func (s *Service) settleRetainedTurnFailure(
 		}
 	} else if routingerr.Decide(
 		routingerr.ContextKanban,
-		classifyKanbanFailure(data),
+		s.classifyKanbanFailure(data),
 		time.Now().UTC(),
 	) == routingerr.DecisionShortRetry {
 		data.RecoveryDisposition = recoveryDispositionRefused
@@ -326,9 +328,7 @@ func (s *Service) persistRetainedTurnFailureMessage(
 		return "", fmt.Errorf("turn failure message creator is unavailable")
 	}
 	message := retainedTurnFailureMessage(data)
-	classified := routingerr.Classify(routingerr.Input{
-		Phase: routingerr.PhasePromptSend, ProviderID: data.AgentID, Stderr: message,
-	})
+	classified := routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhasePromptSend, data.AgentID, message))
 	metadata := map[string]interface{}{
 		"variant":           "error",
 		"scope":             "turn",

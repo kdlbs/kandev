@@ -25,6 +25,11 @@ system_design:
 
 # Task 04: Publish SDKs through Stable releases
 
+The [immutable release recovery work order](../immutable-release-sdk-recovery/task-02-retain-sdk-release.md)
+owns the correction to host-release asset retention. This completed work order
+keeps its original implementation evidence. Use the current system design and
+the recovery package for subsequent publication work.
+
 ## Summary
 
 Integrate the shared SDK version into Stable preparation, signed tagging, npm

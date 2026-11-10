@@ -110,7 +110,7 @@ func (c *Controller) DiscoverCopilotPlugins(
 		Reason:          string(snapshot.Reason),
 		ContextRevision: revision,
 		RuntimeVersion:  snapshot.RuntimeVersion,
-		MountPermitted:  copilotplugins.MountsPermitted(version),
+		MountPermitted:  snapshot.PluginLoadingSupported,
 		Plugins:         copilotPluginRows(snapshot.Rows),
 	}
 	if !c.publishCopilotPluginDiscovery(revision, generation, response) {

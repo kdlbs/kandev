@@ -508,7 +508,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 		e.text("utility profile model: " + model)
 	case strings.HasPrefix(cmd, "/e2e:"):
 		rest := strings.TrimPrefix(cmd, "/e2e:")
-		scenarioName, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
+		scenarioName, args, _ := strings.Cut(strings.TrimSpace(rest), " ")
+		e.scenarioArgs = strings.TrimSpace(args)
 		emitPredefinedScenario(e, scenarioName)
 	// Friendly aliases for the two clarification e2e scenarios so the slash menu
 	// exposes them without forcing users to type /e2e:clarification(-multi).
@@ -534,6 +535,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitParkedFixture(e, cmd)
 	case strings.EqualFold(cmd, "/opencode-background-fixture") || strings.HasPrefix(strings.ToLower(cmd), "/opencode-background-fixture "):
 		emitOpenCodeBackgroundFixture(e, cmd)
+	case strings.EqualFold(cmd, "/claude-background-terminal") || strings.HasPrefix(strings.ToLower(cmd), "/claude-background-terminal "):
+		emitClaudeBackgroundTerminalFixture(e, cmd)
 	case strings.EqualFold(cmd, "/async-subagent-lifecycle") || strings.HasPrefix(strings.ToLower(cmd), "/async-subagent-lifecycle "):
 		emitAsyncSubagentLifecycle(e, cmd, true)
 	case strings.EqualFold(cmd, "/async-subagent-teardown"):

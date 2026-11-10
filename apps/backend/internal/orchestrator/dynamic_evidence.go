@@ -20,11 +20,17 @@ import (
 // durable dynamic continuation package is stored with the route generation
 // separately.
 type promptAttemptEvidence struct {
-	mu               sync.Mutex
-	executionID      string
-	promptGeneration uint64
-	evidenceKnown    bool
-	output           bool
+	keywordHistory []keywordObservation
+	mu             sync.Mutex
+	// retirementState and retirementGeneration identify the notice lifecycle
+	// observed when this attempt began. Reclaimed entries can be replaced by a
+	// state with the same generation, so the counter alone is not unique.
+	retirementState      *transientRetryNoticeState
+	retirementGeneration uint64
+	executionID          string
+	promptGeneration     uint64
+	evidenceKnown        bool
+	output               bool
 	// providerDiagnosticCode records an ACP agent-message diagnostic which is
 	// followed by the matching prompt RPC failure. It is not model output, so it
 	// must not make an otherwise pre-result provider failure unsafe to route.
@@ -81,18 +87,23 @@ func (s *Service) beginPromptAttempt(
 	sessionID, executionID string,
 	promptGeneration uint64,
 	dynamic bool,
-) {
+) *promptAttemptEvidence {
 	if sessionID == "" {
-		return
+		return nil
 	}
 	state, release := s.acquireTransientRetryNoticeState(sessionID)
 	state.mu.Lock()
-	s.dynamicAttemptEvidence.Store(sessionID, &promptAttemptEvidence{
-		executionID:      executionID,
-		promptGeneration: promptGeneration,
-		evidenceKnown:    true,
-		dynamic:          dynamic,
-	})
+	history := s.previousKeywordHistory(sessionID)
+	evidence := &promptAttemptEvidence{
+		keywordHistory:       history,
+		executionID:          executionID,
+		promptGeneration:     promptGeneration,
+		evidenceKnown:        true,
+		dynamic:              dynamic,
+		retirementState:      state,
+		retirementGeneration: state.retirementGeneration,
+	}
+	s.dynamicAttemptEvidence.Store(sessionID, evidence)
 	// A new prompt must publish its complete execution identity before it opens
 	// a retired retry lifecycle to provider events. Initial launches have no
 	// execution yet; bindPromptAttempt clears the fence after launch acceptance.
@@ -101,10 +112,11 @@ func (s *Service) beginPromptAttempt(
 	}
 	state.mu.Unlock()
 	release()
+	return evidence
 }
 
-func (s *Service) beginDynamicAttempt(sessionID string) {
-	s.beginPromptAttempt(sessionID, "", 1, true)
+func (s *Service) beginDynamicAttempt(sessionID string) *promptAttemptEvidence {
+	return s.beginPromptAttempt(sessionID, "", 1, true)
 }
 
 func (s *Service) beginInteractivePromptAttempt(
@@ -203,6 +215,10 @@ func (s *Service) isDynamicPromptSession(session *models.TaskSession) bool {
 }
 
 func (s *Service) bindPromptAttempt(sessionID, executionID string, promptGeneration uint64) {
+	s.bindPromptAttemptIfCurrent(sessionID, executionID, promptGeneration, nil)
+}
+
+func (s *Service) bindPromptAttemptIfCurrent(sessionID, executionID string, promptGeneration uint64, expected *promptAttemptEvidence) {
 	if sessionID == "" || (executionID == "" && promptGeneration == 0) {
 		return
 	}
@@ -213,24 +229,19 @@ func (s *Service) bindPromptAttempt(sessionID, executionID string, promptGenerat
 		release()
 	}()
 	evidence, ok := s.promptAttemptForSession(sessionID)
-	if !ok {
+	if !ok || (expected != nil && evidence != expected) {
+		return
+	}
+	// A fence already present when this attempt began belongs to its predecessor;
+	// a newer retirement must not be cleared by this admission callback.
+	if expected != nil && state.retired.Load() &&
+		(state != expected.retirementState || state.retirementGeneration != expected.retirementGeneration) {
 		return
 	}
 	evidence.mu.Lock()
 	defer evidence.mu.Unlock()
-	if executionID != "" {
-		if evidence.executionID != "" && evidence.executionID != executionID {
-			evidence.evidenceKnown = false
-			return
-		}
-		evidence.executionID = executionID
-	}
-	if promptGeneration != 0 {
-		if evidence.promptGeneration != 0 && evidence.promptGeneration != promptGeneration {
-			evidence.evidenceKnown = false
-			return
-		}
-		evidence.promptGeneration = promptGeneration
+	if !bindPromptAttemptIdentityLocked(evidence, executionID, promptGeneration) {
+		return
 	}
 	if executionID != "" {
 		// The evidence lock is released only after the identity is complete, while
@@ -239,8 +250,30 @@ func (s *Service) bindPromptAttempt(sessionID, executionID string, promptGenerat
 	}
 }
 
-func (s *Service) bindDynamicAttemptExecution(sessionID, executionID string) {
-	s.bindPromptAttempt(sessionID, executionID, 0)
+func bindPromptAttemptIdentityLocked(evidence *promptAttemptEvidence, executionID string, promptGeneration uint64) bool {
+	if executionID != "" {
+		if evidence.executionID != "" && evidence.executionID != executionID {
+			evidence.evidenceKnown = false
+			return false
+		}
+		evidence.executionID = executionID
+	}
+	if promptGeneration != 0 {
+		if evidence.promptGeneration != 0 && evidence.promptGeneration != promptGeneration {
+			evidence.evidenceKnown = false
+			return false
+		}
+		evidence.promptGeneration = promptGeneration
+	}
+	return true
+}
+
+func (s *Service) bindDynamicAttemptExecution(sessionID, executionID string, expected ...*promptAttemptEvidence) {
+	var current *promptAttemptEvidence
+	if len(expected) > 0 {
+		current = expected[0]
+	}
+	s.bindPromptAttemptIfCurrent(sessionID, executionID, 0, current)
 }
 
 func (s *Service) observePromptAttempt(
@@ -256,8 +289,8 @@ func (s *Service) observePromptAttempt(
 		return
 	}
 	evidence.mu.Lock()
-	defer evidence.mu.Unlock()
 	if !evidence.promptIdentityMatchesLocked(executionID, promptGeneration) {
+		evidence.mu.Unlock()
 		return
 	}
 	evidence.output = evidence.output || output
@@ -267,6 +300,10 @@ func (s *Service) observePromptAttempt(
 		// diagnostic is recorded only by observeProviderDiagnostic below.
 		evidence.providerDiagnosticCode = ""
 		evidence.providerDiagnosticText = ""
+	}
+	evidence.mu.Unlock()
+	if output || effect {
+		s.clearKeywordFailureHistory(sessionID)
 	}
 }
 
@@ -617,6 +654,41 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 	return s.withPromptAttemptEvidenceLocked(data)
 }
 
+// withStartupAttemptObservations preserves typed pre-prompt evidence when no
+// prompt record exists, but never discards recorded output or effects from the
+// same execution. An ambiguous existing record fails closed.
+func (s *Service) withStartupAttemptObservations(data watcher.AgentEventData) watcher.AgentEventData {
+	if data.SessionID == "" {
+		return data
+	}
+	state, release := s.acquireTransientRetryNoticeState(data.SessionID)
+	state.mu.Lock()
+	defer func() {
+		state.mu.Unlock()
+		release()
+	}()
+	if state.retired.Load() {
+		data.EvidenceKnown = false
+		return data
+	}
+	evidence, ok := s.promptAttemptForSession(data.SessionID)
+	if !ok {
+		return data
+	}
+	evidence.mu.Lock()
+	defer evidence.mu.Unlock()
+	if data.AgentExecutionID == "" || evidence.executionID == "" ||
+		evidence.executionID != data.AgentExecutionID ||
+		(data.PromptGeneration != 0 && evidence.promptGeneration != 0 && data.PromptGeneration != evidence.promptGeneration) {
+		data.EvidenceKnown = false
+		return data
+	}
+	data.EvidenceKnown = data.EvidenceKnown && evidence.evidenceKnown
+	data.OutputObserved = data.OutputObserved || evidence.outputObservedLocked(data)
+	data.EffectObserved = data.EffectObserved || evidence.effect
+	return data
+}
+
 func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) watcher.AgentEventData {
 	if data.SessionID == "" {
 		return data
@@ -657,7 +729,11 @@ func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) w
 		data.DynamicRouteAttempt = true
 	}
 	if lifecycleEvidenceKnown && lifecycleDiagnosticCandidate && !evidence.output && !evidence.effect {
-		s.observeLifecycleProviderDiagnosticLocked(evidence, data.AgentID, lifecycleDiagnosticText)
+		var diagnostic *streams.ProviderError
+		if data.ProviderError != nil && normalizeDiagnosticText(data.ProviderError.Message) == normalizeDiagnosticText(lifecycleDiagnosticText) {
+			diagnostic = data.ProviderError
+		}
+		s.observeLifecycleProviderDiagnosticLocked(evidence, data.AgentID, lifecycleDiagnosticText, diagnostic)
 	}
 	outputObserved := evidence.outputObservedLocked(data)
 	if lifecycleEvidenceKnown {
@@ -677,7 +753,7 @@ func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) w
 // event may arrive after the terminal failure because those events use
 // separate subscriptions, so an absent or unclassifiable diagnostic fails
 // closed as ordinary output.
-func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, providerID, message string) {
+func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, providerID, message string, diagnostic *streams.ProviderError) {
 	message = normalizeDiagnosticText(message)
 	if message == "" {
 		evidence.output = true
@@ -685,11 +761,22 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 		evidence.providerDiagnosticText = ""
 		return
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhasePromptSend,
-		ProviderID: providerID,
-		Stderr:     message,
-	})
+	input := diagnostic.RoutingInput(routingerr.PhasePromptSend, providerID, message)
+	classified := routingerr.Classify(input)
+	if diagnostic != nil {
+		textClassified := routingerr.Classify(routingerr.Input{
+			Phase:      routingerr.PhasePromptSend,
+			ProviderID: providerID,
+			Stderr:     message,
+		})
+		if textClassified.Code != classified.Code ||
+			textClassified.Confidence != routingerr.ConfHigh || !textClassified.FallbackAllowed {
+			evidence.output = true
+			evidence.providerDiagnosticCode = ""
+			evidence.providerDiagnosticText = ""
+			return
+		}
+	}
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
 		evidence.output = true
 		evidence.providerDiagnosticCode = ""
@@ -710,7 +797,7 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 // itself. Callers must hold e.mu.
 func (e *promptAttemptEvidence) outputObservedLocked(data watcher.AgentEventData) bool {
 	if e.providerDiagnosticCode != "" && e.providerDiagnosticText != "" &&
-		matchingProviderFailureCode(data) == e.providerDiagnosticCode &&
+		providerFailureCodeMatches(data, e.providerDiagnosticCode) &&
 		strings.Contains(normalizeDiagnosticText(matchingProviderFailureMessage(data)), e.providerDiagnosticText) {
 		// Claude ACP emits a human-readable agent_message_chunk immediately
 		// before returning the same provider error from session/prompt. The
@@ -733,11 +820,23 @@ func matchingProviderFailureCode(data watcher.AgentEventData) routingerr.Code {
 	if message == "" {
 		return ""
 	}
-	return routingerr.Classify(routingerr.Input{
+	return routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhasePromptSend, data.AgentID, message)).Code
+}
+
+// providerFailureCodeMatches requires both terminal classifications to match
+// the recorded diagnostic code. Structured metadata cannot be ignored when it
+// conflicts with the diagnostic text.
+func providerFailureCodeMatches(data watcher.AgentEventData, recorded routingerr.Code) bool {
+	message := matchingProviderFailureMessage(data)
+	if message == "" || matchingProviderFailureCode(data) != recorded {
+		return false
+	}
+	textClassified := routingerr.Classify(routingerr.Input{
 		Phase:      routingerr.PhasePromptSend,
 		ProviderID: data.AgentID,
 		Stderr:     message,
-	}).Code
+	})
+	return textClassified.Code == recorded && textClassified.Confidence == routingerr.ConfHigh && textClassified.FallbackAllowed
 }
 
 func (s *Service) withDynamicAttemptEvidence(data watcher.AgentEventData) watcher.AgentEventData {
@@ -773,9 +872,14 @@ func (s *Service) clearPromptAttemptEvidence(sessionID, executionID string, prom
 	}
 	evidence.mu.Lock()
 	matches := evidence.promptIdentityMatchesForClearLocked(executionID, promptGeneration)
+	clearHistory := matches && (evidence.effect || (evidence.output && evidence.providerDiagnosticText == ""))
 	evidence.mu.Unlock()
+	deleted := false
 	if matches {
-		s.dynamicAttemptEvidence.CompareAndDelete(sessionID, evidence)
+		deleted = s.dynamicAttemptEvidence.CompareAndDelete(sessionID, evidence)
+	}
+	if clearHistory && deleted {
+		s.clearKeywordFailureHistory(sessionID)
 	}
 }
 
@@ -922,6 +1026,7 @@ func (s *Service) taskAllowsUnclassifiedStreakClear(ctx context.Context, taskID 
 }
 
 func (s *Service) clearDynamicUnclassifiedStreakForStop(ctx context.Context, sessionID string) {
+	s.clearKeywordFailureHistory(sessionID)
 	if s.repo == nil || s.profileExecutionResolver == nil || sessionID == "" {
 		return
 	}

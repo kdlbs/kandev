@@ -8,7 +8,10 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -343,6 +346,53 @@ func TestListTasksByAssignee(t *testing.T) {
 // mockBlockerRepo implements BlockerRepository for testing.
 type mockBlockerRepo struct {
 	blockers []*orchmodels.TaskBlocker
+}
+
+type mockRelationRepo struct {
+	pairs    map[string]map[string]struct{}
+	addErr   error
+	lastTask string
+}
+
+func newMockRelationRepo() *mockRelationRepo {
+	return &mockRelationRepo{pairs: make(map[string]map[string]struct{})}
+}
+
+func (m *mockRelationRepo) AddRelation(_ context.Context, a, b string) error {
+	m.lastTask = a
+	if m.addErr != nil {
+		return m.addErr
+	}
+	if m.pairs[a] == nil {
+		m.pairs[a] = map[string]struct{}{}
+	}
+	if m.pairs[b] == nil {
+		m.pairs[b] = map[string]struct{}{}
+	}
+	m.pairs[a][b] = struct{}{}
+	m.pairs[b][a] = struct{}{}
+	return nil
+}
+func (m *mockRelationRepo) ListRelationsForTask(_ context.Context, id string) ([]string, error) {
+	ids := make([]string, 0, len(m.pairs[id]))
+	for related := range m.pairs[id] {
+		ids = append(ids, related)
+	}
+	return ids, nil
+}
+func (m *mockRelationRepo) ListRelationsForTasks(_ context.Context, ids []string) (map[string][]string, error) {
+	out := make(map[string][]string, len(ids))
+	for _, id := range ids {
+		out[id], _ = m.ListRelationsForTask(context.Background(), id)
+	}
+	return out, nil
+}
+func (m *mockRelationRepo) RemoveRelationsForTask(_ context.Context, id string) error {
+	for other := range m.pairs[id] {
+		delete(m.pairs[other], id)
+	}
+	delete(m.pairs, id)
+	return nil
 }
 
 func (m *mockBlockerRepo) CreateTaskBlocker(_ context.Context, b *orchmodels.TaskBlocker) error {
@@ -694,6 +744,92 @@ func TestCreateTask_WithBlockedBy_Empty(t *testing.T) {
 		t.Errorf("expected 0 blockers, got %d", len(blockers))
 	}
 	_ = task
+}
+
+func TestCreateTask_WithRelatedTaskIDs(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	relations := newMockRelationRepo()
+	svc.SetRelationRepository(relations)
+	peer := mustSeedTask(t, svc, "Related task")
+	result, err := svc.CreateTask(context.Background(), &CreateTaskRequest{
+		WorkspaceID: "ws-1", Title: "New task", ProjectID: "proj-1",
+		RelatedTaskIDs: []string{peer.ID},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	forward, _ := relations.ListRelationsForTask(context.Background(), result.Task.ID)
+	reverse, _ := relations.ListRelationsForTask(context.Background(), peer.ID)
+	if len(forward) != 1 || forward[0] != peer.ID || len(reverse) != 1 || reverse[0] != result.Task.ID {
+		t.Fatalf("related links = %v and %v", forward, reverse)
+	}
+}
+
+// TestCreateTask_WithRelatedTaskIDs_PublishesPeerUpdate covers the existing
+// peer: creating a task related to it only writes the DB row unless the peer
+// also gets a task.updated carrying its refreshed related list, so an already
+// open client learns about the new edge instead of showing a stale chip.
+func TestCreateTask_WithRelatedTaskIDs_PublishesPeerUpdate(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	relations := newMockRelationRepo()
+	svc.SetRelationRepository(relations)
+	peer := mustSeedTask(t, svc, "Related task")
+
+	eventBus := bus.NewMemoryEventBus(svc.logger)
+	svc.eventBus = eventBus
+	t.Cleanup(eventBus.Close)
+	peerUpdates := make(chan *bus.Event, 4)
+	subscription, err := eventBus.Subscribe(events.TaskUpdated, func(_ context.Context, event *bus.Event) error {
+		data, ok := event.Data.(map[string]interface{})
+		if ok && data["task_id"] == peer.ID {
+			peerUpdates <- event
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe to task.updated: %v", err)
+	}
+	t.Cleanup(func() { _ = subscription.Unsubscribe() })
+
+	result, err := svc.CreateTask(context.Background(), &CreateTaskRequest{
+		WorkspaceID: "ws-1", Title: "New task", ProjectID: "proj-1",
+		RelatedTaskIDs: []string{peer.ID},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	select {
+	case event := <-peerUpdates:
+		data := event.Data.(map[string]interface{})
+		related, ok := data["related"].([]DependencyRef)
+		if !ok || len(related) != 1 || related[0].ID != result.Task.ID {
+			t.Fatalf("peer related projection = %#v, want one ref to %s", data["related"], result.Task.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("peer never received a task.updated after the new task was linked to it")
+	}
+}
+
+func TestCreateTask_RelationWriteFailureRollsBackTaskAndRelations(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	relations := newMockRelationRepo()
+	relations.addErr = errors.New("write failed")
+	svc.SetRelationRepository(relations)
+	peer := mustSeedTask(t, svc, "Related task")
+	_, err := svc.CreateTask(context.Background(), &CreateTaskRequest{
+		WorkspaceID: "ws-1", Title: "New task", ProjectID: "proj-1",
+		RelatedTaskIDs: []string{peer.ID},
+	})
+	if err == nil {
+		t.Fatal("expected relation write error")
+	}
+	if relations.lastTask == "" {
+		t.Fatal("relation write did not run")
+	}
+	if _, err := svc.tasks.GetTask(context.Background(), relations.lastTask); err == nil {
+		t.Fatal("created task remained after relation write failure")
+	}
 }
 
 // mockCommentRepo implements CommentRepository for testing.

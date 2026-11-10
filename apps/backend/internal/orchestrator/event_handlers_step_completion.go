@@ -28,10 +28,48 @@ func (s *Service) subscribeStepCompletionEvents() {
 
 // handleStepCompletionSignaled adapts the bus.Subscribe callback signature
 // (returns error) to onStepCompletionSignaled, which does its own logging
-// and does not surface errors to the bus.
+// and does not surface errors to the bus. When a delayed consumer observed a
+// signal that a replacement superseded, the returned current signal is given
+// one more wakeup after the session guard is released.
 func (s *Service) handleStepCompletionSignaled(ctx context.Context, event *bus.Event) error {
-	s.onStepCompletionSignaled(ctx, event)
+	retry := s.onStepCompletionSignaled(ctx, event)
+	if retry == nil || ctx.Value(stepCompletionRetryContextKey{}) != nil {
+		return nil
+	}
+	taskID, sessionID, stepID, ok := parseStepCompletionEvent(event)
+	if !ok {
+		return nil
+	}
+	s.publishStepCompletionRetry(context.WithValue(ctx, stepCompletionRetryContextKey{}, true), taskID, sessionID, stepID, *retry)
 	return nil
+}
+
+// stepCompletionRetryContextKey bounds supersession re-wakeups to one extra
+// event per delivery chain. The stuck-signal watchdog remains the fallback.
+type stepCompletionRetryContextKey struct{}
+
+// publishStepCompletionRetry republishes a wakeup for the current pending
+// signal after a superseded consumer released its guard. The event is a
+// wakeup only; the subscriber re-reads durable state.
+func (s *Service) publishStepCompletionRetry(ctx context.Context, taskID, sessionID, stepID string, signal models.PendingStepCompletionSignal) {
+	if s.eventBus == nil || signal.SignalID == "" {
+		return
+	}
+	if err := s.eventBus.Publish(ctx, events.WorkflowStepCompletionSignaled, bus.NewEvent(
+		events.WorkflowStepCompletionSignaled, "orchestrator-step-completion",
+		map[string]interface{}{
+			"task_id":     taskID,
+			"session_id":  sessionID,
+			"step_id":     stepID,
+			"signal_id":   signal.SignalID,
+			"source":      signal.Source,
+			"summary":     signal.Summary,
+			"signaled_at": signal.SignaledAt,
+		},
+	)); err != nil {
+		s.logger.Warn("failed to republish superseded step-completion signal",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+	}
 }
 
 // clearPendingStepSignal removes the pending bag entry from the session's
@@ -158,7 +196,7 @@ func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fro
 // the time processOnTurnCompleteViaEngine runs, the gating check passes,
 // and the transition fires inline — the bus event arrives later and finds
 // nothing to do (bag already cleared by the transition). Idempotent.
-func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event) {
+func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event) *models.PendingStepCompletionSignal {
 	taskID, sessionID, stepID, ok := parseStepCompletionEvent(event)
 	if !ok {
 		if event != nil && event.Data != nil {
@@ -166,7 +204,7 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 				s.logger.Warn("onStepCompletionSignaled: unexpected event payload type")
 			}
 		}
-		return
+		return nil
 	}
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
@@ -177,10 +215,10 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 		s.logger.Debug("deferring workflow step completion signal while cancellation is in progress",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
-		return
+		return nil
 	}
 
-	s.reconcileStepCompletionSignalLocked(ctx, taskID, sessionID, stepID)
+	return s.reconcileStepCompletionSignalLocked(ctx, taskID, sessionID, stepID)
 }
 
 // reconcileStepCompletionSignalLocked re-checks a pending step-completion
@@ -192,26 +230,26 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 // successful processOnTurnCompleteViaEngine call; and for the stuck-session
 // watchdog, which gives it that same second chance when a turn never
 // reaches turn-end or a failure event at all.
-func (s *Service) reconcileStepCompletionSignalLocked(ctx context.Context, taskID, sessionID, stepID string) {
+func (s *Service) reconcileStepCompletionSignalLocked(ctx context.Context, taskID, sessionID, stepID string) *models.PendingStepCompletionSignal {
 	ctx = withWorkflowProfileSwitchGuardHeld(ctx, sessionID, "")
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("reconcileStepCompletionSignalLocked: failed to load session",
 			zap.String("session_id", sessionID), zap.Error(err))
-		return
+		return nil
 	}
 	// If the session is still running (turn hasn't ended yet) the inline
 	// turn-end check will pick the signal up — no out-of-band work needed.
 	// Only act on signals that arrive while the session is waiting.
 	if session.State != models.TaskSessionStateWaitingForInput {
-		return
+		return nil
 	}
 
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("reconcileStepCompletionSignalLocked: failed to load task",
 			zap.String("task_id", taskID), zap.Error(err))
-		return
+		return nil
 	}
 	if task.WorkflowStepID != stepID {
 		s.logger.Debug("reconcileStepCompletionSignalLocked: signal stale (step changed)",
@@ -225,21 +263,34 @@ func (s *Service) reconcileStepCompletionSignalLocked(ctx context.Context, taskI
 		// cleared/replaced and erase a freshly-written valid bag entry.
 		latestSession, loadErr := s.repo.GetTaskSession(ctx, sessionID)
 		if loadErr != nil {
-			return
+			return nil
 		}
 		if existing, ok := models.LoadPendingStepSignal(latestSession.Metadata); ok && existing.StepID == stepID {
 			s.clearConsumedStepSignal(ctx, latestSession)
 		}
-		return
+		return nil
 	}
 
 	if !s.stepIsSignalGated(ctx, task.WorkflowStepID) {
-		return
+		return nil
 	}
 
+	observed, _ := models.LoadPendingStepSignal(session.Metadata)
 	// Drive the transition via the engine path. It will re-read the bag
 	// and consume it through the same code path the inline turn-end uses.
 	s.processOnTurnCompleteViaEngine(ctx, taskID, session)
+
+	latest, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || latest.State != models.TaskSessionStateWaitingForInput {
+		return nil
+	}
+	pending, ok := models.LoadPendingStepSignal(latest.Metadata)
+	if !ok || pending.SignalID == "" || pending.SignalID == observed.SignalID {
+		return nil
+	}
+	// A replacement won while this consumer held its guard. Give the current
+	// source one more wakeup; the next pass reads durable state again.
+	return &pending
 }
 
 // parseStepCompletionEvent extracts (task_id, session_id, step_id) from a

@@ -6,6 +6,7 @@ package utility
 import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/modelcatalog"
@@ -88,6 +89,13 @@ type ProbeRequest struct {
 	// Refresh asks agent-specific discovery fallbacks to invalidate their own
 	// model caches. ACP session discovery itself always starts a fresh process.
 	Refresh bool `json:"refresh,omitempty"`
+	// Preparation carries one authenticated, attempt-bound private recovery.
+	Preparation *agentctltypes.ManagedRuntimePreparationDirective `json:"preparation,omitempty"`
+	// InstallContext carries the authenticated runtime-owner scope for
+	// reusable managed npm repairs. The effective installer environment is the
+	// probe's own InferenceConfig.Env, which is already the complete authorized
+	// child environment.
+	InstallContext *agentctltypes.ManagedRuntimeInstallContext `json:"install_context,omitempty"`
 	// ProfileContext marks probes started from a concrete profile discovery
 	// request. It prevents launch settings and provider diagnostics from entering
 	// command logs or client-visible errors.
@@ -111,7 +119,8 @@ type ProbeResponse struct {
 
 	// FailureCode is a stable classification for failures the backend can
 	// handle without receiving raw subprocess diagnostics.
-	FailureCode ProbeFailureCode `json:"failure_code,omitempty"`
+	FailureCode   ProbeFailureCode                           `json:"failure_code,omitempty"`
+	CacheEvidence *agentctltypes.ManagedRuntimeCacheEvidence `json:"cache_evidence,omitempty"`
 
 	// DurationMs is the probe duration in milliseconds.
 	DurationMs int `json:"duration_ms,omitempty"`
@@ -162,6 +171,9 @@ const (
 	// ProbeFailureManagedRuntimeNPMPolicy means npm rejected the trusted exact
 	// package version under a date-qualified release policy.
 	ProbeFailureManagedRuntimeNPMPolicy ProbeFailureCode = "managed_runtime_npm_policy"
+	// ProbeFailureManagedRuntimeCacheIncomplete means the exact installed
+	// package exists but npm's derived execution-root manifest is missing.
+	ProbeFailureManagedRuntimeCacheIncomplete ProbeFailureCode = "managed_runtime_cache_incomplete"
 	// ProbeFailureUnsupportedContext means the selected inference protocol
 	// cannot honor the profile's command prefix or CLI flags.
 	ProbeFailureUnsupportedContext ProbeFailureCode = "unsupported_profile_context"
