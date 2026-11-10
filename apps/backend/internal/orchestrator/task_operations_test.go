@@ -422,7 +422,7 @@ func newCoordinatorStopTestService(
 	agentManager executor.AgentManagerClient,
 ) *Service {
 	log := testLogger()
-	exec := executor.NewExecutor(agentManager, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentManager, repo, log, executor.ExecutorConfig{}))
 	svc := &Service{
 		logger:       log,
 		repo:         repo,
@@ -616,7 +616,7 @@ func TestPromptTask_WaitsForStartingSessionBeforePrompt(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	done := make(chan struct {
 		result *PromptResult
@@ -692,7 +692,7 @@ func TestTrySwitchModelUpdatesRuntimeModelCache(t *testing.T) {
 		setSessionModelSupported: true,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 	session, err := repo.GetTaskSession(context.Background(), "session1")
@@ -739,7 +739,7 @@ func TestPromptTask_TransientErrorDoesNotMoveTaskToReview(t *testing.T) {
 		promptErr:      errors.New("agent stream disconnected: read tcp [::1]:56463->[::1]:10002: use of closed network connection"),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 	session, err := repo.GetTaskSession(context.Background(), "session1")
@@ -784,7 +784,7 @@ func TestPromptTask_CancelEscalatedDoesNotMoveTaskToReview(t *testing.T) {
 		promptErr:      fmt.Errorf("agent error: cancel escalated: agent did not complete turn within timeout: %w", lifecycle.ErrCancelEscalated),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 	session, err := repo.GetTaskSession(context.Background(), "session1")
@@ -825,7 +825,7 @@ func TestPromptTask_ExecutionNotFoundRevertsStateAndBroadcasts(t *testing.T) {
 	}
 	eb := &recordingEventBus{}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.eventBus = eb
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
@@ -969,7 +969,7 @@ func TestPromptTask_PlanModeInjectsPrefix(t *testing.T) {
 		isAgentRunning: true,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 	session, err := repo.GetTaskSession(context.Background(), "session1")
@@ -1002,7 +1002,7 @@ func TestPromptTask_NoPlanModeDoesNotInjectPrefix(t *testing.T) {
 		isAgentRunning: true,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 	session, err := repo.GetTaskSession(context.Background(), "session1")
@@ -1033,7 +1033,7 @@ func TestPromptTask_ResetInProgressReturnsSentinelError(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 	svc.setSessionResetInProgress("session1", true)
@@ -2170,7 +2170,7 @@ func TestCancelAgent_QueuedMessageRunsAfterExplicitDrain(t *testing.T) {
 		promptDone:             promptDone,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	agentMgr.promptAgentFunc = func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error) {
 		if svc.isCancelInFlight("session1") {
 			return nil, fmt.Errorf("prompt abandoned after cancel: %w", lifecycle.ErrCancelEscalated)
@@ -2258,7 +2258,7 @@ func TestQueueAndInterruptForPeerMessage_DeliversQueuedMessageWithoutUserCancelS
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	msgCreator := &mockMessageCreator{}
 	svc.messageCreator = msgCreator
 
@@ -2436,7 +2436,7 @@ func TestQueueAndInterruptForPeerMessage_DeliversTargetedEntryAheadOfOlderQueued
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
@@ -2496,7 +2496,7 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 	}
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
@@ -2806,7 +2806,7 @@ func TestQueueAndInterruptForPeerMessage_ClosesStaleEarlyCheckRace(t *testing.T)
 	}
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &repoTurnService{repo: repo}
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
@@ -2975,7 +2975,7 @@ func TestQueueAndInterruptForPeerMessage_CancelFailureDoesNotStrandMessageWhenRe
 	}
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &repoTurnService{repo: repo}
 
 	// step1 has no on_turn_complete actions, so handleAgentReady's
@@ -3115,7 +3115,7 @@ func TestQueueAndInterruptForPeerMessage_CancelFailureLeavesMessageQueuedWhenSti
 	}
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
@@ -3189,7 +3189,7 @@ func TestQueueAndInterruptForPeerMessage_DoesNotCancelUnrelatedSuccessorTurn(t *
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
@@ -3275,7 +3275,7 @@ func TestQueueAndInterruptForPeerMessage_RacesManualDrainForSameSession(t *testi
 	}
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
@@ -3371,7 +3371,7 @@ func TestQueueAndInterruptForPeerMessage_RacesClarificationTimeoutRecovery(t *te
 	}
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
@@ -3501,7 +3501,7 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 		promptEntries:    []<-chan struct{}{retryAccepted},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
@@ -3606,7 +3606,7 @@ func TestCancelAgent_RacesHandleAgentReady_QueuedMessageStaysParked(t *testing.T
 	}
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
@@ -3904,7 +3904,7 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 		taskRepo := newMockTaskRepo()
 		taskRepo.tasks[taskID] = newTask()
 		agentMgr := &mockAgentManager{}
-		exec := executor.NewExecutor(agentMgr, failureRepo, testLogger(), executor.ExecutorConfig{})
+		exec := withTestCapabilities(executor.NewExecutor(agentMgr, failureRepo, testLogger(), executor.ExecutorConfig{}))
 		svc := &Service{
 			logger:             testLogger(),
 			repo:               failureRepo,
@@ -3952,7 +3952,7 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 		taskRepo := newMockTaskRepo()
 		taskRepo.tasks[taskID] = newTask()
 		agentMgr := &mockAgentManager{}
-		exec := executor.NewExecutor(agentMgr, failureRepo, testLogger(), executor.ExecutorConfig{})
+		exec := withTestCapabilities(executor.NewExecutor(agentMgr, failureRepo, testLogger(), executor.ExecutorConfig{}))
 		svc := &Service{
 			logger:             testLogger(),
 			repo:               failureRepo,
@@ -4213,7 +4213,7 @@ func TestStartCreatedSession_PersistsEarlyCredentialFailure(t *testing.T) {
 		Title: "Test Task", Description: "start", State: v1.TaskStateScheduling,
 	}
 	agentMgr := &mockAgentManager{}
-	exec := executor.NewExecutor(agentMgr, failureRepo, testLogger(), executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, failureRepo, testLogger(), executor.ExecutorConfig{}))
 	svc := &Service{
 		logger:             testLogger(),
 		repo:               failureRepo,
@@ -5978,7 +5978,7 @@ func TestResumeTaskSession_DynamicRouteActionOwnsRecovery(t *testing.T) {
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	_, err = svc.ResumeTaskSession(ctx, "task1", "session1")
 	var blocked *sessionOpenRecoveryBlockedError
@@ -6020,7 +6020,7 @@ func TestResumeTaskSession_OfficeWithoutSchedulerFailsClosed(t *testing.T) {
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	_, err = svc.ResumeTaskSession(ctx, "task1", "session1")
 	if err == nil || !strings.Contains(err.Error(), "office tasks must be resumed through Office") {
@@ -6075,7 +6075,7 @@ func TestResumeTaskSession_ArchivedTaskSkipsFailedState(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 
@@ -6118,7 +6118,7 @@ func TestResumeTaskSession_ArchivedDuringLaunch(t *testing.T) {
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	now := time.Now().UTC()
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
@@ -6163,7 +6163,7 @@ func TestResumeTaskSession_FailureTaskWriteIsConditionalOnFailedSession(t *testi
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 	session, err := repo.GetTaskSession(ctx, "session1")
 	if err != nil {
@@ -6233,7 +6233,7 @@ func TestResumeTaskSession_FailedKeepsResumeToken(t *testing.T) {
 		onStartCalled: &startAgentProcessCalled,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 	session, _ := repo.GetTaskSession(ctx, "session1")
@@ -6290,7 +6290,7 @@ func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *te
 		onStartCalled: &startAgentProcessCalled,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	seedTaskAndSession(t, repo, "task-recover-new-branch", "session-recover-new-branch", models.TaskSessionStateFailed)
 	now := time.Now().UTC()
@@ -6396,7 +6396,7 @@ func TestRecoverSessionDirtyCloneRefusalPreservesResumeTokenAndStampsRepairActio
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedTaskAndSession(t, repo, "task-dirty-recovery", "session-dirty-recovery", models.TaskSessionStateFailed)
 	now := time.Now().UTC()
 	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
@@ -6504,7 +6504,7 @@ func TestResumeTaskSession_ArchiveCancelledSessionResumesSuccessfully(t *testing
 		onStartCalled: &startAgentProcessCalled,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	// Session was cancelled by an archive; the task has since been unarchived
 	// (seedTaskAndSession's task is never archived), leaving exactly the state
@@ -6616,7 +6616,7 @@ func TestResumeTaskSession_FailedStateWriteSurvivesCancelledCallerCtx(t *testing
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), mockTR, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	// Override with the ctx-aware wrapper so we can detect ctx-canceled
 	// writes — the bare mockTaskRepo ignores ctx entirely.
 	svc.taskRepo = taskRepo
@@ -6665,7 +6665,7 @@ func TestResumeTaskSession_AlreadyFailedMissingRemoteRefCreatesNeutralRecoveryMe
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
@@ -6754,7 +6754,7 @@ func TestResumeTaskSession_PersistsBranchRecoveryWarningWhenPreparationFailsLate
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 
@@ -6783,7 +6783,7 @@ func TestResumeTaskSession_UnrelatedLaunchFailureDoesNotCreateRecoveryMessage(t 
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messageCreator := &mockMessageCreator{}
 	svc.messageCreator = messageCreator
 
@@ -6812,7 +6812,7 @@ func TestCompleteTask_UpdatesTaskState(t *testing.T) {
 	repo := setupTestRepo(t)
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
-	exec := executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = exec
 
@@ -6938,7 +6938,7 @@ func TestGetTaskSessionStatus_ReportsEmbeddedVscodeCapability(t *testing.T) {
 	}
 
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
-	svc.executor = executor.NewExecutor(svc.agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(svc.agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -6962,7 +6962,7 @@ func TestGetTaskSessionStatus_FailsClosedWithoutExecutorCapability(t *testing.T)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
-	svc.executor = executor.NewExecutor(svc.agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(svc.agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -7007,7 +7007,7 @@ func TestGetTaskSessionStatus_HealsStuckStartingSession(t *testing.T) {
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -7072,7 +7072,7 @@ func TestGetTaskSessionStatus_UsesTaskEnvironmentBranchForDocker(t *testing.T) {
 
 	agentMgr := &mockAgentManager{}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
 		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
@@ -7764,7 +7764,7 @@ func TestEnsureSessionRunning_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	}
 
 	log := testLogger()
-	exec := executor.NewExecutor(wrappedMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(wrappedMgr, repo, log, executor.ExecutorConfig{}))
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.DefaultSchedulerConfig())
 
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, wrappedMgr)
@@ -7801,7 +7801,7 @@ func TestEnsureSessionRunning_OfficeWaitingForInputFailsClosed(t *testing.T) {
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	session, err := repo.GetTaskSession(ctx, "session1")
 	require.NoError(t, err)
@@ -7860,7 +7860,7 @@ func TestEnsureSessionRunning_WaitingForInputUsesResumePath(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.executor = exec
@@ -7890,7 +7890,7 @@ func TestEnsureSessionRunning_CreatedWithoutExecutionUsesResumePath(t *testing.T
 
 	agentMgr := &mockAgentManager{isAgentRunning: false}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.executor = exec
@@ -7980,7 +7980,7 @@ func TestGetTaskSessionStatus_NeedsWorkspaceRestore_TerminalWithWorktree(t *test
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -8003,7 +8003,7 @@ func TestGetTaskSessionStatus_NeedsWorkspaceRestore_TerminalWithoutWorktree(t *t
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {
@@ -8029,7 +8029,7 @@ func TestGetTaskSessionStatus_NeedsWorkspaceRestore_RepositorylessEnvironment(t 
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
 	if err != nil {

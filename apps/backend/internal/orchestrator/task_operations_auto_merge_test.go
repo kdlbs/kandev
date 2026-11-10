@@ -19,7 +19,7 @@ func TestQueueAndInterruptForPeerMessage_DispatchesSurvivingAutoMergedID(t *test
 		promptDone:             make(chan struct{}),
 	}
 	service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
-	service.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	service.executor = withTestCapabilities(executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 	service.messageCreator = &mockMessageCreator{}
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")

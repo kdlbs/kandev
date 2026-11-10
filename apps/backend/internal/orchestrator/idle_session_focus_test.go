@@ -50,7 +50,7 @@ func TestFocusTaskSessionDoesNotWakeManuallyStoppedSession(t *testing.T) {
 	}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &inactiveTurnService{}
 
 	execution, _, resumed, err := svc.focusTaskSession(ctx, "task-focus-manual-stop", "session-focus-manual-stop")
@@ -115,7 +115,7 @@ func TestFocusTaskSessionResumesIdleSuspensionWithNewLSPLease(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["task-focus-idle-suspended"] = &v1.Task{ID: "task-focus-idle-suspended", State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &inactiveTurnService{}
 	svc.SetLSPLeaseLifecycle(&activeLSPLeaseForTest{sessionID: "session-focus-idle-suspended"})
 

@@ -2,7 +2,7 @@
 status: current
 system: agents
 created: 2026-11-07
-updated: 2026-11-07
+updated: 2026-11-09
 requirements:
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-004
@@ -44,6 +44,40 @@ Accept only a canonical command from a registered `ManagedNPMRuntimeAgent`.
 Validate the exact version through `ValidateExactPackageSpec`. Preserve the
 existing selected OpenCode package family. Native binaries, passthrough,
 operator-defined commands, and launch wrappers remain ineligible.
+
+### Registered launcher and agent argument boundary
+
+The [launch-identity decision](../../../decisions/2026-11-09-managed-npm-launch-identity.md) separates installation authority from per-launch arguments.
+The correction is pending in the [review-fix package](../../../plans/managed-npm-review-fixes/plan.md).
+
+Use one structured recognizer shared by task evidence, lifecycle retry, hostutility, and both utility protocols.
+The proposed `ManagedNPMRuntimeSpec.MatchRuntimeCommand` validates the registered distribution and required runtime arguments.
+A low-level parser under `agent/managedruntime` owns the npm option boundaries.
+These proposed symbols do not exist at the reviewed PR head.
+
+Logical argv starts with `npx --yes <preference> --prefix <canonical-marker> <exact-package>`.
+The preference is the existing offline or online form.
+The package occupies its validated structural position.
+Required protocol arguments follow, including `app-server` for managed native Codex.
+The remaining authorized argv belongs to the agent.
+Do not identify the package by scanning the tail or an arbitrary prefix.
+
+Preserve flag values, order, empty values, and argument boundaries.
+A value that resembles a package or npm option remains an agent value after the validated boundary.
+Do not remove a permission flag to make the command eligible.
+Profile validation still determines which agent arguments are valid.
+Recognition never executes or interprets their contents.
+
+Use the parsed boundaries for online-preference changes and `PreparedRuntime.RewriteNpxCommand`.
+Owned prefix/cache values remain authorized only by the selected handle.
+Reject user-supplied cache paths, duplicated npm options, unsupported npm forms, wrappers, and wrong required protocol arguments.
+Keep physical-cache evidence and observations bound to the actual failed generation.
+
+For discovery, compose the validated logical command with `InferenceConfigDTO.CLIFlags` exactly once.
+Update `eligibleManagedRuntimeProbeConfig` and both utility protocol checks together.
+Keep operator-defined commands, command prefixes, wrappers, and direct native binaries outside managed repair.
+Attempt fingerprints still include all CLI arguments and profile revision evidence.
+A changed profile cannot reuse an earlier failure directive.
 
 Inspection uses the failed child's effective environment and strip policy.
 Resolve npm's cache through direct argv with the same isolated project prefix.
@@ -132,8 +166,10 @@ process waits honor cancellation, including inherited output pipes.
 Cleanup removes only the verified owner root. A marker does not authorize a
 startup-wide orphan sweep. Failed cleanup retains ownership for a later retry.
 
-No shared preparation cache, persistent promotion, new storage table, or global
-launch lock is introduced. Independent operations have independent roots.
+The initial requirement-006 delivery adds no shared preparation cache, persistent
+promotion, storage table, or global launch lock. Its operations have independent roots.
+The [reusable repair design](managed-npm-repair-reuse.md) extends the lifetime
+of validated repairs while retaining this private fallback and shared-tree protection.
 Host probe retries retain the instance's existing admission ordering.
 For profile single-flight work, the existing flight owns preparation. One HTTP
 waiter's cancellation does not cancel other waiters. Context supersession,
@@ -245,3 +281,5 @@ and protocol initialization. It cannot substitute ETARGET or only count retries.
 
 The [delivery package](../../../plans/managed-npm-cache-recovery/plan.md)
 owns work order status and exact validation commands.
+The separate [reuse package](../../../plans/managed-npm-repair-reuse/plan.md)
+owns the proposed cross-launch extension. Its checks remain pending.

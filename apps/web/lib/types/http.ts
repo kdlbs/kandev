@@ -719,6 +719,12 @@ export type RuntimeStorageHealth = {
   observed_at?: string;
   /** Backend receipt age. Browser freshness adds local monotonic elapsed time. */
   age_seconds?: number;
+  /** Accepted delivery-health receipt time. Independent from capacity. */
+  pressure_observed_at?: string;
+  /** Backend receipt age for accepted delivery-health reports. Missing means unknown. */
+  pressure_age_seconds?: number;
+  /** Browser receipt time for this local cache entry. Never sent by the backend. */
+  client_received_at_ms?: number;
   write_pressure?: boolean;
   producer_paused?: boolean;
   delivery_state?: string;
@@ -755,6 +761,11 @@ export type TaskSession = ActiveSubagentCountFields & {
   /** Downstream ACP session ID for the currently selected concrete candidate. */
   downstream_acp_session_id?: string;
   container_id?: string;
+  /**
+   * Observed runtime recorded for the same execution as `container_id`.
+   * `null` means unknown; never infer it from the selected executor.
+   */
+  execution_runtime?: string | null;
   executor_id?: string;
   environment_id?: string;
   /** Current backend agent process execution identity for this session. */

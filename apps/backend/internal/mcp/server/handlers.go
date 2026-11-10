@@ -273,6 +273,9 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		if blockedBy := stringArrayArg(req, "blocked_by"); len(blockedBy) > 0 {
 			payload["blocked_by"] = blockedBy
 		}
+		if relatedTaskIDs := stringArrayArg(req, "related_task_ids"); len(relatedTaskIDs) > 0 {
+			payload["related_task_ids"] = relatedTaskIDs
+		}
 		// Omitted means "derive": with blocked_by set, a start request becomes a
 		// start-when-unblocked intent. start_agent defaults to true and agents
 		// pass it by habit, so deriving is what makes an agent-built chain run in

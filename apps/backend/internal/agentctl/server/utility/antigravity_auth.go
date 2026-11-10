@@ -22,15 +22,16 @@ type probeAuthRequiredError struct {
 }
 
 type authSessionArgs struct {
-	policy  *acpcompat.AuthPolicy
-	consent <-chan string
+	policy        *acpcompat.AuthPolicy
+	consent       <-chan string
+	onInitialized func()
 }
 
-func authSessionOptions(args []authSessionArgs) (*acpcompat.AuthPolicy, <-chan string) {
+func authSessionOptions(args []authSessionArgs) (*acpcompat.AuthPolicy, <-chan string, func()) {
 	if len(args) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return args[0].policy, args[0].consent
+	return args[0].policy, args[0].consent, args[0].onInitialized
 }
 
 func prepareAntigravityUtilityEnv(

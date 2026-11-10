@@ -2542,8 +2542,12 @@ func (s *Service) resolveDynamicLaunchExecution(
 		}
 		return resolved.ExecutionProfileID, nil
 	}
+	previousExecutionProfileID := session.ExecutionProfileID
+	expectedState, expectedUpdatedAt := session.State, session.UpdatedAt
 	applyResolvedExecution(session, resolved)
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := s.persistDynamicRouteProjection(
+		ctx, session, previousExecutionProfileID, expectedState, expectedUpdatedAt,
+	); err != nil {
 		return "", fmt.Errorf("persist dynamic route attribution: %w", err)
 	}
 	return resolved.ExecutionProfileID, nil
@@ -4730,7 +4734,9 @@ func (s *Service) attemptColdResume(
 	if err != nil {
 		return false, err
 	}
-	execution, launchErr := s.executor.ResumeSession(dispatchCtx, session, true)
+	execution, launchErr := s.executor.ResumeSessionWithOptions(
+		dispatchCtx, session, true, executor.ResumeOptions{RequireExecutorActor: true},
+	)
 	releaseCeilingDispatch()
 	if execution != nil && resumeAttempt != nil {
 		resumeAttempt.setExecutionID(execution.AgentExecutionID)
@@ -6029,6 +6035,7 @@ func (s *Service) deleteSessionAndCleanAttachments(ctx context.Context, session 
 	if err != nil {
 		return err
 	}
+	s.clearKeywordFailureHistory(session.ID)
 	if remover, ok := s.attachmentReader.(attachmentBytesRemover); ok {
 		remover.RemoveBytes(deletedAttachments)
 	}

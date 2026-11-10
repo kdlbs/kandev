@@ -1703,6 +1703,12 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	if err != nil {
 		return "", err
 	}
+	// Required-runtime admission runs after the actor authorization above and
+	// before any credential resolution, session persistence, script, or
+	// workspace work.
+	if err := e.admitConcreteExecutorRuntime(execConfig); err != nil {
+		return "", err
+	}
 
 	if execConfig.ExecutorID != "" {
 		session.ExecutorID = execConfig.ExecutorID
@@ -2096,6 +2102,12 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			// workspace default (or an empty config).
 			executorID = strings.TrimSpace(session.ExecutorID)
 		}
+		// Request-scoped retained-runtime admission must precede profile
+		// replacement cleanup, environment recovery, credential resolution, the
+		// existing-workspace success path, and agent/MCP/env updates.
+		if err := e.admitPreparedLaunchRuntime(ctx, task, session, executorID); err != nil {
+			return nil, err
+		}
 		running, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 		if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
 			return nil, fmt.Errorf("load runtime inventory for session %q: %w", sessionID, runningErr)
@@ -2107,8 +2119,12 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if startAgent && opts.RefuseIfAgentRunning && e.executorHasActiveAgent(ctx, session, running) {
 			return nil, ErrExecutionAlreadyRunning
 		}
-		if err := e.claimInheritedEnvironmentTransition(ctx, task, session, executorID, running); err != nil {
+		claimedTransition, err := e.claimInheritedEnvironmentTransition(ctx, task, session, executorID, running)
+		if err != nil {
 			return nil, err
+		}
+		if claimedTransition {
+			ctx = withInheritedTransitionClaimed(ctx)
 		}
 		if opts.McpMode == "" {
 			opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, opts.StartAgent)
@@ -2824,7 +2840,8 @@ func (e *Executor) preparedWorkspaceInventoryRequest(
 	reuseRequired := env != nil
 	reuseRequired = workspaceReuseAllowed(env, execConfig.ExecutorType, reuseRequired, e.taskIsRepoBacked(ctx, task.ID))
 	return &LaunchAgentRequest{
-		TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
+		TaskID: task.ID, OwnerUserID: e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID),
+		WorkspaceID: task.WorkspaceID, SessionID: session.ID,
 		TaskEnvironmentID: session.TaskEnvironmentID, ExecutorType: execConfig.ExecutorType,
 		UseWorktree: shouldUseWorktree(execConfig.ExecutorType), WorkspaceReuseRequired: reuseRequired,
 		Repositories: buildRepoSpecs(repositories),
@@ -2881,6 +2898,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	sessionID := session.ID
 	req := &LaunchAgentRequest{
 		TaskID:                 task.ID,
+		OwnerUserID:            e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID),
 		WorkspaceID:            task.WorkspaceID,
 		TaskTitle:              task.Title,
 		AgentProfileID:         agentProfileID,
@@ -2909,6 +2927,20 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		if resolveErr != nil {
 			return nil, executorConfig{}, resolveErr
 		}
+	}
+	// Required-runtime admission precedes credential resolution, remote secret
+	// resolution, environment transitions, and workspace mutation. The
+	// retained check repeats at this boundary for callers that did not use
+	// launchPreparedSession.
+	if err := e.admitConcreteExecutorRuntime(execConfig); err != nil {
+		return nil, executorConfig{}, err
+	}
+	retainedType := strings.TrimSpace(execConfig.ExecutorType)
+	if retainedType == "" && existingEnv != nil {
+		retainedType = strings.TrimSpace(existingEnv.ExecutorType)
+	}
+	if err := e.admitRetainedPreparedSelection(ctx, task, session, retainedType); err != nil {
+		return nil, executorConfig{}, err
 	}
 	req.ExecutorType = execConfig.ExecutorType
 	if execConfig.ExecutorID != "" {
@@ -3226,6 +3258,7 @@ func dockerLocalCloneSource(repositoryPath string) string {
 func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string, env map[string]string, turnIDs ...string) (*TaskExecution, error) {
 	request := &LaunchAgentRequest{
 		TaskID:      task.ID,
+		OwnerUserID: e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID),
 		WorkspaceID: task.WorkspaceID,
 		SessionID:   session.ID,
 		Env:         cloneStringMap(env),

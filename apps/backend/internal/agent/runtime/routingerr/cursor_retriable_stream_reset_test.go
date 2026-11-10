@@ -137,6 +137,7 @@ func TestClassifyCursorRetriable(t *testing.T) {
 	})
 	if e == nil {
 		t.Fatal("expected non-nil Error")
+		return
 	}
 	if e.Code != CodeAgentTransportLost {
 		t.Fatalf("Code = %q, want %q", e.Code, CodeAgentTransportLost)
@@ -182,6 +183,7 @@ func TestClassifyCursorRetriableLeadingCanceled(t *testing.T) {
 	})
 	if e == nil {
 		t.Fatal("expected non-nil Error")
+		return
 	}
 	if e.Code != CodeAgentTransportLost {
 		t.Fatalf("Code = %q, want %q", e.Code, CodeAgentTransportLost)
@@ -238,6 +240,7 @@ func TestClassifyCursorRetriableCategory(t *testing.T) {
 	})
 	if e == nil {
 		t.Fatal("expected non-nil Error")
+		return
 	}
 	if e.Code != CodeProviderResourceExhausted {
 		t.Fatalf("Code = %q, want %q", e.Code, CodeProviderResourceExhausted)

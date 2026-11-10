@@ -28,7 +28,7 @@ func TestWorkspaceRecoveryBlockPreservesPromptAdmission(t *testing.T) {
 				Reason: "unknown_prompt_outcome", State: models.RecoveryBlockOpen,
 			}
 			require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, block))
-			service.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+			service.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 			response, err := service.LaunchSession(ctx, &LaunchSessionRequest{
 				TaskID: session.TaskID, SessionID: session.ID,

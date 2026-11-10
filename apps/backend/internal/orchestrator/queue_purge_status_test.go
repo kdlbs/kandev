@@ -82,7 +82,7 @@ func TestDeleteSessionPreservesQueuedPrompts(t *testing.T) {
 		t.Fatalf("NewSQLiteRepository: %v", err)
 	}
 	svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	eventBus := bus.NewMemoryEventBus(testLogger())
 	svc.eventBus = eventBus
 

@@ -565,7 +565,7 @@ const taskSessionAgentWorkspaceSelect = `COALESCE((
 // shallow profile) and office (FK to a per-workspace rich profile) sessions —
 // the two column names that used to live here have collapsed into one.
 const taskSessionSelectCols = `ts.id, ts.task_id, ts.queue_incarnation_id,
-	COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''),
+	COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''), COALESCE(er.runtime, ''),
 	ts.agent_profile_id, ts.execution_profile_id, ts.route_generation, ts.route_state, ts.route_reason, ts.downstream_acp_session_id,
 	ts.executor_id, ts.executor_profile_id, ts.environment_id,
 	ts.repository_id, ts.base_branch, ts.base_commit_sha,
@@ -636,6 +636,9 @@ func (r *Repository) createTaskSessionWithInitialRuntimeSeed(
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := r.admitWorkflowAllocationTx(ctx, tx, session.TaskID, route); err != nil {
+		return err
+	}
 	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
 		return err
 	}
@@ -665,6 +668,9 @@ func (r *Repository) CreateTaskSessionWithWorkflowSessionRoute(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.admitWorkflowAllocationTx(ctx, tx, session.TaskID, route); err != nil {
+		return err
+	}
 	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
 		return err
 	}
@@ -730,6 +736,9 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.admitWorkflowAllocationTx(ctx, tx, session.TaskID, route); err != nil {
+		return err
+	}
 	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
 		return err
 	}
@@ -847,6 +856,9 @@ func (r *Repository) createTaskSessionWithSharedGroupWorkspaceBinding(
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.lockSharedMaterializationTasksTx(ctx, tx, groupID, session.TaskID); err != nil {
+		return err
+	}
+	if err := r.admitWorkflowAllocationTx(ctx, tx, session.TaskID, route); err != nil {
 		return err
 	}
 	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
@@ -1851,7 +1863,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 
 	err := row.Scan(
 		&session.ID, &session.TaskID, &session.QueueIncarnationID,
-		&session.AgentExecutionID, &session.ContainerID, &agentProfileID,
+		&session.AgentExecutionID, &session.ContainerID, &session.ExecutionRuntime, &agentProfileID,
 		&session.ExecutionProfileID, &session.RouteGeneration, &session.RouteState, &session.RouteReason, &session.DownstreamACPSessionID,
 		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
@@ -4821,7 +4833,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 
 	err := rows.Scan(
 		&session.ID, &session.TaskID, &session.QueueIncarnationID,
-		&session.AgentExecutionID, &session.ContainerID, &agentProfileID,
+		&session.AgentExecutionID, &session.ContainerID, &session.ExecutionRuntime, &agentProfileID,
 		&session.ExecutionProfileID, &session.RouteGeneration, &session.RouteState, &session.RouteReason, &session.DownstreamACPSessionID,
 		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
