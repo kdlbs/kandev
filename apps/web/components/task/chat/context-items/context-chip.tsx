@@ -229,6 +229,7 @@ function ControlledHoverChip({
         setOpen(next);
       }}
       openDelay={300}
+      closeDelay={300}
     >
       <HoverCardTrigger
         asChild

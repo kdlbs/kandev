@@ -5,7 +5,7 @@ requirements:
   - REQ-TASKS-PROMPT-ATTACHMENTS-001
   - REQ-TASKS-PROMPT-ATTACHMENTS-002
 created: 2026-09-01
-updated: 2026-11-09
+updated: 2026-11-10
 owners:
   - Kandev team
 ---
@@ -518,3 +518,14 @@ Inspect the captured prompt descriptors and materialized bytes, not preview visi
 Desktop and phone browser tests must prove recovery, one user row, retained history,
 reload/reconnect convergence, and a restored editable composer. Runtime failure
 resolution follows the [startup recovery design](../../agents/system-design/session-startup-failure-explanations.md).
+
+## Composer attachment hover continuity
+
+For AC-TASKS-PROMPT-ATTACHMENTS-001.15, the shared `ContextChip` keeps its
+preview mounted and open while a fine pointer crosses the gap from the chip.
+Set the Radix HoverCard close delay explicitly to 300 ms. Preview entry cancels
+pending closure; pointer exit from both surfaces closes it after that delay.
+The existing 300 ms open delay, control layout, image inspection, and touch
+preview drawer remain unchanged. The component regression checks a 250 ms gap
+crossing, action activation, and eventual closure. Delivery is recorded in the
+[hover continuity work order](../../../plans/attachment-hover-continuity/task-01-preserve-hover-continuity.md).
