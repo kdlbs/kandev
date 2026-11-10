@@ -314,14 +314,14 @@ func hardQuotaRuleOutranksRateStatus(rule string) bool {
 	switch rule {
 	case "claude.stderr.quota.v1",
 		ruleClaudeSessionLimit,
-		"claude.stderr.weekly_limit.v1",
+		ruleClaudeWeeklyLimit,
 		ruleClaudeFiveHourLimit,
 		ruleClaudeUsageLimit,
 		"codex.stderr.quota.v1",
 		ruleCodexOutOfCredits,
-		"opencode.stderr.usage_limit.v1",
+		ruleOpenCodeUsageLimit,
 		ruleOpenCodeGoUsageLimit,
-		"opencode.stderr.credit.v1":
+		ruleOpenCodeCredit:
 		return true
 	default:
 		return false

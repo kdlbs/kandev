@@ -33,7 +33,7 @@ test.describe.serial("Cancel turn availability", () => {
   }) => {
     test.setTimeout(120_000);
     const releaseMarker = path.join(backend.tmpDir, `cancel-availability-${randomUUID()}`);
-    const { session } = await seedRunningGeneratingSession(
+    const { session, sessionId } = await seedRunningGeneratingSession(
       testPage,
       apiClient,
       seedData,
@@ -47,10 +47,13 @@ test.describe.serial("Cancel turn availability", () => {
     ).toBeVisible();
 
     await waitForActiveSessionSupportsSteering(testPage);
-    await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeVisible();
-    await expect(session.activeChat().getByTestId("submit-message-button")).toBeVisible();
+    const activeSessionChat = testPage
+      .locator(`[data-testid="session-chat"][data-session-id="${sessionId}"]:visible`)
+      .first();
+    await expect(activeSessionChat.getByTestId("cancel-agent-button")).toBeVisible();
+    await expect(activeSessionChat.getByTestId("submit-message-button")).toBeVisible();
 
-    const cancelButton = session.activeChat().getByTestId("cancel-agent-button");
+    const cancelButton = activeSessionChat.getByTestId("cancel-agent-button");
     await cancelButton.click();
     await waitForActiveSessionCancellationPendingOrSettled(testPage);
     await expect
@@ -65,7 +68,7 @@ test.describe.serial("Cancel turn availability", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await waitForActiveSessionCancellationPending(testPage, false);
     await waitForActiveSessionForegroundActivity(testPage, null);
-    await expect(session.activeChat().getByTestId("cancel-agent-button")).not.toBeVisible({
+    await expect(activeSessionChat.getByTestId("cancel-agent-button")).not.toBeVisible({
       timeout: 15_000,
     });
   });
