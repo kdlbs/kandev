@@ -121,4 +121,11 @@ describe("composer Escape cancellation eligibility", () => {
     handled.preventDefault();
     expect(shouldCancelAgentWithEscape(handled, active)).toBe(false);
   });
+
+  it("leaves Escape to a pending clarification", () => {
+    const event = new KeyboardEvent("keydown", { key: "Escape" });
+    expect(shouldCancelAgentWithEscape(event, { ...active, hasPendingClarification: true })).toBe(
+      false,
+    );
+  });
 });
