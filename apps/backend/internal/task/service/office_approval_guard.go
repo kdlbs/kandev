@@ -26,6 +26,25 @@ type PendingApprover struct {
 	Name           string
 }
 
+// Optional capabilities of the task repository and of the approval guard.
+// They are named so each capability has one definition, and the production
+// wiring and the tests check the same contract.
+type officeCompletionGuardConfigurer interface {
+	OfficeHumanCompletionGuardConfigured() bool
+}
+
+type officeCompletionRepository interface {
+	CompleteOfficeTaskAsHuman(ctx context.Context, id, workspaceID, workflowID, stepID string) (*models.Task, error)
+}
+
+type humanTaskStateRepository interface {
+	UpdateTaskStateAsHuman(ctx context.Context, id string, state v1.TaskState) (*models.Task, error)
+}
+
+type approverNameResolver interface {
+	ResolvePendingApproverNames(ctx context.Context, ids []string) []PendingApprover
+}
+
 // ApprovalsPendingMoveError refuses a human move that would complete an
 // Office task while approvers are pending. Nothing has been written.
 type ApprovalsPendingMoveError struct {
@@ -73,9 +92,10 @@ func (s *Service) guardOfficeHumanCompletion(
 }
 
 func (s *Service) atomicOfficeCompletionConfigured() bool {
-	r, ok := s.tasks.(interface{ OfficeHumanCompletionGuardConfigured() bool })
+	r, ok := s.tasks.(officeCompletionGuardConfigurer)
 	return ok && r.OfficeHumanCompletionGuardConfigured()
 }
+
 func (s *Service) translateOfficeCompletionError(ctx context.Context, err error) error {
 	var pending *repoerrors.OfficeApprovalsPendingError
 	if !errors.As(err, &pending) {
@@ -85,9 +105,7 @@ func (s *Service) translateOfficeCompletionError(ctx context.Context, err error)
 	for _, id := range pending.AgentProfileIDs {
 		result = append(result, PendingApprover{AgentProfileID: id, Name: id})
 	}
-	if resolver, ok := s.officeApprovalGuard.(interface {
-		ResolvePendingApproverNames(context.Context, []string) []PendingApprover
-	}); ok {
+	if resolver, ok := s.officeApprovalGuard.(approverNameResolver); ok {
 		result = resolver.ResolvePendingApproverNames(ctx, pending.AgentProfileIDs)
 	}
 	return &ApprovalsPendingMoveError{Pending: result}
@@ -117,9 +135,7 @@ func (s *Service) CompleteOfficeTaskAsHuman(ctx context.Context, id, expectedSte
 	if task.WorkflowStepID != expectedStepID {
 		return nil, repoerrors.ErrWorkflowChangeConflict
 	}
-	repo, ok := s.tasks.(interface {
-		CompleteOfficeTaskAsHuman(context.Context, string, string, string, string) (*models.Task, error)
-	})
+	repo, ok := s.tasks.(officeCompletionRepository)
 	if !ok {
 		return nil, fmt.Errorf("office human completion repository not configured")
 	}
@@ -155,9 +171,7 @@ func (s *Service) persistHumanTaskState(ctx context.Context, task *models.Task, 
 		MoveTaskOptions{StepHistoryActor: wfmodels.StepTransitionActorHuman}); err != nil {
 		return err
 	}
-	if repo, ok := s.tasks.(interface {
-		UpdateTaskStateAsHuman(context.Context, string, v1.TaskState) (*models.Task, error)
-	}); ok {
+	if repo, ok := s.tasks.(humanTaskStateRepository); ok {
 		_, err := repo.UpdateTaskStateAsHuman(ctx, task.ID, state)
 		return err
 	}
