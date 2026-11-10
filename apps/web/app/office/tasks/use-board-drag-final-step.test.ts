@@ -121,8 +121,6 @@ describe("applyStatusDrop on Done before the final workflow step", () => {
 
     await applyStatusDrop("t1", "done", d);
 
-    expect(d.onInfo).toHaveBeenCalledWith(
-      'Queued for "Done". The task finishes when the step has room.',
-    );
+    expect(d.onInfo).toHaveBeenCalledWith('Queued for "Done". Waiting for room.');
   });
 });
