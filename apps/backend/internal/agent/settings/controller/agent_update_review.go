@@ -74,7 +74,7 @@ func (c *Controller) trustedReviewedRuntime(
 		return nil, agents.ManagedNPMRuntimeSpec{}, err
 	}
 	if fallback {
-		return nil, agents.ManagedNPMRuntimeSpec{}, ErrRuntimeReviewInvalid
+		return nil, agents.ManagedNPMRuntimeSpec{}, ErrRuntimeReviewChanged
 	}
 	activeVersion, effectiveVersion, defaultVersion := active, "", spec.DefaultVersionOrPinned()
 	switch {
@@ -94,7 +94,7 @@ func (c *Controller) trustedReviewedRuntime(
 	})
 	evidence := reviewedEvidence(spec.Package, current, activeVersion, effectiveVersion, family, source, revision)
 	if evidence == nil {
-		return nil, spec, ErrRuntimeReviewInvalid
+		return nil, spec, ErrRuntimeReviewChanged
 	}
 	return evidence, spec, nil
 }
@@ -182,6 +182,15 @@ func (c *Controller) EnqueueReviewedAgentUpdate(
 	if targetVersion == "" {
 		return nil, ErrRuntimeUpdateTargetRequired
 	}
+	// Resolve the published catalogue before taking the policy mutex. A slow
+	// registry must not stall status reads or policy saves for other runtimes.
+	_, preflightSpec, err := c.trustedReviewedRuntime(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.validateAgentUpdateTarget(ctx, preflightSpec, targetVersion); err != nil {
+		return nil, err
+	}
 	c.runtimeAutoUpdateMu.Lock()
 	defer c.runtimeAutoUpdateMu.Unlock()
 	if active, found := c.updateJobStore.GetActive(name); found {
@@ -190,7 +199,7 @@ func (c *Controller) EnqueueReviewedAgentUpdate(
 			Active:    MaintenanceJobRef{JobID: active.JobID, Kind: MaintenanceKindUpdate},
 		}
 	}
-	spec, err := c.verifyReviewedRuntimeLocked(ctx, name, targetVersion, evidence, true)
+	spec, err := c.verifyReviewedRuntimeLocked(ctx, name, targetVersion, evidence, false)
 	if err != nil {
 		return nil, err
 	}

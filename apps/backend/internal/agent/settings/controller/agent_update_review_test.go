@@ -3,7 +3,10 @@ package controller
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -240,5 +243,104 @@ func TestReviewedAgentUpdateGuardedActivationPreservesNewerSelection(t *testing.
 	defer updater.mu.Unlock()
 	if len(updater.probe) == 0 || len(updater.prepare) == 0 {
 		t.Fatalf("guarded candidate did not prepare/probe: prepare=%v probe=%v", updater.prepare, updater.probe)
+	}
+}
+
+type blockingVersionsUpdater struct {
+	*recoveryRuntimeUpdater
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+	block   atomic.Bool
+}
+
+func (u *blockingVersionsUpdater) ResolveVersions(
+	ctx context.Context,
+	packageName string,
+) (RuntimeVersionMetadata, error) {
+	if u.block.Load() {
+		u.once.Do(func() { close(u.started) })
+		select {
+		case <-u.release:
+		case <-ctx.Done():
+			return RuntimeVersionMetadata{}, ctx.Err()
+		}
+	}
+	return u.recoveryRuntimeUpdater.ResolveVersions(ctx, packageName)
+}
+
+func TestReviewedAgentUpdateResolvesCatalogueBeforePolicyLock(t *testing.T) {
+	selection := newRecoverySelectionStore()
+	updater := &blockingVersionsUpdater{
+		recoveryRuntimeUpdater: reviewUpdater(),
+		started:                make(chan struct{}),
+		release:                make(chan struct{}),
+	}
+	ctrl, broadcaster := newReviewedUpdateTestController(t, updater, selection)
+	ctx := context.Background()
+	preview, err := ctrl.PreviewAgentUpdate(ctx, "managed-acp", "1.1.0")
+	if err != nil {
+		t.Fatalf("PreviewAgentUpdate: %v", err)
+	}
+	updater.block.Store(true)
+	result := make(chan error, 1)
+	go func() {
+		_, enqueueErr := ctrl.EnqueueReviewedAgentUpdate(ctx, "managed-acp", "1.1.0", *preview.ReviewedRuntime)
+		result <- enqueueErr
+	}()
+	select {
+	case <-updater.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("catalogue resolution did not start")
+	}
+	if !ctrl.runtimeAutoUpdateMu.TryLock() {
+		t.Fatal("policy mutex is held during catalogue resolution")
+	}
+	ctrl.runtimeAutoUpdateMu.Unlock()
+	close(updater.release)
+	if err := <-result; err != nil {
+		t.Fatalf("EnqueueReviewedAgentUpdate: %v", err)
+	}
+	jobs := ctrl.ListAgentUpdateJobs()
+	if len(jobs) != 1 {
+		t.Fatalf("jobs = %d, want 1", len(jobs))
+	}
+	waitForUpdateStatus(t, broadcaster.completed, jobs[0].JobID, dto.AgentUpdateJobStatusSucceeded)
+}
+
+func TestReviewedAgentUpdateRejectsFallbackThatAppearsAfterPreview(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	selection := newRecoverySelectionStore()
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec: agents.ManagedNPMRuntimeSpec{
+			Package:        "@example/managed-acp",
+			ACPArgs:        []string{"--acp"},
+			DefaultVersion: "1.0.0",
+			NativeBinary:   "managed-acp-native",
+		},
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	broadcaster := newUpdateTerminalBroadcaster()
+	ctrl.SetJobBroadcaster(broadcaster)
+	ctrl.SetRuntimeUpdater(reviewUpdater())
+	ctrl.SetManagedRuntimeSelectionStore(selection)
+	ctrl.SetRuntimeAutoUpdateStore(managedruntime.NewAutoUpdateStore(&autoMemorySettings{}))
+	ctrl.updateJobStore.onRefresh = nil
+	ctx := context.Background()
+	preview, err := ctrl.PreviewAgentUpdate(ctx, "managed-acp", "1.1.0")
+	if err != nil {
+		t.Fatalf("PreviewAgentUpdate: %v", err)
+	}
+	if preview.ReviewedRuntime == nil {
+		t.Fatal("preview did not issue review evidence")
+	}
+	native := filepath.Join(dir, testExecutableName("managed-acp-native"))
+	if err := os.WriteFile(native, []byte("native"), 0o755); err != nil {
+		t.Fatalf("write native executable: %v", err)
+	}
+	if _, err := ctrl.EnqueueReviewedAgentUpdate(ctx, "managed-acp", "1.1.0", *preview.ReviewedRuntime); !errors.Is(err, ErrRuntimeReviewChanged) {
+		t.Fatalf("EnqueueReviewedAgentUpdate error = %v, want review changed", err)
 	}
 }

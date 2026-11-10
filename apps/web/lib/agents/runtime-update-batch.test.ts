@@ -4,6 +4,7 @@ import type { AgentUpdateJob, AgentUpdateStatus } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import {
   EMPTY_RUNTIME_UPDATE_BATCH,
+  applyRuntimeBatchJobs,
   batchCounts,
   getRuntimeUpdateBatchCoordinator,
   loadRuntimeUpdateReviewRows,
@@ -401,5 +402,27 @@ describe("runtime update review row identity", () => {
     );
     expect(row?.currentVersion).toBe("1.0.0");
     expect(row?.effectiveVersion).toBe("2.0.0");
+  });
+});
+
+describe("runtime update batch progress identity", () => {
+  it("returns the same state for a repeated running job snapshot", () => {
+    const rowTarget = target(CLAUDE);
+    const state = {
+      status: "running" as const,
+      authority: "auth",
+      order: [rowTarget.key],
+      rows: {
+        [rowTarget.key]: { ...rowTarget, phase: "running" as const, jobId: JOB_CLAUDE },
+      },
+    };
+    const first = applyRuntimeBatchJobs(state, {
+      [CLAUDE]: job(CLAUDE, { job_id: JOB_CLAUDE, status: "updating" }),
+    });
+    expect(first).toBe(state);
+    const second = applyRuntimeBatchJobs(first, {
+      [CLAUDE]: job(CLAUDE, { job_id: JOB_CLAUDE, status: "updating" }),
+    });
+    expect(second).toBe(first);
   });
 });

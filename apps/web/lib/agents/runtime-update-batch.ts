@@ -182,12 +182,34 @@ export function batchRowProgress(
 ): RuntimeBatchRow {
   if (!row.jobId || !job || job.job_id !== row.jobId) return row;
   if (ACTIVE_JOB_STATUSES.has(job.status)) {
-    return { ...row, phase: job.status === "queued" ? "queued" : "running" };
+    return withRowProgress(row, {
+      phase: job.status === "queued" ? "queued" : "running",
+    });
   }
   if (job.status === "succeeded") {
-    return { ...row, phase: "succeeded", refreshError: job.refresh_error };
+    return withRowProgress(row, { phase: "succeeded", refreshError: job.refresh_error });
   }
-  return { ...row, phase: "failed", error: job.error, errorCode: "error" };
+  return withRowProgress(row, {
+    phase: "failed",
+    error: job.error,
+    errorCode: "error",
+  });
+}
+
+function withRowProgress(
+  row: RuntimeBatchRow,
+  next: Pick<RuntimeBatchRow, "phase"> &
+    Partial<Pick<RuntimeBatchRow, "error" | "errorCode" | "refreshError">>,
+): RuntimeBatchRow {
+  if (
+    row.phase === next.phase &&
+    row.error === next.error &&
+    row.errorCode === next.errorCode &&
+    row.refreshError === next.refreshError
+  ) {
+    return row;
+  }
+  return { ...row, ...next };
 }
 
 export function applyRuntimeBatchJobs(
