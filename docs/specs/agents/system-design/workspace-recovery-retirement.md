@@ -21,9 +21,11 @@ identity, cleanup, and UI ownership. No API or persistence schema changes.
 
 `GetOrEnsureExecution` and `EnsureWorkspaceExecutionForSession` join the existing
 session operation gate before inspecting cached state. Inside that operation,
-lookup acquires the cached execution's `remoteInstanceLifecycleMu` and rechecks
+lookup acquires the cached execution's `remoteInstanceLifecycleMu` through
+`LockContext(ctx)` and rechecks
 that the same execution is still registered. Runtime retirement owns that lock
-while stopping the controller and removing its entry.
+while stopping the controller and removing its entry. Cancelled or expired
+lookup contexts stop waiting for that lock.
 
 If retirement removed the execution, lookup continues through normal
 workspace-only admission and creation. Otherwise, recheck cached admission

@@ -165,3 +165,26 @@ func TestWorkspaceLookupWaitsForRuntimeRetirement(t *testing.T) {
 	require.Nil(t, got.execution)
 	require.ErrorContains(t, got.err, "workspace info provider not configured")
 }
+
+func TestCachedWorkspaceLookupHonorsCancellationDuringRetirement(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := &AgentExecution{ID: "retiring", SessionID: "session", TaskID: "task"}
+	require.NoError(t, mgr.executionStore.Add(execution))
+	execution.remoteInstanceLifecycleMu.Lock()
+	var once sync.Once
+	release := func() { once.Do(execution.remoteInstanceLifecycleMu.Unlock) }
+	defer release()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	finished := make(chan error, 1)
+	go func() {
+		_, err := mgr.cachedWorkspaceExecutionForSession(ctx, execution.SessionID)
+		finished <- err
+	}()
+	select {
+	case err := <-finished:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("cancelled workspace lookup remained blocked on retirement")
+	}
+}

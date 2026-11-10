@@ -20,7 +20,8 @@ system_design:
 
 1. Workspace lookup joins the session operation before reading cached state.
 2. A cached execution under runtime retirement cannot escape to a caller;
-   recheck its registration after retirement releases its lock.
+   recheck its registration after retirement releases its lock. Cancelled
+   lookup contexts stop waiting for retirement.
 3. Failed-session workspace recovery succeeds without changing the existing
    provider identity, terminal-state, or admission contracts.
 
@@ -34,7 +35,7 @@ persistence. This work has no delivery dependencies.
 From the repository root:
 
 ```sh
-GOMAXPROCS=4 go -C apps/backend test -trimpath -p=4 ./internal/agent/runtime/lifecycle -run 'Test(WorkspaceLookup|ConditionalCleanupRunsAfterWorkspacePeer|PromotionRejectsExecutionRemovedByCleanup|EnsureWorkspaceExecutionForSession|CachedWorkspaceRestore|WorkspaceRestore)' -count=1
+GOMAXPROCS=4 GOMEMLIMIT=2GiB go -C apps/backend test -race -trimpath -p=2 ./internal/agent/runtime/lifecycle -run 'Test(WorkspaceLookup|CachedWorkspaceLookup|ConditionalCleanupRunsAfterWorkspacePeer|PromotionRejectsExecutionRemovedByCleanup|EnsureWorkspaceExecutionForSession|CachedWorkspaceRestore|WorkspaceRestore)' -count=1
 bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/manager_execution.go apps/backend/internal/agent/runtime/lifecycle/cleanup_execution_coalescing_test.go
 ```
 
@@ -53,4 +54,5 @@ tests and the original mobile E2E scenario pass after the correction.
 The mobile scenario also passed three consecutive runs with retries disabled.
 The corresponding desktop scenario passed with retries disabled. Scoped Go lint
 reports zero issues. The targeted lifecycle suite also passes with the race
-detector enabled. Final remote CI remains a publication gate.
+detector enabled. A further regression verifies cancellation while retirement holds the lock.
+Final remote CI remains a publication gate.

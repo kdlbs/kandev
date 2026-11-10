@@ -325,7 +325,9 @@ func (m *Manager) cachedWorkspaceExecutionForSession(ctx context.Context, sessio
 	if !exists {
 		return nil, nil
 	}
-	execution.remoteInstanceLifecycleMu.Lock()
+	if err := execution.remoteInstanceLifecycleMu.LockContext(ctx); err != nil {
+		return nil, err
+	}
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, present := m.executionStore.GetBySessionID(sessionID); !present || current != execution {
 		return nil, nil
