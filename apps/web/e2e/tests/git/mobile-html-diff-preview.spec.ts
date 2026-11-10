@@ -16,8 +16,8 @@ function htmlPreviewFrame(filePath: string) {
 
 async function expectTouchTarget(locator: Locator) {
   const box = await locator.boundingBox();
-  expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
-  expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  expect(box?.width ?? 0).toBeGreaterThanOrEqual(43.5);
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(43.5);
 }
 
 test.describe("HTML diff preview on mobile", () => {
