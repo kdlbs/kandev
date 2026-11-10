@@ -8,8 +8,8 @@ type MarkdownNode = {
 const SKIP_NODE_TYPES = new Set(["code", "inlineCode", "link", "linkReference"]);
 
 function taskIdentifierUrl(identifier: string, workspaceId?: string): string {
-  const base = `/office/tasks/${identifier}`;
-  return workspaceId ? `${base}?workspace=${encodeURIComponent(workspaceId)}` : base;
+  const base = `/office/tasks/${encodeURIComponent(identifier)}`;
+  return workspaceId ? `${base}?workspaceId=${encodeURIComponent(workspaceId)}` : base;
 }
 
 // Only identifiers carrying the workspace's task prefix are Kandev tasks;

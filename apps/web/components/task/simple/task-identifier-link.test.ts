@@ -18,7 +18,7 @@ describe("task identifier links", () => {
     expect(splitTaskIdentifierText("KAN-11", "KAN", "ws 1")).toEqual([
       {
         type: "link",
-        url: "/office/tasks/KAN-11?workspace=ws%201",
+        url: "/office/tasks/KAN-11?workspaceId=ws%201",
         children: [{ type: "text", value: "KAN-11" }],
       },
     ]);

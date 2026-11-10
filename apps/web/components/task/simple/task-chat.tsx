@@ -15,7 +15,7 @@ import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useChatMotion } from "@/hooks/use-chat-motion";
 import { useAppStore } from "@/components/state-provider";
-import { selectActiveWorkspace } from "@/lib/state/slices/workspace/selectors";
+import { selectActiveWorkspace, selectWorkspaceById } from "@/lib/state/slices/workspace/selectors";
 import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { selectCommandCount } from "@/lib/state/slices/session/selectors";
 import { createComment } from "@/lib/api/domains/office-api";
@@ -90,14 +90,36 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${remaining}s`;
 }
 
+function useTaskCommentLinkContext(taskWorkspaceId: string) {
+  const taskWorkspace = useAppStore((state) =>
+    taskWorkspaceId ? selectWorkspaceById(taskWorkspaceId)(state) : selectActiveWorkspace(state),
+  );
+  return {
+    taskPrefix: taskWorkspace?.task_prefix,
+    workspaceId: taskWorkspaceId || taskWorkspace?.id,
+  };
+}
+
+function shouldShowCommentRunBadge(
+  comment: TaskComment,
+  isAgent: boolean,
+  hasLaterAgentReply?: boolean,
+): comment is TaskComment & { runStatus: NonNullable<TaskComment["runStatus"]> } {
+  return Boolean(
+    !isAgent && comment.runStatus && comment.runStatus !== "finished" && !hasLaterAgentReply,
+  );
+}
+
 function CommentEntry({
   comment,
   taskId,
+  taskWorkspaceId,
   turn,
   hasLaterAgentReply,
 }: {
   comment: TaskComment;
   taskId: string;
+  taskWorkspaceId: string;
   turn?: CommentTurnContext;
   hasLaterAgentReply?: boolean;
 }) {
@@ -106,8 +128,7 @@ function CommentEntry({
   // Resolve the agent name from the office agents store so renames
   // flow through automatically. Backend session-bridged comments don't
   // carry a name; the mapper leaves authorName empty for agents.
-  const taskPrefix = useAppStore((s) => selectActiveWorkspace(s)?.task_prefix);
-  const workspaceId = useAppStore((s) => s.workspaces.activeId ?? undefined);
+  const { taskPrefix, workspaceId } = useTaskCommentLinkContext(taskWorkspaceId);
   const resolvedAgentName = useAppStore((s) =>
     isAgent
       ? (selectOfficeAgentProfiles(s).find((a) => a.id === comment.authorId)?.name ??
@@ -152,14 +173,11 @@ function CommentEntry({
             workspaceId={workspaceId}
           />
         </div>
-        {!isAgent &&
-          comment.runStatus &&
-          comment.runStatus !== "finished" &&
-          !hasLaterAgentReply && (
-            <div className="mt-1.5">
-              <UserCommentRunBadge status={comment.runStatus} errorMessage={comment.runError} />
-            </div>
-          )}
+        {shouldShowCommentRunBadge(comment, isAgent, hasLaterAgentReply) && (
+          <div className="mt-1.5">
+            <UserCommentRunBadge status={comment.runStatus} errorMessage={comment.runError} />
+          </div>
+        )}
         {comment.toolCalls && comment.toolCalls.length > 0 && (
           <Collapsible>
             <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground mt-1 cursor-pointer hover:text-foreground transition-colors">
@@ -551,6 +569,7 @@ function ChatEntries({
               key={`c-${entry.data.id}`}
               comment={entry.data}
               taskId={taskId}
+              taskWorkspaceId={workspaceId}
               turn={entry.turn}
               hasLaterAgentReply={entry.hasLaterAgentReply}
             />
