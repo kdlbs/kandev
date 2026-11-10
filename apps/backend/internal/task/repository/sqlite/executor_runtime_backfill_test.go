@@ -88,7 +88,9 @@ func TestBackfillExecutorRunningRuntimeRepairsLegacyRows(t *testing.T) {
 		}
 	}
 	assertRuntime("session-executor-evidence", agentruntime.RuntimeStandalone)
-	assertRuntime("session-snapshot-evidence", agentruntime.RuntimeStandalone)
+	// A session snapshot records the selected type, not independent observed
+	// runtime evidence, so a missing executor row stays fail-closed.
+	assertRuntime("session-snapshot-evidence", "")
 	assertRuntime("session-no-evidence", "")
 	assertRuntime("session-existing-runtime", agentruntime.RuntimeStandalone)
 	// SSH could have fallen back to standalone before this change. Its selected

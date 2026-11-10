@@ -379,3 +379,27 @@ func TestResolveExecutorConfigRefusesDeletedProfileWithoutSelection(t *testing.T
 		t.Fatalf("admission error = %v, want unresolved selection", err)
 	}
 }
+
+// TestResolveExecutorConfigAcceptsLegacyStandaloneTypeAliases proves legacy
+// Office/task preferences that store a standalone type in the executor-ID field
+// resolve without a saved executor row, while arbitrary IDs stay unresolved.
+func TestResolveExecutorConfigAcceptsLegacyStandaloneTypeAliases(t *testing.T) {
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	for _, selection := range []models.ExecutorType{
+		models.ExecutorTypeLocal, models.ExecutorType("local_pc"),
+		models.ExecutorTypeWorktree, models.ExecutorTypeMockRemote,
+	} {
+		cfg := exec.resolveExecutorConfig(context.Background(), string(selection), "workspace-config", nil)
+		if cfg.ResolutionErr != nil {
+			t.Fatalf("%s resolution error = %v", selection, cfg.ResolutionErr)
+		}
+		if cfg.ExecutorType != string(selection) || cfg.ExecutorID != "" {
+			t.Fatalf("%s resolved type=%q id=%q, want type alias with no concrete row",
+				selection, cfg.ExecutorType, cfg.ExecutorID)
+		}
+	}
+	cfg := exec.resolveExecutorConfig(context.Background(), "missing-executor", "workspace-config", nil)
+	if cfg.ResolutionErr == nil {
+		t.Fatal("arbitrary missing executor must stay unresolved")
+	}
+}

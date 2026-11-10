@@ -192,6 +192,16 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 
 	executor, err := e.repo.GetExecutor(ctx, resolved)
 	if err != nil || executor == nil {
+		if legacyType, ok := legacyStandaloneExecutorType(resolved); ok {
+			// Legacy task and Office preferences may carry a standalone type
+			// alias in the executor-ID field. The mapped runtime is known and
+			// needs no saved executor row.
+			return executorConfig{
+				ExecutorType: string(legacyType),
+				Metadata:     metadata,
+				RuntimeName:  string(legacyType),
+			}
+		}
 		return executorConfig{
 			ExecutorID:    resolved,
 			Metadata:      metadata,
@@ -217,6 +227,20 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 	}
 
 	return cfg
+}
+
+// legacyStandaloneExecutorType recognizes standalone type aliases used as
+// executor IDs by legacy task and Office preferences. Only the unmapped
+// standalone aliases are accepted; arbitrary or container runtime IDs still
+// require a concrete executor row.
+func legacyStandaloneExecutorType(id string) (models.ExecutorType, bool) {
+	switch models.ExecutorType(strings.TrimSpace(id)) {
+	case models.ExecutorTypeLocal, models.ExecutorType("local_pc"),
+		models.ExecutorTypeWorktree, models.ExecutorTypeMockRemote:
+		return models.ExecutorType(strings.TrimSpace(id)), true
+	default:
+		return "", false
+	}
 }
 
 // profileParentExecutorConfig resolves the executor a selected profile belongs

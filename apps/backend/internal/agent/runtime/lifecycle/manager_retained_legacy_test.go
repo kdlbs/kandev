@@ -297,3 +297,58 @@ func TestLaunchRequestCarriesRetainedEvidence(t *testing.T) {
 		})
 	}
 }
+
+// TestSSHBindingWithoutInventoryRowStaysCompatible proves an in-memory SSH
+// binding with no observed runtime can recover when its selected type matches
+// the admitted SSH runtime. Docker still requires container identity.
+func TestSSHBindingWithoutInventoryRowStaysCompatible(t *testing.T) {
+	mgr, _ := newRuntimeSelectionManager(t, &MockExecutor{name: executor.NameSSH})
+	ssh := &AgentExecution{
+		ID: "execution-ssh", SessionID: "session-ssh", TaskID: "task-1",
+		TaskEnvironmentID: "env-1", ExecutorType: string(models.ExecutorTypeSSH),
+	}
+	if err := mgr.executionStore.Add(ssh); err != nil {
+		t.Fatalf("add ssh execution: %v", err)
+	}
+	if err := mgr.ValidateExecutionRuntime(
+		context.Background(), ssh.SessionID, ssh.TaskEnvironmentID,
+		string(models.ExecutorTypeSSH),
+	); err != nil {
+		t.Fatalf("ssh binding without inventory row error = %v, want nil", err)
+	}
+
+	docker := &AgentExecution{
+		ID: "execution-docker-no-id", SessionID: "session-docker-no-id", TaskID: "task-1",
+		TaskEnvironmentID: "env-1", ExecutorType: string(models.ExecutorTypeLocalDocker),
+	}
+	if err := mgr.executionStore.Add(docker); err != nil {
+		t.Fatalf("add docker execution: %v", err)
+	}
+	if err := mgr.ValidateExecutionRuntime(
+		context.Background(), docker.SessionID, docker.TaskEnvironmentID,
+		string(models.ExecutorTypeLocalDocker),
+	); !errors.Is(err, ErrExecutorIdentityUnverified) {
+		t.Fatalf("docker binding without identity error = %v, want identity unverified", err)
+	}
+}
+
+// TestSSHEmptyRuntimeRowStaysCompatible proves a non-Docker retained row with
+// no recorded runtime can recover when no container identity contradicts it.
+// Docker still refuses the missing identity.
+func TestSSHEmptyRuntimeRowStaysCompatible(t *testing.T) {
+	mgr, _ := newRuntimeSelectionManager(t, &MockExecutor{name: executor.NameSSH})
+	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{prior: &models.ExecutorRunning{
+		ID: "session-ssh-row", SessionID: "session-ssh-row", TaskID: "task-1",
+		Status: models.ExecutorRunningStatusReady,
+	}})
+	if err := mgr.ensureDurableExecutionSelectionCompatible(
+		context.Background(), "session-ssh-row", "env-1", string(models.ExecutorTypeSSH), true,
+	); err != nil {
+		t.Fatalf("ssh empty runtime row error = %v, want nil", err)
+	}
+	if err := mgr.ensureDurableExecutionSelectionCompatible(
+		context.Background(), "session-ssh-row", "env-1", string(models.ExecutorTypeLocalDocker), true,
+	); !errors.Is(err, ErrExecutorIdentityUnverified) {
+		t.Fatalf("docker empty runtime row error = %v, want identity unverified", err)
+	}
+}

@@ -275,16 +275,28 @@ func identityRequiredForSelection(selected executor.Name, execution *AgentExecut
 	if selected == executor.NameDocker {
 		return true
 	}
-	if selected != executor.NameStandalone {
+	if execution == nil {
+		return selected != executor.NameStandalone
+	}
+	// A container ID is contradictory evidence for every non-Docker boundary.
+	if strings.TrimSpace(execution.ContainerID) != "" {
 		return true
 	}
-	// A standalone boundary has no container identity to prove. A missing
-	// runtime on a live execution is expected while its local process is
-	// replaced. A container ID is contradictory evidence and stays refused.
-	if execution == nil {
+	// A recorded observed runtime is already compared by validateObservedRuntime.
+	if strings.TrimSpace(string(execution.RuntimeName)) != "" {
 		return false
 	}
-	return strings.TrimSpace(execution.ContainerID) != ""
+	executorType := execution.ExecutorType
+	if executorType == "" && execution.MetadataSnapshot() != nil {
+		executorType = getMetadataString(execution.MetadataSnapshot(), MetadataKeyExecutorType)
+	}
+	mapped, required := normalizeExecutorSelection(executorType)
+	if required && mapped == selected {
+		// The retained binding selects the same non-Docker runtime that was
+		// admitted for this execution. No container boundary needs identity.
+		return false
+	}
+	return selected != executor.NameStandalone
 }
 
 func validateRetainedRow(execution *AgentExecution, selected executor.Name, row *models.ExecutorRunning) error {
@@ -349,7 +361,9 @@ func validateDurableRow(selected executor.Name, row *models.ExecutorRunning, tas
 		return nil
 	}
 	if row == nil || row.Runtime == "" {
-		if selected == executor.NameStandalone && row != nil && strings.TrimSpace(row.ContainerID) == "" {
+		// A non-Docker boundary with no container identity can recover an
+		// empty legacy runtime row; Docker still requires container evidence.
+		if selected != executor.NameDocker && row != nil && strings.TrimSpace(row.ContainerID) == "" {
 			return nil
 		}
 		return identityUnverifiedError("", selected, "retained runtime identity is unavailable")
@@ -418,10 +432,10 @@ func (m *Manager) ensureDurableExecutionSelectionCompatible(
 	if row == nil {
 		if evidenceRetained {
 			selected, required := normalizeExecutorSelection(executorType)
-			if !required || selected == executor.NameStandalone {
-				// A local runtime replacement removes its inventory row while the
-				// execution stays in memory. A standalone selection has no container
-				// boundary to re-establish and can proceed to re-persist the row.
+			if !required || selected != executor.NameDocker {
+				// A stopped local or remote execution can remove its inventory row
+				// before resume. The selected non-container runtime is not a reuse
+				// boundary, so the resume creates a fresh execution.
 				return nil
 			}
 			return identityUnverifiedError(executorType, selected, "retained runtime identity is unavailable")

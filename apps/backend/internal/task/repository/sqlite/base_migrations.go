@@ -4,7 +4,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -1305,21 +1304,15 @@ func (r *Repository) backfillExecutorsRunningFromTaskSessions() error {
 // identity cannot be established stay empty and remain fail-closed.
 func (r *Repository) backfillExecutorRunningRuntime() error {
 	type legacyRuntimeRow struct {
-		ID               string `db:"id"`
-		ExecutorType     string `db:"executor_type"`
-		ExecutorSnapshot string `db:"executor_snapshot"`
-		EnvironmentType  string `db:"environment_type"`
+		ID           string `db:"id"`
+		ExecutorType string `db:"executor_type"`
 	}
 	rows, err := r.db.QueryxContext(r.migrationContext(), `
 		SELECT
 			er.id AS id,
-			COALESCE(e.type, '') AS executor_type,
-			COALESCE(ts.executor_snapshot, '{}') AS executor_snapshot,
-			COALESCE(te.executor_type, '') AS environment_type
+			COALESCE(e.type, '') AS executor_type
 		FROM executors_running er
 		LEFT JOIN executors e ON e.id = er.executor_id
-		LEFT JOIN task_sessions ts ON ts.id = er.session_id
-		LEFT JOIN task_environments te ON te.id = ts.task_environment_id
 		WHERE COALESCE(er.runtime, '') = ''
 	`)
 	if err != nil {
@@ -1343,7 +1336,7 @@ func (r *Repository) backfillExecutorRunningRuntime() error {
 	}
 
 	for _, legacy := range legacyRows {
-		executorType := firstExecutorType(legacy.ExecutorType, snapshotExecutorType(legacy.ExecutorSnapshot), legacy.EnvironmentType)
+		executorType := strings.TrimSpace(legacy.ExecutorType)
 		if executorType == "" {
 			continue
 		}
@@ -1362,27 +1355,6 @@ func (r *Repository) backfillExecutorRunningRuntime() error {
 		}
 	}
 	return nil
-}
-
-func snapshotExecutorType(snapshot string) string {
-	if strings.TrimSpace(snapshot) == "" {
-		return ""
-	}
-	var parsed map[string]interface{}
-	if err := json.Unmarshal([]byte(snapshot), &parsed); err != nil {
-		return ""
-	}
-	value, _ := parsed["executor_type"].(string)
-	return strings.TrimSpace(value)
-}
-
-func firstExecutorType(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 // commitCaptureActivatedAtMetaKey is the kandev_meta key published by
