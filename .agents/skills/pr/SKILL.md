@@ -58,7 +58,8 @@ explicitly requests task tracking.
    writes a shared registry, and verify the target tag/digest exists.
 
 4. **Screenshots — capture and validate before publication.** For GitHub UI
-   changes, verify the attachment prerequisites in step 7 before capture. For
+   changes, choose the publication route in step 7 before capture. Check native
+   attachment prerequisites only when using native uploads. For
    every host, capture fresh screenshots for every affected viewport of a
    UI-visible change before creating the PR. For repository UI, use
    `/playwright-cli` with an isolated headless
@@ -202,20 +203,24 @@ required screenshot embedding in step 7 is complete.
      fi
      ```
 
-   **Embed (GitHub only):** Upload screenshots with native `gh --attach`.
-   Require GitHub CLI **2.99.0 or newer**, confirm `gh pr comment --help` lists
-   `--attach`, and check authenticated repository push access. Determine the
-   target hostname from `git remote get-url origin` before capture. For a
-   custom GitHub hostname, establish its deployment type and attachment support
-   first; GitHub Enterprise Server is unsupported. If support cannot be
-   established, report the host blocker. If installed `gh` is older than
-   2.99.0, download a current official release to a temporary directory, verify
-   its published checksum, and use that binary for the attachment upload
-   without replacing the system install. Report a blocker only if a verified
-   binary cannot perform the upload. Report missing authentication prerequisites
-   before publication. Contributors without push access to the base repository
-   should use the fork fallback below. See [GitHub's attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
+   **Choose the GitHub publishing route before capture.** Use native attachments
+   when the authenticated actor can upload to the base repository and the host
+   supports them. Otherwise, use the fork fallback below when a suitable public
+   fork is available. The fallback does not require `gh --attach`. See
+   [GitHub's attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
    and [the release announcement](https://github.blog/changelog/2026-09-01-github-cli-media-in-issues-pull-requests-and-comments/).
+
+   **Native attachments (GitHub only):** Require GitHub CLI **2.99.0 or newer**,
+   confirm `gh pr comment --help` lists `--attach`, and check authenticated
+   repository push access. Determine the target hostname from
+   `git remote get-url origin`. For a custom GitHub hostname, establish its
+   deployment type and attachment support first; GitHub Enterprise Server is
+   unsupported. If support cannot be established, use the fork fallback when
+   available. If installed `gh` is older than 2.99.0, download a current official
+   release to a temporary directory, verify its published checksum, and use
+   that binary for upload without replacing the system install. If native upload
+   prerequisites are unavailable, use the fork fallback when available or
+   report the blocker.
 
    Keep assets in ignored `apps/web/.pr-assets` for native uploads. Images must
    be within GitHub's 10 MB upload limit. Add a
