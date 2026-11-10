@@ -118,20 +118,30 @@ const (
 	tfVarDone     = "done"
 	tfVarUnit     = "unit"
 	tfVarDuration = "duration"
+	tfVarSize     = "size"
 )
 
 func countingProgressText(locale string, step *startup.StepSnapshot) string {
 	done := stepDone(step)
+	if step.Unit == startup.UnitBytes {
+		return i18n.Tf(locale, "startup.page.countingBytes", map[string]any{tfVarSize: startup.FormatBytes(done)})
+	}
 	unit := i18n.Tf(locale, "startup.unit."+string(step.Unit), map[string]any{tfVarCount: done})
 	return i18n.Tf(locale, "startup.page.countingProgress", map[string]any{tfVarDone: done, tfVarUnit: unit})
 }
 
 func applyCountedProgress(locale string, step *startup.StepSnapshot, view *startupStepView) {
 	done, total := stepDone(step), stepTotal(step)
-	unit := i18n.Tf(locale, "startup.unit."+string(step.Unit), map[string]any{tfVarCount: total})
-	view.Progress = i18n.Tf(locale, "startup.page.countedProgress", map[string]any{
-		tfVarDone: done, tfVarTotal: total, tfVarUnit: unit,
-	})
+	if step.Unit == startup.UnitBytes {
+		view.Progress = i18n.Tf(locale, "startup.page.countedBytes", map[string]any{
+			tfVarDone: startup.FormatBytes(done), tfVarTotal: startup.FormatBytes(total),
+		})
+	} else {
+		unit := i18n.Tf(locale, "startup.unit."+string(step.Unit), map[string]any{tfVarCount: total})
+		view.Progress = i18n.Tf(locale, "startup.page.countedProgress", map[string]any{
+			tfVarDone: done, tfVarTotal: total, tfVarUnit: unit,
+		})
+	}
 	if total > 0 {
 		view.HasBar = true
 		view.PercentDoneStr = fmt.Sprintf("%.2f", percentDone(done, total))
@@ -203,7 +213,8 @@ func startupPageKeys() []string {
 		"startup.page.title", "startup.page.waiting", "startup.page.lastKnown",
 		"startup.page.timings", "startup.page.interrupted", "startup.duration.milliseconds_one", "startup.duration.milliseconds_other",
 		"startup.page.progressUnavailable", "startup.page.countedProgress",
-		"startup.page.countingProgress", "startup.page.elapsed", "startup.page.eta",
+		"startup.page.countingProgress", "startup.page.countingBytes",
+		"startup.page.countedBytes", "startup.page.elapsed", "startup.page.eta",
 		"startup.page.stalled",
 		"startup.phase.opening_database", "startup.phase.backing_up_database",
 		"startup.phase.applying_migrations", "startup.phase.initializing_services",
@@ -408,14 +419,39 @@ const startupPageScript = `
     return pluralLookup("startup.unit." + unit, count);
   }
 
+  var byteUnitSymbols = ["B", "KB", "MB", "GB", "TB"];
+
+  // Mirrors startup.FormatBytes (AC-PLATFORM-STARTUP-PROGRESS-003.14): the
+  // largest 1024-based unit wins before rounding, B stays whole, and TB caps
+  // the scale. toFixed is the shared web policy; rounding by hand (for example
+  // Math.floor(value * 10 + 0.5) / 10) can land a value just below a midpoint
+  // on it and disagree with formatBytes.
+  function formatBytes(bytes) {
+    if (!(bytes > 0)) return "0 B";
+    var unit = 0;
+    var value = bytes;
+    while (unit < byteUnitSymbols.length - 1 && value >= 1024) {
+      value = value / 1024;
+      unit += 1;
+    }
+    if (unit === 0) return bytes + " B";
+    return value.toFixed(1) + " " + byteUnitSymbols[unit];
+  }
+
   function progressText(step) {
     if (step.measure === "opaque") return t["startup.page.progressUnavailable"];
     if (step.measure === "counting") {
       var done = step.done || 0;
+      if (step.unit === "bytes") {
+        return interpolate(t["startup.page.countingBytes"], { size: formatBytes(done) });
+      }
       return interpolate(t["startup.page.countingProgress"], { done: done, unit: unitLabel(step.unit, done) });
     }
     var counted = step.done || 0;
     var total = step.total || 0;
+    if (step.unit === "bytes") {
+      return interpolate(t["startup.page.countedBytes"], { done: formatBytes(counted), total: formatBytes(total) });
+    }
     return interpolate(t["startup.page.countedProgress"], { done: counted, total: total, unit: unitLabel(step.unit, total) });
   }
 

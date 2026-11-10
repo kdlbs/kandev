@@ -10,17 +10,13 @@ owners:
 
 ## Overview
 
-A Kandev upgrade can spend tens of minutes initializing. An operator sees one
-repeating phase line and an unreachable board, and cannot tell which migration is
-running, how much is left, or whether it is stuck.
+Platform owns startup phases, liveness, and readiness
+([startup lifecycle](startup-lifecycle.md)). Startup surfaces show the current
+step, measured progress, and stalls so operators can assess long upgrades.
 
-Platform already owns startup phases, liveness, and readiness
-([startup lifecycle](startup-lifecycle.md)). This capability adds the layer below a
-phase: the named unit of work inside it, its measured progress, and delivery of
-both to every startup surface.
-
-It refines **AC-PLATFORM-STARTUP-LIFECYCLE-001.4**, which forbade every percentage.
-It survives as AC-PLATFORM-STARTUP-PROGRESS-001.6 and 001.7, which it now cites.
+This contract refines **AC-PLATFORM-STARTUP-LIFECYCLE-001.4**. The earlier ban
+on percentages survives as **AC-PLATFORM-STARTUP-PROGRESS-001.6** and **001.7**,
+which this contract cites.
 
 ## Terminology
 
@@ -38,20 +34,17 @@ It survives as AC-PLATFORM-STARTUP-PROGRESS-001.6 and 001.7, which it now cites.
   reaching Kandev before it is ready, or an open application document.
 - **Sweep step:** One step covering a set of same-shaped units, counting over that
   set rather than opening one step per unit.
-- **Progress:** What AC-PLATFORM-STARTUP-PROGRESS-003.1, 003.4, and 003.7 require of
-  a surface for the active step: for `counted`, done and total with the unit and a
-  determinate bar; for `counting`, done with the unit; for `opaque`, elapsed time and
-  the AC-PLATFORM-STARTUP-PROGRESS-001.5 statement; plus the estimate whenever the
-  snapshot carries one. The rate is not among them; only the launcher reports it,
-  under AC-PLATFORM-STARTUP-PROGRESS-003.5.
+- **Progress:** A `counted` step shows done, total, unit, and a determinate bar.
+  A `counting` step shows done and unit. An `opaque` step shows elapsed time and
+  the AC-PLATFORM-STARTUP-PROGRESS-001.5 statement. Surfaces show any available
+  estimate. Only the launcher shows the rate, under AC-PLATFORM-STARTUP-PROGRESS-003.5.
 
 ## Requirements
 
 ### REQ-PLATFORM-STARTUP-PROGRESS-001: Measured startup steps
 
-**Intent:** Replace "applying migrations for 13 minutes" with the name of the work
-in progress and an honest measurement of how much remains, so an operator can
-decide whether to wait.
+**Intent:** Show the current work and measured progress so operators can decide
+whether to wait.
 
 #### Acceptance criteria
 
@@ -135,8 +128,8 @@ decide whether to wait.
 
 ### REQ-PLATFORM-STARTUP-PROGRESS-002: Stable startup readiness contract
 
-**Intent:** One unauthenticated endpoint that answers "starting, and here is what it
-is doing", then "ready", without changing shape or disappearing.
+**Intent:** Expose startup progress and readiness through one stable,
+unauthenticated endpoint.
 
 #### Acceptance criteria
 
@@ -164,8 +157,7 @@ is doing", then "ready", without changing shape or disappearing.
 
 ### REQ-PLATFORM-STARTUP-PROGRESS-003: Startup visible on every surface
 
-**Intent:** An operator should reach the answer from wherever they are looking,
-including a browser pointed at a migrating backend.
+**Intent:** Show startup progress wherever an operator observes Kandev.
 
 #### Acceptance criteria
 
@@ -220,11 +212,22 @@ including a browser pointed at a migrating backend.
   surface shall state only that Kandev is starting and not yet reachable. No case
   shall render a placeholder step name, an empty progress element, a bar, or an
   unread phase or elapsed time.
+- **AC-PLATFORM-STARTUP-PROGRESS-003.14:** Every startup surface shall show byte counts
+  with B, KB, MB, GB, or TB and factors of 1024. It shall select the largest unit
+  before rounding, capped at TB. B shall use whole numbers, and larger units shall
+  use one fractional digit. Zero shall show `0 B`, and `15389753344` shall show
+  `14.3 GB`. Readiness counts and rates shall retain raw byte values.
+- **AC-PLATFORM-STARTUP-PROGRESS-003.15:** For byte rates, the launcher shall use the
+  same unit thresholds, one fractional digit, and `/s`. For example, `1048576`
+  bytes per second shall show `1.0 MB/s`. An absent rate shall remain absent.
+- **AC-PLATFORM-STARTUP-PROGRESS-003.16:** Initial startup HTML, poll updates, and the
+  restart dialog shall show the same formatted byte counts. Desktop and phone
+  views shall keep the value and unit visible without horizontal overflow.
+  Non-byte units shall retain their count and plural behavior.
 
 ### REQ-PLATFORM-STARTUP-PROGRESS-004: Stuck distinguished from slow
 
-**Intent:** A backfill that is slow and a process that is wedged look identical
-today. They must not.
+**Intent:** Distinguish slow work from work that stopped advancing.
 
 #### Acceptance criteria
 
@@ -250,8 +253,7 @@ today. They must not.
 
 ### REQ-PLATFORM-STARTUP-PROGRESS-005: No new silent startup work
 
-**Intent:** The 2026-09-17 incident was two steps that shipped with no reporting.
-A third must not.
+**Intent:** Make every registered startup step observable.
 
 #### Acceptance criteria
 
@@ -288,31 +290,30 @@ A third must not.
 
 ## Out of scope
 
-- **Making startup faster.** Backfill performance belongs to its own change. The one
-  cost added is AC-PLATFORM-STARTUP-PROGRESS-001.8's total measurement; no latency
-  budget is set for it.
+- **Startup performance.** This contract adds total measurement under
+  AC-PLATFORM-STARTUP-PROGRESS-001.8 without a latency budget.
 - **Cancelling, skipping, retrying, or reordering startup work.** Every surface here
   is read-only.
 - **Progress for work after readiness.** Background maintenance, retention sweeps,
   and post-ready jobs keep their reporting.
-- **A dedicated version endpoint.** An undocumented version path's 404 is answered
-  by `GET /ready`, which carries the version.
+- **A dedicated version endpoint.** `GET /ready` already carries the version.
 - **Localizing the desktop shell.** Its window is a separate bundle with no
   translation pipeline, so its strings stay in the default locale;
   AC-PLATFORM-STARTUP-PROGRESS-003.8 covers the web and backend surfaces.
-- **Per-store startup steps.** An earlier draft gave each of the 41 catalog entries
-  its own step: 41 names per locale, for work whose duration is not what the
-  operator waits on. AC-PLATFORM-STARTUP-PROGRESS-005.2's two sweeps report the
-  same coverage; a store later found slow can be promoted.
-- **Sharpening "bounded periodic status" in AC-PLATFORM-STARTUP-LIFECYCLE-001.4.**
-  AC-PLATFORM-STARTUP-PROGRESS-003.5 bounds the launcher; tightening that clause
-  belongs to its own requirement.
+- **Per-store startup steps.** AC-PLATFORM-STARTUP-PROGRESS-005.2 requires two
+  admission sweeps. Individual stores do not receive separate steps.
+- **Other periodic-status guarantees.** AC-PLATFORM-STARTUP-PROGRESS-003.5 bounds
+  the launcher. Other changes to AC-PLATFORM-STARTUP-LIFECYCLE-001.4 remain separate.
 - **Persisting progress across process lifetimes.** The snapshot describes the
   running process; sequence numbers are scoped to its startup identifier.
-- **An operator-configurable stall threshold, a progress log file, a metrics export,
-  or a step per DDL statement.** The snapshot and existing structured logs are the
-  only outputs; a step is per sweep or named backfill.
+- **A configurable stall threshold, progress log file, metrics export, or step per
+  DDL statement.** Outputs remain the snapshot and existing structured logs.
 
 ## System design
 
 See [startup progress visibility](../system-design/startup-progress-visibility.md).
+
+## Implementation plans
+
+The [readable startup units plan](../../../plans/startup-readable-units/plan.md)
+delivers AC-PLATFORM-STARTUP-PROGRESS-003.14 through 003.16.
