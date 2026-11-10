@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestStepCompleteHandlerSerializesOutcome covers the source-specific completion contract.
 func TestStepCompleteHandlerSerializesOutcome(t *testing.T) {
 	backend := &testBackend{response: map[string]interface{}{
 		"accepted":    false,
@@ -44,6 +45,7 @@ func TestStepCompleteHandlerSerializesOutcome(t *testing.T) {
 	require.Equal(t, "step-review", payload["current"].(map[string]interface{})["step_id"])
 }
 
+// TestStepCompleteToolDescriptionExplainsAsyncOutcome covers the source-specific completion contract.
 func TestStepCompleteToolDescriptionExplainsAsyncOutcome(t *testing.T) {
 	s := New(&testBackend{}, "session-1", "task-1", 10005, newTestLogger(t), "", false, ModeTask)
 	tools := s.mcpServer.ListTools()

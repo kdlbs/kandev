@@ -26,8 +26,6 @@ Then bind transition proof and destination handoff to that identity.
 Both work orders run sequentially in the primary session.
 
 This package is implemented.
-Issue #5173 is assigned to the authenticated GitHub user, `carlosflorencio`.
-All package files remain unstaged and uncommitted.
 
 ## Evidence and root cause
 
@@ -200,9 +198,9 @@ Service acceptance coverage uses the real repository, engine reconciliation, pro
 Implementation complete:
 
 - Source identity, source-turn deduplication, replacement, bounded receipts, commit-proof fencing, receipt projection, and supersession reconciliation are implemented.
-- Handler regressions passed: `go test -trimpath -tags fts5 ./internal/mcp/handlers -run '^TestHandleStepComplete_' -count=1`, including later-native replacement, same-turn payload retention, native verification neutrality, single-snapshot current projection across publication and projection moves, committed-receipt reopen after destination entry, unconfigured projection, foreign-caller denial, and legacy unproven outcomes.
+- Handler regressions passed: `go test -trimpath -tags fts5 ./internal/mcp/handlers -run '^TestHandleStepComplete_' -count=1`, including later-native replacement, same-turn payload retention, native verification neutrality, single-snapshot current projection across publication and projection moves, snapshot-failure omission, terminal-session rejection ordering, committed-receipt reopen after destination entry, unconfigured projection, foreign-caller denial, and legacy unproven outcomes.
 - Service acceptance passed: `go test -trimpath -tags fts5 ./internal/orchestrator -run '^TestStepCompletionOutcome_' -count=1`, including configured Review recipient prompt text, Review/Iterate/Review stale events, queued promotion after repository reload, and real credential refusal without source substitution.
-- Transient proof failure regression passed: the same durable signal moves once on retry without a newer session generation, and records one receipt and handoff.
+- Transient proof failure regression passed: the same durable signal moves once on retry without a newer session generation, and records one receipt and handoff. A deterministic credential refusal keeps its generation consumed, so an unchanged refused signal does not repeat the preflight.
 - Repository and model regressions passed under race: `go test -trimpath -tags fts5 -race ./internal/task/models ./internal/task/repository/sqlite ./internal/mcp/handlers -run 'Test(StepCompletionOutcome|PostgresStepCompletionOutcome|StepCompletionEntry|HandleStepComplete_)' -count=1`.
 - Full affected packages passed: `go test -trimpath -tags fts5 ./internal/task/models ./internal/task/repository/sqlite ./internal/mcp/handlers ./internal/mcp/server ./internal/sysprompt -count=1` (SQLite 473s, handlers 73s).
 - Full orchestrator package passed: `go test -trimpath -tags fts5 ./internal/orchestrator -count=1` (242s).
@@ -211,11 +209,10 @@ Implementation complete:
 - `go test -trimpath -tags fts5 -race ./internal/persistence/storeconformance -count=1` passed (49s).
 - `bash scripts/lint-go-changed` over every changed Go file passed with 0 issues.
 - `gofmt -l` over the affected packages reported no files.
-- PostgreSQL behavior cases are implemented in `step_completion_outcomes_postgres_test.go` and `step_completion_entry_postgres_test.go`; `KANDEV_TEST_POSTGRES_DSN` was unset, so database coverage is recorded as skipped.
+- PostgreSQL behavior cases are implemented in `step_completion_outcomes_postgres_test.go` and `step_completion_entry_postgres_test.go`, including the completion snapshot with and without a primary session; `KANDEV_TEST_POSTGRES_DSN` was unset, so database coverage is recorded as skipped.
 - Public documentation now reflects the shipped result semantics in `automation-and-mcp.md` and `workflow-tips.md`.
 - Public-docs validation and the plan documentation preflight are recorded in Task 02 results.
 
-All files remain unstaged and uncommitted.
 
 ## Documentation preflight
 

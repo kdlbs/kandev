@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ type movingStepCompleteEventBus struct {
 	targetID string
 }
 
+// Publish moves the task synchronously so the response projects the committed route.
 func (b *movingStepCompleteEventBus) Publish(ctx context.Context, _ string, _ *bus.Event) error {
 	task, err := b.repo.GetTask(ctx, b.taskID)
 	if err != nil {
@@ -31,6 +33,15 @@ func (b *movingStepCompleteEventBus) Publish(ctx context.Context, _ string, _ *b
 	return b.repo.UpdateTask(ctx, task)
 }
 
+type failingSnapshotRepo struct {
+	*sqliterepo.Repository
+}
+
+// GetTaskCompletionSnapshot forces the projection to handle a failed snapshot read.
+func (r *failingSnapshotRepo) GetTaskCompletionSnapshot(ctx context.Context, taskID string) (models.TaskCompletionSnapshot, error) {
+	return models.TaskCompletionSnapshot{}, errors.New("snapshot unavailable")
+}
+
 type moveBeforeSnapshotRepo struct {
 	*sqliterepo.Repository
 	taskID   string
@@ -38,6 +49,7 @@ type moveBeforeSnapshotRepo struct {
 	moved    bool
 }
 
+// GetTaskCompletionSnapshot moves the task before delegating to the real reader.
 func (r *moveBeforeSnapshotRepo) GetTaskCompletionSnapshot(ctx context.Context, taskID string) (models.TaskCompletionSnapshot, error) {
 	if !r.moved {
 		r.moved = true
@@ -83,6 +95,7 @@ func sendStepComplete(t *testing.T, h *Handlers, taskID, sessionID, summary, han
 	return payload
 }
 
+// TestHandleStepComplete_NewerNativeTurnReplacesPendingSignal covers the source-specific completion contract.
 func TestHandleStepComplete_NewerNativeTurnReplacesPendingSignal(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task", "session", "step-a", models.TaskSessionStateRunning)
@@ -116,6 +129,7 @@ func TestHandleStepComplete_NewerNativeTurnReplacesPendingSignal(t *testing.T) {
 	require.Equal(t, models.StepCompletionOutcomePending, receipt.Outcome)
 }
 
+// TestHandleStepComplete_SameTurnKeepsFirstPayload covers the source-specific completion contract.
 func TestHandleStepComplete_SameTurnKeepsFirstPayload(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task", "session", "step-a", models.TaskSessionStateRunning)
@@ -140,6 +154,7 @@ func TestHandleStepComplete_SameTurnKeepsFirstPayload(t *testing.T) {
 	require.Equal(t, "first handoff", pending.Handoff)
 }
 
+// TestHandleStepComplete_NativeVerificationKeepsHandoff covers the source-specific completion contract.
 func TestHandleStepComplete_NativeVerificationKeepsHandoff(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task", "session", "step-a", models.TaskSessionStateRunning)
@@ -163,6 +178,7 @@ func TestHandleStepComplete_NativeVerificationKeepsHandoff(t *testing.T) {
 		"native verification without another completion call must not replace the accepted source")
 }
 
+// TestHandleStepComplete_DuplicateOutcome covers the source-specific completion contract.
 func TestHandleStepComplete_DuplicateOutcome(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task", "session", "step-a", models.TaskSessionStateRunning)
@@ -192,6 +208,7 @@ func TestHandleStepComplete_DuplicateOutcome(t *testing.T) {
 	require.False(t, hasTransition, "a pending duplicate must not claim a transition")
 }
 
+// TestHandleStepComplete_ReceiptAfterApplied covers the source-specific completion contract.
 func TestHandleStepComplete_ReceiptAfterApplied(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task", "session", "step-a", models.TaskSessionStateRunning)
@@ -221,6 +238,7 @@ func TestHandleStepComplete_ReceiptAfterApplied(t *testing.T) {
 	require.Len(t, recorder.events, 1, "a committed receipt must not publish another transition")
 }
 
+// TestHandleStepComplete_UnconfiguredOutcome covers the source-specific completion contract.
 func TestHandleStepComplete_UnconfiguredOutcome(t *testing.T) {
 	svc, repo, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
 	seedStepCompleteTarget(t, repo, "task", "session", "step-a", models.TaskSessionStateRunning)
@@ -247,6 +265,7 @@ func TestHandleStepComplete_UnconfiguredOutcome(t *testing.T) {
 	require.Equal(t, models.StepCompletionReasonStepNotSignalGated, receipt.Reason)
 }
 
+// TestHandleStepComplete_CurrentSnapshotAfterPublishMove covers the source-specific completion contract.
 func TestHandleStepComplete_CurrentSnapshotAfterPublishMove(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task", "session", "step-a", models.TaskSessionStateRunning)
@@ -268,6 +287,7 @@ func TestHandleStepComplete_CurrentSnapshotAfterPublishMove(t *testing.T) {
 	require.Greater(t, current["entry_id"].(float64), float64(beforeEntry))
 }
 
+// TestHandleStepComplete_CurrentSnapshotSurvivesProjectionMove covers the source-specific completion contract.
 func TestHandleStepComplete_CurrentSnapshotSurvivesProjectionMove(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task", "session", "step-a", models.TaskSessionStateRunning)
@@ -291,6 +311,54 @@ func TestHandleStepComplete_CurrentSnapshotSurvivesProjectionMove(t *testing.T) 
 	require.Equal(t, "session", current["primary_session_id"])
 }
 
+// TestHandleStepComplete_SnapshotFailureOmitsCurrent covers the source-specific completion contract.
+func TestHandleStepComplete_SnapshotFailureOmitsCurrent(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	seedStepCompleteTarget(t, repo, "task", "session", "step-a", models.TaskSessionStateRunning)
+	createStepCompleteRecoveryTurn(t, repo, "turn-1", "task", "session")
+	h := &Handlers{
+		taskSvc: svc, sessionRepo: &failingSnapshotRepo{Repository: repo},
+		eventBus: &mcpRecordingEventBus{}, logger: testLogger(t).WithFields(),
+	}
+
+	payload := sendStepComplete(t, h, "task", "session", "done", "handoff")
+	require.Equal(t, true, payload["accepted"])
+	_, hasCurrent := payload["current"]
+	require.False(t, hasCurrent, "a failed snapshot must omit current rather than return a stale row")
+}
+
+// TestHandleStepComplete_TerminalSessionRejectsBeforeStaleStep covers the source-specific completion contract.
+func TestHandleStepComplete_TerminalSessionRejectsBeforeStaleStep(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	seedStepCompleteTarget(t, repo, "task", "session", "step-a", models.TaskSessionStateCompleted)
+	createStepCompleteRecoveryTurn(t, repo, "turn-1", "task", "session")
+	task, err := repo.GetTask(t.Context(), "task")
+	require.NoError(t, err)
+	task.WorkflowStepID = "step-b"
+	require.NoError(t, repo.UpdateTask(t.Context(), task))
+	h := newStepCompleteHandler(t, svc, repo, &mcpRecordingEventBus{})
+
+	payload := sendStepComplete(t, h, "task", "session", "retry", "")
+	require.Equal(t, ws.ErrorCodeValidation, payload["code"])
+	require.Contains(t, payload["message"], "terminal session")
+}
+
+// TestHandleStepComplete_TerminalSessionLaunchErrorIsValidation covers the source-specific completion contract.
+func TestHandleStepComplete_TerminalSessionLaunchErrorIsValidation(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	seedStepCompleteTarget(t, repo, "task", "session", "step-a", models.TaskSessionStateCompleted)
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTurn(t.Context(), &models.Turn{
+		ID: "unstamped-turn", TaskSessionID: "session", TaskID: "task", StartedAt: now, CreatedAt: now, UpdatedAt: now,
+	}))
+	h := newStepCompleteHandler(t, svc, repo, &mcpRecordingEventBus{})
+
+	payload := sendStepComplete(t, h, "task", "session", "retry", "")
+	require.Equal(t, ws.ErrorCodeValidation, payload["code"])
+	require.Contains(t, payload["message"], "terminal session")
+}
+
+// TestHandleStepComplete_ReceiptAfterDestinationEntry covers the source-specific completion contract.
 func TestHandleStepComplete_ReceiptAfterDestinationEntry(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task", "session", "step-a", models.TaskSessionStateWaitingForInput)
@@ -321,6 +389,7 @@ func TestHandleStepComplete_ReceiptAfterDestinationEntry(t *testing.T) {
 	require.Len(t, recorder.events, 1)
 }
 
+// TestHandleStepComplete_ReceiptDeniedToForeignCaller covers the source-specific completion contract.
 func TestHandleStepComplete_ReceiptDeniedToForeignCaller(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task-a", "session-a", "step-a", models.TaskSessionStateRunning)
@@ -341,6 +410,7 @@ func TestHandleStepComplete_ReceiptDeniedToForeignCaller(t *testing.T) {
 	require.NotContains(t, string(response.Payload), first["signal_id"].(string))
 }
 
+// TestHandleStepComplete_LegacyOutcomeUnknown covers the source-specific completion contract.
 func TestHandleStepComplete_LegacyOutcomeUnknown(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task", "session", "step-a", models.TaskSessionStateRunning)

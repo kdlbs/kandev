@@ -25,6 +25,7 @@ func TestCompletionInstructionsDistinguishAcceptanceFromCommit(t *testing.T) {
 	}
 }
 
+// TestCompletionOutcomeGuidanceOmittedWhenUngated covers the source-specific completion contract.
 func TestCompletionOutcomeGuidanceOmittedWhenUngated(t *testing.T) {
 	assert.NotContains(t, FormatKandevContext("task", "session", false), "pending means only that the signal was recorded")
 	assert.NotContains(t, FormatOfficeContextWithOptions("task", "session", false), "pending means only that the signal was recorded")

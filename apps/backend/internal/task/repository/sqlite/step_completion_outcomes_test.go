@@ -152,18 +152,22 @@ func exerciseStepCompletionOutcomeReentryRejectsOldSource(t *testing.T, repo *Re
 	require.False(t, applied, "a prior-entry source must not authorize a re-entry move")
 }
 
+// TestStepCompletionOutcome_ReplacementWinsCommitRace covers the source-specific completion contract.
 func TestStepCompletionOutcome_ReplacementWinsCommitRace(t *testing.T) {
 	exerciseStepCompletionOutcomeReplacementWinsCommitRace(t, newTurnStepStampTestRepo(t))
 }
 
+// TestStepCompletionOutcome_MoveAndReceiptRollback covers the source-specific completion contract.
 func TestStepCompletionOutcome_MoveAndReceiptRollback(t *testing.T) {
 	exerciseStepCompletionOutcomeMoveAndReceiptRollback(t, newTurnStepStampTestRepo(t))
 }
 
+// TestStepCompletionOutcome_ReentryRejectsOldSource covers the source-specific completion contract.
 func TestStepCompletionOutcome_ReentryRejectsOldSource(t *testing.T) {
 	exerciseStepCompletionOutcomeReentryRejectsOldSource(t, newTurnStepStampTestRepo(t))
 }
 
+// TestStepCompletionOutcome_LegacySignalGetsUnprovenReceipt covers the source-specific completion contract.
 func TestStepCompletionOutcome_LegacySignalGetsUnprovenReceipt(t *testing.T) {
 	repo := newTurnStepStampTestRepo(t)
 	seedTurnStepStampSession(t, repo, "task", "step-a", "session")

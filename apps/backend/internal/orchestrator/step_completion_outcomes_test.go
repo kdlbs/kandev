@@ -21,6 +21,7 @@ type failOnceAdmissionRepo struct {
 	failures  int
 }
 
+// UpdateTaskWithWorkflowStepAdmissionIfAtStep injects one transient admission failure.
 func (r *failOnceAdmissionRepo) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 	ctx context.Context, task *models.Task, expectedStepID, targetStepID string, limit int,
 ) (bool, error) {
@@ -35,6 +36,101 @@ func (r *failOnceAdmissionRepo) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 	return r.Repository.UpdateTaskWithWorkflowStepAdmissionIfAtStep(ctx, task, expectedStepID, targetStepID, limit)
 }
 
+type blockingAdmissionRepo struct {
+	*sqliterepo.Repository
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+// UpdateTaskWithWorkflowStepAdmissionIfAtStep pauses before the guarded commit.
+func (r *blockingAdmissionRepo) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
+	ctx context.Context, task *models.Task, expectedStepID, targetStepID string, limit int,
+) (bool, error) {
+	r.once.Do(func() { close(r.entered) })
+	<-r.release
+	return r.Repository.UpdateTaskWithWorkflowStepAdmissionIfAtStep(ctx, task, expectedStepID, targetStepID, limit)
+}
+
+// TestStepCompletionOutcome_SupersededConsumerRetryThroughHandler covers the source-specific completion contract.
+func TestStepCompletionOutcome_SupersededConsumerRetryThroughHandler(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task", "session", "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "session", models.TaskSessionStateWaitingForInput, ""))
+	now := time.Now().UTC()
+	_, err := repo.CreateTurnWithStepStamp(ctx, &models.Turn{
+		ID: "turn-1", TaskSessionID: "session", TaskID: "task", StartedAt: now.Add(-2 * time.Second), CreatedAt: now.Add(-2 * time.Second),
+	})
+	require.NoError(t, err)
+	entry := signalEntryForSession(t, repo, "session")
+	first, claimed, err := repo.ClaimStepCompletionSignal(ctx, "task", "session", models.PendingStepCompletionSignal{
+		WorkflowStepTransitionID: entry, StepID: "step1", SourceTurnID: "turn-1", Summary: "old", Handoff: "old handoff",
+	})
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	getter := newMockStepGetter()
+	getter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", AutoAdvanceRequiresSignal: true, Events: wfmodels.StepEvents{
+			OnTurnComplete: []wfmodels.OnTurnCompleteAction{{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "step2"}}},
+		},
+	}
+	getter.steps["step2"] = &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", Position: 1}
+	blocking := &blockingAdmissionRepo{Repository: repo, entered: make(chan struct{}), release: make(chan struct{})}
+	svc := createTestService(repo, getter, newMockTaskRepo())
+	svc.repo = blocking
+	recorder := &mockEventBus{}
+	svc.eventBus = recorder
+	svc.initWorkflowEngine()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = svc.handleStepCompletionSignaled(ctx, stepCompletionSignalEvent("task", "session", "step1"))
+	}()
+	<-blocking.entered
+
+	_, err = repo.CreateTurnWithStepStamp(ctx, &models.Turn{
+		ID: "turn-2", TaskSessionID: "session", TaskID: "task", StartedAt: now, CreatedAt: now,
+	})
+	require.NoError(t, err)
+	replacement, claimed, err := repo.ClaimStepCompletionSignal(ctx, "task", "session", models.PendingStepCompletionSignal{
+		WorkflowStepTransitionID: entry, StepID: "step1", SourceTurnID: "turn-2", Summary: "latest", Handoff: "latest handoff",
+	})
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NotEqual(t, first.SignalID, replacement.SignalID)
+	close(blocking.release)
+	<-done
+
+	published := recorder.published()
+	require.Len(t, published, 1, "the superseded consumer must publish exactly one replacement wakeup")
+	wakeup := published[0].Event
+	payload := wakeup.Data.(map[string]interface{})
+	require.Equal(t, replacement.SignalID, payload["signal_id"])
+
+	task, err := repo.GetTask(ctx, "task")
+	require.NoError(t, err)
+	require.Equal(t, "step1", task.WorkflowStepID, "the superseded consumer must not move the task")
+
+	require.NoError(t, svc.handleStepCompletionSignaled(ctx, wakeup))
+	task, err = repo.GetTask(ctx, "task")
+	require.NoError(t, err)
+	require.Equal(t, "step2", task.WorkflowStepID)
+	carry, present := carryToken(t, repo, "task")
+	require.True(t, present)
+	require.Equal(t, "latest handoff", carry.Handoff)
+	require.Len(t, recorder.published(), 1, "the successful replacement must not publish more wakeups")
+	session, err := repo.GetTaskSession(ctx, "session")
+	require.NoError(t, err)
+	receipt, ok := models.LoadStepCompletionReceipt(session.Metadata)
+	require.True(t, ok)
+	require.Equal(t, replacement.SignalID, receipt.SignalID)
+	require.Equal(t, models.StepCompletionOutcomeTransitionApplied, receipt.Outcome)
+}
+
+// TestStepCompletionOutcome_LegacyAndEngine covers the source-specific completion contract.
 func TestStepCompletionOutcome_LegacyAndEngine(t *testing.T) {
 	for _, path := range []string{"legacy", "engine"} {
 		for _, queued := range []bool{false, true} {
@@ -97,6 +193,7 @@ func TestStepCompletionOutcome_LegacyAndEngine(t *testing.T) {
 	}
 }
 
+// TestStepCompletionOutcome_SupersededConsumerReconcilesLatest covers the source-specific completion contract.
 func TestStepCompletionOutcome_SupersededConsumerReconcilesLatest(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task", "session", "step1")
@@ -159,6 +256,7 @@ func TestStepCompletionOutcome_SupersededConsumerReconcilesLatest(t *testing.T) 
 	require.Equal(t, models.StepCompletionOutcomeTransitionApplied, receipt.Outcome)
 }
 
+// TestStepCompletionOutcome_NativeVerificationKeepsAcceptedSource covers the source-specific completion contract.
 func TestStepCompletionOutcome_NativeVerificationKeepsAcceptedSource(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task", "session", "step1")
@@ -208,6 +306,7 @@ func TestStepCompletionOutcome_NativeVerificationKeepsAcceptedSource(t *testing.
 	require.Equal(t, models.StepCompletionOutcomeTransitionApplied, receipt.Outcome)
 }
 
+// TestStepCompletionOutcome_ProofFailureRetriesSameSignal covers the source-specific completion contract.
 func TestStepCompletionOutcome_ProofFailureRetriesSameSignal(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task", "session", "step1")
@@ -273,6 +372,7 @@ func TestStepCompletionOutcome_ProofFailureRetriesSameSignal(t *testing.T) {
 	require.Equal(t, beforeEntry+1, afterEntry, "the retry must commit exactly one move")
 }
 
+// TestStepCompletionOutcome_PreflightRefusalRecordsBlocked covers the source-specific completion contract.
 func TestStepCompletionOutcome_PreflightRefusalRecordsBlocked(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task", "session", "step1")

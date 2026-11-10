@@ -180,12 +180,6 @@ func (s *Service) processOnTurnCompleteWithCause(
 		ctx = cancellationTransitionAttribution(ctx)
 	}
 	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, true)
-	// A completion-guarded legacy move that remains on the source step failed
-	// before committing. Rewind the generation this attempt consumed so the same
-	// durable signal can be retried without a newer session snapshot.
-	if updated, err := s.repo.GetTask(ctx, taskID); err == nil && updated.WorkflowStepID == currentStep.ID {
-		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, currentStep.ID, session)
-	}
 	return true
 }
 
@@ -8480,7 +8474,6 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, result.ToStepID)
 	if err != nil {
 		s.markStepCompletionBlocked(ctx, taskID, result.FromStepID, session.ID, models.StepCompletionReasonDestinationUnavailable)
-		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
 		recordWorkflowTransitionError(ctx, err)
 		s.logger.Warn("target step not found, skipping transition",
 			zap.String("step_id", result.ToStepID),
@@ -8491,7 +8484,6 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 	if sessionLifecycle {
 		if err := s.preflightWorkflowStepCredentials(ctx, taskID, session, targetStep); err != nil {
 			s.markStepCompletionBlocked(ctx, taskID, result.FromStepID, session.ID, models.StepCompletionReasonDestinationUnavailable)
-			s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
 			recordWorkflowTransitionError(ctx, err)
 			s.logger.Warn("target profile credential preflight failed, skipping transition",
 				zap.String("task_id", taskID),
@@ -8508,7 +8500,6 @@ func (s *Service) applyEngineTransitionWithCommitResultMode(
 
 	fromStep, err := s.loadWorkflowStepForLifecycle(ctx, result.FromStepID, "transition source")
 	if err != nil {
-		s.releaseTurnCompletionGenerationForCompletion(ctx, taskID, result.FromStepID, session)
 		recordWorkflowTransitionError(ctx, err)
 		s.logger.Warn("failed to load from-step for on_exit",
 			zap.String("step_id", result.FromStepID),

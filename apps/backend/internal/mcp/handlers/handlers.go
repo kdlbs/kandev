@@ -2655,6 +2655,10 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 
 	launch, err := h.stepCompletionLaunchStep(ctx, req.SessionID, task.WorkflowStepID)
 	if err != nil {
+		if isTerminalStepCompleteSession(session.State) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				"cannot signal completion for a terminal session (state: "+string(session.State)+")", nil)
+		}
 		h.logger.Error("failed to resolve step-completion turn",
 			zap.String("task_id", req.TaskID),
 			zap.String("session_id", req.SessionID),
@@ -2668,6 +2672,12 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	// still receives the outcome instead of a new transition or a dead end.
 	if receipt, ok := h.exactStepCompletionReceipt(ctx, task, session, launch); ok {
 		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session, models.SignalFromReceipt(*receipt))
+	}
+	// A terminal session cannot accept a new signal; no future turn-end can
+	// consume it. An exact retained receipt was already returned above.
+	if isTerminalStepCompleteSession(session.State) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"cannot signal completion for a terminal session (state: "+string(session.State)+")", nil)
 	}
 	if launchStepID != task.WorkflowStepID {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, fmt.Sprintf(
@@ -2690,12 +2700,6 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		Handoff:                  boundedHandoff,
 		Blockers:                 boundedBlockers,
 		SignaledAt:               time.Now().UTC(),
-	}
-	// A terminal session cannot accept a new signal; no future turn-end can
-	// consume it. An exact retained receipt was already returned above.
-	if isTerminalStepCompleteSession(session.State) {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-			"cannot signal completion for a terminal session (state: "+string(session.State)+")", nil)
 	}
 	signal, stored, err := h.claimStepCompletionSignal(ctx, req.TaskID, req.SessionID, launchStepID, signal)
 	if err != nil {
@@ -2742,7 +2746,9 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		"signal_id":   signal.SignalID,
 		"source":      stepCompletionSignalSource(req.SessionID, signal),
 		"outcome":     stepCompletionOutcome(outcomeStatus, outcomeReason),
-		"current":     h.stepCompletionCurrent(ctx, req.TaskID, task),
+	}
+	if current := h.stepCompletionCurrent(ctx, req.TaskID, task); current != nil {
+		response["current"] = current
 	}
 	if advancesKnown {
 		response["advances"] = advances

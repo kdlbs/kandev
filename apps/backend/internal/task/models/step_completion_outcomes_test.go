@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestStepCompletionReceiptJSONRoundTrip covers the source-specific completion contract.
 func TestStepCompletionReceiptJSONRoundTrip(t *testing.T) {
 	entry := int64(7)
 	signal := PendingStepCompletionSignal{
@@ -36,6 +37,7 @@ func TestStepCompletionReceiptJSONRoundTrip(t *testing.T) {
 	require.True(t, loaded.SameEntry(&entry))
 }
 
+// TestStepCompletionReceiptProof covers the source-specific completion contract.
 func TestStepCompletionReceiptProof(t *testing.T) {
 	entry := int64(3)
 	receipt := NewStepCompletionReceipt("task", "session", PendingStepCompletionSignal{
@@ -52,25 +54,7 @@ func TestStepCompletionReceiptProof(t *testing.T) {
 	require.True(t, queued.HasProof())
 }
 
-func TestStepCompletionSignalSameSource(t *testing.T) {
-	entry := int64(4)
-	base := PendingStepCompletionSignal{StepID: "step", SourceTurnID: "turn-1", WorkflowStepTransitionID: &entry}
-	same := PendingStepCompletionSignal{StepID: "step", SourceTurnID: "turn-1", WorkflowStepTransitionID: &entry, Summary: "changed"}
-	require.True(t, base.SameCompletionSource(same))
-
-	later := PendingStepCompletionSignal{StepID: "step", SourceTurnID: "turn-2", WorkflowStepTransitionID: &entry}
-	require.False(t, base.SameCompletionSource(later))
-
-	otherEntry := int64(5)
-	reentry := PendingStepCompletionSignal{StepID: "step", SourceTurnID: "turn-1", WorkflowStepTransitionID: &otherEntry}
-	require.False(t, base.SameCompletionSource(reentry))
-
-	legacy := PendingStepCompletionSignal{StepID: "step"}
-	legacySame := PendingStepCompletionSignal{StepID: "step", Summary: "legacy duplicate"}
-	require.True(t, legacy.SameCompletionSource(legacySame))
-	require.False(t, legacy.SameCompletionSource(base))
-}
-
+// TestLoadStepCompletionReceiptRejectsIncomplete covers the source-specific completion contract.
 func TestLoadStepCompletionReceiptRejectsIncomplete(t *testing.T) {
 	for name, value := range map[string]interface{}{
 		"missing signal": map[string]interface{}{"step_id": "step", "outcome": StepCompletionOutcomePending},

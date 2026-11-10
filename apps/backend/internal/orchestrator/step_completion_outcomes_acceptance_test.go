@@ -68,6 +68,7 @@ func waitForOnEnter(t *testing.T, done <-chan struct{}) {
 	}
 }
 
+// TestStepCompletionOutcome_ReviewRecipientGetsLatestHandoffOnce covers the source-specific completion contract.
 func TestStepCompletionOutcome_ReviewRecipientGetsLatestHandoffOnce(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
@@ -119,6 +120,7 @@ func TestStepCompletionOutcome_ReviewRecipientGetsLatestHandoffOnce(t *testing.T
 	require.Equal(t, "step-review", sourceReceipt.Transition.StepID)
 }
 
+// TestStepCompletionOutcome_CredentialRefusalKeepsSourceRoute covers the source-specific completion contract.
 func TestStepCompletionOutcome_CredentialRefusalKeepsSourceRoute(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
@@ -130,6 +132,11 @@ func TestStepCompletionOutcome_CredentialRefusalKeepsSourceRoute(t *testing.T) {
 	session, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
 	require.NoError(t, err)
 	require.False(t, fixture.svc.processOnTurnCompleteViaEngine(ctx, "t1", session))
+	consumed, held := fixture.svc.turnCompletionConsumedGeneration.Load(fixture.current.ID)
+	require.True(t, held)
+	require.Equal(t, session.UpdatedAt, consumed, "a deterministic refusal must not release the generation")
+	require.False(t, fixture.svc.processOnTurnCompleteViaEngine(ctx, "t1", session),
+		"an unchanged refused signal must not repeat the preflight")
 
 	task, err := fixture.repo.GetTask(ctx, "t1")
 	require.NoError(t, err)
@@ -155,6 +162,7 @@ func TestStepCompletionOutcome_CredentialRefusalKeepsSourceRoute(t *testing.T) {
 
 }
 
+// TestStepCompletionOutcome_QueuedReviewAndPromotion covers the source-specific completion contract.
 func TestStepCompletionOutcome_QueuedReviewAndPromotion(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
@@ -219,6 +227,7 @@ func TestStepCompletionOutcome_QueuedReviewAndPromotion(t *testing.T) {
 	require.Contains(t, calls[0].Prompt, "queued review handoff")
 }
 
+// TestStepCompletionOutcome_RequestChangesIterateReviewIgnoresStaleEvent covers the source-specific completion contract.
 func TestStepCompletionOutcome_RequestChangesIterateReviewIgnoresStaleEvent(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)

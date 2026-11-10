@@ -291,10 +291,6 @@ func (r *Repository) getLatestTaskStepTransitionIDTx(ctx context.Context, tx ste
 	return id, nil
 }
 
-// GetTaskWorkflowStepEntry returns the task's current workflow and step with
-// the latest transition identity from one database statement. The step and
-// identity must share a snapshot so a retry cannot pair an earlier step read
-// with a later return to the same step.
 // GetTaskCompletionSnapshot returns one statement-consistent route snapshot
 // for completion result projection. State, workflow, step, queue placement,
 // latest entry, and primary session come from the same read.
@@ -335,6 +331,10 @@ func (r *Repository) GetTaskCompletionSnapshot(ctx context.Context, taskID strin
 	return snapshot, nil
 }
 
+// GetTaskWorkflowStepEntry returns the task's current workflow and step with
+// the latest transition identity from one database statement. The step and
+// identity must share a snapshot so a retry cannot pair an earlier step read
+// with a later return to the same step.
 func (r *Repository) GetTaskWorkflowStepEntry(
 	ctx context.Context,
 	taskID string,

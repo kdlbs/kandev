@@ -74,15 +74,18 @@ func stepCompletionTransitionProof(receipt *models.StepCompletionReceipt) map[st
 func (h *Handlers) stepCompletionCurrent(ctx context.Context, taskID string, fallback *models.Task) map[string]interface{} {
 	if reader, ok := h.sessionRepo.(stepCompletionSnapshotReader); ok {
 		snapshot, err := reader.GetTaskCompletionSnapshot(ctx, taskID)
-		if err == nil {
-			return map[string]interface{}{
-				"state":              string(snapshot.State),
-				"workflow_id":        snapshot.WorkflowID,
-				"step_id":            snapshot.StepID,
-				"queued_for_step_id": snapshot.QueuedForStepID,
-				"entry_id":           snapshot.EntryID,
-				"primary_session_id": snapshot.PrimarySessionID,
-			}
+		if err != nil {
+			h.logger.Warn("failed to read step-completion route snapshot",
+				zap.String("task_id", taskID), zap.Error(err))
+			return nil
+		}
+		return map[string]interface{}{
+			"state":              string(snapshot.State),
+			"workflow_id":        snapshot.WorkflowID,
+			"step_id":            snapshot.StepID,
+			"queued_for_step_id": snapshot.QueuedForStepID,
+			"entry_id":           snapshot.EntryID,
+			"primary_session_id": snapshot.PrimarySessionID,
 		}
 	}
 	if fallback == nil {

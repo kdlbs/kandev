@@ -1410,22 +1410,6 @@ type PendingStepCompletionSignal struct {
 	SignaledAt               time.Time `json:"signaled_at"`
 }
 
-// SameCompletionSource reports whether two signals share the authenticated
-// idempotency key: source turn and workflow entry within one step. An empty
-// source turn is the legacy entry-wide compatibility identity.
-func (s PendingStepCompletionSignal) SameCompletionSource(other PendingStepCompletionSignal) bool {
-	return s.StepID == other.StepID &&
-		s.SourceTurnID == other.SourceTurnID &&
-		s.MatchesWorkflowEntry(other.StepID, entryIDOrZero(other.WorkflowStepTransitionID))
-}
-
-func entryIDOrZero(entry *int64) int64 {
-	if entry == nil {
-		return 0
-	}
-	return *entry
-}
-
 // LoadSessionRuntimeConfig decodes the runtime-config bag entry from session
 // metadata. It tolerates both typed values and JSON-rehydrated maps.
 func LoadSessionRuntimeConfig(metadata map[string]interface{}) (SessionRuntimeConfig, bool) {
