@@ -311,6 +311,10 @@ const (
 	ProbeResultUnknown = client.ProbeResultUnknown
 )
 
+// ErrAgentctlClientUnavailable indicates that a session's execution is being
+// replaced and its agentctl client is not currently available.
+var ErrAgentctlClientUnavailable = errors.New("agentctl client not available")
+
 // AgentManagerClient is an interface for the Agent Manager service
 // This will be implemented via gRPC or HTTP client
 type AgentManagerClient interface {

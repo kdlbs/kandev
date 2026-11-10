@@ -1441,31 +1441,9 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 		return nil, err
 	}
 
-	if err := s.agentManager.EnsureWorkspaceExecutionForSession(ctx, req.TaskID, req.SessionID); err != nil {
-		var projectionErr *agentruntime.WorkspaceRecoveryProjectionError
-		if errors.As(err, &projectionErr) {
-			if projectionErr.PersistFailed {
-				return nil, errors.New("workspace recovery state could not be saved")
-			}
-			return nil, &ManagedCloneRelocationRecoveryError{Stamp: projectionErr.Stamp, Stale: projectionErr.Stale}
-		}
-		return nil, fmt.Errorf("failed to restore workspace: %w", err)
-	}
-	// An environment may already have an execution owned by another session.
-	// Restoration succeeds only after this session has its own ready binding.
-	agentExecutionID, err := s.agentManager.GetExecutionIDForSession(ctx, req.SessionID)
+	agentExecutionID, err := s.ensureRestoreWorkspaceExecutionReady(ctx, req.TaskID, req.SessionID)
 	if err != nil {
-		return nil, fmt.Errorf("workspace execution is not bound to the requested session: %w", err)
-	}
-	if strings.TrimSpace(agentExecutionID) == "" {
-		return nil, errors.New("workspace execution is not bound to the requested session")
-	}
-	if err := s.agentManager.WaitForAgentctlReady(ctx, req.SessionID); err != nil {
-		return nil, fmt.Errorf("workspace execution is not ready: %w", err)
-	}
-	currentExecutionID, err := s.agentManager.GetExecutionIDForSession(ctx, req.SessionID)
-	if err != nil || currentExecutionID != agentExecutionID {
-		return nil, errors.New("workspace execution binding changed while waiting for readiness")
+		return nil, err
 	}
 
 	resp := &LaunchSessionResponse{
@@ -1485,6 +1463,74 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 		}
 	}
 	return resp, nil
+}
+
+func (s *Service) ensureRestoreWorkspaceExecutionReady(
+	ctx context.Context,
+	taskID, sessionID string,
+) (string, error) {
+	readyCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	retry := time.NewTicker(100 * time.Millisecond)
+	defer retry.Stop()
+
+	for {
+		if err := s.ensureWorkspaceExecutionForRestore(readyCtx, taskID, sessionID); err != nil {
+			return "", err
+		}
+
+		// An environment may already have an execution owned by another session.
+		// Restoration succeeds only after this session has its own ready binding.
+		executionID, err := s.agentManager.GetExecutionIDForSession(readyCtx, sessionID)
+		if err != nil || strings.TrimSpace(executionID) == "" {
+			if err := waitForRestoreWorkspaceRetry(readyCtx, retry.C); err != nil {
+				return "", fmt.Errorf("workspace execution is not bound to the requested session: %w", err)
+			}
+			continue
+		}
+		if err := s.agentManager.WaitForAgentctlReady(readyCtx, sessionID); err != nil {
+			if !errors.Is(err, executor.ErrAgentctlClientUnavailable) {
+				return "", fmt.Errorf("workspace execution is not ready: %w", err)
+			}
+			if err := waitForRestoreWorkspaceRetry(readyCtx, retry.C); err != nil {
+				return "", fmt.Errorf("workspace execution is not ready: %w", err)
+			}
+			continue
+		}
+
+		currentExecutionID, err := s.agentManager.GetExecutionIDForSession(readyCtx, sessionID)
+		if err != nil || currentExecutionID != executionID {
+			if err := waitForRestoreWorkspaceRetry(readyCtx, retry.C); err != nil {
+				return "", fmt.Errorf("workspace execution binding did not stabilize: %w", err)
+			}
+			continue
+		}
+		return executionID, nil
+	}
+}
+
+func (s *Service) ensureWorkspaceExecutionForRestore(ctx context.Context, taskID, sessionID string) error {
+	err := s.agentManager.EnsureWorkspaceExecutionForSession(ctx, taskID, sessionID)
+	if err == nil {
+		return nil
+	}
+	var projectionErr *agentruntime.WorkspaceRecoveryProjectionError
+	if errors.As(err, &projectionErr) {
+		if projectionErr.PersistFailed {
+			return errors.New("workspace recovery state could not be saved")
+		}
+		return &ManagedCloneRelocationRecoveryError{Stamp: projectionErr.Stamp, Stale: projectionErr.Stale}
+	}
+	return fmt.Errorf("failed to restore workspace: %w", err)
+}
+
+func waitForRestoreWorkspaceRetry(ctx context.Context, retry <-chan time.Time) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-retry:
+		return nil
+	}
 }
 
 // RecoverSessionOptions carries action-specific recovery authority.
