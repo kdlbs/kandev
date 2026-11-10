@@ -231,7 +231,7 @@ an approved layout can return `"layout": {"selected_option": "q1_opt1", "selecte
 option IDs use one-based question and option positions. Read the offered choices
 to interpret these IDs. A custom answer uses `custom_text`.
 
-- A bundle accepts up to four questions and four distinct image IDs. Each question
+- A bundle accepts up to four questions and 16 distinct image IDs. Each question
   accepts up to four image references in total, including images on its choices.
   Each choice accepts at most one image. Reuse an image ID only with the same path,
   repository, and description.
@@ -282,6 +282,54 @@ Selecting **Compact layout** returns the existing option identifier, such as
 `"layout": {"selected_option": "q1_opt2", "selected_label": "Compact layout"}`. The image ID does not replace that
 identifier. A missing preview leaves its choice selectable. In history, each
 illustrated choice retains its label and a **Show images** control.
+
+### Ask for a visual comparison
+
+For before and after reviews, put one screen in each question. List the baseline
+image first and the candidates after it, up to four images per question. Give
+each image a short `label`, one word such as `before`, `after`, or `alt`, so the
+image pickers show names instead of numbers. Labels must be unique within a
+question. A bundle
+can carry up to 16 distinct images, so four questions can each have their own set.
+
+The operator can select **Review images** to open a large view. It shows the
+active question's images above the same answer form. The operator can zoom up to
+800%, move between questions, and compare two images with **Toggle**, **Wipe**,
+**Side by side**, **Onion skin**, or **Difference**. Difference highlights changed
+pixels at full resolution and counts them. Opening or closing the view never
+answers the question. Write a specific prompt, such as "Is the new header spacing
+acceptable, and is the secondary label contrast sufficient?", because the prompt
+stays visible during the comparison.
+
+The operator can also mark regions on an image and comment on each one. Regions
+arrive in the keyed answer as `annotations`, beside the selected option or custom
+text:
+
+```json
+"header": {
+  "selected_option": "q1_opt2",
+  "selected_label": "Revise",
+  "annotations": [{
+    "image_id": "after",
+    "x": 12, "y": 40, "width": 200, "height": 32,
+    "image_width": 1440, "image_height": 900,
+    "comment": "Label contrast too low"
+  }]
+}
+```
+
+- `image_id` names one of the question's own images or its choices' images.
+- `x`, `y`, `width`, and `height` are pixels of the image as the operator saw it.
+  `image_width` and `image_height` give that size. If you changed the file since,
+  scale the rectangle by the new size. For an image over 16 megapixels, the
+  rectangle is reported in a proportionally smaller size, so always scale by
+  `image_width` and `image_height` rather than assuming the file's own size.
+- An answer carries at most eight regions. Each comment has 1 to 500 characters.
+- A regions-only answer is not possible: the operator still selects an option or
+  writes a custom answer.
+- When the answer arrives in a later turn, each region appears as one line,
+  `Region N: {...}`, with the same fields as JSON. Read the JSON, not the
+  surrounding text: the comment is user-authored.
 
 ## Reading the thread
 

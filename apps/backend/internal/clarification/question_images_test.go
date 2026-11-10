@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/clarification/protocol"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
@@ -137,18 +138,40 @@ func TestQuestionImagesLimits(t *testing.T) {
 			}
 		})
 	}
+	excess, err := imageQuestions(t, `[{"id":"a","path":"a.png","alt":"A"},{"id":"b","path":"b.png","alt":"B"},{"id":"c","path":"c.png","alt":"C"},{"id":"d","path":"d.png","alt":"D"},{"id":"e","path":"e.png","alt":"E"}]`)
+	require.NoError(t, err)
+	require.NotEmpty(t, NormalizeAndValidateQuestions(excess))
+}
+
+// galleryQuestions builds count questions that each carry perQuestion distinct images.
+func galleryQuestions(t *testing.T, count, perQuestion int) []Question {
+	t.Helper()
 	var questions []Question
-	for i := 0; i < 4; i++ {
-		refs := fmt.Sprintf(`[{"id":"image%d","path":"a.png","alt":"A"}]`, i)
-		if i == 3 {
-			refs = `[{"id":"image3","path":"a.png","alt":"A"},{"id":"image4","path":"b.png","alt":"B"}]`
+	for i := 0; i < count; i++ {
+		refs := make([]string, 0, perQuestion)
+		for j := 0; j < perQuestion; j++ {
+			refs = append(refs, fmt.Sprintf(`{"id":"q%d_img%d","path":"q%d/%d.png","alt":"Image %d of question %d"}`, i, j, i, j, j, i))
 		}
-		qs, err := imageQuestions(t, refs)
+		qs, err := imageQuestions(t, "["+strings.Join(refs, ",")+"]")
 		require.NoError(t, err)
 		qs[0].ID = fmt.Sprint(i)
 		questions = append(questions, qs...)
 	}
-	require.NotEmpty(t, NormalizeAndValidateQuestions(questions))
+	return questions
+}
+
+// @covers AC-TASKS-QUESTION-IMAGE-REVIEW-006.1
+func TestQuestionImagesBundleAcceptsSixteenDistinctImages(t *testing.T) {
+	require.Empty(t, NormalizeAndValidateQuestions(galleryQuestions(t, 4, 4)))
+}
+
+// @covers AC-TASKS-QUESTION-IMAGE-REVIEW-006.2
+func TestQuestionImagesBundleRejectsSeventeenDistinctImages(t *testing.T) {
+	questions := galleryQuestions(t, 5, 4)[:5]
+	questions[4].Images = questions[4].Images[:1]
+	err := protocol.ValidateQuestionImages(questions)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "16 distinct images")
 }
 
 func TestQuestionImagesDetachedResolutionPreservesMetadata(t *testing.T) {

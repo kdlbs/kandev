@@ -3,6 +3,8 @@ package clarification
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/kandev/kandev/internal/clarification/protocol"
 )
 
 // serializedAttachment is the durable/browser projection of one answer
@@ -25,6 +27,8 @@ type serializedAnswer struct {
 	SelectedOptions []string               `json:"selected_options"`
 	CustomText      string                 `json:"custom_text"`
 	Attachments     []serializedAttachment `json:"attachments,omitempty"`
+	// Annotations stay omitted when empty for the same byte compatibility.
+	Annotations []protocol.AnswerAnnotation `json:"annotations,omitempty"`
 }
 
 // serializedResponse mirrors Response but declares no `omitempty`: every key
@@ -60,6 +64,7 @@ func SerializeResponse(resp *Response) (string, error) {
 			SelectedOptions: append([]string{}, a.SelectedOptions...),
 			CustomText:      a.CustomText,
 			Attachments:     serializeAnswerAttachments(a.Attachments),
+			Annotations:     a.Annotations,
 		})
 	}
 	b, err := json.Marshal(out)
@@ -108,6 +113,7 @@ func DeserializeResponse(data string) (*Response, error) {
 			SelectedOptions: append([]string{}, a.SelectedOptions...),
 			CustomText:      a.CustomText,
 			Attachments:     deserializeAnswerAttachments(a.Attachments),
+			Annotations:     a.Annotations,
 		})
 	}
 	return resp, nil
