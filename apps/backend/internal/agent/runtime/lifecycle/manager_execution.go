@@ -104,15 +104,7 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 		}
 	}
 
-	// Fast path: execution already in memory
-	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
-		if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
-			return nil, err
-		}
-		return execution, nil
-	}
-
-	// Slow path: create on-demand, deduplicated by sessionID-keyed singleflight.
+	// Join the session operation before reading cached state so cleanup can retire it.
 	// Use ensureWorkspaceExecutionLocked (not EnsureWorkspaceExecutionForSession)
 	// to avoid recursing into the same singleflight slot we already hold.
 	value, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
@@ -235,14 +227,6 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 		}
 	}
 
-	// Fast path: execution already in memory
-	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
-		if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
-			return nil, err
-		}
-		return execution, nil
-	}
-
 	value, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
 		return m.ensureWorkspaceExecutionLocked(sharedCtx, taskID, sessionID)
 	})
@@ -335,17 +319,29 @@ func awaitCoalescedResult(
 	}
 }
 
+// Cached workspace access waits for runtime retirement and rechecks its owner.
+func (m *Manager) cachedWorkspaceExecutionForSession(ctx context.Context, sessionID string) (*AgentExecution, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil, nil
+	}
+	execution.remoteInstanceLifecycleMu.Lock()
+	defer execution.remoteInstanceLifecycleMu.Unlock()
+	if current, present := m.executionStore.GetBySessionID(sessionID); !present || current != execution {
+		return nil, nil
+	}
+	if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
+		return nil, err
+	}
+	return execution, nil
+}
+
 // ensureWorkspaceExecutionLocked is the body of EnsureWorkspaceExecutionForSession
 // run inside the sessionID-keyed singleflight bucket. Callers other than
 // EnsureWorkspaceExecutionForSession must already hold the singleflight slot.
 func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, sessionID string) (*AgentExecution, error) {
-	// Double-check after acquiring the slot — a peer in the same group may have
-	// finished while we were waiting.
-	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
-		if err := m.ensureCachedWorkspaceExecutionAdmitted(ctx, execution); err != nil {
-			return nil, err
-		}
-		return execution, nil
+	if execution, err := m.cachedWorkspaceExecutionForSession(ctx, sessionID); execution != nil || err != nil {
+		return execution, err
 	}
 
 	if m.workspaceInfoProvider == nil {

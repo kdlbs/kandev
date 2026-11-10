@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -94,4 +95,73 @@ func TestWorkspaceLookupWaitsForCleanupThenUsesItsOwnResult(t *testing.T) {
 			require.NoError(t, <-cleaned)
 		})
 	}
+}
+
+func TestWorkspaceLookupDoesNotReturnExecutionOwnedByPendingCleanup(t *testing.T) {
+	for _, lookup := range []string{"session", "task session"} {
+		t.Run(lookup, func(t *testing.T) {
+			mgr := newTestManager(t)
+			execution := &AgentExecution{ID: "stopping", SessionID: "session", TaskID: "task"}
+			require.NoError(t, mgr.executionStore.Add(execution))
+			entered, release := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			releaseCleanup := func() { once.Do(func() { close(release) }) }
+			defer releaseCleanup()
+			done := make(chan error, 1)
+			go func() {
+				_, err := mgr.doSerializedExecution(t.Context(), execution.SessionID, func(context.Context) (interface{}, error) {
+					close(entered)
+					<-release
+					mgr.executionStore.Remove(execution.ID)
+					return nil, nil
+				})
+				done <- err
+			}()
+			<-entered
+			ctx := &coalescedRecoveryWaitContext{Context: t.Context(), onWait: releaseCleanup}
+			var got *AgentExecution
+			var err error
+			if lookup == "session" {
+				got, err = mgr.GetOrEnsureExecution(ctx, execution.SessionID)
+			} else {
+				got, err = mgr.EnsureWorkspaceExecutionForSession(ctx, execution.TaskID, execution.SessionID)
+			}
+			require.True(t, got == nil, "workspace access must wait for the current cleanup owner")
+			require.ErrorContains(t, err, "workspace info provider not configured")
+			require.NoError(t, <-done)
+		})
+	}
+}
+
+func TestWorkspaceLookupWaitsForRuntimeRetirement(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := &AgentExecution{ID: "retiring", SessionID: "session", TaskID: "task"}
+	require.NoError(t, mgr.executionStore.Add(execution))
+	execution.remoteInstanceLifecycleMu.Lock()
+	var once sync.Once
+	retire := func() {
+		once.Do(func() {
+			mgr.executionStore.Remove(execution.ID)
+			execution.remoteInstanceLifecycleMu.Unlock()
+		})
+	}
+	defer retire()
+	type result struct {
+		execution *AgentExecution
+		err       error
+	}
+	finished := make(chan result, 1)
+	go func() {
+		got, err := mgr.EnsureWorkspaceExecutionForSession(t.Context(), execution.TaskID, execution.SessionID)
+		finished <- result{execution: got, err: err}
+	}()
+	select {
+	case <-finished:
+		t.Fatal("workspace lookup returned while runtime retirement still owns the execution")
+	case <-time.After(100 * time.Millisecond):
+	}
+	retire()
+	got := <-finished
+	require.Nil(t, got.execution)
+	require.ErrorContains(t, got.err, "workspace info provider not configured")
 }
