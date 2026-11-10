@@ -3,19 +3,20 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
-	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // terminalizeAfterPromotionRepo pauses the prompt claim after the session has
@@ -390,15 +391,15 @@ func TestWorkflowAutoStartRollsBackPromptClaimWhenTerminalizedAfterClaim(t *test
 	}
 }
 
-func TestProcessOnEnterReplacesReusedSessionTerminalizedAfterPromptClaim(t *testing.T) {
-	testProcessOnEnterTerminalizedAfterPromptClaim(t, models.TaskSessionStateCompleted, true)
+func TestProcessOnEnterDoesNotReplaceCompletedSessionAfterPromptClaim(t *testing.T) {
+	testProcessOnEnterTerminalizedAfterPromptClaim(t, models.TaskSessionStateCompleted)
 }
 
 func TestProcessOnEnterPreservesCancelledReusedSessionTerminalizedAfterPromptClaim(t *testing.T) {
-	testProcessOnEnterTerminalizedAfterPromptClaim(t, models.TaskSessionStateCancelled, false)
+	testProcessOnEnterTerminalizedAfterPromptClaim(t, models.TaskSessionStateCancelled)
 }
 
-func testProcessOnEnterTerminalizedAfterPromptClaim(t *testing.T, terminalState models.TaskSessionState, wantReplacement bool) {
+func testProcessOnEnterTerminalizedAfterPromptClaim(t *testing.T, terminalState models.TaskSessionState) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-terminalized-replacement", "session-source", "step-source")
@@ -493,39 +494,11 @@ func testProcessOnEnterTerminalizedAfterPromptClaim(t *testing.T, terminalState 
 
 	sessions, err := repo.ListTaskSessions(ctx, source.TaskID)
 	requireNoError(t, err)
-	if !wantReplacement {
-		if len(sessions) != 2 {
-			t.Fatalf("session count = %d, want no replacement after cancellation", len(sessions))
-		}
-		stored, err := repo.GetTaskSession(ctx, target.ID)
-		requireNoError(t, err)
-		if stored.State != models.TaskSessionStateCancelled {
-			t.Fatalf("cancelled target state = %s, want CANCELLED", stored.State)
-		}
-		if len(launchPrompts) != 0 {
-			t.Fatalf("launch prompts = %#v, want no replacement launch after cancellation", launchPrompts)
-		}
-		return
-	}
-	if len(sessions) != 3 {
-		t.Fatalf("session count = %d, want replacement after terminalized reuse", len(sessions))
-	}
-	var replacement *models.TaskSession
-	for _, session := range sessions {
-		if session.ID != source.ID && session.ID != target.ID {
-			replacement = session
-			break
-		}
-	}
-	if replacement == nil || replacement.AgentProfileID != target.AgentProfileID || !replacement.IsPrimary {
-		t.Fatalf("replacement = %#v, want primary fresh target-profile session", replacement)
-	}
-	if isTerminalSessionState(replacement.State) {
-		t.Fatalf("replacement state = %s, want a nonterminal launched session", replacement.State)
-	}
-	if len(launchPrompts) == 0 || !strings.Contains(launchPrompts[len(launchPrompts)-1], "handoff") {
-		t.Fatalf("replacement launch prompts = %#v, want handoff delivery", launchPrompts)
-	}
+	require.Len(t, sessions, 2, "one accepted entry cannot allocate after terminalization")
+	stored, err := repo.GetTaskSession(ctx, target.ID)
+	requireNoError(t, err)
+	require.Equal(t, terminalState, stored.State)
+	require.Empty(t, launchPrompts, "terminalized route must not launch a replacement")
 }
 
 func TestWorkflowAutoStartReleasesTerminalGuardAfterPromptAdmission(t *testing.T) {
@@ -660,7 +633,7 @@ func TestWorkflowAutoStartCreatedTerminalizedGuard(t *testing.T) {
 
 // terminalizeImplicitSwitchRepo pauses the implicit profile-switch goroutine
 // just before autoStartStepPrompt, so the test can terminalize the session
-// and assert the goroutine detects it and creates a replacement.
+// and assert the goroutine does not allocate again for the same entry.
 type terminalizeImplicitSwitchRepo struct {
 	sessionExecutorStore
 	taskMetadataCarryTaker
@@ -687,25 +660,23 @@ func (r *terminalizeImplicitSwitchRepo) GetTask(ctx context.Context, taskID stri
 }
 
 // TestProcessOnEnterImplicitProfileSwitchTerminalizedGuard verifies that the
-// implicit profile-switch goroutine in processOnEnter's default branch detects
-// that a reused session has terminalized before dispatch and creates a
-// replacement session via createNewSessionForStep.
+// implicit profile-switch goroutine does not allocate another destination
+// when its recorded session terminalizes before dispatch.
 func TestProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t *testing.T) {
-	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCompleted, true, false)
+	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCompleted, false)
 }
 
 func TestProcessOnEnterImplicitProfileSwitchPreservesCancellation(t *testing.T) {
-	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCancelled, false, false)
+	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCancelled, false)
 }
 
 func TestProcessOnEnterImplicitProfileSwitchSurvivesCallerCancellation(t *testing.T) {
-	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCompleted, true, true)
+	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCompleted, true)
 }
 
 func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 	t *testing.T,
 	terminalState models.TaskSessionState,
-	wantReplacement bool,
 	cancelCaller bool,
 ) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -792,6 +763,10 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
 	svc.repo = barrierRepo
 	svc.promptExpander = promptService
+	core, logs := observer.New(zapcore.InfoLevel)
+	observed, err := logger.NewFromZap(zap.New(core))
+	requireNoError(t, err)
+	svc.logger = observed
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 	type launchedPrompt struct {
@@ -823,123 +798,22 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 	close(barrierRepo.allowPrompt)
 
 	<-done
-
-	if !wantReplacement {
-		require.Eventually(t, func() bool {
-			sessions, err := repo.ListTaskSessions(assertCtx, source.TaskID)
-			if err != nil || len(sessions) != 2 {
-				return false
-			}
-			stored, err := repo.GetTaskSession(assertCtx, target.ID)
-			return err == nil && stored.State == models.TaskSessionStateCancelled
-		}, 5*time.Second, 50*time.Millisecond, "expected cancellation to prevent a replacement session")
-		return
+	completionMessage := "failed to create replacement after terminalized profile switch"
+	if terminalState == models.TaskSessionStateCancelled {
+		completionMessage = "implicit profile switch cancelled before dispatch; not creating replacement"
 	}
-
-	// The inner goroutine (implicit profile switch) must finish before we can
-	// assert on its results. Wait on a progress observation: the replacement
-	// session appearing as primary in the database.
-	var replacement *models.TaskSession
 	require.Eventually(t, func() bool {
-		sessions, err := repo.ListTaskSessions(assertCtx, source.TaskID)
-		if err != nil || len(sessions) != 3 {
-			return false
-		}
-		for _, s := range sessions {
-			if s.ID != source.ID && s.ID != target.ID && s.IsPrimary {
-				replacement = s
-				return true
-			}
-		}
-		return false
-	}, 5*time.Second, 50*time.Millisecond, "expected a primary replacement session to appear")
-
-	if isTerminalSessionState(replacement.State) {
-		t.Fatalf("replacement state = %s, want nonterminal", replacement.State)
-	}
-	// The terminalized target must remain in its COMPLETED state.
+		return logs.FilterMessage(completionMessage).Len() == 1
+	}, 10*time.Second, 10*time.Millisecond, "implicit replacement attempt did not finish")
+	sessions, err := repo.ListTaskSessions(assertCtx, source.TaskID)
+	require.NoError(t, err)
+	require.Len(t, sessions, 2)
 	finalTarget, err := repo.GetTaskSession(assertCtx, target.ID)
-	requireNoError(t, err)
-	if finalTarget.State != models.TaskSessionStateCompleted {
-		t.Errorf("terminalized target state = %s, must remain COMPLETED", finalTarget.State)
-	}
-	// The source session (the previous current session) must not be primary.
+	require.NoError(t, err)
+	require.Equal(t, terminalState, finalTarget.State)
 	finalSource, err := repo.GetTaskSession(assertCtx, source.ID)
-	requireNoError(t, err)
-	if finalSource.IsPrimary {
-		t.Error("source session must not be primary after the implicit switch")
-	}
-	containsSavedPrompt := func(content string) bool {
-		return strings.Contains(content, visiblePrompt) &&
-			strings.Contains(content, "Apply the repository principles.") &&
-			strings.Contains(content, handoff) &&
-			strings.Count(content, sysprompt.Wrap(promptReferenceContext)) == 1
-	}
-	var seenLaunches []launchedPrompt
-	var dispatchedContent, dispatchedLaunchSessionID string
-	ok := assert.Eventually(t, func() bool {
-		for {
-			select {
-			case launched := <-launches:
-				seenLaunches = append(seenLaunches, launched)
-			default:
-				goto launchesDrained
-			}
-		}
-	launchesDrained:
-		for _, launched := range seenLaunches {
-			if launched.sessionID == replacement.ID && launched.startAgent && containsSavedPrompt(launched.content) {
-				dispatchedContent = launched.content
-				dispatchedLaunchSessionID = launched.sessionID
-				return true
-			}
-		}
-		agentMgr.mu.Lock()
-		calls := append([]promptCall(nil), agentMgr.capturedPromptCalls...)
-		agentMgr.mu.Unlock()
-		for _, call := range calls {
-			if containsSavedPrompt(call.Prompt) {
-				dispatchedContent = call.Prompt
-				return true
-			}
-		}
-		return false
-	}, 5*time.Second, 10*time.Millisecond)
-	if !ok {
-		agentMgr.mu.Lock()
-		calls := append([]promptCall(nil), agentMgr.capturedPromptCalls...)
-		agentMgr.mu.Unlock()
-		for _, launched := range seenLaunches {
-			t.Logf("launch start=%t session=%s visible=%t expansion_count=%d handoff=%t length=%d",
-				launched.startAgent, launched.sessionID, strings.Contains(launched.content, visiblePrompt),
-				strings.Count(launched.content, sysprompt.Wrap(promptReferenceContext)),
-				strings.Contains(launched.content, handoff), len(launched.content))
-		}
-		for _, call := range calls {
-			t.Logf("prompt execution=%s visible=%t expansion_count=%d handoff=%t length=%d",
-				call.ExecutionID, strings.Contains(call.Prompt, visiblePrompt),
-				strings.Count(call.Prompt, sysprompt.Wrap(promptReferenceContext)),
-				strings.Contains(call.Prompt, handoff), len(call.Prompt))
-		}
-		t.Fatalf("replacement workflow prompt did not dispatch: replacement_id=%s launch_count=%d prompt_calls=%d", replacement.ID, len(seenLaunches), len(calls))
-	}
-	finalReplacement, err := repo.GetTaskSession(assertCtx, replacement.ID)
-	requireNoError(t, err)
-	require.Equal(t, replacement.ID, finalReplacement.ID)
-	require.False(t, isTerminalSessionState(finalReplacement.State))
-	if dispatchedLaunchSessionID != "" {
-		require.Equal(t, replacement.ID, dispatchedLaunchSessionID)
-	}
-	require.Equal(t, 1, strings.Count(dispatchedContent, sysprompt.Wrap(promptReferenceContext)))
-	require.Len(t, messages.userMessages, 1)
-	require.Equal(t, replacement.ID, messages.userMessages[0].sessionID)
-	require.Contains(t, messages.userMessages[0].content, "Apply the repository principles.")
-	require.Contains(t, messages.userMessages[0].content, handoff)
-	require.Equal(t, 1, strings.Count(messages.userMessages[0].content, handoff))
-	require.Equal(t, 1, strings.Count(messages.userMessages[0].content, sysprompt.Wrap(promptReferenceContext)))
-	require.Contains(t, messages.userMessages[0].content, sysprompt.Wrap(promptReferenceContext))
-	require.Contains(t, dispatchedContent, sysprompt.Wrap(promptReferenceContext))
-	// The launch request may add a session-history preamble, so compare the
-	// saved-definition block and handoff contract in both prompt boundaries.
-	require.Equal(t, 1, strings.Count(dispatchedContent, handoff))
+	require.NoError(t, err)
+	require.False(t, finalSource.IsPrimary)
+	require.Empty(t, launches)
+	require.Empty(t, messages.userMessages)
 }
