@@ -71,6 +71,14 @@ type failProfileSwitchPromotionRepo struct {
 	err error
 }
 
+func (r failProfileSwitchPromotionRepo) GetLatestTaskStepTransitionID(ctx context.Context, taskID string) (int64, error) {
+	reader, ok := r.repoStore.(workflowStepTransitionReader)
+	if !ok {
+		return 0, errors.New("wrapped repository does not read workflow transitions")
+	}
+	return reader.GetLatestTaskStepTransitionID(ctx, taskID)
+}
+
 func (r failProfileSwitchPromotionRepo) SetSessionPrimary(context.Context, string) error {
 	return r.err
 }
