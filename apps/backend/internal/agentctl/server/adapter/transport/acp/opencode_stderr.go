@@ -128,6 +128,9 @@ func mergeAllowlistedProviderErrorMetadata(projection *streams.ProviderError, er
 		projection.ErrorKind = acpErrorKindFromData(reqErr.Data)
 	}
 	mergeProviderFailureFields(projection, reqErr.Data)
+	if projection.HTTPStatus == 0 {
+		projection.HTTPStatus = providerHTTPStatusFromData(reqErr.Data)
+	}
 }
 
 // providerErrorFromACPPrompt projects the safe message from a terminal ACP

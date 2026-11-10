@@ -489,6 +489,7 @@ func buildLifecycleLaunchRequest(
 		ApprovedSecretEnvKeys:         append([]string(nil), req.ApprovedSecretEnvKeys...),
 		EnvironmentDefinitions:        append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...),
 		EnvironmentResolutionRequired: req.EnvironmentResolutionRequired,
+		ManagedRuntimeOwnerUserID:     req.OwnerUserID,
 		ACPSessionID:                  req.ACPSessionID,
 		DeliveryStreamID:              req.DeliveryStreamID,
 		DeliveryIncarnationID:         req.DeliveryIncarnationID,

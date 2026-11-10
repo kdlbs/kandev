@@ -2840,7 +2840,8 @@ func (e *Executor) preparedWorkspaceInventoryRequest(
 	reuseRequired := env != nil
 	reuseRequired = workspaceReuseAllowed(env, execConfig.ExecutorType, reuseRequired, e.taskIsRepoBacked(ctx, task.ID))
 	return &LaunchAgentRequest{
-		TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
+		TaskID: task.ID, OwnerUserID: e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID),
+		WorkspaceID: task.WorkspaceID, SessionID: session.ID,
 		TaskEnvironmentID: session.TaskEnvironmentID, ExecutorType: execConfig.ExecutorType,
 		UseWorktree: shouldUseWorktree(execConfig.ExecutorType), WorkspaceReuseRequired: reuseRequired,
 		Repositories: buildRepoSpecs(repositories),
@@ -2897,6 +2898,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	sessionID := session.ID
 	req := &LaunchAgentRequest{
 		TaskID:                 task.ID,
+		OwnerUserID:            e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID),
 		WorkspaceID:            task.WorkspaceID,
 		TaskTitle:              task.Title,
 		AgentProfileID:         agentProfileID,
@@ -3256,6 +3258,7 @@ func dockerLocalCloneSource(repositoryPath string) string {
 func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string, env map[string]string, turnIDs ...string) (*TaskExecution, error) {
 	request := &LaunchAgentRequest{
 		TaskID:      task.ID,
+		OwnerUserID: e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID),
 		WorkspaceID: task.WorkspaceID,
 		SessionID:   session.ID,
 		Env:         cloneStringMap(env),

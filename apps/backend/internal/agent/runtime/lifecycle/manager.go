@@ -116,6 +116,10 @@ type Manager struct {
 	// startupRecoveryDelay overrides the managed-runtime retry delay in tests.
 	startupRecoveryDelay func() time.Duration
 
+	// managedRuntimeSingleUserOwner supplies the disabled-authentication
+	// single-user repair owner. Backend composition owns the live auth mode.
+	managedRuntimeSingleUserOwner func() (string, bool)
+
 	// preparerRegistry maps executor types to environment preparers.
 	preparerRegistry *PreparerRegistry
 
@@ -389,6 +393,13 @@ type ManagedGoCacheEnvironmentProvider interface {
 // SetManagedGoCacheEnvironmentProvider wires install-wide managed cache settings.
 func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEnvironmentProvider) {
 	m.managedGoCache = provider
+}
+
+// SetManagedRuntimeSingleUserOwner wires the live authentication mode and the
+// established single-user identity. The callback must return allowed=false for
+// setup, enabled, unknown, or unavailable authentication.
+func (m *Manager) SetManagedRuntimeSingleUserOwner(owner func() (string, bool)) {
+	m.managedRuntimeSingleUserOwner = owner
 }
 
 // SetManagedRuntimeSelectionStore wires the install-wide exact-version

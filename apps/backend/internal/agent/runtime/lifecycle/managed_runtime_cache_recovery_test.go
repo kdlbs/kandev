@@ -64,90 +64,129 @@ func TestManagedRuntimeCacheStartupEvidenceRequiresVerifiedMatch(t *testing.T) {
 }
 
 func TestManagedRuntimeCacheResume(t *testing.T) {
-	for _, test := range []struct {
-		name  string
-		agent agents.Agent
-	}{
-		{name: "managed ACP", agent: agents.NewClaudeACP()},
-		{name: "managed native Codex app-server", agent: agents.NewCodexAppServer(true)},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			manager, execution, mock, _ := newManagedRuntimeRetryFixture(t, false)
-			mock.supportsManagedRuntimePreparation = true
-			mock.supportsSessionLoad = true
-			client, release := execution.AcquireAgentCtlClient()
-			if _, err := client.Start(context.Background()); err != nil {
-				release()
-				t.Fatalf("start failed generation: %v", err)
-			}
-			failedGeneration := client.ProcessGeneration()
-			release()
+	t.Run("managed ACP", func(t *testing.T) {
+		runManagedRuntimeCacheResume(t, agents.NewClaudeACP(), nil, true)
+	})
+	t.Run("managed native Codex app-server", func(t *testing.T) {
+		runManagedRuntimeCacheResume(t, agents.NewCodexAppServer(true), nil, true)
+	})
+}
 
-			runtimeSpec, ok := agents.BuiltinManagedNPMRuntime(test.agent.ID())
-			if !ok {
-				t.Fatalf("%s is not registered as a managed npm runtime", test.agent.ID())
-			}
-			packageSpec := runtimeSpec.PackageSpec("1.2.3")
-			originalArgs := runtimeSpec.RuntimeCommand("1.2.3").Args()
-			execution.AgentID = test.agent.ID()
-			execution.AgentCommand = originalArgs[0]
-			execution.AgentArgs = append([]string(nil), originalArgs...)
-			execution.ACPSessionID = "saved-native-conversation"
-			execution.setRuntimeEnvironment(map[string]string{
-				"NPM_CONFIG_REGISTRY":   "https://registry.example.test/",
-				"RUNTIME_AUTH_SENTINEL": "preserve-this-value",
-			})
-			evidence := &agentctltypes.ManagedStartupEvidence{
-				ProcessGeneration:     failedGeneration,
-				ExitDisposition:       agentctltypes.ManagedStartupExitOrdinary,
-				CollectionComplete:    true,
-				NPMDiagnosticPresent:  true,
-				NPMDiagnosticComplete: true,
-				UnclassifiedNPMCode:   true,
-				CacheEvidence: &agentctltypes.ManagedRuntimeCacheEvidence{
-					Condition:         agentctltypes.ManagedRuntimeCacheRootManifestMissing,
-					PackageSpec:       packageSpec,
-					ProcessGeneration: failedGeneration,
-				},
-			}
+func TestManagedRuntimeCacheResumeWithCLIArgs(t *testing.T) {
+	t.Run("managed ACP", func(t *testing.T) {
+		runManagedRuntimeCacheResume(t, agents.NewClaudeACP(), []string{"--dangerously-skip-permissions"}, true)
+	})
+	t.Run("managed native Codex app-server", func(t *testing.T) {
+		runManagedRuntimeCacheResume(t, agents.NewCodexAppServer(true), []string{"--profile-flag", "ordered-value"}, true)
+	})
+}
 
-			promptDispatched := make(chan struct{})
-			execution.setInitialPromptDispatchCallbacks(nil, func() { close(promptDispatched) }, nil)
-			attempted, err := manager.retryManagedRuntimeStartup(
-				context.Background(), execution, managedACPInitializeEvidenceFailure("npm execution root is incomplete", evidence),
-				test.agent, "resume and continue task", nil, nil,
-			)
-			if err != nil || !attempted {
-				t.Fatalf("cache recovery result = (%v, %v), want one successful replacement", attempted, err)
-			}
-			select {
-			case <-promptDispatched:
-			case <-time.After(time.Second):
-				t.Fatal("task prompt was not dispatched after cache recovery")
-			}
+func TestManagedRuntimeCacheStartWithCLIArgs(t *testing.T) {
+	runManagedRuntimeCacheResume(t, agents.NewClaudeACP(), []string{"--dangerously-skip-permissions"}, false)
+}
 
-			if got := mock.preparationDirectives; len(got) != 1 || got[0] != (agentctltypes.ManagedRuntimePreparationDirective{
-				Condition:               agentctltypes.ManagedRuntimeCacheRootManifestMissing,
-				PackageSpec:             packageSpec,
-				FailedProcessGeneration: failedGeneration,
-			}) {
-				t.Fatalf("private preparation directives = %#v", got)
-			}
-			if got := mock.loadedSessionIDs; !slices.Equal(got, []string{"saved-native-conversation"}) {
-				t.Fatalf("native conversations loaded = %#v, want the saved token once", got)
-			}
-			if mock.getPromptCalls() != 1 {
-				t.Fatalf("accepted prompt calls = %d, want exactly one", mock.getPromptCalls())
-			}
-			if execution.ACPSessionID != "saved-native-conversation" || !reflect.DeepEqual(execution.AgentArgs, originalArgs) {
-				t.Fatalf("recovery changed conversation or command: session=%q args=%#v", execution.ACPSessionID, execution.AgentArgs)
-			}
-			if mock.configuredEnv["NPM_CONFIG_REGISTRY"] != "https://registry.example.test/" || mock.configuredEnv["RUNTIME_AUTH_SENTINEL"] != "preserve-this-value" {
-				t.Fatalf("replacement environment lost authorized values: %#v", mock.configuredEnv)
-			}
-			if got := mock.getHTTPActions(); !slices.Equal(got, []string{"start", "stop", "configure", "start"}) {
-				t.Fatalf("startup actions = %#v", got)
-			}
-		})
+func runManagedRuntimeCacheResume(t *testing.T, agent agents.Agent, cliFlags []string, savedConversation bool) {
+	t.Helper()
+	manager, execution, mock, _ := newManagedRuntimeRetryFixture(t, false)
+	mock.supportsManagedRuntimePreparation = true
+	mock.supportsSessionLoad = true
+	client, release := execution.AcquireAgentCtlClient()
+	if _, err := client.Start(context.Background()); err != nil {
+		release()
+		t.Fatalf("start failed generation: %v", err)
+	}
+	failedGeneration := client.ProcessGeneration()
+	release()
+
+	runtimeSpec, ok := agents.BuiltinManagedNPMRuntime(agent.ID())
+	if !ok {
+		t.Fatalf("%s is not registered as a managed npm runtime", agent.ID())
+	}
+	packageSpec := runtimeSpec.PackageSpec("1.2.3")
+	originalArgs := runtimeSpec.RuntimeCommand("1.2.3").Args()
+	originalArgs = append(originalArgs, cliFlags...)
+	execution.AgentID = agent.ID()
+	execution.AgentCommand = originalArgs[0]
+	execution.AgentArgs = append([]string(nil), originalArgs...)
+	if savedConversation {
+		execution.ACPSessionID = "saved-native-conversation"
+	}
+	execution.setRuntimeEnvironment(map[string]string{
+		"NPM_CONFIG_REGISTRY":   "https://registry.example.test/",
+		"RUNTIME_AUTH_SENTINEL": "preserve-this-value",
+	})
+	evidence := &agentctltypes.ManagedStartupEvidence{
+		ProcessGeneration:     failedGeneration,
+		ExitDisposition:       agentctltypes.ManagedStartupExitOrdinary,
+		CollectionComplete:    true,
+		NPMDiagnosticPresent:  true,
+		NPMDiagnosticComplete: true,
+		UnclassifiedNPMCode:   true,
+		CacheEvidence: &agentctltypes.ManagedRuntimeCacheEvidence{
+			Condition:         agentctltypes.ManagedRuntimeCacheRootManifestMissing,
+			PackageSpec:       packageSpec,
+			ProcessGeneration: failedGeneration,
+		},
+	}
+
+	promptDispatched := make(chan struct{})
+	execution.setInitialPromptDispatchCallbacks(nil, func() { close(promptDispatched) }, nil)
+	attempted, err := manager.retryManagedRuntimeStartup(
+		context.Background(), execution, managedACPInitializeEvidenceFailure("npm execution root is incomplete", evidence),
+		agent, "resume and continue task", nil, nil,
+	)
+	if err != nil || !attempted {
+		t.Fatalf("cache recovery result = (%v, %v), want one successful replacement", attempted, err)
+	}
+	select {
+	case <-promptDispatched:
+	case <-time.After(time.Second):
+		t.Fatal("task prompt was not dispatched after cache recovery")
+	}
+
+	got := mock.preparationDirectives
+	if len(got) != 1 {
+		t.Fatalf("private preparation directives = %#v", got)
+	}
+	directive := got[0]
+	if directive.RemainingBudgetSeconds < 1 || directive.RemainingBudgetSeconds > 90 {
+		t.Fatalf("recovery budget = %d, want a bounded remaining deadline", directive.RemainingBudgetSeconds)
+	}
+	if directive.DeadlineUnixNano <= 0 {
+		t.Fatal("recovery directive omitted the exact deadline")
+	}
+	directive.RemainingBudgetSeconds = 0
+	directive.DeadlineUnixNano = 0
+	if directive != (agentctltypes.ManagedRuntimePreparationDirective{
+		Condition:               agentctltypes.ManagedRuntimeCacheRootManifestMissing,
+		PackageSpec:             packageSpec,
+		FailedProcessGeneration: failedGeneration,
+	}) {
+		t.Fatalf("private preparation directive = %#v", directive)
+	}
+	wantLoaded := []string(nil)
+	if savedConversation {
+		wantLoaded = []string{"saved-native-conversation"}
+	}
+	if got := mock.loadedSessionIDs; !slices.Equal(got, wantLoaded) {
+		t.Fatalf("native conversations loaded = %#v, want %#v", got, wantLoaded)
+	}
+	if mock.getPromptCalls() != 1 {
+		t.Fatalf("accepted prompt calls = %d, want exactly one", mock.getPromptCalls())
+	}
+	if savedConversation && execution.ACPSessionID != "saved-native-conversation" {
+		t.Fatalf("recovery changed the saved conversation: %q", execution.ACPSessionID)
+	}
+	if !savedConversation && execution.ACPSessionID == "" {
+		t.Fatal("fresh recovery did not create a conversation")
+	}
+	if !reflect.DeepEqual(execution.AgentArgs, originalArgs) {
+		t.Fatalf("recovery changed command: args=%#v want %#v", execution.AgentArgs, originalArgs)
+	}
+	if mock.configuredEnv["NPM_CONFIG_REGISTRY"] != "https://registry.example.test/" || mock.configuredEnv["RUNTIME_AUTH_SENTINEL"] != "preserve-this-value" {
+		t.Fatalf("replacement environment lost authorized values: %#v", mock.configuredEnv)
+	}
+	if got := mock.getHTTPActions(); !slices.Equal(got, []string{"start", "stop", "configure", "start"}) {
+		t.Fatalf("startup actions = %#v", got)
 	}
 }
