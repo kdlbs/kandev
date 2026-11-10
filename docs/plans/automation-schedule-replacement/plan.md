@@ -199,6 +199,11 @@ Implementation checkpoint:
   fake clock, and the post-admission publication case advances to a later edit
   instant so an older cursor write cannot satisfy its assertion. The focused
   race run for both regressions passed in 1.146 seconds.
+- PR #5245 fixup added a concurrent admission/edit barrier regression, distinct
+  cursor instants in the stale-snapshot and edit-wins assertions, a public-doc
+  paragraph split, and docstrings for new helpers and tests. Focused automation
+  race tests passed in 2.373 seconds; the whole package passed in 11.869
+  seconds; changed-file lint reported 0 issues.
 - `git diff --check` passed.
 
 ## Risks

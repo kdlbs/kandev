@@ -106,6 +106,7 @@ func (s *Service) loadScheduledObservation(
 	return a, FireResult{}, true, nil
 }
 
+// scheduledTriggerMatchesObservation reports whether the fresh trigger matches the snapshot.
 func scheduledTriggerMatchesObservation(t *AutomationTrigger, obs scheduledObservation) bool {
 	if t == nil {
 		return false

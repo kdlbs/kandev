@@ -204,7 +204,12 @@ A retry keeps one task, session, turn and submission identity through queued sta
 
 The scheduler checks every 30 seconds and computes each expression's next calendar fire time in its configured timezone. A schedule created part-way through the day first fires at its next scheduled occurrence after creation (not immediately). A schedule missed while the backend was stopped fires once on the next check rather than once per missed occurrence.
 
-Editing a saved cron expression or effective timezone starts that definition at its first occurrence after the successful save. Earlier occurrences of the replacement expression do not run, so changing a weekday or time does not replay history. A save that leaves the schedule definition unchanged keeps the pending occurrence; JSON formatting, expression whitespace, an empty timezone versus `UTC`, and a timezone field that an `@every` or `TZ=`/`CRON_TZ=` expression ignores do not count as a replacement. Clearing the expression stops automatic runs. Entering a non-empty expression later starts from that later save.
+Editing a saved schedule starts the new definition at its first occurrence after the successful save. Earlier occurrences of the replacement expression do not run, so changing a weekday or time does not replay history.
+
+- **Replacement:** a changed cron expression or effective timezone starts a new schedule boundary.
+- **Not a replacement:** JSON formatting, expression whitespace, an empty timezone versus `UTC`, or a timezone field that an `@every` or `TZ=`/`CRON_TZ=` expression ignores. These saves keep the pending occurrence.
+
+Clearing the expression stops automatic runs. Entering a non-empty expression later starts from that later save.
 
 <DocsVideo
   webm="./media/feature-guides/scheduled-workflow-automation.webm"

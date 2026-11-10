@@ -14,10 +14,12 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 )
 
+// scheduleReplacementCursor returns a pointer to a fixed evaluation instant.
 func scheduleReplacementCursor(value time.Time) *time.Time {
 	return &value
 }
 
+// requireAutomationRunCount asserts the recorded run count and trigger status.
 func requireAutomationRunCount(
 	t *testing.T, svc *Service, automationID string, wantRuns int,
 ) []*AutomationRun {
@@ -31,6 +33,7 @@ func requireAutomationRunCount(
 	return runs
 }
 
+// subscribeTriggeredEvents records published automation-triggered events.
 func subscribeTriggeredEvents(t *testing.T, svc *Service) *[]*AutomationTriggeredEvent {
 	t.Helper()
 	var observed []*AutomationTriggeredEvent
@@ -45,6 +48,7 @@ func subscribeTriggeredEvents(t *testing.T, svc *Service) *[]*AutomationTriggere
 	return &observed
 }
 
+// advanceFakeClock advances a synctest bubble to the target instant.
 func advanceFakeClock(t *testing.T, target time.Time) {
 	t.Helper()
 	if delta := time.Until(target); delta > 0 {
@@ -64,6 +68,7 @@ type replacementCalendarCase struct {
 	after    time.Time
 }
 
+// replacementCalendarCases returns fixed calendar replacement scenarios.
 func replacementCalendarCases(t *testing.T) []replacementCalendarCase {
 	t.Helper()
 	newYork, err := time.LoadLocation("America/New_York")
@@ -118,6 +123,7 @@ func replacementCalendarCases(t *testing.T) []replacementCalendarCase {
 }
 
 // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-001.18, AC-OFFICE-AUTOMATIONS-SETTINGS-001.20, AC-OFFICE-AUTOMATIONS-SETTINGS-001.26
+// TestCronScheduler_ReplacementWaitsForNextOccurrence verifies a replacement waits for its first occurrence.
 func TestCronScheduler_ReplacementWaitsForNextOccurrence(t *testing.T) {
 	for _, tc := range replacementCalendarCases(t) {
 		t.Run(tc.name, func(t *testing.T) {
@@ -160,6 +166,7 @@ func TestCronScheduler_ReplacementWaitsForNextOccurrence(t *testing.T) {
 	}
 }
 
+// scheduleReplacementConfig marshals a scheduled config string.
 func scheduleReplacementConfig(t *testing.T, expression, timezone string) string {
 	t.Helper()
 	raw, err := json.Marshal(ScheduledTriggerConfig{CronExpression: expression, Timezone: timezone})
@@ -168,6 +175,7 @@ func scheduleReplacementConfig(t *testing.T, expression, timezone string) string
 }
 
 // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-001.21, AC-OFFICE-AUTOMATIONS-SETTINGS-001.26
+// TestCronScheduler_UnchangedScheduleCatchUp verifies an unchanged save keeps single catch-up behavior.
 func TestCronScheduler_UnchangedScheduleCatchUp(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		now := time.Date(2026, time.November, 7, 10, 0, 0, 0, time.UTC)
@@ -205,6 +213,7 @@ func TestCronScheduler_UnchangedScheduleCatchUp(t *testing.T) {
 }
 
 // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-001.25
+// TestCronScheduler_StaleSnapshotAfterEdit verifies an edited schedule rejects its old snapshot.
 func TestCronScheduler_StaleSnapshotAfterEdit(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		now := time.Date(2026, time.November, 9, 9, 19, 3, 0, time.UTC)
@@ -223,6 +232,8 @@ func TestCronScheduler_StaleSnapshotAfterEdit(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, cs.shouldFire(snapshot, now), "the old snapshot is due")
 
+		editAt := now.Add(time.Second)
+		advanceFakeClock(t, editAt)
 		replacement := json.RawMessage(scheduleReplacementConfig(t, "9 9 * * 6", ""))
 		require.NoError(t, svc.UpdateTrigger(ctx, trig.ID, &UpdateTriggerRequest{Config: &replacement}))
 
@@ -233,7 +244,7 @@ func TestCronScheduler_StaleSnapshotAfterEdit(t *testing.T) {
 		edited, err := svc.store.GetTrigger(ctx, trig.ID)
 		require.NoError(t, err)
 		require.NotNil(t, edited.LastEvaluatedAt)
-		require.True(t, edited.LastEvaluatedAt.Equal(now),
+		require.True(t, edited.LastEvaluatedAt.Equal(editAt),
 			"a rejected observation must not advance the replacement boundary")
 
 		first := time.Date(2026, time.November, 14, 9, 9, 0, 0, time.UTC)
@@ -248,6 +259,7 @@ func TestCronScheduler_StaleSnapshotAfterEdit(t *testing.T) {
 }
 
 // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-001.25
+// TestCronScheduler_DisabledOrDeletedSnapshot verifies disabled and deleted snapshots have no side effects.
 func TestCronScheduler_DisabledOrDeletedSnapshot(t *testing.T) {
 	due := time.Date(2026, time.November, 9, 9, 19, 3, 0, time.UTC)
 	cases := []struct {
@@ -315,6 +327,7 @@ func TestCronScheduler_DisabledOrDeletedSnapshot(t *testing.T) {
 }
 
 // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-001.25
+// TestCronScheduler_StaleCursorSnapshot verifies a stale cursor cannot admit a second run.
 func TestCronScheduler_StaleCursorSnapshot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		firstAdmission := time.Date(2026, time.November, 9, 9, 0, 5, 0, time.UTC)
@@ -356,6 +369,7 @@ func TestCronScheduler_StaleCursorSnapshot(t *testing.T) {
 }
 
 // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-001.27
+// TestCronScheduler_EditAdmissionOrdering verifies edit and admission lock ordering.
 func TestCronScheduler_EditAdmissionOrdering(t *testing.T) {
 	due := time.Date(2026, time.November, 9, 9, 19, 3, 0, time.UTC)
 
@@ -407,6 +421,8 @@ func TestCronScheduler_EditAdmissionOrdering(t *testing.T) {
 			snapshot, err := svc.store.GetTrigger(ctx, trig.ID)
 			require.NoError(t, err)
 
+			editAt := due.Add(time.Second)
+			advanceFakeClock(t, editAt)
 			replacement := json.RawMessage(scheduleReplacementConfig(t, "9 9 * * 6", ""))
 			require.NoError(t, svc.UpdateTrigger(ctx, trig.ID, &UpdateTriggerRequest{Config: &replacement}))
 			cs.fire(ctx, snapshot, due)
@@ -416,8 +432,73 @@ func TestCronScheduler_EditAdmissionOrdering(t *testing.T) {
 			stored, err := svc.store.GetTrigger(ctx, trig.ID)
 			require.NoError(t, err)
 			require.NotNil(t, stored.LastEvaluatedAt)
-			require.True(t, stored.LastEvaluatedAt.Equal(due))
+			require.True(t, stored.LastEvaluatedAt.Equal(editAt),
+				"a discarded observation must not move the edit boundary")
 		})
+	})
+
+	t.Run("an edit waits for admission to finish", func(t *testing.T) {
+		now := time.Now().UTC()
+		svc := newTestService(t)
+		svc.store.db.SetMaxOpenConns(1)
+		svc.store.ro.SetMaxOpenConns(1)
+		ctx := context.Background()
+		eventsObserved := subscribeTriggeredEvents(t, svc)
+		cs := NewCronScheduler(svc, svc.logger)
+		a := seedScheduleReplacementAutomation(t, svc)
+		trig := seedScheduleReplacementTrigger(
+			t, svc, a.ID, scheduleReplacementConfig(t, "@every 1m", ""),
+			scheduleReplacementCursor(now.Add(-5*time.Minute)),
+		)
+		snapshot, err := svc.store.GetTrigger(ctx, trig.ID)
+		require.NoError(t, err)
+		require.True(t, cs.shouldFire(snapshot, now))
+
+		// Pause admission after its fresh read but before it writes the run and
+		// cursor. The actor-context seam runs while the admission lock is held.
+		entered := make(chan struct{})
+		release := make(chan struct{})
+		svc.SetExecutorContext(func(ctx context.Context, _, _ string) (context.Context, error) {
+			close(entered)
+			<-release
+			return ctx, nil
+		})
+
+		fireDone := make(chan struct{})
+		go func() {
+			cs.fire(ctx, snapshot, now)
+			close(fireDone)
+		}()
+		<-entered
+
+		editStarted := time.Now().UTC()
+		editDone := make(chan error, 1)
+		go func() {
+			replacement := json.RawMessage(scheduleReplacementConfig(t, "@every 2m", ""))
+			editDone <- svc.UpdateTrigger(ctx, trig.ID, &UpdateTriggerRequest{Config: &replacement})
+		}()
+
+		select {
+		case editErr := <-editDone:
+			close(release)
+			<-fireDone
+			t.Fatalf("edit completed while admission held the lock: %v", editErr)
+		case <-time.After(500 * time.Millisecond):
+		}
+		close(release)
+		<-fireDone
+		require.NoError(t, <-editDone)
+		editFinished := time.Now().UTC()
+
+		requireAutomationRunCount(t, svc, a.ID, 1)
+		require.Len(t, *eventsObserved, 1)
+		stored, err := svc.store.GetTrigger(ctx, trig.ID)
+		require.NoError(t, err)
+		require.NotNil(t, stored.LastEvaluatedAt)
+		require.False(t, stored.LastEvaluatedAt.Before(editStarted),
+			"a discarded admission cursor must not precede the waiting edit")
+		require.False(t, stored.LastEvaluatedAt.After(editFinished))
+		require.Equal(t, scheduleReplacementConfig(t, "@every 2m", ""), string(stored.Config))
 	})
 
 	t.Run("edit during post-admission publication does not deadlock", func(t *testing.T) {

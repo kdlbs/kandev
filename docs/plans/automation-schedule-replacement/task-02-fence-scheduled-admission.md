@@ -186,5 +186,12 @@ Completed 2026-11-10 after Task 01.
   timestamp, so a delayed cursor rollback would fail. The focused ordering and
   disabled-schedule race run passed in 1.146 seconds; changed-file lint reported
   0 issues.
+- PR #5245 fixup: added a two-goroutine admission/edit barrier regression that
+  pauses admission after its fresh read and proves the edit waits for the
+  admission lock. Separated edit and observation instants in the stale-snapshot
+  and edit-wins cursor assertions, split the public schedule paragraph into a
+  lead, bullets, and the clearing rule, and added docstrings to the new helpers
+  and tests. The focused race suite passed in 2.373 seconds and the whole
+  package passed in 11.869 seconds.
 - No acceptance condition remains pending. PostgreSQL evidence remains the
   Task 01 environment limitation recorded there.

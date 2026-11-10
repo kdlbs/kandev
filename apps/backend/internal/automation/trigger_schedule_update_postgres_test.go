@@ -12,6 +12,7 @@ import (
 )
 
 // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-001.18, AC-OFFICE-AUTOMATIONS-SETTINGS-001.20, AC-OFFICE-AUTOMATIONS-SETTINGS-001.21
+// TestScheduledTriggerUpdate_PostgresParity verifies PostgreSQL matches the SQLite update boundary.
 func TestScheduledTriggerUpdate_PostgresParity(t *testing.T) {
 	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	store, err := NewStore(database, database)

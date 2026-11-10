@@ -13,6 +13,7 @@ import (
 )
 
 // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-001.20, AC-OFFICE-AUTOMATIONS-SETTINGS-001.21, AC-OFFICE-AUTOMATIONS-SETTINGS-001.25
+// TestAutomationTriggerUpdate_ScheduleReplacement verifies the public update action through the scheduler.
 func TestAutomationTriggerUpdate_ScheduleReplacement(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		edit := time.Date(2026, time.November, 9, 9, 19, 3, 0, time.UTC)

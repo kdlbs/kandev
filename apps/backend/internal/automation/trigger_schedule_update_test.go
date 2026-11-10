@@ -12,6 +12,7 @@ import (
 
 const scheduleReplacementHistoricalCursor = "2026-11-07T09:00:00Z"
 
+// scheduleReplacementTime parses a fixed RFC3339 instant used by schedule tests.
 func scheduleReplacementTime(t *testing.T, value string) time.Time {
 	t.Helper()
 	parsed, err := time.Parse(time.RFC3339, value)
@@ -19,6 +20,7 @@ func scheduleReplacementTime(t *testing.T, value string) time.Time {
 	return parsed.UTC()
 }
 
+// seedScheduleReplacementAutomation creates an enabled automation for schedule tests.
 func seedScheduleReplacementAutomation(t *testing.T, svc *Service) *Automation {
 	t.Helper()
 	a := &Automation{
@@ -35,6 +37,7 @@ func seedScheduleReplacementAutomation(t *testing.T, svc *Service) *Automation {
 	return a
 }
 
+// seedScheduleReplacementTrigger persists a scheduled trigger with the supplied config and cursor.
 func seedScheduleReplacementTrigger(
 	t *testing.T, svc *Service, automationID, raw string, cursor *time.Time,
 ) *AutomationTrigger {
@@ -50,6 +53,7 @@ func seedScheduleReplacementTrigger(
 	return trig
 }
 
+// rawScheduleConfig marshals a scheduled config for an update request.
 func rawScheduleConfig(t *testing.T, cfg ScheduledTriggerConfig) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(cfg)
@@ -57,6 +61,7 @@ func rawScheduleConfig(t *testing.T, cfg ScheduledTriggerConfig) json.RawMessage
 	return raw
 }
 
+// requireReplacementBoundary asserts the stored boundary matches one edit instant.
 func requireReplacementBoundary(
 	t *testing.T, stored *AutomationTrigger, before, after time.Time, wantRevision int64,
 ) {
@@ -70,6 +75,7 @@ func requireReplacementBoundary(
 }
 
 // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-001.18, AC-OFFICE-AUTOMATIONS-SETTINGS-001.20
+// TestScheduledTriggerUpdate_ReplacementBoundary verifies changed definitions start after the edit.
 func TestScheduledTriggerUpdate_ReplacementBoundary(t *testing.T) {
 	historical := scheduleReplacementTime(t, scheduleReplacementHistoricalCursor)
 	weekly := `{"cron_expression":"0 9 * * 6"}`
@@ -121,6 +127,7 @@ func TestScheduledTriggerUpdate_ReplacementBoundary(t *testing.T) {
 }
 
 // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-001.21, AC-OFFICE-AUTOMATIONS-SETTINGS-001.26
+// TestScheduledTriggerUpdate_UnchangedDefinition verifies equivalent saves keep the pending occurrence.
 func TestScheduledTriggerUpdate_UnchangedDefinition(t *testing.T) {
 	historical := scheduleReplacementTime(t, scheduleReplacementHistoricalCursor)
 	disabled := false
@@ -196,6 +203,7 @@ func TestScheduledTriggerUpdate_UnchangedDefinition(t *testing.T) {
 }
 
 // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-001.22, AC-OFFICE-AUTOMATIONS-SETTINGS-001.23
+// TestScheduledTriggerUpdate_DisabledAndEmpty verifies disabled and empty schedule transitions.
 func TestScheduledTriggerUpdate_DisabledAndEmpty(t *testing.T) {
 	t.Run("disabled replacement keeps the boundary until re-enabled", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
@@ -275,6 +283,7 @@ func TestScheduledTriggerUpdate_DisabledAndEmpty(t *testing.T) {
 	})
 }
 
+// requireScheduleRowUnchanged asserts a rejected edit left the stored trigger intact.
 func requireScheduleRowUnchanged(t *testing.T, svc *Service, want *AutomationTrigger) {
 	t.Helper()
 	stored, err := svc.store.GetTrigger(context.Background(), want.ID)
@@ -293,6 +302,7 @@ func requireScheduleRowUnchanged(t *testing.T, svc *Service, want *AutomationTri
 }
 
 // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-001.24
+// TestScheduledTriggerUpdate_RejectedEditPreservesState verifies validation and persistence failures.
 func TestScheduledTriggerUpdate_RejectedEditPreservesState(t *testing.T) {
 	invalidEdits := []struct {
 		name string
@@ -342,6 +352,7 @@ func TestScheduledTriggerUpdate_RejectedEditPreservesState(t *testing.T) {
 }
 
 // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-001.21
+// TestScheduledTriggerUpdate_NonScheduledCursor verifies non-scheduled updates keep the cursor.
 func TestScheduledTriggerUpdate_NonScheduledCursor(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -368,6 +379,7 @@ func TestScheduledTriggerUpdate_NonScheduledCursor(t *testing.T) {
 	require.Equal(t, trig.TriggerRevision+1, stored.TriggerRevision)
 }
 
+// ptrRawMessage returns a pointer to a raw JSON message for update requests.
 func ptrRawMessage(raw json.RawMessage) *json.RawMessage {
 	return &raw
 }
