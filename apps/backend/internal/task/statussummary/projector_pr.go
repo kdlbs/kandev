@@ -53,6 +53,8 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	var representative *pullRequestObservation
 	var approvalRepresentative *pullRequestObservation
 	var conflictRepresentative *pullRequestObservation
+	var ciRepresentative *pullRequestObservation
+	var ciRepresentativeState string
 	keys := make([]string, 0, len(state.prs))
 	for key := range state.prs {
 		keys = append(keys, key)
@@ -73,6 +75,13 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 		}
 		if strings.EqualFold(observation.state, prStateOpen) {
 			summary.OpenCount++
+			if state := pullRequestCIState(observation); state != prCIStateNone {
+				if betterCIRepresentative(observation, state, ciRepresentative, ciRepresentativeState) {
+					copy := observation
+					ciRepresentative = &copy
+					ciRepresentativeState = state
+				}
+			}
 			if workflowApprovalRequired(observation) {
 				if approvalRepresentative == nil ||
 					(approvalRepresentative.workflowAttentionStale && !observation.workflowAttentionStale) ||
@@ -114,6 +123,13 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 		summary.MergeConflictPRNumber = conflictRepresentative.number
 		summary.MergeConflictRepository = pullRequestRepositoryIdentity(*conflictRepresentative)
 	}
+	summary.CIState = prCIStateNone
+	if ciRepresentative != nil {
+		summary.CIState = ciRepresentativeState
+		summary.CIPRNumber = ciRepresentative.number
+		summary.CIRepository = pullRequestRepositoryIdentity(*ciRepresentative)
+		summary.CIStale = ciRepresentative.workflowAttentionStale
+	}
 	return &summary
 }
 
@@ -131,6 +147,73 @@ func workflowApprovalRequired(pr pullRequestObservation) bool {
 		pr.headSHA != "" &&
 		strings.EqualFold(pr.headSHA, pr.workflowAttentionHeadSHA) &&
 		strings.EqualFold(pr.workflowAttentionState, "approval_required")
+}
+
+// pullRequestCIState is the ordered display decision table for one pull
+// request. It is intentionally independent of the aggregate icon state, which
+// mutes draft PRs, and never infers CI from review, queue, or mergeability.
+func pullRequestCIState(pr pullRequestObservation) string {
+	if !strings.EqualFold(strings.TrimSpace(pr.state), prStateOpen) {
+		return prCIStateNone
+	}
+	if strings.EqualFold(strings.TrimSpace(pr.checksState), prStateFailure) {
+		return prCIStateFailed
+	}
+	if workflowApprovalRequired(pr) {
+		return prCIStateApprovalRequired
+	}
+	if workflowActionRequired(pr) || strings.EqualFold(strings.TrimSpace(pr.checksState), prStateUnstable) {
+		return prCIStateAttention
+	}
+	if strings.EqualFold(strings.TrimSpace(pr.checksState), prStatePending) {
+		return prCIStateInProgress
+	}
+	return prCIStateNone
+}
+
+func workflowActionRequired(pr pullRequestObservation) bool {
+	return strings.EqualFold(strings.TrimSpace(pr.state), prStateOpen) &&
+		pr.headSHA != "" &&
+		strings.EqualFold(pr.headSHA, pr.workflowAttentionHeadSHA) &&
+		strings.EqualFold(pr.workflowAttentionState, prStateActionRequired)
+}
+
+func pullRequestCIStateRank(state string) int {
+	switch state {
+	case prCIStateFailed:
+		return 4
+	case prCIStateApprovalRequired:
+		return 3
+	case prCIStateAttention:
+		return 2
+	case prCIStateInProgress:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func betterCIRepresentative(
+	candidate pullRequestObservation,
+	candidateState string,
+	current *pullRequestObservation,
+	currentState string,
+) bool {
+	if current == nil {
+		return true
+	}
+	candidateRank := pullRequestCIStateRank(candidateState)
+	currentRank := pullRequestCIStateRank(currentState)
+	if candidateRank != currentRank {
+		return candidateRank > currentRank
+	}
+	if candidate.workflowAttentionStale != current.workflowAttentionStale {
+		return current.workflowAttentionStale
+	}
+	if candidate.number != current.number {
+		return candidate.number < current.number
+	}
+	return candidate.url < current.url
 }
 
 func boundedWorkflowValue(value string) string {

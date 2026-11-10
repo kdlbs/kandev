@@ -405,7 +405,9 @@ For a task with linked GitHub pull requests, open the PR status control above th
 
 If a current pull-request head has a GitHub Actions workflow that requires maintainer approval, the PR status control shows **Awaiting maintainer approval**, even when GitHub reports no checks. Detailed desktop and mobile views show the workflow name, the reason, and a link to GitHub. Approval-only workflow attention is not a failed check, does not start **Auto-fix CI & address comments**, and does not make the pull request ready for **Auto-merge or requeue when ready**. If GitHub does not provide enough evidence, Kandev keeps the workflow state unavailable or marks the last same-head observation as stale instead of claiming approval.
 
-Task lists, Kanban cards, and the task picker also show an amber lock when the current PR head awaits maintainer approval. Hover the icon on desktop or tap it on a phone to see the PR details. If the PR also has merge conflicts, the icon shows the red conflict warning; the details still show both conditions.
+Task lists, Kanban cards, and the task picker also show an amber lock when the current PR head awaits maintainer approval. Hover the icon on desktop or tap it on a phone to see the PR details.
+
+The pull-request icon also shows CI as a separate upper-right marker. A red cross means a check failed. An amber ring means checks are queued or running. An amber exclamation mark means workflow attention that is not an approval gate. Successful checks add no marker, and an all-skipped result also adds no marker. When every selected check completed as skipped, the details say **All checks skipped** and do not claim that tests passed. A skipped count appears separately from the passed count. Merge conflicts use a red triangle beside the pull-request icon, so a conflict does not replace or imply the CI marker. Automation dots keep their existing corners. A missing marker does not prove that CI passed.
 
 Kandev refreshes GitHub Actions observations for empty, running, changing, or
 attention-required results within 30 seconds. Nonempty completed results with
