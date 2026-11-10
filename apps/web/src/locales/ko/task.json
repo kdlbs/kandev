@@ -3158,5 +3158,6 @@
   "contextCompactionTokenCounts": "{{preTokens}} → {{postTokens}} 토큰",
   "contextCompactionTrigger": "실행 조건: {{trigger}}",
   "contextCompactionDuration": "소요 시간: {{duration}}",
-  "deliveryMessageNotDelivered": "전달되지 않았습니다. 다시 보내세요."
+  "deliveryMessageNotDelivered": "전달되지 않았습니다. 다시 보내세요.",
+  "threadExtractChipLabel": "{{author}}의 “{{quote}}”"
 }

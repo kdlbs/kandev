@@ -141,7 +141,12 @@ export function formatAgentMessageCommentsAsMarkdown(comments: AgentMessageComme
 
   const lines: string[] = ["### Agent Message Comments", ""];
   for (const comment of comments) {
-    lines.push("Selected agent response:");
+    // i18n-exempt: agent-facing prompt text, not UI copy
+    lines.push(
+      comment.authorName
+        ? `Selected comment from ${comment.authorName}:`
+        : "Selected agent response:",
+    );
     lines.push(toBlockquote(comment.selectedText));
     lines.push("");
     lines.push("User feedback:");

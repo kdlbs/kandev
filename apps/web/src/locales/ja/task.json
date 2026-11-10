@@ -3158,5 +3158,6 @@
   "contextCompactionTokenCounts": "{{preTokens}} → {{postTokens}} トークン",
   "contextCompactionTrigger": "実行条件：{{trigger}}",
   "contextCompactionDuration": "所要時間：{{duration}}",
-  "deliveryMessageNotDelivered": "未配信です。もう一度送信してください。"
+  "deliveryMessageNotDelivered": "未配信です。もう一度送信してください。",
+  "threadExtractChipLabel": "{{author}}：「{{quote}}」"
 }

@@ -110,10 +110,18 @@ export type MessageTextAnchor = {
 
 export type AgentMessageComment = CommentBase & {
   source: "agent-message";
+  /** Chat message ID, or the Office thread comment ID when `authorName` is set. */
   messageId: string;
   selectedText: string;
   anchor: MessageTextAnchor;
+  /** Set for extracts taken from an Office thread comment: the comment author's display name. */
+  authorName?: string;
 };
+
+/** Comment-store scope for pending extracts of an Office task thread (no chat session exists). */
+export function officeTaskCommentScope(taskId: string): string {
+  return `office-task:${taskId}`;
+}
 
 export type Comment =
   | DiffComment

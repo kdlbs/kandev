@@ -3160,5 +3160,6 @@
   "contextCompactionTokenCounts": "{{preTokens}} tokens → {{postTokens}} tokens",
   "contextCompactionTrigger": "Trigger: {{trigger}}",
   "contextCompactionDuration": "Duration: {{duration}}",
-  "deliveryMessageNotDelivered": "Not delivered. Send it again."
+  "deliveryMessageNotDelivered": "Not delivered. Send it again.",
+  "threadExtractChipLabel": "{{author}}: “{{quote}}”"
 }

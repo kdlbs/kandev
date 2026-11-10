@@ -21,6 +21,7 @@ export {
   isPRFeedbackComment,
   isWalkthroughComment,
   isAgentMessageComment,
+  officeTaskCommentScope,
 } from "./types";
 export {
   formatReviewCommentsAsMarkdown,

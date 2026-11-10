@@ -3158,5 +3158,6 @@
   "contextCompactionTokenCounts": "{{preTokens}} → {{postTokens}} 個 token",
   "contextCompactionTrigger": "觸發方式：{{trigger}}",
   "contextCompactionDuration": "耗時：{{duration}}",
-  "deliveryMessageNotDelivered": "未送達。請再次傳送。"
+  "deliveryMessageNotDelivered": "未送達。請再次傳送。",
+  "threadExtractChipLabel": "{{author}}：“{{quote}}”"
 }

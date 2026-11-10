@@ -295,6 +295,47 @@ describe("formatAgentMessageCommentsAsMarkdown", () => {
   });
 });
 
+describe("formatAgentMessageCommentsAsMarkdown for Office thread comments", () => {
+  const officeComment = (id: string, authorName: string, quote: string, text: string) =>
+    ({
+      id,
+      sessionId: "office-task:t1",
+      source: "agent-message",
+      messageId: `office-comment-${id}`,
+      authorName,
+      selectedText: quote,
+      anchor: {
+        messageId: `office-comment-${id}`,
+        start: 0,
+        end: quote.length,
+        selectedText: quote,
+        prefix: "",
+        suffix: "",
+      },
+      text,
+      createdAt: "",
+      status: "pending",
+    }) as AgentMessageComment;
+
+  it("names the comment author for each extract and mixes several agents", () => {
+    const result = formatAgentMessageCommentsAsMarkdown([
+      officeComment("a", "CEO", "ship the brief", "Cut this down."),
+      officeComment("b", "Worker", "ten days", "Why ten?"),
+    ]);
+
+    expect(result).toContain("Selected comment from CEO:\n> ship the brief");
+    expect(result).toContain("Selected comment from Worker:\n> ten days");
+    expect(result).toContain("User feedback:\n> Cut this down.");
+    expect(result).not.toContain("Selected agent response:");
+  });
+
+  it("keeps the chat label for extracts without an author", () => {
+    const chat = officeComment("c", "x", "plain", "ok");
+    delete (chat as { authorName?: string }).authorName;
+    expect(formatAgentMessageCommentsAsMarkdown([chat])).toContain("Selected agent response:");
+  });
+});
+
 // @covers AC-UI-REVIEW-FILE-COMMENTS-001.5
 it("formats whole-file feedback without inventing a line anchor", () => {
   const comment = {

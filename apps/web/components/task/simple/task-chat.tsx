@@ -20,6 +20,9 @@ import { selectCommandCount } from "@/lib/state/slices/session/selectors";
 import { createComment } from "@/lib/api/domains/office-api";
 import { formatRelativeTime } from "@/lib/utils";
 import { MarkdownComment } from "./markdown-comment";
+import { CommentExtractSurface } from "./comment-extract-surface";
+import { composeCommentBody, useThreadExtracts } from "./use-thread-extracts";
+import { ContextZone } from "@/components/task/chat/context-items/context-zone";
 import { AgentTurnPanel } from "./components/agent-turn-panel";
 import { RunErrorEntry } from "./components/run-error-entry";
 import { UserCommentRunBadge } from "./components/user-comment-run-badge";
@@ -89,6 +92,31 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${remaining}s`;
 }
 
+function CommentBody({
+  taskId,
+  comment,
+  isAgent,
+  authorName,
+}: {
+  taskId: string;
+  comment: TaskComment;
+  isAgent: boolean;
+  authorName: string;
+}) {
+  const markdown = <MarkdownComment content={comment.content} />;
+  if (!isAgent) return markdown;
+  return (
+    <CommentExtractSurface
+      taskId={taskId}
+      commentId={comment.id}
+      content={comment.content}
+      authorName={authorName}
+    >
+      {markdown}
+    </CommentExtractSurface>
+  );
+}
+
 function CommentEntry({
   comment,
   taskId,
@@ -143,7 +171,12 @@ function CommentEntry({
           </span>
         </div>
         <div className="mt-1">
-          <MarkdownComment content={comment.content} />
+          <CommentBody
+            taskId={taskId}
+            comment={comment}
+            isAgent={isAgent}
+            authorName={displayName}
+          />
         </div>
         {!isAgent &&
           comment.runStatus &&
@@ -261,7 +294,7 @@ type CommentComposerFooterProps = {
   isEnhancingPrompt: boolean;
   isUtilityConfigured: boolean;
   submitting: boolean;
-  input: string;
+  canSend: boolean;
   handleSubmit: () => Promise<void>;
   pendingResult: ReturnType<typeof usePromptResultDelivery>["pendingResult"];
   applyPending: () => void;
@@ -275,14 +308,14 @@ function CommentComposerFooter({
   isEnhancingPrompt,
   isUtilityConfigured,
   submitting,
-  input,
+  canSend,
   handleSubmit,
   pendingResult,
   applyPending,
   copyPending,
 }: CommentComposerFooterProps) {
   const { t } = useTranslation();
-  const isSendDisabled = submitting || !input.trim();
+  const isSendDisabled = submitting || !canSend;
 
   return (
     <>
@@ -342,16 +375,20 @@ function CommentComposerFooter({
   );
 }
 
-function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInputProps) {
+function useCommentPromptEnhance({
+  taskId,
+  taskTitle,
+  taskDescription,
+  inputValueRef,
+  setInputAndSync,
+}: {
+  taskId: string;
+  taskTitle?: string;
+  taskDescription?: string;
+  inputValueRef: React.RefObject<string>;
+  setInputAndSync: (next: React.SetStateAction<string>) => void;
+}) {
   const { t } = useTranslation();
-  const [input, setInput] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const inputValueRef = useRef(input);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const setInputAndSync = useCallback((next: React.SetStateAction<string>) => {
-    synchronizeInputValue(inputValueRef, setInput, next);
-  }, []);
   const isUtilityConfigured = useIsUtilityConfigured();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
     sessionId: null,
@@ -366,23 +403,6 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
       return true;
     },
   });
-  const { handleFileSelect, handlePaste } = useChatInputHandlers(setInputAndSync);
-
-  const handleSubmit = useCallback(async () => {
-    const current = inputValueRef.current;
-    if (!current.trim() || submitting) return;
-    setSubmitting(true);
-    try {
-      await createComment(taskId, { body: current.trim(), author_type: "user" });
-      setInputAndSync((latest) => (latest === current ? "" : latest));
-      onSubmitted?.();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("task:failedToSendComment"));
-    } finally {
-      setSubmitting(false);
-    }
-  }, [submitting, taskId, onSubmitted, setInputAndSync, t]);
-
   const handleEnhance = useCallback(() => {
     const current = inputValueRef.current;
     if (!current.trim()) return;
@@ -395,10 +415,51 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
       return inserted;
     });
   }, [enhancePrompt, promptDelivery, t]);
+  return { promptDelivery, isUtilityConfigured, isEnhancingPrompt, handleEnhance };
+}
+
+function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInputProps) {
+  const { t } = useTranslation();
+  const [input, setInput] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputValueRef = useRef(input);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const setInputAndSync = useCallback((next: React.SetStateAction<string>) => {
+    synchronizeInputValue(inputValueRef, setInput, next);
+  }, []);
+  const { promptDelivery, isUtilityConfigured, isEnhancingPrompt, handleEnhance } =
+    useCommentPromptEnhance({ taskId, taskTitle, taskDescription, inputValueRef, setInputAndSync });
+  const { handleFileSelect, handlePaste } = useChatInputHandlers(setInputAndSync);
+  const threadExtracts = useThreadExtracts(taskId);
+  const extractsRef = useRef(threadExtracts.extracts);
+  extractsRef.current = threadExtracts.extracts;
+  const { markSent } = threadExtracts;
+
+  const handleSubmit = useCallback(async () => {
+    const current = inputValueRef.current;
+    const extracts = extractsRef.current;
+    if ((!current.trim() && extracts.length === 0) || submitting) return;
+    setSubmitting(true);
+    try {
+      await createComment(taskId, {
+        body: composeCommentBody(extracts, current),
+        author_type: "user",
+      });
+      markSent(extracts);
+      setInputAndSync((latest) => (latest === current ? "" : latest));
+      onSubmitted?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("task:failedToSendComment"));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [submitting, taskId, onSubmitted, setInputAndSync, markSent, t]);
 
   return (
     <div className="mt-4 pt-4 border-t border-border">
       <div className="rounded-md border bg-muted/30 focus-within:ring-1 focus-within:ring-ring">
+        <ContextZone items={threadExtracts.items} />
         <textarea
           ref={textareaRef}
           value={input}
@@ -421,7 +482,7 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
           isEnhancingPrompt={isEnhancingPrompt}
           isUtilityConfigured={isUtilityConfigured}
           submitting={submitting}
-          input={input}
+          canSend={Boolean(input.trim()) || threadExtracts.extracts.length > 0}
           handleSubmit={handleSubmit}
           pendingResult={promptDelivery.pendingResult}
           applyPending={promptDelivery.applyPending}

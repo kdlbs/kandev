@@ -57,6 +57,8 @@ type MessageCommentSurfaceProps = {
   message: Message;
   sessionId?: string | null;
   isTurnActive: boolean;
+  /** Office thread comment author; set when the surface wraps a thread comment instead of a chat reply. */
+  authorName?: string;
   children: ReactNode;
 };
 
@@ -99,7 +101,7 @@ function commentFromTarget(
   sessionId: string,
   target: CommentTarget,
   renderedText: string,
-  feedback: string,
+  { feedback, authorName }: { feedback: string; authorName?: string },
 ): AgentMessageComment | null {
   const resolved = resolveMessageTextAnchor(target.anchor, renderedText);
   if (!resolved) return null;
@@ -114,6 +116,7 @@ function commentFromTarget(
     createdAt: new Date().toISOString(),
     status: "pending",
     anchor,
+    ...(authorName ? { authorName } : {}),
   };
 }
 
@@ -241,7 +244,7 @@ function MessageCommentDrawer({
   open: boolean;
   onClose: () => void;
   onAdd: (feedback: string) => boolean | void;
-  onRun: (feedback: string) => boolean | void;
+  onRun: ((feedback: string) => boolean | void) | undefined;
   onDelete: (() => void) | undefined;
   errorMessage?: string | null;
 }) {
@@ -259,7 +262,7 @@ function MessageCommentDrawer({
     if (feedback.trim() && onAdd(feedback.trim()) !== false) onClose();
   };
   const run = () => {
-    if (feedback.trim() && onRun(feedback.trim()) !== false) onClose();
+    if (feedback.trim() && onRun?.(feedback.trim()) !== false) onClose();
   };
 
   return (
@@ -299,7 +302,7 @@ function MessageCommentDrawer({
             isEditing={isEditing}
             disabled={!feedback.trim()}
             onAdd={submit}
-            onRun={isEditing ? undefined : run}
+            onRun={isEditing || !onRun ? undefined : run}
             onDelete={onDelete}
           />
         </div>
@@ -426,7 +429,9 @@ function useMessageCommentActions({
   target,
   rootRef,
   close,
+  authorName,
 }: {
+  authorName?: string;
   message: Message;
   sessionId: string | null | undefined;
   target: CommentTarget | null;
@@ -451,7 +456,10 @@ function useMessageCommentActions({
         return true;
       }
       const renderedText = rootRef.current?.textContent ?? "";
-      const comment = commentFromTarget(message, sessionId, target, renderedText, feedback);
+      const comment = commentFromTarget(message, sessionId, target, renderedText, {
+        feedback,
+        authorName,
+      });
       if (!comment) {
         setSaveError(t("task:agentResponseChangedSelectAgain"));
         return null;
@@ -460,7 +468,7 @@ function useMessageCommentActions({
       addComment(comment);
       return comment;
     },
-    [addComment, message, rootRef, sessionId, target, updateComment],
+    [addComment, authorName, message, rootRef, sessionId, target, updateComment],
   );
 
   const handleAdd = useCallback(
@@ -499,6 +507,7 @@ export function MessageCommentSurface({
   message,
   sessionId,
   isTurnActive,
+  authorName,
   children,
 }: MessageCommentSurfaceProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -514,7 +523,15 @@ export function MessageCommentSurface({
     setTarget,
     setComposerOpen,
   );
-  const actions = useMessageCommentActions({ message, sessionId, target, rootRef, close });
+  const actions = useMessageCommentActions({
+    message,
+    sessionId,
+    target,
+    rootRef,
+    close,
+    authorName,
+  });
+  const handleRun = authorName ? undefined : actions.handleRun;
   const portalContainer = rootRef.current?.closest<HTMLElement>('[role="dialog"]');
   const highlightName = agentMessageCommentHighlightName(`${message.id}-${highlightInstanceId}`);
   const hasCustomHighlightSupport = supportsCustomHighlights();
@@ -561,7 +578,7 @@ export function MessageCommentSurface({
           selectedText={target.selection.selectedText}
           position={target.position}
           onAdd={actions.handleAdd}
-          onAddAndRun={target.editingCommentId ? undefined : actions.handleRun}
+          onAddAndRun={target.editingCommentId ? undefined : handleRun}
           onClose={close}
           editingComment={target.editingText}
           onDelete={actions.handleDelete}
@@ -579,7 +596,7 @@ export function MessageCommentSurface({
           open={Boolean(target && composerOpen)}
           onClose={close}
           onAdd={actions.handleAdd}
-          onRun={actions.handleRun}
+          onRun={handleRun}
           onDelete={actions.handleDelete}
           errorMessage={actions.saveError}
         />
