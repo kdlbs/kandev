@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
 
@@ -57,7 +58,7 @@ func TestLoadContinuationSummary_AgentScope_RoundTripsThroughRealWriterAndReader
 	// ClaimNextRun-returned run: CreateRun computes and persists it once,
 	// at creation time, and the reader now reads that stored value
 	// directly instead of re-deriving it from ContextSnapshot.
-	nextRun := &models.Run{ContextSnapshot: "{}", ContinuationScope: "agent:agent-scope-a"}
+	nextRun := &runsmodels.Run{ContextSnapshot: "{}", ContinuationScope: "agent:agent-scope-a"}
 	si := service.NewSchedulerIntegration(svc, time.Minute)
 	got := si.LoadContinuationSummaryForTest(ctx, nextRun, "agent-scope-a", "")
 	if got == "" {
@@ -111,7 +112,7 @@ func TestLoadContinuationSummary_RoutineScope_RoundTripsThroughRealWriterAndRead
 		t.Fatalf("writer did not produce a summary under routine:rt-1: %v (row=%v)", err, written)
 	}
 
-	nextRun := &models.Run{ContextSnapshot: `{"routine_id":"rt-1"}`, ContinuationScope: "routine:rt-1"}
+	nextRun := &runsmodels.Run{ContextSnapshot: `{"routine_id":"rt-1"}`, ContinuationScope: "routine:rt-1"}
 	si := service.NewSchedulerIntegration(svc, time.Minute)
 	got := si.LoadContinuationSummaryForTest(ctx, nextRun, "agent-scope-r", "")
 	if got == "" {

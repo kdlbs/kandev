@@ -10,7 +10,8 @@ import (
 	"expvar"
 	"testing"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/shared"
 )
 
@@ -56,13 +57,13 @@ func TestCheckSelfTriggerAllowance_GenuineErrorIncrementsLaunchRefusedTotal(t *t
 	req := QueueRunRequest{
 		AgentProfileID: "agent-1",
 		Reason:         "self_trigger_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-1",
 	}
 
 	before := launchRefusedCount(string(RefusalSelfTrigger))
 
-	err = svc.checkSelfTriggerAllowance(ctx, tx, rec, "agent-1", req, models.ActorKindAgent, "agent-1", "ws-1", "causation-1", 0)
+	err = svc.checkSelfTriggerAllowance(ctx, tx, rec, "agent-1", req, runsmodels.ActorKindAgent, "agent-1", "ws-1", "causation-1", 0)
 	if err == nil {
 		t.Fatal("checkSelfTriggerAllowance returned nil error for a genuinely unreadable count")
 	}

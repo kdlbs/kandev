@@ -1,3 +1,4 @@
+import { treePath } from "@/hooks/file-rename-continuity";
 import type { OpenFileTab } from "@/lib/types/backend";
 
 export type FileEditorTab = OpenFileTab & { instanceId?: symbol };
@@ -29,7 +30,10 @@ function areOpenFileTabsEqual(left: OpenFileTab, right: OpenFileTab): boolean {
 
 export function upsertOpenFileTab(prev: FileEditorTab[], fileTab: OpenFileTab): FileEditorTab[] {
   const fileKey = getFileTabKey(fileTab);
-  const existingIndex = prev.findIndex((tab) => getFileTabKey(tab) === fileKey);
+  const workspacePath = treePath(fileTab);
+  const existingIndex = prev.findIndex(
+    (tab) => getFileTabKey(tab) === fileKey || (!!workspacePath && treePath(tab) === workspacePath),
+  );
   if (existingIndex >= 0) {
     const existing = prev[existingIndex];
     const refreshed = existing.isDirty
@@ -43,6 +47,9 @@ export function upsertOpenFileTab(prev: FileEditorTab[], fileTab: OpenFileTab): 
       : {
           ...existing,
           ...fileTab,
+          path: existing.path,
+          name: existing.name,
+          repo: existing.repo,
           instanceId: existing.instanceId,
           renderedPreview: fileTab.renderedPreview ?? existing.renderedPreview,
         };

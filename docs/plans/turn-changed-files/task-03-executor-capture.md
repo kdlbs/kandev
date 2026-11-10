@@ -87,3 +87,17 @@ The capture byte preflight bounds candidate working-tree content at 256 MiB per 
 ### Review follow-up (2026-10-08)
 
 Compare and export requests use the accepted start/end commit and tree OIDs, validate that exact pair, and use refs only for reachability. Owned checkpoint refs are deleted with an expected-OID check; failed cleanup keeps a durable retry intent and reconnect drains it. Focused processor, API, and coordinator tests passed. This does not add Kubernetes, Sprites, plugin, or transport qualification evidence.
+
+### Windows CI follow-up (2026-10-20)
+
+PR #4623's Windows process cohort exposed an access-denied error during
+concurrent checkpoint lock acquisition. Windows can retain a deleted file
+until its last handle closes. Lock acquisition now retries that error within
+the existing operation deadline and preserves cancellation and the last error.
+The deterministic Windows regression holds a delete-pending handle and covers
+both release and cancellation. Native Windows CI is pending.
+The existing bounded-lock contract is unchanged; no public behavior or API changes.
+
+Local race stress passed 20 repetitions of
+`TestTurnCheckpointConcurrentCaptureSharesOneImmutableEndpoint` and
+`TestTurnCheckpointLockRecoversStaleOwnerAndHonorsCancellation`.

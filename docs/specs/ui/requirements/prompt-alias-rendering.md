@@ -43,6 +43,9 @@ referenced prompts while reviewing any surface.
   saved prompt, the transcript and anchored last-prompt bar shall render that
   alias as the same prompt chip, including its saved-prompt
   name metadata and hover preview when the saved prompt has content.
+  Escape, outside interaction, and explicit activation that closes the preview
+  shall keep it dismissed despite any older pending hover or focus open.
+  A new pointer entry, focus entry, or explicit activation may reopen it.
 - **AC-UI-PROMPT-ALIAS-001.2:** When a user message contains an unrecognized
   `@` token, each surface shall leave it as ordinary text using the existing
   prompt-name matching rules; rendering shall not invent a chip for an unknown
@@ -86,6 +89,8 @@ This extends the reusable alias presentation contract beyond transcript views.
 - **AC-UI-PROMPT-ALIAS-002.4:** A chip shall expose the current saved definition
   through pointer and keyboard activation on desktop and through a tap on touch devices.
   Preview dismissal shall preserve the draft and return focus to the composer.
+  It shall honor the delayed-open dismissal behavior in criterion
+  `AC-UI-PROMPT-ALIAS-001.1`.
   Users shall have a visible removal action that removes only the selected occurrence.
 - **AC-UI-PROMPT-ALIAS-002.5:** Prompt loading or lookup failure shall not block
   editing or submission. Store updates shall refresh recognition and previews without
@@ -128,3 +133,5 @@ This extends the reusable alias presentation contract beyond transcript views.
 - [Task-create reference chips](../../../plans/task-create-prompt-chips/plan.md)
 
 - [Compact task-create prompt chips](../../../plans/compact-task-prompt-chips/plan.md)
+
+- [Prompt preview dismissal](../../../plans/prompt-preview-dismissal/plan.md)

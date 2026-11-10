@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -83,7 +85,7 @@ func newRunOwnedEventHarness(t *testing.T) *runOwnedEventHarness {
 // hand-crafted one.
 func (r *runOwnedEventHarness) launchTasklessRun(
 	t *testing.T, ctx context.Context,
-) (*officemodels.Run, *officemodels.RunSession) {
+) (*runsmodels.Run, *officemodels.RunSession) {
 	t.Helper()
 	wantCalls := len(r.launcher.calls) + 1
 	if _, err := r.officeSvc.QueueRun(ctx, r.agent.ID, shared.RunReasonRoutineDispatchEvent, `{}`, ""); err != nil {
@@ -95,7 +97,7 @@ func (r *runOwnedEventHarness) launchTasklessRun(
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	var run *officemodels.Run
+	var run *runsmodels.Run
 	for _, candidate := range runs {
 		if candidate.SessionID != "" {
 			session, sessErr := r.officeSvc.RepoForTest().GetRunSession(ctx, candidate.SessionID)

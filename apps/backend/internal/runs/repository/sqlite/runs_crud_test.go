@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // fixedRetryAt is a whole-second timestamp so the round-trip assertion
@@ -17,8 +17,8 @@ var fixedRetryAt = time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 // fullRun is a run with every column CreateRun writes set to a value
 // that differs from the schema default, so dropping any one column
 // from the INSERT changes what comes back out.
-func fullRun() *models.Run {
-	return &models.Run{
+func fullRun() *runsmodels.Run {
+	return &runsmodels.Run{
 		ID:               "run-full",
 		AgentProfileID:   "agent-42",
 		Reason:           "task_assigned",
@@ -76,7 +76,7 @@ func TestCreateRun_PersistsEveryWrittenColumn(t *testing.T) {
 
 func TestCreateRun_PersistsRoutineContinuationScope(t *testing.T) {
 	repo := newTestRepo(t)
-	want := &models.Run{
+	want := &runsmodels.Run{
 		AgentProfileID:  "agent-routine",
 		Reason:          "routine_trigger",
 		ContextSnapshot: `{"routine_id":"routine-1"}`,
@@ -127,7 +127,7 @@ func TestCreateRun_AppliesDefaultsAndStampsIdentity(t *testing.T) {
 	stale := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 	before := time.Now().UTC().Add(-time.Second)
 
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "heartbeat",
 		RequestedAt:    stale,
@@ -161,7 +161,7 @@ func TestCreateRun_AppliesDefaultsAndStampsIdentity(t *testing.T) {
 // preserved (the idempotency and coalescing callers depend on it).
 func TestCreateRun_KeepsCallerSuppliedID(t *testing.T) {
 	repo := newTestRepo(t)
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             "chosen-id",
 		AgentProfileID: "a1",
 		Reason:         "task_assigned",
@@ -190,7 +190,7 @@ func TestUpdateRunRuntimeSnapshot_WritesAllThreeColumns(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	run := mustCreateRun(t, repo, fullRun())
-	other := mustCreateRun(t, repo, &models.Run{
+	other := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "other", AgentProfileID: "a2", Reason: "heartbeat",
 		Capabilities: `{"untouched":true}`,
 	})

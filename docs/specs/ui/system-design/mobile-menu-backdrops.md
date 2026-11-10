@@ -88,6 +88,23 @@ the Home drawer; the backdrop does not change that interaction contract.
 Radix's submenu close key returns to the parent menu, while Escape closes the
 whole menu hierarchy. Neither operation closes an enclosing Drawer.
 
+### Native Sessions opening gesture
+
+`components/task/mobile/mobile-sessions-section.tsx` owns the native Sessions
+row action trigger. For touch input, it suppresses Radix's pointerdown opening
+and opens from the completed trigger click instead, using local controlled open
+state. Menu content is therefore absent during the opening touch sequence and
+cannot receive that gesture as an item selection. Cancelled touches do not open
+the menu. Mouse, pen, and keyboard retain Radix trigger behavior; keyboard events
+for Enter, Space, and ArrowDown do not select the surrounding session row. Other
+trigger keys retain propagation to surrounding keyboard handlers.
+
+This coordination stays local to the consumer. Item callbacks, pending and
+disabled rules, delete confirmation handoff, and captured session identity keep
+their existing owners. It requires no timer, shared primitive change, modal
+mode override, or lifecycle/API change. The trigger works with either standalone
+Radix modality or the enclosing Drawer's inherited menu modality.
+
 ## Mobile composition and compatibility
 
 The nearest shipped exemplars are `components/kanban/mobile-menu-sheet.tsx`

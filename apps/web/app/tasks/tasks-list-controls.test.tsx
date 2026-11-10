@@ -11,8 +11,8 @@ describe("desktop task-list facet options", () => {
   function renderControls(facets = facetOptions) {
     render(
       <TasksListControls
-        showArchived={false}
-        onShowArchivedChange={vi.fn()}
+        archiveMode="active"
+        onArchiveModeChange={vi.fn()}
         tasksListSort="updated_desc"
         onTasksListSortChange={vi.fn()}
         tasksListGroup="workflow_step"

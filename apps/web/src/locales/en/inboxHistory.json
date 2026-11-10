@@ -4,7 +4,7 @@
   "emptyTitleUnnamedWorkspace": "No history in this workspace.",
   "emptyDescription": "This tab lists questions an agent asked that nobody answered: superseded by later work, left behind when a session ended, or unreadable. It is read-only audit evidence, not a queue to clear.",
   "errorTitle": "Could not load history",
-  "errorDescription": "Something went wrong loading the questions in this workspace's history.",
+  "errorDescription": "Could not load this workspace’s question history.",
   "retry": "Retry",
   "reasonSuperseded": "Superseded by later work",
   "reasonSessionEnded": "Session ended without an answer",

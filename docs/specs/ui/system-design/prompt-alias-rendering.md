@@ -81,6 +81,24 @@ entity-reference set.
 6. Store updates invalidate the derived names/components through React store
    subscriptions, so mounted views reconcile without changing message data.
 
+## Preview dismissal ownership
+
+`PromptMentionHoverPreview` reconciles delayed HoverCard open requests with
+explicit dismissal locally. Closing the controlled preview revokes pending
+open intent; delayed callbacks cannot publish an open state until a new trigger
+pointer entry or focus entry. Click, Enter, and Space keep their immediate toggle
+behavior. Trigger pointer-down is excluded from outside dismissal, so the
+subsequent click owns the toggle exactly once. Pointer transit into open
+content, selection, and content interactions
+remain governed by HoverCard. Unmount disposes its timers through Radix.
+The shared UI primitive and its other consumers retain their own policies.
+
+`PromptMentionChip` still selects the native `Drawer` through `useTouchDrawer`.
+Touch entry and dismissal keep the current fixed header, scroll body, safe-area
+padding, and focus behavior. No new timer or dismissal policy enters that path.
+The [dismissal repair plan](../../../plans/prompt-preview-dismissal/plan.md)
+owns focused desktop timing and phone drawer verification.
+
 ## Failure and recovery
 
 If the prompt store is not loaded or a name is absent, the alias is rendered as

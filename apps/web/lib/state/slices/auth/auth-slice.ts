@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { AuthSlice, AuthSliceState } from "./types";
 
 import type { SessionHostnameEntry } from "./types";
@@ -17,7 +18,7 @@ export const defaultAuthState: AuthSliceState = {
   sessionHostnamesEpoch: 0,
 };
 
-type ImmerSet = Parameters<StateCreator<AuthSlice, [["zustand/immer", never]], [], AuthSlice>>[0];
+type ImmerSet = Parameters<SliceCreator<AuthSlice>>[0];
 
 // The auth slice only needs `set` (no cross-slice reads), so it is typed as a
 // plain single-arg creator rather than the full 3-arg StateCreator. `set`

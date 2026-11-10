@@ -71,6 +71,26 @@ export function redactKubernetesDiagnosticText(text: string, credential: string)
   return text.split(credential).join("[REDACTED KUBERNETES CREDENTIAL]");
 }
 
+/** Attempt every cleanup and retain setup diagnostics even when cleanup fails. */
+export function cleanupFailedKubernetesSetup(error: unknown, cleanups: (() => void)[]): never {
+  const errors = [error];
+  for (const cleanup of cleanups) {
+    try {
+      cleanup();
+    } catch (cleanupError) {
+      errors.push(cleanupError);
+    }
+  }
+  if (errors.length === 1) throw error;
+  throw new AggregateError(
+    errors,
+    errors
+      .map((failure) => (failure instanceof Error ? failure.message : String(failure)))
+      .join("\n"),
+    { cause: error },
+  );
+}
+
 export class FixtureResourceOwnership {
   private readonly owned = new Set<FixtureResource>();
 

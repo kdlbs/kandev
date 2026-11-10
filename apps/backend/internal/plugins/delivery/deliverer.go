@@ -29,7 +29,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/store"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // Default tuning values, per docs/plans/plugins/GRPC-CONTRACT.md §5: 10s
@@ -353,6 +353,7 @@ func (d *Deliverer) makeHandler(w *pluginWorker, pattern string) bus.EventHandle
 
 		w.enqueue(Delivery{
 			PluginID: w.id,
+			Origin:   event.PluginOrigin,
 			Event: &pluginsdk.Event{
 				EventID:     uuid.New().String(),
 				EventType:   subject,
@@ -586,5 +587,17 @@ func (w *pluginWorker) sleepOrStop(d time.Duration) bool {
 func (w *pluginWorker) attemptDeliver(ctx context.Context, d Delivery) error {
 	reqCtx, cancel := context.WithTimeout(ctx, w.deps.requestTimeout)
 	defer cancel()
+	if d.Origin != nil {
+		resolver, ok := w.deps.transport.(interface {
+			EventOriginContext(context.Context, string, string) (context.Context, context.CancelFunc)
+		})
+		if ok {
+			originCtx, release := resolver.EventOriginContext(reqCtx, d.Origin.PluginID, d.Origin.Reference)
+			defer release()
+			reqCtx = originCtx
+		} else {
+			reqCtx = pluginsdk.UnidentifiedEventContext(reqCtx)
+		}
+	}
 	return w.deps.transport.DeliverEvent(reqCtx, w.id, d.Event)
 }

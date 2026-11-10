@@ -37,6 +37,7 @@ type PersonalConnectionRepository interface {
 	GetUserConnection(context.Context, string, string) (*UserConnection, error)
 	GetPersonalConnectionGeneration(context.Context, string, string) (int64, error)
 	GetPersonalTokens(context.Context, string, string) (GitHubOAuthTokens, error)
+	GetPersonalTokensForConnection(context.Context, *UserConnection) (GitHubOAuthTokens, error)
 	ReplacePersonalConnection(context.Context, *UserConnection, GitHubOAuthTokens, int64) error
 	ReplacePersonalConnectionForFlow(
 		context.Context,
@@ -52,9 +53,11 @@ type PersonalConnectionRepository interface {
 }
 
 type PersonalAuthConfig struct {
-	RegistrationID string
-	ClientID       string
-	CallbackURL    string
+	AppCredentialGeneration int64
+	GitHubHost              string
+	RegistrationID          string
+	ClientID                string
+	CallbackURL             string
 }
 
 type PersonalAuthStart struct {
@@ -118,12 +121,22 @@ func (s *PersonalAuthService) Start(
 	if err != nil {
 		return PersonalAuthStart{}, fmt.Errorf("load personal GitHub connection: %w", err)
 	}
+	host, err := connectionHost(workspace.GitHubHost)
+	if err != nil {
+		return PersonalAuthStart{}, err
+	}
+	configuredHost, err := connectionHost(s.config.GitHubHost)
+	if err != nil || host.String() != configuredHost.String() {
+		return PersonalAuthStart{}, ErrOAuthFlowStale
+	}
 	expected := workspaceConnectionExpectation(workspace)
 	flow, err := s.flows.Start(ctx, OAuthFlowRequest{
-		WorkspaceID:                        workspaceID,
-		UserID:                             userID,
-		AppRegistrationID:                  s.config.RegistrationID,
-		Kind:                               AuthFlowKindPersonal,
+		WorkspaceID:       workspaceID,
+		UserID:            userID,
+		AppRegistrationID: s.config.RegistrationID,
+		Kind:              AuthFlowKindPersonal,
+		RedirectURI:       s.config.CallbackURL, ExpectedAppCredentialGeneration: s.config.AppCredentialGeneration,
+		GitHubHost:                         host.String(),
 		ExpectedWorkspaceSource:            expected.Source,
 		ExpectedWorkspaceGeneration:        expected.CredentialGeneration,
 		ExpectedInstallationID:             expected.InstallationID,
@@ -133,13 +146,15 @@ func (s *PersonalAuthService) Start(
 	if err != nil {
 		return PersonalAuthStart{}, err
 	}
-	authorizeURL := &url.URL{Scheme: "https", Host: "github.com", Path: "/login/oauth/authorize"}
+	authorizeURL := &url.URL{Scheme: "https", Host: host.String(), Path: "/login/oauth/authorize"}
 	query := authorizeURL.Query()
 	query.Set("client_id", s.config.ClientID)
 	query.Set("redirect_uri", s.config.CallbackURL)
 	query.Set("state", flow.State)
-	query.Set("code_challenge", flow.PKCEChallenge)
-	query.Set("code_challenge_method", "S256")
+	if flow.PKCEChallenge != "" {
+		query.Set("code_challenge", flow.PKCEChallenge)
+		query.Set("code_challenge_method", "S256")
+	}
 	authorizeURL.RawQuery = query.Encode()
 	return PersonalAuthStart{URL: authorizeURL.String(), State: flow.State, ExpiresAt: flow.ExpiresAt}, nil
 }
@@ -184,7 +199,10 @@ func (s *PersonalAuthService) verifyPersonalCallback(
 	flow *AuthFlow,
 	installationID int64,
 ) (GitHubOAuthTokens, GitHubOAuthUser, error) {
-	if callback.Code == "" || flow.PKCEVerifier == "" {
+	if err := validateAuthFlowRegistration(flow, s.config.GitHubHost, s.config.AppCredentialGeneration, s.config.CallbackURL); err != nil {
+		return GitHubOAuthTokens{}, GitHubOAuthUser{}, err
+	}
+	if callback.Code == "" || (defaultOAuthPolicy(flow.OAuthPolicy) == OAuthPolicyPKCES256 && flow.PKCEVerifier == "") {
 		return GitHubOAuthTokens{}, GitHubOAuthUser{}, ErrPersonalTokenInvalid
 	}
 	tokens, err := s.oauth.ExchangeUserCode(ctx, callback.Code, flow.PKCEVerifier, s.config.CallbackURL)
@@ -260,7 +278,7 @@ func (s *PersonalAuthService) ResolvePersonalToken(
 		return "", nil, err
 	}
 	now := s.now().UTC()
-	if tokens.AccessToken != "" && tokens.AccessExpiresAt.After(now.Add(personalTokenRefreshMargin)) {
+	if tokens.AccessToken != "" && (tokens.AccessExpiresAt.IsZero() || tokens.AccessExpiresAt.After(now.Add(personalTokenRefreshMargin))) {
 		return tokens.AccessToken, connection, nil
 	}
 	return s.coalescedPersonalTokenRefresh(ctx, workspaceID, userID, *workspace.InstallationID)
@@ -289,7 +307,7 @@ func (s *PersonalAuthService) coalescedPersonalTokenRefresh(
 			return nil, loadErr
 		}
 		now := s.now().UTC()
-		if tokens.AccessToken != "" && tokens.AccessExpiresAt.After(now.Add(personalTokenRefreshMargin)) {
+		if tokens.AccessToken != "" && (tokens.AccessExpiresAt.IsZero() || tokens.AccessExpiresAt.After(now.Add(personalTokenRefreshMargin))) {
 			return personalRefreshResult{token: tokens.AccessToken, connection: connection}, nil
 		}
 		token, refreshedConnection, refreshErr := s.refreshPersonalToken(
@@ -326,7 +344,7 @@ func (s *PersonalAuthService) loadPersonalConnection(
 	if connection.AppRegistrationID != s.config.RegistrationID {
 		return nil, GitHubOAuthTokens{}, ErrGitHubPersonalRequired
 	}
-	tokens, err := s.repo.GetPersonalTokens(ctx, workspaceID, userID)
+	tokens, err := s.repo.GetPersonalTokensForConnection(ctx, connection)
 	if err != nil {
 		return nil, GitHubOAuthTokens{}, fmt.Errorf("load personal GitHub tokens: %w", err)
 	}
@@ -475,6 +493,11 @@ func (s *PersonalAuthService) requireActiveAppWorkspace(
 		connection.AppRegistrationID != s.config.RegistrationID {
 		return nil, ErrGitHubPersonalRequired
 	}
+	host, err := connectionHost(connection.GitHubHost)
+	configuredHost, configuredErr := connectionHost(s.config.GitHubHost)
+	if err != nil || configuredErr != nil || host.String() != configuredHost.String() {
+		return nil, ErrGitHubPersonalRequired
+	}
 	return connection, nil
 }
 
@@ -530,7 +553,7 @@ func newUserConnection(
 }
 
 func validatePersonalTokens(tokens GitHubOAuthTokens, now time.Time) error {
-	if tokens.AccessToken == "" || !tokens.AccessExpiresAt.After(now) {
+	if tokens.AccessToken == "" || (!tokens.AccessExpiresAt.IsZero() && !tokens.AccessExpiresAt.After(now)) {
 		return ErrPersonalTokenInvalid
 	}
 	if tokens.RefreshExpiresAt != nil && !tokens.RefreshExpiresAt.After(now) {

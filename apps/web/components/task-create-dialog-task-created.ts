@@ -3,7 +3,7 @@ import type {
   PluginTaskCreatedHandler,
   PluginTaskCreatedIdentity,
   RegisterPluginTaskCreatedHandler,
-} from "@kandev/plugin-sdk";
+} from "@kdlbs/plugin-sdk";
 
 type CreatedTaskIdentity = PluginTaskCreatedIdentity;
 export type TaskCreatedHandler = PluginTaskCreatedHandler;

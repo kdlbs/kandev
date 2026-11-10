@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-07-27
-updated: 2026-10-05
+updated: 2026-10-21
 owners:
   - kandev
 ---
@@ -29,6 +29,8 @@ People working inside a task need to find code by what it says, not only by its 
 - **AC-UI-TASK-WORKSPACE-CONTENT-SEARCH-001.7:** For both **Files** and **Contents**, a Git workspace root remains searchable when initialized submodules add named repository scopes. Root matches retain the empty repository identity while child matches retain their task-root-relative scope names. A bare task directory containing sibling repositories is not treated as an additional repository.
 - **AC-UI-TASK-WORKSPACE-CONTENT-SEARCH-001.8:** Search covers every repository materialized for the active task session. Tracked files and untracked, non-ignored files are eligible; ignored files, directories, and workspace metadata are not.
 - **AC-UI-TASK-WORKSPACE-CONTENT-SEARCH-001.9:** For every eligible file whose name is supported by the task filesystem and is valid UTF-8, Files and Contents shall preserve its exact repository-relative identity, including Unicode, leading or trailing whitespace, literal quotes, tabs, and newlines. Filename presentation or encoding shall not turn the result into a different path or hide an otherwise matching file. Aggregate results shall retain the existing repository identity and path-prefix conventions, so selecting a result reads that repository's exact file even when another repository contains the same relative path. Git's filename-quoting preference shall not affect eligibility or identity.
+
+- **AC-UI-TASK-WORKSPACE-CONTENT-SEARCH-001.10:** When content-search polling finishes with a successful attempt and no collected matches, the completed search shall show the no-match state even if earlier attempts failed. Without any collected matches, a final failed attempt shall retain the retryable failure state, including when every attempt fails. Matches collected during polling shall remain available despite other failed attempts. These outcomes apply equally on desktop and phone; cancelled searches shall not replace a newer search's state.
 
 ## Migrated source detail
 
@@ -166,8 +168,10 @@ repositories without parsing path strings.
   with a silently different value.
 - If one eligible file disappears, becomes unreadable, or is invalid while the
   search runs, other files and repositories still return results.
-- If the execution cannot be recovered or the transport request fails, the
-  palette presents a retryable failure state and keeps the entered query.
+- If the execution cannot be recovered or the final transport attempt fails
+  without collected matches, the palette presents a retryable failure state
+  and keeps the entered query. A later successful attempt supersedes an earlier
+  failure, including when it returns no matches. Collected matches remain available.
 - Cancellation stops outstanding repository work and stale responses do not
   replace results for a newer query.
 
@@ -241,3 +245,4 @@ repositories without parsing path strings.
 
 - [Task workspace content search design](../system-design/task-workspace-content-search.md)
 - [Exact workspace search filenames plan](../../../plans/exact-workspace-search-filenames/plan.md)
+- [Content-search retry recovery plan](../../../plans/workspace-content-search-recovery/plan.md)

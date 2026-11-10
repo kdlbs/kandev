@@ -300,6 +300,7 @@ describe("useSavedPresets repository defaults", () => {
     await waitFor(() =>
       expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith({
         workspace_id: WORKSPACE_ID,
+        expected_host: "github.com",
         saved_presets: [
           server,
           expect.objectContaining({
@@ -412,6 +413,7 @@ describe("useSavedPresets default persistence", () => {
     expect(persisted).toBe(true);
     expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith({
       workspace_id: WORKSPACE_ID,
+      expected_host: "github.com",
       saved_presets: [{ ...prA, isDefault: false }, { ...prB, isDefault: true }, issue],
     });
     expect(result.current.presets.map((preset) => preset.isDefault)).toEqual([false, true, true]);
@@ -465,4 +467,26 @@ describe("useSavedPresets default persistence", () => {
 
     expect(result.current.presets.map((preset) => preset.isDefault)).toEqual([true, false]);
   });
+});
+
+it("saves workspace presets against the host captured with the settings", async () => {
+  resetTestState();
+  vi.mocked(updateGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings());
+  vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue({
+    ...workspaceSettings(),
+    github_host: "git.company.example",
+  });
+  const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  await act(async () => {
+    await result.current.save({
+      kind: "pr",
+      label: "Enterprise PRs",
+      customQuery: "is:open",
+      repoFilter: "",
+    });
+  });
+  expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ expected_host: "git.company.example" }),
+  );
 });

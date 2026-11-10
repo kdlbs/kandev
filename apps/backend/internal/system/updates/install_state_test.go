@@ -52,6 +52,54 @@ func TestService_GetManagedUserServiceSupportsApply(t *testing.T) {
 	}
 }
 
+func TestService_GetManagedLegacyLaunchdServiceSupportsApply(t *testing.T) {
+	homeDir := t.TempDir()
+	nodePath := "/usr/local/bin/node"
+	cliEntry := "/Users/alice/.npm/_npx/cache/node_modules/kandev/bin/cli.js"
+	servicePath := filepath.Join(homeDir, "Library", "LaunchAgents", "com.kdlbs.kandev.plist")
+	if err := os.MkdirAll(filepath.Dir(servicePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	metadataPath, _ := writeServiceInstallForTest(t, homeDir, serviceInstallMetadata{
+		Manager: serviceManagerLaunchd, Mode: installModeUser, Kind: installKindNPM,
+		HomeDir: homeDir, LogDir: filepath.Join(homeDir, "logs"), ServicePath: servicePath,
+		NodePath: nodePath, CLIEntry: cliEntry,
+	})
+	plist := `<!-- managed by kandev -->
+<plist><dict>
+  <key>ProgramArguments</key><array>
+    <string>` + nodePath + `</string><string>` + cliEntry + `</string><string>--headless</string>
+  </array>
+  <key>` + envRunningAsService + `</key><string>true</string>
+  <key>` + envServiceMetadata + `</key><string>` + metadataPath + `</string>
+</dict></plist>`
+	if err := os.WriteFile(servicePath, []byte(plist), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envRunningAsService, "true")
+	t.Setenv(envServiceMode, installModeUser)
+	t.Setenv(envServiceManager, serviceManagerLaunchd)
+	t.Setenv(envInstallKind, installKindNPM)
+	t.Setenv(envServiceMetadata, metadataPath)
+
+	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default(), WithHomeDir(homeDir))
+	resp, err := svc.Get(context.Background())
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !resp.Install.ManagedService || !resp.ApplySupported {
+		t.Fatalf("legacy install state=%+v apply_supported=%v reason=%q",
+			resp.Install, resp.ApplySupported, resp.ApplyUnsupportedReason)
+	}
+	args := selfUpdateCommandArgs(applyRequest{Intent: updateIntent{Install: serviceInstallMetadata{
+		NodePath: nodePath, CLIEntry: cliEntry,
+	}}})
+	wantPrefix := []string{nodePath, cliEntry, "service", "self-update"}
+	if len(args) < len(wantPrefix) || strings.Join(args[:len(wantPrefix)], "\x00") != strings.Join(wantPrefix, "\x00") {
+		t.Fatalf("legacy self-update args = %#v, want prefix %#v", args, wantPrefix)
+	}
+}
+
 func TestService_GetManagedNativeServiceSupportsApply(t *testing.T) {
 	homeDir := t.TempDir()
 	servicePath := filepath.Join(homeDir, "kandev.service")
@@ -100,6 +148,65 @@ func TestService_GetManagedNativeServiceSupportsApply(t *testing.T) {
 	}
 	if resp.ChannelEditable || resp.ChannelUnsupportedReason == "" {
 		t.Fatalf("Homebrew nightly capability editable=%v reason=%q", resp.ChannelEditable, resp.ChannelUnsupportedReason)
+	}
+}
+
+func TestService_GetRejectsNativeShellMetadataMismatch(t *testing.T) {
+	homeDir := t.TempDir()
+	servicePath := filepath.Join(homeDir, "Library", "LaunchAgents", "com.kdlbs.kandev.plist")
+	if err := os.MkdirAll(filepath.Dir(servicePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	metadataPath, _ := writeServiceInstallForTest(t, homeDir, serviceInstallMetadata{
+		Manager:      serviceManagerLaunchd,
+		Mode:         installModeUser,
+		Kind:         installKindNPM,
+		HomeDir:      homeDir,
+		LogDir:       filepath.Join(homeDir, "logs"),
+		ServicePath:  servicePath,
+		LauncherPath: "/opt/homebrew/lib/node_modules/kandev/bin/kandev",
+	})
+	metadataData, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata map[string]interface{}
+	if err := json.Unmarshal(metadataData, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	metadata["shell"] = "/bin/bash"
+	metadataData, err = json.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metadataPath, metadataData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plist := `<!-- managed by kandev -->
+<plist><dict>
+  <key>ProgramArguments</key><array>
+    <string>/opt/homebrew/lib/node_modules/kandev/bin/kandev</string>
+    <string>service</string><string>run</string><string>--shell</string><string>/bin/zsh</string>
+  </array>
+  <key>KANDEV_RUNNING_AS_SERVICE</key><string>true</string>
+  <key>KANDEV_SERVICE_METADATA</key><string>` + metadataPath + `</string>
+</dict></plist>`
+	if err := os.WriteFile(servicePath, []byte(plist), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envRunningAsService, "true")
+	t.Setenv(envServiceMode, installModeUser)
+	t.Setenv(envServiceManager, serviceManagerLaunchd)
+	t.Setenv(envInstallKind, installKindNPM)
+	t.Setenv(envServiceMetadata, metadataPath)
+
+	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default(), WithHomeDir(homeDir))
+	resp, err := svc.Get(context.Background())
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if resp.Install.ManagedService || resp.ApplySupported {
+		t.Fatalf("mismatched shell metadata was accepted: install=%+v apply=%v", resp.Install, resp.ApplySupported)
 	}
 }
 

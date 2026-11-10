@@ -12,11 +12,12 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/db"
-	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 )
 
@@ -108,21 +109,21 @@ func TestGateEvaluators_ContextCanceledDefersWithoutRecordingFailure(t *testing.
 	cases := []struct {
 		name string
 		gate string
-		eval func(repo *Repository, ctx context.Context, tx *sqlx.Tx, candidate *models.Run) bool
+		eval func(repo *Repository, ctx context.Context, tx *sqlx.Tx, candidate *runsmodels.Run) bool
 	}{
-		{"agent_ceiling", gateAgentCeiling, func(r *Repository, ctx context.Context, tx *sqlx.Tx, c *models.Run) bool {
+		{"agent_ceiling", gateAgentCeiling, func(r *Repository, ctx context.Context, tx *sqlx.Tx, c *runsmodels.Run) bool {
 			return r.evalAgentCeilingGate(ctx, tx, c, limits)
 		}},
-		{"workspace_ceiling", gateWorkspaceCeiling, func(r *Repository, ctx context.Context, tx *sqlx.Tx, c *models.Run) bool {
+		{"workspace_ceiling", gateWorkspaceCeiling, func(r *Repository, ctx context.Context, tx *sqlx.Tx, c *runsmodels.Run) bool {
 			return r.evalWorkspaceCeilingGate(ctx, tx, c, limits)
 		}},
-		{"instance_ceiling", gateInstanceCeiling, func(r *Repository, ctx context.Context, tx *sqlx.Tx, c *models.Run) bool {
+		{"instance_ceiling", gateInstanceCeiling, func(r *Repository, ctx context.Context, tx *sqlx.Tx, c *runsmodels.Run) bool {
 			return r.evalInstanceCeilingGate(ctx, tx, c, limits)
 		}},
-		{"routine_budget", gateRoutineBudget, func(r *Repository, ctx context.Context, tx *sqlx.Tx, c *models.Run) bool {
+		{"routine_budget", gateRoutineBudget, func(r *Repository, ctx context.Context, tx *sqlx.Tx, c *runsmodels.Run) bool {
 			return r.evalRoutineBudgetGate(ctx, tx, c, limits, budgetWindowStart)
 		}},
-		{"workspace_budget", gateWorkspaceBudget, func(r *Repository, ctx context.Context, tx *sqlx.Tx, c *models.Run) bool {
+		{"workspace_budget", gateWorkspaceBudget, func(r *Repository, ctx context.Context, tx *sqlx.Tx, c *runsmodels.Run) bool {
 			return r.evalWorkspaceBudgetGate(ctx, tx, c, limits, budgetWindowStart)
 		}},
 	}
@@ -131,7 +132,7 @@ func TestGateEvaluators_ContextCanceledDefersWithoutRecordingFailure(t *testing.
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newShutdownContextTestRepo(t)
 			ctx := context.Background()
-			candidate := &models.Run{
+			candidate := &runsmodels.Run{
 				ID:             "candidate-" + tc.name,
 				AgentProfileID: "agent-1",
 				WorkspaceID:    "ws-1",

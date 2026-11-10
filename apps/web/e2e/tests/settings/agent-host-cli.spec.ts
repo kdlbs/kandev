@@ -17,6 +17,7 @@ test.describe("Agent host CLI version and model discovery", () => {
     test.setTimeout(120_000);
 
     await testPage.goto("/settings/agents");
+    await testPage.getByTestId("agent-diagnostics-mock-agent").locator("summary").click();
     const versionLine = testPage.getByTestId("cli-version-mock-agent");
     await expect(versionLine).toBeVisible({ timeout: 15_000 });
     await expect(versionLine).toContainText("9.9.9");

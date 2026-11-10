@@ -31,13 +31,23 @@
 | `requirements/office-seat-read-workflow-scope.md` + `system-design/office-seat-read-workflow-scope-01.md` | draft (shipped) | Workflow-scopes Office's own seat read/write projections to match the engine's slate — extends `review-participant-seats.md`'s AC-OFFICE-REVIEW-SEATS-003.5 dedup guarantee rather than editing that file in place (see trap below) |
 | `requirements/gate-comment-wake.md` + `system-design/gate-comment-wake-01.md` | shipped | A comment at a gated (`review`/`approval`) step wakes only its seat's undecided reviewers/approvers with a verdict-framing prompt, never the comment's own author; `office-default.yml`'s `on_comment` fan-out and the `healBuiltinWorkflowStepOnCommentFanOut` startup reconciler backfill it onto already-materialized system workflows |
 | `requirements/automation-retries.md` + `system-design/automation-retries.md` | draft | Durable retry policy, attempt scheduling, safe recovery, and paged run history |
+| `requirements/agent-task-relations.md` + `system-design/agent-task-relations.md` | shipped | Runtime `task create` accepts `blocked_by` (read-relation scoped, ancestors allowed) and an explicit `workspace_mode`; omitted fields behave as before |
 | `requirements/human-done-final-step.md` + `system-design/human-done-final-step.md` | draft (shipped) | A user's Done (board drop or status picker) before the final workflow step moves the task to that step via the human move path; human moves into a completing step are refused while approvers are pending. Agents keep the `in_review` redirect |
 
-The seven rows above are the only entries reflecting the newer `requirements/` + `system-design/` split; the other 15 predate that migration and this table has not been reconciled with the full current Office spec set. `docs/specs/office/README.md` no longer carries a tracked specification map (see ADR `2026-09-07-on-demand-document-catalogs`) — run `python3 scripts/list-docs.py specs --system office --format paths` for the authoritative, current list of anything not covered here.
+The eight rows above are the only entries in this table reflecting the newer
+`requirements/` + `system-design/` split; the other 16 entries in this table
+predate this migration. The separately listed tier-routing specification above
+is outside this table, which has not been reconciled with the full current
+Office spec set. `docs/specs/office/README.md` no longer carries a tracked
+specification map (see ADR `2026-09-07-on-demand-document-catalogs`) — run
+`python3 scripts/list-docs.py specs --system office --format paths` for the
+authoritative, current list of anything not covered here.
 
 The active Office tier-selection contract is in `docs/specs/office/requirements/office-agent-tier-routing.md`. The deprecated `routing.md` specification is historical and does not override that contract.
 
 ## Traps
+
+- **Routine work is not generic monitoring.** Taskless routine prompts resolve the registered routine identity and description from their persisted wake context. Heavy tasks in an Office workspace's same-workspace, system-owned builtin Routine workflow retain Office identity and use the Office runtime surface. Optional `task_template.required_subtask_count` is a trusted create-time minimum; all task-state writes and Done-step entry use the task repository transaction that checks durable task-specific runner assignments. Detail and bounded batch completion reads share that check. Do not replay existing runs or reopen completed tasks when enabling the opt-in.
 
 - **Run records are owned by `internal/runs/models`.** Office owns the meaning and policy for causation, priority, launch safety, and provider routing; the shared `Run`/`RunEvent` data shapes belong to runs. `office/models` retains compatibility aliases while its consumers migrate. `GateFailureState`, `CausationRefusalEntry`, and `ContinuationScopeForRun` remain Office-owned. See ADR `2026-09-26-run-contract-ownership`.
 - **A run is not a task start.** The `runs` table carries provider routing (`resolved_provider_id`, `logical_provider_order`, `requested_tier`, plus the `office_run_route_attempts` ledger), the per-reason `assembled_prompt`, the `AppendRunEvent` timeline, and retry/backoff/coalescing (`retry_count`, `earliest_retry_at`, `coalesced_count`, `idempotency_key` with unique index `idx_run_idempotency`). `Service.QueueRun` (`service/run.go`) and `SchedulerService.QueueRun` (`scheduler/run.go`) are the entry points that populate all of it; `TaskStarter` (the `StartTask` seam office calls, `service/service.go`) runs only *after*. Calling `StartTask` directly, or any ordinary kanban start path, skips all of the above. See `scheduler.md`.

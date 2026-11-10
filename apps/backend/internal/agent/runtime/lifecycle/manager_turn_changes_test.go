@@ -297,10 +297,9 @@ func TestStopWaitsForRetriedTerminalCaptureBeforeReturning(t *testing.T) {
 	var releaseOnce sync.Once
 	releaseRetry := func() { releaseOnce.Do(func() { close(handler.releaseRetry) }) }
 	t.Cleanup(releaseRetry)
-	stopDone := make(chan struct{})
+	stopDone := make(chan error, 1)
 	go func() {
-		manager.preserveTurnChangesBeforeStop(context.Background(), execution, "")
-		close(stopDone)
+		stopDone <- manager.preserveTurnChangesBeforeStop(context.Background(), execution, "")
 	}()
 	<-handler.firstDeadline
 	select {
@@ -315,7 +314,8 @@ func TestStopWaitsForRetriedTerminalCaptureBeforeReturning(t *testing.T) {
 	}
 	releaseRetry()
 	select {
-	case <-stopDone:
+	case err := <-stopDone:
+		require.NoError(t, err)
 	case <-time.After(time.Second):
 		t.Fatal("executor stop did not continue after terminal capture settled")
 	}
@@ -431,10 +431,9 @@ func TestStopPreservesActiveTurnBeforeExecutorCleanup(t *testing.T) {
 		terminalEntered: make(chan TurnChangeTerminal, 1), releaseTerminal: make(chan struct{}),
 	}
 	manager.SetTurnChangeCaptureHandler(handler)
-	stopDone := make(chan struct{})
+	stopDone := make(chan error, 1)
 	go func() {
-		manager.preserveTurnChangesBeforeStop(context.Background(), execution, "")
-		close(stopDone)
+		stopDone <- manager.preserveTurnChangesBeforeStop(context.Background(), execution, "")
 	}()
 	select {
 	case terminal := <-handler.terminalEntered:
@@ -446,7 +445,8 @@ func TestStopPreservesActiveTurnBeforeExecutorCleanup(t *testing.T) {
 	}
 	close(handler.releaseTerminal)
 	select {
-	case <-stopDone:
+	case err := <-stopDone:
+		require.NoError(t, err)
 	case <-time.After(time.Second):
 		t.Fatal("executor stop remained blocked after terminal capture")
 	}
@@ -690,3 +690,21 @@ func (h *turnChangeCaptureBarrierHandler) FinishTurnChanges(_ context.Context, t
 }
 
 var _ TurnChangeCaptureHandler = (*turnChangeCaptureBarrierHandler)(nil)
+
+func TestTurnChangeRestoreInProgressRequiresStartingExecutionWithoutClient(t *testing.T) {
+	manager := newTestManager(t)
+	require.False(t, manager.TurnChangeRestoreInProgress("missing"))
+
+	execution := &AgentExecution{
+		ID: "execution-restore", SessionID: "session-restore", Status: v1.AgentStatusStarting,
+	}
+	require.NoError(t, manager.executionStore.Add(execution))
+	require.True(t, manager.TurnChangeRestoreInProgress("session-restore"))
+
+	execution.Status = v1.AgentStatusReady
+	require.False(t, manager.TurnChangeRestoreInProgress("session-restore"))
+
+	execution.Status = v1.AgentStatusStarting
+	execution.agentctl = agentctl.NewClient("127.0.0.1", 1, newTestLogger())
+	require.False(t, manager.TurnChangeRestoreInProgress("session-restore"))
+}

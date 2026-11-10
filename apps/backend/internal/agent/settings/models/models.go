@@ -117,6 +117,11 @@ type AgentProfile struct {
 	// user. The store persists this slice as JSON in mcp_selected_servers.
 	MCPSelectedServers []string `json:"mcp_selected_servers" db:"-"`
 
+	// CopilotSelectedPlugins contains stable Copilot plugin identities selected
+	// for this concrete profile. The store persists this slice as JSON in
+	// copilot_selected_plugins. Versions and roots never enter the identity.
+	CopilotSelectedPlugins []string `json:"copilot_selected_plugins" db:"-"`
+
 	// Enabled gates the profile from new-work selection: when false, the
 	// profile is hidden from task/session creation pickers but keeps serving
 	// existing sessions and remains editable in settings. Independent of

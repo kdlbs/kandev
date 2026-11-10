@@ -418,7 +418,12 @@ function MonacoToolbarActions({
         repositoryName={repositoryName}
         size="sm"
       />
-      <FileActionsDropdown filePath={path} sessionId={sessionId} size="sm" />
+      <FileActionsDropdown
+        filePath={path}
+        sessionId={sessionId}
+        repositoryName={repositoryName}
+        size="sm"
+      />
       <DownloadButton onDownload={onDownload} />
       <DeleteButton onDelete={onDelete} />
       <SaveButton isDirty={isDirty} isSaving={isSaving} onSave={onSave} />

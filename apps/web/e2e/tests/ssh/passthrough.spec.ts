@@ -6,7 +6,11 @@ import {
 } from "../../helpers/ssh-passthrough";
 import { execInContainer } from "../../helpers/ssh";
 import { watchWs } from "../../helpers/causal-waits";
+import path from "node:path";
+import { captureSSHInterruptionLogs } from "../../helpers/ssh-failure-diagnostics";
 import { SessionPage } from "../../pages/session-page";
+
+test.use({ trace: "retain-on-failure" });
 
 test("remote passthrough accepts input and keeps its PID after reconnect", async ({
   testPage,
@@ -31,13 +35,45 @@ test("remote passthrough accepts input and keeps its PID after reconnect", async
   ).toHaveLength(1);
 });
 
-test("remote passthrough survives backend interruption without another initial prompt", async ({
-  testPage,
-  apiClient,
-  seedData,
-  backend,
-}) => {
+const interruptionTest =
+  "remote passthrough survives backend interruption without another initial prompt";
+let interruptionLog: ((byteLimit: number) => string) | undefined;
+
+test.beforeEach(() => {
+  interruptionLog = undefined;
+});
+
+test.afterEach(async ({ backend }, testInfo) => {
+  if (testInfo.title === interruptionTest) {
+    await captureSSHInterruptionLogs(testInfo, backend, interruptionLog);
+  }
+});
+
+test(interruptionTest, async ({ testPage, apiClient, seedData, backend }) => {
   const state = await openSSHPassthrough(testPage, apiClient, seedData);
+  const taskDirectory = path.basename(state.workspace);
+  const sessionID = state.task.session_id;
+  if (/^task-[a-f0-9-]{36}$/.test(taskDirectory) && /^[a-f0-9-]{36}$/.test(sessionID ?? "")) {
+    const remoteLog = path.posix.join(
+      state.workspace,
+      ".kandev/sessions",
+      sessionID!,
+      "agentctl.log",
+    );
+    interruptionLog = (byteLimit) =>
+      execInContainer(
+        seedData.sshTarget,
+        [
+          "sh",
+          "-c",
+          'test ! -L "$1" && test -f "$1" && tail -c "$2" -- "$1"',
+          "_",
+          remoteLog,
+          String(Math.min(byteLimit, 512 * 1024)),
+        ],
+        5_000,
+      );
+  }
   const backendPID = backend.pid();
   expect(backendPID).toBeTruthy();
   process.kill(-backendPID!, "SIGKILL");

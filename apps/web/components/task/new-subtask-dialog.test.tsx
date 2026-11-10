@@ -16,7 +16,10 @@ vi.mock("@/lib/api/domains/kanban-api", async (importOriginal) => {
 });
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({ useSettingsData: () => {} }));
 vi.mock("@/hooks/use-is-utility-configured", () => ({ useIsUtilityConfigured: () => false }));
-vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+  useOptionalToast: () => ({ toast: vi.fn() }),
+}));
 vi.mock("@/hooks/use-summarize-session", () => ({
   useSummarizeSession: () => ({ summarize: vi.fn(), isSummarizing: false }),
 }));
@@ -167,12 +170,31 @@ function openDialog(
     loaded?: boolean;
     sessions?: TaskSession[];
     noRepository?: boolean;
+    relatedCandidate?: boolean;
   } = {},
 ) {
   const initial = {
     userSettings: { agentGeneratedTaskTitles: false },
     workspaces: { activeId: "workspace" },
-    kanban: { tasks: options.boardParent ? [parent] : [active], workflowId: "workflow" },
+    kanban: {
+      tasks: [
+        ...(options.boardParent ? [parent] : [active]),
+        ...(options.relatedCandidate
+          ? [
+              {
+                id: "related-candidate",
+                title: "Related candidate",
+                workspaceId: "workspace",
+                workflowId: "workflow",
+                workflowStepId: "step",
+                position: 1,
+                isArchived: false,
+              },
+            ]
+          : []),
+      ],
+      workflowId: "workflow",
+    },
     tasks: {
       activeTaskId: options.boardParent ? "parent" : "active",
       activeSessionId: options.boardParent ? "primary" : "active-session",
@@ -249,6 +271,21 @@ function expectWork() {
 // @covers AC-TASKS-SUBTASK-DIALOG-PARENT-DEFAULTS-001.2
 // @covers AC-TASKS-SUBTASK-DIALOG-PARENT-DEFAULTS-001.5
 describe("selected parent initial defaults", () => {
+  it("submits selected related tasks without changing the parent id", async () => {
+    openDialog({ relatedCandidate: true });
+    enterWork();
+    fireEvent.click(screen.getByTestId("task-create-related-trigger"));
+    fireEvent.click(screen.getByTestId("task-create-related-option-related-candidate"));
+    fireEvent.click(screen.getByRole("button", { name: CREATE_SUBTASK_LABEL }));
+    await waitFor(() =>
+      expect(createTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          parent_id: "parent",
+          related_task_ids: ["related-candidate"],
+        }),
+      ),
+    );
+  });
   it("seeds canonical-only non-active parent and delayed primary without remounting entered work", () => {
     openDialog();
     enterWork();

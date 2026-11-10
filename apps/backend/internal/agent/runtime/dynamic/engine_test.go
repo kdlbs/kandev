@@ -65,6 +65,91 @@ func TestEnginePreferenceKeepsRetryOnCurrentCandidate(t *testing.T) {
 	}
 }
 
+func TestNewEngineUsesCircuitFailureLadderByDefault(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	profile := Profile{Candidates: []Candidate{{ID: "candidate", Enabled: true, BindingKey: "credential:default"}}}
+	failure := &routingerr.Error{Code: routingerr.CodeRateLimited}
+
+	for i, delay := range []time.Duration{time.Minute, 5 * time.Minute} {
+		engine.RecordResourceFailure(profile, "candidate", failure)
+		snapshots := engine.Circuits().Snapshots()
+		if len(snapshots) != 1 || snapshots[0].Failures != i+1 || !snapshots[0].Until.Equal(now.Add(delay)) {
+			t.Fatalf("default engine failure %d: got %+v, want count %d and deadline %v", i+1, snapshots, i+1, now.Add(delay))
+		}
+		now = now.Add(delay)
+	}
+}
+
+func TestKeywordCircuitKeepsLongestDeadlineAcrossFailureOrder(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	resetAt := now.Add(time.Hour)
+	candidate := Candidate{
+		ID: "candidate", Enabled: true, BindingKey: "credential:shared",
+		KeywordContextEnabled: true, KeywordAccountID: "account",
+	}
+	profile := Profile{Candidates: []Candidate{candidate}}
+	failure := func(withReset bool) *routingerr.Error {
+		result := &routingerr.Error{
+			Code: routingerr.CodeRateLimited,
+			Keyword: &routingerr.KeywordDecision{
+				Scope: "account", Action: "try_next", Backoff: 5 * time.Minute,
+			},
+		}
+		if withReset {
+			result.ResetHint = &resetAt
+		}
+		return result
+	}
+	for _, tc := range []struct {
+		name         string
+		firstHasHint bool
+	}{
+		{name: "later hint then no hint", firstHasHint: true},
+		{name: "no hint then later hint", firstHasHint: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := NewEngine(WithClock(func() time.Time { return now }))
+			engine.openCircuitForFailure(profile, candidate.ID, failure(tc.firstHasHint))
+			engine.openCircuitForFailure(profile, candidate.ID, failure(!tc.firstHasHint))
+			if snapshots := engine.Circuits().Snapshots(); len(snapshots) != 1 || !snapshots[0].Until.Equal(resetAt) {
+				t.Fatalf("circuit deadline = %+v, want %v", snapshots, resetAt)
+			}
+		})
+	}
+}
+
+func TestKeywordCircuitFailurePreservesActiveProbeLease(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	candidate := Candidate{
+		ID: "candidate", Enabled: true, BindingKey: "credential:shared",
+		KeywordContextEnabled: true, KeywordAccountID: "account",
+	}
+	profile := Profile{Candidates: []Candidate{candidate}}
+	key := keywordAccountCircuitKey(candidate.KeywordAccountID)
+	engine.Circuits().Open(key, now.Add(-time.Minute), routingerr.CodeRateLimited)
+	lease, ok := engine.Circuits().AcquireProbe(key, time.Minute)
+	if !ok {
+		t.Fatal("could not acquire setup probe lease")
+	}
+	failure := &routingerr.Error{
+		Code: routingerr.CodeRateLimited,
+		Keyword: &routingerr.KeywordDecision{
+			Scope: "account", Action: "try_next", Backoff: 5 * time.Minute,
+		},
+	}
+	engine.openCircuitForFailure(profile, candidate.ID, failure)
+
+	snapshots := engine.Circuits().Snapshots()
+	if len(snapshots) != 1 || !snapshots[0].ProbeUntil.Equal(lease.ExpiresAt) {
+		t.Fatalf("probe lease = %+v, want expiry %v", snapshots, lease.ExpiresAt)
+	}
+	if _, ok := engine.Circuits().AcquireProbe(key, time.Minute); ok {
+		t.Fatal("a second probe acquired the shared circuit before the first lease expired")
+	}
+}
+
 func TestEngineAppliesCandidateErrorActions(t *testing.T) {
 	profile := Profile{
 		ID:      "dynamic-1",
@@ -746,8 +831,12 @@ func TestCircuitProbeLeaseIsExclusive(t *testing.T) {
 	}
 	registry.ReleaseProbe(lease2, false, time.Second)
 	now = now.Add(2 * time.Second)
+	if _, ok := registry.AcquireProbe("provider:claude", time.Minute); ok {
+		t.Fatal("failed probe ignored the default first-rung backoff")
+	}
+	now = now.Add(time.Minute)
 	if _, ok := registry.AcquireProbe("provider:claude", time.Minute); !ok {
-		t.Fatal("probe lease was not released after failure backoff")
+		t.Fatal("probe lease was not released after the default backoff")
 	}
 }
 

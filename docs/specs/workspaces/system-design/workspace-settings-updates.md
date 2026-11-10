@@ -5,6 +5,7 @@ requirements:
   - REQ-WORKSPACES-SETTINGS-UPDATES-001
   - REQ-WORKSPACES-SETTINGS-UPDATES-002
   - REQ-WORKSPACES-SETTINGS-UPDATES-003
+  - REQ-WORKSPACES-REPOSITORY-SAVE-001
 ---
 
 # Workspace settings update system design
@@ -23,6 +24,7 @@ authoritative for their independent contracts.
 | `REQ-WORKSPACES-SETTINGS-UPDATES-001` | Admission and presence; persistence seam; observations; compatibility; verification |
 | `REQ-WORKSPACES-SETTINGS-UPDATES-002` | Current catalogue publication; client compatibility inventory; independent client verification |
 | `REQ-WORKSPACES-SETTINGS-UPDATES-003` | Successful creation publication; creation consumer inventory; creation verification |
+| `REQ-WORKSPACES-REPOSITORY-SAVE-001` | Repository settings acknowledgement reconciliation |
 
 ## Verified baseline path
 
@@ -448,3 +450,44 @@ requirement/design and delivery records carry the change.
 - [Existing task/workflow field-update contract](../../tasks/requirements/task-field-updates.md).
 - [Settings save coordinator](../../../decisions/0046-settings-route-save-coordinator.md).
 - [SQLite transaction entry](../../../decisions/2026-10-05-sqlite-writer-transaction-admission.md).
+
+## Repository settings acknowledgement reconciliation
+
+REQ-WORKSPACES-REPOSITORY-SAVE-001 is owned by the repository lifecycle here;
+[settings manual save](../../ui/requirements/settings-manual-save.md) continues
+to own the reusable coordinator and route guard. The existing POST repository,
+PATCH repository, POST/PUT script and DELETE script actions remain authoritative.
+
+The page captures an immutable submitted repository and accepted baseline. After
+repository creation or update succeeds, settle every admitted script mutation,
+retaining each fulfilled response or deletion separately. Build the next baseline
+from accepted repository metadata, previous scripts and fulfilled operations;
+failed script operations never enter it. Match acknowledgements by submitted
+script identity, never by a filtered response array index. Reconcile a separate
+complete submitted draft projection so failed temporary scripts and newer edits
+remain visible while successful identities become canonical. Newer removals stay
+removed; an acknowledged create removed during Save remains in the baseline so
+retry can delete it. Canonical repository identity also reaches unsaved scripts.
+
+Publish both projections before rethrowing the first failure in stable submission
+order. Promise settlement waits for every sibling, so the existing coordinator
+cannot release Save for retry while an earlier script request remains pending.
+Retries compare scripts with the accepted baseline and submit only missing,
+changed or deleted rows. A per-repository in-flight promise also joins overlapping
+calls at the page handler boundary. Repository creation failure admits no script
+requests; successful creation with failed scripts still becomes one established
+repository. Reset restores this accepted baseline locally through the contributor.
+
+The guarantee covers acknowledged operations in the mounted page. Backend APIs,
+schema, cache ownership, secret policy and ambiguous transport semantics stay unchanged.
+
+Desktop and phone keep the existing repository card and fixed shared Save surface,
+settings-content scroll owner, safe-area handling and touch primitives. The shipped
+phone repository settings page is the exemplar; this repair changes state only.
+Focused real-hook/action/coordinator tests own partial and ordinary outcomes,
+late sibling settlement, newer edits/removals, deletion and Reset. Managed desktop
+and Pixel 5 browser tests use disposable repositories, reject one script before
+forwarding it, persist the remaining operations through the real backend, retry
+and reload, then verify canonical identities and exact script inventory.
+
+[Repository Save implementation plan](../../../plans/repository-save-acknowledgements/plan.md).

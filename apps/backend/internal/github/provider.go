@@ -40,6 +40,15 @@ func wireRateTracker(client Client, tracker *RateTracker) {
 	}
 }
 
+func wireRateAdmission(client Client, admission *RateAdmission) {
+	switch c := client.(type) {
+	case *PATClient:
+		c.withRateAdmission(admission)
+	case *GHClient:
+		c.withRateAdmission(admission)
+	}
+}
+
 // Provide creates the full GitHub integration stack: store, client, and service.
 // Returns the service, a cleanup function, and any error.
 func Provide(
@@ -73,4 +82,18 @@ func Provide(
 		return nil
 	}
 	return svc, cleanup, nil
+}
+
+func clientRateTracker(client Client) *RateTracker {
+	switch c := client.(type) {
+	case *PATClient:
+		if c != nil {
+			return c.rateTracker
+		}
+	case *GHClient:
+		if c != nil {
+			return c.rateTracker
+		}
+	}
+	return nil
 }

@@ -21,12 +21,31 @@ This design pairs with the existing [task search requirement](../requirements/ta
 | .1 through .5 | Existing navigation and transport |
 | .6, .7 | Repository scopes and result contracts |
 | .8, .9 | Exact Git inventory and search consumption |
+| .10 | Browser retry recovery |
 
 ## Existing navigation and transport
 
 The browser's `apps/web/lib/ws/workspace-files.ts` sends `workspace.files.search` and `workspace.content.search`. `WorkspaceFileHandlers.wsSearchFiles` and `wsSearchContent` in `internal/agent/handlers/workspace_file_handlers.go` authorize session access and resolve execution before delegating to the agentctl client. The client in `internal/agent/runtime/agentctl/client_files.go` forwards queries over HTTP; the existing command palette and `use-workspace-content-search.ts` consume the response. Shortcut arbitration, mode switching, route gating, cancellation and stale-result handling remain in their existing owners. This inventory correction changes no browser code or interaction contract.
 
 `api.Server` registers aggregate GET `/api/v1/workspace/search` and `/api/v1/workspace/content-search`. The first returns the legacy `files` array plus structured `results`; the second returns typed content matches. Neither aggregate endpoint gains a repository selector. Selected reads use the existing GET `/api/v1/workspace/file/content` with URL-encoded `repo` and `path`, through `Manager.JoinRepoPath` and `WorkspaceTracker.GetFileContent`.
+
+## Browser retry recovery
+
+`useWorkspaceContentSearch` debounces for 250 ms, then makes eight attempts
+500 ms apart through the real `searchWorkspaceContent` WebSocket wrapper with
+`limit_per_repo: 50`. Each successful response clears the previous attempt's
+error, including an empty response. After polling, an empty accumulated result
+set fails only when the final attempt failed. A successful attempt followed by
+a terminal failure is not proof of a completed empty search. Any collected
+matches still survive later failures under the existing partial-result policy.
+
+Keep incremental union/dedup by raw repository, path, line and column. Query,
+session, inventory and enabled-state invalidation retain the existing effect
+cancellation guard. No cache, backend retry, transport shape or persistence
+change is needed. `CommandPanel` passes the hook state to
+`WorkspaceContentSearch`, which already renders translated no-match and failure
+rows. Desktop and phone use the same state logic and unchanged presentation;
+this state-only correction requires no new viewport-specific interaction.
 
 ## Repository scopes and result contracts
 
@@ -73,11 +92,12 @@ Search and selected reads must leave Git HEAD, refs, index bytes, repository con
 
 Real Git fixtures must drive production inventory, background cache refresh, cached filename search and content search. Registered HTTP tests exercise both aggregate responses followed by selected reads, using distinct content in independent repositories sharing an exact path. Permanent coverage includes native supported names, quoting preferences, tracked tags/modes/stages and eligibility/exclusion controls. The [work order](../../../plans/exact-workspace-search-filenames/task-01-preserve-exact-search-paths.md) defines exact checks.
 
-This is backend result-data correction. Desktop and phone consumers receive the same path strings and repository fields. Layout, touch, scrolling, navigation, shortcuts, localization and viewport behavior do not change; no rendered preview, browser/build or new mobile E2E is required. Existing UI feature limitations are outside this inventory contract.
+The exact-filename inventory correction is backend result-data correction. Desktop and phone consumers receive the same path strings and repository fields. Layout, touch, scrolling, navigation, shortcuts, localization and viewport behavior do not change; no rendered preview, browser/build or new mobile E2E is required for inventory handling. Browser retry recovery is verified through the real hook, WS wrapper and consumer with only request transport mocked. Existing UI feature limitations are outside this inventory contract.
 
 ## Related delivery
 
 - [Exact filenames plan](../../../plans/exact-workspace-search-filenames/plan.md)
+- [Content-search retry recovery plan](../../../plans/workspace-content-search-recovery/plan.md)
 - [Completed root/submodule search correction](../../../plans/submodule-workspace-search/plan.md)
 - [Completed match reveal work](../../../plans/content-search-match-reveal/plan.md)
 - [Classified Git execution](../../platform/system-design/git-subprocess-execution.md)

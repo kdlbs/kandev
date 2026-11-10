@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useRef, useState, type ReactNode } from "react";
+import { memo, useRef, useState, type ReactNode, type Ref } from "react";
 import {
   IconListCheck,
   IconFile,
@@ -53,6 +53,7 @@ type ContextChipProps = {
   dataPath?: string;
   dataIsDirectory?: boolean;
   onClick?: () => void;
+  triggerRef?: Ref<HTMLButtonElement>;
   onUnpin?: () => void;
   onRemove?: () => void;
 };
@@ -69,6 +70,7 @@ export const ContextChip = memo(function ContextChip({
   dataPath,
   dataIsDirectory,
   onClick,
+  triggerRef,
   onUnpin,
   onRemove,
 }: ContextChipProps) {
@@ -136,6 +138,7 @@ export const ContextChip = memo(function ContextChip({
         {(open, usesTouchDrawer) => (
           <button
             type="button"
+            ref={triggerRef}
             onClick={usesTouchDrawer ? undefined : onClick}
             aria-haspopup="dialog"
             aria-expanded={open}
@@ -149,6 +152,7 @@ export const ContextChip = memo(function ContextChip({
   } else if (onClick) {
     labelElement = (
       <button
+        ref={triggerRef}
         className={`flex ${labelSizingClass} min-w-0 flex-1 items-center gap-1 text-left`}
         onClick={onClick}
       >

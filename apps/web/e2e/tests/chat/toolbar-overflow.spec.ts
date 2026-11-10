@@ -103,6 +103,7 @@ test.describe("Toolbar overflow menu", () => {
     // Collapsible items should disappear and expand toggle should appear
     await expect(overflowBtn).toBeVisible({ timeout: 5_000 });
     await expect(modelItem).not.toBeVisible();
+    await expect(mcpItem).toBeVisible();
 
     // Context badge should be hidden when collapsed to avoid clipping
     await expect(contextBadge).not.toBeVisible();

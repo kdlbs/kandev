@@ -82,6 +82,7 @@ type InstanceListProps = {
   onDeleteCancel: (instanceId: string) => void;
   onDeleteConfirm: () => void;
   onSaved: () => void;
+  onPersisted: () => Promise<void>;
   onCancel: () => void;
   onDirtyChange: (isDirty: boolean) => void;
 };
@@ -97,6 +98,7 @@ function InstanceList({
   onDeleteCancel,
   onDeleteConfirm,
   onSaved,
+  onPersisted,
   onCancel,
   onDirtyChange,
 }: InstanceListProps) {
@@ -118,6 +120,7 @@ function InstanceList({
             instance={instance}
             idPrefix="sentry-edit"
             onSaved={onSaved}
+            onPersisted={onPersisted}
             onCancel={onCancel}
             onDirtyChange={onDirtyChange}
           />
@@ -205,23 +208,35 @@ function useSentryDeleteConfirmation(
   return { confirmingDeleteId, startDelete, cancelDelete, cancelDeleteFor, confirmDelete };
 }
 
+function useInstanceFormOpening() {
+  const current = useRef<EditMode>({ kind: "none" });
+  const [mode, setMode] = useState(current.current);
+  const [formDirty, setFormDirty] = useState(false);
+  const openForm = useCallback((next: EditMode) => {
+    current.current = next;
+    setMode(next);
+    setFormDirty(false);
+  }, []);
+  const closeForm = useCallback(() => {
+    // Every opening has its own identity, including reopening the same instance.
+    if (current.current !== mode) return;
+    openForm({ kind: "none" });
+  }, [mode, openForm]);
+  const onDirtyChange = useCallback(
+    (dirty: boolean) => {
+      if (current.current === mode) setFormDirty(dirty);
+    },
+    [mode],
+  );
+  return { mode, formDirty, openForm, closeForm, onDirtyChange };
+}
+
 /** Sentry connection card: title/enable toggle plus the list of configured Sentry instances. */
 export function SentryConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   const { isFinePointer } = useResponsiveBreakpoint();
   const { instances, loading, reload } = useInstanceList(workspaceId);
-  const [mode, setMode] = useState<EditMode>({ kind: "none" });
-  const [formDirty, setFormDirty] = useState(false);
-
-  const closeForm = useCallback(() => {
-    setMode({ kind: "none" });
-    setFormDirty(false);
-  }, []);
-  const handleSaved = useCallback(async () => {
-    setMode({ kind: "none" });
-    setFormDirty(false);
-    await reload();
-  }, [reload]);
+  const { mode, formDirty, openForm, closeForm, onDirtyChange } = useInstanceFormOpening();
 
   const handleDelete = useDeleteInstance(workspaceId, reload);
   const { confirmingDeleteId, startDelete, cancelDelete, cancelDeleteFor, confirmDelete } =
@@ -260,15 +275,15 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
               confirmingDeleteId={confirmingDeleteId}
               onEdit={(id) => {
                 cancelDelete();
-                setFormDirty(false);
-                setMode({ kind: "edit", id });
+                openForm({ kind: "edit", id });
               }}
               onDelete={startDelete}
               onDeleteCancel={cancelDeleteFor}
               onDeleteConfirm={confirmDelete}
-              onSaved={handleSaved}
+              onSaved={closeForm}
+              onPersisted={reload}
               onCancel={closeForm}
-              onDirtyChange={setFormDirty}
+              onDirtyChange={onDirtyChange}
             />
           )}
           {mode.kind === "add" && (
@@ -276,9 +291,10 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
               workspaceId={workspaceId}
               instance={null}
               idPrefix="sentry-add"
-              onSaved={handleSaved}
+              onSaved={closeForm}
+              onPersisted={reload}
               onCancel={closeForm}
-              onDirtyChange={setFormDirty}
+              onDirtyChange={onDirtyChange}
             />
           )}
           {canAddInstance && (
@@ -286,8 +302,7 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
               type="button"
               variant="outline"
               onClick={() => {
-                setFormDirty(false);
-                setMode({ kind: "add" });
+                openForm({ kind: "add" });
               }}
               className="cursor-pointer gap-1"
               data-testid="sentry-add-instance-button"

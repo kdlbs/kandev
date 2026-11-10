@@ -33,41 +33,12 @@ func toWorkloadObservation(w *models.BackgroundWorkload) streams.WorkloadRunObse
 	if state == "" {
 		state = streams.RunStateUnknown
 	}
-	caps := streams.WorkloadCapabilities{
-		Discovery:         "events_only",
-		Output:            "snapshot",
-		Transcript:        w.Kind == string(streams.WorkloadKindSubagent),
-		Parentage:         parentID != "",
-		ReasoningSummary:  false,
-		AttributableUsage: w.Kind == string(streams.WorkloadKindSubagent),
-		Actions: map[streams.WorkloadActionKind]streams.ActionCapability{
-			streams.WorkloadActionStop: {
-				Supported: true,
-				Available: state == streams.RunStateRunning || state == streams.RunStateWaiting,
-			},
-			streams.WorkloadActionInterrupt: {
-				Supported: w.Kind == string(streams.WorkloadKindSubagent),
-				Available: (state == streams.RunStateRunning || state == streams.RunStateWaiting) && w.Kind == string(streams.WorkloadKindSubagent),
-			},
-			streams.WorkloadActionWriteInput: {
-				Supported: false,
-				Available: false,
-				Reason:    string(streams.ActionReasonUnsupported),
-			},
-			streams.WorkloadActionCloseInput: {
-				Supported: false,
-				Available: false,
-				Reason:    string(streams.ActionReasonUnsupported),
-			},
-		},
-	}
-	if w.Kind == string(streams.WorkloadKindShell) {
-		caps.Actions[streams.WorkloadActionInterrupt] = streams.ActionCapability{
-			Supported: false,
-			Available: false,
-			Reason:    string(streams.ActionReasonUnsupported),
-		}
-	}
+	// Only persisted adapter evidence is authoritative. A row without a
+	// declaration (including rows written before capabilities were retained)
+	// keeps the zero value: viewers treat absent evidence as unavailable rather
+	// than inventing controls or a live output stream.
+	capabilities, _ := streams.DecodeWorkloadCapabilities(w.Capabilities)
+	capabilities = streams.ApplyWorkloadActionAvailability(capabilities, state)
 	return streams.WorkloadRunObservation{
 		SessionID:       w.SessionID,
 		WorkID:          w.ID,
@@ -79,7 +50,7 @@ func toWorkloadObservation(w *models.BackgroundWorkload) streams.WorkloadRunObse
 		SourceMessageID: w.SourceMessageID,
 		SourceCallID:    w.SourceCallID,
 		ExitCode:        w.ExitCode,
-		Capabilities:    caps,
+		Capabilities:    capabilities,
 		Output:          w.Output,
 		OutputTruncated: w.OutputTruncated,
 		OutputOffset:    w.OutputOffset,

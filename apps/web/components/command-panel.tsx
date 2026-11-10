@@ -15,7 +15,10 @@ import {
   type CommandPanelScopeMode,
 } from "@/components/command-panel-scope-switcher";
 
-import type { Task } from "@/lib/types/http";
+import type {
+  ConversationSearchState,
+  ConversationTask as Task,
+} from "@/lib/types/conversation-search";
 import type { FileSearchResult } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
@@ -66,6 +69,7 @@ function useCommandPanelState(mode: CommandPanelMode, setMode: (mode: CommandPan
   const [search, setSearch] = useState("");
   const [inputCommand, setInputCommand] = useState<CommandItemType | null>(null);
   const [taskResults, setTaskResults] = useState<Task[]>([]);
+  const [conversationState, setConversationState] = useState<ConversationSearchState>("ready");
   const [isSearching, setIsSearching] = useState(false);
   const [fileResults, setFileResults] = useState<FileSearchResult[]>([]);
   const [isSearchingFiles, setIsSearchingFiles] = useState(false);
@@ -79,6 +83,8 @@ function useCommandPanelState(mode: CommandPanelMode, setMode: (mode: CommandPan
     setInputCommand,
     taskResults,
     setTaskResults,
+    conversationState,
+    setConversationState,
     isSearching,
     setIsSearching,
     fileResults,
@@ -165,6 +171,7 @@ type CommandPanelEffectsOptions = {
   open: boolean;
   state: ReturnType<typeof useCommandPanelState>;
   workspaceId: string | null;
+  workflowId: string | null;
   activeSessionId: string | null;
   inventoryRevision: string;
   workspaceSearchAvailable: boolean;
@@ -177,6 +184,7 @@ function useCommandPanelEffects(options: CommandPanelEffectsOptions) {
     open,
     state,
     workspaceId,
+    workflowId,
     activeSessionId,
     inventoryRevision,
     workspaceSearchAvailable,
@@ -228,10 +236,12 @@ function useCommandPanelEffects(options: CommandPanelEffectsOptions) {
   }, [open, setMode, setSearch, setInputCommand, setTaskResults, setFileResults, setSelectedValue]);
 
   useInlineTaskSearchEffect({
+    setConversationState: state.setConversationState,
     mode,
     search,
     open,
     workspaceId,
+    workflowId,
     steps,
     setTaskResults,
     setIsSearching,
@@ -455,7 +465,7 @@ function useCommandPanelLiveTasks() {
     if (kanbanWorkflowId && activeLastStepId) {
       lastStepIdByWorkflowId.set(kanbanWorkflowId, activeLastStepId);
     }
-    return { tasks, lastStepIdByWorkflowId, steps: kanbanSteps };
+    return { tasks, lastStepIdByWorkflowId, steps: kanbanSteps, workflowId: kanbanWorkflowId };
   }, [kanbanSnapshots, kanbanSteps, kanbanTasks, kanbanWorkflowId]);
 }
 
@@ -473,6 +483,7 @@ export function CommandPanel() {
     tasks: liveTasksById,
     lastStepIdByWorkflowId,
     steps: kanbanSteps,
+    workflowId: kanbanWorkflowId,
   } = useCommandPanelLiveTasks();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -518,6 +529,7 @@ export function CommandPanel() {
     open,
     state,
     workspaceId,
+    workflowId: kanbanWorkflowId,
     activeSessionId,
     inventoryRevision,
     workspaceSearchAvailable,
@@ -606,6 +618,7 @@ export function CommandPanel() {
         handlers.handleSelect(command);
       }}
       isSearching={mode === MODE_COMMAND_CHILDREN ? false : isSearching}
+      conversationState={state.conversationState}
       taskResults={mode === MODE_COMMAND_CHILDREN ? [] : taskResults}
       stepMap={handlers.stepMap}
       repoMap={handlers.repoMap}

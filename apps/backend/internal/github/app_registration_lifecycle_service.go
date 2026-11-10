@@ -74,6 +74,7 @@ type AppRegistrationCatalog struct {
 }
 
 type AppRegistrationManifestStartRequest struct {
+	GitHubHost    string                    `json:"github_host"`
 	WorkspaceID   string                    `json:"workspace_id"`
 	DisplayName   string                    `json:"display_name"`
 	OwnerType     ManifestOwnerType         `json:"owner_type"`
@@ -105,6 +106,7 @@ type AppRegistrationManifestResult struct {
 }
 
 type AppRegistrationImportPrepareRequest struct {
+	GitHubHost    string `json:"github_host"`
 	WorkspaceID   string `json:"workspace_id"`
 	PublicBaseURL string `json:"public_base_url"`
 }
@@ -228,8 +230,13 @@ func (s *AppRegistrationLifecycleService) StartManifest(
 	if err != nil {
 		return AppRegistrationManifestStart{}, err
 	}
+	host, err := connectionHost(request.GitHubHost)
+	if err != nil {
+		return AppRegistrationManifestStart{}, err
+	}
 	registrationID := uuid.NewString()
 	submission, err := BuildAppRegistrationManifest(AppRegistrationManifestRequest{
+		GitHubHost:     host.String(),
 		RegistrationID: registrationID, OwnerType: request.OwnerType, OwnerLogin: request.OwnerLogin,
 		PublicBaseURL: baseURL, Visibility: request.Visibility,
 	})
@@ -243,7 +250,8 @@ func (s *AppRegistrationLifecycleService) StartManifest(
 	now := s.now().UTC()
 	digest := sha256.Sum256([]byte(state))
 	flow := &DeploymentAppRegistrationFlow{
-		StateHash: stateDigestString(digest), RegistrationID: registrationID,
+		GitHubHost: host.String(),
+		StateHash:  stateDigestString(digest), RegistrationID: registrationID,
 		WorkspaceID: request.WorkspaceID, UserID: userID, OperatorUserID: userID,
 		OwnerType: deploymentOwnerType(request.OwnerType), OwnerLogin: request.OwnerLogin,
 		DisplayName: request.DisplayName, Visibility: normalizedAppVisibility(request.Visibility),
@@ -293,7 +301,15 @@ func (s *AppRegistrationLifecycleService) CompleteManifest(
 	if s.converter == nil {
 		return AppRegistrationManifestResult{}, errors.New("GitHub App manifest conversion is unavailable")
 	}
-	converted, err := s.converter.Convert(ctx, strings.TrimSpace(callback.Code))
+	converter := s.converter
+	if _, defaultConverter := converter.(*ManifestConversionClient); defaultConverter {
+		host, err := connectionHost(flow.GitHubHost)
+		if err != nil {
+			return AppRegistrationManifestResult{}, err
+		}
+		converter = NewManifestConversionClientForHost(host)
+	}
+	converted, err := converter.Convert(ctx, strings.TrimSpace(callback.Code))
 	if err != nil {
 		return AppRegistrationManifestResult{}, err
 	}
@@ -355,7 +371,7 @@ func registrationFromManifestFlow(
 ) *AppRegistration {
 	return &AppRegistration{
 		ID: flow.RegistrationID, Source: AppRegistrationSourceManaged,
-		DisplayName: flow.DisplayName, GitHubHost: defaultGitHubAppHost,
+		DisplayName: flow.DisplayName, GitHubHost: defaultAuthFlowHost(flow.GitHubHost),
 		AppID: converted.AppID, ClientID: converted.ClientID, Slug: converted.Slug,
 		OwnerLogin: converted.Owner.Login, OwnerType: deploymentOwnerTypeFromGitHub(converted.Owner.Type),
 		Visibility: flow.Visibility, PublicBaseURL: flow.PublicBaseURL,
@@ -390,11 +406,17 @@ func (s *AppRegistrationLifecycleService) Import(
 		return nil, err
 	}
 	request.PublicBaseURL = baseURL
-	if _, err := s.store.ConsumeAppRegistrationImportPreparation(
+	preparation, err := s.store.ConsumeAppRegistrationImportPreparation(
 		ctx, request.RegistrationID, request.WorkspaceID, userID, baseURL, s.now().UTC(),
-	); err != nil {
+	)
+	if err != nil {
 		return nil, err
 	}
+	host, err := connectionHost(request.GitHubHost)
+	if err != nil || host.String() != defaultAuthFlowHost(preparation.GitHubHost) {
+		return nil, ErrAppRegistrationImportPreparationUnavailable
+	}
+	request.GitHubHost = host.String()
 	unlock := s.store.lockAppRegistrationLifecycle(request.RegistrationID)
 	defer unlock()
 	registration, err := s.importer.Import(ctx, request)
@@ -431,9 +453,14 @@ func (s *AppRegistrationLifecycleService) PrepareImport(
 	if err != nil {
 		return AppRegistrationImportPreparationResult{}, err
 	}
+	host, err := connectionHost(request.GitHubHost)
+	if err != nil {
+		return AppRegistrationImportPreparationResult{}, err
+	}
 	registrationID := uuid.NewString()
 	now := s.now().UTC()
 	preparation := &AppRegistrationImportPreparation{
+		GitHubHost:     host.String(),
 		RegistrationID: registrationID, WorkspaceID: request.WorkspaceID, UserID: userID,
 		PublicBaseURL: baseURL, ExpiresAt: now.Add(appRegistrationImportPreparationTTL), CreatedAt: now,
 	}

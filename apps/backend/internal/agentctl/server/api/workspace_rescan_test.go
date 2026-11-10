@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -20,6 +21,15 @@ import (
 // reconciles trackers against current on-disk state.
 func TestHandleRescanWorkspace_AcceptsEmptyBody(t *testing.T) {
 	s := newTestServer(t)
+	// An empty rescan reconciles the root scope and can start its tracker.
+	// Stop the manager so the tracker goroutines cannot outlive the test.
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.procMgr.Stop(ctx); err != nil {
+			t.Errorf("stop manager: %v", err)
+		}
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspace/rescan", nil)
 	w := httptest.NewRecorder()

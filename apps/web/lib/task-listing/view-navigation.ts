@@ -26,6 +26,7 @@ const TASKS_PATH = "/tasks";
 const VIEW_PAGE: Record<TaskListingView, TaskListingPage> = {
   kanban: "kanban",
   pipeline: "kanban",
+  graph: "kanban",
   list: "tasks",
   threads: "threads",
 };
@@ -57,7 +58,7 @@ export function resolveTaskListingNavigation({
 }: TaskListingNavigationInput): TaskListingNavigation | null {
   const parsed = parseTaskListingView(JSON.stringify(view));
   if (!parsed) return null;
-  if (parsed === "pipeline" && !allowPipeline) return null;
+  if ((parsed === "pipeline" || parsed === "graph") && !allowPipeline) return null;
   return {
     view: parsed,
     href: VIEW_PAGE[parsed] === currentPage ? null : hrefFor(parsed, workspaceId, workflowId),

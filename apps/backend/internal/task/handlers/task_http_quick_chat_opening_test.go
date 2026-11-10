@@ -47,6 +47,7 @@ func quickChatRequestContext(t *testing.T, path, body string) (*gin.Context, *ht
 
 func TestHTTPQuickChatOpeningPayload(t *testing.T) {
 	h, orch, repo := newQuickChatHandlerForTest(t)
+	orch.startCreatedCalled = make(chan struct{}, 1)
 	c, rec := quickChatRequestContext(t, "/workspaces/ws-1/quick-chat", `{
 		"agent_profile_id":"profile-1",
 		"prompt":"Review this trace",
@@ -58,10 +59,68 @@ func TestHTTPQuickChatOpeningPayload(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.NotNil(t, repo.task)
 	assert.Equal(t, "Review this trace", repo.task.Description)
-	require.Len(t, orch.requests, 1)
-	assert.Equal(t, orchestrator.IntentStart, orch.requests[0].Intent)
-	assert.Equal(t, "Review this trace", orch.requests[0].Prompt)
-	assert.Equal(t, []v1.MessageAttachment{openingAttachment}, orch.requests[0].Attachments)
+	select {
+	case <-orch.startCreatedCalled:
+	case <-time.After(time.Second):
+		t.Fatal("Quick Chat did not dispatch its prompt-bearing start")
+	}
+	orch.mu.Lock()
+	defer orch.mu.Unlock()
+	require.Len(t, orch.requests, 2)
+	prepare, start := orch.requests[0], orch.requests[1]
+	assert.Equal(t, orchestrator.IntentPrepare, prepare.Intent)
+	assert.True(t, prepare.DeferredStart)
+	assert.False(t, prepare.LaunchWorkspace)
+	assert.Equal(t, []v1.MessageAttachment{openingAttachment}, prepare.Attachments)
+	require.NotNil(t, prepare.InitialPromptSubmission)
+	assert.Equal(t, "Review this trace", prepare.InitialPromptSubmission.Content)
+	assert.Equal(t, 1, prepare.InitialPromptSubmission.InlineAttachmentCount)
+	assert.Equal(t, orchestrator.IntentStartCreated, start.Intent)
+	assert.Equal(t, "Review this trace", start.Prompt)
+	assert.Equal(t, []v1.MessageAttachment{openingAttachment}, start.Attachments)
+	assert.False(t, start.NoInitialPrompt)
+	assert.True(t, start.QuickChatInitialStart)
+}
+
+func TestHTTPStartQuickChatReturnsDefinitiveMissingRepositoryRejection(t *testing.T) {
+	h, orch, repo := newQuickChatHandlerForTest(t)
+	repo.repositoryErr = repository.ErrRepositoryNotFound
+	c, rec := quickChatRequestContext(
+		t,
+		"/workspaces/ws-1/quick-chat",
+		`{"agent_profile_id":"profile-1","repositories":[{"repository_id":"deleted-repo","base_branch":"main"}]}`,
+	)
+
+	h.httpStartQuickChat(c)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `"error_code":"quick_chat_creation_rejected"`)
+	assert.Equal(t, 0, repo.createTaskCalls, "invalid repository reference must fail before allocation")
+	assert.Empty(t, orch.requests, "invalid repository reference must not launch a session")
+}
+
+func TestQuickChatCreateHTTPStatusRequiresTypedPreAllocationError(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantKnown  bool
+	}{
+		{name: "missing reference", err: &service.PreAllocationTaskCreateError{Cause: service.ErrTaskReferenceNotFound}, wantStatus: http.StatusNotFound, wantKnown: true},
+		{name: "invalid repository set", err: &service.PreAllocationTaskCreateError{Cause: service.ErrInvalidRepositorySet}, wantStatus: http.StatusBadRequest, wantKnown: true},
+		{name: "untyped validation text", err: errors.New("invalid repository after partial creation")},
+		{name: "typed error without allocation evidence", err: service.ErrTaskReferenceNotFound},
+		{name: "unavailable resolver", err: &service.PreAllocationTaskCreateError{Cause: service.NewRepositorySelectionError(service.RepositorySelectionErrorUnavailable, nil)}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			status, known := quickChatCreateHTTPStatus(test.err)
+			assert.Equal(t, test.wantKnown, known)
+			if test.wantKnown {
+				assert.Equal(t, test.wantStatus, status)
+			}
+		})
+	}
 }
 
 func TestHTTPConfigChatOpeningPayload(t *testing.T) {

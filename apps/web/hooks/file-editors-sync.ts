@@ -117,9 +117,12 @@ function publishWorkspaceContent(
 ) {
   const latest = readCurrent();
   if (!latest) return;
+  const workspaceSnapshot = { content: response.content, hash: remoteHash };
   if (latest.isDirty) {
     if (response.content === latest.content) {
       updateFileState(fileKey, {
+        workspaceSnapshot,
+        acceptedWorkspaceSnapshot: workspaceSnapshot,
         resolvedPath: response.resolved_path,
         originalContent: response.content,
         originalHash: remoteHash,
@@ -138,6 +141,7 @@ function publishWorkspaceContent(
     )
       return;
     updateFileState(fileKey, {
+      workspaceSnapshot,
       resolvedPath: response.resolved_path,
       hasRemoteUpdate: true,
       remoteContent: response.content,
@@ -156,6 +160,8 @@ function publishWorkspaceContent(
   }
 
   updateFileState(fileKey, {
+    workspaceSnapshot,
+    acceptedWorkspaceSnapshot: workspaceSnapshot,
     resolvedPath: response.resolved_path,
     content: response.content,
     originalContent: response.content,

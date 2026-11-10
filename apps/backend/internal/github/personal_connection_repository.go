@@ -62,11 +62,29 @@ func (r *StorePersonalConnectionRepository) GetPersonalTokens(
 	if connection == nil {
 		return GitHubOAuthTokens{}, ErrGitHubPersonalRequired
 	}
-	access, err := r.secrets.Reveal(ctx, UserAccessTokenSecretKey(workspaceID, userID))
+	return r.GetPersonalTokensForConnection(ctx, connection)
+}
+
+func (r *StorePersonalConnectionRepository) GetPersonalTokensForConnection(ctx context.Context, connection *UserConnection) (GitHubOAuthTokens, error) {
+	if connection == nil {
+		return GitHubOAuthTokens{}, ErrGitHubPersonalRequired
+	}
+	current, err := r.store.GetUserConnection(ctx, connection.WorkspaceID, connection.UserID)
 	if err != nil {
 		return GitHubOAuthTokens{}, err
 	}
-	refresh, _, err := revealOptionalSecret(ctx, r.secrets, UserRefreshTokenSecretKey(workspaceID, userID))
+	if !sameUserConnectionVersion(current, connection) {
+		return GitHubOAuthTokens{}, ErrPersonalConnectionStale
+	}
+	accessKey, refreshKey, err := r.personalSecretKeys(ctx, connection)
+	if err != nil {
+		return GitHubOAuthTokens{}, err
+	}
+	access, err := r.secrets.Reveal(ctx, accessKey)
+	if err != nil {
+		return GitHubOAuthTokens{}, err
+	}
+	refresh, _, err := revealOptionalSecret(ctx, r.secrets, refreshKey)
 	if err != nil {
 		return GitHubOAuthTokens{}, err
 	}
@@ -98,7 +116,7 @@ func (r *StorePersonalConnectionRepository) replacePersonalConnectionLocked(
 	tokens GitHubOAuthTokens,
 	expectedGeneration int64,
 ) error {
-	if strings.TrimSpace(tokens.AccessToken) == "" || strings.TrimSpace(tokens.RefreshToken) == "" {
+	if strings.TrimSpace(tokens.AccessToken) == "" {
 		return ErrPersonalTokenInvalid
 	}
 	oldConnection, err := r.store.GetUserConnection(ctx, connection.WorkspaceID, connection.UserID)
@@ -113,8 +131,10 @@ func (r *StorePersonalConnectionRepository) replacePersonalConnectionLocked(
 		connection.CredentialGeneration != expectedGeneration+1 {
 		return ErrPersonalConnectionStale
 	}
-	accessKey := UserAccessTokenSecretKey(connection.WorkspaceID, connection.UserID)
-	refreshKey := UserRefreshTokenSecretKey(connection.WorkspaceID, connection.UserID)
+	accessKey, refreshKey, err := r.personalSecretKeys(ctx, connection)
+	if err != nil {
+		return err
+	}
 	oldAccess, hadAccess, err := revealOptionalSecret(ctx, r.secrets, accessKey)
 	if err != nil {
 		return err
@@ -126,7 +146,7 @@ func (r *StorePersonalConnectionRepository) replacePersonalConnectionLocked(
 	if err := r.secrets.Set(ctx, accessKey, personalAccessTokenSecretName, tokens.AccessToken); err != nil {
 		return err
 	}
-	if err := r.secrets.Set(ctx, refreshKey, personalRefreshTokenSecretName, tokens.RefreshToken); err != nil {
+	if err := r.storeRefreshSecret(ctx, refreshKey, tokens.RefreshToken); err != nil {
 		return errors.Join(err, r.restoreSecret(ctx, accessKey, personalAccessTokenSecretName, oldAccess, hadAccess))
 	}
 	if err := r.store.UpsertUserConnection(ctx, connection); err != nil {
@@ -227,8 +247,14 @@ func (r *StorePersonalConnectionRepository) revokePersonalConnectionLocked(
 	connection *UserConnection,
 	workspaceID, userID string,
 ) error {
-	accessKey := UserAccessTokenSecretKey(workspaceID, userID)
-	refreshKey := UserRefreshTokenSecretKey(workspaceID, userID)
+	accessKey, refreshKey := UserAccessTokenSecretKey(workspaceID, userID), UserRefreshTokenSecretKey(workspaceID, userID)
+	if connection != nil {
+		var err error
+		accessKey, refreshKey, err = r.personalSecretKeys(ctx, connection)
+		if err != nil {
+			return err
+		}
+	}
 	oldAccess, hadAccess, err := revealOptionalSecret(ctx, r.secrets, accessKey)
 	if err != nil {
 		return err
@@ -255,6 +281,7 @@ func (r *StorePersonalConnectionRepository) revokePersonalConnectionLocked(
 }
 
 type personalConnectionSnapshot struct {
+	accessKey, refreshKey string
 	connection            *UserConnection
 	access, refresh       string
 	hadAccess, hadRefresh bool
@@ -313,20 +340,25 @@ func (r *StorePersonalConnectionRepository) loadWorkspacePersonalSnapshots(
 ) ([]personalConnectionSnapshot, error) {
 	snapshots := make([]personalConnectionSnapshot, 0, len(connections))
 	for _, connection := range connections {
+		accessKey, refreshKey, err := r.personalSecretKeys(ctx, connection)
+		if err != nil {
+			return nil, err
+		}
 		access, hadAccess, err := revealOptionalSecret(
-			ctx, r.secrets, UserAccessTokenSecretKey(connection.WorkspaceID, connection.UserID),
+			ctx, r.secrets, accessKey,
 		)
 		if err != nil {
 			return nil, err
 		}
 		refresh, hadRefresh, err := revealOptionalSecret(
-			ctx, r.secrets, UserRefreshTokenSecretKey(connection.WorkspaceID, connection.UserID),
+			ctx, r.secrets, refreshKey,
 		)
 		if err != nil {
 			return nil, err
 		}
 		snapshots = append(snapshots, personalConnectionSnapshot{
 			connection: connection, access: access, refresh: refresh,
+			accessKey: accessKey, refreshKey: refreshKey,
 			hadAccess: hadAccess, hadRefresh: hadRefresh,
 		})
 	}
@@ -338,11 +370,10 @@ func (r *StorePersonalConnectionRepository) deleteWorkspacePersonalSecrets(
 	snapshots []personalConnectionSnapshot,
 ) error {
 	for _, snapshot := range snapshots {
-		workspaceID, userID := snapshot.connection.WorkspaceID, snapshot.connection.UserID
-		if err := deleteOptionalSecret(ctx, r.secrets, UserAccessTokenSecretKey(workspaceID, userID)); err != nil {
+		if err := deleteOptionalSecret(ctx, r.secrets, snapshot.accessKey); err != nil {
 			return err
 		}
-		if err := deleteOptionalSecret(ctx, r.secrets, UserRefreshTokenSecretKey(workspaceID, userID)); err != nil {
+		if err := deleteOptionalSecret(ctx, r.secrets, snapshot.refreshKey); err != nil {
 			return err
 		}
 	}
@@ -355,12 +386,11 @@ func (r *StorePersonalConnectionRepository) restoreWorkspacePersonalSnapshots(
 ) error {
 	var restoreErr error
 	for _, snapshot := range snapshots {
-		workspaceID, userID := snapshot.connection.WorkspaceID, snapshot.connection.UserID
 		restoreErr = errors.Join(restoreErr,
 			r.restorePersonalConnectionMetadata(ctx, snapshot.connection),
-			r.restoreSecret(ctx, UserAccessTokenSecretKey(workspaceID, userID),
+			r.restoreSecret(ctx, snapshot.accessKey,
 				personalAccessTokenSecretName, snapshot.access, snapshot.hadAccess),
-			r.restoreSecret(ctx, UserRefreshTokenSecretKey(workspaceID, userID),
+			r.restoreSecret(ctx, snapshot.refreshKey,
 				personalRefreshTokenSecretName, snapshot.refresh, snapshot.hadRefresh),
 		)
 	}
@@ -437,17 +467,45 @@ func (p *personalAuthCredentialProvider) ResolveUser(
 		return nil, fmt.Errorf("%w: personal connection changed during resolution", ErrGitHubConnectionInvalid)
 	}
 	tracker := NewRateTracker(nil, nil)
-	client := NewAppUserTokenClient(token, current.GitHubUserID, current.Login).WithRateTracker(tracker)
+	host, err := connectionHost(p.service.config.GitHubHost)
+	if err != nil {
+		return nil, err
+	}
+	client := NewTokenClientForHost(token, TokenPrincipal{Kind: TokenCredentialUser, PrincipalID: fmt.Sprintf("user:%d", current.GitHubUserID), Login: current.Login}, host).WithRateTracker(tracker)
 	return &ResolvedCredential{
-		Client: client,
+		Client:     client,
+		GitHubHost: host.String(),
 		Principal: AuthPrincipal{
-			Kind:   AuthPrincipalHuman,
-			Source: ConnectionSourceGitHubAppUser,
-			Login:  current.Login,
+			GitHubHost: host.String(),
+			Kind:       AuthPrincipalHuman,
+			Source:     ConnectionSourceGitHubAppUser,
+			Login:      current.Login,
 		},
 		CredentialGeneration: current.CredentialGeneration,
 		ExpiresAt:            current.AccessExpiresAt,
 		RateTracker:          tracker,
 		credential:           token,
 	}, nil
+}
+
+func (r *StorePersonalConnectionRepository) personalSecretKeys(ctx context.Context, connection *UserConnection) (string, string, error) {
+	registration, err := r.store.GetAppRegistration(ctx, connection.AppRegistrationID)
+	if err != nil {
+		return "", "", err
+	}
+	if registration == nil {
+		return "", "", ErrGitHubPersonalRequired
+	}
+	host, err := connectionHost(registration.GitHubHost)
+	if err != nil {
+		return "", "", err
+	}
+	return UserAccessTokenSecretKeyForHost(connection.WorkspaceID, connection.UserID, host.String()), UserRefreshTokenSecretKeyForHost(connection.WorkspaceID, connection.UserID, host.String()), nil
+}
+
+func (r *StorePersonalConnectionRepository) storeRefreshSecret(ctx context.Context, key, value string) error {
+	if value == "" {
+		return deleteOptionalSecret(ctx, r.secrets, key)
+	}
+	return r.secrets.Set(ctx, key, personalRefreshTokenSecretName, value)
 }

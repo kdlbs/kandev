@@ -95,3 +95,29 @@ The recovered-base test now checks that the first response contains complete liv
 - The PR check wait for head `4155a1fbe3beb9c9a4389b12cb0f42c4a537d8e8` reached its 45-minute deadline with 22 passed, 12 skipped, one failed, and 11 pending. The failed Windows job reported that `TestManager_SubscribeWorkspaceStream_MultiRepoEmitsPerRepoStatuses` received no repository statuses before its two-second replay deadline. The test started background polling and immediately subscribed, leaving replay dependent on two first-poll operations finishing inside that short window.
 - The multi-repository stream test now captures each repository's initial status synchronously under a bounded context before subscribing. This makes the test exercise cached replay directly instead of racing tracker startup. `(cd apps/backend && go test -race -count=3 ./internal/agentctl/server/process -run '^TestManager_SubscribeWorkspaceStream_MultiRepoEmitsPerRepoStatuses$')`: passed.
 - All eight review threads were replied to with the implemented fix and regression evidence, then resolved. Fresh PR checks are required after the next fixup push; the previous waiter did not establish terminal results for all backend, frontend, and E2E checks.
+
+### PR #4621 fixture synchronization
+
+The preceding CI run passed all other leaf checks but caught an
+unsuccessful first fresh response in the file-membership browser case. The
+test released that request when the shared enrichment command started, without
+waiting for the new agent's initial prompt to settle. Enrichment activity does
+not establish that the selected session has a stable live source.
+
+Wait for the initial prompt's `COMPLETED` or `WAITING_FOR_INPUT` state before releasing the
+foreground request. Keep real enrichment held, preserve complete-membership and
+pending-detail assertions, and keep retries disabled. Log unsuccessful real
+responses with their protocol context so future failures include the reason.
+This is a test-fixture correction. The production timeout and Git refresh
+contract are unchanged. No public documentation update is needed.
+
+The CI failure did not reproduce locally: the isolated case passed, the two
+recovery cases passed in three repetitions, and the exact five-test CI prefix
+passed in three repetitions. The corrected prefix also passed all 15 checks
+without retries. All three full desktop recovery cases and both phone cases
+passed. The first phone invocation failed before a test body because the mock
+harness health route was unavailable; a fresh isolated port range passed both
+cases with the same binary and assertions. Changed-file ESLint, catalog
+validation, and specification lint passed. Latest
+main was checked; its Office prompt and SSH-liveness
+changes do not contain a local Git-refresh fixture correction.

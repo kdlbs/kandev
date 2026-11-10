@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   PluginManagedConversationController,
   PluginManagedConversationSnapshot,
-} from "@kandev/plugin-sdk";
+} from "@kdlbs/plugin-sdk";
 import { useManagedConversationChat } from "./use-managed-conversation-chat";
 
 const ready: PluginManagedConversationSnapshot = {

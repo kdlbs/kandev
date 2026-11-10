@@ -5,7 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
@@ -24,7 +25,7 @@ func TestQueueRun_RefusesBeyondSelfTriggerTotalAllowance(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "reason_a",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		IdempotencyKey: "task_comment:total-1",
 	}); err != nil {
@@ -33,7 +34,7 @@ func TestQueueRun_RefusesBeyondSelfTriggerTotalAllowance(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "reason_b",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		IdempotencyKey: "task_comment:total-2",
 	}); err != nil {
@@ -43,7 +44,7 @@ func TestQueueRun_RefusesBeyondSelfTriggerTotalAllowance(t *testing.T) {
 	_, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "reason_c",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		IdempotencyKey: "task_comment:total-3",
 	})
@@ -69,7 +70,7 @@ func TestQueueRun_SelfTriggerBothAllowancesExceeded_RefusedAsPerReason(t *testin
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "same_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		IdempotencyKey: "task_comment:both-1",
 	}); err != nil {
@@ -79,7 +80,7 @@ func TestQueueRun_SelfTriggerBothAllowancesExceeded_RefusedAsPerReason(t *testin
 	_, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "same_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		IdempotencyKey: "task_comment:both-2",
 	})
@@ -104,7 +105,7 @@ func TestQueueRun_SelfTriggerTotalBelowPerReason_HonoredAsConfigured(t *testing.
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "solo_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		IdempotencyKey: "task_comment:below-1",
 	}); err != nil {
@@ -114,7 +115,7 @@ func TestQueueRun_SelfTriggerTotalBelowPerReason_HonoredAsConfigured(t *testing.
 	_, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "solo_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		IdempotencyKey: "task_comment:below-2",
 	})
@@ -143,7 +144,7 @@ func TestQueueRun_SelfTriggerTotalAllowancePassResetsGateFailureState(t *testing
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "self_trigger_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 	}); err != nil {
 		t.Fatalf("queue: %v", err)

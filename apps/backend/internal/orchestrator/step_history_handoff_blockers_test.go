@@ -63,6 +63,7 @@ func TestExecuteStepTransition_RecordsHandoffAndBlockersMetadata(t *testing.T) {
 		Handoff:  "watch out for X",
 		Blockers: "needs a design decision",
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -99,6 +100,7 @@ func TestExecuteStepTransition_OmitsBlankHandoffAndBlockers(t *testing.T) {
 		Source:  models.StepCompletionSourceAgent,
 		Summary: "did the work",
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -140,6 +142,7 @@ func TestApplyEngineTransition_RecordsHandoffAndBlockersMetadata(t *testing.T) {
 		Handoff:  "engine handoff text",
 		Blockers: "engine blocker text",
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}

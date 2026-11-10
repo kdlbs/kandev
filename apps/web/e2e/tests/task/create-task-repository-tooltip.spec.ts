@@ -13,6 +13,19 @@ useRegularMode();
 test.describe("Create task repository tooltip", () => {
   test.describe.configure({ retries: 0 });
 
+  test.beforeEach(async ({ testPage }) => {
+    await testPage.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
+  });
+
+  test.afterEach(async ({ testPage }, testInfo) => {
+    const failed = testInfo.status !== testInfo.expectedStatus;
+    const tracePath = testInfo.outputPath("trace.zip");
+    await testPage.context().tracing.stop(failed ? { path: tracePath } : {});
+    if (failed) {
+      await testInfo.attach("trace", { path: tracePath, contentType: "application/zip" });
+    }
+  });
+
   test("contains a long path and waits for a deliberate re-hover after picker selection", async ({
     testPage,
     apiClient,

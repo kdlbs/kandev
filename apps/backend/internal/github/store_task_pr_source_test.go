@@ -102,7 +102,7 @@ func TestTaskPRSourceLegacyConstraintRebuildPreservesValuesAndReplay(t *testing.
 			pr_title, head_branch, base_branch, author_login, state, created_at, updated_at, source
 		) VALUES
 			('legacy-watch', 'ws-source', 'task-legacy-watch', 'repo-watch', 'acme', 'demo', 1,
-			 'https://github.com/acme/demo/pull/1', 'Watch', 'feature/watch', 'main', 'alice', 'open', ?, ?, 'watch'),
+			 'https://git.example.com/acme/demo/pull/1', 'Watch', 'feature/watch', 'main', 'alice', 'open', ?, ?, 'watch'),
 			('legacy-empty', 'ws-source', 'task-legacy-empty', 'repo-empty', 'acme', 'demo', 2,
 			 'https://github.com/acme/demo/pull/2', 'Legacy', 'feature/legacy', 'main', 'alice', 'open', ?, ?, '')
 	`, now, now, now, now); err != nil {
@@ -124,6 +124,13 @@ func TestTaskPRSourceLegacyConstraintRebuildPreservesValuesAndReplay(t *testing.
 		}
 	}
 	assertTaskPRSource(t, "legacy-watch", TaskPRSourceWatch)
+	enterprise, err := reopened.GetTaskPRByID(ctx, "legacy-watch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enterprise.GitHubHost != "git.example.com" {
+		t.Fatalf("legacy rebuild lost explicit host: %q", enterprise.GitHubHost)
+	}
 	assertTaskPRSource(t, "legacy-empty", "")
 
 	replayed, err := NewStore(reopened.db, reopened.ro)

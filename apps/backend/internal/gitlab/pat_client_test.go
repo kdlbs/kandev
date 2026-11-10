@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/unidiff"
 )
 
 func TestPATClientProviderActionContract(t *testing.T) {
@@ -685,7 +687,7 @@ func TestSummarizeApprovals(t *testing.T) {
 
 func TestCountDiffLines(t *testing.T) {
 	diff := "--- a/foo.go\n+++ b/foo.go\n@@ -1,3 +1,3 @@\n-old\n+new1\n+new2\n unchanged\n"
-	add, del := countDiffLines(diff)
+	add, del := unidiff.CountLines(diff)
 	if add != 2 {
 		t.Errorf("additions = %d, want 2", add)
 	}

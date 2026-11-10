@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { TaskReviewFinding, TaskReviewRun } from "@/lib/types/review";
 import type { ReviewSlice, ReviewSliceState } from "./types";
 
@@ -13,9 +14,7 @@ export const defaultReviewState: ReviewSliceState = {
 /** How many runs a task keeps client-side; matches the backend read cap. */
 const RUN_HISTORY_LIMIT = 20;
 
-type ImmerSet = Parameters<
-  StateCreator<ReviewSlice, [["zustand/immer", never]], [], ReviewSlice>
->[0];
+type ImmerSet = Parameters<SliceCreator<ReviewSlice>>[0];
 
 /** Newest run first, so the toolbar always reflects the latest pass. */
 function sortRunsNewestFirst(runs: TaskReviewRun[]): TaskReviewRun[] {

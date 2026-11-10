@@ -93,19 +93,6 @@ func (c *Controller) httpClearToken(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"cleared": true})
 }
 
-func (c *Controller) httpConfigureHost(ctx *gin.Context) {
-	var req ConfigureHostRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "invalid payload: host is required"})
-		return
-	}
-	if err := c.service.ConfigureHost(ctx.Request.Context(), req.Host); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: err.Error()})
-		return
-	}
-	ctx.JSON(http.StatusOK, gin.H{"configured": true, "host": c.service.Host()})
-}
-
 func (c *Controller) httpGetMRFeedback(ctx *gin.Context) {
 	projectPath, iid, err := parseProjectAndIID(ctx)
 	if err != nil {
@@ -223,25 +210,6 @@ func (c *Controller) httpListTaskMRs(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"task_mrs": mrs})
-}
-
-func (c *Controller) httpSyncTaskMR(ctx *gin.Context) {
-	taskID := ctx.Param("taskID")
-	if taskID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "taskID required"})
-		return
-	}
-	var req SyncTaskMRRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "invalid payload: project_path and iid required"})
-		return
-	}
-	row, err := c.service.SyncTaskMR(ctx.Request.Context(), taskID, req.RepositoryID, req.ProjectPath, req.IID)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
-		return
-	}
-	ctx.JSON(http.StatusOK, row)
 }
 
 // httpSearchUserMRs surfaces the configured user's MR queue. filter is one

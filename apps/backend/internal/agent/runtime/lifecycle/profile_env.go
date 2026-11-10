@@ -36,10 +36,6 @@ func (m *Manager) mergeAgentProfileEnvWithPartial(ctx context.Context, profileID
 	return m.mergeAgentProfileEnvFromInfoWithPartial(ctx, info, env, partial)
 }
 
-func (m *Manager) mergeAgentProfileEnvFromInfo(ctx context.Context, info *AgentProfileInfo, env map[string]string) error {
-	return m.mergeAgentProfileEnvFromInfoWithPartial(ctx, info, env, false)
-}
-
 func (m *Manager) mergeAgentProfileEnvFromInfoWithPartial(ctx context.Context, info *AgentProfileInfo, env map[string]string, partial bool) error {
 	if info == nil || env == nil || len(info.EnvVars) == 0 {
 		return nil
@@ -83,7 +79,7 @@ func mergeEnvFillMissing(dst, src map[string]string) {
 // or remove them without hiding inherited user configuration.
 func composeExecutionRuntimeEnvironment(base, overlay map[string]string) (map[string]string, error) {
 	managed := base[githubauth.CredentialBrokerURLEnv] != "" || base[githubauth.CredentialLeaseEnv] != ""
-	removeObsoleteManagedCredentialEnvironment(base)
+	githubauth.RemoveManagedCredentialEnvironment(base)
 	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
 		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value) &&
 			!githubauth.IsManagedGitCredentialConfigEntry(index, entries, managed)
@@ -92,27 +88,6 @@ func composeExecutionRuntimeEnvironment(base, overlay map[string]string) (map[st
 		return nil, fmt.Errorf("remove generated Git credential helpers: %w", err)
 	}
 	return gitconfigenv.Merge(filtered, overlay)
-}
-
-func removeObsoleteManagedCredentialEnvironment(env map[string]string) {
-	for _, key := range []string{
-		githubauth.CredentialBrokerURLEnv,
-		githubauth.CredentialHelperPathEnv,
-		githubauth.CredentialCLIShimDirEnv,
-		githubauth.CredentialCLIBashEnvEnv,
-		githubauth.CredentialParentBashEnv,
-		githubauth.CredentialLeaseEnv,
-		githubauth.CredentialReissueCapabilityEnv,
-		githubauth.CredentialTaskIDEnv,
-		githubauth.CredentialSessionIDEnv,
-		githubauth.CredentialRepositoryEnv,
-		githubauth.CredentialOwnerEnv,
-		githubauth.CredentialRepoEnv,
-		githubauth.CredentialHostEnv,
-		githubauth.CredentialScopesEnv,
-	} {
-		delete(env, key)
-	}
 }
 
 // resolveAgentProfileEnvVars resolves profile env entries. SecretID wins over

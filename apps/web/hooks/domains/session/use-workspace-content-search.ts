@@ -51,6 +51,7 @@ async function searchWorkspaceContentWithRetries(
         query,
         CONTENT_SEARCH_LIMIT_PER_REPO,
       );
+      lastError = undefined;
       for (const result of response.results ?? []) {
         results.set(contentSearchResultKey(result), result);
       }

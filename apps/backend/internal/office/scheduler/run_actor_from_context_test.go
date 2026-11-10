@@ -5,7 +5,8 @@ package scheduler
 import (
 	"testing"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/shared"
 )
 
@@ -27,16 +28,16 @@ func TestActorFromRunContext_MirrorsNormalizeActorsDowngradeRule(t *testing.T) {
 		name        string
 		actorType   string
 		actorID     string
-		wantKind    models.ActorKind
+		wantKind    runsmodels.ActorKind
 		wantID      string
 		wantCounted bool
 	}{
-		{"user_with_id", "user", "user-1", models.ActorKindUser, "user-1", false},
-		{"user_without_id_is_not_downgraded", "user", "", models.ActorKindUser, "", false},
-		{"agent_with_id", "agent", "agent-1", models.ActorKindAgent, "agent-1", false},
-		{"agent_without_id_is_downgraded", "agent", "", models.ActorKindSystem, "", true},
-		{"empty_type_is_downgraded", "", "", models.ActorKindSystem, "", true},
-		{"unknown_type_with_id_is_still_downgraded", "bogus", "id-1", models.ActorKindSystem, "", true},
+		{"user_with_id", "user", "user-1", runsmodels.ActorKindUser, "user-1", false},
+		{"user_without_id_is_not_downgraded", "user", "", runsmodels.ActorKindUser, "", false},
+		{"agent_with_id", "agent", "agent-1", runsmodels.ActorKindAgent, "agent-1", false},
+		{"agent_without_id_is_downgraded", "agent", "", runsmodels.ActorKindSystem, "", true},
+		{"empty_type_is_downgraded", "", "", runsmodels.ActorKindSystem, "", true},
+		{"unknown_type_with_id_is_still_downgraded", "bogus", "id-1", runsmodels.ActorKindSystem, "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

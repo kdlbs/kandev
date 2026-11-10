@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -120,7 +122,7 @@ func (h *Handler) listRuns(c *gin.Context) {
 // runToListItem flattens a *models.Run into RunListItem and pulls task_id
 // out of the JSON-encoded payload (best effort). Times are formatted as
 // RFC3339 strings; nil pointer times stay nil.
-func runToListItem(r *models.Run) RunListItem {
+func runToListItem(r *runsmodels.Run) RunListItem {
 	if r == nil {
 		return RunListItem{}
 	}

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
@@ -48,7 +50,7 @@ func newOfficeRunSessionLauncher(
 //nolint:cyclop,funlen // The launch sequence keeps reservation, identity binding, admission, and cleanup together.
 func (l *officeRunSessionLauncher) StartRunSession(
 	ctx context.Context,
-	run *models.Run,
+	run *runsmodels.Run,
 	agent *models.AgentInstance,
 	launch officeservice.LaunchContext,
 	route *officeservice.RouteOverride,

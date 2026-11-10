@@ -1,11 +1,17 @@
 "use client";
 
+import { githubResourceKey } from "@/lib/github/host";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getPRStatusesBatch, type PRStatusRef } from "@/lib/api/domains/github-api";
 import type { GitHubPR, GitHubPRStatus } from "@/lib/types/github";
 
-export function prStatusKey(owner: string, repo: string, number: number): string {
-  return `${owner}/${repo}#${number}`;
+export function prStatusKey(
+  owner: string,
+  repo: string,
+  number: number,
+  host = "github.com",
+): string {
+  return githubResourceKey(owner, repo, number, host);
 }
 
 // usePRStatuses fetches PR review/checks/mergeable summaries in a single
@@ -25,7 +31,7 @@ export function usePRStatuses(
 
   const key =
     workspaceId && prs.length > 0
-      ? `${workspaceId}:${prs.map((p) => prStatusKey(p.repo_owner, p.repo_name, p.number)).join(",")}`
+      ? `${workspaceId}:${prs.map((p) => prStatusKey(p.repo_owner, p.repo_name, p.number, p.github_host)).join(",")}`
       : "";
 
   // We deliberately depend only on `key`: `prs` gets a new array identity on
@@ -44,6 +50,7 @@ export function usePRStatuses(
       owner: p.repo_owner,
       repo: p.repo_name,
       number: p.number,
+      ...(p.github_host ? { expected_host: p.github_host } : {}),
     }));
     let cancelled = false;
     getPRStatusesBatch(workspaceId!, refs)

@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 )
+
+const checkpointWindowsOS = "windows"
 
 func acquireTurnCheckpointLock(ctx context.Context, gitDir string) (func(), error) {
 	lockPath := filepath.Join(gitDir, "kandev-turn-changes.capture.lock")
@@ -16,18 +19,20 @@ func acquireTurnCheckpointLock(ctx context.Context, gitDir string) (func(), erro
 	defer ticker.Stop()
 	for {
 		unlock, acquired, err := tryCreateTurnCheckpointLock(lockPath)
-		if err != nil {
-			return nil, err
-		}
 		if acquired {
 			return unlock, nil
 		}
-		if _, err := removeStaleTurnCheckpointLock(lockPath, time.Now()); err != nil {
+		if err == nil {
+			_, err = removeStaleTurnCheckpointLock(lockPath, time.Now())
+		}
+		// Windows reports access denied while another handle holds a deleted
+		// lock file. Retry only within the caller's existing operation deadline.
+		if err != nil && (runtime.GOOS != checkpointWindowsOS || !os.IsPermission(err)) {
 			return nil, err
 		}
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, errors.Join(ctx.Err(), err)
 		case <-ticker.C:
 		}
 	}

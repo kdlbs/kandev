@@ -7,7 +7,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func (r *PluginRemoteExecutor) attachRetainedPluginExecutor(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
@@ -32,7 +32,7 @@ func (r *PluginRemoteExecutor) attachRetainedPluginExecutor(ctx context.Context,
 	inventory.Phase = pluginExecutorPhaseReady
 	inventory.Revision++
 	inventory.Generation++
-	client, err := r.newRecoveredAgentctlClient(ctx, r.connectionResolver(state.operationContext, resource, state.inventory.InstancePort), r.logger, state.runtimeIdentity, state.token)
+	client, err := r.newAgentctlClient(ctx, r.connectionResolver(state.operationContext, resource, state.inventory.InstancePort), r.logger, state.runtimeIdentity, state.token)
 	if err != nil {
 		return nil, errors.New("plugin executor retained agentctl transport is unavailable")
 	}
@@ -41,6 +41,7 @@ func (r *PluginRemoteExecutor) attachRetainedPluginExecutor(ctx context.Context,
 		return nil, errors.New("plugin executor retained agentctl readiness check failed")
 	}
 	r.uploadPluginExecutorAgentCredentials(ctx, client, req)
+	r.applyPluginExecutorGitIdentity(ctx, client, req)
 	metadata := clonePluginExecutorMetadata(req.Metadata)
 	metadata[MetadataKeyPluginExecutor] = inventory
 	return &ExecutorInstance{

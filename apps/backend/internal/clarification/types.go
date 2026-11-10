@@ -30,6 +30,9 @@ type Request struct {
 // Answer is the wire type used by clarification responses.
 type Answer = protocol.Answer
 
+// AnswerAttachment is the wire type for one file attached to an answer.
+type AnswerAttachment = protocol.AnswerAttachment
+
 // Response is the wire type used by clarification responses.
 type Response = protocol.Response
 

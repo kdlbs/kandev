@@ -13,6 +13,6 @@
   "emptyTitleUnnamedWorkspace": "この workspace で失敗はない。",
   "emptyDescription": "失敗タスクはトリアージ用にここへ出る。サイドバー合計には入らない。",
   "errorTitle": "失敗タスクを読み込めない",
-  "errorDescription": "この workspace で失敗したタスクの読み込み中に問題発生。自動で再試行する。",
+  "errorDescription": "失敗したタスクを読み込めませんでした。Kandevが自動で再試行します。",
   "truncatedNotice": "最初の失敗タスクだけ表示中。続きは待機中。"
 }

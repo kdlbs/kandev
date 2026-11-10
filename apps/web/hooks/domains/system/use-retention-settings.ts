@@ -1,29 +1,53 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { fetchRetentionStatus, saveRetentionSettings } from "@/lib/api/domains/system-api";
 import type { RetentionSettings } from "@/lib/types/system";
+
+type ReadLifetime = { read: symbol | null };
+
+// Readers share publication authority because route instances share the app store.
+const currentReads = new WeakMap<object, symbol>();
 
 export function useRetentionSettings() {
   const status = useAppStore((s) => s.system.retention);
   const setStatus = useAppStore((s) => s.setSystemRetention);
   const storeApi = useAppStoreApi();
+  const lifetime = useRef<ReadLifetime | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  useLayoutEffect(() => {
+    const owner: ReadLifetime = { read: null };
+    lifetime.current = owner;
+    return () => {
+      lifetime.current = null;
+      if (currentReads.get(storeApi) === owner.read) currentReads.delete(storeApi);
+    };
+  }, [storeApi]);
+
   const reload = useCallback(async () => {
+    const owner = lifetime.current;
+    if (!owner) return;
+    const read = Symbol();
+    owner.read = read;
+    currentReads.set(storeApi, read);
+    const isLocal = () => lifetime.current === owner && owner.read === read;
+    const isCurrent = () => isLocal() && currentReads.get(storeApi) === read;
     setIsLoading(true);
     setError(null);
     try {
-      setStatus(await fetchRetentionStatus({ cache: "no-store" }));
+      const next = await fetchRetentionStatus({ cache: "no-store" });
+      if (isCurrent()) setStatus(next);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (isCurrent()) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setIsLoading(false);
+      if (isLocal()) setIsLoading(false);
+      if (currentReads.get(storeApi) === read) currentReads.delete(storeApi);
     }
-  }, [setStatus]);
+  }, [setStatus, storeApi]);
 
   useEffect(() => {
     if (status) return;
@@ -32,16 +56,12 @@ export function useRetentionSettings() {
 
   const save = useCallback(
     async (settings: RetentionSettings) => {
+      const owner = lifetime.current;
       setSaveError(null);
       try {
         const saved = await saveRetentionSettings(settings);
-        // Apply the PUT's own normalized response synchronously, rather
-        // than relying solely on the reload() below: if that GET fails,
-        // its error is recorded but never surfaces once status is already
-        // loaded (see the isLoading/error-gated branches in
-        // RetentionSettingsCard), which would otherwise leave the store
-        // holding pre-save settings while the save coordinator believes
-        // the save already succeeded.
+        // An admitted write remains authoritative after its view leaves.
+        currentReads.delete(storeApi);
         storeApi.setState((state) =>
           state.system.retention
             ? {
@@ -52,11 +72,11 @@ export function useRetentionSettings() {
               }
             : state,
         );
-        void reload();
+        if (owner && lifetime.current === owner) void reload();
         return saved;
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        setSaveError(message);
+        if (owner && lifetime.current === owner) setSaveError(message);
         throw e;
       }
     },

@@ -49,6 +49,15 @@ async function seedDevScriptSession(
 test.describe("dev server preview control", () => {
   test.describe.configure({ retries: 1 });
 
+  let originalDevScript: string;
+  test.beforeEach(async ({ testPage, apiClient, seedData }) => {
+    void testPage;
+    originalDevScript = (await apiClient.getRepository(seedData.repositoryId)).dev_script ?? "";
+  });
+  test.afterEach(async ({ apiClient, seedData }) => {
+    await apiClient.updateRepository(seedData.repositoryId, { dev_script: originalDevScript });
+  });
+
   test("starts the dev script, shows its output, and offers a stop control", async ({
     testPage,
     apiClient,
@@ -81,4 +90,115 @@ test.describe("dev server preview control", () => {
 
     await expect(toggle).toHaveAttribute("aria-label", START_LABEL);
   });
+});
+
+type HeldStart = { session: string; release: () => void; finished: Promise<void> };
+
+async function holdStarts(testPage: Page, held: HeldStart[]) {
+  // Synthetic transport keeps this scenario independent of process startup.
+  await testPage.route("**/processes/start", async (route) => {
+    let release!: () => void;
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const sessionId = new URL(route.request().url()).pathname.split("/").at(-3)!;
+    held.push({ session: sessionId, release, finished });
+    try {
+      await gate;
+      await route.fulfill({
+        json: {
+          process: {
+            id: `preview-${sessionId}`,
+            session_id: sessionId,
+            kind: "dev",
+            status: "running",
+            command: "echo preview",
+            working_dir: "/repo",
+            started_at: "2026-10-21T12:00:00Z",
+            updated_at: "2026-10-21T12:00:00Z",
+          },
+        },
+      });
+    } finally {
+      finish();
+    }
+  });
+}
+
+// @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.17
+// @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.18
+test("keeps both headers pending only for their selected session during navigation", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const original = (await apiClient.getRepository(seedData.repositoryId)).dev_script ?? "";
+  const held: HeldStart[] = [];
+  try {
+    await apiClient.updateRepository(seedData.repositoryId, { dev_script: "echo preview" });
+    const create = (title: string) =>
+      apiClient.createTaskWithAgent(seedData.workspaceId, title, seedData.agentProfileId, {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      });
+    const a = await create("Preview pending Alpha");
+    const b = await create("Preview pending Beta");
+    await testPage.goto(`/t/${a.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle();
+    const center = testPage.getByTestId("dev-server-preview-toggle-center");
+    const terminal = testPage.getByTestId("dev-server-preview-toggle");
+    await expect(center).toBeVisible();
+    await expect(terminal).toBeVisible();
+
+    await holdStarts(testPage, held);
+    const aRequest = testPage.waitForRequest(`**/task-sessions/${a.session_id}/processes/start`);
+    await center.click();
+    await aRequest;
+    await expect(center).toBeDisabled();
+    await expect(terminal).toBeDisabled();
+    await session.clickTaskInSidebar("Preview pending Beta");
+    await expect(testPage).toHaveURL(new RegExp(`/t/${b.id}`));
+    await expect(center).toBeEnabled();
+    await expect(terminal).toBeEnabled();
+    const bRequest = testPage.waitForRequest(`**/task-sessions/${b.session_id}/processes/start`);
+    await terminal.click();
+    await bRequest;
+    await expect(center).toBeDisabled();
+    await expect(terminal).toBeDisabled();
+    const aResponse = waitForHttp(
+      testPage,
+      "POST",
+      new RegExp(`/task-sessions/${a.session_id}/processes/start$`),
+    );
+    held.find((item) => item.session === a.session_id)!.release();
+    await aResponse;
+    await expect(center).toBeDisabled();
+    await expect(terminal).toBeDisabled();
+    await session.clickTaskInSidebar("Preview pending Alpha");
+    await expect(center).toBeEnabled();
+    await session.clickTaskInSidebar("Preview pending Beta");
+    await expect(center).toBeDisabled();
+    const bResponse = waitForHttp(
+      testPage,
+      "POST",
+      new RegExp(`/task-sessions/${b.session_id}/processes/start$`),
+    );
+    held.find((item) => item.session === b.session_id)!.release();
+    await bResponse;
+    await expect(center).toBeEnabled();
+    await expect(terminal).toBeEnabled();
+  } finally {
+    for (const request of held) request.release();
+    await Promise.all(held.map((request) => request.finished));
+    await testPage.unrouteAll({ behavior: "wait" });
+    await apiClient.updateRepository(seedData.repositoryId, { dev_script: original });
+  }
 });

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
@@ -17,7 +19,7 @@ import (
 
 // ClaimNextRun atomically claims the next eligible run from the queue.
 // Returns nil, nil if no run is available.
-func (s *Service) ClaimNextRun(ctx context.Context) (*models.Run, error) {
+func (s *Service) ClaimNextRun(ctx context.Context) (*runsmodels.Run, error) {
 	req, err := s.repo.ClaimNextEligibleRun(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -113,7 +115,7 @@ func (s *Service) transitionRunTerminal(ctx context.Context, id, status string, 
 // workspace label falls back to LoopUnattributedWorkspace when the
 // owning agent can't be resolved, matching AC-003.8 — never dropped,
 // never guessed into a real workspace's totals.
-func (s *Service) recordTerminalShape(ctx context.Context, run *models.Run, status string, outcome *string) {
+func (s *Service) recordTerminalShape(ctx context.Context, run *runsmodels.Run, status string, outcome *string) {
 	if run == nil {
 		return
 	}
@@ -134,7 +136,7 @@ func (s *Service) recordTerminalShape(ctx context.Context, run *models.Run, stat
 // for the whole batch.
 func (s *Service) recordTerminalShapesForCancelledRuns(ctx context.Context, cancelled []runssqlite.CancelledRun) {
 	for _, row := range cancelled {
-		s.recordTerminalShape(ctx, &models.Run{
+		s.recordTerminalShape(ctx, &runsmodels.Run{
 			AgentProfileID: row.AgentProfileID,
 			SessionID:      row.SessionID,
 			RequestedAt:    row.RequestedAt,
@@ -164,7 +166,7 @@ func (s *Service) RecordCancelledRunTerminalShapes(ctx context.Context, cancelle
 // inactive/idle and never reached the checkout attempt in processRun) must
 // not clear a different, currently-active agent's lock out from under it —
 // that inverted the invariant this whole release path exists to protect.
-func (s *Service) releaseTaskCheckoutForRun(ctx context.Context, run *models.Run) {
+func (s *Service) releaseTaskCheckoutForRun(ctx context.Context, run *runsmodels.Run) {
 	if run == nil {
 		return
 	}
@@ -191,7 +193,7 @@ func (s *Service) releaseTaskCheckoutForRun(ctx context.Context, run *models.Run
 //
 // run.AgentProfileID is the launching agent's own identity (processRun
 // resolves the agent from the run), so no extra agent load is needed here.
-func (s *Service) stampRunFinished(ctx context.Context, run *models.Run) {
+func (s *Service) stampRunFinished(ctx context.Context, run *runsmodels.Run) {
 	if run == nil || run.AgentProfileID == "" {
 		return
 	}
@@ -212,7 +214,7 @@ func (s *Service) stampRunFinished(ctx context.Context, run *models.Run) {
 // resolves those via the task_id this payload carries.
 // Best-effort: skips silently when no bus is configured.
 func (s *Service) publishRunProcessed(
-	ctx context.Context, id, status string, run *models.Run,
+	ctx context.Context, id, status string, run *runsmodels.Run,
 ) {
 	s.publishRunProcessedForWorkspace(ctx, id, status, run, "")
 }
@@ -225,7 +227,7 @@ func (s *Service) publishRunProcessed(
 // (see office_notifications.go's workspaceForEvent / BroadcastToWorkspaceOrDrop).
 // Best-effort: skips silently when no bus is configured.
 func (s *Service) publishRunProcessedForWorkspace(
-	ctx context.Context, id, status string, run *models.Run, workspaceID string,
+	ctx context.Context, id, status string, run *runsmodels.Run, workspaceID string,
 ) {
 	if s.eb == nil {
 		return
@@ -257,7 +259,7 @@ func (s *Service) publishRunProcessedForWorkspace(
 
 // ProcessRunGuard checks if the agent is still eligible to be woken.
 // Returns true if the run should proceed, false if it should be skipped.
-func (s *Service) ProcessRunGuard(ctx context.Context, run *models.Run) (bool, error) {
+func (s *Service) ProcessRunGuard(ctx context.Context, run *runsmodels.Run) (bool, error) {
 	agent, err := s.GetAgentFromConfig(ctx, run.AgentProfileID)
 	if err != nil {
 		return false, err

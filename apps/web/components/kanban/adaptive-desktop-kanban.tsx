@@ -4,6 +4,10 @@ import { useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { useDesktopKanbanPan } from "@/hooks/domains/kanban/use-desktop-kanban-pan";
+import {
+  KANBAN_BOUNDED_DRAG_SCROLL_ATTRIBUTE,
+  useKanbanHorizontalDragScroll,
+} from "@/hooks/domains/kanban/use-kanban-horizontal-drag-scroll";
 import { useKanbanOverflow } from "@/hooks/domains/kanban/use-kanban-overflow";
 import { getKanbanColumnGridTemplate, KANBAN_COLUMN_MIN_PX } from "./kanban-grid-template";
 import { KanbanOverflowFades } from "./kanban-overflow-fades";
@@ -25,6 +29,11 @@ export function AdaptiveDesktopKanban({
 }: AdaptiveDesktopKanbanProps) {
   const scrollWindowRef = useRef<HTMLDivElement | null>(null);
   const laneGridRef = useRef<HTMLDivElement | null>(null);
+  const capturePointer = useKanbanHorizontalDragScroll({
+    isDragging,
+    scrollWindowRef,
+    laneGridRef,
+  });
   const { t } = useTranslation();
   const { cancelPan, handleMouseDown, handleMouseMove, isPanCandidate, isPanning } =
     useDesktopKanbanPan(scrollWindowRef);
@@ -42,11 +51,12 @@ export function AdaptiveDesktopKanban({
     >
       <div
         ref={scrollWindowRef}
+        {...{ [KANBAN_BOUNDED_DRAG_SCROLL_ATTRIBUTE]: "" }}
         aria-label={t("kanban:columns")}
         data-testid="desktop-kanban-scroll-window"
-        className={`kanban-scroll-region h-full min-h-0 min-w-0 overflow-x-auto overscroll-y-auto snap-x snap-mandatory ${
+        className={`kanban-scroll-region h-full min-h-0 min-w-0 overflow-x-auto overscroll-y-auto ${
           isPanCandidate ? "cursor-grabbing" : ""
-        } ${isPanning ? "select-none" : ""} ${isDragging ? "scrollbar-hide" : ""}`}
+        } ${isPanning ? "select-none" : ""} ${isDragging ? "scrollbar-hide snap-none" : "snap-x snap-mandatory"}`}
         data-kanban-scroll-axis="horizontal"
         data-kanban-scroll-active={overflow.isScrolling}
         data-kanban-scroll-left={overflow.canScrollLeft}
@@ -54,8 +64,12 @@ export function AdaptiveDesktopKanban({
         style={{
           height: columnHeight ? "auto" : undefined,
           containerType: "inline-size",
-          scrollSnapType: isPanning ? "none" : undefined,
+          scrollSnapType: isDragging || isPanning ? "none" : undefined,
         }}
+        onPointerDownCapture={capturePointer}
+        onPointerMoveCapture={capturePointer}
+        onTouchStartCapture={capturePointer}
+        onTouchMoveCapture={capturePointer}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={cancelPan}

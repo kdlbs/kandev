@@ -3,6 +3,9 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/executor"
@@ -73,5 +76,86 @@ func TestWorktreePreparer_SetupScriptFailure_KeepsCreateWorktreeStepCompleted(t 
 	// The non-fatal failure surfaces as a warning on the step instead.
 	if createStep.Warning == "" {
 		t.Errorf(`"Create worktree" should carry the setup-script warning when the script fails`)
+	}
+}
+
+func TestWorktreePreparer_MultiRepo_RollbackKeepsDirtyRetainedCheckout(t *testing.T) {
+	repoA := initBareGitRepo(t, "retained-good")
+	repoB := initBareGitRepo(t, "retained-bad")
+	preparer, mgr, store := newPreparerForTestWithStore(t)
+
+	const (
+		taskID  = "task-retained-rollback"
+		taskDir = "retained-rollback_123"
+		repoID  = "repo-retained-good"
+		branch  = "feature/retained"
+	)
+	retained, err := mgr.Create(context.Background(), worktree.CreateRequest{
+		TaskID:         taskID,
+		SessionID:      "session-before-prepare",
+		RepositoryID:   repoID,
+		RepositoryPath: repoA,
+		BaseBranch:     "main",
+		CheckoutBranch: branch,
+		TaskDirName:    taskDir,
+		RepoName:       "good",
+	})
+	if err != nil {
+		t.Fatalf("create retained checkout: %v", err)
+	}
+	if err := store.DeleteWorktree(context.Background(), retained.ID); err != nil {
+		t.Fatalf("remove retained checkout inventory row: %v", err)
+	}
+
+	readme := filepath.Join(retained.Path, "README.md")
+	if err := os.WriteFile(readme, []byte("staged change\n"), 0o644); err != nil {
+		t.Fatalf("write staged change: %v", err)
+	}
+	runGitForPreparerTest(t, retained.Path, "add", "README.md")
+	if err := os.WriteFile(readme, []byte("unstaged change\n"), 0o644); err != nil {
+		t.Fatalf("write unstaged change: %v", err)
+	}
+	untracked := filepath.Join(retained.Path, "notes.txt")
+	if err := os.WriteFile(untracked, []byte("untracked work\n"), 0o644); err != nil {
+		t.Fatalf("write untracked change: %v", err)
+	}
+
+	result, err := preparer.Prepare(context.Background(), &EnvPrepareRequest{
+		TaskID:       taskID,
+		SessionID:    "session-after-prepare",
+		ExecutorType: executor.NameStandalone,
+		TaskDirName:  taskDir,
+		Repositories: []RepoPrepareSpec{
+			{RepositoryID: repoID, RepositoryPath: repoA, RepoName: "good", BaseBranch: "main", CheckoutBranch: branch},
+			{RepositoryID: "repo-retained-bad", RepositoryPath: repoB, RepoName: "bad", BaseBranch: "missing-branch"},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare returned hard error (should report via result): %v", err)
+	}
+	if result.Success {
+		t.Fatal("expected failure when the second repository has no requested base branch")
+	}
+
+	if _, err := os.Stat(retained.Path); err != nil {
+		t.Fatalf("retained checkout path was removed: %v", err)
+	}
+	if got, err := os.ReadFile(readme); err != nil || string(got) != "unstaged change\n" {
+		t.Fatalf("retained tracked file = %q, %v; want unstaged change", got, err)
+	}
+	if got, err := os.ReadFile(untracked); err != nil || string(got) != "untracked work\n" {
+		t.Fatalf("retained untracked file = %q, %v; want untracked work", got, err)
+	}
+	status := runGitForPreparerTest(t, retained.Path, "status", "--porcelain")
+	if !strings.Contains(status, "MM README.md") || !strings.Contains(status, "?? notes.txt") {
+		t.Fatalf("retained checkout status = %q, want staged, unstaged, and untracked changes", status)
+	}
+
+	rows, err := store.GetWorktreesByTaskID(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("list retained checkout registration: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID == retained.ID || rows[0].Status != worktree.StatusActive || rows[0].Path != retained.Path {
+		t.Fatalf("retained checkout registration = %+v, want one active row for the same path and new ID", rows)
 	}
 }

@@ -10,22 +10,9 @@ import type { WorkspaceSlice } from "../workspace/types";
 type TestStore = FailedInboxSlice & WorkspaceSlice;
 
 function newStore() {
-  // `createFailedInboxSlice` and `createWorkspaceSlice` both type `set`/`get`
-  // against the full `AppState` (the zustand slices pattern, so composing
-  // them in store.ts needs no cast); this isolated test store only composes
-  // these two slices, so the shapes need a cast here, in test-only code the
-  // store.ts architecture rule does not cover. `createWorkspaceSlice` is
-  // real, not a stub: `beginFailedInboxRead` now reads
-  // `workspaces.activeIdRevision`, the app-wide signal a genuine workspace
-  // switch bumps regardless of whether the Inbox is mounted to see it, so a
-  // test proving that has to drive a real `setActiveWorkspace`.
   return create<TestStore>()(
-    immer((set, get, api) => ({
-      ...createWorkspaceSlice(
-        set as unknown as Parameters<typeof createWorkspaceSlice>[0],
-        get as unknown as Parameters<typeof createWorkspaceSlice>[1],
-        api as unknown as Parameters<typeof createWorkspaceSlice>[2],
-      ),
+    immer((set, get) => ({
+      ...createWorkspaceSlice(set, get),
       ...createFailedInboxSlice(
         set as unknown as Parameters<typeof createFailedInboxSlice>[0],
         get as unknown as Parameters<typeof createFailedInboxSlice>[1],

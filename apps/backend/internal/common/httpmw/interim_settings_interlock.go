@@ -35,7 +35,14 @@ func NewInterimSettingsInterlockToken() (string, error) {
 // payload, so this is an interim CSRF/accidental-mutation interlock only.
 func InterimSettingsInterlock(token string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if strings.TrimSpace(token) == "" || hasBearerAuthorization(c.GetHeader("Authorization")) ||
+		if hasBearerAuthorization(c.GetHeader("Authorization")) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error":      "forbidden",
+				"error_code": "forbidden",
+			})
+			return
+		}
+		if strings.TrimSpace(token) == "" ||
 			!constantTimeEqual(c.GetHeader(InterimSettingsInterlockHeader), token) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error":      "interim settings interlock required",

@@ -1,6 +1,7 @@
+import { waitForSessionDone, waitForSessionGitHydration } from "../../helpers/session";
 import { type Page } from "@playwright/test";
 import path from "node:path";
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import {
   GitHelper,
@@ -26,13 +27,15 @@ async function setupTask(
   taskTitle: string,
 ) {
   const profile = await createStandardProfile(apiClient, profileName);
-  await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
+  const task = await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
     description: "/e2e:simple-message",
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
     repository_ids: [seedData.repositoryId],
   });
+  await waitForSessionDone(apiClient, task.id, task.session_id!, "File search fixture settled");
   const session = await openTaskSession(testPage, taskTitle);
+  await waitForSessionGitHydration(testPage, task.session_id!);
   await session.clickTab("Files");
   return session;
 }
@@ -46,6 +49,7 @@ test.describe("File tree search", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
     git.createFile("search-alpha.ts", "a");
     // Match lives inside a folder we never expand. Search must still find it.
     git.createFile("deep/nested/needle-target.ts", "needle");
@@ -89,6 +93,7 @@ test.describe("File tree search", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
     git.createFile("clear-alpha.ts", "a");
     git.createFile("clear-bravo.ts", "b");
     git.stageAll();

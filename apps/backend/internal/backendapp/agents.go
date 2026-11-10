@@ -2,7 +2,10 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	"os"
 	"strings"
 	"time"
@@ -17,19 +20,23 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 func provideLifecycleManager(
+	ctx context.Context,
 	cfg *config.Config,
 	runtimeOwner *agentctl.RuntimeOwner,
 	log *logger.Logger,
 	eventBus bus.EventBus,
 	agentSettingsRepo settingsstore.Repository,
+	legacyWorkspaceSource legacyMCPWorkspaceSource,
 	agentRegistry *registry.Registry,
 	rawSecretStore secrets.SecretStore,
 	baseBranchProvider lifecycle.BaseBranchProvider,
@@ -45,6 +52,7 @@ func provideLifecycleManager(
 	passthroughSessionProvider lifecycle.PassthroughSessionProvider,
 	runningWriter lifecycle.ExecutorRunningWriter,
 	startupRecoveryGuard *lifecycle.RecoveryGuard,
+	authSvc *auth.Service,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 	secretStores := newLifecycleSecretStores(rawSecretStore)
@@ -124,6 +132,12 @@ func provideLifecycleManager(
 		cfg.ResolvedHomeDir(),
 		log,
 	)
+	configureMCPResolver(lifecycleMgr, agentSettingsRepo, mcpService, secretStores.runtime)
+	if stateRepo, ok := agentSettingsRepo.(mcpconfig.SessionMCPSelectionStateRepository); ok {
+		lifecycleMgr.SetMCPSelectionStateRepository(stateRepo)
+	}
+	importLegacyMCPProfiles(ctx, log, agentSettingsRepo, legacyWorkspaceSource, mcpService)
+	registerMCPDeletionCleanup(eventBus, agentSettingsRepo, log)
 	lifecycleMgr.SetRuntimeOwner(runtimeOwner)
 
 	// Persistence writer for executors_running, wired before Start runs its
@@ -183,6 +197,7 @@ func provideLifecycleManager(
 	// but the reader still lets future Wave-B/C consumers light up.
 	lifecycleMgr.SetAgentProfileReader(agentSettingsRepo)
 	lifecycleMgr.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
+	lifecycleMgr.SetManagedRuntimeSingleUserOwner(singleUserManagedRuntimeOwner(authSvc))
 
 	// MCP handler is set later in main.go after MCP handlers are registered
 	// via lifecycleMgr.SetMCPHandler(gateway.Dispatcher)
@@ -202,6 +217,9 @@ func provideLifecycleManager(
 	if mcpPrincipalScoper != nil {
 		lifecycleMgr.SetMCPPrincipalScoper(mcpPrincipalScoper)
 	}
+	lifecycleMgr.SetBuiltinActionResolver(func(profile mcpprofile.Context) ([]string, error) {
+		return mcpserver.ResolveBuiltinActions(profile, log)
+	})
 	// AC-EXECUTORS-SURVIVAL-002.14: wire the workspace info provider before
 	// Start so a recovered execution's task-environment identity is
 	// reconstructed from the durable store during this same startup pass,
@@ -270,6 +288,269 @@ func registerKubernetesBackend(
 func registerKubernetesPreparer(registry *lifecycle.PreparerRegistry, log *logger.Logger) {
 	registry.Register(models.ExecutorTypeKubernetes, lifecycle.NewKubernetesPreparer(log))
 	log.Info("Kubernetes preparer registered")
+}
+
+type mcpTaskDataCleaner interface {
+	DeleteMCPTaskData(context.Context, string, []string) error
+}
+
+type mcpWorkspaceDataCleaner interface {
+	DeleteMCPWorkspaceData(context.Context, string) error
+}
+
+func registerMCPDeletionCleanup(eventBus bus.EventBus, repo interface{}, log *logger.Logger) {
+	if eventBus == nil || repo == nil {
+		return
+	}
+	registerMCPSessionDeletionCleanup(eventBus, repo, log)
+	if cleaner, ok := repo.(mcpTaskDataCleaner); ok {
+		if _, err := eventBus.Subscribe(events.TaskDeleted, func(ctx context.Context, event *bus.Event) error {
+			taskID, sessionIDs := mcpTaskDeletionData(event)
+			if taskID == "" {
+				return nil
+			}
+			if err := cleaner.DeleteMCPTaskData(ctx, taskID, sessionIDs); err != nil {
+				return fmt.Errorf("delete MCP task data: %w", err)
+			}
+			return nil
+		}); err != nil {
+			log.Error("failed to subscribe to MCP task deletion cleanup", zap.Error(err))
+		}
+	}
+	if cleaner, ok := repo.(mcpWorkspaceDataCleaner); ok {
+		if _, err := eventBus.Subscribe(events.WorkspaceDeleted, func(ctx context.Context, event *bus.Event) error {
+			workspaceID := mcpEventString(event, "id")
+			if workspaceID == "" {
+				return nil
+			}
+			if err := cleaner.DeleteMCPWorkspaceData(ctx, workspaceID); err != nil {
+				return fmt.Errorf("delete MCP workspace data: %w", err)
+			}
+			return nil
+		}); err != nil {
+			log.Error("failed to subscribe to MCP workspace deletion cleanup", zap.Error(err))
+		}
+	}
+}
+
+func mcpTaskDeletionData(event *bus.Event) (string, []string) {
+	taskID := mcpEventString(event, "task_id")
+	if event == nil {
+		return taskID, nil
+	}
+	data, ok := event.Data.(map[string]interface{})
+	if !ok {
+		return taskID, nil
+	}
+	return taskID, mcpEventStrings(data["mcp_session_ids"])
+}
+
+func mcpEventString(event *bus.Event, key string) string {
+	if event == nil {
+		return ""
+	}
+	data, ok := event.Data.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	value, _ := data[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func mcpEventStrings(value interface{}) []string {
+	var values []string
+	switch typed := value.(type) {
+	case []string:
+		values = typed
+	case []interface{}:
+		values = make([]string, 0, len(typed))
+		for _, item := range typed {
+			if value, ok := item.(string); ok {
+				values = append(values, value)
+			}
+		}
+	default:
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+type legacyMCPWorkspaceSource interface {
+	ListWorkspaces(context.Context) ([]*models.Workspace, error)
+}
+
+type legacyMCPWorkspaceLister struct {
+	source   legacyMCPWorkspaceSource
+	profiles settingsstore.Repository
+}
+
+func (l legacyMCPWorkspaceLister) ListMCPProfileWorkspaces(ctx context.Context, profileID string) ([]string, error) {
+	if l.profiles != nil {
+		profile, err := l.profiles.GetAgentProfile(ctx, profileID)
+		if err != nil {
+			return nil, err
+		}
+		if profile != nil && strings.TrimSpace(profile.WorkspaceID) != "" {
+			return []string{profile.WorkspaceID}, nil
+		}
+	}
+	workspaces, err := l.source.ListWorkspaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(workspaces))
+	for _, workspace := range workspaces {
+		if workspace != nil && strings.TrimSpace(workspace.ID) != "" {
+			ids = append(ids, workspace.ID)
+		}
+	}
+	return ids, nil
+}
+
+func importLegacyMCPProfiles(
+	ctx context.Context,
+	log *logger.Logger,
+	agentSettingsRepo settingsstore.Repository,
+	workspaceSource legacyMCPWorkspaceSource,
+	mcpService *mcpconfig.Service,
+) {
+	if workspaceSource == nil || mcpService == nil {
+		return
+	}
+	importer, ok := newLegacyMCPImporter(agentSettingsRepo, workspaceSource, mcpService)
+	if !ok {
+		return
+	}
+	agents, err := agentSettingsRepo.ListAgents(ctx)
+	if err != nil {
+		log.Warn("failed to list agents for legacy MCP import", zap.Error(err))
+		return
+	}
+	for _, agent := range agents {
+		if agent == nil || strings.TrimSpace(agent.ID) == "" {
+			continue
+		}
+		importLegacyMCPAgentProfiles(ctx, log, agentSettingsRepo, mcpService, importer, agent.ID)
+	}
+}
+
+func newLegacyMCPImporter(
+	agentSettingsRepo settingsstore.Repository,
+	workspaceSource legacyMCPWorkspaceSource,
+	mcpService *mcpconfig.Service,
+) (*mcpconfig.LegacyImporter, bool) {
+	catalogRepo, catalogOK := agentSettingsRepo.(mcpconfig.CatalogRepository)
+	selectionRepo, selectionOK := agentSettingsRepo.(mcpconfig.SelectionRepository)
+	if !catalogOK || !selectionOK {
+		return nil, false
+	}
+	catalog := mcpconfig.NewCatalogService(catalogRepo)
+	catalog.SetSelectionRepository(selectionRepo)
+	selections := mcpconfig.NewSelectionService(selectionRepo, catalogRepo)
+	var states mcpconfig.LegacyImportStateRepository
+	if stateRepo, ok := agentSettingsRepo.(mcpconfig.LegacyImportStateRepository); ok {
+		states = stateRepo
+	}
+	return mcpconfig.NewLegacyImporter(
+		mcpService,
+		legacyMCPWorkspaceLister{source: workspaceSource, profiles: agentSettingsRepo},
+		catalog,
+		selections,
+		states,
+	), true
+}
+
+func importLegacyMCPAgentProfiles(
+	ctx context.Context,
+	log *logger.Logger,
+	agentSettingsRepo settingsstore.Repository,
+	mcpService *mcpconfig.Service,
+	importer *mcpconfig.LegacyImporter,
+	agentID string,
+) {
+	profiles, err := agentSettingsRepo.ListAgentProfiles(ctx, agentID)
+	if err != nil {
+		log.Warn("failed to list agent profiles for legacy MCP import",
+			zap.String("agent_id", agentID), zap.Error(err))
+		return
+	}
+	for _, profile := range profiles {
+		if profile == nil || strings.TrimSpace(profile.ID) == "" {
+			continue
+		}
+		if shouldSkipLegacyMCPProfile(ctx, log, mcpService, profile.ID) {
+			continue
+		}
+		if _, err := importer.ImportProfile(ctx, profile.ID); err != nil {
+			log.Warn("legacy MCP import requires attention",
+				zap.String("profile_id", profile.ID), zap.Error(err))
+		}
+	}
+}
+
+func shouldSkipLegacyMCPProfile(
+	ctx context.Context,
+	log *logger.Logger,
+	mcpService *mcpconfig.Service,
+	profileID string,
+) bool {
+	if _, err := mcpService.GetConfigByProfileID(ctx, profileID); err == nil {
+		return false
+	} else if errors.Is(err, mcpconfig.ErrAgentMcpUnsupported) {
+		return true
+	} else {
+		log.Warn("failed to read legacy MCP profile",
+			zap.String("profile_id", profileID), zap.Error(err))
+		return true
+	}
+}
+
+func configureMCPResolver(
+	lifecycleMgr *lifecycle.Manager,
+	agentSettingsRepo settingsstore.Repository,
+	mcpService *mcpconfig.Service,
+	secretStore secrets.SecretStore,
+) {
+	catalogRepo, ok := agentSettingsRepo.(mcpconfig.CatalogRepository)
+	if !ok {
+		return
+	}
+	selectionRepo, ok := agentSettingsRepo.(mcpconfig.SelectionRepository)
+	if !ok {
+		return
+	}
+	mcpResolver := mcpconfig.NewResolver(catalogRepo, selectionRepo)
+	var importStates mcpconfig.LegacyImportStateReader
+	if stateRepo, ok := agentSettingsRepo.(mcpconfig.LegacyImportStateReader); ok {
+		importStates = stateRepo
+	}
+	mcpResolver.SetLegacyProvider(mcpService, importStates)
+	if secretStore != nil {
+		mcpResolver.SetSecretResolver(mcpSecretResolver(secretStore))
+	}
+	lifecycleMgr.SetMCPResolver(mcpResolver)
+}
+
+func mcpSecretResolver(store secrets.SecretStore) mcpconfig.MCPSecretResolver {
+	return func(ctx context.Context, secretID, workspaceID string) (string, error) {
+		if scoped, ok := store.(secrets.ScopedSecretStore); ok {
+			return scoped.RevealForWorkspace(ctx, secretID, workspaceID)
+		}
+		return store.Reveal(ctx, secretID)
+	}
 }
 
 func credentialFilePath(cfg *config.Config) string {

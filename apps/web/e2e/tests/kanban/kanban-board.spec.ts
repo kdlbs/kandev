@@ -191,6 +191,7 @@ test.describe("Kanban board", () => {
       targetBox.x + targetBox.width / 2,
       targetBox.y + targetBox.height / 2,
     );
+    await expect(targetColumn).toHaveClass(/bg-primary\/5/);
     await testPage.mouse.up();
 
     await expect

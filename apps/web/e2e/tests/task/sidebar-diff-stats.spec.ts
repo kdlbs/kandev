@@ -2,6 +2,8 @@ import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
+test.use({ trace: "retain-on-failure" });
+
 type GitSnapshotResponse = {
   snapshots: Array<{
     metadata?: { branch_additions?: number; branch_deletions?: number };

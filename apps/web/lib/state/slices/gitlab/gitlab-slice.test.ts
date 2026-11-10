@@ -67,7 +67,7 @@ function makeStatus(overrides: Partial<GitLabStatus> = {}): GitLabStatus {
 }
 
 function makeStore() {
-  return create<GitLabSlice>()(immer((...a) => createGitLabSlice(...a)));
+  return create<GitLabSlice>()(immer((set, get) => createGitLabSlice(set, get)));
 }
 
 function workspaceMRs(store: ReturnType<typeof makeStore>, workspaceId = "ws-1") {
@@ -325,14 +325,6 @@ describe("action presets + stats", () => {
     };
     store.getState().setGitLabActionPresets("ws-1", presets);
     expect(store.getState().gitlabActionPresets.byWorkspaceId["ws-1"]).toEqual(presets);
-
-    store.getState().setGitLabStats({
-      open_mrs: 5,
-      mrs_awaiting_my_review: 2,
-      open_issues_assigned_me: 3,
-    });
-    expect(store.getState().gitlabStats.data?.open_mrs).toBe(5);
-    expect(store.getState().gitlabStats.loadedAt).not.toBeNull();
   });
 });
 

@@ -14,10 +14,10 @@ vi.mock("./use-task-removal", () => ({
 }));
 vi.mock("./use-task-workflow-move", () => ({ useTaskWorkflowMove: () => moveTasks }));
 
-type FakeTask = { id: string; workflowStepId: string };
+type FakeTask = { id: string; workflowId: string; workflowStepId: string };
 
 let storeState: {
-  kanban: { workflowId: string | null; tasks: FakeTask[] };
+  kanban: { workflowId: string | null; tasks: FakeTask[]; steps: { id: string }[] };
   kanbanMulti: { snapshots: Record<string, { tasks: FakeTask[] }> };
   hydrate: (patch: Record<string, unknown>) => void;
   setWorkflowSnapshot: (wfId: string, snapshot: { tasks: FakeTask[] }) => void;
@@ -27,9 +27,10 @@ function resetStore() {
   storeState = {
     kanban: {
       workflowId: "wf1",
+      steps: [{ id: "step-1" }, { id: "step-2" }],
       tasks: [
-        { id: "a", workflowStepId: "step-1" },
-        { id: "b", workflowStepId: "step-1" },
+        { id: "a", workflowId: "wf1", workflowStepId: "step-1" },
+        { id: "b", workflowId: "wf1", workflowStepId: "step-1" },
       ],
     },
     kanbanMulti: { snapshots: {} },
@@ -80,13 +81,13 @@ describe("useTaskMultiSelect — bulk move", () => {
     expect(moveTasks).not.toHaveBeenCalled();
   });
 
-  it("does nothing without a workflow id", async () => {
+  it("uses matching board evidence without a workflow argument", async () => {
     const { result } = renderHook(() => useTaskMultiSelect(null));
     act(() => result.current.toggleSelect("a"));
     await act(async () => {
       await result.current.bulkMove("step-2");
     });
-    expect(moveTasks).not.toHaveBeenCalled();
+    expect(moveTasks).toHaveBeenCalledWith(["a"], "wf1", "step-2", "step");
   });
 
   it("leaves the store unchanged and swallows the rejection on failure", async () => {

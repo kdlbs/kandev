@@ -3,6 +3,7 @@ package streams
 import (
 	"context"
 	"encoding/json"
+	p "github.com/kandev/kandev/internal/mcp/profile"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -126,6 +127,11 @@ type MCPAttachmentTestResult struct {
 // It deliberately has no headers, environment, command arguments, tool input,
 // tool result, or full endpoint URL fields.
 type MCPServerAttachment struct {
+	BuiltinPackage       p.PackageID              `json:"builtin_package,omitempty"`
+	AcceptedAt           *time.Time               `json:"accepted_at,omitempty"`
+	DefinitionID         string                   `json:"definition_id,omitempty"`
+	DefinitionRevision   int64                    `json:"definition_revision,omitempty"`
+	Origins              []MCPSelectionOrigin     `json:"origins,omitempty"`
 	Name                 string                   `json:"name"`
 	Source               MCPServerSource          `json:"source,omitempty"`
 	Transport            string                   `json:"transport,omitempty"`
@@ -152,6 +158,10 @@ type MCPServerAttachment struct {
 // raw network/stdio target or error summary, but Apply persists only the
 // sanitized projection.
 type MCPAttachmentEvidence struct {
+	BuiltinPackage     p.PackageID               `json:"builtin_package,omitempty"`
+	DefinitionID       string                    `json:"definition_id,omitempty"`
+	DefinitionRevision int64                     `json:"definition_revision,omitempty"`
+	Origins            []MCPSelectionOrigin      `json:"origins,omitempty"`
 	AttemptID          string                    `json:"attachment_attempt_id"`
 	ServerName         string                    `json:"server_name,omitempty"`
 	Kind               MCPAttachmentEvidenceKind `json:"kind"`
@@ -169,26 +179,28 @@ type MCPAttachmentEvidence struct {
 
 // MCPAttachmentAttempt is one ACP new/load/reset or passthrough process start.
 type MCPAttachmentAttempt struct {
-	AttemptID      string                  `json:"attachment_attempt_id"`
-	TaskID         string                  `json:"task_id,omitempty"`
-	SessionID      string                  `json:"session_id,omitempty"`
-	ExecutionID    string                  `json:"execution_id,omitempty"`
-	AgentID        string                  `json:"agent_id,omitempty"`
-	AgentProfileID string                  `json:"agent_profile_id,omitempty"`
-	ACPSessionID   string                  `json:"acp_session_id,omitempty"`
-	StartedAt      time.Time               `json:"started_at"`
-	UpdatedAt      time.Time               `json:"updated_at,omitempty"`
-	SupersededAt   *time.Time              `json:"superseded_at,omitempty"`
-	Servers        []MCPServerAttachment   `json:"servers,omitempty"`
-	Evidence       []MCPAttachmentEvidence `json:"evidence,omitempty"`
-	SessionError   string                  `json:"session_error,omitempty"`
+	BuiltinPackages *p.BuiltinManifest      `json:"builtin_packages,omitempty"`
+	AttemptID       string                  `json:"attachment_attempt_id"`
+	TaskID          string                  `json:"task_id,omitempty"`
+	SessionID       string                  `json:"session_id,omitempty"`
+	ExecutionID     string                  `json:"execution_id,omitempty"`
+	AgentID         string                  `json:"agent_id,omitempty"`
+	AgentProfileID  string                  `json:"agent_profile_id,omitempty"`
+	ACPSessionID    string                  `json:"acp_session_id,omitempty"`
+	StartedAt       time.Time               `json:"started_at"`
+	UpdatedAt       time.Time               `json:"updated_at,omitempty"`
+	SupersededAt    *time.Time              `json:"superseded_at,omitempty"`
+	Servers         []MCPServerAttachment   `json:"servers,omitempty"`
+	Evidence        []MCPAttachmentEvidence `json:"evidence,omitempty"`
+	SessionError    string                  `json:"session_error,omitempty"`
 }
 
 // MCPAttachmentHistory is the bounded persisted state for one Kandev session.
 type MCPAttachmentHistory struct {
-	Version  int                    `json:"version"`
-	Current  MCPAttachmentAttempt   `json:"current"`
-	Previous []MCPAttachmentAttempt `json:"previous,omitempty"`
+	BuiltinBinding *BuiltinMCPAcceptedBinding `json:"builtin_binding,omitempty"`
+	Version        int                        `json:"version"`
+	Current        MCPAttachmentAttempt       `json:"current"`
+	Previous       []MCPAttachmentAttempt     `json:"previous,omitempty"`
 }
 
 // StartAttempt makes attempt current and marks the previous current attempt as
@@ -211,6 +223,7 @@ func (h *MCPAttachmentHistory) StartAttempt(attempt MCPAttachmentAttempt) {
 		h.Previous = append([]MCPAttachmentAttempt{superseded}, h.Previous...)
 	}
 	h.Current = attempt
+	h.updateBuiltinAcceptance()
 	if len(h.Previous) > MaxMCPAttachmentAttempts-1 {
 		h.Previous = h.Previous[:MaxMCPAttachmentAttempts-1]
 	}
@@ -249,6 +262,7 @@ func (h *MCPAttachmentHistory) Apply(evidence MCPAttachmentEvidence) bool {
 		index = len(h.Current.Servers) - 1
 	}
 	h.Current.Servers[index].applyEvidence(evidence, catalogTruncated)
+	h.updateBuiltinAcceptance()
 	return true
 }
 
@@ -263,7 +277,7 @@ func (h MCPAttachmentHistory) CurrentServer(name string) (MCPServerAttachment, b
 
 // Valid reports whether a history has the current schema and current attempt.
 func (h MCPAttachmentHistory) Valid() bool {
-	return h.Version == MCPAttachmentSchemaVersion && h.Current.AttemptID != ""
+	return h.Version == MCPAttachmentSchemaVersion && h.Current.AttemptID != "" && h.validBuiltinBinding()
 }
 
 func (s *MCPServerAttachment) applyEvidence(evidence MCPAttachmentEvidence, catalogTruncated bool) {
@@ -272,6 +286,18 @@ func (s *MCPServerAttachment) applyEvidence(evidence MCPAttachmentEvidence, cata
 }
 
 func (s *MCPServerAttachment) applyEvidenceDetails(evidence MCPAttachmentEvidence, catalogTruncated bool) {
+	if evidence.Source == MCPServerSourceKandev && evidence.BuiltinPackage != "" && p.BuiltinPackageForRuntimeName(evidence.ServerName) == evidence.BuiltinPackage {
+		s.BuiltinPackage = evidence.BuiltinPackage
+		if evidence.Kind == MCPAttachmentEvidenceSessionAccepted && s.AcceptedAt == nil {
+			accepted := evidence.OccurredAt
+			s.AcceptedAt = &accepted
+		}
+	}
+	if evidence.DefinitionID != "" {
+		s.DefinitionID = evidence.DefinitionID
+		s.DefinitionRevision = evidence.DefinitionRevision
+		s.Origins = normalizeMCPOrigins(evidence.Origins)
+	}
 	if evidence.Source != "" {
 		s.Source = evidence.Source
 	}
@@ -459,7 +485,12 @@ func appendBoundedMCPAttachmentEvidence(existing []MCPAttachmentEvidence, eviden
 }
 
 func sanitizeMCPAttachmentEvidence(evidence MCPAttachmentEvidence) (MCPAttachmentEvidence, bool) {
+	if evidence.Source != MCPServerSourceKandev || p.BuiltinPackageForRuntimeName(evidence.ServerName) != evidence.BuiltinPackage {
+		evidence.BuiltinPackage = ""
+	}
 	var catalogTruncated bool
+	evidence.DefinitionID = boundedMCPIdentity(evidence.DefinitionID)
+	evidence.Origins = normalizeMCPOrigins(evidence.Origins)
 	if evidence.Transport == "stdio" {
 		evidence.Target = SanitizeMCPStdioTarget(evidence.Target)
 	} else if evidence.Target != "" {

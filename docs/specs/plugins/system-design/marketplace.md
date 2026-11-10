@@ -4,6 +4,7 @@ system: plugins
 requirements:
   - REQ-PLUGINS-MARKETPLACE-001
   - REQ-PLUGINS-MARKETPLACE-002
+  - REQ-PLUGINS-MARKETPLACE-004
 created: 2026-07-18
 owners:
   - jcfs
@@ -26,6 +27,7 @@ installer described here. Native plugin behavior remains owned by this document.
 | `REQ-PLUGINS-MARKETPLACE-001` | [Migrated source detail](#migrated-source-detail) |
 | `REQ-PLUGINS-MARKETPLACE-002` | [Curated release propagation](#curated-release-propagation) |
 | `REQ-PLUGINS-MARKETPLACE-003` | [Registry preview images](#registry-preview-images) |
+| `REQ-PLUGINS-MARKETPLACE-004` | [Auto-update (opt-in)](#auto-update-opt-in) |
 
 ## Registry preview images
 
@@ -94,13 +96,10 @@ while keeping install-by-URL and sideloading as escape hatches.
   or actively-maintained plugins are not buried under older high-star incumbents.
 - Each catalog entry shows: display name, description, author, categories, the source
   repository link, the latest published version, and its star count.
-- Release authors and registry reviewers SHALL apply the attribution convention:
-  first-party `kdlbs/kandev-plugin-*` releases declare `author: "kandev"`,
-  community releases declare the contributor's stable identity, and a plugin is
-  not labeled `kandev` only because a maintainer curated it into the official
-  source. This is a release and curation check, not an index-builder ownership
-  validation rule. The builder preserves a declared manifest author and falls
-  back to the repository owner for legacy releases without one.
+- Native-plugin catalog attribution and installed manifest labels follow the
+  [native-plugin attribution design](native-plugin-attribution.md). The curated
+  repository supplies the catalog identity. Canvas author metadata remains
+  governed by its distribution contract.
 - The catalog source repository link SHALL identify the repository named by the
   registry entry. The index builder derives this value from the registry pointer.
   A release manifest's `repo_url`, when present, SHOULD identify the same
@@ -224,7 +223,7 @@ This is the fetch contract between a marketplace source and kandev. Additional
       "id": "agent-stats",
       "name": "Agent Stats",              // from manifest display_name
       "description": "Per-session token & LOC dashboard",
-      "author": "kandev",                 // from the release manifest
+      "author": "kdlbs",                  // curated repository owner (native plugin)
       "categories": ["analytics"],
       "icon_url": "https://raw.githubusercontent.com/kdlbs/kandev-plugin-agent-stats/v1.4.0/icon.svg",
       "repo_url": "https://github.com/kdlbs/kandev-plugin-agent-stats",
@@ -436,7 +435,7 @@ response but stays `enabled`.
   schema/consistency check fails and the PR is blocked.
 - **GIVEN** the latest release of the first-party Bitbucket plugin declares
   `author: "kandev"` and its `repo_url` points to `kdlbs/kandev-plugin-bitbucket`,
-  **WHEN** the official index is built, **THEN** the catalog shows **by kandev** and
+  **WHEN** the official index is built, **THEN** the catalog shows **by kdlbs** and
   links to the `kdlbs` Bitbucket repository.
 - **GIVEN** the latest release of the community YouTrack plugin is owned by
   `ahmedbally` and declares `author: "ahmedbally"` with its matching repository URL,
@@ -483,6 +482,16 @@ API: `GET/PUT /api/plugins/settings` (`{auto_update_default}`) for the
 instance-wide default and `PUT /api/plugins/:id/auto-update` (`{auto_update:
 true|false|null}`) for the per-plugin override. Both require the same operator
 authority as the rest of plugin management.
+
+`useAutoUpdateSettings` serializes accepted PUTs within its mounted page, using
+a promise tail and synchronous intent counter. Only the latest intent publishes
+its receipt or rollback; every successful receipt updates the accepted baseline.
+The baseline starts unknown: failed GET uses the off fallback, not confirmed
+data. Late initial GET cannot replace an admitted edit. Accepted writes drain
+after unmount, without publishing state or toasts; disposed callbacks admit
+nothing. This is local orchestration, without cross-mount ordering or transport
+exactly-once claims. Both switch consumers share this state; row overrides use
+their separate endpoint.
 
 ## Out of scope
 

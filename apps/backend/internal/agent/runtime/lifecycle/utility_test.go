@@ -16,6 +16,7 @@ import (
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/secrets"
 )
 
 // inferenceTestAgent is an agent whose inference support is controlled by the
@@ -102,6 +103,10 @@ func newInferenceHarness(t *testing.T, resolver ProfileResolver, registered ...a
 	t.Helper()
 	h := &inferenceHarness{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/identity" {
+			_, _ = w.Write([]byte(`{"capabilities":["launch-wrapper.v1"]}`))
+			return
+		}
 		if r.URL.Path != "/api/v1/inference/prompt" {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -324,6 +329,9 @@ func TestManagerExecuteInferenceProfilePrompt(t *testing.T) {
 			},
 		}}, newInferenceAgent("inference-ok", true, true))
 
+		store := newInMemorySecretStore()
+		store.store["secret-1"] = &secrets.SecretWithValue{Secret: secrets.Secret{ID: "secret-1"}, Value: "resolved-secret"}
+		harness.manager.secretStore = store
 		resp, err := harness.manager.ExecuteInferenceProfilePrompt(t.Context(), "session-1", "profile-1", "hello")
 		if err != nil {
 			t.Fatalf("ExecuteInferenceProfilePrompt: %v", err)
@@ -345,8 +353,8 @@ func TestManagerExecuteInferenceProfilePrompt(t *testing.T) {
 		if got.InferenceConfig == nil {
 			t.Fatal("missing inference config")
 		}
-		if !equalStrings(got.InferenceConfig.CommandPrefix, []string{"greywall", "--"}) {
-			t.Fatalf("CommandPrefix = %v", got.InferenceConfig.CommandPrefix)
+		if !equalStrings(got.InferenceConfig.LaunchWrapper.Argv, []string{"greywall", "--"}) || got.InferenceConfig.LaunchWrapper.Version != 1 || len(got.InferenceConfig.CommandPrefix) != 0 {
+			t.Fatalf("LaunchWrapper = %+v", got.InferenceConfig.LaunchWrapper)
 		}
 		if !equalStrings(got.InferenceConfig.CLIFlags, []string{"--verbose"}) {
 			t.Fatalf("CLIFlags = %v", got.InferenceConfig.CLIFlags)
@@ -354,8 +362,8 @@ func TestManagerExecuteInferenceProfilePrompt(t *testing.T) {
 		if got.InferenceConfig.Env["PROFILE_VAR"] != "profile-value" {
 			t.Fatalf("Env = %+v, want the plain profile var", got.InferenceConfig.Env)
 		}
-		if _, leaked := got.InferenceConfig.Env["SECRET_VAR"]; leaked {
-			t.Fatalf("secret-backed env vars must not be inlined: %+v", got.InferenceConfig.Env)
+		if got.InferenceConfig.Env["SECRET_VAR"] != "resolved-secret" {
+			t.Fatal("profile secret was not resolved")
 		}
 		if _, present := got.InferenceConfig.Env[""]; present {
 			t.Fatalf("blank env keys must be dropped: %+v", got.InferenceConfig.Env)

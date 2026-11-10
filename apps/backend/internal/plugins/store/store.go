@@ -44,8 +44,13 @@ type Record struct {
 	// plugin. It is persisted with the record and never derived from the
 	// plugin id, package digest, workspace, or install path.
 	InstallationID string `yaml:"installation_id,omitempty" json:"installation_id,omitempty"`
-	InstallPath    string `yaml:"install_path" json:"install_path"`
-	Signed         bool   `yaml:"signed" json:"signed"`
+	// AgentToolPolicyVersion is a Host-minted opaque boundary for exact
+	// automation tool approvals. It changes on every installation replacement
+	// and admitted configuration save, so earlier approvals require review.
+	// It is preserved across restarts and status-only enable/disable.
+	AgentToolPolicyVersion string `yaml:"agent_tool_policy_version,omitempty" json:"agent_tool_policy_version,omitempty"`
+	InstallPath            string `yaml:"install_path" json:"install_path"`
+	Signed                 bool   `yaml:"signed" json:"signed"`
 	// AutoUpdate is the operator's per-plugin auto-update override. It is a
 	// tri-state: nil means "inherit the instance-wide default"
 	// (Service.AutoUpdateDefault), true forces auto-update on for this plugin,

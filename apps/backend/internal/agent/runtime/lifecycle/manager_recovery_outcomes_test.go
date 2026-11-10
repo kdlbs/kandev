@@ -2,6 +2,9 @@ package lifecycle
 
 import (
 	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -85,9 +88,20 @@ func TestRecoverySummaryDistinguishesEmptyEnumerationFromFailure(t *testing.T) {
 // @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.5
 func TestRecoverySummaryMixedBackendsAccountsEachRecordOnce(t *testing.T) {
 	log, logs := newObservedRecoveryManagerLogger(t)
+	instance := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/identity":
+			_, _ = w.Write([]byte(`{"capabilities":["launch-wrapper.v1"]}`))
+		case "/api/v1/agent/launch-wrapper":
+			_, _ = w.Write([]byte(`{"version":1}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(instance.Close)
 	control := newStandaloneControlServer(t, true)
 	control.listInstances = []*agentctlclient.InstanceInfo{
-		{ID: "inst-1", SessionID: "session-1", Port: 4001},
+		{ID: "inst-1", SessionID: "session-1", Port: instance.Listener.Addr().(*net.TCPAddr).Port},
 	}
 
 	standaloneExec := control.executor(t)
@@ -115,6 +129,8 @@ func TestRecoverySummaryMixedBackendsAccountsEachRecordOnce(t *testing.T) {
 	err := mgr.Start(context.Background())
 	require.NoError(t, err)
 
+	_, retracked := mgr.GetExecutionBySessionID("session-1")
+	require.True(t, retracked)
 	fields := recoveryOutcomeFields(t, logs)
 	assertRecoveryCount(t, fields, "candidate_count", 3)
 	assertRecoveryCount(t, fields, "retracked_count", 1)

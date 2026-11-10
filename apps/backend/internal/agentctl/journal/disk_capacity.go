@@ -103,12 +103,20 @@ func (j *Journal) reserveDiskCapacity(db *bolt.DB, writeBytes int64, preserveRes
 	required := requiredDiskBytes(reserve, j.config.DiskWriteHeadroomBytes, diskBytes)
 	available := j.diskAvailableAfterWritesLocked()
 	if required == math.MaxInt64 || available < required {
-		return diskCapacityReservation{}, ErrJournalFull
+		return diskCapacityReservation{}, NewStorageError(
+			StorageReasonDiskSpaceLow,
+			ErrJournalFull,
+			WithDiskMeasurements(available, required),
+		)
 	}
 	pendingDisk := requiredDiskBytes(j.diskPendingBytes, diskBytes, 0)
 	pendingReusable := requiredDiskBytes(j.diskReusablePendingBytes, reuseCredit, 0)
 	if pendingDisk == math.MaxInt64 || pendingReusable == math.MaxInt64 {
-		return diskCapacityReservation{}, ErrJournalFull
+		return diskCapacityReservation{}, NewStorageError(
+			StorageReasonDiskSpaceLow,
+			ErrJournalFull,
+			WithDiskMeasurements(available, pendingDisk),
+		)
 	}
 	j.diskPendingBytes = pendingDisk
 	j.diskReusablePendingBytes = pendingReusable

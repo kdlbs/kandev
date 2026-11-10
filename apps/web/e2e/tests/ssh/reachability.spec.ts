@@ -15,6 +15,18 @@ import { SSHSettingsPage } from "../../pages/SSHSettingsPage";
  * Covers AC-EXECUTORS-SSH-REACHABILITY-001.9, 001.11, 002.1, 003.1, 003.3.
  */
 test.describe("ssh executor — reachability", () => {
+  let releaseProbeEnvironment: (() => Promise<void>) | undefined;
+  test.beforeEach(async ({ backend }) => {
+    // Only the explicit probes below may advance this test's failure counter.
+    releaseProbeEnvironment = await backend.useEnv({
+      KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS: "0",
+    });
+  });
+  test.afterEach(async () => {
+    await releaseProbeEnvironment?.();
+    releaseProbeEnvironment = undefined;
+  });
+
   test("reflects reachable, then unreachable after the failure threshold, then clears on a single success", async ({
     testPage,
     seedData,

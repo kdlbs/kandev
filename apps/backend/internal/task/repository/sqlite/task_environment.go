@@ -950,15 +950,6 @@ func (r *Repository) TransferTaskEnvironmentOwnership(
 	return r.transferTaskEnvironmentOwnershipWithDeletion(ctx, envID, expectedTaskID, expectedGeneration, taskID, nil)
 }
 
-func (r *Repository) transferTaskEnvironmentOwnership(
-	ctx context.Context,
-	envID, expectedTaskID string,
-	expectedGeneration int64,
-	taskID string,
-) error {
-	return r.transferTaskEnvironmentOwnershipWithDeletion(ctx, envID, expectedTaskID, expectedGeneration, taskID, nil)
-}
-
 func (r *Repository) TransferManagedDeletionEnvironment(ctx context.Context, claim managed.DeleteClaim, envID, expectedTaskID string, expectedGeneration int64, taskID string) error {
 	if claim.TaskID != expectedTaskID {
 		return managed.ErrDeletionOwned

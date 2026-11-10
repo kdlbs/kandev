@@ -198,6 +198,7 @@ sequentially via the managed runner, which rebuilds artifacts.
 - [x] [Task 01: Safe readable diagnostics](task-01-safe-diagnostics.md)
 - [x] [Task 02: Initial recovery ownership and actions](task-02-recovery-hierarchy.md), depends on 01.
 - [x] [Task 03: Uniform composer recovery](task-03-uniform-recovery.md), depends on 02. Completed September 20.
+- [x] [Task 04: Keep failure explanations readable](task-04-readable-failure-copy.md), depends on 03. Completed October 20.
 
 ## Documentation impact
 

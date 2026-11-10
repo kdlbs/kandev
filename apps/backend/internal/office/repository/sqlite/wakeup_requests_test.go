@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/google/uuid"
 
-	officemodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
 )
@@ -189,7 +190,7 @@ func TestWakeupRequest_MarkCoalesced(t *testing.T) {
 
 	// Seed an in-flight run with an initial context snapshot.
 	runID := uuid.New().String()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID:              runID,
 		AgentProfileID:  "agent-1",
 		Reason:          "heartbeat",
@@ -243,7 +244,7 @@ func TestWakeupRequest_MarkCoalesced(t *testing.T) {
 func TestWakeupRequest_PromoteAndCoalesceCommitsAllState(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID:              "run-cron",
 		AgentProfileID:  "agent-1",
 		Reason:          shared.RunReasonRoutineDispatchCron,
@@ -298,7 +299,7 @@ func TestWakeupRequest_PromoteAndCoalesceCommitsAllState(t *testing.T) {
 func TestWakeupRequest_PromoteAndCoalesceClaimedRunDoesNothing(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID: "run-cron", AgentProfileID: "agent-1",
 		Reason: shared.RunReasonRoutineDispatchCron, Payload: "{}",
 		Status: "claimed", CoalescedCount: 1, ContextSnapshot: "{}",
@@ -335,7 +336,7 @@ func TestWakeupRequest_PromoteAndCoalesceClaimedRunDoesNothing(t *testing.T) {
 func TestWakeupRequest_PromoteAndCoalesceRollsBackOnMergeError(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID: "run-cron", AgentProfileID: "agent-1",
 		Reason: shared.RunReasonRoutineDispatchCron, Payload: "{}",
 		Status: "queued", CoalescedCount: 1, ContextSnapshot: "{}",

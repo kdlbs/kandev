@@ -98,6 +98,8 @@
   "failedToMigrateTasks": "Ƒàĩĺēď ţō ḿĩĝŕàţē ţàśķś",
   "failedToSaveWorkflowChanges": "Ƒàĩĺēď ţō śàvē ŵōŕķƒĺōŵ ćĥàńĝēś",
   "failedToUpdateWorkflowStep": "Ƒàĩĺēď ţō ũƥďàţē ŵōŕķƒĺōŵ śţēƥ",
+  "holdStep": "Ĥōĺď śţēƥ",
+  "holdStepHelp": "Ḿàŕķś ţĥĩś śţēƥ àś à ĥōĺď śţēƥ. Ţĥē ćĺàśśĩƒĩćàţĩōń ĩś śţōŕēď ōń ţĥē śţēƥ, àńď ĩţ ďōēś ńōţ śţàŕţ, śţōƥ, ōŕ ḿōvē à ţàśķ.",
   "hopNumber": "Ĥōƥ {{index}}",
   "import": "Ĩḿƥōŕţ",
   "importCompleteTitle": "Ĩḿƥōŕţ ćōḿƥĺēţē",

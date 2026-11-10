@@ -15,8 +15,8 @@ const (
 // Attended reports whether p classifies as attended.
 func (p RunProvenance) Attended() bool { return p == RunProvenanceAttended }
 
-// attendedRunReasons is the exact 20-literal allowlist of
-// AC-OFFICE-BUDGET-007.2: 16 current reasons plus 4 legacy literals. Every
+// attendedRunReasons is the exact 21-literal allowlist of
+// AC-OFFICE-BUDGET-007.2: 17 current reasons plus 4 legacy literals. Every
 // other value, including one the build does not recognize, classifies as
 // unattended (RunProvenanceUnattended's zero value).
 //
@@ -27,6 +27,7 @@ func (p RunProvenance) Attended() bool { return p == RunProvenanceAttended }
 var attendedRunReasons = map[string]struct{}{
 	"task_assigned":               {},
 	"task_comment":                {},
+	"handoff_completed":           {},
 	"task_review_requested":       {},
 	"task_changes_requested":      {},
 	"task_blockers_resolved":      {},

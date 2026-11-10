@@ -1,4 +1,4 @@
-import type { DockviewReadyEvent } from "dockview-react";
+import type { DockviewApi, DockviewReadyEvent } from "dockview-react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -10,6 +10,7 @@ import {
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
   setPinnedTarget,
+  TERMINAL_DEFAULT_ID,
 } from "@/lib/state/layout-manager";
 import {
   getManualRightWidth,
@@ -24,6 +25,7 @@ import { getDockviewElement, measureDockviewGridWidth } from "@/lib/state/dockvi
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { parkUserShell, stopUserShell } from "@/lib/api/domains/user-shell-api";
+import { makeUserShellScope, userShellScopeKey } from "@/lib/state/user-shell-scope";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
   snapshotColumnWidths,
@@ -78,7 +80,7 @@ function refreshAutomaticRightTarget(api: DockviewReadyEvent["api"]): void {
   const store = useDockviewStore.getState();
   if (!hasPinnedRightColumn(api) || getManualRightWidth(store.currentLayoutEnvId) !== null) return;
   const sv = getRootSplitview(api);
-  const sidebarWidth = store.sidebarVisible && sv?.length >= 3 ? sv.getViewSize(0) : 0;
+  const sidebarWidth = store.sidebarVisible && sv && sv.length >= 3 ? sv.getViewSize(0) : 0;
   setPinnedTarget(
     "right",
     resolveResponsiveRightWidth(measureDockviewGridWidth(api), sidebarWidth, null),
@@ -92,7 +94,7 @@ function isPinnedRightSash(api: DockviewReadyEvent["api"], target: EventTarget |
   const sash = (target as HTMLElement | null)?.closest(".dv-sash");
   if (!sash) return false;
   const sv = getRootSplitview(api);
-  const rootSashes = sv?.sashes as Array<{ container?: HTMLElement }> | undefined;
+  const rootSashes = sv?.sashes;
   return rootSashes?.[rootSashes.length - 1]?.container === sash;
 }
 
@@ -125,7 +127,7 @@ function applyRightConstraints(
   measuredWidth: number | undefined,
 ): number {
   const sv = getRootSplitview(api);
-  const sidebarWidth = sv?.length >= 3 ? sv.getViewSize(0) : 0;
+  const sidebarWidth = sv && sv.length >= 3 ? sv.getViewSize(0) : 0;
   const maximumWidth = computeRightMaxPx(measuredWidth, sidebarWidth);
   for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
     const group = api.groups.find((candidate) => candidate.id === gid);
@@ -521,18 +523,71 @@ function handleTerminalPanelClosed(
   const fallbackEnv = active ? (state.environmentIdBySessionId[active] ?? null) : null;
   const envForTerminal = stampedEnv || fallbackEnv;
   if (!envForTerminal) return;
-  const shell = state.userShells.byEnvironmentId[envForTerminal]?.find(
-    (s) => s.terminalId === terminalId,
+  const scope = makeUserShellScope(
+    envForTerminal,
+    stampedTaskID ?? state.tasks.activeTaskId ?? null,
   );
+  const shell = scope
+    ? state.userShells.byScope[userShellScopeKey(scope)]?.find((s) => s.terminalId === terminalId)
+    : undefined;
   if (shell?.kind === "ordinary") {
     parkUserShell(terminalId, stampedTaskID).then(
-      () => state.updateUserShell(envForTerminal, terminalId, { state: "parked" }),
+      () => scope && state.updateUserShell(scope, terminalId, { state: "parked" }),
       (err: unknown) => console.error("park terminal on tab close:", err),
     );
   } else {
     stopUserShell(envForTerminal, terminalId, stampedTaskID).catch((err: unknown) =>
       console.warn("stop terminal on tab close:", err),
     );
+  }
+}
+
+/**
+ * Removes ordinary terminal panels that do not belong to the active
+ * task/environment scope, including panels whose own stamps name another task
+ * or environment. Closing an invalid panel must not park or stop the foreign
+ * PTY, so the panel is marked as a terminate-close first and the normal close
+ * cleanup skips its side effects.
+ */
+export function removeInvalidOrdinaryTerminalPanels(
+  api: DockviewApi,
+  appStore: StoreApi<AppState>,
+  scope: { environmentId: string; taskId: string | null },
+): void {
+  if (useDockviewStore.getState().isRestoringLayout) return;
+  const state = appStore.getState();
+  const owned = new Set(
+    (state.userShells.byScope[userShellScopeKey(scope)] ?? [])
+      .filter((shell) => shell.state !== "parked")
+      .map((shell) => shell.terminalId),
+  );
+  const legacyOwned = new Set(
+    (state.userShells.byEnvironmentId[scope.environmentId] ?? [])
+      .filter((shell) => shell.kind !== "ordinary")
+      .map((shell) => shell.terminalId),
+  );
+  for (const panel of [...api.panels]) {
+    if (panel.id === TERMINAL_DEFAULT_ID) continue;
+    const params = (panel.params ?? {}) as Record<string, unknown>;
+    const terminalId = params.terminalId as string | undefined;
+    if (!terminalId || !terminalId.startsWith("shell-")) continue;
+    const stampedTask = params.taskID as string | undefined;
+    const stampedEnv = params.environmentId as string | undefined;
+    if (!!stampedEnv && stampedEnv !== scope.environmentId) {
+      markTerminalPanelTerminateClose(panel.api.id);
+      panel.api.close();
+      continue;
+    }
+    // Legacy descriptors have no task identity and stay environment-scoped.
+    if (legacyOwned.has(terminalId)) continue;
+    const taskConflict = !!stampedTask && stampedTask !== scope.taskId;
+    // A panel retained from another task must not stay in this workbench even
+    // when its stamped cache contains the row. Parked ordinary terminals are
+    // not attachable from an extra panel either. The close is marked as
+    // terminate-only so it never parks or stops that terminal.
+    if (!taskConflict && owned.has(terminalId)) continue;
+    markTerminalPanelTerminateClose(panel.api.id);
+    panel.api.close();
   }
 }
 

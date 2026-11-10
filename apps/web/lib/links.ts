@@ -1,6 +1,8 @@
 export type TaskLinkOptions = {
   layout?: string;
   sessionId?: string;
+  /** Workbench panel the task page should open once its layout is ready. */
+  panel?: "task-graph";
   searchParams?: URLSearchParams;
 };
 
@@ -14,21 +16,28 @@ export function linkToTask(taskId: string, layoutOrOptions?: string | TaskLinkOp
 
   if (options.layout !== undefined) searchParams.set("layout", options.layout);
   if (options.sessionId !== undefined) searchParams.set("sessionId", options.sessionId);
+  if (options.panel !== undefined) searchParams.set("panel", options.panel);
 
   const query = searchParams.toString();
   return query ? `${base}?${query}` : base;
 }
 
+/** Home query param naming the task the board Graph view should focus. */
+export const BOARD_GRAPH_FOCUS_PARAM = "graphFocus";
+
 export function linkToTaskOverview({
   workspaceId,
   workflowId,
+  graphFocusTaskId,
 }: {
   workspaceId?: string;
   workflowId?: string;
+  graphFocusTaskId?: string;
 } = {}): string {
   const params = new URLSearchParams({ home: "overview" });
   if (workspaceId) params.set("workspaceId", workspaceId);
   if (workflowId) params.set("workflowId", workflowId);
+  if (graphFocusTaskId) params.set(BOARD_GRAPH_FOCUS_PARAM, graphFocusTaskId);
   return `/?${params.toString()}`;
 }
 
@@ -66,6 +75,16 @@ export function replaceTaskUrl(taskId: string, sessionId?: string): void {
 
 export function linkToTasks(workspaceId?: string): string {
   return workspaceId ? `/tasks?workspace=${workspaceId}` : "/tasks";
+}
+
+export function linkToArchivedTasks(workspaceId: string): string {
+  const params = new URLSearchParams({
+    workspace: workspaceId,
+    archive: "archived",
+    workflow: "all",
+    repository: "all",
+  });
+  return `/tasks?${params.toString()}`;
 }
 
 /**

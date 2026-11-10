@@ -50,6 +50,7 @@ func TestExecuteStepTransition_WritesHandoffCarryToken(t *testing.T) {
 		Summary: "did the work",
 		Handoff: "watch out for X",
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -82,6 +83,7 @@ func TestExecuteStepTransition_BlankHandoffRemovesToken(t *testing.T) {
 	svc.stepHistoryRecorder = &fakeStepHistoryRecorder{}
 
 	signal := models.PendingStepCompletionSignal{StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "done"}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -110,6 +112,7 @@ func TestExecuteStepTransition_OnTurnStartDoesNotTouchToken(t *testing.T) {
 	svc.stepHistoryRecorder = &fakeStepHistoryRecorder{}
 
 	signal := models.PendingStepCompletionSignal{StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "premature"}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -160,6 +163,7 @@ func TestExecuteStepTransition_QueuedTransitionStillWritesHandoffCarryToken(t *t
 		Summary: "did the work",
 		Handoff: "watch out for X",
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -218,6 +222,7 @@ func TestApplyEngineTransition_WritesHandoffCarryToken(t *testing.T) {
 		Summary: "engine path done",
 		Handoff: "engine handoff text",
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -280,6 +285,7 @@ func TestApplyEngineTransition_QueuedTransitionWritesHandoffCarryTokenAtAdmissio
 		Summary: "engine queued work",
 		Handoff: "carry before promotion",
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -323,6 +329,7 @@ func TestApplyEngineTransition_OnTurnStartDoesNotTouchToken(t *testing.T) {
 	svc.stepHistoryRecorder = &fakeStepHistoryRecorder{}
 
 	signal := models.PendingStepCompletionSignal{StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "premature"}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}

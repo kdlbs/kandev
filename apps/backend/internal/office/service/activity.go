@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
@@ -113,7 +115,7 @@ func (s *Service) appendRunEventStrict(
 // publishRunEventAppended emits the per-run notification on the event
 // bus. Subjects are namespaced by run id so only clients subscribed
 // to that run get the message.
-func (s *Service) publishRunEventAppended(ctx context.Context, evt *models.RunEvent) {
+func (s *Service) publishRunEventAppended(ctx context.Context, evt *runsmodels.RunEvent) {
 	if s.eb == nil || evt == nil {
 		return
 	}

@@ -1600,6 +1600,12 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 		cancelAgentBlock:   make(chan struct{}),
 		cancelAgentEntered: make(chan struct{}, 1),
 	}
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(agentMgr.cancelAgentBlock)
+		}
+	})
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
@@ -1616,32 +1622,46 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	// don't depend on real subprocess timing.
 	<-agentMgr.cancelAgentEntered
 
-	// Fire several duplicates while the first is still parked. Each joins the
-	// owner operation and waits for its result rather than invoking the manager.
-	const duplicates = 5
-	duplicateDone := make(chan error, duplicates)
-	for i := 0; i < duplicates; i++ {
-		go func() {
-			duplicateDone <- svc.CancelAgent(context.Background(), "session1")
-		}()
+	// Fire a duplicate while the first is still parked. Wait until it joins the
+	// owned operation before releasing the first call, so scheduling cannot turn
+	// a late duplicate into a new cancellation.
+	svc.cancellationOperationsMu.Lock()
+	operation := svc.cancellationOperations["session1"]
+	svc.cancellationOperationsMu.Unlock()
+	if operation == nil {
+		t.Fatal("expected in-flight cancellation operation")
+	}
+	duplicateDone := make(chan error, 1)
+	go func() {
+		duplicateDone <- svc.CancelAgent(context.Background(), "session1")
+	}()
+	select {
+	case <-operation.joined:
+	case <-time.After(5 * time.Second):
+		t.Fatal("duplicate cancel did not join the in-flight operation")
 	}
 	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 agentManager.CancelAgent call while first is in flight, got %d", got)
 	}
 
-	// Release the first call. The owner and all joiners observe the same result;
+	// Release the first call. The owner and its duplicate observe the same result;
 	// after the operation clears, a fresh cancel is allowed through.
+	released = true
 	close(agentMgr.cancelAgentBlock)
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first CancelAgent returned error: %v", err)
 	}
-	for i := 0; i < duplicates; i++ {
-		if err := <-duplicateDone; err != nil {
-			t.Fatalf("duplicate cancel %d returned error: %v", i, err)
-		}
+	if err := <-duplicateDone; err != nil {
+		t.Fatalf("duplicate cancel returned error: %v", err)
 	}
 
 	agentMgr.cancelAgentBlock = nil // unblock subsequent calls
+	// The first cancellation settled the turn, so the session is idle now. A
+	// fresh cancel must be allowed through once the operation clears, but it is
+	// only a real target again while a turn is live.
+	require.NoError(t, repo.UpdateTaskSessionState(
+		context.Background(), "session1", models.TaskSessionStateRunning, "",
+	))
 	if err := svc.CancelAgent(context.Background(), "session1"); err != nil {
 		t.Fatalf("post-release CancelAgent returned error: %v", err)
 	}
@@ -4726,6 +4746,7 @@ type mockMessageCreator struct {
 	sessionMessageOnce        sync.Once
 	sessionMessageErr         error
 	idempotentSessionMessages map[string]struct{}
+	sessionMessageCreatedAt   map[string]time.Time
 	agentMessages             []mockAgentMessage
 	agentMessageWrites        int
 	agentStreamWrites         int
@@ -4741,13 +4762,17 @@ type mockMessageCreator struct {
 	lastAgentPlanContent      string
 	userMessageErr            error
 	idempotentUserMessages    map[string]struct{}
+	userMessageStatuses       map[string]string
+	userMessageStatusFn       func(messageID, sessionID, status string) (bool, error)
 	permissionClaimFn         func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
 	permissionFinishFn        func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
 	permissionAuditFn         func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
 	permissionUpdateFn        func(context.Context, string, string, string, string, models.PermissionStatus) error
+	permissionPresentationFn  func(context.Context, models.PermissionPresentationUpdate) (*models.Message, bool, error)
 	permissionMessageDecision *models.PermissionDecision
+	permissionMessageOptions  models.PermissionRequestMessageOptions
 	permissionMessageWrites   int
-	permissionMessageCreateFn func(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}, *models.PermissionDecision) (string, error)
+	permissionMessageCreateFn func(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}, models.PermissionRequestMessageOptions) (string, error)
 }
 
 type mockUserMessage struct {
@@ -4756,6 +4781,7 @@ type mockUserMessage struct {
 }
 
 type mockSessionMessage struct {
+	id                                              string
 	taskID, content, sessionID, messageType, turnID string
 	metadata                                        map[string]interface{}
 	requestsInput                                   bool
@@ -4791,6 +4817,46 @@ func (m *mockMessageCreator) CreateUserMessageIdempotent(
 	}
 	m.idempotentUserMessages[messageID] = struct{}{}
 	m.userMessages = append(m.userMessages, mockUserMessage{taskID, content, sessionID, turnID, metadata})
+	return nil
+}
+
+func (m *mockMessageCreator) SetUserMessageDeliveryStatus(
+	_ context.Context,
+	messageID, sessionID, status string,
+) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.userMessageStatusFn != nil {
+		return m.userMessageStatusFn(messageID, sessionID, status)
+	}
+	if _, exists := m.idempotentUserMessages[messageID]; !exists {
+		return false, nil
+	}
+	if m.userMessageStatuses == nil {
+		m.userMessageStatuses = make(map[string]string)
+	}
+	m.userMessageStatuses[messageID] = status
+	return true, nil
+}
+
+func (m *mockMessageCreator) CreateCompletedUserMessageIdempotent(
+	_ context.Context,
+	messageID, taskID, content, sessionID string,
+	metadata map[string]interface{},
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.userMessageErr != nil {
+		return m.userMessageErr
+	}
+	if m.idempotentUserMessages == nil {
+		m.idempotentUserMessages = make(map[string]struct{})
+	}
+	if _, exists := m.idempotentUserMessages[messageID]; exists {
+		return nil
+	}
+	m.idempotentUserMessages[messageID] = struct{}{}
+	m.userMessages = append(m.userMessages, mockUserMessage{taskID, content, sessionID, "", metadata})
 	return nil
 }
 
@@ -4863,7 +4929,13 @@ func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, m
 		return nil
 	}
 	m.idempotentSessionMessages[messageID] = struct{}{}
+	if m.sessionMessageCreatedAt != nil {
+		if _, recorded := m.sessionMessageCreatedAt[messageID]; !recorded {
+			m.sessionMessageCreatedAt[messageID] = time.Now().UTC()
+		}
+	}
 	m.sessionMessages = append(m.sessionMessages, mockSessionMessage{
+		id:            messageID,
 		taskID:        taskID,
 		content:       content,
 		sessionID:     sessionID,
@@ -4876,6 +4948,13 @@ func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, m
 		m.sessionMessageOnce.Do(func() { close(m.sessionMessageDone) })
 	}
 	return nil
+}
+
+func (m *mockMessageCreator) SessionMessageCreatedAt(_ context.Context, messageID string) (time.Time, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	createdAt, ok := m.sessionMessageCreatedAt[messageID]
+	return createdAt, ok
 }
 
 func (m *mockMessageCreator) CreateLifecycleSessionMessage(_ context.Context, taskID, content, sessionID, messageType string, metadata map[string]interface{}) error {
@@ -4895,11 +4974,12 @@ func (m *mockMessageCreator) CreateLifecycleSessionMessage(_ context.Context, ta
 	return nil
 }
 
-func (m *mockMessageCreator) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error) {
-	m.permissionMessageDecision = decision
+func (m *mockMessageCreator) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, messageOptions models.PermissionRequestMessageOptions) (string, error) {
+	m.permissionMessageDecision = messageOptions.Decision
+	m.permissionMessageOptions = messageOptions
 	m.permissionMessageWrites++
 	if m.permissionMessageCreateFn != nil {
-		return m.permissionMessageCreateFn(ctx, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID, options, actionType, actionDetails, decision)
+		return m.permissionMessageCreateFn(ctx, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID, options, actionType, actionDetails, messageOptions)
 	}
 	return "", nil
 }
@@ -4909,6 +4989,13 @@ func (m *mockMessageCreator) UpdatePermissionMessage(ctx context.Context, taskID
 		return m.permissionUpdateFn(ctx, taskID, sessionID, requestID, pendingID, status)
 	}
 	return nil
+}
+
+func (m *mockMessageCreator) UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+	if m.permissionPresentationFn != nil {
+		return m.permissionPresentationFn(ctx, request)
+	}
+	return nil, false, nil
 }
 
 func (m *mockMessageCreator) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {

@@ -85,7 +85,7 @@ Send focus only on explicit selection/open or browser visibility/window focus re
 Debounce duplicate events and check durable idle-suspension provenance on the backend.
 For an already-live settled session, persist the explicit-focus observation in existing session metadata, bound to the current execution. Reconstruct that floor during idle-candidate selection so a restart cannot discard a recent focus interval. Validate its identity and observation time independently of passive session metadata timestamps.
 Hidden mounted tabs, generic session reads, and list subscriptions cannot wake processes.
-The focus exception bypasses prevent-auto-start-on-open only for this idle-suspended session.
+Focus recovery honors prevent-auto-start-on-open. The web client gates both open-time and window-focus recovery: with the preference enabled it sends no focus resume for an idle-suspended session, records the resume-skipped marker, and leaves recovery to an accepted message. Visible restart priority for a session with a recovery block applies the same gate when the stored session state can be idle-suspended. A completed idle-suspended session keeps its terminal recovery actions instead of the composer hint. The backend focus path is unchanged because the preference is a web-client gate.
 Workflow ownership, archive checks, and authorization still apply. Focus must not wake every sibling session.
 
 Resume through the existing provider resume/load path using the saved token. Focus sends no prompt.
@@ -110,6 +110,7 @@ Provider process-internal work beyond ACP visibility is a limitation of the opt-
 
 The orchestrator's idle reclaim is separate from the workspace policy. The periodic reaper and the synchronous settle points share one primitive.
 `classifyIdleReclaim` releases a runtime only for a settled session with no live agent and no active turn.
+When agentctl status fails, lifecycle may consult an optional runtime capability for positive agentctl process-absence evidence. SSH uses only the remote PID and existing connection of the tracked execution instance. A completed remote probe must confirm absence, and the instance and answering transport must remain current after the probe. Missing PID, missing instance/client, a live process, permission/probe errors, cancellation, transport loss, and unsupported runtimes retain the original status error and skip reclaim. This path never redials SSH and never treats UI remote-status values as process-absence evidence. Existing lifecycle cleanup, execution-identity checks, active-turn guards, and resume-record preservation still apply.
 For `WAITING_FOR_INPUT` and `IDLE` it also requires a stored resume token or row status `running`.
 
 `models.RowMustBePreserved` keeps the `executors_running` row of a resumable session.

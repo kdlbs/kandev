@@ -4,7 +4,7 @@
   "emptyTitleUnnamedWorkspace": "このワークスペースに履歴なし。",
   "emptyDescription": "このタブは、エージェントが聞いたのに誰も答えなかった質問を並べる。後続作業で置き換わったもの、セッション終了で残ったもの、読めないもの。消すためのキューじゃなく、読み取り専用の監査証跡。",
   "errorTitle": "履歴を読み込めなかった",
-  "errorDescription": "このワークスペースの履歴にある質問の読み込みで問題発生。",
+  "errorDescription": "このワークスペースの質問履歴を読み込めませんでした。",
   "retry": "再試行",
   "reasonSuperseded": "後続作業で置き換え",
   "reasonSessionEnded": "回答なしでセッション終了",

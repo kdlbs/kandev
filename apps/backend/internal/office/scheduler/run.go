@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -330,7 +332,7 @@ func (ss *SchedulerService) QueueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) (shared.QueueOutcome, error) {
-	outcome, err := ss.queueRunAsActor(ctx, agentInstanceID, reason, payload, idempotencyKey, "", "", models.ActorKindSystem, "")
+	outcome, err := ss.queueRunAsActor(ctx, agentInstanceID, reason, payload, idempotencyKey, "", "", runsmodels.ActorKindSystem, "")
 	return outcome, err
 }
 
@@ -354,7 +356,7 @@ func (ss *SchedulerService) QueueRun(
 func (ss *SchedulerService) queueRunAsActor(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey, waveKey, waveString string,
-	actorKind models.ActorKind, actorID string,
+	actorKind runsmodels.ActorKind, actorID string,
 ) (runsservice.QueueOutcome, error) {
 	agent, err := ss.guardAgentStatus(ctx, agentInstanceID)
 	if err != nil {
@@ -410,8 +412,8 @@ func (ss *SchedulerService) queueRunAsActor(
 // cause. Returns "" for a non-agent actor or an agent with no live
 // claimed run, in which case causation resolution roots the new run
 // exactly as it did before this lookup existed.
-func (ss *SchedulerService) resolveCausingRunID(ctx context.Context, actorKind models.ActorKind, actorID string) (string, error) {
-	if actorKind != models.ActorKindAgent || actorID == "" {
+func (ss *SchedulerService) resolveCausingRunID(ctx context.Context, actorKind runsmodels.ActorKind, actorID string) (string, error) {
+	if actorKind != runsmodels.ActorKindAgent || actorID == "" {
 		return "", nil
 	}
 	run, err := ss.repo.RunsRepository().GetClaimedRunForCausationAttribution(ctx, actorID)
@@ -458,17 +460,17 @@ func (ss *SchedulerService) QueueRunCtx(
 // actor stays visible. A "user" ActorType is never downgraded for a
 // missing ActorID — a browser-originated status/assignee change has none
 // to give — so it always resolves to ActorKindUser.
-func actorFromRunContext(c RunContext) (models.ActorKind, string) {
+func actorFromRunContext(c RunContext) (runsmodels.ActorKind, string) {
 	switch c.ActorType {
 	case "user":
-		return models.ActorKindUser, c.ActorID
+		return runsmodels.ActorKindUser, c.ActorID
 	case assignmentWakeActorTypeAgent:
 		if c.ActorID != "" {
-			return models.ActorKindAgent, c.ActorID
+			return runsmodels.ActorKindAgent, c.ActorID
 		}
 	}
 	shared.LaunchActorMissingTotal.Add(shared.LaunchSafetyLabel("reason", c.Reason), 1)
-	return models.ActorKindSystem, ""
+	return runsmodels.ActorKindSystem, ""
 }
 
 // encodeRunContext JSON-encodes c. When c.ExtraPayload is empty the output

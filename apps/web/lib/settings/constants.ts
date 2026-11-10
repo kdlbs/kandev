@@ -9,6 +9,8 @@ export const STORAGE_KEYS = {
   SETTINGS_MENU_EXPANDED: "kandev.settings.menuExpanded",
   /** Whether chat text, new items, and scrolling animate on this device. */
   CHAT_ANIMATIONS: "kandev.settings.chatAnimations",
+  /** Whether image file previews start expanded on this device. */
+  IMAGE_PREVIEWS_EXPANDED_BY_DEFAULT: "kandev.settings.imagePreviewsExpandedByDefault",
   /** Whether agent rich-output line and bar charts animate on this device. */
   RICH_OUTPUT_ANIMATIONS: "kandev.settings.richOutputAnimations",
 } as const;

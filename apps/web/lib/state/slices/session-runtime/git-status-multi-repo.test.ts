@@ -48,9 +48,7 @@ const FRONTEND_FILE = "frontend.tsx";
 const BACKEND_FILE = "backend.go";
 
 function makeStore() {
-  return create<SessionRuntimeSlice>()(
-    immer((set, get, store) => createSessionRuntimeSlice(set, get, store)),
-  );
+  return create<SessionRuntimeSlice>()(immer((set, get) => createSessionRuntimeSlice(set, get)));
 }
 
 function setStatus(store: ReturnType<typeof makeStore>, status: GitStatusEntry): void {

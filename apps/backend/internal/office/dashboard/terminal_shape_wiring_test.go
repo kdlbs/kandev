@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/dashboard"
-	"github.com/kandev/kandev/internal/office/models"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
@@ -57,11 +58,11 @@ func TestAddTaskReviewer_ClaimingAutoSeatRecordsDisplacedRunTerminalShape(t *tes
 		t.Fatalf("seed auto seat: %v", err)
 	}
 
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-auto",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"claim-shape1","workflow_step_id":"` + stepID + `"}`,
-		Status:         models.RunStatusQueued,
+		Status:         runsmodels.RunStatusQueued,
 		CoalescedCount: 1,
 	}
 	if err := deps.repo.CreateRun(context.Background(), run); err != nil {
@@ -108,11 +109,11 @@ func TestSetTerminalShapeRecorder_NilTolerated(t *testing.T) {
 	`, stepID); err != nil {
 		t.Fatalf("seed auto seat: %v", err)
 	}
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-auto",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"claim-shape-nil","workflow_step_id":"` + stepID + `"}`,
-		Status:         models.RunStatusQueued,
+		Status:         runsmodels.RunStatusQueued,
 		CoalescedCount: 1,
 	}
 	if err := deps.repo.CreateRun(context.Background(), run); err != nil {

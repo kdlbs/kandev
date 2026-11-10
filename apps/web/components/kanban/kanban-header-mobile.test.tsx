@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { pluginRegistry } from "@/lib/plugins/registry";
+import { CommandRegistryProvider } from "@/lib/commands/command-registry";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: true }),
@@ -131,6 +132,7 @@ function renderHeader(props: Partial<ComponentProps<typeof KanbanHeaderMobile>> 
         {...props}
       />
     </StateProvider>,
+    { wrapper: CommandRegistryProvider },
   );
 }
 

@@ -34,6 +34,7 @@ function renderPicker(
   profile: ProfileFormData,
   discovery?: ModelDiscovery,
   onChange: (patch: Partial<ProfileFormData>) => void = vi.fn(),
+  disabled?: boolean,
 ) {
   return render(
     <TooltipProvider>
@@ -45,6 +46,7 @@ function renderPicker(
         onChange={onChange}
         ariaLabel={startModelAria}
         goneModelLabel={goneLabel}
+        disabled={disabled}
         discovery={discovery}
       />
     </TooltipProvider>,
@@ -69,6 +71,15 @@ describe("ModelPicker without discovery (non-host-CLI agent)", () => {
     fireEvent.click(trigger);
     const option = screen.getByRole("option", { name: /claude-gone/i });
     expect(option.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  // @covers AC-AGENTS-COPILOT-PLUGINS-006.8
+  it("does not mark a saved model unavailable while discovery is blocked", () => {
+    renderPicker(formData({ model: "claude-gone" }), undefined, vi.fn(), true);
+
+    const trigger = screen.getByRole("button", { name: startModelAria });
+    expect(trigger.textContent).toContain("claude-gone");
+    expect(trigger.className).not.toContain("text-destructive");
   });
 
   it("renders no discovery note", () => {

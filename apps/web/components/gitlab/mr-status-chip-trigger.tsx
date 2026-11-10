@@ -86,6 +86,7 @@ function useMRChipAriaLabel(openCount: number, actedOnMR: TaskMR) {
 }
 
 export type MRChipTriggerAttrs = {
+  "data-slot": "change-request-status-chip";
   "data-testid": "mr-status-chip";
   "data-status": MRChipStatus;
   "data-mr-count": number;
@@ -109,6 +110,7 @@ export function useMRChipTriggerAttrs({
   frozen: boolean;
 }): MRChipTriggerAttrs {
   return {
+    "data-slot": "change-request-status-chip",
     "data-testid": "mr-status-chip",
     "data-status": liveStatus,
     "data-mr-count": openCount,

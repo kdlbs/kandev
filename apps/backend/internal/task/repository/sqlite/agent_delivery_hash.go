@@ -26,6 +26,16 @@ func agentDeliveryEventHash(event *models.AgentDeliveryEvent) string {
 	return agentDeliveryEventHashNormalized(event, mode, content)
 }
 
+// agentDeliveryEventHashWithoutToolOutputBytes is the supported v1 form used by
+// readers that predate the legacy compatibility field.
+func agentDeliveryEventHashWithoutToolOutputBytes(event *models.AgentDeliveryEvent) string {
+	if event == nil {
+		return ""
+	}
+	mode, content := normalizeAgentDeliveryPayloadWithoutToolOutputBytes(event.Payload)
+	return agentDeliveryEventHashNormalized(event, mode, content)
+}
+
 func agentDeliveryEventHashNormalized(event *models.AgentDeliveryEvent, mode byte, content []byte) string {
 	hash := sha256.New()
 	_, _ = hash.Write([]byte{agentDeliveryPayloadHashVersion})
@@ -62,6 +72,15 @@ func normalizeAgentDeliveryPayload(payload []byte) (byte, []byte) {
 	if err := json.Unmarshal(payload, &event); err != nil {
 		return agentDeliveryHashRawBytes, payload
 	}
+	return normalizeDecodedAgentDeliveryPayload(&event, payload)
+}
+
+func normalizeAgentDeliveryPayloadWithoutToolOutputBytes(payload []byte) (byte, []byte) {
+	var event streams.AgentEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return agentDeliveryHashRawBytes, payload
+	}
+	event.ToolOutputBytes = nil
 	return normalizeDecodedAgentDeliveryPayload(&event, payload)
 }
 

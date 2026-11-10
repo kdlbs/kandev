@@ -16,6 +16,10 @@ type nativeResumeDeliverySubmissionReader interface {
 	ListAgentDeliverySubmissions(context.Context, string) ([]*models.AgentDeliverySubmission, error)
 }
 
+type nativeResumeUnprovenCompletionVerifier interface {
+	VerifyUnprovenNativeResumeCompletion(context.Context, string, string, models.NativeResumeSubmissionEvidence) (bool, error)
+}
+
 func (s *Service) checkNativeResumeDeliveryBlock(ctx context.Context, taskID, sessionID string) error {
 	block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
 	if err != nil || block == nil || block.Reason != durableDeliveryUnresolvedReason {
@@ -55,12 +59,39 @@ func (s *Service) checkNativeResumeDeliveryBlock(ctx context.Context, taskID, se
 			return &sessionRecoveryRequiredError{Block: block}
 		case models.DeliverySubmissionInterruptedUnknown:
 			unknown = true
+		case models.DeliverySubmissionCompleted:
+			if nativeResumeUnprovenCompletion(ctx, s.repo, block, submission) {
+				unknown = true
+			}
 		}
 	}
 	if !unknown && !s.canProveSettledNativeDeliveryBlock(block) {
 		return &sessionRecoveryRequiredError{Block: block}
 	}
 	return nil
+}
+
+// nativeResumeUnprovenCompletion gates explicit Resume before launch. The
+// transactional native proof still owns the actual fence resolution.
+func nativeResumeUnprovenCompletion(
+	ctx context.Context,
+	repository any,
+	block *models.SessionRecoveryBlock,
+	submission *models.AgentDeliverySubmission,
+) bool {
+	verifier, supported := repository.(nativeResumeUnprovenCompletionVerifier)
+	if !supported {
+		return false
+	}
+	verified, err := verifier.VerifyUnprovenNativeResumeCompletion(
+		ctx, block.SessionID, block.IncarnationID,
+		models.NativeResumeSubmissionEvidence{
+			ID: submission.ID, HarnessGeneration: submission.HarnessGeneration,
+			PayloadHash: submission.PayloadHash, State: submission.State,
+			Outcome: submission.Outcome, StreamID: block.DeliveryStreamID,
+		},
+	)
+	return err == nil && verified
 }
 
 func (s *Service) acknowledgeNativeResumeDelivery(ctx context.Context, sessionID string) error {
@@ -86,6 +117,10 @@ type nativeResumeEvidenceBlockResolver interface {
 	ResolveSessionRecoveryBlockWithNativeEvidence(context.Context, string, *models.NativeResumeDeliveryEvidence, time.Time) (bool, error)
 }
 
+type nativeResumeEvidenceBlockVerifier interface {
+	VerifyResolvedSessionRecoveryBlockWithNativeEvidence(context.Context, string, *models.NativeResumeDeliveryEvidence) (bool, error)
+}
+
 func (s *Service) resolveNativeDeliveryBlock(ctx context.Context, block *models.SessionRecoveryBlock, completedAt time.Time) (bool, bool, error) {
 	reader, canRead := s.agentManager.(nativeResumeDeliveryEvidenceReader)
 	resolver, canResolve := s.repo.(nativeResumeEvidenceBlockResolver)
@@ -100,6 +135,11 @@ func (s *Service) resolveNativeDeliveryBlock(ctx context.Context, block *models.
 		return false, false, nil
 	}
 	changed, err := resolver.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, block.ID, proof, completedAt)
+	if err == nil && !changed {
+		if verifier, canVerify := s.repo.(nativeResumeEvidenceBlockVerifier); canVerify {
+			changed, err = verifier.VerifyResolvedSessionRecoveryBlockWithNativeEvidence(ctx, block.ID, proof)
+		}
+	}
 	return changed, true, err
 }
 

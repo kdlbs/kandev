@@ -3,6 +3,8 @@
 import { useTranslation } from "react-i18next";
 import { IconGitBranch } from "@tabler/icons-react";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { useSearchParams } from "@/lib/routing/client-router";
+import { readMCPContextHint } from "@/lib/mcp/management-links";
 import { RepositoryCard } from "@/components/settings/repository-card";
 import type { Workspace } from "@/lib/types/http";
 import { AddRepositoryMenu } from "./workspace-add-repository-menu";
@@ -21,6 +23,7 @@ type WorkspaceRepositoriesSectionProps = {
     | "handleUpdateRepositoryScript"
     | "handleDeleteRepositoryScript"
     | "handleSaveRepository"
+    | "handleDiscardRepository"
     | "handleDeleteRepository"
     | "openDialog"
     | "setRemoteRepoDialogOpen"
@@ -33,6 +36,13 @@ export function WorkspaceRepositoriesSection({
   state,
 }: WorkspaceRepositoriesSectionProps) {
   const { t } = useTranslation();
+  const params = useSearchParams();
+  const hint = readMCPContextHint(params, "repositoryId");
+  const target =
+    hint.value &&
+    state.repositoryItems.find(
+      (repo) => repo.id === hint.value && repo.workspace_id === workspaceId,
+    );
   const {
     repositoryItems,
     savedRepositoriesById,
@@ -41,6 +51,7 @@ export function WorkspaceRepositoriesSection({
     handleUpdateRepositoryScript,
     handleDeleteRepositoryScript,
     handleSaveRepository,
+    handleDiscardRepository,
     handleDeleteRepository,
     openDialog,
     setRemoteRepoDialogOpen,
@@ -65,6 +76,11 @@ export function WorkspaceRepositoriesSection({
         )
       }
     >
+      {hint.present && !target && (
+        <p role="alert" className="text-sm text-muted-foreground">
+          {t("settings:mcpOwnerUnavailable")}
+        </p>
+      )}
       <div className="grid gap-3">
         {repositoryItems.map((repo) => (
           <RepositoryCard
@@ -74,13 +90,14 @@ export function WorkspaceRepositoriesSection({
             savedRepository={savedRepositoriesById.get(repo.id)}
             isRepositoryDirty={isRepositoryDirty(repo, savedRepositoriesById.get(repo.id))}
             areScriptsDirty={areRepositoryScriptsDirty(repo, savedRepositoriesById.get(repo.id))}
-            autoOpen={Boolean(repo.__autoOpen)}
+            autoOpen={Boolean(repo.__autoOpen) || Boolean(target && target.id === repo.id)}
             readOnly={readOnly}
             onUpdate={handleUpdateRepository}
             onAddScript={handleAddRepositoryScript}
             onUpdateScript={handleUpdateRepositoryScript}
             onDeleteScript={handleDeleteRepositoryScript}
             onSave={handleSaveRepository}
+            onDiscard={handleDiscardRepository}
             onDelete={handleDeleteRepository}
           />
         ))}

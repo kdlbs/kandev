@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { SystemSlice, SystemSliceState } from "./types";
 
 export const defaultSystemState: SystemSliceState = {
@@ -19,16 +20,9 @@ export const defaultSystemState: SystemSliceState = {
   },
 };
 
-type ImmerSet = Parameters<
-  StateCreator<SystemSlice, [["zustand/immer", never]], [], SystemSlice>
->[0];
+type ImmerSet = Parameters<SliceCreator<SystemSlice>>[0];
 
-export const createSystemSlice: StateCreator<
-  SystemSlice,
-  [["zustand/immer", never]],
-  [],
-  SystemSlice
-> = (set: ImmerSet, _get, _api) => ({
+export const createSystemSlice: SliceCreator<SystemSlice> = (set: ImmerSet) => ({
   ...defaultSystemState,
   setSystemRetention: (status) =>
     set((draft) => {

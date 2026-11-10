@@ -29,7 +29,9 @@ type MockTaskPlansState = {
 type MockState = {
   taskPlans: MockTaskPlansState;
   connection: { status: string };
-  setTaskPlan: ReturnType<typeof vi.fn>;
+  beginTaskPlanRead: ReturnType<typeof vi.fn>;
+  finishTaskPlanRead: ReturnType<typeof vi.fn>;
+  setTaskPlan: ReturnType<typeof vi.fn<(taskId: string, plan: TaskPlan | null) => void>>;
   setTaskPlanLoading: ReturnType<typeof vi.fn>;
   setTaskPlanSaving: ReturnType<typeof vi.fn>;
   markTaskPlanSeen: ReturnType<typeof vi.fn>;
@@ -61,6 +63,11 @@ function freshState(): MockState {
       comparePairByTaskId: {},
     },
     connection: { status: "connected" },
+    beginTaskPlanRead: vi.fn(() => Symbol()),
+    finishTaskPlanRead: vi.fn((taskId: string, _token: symbol, plan?: TaskPlan | null) => {
+      if (plan !== undefined) mockState.setTaskPlan(taskId, plan);
+      return true;
+    }),
     setTaskPlan: vi.fn(),
     setTaskPlanLoading: vi.fn(),
     setTaskPlanSaving: vi.fn(),

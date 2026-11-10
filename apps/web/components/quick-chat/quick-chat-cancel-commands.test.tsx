@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     state,
+    toast: vi.fn(),
     underlyingCancel: vi.fn(async () => {}),
     setCancelTurnPending: (sessionId: string, pending: boolean) => {
       if (pending) state.chatInput.cancellingBySessionId[sessionId] = true;
@@ -32,6 +33,10 @@ const mocks = vi.hoisted(() => {
     },
   };
 });
+
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: mocks.toast }),
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),

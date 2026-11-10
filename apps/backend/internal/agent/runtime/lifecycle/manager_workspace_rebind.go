@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"strings"
 	"time"
 
@@ -217,23 +218,32 @@ func (m *Manager) restoreReboundACPSession(ctx context.Context, execution *Agent
 	if err := waitForReboundUpdatesStream(ctx, updatesReady); err != nil {
 		return err
 	}
+	operation := &preparedMCPOperation{}
+	needsResolution := (m.mcpResolver != nil && execution.WorkspaceID != "") || (m.mcpProvider != nil && execution.AgentProfileID != "")
+	if needsResolution {
+		agentConfig, err := m.getAgentConfigForExecution(execution)
+		if err != nil {
+			return err
+		}
+		operation, err = m.prepareExecutionMCP(ctx, execution, agentConfig)
+		if err != nil {
+			return err
+		}
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return fmt.Errorf("agentctl client is unavailable")
 	}
-	_, err := client.Initialize(ctx, "kandev", "1.0.0")
-	releaseClient()
-	if err != nil {
+	if _, err := client.Initialize(ctx, "kandev", "1.0.0"); err != nil {
 		return fmt.Errorf("initialize restarted ACP adapter: %w", err)
 	}
-	client, releaseClient = execution.AcquireAgentCtlClient()
-	if client == nil {
-		return fmt.Errorf("agentctl client is unavailable")
-	}
-	err = client.LoadSession(ctx, acpID, nil)
-	releaseClient()
+	attemptID, err := client.LoadSessionWithResult(operation.context(ctx), acpID, operation.servers, streams.SessionSettingsPolicyStrict)
 	if err != nil {
 		return err
+	}
+	if operation.captured {
+		m.recordAcceptedMCPSetupOperation(ctx, execution, operation.setup, operation.revision, attemptID)
 	}
 	return nil
 }

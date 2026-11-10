@@ -4,7 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPostgresStoreSchemaReplay(t *testing.T) {
@@ -32,7 +34,7 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 		t.Fatalf("second GitHub store schema init: %v", err)
 	}
 
-	ctx := t.Context()
+	ctx := authn.WithIdentity(t.Context(), authn.Identity{UserID: "alice", Role: authn.RoleMember})
 	now := time.Now().UTC()
 	registration := newAppRegistration("registration-postgres", 1001, "PostgreSQL", now)
 	if err := store.UpsertDeploymentAppRegistration(ctx, registration); err != nil {
@@ -148,6 +150,7 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	}
 
 	reviewWatch := &ReviewWatch{
+		GitHubHost:          "git.example.com",
 		WorkspaceID:         "ws-1",
 		WorkflowID:          "workflow-1",
 		WorkflowStepID:      "step-1",
@@ -164,6 +167,8 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	if err != nil || gotReviewWatch == nil || len(gotReviewWatch.Repos) != 1 {
 		t.Fatalf("get review watch = %+v, err %v", gotReviewWatch, err)
 	}
+	require.Equal(t, "alice", gotReviewWatch.CreatedByUserID)
+	require.Equal(t, reviewWatch.GitHubHost, gotReviewWatch.GitHubHost)
 	reserved, err := store.ReserveReviewPRTask(ctx, reviewWatch.ID, "acme", "widget", 42, "https://github.com/acme/widget/pull/42")
 	if err != nil || !reserved {
 		t.Fatalf("reserve review PR task = %v, err %v", reserved, err)
@@ -177,6 +182,7 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	}
 
 	issueWatch := &IssueWatch{
+		GitHubHost:          "git.example.com",
 		WorkspaceID:         "ws-1",
 		WorkflowID:          "workflow-1",
 		WorkflowStepID:      "step-1",
@@ -193,6 +199,8 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	if err != nil || gotIssueWatch == nil || len(gotIssueWatch.Labels) != 1 {
 		t.Fatalf("get issue watch = %+v, err %v", gotIssueWatch, err)
 	}
+	require.Equal(t, "alice", gotIssueWatch.CreatedByUserID)
+	require.Equal(t, issueWatch.GitHubHost, gotIssueWatch.GitHubHost)
 	reserved, err = store.ReserveIssueWatchTask(ctx, issueWatch.ID, "acme", "widget", 7, "https://github.com/acme/widget/issues/7")
 	if err != nil || !reserved {
 		t.Fatalf("reserve issue task = %v, err %v", reserved, err)

@@ -155,9 +155,6 @@ export class SessionPage {
   prClosedDismissButton() {
     return this.page.getByTestId("pr-closed-dismiss-button");
   }
-  prStatusChip() {
-    return this.activeChat().getByTestId("chat-status-bar").getByTestId("pr-status-chip");
-  }
   todoIndicator() {
     return this.activeChat().getByTestId("todo-indicator");
   }
@@ -556,6 +553,35 @@ export class SessionPage {
   clarificationCustomSubmit(): Locator {
     return this.page.getByTestId("clarification-custom-submit");
   }
+  /** Paperclip trigger for question-answer files (header or custom row). */
+  clarificationAttachmentTrigger(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-attachment-trigger");
+  }
+
+  /** Hidden file input used by the paperclip. */
+  clarificationAttachmentInput(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-attachment-input");
+  }
+
+  /** Paperclip count/progress/failure badge. */
+  clarificationAttachmentBadge(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-attachment-badge");
+  }
+
+  /** On-demand answer-file manager surface. */
+  clarificationAttachmentManager(): Locator {
+    return this.page.getByTestId("clarification-attachment-manager");
+  }
+
+  /** Submits the active single-question or multi-question answer explicitly. */
+  async submitClarification(): Promise<void> {
+    const headerSubmit = this.clarificationSubmit();
+    if ((await headerSubmit.count()) > 0) {
+      await headerSubmit.click();
+      return;
+    }
+    await this.clarificationCustomSubmit().click();
+  }
 
   /** Deferred notice shown when agent has disconnected from clarification. */
   clarificationDeferredNotice(): Locator {
@@ -675,6 +701,11 @@ export class SessionPage {
       .getByTestId("recovery-resume-button")
       .filter({ visible: true })
       .first();
+  }
+
+  /** Retry-connection action shown for uncertain delivery recovery. */
+  recoveryRetryConnectionButton(): Locator {
+    return this.activeChat().getByTestId("recovery-retry-connection-button");
   }
 
   /** Error returned by a manual session recovery action. */
@@ -1084,12 +1115,25 @@ export class SessionPage {
 
   /** Click a dockview tab by its visible label (e.g. "Changes", "Files", "Terminal"). */
   async clickTab(label: string, options: { force?: boolean } = {}): Promise<void> {
+    const dockviewLayout = this.page.locator('[data-testid="dockview-task-layout"]:visible');
+    const layoutCount = await dockviewLayout.count();
+    if (layoutCount > 0) {
+      await expect(dockviewLayout).toHaveCount(1);
+      await expect(dockviewLayout).toHaveAttribute("aria-busy", "false", { timeout: 15_000 });
+    }
+
     const tab = this.page
       .locator(".dv-default-tab:visible")
       .filter({ hasText: new RegExp(`^${escapeRegExp(label)}(?: \\(\\d+\\))?$`) })
       .first();
     await expect(tab).toBeVisible();
-    await tab.click(options);
+    const tabWrapper = tab.locator(
+      "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' dv-tab ')][1]",
+    );
+    await expect(async () => {
+      await tab.click(options);
+      await expect(tabWrapper).toHaveClass(/dv-active-tab/, { timeout: 1_000 });
+    }).toPass({ timeout: 10_000 });
   }
 
   /** Open the Changes Diff action in its direct or width-aware overflow presentation. */
@@ -1394,6 +1438,11 @@ export class SessionPage {
     await this.activePanel("terminal-panel")
       .getByTestId("passthrough-loading")
       .waitFor({ state: "hidden", timeout });
+  }
+
+  /** Buffer text of the active shell terminal panel. */
+  async readTerminalBuffer(): Promise<string> {
+    return this.readXtermBuffer("terminal-panel");
   }
 
   /** Wait for the active shell to emit its initial prompt before sending input. */

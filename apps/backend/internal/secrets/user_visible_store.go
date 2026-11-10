@@ -107,6 +107,15 @@ func (s *UserVisibleStore) Delete(ctx context.Context, id string) error {
 	return s.store.Delete(ctx, id)
 }
 
+// UpdateForWorkspace updates a visible Global or same-workspace secret after
+// the service has authorized access to the requested workspace.
+func (s *UserVisibleStore) UpdateForWorkspace(ctx context.Context, id, workspaceID string, req *UpdateSecretRequest) error {
+	if _, err := s.GetForWorkspace(ctx, id, workspaceID); err != nil {
+		return err
+	}
+	return s.store.Update(ctx, id, req)
+}
+
 // DeleteForWorkspace removes a visible Global or same-workspace secret after
 // the service has authorized access to the requested workspace.
 func (s *UserVisibleStore) DeleteForWorkspace(ctx context.Context, id, workspaceID string) error {

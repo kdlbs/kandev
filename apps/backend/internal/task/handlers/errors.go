@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
@@ -37,6 +38,9 @@ const (
 const errorDetailKeyErrorCode = "error_code"
 
 func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string) {
+	if handleBuiltinCreationHTTPError(c, err) {
+		return
+	}
 	var approvalsErr *service.ApprovalsPendingMoveError
 	if errors.As(err, &approvalsErr) || errors.Is(err, service.ErrWorkflowChangeConflict) {
 		handleSelectedMoveError(c, log, err)
@@ -56,6 +60,14 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 	}
 	if errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked) {
 		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
+		return
+	}
+	if errors.Is(err, models.ErrWorkspaceDefaultExecutorUnavailable) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
+		return
+	}
+	if errors.Is(err, models.ErrExecutorMutationDenied) {
+		c.JSON(http.StatusForbidden, gin.H{"error": models.ErrExecutorMutationDenied.Error()})
 		return
 	}
 	if isNotFound(err) {
@@ -100,6 +112,12 @@ func cleanupInspectionFields(err error) []zap.Field {
 }
 
 func taskErrorBody(err error) gin.H {
+	if errors.Is(err, models.ErrWorkspaceDefaultExecutorUnavailable) {
+		return gin.H{
+			"error":      models.ErrWorkspaceDefaultExecutorUnavailable.Error(),
+			"error_code": models.WorkspaceDefaultExecutorUnavailableErrorCode,
+		}
+	}
 	body := gin.H{"error": err.Error()}
 	for key, value := range taskErrorDetails(err) {
 		body[key] = value
@@ -140,6 +158,26 @@ func repositorySelectionHTTPStatus(err error) (int, bool) {
 	default:
 		return http.StatusInternalServerError, true
 	}
+}
+
+func quickChatCreateHTTPStatus(err error) (int, bool) {
+	var preAllocationErr *service.PreAllocationTaskCreateError
+	if !errors.As(err, &preAllocationErr) {
+		return 0, false
+	}
+	switch {
+	case errors.Is(err, service.ErrTaskReferenceNotFound), errors.Is(err, taskrepository.ErrRepositoryNotFound):
+		return http.StatusNotFound, true
+	case errors.Is(err, service.ErrInvalidRepositorySet),
+		errors.Is(err, service.ErrInvalidInitialWorkspaceLayout),
+		errors.Is(err, service.ErrInvalidWorkspaceRepositoryPlacement),
+		errors.Is(err, service.ErrInvalidWorkspaceSource):
+		return http.StatusBadRequest, true
+	}
+	if status, ok := repositorySelectionHTTPStatus(err); ok && status < http.StatusInternalServerError {
+		return status, true
+	}
+	return 0, false
 }
 
 func repositorySelectionWSCode(err error) (string, bool) {

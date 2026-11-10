@@ -37,7 +37,7 @@ func TestFreshStartRegisteredJournalRetirementNeverDispatchesPredecessor(t *test
 			HarnessGeneration: 1, StreamID: "incarnation:g1", State: state, Hash: "hash", Payload: []byte("retained predecessor intent")})
 		require.NoError(t, err)
 	}
-	require.NoError(t, retireUnresolvedDeliverySubmissions(t.Context(), client, execution))
+	require.NoError(t, retireUnresolvedDeliverySubmissions(t.Context(), deliveryJournalReleaser{}, client, execution))
 	dispatcher := &process.SubmissionDelivery{Journal: retained}
 	calls := 0
 	for i := range states {

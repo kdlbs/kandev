@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useSettingsDraft } from "./use-settings-draft";
 import { useTranslation } from "react-i18next";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -27,18 +27,7 @@ export function AgentTabCloseBehaviorSettings() {
   const preference = useAppStore((state) => state.userSettings.agentTabCloseBehavior);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
-  const [saved, setSaved] = useState(preference);
-  const [draft, setDraft] = useState(preference);
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-  const isDirty = draft !== saved;
-
-  useEffect(() => {
-    setSaved((previous) => {
-      if (draftRef.current === previous) setDraft(preference);
-      return preference;
-    });
-  }, [preference]);
+  const { saved, setSaved, draft, setDraft, isDirty } = useSettingsDraft(preference);
 
   useSettingsSaveContributor({
     id: "general-agent-tab-close-behavior",

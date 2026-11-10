@@ -39,7 +39,7 @@ func (s *Service) stopFailedContinuationRestore(ctx context.Context, taskID, ses
 }
 
 func (s *Service) retryContinuationPreparation(ctx context.Context, taskID, sessionID string, entry *transientRetryEntry, failure error) bool {
-	if ctx.Err() != nil || entry.attempt >= transientMaxAttempts {
+	if ctx.Err() != nil || entry.attempt >= entry.policy.maxAttempts() {
 		return false
 	}
 	classificationFailure := failure
@@ -106,7 +106,7 @@ func (s *Service) createContinuationRecoveryMessage(ctx context.Context, data wa
 	entry.mu.Unlock()
 	if data.RecoveryDisposition == "" {
 		data.RecoveryDisposition = recoveryDispositionManual
-		if data.RecoveryAttemptsStarted >= transientMaxAttempts {
+		if data.RecoveryAttemptsStarted >= entry.policy.maxAttempts() {
 			data.RecoveryDisposition = recoveryDispositionExhausted
 		}
 	}

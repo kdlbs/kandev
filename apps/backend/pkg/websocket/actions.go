@@ -21,11 +21,12 @@ const (
 	ActionWorkspaceDelete = "workspace.delete"
 
 	// Repository actions
-	ActionRepositoryList   = "repository.list"
-	ActionRepositoryCreate = "repository.create"
-	ActionRepositoryGet    = "repository.get"
-	ActionRepositoryUpdate = "repository.update"
-	ActionRepositoryDelete = "repository.delete"
+	ActionRepositoryList              = "repository.list"
+	ActionRepositoryCreate            = "repository.create"
+	ActionRepositoryGet               = "repository.get"
+	ActionRepositoryUpdate            = "repository.update"
+	ActionRepositoryDelete            = "repository.delete"
+	ActionRepositoryValidateRemoteURL = "repository.remote_url.validate"
 
 	// Repository Set actions
 	ActionRepositorySetList   = "repository_set.list"
@@ -128,6 +129,7 @@ const (
 	ActionSessionRecover                  = "session.recover"
 	ActionSessionWorkspaceRecoveryGet     = "session.workspace_recovery.get"
 	ActionSessionWorkspaceRecoveryChanged = "session.workspace_recovery.changed"
+	ActionSessionRuntimeStorageChanged    = "task_session.runtime_storage_changed"
 	ActionSessionResetContext             = "session.reset_context"
 	ActionSessionStop                     = "session.stop"
 	ActionSessionDelete                   = "session.delete"
@@ -292,6 +294,7 @@ const (
 	ActionSessionLaunchWarning          = "session.launch.warning"
 	ActionSessionMCPStatusUpdated       = "session.mcp_status_updated"
 	ActionSessionInfoUpdated            = "session.info_updated"
+	ActionSessionPromptSuggestion       = "session.prompt_suggestion"
 	ActionSessionSetMode                = "session.set_mode"
 	ActionSessionTodosUpdated           = "session.todos_updated"
 	ActionSessionPromptUsage            = "session.prompt_usage"
@@ -515,7 +518,6 @@ const (
 	ActionMCPClarificationTimeout                  = "mcp.clarification_timeout"
 	ActionMCPSetTaskTitle                          = "mcp.set_task_title"
 	ActionMCPGetDiagnosticBundle                   = "mcp.get_diagnostic_bundle"
-
 	// Office task handoffs (cross-task context).
 	ActionMCPListRelatedTasks         = "mcp.list_related_tasks"
 	ActionMCPListTaskDocuments        = "mcp.list_task_documents"
@@ -721,6 +723,7 @@ const (
 	ActionAutomationTriggerUpdate       = "automation.trigger.update"
 	ActionAutomationTriggerDelete       = "automation.trigger.delete"
 	ActionAutomationTriggerTypes        = "automation.trigger_types"
+	ActionAutomationPluginToolOptions   = "automation.plugin_tool_options"
 	ActionAutomationWebhookRevealSecret = "automation.webhook.reveal_secret"
 	ActionAutomationRunDelete           = "automation.run.delete"
 	ActionAutomationRunStop             = "automation.run.stop"

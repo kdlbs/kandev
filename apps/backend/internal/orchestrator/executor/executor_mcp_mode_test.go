@@ -172,6 +172,68 @@ func TestResolveTaskSessionMCPProfile_CanvasCapabilityFollowsFeatureAndSurface(t
 	}
 }
 
+func TestResolveTaskSessionMCPProfile_WorkspaceCollaborationReportFollowsFeatureAndSurface(t *testing.T) {
+	tests := []struct {
+		name          string
+		task          *models.Task
+		expectReport  bool
+		expectSurface mcpprofile.Surface
+	}{
+		{
+			name:          "kanban task",
+			task:          &models.Task{ID: "task-kanban"},
+			expectReport:  true,
+			expectSurface: mcpprofile.SurfaceKanbanTask,
+		},
+		{
+			name:          "office task",
+			task:          &models.Task{ID: "task-office", IsFromOffice: true},
+			expectReport:  false,
+			expectSurface: mcpprofile.SurfaceOfficeTask,
+		},
+		{
+			name:          "automation task",
+			task:          &models.Task{ID: "task-automation", Origin: models.TaskOriginAutomationRun},
+			expectReport:  true,
+			expectSurface: mcpprofile.SurfaceAutomation,
+		},
+		{
+			name:          "configuration session",
+			task:          &models.Task{ID: "task-config"},
+			expectReport:  false,
+			expectSurface: mcpprofile.SurfaceConfiguration,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+			session := &models.TaskSession{ID: "session", TaskID: tt.task.ID}
+			if tt.expectSurface == mcpprofile.SurfaceConfiguration {
+				session.Metadata = map[string]interface{}{"config_mode": true}
+			}
+			repo.tasks[tt.task.ID] = tt.task
+			repo.sessions[session.ID] = session
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+			profile, err := exec.ResolveTaskSessionMCPProfile(context.Background(), tt.task.ID, session, true)
+			require.NoError(t, err)
+			require.False(t, profile.HasCapability(mcpprofile.CapabilityWorkspaceCollaborationReport))
+
+			exec.SetWorkspaceCollaborationEnabled(true)
+			profile, err = exec.ResolveTaskSessionMCPProfile(context.Background(), tt.task.ID, session, true)
+			require.NoError(t, err)
+			require.Equal(t, tt.expectSurface, profile.Surface)
+			require.Equal(t, tt.expectReport, profile.HasCapability(mcpprofile.CapabilityWorkspaceCollaborationReport))
+
+			exec.SetWorkspaceCollaborationEnabled(false)
+			profile, err = exec.ResolveTaskSessionMCPProfile(context.Background(), tt.task.ID, session, true)
+			require.NoError(t, err)
+			require.False(t, profile.HasCapability(mcpprofile.CapabilityWorkspaceCollaborationReport))
+		})
+	}
+}
+
 func TestResolveTaskSessionMCPMode_TitlePendingIsTaskModeVariant(t *testing.T) {
 	ctx := context.Background()
 	repo := newMockRepository()

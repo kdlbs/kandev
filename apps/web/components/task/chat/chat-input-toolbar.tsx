@@ -1,5 +1,7 @@
 "use client";
 
+import type { TaskSessionMCPSelection } from "@/hooks/domains/session/use-task-session-mcp-selection";
+
 import { memo } from "react";
 
 import { SHORTCUTS } from "@/lib/keyboard/constants";
@@ -17,6 +19,7 @@ export type ChatInputToolbarProps = {
   planModeAvailable?: boolean;
   mcpServers?: string[];
   mcpAttachmentHistory?: MCPAttachmentHistory;
+  mcpSelection?: TaskSessionMCPSelection | null;
   onPlanModeChange: (enabled: boolean) => void;
   sessionId: string | null;
   detailActive?: boolean;
@@ -171,6 +174,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         }
         mcpServers={props.mcpServers}
         mcpAttachmentHistory={props.mcpAttachmentHistory}
+        mcpSelection={props.mcpSelection}
         sessionId={props.sessionId}
         detailActive={props.detailActive}
         taskId={props.taskId}

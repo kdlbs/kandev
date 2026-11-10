@@ -4,7 +4,7 @@
   "emptyTitleUnnamedWorkspace": "Sem histórico nesta área de trabalho.",
   "emptyDescription": "Este separador lista perguntas que um agente fez e a que ninguém respondeu: substituídas por trabalho posterior, deixadas para trás quando uma sessão terminou, ou impossíveis de ler. É uma prova de auditoria só de leitura, não uma fila para limpar.",
   "errorTitle": "Não foi possível carregar o histórico",
-  "errorDescription": "Ocorreu um erro ao carregar as perguntas do histórico desta área de trabalho.",
+  "errorDescription": "Não foi possível carregar o histórico de perguntas deste espaço de trabalho.",
   "retry": "Tentar novamente",
   "reasonSuperseded": "Substituída por trabalho posterior",
   "reasonSessionEnded": "Sessão terminada sem resposta",

@@ -3,6 +3,7 @@ package github
 import (
 	"bytes"
 	"context"
+
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -13,6 +14,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"io"
 	"net/http"
 	"strconv"
@@ -94,6 +96,7 @@ type AppWebhookConfig struct {
 
 // AppClient authenticates as the deployment GitHub App.
 type AppClient struct {
+	host       githubhost.Host
 	appID      int64
 	privateKey *rsa.PrivateKey
 	httpClient *http.Client
@@ -103,6 +106,13 @@ type AppClient struct {
 
 // NewAppClient parses an RSA private key and creates a GitHub App client.
 func NewAppClient(appID int64, privateKeyPEM []byte) (*AppClient, error) {
+	return NewAppClientForHost(appID, privateKeyPEM, githubhost.Public())
+}
+
+func NewAppClientForHost(appID int64, privateKeyPEM []byte, host githubhost.Host) (*AppClient, error) {
+	if !host.Valid() {
+		return nil, githubhost.ErrInvalidHost
+	}
 	if appID <= 0 {
 		return nil, fmt.Errorf("GitHub App ID must be positive")
 	}
@@ -111,10 +121,11 @@ func NewAppClient(appID int64, privateKeyPEM []byte) (*AppClient, error) {
 		return nil, fmt.Errorf("parse GitHub App private key: %w", err)
 	}
 	return &AppClient{
+		host:       host,
 		appID:      appID,
 		privateKey: privateKey,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		baseURL:    githubAPIBase,
+		httpClient: newGitHubHTTPClient(30 * time.Second),
+		baseURL:    host.RESTURL(),
 		now:        time.Now,
 	}, nil
 }
@@ -298,7 +309,7 @@ func (c *AppClient) appRequest(ctx context.Context, method, path string, body, o
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := c.httpClient.Do(req)
+	resp, err := doGitHubRequest(c.httpClient, req)
 	if err != nil {
 		return fmt.Errorf("GitHub App request: %w", err)
 	}

@@ -112,8 +112,9 @@ func TestObserveSessionCoresidency_WorkingSiblingLogsWarningAndIncrementsCounter
 	if strings.Contains(lowerMsg, "fail") {
 		t.Fatalf("warning message = %q, must not read as Kandev failing to prevent something it permits", warnings[0].Message)
 	}
-	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after != before+1 {
-		t.Fatalf("admitted[launch] counter = %d, want %d", after, before+1)
+	// Other tests can still emit asynchronous observations into the global counter.
+	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after < before+1 {
+		t.Fatalf("admitted[launch] counter = %d, want at least %d", after, before+1)
 	}
 }
 
@@ -207,8 +208,9 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 		t.Fatal("timed out waiting for the agent process to start")
 	}
 
-	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after != before+1 {
-		t.Fatalf("admitted[launch] counter = %d, want %d", after, before+1)
+	// Other tests can still emit asynchronous observations into the global counter.
+	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after < before+1 {
+		t.Fatalf("admitted[launch] counter = %d, want at least %d", after, before+1)
 	}
 	warnings := logs.FilterMessageSnippet("starting an agent while another session").All()
 	if len(warnings) != 1 {
@@ -266,8 +268,9 @@ func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 		t.Fatalf("co-residency observations before process start = %d, want 1", observed)
 	}
 
-	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume); after != before+1 {
-		t.Fatalf("admitted[resume] counter = %d, want %d", after, before+1)
+	// Other tests can still emit asynchronous observations into the global counter.
+	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume); after < before+1 {
+		t.Fatalf("admitted[resume] counter = %d, want at least %d", after, before+1)
 	}
 	warnings := logs.FilterMessageSnippet("starting an agent while another session").All()
 	if len(warnings) != 1 {

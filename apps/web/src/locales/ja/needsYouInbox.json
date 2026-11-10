@@ -12,7 +12,7 @@
   "anotherCallerRejected": "他の人がすでに「{{question}}」を拒否済み。",
   "bundleNoLongerActive": "「{{question}}」はもう回答待ちじゃない。",
   "errorTitle": "受信箱を読み込めなかった",
-  "errorDescription": "待機中の質問の読み込みで問題発生。",
+  "errorDescription": "回答待ちの質問を読み込めませんでした。",
   "retry": "再試行",
   "emptyTitle": "{{workspace}} で待機中のものはない。",
   "emptyDescription": "この一覧は、この workspace で agent をブロックしてる質問だけ対象。他 workspace の bundle、保留中の権限リクエスト、親質問レコード、自分の snooze 済みや dismiss 済み行は数えない。",

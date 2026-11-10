@@ -94,6 +94,16 @@ The [task cleanup design](../../tasks/system-design/dirty-worktree-deletion.md#r
 owns inspection, cascade scope, retry, and stale-response handling, including
 retained worktrees whose task has no executor projection.
 
+Quick Chat's conversation-close and retained-creation deletion entry points
+must use the same inspection and explicit consent contract for their backing
+task. Their confirmation must carry the selected options and matching
+confirmation ID to the task deletion request. The chat must remain visible on
+failed admission; consent resets when the target or dialog changes. A local
+setup tab without a backing task closes without a task deletion request. The
+existing task recovery choices and unknown-inspection safeguards apply to
+backed chats. The Quick Chat adaptation is recorded in the
+[implementation plan](../../../plans/quick-chat-dirty-deletion/plan.md).
+
 Each full surface uses an auto/minmax/auto layout: title in the first row, one
 `minmax(0, 1fr)` body containing description, cleanup consequences, warning,
 and cascade choice, then the persistent action footer. The surface is capped by

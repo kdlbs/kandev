@@ -36,18 +36,11 @@ import {
 } from "@kandev/ui/drawer";
 import { IconCheck, IconChevronDown, IconX } from "@tabler/icons-react";
 import { formatBytes } from "@/lib/utils/format-bytes";
+import type { FileAttachment } from "@/components/task/chat/file-attachment";
 import {
-  processFile,
-  MAX_FILES,
-  MAX_TOTAL_SIZE,
-  type FileAttachment,
-} from "@/components/task/chat/file-attachment";
-import {
-  useAttachmentCountFeedback,
-  useAttachmentFileFeedback,
-  useAttachmentTotalSizeFeedback,
-  useUnreadablePastedImageFeedback,
-} from "@/components/task/chat/use-attachment-file-feedback";
+  useTaskCreateAttachments,
+  type TaskCreateAttachmentController,
+} from "@/hooks/domains/task/use-task-create-attachments";
 import {
   readClipboardAttachments,
   type ImagePasteIssue,
@@ -72,8 +65,6 @@ import type { LinearIssue } from "@/lib/types/linear";
 import { useTaskCreatePromptMention } from "@/hooks/use-task-create-prompt-mention";
 import { cn } from "@/lib/utils";
 import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
-import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
-import { ApiError } from "@/lib/api/client";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
@@ -91,29 +82,6 @@ export { BranchSelector } from "./branch-selector";
 export type { BranchOption, BranchSelectorProps } from "./branch-selector";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
-
-type AttachmentLimitRejection = "count" | "total-size" | null;
-
-function acceptAttachmentsWithinLimits(
-  existing: FileAttachment[],
-  processed: FileAttachment[],
-): { accepted: FileAttachment[]; rejection: AttachmentLimitRejection } {
-  let nextCount = existing.length;
-  let nextTotalSize = existing.reduce((sum, att) => sum + att.size, 0);
-  const accepted: FileAttachment[] = [];
-
-  for (const att of processed) {
-    if (nextCount >= MAX_FILES) return { accepted, rejection: "count" };
-    if (nextTotalSize + att.size > MAX_TOTAL_SIZE) {
-      return { accepted, rejection: "total-size" };
-    }
-    accepted.push(att);
-    nextCount += 1;
-    nextTotalSize += att.size;
-  }
-
-  return { accepted, rejection: null };
-}
 
 type RepositoryOption = {
   value: string;
@@ -437,6 +405,8 @@ type TaskFormInputsProps = {
   onDescriptionValueChange?: (value: string) => void;
   initialAttachments?: FileAttachment[];
   onAttachmentsChange?: (attachments: FileAttachment[]) => boolean | void;
+  /** An external controller keeps uploads alive above a closing dialog. */
+  attachmentController?: TaskCreateAttachmentController;
   quickChatComposer?: boolean;
   composerSubmitDisabled?: boolean;
   toolbarActions?: React.ReactNode;
@@ -470,156 +440,6 @@ type TaskFormInputsProps = {
    */
   onComposerSubmit?: () => boolean | Promise<boolean>;
 };
-
-// eslint-disable-next-line max-lines-per-function
-function useFileAttachments(
-  workspaceId: string | null | undefined,
-  onPendingAttachmentUploadsChange?: (pending: boolean) => void,
-  initialAttachments: FileAttachment[] = [],
-  onAttachmentsChange?: (attachments: FileAttachment[]) => boolean | void,
-) {
-  const [attachments, setAttachments] = useState<FileAttachment[]>(initialAttachments);
-  const attachmentsRef = useRef<FileAttachment[]>(initialAttachments);
-
-  const updateAttachment = useCallback(
-    (id: string, update: Partial<FileAttachment>): boolean => {
-      const next = attachmentsRef.current.map((attachment) =>
-        attachment.id === id ? { ...attachment, ...update } : attachment,
-      );
-      attachmentsRef.current = next;
-      setAttachments(next);
-      return onAttachmentsChange?.(next) !== false;
-    },
-    [onAttachmentsChange],
-  );
-
-  const uploadPendingAttachment = useCallback(
-    async (attachment: FileAttachment) => {
-      if (!workspaceId || !attachment.file || attachment.attachmentId) return;
-      if (!updateAttachment(attachment.id, { uploadStatus: "uploading" })) return;
-      try {
-        const uploaded = await uploadAttachment(attachment.file, {
-          workspaceId,
-          kind: attachment.isImage ? "image" : "resource",
-          deliveryMode: attachment.deliveryMode,
-        });
-        if (!attachmentsRef.current.some((current) => current.id === attachment.id)) {
-          void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
-          return;
-        }
-        const keptByDraft = updateAttachment(attachment.id, {
-          attachmentId: uploaded.attachment_id,
-          expiresAt: uploaded.expires_at,
-          uploadStatus: "ready",
-          size: uploaded.size_bytes,
-        });
-        if (!keptByDraft) void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
-      } catch (error) {
-        updateAttachment(attachment.id, {
-          uploadStatus: "failed",
-          uploadError: error instanceof ApiError ? error.message : t("task:uploadFailed"),
-        });
-      }
-    },
-    [updateAttachment, workspaceId],
-  );
-
-  useEffect(() => {
-    if (!workspaceId) return;
-    for (const attachment of attachmentsRef.current) {
-      if (attachment.file && !attachment.attachmentId && attachment.uploadStatus !== "uploading") {
-        void uploadPendingAttachment(attachment);
-      }
-    }
-  }, [uploadPendingAttachment, workspaceId]);
-
-  const [isDragging, setIsDragging] = useState(false);
-  const warnAttachmentCountLimit = useAttachmentCountFeedback();
-  const rejectOversizedFile = useAttachmentFileFeedback();
-  const warnAttachmentTotalSizeLimit = useAttachmentTotalSizeFeedback();
-  const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
-
-  useEffect(() => {
-    onPendingAttachmentUploadsChange?.(
-      attachments.some((attachment) => attachment.file && !attachment.attachmentId),
-    );
-  }, [attachments, onPendingAttachmentUploadsChange, workspaceId]);
-
-  const addFiles = useCallback(
-    async (files: File[], issue?: ImagePasteIssue) => {
-      if (issue === "unreadable-image") {
-        warnUnreadablePastedImage();
-        return;
-      }
-      const processed: FileAttachment[] = [];
-      for (const file of files) {
-        if (rejectOversizedFile(file)) continue;
-        const attachment = await processFile(file);
-        if (attachment) processed.push(attachment);
-      }
-      if (processed.length === 0) return;
-
-      const { accepted, rejection } = acceptAttachmentsWithinLimits(
-        attachmentsRef.current,
-        processed,
-      );
-      if (rejection === "count") {
-        warnAttachmentCountLimit();
-      } else if (rejection === "total-size") {
-        warnAttachmentTotalSizeLimit();
-      }
-      if (accepted.length === 0) return;
-
-      const next = [...attachmentsRef.current, ...accepted];
-      attachmentsRef.current = next;
-      setAttachments(next);
-      for (const attachment of accepted) void uploadPendingAttachment(attachment);
-    },
-    [
-      rejectOversizedFile,
-      warnAttachmentCountLimit,
-      warnAttachmentTotalSizeLimit,
-      warnUnreadablePastedImage,
-      uploadPendingAttachment,
-    ],
-  );
-
-  const handleRemoveAttachment = useCallback((id: string) => {
-    const removed = attachmentsRef.current.find((attachment) => attachment.id === id);
-    const next = attachmentsRef.current.filter((att) => att.id !== id);
-    attachmentsRef.current = next;
-    setAttachments(next);
-    if (removed?.attachmentId) void deleteAttachment(removed.attachmentId).catch(() => undefined);
-  }, []);
-
-  const clearAttachments = useCallback(() => {
-    const current = attachmentsRef.current;
-    attachmentsRef.current = [];
-    setAttachments([]);
-    current.forEach((attachment) => {
-      if (attachment.attachmentId)
-        void deleteAttachment(attachment.attachmentId).catch(() => undefined);
-    });
-  }, []);
-
-  const handleRetryAttachment = useCallback(
-    (id: string) => {
-      const attachment = attachmentsRef.current.find((item) => item.id === id);
-      if (attachment) void uploadPendingAttachment(attachment);
-    },
-    [uploadPendingAttachment],
-  );
-
-  return {
-    attachments,
-    isDragging,
-    setIsDragging,
-    addFiles,
-    handleRemoveAttachment,
-    handleRetryAttachment,
-    clearAttachments,
-  };
-}
 
 function useAttachmentHandlers(
   disabled: boolean | undefined,
@@ -683,30 +503,39 @@ function useAttachmentHandlers(
   return { handlePaste, handleDragOver, handleDragLeave, handleDrop };
 }
 
+function areAttachmentsMutable(controller?: TaskCreateAttachmentController): boolean {
+  return controller ? controller.isAccepting : true;
+}
+
 function toContextItems(
   attachments: FileAttachment[],
+  mutable: boolean,
   onRemove: (id: string) => void,
   onRetry: (id: string) => void,
 ): ContextItem[] {
-  return attachments.map((att) =>
-    att.isImage
+  return attachments.map((att) => {
+    const controls = mutable
+      ? {
+          onRemove: () => onRemove(att.id),
+          ...(att.file ? { onRetry: () => onRetry(att.id) } : {}),
+        }
+      : {};
+    return att.isImage
       ? ({
           kind: "image" as const,
           id: `image:${att.id}`,
           label: t("task:imageWithSize", { bytes: formatBytes(att.size) }),
           attachment: att,
-          onRemove: () => onRemove(att.id),
-          onRetry: () => onRetry(att.id),
+          ...controls,
         } as ImageContextItem)
       : ({
           kind: "file-attachment" as const,
           id: `file:${att.id}`,
           label: att.fileName,
           attachment: att,
-          onRemove: () => onRemove(att.id),
-          onRetry: () => onRetry(att.id),
-        } as FileAttachmentContextItem),
-  );
+          ...controls,
+        } as FileAttachmentContextItem);
+  });
 }
 
 function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
@@ -1167,6 +996,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   onDescriptionValueChange,
   initialAttachments,
   onAttachmentsChange,
+  attachmentController,
   quickChatComposer,
   contextLeadingContent,
   composerSubmitDisabled,
@@ -1193,6 +1023,13 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   useEffect(() => {
     if (!hasLaunchPromptPreview) setIsLaunchPromptPreview(false);
   }, [hasLaunchPromptPreview]);
+  const internalAttachmentController = useTaskCreateAttachments({
+    workspaceId,
+    enabled: !attachmentController,
+    initialAttachments,
+    onPendingAttachmentUploadsChange,
+    onAttachmentsChange,
+  });
   const {
     attachments,
     isDragging,
@@ -1201,20 +1038,22 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     handleRemoveAttachment,
     handleRetryAttachment,
     clearAttachments,
-  } = useFileAttachments(
-    workspaceId,
-    onPendingAttachmentUploadsChange,
-    initialAttachments,
-    onAttachmentsChange,
-  );
+  } = attachmentController ?? internalAttachmentController;
   const { handlePaste, handleDragOver, handleDragLeave, handleDrop } = useAttachmentHandlers(
     disabled,
     addFiles,
     setIsDragging,
   );
+  const attachmentsMutable = areAttachmentsMutable(attachmentController);
   const contextItems = useMemo(
-    () => toContextItems(attachments, handleRemoveAttachment, handleRetryAttachment),
-    [attachments, handleRemoveAttachment, handleRetryAttachment],
+    () =>
+      toContextItems(
+        attachments,
+        attachmentsMutable,
+        handleRemoveAttachment,
+        handleRetryAttachment,
+      ),
+    [attachments, attachmentsMutable, handleRemoveAttachment, handleRetryAttachment],
   );
   const { description, descriptionRef, textareaRef, setDescriptionValue, insertAtCursor } =
     useDescriptionInput({

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 )
@@ -55,7 +57,7 @@ type RunSnapshotStore interface {
 	) (bool, error)
 	// GetRunByID re-reads a run so the losing side of a CAS race can adopt
 	// the winner's persisted scope.
-	GetRunByID(ctx context.Context, id string) (*models.Run, error)
+	GetRunByID(ctx context.Context, id string) (*runsmodels.Run, error)
 }
 
 // RunnerTaskLister resolves a taskless run's task scope: the ordered,
@@ -106,7 +108,7 @@ type scopeDerivation struct {
 }
 
 // Build resolves the agent identity and capabilities for a run.
-func (b *ContextBuilder) Build(ctx context.Context, run *models.Run) (RunContext, error) {
+func (b *ContextBuilder) Build(ctx context.Context, run *runsmodels.Run) (RunContext, error) {
 	runCtx, _, err := b.build(ctx, run)
 	return runCtx, err
 }
@@ -114,7 +116,7 @@ func (b *ContextBuilder) Build(ctx context.Context, run *models.Run) (RunContext
 // build is Build's unexported counterpart: it additionally returns the
 // scopeDerivation so BuildAndPersist can choose the right event and CAS
 // path after the persistence swap decides which build actually won.
-func (b *ContextBuilder) build(ctx context.Context, run *models.Run) (RunContext, scopeDerivation, error) {
+func (b *ContextBuilder) build(ctx context.Context, run *runsmodels.Run) (RunContext, scopeDerivation, error) {
 	if run == nil {
 		return RunContext{}, scopeDerivation{}, fmt.Errorf("run is required")
 	}
@@ -174,7 +176,7 @@ func (b *ContextBuilder) resolveAvailableActions(ctx context.Context, taskID, ag
 // reused verbatim from a final persisted marker or, failing that, freshly
 // derived from the runner set.
 func (b *ContextBuilder) deriveScope(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance, taskID string,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance, taskID string,
 ) (Capabilities, scopeDerivation) {
 	caps := FromAgent(agent)
 	if taskID != "" {
@@ -217,7 +219,7 @@ func (b *ContextBuilder) deriveRunnerSet(ctx context.Context, agentID, workspace
 // whether they carry a final task_scope_source marker. An absent,
 // provisional, unrecognized, or unparseable snapshot all report false, so
 // the caller derives a fresh scope instead of reusing a stale or partial one.
-func reusePersistedTaskScope(run *models.Run) (Capabilities, bool) {
+func reusePersistedTaskScope(run *runsmodels.Run) (Capabilities, bool) {
 	if run == nil || run.Capabilities == "" {
 		return Capabilities{}, false
 	}
@@ -244,7 +246,7 @@ func withScope(caps Capabilities, derivation scopeDerivation) Capabilities {
 // the scope and never appends, so a build that loses the CAS race, has no
 // appender, or persists nothing (no Runs store) appends no scope event and
 // still returns a context.
-func (b *ContextBuilder) BuildAndPersist(ctx context.Context, run *models.Run) (RunContext, error) {
+func (b *ContextBuilder) BuildAndPersist(ctx context.Context, run *runsmodels.Run) (RunContext, error) {
 	runCtx, derivation, err := b.build(ctx, run)
 	if err != nil {
 		return RunContext{}, err
@@ -267,7 +269,7 @@ func (b *ContextBuilder) BuildAndPersist(ctx context.Context, run *models.Run) (
 // task-bound run's scope is a pure function of its payload, and a reused
 // final scope is, by construction, already the scope every concurrent
 // build would agree on.
-func (b *ContextBuilder) persistUnconditional(ctx context.Context, run *models.Run, runCtx RunContext) error {
+func (b *ContextBuilder) persistUnconditional(ctx context.Context, run *runsmodels.Run, runCtx RunContext) error {
 	caps, input, err := marshalSnapshot(runCtx)
 	if err != nil {
 		return err
@@ -289,7 +291,7 @@ func (b *ContextBuilder) persistUnconditional(ctx context.Context, run *models.R
 // the derive-and-swap, up to maxScopeSwapAttempts total attempts.
 func (b *ContextBuilder) persistWithCAS(
 	ctx context.Context,
-	run *models.Run,
+	run *runsmodels.Run,
 	runCtx RunContext,
 	derivation scopeDerivation,
 	prevCapabilities string,

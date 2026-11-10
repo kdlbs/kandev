@@ -4,7 +4,6 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
 import type { WorkflowStep } from "../../../lib/types/http";
-import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
 const TASK_VISIBLE_TIMEOUT = 10_000;
 
@@ -34,36 +33,14 @@ async function pickListboxOption(page: Page, optionLabel: string): Promise<void>
   await expect(listbox).toHaveCount(0);
 }
 
-async function closeDisplayDropdown(page: Page): Promise<void> {
-  // The display settings Popover does NOT auto-close when an inner Select option
-  // is picked. Click the trigger to toggle closed. Radix leaves a brief
-  // pointer-events overlay on <html> after the inner Select closes, so use
-  // force: true to bypass Playwright's interception check.
-  const trigger = page.getByTestId("display-button");
-  if ((await trigger.getAttribute("data-state")) === "open") {
-    await trigger.click({ force: true });
-  }
-  await expect(trigger).not.toHaveAttribute("data-state", "open");
-  // Wait for the menu portal to fully unmount before any subsequent open;
-  // otherwise re-clicking the trigger lands while Radix is mid-cleanup and
-  // the menu content fails to render.
-  await expect(page.getByTestId("display-settings-content")).toHaveCount(0);
-}
-
 async function selectWorkflowFilter(page: Page, optionLabel: string): Promise<void> {
-  await page.getByTestId("display-button").click();
-  await expandDisplaySettingsGroup(page, "filters");
-  await page.getByTestId("display-workflow-filter").click();
+  await page.getByTestId("tasks-list-workflow-filter").click();
   await pickListboxOption(page, optionLabel);
-  await closeDisplayDropdown(page);
 }
 
 async function selectRepositoryFilter(page: Page, optionLabel: string): Promise<void> {
-  await page.getByTestId("display-button").click();
-  await expandDisplaySettingsGroup(page, "filters");
-  await page.getByTestId("display-repository-filter").click();
+  await page.getByTestId("tasks-list-repository-filter").click();
   await pickListboxOption(page, optionLabel);
-  await closeDisplayDropdown(page);
 }
 
 async function createLocalRepo(tmpDir: string, name: string): Promise<string> {
@@ -322,5 +299,87 @@ test.describe("Task list display filters", () => {
     });
     await expect(taskInList(testPage, "T2 wf-A repo-2")).not.toBeVisible();
     await expect(taskInList(testPage, "T3 wf-B repo-1")).not.toBeVisible();
+  });
+  // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-002.2 AC-TASKS-LIST-ARCHIVE-FILTERS-002.4
+  test("combines archive, workflow, repository, and text filters and retains mode on clear", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const other = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Archive filter other",
+      "simple",
+    );
+    const { steps } = await apiClient.listWorkflowSteps(other.id);
+    for (const [title, workflow, step, repositories] of [
+      ["Archive match", seedData.workflowId, seedData.startStepId, [seedData.repositoryId]],
+      ["Archive other workflow", other.id, steps[0].id, [seedData.repositoryId]],
+      ["Archive without repository", seedData.workflowId, seedData.startStepId, []],
+    ] as const) {
+      const task = await apiClient.createTask(seedData.workspaceId, title, {
+        workflow_id: workflow,
+        workflow_step_id: step,
+        repository_ids: [...repositories],
+      });
+      await apiClient.archiveTask(task.id);
+    }
+    await apiClient.createTask(seedData.workspaceId, "Active match", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    await testPage.goto(
+      `/tasks?workspace=${seedData.workspaceId}&archive=archived&workflow=all&repository=all&sort=title_asc&group=none`,
+    );
+    await expect(testPage.getByTestId("tasks-list-row-title")).toHaveCount(3);
+    const workflow = (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
+      (w) => w.id === seedData.workflowId,
+    )!;
+    await selectWorkflowFilter(testPage, workflow.name);
+    await selectRepositoryFilter(testPage, "E2E Repo");
+    await testPage.getByTestId("tasks-list-search").fill("match");
+    await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText(["Archive match"]);
+    await testPage.getByTestId("tasks-list-clear-filters").click();
+    await expect(testPage.getByTestId("tasks-list-row-title")).toHaveCount(3);
+    await expect(testPage.getByTestId("tasks-list-search")).toHaveValue("");
+    await expect(testPage).toHaveURL(
+      (url) =>
+        url.searchParams.get("archive") === "archived" &&
+        url.searchParams.get("sort") === "title_asc" &&
+        url.searchParams.get("group") === "none",
+    );
+    for (const [width, height] of [
+      [767, 44],
+      [768, 28],
+    ]) {
+      await testPage.setViewportSize({ width, height: 900 });
+      const control = testPage.getByTestId("tasks-list-archive-archived");
+      expect(Math.abs((await control.boundingBox())!.height - height)).toBeLessThanOrEqual(1);
+      expect(
+        await testPage.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+    }
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    await testPage.screenshot({ path: "test-results/task-list-desktop-filters.png" });
+  });
+
+  // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.5
+  test("shows an unavailable workflow without broadening the archive", async ({
+    testPage,
+    seedData,
+  }) => {
+    await testPage.goto(
+      `/tasks?workspace=${seedData.workspaceId}&archive=archived&workflow=unavailable&repository=all`,
+    );
+    await expect(testPage.getByTestId("tasks-list-error")).toContainText("Workflow unavailable");
+    await expect(testPage.getByTestId("tasks-list-row")).toHaveCount(0);
+    await testPage
+      .getByTestId("tasks-list-error")
+      .getByRole("button", { name: "Clear filters" })
+      .click();
+    await expect(testPage.getByText("No archived tasks", { exact: true })).toBeVisible();
   });
 });

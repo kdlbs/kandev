@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { memo, useEffect, useEffectEvent, useMemo, useRef, useState, useCallback } from "react";
 import type { RevertBlockInfo } from "@/components/diff";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent, updateFileContent } from "@/lib/ws/workspace-files";
@@ -249,41 +249,45 @@ function useAutoMarkOnScroll({
   suppressAutoMark,
 }: AutoMarkArgs) {
   const scrollSentinelRef = useRef<HTMLDivElement | null>(null);
-  const autoMarkedRef = useRef(false);
-  useEffect(() => {
-    if (!autoMarkOnScroll || isReviewed || isStale) {
-      autoMarkedRef.current = false;
-      return;
+  const markIfEligible = useEffectEvent(() => {
+    if (!isReviewed && !isStale && !suppressAutoMark.current) {
+      onToggleReviewed(fileKey, true);
     }
+  });
+  useEffect(() => {
+    if (!autoMarkOnScroll) return;
     const sentinel = scrollSentinelRef.current;
     const root = scrollContainer.current;
     if (!sentinel || !root) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (
-          !entry.isIntersecting &&
-          entry.boundingClientRect.top < root.getBoundingClientRect().top &&
-          !suppressAutoMark.current &&
-          !autoMarkedRef.current
-        ) {
-          autoMarkedRef.current = true;
-          console.debug("[review] auto-mark reviewed:", fileKey);
-          onToggleReviewed(fileKey, true);
-        }
-      },
-      { threshold: 0, root },
-    );
+    let active = true;
+    let previousAbove: boolean | null = null;
+    let previousOffset: number | null = null;
+    let previousScrollTop = root.scrollTop;
+    const updatePosition = (allowMark: boolean) => {
+      if (!active) return;
+      const offset = sentinel.getBoundingClientRect().top - root.getBoundingClientRect().top;
+      const above = offset < 0;
+      const scrollDelta = root.scrollTop - previousScrollTop;
+      // A scroll pass moves the marker by the scroll delta; layout shifts change that offset.
+      const movedWithScroll =
+        previousOffset !== null && Math.abs(previousOffset - offset - scrollDelta) < 1;
+      const crossed = previousAbove === false && above && scrollDelta > 0 && movedWithScroll;
+      previousAbove = above;
+      previousOffset = offset;
+      previousScrollTop = root.scrollTop;
+      if (allowMark && crossed) markIfEligible();
+    };
+    const handleScroll = () => updatePosition(true);
+    // Layout observations refresh the baseline without certifying a reading pass.
+    const observer = new IntersectionObserver(() => updatePosition(false), { threshold: 0, root });
     observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [
-    autoMarkOnScroll,
-    fileKey,
-    isReviewed,
-    isStale,
-    onToggleReviewed,
-    scrollContainer,
-    suppressAutoMark,
-  ]);
+    root.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      active = false;
+      root.removeEventListener("scroll", handleScroll);
+      observer.disconnect();
+    };
+  }, [autoMarkOnScroll, fileKey, scrollContainer]);
   return scrollSentinelRef;
 }
 

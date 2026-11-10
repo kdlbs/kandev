@@ -161,6 +161,34 @@ describe("useChatInputContainer opening attachment recovery", () => {
   });
 });
 
+describe("useChatInputContainer restart", () => {
+  // @covers AC-TASKS-SESSION-TAB-RESTART-001.6
+  it("blocks restart submission while keeping a draft editable and defers to recovery afterward", () => {
+    const draftText = "draft kept during restart";
+    localStorage.clear();
+    const { result, rerender } = renderInputState({
+      isRestarting: true,
+      canQueueWhileStarting: true,
+    });
+    act(() => {
+      result.current.handleChange(draftText);
+    });
+
+    expect(result.current.isDisabled).toBe(false);
+    expect(result.current.submitDisabled).toBe(true);
+    expect(result.current.submitDisabledReason).toBe("Restarting session...");
+    expect(result.current.value).toBe(draftText);
+
+    rerender({ isRestarting: false, needsRecovery: true });
+    expect(result.current.submitDisabled).toBe(true);
+    expect(result.current.value).toBe(draftText);
+
+    rerender({ isRestarting: false });
+    expect(result.current.submitDisabled).toBe(false);
+    expect(result.current.value).toBe(draftText);
+  });
+});
+
 describe("useChatInputContainer", () => {
   it("@covers AC-UI-SESSION-START-COMPOSER-READINESS-001.1 keeps editing available while startup blocks submission", () => {
     const { result } = renderInputState({ isStarting: true });

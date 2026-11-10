@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
@@ -158,6 +159,14 @@ func providerDefaultDecision(state *CachedModelState, policy StartModelPolicy, r
 	return decision
 }
 
+// isStartModelTransportError recognizes caller cancellation and typed loss of
+// the backend's agent stream. Opaque ACP replies cannot attest transport loss:
+// their messages can describe a provider-side model application failure.
+func isStartModelTransportError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, agentctl.ErrAgentStreamNotConnected)
+}
+
 // applyStartModelPolicy applies the profile model only when the executor's
 // ACP catalog advertises it. An exact profile fails closed when the requested
 // model cannot be attested before inference. Compatible profiles preserve the
@@ -235,7 +244,7 @@ func applyStartModelPolicy(
 			decision.SetModelCalled = true
 			return decision, nil
 		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if isStartModelTransportError(err) {
 			return decision, err
 		}
 		return decision, modelSelectionBootstrapFailure(
@@ -291,7 +300,7 @@ func applyUniqueAdvertisedVariation(
 			decision.SetModelCalled = true
 			return decision, nil
 		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if isStartModelTransportError(err) {
 			return decision, err
 		}
 		return decision, modelSelectionBootstrapFailure(
@@ -327,7 +336,7 @@ func applyAdvertisedFallback(
 			}
 			return providerDefaultDecision(state, policy, ModelSelectionReasonSelectionUnsupported), nil
 		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if isStartModelTransportError(err) {
 			return decision, err
 		}
 		return decision, modelSelectionBootstrapFailure(

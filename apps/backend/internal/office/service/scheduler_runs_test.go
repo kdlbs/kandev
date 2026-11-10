@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
@@ -55,7 +57,7 @@ func TestProcessRunGuard_AllowsActiveAgent(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	run := &models.Run{AgentProfileID: agent.ID}
+	run := &runsmodels.Run{AgentProfileID: agent.ID}
 	ok, err := svc.ProcessRunGuard(ctx, run)
 	if err != nil {
 		t.Fatalf("guard: %v", err)
@@ -77,7 +79,7 @@ func TestProcessRunGuard_BlocksPausedAgent(t *testing.T) {
 		t.Fatalf("pause: %v", err)
 	}
 
-	run := &models.Run{AgentProfileID: agent.ID}
+	run := &runsmodels.Run{AgentProfileID: agent.ID}
 	ok, err := svc.ProcessRunGuard(ctx, run)
 	if err != nil {
 		t.Fatalf("guard: %v", err)
@@ -149,8 +151,8 @@ func TestFailRun_WritesFailedStatusAndNullOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if got.Status != models.RunStatusFailed {
-		t.Errorf("status = %q, want %q", got.Status, models.RunStatusFailed)
+	if got.Status != runsmodels.RunStatusFailed {
+		t.Errorf("status = %q, want %q", got.Status, runsmodels.RunStatusFailed)
 	}
 	if got.Outcome != nil {
 		t.Errorf("outcome = %q, want nil (a failed run must never carry a finished-path outcome value)", *got.Outcome)
@@ -206,7 +208,7 @@ func TestTransitionRunTerminal_FirstWriterWinsOnStatusAndOutcome(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get run: %v", err)
 		}
-		if got.Status != models.RunStatusFinished || got.Outcome == nil || *got.Outcome != service.RunOutcomeProcessed {
+		if got.Status != runsmodels.RunStatusFinished || got.Outcome == nil || *got.Outcome != service.RunOutcomeProcessed {
 			t.Fatalf("row = {status: %q, outcome: %v}, want the FIRST write preserved: {finished, %q}", got.Status, got.Outcome, service.RunOutcomeProcessed)
 		}
 	})
@@ -229,7 +231,7 @@ func TestTransitionRunTerminal_FirstWriterWinsOnStatusAndOutcome(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get run: %v", err)
 		}
-		if got.Status != models.RunStatusFailed || got.Outcome != nil {
+		if got.Status != runsmodels.RunStatusFailed || got.Outcome != nil {
 			t.Fatalf("row = {status: %q, outcome: %v}, want the FIRST write preserved: {failed, nil}", got.Status, got.Outcome)
 		}
 	})

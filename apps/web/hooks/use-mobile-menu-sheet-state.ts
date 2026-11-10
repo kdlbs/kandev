@@ -84,8 +84,8 @@ function buildMobileDisplayOptions({
   return {
     ...rest,
     showTaskDetails: currentPage === "tasks",
-    showWorkflow: !isMobile || currentPage !== "kanban",
-    showRepository: currentPage !== "threads",
+    showWorkflow: currentPage !== "tasks" && (!isMobile || currentPage !== "kanban"),
+    showRepository: currentPage !== "threads" && currentPage !== "tasks",
     showPreviewPanel: currentPage !== "threads",
     tasksListOptions: isMobile && currentPage === "tasks" ? tasksListOptions : undefined,
     columnsSection,

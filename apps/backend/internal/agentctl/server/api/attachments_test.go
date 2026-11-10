@@ -17,6 +17,17 @@ import (
 )
 
 func TestMaterializeAttachment_StreamsIntoSessionDirectory(t *testing.T) {
+	for _, fallback := range []bool{false, true} {
+		t.Run(strconv.FormatBool(fallback), func(t *testing.T) {
+			if fallback {
+				forceUnsupportedAttachmentLink(t)
+			}
+			testMaterializeAttachment_StreamsIntoSessionDirectory(t)
+		})
+	}
+}
+
+func testMaterializeAttachment_StreamsIntoSessionDirectory(t *testing.T) {
 	workDir := t.TempDir()
 	log := newTestLogger()
 	cfg := &config.InstanceConfig{Port: 0, WorkDir: workDir, AuthToken: "test-token"}
@@ -74,6 +85,17 @@ func TestMaterializeAttachment_StreamsIntoSessionDirectory(t *testing.T) {
 }
 
 func TestMaterializeAttachment_RejectsDescriptorSizeMismatch(t *testing.T) {
+	for _, fallback := range []bool{false, true} {
+		t.Run(strconv.FormatBool(fallback), func(t *testing.T) {
+			if fallback {
+				forceUnsupportedAttachmentLink(t)
+			}
+			testMaterializeAttachment_RejectsDescriptorSizeMismatch(t)
+		})
+	}
+}
+
+func testMaterializeAttachment_RejectsDescriptorSizeMismatch(t *testing.T) {
 	workDir := t.TempDir()
 	log := newTestLogger()
 	cfg := &config.InstanceConfig{Port: 0, WorkDir: workDir, AuthToken: "test-token"}
@@ -154,6 +176,17 @@ func TestMaterializeAttachment_RejectsPathTraversalIdentity(t *testing.T) {
 }
 
 func TestInstallMaterializedAttachment_NeverOverwritesConcurrentNames(t *testing.T) {
+	for _, fallback := range []bool{false, true} {
+		t.Run(strconv.FormatBool(fallback), func(t *testing.T) {
+			if fallback {
+				forceUnsupportedAttachmentLink(t)
+			}
+			testInstallMaterializedAttachment_NeverOverwritesConcurrentNames(t)
+		})
+	}
+}
+
+func testInstallMaterializedAttachment_NeverOverwritesConcurrentNames(t *testing.T) {
 	dir := t.TempDir()
 	type result struct {
 		name string

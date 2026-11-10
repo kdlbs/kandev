@@ -219,7 +219,10 @@ export type UserSettings = {
   confirm_task_archive?: boolean;
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
+  unread_task_dot?: boolean;
+  unread_task_dot_hide_delay_seconds?: number;
   agent_generated_task_titles?: boolean;
+  prompt_suggestions?: boolean;
   auto_focus_new_tasks?: boolean;
   agent_tab_close_behavior?: "delete_session" | "hide_panel";
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
@@ -305,7 +308,10 @@ export type UserSettingsUpdatePayload = {
   confirm_task_archive?: boolean;
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
+  unread_task_dot?: boolean;
+  unread_task_dot_hide_delay_seconds?: number;
   agent_generated_task_titles?: boolean;
+  prompt_suggestions?: boolean;
   auto_focus_new_tasks?: boolean;
   agent_tab_close_behavior?: "delete_session" | "hide_panel";
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;

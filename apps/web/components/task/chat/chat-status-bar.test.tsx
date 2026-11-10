@@ -3,6 +3,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { useSyncExternalStore, type ComponentProps } from "react";
 import { ChatStatusBar, shouldRenderChatStatusBar } from "./chat-status-bar";
 
+const USAGE_TRIGGER_TEST_ID = "conversation-usage-trigger";
+
 const statusStore = vi.hoisted(() => {
   const state = {
     features: { agentBackgroundWork: false },
@@ -13,6 +15,7 @@ const statusStore = vi.hoisted(() => {
           id: "session-1",
           task_id: "",
           state: "IDLE",
+          agent_profile_id: undefined as string | undefined,
           metadata: {
             acp: {
               meta: {
@@ -27,6 +30,17 @@ const statusStore = vi.hoisted(() => {
           },
         },
       },
+    },
+    agentProfiles: {
+      items: [
+        {
+          id: "profile-antigravity",
+          label: "Antigravity • Personal",
+          agent_id: "agent-antigravity",
+          agent_name: "antigravity-acp",
+          cli_passthrough: false,
+        },
+      ],
     },
   };
   const listeners = new Set<() => void>();
@@ -73,6 +87,7 @@ vi.mock("@/components/task/workflow-move-proceed-button", () => ({
 vi.mock("@/components/github/pr-status-chip", () => ({ PRStatusChip: () => null }));
 vi.mock("@/components/gitlab/mr-status-chip", () => ({ MRStatusChip: () => null }));
 vi.mock("@/components/task/task-dependency-chip", () => ({ TaskDependencyChip: () => null }));
+vi.mock("@/components/task-graph/task-graph-button", () => ({ TaskGraphButton: () => null }));
 vi.mock("@/components/azure-devops/azure-devops-task-pull-request-chip", () => ({
   AzureDevOpsTaskPullRequestChip: () => null,
 }));
@@ -87,7 +102,15 @@ vi.mock("@/components/task/chat/transcript-nav-group", () => ({
     usageControl ?? null,
 }));
 vi.mock("./conversation-usage-display", () => ({
-  ConversationUsageDisplay: ({ taskId, sessionId }: { taskId: string; sessionId: string }) =>
+  ConversationUsageDisplay: ({
+    taskId,
+    sessionId,
+    subscriptionBilling,
+  }: {
+    taskId: string;
+    sessionId: string;
+    subscriptionBilling?: boolean;
+  }) =>
     usageDisplay.visible ? (
       <button
         type="button"
@@ -95,6 +118,7 @@ vi.mock("./conversation-usage-display", () => ({
         data-testid="conversation-usage-trigger"
         data-task-id={taskId}
         data-session-id={sessionId}
+        data-subscription-billing={subscriptionBilling ? "true" : "false"}
       />
     ) : null,
 }));
@@ -153,12 +177,11 @@ describe("chat status bar goal visibility", () => {
   it("places the goal after review status and before the queue chip", () => {
     renderStatus({ queueChip: <span data-testid="queue-chip" /> });
 
-    const row = screen.getByTestId("chat-status-bar");
-    const order = Array.from(row.children).map((child) => child.getAttribute("data-testid"));
-    expect(order.indexOf("registered-review-status")).toBeLessThan(
-      order.indexOf("agent-goal-chip"),
-    );
-    expect(order.indexOf("agent-goal-chip")).toBeLessThan(order.indexOf("queue-chip"));
+    const review = screen.getByTestId("registered-review-status");
+    const goal = screen.getByTestId("agent-goal-chip");
+    const queue = screen.getByTestId("queue-chip");
+    expect(review.compareDocumentPosition(goal) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(goal.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("counts an active goal when deciding whether the row is needed", () => {
@@ -176,8 +199,8 @@ describe("chat status bar goal visibility", () => {
 });
 
 describe("conversation usage status control", () => {
-  // @covers AC-UI-COMPOSER-ACTION-WRAP-001.2, .4, .5
-  it("preserves action and utility instances when responsive order changes", () => {
+  // @covers AC-UI-COMPOSER-ACTION-WRAP-001.2, .4, .5, .6, .7
+  it("preserves status, action, and utility instances when responsive order changes", () => {
     const props: ComponentProps<typeof ChatStatusBar> = {
       todoItems: [],
       taskId: "task-1",
@@ -191,14 +214,19 @@ describe("conversation usage status control", () => {
     };
     const { rerender } = render(<ChatStatusBar {...props} />);
     const proceed = screen.getByTestId("proceed-next-step");
-    const usage = screen.getByTestId("conversation-usage-trigger");
+    const usage = screen.getByTestId(USAGE_TRIGGER_TEST_ID);
+    const review = screen.getByTestId("registered-review-status");
     for (const isMobile of [true, false, true]) {
       viewport.isMobile = isMobile;
       rerender(<ChatStatusBar {...props} />);
       expect(screen.getByTestId("proceed-next-step")).toBe(proceed);
-      expect(screen.getByTestId("conversation-usage-trigger")).toBe(usage);
+      expect(screen.getByTestId(USAGE_TRIGGER_TEST_ID)).toBe(usage);
+      expect(screen.getByTestId("registered-review-status")).toBe(review);
       const order = proceed.compareDocumentPosition(usage);
       expect(Boolean(order & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(isMobile);
+      expect(
+        Boolean(proceed.compareDocumentPosition(review) & Node.DOCUMENT_POSITION_FOLLOWING),
+      ).toBe(isMobile);
     }
   });
 
@@ -206,7 +234,7 @@ describe("conversation usage status control", () => {
     renderStatus({ taskId: "task-1", sessionId: "session-1" });
 
     const row = screen.getByTestId("chat-status-bar");
-    const trigger = screen.getByTestId("conversation-usage-trigger");
+    const trigger = screen.getByTestId(USAGE_TRIGGER_TEST_ID);
     expect(row.contains(trigger)).toBe(true);
     expect(trigger.getAttribute("data-task-id")).toBe("task-1");
     expect(trigger.getAttribute("data-session-id")).toBe("session-1");
@@ -234,5 +262,19 @@ describe("conversation usage status control", () => {
     expect(actions.className).toContain("ml-auto");
     expect(actions.contains(proceed)).toBe(true);
     expect(proceed.className).toContain("h-6");
+  });
+
+  it("marks Antigravity subscription sessions for the cost disclosure", () => {
+    const session = statusStore.state.taskSessions.items["session-1"];
+    session.agent_profile_id = "profile-antigravity";
+    try {
+      renderStatus({ taskId: "task-1", sessionId: "session-1" });
+
+      expect(
+        screen.getByTestId(USAGE_TRIGGER_TEST_ID).getAttribute("data-subscription-billing"),
+      ).toBe("true");
+    } finally {
+      session.agent_profile_id = undefined;
+    }
   });
 });

@@ -30,33 +30,45 @@ export function useExternalFocusSelection(inputRef: RefObject<HTMLInputElement |
     };
     const clear = () => {
       clearTimeout(timer);
+      timer = undefined;
       selection = undefined;
+    };
+    const restoreImmediately = () => {
+      const saved = selection;
+      if (saved && doc.activeElement === input && input.value === saved.value) {
+        input.setSelectionRange(saved.start, saved.end, saved.direction);
+      }
     };
     const restore = () => {
       const saved = selection;
       if (!saved) return;
       clearTimeout(timer);
       timer = setTimeout(() => {
+        timer = undefined;
         if (selection !== saved) return;
-        if (doc.activeElement === input && input.value === saved.value) {
-          input.setSelectionRange(saved.start, saved.end, saved.direction);
-        }
+        restoreImmediately();
       }, 0);
+    };
+    const beforeUserInput = (event: Event) => {
+      if (event.target === input && timer !== undefined) restoreImmediately();
+      clear();
     };
     win.addEventListener("blur", windowBlur);
     input.addEventListener("blur", inputBlur);
     input.addEventListener("focus", restore);
     doc.addEventListener("pointerdown", clear, true);
+    input.addEventListener("beforeinput", beforeUserInput);
     input.addEventListener("input", clear);
-    doc.addEventListener("keydown", clear, true);
+    doc.addEventListener("keydown", beforeUserInput, true);
     return () => {
       clear();
       win.removeEventListener("blur", windowBlur);
       input.removeEventListener("blur", inputBlur);
       input.removeEventListener("focus", restore);
       doc.removeEventListener("pointerdown", clear, true);
+      input.removeEventListener("beforeinput", beforeUserInput);
       input.removeEventListener("input", clear);
-      doc.removeEventListener("keydown", clear, true);
+      doc.removeEventListener("keydown", beforeUserInput, true);
     };
   }, [inputRef]);
 }

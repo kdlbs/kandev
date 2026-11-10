@@ -100,6 +100,7 @@ func TestExecuteStepTransition_RecordsConsumedSignalMetadata(t *testing.T) {
 		Source:  models.StepCompletionSourceAgent,
 		Summary: "did the work",
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -131,6 +132,7 @@ func TestExecuteStepTransition_OnTurnStartDoesNotAttachSignal(t *testing.T) {
 	// A signal is pending for step1, but this is an on_turn_start move
 	// (triggerOnEnter=false) — it must not consume or report the signal.
 	signal := models.PendingStepCompletionSignal{StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "premature"}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -188,6 +190,7 @@ func TestApplyEngineTransition_RecordsConsumedSignalMetadata(t *testing.T) {
 		Source:  models.StepCompletionSourceAgent,
 		Summary: "engine path done",
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -237,6 +240,7 @@ func TestApplyEngineTransition_OnTurnStartDoesNotAttachSignal(t *testing.T) {
 	svc.stepHistoryRecorder = recorder
 
 	signal := models.PendingStepCompletionSignal{StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "premature"}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}

@@ -6,15 +6,16 @@ import (
 	"fmt"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/db/dialect"
-	"github.com/kandev/kandev/internal/office/models"
 )
 
 // GetRun fetches a single run row by id.
 func (r *Repository) GetRun(
 	ctx context.Context, id string,
-) (*models.Run, error) {
-	var req models.Run
+) (*runsmodels.Run, error) {
+	var req runsmodels.Run
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT * FROM runs WHERE id = ?
 	`), id).StructScan(&req)
@@ -143,9 +144,9 @@ func (r *Repository) DeleteAgentPauseRecovery(
 // newer run already succeeded or is already queued.
 func (r *Repository) GetLatestRunForAgentTask(
 	ctx context.Context, agentID, taskID string,
-) (*models.Run, error) {
+) (*runsmodels.Run, error) {
 	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")
-	var run models.Run
+	var run runsmodels.Run
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
 		SELECT * FROM runs
 		WHERE agent_profile_id = ? AND %s = ?

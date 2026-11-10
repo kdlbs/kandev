@@ -26,5 +26,7 @@ export async function expectThreadsHome(page: Page, workspaceId: string) {
 
 export async function expectEmptyList(page: Page) {
   await expect(page).toHaveURL((url) => url.pathname === "/tasks");
-  await expect(page.getByText("No tasks found.", { exact: true })).toBeVisible();
+  await expect(
+    page.getByTestId("tasks-list-view").getByText("No tasks match these filters", { exact: true }),
+  ).toBeVisible();
 }

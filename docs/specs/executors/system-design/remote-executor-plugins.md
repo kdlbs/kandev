@@ -142,6 +142,9 @@ the session instance is healthy, core writes the credential files and configurat
 selected on the profile through agentctl processes, with contents in the process environment and
 never in the command line, and runs the setup scripts of selected environment-variable methods.
 Upload is best-effort and does not fail the launch, as for the other remote executors.
+With both Git values set, setup runs `git config --global` at launch and
+reattach. It inherits the agent's `HOME` and Git config environment, not the
+credential-copy home. Values stay in the environment.
 Do not put session secrets into reusable image configuration.
 
 The first version requires a Kandev runtime API URL reachable from the remote network.
@@ -237,6 +240,40 @@ Provider lifecycle and task-session state remain separate concepts.
 
 One unresolved allocation blocks a later launch for that session. No new idempotency key is generated
 to escape uncertainty. Provider implementations must support recovery by the original identity.
+
+## Repository materialization credentials
+
+Materialization implements AC-EXECUTORS-PLUGIN-002.5 through
+AC-EXECUTORS-PLUGIN-002.7. Providers retain the existing bootstrap contract;
+Git broker issuance, scope checks, and reissue remain authoritative.
+
+Instance admission removes inherited managed broker authorization and generated
+credential config before merging `CreateRequest.Env`. Runtime helper tools and
+unrelated Git configuration remain available. Standalone default collection keeps
+its existing behavior. The request becomes `InstanceConfig.AgentEnv`. Agentctl takes
+a detached snapshot of the current instance Git environment under the process
+manager's existing lock. One request uses one snapshot throughout clone, fetch,
+PR-base preparation, sparse checkout, and checkout. An explicit operation-scoped
+Git runner carries this environment through both `materializeGitOutput` and
+`materializeCheckoutGit`; no process-global environment mutation is permitted.
+
+Build the command environment using the current instance snapshot as the source
+of managed authorization. Preserve process-installed helper tooling when absent
+from that snapshot, including `KANDEV_GITHUB_CREDENTIAL_HELPER_PATH`. Capture
+installed tooling during manager construction, as existing managed Git activation
+does; do not re-read mutable ambient credentials per command. Do not fall back to
+startup broker leases when the instance lacks current authorization. Use `internal/gitconfigenv` to preserve and validate unrelated indexed config.
+
+Both runners retain `subproc.NewGitCommand`, classified `GitLifecycle` capacity,
+existing verb-specific timeouts, cancellation, stdin handling, and final
+noninteractive Git environment enforcement. Preparation failures retain sanitized
+errors. Repository validation, cleanup, origin scrubbing, and response shapes
+remain unchanged. Secrets remain transient command environment values, never
+serialized into the repository or a provider checkpoint.
+
+No workspace credential-mode default changes: `executor` uses credentials already
+available on the remote executor; `managed` permits host-issued scoped credentials.
+Public documentation must explain that distinction for private plugin repositories.
 
 ## Recovery and cleanup
 

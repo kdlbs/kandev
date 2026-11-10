@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"time"
 
 	"github.com/google/uuid"
@@ -106,7 +107,7 @@ func (s *Store) CreateManagedSchedule(ctx context.Context, item *Automation, tri
 		resource_revision, repository_mode, prompt, task_title_template, execution_mode, enabled,
 		max_concurrent_runs, continuation_policy, continuation_task_id, webhook_secret, last_triggered_at,
 		created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`),
-		executorCreatorUserID(ctx), item.ID, item.WorkspaceID, item.Name, item.Description, item.WorkflowID, item.WorkflowStepID,
+		executoridentity.CreatorUserID(ctx), item.ID, item.WorkspaceID, item.Name, item.Description, item.WorkflowID, item.WorkflowStepID,
 		item.AgentProfileID, item.ExecutorProfileID, item.TaskMode, item.ManagedOwnerInstallationID,
 		item.ManagedDestinationInstallationID, item.ManagedDestinationConversationID,
 		item.ManagedDestinationPluginID, item.ManagedDestinationInstanceKey, item.ManagedDestinationRevision,

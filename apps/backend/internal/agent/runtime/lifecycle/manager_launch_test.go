@@ -285,7 +285,8 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 		}
 		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
-		require.Equal(t, "greywall -- copilot --acp", cmds.initial)
+		require.Equal(t, "copilot --acp", cmds.initial)
+		require.Equal(t, []string{"greywall", "--"}, cmds.wrapper.Argv)
 	})
 
 	t.Run("prefix precedes appended cli flags", func(t *testing.T) {
@@ -296,7 +297,7 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 		}
 		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
-		require.Equal(t, "greywall -- copilot --acp --allow-all-tools", cmds.initial)
+		require.Equal(t, "copilot --acp --allow-all-tools", cmds.initial)
 	})
 
 	t.Run("empty prefix leaves the command unwrapped", func(t *testing.T) {
@@ -330,7 +331,7 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 		}
 		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, continueAgent, agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
-		require.Equal(t, "greywall -- amp threads continue --allow-all-tools", cmds.continue_)
+		require.Equal(t, "amp threads continue --allow-all-tools", cmds.continue_)
 	})
 }
 
@@ -1727,41 +1728,46 @@ func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
 	require.Equal(t, SessionSettingsPolicyProviderRestored, got.sessionSettingsProjectionPolicy())
 	require.NotEmpty(t, got.AgentCommand, "AgentCommand must be populated by promotion")
 	require.GreaterOrEqual(t, len(got.AgentArgs), 2, "promotion must populate structured argv")
-	require.Equal(t, []string{"/opt/wrapper dir/wrapper", "--"}, got.AgentArgs[:2],
-		"promotion must preserve the prefix argv token containing spaces")
+	require.Equal(t, []string{"/opt/wrapper dir/wrapper", "--"}, got.LaunchWrapper.Argv,
+		"promotion must preserve the separate wrapper token containing spaces")
 	require.Equal(t, "acp-session-abc", got.ACPSessionID, "ACPSessionID must be carried over from the request")
 	require.True(t, got.isResumedSession, "isResumedSession must be set when PreviousExecutionID is non-empty")
 }
 
 func TestLaunch_PromotesWorkspaceOnlyExecutionWithInitialPrompt(t *testing.T) {
-	mgr := newTestManager(t)
-	mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
-		ProfileID: "profile-prompt",
-		AgentName: "auggie",
-	}}
+	for _, workspaceHadPredecessor := range []bool{false, true} {
+		t.Run("workspace_had_predecessor_"+strconv.FormatBool(workspaceHadPredecessor), func(t *testing.T) {
+			mgr := newTestManager(t)
+			mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
+				ProfileID: "profile-prompt",
+				AgentName: "auggie",
+			}}
 
-	existing := &AgentExecution{
-		ID:             "exec-workspace-only-prompt",
-		SessionID:      "session-prompt",
-		TaskID:         "task-prompt",
-		AgentProfileID: "profile-prompt",
+			existing := &AgentExecution{
+				ID:               "exec-workspace-only-prompt",
+				SessionID:        "session-prompt",
+				TaskID:           "task-prompt",
+				AgentProfileID:   "profile-prompt",
+				isResumedSession: workspaceHadPredecessor,
+			}
+			require.NoError(t, mgr.executionStore.Add(existing))
+
+			attachment := MessageAttachment{AttachmentID: "attachment-1", Type: "resource", Name: "brief.md"}
+			got, err := mgr.Launch(context.Background(), &LaunchRequest{
+				TaskID:          existing.TaskID,
+				SessionID:       existing.SessionID,
+				AgentProfileID:  existing.AgentProfileID,
+				TaskDescription: "start the requested work",
+				TurnID:          "turn-initial",
+				Attachments:     []MessageAttachment{attachment},
+			})
+			require.NoError(t, err)
+			require.Same(t, existing, got)
+			require.Equal(t, "start the requested work", getTaskDescriptionFromMetadata(got))
+			require.Equal(t, []MessageAttachment{attachment}, getAttachmentsFromMetadata(got))
+			require.Equal(t, "turn-initial", got.promptTurnIDSnapshot())
+		})
 	}
-	require.NoError(t, mgr.executionStore.Add(existing))
-
-	attachment := MessageAttachment{AttachmentID: "attachment-1", Type: "resource", Name: "brief.md"}
-	got, err := mgr.Launch(context.Background(), &LaunchRequest{
-		TaskID:          existing.TaskID,
-		SessionID:       existing.SessionID,
-		AgentProfileID:  existing.AgentProfileID,
-		TaskDescription: "start the requested work",
-		TurnID:          "turn-initial",
-		Attachments:     []MessageAttachment{attachment},
-	})
-	require.NoError(t, err)
-	require.Same(t, existing, got)
-	require.Equal(t, "start the requested work", getTaskDescriptionFromMetadata(got))
-	require.Equal(t, []MessageAttachment{attachment}, getAttachmentsFromMetadata(got))
-	require.Equal(t, "turn-initial", got.promptTurnIDSnapshot())
 }
 
 func TestLaunch_DoesNotPromoteWorkspaceExecutionAfterSessionTerminalizes(t *testing.T) {

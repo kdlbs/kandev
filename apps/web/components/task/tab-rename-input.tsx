@@ -15,6 +15,7 @@ export function TabRenameInput({
   onCancel,
   testId = "tab-rename-input",
   maxLength,
+  limitValue,
 }: {
   initial: string;
   seqBadge: number | null;
@@ -23,6 +24,8 @@ export function TabRenameInput({
   testId?: string;
   /** Hard cap typed input to match a server-side name length limit. */
   maxLength?: number;
+  /** Domain-owned draft limit when native UTF-16 maxLength is unsuitable. */
+  limitValue?: (value: string, insertionEnd: number | null) => string;
 }) {
   const [value, setValue] = useState(initial);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -62,9 +65,14 @@ export function TabRenameInput({
       <input
         ref={inputRef}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) =>
+          setValue(
+            limitValue ? limitValue(e.target.value, e.target.selectionStart) : e.target.value,
+          )
+        }
         onKeyDown={(e) => {
           e.stopPropagation();
+          if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
           if (doneRef.current) return;
           if (e.key === "Enter") {
             e.preventDefault();

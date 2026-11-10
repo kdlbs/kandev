@@ -165,6 +165,42 @@ commit ordering or an exact per-write snapshot. A concurrent deletion after
 commit can still make the reread fail. This repair changes field writes, not
 those read and delivery semantics.
 
+### Client list ownership and event races
+
+`workspace-slice.ts` maintains a local revision per workspace. Every valid
+removal advances it, including a removal before any list bucket exists. Events
+do not mark an unlisted workspace loaded. `setRepositorySets` accepts a list
+only when its captured revision is still current. This is local ordering
+protection, not a server revision or a globally ordered event protocol.
+
+`useRepositorySets` shares one in-flight list promise per app store and
+workspace, following the store-scoped request ownership used by `useBranches`.
+Initial loads and manual refreshes join that read. Each HTTP attempt captures
+the current store revision directly. If a successful response was overtaken
+while the workspace remains unloaded, the same owner reads again at the current
+revision before settling. Only one request for that key runs at a time; event
+bursts do not create parallel reads. Once a complete list is already loaded,
+the existing event-updated cache suffices and an overtaken response is dropped.
+
+The store owns request completion, so unmounting or disabling the initiating
+consumer does not strand loading or cancel a read needed by another consumer.
+A workspace switch cannot publish into the new workspace's bucket. Settlement
+removes the in-flight entry and clears loading. A failed read preserves cached
+events and loaded status, stops automatic retries, and permits a later mount or
+manual refresh to retry. Independent providers never share request ownership.
+No tombstones or request state are persisted.
+
+The shared read has a 30-second deadline across the initial HTTP attempt and
+all recovery attempts. They share one abort signal. Deadline expiry follows
+the same failure cleanup as a rejected request, preserving cached sets and
+allowing a later retry. Settlement clears the timer as well as ownership and
+loading, so a hung transport or continuous event churn cannot retain the
+single-flight owner indefinitely.
+
+New Task, New Subtask, and repository settings consume this same hook on desktop
+and phone. Recovery changes the available sets without changing draft rows or
+any layout, navigation, touch, or scrolling behavior.
+
 ## Settings experience
 
 The approved editor uses one inline row for each selected repository. The

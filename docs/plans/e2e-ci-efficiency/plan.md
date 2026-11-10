@@ -149,6 +149,10 @@ The [October CI performance continuation](../ci-performance/plan.md) owns shared
 Its [new evidence](../ci-performance/evidence-2026-10-08.md) does not close this package's three-main-run or forced-miss rollout requirements.
 This package retains the implementation and pending rollout status recorded above.
 
+The [October 26 continuation](../ci-performance/plan.md#october-26-cache-and-partition-continuation)
+owns the separately confirmed pnpm path repair and its total setup measurements.
+Its Tasks 17–20 preserve the current matrices and do not close this package's browser-cache rollout requirements.
+
 - GitHub Actions cache transfer can cost enough time to erase the browser-copy
   saving. Step summaries must report restore and verification duration before
   declaring success.

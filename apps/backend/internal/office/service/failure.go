@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -98,7 +100,7 @@ type AgentFailureEvidence struct {
 // escalate or publish for it either.
 func (s *Service) HandleAgentFailure(
 	ctx context.Context,
-	run *models.Run,
+	run *runsmodels.Run,
 	errorMessage string,
 	agentID string,
 	providerError *streams.ProviderError,
@@ -197,7 +199,7 @@ func (s *Service) HandleAgentFailure(
 // to cover — falls through the provider-specific rules unmatched and
 // classifies as an unretryable agent_runtime_error instead.
 func (s *Service) tryLegacyTransientRetry(
-	ctx context.Context, run *models.Run, errorMessage string, agentID string,
+	ctx context.Context, run *runsmodels.Run, errorMessage string, agentID string,
 	providerError *streams.ProviderError, evidence AgentFailureEvidence,
 ) bool {
 	if !legacyTransientRetryEvidenceSafe(run, evidence) {
@@ -242,7 +244,7 @@ func (s *Service) tryLegacyTransientRetry(
 	return true
 }
 
-func legacyTransientRetryDelay(run *models.Run) (time.Duration, bool) {
+func legacyTransientRetryDelay(run *runsmodels.Run) (time.Duration, bool) {
 	if run == nil || run.RetryCount >= officeLegacyTransientMaxRetries {
 		return 0, false
 	}
@@ -277,22 +279,18 @@ func classifyLegacyTransientFailure(
 			providerID = id
 		}
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhaseStreaming,
-		ProviderID: providerID,
-		Stderr:     message,
-	})
+	classified := routingerr.Classify(providerError.RoutingInput(routingerr.PhaseStreaming, providerID, message))
 	if !classified.ShouldShortRetry() {
 		return nil, false
 	}
 	if !evidence.ProviderDiagnosticCandidate {
 		return classified, true
 	}
-	diagnostic := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhasePromptSend,
-		ProviderID: providerID,
-		Stderr:     evidence.ProviderDiagnosticText,
-	})
+	var matchingDiagnostic *streams.ProviderError
+	if providerError != nil && normalizeFailureText(providerError.Message) == normalizeFailureText(evidence.ProviderDiagnosticText) {
+		matchingDiagnostic = providerError
+	}
+	diagnostic := routingerr.Classify(matchingDiagnostic.RoutingInput(routingerr.PhasePromptSend, providerID, evidence.ProviderDiagnosticText))
 	diagnosticText := normalizeFailureText(evidence.ProviderDiagnosticText)
 	if diagnostic.Confidence != routingerr.ConfHigh || !diagnostic.ShouldShortRetry() ||
 		diagnostic.Code != classified.Code || diagnosticText == "" ||
@@ -302,7 +300,7 @@ func classifyLegacyTransientFailure(
 	return classified, true
 }
 
-func legacyTransientRetryEvidenceSafe(run *models.Run, evidence AgentFailureEvidence) bool {
+func legacyTransientRetryEvidenceSafe(run *runsmodels.Run, evidence AgentFailureEvidence) bool {
 	if run == nil || evidence.RunID == "" || evidence.RunID != run.ID || evidence.SessionID == "" ||
 		evidence.AgentExecutionID == "" || evidence.PromptGeneration == 0 ||
 		!evidence.EvidenceKnown || evidence.OutputObserved || evidence.EffectObserved {
@@ -543,7 +541,7 @@ func (s *Service) recoverPausedTask(
 		return fmt.Errorf("load latest run: %w", err)
 	}
 	if latest == nil || latest.ID != recovery.FailedRunID ||
-		latest.Status != models.RunStatusFailed {
+		latest.Status != runsmodels.RunStatusFailed {
 		return s.discardPauseRecovery(ctx, recovery)
 	}
 	if err := s.requeueRunForTask(
@@ -589,7 +587,7 @@ func (s *Service) IsInboxItemDismissed(
 // inbox query layer can fetch a run by id.
 func (s *Service) GetRun(
 	ctx context.Context, id string,
-) (*models.Run, error) {
+) (*runsmodels.Run, error) {
 	return s.repo.GetRun(ctx, id)
 }
 
@@ -740,7 +738,7 @@ func (s *Service) requeueRunForTask(
 }
 
 func (s *Service) publishRunFailed(
-	ctx context.Context, run *models.Run,
+	ctx context.Context, run *runsmodels.Run,
 	errorMessage string, count, threshold int,
 ) {
 	if s.eb == nil {

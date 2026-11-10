@@ -26,6 +26,7 @@ type mcpCreateTaskRequest struct {
 	WorkspaceMode          string               `json:"workspace_mode"`
 	Title                  string               `json:"title"`
 	Description            string               `json:"description"`
+	Priority               string               `json:"priority"`
 	Autopilot              bool                 `json:"autopilot"`
 	AgentProfileID         string               `json:"agent_profile_id"`
 	ExecutorProfileID      string               `json:"executor_profile_id"`
@@ -33,9 +34,11 @@ type mcpCreateTaskRequest struct {
 	Repositories           []mcpRepositoryInput `json:"repositories"`
 	BaseBranch             string               `json:"base_branch"`
 	BlockedBy              []string             `json:"blocked_by"`
+	RelatedTaskIDs         []string             `json:"related_task_ids"`
 	StartWhenUnblocked     *bool                `json:"start_when_unblocked"`
 	AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"`
 	ExternalID             string               `json:"external_id"`
+	MCPServerIDs           []string             `json:"mcp_server_ids"`
 }
 
 type mcpCreateTaskAdmission struct {

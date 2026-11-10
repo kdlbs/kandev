@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -18,7 +20,7 @@ const staleRunThreshold = 2 * time.Hour
 // than executed. Returns (true, reason) when it should be cancelled.
 func (si *SchedulerIntegration) evaluateRunStaleness(
 	ctx context.Context,
-	run *models.Run,
+	run *runsmodels.Run,
 ) (bool, string, error) {
 	if run.RetryCount > 0 && !run.RequestedAt.IsZero() &&
 		time.Since(run.RequestedAt) > staleRunThreshold {
@@ -66,7 +68,7 @@ func (si *SchedulerIntegration) evaluateRunStaleness(
 // must not be reported as cancelled.
 func (si *SchedulerIntegration) cancelStaleRun(
 	ctx context.Context,
-	run *models.Run,
+	run *runsmodels.Run,
 	agent *models.AgentInstance,
 	reason string,
 ) {

@@ -54,13 +54,13 @@ func TestOnlineManagedRuntimeArgsPreserveTrustedLaunchIdentity(t *testing.T) {
 		Package: "@scope/managed-acp",
 		ACPArgs: []string{"--acp", "--model", "fast"},
 	}
-	initial := []string{"greywall", "--", "npx", "--yes", managedRuntimePreferOfflineArg, "--prefix", "~/.kandev/managed-npm-runtime", "@scope/managed-acp@1.2.3", "--acp", "--model", "fast"}
+	initial := []string{"npx", "--yes", managedRuntimePreferOfflineArg, "--prefix", "~/.kandev/managed-npm-runtime", "@scope/managed-acp@1.2.3", "--acp", "--model", "fast", "--profile-flag", "ordered-value"}
 
 	got, packageSpec, ok := onlineManagedRuntimeArgs(initial, spec)
 	if !ok {
 		t.Fatal("expected managed runtime recovery command")
 	}
-	want := []string{"greywall", "--", "npx", "--yes", "--prefer-online", "--prefix", "~/.kandev/managed-npm-runtime", "@scope/managed-acp@1.2.3", "--acp", "--model", "fast"}
+	want := []string{"npx", "--yes", "--prefer-online", "--prefix", "~/.kandev/managed-npm-runtime", "@scope/managed-acp@1.2.3", "--acp", "--model", "fast", "--profile-flag", "ordered-value"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("online args = %#v, want %#v", got, want)
 	}
@@ -73,6 +73,7 @@ func TestOnlineManagedRuntimeArgsRejectsNonManagedCommands(t *testing.T) {
 	spec := agents.ManagedNPMRuntimeSpec{Package: "managed-acp"}
 	for _, args := range [][]string{
 		{"native-agent", "--acp"},
+		{"greywall", "--", "npx", "--yes", managedRuntimePreferOfflineArg, "--prefix", "~/.kandev/managed-npm-runtime", "managed-acp@1.2.3", "--acp"},
 		{"npx", "--yes", managedRuntimePreferOfflineArg, "--prefix", "~/.kandev/managed-npm-runtime", "other-agent@1.2.3"},
 		{"npx", "--yes", managedRuntimePreferOfflineArg, "managed-acp@1.2.3"},
 	} {

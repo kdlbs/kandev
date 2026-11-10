@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
@@ -13,12 +13,16 @@ const mocks = vi.hoisted(() => ({
   listWorkflows: vi.fn(),
   fetchUserSettings: vi.fn(),
   fetchJson: vi.fn(),
+  tasksPage: vi.fn(),
 }));
 
 const DEFAULT_WORKSPACE_ID = "ws-default";
 const SELECTED_WORKSPACE_ID = "ws-selected";
 const EXISTING_WORKFLOW_ID = "wf-existing";
 const EXISTING_REPOSITORY_ID = "repo-existing";
+const TASKS_PAGE_TEST_ID = "tasks-page";
+const GITHUB_PAGE_TEST_ID = "github-page";
+const WORKSPACE_ID_ATTRIBUTE = "data-workspace-id";
 const TEST_TIMESTAMP = "2026-06-24T00:00:00Z";
 
 let store: StoreApi<AppState>;
@@ -38,8 +42,16 @@ function CaptureStore() {
 
 vi.mock("@/app/github/github-page-client", () => ({
   GitHubPageClient: ({ workspaceId }: { workspaceId?: string }) => (
-    <div data-testid="github-page" data-workspace-id={workspaceId ?? ""} />
+    <div data-testid={GITHUB_PAGE_TEST_ID} data-workspace-id={workspaceId ?? ""} />
   ),
+}));
+
+vi.mock("@/app/tasks/tasks-page-client", () => ({
+  TasksPageClient: (props: unknown) => {
+    const activeId = useAppStoreApi().getState().workspaces.activeId;
+    mocks.tasksPage(props, activeId);
+    return <div data-testid={TASKS_PAGE_TEST_ID} data-workspace-id={activeId ?? ""} />;
+  },
 }));
 
 vi.mock("@/app/page-client", () => ({
@@ -86,7 +98,7 @@ describe("SpaRoutes data-backed workspace context", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId("kanban-page").getAttribute("data-workspace-id")).toBe(
+      expect(screen.getByTestId("kanban-page").getAttribute(WORKSPACE_ID_ATTRIBUTE)).toBe(
         SELECTED_WORKSPACE_ID,
       );
     });
@@ -176,7 +188,7 @@ describe("SpaRoutes data-backed workspace context", () => {
       </StateProvider>,
     );
 
-    await waitFor(() => expect(screen.getByTestId("github-page")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId(GITHUB_PAGE_TEST_ID)).toBeTruthy());
     expect(store.getState().workflows.items).toEqual([
       expect.objectContaining({ id: EXISTING_WORKFLOW_ID }),
     ]);
@@ -331,6 +343,135 @@ describe("SpaRoutes data-backed workspace context", () => {
   });
 });
 
+describe("Tasks URL workspace ownership", () => {
+  it("marks metadata ready only after the route reads finish, including empty lists", async () => {
+    mockGitHubWorkspaceBootstrap();
+    const workflows = deferred<{ workflows: never[] }>();
+    mocks.listWorkflows.mockReturnValueOnce(workflows.promise);
+    window.history.replaceState({}, "", `/tasks?workspace=${DEFAULT_WORKSPACE_ID}&workflow=all`);
+    renderTasksWorkspace();
+    await waitFor(() => expect(mocks.listWorkflows).toHaveBeenCalled());
+    expect(screen.getByRole("status").textContent).toContain("Tasks");
+    expect(mocks.tasksPage).not.toHaveBeenCalled();
+    await act(async () => workflows.resolve({ workflows: [] }));
+    await waitFor(() =>
+      expect(mocks.tasksPage.mock.calls.at(-1)?.[0].initialMetadataLoaded).toEqual({
+        workflows: true,
+        repositories: true,
+      }),
+    );
+  });
+
+  // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.1
+  it("activates the URL workspace before mounting List and retains the complete query", async () => {
+    mockGitHubWorkspaceBootstrap();
+    const href = `/tasks?workspace=${SELECTED_WORKSPACE_ID}&archive=archived&workflow=all&repository=all&q=needle&sort=title_desc&group=none`;
+    window.history.replaceState({}, "", href);
+    renderTasksWorkspace();
+
+    await waitFor(() =>
+      expect(screen.getByTestId(TASKS_PAGE_TEST_ID).getAttribute(WORKSPACE_ID_ATTRIBUTE)).toBe(
+        SELECTED_WORKSPACE_ID,
+      ),
+    );
+    expect(mocks.tasksPage.mock.calls.every((call) => call[1] === SELECTED_WORKSPACE_ID)).toBe(
+      true,
+    );
+    expect(window.location.pathname + window.location.search).toBe(href);
+    expect(mocks.listWorkflows).toHaveBeenCalledWith(SELECTED_WORKSPACE_ID, expect.anything());
+  });
+
+  it("does not broaden an unknown URL workspace to the saved workspace", async () => {
+    mockGitHubWorkspaceBootstrap();
+    window.history.replaceState({}, "", "/tasks?workspace=missing&archive=archived");
+    renderTasksWorkspace();
+
+    expect((await screen.findByRole("alert")).textContent).toBe("Workspace not found");
+    expect(mocks.tasksPage).not.toHaveBeenCalled();
+    expect(mocks.listWorkflows).not.toHaveBeenCalled();
+    expect(store.getState().workspaces.activeId).toBe(DEFAULT_WORKSPACE_ID);
+  });
+
+  it("retries a failed workspace lookup without exposing its internal error", async () => {
+    mockGitHubWorkspaceBootstrap();
+    mocks.listWorkspaces.mockRejectedValueOnce(new Error("private workspace diagnostic"));
+    window.history.replaceState(
+      {},
+      "",
+      `/tasks?workspace=${SELECTED_WORKSPACE_ID}&archive=archived`,
+    );
+    renderTasksWorkspace();
+
+    expect((await screen.findByRole("alert")).textContent).toBe("Failed to load route");
+    expect(screen.queryByText("private workspace diagnostic")).toBeNull();
+    expect(mocks.tasksPage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(screen.getByTestId(TASKS_PAGE_TEST_ID).getAttribute(WORKSPACE_ID_ATTRIBUTE)).toBe(
+        SELECTED_WORKSPACE_ID,
+      ),
+    );
+  });
+
+  it("resolves each workspace when history changes an already mounted List", async () => {
+    mockGitHubWorkspaceBootstrap();
+    window.history.replaceState(
+      {},
+      "",
+      `/tasks?workspace=${SELECTED_WORKSPACE_ID}&archive=archived`,
+    );
+    renderTasksWorkspace();
+    await waitFor(() => expect(store.getState().workspaces.activeId).toBe(SELECTED_WORKSPACE_ID));
+
+    for (const workspaceId of [DEFAULT_WORKSPACE_ID, SELECTED_WORKSPACE_ID]) {
+      const href = `/tasks?workspace=${workspaceId}&archive=archived&q=retained&workflow=all&repository=all`;
+      await act(async () => {
+        window.history.pushState({}, "", href);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
+      await waitFor(() =>
+        expect(screen.getByTestId(TASKS_PAGE_TEST_ID).getAttribute(WORKSPACE_ID_ATTRIBUTE)).toBe(
+          workspaceId,
+        ),
+      );
+      expect(window.location.pathname + window.location.search).toBe(href);
+    }
+  });
+});
+
+it.each(["workflows", "repositories"] as const)(
+  "keeps successful metadata ready when the %s read fails",
+  async (failed) => {
+    mockGitHubWorkspaceBootstrap();
+    const read = failed === "workflows" ? mocks.listWorkflows : mocks.listRepositories;
+    read.mockRejectedValueOnce(new Error("metadata read failed"));
+    window.history.replaceState({}, "", `/tasks?workspace=${SELECTED_WORKSPACE_ID}`);
+    renderTasksWorkspace();
+    await waitFor(() =>
+      expect(mocks.tasksPage.mock.calls.at(-1)?.[0].initialMetadataLoaded).toEqual({
+        workflows: failed !== "workflows",
+        repositories: failed !== "repositories",
+      }),
+    );
+  },
+);
+
+function renderTasksWorkspace() {
+  return render(
+    <StateProvider
+      initialState={{
+        workspaces: {
+          items: [workspaceState(DEFAULT_WORKSPACE_ID), workspaceState(SELECTED_WORKSPACE_ID)],
+          activeId: DEFAULT_WORKSPACE_ID,
+        },
+      }}
+    >
+      <CaptureStore />
+      <SpaRoutes />
+    </StateProvider>,
+  );
+}
+
 function mockGitHubWorkspaceBootstrap({ workspacesError }: { workspacesError?: Error } = {}) {
   window.history.replaceState({}, "", "/github");
   if (workspacesError) {
@@ -357,7 +498,7 @@ function mockGitHubWorkspaceBootstrap({ workspacesError }: { workspacesError?: E
 
 async function expectSelectedWorkspace() {
   await waitFor(() => {
-    expect(screen.getByTestId("github-page").getAttribute("data-workspace-id")).toBe(
+    expect(screen.getByTestId(GITHUB_PAGE_TEST_ID).getAttribute(WORKSPACE_ID_ATTRIBUTE)).toBe(
       SELECTED_WORKSPACE_ID,
     );
   });

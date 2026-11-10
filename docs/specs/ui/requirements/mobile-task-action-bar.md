@@ -11,8 +11,9 @@ owners:
 ## Overview
 
 The task composer needs a readable terminal notice and reachable controls on
-phones. UI owns this reusable presentation contract across chat and passthrough
-composers. Tasks and integrations retain archive, workflow, and PR state authority.
+phones and in narrow desktop panes. UI owns this reusable presentation contract
+across chat and passthrough composers. Tasks and integrations retain archive,
+workflow, and PR state authority.
 
 ## Requirements
 
@@ -59,6 +60,14 @@ from the conversation.
   composer region outside the transcript scroller and above existing bottom
   navigation/safe-area clearance. It shall introduce no additional vertical
   scroller. Opening or dismissing a notice shall leave the composer usable.
+- **AC-UI-MOBILE-TASK-ACTION-BAR-001.9:** In narrow desktop panes, including
+  Threads Columns and Grid tiles, terminal notices shall retain readable text
+  beside Archive and dismiss. Utility and workflow controls shall wrap before
+  they force ordinary words into single-character columns. At tile widths of
+  360px, 384px, and 480px, the notice and its controls shall remain contained.
+  When sufficient width exists, desktop controls shall retain their compact
+  inline arrangement. This behavior shall depend on available pane width,
+  including when the browser viewport is wider than 768px.
 
 ## Out of scope
 
@@ -71,3 +80,4 @@ from the conversation.
 
 - [System design](../system-design/mobile-task-action-bar.md)
 - [Implementation plan](../../../plans/mobile-task-action-bar/plan.md)
+- [Narrow notice repair plan](../../../plans/threads-pr-notice-layout/plan.md)

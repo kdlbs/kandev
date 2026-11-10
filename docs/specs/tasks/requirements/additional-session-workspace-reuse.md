@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-19
-updated: 2026-10-12
+updated: 2026-11-08
 owners:
   - kandev
 ---
@@ -57,6 +57,15 @@ reconstructs or resumes its runtime.
   or recovered runtime workspace exists, a legacy repository-backed session
   can continue to use its source checkout as a compatibility fallback.
 
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.4:** Changing only a task
+  repository's comparison base, including retargeting a stacked pull request,
+  shall preserve reuse of its existing validated checkout on resume and later
+  session attachment when its recorded ownership evidence is complete and
+  unambiguous. Incomplete evidence shall retain the guarded recovery path. The updated comparison base shall still apply to change
+  calculations. An explicit checkout-branch selection or ambiguous existing
+  checkouts shall retain exact selection and fail safely when it cannot be
+  proven, without modifying files or repository inventory.
+
 ### REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003: Executor Transition Workspace Validation
 
 **Intent:** Prevent a session launched with a different executor type from
@@ -81,6 +90,27 @@ starting in a stale workspace retained by the previous executor.
 - **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.4:** Rejecting an invalid
   workspace shall not delete, move, reset, clean, checkout, or otherwise modify
   the stale path, the canonical repository, or either environment inventory.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5:** When a new launch of
+  an `inherit_parent` or `shared_group` task selects a non-Kubernetes executor
+  type different from the inherited environment's executor type, the launch
+  shall detach from the inherited environment and materialize a fresh
+  environment owned by the task on the selected executor instead of failing.
+  The inherited environment and its owner shall remain unchanged. Resume of a
+  session already bound to the inherited environment shall keep the typed
+  executor-mismatch refusal, and Kubernetes shall keep its unsupported-reuse
+  refusal.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.6:** After an eligible
+  detachment, the task-owned environment shall become canonical for that task.
+  Later sessions of that task shall use it instead of rebinding to the parent
+  or group environment.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.7:** Detaching one member
+  from a shared group shall leave the group's environment and materialized
+  environment reference unchanged. Other active members shall continue to use
+  that group environment.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.8:** When sessions of one
+  task concurrently launch after an eligible detachment, they shall converge on
+  one canonical task environment and shall not create multiple physical
+  workspaces for the same repository slots.
 
 ### REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004: Concurrent Session Workspace Visibility
 

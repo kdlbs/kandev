@@ -69,6 +69,38 @@ Other backend behavior and health issue identities remain unchanged.
 
 ## State and permissions
 
+### Office availability
+
+The [visibility fix package](../../../plans/office-retention-visibility/plan.md)
+records the implemented correction for criteria 002.2 and 002.6 through 002.8.
+System-page owns this correction because it owns Storage composition and destinations.
+Office retains ownership of retention operations.
+
+`StorageSettings` reads the effective flag through `useFeature("office")`.
+Use that value to include the retention tab, its target mapping, and its panel.
+Omit the entire retention panel when disabled so its hooks and save contributor cannot mount.
+Do not infer availability from an individual agent profile or workspace mode.
+
+Keep Host targets in the mapping. Add the retention target only while Office is enabled.
+This matters because `useSettingsTab` gives recognized fragments precedence over query validation.
+With the retention mapping absent, a disabled retention query falls back to Host.
+Legacy redirects keep their existing paths and fragments, then receive the same destination fallback.
+Do not add a redirect loop or rewrite unrelated query parameters.
+If the effective flag changes, recalculate the available tabs and unmount the unavailable panel.
+
+Extend `SettingsDiscoveryContext` with optional `officeEnabled`, defaulting to false.
+Extend the existing `requires` union and resolver with an `office` gate.
+Apply that gate to the `system-retention` catalog entry.
+`useSettingsDiscovery` supplies the effective flag and includes it in memo dependencies.
+Keep the catalog identity stable. Enabled discovery still opens the existing target.
+
+Both viewports reuse `SettingsTabs` and the existing page scroll owner.
+Desktop retains header alignment. Phone retains tabs below the description and 44px touch targets.
+No new copy, animation, permission rule, backend flag, or retention policy is required.
+The operations guide states that the tab requires Office.
+
+### Retained settings state
+
 The existing `SettingsSaveProvider` is keyed by pathname, not query.
 Use the UI design's same-path tab replacement and retained stateful panels.
 Keep contributors `system:storage-policy`, `system:retention`, and `system:tool-payload-retention` in their owning page.

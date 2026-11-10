@@ -14,7 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/sysprompt"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // sessionToDTO maps a TaskSession to the Go-native Session DTO, resolving

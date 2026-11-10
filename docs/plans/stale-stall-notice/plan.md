@@ -109,3 +109,11 @@ verify the compaction row is present in the short case and absent in the long
 case, then verify live resolution and reload. The action renderer harness also
 covers an unloaded tool update with only the notice in the message store.
 Both Chromium cases and the focused frontend checks pass.
+
+## Follow-up design, 20 October 2026
+
+The [silent prompt recovery package](../silent-prompt-recovery/plan.md) changes
+no-output inactivity to advisory handling and preserves this package's progress
+clock, stop reachability, and notice-resolution guarantees where applicable.
+Its implementation is pending. Results above remain historical verification
+of this package, not evidence that the follow-up has shipped.

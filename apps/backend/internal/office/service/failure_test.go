@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
@@ -21,7 +23,7 @@ import (
 // file silently no-op.
 func queueAndReadRun(
 	t *testing.T, svc *service.Service, agentID, taskID string,
-) *models.Run {
+) *runsmodels.Run {
 	t.Helper()
 	ctx := context.Background()
 	payload := mustMarshalJSON(map[string]string{"task_id": taskID})

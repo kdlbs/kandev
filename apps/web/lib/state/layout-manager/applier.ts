@@ -1,3 +1,4 @@
+import { readResizableRootSplitview, type RootSplitview } from "../dockview-internals";
 import type { DockviewApi } from "dockview-react";
 import type { LayoutState } from "./types";
 import { toSerializedDockview } from "./serializer";
@@ -20,11 +21,8 @@ export type LayoutGroupIds = {
   sidebarGroupId: string;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getRootSplitview(api: DockviewApi): any | null {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sv = (api as any).component?.gridview?.root?.splitview;
-  return sv?.resizeView && sv?.getViewSize ? sv : null;
+export function getRootSplitview(api: DockviewApi): RootSplitview | null {
+  return readResizableRootSplitview(api);
 }
 
 /** Find a group by well-known ID, falling back to panel-based lookup. */
@@ -185,7 +183,7 @@ function configureRightPinned(
     if (col.id === "sidebar" || !col.pinned) continue;
     // Same rationale as `configureSidebarPinned`: derive the cap from the
     // measured dockview width, not `window.innerWidth`.
-    const sidebarWidth = sv?.length >= 3 ? sv.getViewSize(0) : 0;
+    const sidebarWidth = sv && sv.length >= 3 ? sv.getViewSize(0) : 0;
     const cap = col.maxWidth ?? computePinnedMaxPxFor(col.id, viewportWidth, sidebarWidth);
     applyConstraintsToAllPanelGroups(api, col, cap);
     if (col.id !== "right") continue;

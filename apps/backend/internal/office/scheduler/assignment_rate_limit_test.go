@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 
-	"github.com/kandev/kandev/internal/office/models"
+	"github.com/google/uuid"
 )
 
 // TestClassifyAssignmentWake covers the three-step predicate in the
@@ -178,12 +178,12 @@ func TestCheckAssignmentWakeAllowance_TaskUnattributedAdmits(t *testing.T) {
 // established repo pattern (SetRunRequestedAtForTest) instead of
 // time.Sleep.
 func createAssignmentWakeRun(t *testing.T, repo interface {
-	CreateRun(ctx context.Context, r *models.Run) error
+	CreateRun(ctx context.Context, r *runsmodels.Run) error
 	SetRunRequestedAtForTest(ctx context.Context, runID string, ts time.Time) error
 }, taskID string, requestedAt time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	r := &models.Run{
+	r := &runsmodels.Run{
 		ID:             uuid.New().String(),
 		AgentProfileID: "agent-1",
 		Reason:         RunReasonTaskAssigned,

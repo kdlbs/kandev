@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { updateFileContent, deleteFile } from "@/lib/ws/workspace-files";
+import { updateFileContent, deleteFile, type FileUpdateResponse } from "@/lib/ws/workspace-files";
 import { generateUnifiedDiff, calculateHash } from "@/lib/utils/file-diff";
 import type { useToast } from "@/components/toast-provider";
 import { buildRepoScopedItemId, PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
@@ -80,26 +80,58 @@ function captureOwner(fileKey: string, params: SaveDeleteParams) {
   return { sessionId, visit, file, panel, api, isCurrent };
 }
 
+function buildSavedFileState(file: FileEditorState, current: FileEditorState, newHash: string) {
+  const observation = current.workspaceSnapshot;
+  // Changed workspace publications install a fresh snapshot object.
+  const hasNewObservation =
+    observation && observation !== file.workspaceSnapshot && observation.content !== file.content;
+  const accepted = current.acceptedWorkspaceSnapshot;
+  const acceptedObservation =
+    accepted &&
+    accepted !== file.acceptedWorkspaceSnapshot &&
+    accepted.content !== file.content &&
+    current.originalContent === accepted.content &&
+    current.originalHash === accepted.hash &&
+    (hasNewObservation || accepted === observation);
+  const originalContent = acceptedObservation ? current.originalContent : file.content;
+  const originalHash = acceptedObservation ? current.originalHash : newHash;
+  return {
+    originalContent,
+    originalHash,
+    isDirty: current.content !== originalContent,
+    ...(!hasNewObservation && {
+      hasRemoteUpdate: false,
+      remoteContent: undefined,
+      remoteOriginalHash: undefined,
+    }),
+  };
+}
+
 function publishSavedFile(
   fileKey: string,
   file: FileEditorState,
-  newHash: string,
-  sessionId: string,
+  response: FileUpdateResponse & { new_hash: string },
   params: SaveDeleteParams,
+  owner: NonNullable<ReturnType<typeof captureOwner>>,
 ) {
-  // Typing preserves the buffer lifetime while the saved snapshot stays fixed.
   const current = getOpenFiles().get(fileKey)!;
-  lspClientManager.saveDocument(sessionId, file.path, file.repo, file.content, current.content);
-  const stillClean = current.content === file.content;
-  params.updateFileState(fileKey, {
-    originalContent: file.content,
-    originalHash: newHash,
-    isDirty: !stillClean,
-    hasRemoteUpdate: false,
-    remoteContent: undefined,
-    remoteOriginalHash: undefined,
-  });
-  if (stillClean) updatePanelAfterSave(file.path, file.name, file.repo);
+  lspClientManager.saveDocument(
+    owner.sessionId,
+    file.path,
+    file.repo,
+    file.content,
+    current.content,
+  );
+  const updates = buildSavedFileState(file, current, response.new_hash);
+  params.updateFileState(fileKey, updates);
+  if (!updates.isDirty && owner.isCurrent()) updatePanelAfterSave(file.path, file.name, file.repo);
+  if (owner.isCurrent() && response.resolution === "overwritten") {
+    params.toast({
+      title: t("editors:fileSavedOverwritten"),
+      description: t("editors:fileSavedOverwrittenDescription"),
+      variant: "default",
+    });
+  }
 }
 
 async function performSaveFile(path: string, repo: string | undefined, params: SaveDeleteParams) {
@@ -127,14 +159,7 @@ async function performSaveFile(path: string, repo: string | undefined, params: S
     });
     if (!owner.isCurrent()) return;
     if (response.success && response.new_hash) {
-      publishSavedFile(fileKey, file, response.new_hash, owner.sessionId, params);
-      if (response.resolution === "overwritten") {
-        params.toast({
-          title: t("editors:fileSavedOverwritten"),
-          description: t("editors:fileSavedOverwrittenDescription"),
-          variant: "default",
-        });
-      }
+      publishSavedFile(fileKey, file, { ...response, new_hash: response.new_hash }, params, owner);
     } else {
       params.toast({
         title: t("editors:saveFailed"),
@@ -209,7 +234,22 @@ export function useSaveDeleteActions(params: SaveDeleteParams) {
       if (!owner || !file?.hasRemoteUpdate || file.remoteContent === undefined) return;
       const remoteHash = file.remoteOriginalHash ?? (await calculateHash(file.remoteContent));
       if (!owner.isCurrent()) return;
+      const current = getOpenFiles().get(fileKey)!;
+      // The buffer lifetime can survive a newer snapshot during hash preparation.
+      if (
+        !current.hasRemoteUpdate ||
+        current.remoteContent !== file.remoteContent ||
+        current.remoteOriginalHash !== file.remoteOriginalHash ||
+        current.workspaceSnapshot !== file.workspaceSnapshot
+      )
+        return;
+      const acceptedWorkspaceSnapshot = file.workspaceSnapshot ?? {
+        content: file.remoteContent,
+        hash: remoteHash,
+      };
       updateFileState(fileKey, {
+        workspaceSnapshot: acceptedWorkspaceSnapshot,
+        acceptedWorkspaceSnapshot,
         content: file.remoteContent,
         originalContent: file.remoteContent,
         originalHash: remoteHash,
@@ -218,7 +258,7 @@ export function useSaveDeleteActions(params: SaveDeleteParams) {
         remoteContent: undefined,
         remoteOriginalHash: undefined,
       });
-      updatePanelAfterSave(file.path, file.name, file.repo);
+      if (owner.isCurrent()) updatePanelAfterSave(file.path, file.name, file.repo);
     },
     [params, updateFileState],
   );

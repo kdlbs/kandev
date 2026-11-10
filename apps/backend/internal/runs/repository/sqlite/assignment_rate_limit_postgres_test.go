@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // TestPostgresCountAgentInitiatedAssignmentWakes_BasicCount is the
@@ -22,7 +22,7 @@ func TestPostgresCountAgentInitiatedAssignmentWakes_BasicCount(t *testing.T) {
 	windowStart := now.Add(-10 * time.Minute)
 
 	inWindow := func(id, payload string) {
-		r := mustCreateRun(t, repo, &models.Run{
+		r := mustCreateRun(t, repo, &runsmodels.Run{
 			ID: id, AgentProfileID: "a1", Reason: "task_assigned",
 			Payload: payload, Status: "queued", CoalescedCount: 1,
 		})
@@ -55,7 +55,7 @@ func TestPostgresCountAgentInitiatedAssignmentWakes_GuardsNonStringTaskID(t *tes
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	r := mustCreateRun(t, repo, &models.Run{
+	r := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "pg-guard-numeric", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":42,"actor_type":"agent"}`, Status: "queued", CoalescedCount: 1,
 	})
@@ -77,13 +77,13 @@ func TestPostgresCountAgentInitiatedAssignmentWakes_WindowIsHalfOpenExclusiveSta
 	ctx := context.Background()
 	windowStart := time.Now().UTC()
 
-	atBoundary := mustCreateRun(t, repo, &models.Run{
+	atBoundary := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "pg-win-at-boundary", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":"pg-t3","actor_type":"agent"}`, Status: "queued", CoalescedCount: 1,
 	})
 	setRequestedAt(t, repo, atBoundary.ID, windowStart)
 
-	insideWindow := mustCreateRun(t, repo, &models.Run{
+	insideWindow := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "pg-win-inside", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":"pg-t3","actor_type":"agent"}`, Status: "queued", CoalescedCount: 1,
 	})
@@ -107,13 +107,13 @@ func TestPostgresCountAgentInitiatedAssignmentWakes_WindowIsHalfOpenInclusiveEnd
 	evaluationInstant := time.Now().UTC()
 	windowStart := evaluationInstant.Add(-10 * time.Minute)
 
-	atBoundary := mustCreateRun(t, repo, &models.Run{
+	atBoundary := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "pg-win-end-at-boundary", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":"pg-t4","actor_type":"agent"}`, Status: "queued", CoalescedCount: 1,
 	})
 	setRequestedAt(t, repo, atBoundary.ID, evaluationInstant)
 
-	future := mustCreateRun(t, repo, &models.Run{
+	future := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "pg-win-end-future", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":"pg-t4","actor_type":"agent"}`, Status: "queued", CoalescedCount: 1,
 	})

@@ -8,6 +8,13 @@ import type { GroupedSidebarList } from "@/lib/sidebar/apply-view";
 
 afterEach(() => cleanup());
 
+/** Unread dots stay off in these tests; the unread suites cover them. */
+const UNREAD_DOT_OFF = {
+  unreadMessagesEnabled: false,
+  unreadDotHideDelayMs: 0,
+  displayedSessionId: null,
+} as const;
+
 function Providers({ children }: { children: React.ReactNode }) {
   return (
     <StateProvider>
@@ -51,6 +58,7 @@ function renderSwitcher(collapsedSubtaskParentIds: string[] = []) {
         grouped={grouped()}
         activeTaskId={null}
         selectedTaskId={null}
+        {...UNREAD_DOT_OFF}
         onSelectTask={vi.fn()}
         onToggleSubtasks={vi.fn()}
         collapsedSubtaskParentIds={collapsedSubtaskParentIds}
@@ -70,6 +78,7 @@ it("omits the state group header icon while retaining task row icons", () => {
         }}
         activeTaskId={null}
         selectedTaskId={null}
+        {...UNREAD_DOT_OFF}
         onSelectTask={vi.fn()}
       />
     </Providers>,
@@ -129,6 +138,7 @@ describe("TaskSwitcher — nested subtasks beyond depth 1", () => {
           }}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onToggleSubtasks={vi.fn()}
           collapsedSubtaskParentIds={[]}
@@ -160,6 +170,7 @@ describe("TaskSwitcher — nested subtasks beyond depth 1", () => {
           }}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onToggleSubtasks={vi.fn()}
           collapsedSubtaskParentIds={["Root"]}
@@ -181,6 +192,7 @@ describe("TaskSwitcher — nested subtasks beyond depth 1", () => {
           grouped={grouped()}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onToggleSubtasks={vi.fn()}
           collapsedSubtaskParentIds={[]}
@@ -206,6 +218,7 @@ describe("TaskSwitcher cross-page selection", () => {
           grouped={grouped()}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           selectedTaskIds={new Set(["Root", "off-page-task"])}
           onClearSelection={clearSelection}
           onSelectTask={vi.fn()}
@@ -257,6 +270,7 @@ describe("TaskSwitcher — workflow completion icons", () => {
           }}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
         />
       </Providers>,
@@ -292,6 +306,7 @@ describe("TaskSwitcher — bulk pin menu", () => {
           }}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onBulkPin={vi.fn()}
           pinnedTaskIds={[TASK_A.id, TASK_B.id]}
@@ -315,6 +330,7 @@ describe("TaskSwitcher — detach menu", () => {
           grouped={grouped()}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onDetachTask={onDetachTask}
         />
@@ -337,6 +353,7 @@ describe("TaskSwitcher — detach menu", () => {
           grouped={grouped()}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onDetachTask={onDetachTask}
           onClearSelection={onClearSelection}
@@ -358,6 +375,7 @@ describe("TaskSwitcher — detach menu", () => {
           grouped={grouped()}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onDetachTask={vi.fn()}
         />
@@ -373,6 +391,7 @@ describe("TaskSwitcher — detach menu", () => {
           grouped={grouped()}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onDetachTask={vi.fn()}
           selectedTaskIds={new Set([CHILD.id, GRANDCHILD.id])}
@@ -393,6 +412,7 @@ describe("TaskSwitcher — create subtask menu", () => {
           grouped={grouped()}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onCreateSubtask={onCreateSubtask}
         />
@@ -423,6 +443,7 @@ describe("TaskSwitcher — edit menu", () => {
           }}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onEditTask={onEditTask}
         />
@@ -455,6 +476,7 @@ describe("TaskSwitcher — edit menu", () => {
           }}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onEditTask={onEditTask}
         />
@@ -474,6 +496,7 @@ describe("TaskSwitcher — edit menu", () => {
           }}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onEditTask={onEditTask}
           selectedTaskIds={new Set([editableTask.id, archivedTask.id])}
@@ -502,6 +525,7 @@ describe("TaskSwitcher — archived rows action menu", () => {
           }}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onEditTask={vi.fn()}
           onRenameTask={vi.fn()}
@@ -544,6 +568,7 @@ describe("TaskSwitcher — edit menu prerequisites", () => {
           }}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onEditTask={vi.fn()}
         />
@@ -567,6 +592,7 @@ describe("TaskSwitcher — external issue link menu", () => {
           }}
           activeTaskId={null}
           selectedTaskId={null}
+          {...UNREAD_DOT_OFF}
           onSelectTask={vi.fn()}
           onLinkPullRequest={vi.fn()}
           onLinkIssue={vi.fn()}
@@ -604,48 +630,5 @@ describe("TaskSwitcher — external issue link menu", () => {
 
     expect(onLinkMergeRequest).toHaveBeenCalledWith(archivedTask.id, archivedTask.title);
     expect(closeMenu).toHaveBeenCalledOnce();
-  });
-});
-
-describe("TaskSwitcher repository labels", () => {
-  const REPOSITORY_TEST_ID = "sidebar-task-repository";
-  const REPOSITORY_SLUG = "kdlbs/kandev";
-
-  function renderGroupedBy(
-    groupKey: GroupedSidebarList["groupKey"],
-    groups: GroupedSidebarList["groups"],
-  ) {
-    return render(
-      <Providers>
-        <TaskSwitcher
-          grouped={{ groups, subTasksByParentId: new Map(), groupKey }}
-          activeTaskId={null}
-          selectedTaskId={null}
-          onSelectTask={vi.fn()}
-        />
-      </Providers>,
-    );
-  }
-
-  const REPO_TASK = item("Task A", undefined, { repositoryPath: REPOSITORY_SLUG });
-
-  it("names each task's repository in a flat, ungrouped list", () => {
-    renderGroupedBy("none", [{ key: "__all__", label: "All", tasks: [REPO_TASK] }]);
-
-    expect(screen.getByTestId(REPOSITORY_TEST_ID).textContent).toBe(REPOSITORY_SLUG);
-  });
-
-  it("names each task's repository when grouped by a dimension other than repository", () => {
-    renderGroupedBy("workflowStep", [{ key: "step-1", label: "In progress", tasks: [REPO_TASK] }]);
-
-    expect(screen.getByTestId(REPOSITORY_TEST_ID).textContent).toBe(REPOSITORY_SLUG);
-  });
-
-  it("leaves the repository off the rows when the group header already names it", () => {
-    renderGroupedBy("repository", [
-      { key: REPOSITORY_SLUG, label: REPOSITORY_SLUG, tasks: [REPO_TASK] },
-    ]);
-
-    expect(screen.queryByTestId(REPOSITORY_TEST_ID)).toBeNull();
   });
 });

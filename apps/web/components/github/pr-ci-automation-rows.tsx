@@ -195,7 +195,7 @@ function CIAutoFixRoundHelpButton({
       testId="ci-auto-fix-round-help"
       ariaLabel={t("github:explainAutoFixRounds")}
     >
-      <span data-testid="ci-auto-fix-round-explanation">
+      <span className="whitespace-pre-line" data-testid="ci-auto-fix-round-explanation">
         {t("github:autoFixRoundExplanation", { current: round.current, max: round.max })}
       </span>
     </CIAutomationHelpButton>

@@ -1,8 +1,11 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { emitSettingsTargetRequest } from "@/lib/settings-discovery/target";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import type { NotificationProvider } from "@/lib/types/http";
 import { NotificationsSettings } from "./notifications-settings";
 import { SettingsSaveProvider } from "./settings-save-provider";
+import { SettingsTargetProvider } from "./settings-target-provider";
 
 const mocks = vi.hoisted(() => ({
   createNotificationProvider: vi.fn(),
@@ -193,5 +196,134 @@ describe("NotificationsSettings", () => {
     expect(screen.getAllByText("Saved Apprise").length).toBeGreaterThan(0);
     expect(screen.queryByDisplayValue("Changed Apprise")).toBeNull();
     expect(screen.queryByDisplayValue("json://changed")).toBeNull();
+  });
+});
+
+describe("NotificationsSettings device preferences", () => {
+  it("shows one page introduction and compact device rows before push", () => {
+    const { container } = render(
+      <SettingsSaveProvider>
+        <NotificationsSettings />
+      </SettingsSaveProvider>,
+    );
+
+    expect(screen.getByRole("heading", { level: 2, name: "Notifications" })).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Choose how this device alerts you to agent turns, questions, and Office events.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(
+        "Notify this device when a selected agent turn, question, or Office event occurs.",
+      ),
+    ).toBeNull();
+    expect(
+      screen.queryByText(
+        "Play a sound on this device when a selected agent turn, question, or Office event occurs.",
+      ),
+    ).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Desktop Notifications" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Notification Sound" })).toBeNull();
+
+    const desktopRow = container.querySelector(
+      '[data-testid="notification-permission-group"][data-notification-preference-row="true"]',
+    );
+    const soundRow = container.querySelector(
+      '[data-testid="notification-sound-group"][data-notification-preference-row="true"]',
+    );
+    const pushHeading = screen.getByRole("heading", { name: "Push Notifications" });
+    expect(desktopRow).toBeTruthy();
+    expect(soundRow).toBeTruthy();
+    expect(
+      desktopRow!.compareDocumentPosition(soundRow!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      soundRow!.compareDocumentPosition(pushHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(desktopRow!.contains(screen.getByText("Notification Sound"))).toBe(false);
+  });
+
+  it("keeps both device preference settings-search targets registered", async () => {
+    const reveal = vi.fn();
+    render(
+      <SettingsTargetProvider revealTarget={reveal}>
+        <SettingsSaveProvider>
+          <NotificationsSettings />
+        </SettingsSaveProvider>
+      </SettingsTargetProvider>,
+    );
+
+    emitSettingsTargetRequest(GENERAL_SETTINGS_TARGETS.desktopNotifications);
+    await waitFor(() => expect(reveal).toHaveBeenCalledTimes(1));
+    expect((reveal.mock.calls[0][0] as HTMLElement).getAttribute("data-testid")).toBe(
+      "notification-permission-group",
+    );
+
+    emitSettingsTargetRequest(GENERAL_SETTINGS_TARGETS.notificationSound);
+    await waitFor(() => expect(reveal).toHaveBeenCalledTimes(2));
+    expect((reveal.mock.calls[1][0] as HTMLElement).getAttribute("data-testid")).toBe(
+      "notification-sound-group",
+    );
+  });
+});
+
+describe("NotificationsSettings webhook providers", () => {
+  it("offers a webhook provider form next to Apprise", () => {
+    render(
+      <SettingsSaveProvider>
+        <NotificationsSettings />
+      </SettingsSaveProvider>,
+    );
+
+    expect(screen.getByText("Webhooks")).toBeTruthy();
+    expect(screen.getByText("No webhook providers configured yet.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Webhook Provider" }));
+
+    fireEvent.change(screen.getByPlaceholderText("Provider name"), {
+      target: { value: "GoClaw" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Webhook URL"), {
+      target: { value: "http://goclaw.local:18789/hooks/kandev/turn-finished" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Headers, one per line (Name: value)"), {
+      target: { value: "X-Tenant: acme" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Secret (optional)"), {
+      target: { value: "gateway-token" },
+    });
+
+    expect(screen.getByDisplayValue("GoClaw")).toBeTruthy();
+    expect(
+      screen.getByDisplayValue("http://goclaw.local:18789/hooks/kandev/turn-finished"),
+    ).toBeTruthy();
+  });
+
+  it("blocks duplicate webhook headers with an actionable message", () => {
+    render(
+      <SettingsSaveProvider>
+        <NotificationsSettings />
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Webhook Provider" }));
+    fireEvent.change(screen.getByPlaceholderText("Webhook URL"), {
+      target: { value: "https://hooks.example.com/kandev" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Headers, one per line (Name: value)"), {
+      target: { value: "X-Tenant: acme\nx-tenant: other" },
+    });
+
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Webhook headers must use valid HTTP header names and must not repeat.",
+    );
+    expect(
+      (
+        within(screen.getByTestId("settings-floating-save")).getByRole("button", {
+          name: "Save changes",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
   });
 });

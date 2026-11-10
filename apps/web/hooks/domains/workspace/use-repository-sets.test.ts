@@ -20,9 +20,11 @@ type MockState = {
 };
 
 let mockState: MockState;
+const mockStore = { getState: () => mockState };
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
+  useAppStoreApi: () => mockStore,
 }));
 
 vi.mock("@/lib/api", () => ({

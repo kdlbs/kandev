@@ -155,18 +155,17 @@ describe("KanbanDisplayDropdown — grouped display settings", () => {
     expect(settings.onTogglePreviewOnClick).not.toHaveBeenCalled();
   });
 
-  it("keeps page-specific controls inside the filters and list groups", () => {
+  it("keeps List row options and leaves scope controls in the List toolbar", () => {
     render(<KanbanDisplayDropdown currentPage="tasks" />);
     openDropdown();
 
-    expect(groupToggle("filters").getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe("false");
+    expect(screen.queryByTestId(`${DISPLAY_SETTINGS_PREFIX}filters-toggle`)).toBeNull();
     expect(groupToggle("list-rows").getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe("false");
     expect(screen.queryByTestId(`${DISPLAY_SETTINGS_PREFIX}sort-toggle`)).toBeNull();
     expect(screen.queryByTestId("display-settings-preview-toggle")).not.toBeNull();
 
-    expandGroup("filters");
-    expect(screen.getByTestId(DISPLAY_WORKFLOW_FILTER_TEST_ID)).not.toBeNull();
-    expect(screen.getByTestId(DISPLAY_REPOSITORY_FILTER_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(DISPLAY_WORKFLOW_FILTER_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(DISPLAY_REPOSITORY_FILTER_TEST_ID)).toBeNull();
     expect(screen.queryByTestId("display-priority-filter-option-critical")).toBeNull();
 
     expandGroup("list-rows");
@@ -185,6 +184,7 @@ describe("KanbanDisplayDropdown — plugin task filters", () => {
   it("renders a filter section with its options and current selection", () => {
     render(
       <KanbanDisplayDropdown
+        currentPage="tasks"
         pluginFilters={[TAGS_FILTER]}
         pluginFilterSelections={{ [TAGS_FILTER_KEY]: ["bug"] }}
       />,

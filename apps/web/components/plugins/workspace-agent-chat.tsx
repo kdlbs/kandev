@@ -11,7 +11,7 @@ import {
 } from "@/lib/plugins/managed-conversation";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useManagedConversationChat } from "@/hooks/use-managed-conversation-chat";
-import type { PluginTranslationOptions, PluginWorkspaceAgentChatProps } from "@kandev/plugin-sdk";
+import type { PluginTranslationOptions, PluginWorkspaceAgentChatProps } from "@kdlbs/plugin-sdk";
 import { generateUUID } from "@/lib/uuid";
 import {
   EMPTY_WORKSPACE_AGENT_CHAT_COMPOSER_STATE,

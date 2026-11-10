@@ -20,6 +20,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useCollapsedAgentBlocks } from "@/hooks/domains/settings/use-collapsed-agent-blocks";
 import { AgentLogo } from "@/components/agent-logo";
 import { AgentLoginDialog } from "@/components/settings/agent-login-dialog";
+import { AntigravityLoginDialog } from "@/components/settings/antigravity-login-dialog";
 import { AgentRuntimeUpdateControl } from "@/components/settings/agent-runtime-update-control";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
@@ -31,7 +32,7 @@ import type {
   InstallJob,
 } from "@/lib/api";
 import type { Agent, AgentDiscovery, RuntimeUpdate } from "@/lib/types/http";
-import { presentHostCLIVersion } from "@/lib/agent-host-cli";
+import { AgentRuntimeSummary } from "./agent-runtime-summary";
 
 type Props = {
   agent: AgentDiscovery;
@@ -67,6 +68,12 @@ type Props = {
   children?: ReactNode;
 };
 
+function authTooltipKey(antigravityLogin: boolean, loginAvailable: boolean): string {
+  if (antigravityLogin) return "agents:authRequiredOpenAntigravityLogin";
+  if (loginAvailable) return "agents:authRequiredOpenLoginTerminal";
+  return "agents:authRequiredOpenShell";
+}
+
 function InstalledAgentIdentity({
   agent,
   displayName,
@@ -74,7 +81,10 @@ function InstalledAgentIdentity({
   probing,
   authRequired,
   loginAvailable,
+  antigravityLogin,
   onAuthClick,
+  runtime,
+  status,
 }: {
   agent: AgentDiscovery;
   displayName: string;
@@ -82,10 +92,12 @@ function InstalledAgentIdentity({
   probing: boolean;
   authRequired: boolean;
   loginAvailable: boolean;
+  antigravityLogin: boolean;
   onAuthClick: () => void;
+  runtime?: RuntimeUpdate;
+  status?: AgentUpdateStatus;
 }) {
   const { t } = useTranslation();
-  const versionPresentation = presentHostCLIVersion(agent);
   return (
     <div className="space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -124,37 +136,17 @@ function InstalledAgentIdentity({
                   <IconLock className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>
-                {loginAvailable
-                  ? t("agents:authRequiredOpenLoginTerminal")
-                  : t("agents:authRequiredOpenShell")}
-              </TooltipContent>
+              <TooltipContent>{t(authTooltipKey(antigravityLogin, loginAvailable))}</TooltipContent>
             </Tooltip>
           )}
         </div>
       </div>
-      <p
-        className="text-xs text-muted-foreground line-clamp-2"
-        title={agent.matched_path ?? undefined}
-      >
-        {agent.matched_path ? t("agents:detectedAt", { path: agent.matched_path }) : ""}
-      </p>
-      {versionPresentation && (
-        <p
-          className="text-xs text-muted-foreground line-clamp-2"
-          data-testid={`cli-version-${agent.name}`}
-        >
-          {versionPresentation.kind === "known"
-            ? t("agents:cliVersionLabel", {
-                name: displayName,
-                version: versionPresentation.version,
-              })
-            : t("agents:cliVersionUnknown", {
-                name: displayName,
-                reason: versionPresentation.reason,
-              })}
-        </p>
-      )}
+      <AgentRuntimeSummary
+        agent={agent}
+        displayName={displayName}
+        runtime={runtime}
+        status={status}
+      />
     </div>
   );
 }
@@ -304,16 +296,19 @@ export function InstalledAgentCard(props: Props) {
   const agentHref = `/settings/agents/${encodeURIComponent(agent.name)}`;
   const [loginOpen, setLoginOpen] = useState(false);
   const [shellOpen, setShellOpen] = useState(false);
+  const [antigravityLoginOpen, setAntigravityLoginOpen] = useState(false);
   const authRequired = capabilityStatus === "auth_required";
   const probing = capabilityStatus === "probing";
   const loginAvailable = Boolean(agent.login_command);
+  const antigravityAgent = agent.name === "antigravity-acp";
   const profileCount = savedAgent?.profiles.length ?? 0;
 
   // Either we have a registered login command (open the dedicated login PTY)
   // or we don't (open a plain host shell so the user can explore via
   // `<agent> --help`, run their own auth recipe, etc.).
   const handleAuthClick = () => {
-    if (loginAvailable) setLoginOpen(true);
+    if (antigravityAgent) setAntigravityLoginOpen(true);
+    else if (loginAvailable) setLoginOpen(true);
     else setShellOpen(true);
   };
 
@@ -337,10 +332,10 @@ export function InstalledAgentCard(props: Props) {
     >
       {/* Header section: identity + agent-level actions. */}
       <div
-        className="flex min-w-0 flex-wrap items-start justify-between gap-3 px-3 py-2.5"
+        className="flex min-w-0 flex-col items-start justify-between gap-3 px-3 py-2.5 md:flex-row md:flex-wrap"
         data-testid={`agent-card-header-${agent.name}`}
       >
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 w-full md:w-auto md:flex-1">
           <InstalledAgentIdentity
             agent={agent}
             displayName={displayName}
@@ -348,10 +343,13 @@ export function InstalledAgentCard(props: Props) {
             probing={probing}
             authRequired={authRequired}
             loginAvailable={loginAvailable}
+            antigravityLogin={antigravityAgent}
             onAuthClick={handleAuthClick}
+            runtime={props.runtimeUpdate}
+            status={props.runtimeUpdateStatus}
           />
         </div>
-        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+        <div className="flex min-w-0 w-full flex-wrap items-center justify-end gap-2 md:w-auto">
           {isCollapsed && <CollapsedCountLabel agentName={agent.name} count={profileCount} />}
           <RuntimeVersionControl {...props} />
           <AgentCollapseControl
@@ -381,6 +379,8 @@ export function InstalledAgentCard(props: Props) {
         shellOpen={shellOpen}
         setShellOpen={setShellOpen}
         loginAvailable={loginAvailable}
+        antigravityLoginOpen={antigravityLoginOpen}
+        setAntigravityLoginOpen={setAntigravityLoginOpen}
         onAuthComplete={onAuthComplete}
       />
     </Card>
@@ -429,6 +429,8 @@ function AuthDialogs({
   shellOpen,
   setShellOpen,
   loginAvailable,
+  antigravityLoginOpen,
+  setAntigravityLoginOpen,
   onAuthComplete,
 }: {
   agent: AgentDiscovery;
@@ -437,8 +439,19 @@ function AuthDialogs({
   shellOpen: boolean;
   setShellOpen: (open: boolean) => void;
   loginAvailable: boolean;
+  antigravityLoginOpen: boolean;
+  setAntigravityLoginOpen: (open: boolean) => void;
   onAuthComplete?: () => void;
 }) {
+  if (agent.name === "antigravity-acp") {
+    return (
+      <AntigravityLoginDialog
+        open={antigravityLoginOpen}
+        onOpenChange={setAntigravityLoginOpen}
+        onComplete={onAuthComplete}
+      />
+    );
+  }
   if (loginAvailable) {
     return (
       <AgentLoginDialog

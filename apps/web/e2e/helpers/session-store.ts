@@ -29,6 +29,9 @@ type E2EStoreWindow = Window & {
     setState: (
       updater: (state: {
         taskSessions: { items: Record<string, Record<string, unknown>> };
+        sessionModels: {
+          bySessionId: Record<string, SessionModelsData | undefined>;
+        };
       }) => void,
     ) => void;
   };
@@ -474,6 +477,83 @@ export async function seedConfirmedConfigOptions(
       });
     },
     { sid: sessionId, confirmedOptions: options },
+  );
+}
+
+export type StaleRuntimeConfigSeed = {
+  configOptionsSettled: boolean;
+  staleKeyValues: Record<string, string>;
+  advertisedConfigOptionCount: number;
+};
+
+/**
+ * Seeds historical runtime option keys the current agent never advertised and
+ * clears the session-model settlement marker. The retained advertised catalog
+ * must still keep the model selector usable.
+ */
+export async function seedStaleRuntimeConfigWithoutSettlement(
+  page: Page,
+  sessionId: string,
+  staleKeys: Record<string, string> = { context: "200k", reasoning_effort: "high" },
+): Promise<StaleRuntimeConfigSeed> {
+  await page.waitForFunction(() => Boolean((window as E2EStoreWindow).__KANDEV_E2E_STORE__));
+  return page.evaluate(
+    ({ sid, keys }) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) {
+        throw new Error("E2E store bridge missing — is __KANDEV_E2E_EXPOSE_STORE__ set?");
+      }
+      store.setState((state) => {
+        const session = state.taskSessions.items[sid];
+        const sessionModels = state.sessionModels.bySessionId[sid];
+        if (!session) throw new Error(`Session ${sid} not found in store`);
+        if (!sessionModels) throw new Error(`Session models ${sid} not found in store`);
+        const metadata = (session.metadata as Record<string, unknown> | undefined) ?? {};
+        const runtime = (metadata.runtime_config as Record<string, unknown> | undefined) ?? {};
+        const runtimeOptions = (runtime.config_options as Record<string, string> | undefined) ?? {};
+        state.taskSessions.items[sid] = {
+          ...session,
+          metadata: {
+            ...metadata,
+            runtime_config: {
+              ...runtime,
+              config_options: { ...runtimeOptions, ...keys },
+            },
+          },
+        };
+        state.sessionModels.bySessionId[sid] = {
+          ...sessionModels,
+          configOptionsSettled: undefined,
+        };
+      });
+
+      const updated = store.getState();
+      const entry = updated.sessionModels.bySessionId[sid];
+      const metadata = updated.taskSessions.items[sid]?.metadata as
+        | { runtime_config?: { config_options?: Record<string, string> } }
+        | undefined;
+      const persistedOptions = metadata?.runtime_config?.config_options ?? {};
+      if (!entry) throw new Error(`Session models ${sid} disappeared after seeding`);
+      if (entry.configOptionsSettled === true) {
+        throw new Error("Session model settlement marker was not cleared");
+      }
+      if (entry.configOptions.length === 0) {
+        throw new Error("Advertised config options were not retained");
+      }
+      const staleKeyValues: Record<string, string> = {};
+      for (const [key, value] of Object.entries(keys)) {
+        if (persistedOptions[key] !== value) {
+          throw new Error(`Stale runtime key ${key} was not seeded`);
+        }
+        staleKeyValues[key] = value;
+      }
+      return {
+        configOptionsSettled: entry.configOptionsSettled === true,
+        staleKeyValues,
+        advertisedConfigOptionCount: entry.configOptions.length,
+      };
+    },
+    { sid: sessionId, keys: staleKeys },
   );
 }
 

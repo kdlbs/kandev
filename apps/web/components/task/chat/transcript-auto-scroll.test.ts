@@ -365,6 +365,42 @@ describe("createFrameCoalescer", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it("cancel() drops a pending capture and rejects its late callback", () => {
+    const run = vi.fn();
+    const coalescer = createFrameCoalescer(run);
+    coalescer.schedule();
+    const late = frameCallbacks.get(pendingOrder[0])!;
+    coalescer.cancel();
+    expect(pendingOrder).toEqual([]);
+    late();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("a cancelled callback cannot consume or clear a replacement frame", () => {
+    const run = vi.fn();
+    const coalescer = createFrameCoalescer(run);
+    coalescer.schedule();
+    const late = frameCallbacks.get(pendingOrder[0])!;
+    coalescer.cancel();
+    coalescer.schedule();
+    late();
+    coalescer.schedule();
+    expect(run).not.toHaveBeenCalled();
+    expect(pendingOrder).toHaveLength(1);
+    runPendingFrame(pendingOrder, frameCallbacks);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("a flushed callback cannot duplicate the synchronous capture", () => {
+    const run = vi.fn();
+    const coalescer = createFrameCoalescer(run);
+    coalescer.schedule();
+    const late = frameCallbacks.get(pendingOrder[0])!;
+    coalescer.flush();
+    late();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
   it("flush() with no pending frame still runs once", () => {
     const run = vi.fn();
     const coalescer = createFrameCoalescer(run);

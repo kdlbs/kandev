@@ -11,6 +11,7 @@ import { safeDecodePathSegment } from "@/lib/routing/path";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import { SettingsTargetProvider } from "@/components/settings/settings-target-provider";
 import { useSettingsBreadcrumbs } from "@/components/settings/use-settings-breadcrumbs";
+import { SettingsCloseButton } from "./settings-close-button";
 
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -129,8 +130,13 @@ function SettingsShell({
               backLabel={backLabel}
               parents={parents}
               showStatusTrigger={false}
-              className="h-10"
-              actions={showIntegrationCopyAction ? <IntegrationCopyConfigAction /> : undefined}
+              className="h-14 md:h-10"
+              actions={
+                <>
+                  {showIntegrationCopyAction && <IntegrationCopyConfigAction />}
+                  <SettingsCloseButton />
+                </>
+              }
               // No hamburger inside Settings: `/settings` renders the menu as a
               // page on a phone, reached through the breadcrumb's Settings crumb
               // (a link only below md — on desktop the sidebar menu is always

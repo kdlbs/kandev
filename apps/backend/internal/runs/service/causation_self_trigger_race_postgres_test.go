@@ -7,10 +7,11 @@ import (
 	"sync"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -65,7 +66,7 @@ func TestPostgresQueueRun_SelfTriggerAllowanceHoldsUnderConcurrency(t *testing.T
 			outcome, err := svc.QueueRun(context.Background(), runsservice.QueueRunRequest{
 				AgentProfileID: agentProfileID,
 				Reason:         "self_trigger_reason",
-				ActorKind:      models.ActorKindAgent,
+				ActorKind:      runsmodels.ActorKindAgent,
 				ActorID:        agentProfileID,
 				IdempotencyKey: fmt.Sprintf("task_comment:self-race-%d", i),
 			})
@@ -98,7 +99,7 @@ func TestPostgresQueueRun_SelfTriggerAllowanceHoldsUnderConcurrency(t *testing.T
 	if err := db.Get(&count, db.Rebind(`
 		SELECT COUNT(*) FROM runs
 		WHERE agent_profile_id = ? AND reason = ? AND actor_kind = ? AND actor_id = ?
-	`), agentProfileID, "self_trigger_reason", string(models.ActorKindAgent), agentProfileID); err != nil {
+	`), agentProfileID, "self_trigger_reason", string(runsmodels.ActorKindAgent), agentProfileID); err != nil {
 		t.Fatalf("count persisted runs: %v", err)
 	}
 	if count != 1 {

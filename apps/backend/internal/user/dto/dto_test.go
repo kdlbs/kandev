@@ -715,3 +715,27 @@ func TestNullableRawMessage(t *testing.T) {
 		}
 	})
 }
+
+// TestPromptSuggestionsDTOAndPatchSemantics verifies the prompt suggestion flag maps to the DTO and patches only when present.
+func TestPromptSuggestionsDTOAndPatchSemantics(t *testing.T) {
+	got := FromUserSettings(&models.UserSettings{PromptSuggestions: true})
+	if !got.PromptSuggestions {
+		t.Fatal("DTO PromptSuggestions = false, want true")
+	}
+
+	var omitted UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
+		t.Fatalf("decode omitted request: %v", err)
+	}
+	if omitted.PromptSuggestions != nil {
+		t.Fatalf("omitted PromptSuggestions = %#v, want nil", omitted.PromptSuggestions)
+	}
+
+	var explicit UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"prompt_suggestions":true}`), &explicit); err != nil {
+		t.Fatalf("decode explicit request: %v", err)
+	}
+	if explicit.PromptSuggestions == nil || !*explicit.PromptSuggestions {
+		t.Fatalf("PromptSuggestions = %#v, want true", explicit.PromptSuggestions)
+	}
+}

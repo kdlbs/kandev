@@ -69,3 +69,41 @@ describe("launchSession", () => {
     expect(request).toHaveBeenCalledWith(launchMessageType, launchRequest, 90_000);
   });
 });
+
+describe("launchSession restore_workspace response", () => {
+  const restoreRequest = { task_id: "t1", session_id: "s1", intent: "restore_workspace" as const };
+
+  beforeEach(() => {
+    request.mockReset();
+  });
+
+  it("rejects a successful restore that names no execution for the session", async () => {
+    request.mockResolvedValue({ success: true, task_id: "t1", state: "CREATED" });
+    await expect(launchSession(restoreRequest)).rejects.toThrow();
+  });
+
+  it("accepts a successful restore bound to an execution", async () => {
+    const response = { success: true, task_id: "t1", state: "CREATED", agent_execution_id: "e1" };
+    request.mockResolvedValue(response);
+    await expect(launchSession(restoreRequest)).resolves.toEqual(response);
+  });
+
+  it.each(["queued", "suppressed"] as const)(
+    "accepts a %s restore without an execution",
+    async (disposition) => {
+      const response = {
+        success: true,
+        task_id: "t1",
+        state: "CREATED",
+        activation_disposition: disposition,
+      };
+      request.mockResolvedValue(response);
+      await expect(launchSession(restoreRequest)).resolves.toEqual(response);
+    },
+  );
+
+  it("does not apply the restore check to other intents", async () => {
+    request.mockResolvedValue({ success: true, task_id: "t1", state: "CREATED" });
+    await expect(launchSession({ task_id: "t1", intent: "resume" })).resolves.toBeDefined();
+  });
+});

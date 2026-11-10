@@ -7,7 +7,7 @@ import {
   type MessageType,
   type TaskPendingAction,
 } from "@/lib/types/http";
-import { isRichOutputMessage } from "@/components/task/chat/types";
+import { isContextCompactionMessage, isRichOutputMessage } from "@/components/task/chat/types";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import {
   findPendingClarification,
@@ -24,6 +24,7 @@ import {
   buildToolCallIds,
   filterVisibleMessages,
   isSetupScriptMessage,
+  isFooterActionMessage,
 } from "./processed-message-filtering";
 
 export {
@@ -300,6 +301,7 @@ function groupActivityMessages(allMessages: Message[]): RenderItem[] {
       message.type &&
       ACTIVITY_MESSAGE_TYPES.has(message.type) &&
       !isSubagentMessage(message) &&
+      !isContextCompactionMessage(message) &&
       !isRichOutputMessage(message);
     const messageTurnId = message.turn_id ?? null;
     if (isActivity && messageTurnId) {
@@ -613,8 +615,7 @@ export function useProcessedMessages(
     const regular: Message[] = [];
     const footer: Message[] = [];
     for (const msg of allMessages) {
-      const meta = msg.metadata as Record<string, unknown> | undefined;
-      if (Array.isArray(meta?.actions) && !meta?.recovery_actions) {
+      if (isFooterActionMessage(msg)) {
         footer.push(msg);
       } else {
         regular.push(msg);

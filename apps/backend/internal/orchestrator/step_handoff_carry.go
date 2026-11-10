@@ -243,6 +243,33 @@ func newStepHandoffOnce() *stepHandoffOnce {
 	return &stepHandoffOnce{}
 }
 
+type stepHandoffOnceContextKey struct{}
+
+type scopedStepHandoffOnce struct {
+	taskID string
+	stepID string
+	once   *stepHandoffOnce
+}
+
+// withStepHandoffOnce lets a caller that may launch the same step entry more
+// than once share one handoff claim with StartSessionForWorkflowStep, so a
+// launch refused after the claim does not consume the text its retry needs.
+func withStepHandoffOnce(ctx context.Context, taskID, stepID string, once *stepHandoffOnce) context.Context {
+	return context.WithValue(ctx, stepHandoffOnceContextKey{}, scopedStepHandoffOnce{taskID: taskID, stepID: stepID, once: once})
+}
+
+// claimStepHandoffTextForLaunch claims the step's handoff text through the
+// caller's shared once when it was scoped to this task and step, and directly
+// otherwise.
+func (s *Service) claimStepHandoffTextForLaunch(ctx context.Context, taskID, stepID string) string {
+	if scoped, ok := ctx.Value(stepHandoffOnceContextKey{}).(scopedStepHandoffOnce); ok &&
+		scoped.once != nil && scoped.taskID == taskID && scoped.stepID == stepID {
+		return s.resolveStepHandoffText(ctx, scoped.once, taskID, stepID, true)
+	}
+	text, _ := s.claimStepHandoffCarryText(ctx, taskID, stepID)
+	return text
+}
+
 // resolveStepHandoffText returns the handoff text to append for this step
 // entry, claiming it at most once. wouldSend reports whether the caller's own
 // dispatch branch has already decided it will send the agent something over

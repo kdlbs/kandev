@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"strings"
 	"time"
 
@@ -214,7 +215,7 @@ const reviewWatchSelectCols = `created_by_user_id, id, workspace_id, workflow_id
 
 // CreateReviewWatch inserts a review watch and serializes Projects to JSON.
 func (s *Store) CreateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
-	rw.CreatedByUserID = executorCreatorUserID(ctx)
+	rw.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if rw.ID == "" {
 		rw.ID = uuid.New().String()
 	}
@@ -591,7 +592,7 @@ const issueWatchSelectCols = `created_by_user_id, id, workspace_id, workflow_id,
 
 // CreateIssueWatch inserts an issue watch and serializes Projects + Labels.
 func (s *Store) CreateIssueWatch(ctx context.Context, iw *IssueWatch) error {
-	iw.CreatedByUserID = executorCreatorUserID(ctx)
+	iw.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if iw.ID == "" {
 		iw.ID = uuid.New().String()
 	}

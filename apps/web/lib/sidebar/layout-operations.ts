@@ -1,3 +1,4 @@
+import { isIntegrationPlugin, sidebarNodeSiblings } from "./integration-plugin-layout";
 import { generateUUID } from "@/lib/utils";
 import {
   SIDEBAR_LAYOUT_LIMITS,
@@ -321,9 +322,22 @@ export function moveSection(
   }
   const index = layout.nodes.findIndex((node) => node.id === nodeId);
   if (index < 0) throw new SidebarLayoutOperationError("missing_node");
-  const next = copyLayout(layout);
-  const [node] = next.nodes.splice(index, 1);
-  if (!node) throw new SidebarLayoutOperationError("missing_node");
-  next.nodes.splice(position, 0, node);
-  return next;
+  const target = layout.nodes[position];
+  if (
+    index === position ||
+    isIntegrationPlugin(layout.nodes[index]) !== isIntegrationPlugin(target)
+  )
+    return layout;
+  const siblings = sidebarNodeSiblings(layout.nodes, nodeId);
+  const from = siblings.findIndex((node) => node.id === nodeId);
+  const to = siblings.findIndex((node) => node.id === target.id);
+  const reordered = [...siblings];
+  const [node] = reordered.splice(from, 1);
+  reordered.splice(to, 0, node);
+  const ids = new Set(siblings.map((item) => item.id));
+  let cursor = 0;
+  return {
+    ...layout,
+    nodes: layout.nodes.map((item) => (ids.has(item.id) ? reordered[cursor++] : item)),
+  };
 }

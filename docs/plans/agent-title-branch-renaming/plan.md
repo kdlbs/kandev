@@ -6,6 +6,10 @@ status: complete
 
 # Implementation Plan: Agent Title Branch Renaming
 
+Follow-up: [generated-branch continuity](../turn-change-title-branch-continuity/plan.md)
+adds expected-branch validation and turn-history coverage for issue #4961.
+This completed package retains its existing work-order statuses and verification results.
+
 ## Overview
 
 Extend the existing owner-only `set_task_title_kandev` transaction with a per-repository

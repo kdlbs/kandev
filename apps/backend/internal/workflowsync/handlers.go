@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
@@ -131,6 +132,9 @@ func (c *Controller) httpForceSync(ctx *gin.Context) {
 		return
 	}
 	result, syncErr := c.service.SyncWorkspace(ctx.Request.Context(), workspaceID)
+	if ctx.Request.Context().Err() != nil {
+		return
+	}
 	if workspaceDenied(syncErr) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
 		return
@@ -150,7 +154,13 @@ func (c *Controller) httpForceSync(ctx *gin.Context) {
 	}
 	response := gin.H{"config": cfg}
 	if syncErr != nil {
-		response["error"] = syncErr.Error()
+		if rateLimit, rateLimited := github.OperationRateLimitFromError(syncErr, c.service.now().UTC()); rateLimited {
+			response["error"] = "GitHub operation is rate limited"
+			response["error_code"] = github.RateLimitErrorCode
+			response["rate_limit"] = rateLimit
+		} else {
+			response["error"] = safeSyncErrorMessage(syncErr)
+		}
 	}
 	if result != nil {
 		response["result"] = result

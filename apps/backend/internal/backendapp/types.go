@@ -41,6 +41,7 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
+	taskchanges "github.com/kandev/kandev/internal/task/changes"
 	"github.com/kandev/kandev/internal/task/deliveryretention"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -83,6 +84,9 @@ type Repositories struct {
 }
 
 type Services struct {
+	capacityRetryClock       *e2eCapacityRetryClock
+	TurnHistoryStore         *taskchanges.GitHistoryStore
+	TurnHistory              *taskchanges.HistoryService
 	DeliveryRetention        *deliveryretention.Worker
 	ManagedRuntimeSelections managedruntime.SelectionStore
 	DynamicProfileResolver   *agentruntime.ProfileExecutionResolver
@@ -137,6 +141,9 @@ type Services struct {
 	// registry, event delivery, health monitoring). Always constructed
 	// (non-nil) when initialization succeeds.
 	Plugins *plugins.Service
+	// PluginToolCatalog fans lifecycle catalog changes out to agentctl
+	// executions and in-process MCP servers. Nil until main starts plugins.
+	PluginToolCatalog *pluginToolCatalogFanout
 	// AgentConversations is the managed workspace agent conversation
 	// service behind the agent_conversation Host capability. Nil when the
 	// plugins service itself is unavailable.

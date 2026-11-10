@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -21,11 +22,12 @@ func TestWaitForPromptDone_MetadataOnlyStreamStillReportsNeverStarted(t *testing
 		sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
 		sm.eventPublisher = NewEventPublisher(eventBus, newSessionTestLogger())
 		execution := &AgentExecution{
-			ID:           "test-exec",
-			TaskID:       "test-task",
-			SessionID:    "test-session",
-			promptDoneCh: make(chan PromptCompletionSignal, 1),
-			Status:       v1.AgentStatusRunning,
+			promptGeneration: 7,
+			ID:               "test-exec",
+			TaskID:           "test-task",
+			SessionID:        "test-session",
+			promptDoneCh:     make(chan PromptCompletionSignal, 1),
+			Status:           v1.AgentStatusRunning,
 		}
 		execution.lastActivityAt = time.Now()
 
@@ -104,5 +106,59 @@ func TestRecordActivity_MetadataFrameDoesNotAdvancePromptProgress(t *testing.T) 
 	}
 	if !agentEventSeen {
 		t.Fatal("agentEventSincePrompt = false after a turn-content event")
+	}
+}
+
+// @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.13
+func TestPromptAcceptancePreservesEarlyOutputEvidence(t *testing.T) {
+	for _, withStore := range []bool{false, true} {
+		t.Run(fmt.Sprintf("store=%t", withStore), func(t *testing.T) {
+			sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+			execution := &AgentExecution{ID: "early-output", SessionID: "session"}
+			generation := beginExecutionPrompt(execution)
+			if withStore {
+				sm.executionStore = NewExecutionStore()
+				if err := sm.executionStore.Add(execution); err != nil {
+					t.Fatal(err)
+				}
+			}
+			execution.markAgentActivity()
+			beforeTime, _, beforeEpoch := execution.promptActivitySnapshot()
+
+			sm.markPromptDispatched(execution, generation)
+
+			evidence := execution.promptAttemptEvidenceSnapshot()
+			if !evidence.OutputObserved || !evidence.EffectObserved {
+				t.Fatal("acceptance erased output/effect evidence from the same turn")
+			}
+			afterTime, _, afterEpoch := execution.promptActivitySnapshot()
+			if !afterTime.Equal(beforeTime) || afterEpoch != beforeEpoch {
+				t.Fatal("acceptance changed the progress clock after real output")
+			}
+		})
+	}
+}
+
+// @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.13
+func TestBeginPromptClearsPreviousEvidence(t *testing.T) {
+	execution := &AgentExecution{ID: "new-turn", SessionID: "session"}
+	store := NewExecutionStore()
+	if err := store.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+	execution.markAgentActivity()
+	generation, err := store.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := execution.promptAttemptEvidenceSnapshot()
+	if evidence.OutputObserved || evidence.EffectObserved {
+		t.Fatal("a new prompt inherited its predecessor's output/effect evidence")
+	}
+	_, _, beforeEpoch := execution.promptActivitySnapshot()
+	store.MarkPromptDispatched(execution.ID, generation)
+	at, seen, epoch := execution.promptActivitySnapshot()
+	if at.IsZero() || seen || epoch != beforeEpoch+1 {
+		t.Fatal("first acceptance must arm the clock without inventing output")
 	}
 }

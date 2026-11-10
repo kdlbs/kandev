@@ -10,12 +10,13 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
@@ -72,7 +73,7 @@ func TestApplyCausationLineage_ContextCanceledDefersWithoutRecordingFailure(t *t
 	svc := newShutdownContextTestService(t)
 	ctx := context.Background()
 
-	causing := &models.Run{
+	causing := &runsmodels.Run{
 		ID:             "causing-run-1",
 		AgentProfileID: "agent-1",
 		WorkspaceID:    "ws-1",
@@ -98,13 +99,13 @@ func TestApplyCausationLineage_ContextCanceledDefersWithoutRecordingFailure(t *t
 	req := QueueRunRequest{
 		AgentProfileID: "agent-1",
 		Reason:         "child_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-1",
 		CausingRunID:   causing.ID,
 	}
 	res := &causationResolution{WorkspaceID: "ws-1"}
 
-	err = svc.applyCausationLineage(canceledCtx, tx, rec, "agent-1", req, models.ActorKindAgent, res)
+	err = svc.applyCausationLineage(canceledCtx, tx, rec, "agent-1", req, runsmodels.ActorKindAgent, res)
 	if err == nil {
 		t.Fatal("applyCausationLineage returned nil error for a context-canceled read")
 	}
@@ -140,11 +141,11 @@ func TestCheckSelfTriggerAllowance_ContextCanceledDefersWithoutRecordingFailure(
 	req := QueueRunRequest{
 		AgentProfileID: "agent-1",
 		Reason:         "self_trigger_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-1",
 	}
 
-	err = svc.checkSelfTriggerAllowance(canceledCtx, tx, rec, "agent-1", req, models.ActorKindAgent, "agent-1", "ws-1", "causation-1", 0)
+	err = svc.checkSelfTriggerAllowance(canceledCtx, tx, rec, "agent-1", req, runsmodels.ActorKindAgent, "agent-1", "ws-1", "causation-1", 0)
 	if err == nil {
 		t.Fatal("checkSelfTriggerAllowance returned nil error for a context-canceled read")
 	}

@@ -106,7 +106,7 @@ func TestEnableThenSetupPromotesDefaultUser(t *testing.T) {
 		t.Fatalf("mode after setup = %s, want enabled", f.svc.Mode())
 	}
 	// The minted session authenticates.
-	identity, ok := f.svc.ResolveSessionToken(ctx, token, "")
+	identity, ok, _ := f.svc.ResolveSessionToken(ctx, token, "")
 	if !ok || identity.UserID != userstore.DefaultUserID || !identity.IsAdmin() {
 		t.Fatalf("session identity = %+v ok=%v", identity, ok)
 	}
@@ -142,7 +142,7 @@ func TestLoginFlow(t *testing.T) {
 	if user.Email != "admin@x.dev" {
 		t.Fatalf("unexpected user: %+v", user)
 	}
-	identity, ok := f.svc.ResolveSessionToken(ctx, token, "")
+	identity, ok, _ := f.svc.ResolveSessionToken(ctx, token, "")
 	if !ok || !identity.IsAdmin() {
 		t.Fatalf("resolve: %+v ok=%v", identity, ok)
 	}
@@ -150,8 +150,8 @@ func TestLoginFlow(t *testing.T) {
 	if err := f.svc.Logout(ctx, identity.SessionID, identity.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := f.svc.ResolveSessionToken(ctx, token, ""); ok {
-		t.Fatal("session must be dead after logout")
+	if _, ok, err := f.svc.ResolveSessionToken(ctx, token, ""); ok || err != nil {
+		t.Fatalf("session must be invalid with nil error after logout: ok=%v err=%v", ok, err)
 	}
 }
 
@@ -182,16 +182,16 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identityA, _ := f.svc.ResolveSessionToken(ctx, tokenA, "")
+	identityA, _, _ := f.svc.ResolveSessionToken(ctx, tokenA, "")
 
 	if err := f.svc.ChangePassword(ctx, identityA.UserID, identityA.SessionID, "adminpass123", "newpass12345"); err != nil {
 		t.Fatalf("change password: %v", err)
 	}
-	if _, ok := f.svc.ResolveSessionToken(ctx, tokenA, ""); !ok {
+	if _, ok, _ := f.svc.ResolveSessionToken(ctx, tokenA, ""); !ok {
 		t.Fatal("current session must survive password change")
 	}
-	if _, ok := f.svc.ResolveSessionToken(ctx, tokenB, ""); ok {
-		t.Fatal("other sessions must be revoked")
+	if _, ok, err := f.svc.ResolveSessionToken(ctx, tokenB, ""); ok || err != nil {
+		t.Fatalf("revoked session must be invalid with nil error: ok=%v err=%v", ok, err)
 	}
 	if _, _, err := f.svc.Login(ctx, "admin@x.dev", "newpass12345", "", ""); err != nil {
 		t.Fatalf("login with new password: %v", err)
@@ -218,7 +218,7 @@ func TestInviteFlow(t *testing.T) {
 	if user.Role != usermodels.RoleMember {
 		t.Fatalf("role = %s, want member", user.Role)
 	}
-	identity, ok := f.svc.ResolveSessionToken(ctx, sessionToken, "")
+	identity, ok, _ := f.svc.ResolveSessionToken(ctx, sessionToken, "")
 	if !ok || identity.IsAdmin() {
 		t.Fatalf("member identity: %+v ok=%v", identity, ok)
 	}
@@ -256,17 +256,17 @@ func TestAdminUserManagement(t *testing.T) {
 	if err != nil || record.ID == "" {
 		t.Fatalf("mint token: %v", err)
 	}
-	if _, ok := f.svc.ResolveBearer(ctx, pat); !ok {
+	if _, ok, _ := f.svc.ResolveBearer(ctx, pat); !ok {
 		t.Fatal("fresh PAT must authenticate")
 	}
 	if _, err := f.svc.AdminSetRoleStatus(ctx, member.ID, "", "disabled"); err != nil {
 		t.Fatalf("disable member: %v", err)
 	}
-	if _, ok := f.svc.ResolveSessionToken(ctx, memberToken, ""); ok {
-		t.Fatal("disabled member session must fail")
+	if _, ok, err := f.svc.ResolveSessionToken(ctx, memberToken, ""); ok || err != nil {
+		t.Fatalf("disabled member session must be invalid with nil error: ok=%v err=%v", ok, err)
 	}
-	if _, ok := f.svc.ResolveBearer(ctx, pat); ok {
-		t.Fatal("disabled member PAT must fail")
+	if _, ok, err := f.svc.ResolveBearer(ctx, pat); ok || err != nil {
+		t.Fatalf("disabled member PAT must be invalid with nil error: ok=%v err=%v", ok, err)
 	}
 	if _, _, err := f.svc.Login(ctx, "m@x.dev", "memberpass123", "", ""); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("disabled member login: %v", err)
@@ -275,8 +275,8 @@ func TestAdminUserManagement(t *testing.T) {
 
 func TestResolveBearerIgnoresNonPAT(t *testing.T) {
 	f := newServiceFixture(t, false)
-	if _, ok := f.svc.ResolveBearer(context.Background(), "eyJhbGciOiJIUzI1NiJ9.agent.jwt"); ok {
-		t.Fatal("non-PAT bearer must not resolve")
+	if _, ok, err := f.svc.ResolveBearer(context.Background(), "eyJhbGciOiJIUzI1NiJ9.agent.jwt"); ok || err != nil {
+		t.Fatalf("non-PAT bearer must be invalid with nil error: ok=%v err=%v", ok, err)
 	}
 }
 
@@ -334,7 +334,7 @@ func TestResolveSessionTokenRefreshesChangedIP(t *testing.T) {
 
 	t.Run("different IP refreshes stored IP", func(t *testing.T) {
 		token, hash, _, _ := seedAgedSession("1.1.1.1")
-		if _, ok := f.svc.ResolveSessionToken(ctx, token, "2.2.2.2"); !ok {
+		if _, ok, _ := f.svc.ResolveSessionToken(ctx, token, "2.2.2.2"); !ok {
 			t.Fatal("resolve failed")
 		}
 		if got := sessionByHash(hash).IP; got != "2.2.2.2" {
@@ -344,7 +344,7 @@ func TestResolveSessionTokenRefreshesChangedIP(t *testing.T) {
 
 	t.Run("non-empty request IP backfills empty stored IP", func(t *testing.T) {
 		token, hash, _, _ := seedAgedSession("")
-		if _, ok := f.svc.ResolveSessionToken(ctx, token, "2.2.2.2"); !ok {
+		if _, ok, _ := f.svc.ResolveSessionToken(ctx, token, "2.2.2.2"); !ok {
 			t.Fatal("resolve failed")
 		}
 		if got := sessionByHash(hash).IP; got != "2.2.2.2" {
@@ -354,7 +354,7 @@ func TestResolveSessionTokenRefreshesChangedIP(t *testing.T) {
 
 	t.Run("same IP keeps stored IP and still touches", func(t *testing.T) {
 		token, hash, seededLastSeen, seededExpires := seedAgedSession("1.1.1.1")
-		if _, ok := f.svc.ResolveSessionToken(ctx, token, "1.1.1.1"); !ok {
+		if _, ok, _ := f.svc.ResolveSessionToken(ctx, token, "1.1.1.1"); !ok {
 			t.Fatal("resolve failed")
 		}
 		got := sessionByHash(hash)
@@ -379,7 +379,7 @@ func TestResolveSessionTokenRefreshesChangedIP(t *testing.T) {
 
 	t.Run("empty request IP keeps stored IP and still touches", func(t *testing.T) {
 		token, hash, seededLastSeen, seededExpires := seedAgedSession("1.1.1.1")
-		if _, ok := f.svc.ResolveSessionToken(ctx, token, ""); !ok {
+		if _, ok, _ := f.svc.ResolveSessionToken(ctx, token, ""); !ok {
 			t.Fatal("resolve failed")
 		}
 		got := sessionByHash(hash)
@@ -419,7 +419,7 @@ func TestResolveSessionTokenRefreshesChangedIP(t *testing.T) {
 		if err := f.svc.store.CreateSession(ctx, session); err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := f.svc.ResolveSessionToken(ctx, token, "2.2.2.2"); !ok {
+		if _, ok, _ := f.svc.ResolveSessionToken(ctx, token, "2.2.2.2"); !ok {
 			t.Fatal("resolve must succeed for future-seed session")
 		}
 		got := sessionByHash(hash)
@@ -434,7 +434,7 @@ func TestResolveSessionTokenRefreshesChangedIP(t *testing.T) {
 		if err := f.svc.store.TouchSession(ctx, session.ID, now.Add(-2*time.Hour), future, ""); err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := f.svc.ResolveSessionToken(ctx, token, "2.2.2.2"); !ok {
+		if _, ok, _ := f.svc.ResolveSessionToken(ctx, token, "2.2.2.2"); !ok {
 			t.Fatal("resolve after aging failed")
 		}
 		if got := sessionByHash(hash).IP; got != "2.2.2.2" {

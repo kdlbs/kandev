@@ -30,10 +30,6 @@ func newEntryPromptFixture(t *testing.T, taskID, sessionID string, sessionState 
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, taskID, sessionID, sessionState)
-	require.NoError(t, repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, models.PendingStepCompletionSignal{
-		StepID: entryGateStepID,
-		Source: models.StepCompletionSourceAgent,
-	}))
 
 	stepGetter := newMockStepGetter()
 	stepGetter.steps[entryGateStepID] = &wfmodels.WorkflowStep{
@@ -54,6 +50,11 @@ func newEntryPromptFixture(t *testing.T, taskID, sessionID string, sessionState 
 	task.WorkflowID = "wf1"
 	task.WorkflowStepID = entryGateStepID
 	require.NoError(t, repo.UpdateTaskPreservingDeferredLaunch(ctx, task))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, models.PendingStepCompletionSignal{
+		WorkflowStepTransitionID: signalEntryForSession(t, repo, sessionID),
+		StepID:                   entryGateStepID,
+		Source:                   models.StepCompletionSourceAgent,
+	}))
 	return &entryPromptFixture{ctx: ctx, repo: repo, svc: svc, taskID: taskID, session: sessionID}
 }
 

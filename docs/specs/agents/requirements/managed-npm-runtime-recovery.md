@@ -1,7 +1,8 @@
 ---
-status: active
+status: draft
 system: agents
 created: 2026-08-24
+updated: 2026-11-08
 owners:
   - kandev
 ---
@@ -12,6 +13,7 @@ owners:
 
 Managed npm runtimes use exact reviewed package versions. Stale npm metadata
 can hide a published version and stop the agent before ACP initialization.
+Missing execution metadata can also stop a cached runtime before initialization.
 
 Kandev retries recoverable setup failures without requiring the end user to operate npm. Strict ETARGET recovery applies to host capability probes and task launches.
 Broader bounded setup recovery applies to task launches on local PC, local Docker,
@@ -21,9 +23,17 @@ Managed runtime package resolution is independent of the task repository's
 project npm configuration. A repository release-age policy must not prevent an
 operator-selected, successfully validated runtime from starting.
 
+Requirements 001 through 004 retain the existing contract. Requirement 005
+adds recovery of a missing bundled Codex platform dependency. [Requirement 006](managed-npm-cache-recovery.md)
+adds recovery of incomplete npm execution trees after an upgrade or restart.
+Each delivery package records its own implementation status.
+
+[Requirement 007](managed-npm-repair-reuse.md) extends verified cache
+recovery with reuse across launches. It preserves the shared-tree protection rule.
+
 ## Terminology
 
-- **Managed npm runtime:** A built-in ACP runtime that Kandev launches through an exact npm package version.
+- **Managed npm runtime:** A registered agent runtime that Kandev launches through an exact npm package version. This includes ACP and managed native Codex app-server.
 - **Execution tree:** The deterministic npm `_npx` directory for one exact package specification.
 - **Executor-local:** An operation that runs in the environment that hosts the agent process and its npm cache.
 
@@ -84,13 +94,43 @@ operator-selected, successfully validated runtime from starting.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-004.7:** Delayed exit, error, and disconnect events from a failed attempt shall not fail or stop its replacement. Concurrent launch tests shall include a healthy sibling, a recovered sibling, and an exhausted sibling.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-004.8:** Diagnostics shall distinguish npm setup failure from an unexplained early process exit. They shall record attempt, outcome, and bounded exit evidence without exposing credentials or registry URLs. Final UI text shall not attribute an unexplained exit to npm or claim unperformed cache repair.
 
+### REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-005: Missing bundled dependency recovery
+
+**Intent:** A missing required platform dependency in Kandev's managed Codex ACP
+installation shall recover without terminal commands or a change of runtime
+selection.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-005.1:** When a managed Codex ACP launch or host capability probe fails before initialization completes, and Kandev confirms that its bundled Codex installation lacks the required dependency for the execution host's supported platform, Kandev shall attempt automatic preparation and retry once. An error string alone shall not establish eligibility.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-005.2:** The repair shall use the same exact selected ACP package version, execution host, configured registry, authorized launch settings, and original task/session identity. It shall not select a global Codex installation, change `CODEX_PATH`, switch models, update a saved runtime selection, or reset the conversation. A fresh installation can resolve transitive versions within that exact ACP package's declared dependency constraints; recovered runtime observations shall reflect the actual bundled CLI.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-005.3:** Automatic preparation shall not modify or remove the failed shared execution tree, unrelated caches, or files used by any healthy session. A concurrent healthy sibling shall continue working while another launch repairs and a third exhausts recovery.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-005.4:** Preparation shall include the required platform dependency, validate it before retry, and remain isolated from repository npm configuration. Any optional-dependency inclusion override shall apply only to the isolated managed-runtime operation, never to user npm configuration or project installs.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-005.5:** Task launch, task resume, agent-wide host discovery, profile capability discovery, and profile model-option resolution shall provide the same bounded recovery for eligible managed Codex ACP contexts. Profile repair shall preserve saved settings, draft values, and context-generation isolation; it shall not publish a profile result into the agent-wide catalogue. Supported task executors remain local PC, local Docker, and remote SSH.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-005.6:** Missing-dependency recovery shall consume the operation's existing single replacement budget rather than add another retry after ETARGET or transient recovery. Cleanup, preparation, validation, and replacement shall share a maximum 90-second recovery budget and the caller's earlier deadline. Stop, cancellation, shutdown, failure to reap the old process, or a changed runtime/profile context shall prevent replacement. Recovery shall never replay a prompt or a conversation-creation/restoration operation.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-005.7:** Successful recovery shall continue the original operation without a failure card or user intervention, deliver any accepted task prompt once, and publish the recovered capability result only to its matching context. The prepared runtime's files shall remain available for as long as its subprocess can use them, including supported backend detach/adoption, and shall become removable only after owned subprocess cleanup.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-005.8:** Exhaustion, unsupported repair, missing evidence, or preparation failure shall remain visible through existing localized startup/probe error surfaces on desktop and phone. Task failure shall retain one **Retry runtime** action and bounded sanitized details. Details shall distinguish missing dependencies, preparation failure, and replacement failure without claiming that an unperformed repair succeeded.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-005.9:** Kandev shall not use this repair for native or passthrough commands, externally supplied Codex binaries, arbitrary missing modules, unsupported executors, or a failure after initialization. Authentication, release-age policy, permission, disk-space, invalid-configuration, and intentional termination failures shall retain their existing precedence. Older agentctl peers without the repair capability shall fail visibly without destructive fallback.
+
+## Incomplete execution-tree recovery
+
+[Requirement 006](managed-npm-cache-recovery.md) owns verified missing npm
+execution metadata and automatic recovery after upgrade or restart.
+Its separate document keeps that delivery lifecycle independent from the
+pending bundled-dependency extension above.
+
 ## Out of scope
 
 - Automatic version rollback or selection of another package version.
 - Registry replacement, dependency substitution, or global npm cache cleanup.
-- Native runtimes, passthrough commands, unclassified npm errors without eligible early-exit evidence, and a second automatic retry.
+- Direct native binaries, passthrough commands, unclassified npm errors without verified cache or eligible early-exit evidence, and a second automatic retry.
+- General-purpose dependency repair, installation of a package named only in stderr, and guarantees against npm or registry outages.
+- Persistent repair reuse outside the verified-cache extension defined by [requirement 007](managed-npm-repair-reuse.md).
 - Automatic cache repair and retry for Sprites, remote Docker, Kubernetes, and future executors without a validated executor-local launch and stop contract. Kandev still classifies a policy failure when bounded diagnostics are available for the exact trusted package.
 
 ## Implementation package
 
 - [Managed npm startup resilience](../../../plans/managed-npm-startup-resilience/plan.md)
+- [Missing Codex dependency recovery](../../../plans/managed-codex-dependency-recovery/plan.md)
+- [Incomplete npm cache recovery](../../../plans/managed-npm-cache-recovery/plan.md)
+- [Reusable managed npm repairs](../../../plans/managed-npm-repair-reuse/plan.md)

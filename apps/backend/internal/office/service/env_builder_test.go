@@ -3,6 +3,8 @@ package service_test
 import (
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
@@ -16,7 +18,7 @@ func TestBuildEnvVars_AllFieldsPopulated(t *testing.T) {
 		Name:        "CEO",
 		WorkspaceID: "ws-1",
 	}
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID:      "wake-1",
 		Reason:  "task_assigned",
 		Payload: `{"task_id":"t-42","comment_id":"c-99"}`,
@@ -62,7 +64,7 @@ func TestBuildEnvVars_NoOptionalFields(t *testing.T) {
 		Name:        "Worker",
 		WorkspaceID: "ws-1",
 	}
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID:      "wake-2",
 		Reason:  "heartbeat",
 		Payload: `{}`,
@@ -94,7 +96,7 @@ func TestBuildEnvVars_TaskIDExtractedFromPayload(t *testing.T) {
 	si := service.NewSchedulerIntegration(svc, 0)
 
 	agent := &models.AgentInstance{ID: "a1", Name: "W"}
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID:      "w1",
 		Reason:  "task_comment",
 		Payload: `{"task_id":"task-xyz"}`,
@@ -112,7 +114,7 @@ func TestBuildEnvVars_KandevCLI(t *testing.T) {
 	si := service.NewSchedulerIntegration(svc, 0)
 
 	agent := &models.AgentInstance{ID: "a1", Name: "W"}
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID:      "w1",
 		Reason:  "task_assigned",
 		Payload: `{}`,
@@ -130,7 +132,7 @@ func TestBuildEnvVars_KandevCLI_NotSetWhenEmpty(t *testing.T) {
 	si := service.NewSchedulerIntegration(svc, 0)
 
 	agent := &models.AgentInstance{ID: "a1", Name: "W"}
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID:      "w1",
 		Reason:  "task_assigned",
 		Payload: `{}`,

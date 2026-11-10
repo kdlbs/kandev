@@ -18,6 +18,7 @@ import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { TaskDependencyChip } from "@/components/task/task-dependency-chip";
+import { TaskGraphButton } from "@/components/task-graph/task-graph-button";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
@@ -25,6 +26,7 @@ import { ConversationUsageDisplay } from "@/components/task/chat/conversation-us
 import { TranscriptNavGroup } from "@/components/task/chat/transcript-nav-group";
 import { OpenInThreadsButton } from "@/components/threads/open-in-threads-button";
 import { useIsDeckThread } from "@/hooks/domains/threads/use-deck-thread";
+import { useSessionSubscriptionUsage } from "@/hooks/domains/session/use-session-subscription-usage";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TodoIndicator } from "./todo-indicator";
 import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
@@ -141,6 +143,8 @@ export type ChatStatusBarProps = {
   onJumpToLatest?: () => void;
   showScrollToStart?: boolean;
   onScrollToStart?: () => void;
+  /** Stable composer focus target when a dismissed chip no longer exists. */
+  onFocusComposer?: () => void;
 };
 
 export function ComposerCIStatus({
@@ -154,7 +158,12 @@ export function ComposerCIStatus({
 }) {
   return (
     <div
-      className={cn("flex flex-wrap items-center gap-1.5 empty:hidden", standalone && "px-2 py-1")}
+      className={cn(
+        "flex min-w-0 max-w-full flex-wrap items-center gap-1.5 empty:hidden",
+        !standalone &&
+          "max-md:[&_[data-slot=change-request-status-chip]]:min-h-11 max-md:[&_[data-slot=change-request-status-chip]]:min-w-11 [@media(pointer:coarse)]:[&_[data-slot=change-request-status-chip]]:min-h-11 [@media(pointer:coarse)]:[&_[data-slot=change-request-status-chip]]:min-w-11",
+        standalone && "px-2 py-1",
+      )}
     >
       <PRStatusChip taskId={taskId} />
       <MRStatusChip taskId={taskId} />
@@ -210,10 +219,11 @@ function ChatStatusBarRightControls({
   showScrollToStart,
   onScrollToStart,
 }: ChatStatusBarRightControlsProps) {
+  const subscriptionUsage = useSessionSubscriptionUsage(sessionId);
   return (
     <div
       data-testid="chat-status-bar-right-controls"
-      className="flex min-w-0 flex-wrap items-center gap-1.5 empty:hidden max-md:w-full max-md:justify-end"
+      className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 empty:hidden"
     >
       {showThreadsLink && <OpenInThreadsButton taskId={taskId} sessionId={sessionId} />}
       {showAutoScrollControl && sessionId && <AutoScrollToggleButton sessionId={sessionId} />}
@@ -234,6 +244,7 @@ function ChatStatusBarRightControls({
               taskId={taskId}
               sessionId={sessionId}
               detailActive={detailActive}
+              subscriptionBilling={subscriptionUsage}
             />
           ) : null
         }
@@ -244,6 +255,8 @@ function ChatStatusBarRightControls({
 
 /** Phones place progression above utilities; each composition follows its DOM order. */
 function ChatStatusBarActions({
+  children,
+  taskId,
   rightControlProps,
   showRightControls,
   showProceed,
@@ -252,6 +265,8 @@ function ChatStatusBarActions({
   onProceed,
   isMoving,
 }: {
+  children: ReactNode;
+  taskId: string | null;
   rightControlProps: ChatStatusBarRightControlsProps;
   showRightControls: boolean;
   showProceed: boolean;
@@ -261,30 +276,49 @@ function ChatStatusBarActions({
   isMoving: boolean;
 }) {
   const { isMobile } = useResponsiveBreakpoint();
-  if (!showRightControls && !(showProceed && nextStepName)) return null;
+  const status = (
+    <div
+      key="status"
+      className="mr-auto flex min-w-0 max-w-full flex-wrap items-center gap-1.5 [&:not(:has(>_:not(:empty)))]:hidden"
+    >
+      {children}
+    </div>
+  );
+  const banners = <ChatStatusBarArchiveBanners key="banners" taskId={taskId} />;
   const controls = showRightControls ? (
     <ChatStatusBarRightControls key="controls" {...rightControlProps} />
   ) : null;
   const proceed =
     showProceed && nextStepName ? (
-      <WorkflowMoveProceedButton
-        key="proceed"
-        previewTarget={previewTarget}
-        nextStepName={nextStepName}
-        onProceed={onProceed}
-        isMoving={isMoving}
-        className="h-6 max-w-full max-md:ml-auto max-md:h-auto max-md:min-h-11 max-md:min-w-11 max-md:whitespace-normal max-md:break-words [@media(pointer:coarse)]:h-auto [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:whitespace-normal [@media(pointer:coarse)]:break-words"
-        testId="proceed-next-step"
-      />
+      <div key="proceed" className="contents max-md:flex max-md:w-full max-md:justify-end">
+        <WorkflowMoveProceedButton
+          previewTarget={previewTarget}
+          nextStepName={nextStepName}
+          onProceed={onProceed}
+          isMoving={isMoving}
+          className="h-6 max-w-full max-md:ml-auto max-md:h-auto max-md:min-h-11 max-md:min-w-11 max-md:whitespace-normal max-md:break-words [@media(pointer:coarse)]:h-auto [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:whitespace-normal [@media(pointer:coarse)]:break-words"
+          testId="proceed-next-step"
+        />
+      </div>
     ) : null;
   return (
     <div
       data-testid="chat-status-bar-actions"
-      className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 max-md:w-full max-md:flex-col max-md:items-stretch"
+      className="ml-auto flex w-full min-w-0 flex-wrap items-center gap-1.5 md:justify-end"
     >
-      {isMobile ? [proceed, controls] : [controls, proceed]}
+      {isMobile ? [banners, proceed, status, controls] : [status, banners, controls, proceed]}
     </div>
   );
+}
+
+function useActiveAgentGoal(sessionId: string | null) {
+  const metadata = useAppStore((state) =>
+    sessionId ? readACPMetadata(state.taskSessions.items[sessionId]?.metadata) : undefined,
+  );
+  return useMemo(() => {
+    const goal = getAgentGoal(metadata);
+    return goal?.status === "active" ? goal : null;
+  }, [metadata]);
 }
 
 export function ChatStatusBar({
@@ -307,6 +341,7 @@ export function ChatStatusBar({
   onJumpToLatest,
   showScrollToStart,
   onScrollToStart,
+  onFocusComposer,
 }: ChatStatusBarProps) {
   const separateCI = useComposerDisclosureContext()?.enabled;
   const showTodos = todoItems.length > 0;
@@ -318,13 +353,7 @@ export function ChatStatusBar({
   // Asked here rather than inside the button so the cluster still renders when
   // the Threads jump is the only right-hand control this session qualifies for.
   const showThreadsLink = useIsDeckThread(taskId, sessionId);
-  const activeGoalMetadata = useAppStore((state) =>
-    sessionId ? readACPMetadata(state.taskSessions.items[sessionId]?.metadata) : undefined,
-  );
-  const activeGoal = useMemo(() => {
-    const goal = getAgentGoal(activeGoalMetadata);
-    return goal?.status === "active" ? goal : null;
-  }, [activeGoalMetadata]);
+  const activeGoal = useActiveAgentGoal(sessionId);
   const { canShare, showConversationUsage, showRightControls } = getRightControlVisibility({
     taskId,
     sessionId,
@@ -351,16 +380,15 @@ export function ChatStatusBar({
     showScrollToStart,
     onScrollToStart,
   };
-  if (
-    !shouldRenderChatStatusBar({
-      hasTask: !!taskId,
-      hasTodos: showTodos,
-      hasQueueChip: !!queueChip,
-      showRightControls,
-      showProceed,
-      hasGoal: !!activeGoal,
-    })
-  ) {
+  const renderStatusBar = shouldRenderChatStatusBar({
+    hasTask: !!taskId,
+    hasTodos: showTodos,
+    hasQueueChip: !!queueChip,
+    showRightControls,
+    showProceed,
+    hasGoal: !!activeGoal,
+  });
+  if (!renderStatusBar) {
     return null;
   }
   // PRMergedBanner returns null internally when not applicable
@@ -369,15 +397,8 @@ export function ChatStatusBar({
       data-testid="chat-status-bar"
       className="flex min-w-0 flex-wrap items-center gap-1.5 py-1 text-xs text-muted-foreground"
     >
-      {showTodos && <TodoIndicator todos={todoItems} />}
-      {autopilot && <AutopilotChatChip />}
-      <TaskDependencyChip taskId={taskId} />
-      {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
-      {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
-      <BackgroundWorkChip sessionId={sessionId} detailActive={detailActive} />
-      {queueChip}
-      <ChatStatusBarArchiveBanners taskId={taskId} />
       <ChatStatusBarActions
+        taskId={taskId}
         rightControlProps={rightControlProps}
         showRightControls={showRightControls}
         showProceed={showProceed}
@@ -385,7 +406,20 @@ export function ChatStatusBar({
         previewTarget={previewTarget}
         onProceed={onProceed}
         isMoving={isMoving}
-      />
+      >
+        {showTodos && <TodoIndicator todos={todoItems} />}
+        {autopilot && <AutopilotChatChip />}
+        <TaskDependencyChip taskId={taskId} />
+        <TaskGraphButton taskId={taskId} />
+        {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
+        {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
+        <BackgroundWorkChip
+          sessionId={sessionId}
+          detailActive={detailActive}
+          onRequestComposerFocus={onFocusComposer}
+        />
+        {queueChip}
+      </ChatStatusBarActions>
     </div>
   );
 }

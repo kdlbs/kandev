@@ -49,7 +49,7 @@ function ArchiveDismissBanner({
         data-testid={`${testIdPrefix}-banner`}
         className={cn(
           containerClass,
-          "min-w-0 max-md:order-first max-md:basis-full",
+          "min-w-[min(100%,20rem)] max-w-full basis-80 max-md:order-first max-md:basis-full",
           archive.target && !isFinePointer && "flex-wrap",
         )}
       >

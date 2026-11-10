@@ -327,6 +327,64 @@ exception rather than leaving the parity rule to over-claim.
   missing-subject behavior. The menu is closed by then, because the removal is
   observed through state rather than through a menu interaction.
 
+### External issue-link form lifetime
+
+`TaskExternalLinkDialog` owns this rule for all existing callers, including
+`SidebarLinkDialogs` and the phone task picker
+(`AC-TASKS-TASK-ACTIONS-MENU-004.7`). Key its inner form by task identifier,
+provider, and workspace, so subject replacement creates independent transient
+state. A committed opening receives a fresh local admission identity; closing
+invalidates it synchronously, and layout cleanup invalidates it on unmount or
+open-state change. StrictMode setup/cleanup must create fresh identities rather
+than revive an old request. Render attempts do not mutate admission ownership.
+
+Submit captures that identity and the original task, issue key, workspace,
+provider, and selected Sentry instance. It continues the existing lookup and
+PATCH, including reading the latest original-task title after lookup and applying
+the existing title normalization. Only the still-current identity can close the
+form or publish inline error/pending state. A stale success retains its success
+toast; a stale failure uses the existing error-toast surface instead of silently
+losing feedback or placing an error in a replacement form. There is no request
+cancellation, rollback, shared pending registry, or transport change. Field-only
+task updates do not replace an opening.
+
+### Native GitLab task-MR link lifetime
+
+`TaskMRLinkDialog` owns `AC-TASKS-TASK-ACTIONS-MENU-004.8` across conditional
+`SidebarLinkDialogs` mounts (desktop sidebar and phone task picker), retained
+`TaskActionsMenuDialogs` and card mounts, and the MR status chip/topbar. The
+Tasks system owns form completion authority; the
+[GitLab integration](../../integrations/requirements/gitlab-integration.md)
+continues to own provider permissions, URL validation and association semantics.
+
+Key an inner form by task and workspace identifiers. Give each committed open
+form and explicit repository selection a fresh local admission identity in a
+layout effect. Closing invalidates it synchronously; layout cleanup retires it on
+unmount or replacement. StrictMode effect replay must create a new identity;
+uncommitted concurrent renders must not mutate the current owner. Object-only
+metadata refreshes keep the same form. Repository changes retire completion and
+busy authority without rewriting its raw URL or moving focus. Keep default
+repository hydration and closed-form reset behavior. Passive default hydration
+fills the selector without retiring a pending admission or changing its captured
+payload; only an explicit selection change advances repository ownership.
+
+Submit captures the identity, trimmed URL, repository, workspace and task. Its
+synchronous pending bit prevents duplicate admissions before React renders.
+`createTaskMR` and `setTaskMR` continue to publish successful original-target
+associations regardless of whether their form survives. Only the current owner
+can close or clear pending state. Failures keep the existing error toast even
+when stale, without changing replacement form state. No abort, rollback,
+shared registry, API/store change or generic form framework is introduced.
+
+Permanent integration coverage uses the actual sidebar coordinator, providers,
+Radix dialog, API client and store with only fetch deferred. It also exercises
+retained mounts, task/workspace/repository replacement and return, concurrent
+requests, StrictMode, and abandoned renders. Focused desktop and phone browser
+checks use the shipped Link action, a disposable backend and mock GitLab,
+causally held responses, persisted original associations and a later Save or
+Cancel. Phone uses the shipped task-picker sheet and touch activation. The
+existing compact dialog composition and localized copy are unchanged.
+
 ## Persistence
 
 None. This capability adds no storage, no migration, and no restart behavior.

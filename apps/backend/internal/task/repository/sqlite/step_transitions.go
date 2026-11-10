@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // ListTaskStepTransitions reads newest-first ledger rows using immutable IDs.
@@ -106,9 +107,16 @@ type stepTransitionTx interface {
 // serialized against other writers of the same task row. On SQLite the
 // writer pool already serializes writers, so the plain read is sufficient.
 func (r *Repository) readTaskStepInTx(ctx context.Context, tx stepTransitionTx, taskID string) (workflowID, stepID string, found bool, err error) {
+	return r.readTaskStepInTxMode(ctx, tx, taskID, false)
+}
+
+func (r *Repository) readTaskStepInTxMode(ctx context.Context, tx stepTransitionTx, taskID string, noWait bool) (workflowID, stepID string, found bool, err error) {
 	query := `SELECT workflow_id, workflow_step_id FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += ` FOR UPDATE`
+		if noWait {
+			query += ` NOWAIT`
+		}
 	}
 	var wf, step sql.NullString
 	err = tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&wf, &step)
@@ -119,6 +127,24 @@ func (r *Repository) readTaskStepInTx(ctx context.Context, tx stepTransitionTx, 
 		return "", "", false, err
 	}
 	return wf.String, step.String, true, nil
+}
+
+const taskStateSelectQuery = `SELECT state FROM tasks WHERE id = ?`
+
+// readTaskStateInTx reads the task's current business state inside the same
+// transaction and row lock as readTaskStepInTx. Automatic admission uses it to
+// make the transition's observed state a precondition: a concurrent status
+// write that committed after the caller's snapshot must win over the move.
+func (r *Repository) readTaskStateInTx(ctx context.Context, tx stepTransitionTx, taskID string) (v1.TaskState, error) {
+	query := taskStateSelectQuery
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR UPDATE`
+	}
+	var state string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&state); err != nil {
+		return "", err
+	}
+	return v1.TaskState(state), nil
 }
 
 // stepTransitionInput is the fully-resolved shape of one ledger row, with

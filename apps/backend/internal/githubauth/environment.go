@@ -113,3 +113,25 @@ func isManagedGitCredentialHelper(value string, managed bool) bool {
 	return value == ManagedGitCredentialHelper || value == LegacyShimGitCredentialHelper ||
 		(managed && value == LegacyGitCredentialHelper)
 }
+
+// RemoveManagedCredentialEnvironment removes credentials owned by a previous execution.
+func RemoveManagedCredentialEnvironment(env map[string]string) {
+	for _, key := range []string{
+		CredentialBrokerURLEnv,
+		CredentialHelperPathEnv,
+		CredentialCLIShimDirEnv,
+		CredentialCLIBashEnvEnv,
+		CredentialParentBashEnv,
+		CredentialLeaseEnv,
+		CredentialReissueCapabilityEnv,
+		CredentialTaskIDEnv,
+		CredentialSessionIDEnv,
+		CredentialRepositoryEnv,
+		CredentialOwnerEnv,
+		CredentialRepoEnv,
+		CredentialHostEnv,
+		CredentialScopesEnv,
+	} {
+		delete(env, key)
+	}
+}

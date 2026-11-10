@@ -151,6 +151,7 @@ export function OfficeDockviewLayout({ taskId, sessionId, task }: OfficeDockview
   return (
     <VcsDialogsProvider
       sessionId={sessionId}
+      taskId={taskId}
       baseBranch={pullRequestProps.baseBranch}
       pullRequestBaseBranch={pullRequestProps.pullRequestTarget}
       pullRequestTargetsByRepository={pullRequestProps.pullRequestTargetsByRepository}

@@ -748,6 +748,17 @@ func (r *Repository) taskTransferPreservation(
 		return nil, "", err
 	}
 	counts["task_children"] = childCount
+	var compactionIDs []string
+	if err := tx.SelectContext(ctx, &compactionIDs, r.db.Rebind(`
+		SELECT c.session_id || '|' || c.provider || '|' || c.native_session_id || '|' || c.compaction_attempt_id
+		FROM task_session_compactions c
+		JOIN task_sessions s ON s.id = c.session_id
+		WHERE s.task_id = ?
+		ORDER BY 1`), taskID); err != nil {
+		return nil, "", err
+	}
+	counts["task_session_compactions"] = len(compactionIDs)
+	identities["task_session_compactions"] = compactionIDs
 	payload := struct {
 		TaskID       string                              `json:"task_id"`
 		Sessions     []models.TaskTransferSessionReceipt `json:"sessions"`

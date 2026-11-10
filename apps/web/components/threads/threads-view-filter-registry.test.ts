@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { TFunction } from "i18next";
 import type { ThreadCandidate } from "@/lib/threads/thread-view-query";
-import { getThreadFilterOptions, THREAD_SORT_OPTIONS } from "./threads-view-filter-registry";
+import {
+  getThreadFilterOptions,
+  THREAD_SORT_OPTIONS,
+  threadSortOptionsForScope,
+} from "./threads-view-filter-registry";
 
 const candidate = {
   taskId: "task-1",
@@ -35,12 +39,22 @@ describe("Threads filter option labels", () => {
 
 describe("Threads sort options", () => {
   it("gives every sort option a localized explanation", () => {
-    expect(THREAD_SORT_OPTIONS).toHaveLength(9);
+    expect(THREAD_SORT_OPTIONS).toHaveLength(10);
     expect(
       THREAD_SORT_OPTIONS.every((option) => {
         const descriptionKey = (option as { descriptionKey?: unknown }).descriptionKey;
         return typeof descriptionKey === "string" && descriptionKey.startsWith("threads:");
       }),
     ).toBe(true);
+  });
+
+  // @covers AC-UI-THREADS-SAVED-VIEWS-003.14, AC-UI-THREADS-SAVED-VIEWS-003.17
+  it("offers Selection order only for the selected task scope", () => {
+    const selectedKeys = threadSortOptionsForScope("selected").map((option) => option.key);
+    const allKeys = threadSortOptionsForScope("all").map((option) => option.key);
+
+    expect(selectedKeys).toContain("selection");
+    expect(allKeys).not.toContain("selection");
+    expect(allKeys).toHaveLength(THREAD_SORT_OPTIONS.length - 1);
   });
 });

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"strings"
 	"sync"
 	"time"
@@ -111,6 +112,9 @@ type RunDispatcher interface {
 	) error
 }
 
+// DispatchDeferredFixedProfileSuspended identifies a pre-provider circuit wait.
+const DispatchDeferredFixedProfileSuspended = "fixed_profile_suspended"
+
 // RunDispatchDeferred marks an error that must leave the admitted run open
 // for an explicit recovery action. The automation package deliberately keeps
 // this contract generic so the orchestrator can classify native-session
@@ -201,14 +205,16 @@ type ManagedConversationAutomationDelivery interface {
 
 // Service coordinates automation operations.
 type Service struct {
-	executorContext  func(context.Context, string, string) (context.Context, error)
-	pluginAutomation PluginAutomationProvider
-	store            *Store
-	eventBus         bus.EventBus
-	logger           *logger.Logger
-	taskDeleter      TaskDeleter // optional; nil-safe
-	runStopper       RunStopper  // optional; wired by the orchestrator composition
-	runLiveness      RunLivenessChecker
+	executorContext          func(context.Context, string, string) (context.Context, error)
+	pluginAutomation         PluginAutomationProvider
+	pluginToolOptions        PluginToolOptionsProvider
+	pluginToolCatalogChanged func()
+	store                    *Store
+	eventBus                 bus.EventBus
+	logger                   *logger.Logger
+	taskDeleter              TaskDeleter // optional; nil-safe
+	runStopper               RunStopper  // optional; wired by the orchestrator composition
+	runLiveness              RunLivenessChecker
 	// workflowLocator gates workflow ownership. Optional: when nil (isolated
 	// tests) ownership is not enforced.
 	workflowLocator WorkflowLocator
@@ -536,6 +542,11 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 	if err := validateManagedDestination(taskMode, req.ManagedDestination); err != nil {
 		return nil, err
 	}
+	pluginTools, unlockPluginTools, err := s.pluginToolsForSave(ctx, req.WorkspaceID, req.PluginTools, hasNativePluginToolIntent(ctx), taskMode)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockPluginTools()
 	var destinationInstallationID, destinationConversationID string
 	if taskMode == TaskModeManagedConversation {
 		if s.managedDestinationResolver == nil {
@@ -600,6 +611,7 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 		Prompt:                           req.Prompt,
 		TaskTitleTemplate:                req.TaskTitleTemplate,
 		RetryPolicy:                      req.RetryPolicy,
+		PluginTools:                      pluginTools,
 		Enabled:                          true,
 		MaxConcurrentRuns:                maxRuns,
 		ContinuationPolicy:               continuationPolicy,
@@ -637,10 +649,10 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 			return nil, err
 		}
 	}
-	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), a.ExecutorProfileID, a.WorkspaceID); err != nil {
+	if _, err := s.executorActorContext(ctx, executoridentity.CreatorUserID(ctx), a.ExecutorProfileID, a.WorkspaceID); err != nil {
 		return nil, err
 	}
-	a.CreatedByUserID = executorCreatorUserID(ctx)
+	a.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if ownerInstallationID != "" {
 		if _, err := s.store.CreateManagedSchedule(ctx, a, req.Triggers, operationID, payloadDigest); err != nil {
 			return nil, fmt.Errorf("create managed schedule: %w", err)
@@ -656,6 +668,9 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 					zap.String("automation_id", a.ID), zap.String("type", string(ts.Type)), zap.Error(err))
 			}
 		}
+	}
+	if len(pluginTools) > 0 {
+		s.notifyPluginToolCatalogChanged()
 	}
 
 	return s.store.GetAutomation(ctx, a.ID)
@@ -735,6 +750,16 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	}
 	if err := validateManagedDestination(taskMode, managedDestination); err != nil {
 		return nil, err
+	}
+	if req.PluginTools != nil {
+		if !hasNativePluginToolIntent(ctx) {
+			return nil, errors.New("plugin tools may only be changed by the native automation editor")
+		}
+		_, unlockPluginTools, err := s.pluginToolsForSave(ctx, existing.WorkspaceID, *req.PluginTools, true, taskMode)
+		if err != nil {
+			return nil, err
+		}
+		defer unlockPluginTools()
 	}
 	destinationInstallationID, destinationConversationID := "", ""
 	if taskMode == TaskModeManagedConversation {
@@ -823,10 +848,17 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 		clone.RepositoryMode = &repositoryMode
 		storeReq = &clone
 	}
+	selectionChanged := req.PluginTools != nil || (req.TaskMode != nil && taskMode != existing.TaskMode)
+	notifySelectionChanged := func() {
+		if selectionChanged {
+			s.notifyPluginToolCatalogChanged()
+		}
+	}
 	if req.Enabled != nil && !*req.Enabled {
 		if err := s.store.UpdateAutomation(ctx, id, storeReq); err != nil {
 			return nil, err
 		}
+		notifySelectionChanged()
 		if err := s.cancelAutomationWebhookReceipts(ctx, id); err != nil {
 			return nil, err
 		}
@@ -841,6 +873,7 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	if err := s.store.UpdateAutomation(ctx, id, storeReq); err != nil {
 		return nil, err
 	}
+	notifySelectionChanged()
 	return s.store.GetAutomation(ctx, id)
 }
 
@@ -926,12 +959,12 @@ func (s *Service) DeleteAutomation(ctx context.Context, id string) error {
 		return err
 	}
 	disabled := false
+	unlock := s.automationRunLock(id)
+	defer unlock()
 	if err := s.store.UpdateAutomation(ctx, id, &UpdateAutomationRequest{Enabled: &disabled}); err != nil {
 		return err
 	}
 
-	unlock := s.automationRunLock(id)
-	defer unlock()
 	cleanupTaskIDs, err := s.hiddenAutomationTaskIDs(ctx, id)
 	if err != nil {
 		return err

@@ -31,7 +31,7 @@ import { TaskLaunchErrorProvider } from "./task-launch-error-context";
 import { PreviewTaskErrorShell } from "./preview-task-error-shell";
 import { type SessionRecoveryOwner } from "@/lib/session-recovery-presentation";
 import type { HandoffPreset } from "./new-session-dialog";
-import { MAX_SESSION_NAME_LENGTH, useSessionRenameCommitter } from "./use-session-rename";
+import { limitSessionName, useSessionRenameCommitter } from "./use-session-rename";
 import {
   buildAgentLabelsById,
   isSessionActive,
@@ -179,7 +179,7 @@ function useBuildPreviewTabs({
                 onCommit={dialogs.handleCommitRename}
                 onCancel={() => dialogs.setRenamingSessionId(null)}
                 testId="preview-session-tab-rename-input"
-                maxLength={MAX_SESSION_NAME_LENGTH}
+                limitValue={limitSessionName}
               />
             ) : undefined,
         };

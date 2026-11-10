@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 
-	"github.com/kandev/kandev/internal/office/models"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
@@ -20,9 +21,9 @@ import (
 // seeded by seedClaimAgent for the same agentID.
 func queueRunAt(
 	t *testing.T, repo *runssqlite.Repository, id, agentID string, requestedAt time.Time,
-) *models.Run {
+) *runsmodels.Run {
 	t.Helper()
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             id,
 		AgentProfileID: agentID,
 		WorkspaceID:    claimTestWorkspace(agentID),
@@ -126,7 +127,7 @@ func TestClaimRun_ConcurrentClaimsAreExclusive(t *testing.T) {
 		queueRunAt(t, repo, string(rune('a'+i))+"-run", "a1", base.Add(time.Duration(i)*time.Minute))
 	}
 
-	ids, noRows := runConcurrentClaims(t, claimers, func() (*models.Run, error) {
+	ids, noRows := runConcurrentClaims(t, claimers, func() (*runsmodels.Run, error) {
 		return repo.ClaimRun(ctx, "a1")
 	})
 
@@ -282,7 +283,7 @@ func TestClaimNextEligibleRun_ConcurrentClaimsRespectOnePerAgent(t *testing.T) {
 	}
 
 	const claimers = 10
-	ids, noRows := runConcurrentClaims(t, claimers, func() (*models.Run, error) {
+	ids, noRows := runConcurrentClaims(t, claimers, func() (*runsmodels.Run, error) {
 		return repo.ClaimNextEligibleRun(ctx)
 	})
 
@@ -301,11 +302,11 @@ func TestClaimNextEligibleRun_ConcurrentClaimsRespectOnePerAgent(t *testing.T) {
 // closing a start channel, and returns the claimed IDs plus the number
 // of sql.ErrNoRows results. Any other error fails the test.
 func runConcurrentClaims(
-	t *testing.T, n int, claim func() (*models.Run, error),
+	t *testing.T, n int, claim func() (*runsmodels.Run, error),
 ) ([]string, int) {
 	t.Helper()
 	start := make(chan struct{})
-	results := make(chan *models.Run, n)
+	results := make(chan *runsmodels.Run, n)
 	errs := make(chan error, n)
 
 	var wg sync.WaitGroup

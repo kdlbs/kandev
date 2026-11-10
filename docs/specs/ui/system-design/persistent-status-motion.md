@@ -7,9 +7,40 @@ requirements:
   - REQ-UI-PERSISTENT-STATUS-MOTION-003
   - REQ-UI-PERSISTENT-STATUS-MOTION-004
   - REQ-UI-PERSISTENT-STATUS-MOTION-005
+  - REQ-UI-PERSISTENT-STATUS-MOTION-006
 ---
 
 # Persistent Status Motion System Design
+
+## Reduced-motion extension
+
+`REQ-UI-PERSISTENT-STATUS-MOTION-006` governs reduced-motion behavior.
+This section supersedes earlier preservation of each primitive's reduced-motion
+policy only for the host-owned persistent indicators in that requirement.
+
+Reuse `persistent-motion-visibility.tsx`, `CompositorSpin`, `CompositorPulse`,
+and `GridSpinner`. The shared visibility helper already exists; do not rebuild
+its document/intersection lifecycle. Keep no-preference timing, stagger, color,
+geometry, and labels. Suppress infinite motion when `matchMedia` reports reduce,
+including runtime preference changes. Set a deliberate static transform and
+opacity so a grid cell cannot stop at zero scale or a status at zero opacity.
+Scope equivalent CSS fallback rules to owned indicators. Do not scan and pause
+all document animations. Cancel or pause owned effects consistently and clean
+up preference listeners. A visible unfocused split pane remains eligible for
+normal motion. Hidden document, offscreen target, and hidden panel gates remain.
+
+The shared `@kandev/ui/spinner` also supplies persistent loading indicators on
+host-rendered plugin actions. Its CSS rotation uses `motion-reduce:animate-none`
+to keep the same visible SVG and accessible busy semantics under reduce. The
+media query responds to preference changes without another observer or listener.
+Normal rotation and the action's enabled state remain unchanged. The same rule
+also applies to bounded uses of this shared component.
+
+Component tests cover preference changes, fallback, active-state changes while
+hidden, and cleanup. Desktop and phone browser tests assert visible static
+status under reduce and the original visible motion under no-preference.
+Performance captures count running and paused animations separately; the
+number returned by `getAnimations()` is not an active-animation count.
 
 ## Purpose and boundaries
 
@@ -31,6 +62,9 @@ One-shot attention and transition effects remain outside this design.
 | `REQ-UI-PERSISTENT-STATUS-MOTION-001` | [Motion primitive](#motion-primitive), [Status surfaces](#status-surfaces), [Desktop and mobile composition](#desktop-and-mobile-composition)                                                         |
 | `REQ-UI-PERSISTENT-STATUS-MOTION-002` | [Grid activity motion](#grid-activity-motion), [Animation lifecycle and fallback](#animation-lifecycle-and-fallback), [Verification and performance evidence](#verification-and-performance-evidence) |
 | `REQ-UI-PERSISTENT-STATUS-MOTION-003` | [Opacity pulse motion](#opacity-pulse-motion), [Desktop and mobile composition](#desktop-and-mobile-composition), [Verification and performance evidence](#verification-and-performance-evidence)     |
+
+Requirement 004 maps to [Visibility lifecycle](#visibility-lifecycle).
+Requirement 006 maps to [Reduced-motion extension](#reduced-motion-extension).
 
 ## Motion primitive
 
@@ -65,7 +99,9 @@ per-cell stagger from `apps/web/app/globals.css`.
 
 The CSS classes remain the visual and compatibility contract. The component
 reads the computed CSS timing before it disables CSS sampling on each live
-animation target. The Web Animations effects then own the same staggered motion.
+animation target. Change only `animation-name` so the visibility controller
+retains its separate `animation-play-state` pause through preference changes.
+The Web Animations effects then own the same staggered motion.
 The grid wrapper retains its dimensions, `role="status"`, translated accessible
 label, and public class names. The cube elements remain decorative.
 
@@ -203,23 +239,10 @@ and restores CSS for all nine cells so one grid never mixes timing engines.
 The wrapper preserves existing test IDs and semantic attributes. Tests and
 assistive technology do not need to depend on the nested SVG element.
 
-## Proposed rendering CPU follow-up
-
-This section is draft. Earlier sections describe the accepted implementation.
-The [follow-up plan](../../../plans/frontend-rendering-cpu/plan.md) owns delivery
-and the outstanding attribution investigation.
-
-### Mapping
-
-| Requirement                         | Proposed boundary             |
-| ----------------------------------- | ----------------------------- |
-| REQ-UI-PERSISTENT-STATUS-MOTION-004 | Visibility lifecycle below    |
-| REQ-UI-PERSISTENT-STATUS-MOTION-005 | Context-ring transition below |
-
-### Visibility lifecycle
+## Visibility lifecycle
 
 Keep animation ownership in `CompositorSpin`, `CompositorPulse`, and
-`GridSpinner`. Introduce a small shared lifecycle helper in
+`GridSpinner`. Reuse the shared lifecycle helper in
 `apps/packages/ui/src/` for their owned animation handles. It must not scan or
 pause arbitrary document animations in production. Diagnostic controls may do
 so only inside the isolated performance fixture.
@@ -242,11 +265,33 @@ fallbacks. Restore prior inline declarations on cleanup. A new effect created
 while hidden starts paused, including after a class or reduced-motion change.
 Cancel old handles before replacement. Disconnect observers and listeners on
 unmount. If observation is unavailable, assume intersection and retain document
-visibility gating. Preserve each primitive's existing reduced-motion policy.
+visibility gating. Preserve each primitive's reduced-motion policy from requirement 006.
+
+The legacy Threads status SVG uses this same helper directly for requirements
+004 and 006. It retains its current transform target while the separate 001
+HTML-target migration remains unresolved. The board passes geometric column
+visibility, independently of detail activation or preload eligibility. A known
+hidden owner pauses before paint and allocates no intersection observer. A
+visible owner also checks the icon's intersection. Unknown board geometry
+retains the intersection/document fallback. Retired observer callbacks cannot
+change current eligibility. This path adds no wrapper or animation engine.
 
 Domain updates and subscriptions continue while presentation motion pauses.
 Do not unmount editors, transcripts, terminals, or panels to pause an indicator.
 Do not introduce settings, persistence, backend changes, or plugin controls.
+
+## Proposed rendering CPU follow-up
+
+The context-ring and attribution work in this section remains draft. Earlier
+sections describe the accepted status-motion implementation.
+The [follow-up plan](../../../plans/frontend-rendering-cpu/plan.md) owns delivery
+and the outstanding attribution investigation.
+
+### Mapping
+
+| Requirement                         | Proposed boundary             |
+| ----------------------------------- | ----------------------------- |
+| REQ-UI-PERSISTENT-STATUS-MOTION-005 | Context-ring transition below |
 
 ### Context-ring transition
 

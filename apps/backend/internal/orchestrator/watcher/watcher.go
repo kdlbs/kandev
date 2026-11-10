@@ -46,6 +46,7 @@ type AgentEventData struct {
 	AgentID                   string                                `json:"agent_id,omitempty"`
 	AgentProfileID            string                                `json:"agent_profile_id"`
 	ExecutionProfileID        string                                `json:"execution_profile_id,omitempty"`
+	ResourceCircuitKey        string                                `json:"resource_circuit_key,omitempty"`
 	TurnID                    string                                `json:"turn_id,omitempty"`
 	DeliveryStreamID          string                                `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string                                `json:"delivery_incarnation_id,omitempty"`
@@ -72,15 +73,17 @@ type AgentEventData struct {
 	RecoveredAvailabilityOnly bool                                  `json:"recovered_availability_only,omitempty"`
 	RunID                     string                                `json:"run_id,omitempty"`
 	CausingRunID              string                                `json:"causing_run_id,omitempty"`
+	TerminalCausingRunID      string                                `json:"terminal_causing_run_id,omitempty"`
 	// DynamicRouteAttempt marks failures and stream evidence that belong to a
 	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
 	// explicitly known to contain no output or effects.
-	DynamicRouteAttempt         bool   `json:"dynamic_route_attempt,omitempty"`
-	EvidenceKnown               bool   `json:"evidence_known,omitempty"`
-	OutputObserved              bool   `json:"output_observed,omitempty"`
-	EffectObserved              bool   `json:"effect_observed,omitempty"`
-	ProviderDiagnosticCandidate bool   `json:"provider_diagnostic_candidate,omitempty"`
-	ProviderDiagnosticText      string `json:"provider_diagnostic_text,omitempty"`
+	DynamicRouteAttempt         bool                      `json:"dynamic_route_attempt,omitempty"`
+	EvidenceKnown               bool                      `json:"evidence_known,omitempty"`
+	OutputObserved              bool                      `json:"output_observed,omitempty"`
+	EffectObserved              bool                      `json:"effect_observed,omitempty"`
+	ProviderDiagnosticCandidate bool                      `json:"provider_diagnostic_candidate,omitempty"`
+	ProviderDiagnosticText      string                    `json:"provider_diagnostic_text,omitempty"`
+	Storage                     *models.AgentErrorStorage `json:"storage,omitempty"`
 	// UserInitiated marks a failure event raised by an explicit user action
 	// (cancelling the transient retry loop) rather than the agent itself
 	// failing. Set only at CancelTransientRetry's call site; every other
@@ -108,16 +111,22 @@ type ACPSessionEventData struct {
 
 // PermissionRequestData contains data from permission_request events
 type PermissionRequestData struct {
-	TaskID        string                   `json:"task_id"`
-	TaskSessionID string                   `json:"session_id"`
-	AgentID       string                   `json:"agent_id"`
-	RequestID     string                   `json:"request_id"`
-	PendingID     string                   `json:"pending_id"`
-	ToolCallID    string                   `json:"tool_call_id"`
-	Title         string                   `json:"title"`
-	Options       []map[string]interface{} `json:"options"`
-	ActionType    string                   `json:"action_type"`
-	ActionDetails map[string]interface{}   `json:"action_details"`
+	TaskID        string `json:"task_id"`
+	TaskSessionID string `json:"session_id"`
+	AgentID       string `json:"agent_id"`
+	// OwnerKind is "run" for a run-owned Office execution, which Office
+	// answers; the task permission path ignores it.
+	OwnerKind  string                   `json:"owner_kind,omitempty"`
+	RequestID  string                   `json:"request_id"`
+	PendingID  string                   `json:"pending_id"`
+	ToolCallID string                   `json:"tool_call_id"`
+	Title      string                   `json:"title"`
+	Options    []map[string]interface{} `json:"options"`
+	// HumanInput marks a provider-native question only a person can answer.
+	// Automatic consumers must leave it pending.
+	HumanInput    bool                   `json:"human_input,omitempty"`
+	ActionType    string                 `json:"action_type"`
+	ActionDetails map[string]interface{} `json:"action_details"`
 	// AutoApprovedOptionID names the option agentctl already selected on the
 	// user's behalf. Nonempty means the request is recorded, not pending.
 	AutoApprovedOptionID   string `json:"auto_approved_option_id,omitempty"`
@@ -148,14 +157,16 @@ type TaskMovedEventData struct {
 
 // ContextWindowData contains data from context window events
 type ContextWindowData struct {
-	TaskID                 string  `json:"task_id"`
-	TaskSessionID          string  `json:"session_id"`
-	AgentID                string  `json:"agent_id"`
-	ContextWindowSize      int64   `json:"context_window_size"`
-	ContextWindowUsed      int64   `json:"context_window_used"`
-	ContextWindowRemaining int64   `json:"context_window_remaining"`
-	ContextEfficiency      float64 `json:"context_efficiency"`
-	Timestamp              string  `json:"timestamp"`
+	TaskID                      string  `json:"task_id"`
+	TaskSessionID               string  `json:"session_id"`
+	AgentID                     string  `json:"agent_id"`
+	ContextWindowSize           int64   `json:"context_window_size"`
+	ContextWindowUsed           int64   `json:"context_window_used"`
+	ContextWindowRemaining      int64   `json:"context_window_remaining"`
+	ContextEfficiency           float64 `json:"context_efficiency"`
+	CompactionInferenceDisabled bool    `json:"compaction_inference_disabled,omitempty"`
+	CopilotNativeSessionEvents  bool    `json:"copilot_native_session_events,omitempty"`
+	Timestamp                   string  `json:"timestamp"`
 }
 
 // EventHandlers contains callbacks for different event types
@@ -537,6 +548,7 @@ func (w *Watcher) createAgentEventHandler(handler func(ctx context.Context, data
 			return nil // Don't return error to continue processing other events
 		}
 
+		data = withDeliveryStorageCause(data)
 		w.logger.Debug("Handling agent event",
 			zap.String("event_type", event.Type),
 			zap.String("task_id", data.TaskID),

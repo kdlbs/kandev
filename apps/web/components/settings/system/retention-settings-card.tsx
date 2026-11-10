@@ -163,7 +163,8 @@ function useRetentionDraft(remote: ReturnType<typeof useRetentionSettings>, isAd
     save: async () => {
       if (!draft) return;
       if (invalidFields.size > 0) throw new Error(t("system:retentionInvalidFields"));
-      await remote.save(draft);
+      const saved = await remote.save(draft);
+      setDraft((current) => (serialize(current) === serialize(draft) ? saved : current));
     },
     discard: () => {
       if (saved) setDraft(saved);

@@ -1,6 +1,7 @@
 package github
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -88,4 +89,12 @@ func (c *pollerCircuits) summary(now time.Time) (openAuth, openConfig, openTrans
 		}
 	}
 	return openAuth, openConfig, openTransient
+}
+
+// Local admission deferrals do not represent a failed provider request.
+func (c *pollerCircuits) recordError(workspaceID string, err error, now time.Time) {
+	if errors.Is(err, ErrBackgroundAdmissionDeferred) {
+		return
+	}
+	c.recordOutcome(workspaceID, classifyPollErr(err), now)
 }

@@ -33,7 +33,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -56,13 +57,13 @@ func TestCarrierSetCompleteness_CarrierKeysHaveNoDuplicates(t *testing.T) {
 }
 
 func TestCarrierSetCompleteness_WriteSideKeySetMatchesCarrierKeys(t *testing.T) {
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID:               "run-completeness-1",
 		ChainCausationID: "causation-completeness-1",
 		CausationDepth:   3,
 		HumanRooted:      true,
 		RoutineID:        "routine-completeness-1",
-		ActorKind:        models.ActorKindAgent,
+		ActorKind:        runsmodels.ActorKindAgent,
 		ActorID:          "agent-completeness-1",
 	}
 	written := carrierMetadataFromRun(run)
@@ -123,7 +124,7 @@ var runCausationNamedValues = []runCausationNamedValue{
 // struct rather than assumed to still exist.
 func runModelDBColumns(t *testing.T) map[string]bool {
 	t.Helper()
-	typ := reflect.TypeOf(models.Run{})
+	typ := reflect.TypeOf(runsmodels.Run{})
 	cols := make(map[string]bool, typ.NumField())
 	for i := 0; i < typ.NumField(); i++ {
 		tag := typ.Field(i).Tag.Get("db")
@@ -182,13 +183,13 @@ func TestCarrierSetCompleteness_EveryACNamedValueIsCarriedOrDocumentedRederivabl
 }
 
 func TestCarrierSetCompleteness_ReadSideDecodesEveryWrittenKey(t *testing.T) {
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID:               "run-completeness-2",
 		ChainCausationID: "causation-completeness-2",
 		CausationDepth:   5,
 		HumanRooted:      true,
 		RoutineID:        "routine-completeness-2",
-		ActorKind:        models.ActorKindAgent,
+		ActorKind:        runsmodels.ActorKindAgent,
 		ActorID:          "agent-completeness-2",
 	}
 	written := carrierMetadataFromRun(run)

@@ -114,6 +114,15 @@ At exhaustion, publish unavailable. An authorized explicit retry starts a new bo
 Duplicate retry requests join the existing episode; they do not reset its budget.
 Initial backend startup uses existing startup failure semantics.
 
+Candidate provisioning uses a bounded attempt context for health checks,
+authentication, adoption and owner-record persistence. Ownership renewal for
+both fresh and adopted servers, and monitoring of an adopted server, use the
+backend lifetime context. Returning from a replacement attempt cancels only
+its provisioning work. The runtime binding retains explicit cleanup for the
+renewal loop and monitor: abort, retirement and backend shutdown stop those
+resources even while the backend lifetime context remains live. Startup
+defaults the lifetime context to its existing launch context.
+
 ## Session recovery
 
 Fence affected local executions by old runtime epoch under existing admission guards.

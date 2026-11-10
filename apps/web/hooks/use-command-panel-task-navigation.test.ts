@@ -38,3 +38,20 @@ describe("useCommandPanelTaskNavigation", () => {
     expect(mockPush).toHaveBeenNthCalledWith(2, "/t/task-b");
   });
 });
+
+it("opens the session that contains the conversation match", () => {
+  const { result } = renderHook(() => useCommandPanelTaskNavigation("/", null));
+  act(() =>
+    result.current({
+      ...task("found"),
+      conversation_match: {
+        session_id: "matching-session",
+        message_id: "m1",
+        author_type: "agent",
+        excerpt: "needle",
+        highlight_ranges: [[0, 6]],
+      },
+    }),
+  );
+  expect(mockPush).toHaveBeenLastCalledWith("/t/found?sessionId=matching-session");
+});

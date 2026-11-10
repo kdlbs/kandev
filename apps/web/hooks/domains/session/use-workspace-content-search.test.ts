@@ -1,22 +1,19 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockSearchWorkspaceContent = vi.fn();
-const mockClient = { request: vi.fn() };
+const { mockRequest } = vi.hoisted(() => ({ mockRequest: vi.fn() }));
+const mockClient = { request: mockRequest };
+const TRANSPORT_ERROR = "transport-error";
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => mockClient,
-}));
-
-vi.mock("@/lib/ws/workspace-files", () => ({
-  searchWorkspaceContent: (...args: unknown[]) => mockSearchWorkspaceContent(...args),
 }));
 
 import { useWorkspaceContentSearch } from "./use-workspace-content-search";
 
 beforeEach(() => {
   vi.useFakeTimers();
-  mockSearchWorkspaceContent.mockReset();
+  mockRequest.mockReset();
 });
 
 afterEach(() => {
@@ -36,7 +33,7 @@ describe("useWorkspaceContentSearch request lifecycle", () => {
         match_ranges: [{ start: 0, end: 6 }],
       },
     ];
-    mockSearchWorkspaceContent.mockResolvedValue({ results });
+    mockRequest.mockResolvedValue({ results });
     const { result } = renderHook(() =>
       useWorkspaceContentSearch({
         enabled: true,
@@ -47,12 +44,16 @@ describe("useWorkspaceContentSearch request lifecycle", () => {
 
     expect(result.current.isSearching).toBe(true);
     await act(async () => vi.advanceTimersByTimeAsync(249));
-    expect(mockSearchWorkspaceContent).not.toHaveBeenCalled();
+    expect(mockRequest).not.toHaveBeenCalled();
 
     await act(async () => vi.runAllTimersAsync());
 
-    expect(mockSearchWorkspaceContent).toHaveBeenCalledWith(mockClient, "session-1", "needle", 50);
-    expect(mockSearchWorkspaceContent).toHaveBeenCalledTimes(8);
+    expect(mockRequest).toHaveBeenCalledWith("workspace.content.search", {
+      session_id: "session-1",
+      query: "needle",
+      limit_per_repo: 50,
+    });
+    expect(mockRequest).toHaveBeenCalledTimes(8);
     expect(result.current.results).toEqual(results);
     expect(result.current.isSearching).toBe(false);
   });
@@ -68,7 +69,7 @@ describe("useWorkspaceContentSearch request lifecycle", () => {
         match_ranges: [{ start: 0, end: 13 }],
       },
     ];
-    mockSearchWorkspaceContent.mockResolvedValue({ results });
+    mockRequest.mockResolvedValue({ results });
     const { result } = renderHook(() =>
       useWorkspaceContentSearch({
         enabled: true,
@@ -79,7 +80,7 @@ describe("useWorkspaceContentSearch request lifecycle", () => {
 
     await act(async () => vi.advanceTimersByTimeAsync(250));
 
-    expect(mockSearchWorkspaceContent).toHaveBeenCalledTimes(1);
+    expect(mockRequest).toHaveBeenCalledTimes(1);
     expect(result.current.results).toEqual(results);
     expect(result.current.isSearching).toBe(true);
 
@@ -98,7 +99,7 @@ describe("useWorkspaceContentSearch request lifecycle", () => {
         match_ranges: [],
       },
     ];
-    mockSearchWorkspaceContent.mockResolvedValue({ results: previousResults });
+    mockRequest.mockResolvedValue({ results: previousResults });
     const { result, rerender } = renderHook(
       ({ query }) => useWorkspaceContentSearch({ enabled: true, query, sessionId: "session-1" }),
       { initialProps: { query: "previous" } },
@@ -123,7 +124,7 @@ describe("useWorkspaceContentSearch retry publishing", () => {
       preview: "primary needle",
       match_ranges: [],
     };
-    mockSearchWorkspaceContent.mockResolvedValue({ results: [primaryResult] });
+    mockRequest.mockResolvedValue({ results: [primaryResult] });
     const { result } = renderHook(() =>
       useWorkspaceContentSearch({
         enabled: true,
@@ -134,13 +135,13 @@ describe("useWorkspaceContentSearch retry publishing", () => {
 
     await act(async () => vi.advanceTimersByTimeAsync(250));
 
-    expect(mockSearchWorkspaceContent).toHaveBeenCalledTimes(1);
+    expect(mockRequest).toHaveBeenCalledTimes(1);
     expect(result.current.results).toEqual([primaryResult]);
     expect(result.current.isSearching).toBe(true);
   });
 
   it("clears results without sending when search is disabled", async () => {
-    mockSearchWorkspaceContent.mockResolvedValue({ results: [] });
+    mockRequest.mockResolvedValue({ results: [] });
     const { result, rerender } = renderHook(
       ({ enabled, query }) => useWorkspaceContentSearch({ enabled, query, sessionId: "session-1" }),
       { initialProps: { enabled: true, query: "needle" } },
@@ -149,7 +150,7 @@ describe("useWorkspaceContentSearch retry publishing", () => {
     rerender({ enabled: false, query: "needle" });
     await act(async () => vi.runAllTimersAsync());
 
-    expect(mockSearchWorkspaceContent).not.toHaveBeenCalled();
+    expect(mockRequest).not.toHaveBeenCalled();
     expect(result.current.results).toEqual([]);
     expect(result.current.isSearching).toBe(false);
   });
@@ -165,7 +166,7 @@ describe("useWorkspaceContentSearch validation and failures", () => {
       }),
     );
 
-    expect(mockSearchWorkspaceContent).not.toHaveBeenCalled();
+    expect(mockRequest).not.toHaveBeenCalled();
     expect(result.current.error).toBe("session-unavailable");
   });
 
@@ -179,13 +180,13 @@ describe("useWorkspaceContentSearch validation and failures", () => {
     );
     await act(async () => vi.runAllTimersAsync());
 
-    expect(mockSearchWorkspaceContent).not.toHaveBeenCalled();
+    expect(mockRequest).not.toHaveBeenCalled();
     expect(result.current.error).toBe("query-too-long");
     expect(result.current.isSearching).toBe(false);
   });
 
   it("distinguishes a transport failure from an empty result", async () => {
-    mockSearchWorkspaceContent.mockRejectedValue(new Error("offline"));
+    mockRequest.mockRejectedValue(new Error("offline"));
     const { result } = renderHook(() =>
       useWorkspaceContentSearch({
         enabled: true,
@@ -197,7 +198,7 @@ describe("useWorkspaceContentSearch validation and failures", () => {
     await act(async () => vi.runAllTimersAsync());
 
     expect(result.current.results).toEqual([]);
-    expect(result.current.error).toBe("transport-error");
+    expect(result.current.error).toBe(TRANSPORT_ERROR);
     expect(result.current.isSearching).toBe(false);
   });
 
@@ -218,7 +219,7 @@ describe("useWorkspaceContentSearch validation and failures", () => {
       preview: "extra needle",
       match_ranges: [],
     };
-    mockSearchWorkspaceContent
+    mockRequest
       .mockResolvedValueOnce({ results: [primary] })
       .mockResolvedValueOnce({ results: [primary, extra] })
       .mockResolvedValue({ results: [primary, extra] });
@@ -244,7 +245,7 @@ describe("useWorkspaceContentSearch validation and failures", () => {
       preview: "needle",
       match_ranges: [],
     };
-    mockSearchWorkspaceContent.mockResolvedValue({ results: [match] });
+    mockRequest.mockResolvedValue({ results: [match] });
     const { result } = renderHook(() =>
       useWorkspaceContentSearch({
         enabled: true,
@@ -283,7 +284,7 @@ describe("useWorkspaceContentSearch stale responses", () => {
       },
     ];
     let resolveFirst: ((value: { results: typeof firstResults }) => void) | undefined;
-    mockSearchWorkspaceContent
+    mockRequest
       .mockImplementationOnce(
         () =>
           new Promise<{ results: typeof firstResults }>((resolve) => {
@@ -302,7 +303,7 @@ describe("useWorkspaceContentSearch stale responses", () => {
     await act(async () => resolveFirst?.({ results: firstResults }));
     await act(async () => vi.runAllTimersAsync());
 
-    expect(mockSearchWorkspaceContent).toHaveBeenCalledTimes(9);
+    expect(mockRequest).toHaveBeenCalledTimes(9);
     expect(result.current.results).toEqual(secondResults);
     expect(result.current.isSearching).toBe(false);
   });
@@ -318,7 +319,7 @@ describe("useWorkspaceContentSearch stale responses", () => {
     };
     const current = { ...stale, repository_name: "current-checkout", path: "src/current.ts" };
     let resolveStale: ((value: { results: (typeof stale)[] }) => void) | undefined;
-    mockSearchWorkspaceContent
+    mockRequest
       .mockImplementationOnce(
         () =>
           new Promise<{ results: (typeof stale)[] }>((resolve) => {
@@ -373,7 +374,7 @@ describe("useWorkspaceContentSearch incremental publishing", () => {
       preview: "extra needle",
       match_ranges: [],
     };
-    mockSearchWorkspaceContent
+    mockRequest
       .mockResolvedValueOnce({ results: [primary] })
       .mockResolvedValue({ results: [primary, extra] });
     const { result } = renderHook(() =>
@@ -407,7 +408,7 @@ describe("useWorkspaceContentSearch incremental publishing", () => {
       match_ranges: [],
     };
     let resolveStale: ((value: { results: (typeof staleResult)[] }) => void) | undefined;
-    mockSearchWorkspaceContent
+    mockRequest
       .mockImplementationOnce(
         () =>
           new Promise<{ results: (typeof staleResult)[] }>((resolve) => {
@@ -433,4 +434,138 @@ describe("useWorkspaceContentSearch incremental publishing", () => {
 
     expect(result.current.results).toEqual([liveResult]);
   });
+});
+
+// @covers AC-UI-TASK-WORKSPACE-CONTENT-SEARCH-001.10
+// Only request transport is mocked; retries use the actual hook and WS wrapper.
+describe("useWorkspaceContentSearch retry recovery", () => {
+  it.each([
+    [
+      "initial failure followed by successful empty responses",
+      [false, true, true, true, true, true, true, true],
+      null,
+    ],
+    [
+      "middle failure followed by successful empty responses",
+      [true, false, true, true, true, true, true, true],
+      null,
+    ],
+    ["recovery on the last attempt", [false, false, false, false, false, false, false, true], null],
+    ["healthy empty search", [true, true, true, true, true, true, true, true], null],
+    [
+      "every attempt fails",
+      [false, false, false, false, false, false, false, false],
+      TRANSPORT_ERROR,
+    ],
+    [
+      "only the final attempt fails",
+      [true, true, true, true, true, true, true, false],
+      TRANSPORT_ERROR,
+    ],
+    [
+      "recovery followed by another terminal failure",
+      [false, true, true, true, true, true, true, false],
+      TRANSPORT_ERROR,
+    ],
+  ] as const)("settles %s", async (_scenario, successfulAttempts, error) => {
+    for (const success of successfulAttempts) {
+      if (success) mockRequest.mockResolvedValueOnce({ results: [] });
+      else mockRequest.mockRejectedValueOnce(new Error("temporary disconnect"));
+    }
+    const { result } = renderHook(() =>
+      useWorkspaceContentSearch({ enabled: true, query: "needle", sessionId: "session-1" }),
+    );
+
+    await act(async () => vi.runAllTimersAsync());
+
+    expect(mockRequest).toHaveBeenCalledTimes(8);
+    expect(mockRequest).toHaveBeenLastCalledWith("workspace.content.search", {
+      session_id: "session-1",
+      query: "needle",
+      limit_per_repo: 50,
+    });
+    expect(result.current).toEqual({ results: [], isSearching: false, error });
+  });
+});
+
+describe("useWorkspaceContentSearch recovery preserves polling and cancellation", () => {
+  it("retains and deduplicates raw repository matches across failed and empty attempts", async () => {
+    const root = {
+      repository_name: "",
+      path: " src/shared.ts ",
+      line: 4,
+      column: 2,
+      preview: "needle",
+      match_ranges: [{ start: 0, end: 6 }],
+    };
+    const child = { ...root, repository_name: "child/raw" };
+    mockRequest
+      .mockRejectedValueOnce(new Error("initial failure"))
+      .mockResolvedValueOnce({ results: [root] })
+      .mockRejectedValueOnce(new Error("middle failure"))
+      .mockResolvedValueOnce({ results: [root, child] })
+      .mockResolvedValueOnce({ results: [] })
+      .mockRejectedValue(new Error("terminal failures"));
+    const { result } = renderHook(() =>
+      useWorkspaceContentSearch({ enabled: true, query: "needle", sessionId: "session-1" }),
+    );
+
+    await act(async () => vi.advanceTimersByTimeAsync(750));
+    expect(result.current).toEqual({ results: [root], isSearching: true, error: null });
+    await act(async () => vi.runAllTimersAsync());
+
+    expect(mockRequest).toHaveBeenCalledTimes(8);
+    expect(result.current).toEqual({ results: [root, child], isSearching: false, error: null });
+  });
+
+  it("retains the debounce and retry spacing during recovery", async () => {
+    mockRequest.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ results: [] });
+    const { result } = renderHook(() =>
+      useWorkspaceContentSearch({ enabled: true, query: "needle", sessionId: "session-1" }),
+    );
+
+    await act(async () => vi.advanceTimersByTimeAsync(249));
+    expect(mockRequest).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(mockRequest).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(499));
+    expect(mockRequest).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(mockRequest).toHaveBeenCalledTimes(2);
+    expect(result.current).toEqual({ results: [], isSearching: true, error: null });
+    await act(async () => vi.runAllTimersAsync());
+    expect(result.current).toEqual({ results: [], isSearching: false, error: null });
+  });
+
+  it.each(["query", "sessionId", "inventoryRevision", "enabled"] as const)(
+    "ignores an old failure after %s changes",
+    async (key) => {
+      let rejectOld: (error: Error) => void = () => {};
+      mockRequest
+        .mockImplementationOnce(
+          () =>
+            new Promise((_resolve, reject) => {
+              rejectOld = reject;
+            }),
+        )
+        .mockResolvedValue({ results: [] });
+      const initialProps = {
+        enabled: true,
+        query: "needle",
+        sessionId: "session-1",
+        inventoryRevision: "before",
+      };
+      const { result, rerender } = renderHook(useWorkspaceContentSearch, { initialProps });
+      await act(async () => vi.advanceTimersByTimeAsync(250));
+
+      rerender({ ...initialProps, [key]: key === "enabled" ? false : "replacement" });
+      await act(async () => vi.runAllTimersAsync());
+      expect(result.current).toEqual({ results: [], isSearching: false, error: null });
+      await act(async () => rejectOld(new Error("stale disconnect")));
+      await act(async () => vi.runAllTimersAsync());
+
+      expect(mockRequest).toHaveBeenCalledTimes(key === "enabled" ? 1 : 9);
+      expect(result.current).toEqual({ results: [], isSearching: false, error: null });
+    },
+  );
 });

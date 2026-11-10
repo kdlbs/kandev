@@ -224,22 +224,20 @@ describe("PRStatusChip auto-fix round display", () => {
     const [explanation] = await screen.findAllByTestId(ROUND_EXPLANATION_TESTID);
     expect(explanation.textContent).toContain("Auto-fix has used 1 of 10 rounds");
     expect(explanation.textContent).toContain(
-      "Kandev waits for all PR checks to finish before starting a new CI auto-fix turn",
+      "Kandev waits for all PR checks before starting the next fix",
+    );
+    expect(explanation.textContent).toContain("Updating a queued message uses no extra round");
+    expect(explanation.textContent).toContain(
+      "auto-fix pauses once no queued message remains to update",
     );
     expect(explanation.textContent).toContain(
-      "Updating an already queued auto-fix message does not use another round",
+      "If the agent reports no outcome, Kandev may retry the same feedback",
     );
     expect(explanation.textContent).toContain(
-      "pauses auto-fix for this PR so it cannot loop forever",
+      "After the agent makes a change, Kandev waits for GitHub to update before retrying",
     );
     expect(explanation.textContent).toContain(
-      "If a turn ends without a recorded outcome, Kandev can retry the same settled feedback",
-    );
-    expect(explanation.textContent).toContain(
-      "After an action-taken outcome, Kandev waits for provider progress before retrying",
-    );
-    expect(explanation.textContent).toContain(
-      "A non-actionable or blocked outcome acknowledges unchanged feedback and does not retry it",
+      "Feedback marked blocked or requiring no action is not retried while unchanged",
     );
   });
 
@@ -258,10 +256,10 @@ describe("PRStatusChip auto-fix round display", () => {
     const explanation = await screen.findByTestId(ROUND_EXPLANATION_TESTID);
     expect(explanation.textContent).toContain("Auto-fix has used 2 of 10 rounds");
     expect(explanation.textContent).toContain(
-      "Kandev waits for all PR checks to finish before starting a new CI auto-fix turn",
+      "Kandev waits for all PR checks before starting the next fix",
     );
     expect(explanation.textContent).toContain(
-      "If a turn ends without a recorded outcome, Kandev can retry the same settled feedback",
+      "If the agent reports no outcome, Kandev may retry the same feedback",
     );
   });
 });

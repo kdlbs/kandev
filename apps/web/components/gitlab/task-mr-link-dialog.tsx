@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -105,28 +105,26 @@ function LinkDialogFields({
   );
 }
 
-export function TaskMRLinkDialog({
-  open,
-  onOpenChange,
-  taskId,
-  workspaceId,
-  taskRepositories,
-  repositories,
-  focusReturnRef,
-}: {
+type TaskMRLinkDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   taskId: string;
   workspaceId: string;
   taskRepositories: TaskRepositoryLink[];
   repositories: Repository[];
-  /** Element to return keyboard focus to on close (AC-TASKS-TASK-ACTIONS-MENU-001.12).
-   * Omitted callers keep Radix's default restore-to-previously-focused-element behavior. */
+  /** Element to receive keyboard focus when the dialog closes. */
   focusReturnRef?: RefObject<HTMLElement | null>;
-}) {
+};
+
+export function TaskMRLinkDialog(props: TaskMRLinkDialogProps) {
+  return <MRLinkFormDialog key={JSON.stringify([props.taskId, props.workspaceId])} {...props} />;
+}
+
+function useMRLinkForm(
+  { open, onOpenChange, taskId, workspaceId }: TaskMRLinkDialogProps,
+  defaultRepositoryID: string,
+) {
   const { t } = useTranslation();
-  const options = useRepositoryOptions(repositories, taskRepositories);
-  const defaultRepositoryID = options[0]?.id ?? NO_REPOSITORY;
   const [mrURL, setMRURL] = useState("");
   const [repositoryID, setRepositoryID] = useState(defaultRepositoryID);
   const [submitting, setSubmitting] = useState(false);
@@ -145,8 +143,33 @@ export function TaskMRLinkDialog({
     setRepositoryID(defaultRepositoryID);
   }, [defaultRepositoryID, open]);
 
+  const owner = useRef<{ submitting: boolean } | null>(null);
+  const [selectionEpoch, setSelectionEpoch] = useState(0);
+
+  useLayoutEffect(() => {
+    owner.current = open ? { submitting: false } : null;
+    setSubmitting(false);
+    return () => {
+      owner.current = null;
+    };
+  }, [open, selectionEpoch]);
+
+  const changeOpen = (nextOpen: boolean) => {
+    if (!nextOpen) owner.current = null;
+    onOpenChange(nextOpen);
+  };
+  const changeRepository = (value: string) => {
+    if (value !== repositoryID) {
+      owner.current = null;
+      setSelectionEpoch((epoch) => epoch + 1);
+    }
+    setRepositoryID(value);
+  };
+
   const submit = async () => {
-    if (!mrURL.trim() || submitting) return;
+    const admission = owner.current;
+    if (!mrURL.trim() || !admission || admission.submitting) return;
+    admission.submitting = true;
     setSubmitting(true);
     try {
       const association = await createTaskMR(
@@ -158,7 +181,7 @@ export function TaskMRLinkDialog({
         workspaceId,
       );
       setTaskMR(workspaceId, taskId, association);
-      onOpenChange(false);
+      if (owner.current === admission) changeOpen(false);
     } catch (error) {
       toast({
         title: t("gitlab:failedToLinkMergeRequest"),
@@ -167,12 +190,26 @@ export function TaskMRLinkDialog({
         variant: "error",
       });
     } finally {
-      setSubmitting(false);
+      if (owner.current === admission) {
+        admission.submitting = false;
+        setSubmitting(false);
+      }
     }
   };
 
+  return { mrURL, setMRURL, repositoryID, submitting, submit, changeOpen, changeRepository };
+}
+
+function MRLinkFormDialog(props: TaskMRLinkDialogProps) {
+  const { open, taskRepositories, repositories, focusReturnRef } = props;
+  const { t } = useTranslation();
+  const options = useRepositoryOptions(repositories, taskRepositories);
+  const defaultRepositoryID = options[0]?.id ?? NO_REPOSITORY;
+  const { mrURL, setMRURL, repositoryID, submitting, submit, changeOpen, changeRepository } =
+    useMRLinkForm(props, defaultRepositoryID);
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={changeOpen}>
       <DialogContent
         className="sm:max-w-md"
         onCloseAutoFocus={createFocusReturnHandler(focusReturnRef)}
@@ -186,13 +223,13 @@ export function TaskMRLinkDialog({
           onMRURLChange={setMRURL}
           options={options}
           repositoryID={repositoryID}
-          onRepositoryChange={setRepositoryID}
+          onRepositoryChange={changeRepository}
         />
         <DialogFooter>
           <Button
             type="button"
             variant="outline"
-            onClick={() => onOpenChange(false)}
+            onClick={() => changeOpen(false)}
             className="cursor-pointer"
           >
             {t("common:cancel")}

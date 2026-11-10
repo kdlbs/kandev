@@ -11,7 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/state"
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	_ "github.com/mattn/go-sqlite3"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

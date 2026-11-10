@@ -1,23 +1,24 @@
 import type { RenderItem } from "@/hooks/use-processed-messages";
+import { isFooterActionMessage } from "@/hooks/processed-message-filtering";
+import type { Message } from "@/lib/types/http";
+
+/** The frontend-only placeholder use-processed-messages.ts injects for a
+ *  session with no real messages. It never exists as a backend row, so it can
+ *  be neither a read cursor nor a divider boundary. */
+const TASK_DESCRIPTION_PLACEHOLDER_ID = "task-description";
 
 /** Message ids carried by a render item — a "message" item carries its own
  *  id, a "turn_group" carries every message bundled into that visual group,
  *  and non-message items (prepare_progress, agent_error_notice) carry none.
- *
- *  The frontend-only "task-description" placeholder (injected by
- *  use-processed-messages.ts when a session has no real messages yet) is
- *  excluded too: it never exists as a row in the backend messages table, so
- *  treating it as a real message id would make lastRenderedMessageId return
- *  "task-description" as the cursor target — which the backend's
- *  MarkSessionRead correctly rejects as an unknown message id (400), but
- *  only after a wasted round trip logged as a console error on every visit
- *  to a session with no messages yet. */
+ *  The task-description placeholder is excluded. */
 function renderItemMessageIds(item: RenderItem): string[] {
   if (item.type === "message") {
-    return item.message.id === "task-description" ? [] : [item.message.id];
+    return item.message.id === TASK_DESCRIPTION_PLACEHOLDER_ID ? [] : [item.message.id];
   }
   if (item.type === "turn_group") {
-    return item.messages.map((message) => message.id).filter((id) => id !== "task-description");
+    return item.messages
+      .map((message) => message.id)
+      .filter((id) => id !== TASK_DESCRIPTION_PLACEHOLDER_ID);
   }
   return [];
 }
@@ -68,25 +69,43 @@ export function findUnreadDividerItemId(
 }
 
 /**
- * Returns the id of the newest message actually represented among items —
- * i.e. the last message that made it into the rendered transcript — or null
- * if items carries no message at all.
- *
- * Callers deriving the Slack-style read-cursor's "latest message" must use
- * this instead of the raw backend message list's last row: some backend
- * rows never render (a pending `clarification_request`, a hidden "Session
- * resumed" status, setup script output, a collapsed todo snapshot, ...), so
- * the raw list's tail can be a message findUnreadDividerItemId will never
- * find among items — which it then (correctly, per its own contract) treats
- * as "the whole loaded window is unread", drawing the divider before
- * everything even though nothing visible is actually new. Deriving the
- * cursor from the same render-item universe findUnreadDividerItemId
- * searches keeps both sides in sync.
+ * Returns the id the read cursor acknowledges for a displayed session: the
+ * newest message the client has loaded, whether or not the transcript renders
+ * it. Every message the server can count as unread is stored and loaded
+ * before it can render, so acknowledging the loaded tail always reads past
+ * hidden or collapsed rows; acknowledging only the rendered tail could leave
+ * such a row unread forever. Footer-action notices are skipped: they never
+ * count as unread, and a transient-retry notice is deleted when the retry ends,
+ * which would leave a cursor with no position in the session.
  */
-export function lastRenderedMessageId(items: RenderItem[]): string | null {
-  for (let i = items.length - 1; i >= 0; i--) {
-    const ids = renderItemMessageIds(items[i]);
-    if (ids.length > 0) return ids[ids.length - 1];
+export function newestAcknowledgeableMessageId(messages: Message[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.id !== TASK_DESCRIPTION_PLACEHOLDER_ID && !isFooterActionMessage(message)) {
+      return message.id;
+    }
   }
   return null;
+}
+
+/**
+ * Maps a read cursor onto the rendered transcript before divider placement.
+ * The cursor can point at a loaded message the transcript does not render;
+ * the divider then belongs after the newest rendered message at or before it.
+ * A cursor with nothing rendered before it, or outside the loaded window,
+ * passes through so findUnreadDividerItemId treats the window as unread.
+ */
+export function dividerCursorForRenderedItems(
+  messages: Message[],
+  items: RenderItem[],
+  cursor: string | null | undefined,
+): string | null {
+  if (!cursor) return null;
+  const rendered = new Set(items.flatMap(renderItemMessageIds));
+  if (rendered.has(cursor)) return cursor;
+  const cursorIndex = messages.findIndex((message) => message.id === cursor);
+  for (let i = cursorIndex - 1; i >= 0; i--) {
+    if (rendered.has(messages[i].id)) return messages[i].id;
+  }
+  return cursor;
 }

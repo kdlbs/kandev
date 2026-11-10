@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
@@ -174,7 +176,7 @@ func TestRunsServiceEngineAdapter_QueueRunInheritsTaskCarrier(t *testing.T) {
 		models.MetaKeyOfficeCarrierCreatingRunID:  "run-engine-1",
 		models.MetaKeyOfficeCarrierHumanRooted:    true,
 		models.MetaKeyOfficeCarrierRoutineID:      "routine-engine-1",
-		models.MetaKeyOfficeCarrierActorKind:      string(officemodels.ActorKindAgent),
+		models.MetaKeyOfficeCarrierActorKind:      string(runsmodels.ActorKindAgent),
 		models.MetaKeyOfficeCarrierActorID:        "creator-agent-1",
 	})
 
@@ -195,7 +197,7 @@ func TestRunsServiceEngineAdapter_QueueRunInheritsTaskCarrier(t *testing.T) {
 		t.Fatalf("list runs: %v (got %d)", err, len(runs))
 	}
 	run := runs[0]
-	if run.ActorKind != officemodels.ActorKindAgent || run.ActorID != "creator-agent-1" {
+	if run.ActorKind != runsmodels.ActorKindAgent || run.ActorID != "creator-agent-1" {
 		t.Errorf("actor = %s/%s, want carried agent/creator-agent-1", run.ActorKind, run.ActorID)
 	}
 	if run.RoutineID != "routine-engine-1" {
@@ -286,13 +288,13 @@ func TestRunsServiceEngineAdapter_QueueRunPrefersLiveClaimedRunOverStaleTaskCarr
 		models.MetaKeyOfficeCarrierCreatingRunID:  "stale-run",
 		models.MetaKeyOfficeCarrierHumanRooted:    false,
 		models.MetaKeyOfficeCarrierRoutineID:      "",
-		models.MetaKeyOfficeCarrierActorKind:      string(officemodels.ActorKindSystem),
+		models.MetaKeyOfficeCarrierActorKind:      string(runsmodels.ActorKindSystem),
 		models.MetaKeyOfficeCarrierActorID:        "",
 	})
 
 	// A run is now actually executing the task's turn.
 	if _, err := officeSvc.QueueRunWithActor(ctx, turnAgent.ID, "task_assigned",
-		`{"task_id":"`+taskID+`"}`, "", officemodels.ActorKindAgent, "turn-agent-actor", ""); err != nil {
+		`{"task_id":"`+taskID+`"}`, "", runsmodels.ActorKindAgent, "turn-agent-actor", ""); err != nil {
 		t.Fatalf("queue live run: %v", err)
 	}
 	liveRun, err := officeSvc.ClaimNextRun(ctx)
@@ -314,7 +316,7 @@ func TestRunsServiceEngineAdapter_QueueRunPrefersLiveClaimedRunOverStaleTaskCarr
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	var queued *officemodels.Run
+	var queued *runsmodels.Run
 	for _, r := range runs {
 		if r.AgentProfileID == targetAgent.ID {
 			queued = r
@@ -370,7 +372,7 @@ func TestRunsServiceEngineAdapter_QueueRunScopesToCausingAgentWhenTwoAgentsHoldC
 	// unscoped most-recently-claimed lookup would pick turnAgentB's run
 	// regardless of which agent is actually causing this queue_run.
 	if _, err := officeSvc.QueueRunWithActor(ctx, turnAgentA.ID, "task_assigned",
-		`{"task_id":"`+taskID+`"}`, "", officemodels.ActorKindAgent, "agent-a-actor", ""); err != nil {
+		`{"task_id":"`+taskID+`"}`, "", runsmodels.ActorKindAgent, "agent-a-actor", ""); err != nil {
 		t.Fatalf("queue turnAgentA's run: %v", err)
 	}
 	runA, err := officeSvc.ClaimNextRun(ctx)
@@ -378,7 +380,7 @@ func TestRunsServiceEngineAdapter_QueueRunScopesToCausingAgentWhenTwoAgentsHoldC
 		t.Fatalf("claim turnAgentA's run: %v (run=%v)", err, runA)
 	}
 	if _, err := officeSvc.QueueRunWithActor(ctx, turnAgentB.ID, "task_assigned",
-		`{"task_id":"`+taskID+`"}`, "", officemodels.ActorKindAgent, "agent-b-actor", ""); err != nil {
+		`{"task_id":"`+taskID+`"}`, "", runsmodels.ActorKindAgent, "agent-b-actor", ""); err != nil {
 		t.Fatalf("queue turnAgentB's run: %v", err)
 	}
 	runB, err := officeSvc.ClaimNextRun(ctx)
@@ -399,7 +401,7 @@ func TestRunsServiceEngineAdapter_QueueRunScopesToCausingAgentWhenTwoAgentsHoldC
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	var queued *officemodels.Run
+	var queued *runsmodels.Run
 	for _, r := range runs {
 		if r.AgentProfileID == targetAgent.ID {
 			queued = r
@@ -438,7 +440,7 @@ func TestRunsServiceEngineAdapter_QueueRunUsesSourceTaskForCrossTaskAction(t *te
 	sourceTaskID := seedTaskWithCarrier(t, taskSvc, nil)
 	targetTaskID := seedTaskWithCarrier(t, taskSvc, nil)
 	if _, err := officeSvc.QueueRunWithActor(ctx, turnAgent.ID, "task_assigned",
-		`{"task_id":"`+sourceTaskID+`"}`, "", officemodels.ActorKindUser, "user-1", ""); err != nil {
+		`{"task_id":"`+sourceTaskID+`"}`, "", runsmodels.ActorKindUser, "user-1", ""); err != nil {
 		t.Fatalf("queue source run: %v", err)
 	}
 	sourceRun, err := officeSvc.ClaimNextRun(ctx)
@@ -460,7 +462,7 @@ func TestRunsServiceEngineAdapter_QueueRunUsesSourceTaskForCrossTaskAction(t *te
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	var queued *officemodels.Run
+	var queued *runsmodels.Run
 	for _, run := range runs {
 		if run.AgentProfileID == targetAgent.ID {
 			queued = run
@@ -476,7 +478,7 @@ func TestRunsServiceEngineAdapter_QueueRunUsesSourceTaskForCrossTaskAction(t *te
 	if queued.CausationDepth != sourceRun.CausationDepth+1 {
 		t.Fatalf("causation_depth = %d, want %d", queued.CausationDepth, sourceRun.CausationDepth+1)
 	}
-	if queued.ActorKind != officemodels.ActorKindAgent || queued.ActorID != turnAgent.ID {
+	if queued.ActorKind != runsmodels.ActorKindAgent || queued.ActorID != turnAgent.ID {
 		t.Fatalf("actor = %s/%s, want acting agent %s", queued.ActorKind, queued.ActorID, turnAgent.ID)
 	}
 }
@@ -530,7 +532,7 @@ func TestRunsServiceEngineAdapter_QueueRunNoCarrierDeclaresSystemActorExplicitly
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("list runs: %v (got %d)", err, len(runs))
 	}
-	if runs[0].ActorKind != officemodels.ActorKindSystem {
+	if runs[0].ActorKind != runsmodels.ActorKindSystem {
 		t.Errorf("actor_kind = %q, want system", runs[0].ActorKind)
 	}
 }

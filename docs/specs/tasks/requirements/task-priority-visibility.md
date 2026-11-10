@@ -90,8 +90,9 @@ each card in turn.
   source, including another browser client, the Office task UI or a REST API
   caller, the card shall reflect the new value without a page reload. That list is
   illustrative: the card shall follow the stored value regardless of which writer
-  produced it. Agents cannot currently set priority, because the MCP task tools do
-  not accept the field.
+  produced it. MCP clients set and change priority through the
+  [MCP task priority contract](mcp-task-priority.md); this requirement does not
+  define that automation API.
 - **AC-TASKS-PRIORITY-VISIBILITY-001.9:** A message that refreshes the board
   without carrying priority shall not clear, blank or alter the priority already
   displayed for a task. A client shall either receive priority in such a message
@@ -307,8 +308,8 @@ Each exclusion below is a decision, not an omission.
 - **Server-side rejection of an invalid priority token.** This capability adds
   fixed four-option controls, so its user-facing writers cannot emit an invalid
   token. Consistent validation for every API writer is a separate hardening task.
-- **MCP priority write support.** The MCP task contract is unchanged. Adding a
-  priority argument to MCP tools is a separate contract change.
+- **The MCP priority write API.** This requirement does not define the MCP write
+  API. The [MCP task priority contract](mcp-task-priority.md) owns it.
 - **The Office task UI.** Office already surfaces priority, over a different
   five-token vocabulary that includes `none` and supports workspace-supplied
   labels. Nothing here changes it, and the two vocabularies are deliberately not

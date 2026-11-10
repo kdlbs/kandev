@@ -1,5 +1,6 @@
 import { expect, kubernetesProfileConfig, test } from "../../fixtures/kubernetes-test-base";
 import { execInKubernetesPod, waitForKubernetesPod } from "../../helpers/kubernetes";
+import { managedRuntimePackageSpec } from "../../helpers/managed-runtime-catalogue";
 import {
   disableNativeCodexAppServer,
   createNativeCodexExecutorProbe,
@@ -42,8 +43,8 @@ test("native Codex profile is gated and launches through the Kubernetes executor
     const sessionId = sessions[0]?.id;
     expect(sessionId).toBeTruthy();
     const pod = await waitForKubernetesPod(cluster, taskId, sessionId!);
-    expect(execInKubernetesPod(cluster, pod.metadata.name, ["cat", probe.markerPath])).toMatch(
-      /@openai\/codex@0\.154\.0 app-server/,
+    expect(execInKubernetesPod(cluster, pod.metadata.name, ["cat", probe.markerPath])).toContain(
+      `${managedRuntimePackageSpec("@openai/codex")} app-server`,
     );
 
     await disableNativeCodexAppServer(backend, apiClient, probe.profile.id);

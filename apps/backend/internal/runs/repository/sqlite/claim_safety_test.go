@@ -8,7 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
@@ -220,7 +221,7 @@ func TestClaimNextEligibleRun_RoutineBudgetDefersAfterHourlyLimit(t *testing.T) 
 		RoutineBudgetPerHour:   1,
 	})
 
-	first := mustCreateRun(t, repo, &models.Run{
+	first := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             "routine-first",
 		AgentProfileID: "a1",
 		WorkspaceID:    ws,
@@ -231,7 +232,7 @@ func TestClaimNextEligibleRun_RoutineBudgetDefersAfterHourlyLimit(t *testing.T) 
 		CoalescedCount: 1,
 	})
 	setRequestedAt(t, repo, first.ID, base)
-	mustCreateRun(t, repo, &models.Run{
+	mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             "routine-second",
 		AgentProfileID: "a1",
 		WorkspaceID:    ws,
@@ -270,7 +271,7 @@ func TestClaimNextEligibleRun_HumanRootedRunsExemptFromWorkspaceBudget(t *testin
 		WorkspaceBudgetPerHour: 1,
 	})
 
-	nonHuman := mustCreateRun(t, repo, &models.Run{
+	nonHuman := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             "non-human",
 		AgentProfileID: "a1",
 		WorkspaceID:    ws,
@@ -281,7 +282,7 @@ func TestClaimNextEligibleRun_HumanRootedRunsExemptFromWorkspaceBudget(t *testin
 		HumanRooted:    false,
 	})
 	setRequestedAt(t, repo, nonHuman.ID, base)
-	human := mustCreateRun(t, repo, &models.Run{
+	human := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             "human-rooted",
 		AgentProfileID: "a1",
 		WorkspaceID:    ws,
@@ -323,7 +324,7 @@ func TestClaimNextEligibleRun_AgeBasedPromotionReordersClaim(t *testing.T) {
 	repo.SetClaimSafetyLimits(runssqlite.ClaimSafetyLimits{PromotionAge: 10 * time.Minute})
 
 	now := time.Now().UTC()
-	stale := mustCreateRun(t, repo, &models.Run{
+	stale := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             "stale-periodic",
 		AgentProfileID: "a1",
 		WorkspaceID:    claimTestWorkspace("a1"),
@@ -331,10 +332,10 @@ func TestClaimNextEligibleRun_AgeBasedPromotionReordersClaim(t *testing.T) {
 		Payload:        `{}`,
 		Status:         "queued",
 		CoalescedCount: 1,
-		PriorityClass:  models.PriorityClassPeriodic,
+		PriorityClass:  runsmodels.PriorityClassPeriodic,
 	})
 	setRequestedAt(t, repo, stale.ID, now.Add(-20*time.Minute))
-	fresh := mustCreateRun(t, repo, &models.Run{
+	fresh := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             "fresh-event",
 		AgentProfileID: "a1",
 		WorkspaceID:    claimTestWorkspace("a1"),
@@ -342,7 +343,7 @@ func TestClaimNextEligibleRun_AgeBasedPromotionReordersClaim(t *testing.T) {
 		Payload:        `{}`,
 		Status:         "queued",
 		CoalescedCount: 1,
-		PriorityClass:  models.PriorityClassEvent,
+		PriorityClass:  runsmodels.PriorityClassEvent,
 	})
 	setRequestedAt(t, repo, fresh.ID, now.Add(-time.Minute))
 
@@ -372,7 +373,7 @@ func TestClaimNextEligibleRun_AgeBasedPromotionIsNoOpForHumanClass(t *testing.T)
 	repo.SetClaimSafetyLimits(runssqlite.ClaimSafetyLimits{PromotionAge: 10 * time.Minute})
 
 	now := time.Now().UTC()
-	staleHuman := mustCreateRun(t, repo, &models.Run{
+	staleHuman := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             "stale-human",
 		AgentProfileID: "a1",
 		WorkspaceID:    claimTestWorkspace("a1"),
@@ -380,10 +381,10 @@ func TestClaimNextEligibleRun_AgeBasedPromotionIsNoOpForHumanClass(t *testing.T)
 		Payload:        `{}`,
 		Status:         "queued",
 		CoalescedCount: 1,
-		PriorityClass:  models.PriorityClassHuman,
+		PriorityClass:  runsmodels.PriorityClassHuman,
 	})
 	setRequestedAt(t, repo, staleHuman.ID, now.Add(-20*time.Minute))
-	freshHuman := mustCreateRun(t, repo, &models.Run{
+	freshHuman := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             "fresh-human",
 		AgentProfileID: "a1",
 		WorkspaceID:    claimTestWorkspace("a1"),
@@ -391,7 +392,7 @@ func TestClaimNextEligibleRun_AgeBasedPromotionIsNoOpForHumanClass(t *testing.T)
 		Payload:        `{}`,
 		Status:         "queued",
 		CoalescedCount: 1,
-		PriorityClass:  models.PriorityClassHuman,
+		PriorityClass:  runsmodels.PriorityClassHuman,
 	})
 	setRequestedAt(t, repo, freshHuman.ID, now.Add(-time.Minute))
 
@@ -414,7 +415,7 @@ func TestClaimNextEligibleRun_AppendsLedgerRowOnClaim(t *testing.T) {
 	const routineID = "ledger-routine"
 	seedAgentInWorkspace(t, repo, "a1", ws, 5)
 
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:               "ledger-run",
 		AgentProfileID:   "a1",
 		WorkspaceID:      ws,
@@ -527,9 +528,9 @@ func seedAgentInWorkspace(t *testing.T, repo *runssqlite.Repository, agentID, wo
 // share one workspace across agents.
 func queueRunInWorkspace(
 	t *testing.T, repo *runssqlite.Repository, id, agentID, workspaceID string, requestedAt time.Time,
-) *models.Run {
+) *runsmodels.Run {
 	t.Helper()
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             id,
 		AgentProfileID: agentID,
 		WorkspaceID:    workspaceID,

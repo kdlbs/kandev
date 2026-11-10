@@ -38,7 +38,7 @@ These are explicit integration changes, not a new ACP protocol implementation.
 
 The earlier isolated experiment loaded a 1.18.5 conversation in 2.0.18 and recalled its previous codeword.
 A temporary Kandev adapter test completed a v2 turn. Neither result proves full application migration.
-The exact candidates for permanent compatibility tests are managed v1 1.18.32 and v2 2.0.18;
+The exact candidates for permanent compatibility tests are managed v1 1.19.5 and v2 2.2.5;
 include the observed native v1 1.18.5 fixture where practical.
 
 ## Runtime definitions and command resolution
@@ -47,8 +47,8 @@ Maintain two trusted OpenCode definitions in `internal/agent/agents`:
 
 | Family | Package | Initial reviewed pin | ACP arguments |
 | --- | --- | --- | --- |
-| v1 | `opencode-ai` | 1.18.32 | `acp --print-logs --log-level ERROR` |
-| v2 | `@opencode/cli` | 2.0.18 | `acp --print-logs --log-level error` |
+| v1 | `opencode-ai` | 1.19.5 | `acp --print-logs --log-level ERROR` |
+| v2 | `@opencode/cli` | 2.2.5 | `acp --print-logs --log-level error` |
 
 Keep both package pins in `managed_npm_runtime_versions.json` and its maintenance workflow.
 Do not resolve `latest` during launch. Version catalogues must reject versions outside their family's major.

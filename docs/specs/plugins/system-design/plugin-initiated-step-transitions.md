@@ -157,7 +157,7 @@ than invented during build, because a correction after release is a *second*
 breaking change on top of the `UpdateTask` one.
 
 Added to the existing `Host` service in
-`apps/backend/proto/kandev/plugin/v1/plugin.proto`, beside `CreateTask` and
+`pluginsdk/proto/kandev/plugin/v1/plugin.proto`, beside `CreateTask` and
 `UpdateTask`:
 
 ```proto

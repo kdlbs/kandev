@@ -24,10 +24,16 @@ test("same menu from listings and page shells", async ({ testPage }) => {
 // @covers AC-UI-MOBILE-MENU-001.4, AC-UI-MOBILE-MENU-001.6
 test("separate listing controls preserve search behavior", async ({ testPage }) => {
   await testPage.goto("/tasks");
+  await expect(testPage.getByPlaceholder("Search tasks...")).toBeVisible();
   const options = testPage.getByTestId("mobile-topbar-page-context");
   await options.tap();
   const sheet = testPage.getByRole("dialog", { name: "View options", exact: true });
   await expect(sheet.getByRole("link", { name: "Settings", exact: true })).toHaveCount(0);
+  await expect(sheet.getByTestId("mobile-search-toggle")).toHaveCount(0);
+  await sheet.getByRole("radio", { name: "Kanban", exact: true }).tap();
+  await expect(sheet).toBeHidden();
+  await expect(testPage.getByTestId("kanban-board")).toBeVisible();
+  await options.tap();
   await testPage.screenshot({ path: test.info().outputPath("view-options-393.png") });
   await sheet.getByTestId("mobile-search-toggle").tap();
   const search = testPage.getByPlaceholder("Search tasks...");

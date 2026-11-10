@@ -1055,6 +1055,32 @@ describe("useNativeScrollManagement transcript pagination", () => {
     }
   });
 
+  it("lets explicit latest supersede near-edge upward intent", () => {
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    const latestRef: { current: (() => boolean) | null } = { current: null };
+    const props = { metrics, sessionId: "session-latest", enabled: true, latestRef };
+    const view = render(
+      <NativeScrollManagementHarness {...props} items={[transcriptMessage(LATEST_MESSAGE_ID)]} />,
+    );
+    const element = screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID);
+    act(() => {
+      metrics.scrollTop = 599;
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
+      element.dispatchEvent(new Event("scroll"));
+      expect(latestRef.current?.()).toBe(true);
+      metrics.scrollTop = 600;
+      element.dispatchEvent(new Event("scroll"));
+    });
+    metrics.scrollHeight = 1021;
+    view.rerender(
+      <NativeScrollManagementHarness
+        {...props}
+        items={[transcriptMessage(LATEST_MESSAGE_ID), transcriptMessage("next-message")]}
+      />,
+    );
+    expect(metrics.scrollTop).toBe(2_147_483_647);
+  });
+
   // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.18
   it("jumps to the transcript end without changing the disabled auto-scroll preference", () => {
     const metrics = { scrollHeight: 1000, scrollTop: 300, clientHeight: 400 };
@@ -2405,6 +2431,360 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     expect(metrics.scrollTop).toBe(570);
   });
 
+  it.each([
+    { motionEnabled: false, label: "motion disabled" },
+    { motionEnabled: true, label: "motion enabled" },
+  ])(
+    "keeps upward intent when a queued follow scroll arrives before native movement ($label)",
+    ({ motionEnabled }) => {
+      let time = 0;
+      let serial = 0;
+      const frames = new Map<number, FrameRequestCallback>();
+      vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+        frames.set(++serial, callback);
+        return serial;
+      });
+      vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+      const flushMotion = () => {
+        for (let frame = 0; frame < 14; frame++)
+          act(() => {
+            time += 16;
+            const callbacks = [...frames.values()];
+            frames.clear();
+            callbacks.forEach((callback) => callback(time));
+          });
+      };
+      const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+      const props = {
+        isWorking: false,
+        hasUnreadDivider: false,
+        motionEnabled,
+        metrics,
+        sessionId: "reading-session",
+      };
+      const view = render(<AutoScrollHarness {...props} />);
+      try {
+        const element = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+        act(() => {
+          element.dispatchEvent(new WheelEvent("wheel", { deltaY: -160 }));
+          element.dispatchEvent(new Event("scroll"));
+        });
+        metrics.scrollHeight = 1021;
+        view.rerender(
+          <AutoScrollHarness {...props} messages={[...TEST_MESSAGES, {} as Message]} />,
+        );
+        act(() => {
+          metrics.scrollTop = 440;
+          element.dispatchEvent(new Event("scroll"));
+        });
+        metrics.scrollHeight = 1042;
+        view.rerender(
+          <AutoScrollHarness
+            {...props}
+            messages={[...TEST_MESSAGES, {} as Message, {} as Message]}
+          />,
+        );
+        flushMotion();
+        expect(metrics.scrollTop).toBe(440);
+
+        act(() => {
+          element.dispatchEvent(new WheelEvent("wheel", { deltaY: 1_000_000 }));
+          metrics.scrollTop = 642;
+          element.dispatchEvent(new Event("scroll"));
+        });
+        metrics.scrollHeight = 1063;
+        view.rerender(
+          <AutoScrollHarness
+            {...props}
+            messages={[...TEST_MESSAGES, {} as Message, {} as Message, {} as Message]}
+          />,
+        );
+        flushMotion();
+        if (motionEnabled) expect(Math.abs(metrics.scrollTop - 663)).toBeLessThanOrEqual(1);
+        else expect(metrics.scrollTop).toBe(2_147_483_647);
+      } finally {
+        view.unmount();
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it("does not carry pending upward intent into another session", () => {
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    const props = { isWorking: false, hasUnreadDivider: false, metrics };
+    const view = render(<AutoScrollHarness {...props} sessionId="first" />);
+    const element = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+    act(() => {
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY: -160 }));
+      element.dispatchEvent(new Event("scroll"));
+    });
+    view.rerender(<AutoScrollHarness {...props} sessionId="second" />);
+    act(() => element.dispatchEvent(new Event("scroll")));
+    metrics.scrollHeight = 1021;
+    view.rerender(
+      <AutoScrollHarness
+        {...props}
+        sessionId="second"
+        messages={[...TEST_MESSAGES, {} as Message]}
+      />,
+    );
+    expect(metrics.scrollTop).toBe(2_147_483_647);
+  });
+
+  it("resumes at bottom when native upward movement precedes its wheel handler", () => {
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    const props = {
+      isWorking: false,
+      hasUnreadDivider: false,
+      metrics,
+      sessionId: "reading-session",
+    };
+    const view = render(<AutoScrollHarness {...props} />);
+    const element = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+    act(() => {
+      metrics.scrollTop = 440;
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY: -160 }));
+      element.dispatchEvent(new Event("scroll"));
+    });
+    metrics.scrollHeight = 1021;
+    view.rerender(<AutoScrollHarness {...props} messages={[...TEST_MESSAGES, {} as Message]} />);
+    expect(metrics.scrollTop).toBe(440);
+    act(() => {
+      element.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", bubbles: true }));
+      metrics.scrollTop = 621;
+      element.dispatchEvent(new Event("scroll"));
+    });
+    metrics.scrollHeight = 1042;
+    view.rerender(
+      <AutoScrollHarness {...props} messages={[...TEST_MESSAGES, {} as Message, {} as Message]} />,
+    );
+    expect(metrics.scrollTop).toBe(2_147_483_647);
+  });
+
+  it.each(["PageDown", "ArrowDown", " ", "End", "touch"])(
+    "resumes near-edge reading after fresh downward %s input",
+    (input) => {
+      const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+      const props = { isWorking: false, hasUnreadDivider: false, metrics };
+      const view = render(<AutoScrollHarness {...props} />);
+      const element = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      act(() => {
+        metrics.scrollTop = 599;
+        element.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
+        element.dispatchEvent(new Event("scroll"));
+        if (input === "touch") {
+          element.dispatchEvent(touchEvent("touchstart", 100));
+          element.dispatchEvent(touchEvent("touchmove", 80));
+        } else {
+          element.dispatchEvent(new KeyboardEvent("keydown", { key: input, bubbles: true }));
+        }
+        metrics.scrollTop = 600;
+        element.dispatchEvent(new Event("scroll"));
+      });
+      metrics.scrollHeight = 1021;
+      view.rerender(<AutoScrollHarness {...props} messages={[...TEST_MESSAGES, {} as Message]} />);
+      expect(metrics.scrollTop).toBe(2_147_483_647);
+    },
+  );
+
+  it.each(["textarea", "editable", "prevented"])(
+    "keeps upward reading when End belongs to a nested %s target",
+    (kind) => {
+      const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+      const props = { isWorking: false, hasUnreadDivider: false, metrics };
+      const view = render(<AutoScrollHarness {...props} />);
+      const element = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      const target = document.createElement(kind === "textarea" ? "textarea" : "div");
+      if (kind === "editable") target.setAttribute("contenteditable", "true");
+      element.append(target);
+      // Native scrollTop is clamped after the initial bottom placement.
+      metrics.scrollTop = 600;
+      act(() => {
+        element.dispatchEvent(new WheelEvent("wheel", { deltaY: -160 }));
+        const key = new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true });
+        if (kind === "prevented") key.preventDefault();
+        target.dispatchEvent(key);
+        element.dispatchEvent(new Event("scroll"));
+      });
+      metrics.scrollHeight = 1021;
+      view.rerender(<AutoScrollHarness {...props} messages={[...TEST_MESSAGES, {} as Message]} />);
+      expect(metrics.scrollTop).toBe(600);
+    },
+  );
+
+  it("lets keyboard End supersede pending upward intent", () => {
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    const props = {
+      isWorking: false,
+      hasUnreadDivider: false,
+      metrics,
+      sessionId: "reading-session",
+    };
+    const view = render(<AutoScrollHarness {...props} />);
+    const element = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+    act(() => {
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY: -160 }));
+      element.dispatchEvent(new Event("scroll"));
+      element.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+      metrics.scrollHeight = 1021;
+      metrics.scrollTop = 621;
+      element.dispatchEvent(new Event("scroll"));
+    });
+    metrics.scrollHeight = 1042;
+    view.rerender(<AutoScrollHarness {...props} messages={[...TEST_MESSAGES, {} as Message]} />);
+    expect(metrics.scrollTop).toBe(2_147_483_647);
+  });
+
+  it("resumes following at the measured bottom when content grows before the wheel scroll settles", () => {
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    render(<AutoScrollHarness isWorking={false} hasUnreadDivider={false} metrics={metrics} />);
+    const element = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+    act(() => {
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }));
+      metrics.scrollTop = 480;
+      element.dispatchEvent(new Event("scroll"));
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY: 1_000_000 }));
+      metrics.scrollHeight = 1021;
+      metrics.scrollTop = 600;
+      element.dispatchEvent(new Event("scroll"));
+    });
+    expect(metrics.scrollTop).toBe(2_147_483_647);
+  });
+
+  it("keeps a partial downward wheel in history when later geometry reaches the old edge", () => {
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    render(<AutoScrollHarness isWorking={false} hasUnreadDivider={false} metrics={metrics} />);
+    const element = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+    act(() => {
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }));
+      metrics.scrollTop = 480;
+      element.dispatchEvent(new Event("scroll"));
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY: 50 }));
+      metrics.scrollTop = 530;
+      element.dispatchEvent(new Event("scroll"));
+      metrics.scrollHeight = 1021;
+      metrics.scrollTop = 600;
+      element.dispatchEvent(new Event("scroll"));
+    });
+    expect(metrics.scrollTop).toBe(600);
+  });
+
+  it("keeps smooth follow timing after a wheel reaches the edge before appended content", () => {
+    let time = 0;
+    let serial = 0;
+    const frames = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.set(++serial, callback);
+      return serial;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    const view = render(
+      <AutoScrollHarness
+        isWorking={false}
+        hasUnreadDivider={false}
+        metrics={metrics}
+        motionEnabled
+      />,
+    );
+    try {
+      const element = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      act(() => {
+        element.dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }));
+        metrics.scrollTop = 480;
+        element.dispatchEvent(new Event("scroll"));
+        element.dispatchEvent(new WheelEvent("wheel", { deltaY: 1_000_000 }));
+        metrics.scrollHeight = 1021;
+        metrics.scrollTop = 600;
+        element.dispatchEvent(new Event("scroll"));
+      });
+      expect(metrics.scrollTop).toBe(600);
+      for (let frame = 0; frame < 14; frame++)
+        act(() => {
+          time += 16;
+          const callbacks = [...frames.values()];
+          frames.clear();
+          callbacks.forEach((callback) => callback(time));
+        });
+      expect(Math.abs(metrics.scrollTop - 621)).toBeLessThanOrEqual(1);
+    } finally {
+      view.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps a reversed wheel intent in history when an older downward scroll arrives", () => {
+    const metrics = { scrollHeight: 1000, scrollTop: 480, clientHeight: 400 };
+    render(<AutoScrollHarness isWorking={false} hasUnreadDivider={false} metrics={metrics} />);
+    const element = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+    act(() => {
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY: 1_000_000 }));
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY: -30 }));
+      metrics.scrollHeight = 1021;
+      metrics.scrollTop = 600;
+      element.dispatchEvent(new Event("scroll"));
+    });
+    expect(metrics.scrollTop).toBe(600);
+  });
+
+  it("does not follow an expired wheel intent after unrelated geometry changes", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1000);
+    try {
+      const metrics = { scrollHeight: 1000, scrollTop: 480, clientHeight: 400 };
+      render(<AutoScrollHarness isWorking={false} hasUnreadDivider={false} metrics={metrics} />);
+      const element = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      act(() => {
+        element.dispatchEvent(new WheelEvent("wheel", { deltaY: 1_000_000 }));
+        element.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
+        element.dispatchEvent(new WheelEvent("wheel", { deltaY: 1_000_000 }));
+        now.mockReturnValue(1251);
+        metrics.scrollHeight = 1021;
+        metrics.scrollTop = 600;
+        element.dispatchEvent(new Event("scroll"));
+      });
+      expect(metrics.scrollTop).toBe(600);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("keeps an explicit reader position after a pending downward wheel", () => {
+    const metrics = { scrollHeight: 1000, scrollTop: 480, clientHeight: 400 };
+    const markRef: { current?: () => void } = {};
+    render(
+      <AutoScrollHarness
+        isWorking={false}
+        hasUnreadDivider={false}
+        metrics={metrics}
+        markRef={markRef}
+      />,
+    );
+    const element = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+    act(() => {
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY: 1_000_000 }));
+      markRef.current?.();
+      metrics.scrollHeight = 1021;
+      metrics.scrollTop = 600;
+      element.dispatchEvent(new Event("scroll"));
+    });
+    expect(metrics.scrollTop).toBe(600);
+  });
+
+  it("does not read transcript bounds for an inactive downward wheel", () => {
+    render(<AutoScrollHarness isWorking={false} hasUnreadDivider={false} isVisible={false} />);
+    const element = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+    let reads = 0;
+    Object.defineProperty(element, "scrollHeight", {
+      configurable: true,
+      get: () => {
+        reads++;
+        return 1000;
+      },
+    });
+    act(() => element.dispatchEvent(new WheelEvent("wheel", { deltaY: 1_000_000 })));
+    expect(reads).toBe(0);
+  });
+
   // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.20
   it("does not force a reader to bottom when work starts", () => {
     const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
@@ -2571,6 +2951,39 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     );
 
     expect(scrollContainer.scrollTop).toBe(600);
+  });
+
+  it("cancels an unconfirmed position when initial placement detaches before its frame", () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let frameId = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.set(++frameId, callback);
+      return frameId;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    const view = render(
+      <AutoScrollHarness
+        isWorking={false}
+        hasUnreadDivider={false}
+        sessionId="unconfirmed-placement"
+        initialPlacementPending
+        metrics={{ scrollHeight: 1000, scrollTop: 275, clientHeight: 400 }}
+      />,
+    );
+    try {
+      const root = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      act(() => root.dispatchEvent(new Event("scroll")));
+      expect(frames.size).toBe(1);
+      const late = [...frames.values()][0];
+      view.unmount();
+      const remainingFrames = frames.size;
+      act(() => late(16));
+      expect(transcriptScrollTopWrites).not.toHaveBeenCalled();
+      expect(remainingFrames).toBe(0);
+    } finally {
+      view.unmount();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("persists the last visible disabled offset through hide, unmount, and remount", () => {
@@ -3591,28 +4004,52 @@ describe("missing prompt row scope", () => {
   });
 });
 
+const CHAT_CONTENT_ATTRIBUTE = "data-chat-content";
+const RESIZE_FIRST = "resize-first";
+const SCROLL_FIRST = "scroll-first";
+
+/** Stubs ResizeObserver so content-resize notifications can be delivered by
+ *  the test, including the observers registered by both scroll hooks. */
+function stubContentResizeObserver(): Set<() => void> {
+  const contentResizes = new Set<() => void>();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(private callback: ResizeObserverCallback) {}
+      observe(element: Element) {
+        if (element.hasAttribute(CHAT_CONTENT_ATTRIBUTE)) {
+          contentResizes.add(() => this.callback([], this as unknown as ResizeObserver));
+        }
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  return contentResizes;
+}
+
+function installClampedScrollTop(container: HTMLElement, metrics: NativeScrollMetrics) {
+  Object.defineProperty(container, "scrollTop", {
+    configurable: true,
+    get: () => metrics.scrollTop,
+    set: (value: number) => {
+      metrics.scrollTop = Math.max(0, Math.min(value, metrics.scrollHeight - metrics.clientHeight));
+    },
+  });
+}
+
 it.each([
   { enabled: true, reading: false, pending: false, expected: 900 },
   { enabled: true, reading: false, pending: true, expected: 900 },
   { enabled: true, reading: true, pending: true, expected: 570 },
   { enabled: false, reading: false, pending: true, expected: 600 },
+  { enabled: true, reading: false, pending: true, shrink: true, expected: 800 },
+  { enabled: true, reading: true, pending: true, shrink: true, expected: 470 },
+  { enabled: false, reading: false, pending: true, shrink: true, expected: 500 },
 ])(
-  "handles delayed card growth with enabled=$enabled reading=$reading pending=$pending",
-  ({ enabled, reading, pending, expected }) => {
-    let contentResize: (() => void) | undefined;
-    vi.stubGlobal(
-      "ResizeObserver",
-      class {
-        constructor(private callback: ResizeObserverCallback) {}
-        observe(element: Element) {
-          if (element.hasAttribute("data-chat-content")) {
-            contentResize = () => this.callback([], this as unknown as ResizeObserver);
-          }
-        }
-        unobserve() {}
-        disconnect() {}
-      },
-    );
+  "handles delayed card growth with enabled=$enabled reading=$reading pending=$pending shrink=$shrink",
+  ({ enabled, reading, pending, shrink = false, expected }) => {
+    const contentResizes = stubContentResizeObserver();
     const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
     try {
       const view = render(
@@ -3625,24 +4062,182 @@ it.each([
         />,
       );
       const container = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
-      Object.defineProperty(container, "scrollTop", {
-        configurable: true,
-        get: () => metrics.scrollTop,
-        set: (value: number) => {
-          metrics.scrollTop = Math.max(
-            0,
-            Math.min(value, metrics.scrollHeight - metrics.clientHeight),
-          );
-        },
-      });
+      installClampedScrollTop(container, metrics);
       act(() => {
         if (reading) {
           container.dispatchEvent(new WheelEvent("wheel", { deltaY: -30 }));
           metrics.scrollTop = 570;
         }
         metrics.scrollHeight = 1300;
+        if (shrink) {
+          contentResizes.forEach((resize) => resize());
+          metrics.scrollHeight = 1200;
+          metrics.scrollTop -= 100;
+        }
         container.dispatchEvent(new Event("scroll"));
-        contentResize?.();
+        contentResizes.forEach((resize) => resize());
+      });
+      view.rerender(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          metrics={metrics}
+          enabled={enabled}
+          initialPlacementPending={false}
+        />,
+      );
+      expect(metrics.scrollTop).toBe(expected);
+    } finally {
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  },
+);
+
+it.each([
+  { enabled: true, reading: false, shrinkNotifyFirst: false, expected: 700 },
+  { enabled: true, reading: false, shrinkNotifyFirst: true, expected: 700 },
+  { enabled: true, reading: true, shrinkNotifyFirst: false, expected: 400 },
+  { enabled: false, reading: false, shrinkNotifyFirst: false, expected: 400 },
+])(
+  "preserves follow through growth then native shrink while placement is blocked (enabled=$enabled reading=$reading shrinkNotifyFirst=$shrinkNotifyFirst)",
+  ({ enabled, reading, shrinkNotifyFirst, expected }) => {
+    const contentResizes = stubContentResizeObserver();
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    try {
+      const view = render(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          metrics={metrics}
+          enabled={enabled}
+          initialPlacementPending
+        />,
+      );
+      const container = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      installClampedScrollTop(container, metrics);
+      act(() => {
+        if (reading) {
+          container.dispatchEvent(new WheelEvent("wheel", { deltaY: -30 }));
+        }
+        // Grow and deliver the first measurement, then shrink. The shrink
+        // measurement can arrive before or after native anchoring moves the
+        // viewport, so cover both notification orders before the scroll event.
+        metrics.scrollHeight = 1300;
+        contentResizes.forEach((resize) => resize());
+        metrics.scrollHeight = 1100;
+        if (shrinkNotifyFirst) contentResizes.forEach((resize) => resize());
+        metrics.scrollTop = 400;
+        container.dispatchEvent(new Event("scroll"));
+      });
+      view.rerender(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          metrics={metrics}
+          enabled={enabled}
+          initialPlacementPending={false}
+        />,
+      );
+      expect(metrics.scrollTop).toBe(expected);
+    } finally {
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  },
+);
+
+it.each([
+  { enabled: true, reading: false, expected: 700 },
+  { enabled: true, reading: true, expected: 100 },
+  { enabled: false, reading: false, expected: 100 },
+])(
+  "preserves follow through repeated resizes before native restoration (enabled=$enabled reading=$reading)",
+  ({ enabled, reading, expected }) => {
+    const contentResizes = stubContentResizeObserver();
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    try {
+      const view = render(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          metrics={metrics}
+          enabled={enabled}
+          initialPlacementPending
+        />,
+      );
+      const container = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      installClampedScrollTop(container, metrics);
+      act(() => {
+        if (reading) {
+          container.dispatchEvent(new WheelEvent("wheel", { deltaY: -30 }));
+        }
+        // More than four resizes before reconciliation must not evict the
+        // peak height needed to explain this upward native restoration.
+        metrics.scrollHeight = 1600;
+        contentResizes.forEach((resize) => resize());
+        for (const height of [1500, 1400, 1300, 1200, 1100]) {
+          metrics.scrollHeight = height;
+          contentResizes.forEach((resize) => resize());
+        }
+        metrics.scrollTop = 100;
+        container.dispatchEvent(new Event("scroll"));
+      });
+      view.rerender(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          metrics={metrics}
+          enabled={enabled}
+          initialPlacementPending={false}
+        />,
+      );
+      expect(metrics.scrollTop).toBe(expected);
+    } finally {
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  },
+);
+
+it.each([
+  { order: RESIZE_FIRST, enabled: true, reading: false, expected: 900 },
+  { order: SCROLL_FIRST, enabled: true, reading: false, expected: 900 },
+  { order: RESIZE_FIRST, enabled: true, reading: true, expected: 500 },
+  { order: RESIZE_FIRST, enabled: false, reading: false, expected: 500 },
+])(
+  "preserves follow through $order native restoration while placement is blocked (enabled=$enabled reading=$reading)",
+  ({ order, enabled, reading, expected }) => {
+    const contentResizes = stubContentResizeObserver();
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    try {
+      const view = render(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          metrics={metrics}
+          enabled={enabled}
+          initialPlacementPending
+        />,
+      );
+      const container = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      installClampedScrollTop(container, metrics);
+      const simulateNativeRestoration = () => {
+        metrics.scrollTop = 500;
+        container.dispatchEvent(new Event("scroll"));
+      };
+      act(() => {
+        if (reading) {
+          container.dispatchEvent(new WheelEvent("wheel", { deltaY: -30 }));
+        }
+        metrics.scrollHeight = 1300;
+        if (order === RESIZE_FIRST) {
+          contentResizes.forEach((resize) => resize());
+          simulateNativeRestoration();
+        } else {
+          simulateNativeRestoration();
+          contentResizes.forEach((resize) => resize());
+        }
       });
       view.rerender(
         <AutoScrollHarness

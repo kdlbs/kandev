@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
@@ -129,7 +130,7 @@ func TestCancelRunsWhere_ReturnedRowsCarryClassificationFields(t *testing.T) {
 	ctx := context.Background()
 	requestedAt := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 
-	launched := mustCreateRun(t, repo, &models.Run{
+	launched := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "launched", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{}`, Status: "claimed",
 	})
@@ -139,7 +140,7 @@ func TestCancelRunsWhere_ReturnedRowsCarryClassificationFields(t *testing.T) {
 	if _, err := repo.SetRunSessionID(ctx, launched.ID, "session-in-flight"); err != nil {
 		t.Fatalf("set session id: %v", err)
 	}
-	neverLaunched := mustCreateRun(t, repo, &models.Run{
+	neverLaunched := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "never-launched", AgentProfileID: "a2", Reason: "task_assigned",
 		Payload: `{}`, Status: "queued",
 	})
@@ -188,11 +189,11 @@ func TestCancelRunsWhere_MultiArgSelectorBindsInOrder(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	mustCreateRun(t, repo, &models.Run{
+	mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "match", AgentProfileID: "a1", Reason: "task_comment",
 		Payload: `{"task_id":"t1"}`, Status: "queued",
 	})
-	mustCreateRun(t, repo, &models.Run{
+	mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "wrong-reason", AgentProfileID: "a1", Reason: "heartbeat",
 		Payload: `{"task_id":"t1"}`, Status: "queued",
 	})

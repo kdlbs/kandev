@@ -1,3 +1,4 @@
+import { proveRetentionRefreshOrdering } from "../../helpers/retention-refresh-ordering";
 import { test, expect } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
 
@@ -106,4 +107,11 @@ test.describe("System retention settings", () => {
       await saveChanges(testPage);
     }
   });
+});
+
+// @covers AC-OFFICE-RUN-HISTORY-RETENTION-004.10
+test("preserves the acknowledged policy after leaving and reentering Storage", async ({
+  testPage,
+}) => {
+  await proveRetentionRefreshOrdering(testPage, false);
 });

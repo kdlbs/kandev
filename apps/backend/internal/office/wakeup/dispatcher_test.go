@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -99,12 +101,12 @@ func (h *testHarness) seedWakeup(id, source, payload string) {
 
 func (h *testHarness) seedRun(id, status string) {
 	h.t.Helper()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID:              id,
 		AgentProfileID:  h.agentID,
 		Reason:          "routine",
 		Payload:         "{}",
-		Status:          officemodels.RunStatus(status),
+		Status:          runsmodels.RunStatus(status),
 		CoalescedCount:  1,
 		ContextSnapshot: `{"prior":"snapshot"}`,
 	}
@@ -117,17 +119,26 @@ func (h *testHarness) seedRun(id, status string) {
 // exercise the idle-skip reason-classification promotion logic.
 func (h *testHarness) seedRunWithReason(id, status, reason string) {
 	h.t.Helper()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID:              id,
 		AgentProfileID:  h.agentID,
 		Reason:          reason,
 		Payload:         "{}",
-		Status:          officemodels.RunStatus(status),
+		Status:          runsmodels.RunStatus(status),
 		CoalescedCount:  1,
 		ContextSnapshot: `{"prior":"snapshot"}`,
 	}
 	if err := h.repo.CreateRun(context.Background(), run); err != nil {
 		h.t.Fatalf("seed run: %v", err)
+	}
+}
+
+func (h *testHarness) setRunRoutineIdentity(id, routineID string) {
+	h.t.Helper()
+	if _, err := h.repo.ExecRaw(context.Background(),
+		`UPDATE runs SET routine_id = ?, context_snapshot = ? WHERE id = ?`,
+		routineID, `{"routine_id":"`+routineID+`"}`, id); err != nil {
+		h.t.Fatalf("set run routine identity: %v", err)
 	}
 }
 
@@ -197,14 +208,14 @@ func TestDispatch_NoInflight_CreatesFreshRun_ThroughAuthoritativeSeam(t *testing
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if run.PriorityClass != officemodels.PriorityClassPeriodic {
-		t.Errorf("priority_class = %v, want PriorityClassPeriodic (%v)", run.PriorityClass, officemodels.PriorityClassPeriodic)
+	if run.PriorityClass != runsmodels.PriorityClassPeriodic {
+		t.Errorf("priority_class = %v, want PriorityClassPeriodic (%v)", run.PriorityClass, runsmodels.PriorityClassPeriodic)
 	}
 	if run.WorkspaceID != "ws-1" {
 		t.Errorf("workspace_id = %q, want %q (resolved from the agent profile, not left empty)", run.WorkspaceID, "ws-1")
 	}
-	if run.ActorKind != officemodels.ActorKindSystem {
-		t.Errorf("actor_kind = %q, want %q", run.ActorKind, officemodels.ActorKindSystem)
+	if run.ActorKind != runsmodels.ActorKindSystem {
+		t.Errorf("actor_kind = %q, want %q", run.ActorKind, runsmodels.ActorKindSystem)
 	}
 	if run.RoutineID != "r-1" {
 		t.Errorf("routine_id = %q, want %q (routine launch budget accounting depends on this)", run.RoutineID, "r-1")
@@ -245,6 +256,7 @@ func TestDispatch_CoalesceIntoQueuedRun(t *testing.T) {
 func TestDispatch_EventCoalescingIntoQueuedCronRun_PromotesReason(t *testing.T) {
 	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
 	h.seedRunWithReason("run-cron", "queued", shared.RunReasonRoutineDispatchCron)
+	h.setRunRoutineIdentity("run-cron", "r-1")
 	h.seedWakeupWithReason("w-event", wakeup.SourceRoutine, `{"routine_id":"r-1"}`, shared.RunReasonRoutineDispatchEvent)
 
 	if err := h.dispatcher.Dispatch(context.Background(), "w-event"); err != nil {
@@ -297,6 +309,48 @@ func TestDispatch_CronCoalescingIntoQueuedEventRun_DoesNotDemote(t *testing.T) {
 	}
 	if run.Reason != shared.RunReasonRoutineDispatchEvent {
 		t.Errorf("run.Reason = %q, want unchanged %q (no demotion)", run.Reason, shared.RunReasonRoutineDispatchEvent)
+	}
+}
+
+func TestDispatch_DifferentRoutineUsesSeparateRun(t *testing.T) {
+	for _, status := range []string{"queued", "claimed"} {
+		t.Run(status, func(t *testing.T) {
+			h := newHarness(t, wakeup.PolicyCoalesceIfActive)
+			original := &runsmodels.Run{
+				ID: "run-routine-a", AgentProfileID: h.agentID, Reason: shared.RunReasonRoutineDispatchCron,
+				RoutineID: "routine-a", Payload: "{}", Status: runsmodels.RunStatus(status),
+				CoalescedCount: 1, ContextSnapshot: `{"routine_id":"routine-a"}`,
+			}
+			if err := h.repo.CreateRun(context.Background(), original); err != nil {
+				t.Fatalf("seed original run: %v", err)
+			}
+			h.seedWakeupWithReason("w-routine-b", wakeup.SourceRoutine, `{"routine_id":"routine-b"}`, shared.RunReasonRoutineDispatchCron)
+
+			if err := h.dispatcher.Dispatch(context.Background(), "w-routine-b"); err != nil {
+				t.Fatalf("dispatch: %v", err)
+			}
+			request, err := h.repo.GetWakeupRequest(context.Background(), "w-routine-b")
+			if err != nil {
+				t.Fatalf("get request: %v", err)
+			}
+			if request.Status != officesqlite.WakeupStatusClaimed || request.RunID == original.ID {
+				t.Fatalf("request = status %q, run %q; want a fresh claimed run", request.Status, request.RunID)
+			}
+			fresh, err := h.repo.GetRunByID(context.Background(), request.RunID)
+			if err != nil {
+				t.Fatalf("get fresh run: %v", err)
+			}
+			if fresh.RoutineID != "routine-b" {
+				t.Errorf("fresh run routine_id = %q, want routine-b", fresh.RoutineID)
+			}
+			preserved, err := h.repo.GetRunByID(context.Background(), original.ID)
+			if err != nil {
+				t.Fatalf("get original run: %v", err)
+			}
+			if preserved.CoalescedCount != 1 || strings.Contains(preserved.ContextSnapshot, "routine-b") {
+				t.Errorf("original run absorbed another routine: %+v", preserved)
+			}
+		})
 	}
 }
 
@@ -466,6 +520,7 @@ func dispatchRoutineWith(t *testing.T, policy string) string {
 	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
 	h.dispatcher.SetRoutineLookup(&fakeRoutineLookup{policy: policy})
 	h.seedRun("run-pre", "queued")
+	h.setRunRoutineIdentity("run-pre", "r-1")
 	h.seedWakeup("w-1", wakeup.SourceRoutine, `{"routine_id":"r-1"}`)
 	if err := h.dispatcher.Dispatch(context.Background(), "w-1"); err != nil {
 		t.Fatalf("dispatch: %v", err)
@@ -513,6 +568,7 @@ func TestDispatch_Routine_NoLookupFallsBackToCoalesce(t *testing.T) {
 	// always_enqueue (which would defeat the bottleneck guard).
 	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
 	h.seedRun("run-pre", "queued")
+	h.setRunRoutineIdentity("run-pre", "r-1")
 	h.seedWakeup("w-1", wakeup.SourceRoutine, `{"routine_id":"r-1"}`)
 
 	if err := h.dispatcher.Dispatch(context.Background(), "w-1"); err != nil {
@@ -538,6 +594,7 @@ func TestDispatch_UnknownPolicy_FallsBackToCoalesceAndPromotes(t *testing.T) {
 	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
 	h.dispatcher.SetRoutineLookup(&fakeRoutineLookup{policy: "not_a_real_policy"})
 	h.seedRunWithReason("run-cron", "queued", shared.RunReasonRoutineDispatchCron)
+	h.setRunRoutineIdentity("run-cron", "r-1")
 	h.seedWakeupWithReason("w-event", wakeup.SourceRoutine, `{"routine_id":"r-1"}`, shared.RunReasonRoutineDispatchEvent)
 
 	if err := h.dispatcher.Dispatch(context.Background(), "w-event"); err != nil {

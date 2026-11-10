@@ -44,6 +44,7 @@
   "undo": "Anular",
   "update": "Atualizar",
   "walkthrough": "Passo a passo",
+  "walkthroughGeneratedAt": "Gerado em {{date}}",
   "walkthroughNoteAdded": "Nota do passo a passo adicionada",
   "walkthroughNoteQueued": "Nota do passo a passo em fila",
   "walkthroughNoteSent": "Nota do passo a passo enviada",
@@ -52,5 +53,14 @@
   "fileStatusModified": "Modificado",
   "fileStatusMoved": "Movido",
   "fileStatusMovedFrom": "Movido de {{oldPath}}",
-  "fileStatusUntracked": "Não rastreado"
+  "fileStatusUntracked": "Não rastreado",
+  "walkthroughComment": "Comentar",
+  "walkthroughPending": "Pendente",
+  "walkthroughSubmitted": "Enviado",
+  "walkthroughCommentCount_one": "{{count}} comentário",
+  "walkthroughCommentCount_other": "{{count}} comentários",
+  "walkthroughSelectStep": "Ir para o passo",
+  "walkthroughUntitledStep": "Passo {{number}}",
+  "walkthroughStepOption_one": "{{number}}. {{title}} ({{count}} comentário)",
+  "walkthroughStepOption_other": "{{number}}. {{title}} ({{count}} comentários)"
 }

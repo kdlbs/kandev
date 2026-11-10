@@ -239,6 +239,8 @@ export type QueuedMessage = {
   metadata?: QueuedMessageMetadata;
   queued_at: string;
   queued_by?: string;
+  /** Response-only: the accepted prompt could not retire the observed turn-error badge. */
+  turn_error_acknowledgement_failed?: boolean;
 };
 
 /** Capacity info kept alongside the entry list. */
@@ -472,6 +474,8 @@ export type SessionSliceActions = {
   setActiveModel: (sessionId: string, modelId: string) => void;
   clearActiveModel: (sessionId: string) => void;
   // Task plan actions
+  beginTaskPlanRead: (taskId: string) => symbol;
+  finishTaskPlanRead: (taskId: string, token: symbol, plan?: TaskPlan | null) => boolean;
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
