@@ -49,7 +49,13 @@ export function ImageState({
         {t(error ? imageErrorKey(state.code) : "task:questionImageLoading")}
       </p>
       {error && (
-        <Button type="button" variant="outline" className={reviewControlSize} onClick={onRetry}>
+        <Button
+          type="button"
+          variant="outline"
+          className={reviewControlSize}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={onRetry}
+        >
           {t("task:questionImageRetry")}
         </Button>
       )}

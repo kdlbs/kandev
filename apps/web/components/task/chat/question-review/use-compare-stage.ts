@@ -63,7 +63,7 @@ function useShowSelectedRegion(
     if (imageId && segment.images.some((image) => image.id === imageId)) {
       dispatch({ type: "show", id: imageId });
     }
-  }, [dispatch, imageId, segment.images]);
+  }, [dispatch, imageId, segment.images, selected]);
 }
 
 type Handlers = {

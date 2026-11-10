@@ -181,6 +181,31 @@ describe("question image review control", () => {
   });
 });
 
+describe("question image review submit feedback", () => {
+  it("shows a failed submit and retry action inside the open review dialog", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
+    renderOverlay(imageBundle());
+    const dialog = openReview();
+
+    fireEvent.click(within(dialog).getAllByTestId(OPTION)[0]);
+    fireEvent.click(within(dialog).getByTestId("clarification-next"));
+    fireEvent.click(within(dialog).getAllByTestId(OPTION)[0]);
+    fireEvent.click(within(dialog).getByTestId(SUBMIT));
+
+    await waitFor(() =>
+      expect(within(dialog).getByTestId("clarification-submit-error")).toBeTruthy(),
+    );
+    expect(within(dialog).getByTestId("clarification-retry")).toBeTruthy();
+    expect(within(dialog).getAllByTestId(OPTION)[0].getAttribute(DATA_SELECTED)).toBe("true");
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
+    fireEvent.click(within(dialog).getByTestId("clarification-retry"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+});
+
 describe("question image review view", () => {
   // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-002.1
   // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-001.4

@@ -1002,6 +1002,14 @@ export function ClarificationInputOverlay({
 
   const form = (
     <>
+      {group.submitState === "error" && (
+        <ClarificationStatusBanner
+          state={group.submitState}
+          onRetry={() => {
+            if (attachmentsReady) void group.retry(enrichAnswers(group.answers));
+          }}
+        />
+      )}
       {sharedContext && (
         <div data-testid="clarification-context" className="mx-4 mt-3 mb-2 text-[13px]">
           <ClarificationMarkdown variant="context">{sharedContext}</ClarificationMarkdown>
@@ -1069,14 +1077,6 @@ export function ClarificationInputOverlay({
         canExpandPanel={canExpandPanel}
         collapseContentId={collapseContentId}
       />
-      {group.submitState === "error" && (
-        <ClarificationStatusBanner
-          state={group.submitState}
-          onRetry={() => {
-            if (attachmentsReady) void group.retry(enrichAnswers(group.answers));
-          }}
-        />
-      )}
       {lateInteraction &&
         ((lateMode && effectiveLateStatus === "error") ||
           (!lateMode && group.lateAnswerState === "error")) && (

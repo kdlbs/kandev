@@ -246,6 +246,68 @@ test("marks a region on an image and delivers it with the answer", async ({
   );
 });
 
+test("reopens a region comment after changing comparison modes", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(180_000);
+  seedReviewImages(seedData.repositoryPath);
+  const { session } = await openReviewQuestions(testPage, apiClient, seedData, reviewScript());
+  await session.clarificationOverlay().getByTestId("question-review-open").click();
+  const dialog = testPage.getByTestId("question-review-dialog");
+  await expect(dialog.getByRole("img", { name: reviewImages.before.alt })).toBeVisible();
+
+  await dialog.getByTestId("question-review-annotate").click();
+  const stage = dialog.getByTestId("question-review-stage");
+  const box = (await stage.boundingBox())!;
+  await testPage.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3);
+  await testPage.mouse.down();
+  await testPage.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.6, { steps: 4 });
+  await testPage.mouse.up();
+  await dialog.getByTestId("question-review-region-input").fill("Header spacing");
+  await dialog.getByTestId("question-review-region-add").click();
+
+  await dialog.getByTestId("question-review-modes").getByText("Wipe", { exact: true }).click();
+  const item = dialog.getByTestId("question-review-region-item");
+  await item.getByTestId("question-review-region-edit").click();
+  const popover = dialog.getByTestId("question-review-region-popover");
+  await expect(popover).toBeVisible();
+  await expect(dialog.getByTestId("question-review-region-input")).toHaveValue("Header spacing");
+
+  await testPage.keyboard.press("Escape");
+  await expect(popover).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+});
+
+test("retries an image load from the review stage", async ({ testPage, apiClient, seedData }) => {
+  test.setTimeout(180_000);
+  seedReviewImages(seedData.repositoryPath);
+  const { session } = await openReviewQuestions(testPage, apiClient, seedData, reviewScript());
+  const imageRoute = /\/api\/v1\/clarification\/[^/]+\/images\/after(?:\?|$)/;
+  let imageRequests = 0;
+  await testPage.route(imageRoute, async (route) => {
+    imageRequests += 1;
+    if (imageRequests === 1) {
+      await route.abort();
+      return;
+    }
+    await route.continue();
+  });
+
+  await session.clarificationOverlay().getByTestId("question-review-open").click();
+  const dialog = testPage.getByTestId("question-review-dialog");
+  const retry = dialog.getByRole("button", { name: "Retry" });
+  await expect(retry).toBeVisible();
+  expect(imageRequests).toBeGreaterThan(0);
+  const requestsBeforeRetry = imageRequests;
+  await retry.click();
+
+  await expect.poll(() => imageRequests).toBe(requestsBeforeRetry + 1);
+  await expect(retry).toHaveCount(0);
+  await testPage.unroute(imageRoute);
+});
+
 test("steps candidates, keeps the mode, zooms to changes, and holds to compare", async ({
   testPage,
   apiClient,
