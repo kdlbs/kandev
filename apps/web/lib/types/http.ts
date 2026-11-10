@@ -761,6 +761,11 @@ export type TaskSession = ActiveSubagentCountFields & {
   /** Downstream ACP session ID for the currently selected concrete candidate. */
   downstream_acp_session_id?: string;
   container_id?: string;
+  /**
+   * Observed runtime recorded for the same execution as `container_id`.
+   * `null` means unknown; never infer it from the selected executor.
+   */
+  execution_runtime?: string | null;
   executor_id?: string;
   environment_id?: string;
   /** Current backend agent process execution identity for this session. */

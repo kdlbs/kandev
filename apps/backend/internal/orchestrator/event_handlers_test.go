@@ -463,6 +463,14 @@ type passthroughStdinCall struct {
 	Data      string
 }
 
+func (m *mockAgentManager) RequiresCloneURL(string) bool          { return false }
+func (m *mockAgentManager) ShouldApplyPreferredShell(string) bool { return false }
+func (m *mockAgentManager) ValidateExecutorRuntime(string) error  { return nil }
+
+func (m *mockAgentManager) ValidateExecutionRuntime(context.Context, string, string, string) error {
+	return nil
+}
+
 func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 	if m.launchAgentFunc != nil {
 		return m.launchAgentFunc(ctx, req)
@@ -997,6 +1005,25 @@ func setupTestRepo(t *testing.T) *sqliterepo.Repository {
 	return sqliterepo.NewWithInitializedDB(database, database, nil)
 }
 
+// seedExecutorRow registers a built-in executor row so a session that selects
+// it resolves a concrete executor type during launch admission. Required
+// runtime selection refuses an executor ID whose lookup has no type.
+func seedExecutorRow(t *testing.T, repo *sqliterepo.Repository, id string, executorType models.ExecutorType) {
+	t.Helper()
+	ctx := context.Background()
+	if existing, err := repo.GetExecutor(ctx, id); err == nil && existing != nil {
+		return
+	}
+	now := time.Now().UTC()
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID: id, Name: id, Type: executorType,
+		Status: models.ExecutorStatusActive, IsSystem: true, Resumable: true,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed executor %q: %v", id, err)
+	}
+}
+
 // seedSession creates a task, workspace, workflow and session in the repo for testing.
 func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, workflowStepID string, queueIncarnationID ...string) {
 	t.Helper()
@@ -1306,7 +1333,7 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 		}
 		agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
 		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
-		svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+		svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 		seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
 
 		if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "queued", "", messagequeue.QueuedByUser, false, nil); err != nil {
@@ -1727,7 +1754,7 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 		promptErr:      errors.New("agent stream disconnected: read tcp [::1]:56463->[::1]:10002: use of closed network connection"),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 
@@ -1794,7 +1821,7 @@ func TestExecuteQueuedMessage_RequeuesCoalescedMessageWithOriginalSender(t *test
 		promptErr:      errors.New("agent stream disconnected: read tcp [::1]:56463->[::1]:10002: use of closed network connection"),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q1",
@@ -1870,7 +1897,7 @@ func TestExecuteQueuedMessage_FiresOnTurnStart(t *testing.T) {
 		messageQueue: newAuthoritativeMemoryQueue(repo, log),
 	}
 	svc.SetWorkflowStepGetter(stepGetter)
-	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q1",
@@ -1925,7 +1952,7 @@ func TestExecuteQueuedMessage_NoOnTurnStart_StepUnchanged(t *testing.T) {
 		messageQueue: newAuthoritativeMemoryQueue(repo, log),
 	}
 	svc.SetWorkflowStepGetter(stepGetter)
-	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q1",

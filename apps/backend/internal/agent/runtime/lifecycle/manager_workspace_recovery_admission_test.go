@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -84,6 +85,7 @@ func newWorkspaceRecoveryFixture(
 	writer := &captureExecutorRunningWriter{prior: &models.ExecutorRunning{
 		ID: "running-prior", SessionID: workspaceRecoverySessionID,
 		TaskID: workspaceRecoveryTaskID, AgentExecutionID: "execution-prior",
+		Runtime: agentruntime.RuntimeStandalone,
 	}}
 	manager.SetExecutorRunningWriter(writer)
 	return manager, backend, writer

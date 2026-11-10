@@ -119,7 +119,7 @@ func taskSessionSummarySelectCols(driver string) string {
 	}
 	return strings.Join([]string{
 		"ts.id", "ts.task_id", "ts.queue_incarnation_id",
-		"COALESCE(er.agent_execution_id, '')", "COALESCE(er.container_id, '')",
+		"COALESCE(er.agent_execution_id, '')", "COALESCE(er.container_id, '')", "COALESCE(er.runtime, '')",
 		"ts.agent_profile_id", "ts.execution_profile_id", "ts.route_generation", "ts.route_state", "ts.route_reason",
 		"ts.executor_id", "ts.executor_profile_id", "ts.environment_id",
 		"ts.repository_id", "ts.base_branch", "ts.base_commit_sha",
@@ -179,7 +179,7 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 	)
 	if err := rows.Scan(
 		&observation.ID, &observation.TaskID, &queueIncarnationID,
-		&observation.AgentExecutionID, &observation.ContainerID,
+		&observation.AgentExecutionID, &observation.ContainerID, &observation.ExecutionRuntime,
 		&agentProfileID, &executionProfileID, &observation.RouteGeneration,
 		&routeState, &routeReason, &executorID, &executorProfileID,
 		&environmentID, &repositoryID, &baseBranch, &baseCommitSHA, &workspacePath, &agentWorkspacePath,

@@ -215,7 +215,7 @@ func buildColdResumeScenario(t *testing.T, opts coldResumeOptions) *coldResumeSc
 		Title: "Test", Description: "Implement a python fibonacci", State: v1.TaskStateInProgress,
 	}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	svc := &Service{
 		logger:             log,
 		repo:               repo,

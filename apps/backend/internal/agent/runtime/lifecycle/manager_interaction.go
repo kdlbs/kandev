@@ -161,6 +161,11 @@ func (m *Manager) PromptAgentWithDispatchCallbackAndSubmissionID(
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	// A new prompt is an authenticated effect on the retained worker. Refuse it
+	// when the recorded runtime cannot satisfy the selection.
+	if err := m.requireExecutionSelectionCompatibility(ctx, execution); err != nil {
+		return nil, err
+	}
 	if m.isIdleSettledRetiredLocalExecution(execution) {
 		m.retireStaleLocalExecution(execution)
 		return nil, fmt.Errorf("retired idle execution %q requires native restore: %w", executionID, ErrExecutionNotFound)
@@ -227,6 +232,9 @@ func (m *Manager) PromptAgentWithAdmissionCallbackAndSubmissionID(
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	if err := m.requireExecutionSelectionCompatibility(ctx, execution); err != nil {
+		return nil, err
+	}
 	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
 	if err != nil {
 		return nil, err
@@ -261,6 +269,9 @@ func (m *Manager) SteerAgentWithDispatchCallback(ctx context.Context, executionI
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	if err := m.requireExecutionSelectionCompatibility(ctx, execution); err != nil {
+		return nil, err
 	}
 	if err := m.runtimeReplacementRecoveryError(execution); err != nil {
 		return nil, err

@@ -14,7 +14,7 @@ func TestForegroundActivitySignal_FollowUpPromptKeepsIndependentCompletionIdenti
 	repo := setupTestRepo(t)
 	agentMgr := &mockAgentManager{isAgentRunning: true}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	eb := &recordingEventBus{}
 	svc.eventBus = eb
 	svc.messageCreator = &mockMessageCreator{}
@@ -103,7 +103,7 @@ func TestForegroundActivitySignal_PreDispatchEventsUseCurrentPromptCycle(t *test
 	baseAgentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	agentMgr := &beforeDispatchAgentManager{mockAgentManager: baseAgentMgr}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 
 	const (
@@ -185,7 +185,7 @@ func TestForegroundActivitySignal_ClaimedPreDispatchCompletionReconcilesOnAccept
 			baseAgentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 			agentMgr := &beforeDispatchAgentManager{mockAgentManager: baseAgentMgr}
 			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-			svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+			svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 			svc.messageCreator = &mockMessageCreator{}
 			eb := &recordingEventBus{}
 			svc.eventBus = eb
