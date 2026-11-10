@@ -591,6 +591,7 @@ export function KeyboardShortcutsSettings() {
       >
         <SettingsRow
           label={t("settings:escapeCancelsAgent")}
+          discoveryTargetId={GENERAL_SETTINGS_TARGETS.escapeCancelsAgent}
           description={t("settings:escapeCancelsAgentDescription")}
           controlId="escape-cancels-agent"
           touchTarget="switch"
