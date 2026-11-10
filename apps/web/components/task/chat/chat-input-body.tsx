@@ -64,6 +64,7 @@ export type ChatInputEditorAreaProps = {
   isAgentBusy: boolean;
   onEscape?: (event: React.KeyboardEvent<HTMLElement>) => void;
   canCancelAgent?: boolean;
+  escapeCancelsAgent?: boolean;
   hasPendingClarification?: boolean;
   onPlanModeChange: (enabled: boolean) => void;
   taskTitle?: string;
@@ -284,6 +285,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
       if (
         event.key !== "Escape" ||
         !p.canCancelAgent ||
+        !p.escapeCancelsAgent ||
         p.hasPendingClarification ||
         event.nativeEvent.isComposing ||
         event.nativeEvent.keyCode === 229 ||
@@ -295,7 +297,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
       event.preventDefault();
       p.onCancel();
     },
-    [p.canCancelAgent, p.hasPendingClarification, p.onCancel],
+    [p.canCancelAgent, p.escapeCancelsAgent, p.hasPendingClarification, p.onCancel],
   );
 
   const composerCapability = useChatPluginComposer(composerPluginOptions(p, hasContent));

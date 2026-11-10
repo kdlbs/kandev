@@ -1,7 +1,7 @@
 ---
 id: "01-chat-escape-cancel"
 title: "Cancel a running turn with Escape"
-status: blocked
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -12,6 +12,7 @@ acceptance_criteria:
   - AC-TASKS-KEYBOARD-ACTIONS-004.2
   - AC-TASKS-KEYBOARD-ACTIONS-004.3
   - AC-TASKS-KEYBOARD-ACTIONS-004.4
+  - AC-TASKS-KEYBOARD-ACTIONS-004.5
 system_design:
   - ../../specs/tasks/system-design/task-keyboard-actions.md
 ---
@@ -33,12 +34,13 @@ an attached keyboard.
 
 ## Out of scope
 
-- New global shortcut settings, touch controls, or cancellation transport.
+- New global shortcut binding, touch controls, or cancellation transport.
 - Cancellation from the transcript or chat toolbar.
 
 ## Acceptance
 
-- Escape from the focused composer cancels exactly one active turn using the
+- The persisted Escape cancellation setting defaults off and can be enabled in keyboard settings.
+- When enabled, Escape from the focused composer cancels exactly one active turn using the
   resolved session; it does nothing when idle or composing.
 - Escape outside the composer retains its existing behavior.
 - Desktop and phone browser tests prove the user-visible path.
@@ -121,13 +123,8 @@ None.
 
 ## Results
 
-Implementation and targeted checks are complete. Unit tests pass (5 files,
-90 tests); web typecheck, targeted ESLint, specification validation, full
-specification lint, and `git diff --check` pass.
-
-Desktop Playwright could not reach test execution because the managed runner's
-backend build fails with `go: Permission denied` at `build-agentctl`. The
-elevated retry failed identically. The phone Playwright command has not run
-because it uses the same blocked Go backend build. Keep this work order blocked
-until both browser scenarios can run in an environment with an executable Go
-toolchain.
+The setting defaults off and persists with user settings. Focused settings and
+composer unit tests, Go user-settings and boot-payload tests, TypeScript,
+translation checks, and specification validation passed. Focused desktop and
+mobile Playwright scenarios passed with the setting enabled; a desktop scenario
+also confirmed Escape leaves a running agent alone with the setting disabled.

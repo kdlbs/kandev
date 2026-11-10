@@ -3,6 +3,7 @@
 import { useTaskSessionMCPSelection } from "@/hooks/domains/session/use-task-session-mcp-selection";
 
 import { forwardRef, useCallback } from "react";
+import { useAppStore } from "@/components/state-provider";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { Message } from "@/lib/types/http";
 import type { ReviewComment } from "@/lib/state/slices/comments";
@@ -351,6 +352,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     const { sessionId, taskId, taskTitle, taskDescription, isAgentBusy, isStarting, isSending } =
       props;
     const p = normalizeChatInputProps(props);
+    const escapeCancelsAgent = useAppStore((state) => state.userSettings.escapeCancelsAgent);
     const mcpSelection = useTaskSessionMCPSelection({
       taskId,
       sessionId,
@@ -490,12 +492,15 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
               />
             ) : null
           }
-          editorAreaProps={buildEditorAreaProps(s, p, {
-            mcpSelection,
-            onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
-            isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
-            isUtilityConfigured: promptEnhancement.isUtilityConfigured,
-          })}
+          editorAreaProps={{
+            ...buildEditorAreaProps(s, p, {
+              mcpSelection,
+              onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
+              isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
+              isUtilityConfigured: promptEnhancement.isUtilityConfigured,
+            }),
+            escapeCancelsAgent,
+          }}
         />
       </>
     );

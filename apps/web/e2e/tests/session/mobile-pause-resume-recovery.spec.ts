@@ -14,6 +14,7 @@ test.describe("mobile: pause queue recovery", () => {
   }) => {
     test.setTimeout(90_000);
     const ws = watchWs(testPage);
+    await apiClient.saveUserSettings({ escape_cancels_agent: true });
     await apiClient.updateWorkflowStep(seedData.startStepId, {
       cancel_triggers_turn_complete: false,
     });

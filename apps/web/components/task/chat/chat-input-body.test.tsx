@@ -126,6 +126,7 @@ describe("ChatInputBody Escape cancellation", () => {
               ...props().editorAreaProps,
               isAgentBusy: true,
               canCancelAgent: true,
+              escapeCancelsAgent: true,
               onCancel,
             },
           })}
@@ -163,6 +164,28 @@ describe("ChatInputBody Escape cancellation", () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
+  it("does not cancel by default when cancellation is available", () => {
+    const onCancel = vi.fn();
+    render(
+      <TooltipProvider>
+        <ChatInputBody
+          {...props({
+            editorAreaProps: {
+              ...props().editorAreaProps,
+              isAgentBusy: true,
+              canCancelAgent: true,
+              onCancel,
+            },
+          })}
+        />
+      </TooltipProvider>,
+    );
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID).dispatchEvent(event);
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   it("uses cancel eligibility when the agent is running without queued-input busy state", () => {
     const onCancel = vi.fn();
     const base = props().editorAreaProps;
@@ -170,7 +193,13 @@ describe("ChatInputBody Escape cancellation", () => {
       <TooltipProvider>
         <ChatInputBody
           {...props({
-            editorAreaProps: { ...base, isAgentBusy: false, canCancelAgent: true, onCancel },
+            editorAreaProps: {
+              ...base,
+              isAgentBusy: false,
+              canCancelAgent: true,
+              escapeCancelsAgent: true,
+              onCancel,
+            },
           })}
         />
       </TooltipProvider>,
@@ -196,6 +225,7 @@ describe("ChatInputBody Escape cancellation", () => {
               isAgentBusy: true,
               canCancelAgent: true,
               hasPendingClarification: true,
+              escapeCancelsAgent: true,
               onCancel,
             },
           })}
@@ -222,6 +252,7 @@ describe("ChatInputBody Escape cancellation", () => {
               ...props().editorAreaProps,
               isAgentBusy: true,
               canCancelAgent: true,
+              escapeCancelsAgent: true,
               onCancel,
             },
           })}

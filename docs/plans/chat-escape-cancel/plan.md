@@ -36,7 +36,7 @@ interactions keep their existing key behavior.
 
 Use `useChatPanelHandlers` in `apps/web/components/task/chat/chat-input-area.tsx`
 and its existing `handleCancelTurn`. Scope the Escape keydown to the actual
-composer, consume it only when the agent is running and the event is not an IME
+composer, consume it only when the user has enabled the setting, cancellation is available, and the event is not an IME
 composition event, and preserve the existing cancel request and error handling.
 The rendered chat's running state and resolved session remain authoritative.
 
@@ -65,7 +65,7 @@ UI-02: Phone task chat, attached keyboard, agent running.
 +------------------------------+
 ```
 
-Required: no additional control or layout change; Escape cancels only from the
+The keyboard settings page exposes a switch, off by default. When enabled, Escape cancels only from the
 focused composer while running. Phone composition stays in the existing chat
 surface; no touch target, drawer, or scroll behavior changes. Previews map to
 AC-TASKS-KEYBOARD-ACTIONS-004.1 through .4.
@@ -90,14 +90,13 @@ composer behavior.
 
 ## Work orders
 
-- [ ] [Task 01: Cancel a running turn with Escape](task-01-chat-escape-cancel.md)
+- [x] [Task 01: Cancel a running turn with Escape](task-01-chat-escape-cancel.md)
 
 ## Verification results
 
-Unit tests, web typecheck, targeted ESLint, specification validation, and
-`git diff --check` pass. Playwright is blocked because the managed runner cannot
-execute its Go backend build (`go: Permission denied`); the browser scenarios
-remain required before this plan can be marked implemented.
+Focused unit, Go, TypeScript, translation, and specification checks passed.
+Desktop and mobile Playwright scenarios passed with cancellation enabled; the
+desktop disabled-setting scenario also passed.
 
 ## Risks
 

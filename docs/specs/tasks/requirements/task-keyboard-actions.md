@@ -102,10 +102,10 @@ target of these commands. Mod means Command on macOS and Control elsewhere.
 #### Acceptance criteria
 
 - **AC-TASKS-KEYBOARD-ACTIONS-004.1:** When the chat composer has focus and the
-  agent is running, Escape shall invoke the existing cancel-turn action for the
+  agent is running and the user has enabled Escape cancellation, Escape shall invoke the existing cancel-turn action for the
   composer's resolved session and prevent the browser's default Escape action.
 - **AC-TASKS-KEYBOARD-ACTIONS-004.2:** When the agent is not running, the
-  composer is not focused, or Escape is part of IME composition, Escape shall
+  composer is not focused, the setting is disabled, or Escape is part of IME composition, Escape shall
   not cancel an agent turn.
 - **AC-TASKS-KEYBOARD-ACTIONS-004.3:** Escape handling shall not cancel a turn
   from another focused chat control or overlay, and existing Escape behavior
@@ -113,6 +113,9 @@ target of these commands. Mod means Command on macOS and Control elsewhere.
 - **AC-TASKS-KEYBOARD-ACTIONS-004.4:** The shortcut shall use the current
   composer session and the existing cancellation transport; it shall not
   dispatch more than once for one keydown.
+- **AC-TASKS-KEYBOARD-ACTIONS-004.5:** A user setting in keyboard shortcut
+  preferences shall enable Escape cancellation. It shall default to off and
+  persist across sessions and devices.
 
 ## Out of scope
 

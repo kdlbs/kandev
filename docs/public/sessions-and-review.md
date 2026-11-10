@@ -542,6 +542,8 @@ If the final attempt fails and no matches were collected, it shows a retryable
 failure instead. Matches already found remain available during retries.
 
 Open **Settings > Preferences > Keyboard Shortcuts** to customize these bindings.
+In **Chat Input**, enable **Escape pauses the agent** to pause a running agent
+by pressing Escape while the chat input has focus. This option is off by default.
 Use **Search shortcuts** to filter core and integration actions by name. Clear
 the search to restore the full list; unsaved shortcut changes remain in the draft.
 

@@ -15,6 +15,7 @@ import {
 } from "@tabler/icons-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
+import { Switch } from "@kandev/ui/switch";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { settingsControlClassName } from "@/components/settings/settings-control";
 import { SettingsRow } from "@/components/settings/settings-group";
@@ -557,6 +558,7 @@ export function KeyboardShortcutsSettings() {
   const shortcuts = useShortcutDraft("general-keyboard-shortcuts");
   const [saved, setSaved] = useState(() => ({
     chatSubmitKey: userSettings.chatSubmitKey,
+    escapeCancelsAgent: userSettings.escapeCancelsAgent,
   }));
   const [draft, setDraft] = useState(saved);
   const revision = JSON.stringify(draft);
@@ -572,6 +574,7 @@ export function KeyboardShortcutsSettings() {
         workspace_id: current.workspaceId || "",
         repository_ids: current.repositoryIds || [],
         chat_submit_key: submitted.chatSubmitKey,
+        escape_cancels_agent: submitted.escapeCancelsAgent,
       });
       setSaved(submitted);
       setUserSettings({ ...storeApi.getState().userSettings, ...submitted });
@@ -586,6 +589,22 @@ export function KeyboardShortcutsSettings() {
         title={t("settings:chatInput")}
         description={t("settings:configureChatInputBehavior")}
       >
+        <SettingsRow
+          label={t("settings:escapeCancelsAgent")}
+          description={t("settings:escapeCancelsAgentDescription")}
+          controlId="escape-cancels-agent"
+          touchTarget="switch"
+          isDirty={draft.escapeCancelsAgent !== saved.escapeCancelsAgent}
+          control={
+            <Switch
+              id="escape-cancels-agent"
+              checked={draft.escapeCancelsAgent}
+              onCheckedChange={(escapeCancelsAgent) =>
+                setDraft((current) => ({ ...current, escapeCancelsAgent }))
+              }
+            />
+          }
+        />
         <ChatSubmitKeyCard
           value={draft.chatSubmitKey}
           isDirty={draft.chatSubmitKey !== saved.chatSubmitKey}

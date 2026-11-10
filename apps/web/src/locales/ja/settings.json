@@ -489,6 +489,8 @@
   "memory": "メモリ %",
   "mergeThisSplitIntoTheSplit": "この分割を {{target}} を含む分割に統合します。",
   "mergeWithTarget": "{{target}} と統合",
+  "escapeCancelsAgent": "Escape キーでエージェントを一時停止",
+  "escapeCancelsAgentDescription": "チャット入力欄で Escape キーを押すと、実行中のエージェントを一時停止します。",
   "messageSubmitKey": "メッセージ送信キー",
   "messageTimeDisplay": "メッセージ時刻",
   "messageTimeDisplayDescription": "メッセージのタイムスタンプの表示形式を選択します。別の形式は、タイムスタンプにカーソルを合わせるかタップすると表示されます。",

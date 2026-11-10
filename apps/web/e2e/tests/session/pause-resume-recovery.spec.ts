@@ -57,12 +57,29 @@ async function seedTaskAndWaitForIdle(
 test.describe("Pause → resume recovery", () => {
   // Cancel/resume timing can be sensitive under CI load.
 
+  test("Escape leaves the running agent alone when the setting is off", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.saveUserSettings({ escape_cancels_agent: false });
+    const session = await seedTaskAndWaitForIdle(testPage, apiClient, seedData, "Escape disabled");
+    await session.sendMessage("/slow 8s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    const editor = session.activeChat().locator(".tiptap.ProseMirror:visible").first();
+    await editor.focus();
+    await editor.press("Escape");
+    await dwell(testPage, 300, "negative-assertion", "Escape must not pause when disabled");
+    await expect(session.agentStatus()).toBeVisible();
+  });
+
   test("Escape cancels only while the chat composer is focused", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     const ws = watchWs(testPage);
+    await apiClient.saveUserSettings({ escape_cancels_agent: true });
     const session = await seedTaskAndWaitForIdle(
       testPage,
       apiClient,
