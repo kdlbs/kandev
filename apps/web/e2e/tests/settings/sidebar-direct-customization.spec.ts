@@ -18,6 +18,7 @@ test.beforeEach(async ({ apiClient, seedData }) => {
 test("customizes visibility and presentation from the menu and settings", async ({
   testPage: page,
   apiClient,
+  seedData,
 }) => {
   await page.goto("/tasks");
   const sidebar = page.getByTestId("app-sidebar");
@@ -30,6 +31,15 @@ test("customizes visibility and presentation from the menu and settings", async 
   await expect(menu.getByText("Sidebar settings", { exact: true })).toBeVisible();
   await menu.getByTestId("sidebar-visibility-home").click();
   await expect(sidebar.getByRole("link", { name: "Home", exact: true })).toHaveCount(0);
+  // Visibility updates optimistically. Reload only after the layout is saved.
+  await expect
+    .poll(async () => {
+      const { settings } = await apiClient.getUserSettings();
+      return settings.sidebar_layouts_by_workspace?.[seedData.workspaceId]?.nodes.find(
+        (node) => node.id === "home",
+      )?.visible;
+    })
+    .toBe(false);
   await page.reload();
   await expect(sidebar.getByRole("link", { name: "Home", exact: true })).toHaveCount(0);
   await create.click({ button: "right" });

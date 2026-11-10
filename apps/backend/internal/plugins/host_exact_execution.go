@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/plugins/state"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

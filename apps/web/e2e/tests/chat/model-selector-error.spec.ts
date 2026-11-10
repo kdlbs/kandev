@@ -2,6 +2,7 @@ import type { Route } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
+import { seedStaleRuntimeConfigWithoutSettlement } from "../../helpers/session-store";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
@@ -609,5 +610,80 @@ test.describe("Chat model selector — popover open/close behavior", () => {
     // is mounted (Radix unmounts it on close).
     const updatedEffortTrigger = testPage.getByTestId("config-option-trigger-effort");
     await expect(updatedEffortTrigger).toBeVisible();
+  });
+});
+
+/**
+ * Verifies a resumed session whose persisted runtime config still names option
+ * keys the current agent never advertises, with no settlement marker. The
+ * advertised catalog must keep the model and effort controls usable, and a
+ * model change must send only the explicit advertised choice.
+ */
+test.describe("Chat model selector — stale runtime config", () => {
+  test("stale runtime config without settlement keeps advertised controls usable", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Model Selector Stale Config Test",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("expected an auto-started session");
+    await waitForOpeningModelTurn(apiClient, task.id, task.session_id);
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    const trigger = testPage.getByRole("button", { name: "Session model settings" });
+    await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
+
+    const seeded = await seedStaleRuntimeConfigWithoutSettlement(testPage, task.session_id);
+    expect(seeded.configOptionsSettled).toBe(false);
+    expect(seeded.staleKeyValues).toEqual({ context: "200k", reasoning_effort: "high" });
+    expect(seeded.advertisedConfigOptionCount).toBeGreaterThan(0);
+    await expect(trigger).toBeVisible({ timeout: 15_000 });
+
+    const configRequests: string[] = [];
+    await testPage.route("**/set-config-option", async (route) => {
+      const body = route.request().postDataJSON() as { config_id?: string };
+      if (body.config_id) configRequests.push(body.config_id);
+      await route.continue();
+    });
+    await testPage.route("**/set-model", async (route) => {
+      await route.continue();
+    });
+
+    await trigger.click();
+    const modelListbox = testPage.getByRole("listbox");
+    const smartOption = modelListbox.getByRole("option", { name: /Mock Smart/ });
+    await expect(smartOption).toBeVisible({ timeout: 5_000 });
+    await smartOption.click();
+    await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
+
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
+        const runtime = sessions.find((item) => item.id === task.session_id)?.metadata
+          ?.runtime_config as { model?: string } | undefined;
+        return runtime?.model;
+      })
+      .toBe("mock-smart");
+
+    const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
+    await expect(effortTrigger).toBeVisible({ timeout: 5_000 });
+    await effortTrigger.click();
+    await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible();
+
+    expect(configRequests).toEqual(["model"]);
   });
 });

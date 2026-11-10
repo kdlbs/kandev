@@ -9,6 +9,8 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
+const reviewInferenceOwnerKind = "review"
+
 type reviewInferenceIdentityReader interface {
 	GetTaskSession(context.Context, string) (*taskmodels.TaskSession, error)
 	GetTaskReviewRun(context.Context, string) (*taskmodels.TaskReviewRun, error)
@@ -29,7 +31,7 @@ func reviewInferenceContext(reader reviewInferenceIdentityReader) func(context.C
 			return ctx, fmt.Errorf("review run and session ownership do not match")
 		}
 		return agentruntime.WithInferenceIdentity(ctx, agentruntime.InferenceIdentity{
-			TaskID: run.TaskID, SessionID: session.ID, LogicalProfileID: reviewer.ProfileID, ReviewRunID: run.ID, OwnerKind: "review",
+			TaskID: run.TaskID, SessionID: session.ID, LogicalProfileID: reviewer.ProfileID, ReviewRunID: run.ID, OwnerKind: reviewInferenceOwnerKind,
 		}), nil
 	}
 }

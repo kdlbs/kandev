@@ -44,7 +44,7 @@ func proveHistoricalDeliveryOwnerDead(historical AgentDeliveryRecoveryIdentity) 
 	if historical.OriginalRuntime.Validate() != nil {
 		return ErrDeliveryRecoveryBlocked
 	}
-	dead, err := processidentity.OwnedSessionTerminated(historical.OriginalRuntime)
+	dead, err := processidentity.OriginalOwnerTerminated(historical.OriginalRuntime)
 	if err != nil || !dead {
 		return fmt.Errorf("%w: historical delivery owner is not proven terminated", ErrDeliveryRecoveryBlocked)
 	}

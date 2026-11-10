@@ -107,14 +107,22 @@ func TestRecordTerminalOutcomeCopiesCapacityContinuationSnapshot(t *testing.T) {
 	m := &Manager{}
 	m.SetTurnOutcomeRecorder("instance-1", recorder)
 	snapshot := &streams.CapacityContinuationSnapshot{
-		Support: streams.CapacityContinuationCodexLiveSessionV1, PromptGeneration: 7,
-		EvidenceComplete: true, CompletedTools: 2,
+		Support: streams.CapacityContinuationCodexLiveSessionV2, PromptGeneration: 7,
+		EvidenceComplete: true, CompletedTools: 2, KnownFailedShellTools: 3,
 	}
 	event := adapter.AgentEvent{Type: adapter.EventTypeError, CapacityContinuation: snapshot}
 	m.recordTerminalOutcome(&event)
 	snapshot.CompletedTools = 99
-	if got := recorder.calls[0].event.CapacityContinuation.CompletedTools; got != 2 {
-		t.Fatalf("retained completed tool count = %d, want immutable value 2", got)
+	snapshot.KnownFailedShellTools = 99
+	retained := recorder.calls[0].event.CapacityContinuation
+	if retained.CompletedTools != 2 {
+		t.Fatalf("retained completed tool count = %d, want immutable value 2", retained.CompletedTools)
+	}
+	if retained.KnownFailedShellTools != 3 {
+		t.Fatalf("retained known failed shell count = %d, want immutable value 3", retained.KnownFailedShellTools)
+	}
+	if retained.Support != streams.CapacityContinuationCodexLiveSessionV2 {
+		t.Fatalf("retained support = %q, want codex_live_session_v2", retained.Support)
 	}
 }
 

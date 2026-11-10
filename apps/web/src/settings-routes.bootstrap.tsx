@@ -12,10 +12,16 @@ export function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
     let cancelled = false;
 
     async function bootstrap() {
-      const initialState = await loadSettingsInitialState(
-        () => store.getState().agentProfiles.version,
-        () => store.getState().workspaces.activeId,
-      );
+      let initialState;
+      let workspaceItems;
+      do {
+        workspaceItems = store.getState().workspaces.items;
+        initialState = await loadSettingsInitialState(
+          () => store.getState().agentProfiles.version,
+          () => store.getState().workspaces.activeId,
+        );
+        // A workspace mutation supersedes the in-flight list snapshot.
+      } while (!cancelled && workspaceItems !== store.getState().workspaces.items);
       if (cancelled || Object.keys(initialState).length === 0) return;
       const desiredWorkspaceId = initialState.workspaces?.activeId ?? null;
       const workspaceBeforeHydration = store.getState().workspaces.activeId;

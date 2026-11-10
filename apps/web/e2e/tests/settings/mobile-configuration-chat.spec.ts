@@ -80,6 +80,7 @@ test.describe("Configuration Chat on mobile", () => {
     expect(answerBox).not.toBeNull();
     expect(answerBox!.x + answerBox!.width).toBeLessThanOrEqual(viewport!.width);
     await answer.tap();
+    await clarification.getByRole("button", { name: "Send answer" }).tap();
     await expect(clarification).not.toBeVisible({ timeout: 30_000 });
   });
 });

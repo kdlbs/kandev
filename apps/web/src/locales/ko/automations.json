@@ -359,5 +359,19 @@
   "runStatusRetrySchedulingFailed": "재시도 예약 실패",
   "retryAttempt": "시도 {{attempt}}",
   "retryDue": "{{when}}에 재시도 예정",
-  "stopRetry": "재시도 중지"
+  "stopRetry": "재시도 중지",
+  "pluginToolsTitle": "플러그인 도구(선택 사항)",
+  "pluginToolsDescription": "이 자동화에서 사용할 수 있는 도구를 선택하세요.",
+  "pluginToolsLoading": "플러그인 도구를 불러오는 중...",
+  "pluginToolsLoadError": "플러그인 도구를 불러오지 못했습니다. 저장된 선택은 변경되지 않았습니다.",
+  "pluginToolsRetry": "다시 시도",
+  "pluginToolsEmpty": "현재 비공개 자동화용 도구를 제공하는 설치된 플러그인이 없습니다.",
+  "pluginToolsReviewRequired": "검토 필요: 플러그인 구성이 변경되었습니다.",
+  "pluginToolsPreviouslySelected": "이전 선택: {{names}}",
+  "pluginToolsReselect": "도구를 다시 선택하고 저장하여 액세스를 복원하세요.",
+  "pluginToolsClear": "지우기",
+  "pluginToolsRead": "읽기",
+  "pluginToolsWrite": "쓰기",
+  "pluginToolsClearedHint": "저장하면 플러그인 도구 액세스가 제거됩니다.",
+  "pluginToolsUnavailable": "플러그인을 사용할 수 없음"
 }

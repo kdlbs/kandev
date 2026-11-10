@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -170,6 +171,100 @@ func TestApplyEngineTransition_NotAppliedCommitSkipsLifecycle(t *testing.T) {
 	select {
 	case <-onEnterRan:
 		t.Fatal("target step on_enter ran for a refused commit")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// staleStateAdmissionRepo serves the caller's snapshot with an obsolete state
+// while the persisted row carries the concurrent business write. This models
+// the #4889 race between the transition's decision read and admission.
+type staleStateAdmissionRepo struct {
+	*sqliterepo.Repository
+	staleState v1.TaskState
+	served     bool
+}
+
+func (r *staleStateAdmissionRepo) GetTask(ctx context.Context, taskID string) (*models.Task, error) {
+	task, err := r.Repository.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if !r.served {
+		r.served = true
+		task.State = r.staleState
+	}
+	return task, nil
+}
+
+// TestApplyEngineTransition_BlockedAdmissionSkipsDestinationEffects is the
+// concurrent-admission regression for #4889: the caller decides the move from
+// an IN_PROGRESS snapshot, a concurrent write commits BLOCKED, and admission
+// must report the transition unapplied. No step transition row, task.updated,
+// or target on_enter may follow.
+func TestApplyEngineTransition_BlockedAdmissionSkipsDestinationEffects(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedSession(t, baseRepo, "task-blocked-race", "session-blocked-race", "step_from")
+	if err := baseRepo.UpdateTaskState(ctx, "task-blocked-race", v1.TaskStateBlocked); err != nil {
+		t.Fatalf("mark task blocked: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step_from"] = &wfmodels.WorkflowStep{
+		ID: "step_from", WorkflowID: "wf1", Name: "From", Position: 0,
+	}
+	stepGetter.steps["step_to"] = &wfmodels.WorkflowStep{
+		ID: "step_to", WorkflowID: "wf1", Name: "To", Position: 1,
+	}
+	svc := createEngineService(t, baseRepo, stepGetter, &mockAgentManager{repoForExecutionLookup: baseRepo})
+	svc.repo = &staleStateAdmissionRepo{Repository: baseRepo, staleState: v1.TaskStateInProgress}
+	events := &recordingTaskEventPublisher{}
+	svc.SetTaskEventPublisher(events)
+	onEnterRan := make(chan struct{}, 1)
+	svc.onProcessOnEnterComplete = func() {
+		select {
+		case onEnterRan <- struct{}{}:
+		default:
+		}
+	}
+
+	session, err := baseRepo.GetTaskSession(ctx, "session-blocked-race")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	applied := svc.applyEngineTransitionWithMode(
+		ctx, "task-blocked-race", session,
+		engine.HandleResult{Transitioned: true, FromStepID: "step_from", ToStepID: "step_to"},
+		engine.TriggerOnTurnComplete, "", transitionLifecycleWithOnEnter,
+	)
+	if applied {
+		t.Fatal("expected the blocked admission to report the transition unapplied")
+	}
+
+	task, err := baseRepo.GetTask(ctx, "task-blocked-race")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if task.WorkflowStepID != "step_from" || task.State != v1.TaskStateBlocked {
+		t.Fatalf("task = step %q state %q, want step_from/BLOCKED", task.WorkflowStepID, task.State)
+	}
+	transitions, err := baseRepo.ListTaskStepTransitions(ctx, "task-blocked-race", 0, 50)
+	if err != nil {
+		t.Fatalf("list step transitions: %v", err)
+	}
+	for _, tr := range transitions {
+		if tr.ToWorkflowStepID != nil && *tr.ToWorkflowStepID == "step_to" {
+			t.Fatalf("unexpected step transition row for an unapplied blocked admission: %+v", tr)
+		}
+	}
+	for _, id := range events.updated {
+		if id == "task-blocked-race" {
+			t.Fatal("task.updated published for an unapplied blocked admission")
+		}
+	}
+	select {
+	case <-onEnterRan:
+		t.Fatal("target step on_enter ran for an unapplied blocked admission")
 	case <-time.After(200 * time.Millisecond):
 	}
 }

@@ -12,6 +12,7 @@ import {
   buildDebugEntries,
   buildTaskFromKanban,
   hasResolvedTaskDetails,
+  isCreationPendingSearch,
   resolveEffectiveTask,
   resolveTaskPullRequestProps,
   resolveTaskContentState,
@@ -672,5 +673,13 @@ describe("resolveEffectiveTask archived state", () => {
 
     expect(resolved?.workspace_id).toBe("");
     expect(resolved?.workflow_id).toBe("");
+  });
+});
+
+describe("isCreationPendingSearch", () => {
+  it("recognizes the read-only creation gate and ignores ordinary task links", () => {
+    expect(isCreationPendingSearch(new URLSearchParams("creation=pending"))).toBe(true);
+    expect(isCreationPendingSearch(new URLSearchParams("creation=done"))).toBe(false);
+    expect(isCreationPendingSearch(new URLSearchParams(""))).toBe(false);
   });
 });

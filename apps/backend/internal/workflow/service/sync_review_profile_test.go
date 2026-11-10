@@ -19,7 +19,7 @@ func TestApplySyncedWorkflows_PreservesCurrentReviewAgentProfileBinding(t *testi
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
 	wf.Description = "synced Dev Flow"
-	createStep(t, svc, &models.WorkflowStep{
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{
 		ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, Color: "#aabbcc", IsStartStep: true,
 		Events: models.StepEvents{OnEnter: []models.OnEnterAction{{
 			Type:   models.OnEnterRunCodeReview,
@@ -63,7 +63,7 @@ func TestApplySyncedWorkflows_LogsReviewAgentProfileRebinding(t *testing.T) {
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
 	wf.Description = "synced Dev Flow"
-	createStep(t, svc, &models.WorkflowStep{
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{
 		ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, Color: "#aabbcc", IsStartStep: true,
 		Events: models.StepEvents{OnEnter: []models.OnEnterAction{{
 			Type:   models.OnEnterRunCodeReview,

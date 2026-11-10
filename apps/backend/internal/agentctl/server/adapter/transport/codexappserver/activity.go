@@ -90,6 +90,10 @@ func (a *Adapter) emitCollabToolCall(item map[string]any, rootThreadID, turnID s
 		workID = receivers[0]
 	}
 	payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindSubagent, workID, !terminal, terminal)
+	// Codex denies in the provider when this declaration is missing from the
+	// normalized frame: the shared viewer must keep Interrupt available for a
+	// live child without waiting for a snapshot reload.
+	payload.SetBackgroundWorkCapabilities(codexSubagentCapabilities())
 	eventType := streams.EventTypeToolCall
 	toolStatus := childStatusRunning
 	if terminal {
@@ -229,6 +233,7 @@ func (a *Adapter) emitSubagentToolUpdate(binding childBinding, status, childThre
 	payload.SubagentTask().ChildSessionID = childThreadID
 	ended := status == childStatusCompleted || status == childStatusError || status == childStatusInterrupted
 	payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindSubagent, childThreadID, !ended, ended)
+	payload.SetBackgroundWorkCapabilities(codexSubagentCapabilities())
 	a.emit(streams.AgentEvent{
 		Type:              streams.EventTypeToolUpdate,
 		SessionID:         binding.parentThreadID,
@@ -265,6 +270,7 @@ func (a *Adapter) emitCommandExecution(item map[string]any, rootThreadID, parent
 	}
 	if background {
 		payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, itemID, !completed, completed)
+		payload.SetBackgroundWorkCapabilities(codexBackgroundTerminalCapabilities())
 	}
 	eventType := streams.EventTypeToolCall
 	if completed {

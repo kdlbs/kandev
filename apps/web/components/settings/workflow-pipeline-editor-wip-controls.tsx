@@ -78,6 +78,7 @@ export function StepWipControls({
           </Label>
           <HelpTip
             testId={`${step.id}-pull-from-guidance-help`}
+            mobileTouchTarget
             text={
               <div className="space-y-2">
                 <p>{pullFromGuidance}</p>

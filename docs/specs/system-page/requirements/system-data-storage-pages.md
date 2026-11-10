@@ -64,10 +64,13 @@ so that I can reach the required maintenance task quickly.
 #### Acceptance criteria
 
 - **AC-SYSTEM-PAGE-DATA-STORAGE-PAGES-002.1:** Data & Logs shall offer Database and Logs tabs. Database shall contain database status/actions, message compaction, and backups in that order.
-- **AC-SYSTEM-PAGE-DATA-STORAGE-PAGES-002.2:** Storage shall offer Host and Office retention tabs. Host shall retain the complete existing host-maintenance flow.
+- **AC-SYSTEM-PAGE-DATA-STORAGE-PAGES-002.2:** Storage shall always offer Host and shall offer Office retention only when the effective Office feature is enabled. Host shall retain the complete existing host-maintenance flow.
 - **AC-SYSTEM-PAGE-DATA-STORAGE-PAGES-002.3:** Office retention shall contain retention status followed by its policy. Data & Logs shall no longer contain Office retention.
 - **AC-SYSTEM-PAGE-DATA-STORAGE-PAGES-002.4:** Search, legacy links, and retention health links shall open the owning tab and target. Existing canonical page paths shall remain valid.
 - **AC-SYSTEM-PAGE-DATA-STORAGE-PAGES-002.5:** Both pages shall use the shared header-tab interaction. Role gates, save protection, loading/error states, and existing maintenance actions shall remain effective.
+- **AC-SYSTEM-PAGE-DATA-STORAGE-PAGES-002.6:** With Office disabled, direct and legacy retention links shall display Host, including links with retention target fragments. They shall not display retention controls or initiate retention requests.
+- **AC-SYSTEM-PAGE-DATA-STORAGE-PAGES-002.7:** Settings discovery shall omit Office retention when Office is disabled and include its existing destination when Office is enabled.
+- **AC-SYSTEM-PAGE-DATA-STORAGE-PAGES-002.8:** Desktop and phone shall apply the same Office visibility rule. If Office becomes unavailable while retention is selected, Storage shall display Host and remove the retention controls.
 
 ### REQ-SYSTEM-PAGE-DATA-STORAGE-PAGES-003: Understandable maintenance controls
 
@@ -101,6 +104,8 @@ The added tab and presentation criteria describe the implemented 2026-09-15
 settings package. The two-page split and its tab allocation are current.
 The [shared header contract](../../ui/requirements/settings-header-tabs.md) owns reusable tab interactions.
 Office retains ownership of [retention semantics](../../office/requirements/run-history-retention-operations.md).
+The Office visibility refinement in criteria 002.2 and 002.6 through 002.8 is
+implemented in the [visibility fix package](../../../plans/office-retention-visibility/plan.md).
 
 ## Out of scope
 

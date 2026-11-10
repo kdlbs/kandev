@@ -249,6 +249,10 @@ test("wraps status and transcript controls without shrinking targets", async ({
     );
     await associatePR(apiClient, taskId, "open");
     await testPage.setViewportSize({ width: 320, height: 851 });
+    const autoScroll = session.activeChat().getByTestId("auto-scroll-toggle-button");
+    await expect(autoScroll).toHaveAttribute("aria-pressed", "true");
+    await autoScroll.tap();
+    await expect(autoScroll).toHaveAttribute("aria-pressed", "false");
     await revealTranscriptControls(session.activeChat());
     const bar = session.chatStatusBar();
     const todo = bar.getByTestId("todo-indicator");

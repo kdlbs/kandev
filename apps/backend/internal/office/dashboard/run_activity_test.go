@@ -37,7 +37,6 @@ func createTaskSessionsTable(t *testing.T, deps *testDeps) {
 		CREATE TABLE IF NOT EXISTS task_sessions (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
-			agent_execution_id TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			state TEXT NOT NULL DEFAULT 'CREATED',
 			started_at TIMESTAMP NOT NULL,
@@ -355,7 +354,7 @@ func TestLiveRuns_StatusMapping(t *testing.T) {
 	}
 	statusBySession := map[string]string{}
 	for _, r := range runs {
-		// Note: agentId in this test setup will be the agent_execution_id from session (empty string default)
+		// Note: agentId in this test setup will be the agent_profile_id from session (empty string default)
 		// We key by taskId instead.
 		taskID, _ := r["taskId"].(string)
 		status, _ := r["status"].(string)
@@ -369,5 +368,64 @@ func TestLiveRuns_StatusMapping(t *testing.T) {
 	}
 	if statusBySession["sm-task3"] != "cancelled" {
 		t.Errorf("sm-task3 status = %q, want cancelled", statusBySession["sm-task3"])
+	}
+}
+
+// TestLiveRuns_ResolvesAgentFromSessionProfile verifies that live runs are
+// read against the production task_sessions schema (which no longer carries
+// agent_execution_id) and attribute each run to the Office agent stored in
+// task_sessions.agent_profile_id.
+func TestLiveRuns_ResolvesAgentFromSessionProfile(t *testing.T) {
+	deps := newTestDeps(t)
+	createTaskSessionsTable(t, deps)
+	deps.agents.names = map[string]string{"agent-live": "Live Worker"}
+
+	ws := "ws-liveruns-agent"
+	insertTestTask(t, deps.db, "lra-task1", ws, "Agent Task", "IN_PROGRESS", 0)
+	startedAt := time.Now().UTC().Add(-2 * time.Minute).Format("2006-01-02T15:04:05Z")
+	if _, err := deps.db.Exec(`
+		INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at)
+		VALUES (?, ?, ?, 'RUNNING', ?, ?)
+	`, "lra-sess1", "lra-task1", "agent-live", startedAt, startedAt); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	missingAgentStartedAt := time.Now().UTC().Add(-3 * time.Minute).Format("2006-01-02T15:04:05Z")
+	insertTestTask(t, deps.db, "lra-task-missing-agent", ws, "Former Agent Task", "IN_PROGRESS", 0)
+	if _, err := deps.db.Exec(`
+		INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at)
+		VALUES (?, ?, ?, 'RUNNING', ?, ?)
+	`, "lra-sess-missing-agent", "lra-task-missing-agent", "agent-deleted", missingAgentStartedAt, missingAgentStartedAt); err != nil {
+		t.Fatalf("insert session for missing agent: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/office/workspaces/"+ws+"/live-runs", nil)
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]json.RawMessage
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var runs []map[string]interface{}
+	if err := json.Unmarshal(resp["runs"], &runs); err != nil {
+		t.Fatalf("decode runs: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("runs length = %d, want 2", len(runs))
+	}
+	if runs[0]["agentId"] != "agent-live" {
+		t.Errorf("agentId = %v, want agent-live", runs[0]["agentId"])
+	}
+	if runs[0]["agentName"] != "Live Worker" {
+		t.Errorf("agentName = %v, want 'Live Worker'", runs[0]["agentName"])
+	}
+	if runs[1]["agentId"] != "agent-deleted" {
+		t.Errorf("missing agentId = %v, want agent-deleted", runs[1]["agentId"])
+	}
+	if runs[1]["agentName"] != "" {
+		t.Errorf("missing agentName = %v, want empty", runs[1]["agentName"])
 	}
 }

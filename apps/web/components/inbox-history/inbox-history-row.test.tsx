@@ -25,6 +25,7 @@ import { InboxHistoryRow } from "./inbox-history-row";
 const TASK_ID = "t1";
 const SESSION_ID = "s1";
 const TOGGLE_TESTID = "inbox-history-row-toggle";
+const DETAIL_TESTID = "inbox-history-clarification-detail";
 
 function message(overrides: Partial<Message> = {}): Message {
   return {
@@ -85,6 +86,25 @@ function expandRow() {
   fireEvent.click(screen.getByTestId(TOGGLE_TESTID));
 }
 
+function markdownBundle(title = "Choose `storage`"): InboxHistoryBundle {
+  return bundle({
+    context: "Keep `context` literal.",
+    messages: [
+      message({
+        metadata: {
+          question: {
+            id: "markdown",
+            title,
+            prompt:
+              "Read **guidance** in the [storage guide](https://example.com/storage).\n\n1. Check retention\n2. Compare costs",
+            options: [{ option_id: "postgres", label: "`Postgres`", description: "" }],
+          },
+        },
+      }),
+    ],
+  });
+}
+
 beforeEach(() => {
   mocks.copyToClipboard.mockReset().mockResolvedValue(true);
   mocks.toast.mockReset();
@@ -117,7 +137,7 @@ describe("InboxHistoryRow — kind and content", () => {
     render(<InboxHistoryRow bundle={bundle()} />);
     expandRow();
 
-    const detail = screen.getByTestId("inbox-history-clarification-detail");
+    const detail = screen.getByTestId(DETAIL_TESTID);
     expect(detail.textContent).toContain("Pick a branch");
     expect(detail.textContent).toContain("Which branch should I use?");
     expect(detail.textContent).toContain("main");
@@ -173,6 +193,76 @@ describe("InboxHistoryRow — turn identity and step label", () => {
     const turnIdentity = screen.getByTestId("inbox-history-turn-identity");
     expect(turnIdentity.textContent).toContain("t1");
     expect(turnIdentity.textContent).not.toContain("undefined");
+  });
+});
+
+// @covers AC-UI-CLARIFICATION-MARKDOWN-001.1 through .4, .6, .7
+describe("InboxHistoryRow Markdown", () => {
+  it("formats clarification summaries and expanded questions", () => {
+    const value = markdownBundle();
+    const original = JSON.stringify(value);
+    render(<InboxHistoryRow bundle={value} />);
+
+    expect(screen.getByTestId(TOGGLE_TESTID).querySelector("code")?.textContent).toBe("storage");
+    expandRow();
+    const detail = screen.getByTestId(DETAIL_TESTID);
+    expect(Array.from(detail.querySelectorAll("code"), (node) => node.textContent)).toEqual([
+      "storage",
+      "Postgres",
+    ]);
+    expect(detail.querySelector("strong")?.textContent).toBe("guidance");
+    expect(detail.querySelectorAll("ol > li")).toHaveLength(2);
+    expect(detail.textContent).toContain("Keep `context` literal.");
+    expect(JSON.stringify(value)).toBe(original);
+  });
+
+  it("keeps summary links passive and detail links interactive", () => {
+    render(
+      <InboxHistoryRow bundle={markdownBundle("Read [guide](https://example.com/storage)")} />,
+    );
+    const toggle = screen.getByTestId(TOGGLE_TESTID);
+    expect(toggle.querySelector("a")).toBeNull();
+    expect(toggle.textContent).toContain("Read guide");
+
+    expandRow();
+    const detail = screen.getByTestId(DETAIL_TESTID);
+    const link = detail.querySelector<HTMLAnchorElement>('a[href="https://example.com/storage"]');
+    expect(link).not.toBeNull();
+    expect(link?.target).toBe("_blank");
+    expect(link?.rel).toBe("noopener noreferrer");
+    fireEvent.click(link!);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(toggle);
+    expect(screen.queryByTestId(DETAIL_TESTID)).toBeNull();
+  });
+
+  it("renders title-less prompts as full question content", () => {
+    render(<InboxHistoryRow bundle={markdownBundle("")} />);
+    expect(screen.getByTestId(TOGGLE_TESTID).querySelector("strong")?.textContent).toBe("guidance");
+    expandRow();
+    const detail = screen.getByTestId(DETAIL_TESTID);
+    expect(detail.querySelectorAll("ol > li")).toHaveLength(2);
+    expect(detail.querySelector('a[href="https://example.com/storage"]')).not.toBeNull();
+  });
+
+  it("keeps context-only summaries and permission content literal", () => {
+    const value = bundle({ messages: [], context: "Keep **context** literal" });
+    const { rerender } = render(<InboxHistoryRow bundle={value} />);
+    const toggle = screen.getByTestId(TOGGLE_TESTID);
+    expect(toggle.textContent).toContain("Keep **context** literal");
+    expect(toggle.querySelector("strong")).toBeNull();
+
+    rerender(
+      <InboxHistoryRow
+        bundle={permissionBundle({
+          messages: [message({ content: "Allow **deletion**?", type: "permission_request" })],
+        })}
+      />,
+    );
+    expandRow();
+    const detail = screen.getByTestId("inbox-history-permission-detail");
+    expect(detail.textContent).toBe("Allow **deletion**?");
+    expect(detail.querySelector("strong")).toBeNull();
   });
 });
 

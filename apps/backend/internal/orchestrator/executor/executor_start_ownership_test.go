@@ -58,7 +58,7 @@ func TestExistingWorkspaceStart_ActiveAgent(t *testing.T) {
 	}
 
 	_, err := exec.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, "queued follow-up", true, "", request, nil, nil, nil, nil, true,
+		ctx, task, session, "queued follow-up", true, "", request, nil, nil, nil, nil, nil, true,
 	)
 	if err == nil {
 		<-started
@@ -102,7 +102,7 @@ func TestExistingWorkspaceStart_PreparedWorkspaceCanStart(t *testing.T) {
 	}
 
 	execution, err := exec.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, "initial brief", true, "", request, nil, nil, nil, nil, true,
+		ctx, task, session, "initial brief", true, "", request, nil, nil, nil, nil, nil, true,
 	)
 
 	require.NoError(t, err)
@@ -158,7 +158,7 @@ func TestExistingWorkspaceStart_BindsInitialDeliveryBeforeAdmission(t *testing.T
 	}
 	exec := newTestExecutor(t, manager, repo)
 	_, err := exec.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, "initial prompt", true, "", request, nil, nil, nil, nil, false,
+		ctx, task, session, "initial prompt", true, "", request, nil, nil, nil, nil, nil, false,
 	)
 	require.NoError(t, err)
 	select {

@@ -69,6 +69,55 @@ func TestProfileUpdateRequestPreservesOmissionAndExplicitValues(t *testing.T) {
 	}
 }
 
+func TestCopilotPluginSelectionContract(t *testing.T) {
+	var omitted ProfileUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":"profile-1"}`), &omitted); err != nil {
+		t.Fatal(err)
+	}
+	if omitted.CopilotSelectedPlugins.Set {
+		t.Fatal("omitted selection must remain distinguishable")
+	}
+	var explicitEmpty ProfileUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":"profile-1","copilot_selected_plugins":[]}`), &explicitEmpty); err != nil {
+		t.Fatal(err)
+	}
+	if !explicitEmpty.CopilotSelectedPlugins.Set || explicitEmpty.CopilotSelectedPlugins.Value == nil || len(explicitEmpty.CopilotSelectedPlugins.Value) != 0 {
+		t.Fatalf("explicit empty selection = %#v", explicitEmpty.CopilotSelectedPlugins)
+	}
+	if err := explicitEmpty.Validate(); err != nil {
+		t.Fatalf("explicit empty selection rejected: %v", err)
+	}
+	var nullSelection ProfileUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":"profile-1","copilot_selected_plugins":null}`), &nullSelection); err == nil {
+		t.Fatal("null selection unexpectedly decoded")
+	}
+
+	valid := `{"id":"profile-1","copilot_selected_plugins":["installed:copilot-plugins/spark","live:fixture-market/harness"]}`
+	var selected ProfileUpdateRequest
+	if err := json.Unmarshal([]byte(valid), &selected); err != nil {
+		t.Fatal(err)
+	}
+	if err := selected.Validate(); err != nil {
+		t.Fatalf("valid selection rejected: %v", err)
+	}
+	duplicate := `{"id":"profile-1","copilot_selected_plugins":["installed:m/p","installed:m/p"]}`
+	var duplicated ProfileUpdateRequest
+	if err := json.Unmarshal([]byte(duplicate), &duplicated); err != nil {
+		t.Fatal(err)
+	}
+	if err := duplicated.Validate(); err == nil {
+		t.Fatal("duplicate selection unexpectedly validated")
+	}
+	invalid := `{"id":"profile-1","copilot_selected_plugins":["not-an-identity"]}`
+	var malformed ProfileUpdateRequest
+	if err := json.Unmarshal([]byte(invalid), &malformed); err != nil {
+		t.Fatal(err)
+	}
+	if err := malformed.Validate(); err == nil {
+		t.Fatal("malformed selection unexpectedly validated")
+	}
+}
+
 func TestProfileContractFieldsAreUniqueAndClassified(t *testing.T) {
 	fields := ProfileContractFields()
 	seen := make(map[string]struct{}, len(fields))

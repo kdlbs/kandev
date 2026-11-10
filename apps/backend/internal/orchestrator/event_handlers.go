@@ -63,7 +63,7 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 			return
 		}
 	}
-	tokenAccepted := s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.AgentExecutionID, data.ACPSessionID, "", data.AttemptID)
+	tokenAccepted := s.storeResumeTokenFromAgentEvent(ctx, data.TaskID, data.SessionID, data.AgentExecutionID, data.ACPSessionID, "", data.AttemptID)
 	s.persistInitialHarnessGeneration(ctx, data, tokenAccepted)
 }
 
@@ -290,6 +290,22 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expec
 			zap.Error(err))
 	}
 	return false
+}
+
+// storeResumeTokenFromAgentEvent defers event-owned token writes while a
+// context reset owns the session identity transition. The reset commits the
+// token and generation together after the provider operation settles.
+func (s *Service) storeResumeTokenFromAgentEvent(
+	ctx context.Context, taskID, sessionID, expectedExecID, acpSessionID, lastMessageUUID string, origin ...string,
+) bool {
+	if s.isSessionResetInProgress(sessionID) {
+		s.logger.Debug("deferring resume token event during context reset",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("expected_exec_id", expectedExecID))
+		return false
+	}
+	return s.storeResumeToken(ctx, taskID, sessionID, expectedExecID, acpSessionID, lastMessageUUID, origin...)
 }
 
 // currentACPSessionID returns the lifecycle manager's current ACP session ID

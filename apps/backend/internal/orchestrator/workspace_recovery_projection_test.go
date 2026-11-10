@@ -36,7 +36,7 @@ func TestRecoverSessionProjectsManagedCloneRefusalWithCapturedIdentity(t *testin
 	repo := setupTestRepo(t)
 	agentMgr := &mockAgentManager{}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedTaskAndSession(t, repo, "task-recovery-projection", "session-recovery-projection", models.TaskSessionStateCancelled)
 	now := time.Now().UTC()
 	const environmentID = "environment-recovery-projection"
@@ -101,7 +101,7 @@ func TestWorkspaceRecoveryStatusReadDoesNotBootstrapAgent(t *testing.T) {
 		return nil, nil
 	}}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	const taskID = "task-recovery-status-read"
 	const sessionID = "session-recovery-status-read"
 	const environmentID = "environment-recovery-status-read"
@@ -154,7 +154,7 @@ func TestRecoverSessionReturnsLiveWorkspaceRecoveryWithoutPreflight(t *testing.T
 		return nil, nil
 	}}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	const taskID = "task-recovery-in-progress"
 	const sessionID = "session-recovery-in-progress"
 	const environmentID = "environment-recovery-in-progress"

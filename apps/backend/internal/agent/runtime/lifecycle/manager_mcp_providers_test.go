@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/mcp/plugintools"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
 func TestSetMcpProvidersForSessionCallsLiveAgentctl(t *testing.T) {
@@ -66,5 +67,33 @@ func TestSetPluginToolsForAllExecutionsCallsLiveAgentctl(t *testing.T) {
 	}
 	if snapshot := <-got; snapshot.Generation != want.Generation || snapshot.Revision != want.Revision {
 		t.Fatalf("snapshot = %#v, want %#v", snapshot, want)
+	}
+}
+
+func TestSetPluginToolsForAllExecutionsProjectsCoordinatorSurface(t *testing.T) {
+	got := make(chan plugintools.Snapshot, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var snapshot plugintools.Snapshot
+		if err := json.NewDecoder(r.Body).Decode(&snapshot); err != nil {
+			t.Error(err)
+		}
+		got <- snapshot
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	mgr, execution := workspaceSourceTestManager(t, server.URL, nil)
+	execution.setMetadataValue(mcpprofile.CoordinatorToolPolicyMetadataKey, `{"version":2}`)
+
+	want := plugintools.Snapshot{Generation: "g", Revision: 3, Tools: []plugintools.Definition{
+		{PluginID: "provider", LocalName: "usage", ExposedName: "kandev_provider_usage", Description: "usage",
+			Surfaces: []string{plugintools.SurfaceKanban, plugintools.SurfaceCoordinator}, ReadOnlyHint: true,
+			InvocationScope: plugintools.InvocationScopeInstance, InputSchema: []byte(`{"type":"object"}`)},
+	}}
+	if err := mgr.SetPluginToolsForAllExecutions(context.Background(), want); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := <-got
+	if len(snapshot.Tools) != 1 || len(snapshot.Tools[0].Surfaces) != 1 || snapshot.Tools[0].Surfaces[0] != plugintools.SurfaceCoordinator {
+		t.Fatalf("coordinator projection = %#v", snapshot.Tools)
 	}
 }

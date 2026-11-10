@@ -22,6 +22,25 @@ type Recognizer interface {
 	RecognizesDetachedLaunch(payload *streams.NormalizedPayload) bool
 }
 
+// ResultObservation is the adapter-owned evidence for one tool call at the
+// moment a launch can be confirmed from its tool result. Payload carries the
+// input-derived state (for example ShellExecPayload.Background); Result is the
+// provider's raw tool result. It exists so a recognizer whose launch identity
+// is only complete in the result can still live behind this registry.
+type ResultObservation struct {
+	Payload *streams.NormalizedPayload
+	Result  any
+}
+
+// ResultRecognizer is the optional second phase of a Recognizer for agents
+// that report a detached launch in the tool result rather than in the input.
+// RecognizesDetachedLaunch answers the input-time question and may report
+// false; RecognizesConfirmedLaunch reports the resulting opaque work ID.
+type ResultRecognizer interface {
+	Recognizer
+	RecognizesConfirmedLaunch(obs ResultObservation) (workID string, ok bool)
+}
+
 var (
 	mu       sync.RWMutex
 	registry = make(map[string]Recognizer)
@@ -84,4 +103,27 @@ func RecognizesDetachedLaunch(agentID string, payload *streams.NormalizedPayload
 		}
 	}()
 	return recognizer.RecognizesDetachedLaunch(payload)
+}
+
+// ConfirmDetachedLaunch asks agentID's result-phase recognizer to confirm a
+// detached launch from the tool result and return its opaque work ID. Agents
+// without a result-phase recognizer, and recognizers that panic, report no
+// confirmation so the caller keeps its input-only behaviour.
+func ConfirmDetachedLaunch(agentID string, payload *streams.NormalizedPayload, result any) (workID string, confirmed bool) {
+	recognizer, ok := Lookup(agentID)
+	if !ok {
+		return "", false
+	}
+	resultRecognizer, ok := recognizer.(ResultRecognizer)
+	if !ok {
+		return "", false
+	}
+
+	defer func() {
+		if recover() != nil {
+			workID = ""
+			confirmed = false
+		}
+	}()
+	return resultRecognizer.RecognizesConfirmedLaunch(ResultObservation{Payload: payload, Result: result})
 }

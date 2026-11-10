@@ -18,6 +18,7 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/antigravityruntime"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
@@ -45,12 +46,17 @@ const (
 // It spawns a new agent process, performs the ACP handshake, sends the prompt,
 // collects the response, and tears down the process.
 type ACPInferenceExecutor struct {
-	logger *zap.Logger
+	logger      *zap.Logger
+	preparation *managedRuntimePreparationState
 }
 
 // NewACPInferenceExecutor creates a new ACP inference executor.
-func NewACPInferenceExecutor(logger *zap.Logger) *ACPInferenceExecutor {
-	return &ACPInferenceExecutor{logger: logger}
+func NewACPInferenceExecutor(logger *zap.Logger, preparation ...*managedRuntimePreparationState) *ACPInferenceExecutor {
+	state := newManagedRuntimePreparationState()
+	if len(preparation) != 0 && preparation[0] != nil {
+		state = preparation[0]
+	}
+	return &ACPInferenceExecutor{logger: logger, preparation: state}
 }
 
 // Execute runs a one-shot prompt using the ACP protocol.
@@ -69,7 +75,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		return &PromptResponse{Success: false, Error: "work_dir is required for ACP inference"}, nil
 	}
 	model, modelConfigOptions, _ := acpcompat.MigrateCursorModel(req.AgentID, req.Model, nil)
-	resolvedCmd, cmdErr := resolveSpawnCommand(cfg)
+	resolvedCmd, cmdErr := resolveSpawnCommandContext(ctx, cfg)
 	if cmdErr != "" {
 		return &PromptResponse{Success: false, Error: cmdErr}, nil
 	}
@@ -84,6 +90,10 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		zap.String("model", model))
 
 	env := sanitizeEnvForAgent(cfg)
+	env, envErr := prepareAntigravityUtilityEnv(ctx, req.AgentID, cfg, env)
+	if envErr != nil {
+		return &PromptResponse{Success: false, Error: envErr.Error()}, nil
+	}
 	args, prepareErr := prepareACPLaunch(cfg, resolvedCmd, args, env)
 	if prepareErr != nil {
 		return &PromptResponse{Success: false, Error: prepareErr.Error()}, nil
@@ -130,7 +140,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		e.logger.Warn("ACP inference: dropping unsupported MCP server transport",
 			zap.String("name", name))
 	}
-	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, req.AutoApprovePermissions, mcpServers, cfg.ProviderGatewayAuth)
+	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, req.AutoApprovePermissions, mcpServers, cfg.ProviderGatewayAuth, authSessionArgs{policy: cfg.AuthPolicy, consent: stderr.consent()})
 	if err != nil {
 		failure := withUpstreamHint(err, cfg.ProviderGatewayAuth, stderr.tail())
 		if !cfg.LaunchWrapper.IsZero() {
@@ -173,7 +183,9 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	autoApprovePermissions *bool,
 	mcpServers []acp.McpServer,
 	gatewayAuth *acpprovider.GatewayAuth,
+	authArgs ...authSessionArgs,
 ) (string, error) {
+	authPolicy, consent, _ := authSessionOptions(authArgs)
 	// Collect response text from updates
 	var responseText strings.Builder
 	var mu sync.Mutex
@@ -217,18 +229,18 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	// model-picker mode from the handshake advertises a different id set per
 	// mode — so opting out here would reject the very model ids the rest of
 	// the product hands out.
-	_, err := conn.Initialize(ctx, acp.InitializeRequest{
+	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
 		ClientCapabilities: clientCapabilitiesForInference(agentID, gatewayAuth),
-		ClientInfo: &acp.Implementation{
-			Name:    "kandev-inference",
-			Version: "1.0.0",
-		},
+		ClientInfo:         inferenceClientInfo(agentID, "kandev-inference"),
 	})
 	if err != nil {
 		return "", describeACPFailure(ctx, "initialize", err)
 	}
 	if err := applyInferenceGatewayAuth(ctx, conn, gatewayAuth); err != nil {
+		return "", err
+	}
+	if err := applyAntigravityAuth(ctx, conn, agentID, authPolicy, initResp, consent); err != nil {
 		return "", err
 	}
 
@@ -475,7 +487,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	if workDir == "" {
 		return &ProbeResponse{Success: false, Error: "work_dir is required for ACP probe"}, nil
 	}
-	resolvedCmd, cmdErr := resolveSpawnCommand(cfg)
+	resolvedCmd, cmdErr := resolveSpawnCommandContext(ctx, cfg)
 	if cmdErr != "" {
 		return &ProbeResponse{Success: false, Error: cmdErr}, nil
 	}
@@ -490,7 +502,61 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	// Probes intentionally omit the model flag so session/new returns the agent's
 	// default model and the complete availableModels list.
 	args := buildACPCommand(cfg, "")
+	var prepared *managedruntime.PreparedRuntime
+	// A remembered failure owns the replacement decision. Selecting a repair
+	// before prepareProbeRepair would rewrite the prefix/cache and then force a
+	// second rewrite when another caller publishes in between.
+	if req.Preparation == nil {
+		if selected, _ := e.preparation.selectProbeRuntime(ctx, req, cfg); selected != nil {
+			rewritten, rewriteErr := selected.RewriteNpxCommand(args)
+			if rewriteErr != nil {
+				_ = selected.Close()
+				return &ProbeResponse{Success: false, Error: "selected managed runtime repair is unusable"}, nil
+			}
+			prepared, args = selected, rewritten
+		}
+	}
+	var cleanup func()
+	defer func() {
+		if cleanup != nil {
+			cleanup()
+		}
+		if prepared != nil {
+			if closeErr := prepared.Close(); closeErr != nil {
+				e.preparation.retainOwner(prepared)
+			}
+		}
+	}()
 	env := sanitizeEnvForAgent(cfg)
+	env, envErr := prepareAntigravityUtilityEnv(ctx, req.AgentID, cfg, env)
+	if envErr != nil {
+		return &ProbeResponse{Success: false, Error: envErr.Error(), FailureCode: ProbeFailureUnsupportedContext}, nil
+	}
+	if req.Preparation != nil {
+		packageSpec, ok := managedRuntimeProbePackageForAgent(req.AgentID, cfg.Command)
+		if !ok || !e.preparation.validatesDirective(req.Preparation, req.AgentID, string(cfg.Protocol), cfg) {
+			return &ProbeResponse{Success: false, Error: "verified managed runtime evidence is stale"}, nil
+		}
+		if packageSpec != req.Preparation.PackageSpec {
+			return &ProbeResponse{Success: false, Error: "verified managed runtime package changed"}, nil
+		}
+		if prepared != nil {
+			_ = prepared.Close()
+			prepared = nil
+		}
+		var prepareErr error
+		prepared, prepareErr = e.preparation.prepareProbeRepair(ctx, req, cfg, env, e.logger)
+		if prepareErr != nil {
+			if prepared != nil {
+				e.preparation.retainOwner(prepared)
+			}
+			return &ProbeResponse{Success: false, Error: "private managed runtime preparation failed"}, nil
+		}
+		args, prepareErr = prepared.RewriteNpxCommand(args)
+		if prepareErr != nil {
+			return &ProbeResponse{Success: false, Error: "private managed runtime command validation failed"}, nil
+		}
+	}
 	args, prepareErr := prepareACPLaunch(cfg, resolvedCmd, args, env)
 	if prepareErr != nil {
 		return &ProbeResponse{Success: false, Error: prepareErr.Error(), FailureCode: ProbeFailureUnsupportedContext}, nil
@@ -535,31 +601,53 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 			zap.Error(err))
 	}
 	var cleanupOnce sync.Once
-	cleanup := func() {
+	cleanup = func() {
 		cleanupOnce.Do(func() { cleanupACPCommand(ctx, cmd, lifecycle, e.logger) })
 	}
-	defer cleanup()
 
+	publishInitialized := func() {
+		if prepared == nil || prepared.RepairPublished() {
+			return
+		}
+		if publishErr := e.preparation.publishProbeRepair(ctx, prepared, req, cfg); publishErr != nil {
+			e.logger.Warn("managed runtime ACP probe repair publication failed", zap.Error(publishErr))
+		}
+	}
 	resp, err := e.probeACPSessionWithContext(
 		ctx, stdin, stdout, workDir, req.AgentID, req.Model, req.Mode, req.ConfigOptions, cfg.ProviderGatewayAuth,
+		authSessionArgs{policy: cfg.AuthPolicy, consent: stderr.consent(), onInitialized: publishInitialized},
 	)
 	if err != nil {
+		var authErr *probeAuthRequiredError
+		if errors.As(err, &authErr) && authErr.response != nil {
+			cleanup()
+			authErr.response.DurationMs = int(time.Since(startTime).Milliseconds())
+			return authErr.response, nil
+		}
 		cleanup()
 		stderrTail, logTail := stderr.probeTails()
 		// Classification uses raw evidence; only the complete-line projection
 		// reaches the sanitized diagnostic log.
 		managedFailureCode := managedRuntimeProbeFailureCode(cfg.Command, stderrTail)
+		cacheEvidence := e.preparation.managedRuntimeCacheEvidenceForProbe(
+			ctx, req.AgentID, string(cfg.Protocol), cfg, args, cmd.Env, cmd.Path, cmd.Dir, &stderr, e.logger,
+		)
 		failureCode := managedFailureCode
 		failureMessage := sanitizeProbeDiagnostic(withUpstreamHint(err, cfg.ProviderGatewayAuth, stderrTail))
 		if req.ProfileContext || !cfg.LaunchWrapper.IsZero() {
 			failureMessage, failureCode = sanitizeProfileProbeFailure(err, stderrTail)
 		}
+		if cacheEvidence != nil {
+			failureCode = ProbeFailureManagedRuntimeCacheIncomplete
+			managedFailureCode = ProbeFailureManagedRuntimeCacheIncomplete
+		}
 		e.logProbeFailure(req, err, logTail, failureCode, managedFailureCode)
 		return &ProbeResponse{
-			Success:     false,
-			Error:       failureMessage,
-			FailureCode: failureCode,
-			DurationMs:  int(time.Since(startTime).Milliseconds()),
+			Success:       false,
+			Error:         failureMessage,
+			FailureCode:   failureCode,
+			CacheEvidence: cacheEvidence,
+			DurationMs:    int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
 	if len(resp.Models) == 0 && isOpenCode {
@@ -583,6 +671,9 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		cmd.Dir,
 		resp.AgentVersion,
 	)
+	if req.Preparation != nil {
+		e.preparation.retireProbeAttempt(req.Preparation.ProbeAttemptID)
+	}
 
 	resp.Success = true
 	resp.DurationMs = int(time.Since(startTime).Milliseconds())
@@ -604,16 +695,18 @@ func managedRuntimeProbeFailureCode(command []string, stderr string) ProbeFailur
 }
 
 func managedRuntimeProbePackageSpec(command []string) (string, bool) {
-	// Accept only npx --yes --prefer-offline --prefix <fixed-prefix> <exact-spec>.
-	if len(command) < 6 || command[0] != "npx" || command[1] != "--yes" || command[2] != "--prefer-offline" ||
-		command[3] != "--prefix" || command[4] != managedruntime.NPMProjectPrefix {
+	if len(command) < 6 || command[2] != codexNpmPreferOfflineFlag {
 		return "", false
 	}
-	packageSpec := command[5]
-	if err := managedruntime.ValidateExactPackageSpec(packageSpec); err != nil {
+	packageName, ok := managedruntime.PackageNameFromExactSpec(command[5])
+	if !ok {
 		return "", false
 	}
-	return packageSpec, true
+	invocation, err := managedruntime.ParseManagedNPMInvocation(command, packageName, nil)
+	if err != nil {
+		return "", false
+	}
+	return invocation.PackageSpec, true
 }
 
 // isOpenCodeACPCommand reports whether the configured ACP probe command is
@@ -944,7 +1037,9 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	mode string,
 	requestedConfigOptions map[string]string,
 	gatewayAuth *acpprovider.GatewayAuth,
+	authArgs ...authSessionArgs,
 ) (*ProbeResponse, error) {
+	authPolicy, consent, onInitialized := authSessionOptions(authArgs)
 	updates := newACPProbeNotificationState(agentID)
 
 	client := acpclient.NewClient(
@@ -969,15 +1064,25 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
 		ClientCapabilities: clientCapabilitiesForInference(agentID, gatewayAuth),
-		ClientInfo: &acp.Implementation{
-			Name:    "kandev-probe",
-			Version: "1.0.0",
-		},
+		ClientInfo:         inferenceClientInfo(agentID, "kandev-probe"),
 	})
 	if err != nil {
 		return nil, describeACPFailure(ctx, "initialize", err)
 	}
+	if onInitialized != nil {
+		onInitialized()
+	}
 	if err := applyInferenceGatewayAuth(ctx, conn, gatewayAuth); err != nil {
+		return nil, err
+	}
+	if err := applyAntigravityAuth(ctx, conn, agentID, authPolicy, initResp, consent); err != nil {
+		if isAuthRequiredError(err) {
+			out := buildInitProbeFields(initResp)
+			out.Success = false
+			out.FailureCode = ProbeFailureAuthenticationRequired
+			out.Error = err.Error()
+			return out, &probeAuthRequiredError{response: out}
+		}
 		return nil, err
 	}
 
@@ -992,7 +1097,14 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	// Mode can change the provider's available options. Apply it before the
 	// model and use the resulting notification, when present, as the next
 	// model-selection snapshot.
-	if mode != "" {
+	//
+	// A mode the agent did not advertise is left unapplied: repository-local
+	// modes (for example OpenCode agents defined in a checkout's opencode.json)
+	// only exist once a task session opens in that checkout. The probe runs in
+	// a scratch workspace, so rejecting the probe would block saving profiles
+	// and workflow rules for a mode the real session applies fine. Task
+	// sessions still apply the mode and fail loudly when it is invalid.
+	if mode != "" && sessionAllowsMode(sessionResp, mode) {
 		updated, err := applyProbeMode(ctx, conn, sessionResp.SessionId, mode, updates)
 		if err != nil {
 			return nil, err
@@ -1113,6 +1225,7 @@ func applySessionCompatibility(out *ProbeResponse, agentID string) {
 			Description:  option.Description,
 			CurrentValue: option.CurrentValue,
 			Category:     option.Category,
+			Catalog:      option.Catalog,
 		}
 		for _, choice := range option.Options {
 			converted.Options = append(converted.Options, streams.ConfigOptionValue{
@@ -1133,6 +1246,7 @@ func applySessionCompatibility(out *ProbeResponse, agentID string) {
 			Description:  option.Description,
 			CurrentValue: option.CurrentValue,
 			Category:     option.Category,
+			Catalog:      option.Catalog,
 		}
 		for _, choice := range option.Options {
 			converted.Options = append(converted.Options, ProbeConfigOptionChoice{
@@ -1177,6 +1291,7 @@ func probeConfigOptions(opts []acp.SessionConfigOption) []ProbeConfigOption {
 			Name:         sel.Name,
 			Description:  derefString(sel.Description),
 			CurrentValue: string(sel.CurrentValue),
+			Catalog:      acpcompat.CatalogFromSelectOptions(sel.Options),
 		}
 		if sel.Category != nil {
 			config.Category = string(*sel.Category)
@@ -1227,6 +1342,47 @@ func applyConfigOptionsAsModes(out *ProbeResponse, opts []acp.SessionConfigOptio
 			Meta:        opt.Meta,
 		})
 	}
+}
+
+// sessionAllowsMode reports whether a mode can be applied to a fresh session.
+// An agent that did not advertise any mode state cannot tell, so every mode is
+// attempted there to preserve the previous behavior. An advertised mode list,
+// including an authoritative empty one, marks modes outside it as
+// repository-local: those are skipped rather than failed; see
+// probeACPSessionWithContext.
+func sessionAllowsMode(sessionResp acp.NewSessionResponse, mode string) bool {
+	advertised, present := sessionAdvertisedModeIDs(sessionResp)
+	if !present {
+		return true
+	}
+	_, ok := advertised[mode]
+	return ok
+}
+
+// sessionAdvertisedModeIDs collects the mode ids a new session offers, from
+// both the legacy modes state and the configOptions[] mode select. The second
+// return reports whether the agent advertised mode state at all: a present
+// modes state or mode select with zero options is authoritative, while their
+// absence means the agent never described its modes.
+func sessionAdvertisedModeIDs(sessionResp acp.NewSessionResponse) (map[string]struct{}, bool) {
+	var count int
+	present := sessionResp.Modes != nil
+	if sessionResp.Modes != nil {
+		count = len(sessionResp.Modes.AvailableModes)
+	}
+	advertised := make(map[string]struct{}, count+len(sessionResp.ConfigOptions))
+	if sessionResp.Modes != nil {
+		for _, mode := range sessionResp.Modes.AvailableModes {
+			advertised[string(mode.Id)] = struct{}{}
+		}
+	}
+	if sel := findSelectConfigOption(sessionResp.ConfigOptions, acp.SessionConfigOptionCategoryMode); sel != nil {
+		present = true
+		for _, opt := range selectOptionsUngrouped(sel.Options) {
+			advertised[string(opt.Value)] = struct{}{}
+		}
+	}
+	return advertised, present
 }
 
 // findSelectConfigOption returns the first Select-typed configOption whose
@@ -1334,9 +1490,21 @@ func resolveProbeCommand(name string) string {
 // from. The operator who typed the command is the operator who could run it
 // directly on the host.
 func resolveSpawnCommand(cfg *InferenceConfigDTO) (string, string) {
+	return resolveSpawnCommandContext(context.Background(), cfg)
+}
+
+func resolveSpawnCommandContext(ctx context.Context, cfg *InferenceConfigDTO) (string, string) {
 	command := cfg.Command[0]
 	if cfg.OperatorDefined {
 		return command, ""
+	}
+	if filepath.IsAbs(command) {
+		if antigravityruntime.IsValidatedServerPath(ctx, command) {
+			return command, ""
+		}
+		if base := filepath.Base(command); base == "agy_acp_server.par" || base == "agy_acp_server.exe" {
+			return "", fmt.Sprintf("command %q is not a vetted managed ACP runtime", command)
+		}
 	}
 	resolved := resolveProbeCommand(command)
 	if resolved == "" {
@@ -1367,9 +1535,58 @@ const stderrTailLimit = 4 << 10
 // os/exec copies stderr on its own goroutine. The mutex protects both the
 // retained bytes and their first-line boundary while readers take snapshots.
 type stderrBuffer struct {
-	mu               sync.Mutex
-	buf              bytes.Buffer
-	partialFirstLine bool
+	mu                    sync.Mutex
+	buf                   bytes.Buffer
+	consentScan           bytes.Buffer
+	managedNPMPartial     bytes.Buffer
+	managedNPMDiscardLine bool
+	managedNPMRaw         bytes.Buffer
+	managedNPMRawOverflow bool
+	partialFirstLine      bool
+	consentOnce           sync.Once
+	consentCh             chan string
+}
+
+// consent returns the channel that receives the first validated Google consent
+// URL observed on stderr.
+func (b *stderrBuffer) consent() <-chan string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.consentOnce.Do(func() {
+		b.consentCh = make(chan string, 1)
+	})
+	return b.consentCh
+}
+
+func (b *stderrBuffer) emitConsentLocked(line string) {
+	if b.consentCh == nil {
+		return
+	}
+	if raw, ok := acpcompat.ParseConsentURL(line); ok {
+		select {
+		case b.consentCh <- raw:
+		default:
+		}
+		b.consentScan.Reset()
+		b.buf.Reset()
+		b.buf.WriteString("[antigravity consent URL redacted]\n")
+	}
+}
+
+func (b *stderrBuffer) redactConsentLocked() {
+	text := b.buf.String()
+	idx := strings.LastIndexByte(text, '\n')
+	if idx < 0 {
+		return
+	}
+	head, tail := text[:idx+1], text[idx+1:]
+	redacted := acpcompat.RedactConsentURLs(head)
+	if redacted == head && tail == "" {
+		return
+	}
+	b.buf.Reset()
+	b.buf.WriteString(redacted)
+	b.buf.WriteString(tail)
 }
 
 // Write keeps only the trailing stderrTailLimit bytes, so an agent that chatters
@@ -1381,6 +1598,7 @@ func (b *stderrBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	written := len(p)
+	b.collectManagedNPMDiagnosticLocked(p)
 	if len(p) > stderrTailLimit {
 		cut := len(p) - stderrTailLimit
 		b.partialFirstLine = p[cut-1] != '\n'
@@ -1392,7 +1610,79 @@ func (b *stderrBuffer) Write(p []byte) (int, error) {
 		discarded := b.buf.Next(excess)
 		b.partialFirstLine = discarded[len(discarded)-1] != '\n'
 	}
+	b.consentScan.Write(p)
+	if b.consentScan.Len() > 2*stderrTailLimit {
+		b.consentScan.Next(b.consentScan.Len() - stderrTailLimit)
+	}
+	b.emitConsentLocked(b.consentScan.String())
+	b.redactConsentLocked()
 	return written, nil
+}
+
+const maxManagedRuntimeRawNPMDiagnosticBytes = 16 << 10
+
+func (b *stderrBuffer) collectManagedNPMDiagnosticLocked(p []byte) {
+	if b.managedNPMRawOverflow {
+		return
+	}
+	if b.managedNPMDiscardLine {
+		newline := bytes.IndexByte(p, '\n')
+		if newline < 0 {
+			return
+		}
+		p = p[newline+1:]
+		b.managedNPMDiscardLine = false
+	}
+	combined := make([]byte, 0, b.managedNPMPartial.Len()+len(p))
+	combined = append(combined, b.managedNPMPartial.Bytes()...)
+	combined = append(combined, p...)
+	b.managedNPMPartial.Reset()
+	for {
+		newline := bytes.IndexByte(combined, '\n')
+		if newline < 0 {
+			break
+		}
+		line := strings.TrimSuffix(string(combined[:newline]), "\r")
+		if isManagedNPMEvidenceLine(line) {
+			if b.managedNPMRaw.Len()+len(line)+1 > maxManagedRuntimeRawNPMDiagnosticBytes {
+				b.managedNPMRawOverflow = true
+				b.managedNPMRaw.Reset()
+				b.managedNPMPartial.Reset()
+				return
+			}
+			b.managedNPMRaw.WriteString(line)
+			b.managedNPMRaw.WriteByte('\n')
+		}
+		combined = combined[newline+1:]
+	}
+	if len(combined) > maxManagedRuntimeRawNPMDiagnosticBytes {
+		b.managedNPMDiscardLine = true
+		if looksLikeManagedNPMEvidencePrefix(combined) {
+			b.managedNPMRawOverflow = true
+			b.managedNPMRaw.Reset()
+		}
+		return
+	}
+	b.managedNPMPartial.Write(combined)
+}
+
+func isManagedNPMEvidenceLine(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(line))
+	return strings.HasPrefix(lower, "npm error code ") || strings.HasPrefix(lower, "npm err! code ") ||
+		strings.HasPrefix(lower, "npm error syscall ") || strings.HasPrefix(lower, "npm err! syscall ") ||
+		strings.HasPrefix(lower, "npm error path ") || strings.HasPrefix(lower, "npm err! path ")
+}
+
+func looksLikeManagedNPMEvidencePrefix(line []byte) bool {
+	lower := strings.ToLower(string(line))
+	return strings.HasPrefix(lower, "npm error ") || strings.HasPrefix(lower, "npm err! ")
+}
+
+func (b *stderrBuffer) managedNPMDiagnosticSnapshot() (string, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	partialDiagnostic := looksLikeManagedNPMEvidencePrefix(b.managedNPMPartial.Bytes())
+	return strings.TrimSpace(b.managedNPMRaw.String()), !b.managedNPMRawOverflow && !b.managedNPMDiscardLine && !partialDiagnostic
 }
 
 // tail returns what was retained, trimmed — the end of the output rather than
@@ -1402,7 +1692,7 @@ func (b *stderrBuffer) Write(p []byte) (int, error) {
 func (b *stderrBuffer) tail() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return strings.TrimSpace(b.buf.String())
+	return acpcompat.RedactConsentURLs(strings.TrimSpace(b.buf.String()))
 }
 
 // probeTails keeps classification and complete-line log input on one snapshot.
@@ -1416,7 +1706,7 @@ func (b *stderrBuffer) probeTails() (string, string) {
 	if partial {
 		_, logTail, _ = strings.Cut(logTail, "\n")
 	}
-	return strings.TrimSpace(raw), strings.TrimSpace(logTail)
+	return acpcompat.RedactConsentURLs(strings.TrimSpace(raw)), acpcompat.RedactConsentURLs(strings.TrimSpace(logTail))
 }
 
 // describeACPFailure names an expired or cancelled context as the cause instead
@@ -1447,6 +1737,15 @@ func clientCapabilitiesForInference(agentID string, gw *acpprovider.GatewayAuth)
 		caps.Auth = acp.AuthCapabilities{Meta: acpprovider.ClientAuthMeta()}
 	}
 	return caps
+}
+
+// inferenceClientInfo keeps the provider-specific wire identity while leaving
+// every other agent on its existing name.
+func inferenceClientInfo(agentID, fallbackName string) *acp.Implementation {
+	if name, version := acpcompat.ClientInfoForAgent(agentID); name != "" {
+		return &acp.Implementation{Name: name, Version: version}
+	}
+	return &acp.Implementation{Name: fallbackName, Version: "1.0.0"}
 }
 
 // applyInferenceGatewayAuth authenticates an ephemeral probe/inference session
@@ -1520,6 +1819,7 @@ func sanitizeEnvForAgent(cfg *InferenceConfigDTO) []string {
 			env = RemoveEnvEntry(env, key)
 		}
 	}
+	env = launchwrapper.StripAgentDebugSettings(env)
 	return launchwrapper.StripControlCredentials(env)
 }
 

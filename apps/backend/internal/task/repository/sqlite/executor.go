@@ -268,6 +268,10 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 	if err := r.retainQuickChatHistoryTx(ctx, tx, running.SessionID); err != nil {
 		return err
 	}
+	metadataJSON, err = r.retainBuiltinBindingTx(ctx, tx, running, metadataJSON)
+	if err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executors_running (
 			id, session_id, task_id, execution_profile_id, executor_id, runtime, status, idle_suspension_state, resumable, resume_token,
@@ -658,6 +662,31 @@ func (r *Repository) HasExecutorRunningRow(ctx context.Context, sessionID string
 		SELECT 1 FROM executors_running WHERE session_id = ? LIMIT 1
 	`), sessionID).Scan(&exists)
 	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// HasActiveExecutorRunningRow returns true if sessionID has an executors_running
+// row whose runtime may still be writing to the workspace. Failed rows remain
+// active because a stream failure does not confirm that the runtime stopped.
+func (r *Repository) HasActiveExecutorRunningRow(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, fmt.Errorf("session_id is required")
+	}
+	var exists int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT 1 FROM executors_running
+		WHERE session_id = ? AND (status IS NULL OR status NOT IN (?, ?))
+		LIMIT 1
+	`), sessionID,
+		models.ExecutorRunningStatusStopped,
+		models.ExecutorRunningStatusComplete,
+	).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {

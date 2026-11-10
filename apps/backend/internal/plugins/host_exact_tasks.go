@@ -11,7 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/plugins/state"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -575,16 +575,26 @@ func (h *pluginHost) CreateTaskExact(ctx context.Context, input pluginsdk.ExactT
 	}
 	prepared, launch, err := (taskReader{host: h}).prepareCreate(ctx, input.Task)
 	if err != nil {
-		resultStatus := exactTaskUpdateErrorStatus(err)
-		if resultStatus == pluginsdk.CommandUnavailable {
-			return &pluginsdk.CommandResult{Status: resultStatus, Reason: "task_create_validation_unavailable"}, nil, nil
+		return completeExactTaskCreateValidationFailure(ctx, admission, input.ExternalID, err)
+	}
+	existing, found, err := admission.writer.FindTaskByExternalID(ctx, input.WorkspaceID, input.ExternalID)
+	if err != nil {
+		return &pluginsdk.CommandResult{Status: exactTaskUpdateErrorStatus(err), Reason: "task_create_lookup_unavailable"}, nil, nil
+	}
+	if found {
+		if existing == nil || existing.ID == "" {
+			return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "task_create_lookup_result_unavailable"}, nil, nil
 		}
+		dto := taskModelToDTO(existing)
 		completed, completeErr := admission.store.Complete(ctx, admission.record.Intent.OperationID,
-			string(resultStatus), string(resultStatus), input.ExternalID, "")
+			string(pluginsdk.CommandAlreadyApplied), "", existing.ID, dto.ResourceVersion)
 		if completeErr != nil {
-			return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "command_receipt_unavailable"}, nil, nil
+			return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "command_receipt_unavailable"}, &dto, nil
 		}
-		return commandResultFromRecord(completed), nil, nil
+		return commandResultFromRecord(completed), &dto, nil
+	}
+	if err := h.validateTaskLaunch(ctx, launch); err != nil {
+		return completeExactTaskCreateValidationFailure(ctx, admission, input.ExternalID, err)
 	}
 
 	created, alreadyApplied, err := admission.writer.CreateTaskExact(ctx, ExactTaskCreateInput{
@@ -611,6 +621,24 @@ func (h *pluginHost) CreateTaskExact(ctx context.Context, input pluginsdk.ExactT
 		return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "command_receipt_unavailable"}, &dto, nil
 	}
 	return commandResultFromRecord(completed), &dto, nil
+}
+
+func completeExactTaskCreateValidationFailure(
+	ctx context.Context,
+	admission *exactTaskCreateAdmission,
+	externalID string,
+	validationErr error,
+) (*pluginsdk.CommandResult, *pluginsdk.Task, error) {
+	resultStatus := exactTaskUpdateErrorStatus(validationErr)
+	if resultStatus == pluginsdk.CommandUnavailable {
+		return &pluginsdk.CommandResult{Status: resultStatus, Reason: "task_create_validation_unavailable"}, nil, nil
+	}
+	completed, err := admission.store.Complete(ctx, admission.record.Intent.OperationID,
+		string(resultStatus), string(resultStatus), externalID, "")
+	if err != nil {
+		return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "command_receipt_unavailable"}, nil, nil
+	}
+	return commandResultFromRecord(completed), nil, nil
 }
 
 func (h *pluginHost) admitExactTaskCreate(

@@ -16,6 +16,7 @@ import (
 )
 
 type blockingGitHubClients struct {
+	fakeGitHubClients
 	started        chan struct{}
 	release        chan struct{}
 	unblockedCall  chan struct{}

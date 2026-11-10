@@ -2,6 +2,7 @@
 status: current
 system: tasks
 requirements:
+  - REQ-TASKS-BOARD-BULK-MOVE-SCOPE-001
   - REQ-TASKS-BOARD-PRIORITY-SORT-FILTER-001
   - REQ-TASKS-BOARD-PRIORITY-SORT-FILTER-002
   - REQ-TASKS-BOARD-PRIORITY-SORT-FILTER-003
@@ -25,6 +26,7 @@ task priority or a workflow position.
 
 | Requirement | Design sections |
 | --- | --- |
+| REQ-TASKS-BOARD-BULK-MOVE-SCOPE-001 | Ordering and bulk moves |
 | REQ-TASKS-BOARD-PRIORITY-SORT-FILTER-001 | Components and responsibilities, Task projection |
 | REQ-TASKS-BOARD-PRIORITY-SORT-FILTER-002 | Ordering and bulk moves |
 | REQ-TASKS-BOARD-PRIORITY-SORT-FILTER-003 | Responsive controls |
@@ -82,6 +84,39 @@ and step ordering used by the rendered board. A bulk move then assigns target
 positions in that deterministic order. Hidden workflows are included when a
 person explicitly selects them, while workflow selection still limits the
 ordering universe.
+
+### Workflow scope of a board step move
+
+`useMultiSelectDerived` offers steps for the selected workflow, while
+`useTaskMultiSelect` currently sends its board workflow argument to the batch
+move. In All Workflows that argument may describe a different hydrated workflow
+or be null. Resolve scope from the invocation's eligible selection and existing
+workflow snapshots, with the matching single-workflow snapshot as fallback only
+when it supplies consistent evidence. If the selected workflow's multi-workflow
+snapshot has no steps, offer the matching hydrated board's steps; never take
+steps from a different hydrated workflow. A task found in more than one workflow,
+missing task evidence, conflicting task/snapshot identity, an absent or
+ambiguous destination, or a destination outside the selection's workflow fails
+closed. The offered destinations and invocation guard must agree; revalidate at
+invocation against current store state rather than relying on a stale menu.
+
+Keep the board context for its existing selection lifecycle and other actions.
+Submit one ordered batch through `useTaskWorkflowMove` only after the scope is
+unambiguous. The backend remains authoritative for move validation and arrival
+placement. Apply the existing local update only after success and retain the
+selection and existing error toast on rejection. This does not introduce a
+cross-workflow move, per-task fanout, or a new API.
+
+### Phone destination trigger
+
+`TaskMultiSelectToolbar` keeps the existing bulk-actions sheet as the modal
+owner on phone. Its destination menu uses controlled open state and follows the
+existing `RepositorySourceMenu` touch pattern: mark touch pointerdown pending,
+prevent its default opening, clear the pending state on pointer cancellation,
+and toggle the menu on the touch's synthetic click. The phone menu is
+non-modal within the sheet. Desktop keeps its modal menu and existing mouse and
+keyboard operation. Opening choices does not dispatch a move; only explicitly
+selecting a destination invokes the existing batch path.
 
 ## State lifecycle
 

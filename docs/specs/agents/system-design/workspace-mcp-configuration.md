@@ -164,9 +164,8 @@ Advanced settings contains a compact MCP label/count/help row matching priority.
 Opening it shows inherited origins and task additions in a bounded desktop
 popover or touch drawer. Keep the main form free of persistent helper text.
 
-The picker separates inherited rows from additions at the current scope. Each
-inherited row lists its origins. It does not show a misleading checkbox that
-implies subtraction.
+Pickers separate inherited origins from positive additions. Only existing sessions
+expose explicit [exclude/restore actions](session-mcp-exclusions.md).
 
 Origin identities remain stable IDs in selection and attachment contracts.
 Presentation resolves names from existing workspace-contextual profile options,
@@ -247,11 +246,10 @@ nonblank descriptions and passive metadata from `mcpDefinitionBadgeKeys` on
 inherited rows and every shared picker choice, including repository/task forms.
 Legacy import is not Custom. Retain aliases,
 disabled state, pending annotations, checkbox accessibility and existing search.
-No transport configuration is exposed. Inherited rows remain read-only.
-
-Keep dialog/drawer ownership, wrapped details, one scroller and touch targets.
-Status and pending changes precede groups, independent of search. No API,
-storage, polling or save change. Origin grouping remains session-specific.
+Transport configuration stays hidden. Existing-session exclusion actions extend
+read-only inheritance in other pickers. Preserve wrapped details, one scroller,
+touch targets, and status/pending groups independent of search. Origin grouping
+adds no storage or polling; exclusions extend the shared write transaction.
 Original phone composition: [origin sections plan](../../../plans/mcp-customize-origins/plan.md).
 
 Only the raw JSON editor is retired. The profile transport policy card remains,
@@ -327,7 +325,7 @@ Resolution follows this order:
 1. Load repository selections for every task repository.
 2. Load the profile selection for the execution workspace.
 3. Load task and task-session selections.
-4. Union rows by stable definition ID and accumulate origin descriptors.
+4. Union rows by definition ID, retain origins, then subtract session exclusions.
 5. Load enabled definitions and sort them by normalized runtime name.
 6. Resolve secret references on the server at the last responsible moment.
 7. Apply executor and provider transport policy.

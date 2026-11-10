@@ -129,12 +129,12 @@ Prefer the public authoring docs and current template over old examples. The
 frontend contract pair is `docs/plans/plugins/PLUGIN-API.md` plus
 `apps/web/lib/plugins/types.ts`; concrete UI exports are in
 `apps/web/lib/plugins/host-api.ts`. The backend contract is
-`apps/backend/pkg/pluginsdk` plus `apps/backend/proto/kandev/plugin/v1/plugin.proto`.
+`pluginsdk` plus `pluginsdk/proto/kandev/plugin/v1/plugin.proto`.
 Read `docs/plans/plugins/GRPC-CONTRACT.md` when changing the wire contract or
 when the public docs do not answer a low-level compatibility question.
 
 The frontend and backend matrices in `docs/public/plugins-authoring.md`,
-together with `apps/web/lib/plugins/types.ts` and `apps/backend/pkg/pluginsdk`,
+together with `apps/web/lib/plugins/types.ts` and `pluginsdk`,
 are the authoritative record of what exists today. Read them rather than
 asserting from memory that a hook is missing, and do not publish a signature
 they do not declare.
@@ -156,8 +156,8 @@ for later. In the same change:
    - frontend: `docs/plans/plugins/PLUGIN-API.md` plus
      `apps/web/lib/plugins/types.ts`; update `host-api.ts`, `registry.ts`, or
      the mounted component when the concrete surface changes;
-   - backend: `apps/backend/pkg/pluginsdk`,
-     `apps/backend/proto/kandev/plugin/v1/plugin.proto`, and the manifest model
+   - backend: `pluginsdk`,
+     `pluginsdk/proto/kandev/plugin/v1/plugin.proto`, and the manifest model
      or validator when applicable; update `docs/plans/plugins/GRPC-CONTRACT.md`
      for wire-level changes.
 3. Update `docs/public/plugins-authoring.md` in the same change: add the hook to
@@ -206,14 +206,17 @@ repository above.
 4. Inspect repository-local instructions before editing. Replace template
    identity and example behavior without deleting its packaging, test, or
    release safeguards.
-5. Materialize the plugin as a sibling of the Kandev checkout, or update the
-   template's `go.mod` replacement deliberately. Until the SDK is a standalone
-   module, the default `replace` resolves `../kandev/apps/backend`.
+5. Check public SDK availability before migrating. After the selected release
+   is verified, pin `github.com/kdlbs/kandev/pluginsdk` and `@kdlbs/plugin-sdk`
+   to exact versions. Remove SDK local replacements/file links, regenerate
+   locks, and run the installed-dependency compatibility checker documented in
+   the authoring guide. Use the SDK-wide host floor, not a guessed feature floor.
 
-For a standalone plugin that replaces the SDK with a sibling checkout, record
-the exact tested SDK ref, align CI and release checkouts with that ref, and
-verify minimum-host compatibility separately. Do not tidy or build against
-whatever monorepo checkout happens to be present.
+Existing templates may still use `.kandev-sdk-ref` and sibling checkouts. Keep
+that tested commit until the separate template migration is ready. Inspect
+packaging steps before removing checkouts: `plugin-pack` still belongs to the
+backend and needs an independently pinned tooling source. SDK-only compilation
+and typechecking do not require a Kandev sibling after public migration.
 
 If the requested repository does not exist and cannot be created with the
 available GitHub tooling, stop after producing a precise repository bootstrap

@@ -32,6 +32,7 @@ import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-he
 import type { DraftProfile, DraftAgent, SaveAgentCallbacks } from "./agent-save-helpers";
 import { AgentHeader, ProfilesCard } from "./agent-setup-parts";
 import { isHandledApiError } from "@/lib/api/client";
+import { DEVIN_AGENT_ID, newDevinProfileDefaults } from "@/lib/devin-profile-settings";
 
 const defaultMcpConfig: NonNullable<DraftProfile["mcp_config"]> = {
   enabled: false,
@@ -50,28 +51,34 @@ type AgentSetupFormProps = {
 
 const createDraftProfile = (
   agentId: string,
+  agentName: string,
   agentDisplayName: string,
   defaultModel: string,
   permissionSettings?: Record<string, PermissionSetting>,
-  kind: AgentProfileKind = "concrete",
-): DraftProfile => ({
-  id: toAgentProfileId(`draft-${generateUUID()}`),
-  kind,
-  dynamic: kind === "dynamic" ? { version: 1, candidates: [] } : undefined,
-  agentId,
-  name: "",
-  agentDisplayName,
-  model: defaultModel,
-  ...buildDefaultPermissions(permissionSettings ?? {}),
-  cliPassthrough: false,
-  cursorMcpAuthEnabled: true,
-  cursorPluginsMcpEnabled: true,
-  cliFlags: seedDefaultCLIFlags(permissionSettings ?? {}),
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-  isNew: true,
-  mcp_config: { ...defaultMcpConfig },
-});
+): DraftProfile => {
+  const kind: AgentProfileKind = agentName === "dynamic" ? "dynamic" : "concrete";
+  const devinDefaults = agentName === DEVIN_AGENT_ID ? newDevinProfileDefaults({}) : undefined;
+  return {
+    id: toAgentProfileId(`draft-${generateUUID()}`),
+    kind,
+    dynamic: kind === "dynamic" ? { version: 1, candidates: [] } : undefined,
+    agentId,
+    name: "",
+    agentDisplayName,
+    model: defaultModel,
+    mode: devinDefaults?.mode ?? "",
+    envVars: devinDefaults?.envVars ?? [],
+    ...buildDefaultPermissions(permissionSettings ?? {}),
+    cliPassthrough: false,
+    cursorMcpAuthEnabled: true,
+    cursorPluginsMcpEnabled: true,
+    cliFlags: seedDefaultCLIFlags(permissionSettings ?? {}),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    isNew: true,
+    mcp_config: { ...defaultMcpConfig },
+  };
+};
 
 const cloneAgent = (agent: Agent): DraftAgent => ({
   ...agent,
@@ -90,13 +97,7 @@ const ensureProfiles = (
   return {
     ...agent,
     profiles: [
-      createDraftProfile(
-        agent.id,
-        agentDisplayName,
-        defaultModel,
-        permissionSettings,
-        agent.name === "dynamic" ? "dynamic" : "concrete",
-      ),
+      createDraftProfile(agent.id, agent.name, agentDisplayName, defaultModel, permissionSettings),
     ],
   };
 };
@@ -276,10 +277,10 @@ function useProfileHandlers(
         {
           ...createDraftProfile(
             current.id,
+            current.name,
             resolveDisplayName(current.name),
             defaultModel,
             permissionSettings,
-            current.name === "dynamic" ? "dynamic" : "concrete",
           ),
           id: draftId,
         },
@@ -299,10 +300,10 @@ function useProfileHandlers(
             : [
                 createDraftProfile(
                   current.id,
+                  current.name,
                   resolveDisplayName(current.name),
                   defaultModel,
                   permissionSettings,
-                  current.name === "dynamic" ? "dynamic" : "concrete",
                 ),
               ],
       };

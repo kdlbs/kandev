@@ -11,6 +11,7 @@ const mergePRMock = vi.hoisted(() => vi.fn());
 const accessMock = vi.hoisted(() => vi.fn());
 const refreshAccessMock = vi.hoisted(() => vi.fn());
 const methodsMock = vi.hoisted(() => vi.fn());
+const ENTERPRISE_HOST = "git.company.example";
 const MERGE_BUTTON_TEST_ID = "pr-merge-button";
 
 vi.mock("@/lib/api/domains/github-api", () => ({ mergePR: mergePRMock }));
@@ -122,16 +123,19 @@ describe("PRMergeButton", () => {
             workspaceId="beta"
             sessionId="beta-session"
           >
-            <PRMergeButton taskPR={taskPR} />
+            <PRMergeButton taskPR={{ ...taskPR, github_host: ENTERPRISE_HOST }} />
           </TaskWorkspaceProvider>
         </ToastProvider>
       </StateProvider>,
     );
-    expect(accessMock).toHaveBeenCalledWith("beta", "acme", "site", true);
-    expect(methodsMock).toHaveBeenCalledWith("beta", "acme", "site");
+    expect(accessMock).toHaveBeenCalledWith("beta", "acme", "site", true, ENTERPRISE_HOST);
+    expect(methodsMock).toHaveBeenCalledWith("beta", "acme", "site", ENTERPRISE_HOST);
     fireEvent.click(screen.getByTestId(MERGE_BUTTON_TEST_ID));
     await waitFor(() =>
-      expect(mergePRMock).toHaveBeenCalledWith("beta", "acme", "site", 42, undefined),
+      expect(mergePRMock).toHaveBeenCalledWith("beta", "acme", "site", 42, {
+        mergeMethod: undefined,
+        expectedHost: ENTERPRISE_HOST,
+      }),
     );
   });
 

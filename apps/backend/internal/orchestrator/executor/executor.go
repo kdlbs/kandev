@@ -225,6 +225,18 @@ type sharedGroupWorkspaceBindingTaskSessionCreator interface {
 	CreateTaskSessionWithSharedGroupWorkspaceBinding(context.Context, *models.TaskSession, *models.TaskEnvironment, string) error
 }
 
+type inheritedTaskEnvironmentTransitionClaimer interface {
+	ClaimInheritedTaskEnvironmentTransition(
+		context.Context,
+		string,
+		string,
+		string,
+		string,
+		string,
+		string,
+	) (*models.TaskEnvironment, bool, bool, error)
+}
+
 type primarySessionTaskStateStore interface {
 	UpdateTaskStateIfPrimarySessionState(
 		context.Context,
@@ -246,6 +258,10 @@ var (
 	ErrTaskArchived            = errors.New("task is archived")
 	ErrStaleExecution          = errors.New("stale execution: no live execution in memory")
 	ErrAgentCommandMissing     = errors.New("existing execution has no agent command configured")
+	// ErrExecutorActorUnavailable means executor admission could not establish
+	// the user a resume must launch as, so the resume fails closed instead of
+	// launching without an identity.
+	ErrExecutorActorUnavailable = errors.New("resume requires an executor actor, but none is available")
 	// ErrSessionAdvancedToRunning reports that another launch advanced the
 	// session before this launch could persist its prepared runtime data.
 	ErrSessionAdvancedToRunning = errors.New("session state advanced to RUNNING before runtime persistence")
@@ -294,6 +310,10 @@ const (
 	ProbeResultSettled = client.ProbeResultSettled
 	ProbeResultUnknown = client.ProbeResultUnknown
 )
+
+// ErrAgentctlClientUnavailable indicates that a session's execution is being
+// replaced and its agentctl client is not currently available.
+var ErrAgentctlClientUnavailable = errors.New("agentctl client not available")
 
 // AgentManagerClient is an interface for the Agent Manager service
 // This will be implemented via gRPC or HTTP client
@@ -532,7 +552,11 @@ type LaunchAgentRequest struct {
 	CandidateExecutionID         string
 	OnExecutionAllocated         func(context.Context, string) error
 
-	TaskID                string
+	TaskID string
+	// OwnerUserID is the authenticated application owner used for reusable
+	// repair identity. It is resolved from the actor or workspace owner and is
+	// never derived from child environment values.
+	OwnerUserID           string
 	TaskScope             lifecycle.TaskLaunchScope
 	SessionSettingsPolicy ResumeSettingsPolicy
 	WorkspaceID           string // Kandev workspace ID — used to build scratch dir for repo-less tasks
@@ -629,26 +653,27 @@ type LaunchAgentRequest struct {
 	CopyFiles string
 
 	// Worktree configuration for concurrent agent execution
-	UseWorktree             bool   // Whether to use a Git worktree for isolation
-	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
-	RepositoryID            string // Repository ID for worktree tracking
-	TaskRepositoryID        string // Exact task_repositories row for worktree recovery
-	RepositoryPath          string // Path to the main repository (for worktree creation)
-	BaseBranch              string // Base branch for the worktree (e.g., "main")
-	IntegrationRef          string // Verified terminal integration target for managed branch compaction
-	DefaultBranch           string // Repository's default_branch, used as a fallback when BaseBranch is missing
-	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
-	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution      *models.RemoteContribution
-	CheckoutOptions         *models.RepositoryCheckoutOptions
-	ContributionDestination *models.ContributionDestination
-	ComparisonTarget        *models.ComparisonTarget
-	QualifiedPRBase         *models.PRBase
-	WorktreeBranchPrefix    string // Branch prefix for worktree branches
-	WorktreeBranchTemplate  string // Branch name template for worktree branches
-	WorktreeBranchTicket    string // External ticket value for branch templates
-	PullBeforeWorktree      bool   // Whether to pull from remote before creating the worktree
-	RemoteSyncHandled       bool   // Provider-authenticated origin refresh already completed
+	UseWorktree              bool   // Whether to use a Git worktree for isolation
+	WorktreeID               string // Existing worktree ID to reuse (skip creation if set)
+	RepositoryID             string // Repository ID for worktree tracking
+	TaskRepositoryID         string // Exact task_repositories row for worktree recovery
+	RepositoryPath           string // Path to the main repository (for worktree creation)
+	BaseBranch               string // Base branch for the worktree (e.g., "main")
+	BaseBranchFallbackPolicy models.BaseBranchFallbackPolicy
+	IntegrationRef           string // Verified terminal integration target for managed branch compaction
+	DefaultBranch            string // Repository's default_branch, used as a fallback when BaseBranch is missing
+	CheckoutBranch           string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber                 int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution       *models.RemoteContribution
+	CheckoutOptions          *models.RepositoryCheckoutOptions
+	ContributionDestination  *models.ContributionDestination
+	ComparisonTarget         *models.ComparisonTarget
+	QualifiedPRBase          *models.PRBase
+	WorktreeBranchPrefix     string // Branch prefix for worktree branches
+	WorktreeBranchTemplate   string // Branch name template for worktree branches
+	WorktreeBranchTicket     string // External ticket value for branch templates
+	PullBeforeWorktree       bool   // Whether to pull from remote before creating the worktree
+	RemoteSyncHandled        bool   // Provider-authenticated origin refresh already completed
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
 	RefreshRepository func(context.Context) error
@@ -691,22 +716,23 @@ type WorkspaceFolderSpec struct {
 // the orchestrator package does not need to import lifecycle types into its
 // public API.
 type RepoSpec struct {
-	TaskRepositoryID        string
-	RepositoryID            string
-	RepositoryPath          string
-	RepositoryURL           string
-	RepoName                string
-	BaseBranch              string
-	IntegrationRef          string
-	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch          string
-	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution      *models.RemoteContribution
-	CheckoutOptions         *models.RepositoryCheckoutOptions
-	ContributionDestination *models.ContributionDestination
-	ComparisonTarget        *models.ComparisonTarget
-	QualifiedPRBase         *models.PRBase
-	WorktreeID              string
+	TaskRepositoryID         string
+	RepositoryID             string
+	RepositoryPath           string
+	RepositoryURL            string
+	RepoName                 string
+	BaseBranch               string
+	BaseBranchFallbackPolicy models.BaseBranchFallbackPolicy
+	IntegrationRef           string
+	DefaultBranch            string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch           string
+	PRNumber                 int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution       *models.RemoteContribution
+	CheckoutOptions          *models.RepositoryCheckoutOptions
+	ContributionDestination  *models.ContributionDestination
+	ComparisonTarget         *models.ComparisonTarget
+	QualifiedPRBase          *models.PRBase
+	WorktreeID               string
 	// AllowBranchReplacement permits explicit branch replacement for this repo.
 	AllowBranchReplacement bool
 	WorktreeBranchPrefix   string
@@ -780,7 +806,8 @@ type LaunchOptions struct {
 	// persisted the execution that will receive this turn, but before its
 	// process is started. Callers use this boundary to bind turn-scoped
 	// evidence to the execution that actually won admission.
-	OnExecutionAdmitted func(executionID string)
+	OnExecutionAdmitted   func(executionID string)
+	OnStartAttemptClaimed func(attemptID string)
 	// OnInitialPromptAccepted transfers startup ownership after lifecycle reports
 	// that the initial prompt was accepted by the provider. OnInitialPromptFailed
 	// closes that ownership when delivery fails before acceptance.
@@ -1037,6 +1064,13 @@ type CancelledResumeExecutionCleanupFunc func(
 // stop still runs, while orphan cleanup uses the record to avoid duplicating it.
 type ExecutionStopOwnerRegistrationFunc func(sessionID, agentExecutionID string, force bool)
 
+// ExecutionReplacementStopOwnerRegistrationFunc requires an exact-execution
+// teardown claim before a profile replacement stops the old execution.
+type ExecutionReplacementStopOwnerRegistrationFunc func(
+	ctx context.Context,
+	sessionID, agentExecutionID string,
+) bool
+
 // TaskReviewStateReconcileFunc is called when runtime work stopped and the
 // parent task should move to REVIEW only if no session is still STARTING/RUNNING.
 type TaskReviewStateReconcileFunc func(ctx context.Context, taskID, completedSessionID string)
@@ -1096,13 +1130,6 @@ type PrimarySessionSetFunc func(ctx context.Context, taskID, sessionID string)
 // and invalidates updates captured before the reset.
 type ContextWindowResetFunc func(ctx context.Context, sessionID string) error
 
-// ExecutorTypeCapabilities provides behavioral queries about executor types.
-// Implemented by the lifecycle manager using its backend registry.
-type ExecutorTypeCapabilities interface {
-	RequiresCloneURL(executorType string) bool
-	ShouldApplyPreferredShell(executorType string) bool
-}
-
 // AttachmentReader is the narrow attachment-store seam used to stream a
 // claimed descriptor into a passthrough workspace.
 type AttachmentReader interface {
@@ -1128,17 +1155,20 @@ type CoordinatorLookup interface {
 
 // Executor manages agent execution for tasks
 type Executor struct {
-	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
-	executorAdmission         func(context.Context, string, string, string) (context.Context, error)
-	agentManager              AgentManagerClient
-	attachmentReader          AttachmentReader
-	repo                      executorStore
-	secretStore               secrets.SecretStore
-	shellPrefs                ShellPreferenceProvider
-	capabilities              ExecutorTypeCapabilities
-	gitlabCredentials         GitLabCredentialResolver
-	logger                    *logger.Logger
-	canvasesEnabled           bool
+	builtinPolicyReader           BuiltinPolicyReader
+	autonomousExecutorContext     func(context.Context, string, string) (context.Context, error)
+	executorAdmission             func(context.Context, string, string, string) (context.Context, error)
+	agentManager                  AgentManagerClient
+	attachmentReader              AttachmentReader
+	repo                          executorStore
+	secretStore                   secrets.SecretStore
+	shellPrefs                    ShellPreferenceProvider
+	managedRuntimeSingleUserOwner func() (string, bool)
+	capabilities                  ExecutorTypeCapabilities
+	gitlabCredentials             GitLabCredentialResolver
+	logger                        *logger.Logger
+	canvasesEnabled               bool
+	workspaceCollaborationEnabled bool
 
 	// coordinators resolves a coordinator conversation task to its
 	// coordinator and reports profile readiness, for the fail-closed
@@ -1200,6 +1230,7 @@ type Executor struct {
 	// orchestrator so coordinator graceful stop and launch cleanup cannot both
 	// tear down the same execution.
 	onExecutionCleanupClaim ExecutionCleanupClaimFunc
+	onStaleExecutionCleanup func(context.Context, string)
 	// Callback for cancelled resume startup cleanup, which must share the
 	// orchestrator's retryable exact-execution teardown claim.
 	onCancelledResumeExecutionCleanup CancelledResumeExecutionCleanupFunc
@@ -1207,6 +1238,8 @@ type Executor struct {
 	// Callback for registering explicit exact-execution teardown ownership before
 	// a legacy stop persists CANCELLED. The requested stop always runs.
 	onExecutionStopOwnerRegistration ExecutionStopOwnerRegistrationFunc
+	// Profile replacements abort when the exact stop cannot be coordinated with cancellation.
+	onExecutionReplacementStopOwnerRegistration ExecutionReplacementStopOwnerRegistrationFunc
 
 	// Callback for REVIEW reconciliation after runtime start failures. Set by the
 	// orchestrator so failed-start writes share the same serialized guard as
@@ -1524,6 +1557,12 @@ func (e *Executor) SetCanvasesEnabled(enabled bool) {
 	e.canvasesEnabled = enabled
 }
 
+// SetWorkspaceCollaborationEnabled controls whether task MCP profiles expose
+// the report-only delivery mode. Applied before any new session launch.
+func (e *Executor) SetWorkspaceCollaborationEnabled(enabled bool) {
+	e.workspaceCollaborationEnabled = enabled
+}
+
 // SetOnTaskStateChange sets a callback for task state changes.
 // This allows the orchestrator to route state changes through the task service layer
 // which publishes WebSocket events. Without this, async goroutines would only update
@@ -1611,6 +1650,13 @@ func (e *Executor) SetOnCancelledResumeExecutionCleanup(fn CancelledResumeExecut
 // SetOnExecutionStopOwnerRegistration sets the explicit-stop ownership registrar.
 func (e *Executor) SetOnExecutionStopOwnerRegistration(fn ExecutionStopOwnerRegistrationFunc) {
 	e.onExecutionStopOwnerRegistration = fn
+}
+
+// SetOnExecutionReplacementStopOwnerRegistration sets the required replacement-stop claim.
+func (e *Executor) SetOnExecutionReplacementStopOwnerRegistration(
+	fn ExecutionReplacementStopOwnerRegistrationFunc,
+) {
+	e.onExecutionReplacementStopOwnerRegistration = fn
 }
 
 // SetOnTaskReviewStateReconcile sets the guarded task REVIEW reconciliation

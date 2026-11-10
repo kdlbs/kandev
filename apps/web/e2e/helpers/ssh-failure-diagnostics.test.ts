@@ -1,17 +1,38 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import type { TestInfo } from "@playwright/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { captureSSHInterruptionLogs } from "./ssh-failure-diagnostics";
+import { execInContainer, type SSHServerHandle } from "./ssh";
 
 const roots: string[] = [];
 const credential = "FAKE-CREDENTIAL-DO-NOT-RETAIN";
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
+
+function fakeDocker(root: string, script: string): SSHServerHandle {
+  fs.writeFileSync(path.join(root, "docker"), `#!${process.execPath}\n${script}\n`, {
+    mode: 0o755,
+  });
+  vi.stubEnv("PATH", `${root}${path.delimiter}${process.env.PATH ?? ""}`);
+  return {
+    containerId: "diagnostic-container",
+    containerName: "diagnostic-container",
+    host: "127.0.0.1",
+    port: 22,
+    user: "kandev",
+    identityFile: path.join(root, "id_ed25519"),
+    publicKeyFile: path.join(root, "id_ed25519.pub"),
+    hostFingerprint: "SHA256:diagnostic-fixture",
+    workDir: root,
+  };
+}
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-ssh-diagnostics-"));
@@ -193,6 +214,92 @@ describe("captureSSHInterruptionLogs", () => {
     expect(captures[2].error).toBe("ELOOP");
     expect(fs.existsSync(path.join(state.output, "ssh-remote-agentctl.log"))).toBe(false);
     expect(captures[1].attachedBytes).toBeGreaterThan(0);
+  });
+
+  it("captures a remote tail when its host mount is unavailable and redacts before writing", async () => {
+    const state = fixture();
+    fs.unlinkSync(state.remote);
+    const payload = `${credential}\nAuthorization: Bearer ${credential}\nremote listener stopped\n`;
+    const target = fakeDocker(state.root, `process.stdout.write(${JSON.stringify(payload)});`);
+    const readRemote = vi.fn((byteLimit: number) => {
+      expect(byteLimit).toBeGreaterThan(0);
+      expect(byteLimit).toBeLessThan(2 * 1024 * 1024);
+      return execInContainer(target, ["cat", state.remote], 1_000);
+    });
+    await captureSSHInterruptionLogs(state.info, state.backend, readRemote);
+    expect(readRemote).toHaveBeenCalledOnce();
+    const retained = fs.readFileSync(path.join(state.output, "ssh-remote-agentctl.log"), "utf8");
+    expect(retained).toContain("remote listener stopped");
+    expect(retained).not.toContain(credential);
+    expect(state.metadata().captures[2].error).toBeUndefined();
+    expect(state.metadata().captures[2].originalBytes).toBeUndefined();
+  });
+
+  it.each(["initial", "retry"])(
+    "stops stalled %s Docker diagnostic reads without retaining partial output",
+    async (attempt) => {
+      const state = fixture();
+      const retryMarker = path.join(state.root, "retry-marker");
+      const target = fakeDocker(
+        state.root,
+        [
+          'const fs = require("node:fs");',
+          `const marker = ${JSON.stringify(retryMarker)};`,
+          `if (${attempt === "retry"} && !fs.existsSync(marker)) {`,
+          '  fs.writeFileSync(marker, "first attempt");',
+          '  process.stderr.write("unable to upgrade to tcp: 409");',
+          "  process.exit(1);",
+          "}",
+          `process.stdout.write(${JSON.stringify(`password=${credential}\n`)});`,
+          `process.stderr.write(${JSON.stringify(`Authorization: Bearer ${credential}\n`)});`,
+          'fs.writeFileSync(marker, "stalled after output");',
+          'process.on("SIGTERM", () => {});',
+          // The fake transport stalls, then exits if the subprocess deadline is absent.
+          "setTimeout(() => process.exit(0), 5_000);",
+        ].join("\n"),
+      );
+      const errors = [{ message: "original interruption assertion failed" }];
+      Object.assign(state.info, { errors });
+      const writes = vi.spyOn(fs, "writeFileSync");
+      const started = performance.now();
+
+      await captureSSHInterruptionLogs(state.info, state.backend, () =>
+        execInContainer(target, ["cat", state.remote], 1_000),
+      );
+
+      expect(performance.now() - started).toBeLessThan(4_000);
+      expect(fs.readFileSync(retryMarker, "utf8")).toBe("stalled after output");
+      expect(state.metadata().captures[2].error).toBe("diagnostic collection failed");
+      expect(fs.existsSync(path.join(state.output, "ssh-remote-agentctl.log"))).toBe(false);
+      expect(state.metadata().captures[0].attachedBytes).toBeGreaterThan(0);
+      expect(state.info.status).toBe("failed");
+      expect(state.info.errors).toBe(errors);
+      for (const [, body] of writes.mock.calls) expect(String(body)).not.toContain(credential);
+    },
+    15_000,
+  );
+
+  it("does not read the remote container after a passing test", async () => {
+    const state = fixture();
+    const readRemote = vi.fn(() => "remote listener stopped\n");
+    await captureSSHInterruptionLogs(
+      { ...state.info, status: "passed" },
+      state.backend,
+      readRemote,
+    );
+    expect(readRemote).not.toHaveBeenCalled();
+    expect(state.attach).not.toHaveBeenCalled();
+  });
+
+  it("omits raw remote command failures from diagnostic metadata", async () => {
+    const state = fixture();
+    await captureSSHInterruptionLogs(state.info, state.backend, () => {
+      throw new Error(`docker exec failed: password=${credential}`);
+    });
+    const metadata = state.metadata();
+    expect(metadata.captures[2].error).toBe("diagnostic collection failed");
+    expect(JSON.stringify(metadata)).not.toContain(credential);
+    expect(state.info.status).toBe("failed");
   });
 
   it("preserves the original failure and closes log descriptors when attachment fails", async () => {

@@ -1,3 +1,6 @@
+import type { ThreadTaskScope, ThreadView } from "@/lib/state/slices/ui/thread-view-types";
+import { ATTENTION_SORT } from "@/lib/threads/thread-view-query";
+
 export const MIN_THREAD_VIEW_COLUMNS = 1;
 export const MAX_THREAD_VIEW_COLUMNS = 30;
 export const MAX_THREAD_VIEW_TASK_IDS = 200;
@@ -48,4 +51,21 @@ export function updateVisibleThreadTaskSelection(
     next.push(taskId);
   }
   return next;
+}
+
+/**
+ * The draft fields to write when the task-scope mode changes. Selection order
+ * has nothing to rank in the all scope, so leaving it replaces the sort in the
+ * same edit.
+ */
+export function threadTaskScopeModeUpdate(
+  current: Pick<ThreadView, "taskScope" | "sort">,
+  mode: ThreadTaskScope["mode"],
+): Partial<Pick<ThreadView, "taskScope" | "sort">> {
+  if (mode === "selected") {
+    const taskIds = current.taskScope.mode === "selected" ? [...current.taskScope.taskIds] : [];
+    return { taskScope: { mode: "selected", taskIds } };
+  }
+  const taskScope: ThreadTaskScope = { mode: "all", taskIds: [] };
+  return current.sort.key === "selection" ? { taskScope, sort: ATTENTION_SORT } : { taskScope };
 }

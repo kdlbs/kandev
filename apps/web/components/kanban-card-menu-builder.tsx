@@ -1,4 +1,4 @@
-import { IconLoader, IconUnlink } from "@tabler/icons-react";
+import { IconHierarchy3, IconLoader, IconUnlink } from "@tabler/icons-react";
 import { t } from "@/lib/i18n";
 import { buildLinkSubmenu } from "./kanban-card-link-submenu";
 import {
@@ -76,12 +76,29 @@ function buildDetachEntry({
   };
 }
 
+function buildShowGraphEntry(
+  onShowGraph: (() => void) | undefined,
+  isProcessing: boolean,
+): KanbanCardMenuEntry | null {
+  if (!onShowGraph) return null;
+  return {
+    kind: "item",
+    key: "show-in-graph",
+    testId: "task-context-show-in-graph",
+    icon: <IconHierarchy3 className="mr-2 h-4 w-4" />,
+    label: t("task:taskGraphShowInGraph"),
+    disabled: isProcessing,
+    onSelect: onShowGraph,
+  };
+}
+
 function buildRelationshipMenuEntries(
   args: Pick<
     BuildKanbanCardMenuEntriesArgs,
     | "parentTaskId"
     | "onDetach"
     | "isDetaching"
+    | "onShowGraph"
     | "onLinkPullRequest"
     | "onLinkIssue"
     | "onLinkMergeRequest"
@@ -108,7 +125,10 @@ function buildRelationshipMenuEntries(
     isDetaching: args.isDetaching,
     isProcessing,
   });
-  return [linkEntry, detachEntry].filter((entry): entry is KanbanCardMenuEntry => entry !== null);
+  const graphEntry = buildShowGraphEntry(args.onShowGraph, isProcessing);
+  return [graphEntry, linkEntry, detachEntry].filter(
+    (entry): entry is KanbanCardMenuEntry => entry !== null,
+  );
 }
 
 function buildCardMenuGroups(args: {
@@ -147,6 +167,7 @@ export function buildKanbanCardMenuEntries({
   onArchive,
   onDelete,
   onDetach,
+  onShowGraph,
   onLinkPullRequest,
   onLinkIssue,
   onLinkMergeRequest,
@@ -198,6 +219,7 @@ export function buildKanbanCardMenuEntries({
       parentTaskId,
       onDetach,
       isDetaching,
+      onShowGraph,
       onLinkPullRequest,
       onLinkIssue,
       onLinkMergeRequest,

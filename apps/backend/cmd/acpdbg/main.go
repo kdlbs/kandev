@@ -88,10 +88,13 @@ Shared flags:
   --verbose        mirror frames to stderr
   --stderr         capture child stderr into the JSONL
   --exec "CMD"     spawn an arbitrary command instead of a registered agent
+  --client-capabilities JSON  merge client capabilities into initialize
+  --air-capabilities LIST     advertise comma-separated AIR capabilities
 
 The JSONL file records every request, response, notification, and meta
 event in chronological order. See .claude/skills/acp-debug/SKILL.md for the
-schema and examples.`)
+schema and examples. Use --air-capabilities to advertise AIR extensions such
+as asyncTasks during a probe or agent-matrix run.`)
 }
 
 type sharedFlags struct {
@@ -102,6 +105,30 @@ type sharedFlags struct {
 	verbose bool
 	stderr  bool
 	exec    string
+	// airCapabilities lists AIR extension capabilities to advertise in the
+	// initialize clientCapabilities._meta block.
+	airCapabilities    string
+	clientCapabilities map[string]any
+}
+
+type clientCapabilitiesFlag struct {
+	target *map[string]any
+}
+
+func (f clientCapabilitiesFlag) String() string {
+	return ""
+}
+
+func (f clientCapabilitiesFlag) Set(value string) error {
+	var capabilities map[string]any
+	if err := json.Unmarshal([]byte(value), &capabilities); err != nil {
+		return fmt.Errorf("--client-capabilities must be a JSON object: %w", err)
+	}
+	if capabilities == nil {
+		return errors.New("--client-capabilities must be a JSON object")
+	}
+	*f.target = capabilities
+	return nil
 }
 
 func registerShared(fs *flag.FlagSet) *sharedFlags {
@@ -113,6 +140,10 @@ func registerShared(fs *flag.FlagSet) *sharedFlags {
 	fs.BoolVar(&f.verbose, "verbose", false, "mirror frames to stderr")
 	fs.BoolVar(&f.stderr, "stderr", false, "capture child stderr into the JSONL")
 	fs.StringVar(&f.exec, "exec", "", "spawn an arbitrary command instead of a registered agent")
+	fs.StringVar(&f.airCapabilities, "air-capabilities", "",
+		"comma-separated AIR extension capabilities to advertise (e.g. asyncTasks)")
+	fs.Var(clientCapabilitiesFlag{target: &f.clientCapabilities}, "client-capabilities",
+		"JSON object of additional client capabilities to merge into initialize")
 	return f
 }
 
@@ -427,18 +458,17 @@ func probeOne(ctx context.Context, shared *sharedFlags, spec acpdbg.AgentSpec) m
 		AgentID: spec.ID,
 		Status:  "failed",
 	}
+	if spec.ResolveError != "" {
+		entry.Error = spec.ResolveError
+		return entry
+	}
 	jsonlPath := resolveJSONLPath(shared, spec.ID, "probe")
 	entry.JSONL = jsonlPath
 
 	runCtx, cancel := context.WithTimeout(ctx, shared.timeout)
 	defer cancel()
 
-	runner, err := acpdbg.NewRunner(runCtx, jsonlPath, acpdbg.RunConfig{
-		AgentID:       spec.ID,
-		Command:       spec.Command,
-		Workdir:       shared.workdir,
-		CaptureStderr: shared.stderr,
-	})
+	runner, err := acpdbg.NewRunner(runCtx, jsonlPath, probeRunConfig(shared, spec))
 	if err != nil {
 		entry.Error = err.Error()
 		entry.Status = classifyError(err.Error())
@@ -467,12 +497,26 @@ func probeOne(ctx context.Context, shared *sharedFlags, spec acpdbg.AgentSpec) m
 	return entry
 }
 
+func probeRunConfig(shared *sharedFlags, spec acpdbg.AgentSpec) acpdbg.RunConfig {
+	return acpdbg.RunConfig{
+		AgentID:            spec.ID,
+		Command:            spec.Command,
+		Env:                spec.Env,
+		Workdir:            shared.workdir,
+		CaptureStderr:      shared.stderr,
+		ClientCapabilities: shared.clientCapabilities,
+		AIRCapabilities:    splitCapabilities(shared.airCapabilities),
+	}
+}
+
 // --- helpers ---
 
 func resolveRunConfig(fs *flag.FlagSet, shared *sharedFlags, _ string) (acpdbg.RunConfig, error) {
 	cfg := acpdbg.RunConfig{
-		Workdir:       shared.workdir,
-		CaptureStderr: shared.stderr,
+		Workdir:            shared.workdir,
+		CaptureStderr:      shared.stderr,
+		ClientCapabilities: shared.clientCapabilities,
+		AIRCapabilities:    splitCapabilities(shared.airCapabilities),
 	}
 	if shared.exec != "" {
 		parts := splitExec(shared.exec)
@@ -497,7 +541,18 @@ func resolveRunConfig(fs *flag.FlagSet, shared *sharedFlags, _ string) (acpdbg.R
 	}
 	cfg.AgentID = spec.ID
 	cfg.Command = spec.Command
+	cfg.Env = spec.Env
 	return cfg, nil
+}
+
+func splitCapabilities(value string) []string {
+	var capabilities []string
+	for _, part := range strings.Split(value, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			capabilities = append(capabilities, trimmed)
+		}
+	}
+	return capabilities
 }
 
 func resolveJSONLPath(shared *sharedFlags, agentID, op string) string {

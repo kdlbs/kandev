@@ -43,11 +43,12 @@ func CompareMCPSetups(state SessionMCPSelectionState, desired *MCPSetupSnapshot)
 
 func boundedMCPComparison(result *MCPSetupComparison) *MCPSetupComparison {
 	encoded, err := json.Marshal(result)
-	if len(result.Changes) > maxMCPSetupServers || err != nil || len(encoded) > maxMCPSetupBytes {
+	if len(result.Changes) > maxMCPSetupServers || len(result.ExcludedDefinitionIDs) > maxMCPSetupServers || err != nil || len(encoded) > maxMCPSetupBytes {
 		result.Status = comparisonStatusUnavailable
 		result.Reason = "comparison_too_large"
 		result.Changes = nil
 		result.SelectionIDs = nil
+		result.ExcludedDefinitionIDs = nil
 	}
 	return result
 }

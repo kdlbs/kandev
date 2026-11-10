@@ -9,6 +9,7 @@ import (
 
 func validateStartupSettings(cfg *Config) error {
 	errs := validateTrustedProxies(cfg)
+	errs = append(errs, configuredValidation(cfg, sqliteReaderConnsKey, sqliteReaderConnsApplies(cfg) && (cfg.Database.SQLiteReaderConns < sqliteReaderConnsMinimum || cfg.Database.SQLiteReaderConns > sqliteReaderConnsMaximum), "database.sqliteReaderConns must be between 1 and 64")...)
 	errs = append(errs, configuredValidation(cfg, "tasks.preparationTimeout", cfg.Tasks.PreparationTimeout <= 0, "tasks.preparationTimeout must be positive")...)
 	errs = append(errs, configuredValidation(cfg, "tasks.stallDetectionThreshold", cfg.Tasks.StallDetectionThreshold <= 0, "tasks.stallDetectionThreshold must be positive")...)
 	errs = append(errs, validateDeliveryRetentionSettings(cfg.Tasks.DeliveryRetention)...)

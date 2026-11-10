@@ -18,7 +18,8 @@ test.describe("Office config sync (provider)", () => {
     const saveBar = testPage.getByTestId("settings-floating-save");
     const saveButton = saveBar.getByRole("button", { name: "Save changes" });
     // Default provider is GitHub; the shared save bar appears after the draft changes.
-    await testPage.getByLabel("Repository owner").fill("kdlbs");
+    await testPage.getByLabel("Repository name").fill("");
+    await testPage.getByLabel("Repository owner").fill("e2e-owner");
     await expect(saveButton).toBeDisabled();
     await testPage.getByLabel("Repository name").fill("office-config");
     await expect(saveButton).toBeEnabled();

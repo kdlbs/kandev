@@ -61,7 +61,8 @@ describe("canvas distribution API", () => {
     const [, init] = fetchSpy.mock.calls.at(-1) ?? [];
     expect(init?.method).toBe("POST");
     expect(init?.body).toBeInstanceOf(FormData);
-    expect((init?.body as FormData).get("package")).toBe(file);
+    const body = init?.body as FormData | undefined;
+    expect(body?.get("package")).toBe(file);
     expect(new Headers(init?.headers).get("Content-Type")).toBeNull();
   });
 

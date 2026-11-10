@@ -34,8 +34,8 @@ const (
 	// DependencyFailed means the predecessor reached a terminal state that is
 	// not success. It never resolves the edge.
 	DependencyFailed = "failed"
-	// DependencyPending means the predecessor has not finished. Archived
-	// predecessors are pending: archival is neither success nor failure.
+	// DependencyPending means the predecessor has not finished. Archival
+	// alone does not change whether the predecessor finished successfully.
 	DependencyPending = "pending"
 	// dependencyMissing marks an edge whose predecessor row is gone. Internal
 	// only: such edges are dropped from the projection rather than reported.
@@ -79,6 +79,7 @@ type DependencyView struct {
 	BlockedReason      string
 	DependsOn          []DependencyRef
 	Blocks             []DependencyRef
+	Related            []DependencyRef
 	DependsOnTruncated bool
 	BlocksTruncated    bool
 }
@@ -537,6 +538,7 @@ func (s *Service) dependencyEventFields(ctx context.Context, task *models.Task) 
 		"blocked_reason": view.BlockedReason,
 		"depends_on":     view.DependsOn,
 		"blocks":         view.Blocks,
+		"related":        view.Related,
 	}
 }
 
@@ -652,7 +654,24 @@ func (s *Service) buildDependencyViews(
 		// edges can exist), the projection reports the withheld verdict here,
 		// because an omitted map entry reads as the zero-value DependencyView
 		// (Blocked: false) — an indistinguishable, silent "not blocked".
-		return withheldDependencyViews(ids), nil
+		views := withheldDependencyViews(ids)
+		if s.relations != nil {
+			related, relationErr := s.relations.ListRelationsForTasks(ctx, ids)
+			if relationErr != nil {
+				s.logger.Warn("failed to load task relations", zap.Error(relationErr))
+			} else if enforceFanOut && distinctEdgeEndCount(nil, nil, related) > maxDependencyFanOut {
+				return nil, ErrDependencyFanOutExceeded
+			} else if refs, refErr := s.resolveDependencyRefs(ctx, nil, nil, related); refErr != nil {
+				s.logger.Warn("failed to resolve related task refs", zap.Error(refErr))
+			} else {
+				for _, id := range ids {
+					view := views[id]
+					view.Related = relatedRefs(related[id], refs)
+					views[id] = view
+				}
+			}
+		}
+		return views, nil
 	}
 	if ctx.Err() != nil {
 		return withheldDependencyViews(ids), nil
@@ -683,10 +702,19 @@ func (s *Service) buildDependencyViews(
 	// edge rows alone, so there is no reason to resolve title/state for an
 	// end that would only be truncated away afterward.
 	dependents, blocksTruncated := cutDependentsForResolution(dependents)
-	if enforceFanOut && distinctEdgeEndCount(predecessors, dependents) > maxDependencyFanOut {
+	var related map[string][]string
+	if s.relations != nil {
+		var relationErr error
+		related, relationErr = s.relations.ListRelationsForTasks(ctx, ids)
+		if relationErr != nil {
+			s.logger.Warn("failed to load task relations", zap.Error(relationErr))
+			related = nil
+		}
+	}
+	if enforceFanOut && distinctEdgeEndCount(predecessors, dependents, related) > maxDependencyFanOut {
 		return nil, ErrDependencyFanOutExceeded
 	}
-	refs, err := s.resolveDependencyRefs(ctx, predecessors, dependents)
+	refs, err := s.resolveDependencyRefs(ctx, predecessors, dependents, related)
 	if err != nil {
 		if !isRequestCancellationError(ctx, err) {
 			s.logger.Warn("failed to resolve dependency edge ends", zap.Error(err))
@@ -697,17 +725,18 @@ func (s *Service) buildDependencyViews(
 		return withheldDependencyViews(ids), nil
 	}
 	for _, id := range ids {
-		out[id] = buildDependencyView(refs, predecessors[id], dependents[id], blocksTruncated[id])
+		view := buildDependencyView(refs, predecessors[id], dependents[id], blocksTruncated[id])
+		view.Related = relatedRefs(related[id], refs)
+		out[id] = view
 	}
 	return out, nil
 }
 
-// distinctEdgeEndCount returns the number of distinct task ids named on
-// either side of any edge in the batch, mirroring the union resolveDependencyRefs
-// resolves in one query.
-func distinctEdgeEndCount(predecessors, dependents map[string][]string) int {
+// distinctEdgeEndCount returns the number of distinct task ids named on either
+// side of any displayed edge, mirroring the union resolveDependencyRefs reads.
+func distinctEdgeEndCount(predecessors, dependents, related map[string][]string) int {
 	seen := map[string]struct{}{}
-	for _, group := range []map[string][]string{predecessors, dependents} {
+	for _, group := range []map[string][]string{predecessors, dependents, related} {
 		for _, ids := range group {
 			for _, id := range ids {
 				seen[id] = struct{}{}
@@ -751,10 +780,10 @@ func withheldDependencyViews(ids []string) map[string]DependencyView {
 // batch closed: a derivation step that cannot complete blocks every task in
 // the batch, not just the tasks whose edges could not resolve.
 func (s *Service) resolveDependencyRefs(
-	ctx context.Context, predecessors, dependents map[string][]string,
+	ctx context.Context, predecessors, dependents, related map[string][]string,
 ) (map[string]DependencyRef, error) {
 	seen := map[string]struct{}{}
-	for _, group := range []map[string][]string{predecessors, dependents} {
+	for _, group := range []map[string][]string{predecessors, dependents, related} {
 		for _, ids := range group {
 			for _, id := range ids {
 				seen[id] = struct{}{}
@@ -795,6 +824,27 @@ func (s *Service) resolveDependencyRefs(
 		}
 	}
 	return refs, nil
+}
+
+// relatedRefs resolves non-blocking "related" edge ends to the same
+// id/title/state shape the depends-on and blocks lists use, so the frontend
+// has one consumer contract for every edge kind. A related edge carries no
+// resolution verdict, so Status is always cleared; a dangling edge to a
+// deleted task is dropped rather than rendered as a blank link.
+func relatedRefs(ids []string, refs map[string]DependencyRef) []DependencyRef {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]DependencyRef, 0, len(ids))
+	for _, id := range ids {
+		ref := refs[id]
+		if ref.Status == dependencyMissing {
+			continue
+		}
+		ref.Status = ""
+		out = append(out, ref)
+	}
+	return out
 }
 
 // buildDependencyView derives blocked/reason plus both edge lists for one
@@ -852,17 +902,14 @@ func buildDependencyView(
 //
 // Resolution requires SUCCESS. This is deliberately stricter than the
 // on_children_completed trigger, which counts FAILED as terminal: a chain must
-// never proceed on a failed step. Archived tasks are pending, because archival
-// is neither success nor failure.
+// never proceed on a failed step. Archival does not change the persisted
+// outcome: an archived completed predecessor remains resolved.
 func DependencyStatusForTask(task *models.Task) string {
 	if task == nil {
 		return DependencyPending
 	}
 	switch task.State {
 	case v1.TaskStateCompleted:
-		if task.ArchivedAt != nil {
-			return DependencyPending
-		}
 		return DependencyResolved
 	case v1.TaskStateFailed, v1.TaskStateCancelled:
 		return DependencyFailed
@@ -1028,11 +1075,27 @@ func (s *Service) ListDependentTaskIDs(ctx context.Context, taskID string) ([]st
 // deleteDependencyEdgesForTask removes both directions of every edge touching
 // taskID. task_blockers predates the tasks foreign key, so nothing cascades.
 func (s *Service) deleteDependencyEdgesForTask(ctx context.Context, taskID string) {
+	var related []string
+	if s.relations != nil {
+		var err error
+		related, err = s.relations.ListRelationsForTask(ctx, taskID)
+		if err != nil {
+			s.logger.Warn("failed to list related tasks before edge cleanup",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+		if err := s.relations.RemoveRelationsForTask(ctx, taskID); err != nil {
+			s.logger.Warn("failed to clean up task relations",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+	}
+	refreshIDs := append([]string(nil), related...)
 	if s.blockers == nil {
+		s.publishDependencyChange(ctx, refreshIDs...)
 		return
 	}
 	cleaner, ok := s.blockers.(taskDependencyCleaner)
 	if !ok {
+		s.publishDependencyChange(ctx, refreshIDs...)
 		return
 	}
 	var dependents, blockers []string
@@ -1058,9 +1121,10 @@ func (s *Service) deleteDependencyEdgesForTask(ctx context.Context, taskID strin
 	if cleanupErr != nil {
 		s.logger.Warn("failed to clean up dependency edges for deleted task",
 			zap.String("task_id", taskID), zap.Error(cleanupErr))
-		return
 	}
 	// Dependents may now be unblocked, and blockers may have lost a
 	// dependent. Refresh both surviving sides without auto-starting anything.
-	s.publishDependencyChange(ctx, append(dependents, blockers...)...)
+	refreshIDs = append(refreshIDs, dependents...)
+	refreshIDs = append(refreshIDs, blockers...)
+	s.publishDependencyChange(ctx, refreshIDs...)
 }

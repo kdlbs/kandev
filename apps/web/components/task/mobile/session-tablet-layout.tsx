@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useMemo, useRef, type RefObject } from "react";
 import { Group, Panel } from "react-resizable-panels";
 import { TaskCenterPanel } from "../task-center-panel";
 import { TaskRightPanel } from "../task-right-panel";
@@ -12,6 +12,7 @@ import { useLayoutStore } from "@/lib/state/layout-store";
 import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
 import type { Repository } from "@/lib/types/http";
 import type { Layout } from "react-resizable-panels";
+import type { RenameAdapter } from "@/hooks/file-rename-continuity";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { TaskReviewDialogMount } from "../dockview-review-dialog";
 
@@ -43,6 +44,7 @@ type TabletLeftPanelProps = {
   handleClearSelectedDiff: () => void;
   handleFileOpenHandled: () => void;
   sessionId?: string | null;
+  renameAdapter: RefObject<RenameAdapter | null>;
 };
 
 function TabletLeftPanel({
@@ -55,6 +57,7 @@ function TabletLeftPanel({
   handleClearSelectedDiff,
   handleFileOpenHandled,
   sessionId,
+  renameAdapter,
 }: TabletLeftPanelProps) {
   const centerPanel = (
     <TaskCenterPanel
@@ -63,6 +66,7 @@ function TabletLeftPanel({
       onDiffHandled={handleClearSelectedDiff}
       onFileOpenHandled={handleFileOpenHandled}
       sessionId={sessionId}
+      renameAdapter={renameAdapter}
     />
   );
   if (layoutStatePreview) {
@@ -91,6 +95,7 @@ function TabletLeftPanel({
       onDiffHandled={handleClearSelectedDiff}
       onFileOpenHandled={handleFileOpenHandled}
       sessionId={sessionId}
+      renameAdapter={renameAdapter}
     />
   );
 }
@@ -118,10 +123,13 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
     [layoutBySession, sessionKey],
   );
 
+  const renameAdapter = useRef<RenameAdapter | null>(null);
   const hasDevScript = Boolean(repository?.dev_script?.trim());
   const sessionForPreview = effectiveSessionId;
 
-  const topFilesPanel = <TaskFilesPanel onOpenFile={handleOpenFile} />;
+  const topFilesPanel = (
+    <TaskFilesPanel onOpenFile={handleOpenFile} renameAdapter={renameAdapter} />
+  );
 
   // Tablet layout: two columns (left for chat/plan/changes, right for files+terminal)
   const tabletLayoutKey = "task-layout-tablet-v1";
@@ -165,6 +173,7 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
             handleClearSelectedDiff={handleClearSelectedDiff}
             handleFileOpenHandled={handleFileOpenHandled}
             sessionId={sessionForPreview}
+            renameAdapter={renameAdapter}
           />
         </Panel>
 

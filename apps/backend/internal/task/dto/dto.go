@@ -268,7 +268,8 @@ type TaskDTO struct {
 	DependsOn []TaskDependencyRefDTO `json:"depends_on,omitempty"`
 	// Blocks lists direct dependents so the dependency chip can render both
 	// directions without a second round trip.
-	Blocks []TaskDependencyRefDTO `json:"blocks,omitempty"`
+	Blocks  []TaskDependencyRefDTO `json:"blocks,omitempty"`
+	Related []TaskDependencyRefDTO `json:"related,omitempty"`
 	// StartWhenUnblocked reports that a launch intent is waiting on dependency
 	// resolution. Read-only here; set through the create request or the picker.
 	StartWhenUnblocked bool `json:"start_when_unblocked,omitempty"`
@@ -296,6 +297,9 @@ type TaskDTO struct {
 	// idempotency (docs/specs/tasks/requirements/external-id-idempotency.md). Omitted
 	// when the task holds none.
 	ExternalID string `json:"external_id,omitempty"`
+	// QuickChatCreationID is the exact retry token carried by lifecycle
+	// projections for an internally keyed Quick Chat creation.
+	QuickChatCreationID string `json:"quick_chat_creation_id,omitempty"`
 	// IsFromOffice is the authoritative "this task is owned by office"
 	// flag. Computed by the task repo at read time as
 	// (project_id != '' OR workflow_id == workspace.office_workflow_id).
@@ -413,26 +417,33 @@ type TaskSessionDTO struct {
 	QueueIncarnationID string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
-	Name               string `json:"name"`
-	AgentExecutionID   string `json:"agent_execution_id,omitempty"`
-	ContainerID        string `json:"container_id,omitempty"`
-	AgentProfileID     string `json:"agent_profile_id,omitempty"`
-	ExecutionProfileID string `json:"execution_profile_id,omitempty"`
-	RouteGeneration    int64  `json:"route_generation,omitempty"`
-	RouteState         string `json:"route_state,omitempty"`
-	RouteReason        string `json:"route_reason,omitempty"`
-	ExecutorID         string `json:"executor_id,omitempty"`
-	ExecutorProfileID  string `json:"executor_profile_id,omitempty"`
-	EnvironmentID      string `json:"environment_id,omitempty"`
-	RepositoryID       string `json:"repository_id,omitempty"`
-	BaseBranch         string `json:"base_branch,omitempty"`
-	BaseCommitSHA      string `json:"base_commit_sha,omitempty"`
-	WorktreeID         string `json:"worktree_id,omitempty"`
-	WorktreePath       string `json:"worktree_path,omitempty"`
-	WorktreeBranch     string `json:"worktree_branch,omitempty"`
+	Name             string `json:"name"`
+	AgentExecutionID string `json:"agent_execution_id,omitempty"`
+	ContainerID      string `json:"container_id,omitempty"`
+	// ExecutionRuntime is the observed runtime recorded for the same
+	// executors_running row as AgentExecutionID/ContainerID. Null means
+	// unknown; it is never inferred from the selected executor.
+	ExecutionRuntime   *string `json:"execution_runtime"`
+	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
+	ExecutionProfileID string  `json:"execution_profile_id,omitempty"`
+	RouteGeneration    int64   `json:"route_generation,omitempty"`
+	RouteState         string  `json:"route_state,omitempty"`
+	RouteReason        string  `json:"route_reason,omitempty"`
+	ExecutorID         string  `json:"executor_id,omitempty"`
+	ExecutorProfileID  string  `json:"executor_profile_id,omitempty"`
+	EnvironmentID      string  `json:"environment_id,omitempty"`
+	RepositoryID       string  `json:"repository_id,omitempty"`
+	BaseBranch         string  `json:"base_branch,omitempty"`
+	BaseCommitSHA      string  `json:"base_commit_sha,omitempty"`
+	WorktreeID         string  `json:"worktree_id,omitempty"`
+	WorktreePath       string  `json:"worktree_path,omitempty"`
+	WorktreeBranch     string  `json:"worktree_branch,omitempty"`
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
+	// AgentWorkspacePath is the confirmed native-session working directory used
+	// as the base for repository-relative chat links. Null means unknown.
+	AgentWorkspacePath *string `json:"agent_workspace_path"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for backward
 	// compatibility. Entries use the stable session-worktree wire shape
@@ -471,6 +482,9 @@ type TaskSessionDTO struct {
 	// generation that produced CancellationPending. It is always serialized so
 	// clients can reject delayed snapshots from older generations.
 	CancellationRevision uint64 `json:"cancellation_revision"`
+	// RuntimeStorageHealth mirrors the lifecycle-owned advisory capacity
+	// projection. It is never persisted and stays absent for older sources.
+	RuntimeStorageHealth *RuntimeStorageHealthDTO `json:"runtime_storage_health,omitempty"`
 	// SupportsSteering is true when a send right now would be delivered into the
 	// still-generating turn (mid-turn steering) rather than blocked/queued.
 	// Derived live at serialization from the connected agent's negotiated
@@ -610,26 +624,33 @@ type TaskSessionSummaryDTO struct {
 	QueueIncarnationID string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
-	Name               string `json:"name"`
-	AgentExecutionID   string `json:"agent_execution_id,omitempty"`
-	ContainerID        string `json:"container_id,omitempty"`
-	AgentProfileID     string `json:"agent_profile_id,omitempty"`
-	ExecutionProfileID string `json:"execution_profile_id,omitempty"`
-	RouteGeneration    int64  `json:"route_generation,omitempty"`
-	RouteState         string `json:"route_state,omitempty"`
-	RouteReason        string `json:"route_reason,omitempty"`
-	ExecutorID         string `json:"executor_id,omitempty"`
-	ExecutorProfileID  string `json:"executor_profile_id,omitempty"`
-	EnvironmentID      string `json:"environment_id,omitempty"`
-	RepositoryID       string `json:"repository_id,omitempty"`
-	BaseBranch         string `json:"base_branch,omitempty"`
-	BaseCommitSHA      string `json:"base_commit_sha,omitempty"`
-	WorktreeID         string `json:"worktree_id,omitempty"`
-	WorktreePath       string `json:"worktree_path,omitempty"`
-	WorktreeBranch     string `json:"worktree_branch,omitempty"`
+	Name             string `json:"name"`
+	AgentExecutionID string `json:"agent_execution_id,omitempty"`
+	ContainerID      string `json:"container_id,omitempty"`
+	// ExecutionRuntime is the observed runtime recorded for the same
+	// executors_running row as AgentExecutionID/ContainerID. Null means
+	// unknown; it is never inferred from the selected executor.
+	ExecutionRuntime   *string `json:"execution_runtime"`
+	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
+	ExecutionProfileID string  `json:"execution_profile_id,omitempty"`
+	RouteGeneration    int64   `json:"route_generation,omitempty"`
+	RouteState         string  `json:"route_state,omitempty"`
+	RouteReason        string  `json:"route_reason,omitempty"`
+	ExecutorID         string  `json:"executor_id,omitempty"`
+	ExecutorProfileID  string  `json:"executor_profile_id,omitempty"`
+	EnvironmentID      string  `json:"environment_id,omitempty"`
+	RepositoryID       string  `json:"repository_id,omitempty"`
+	BaseBranch         string  `json:"base_branch,omitempty"`
+	BaseCommitSHA      string  `json:"base_commit_sha,omitempty"`
+	WorktreeID         string  `json:"worktree_id,omitempty"`
+	WorktreePath       string  `json:"worktree_path,omitempty"`
+	WorktreeBranch     string  `json:"worktree_branch,omitempty"`
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
+	// AgentWorkspacePath is the confirmed native-session working directory used
+	// as the base for repository-relative chat links. Null means unknown.
+	AgentWorkspacePath *string `json:"agent_workspace_path"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for backward
 	// compatibility. Entries use the stable session-worktree wire shape.
@@ -653,6 +674,9 @@ type TaskSessionSummaryDTO struct {
 	// CancellationRevision identifies the process-local cancellation transition
 	// generation represented by CancellationPending.
 	CancellationRevision uint64 `json:"cancellation_revision"`
+	// RuntimeStorageHealth mirrors the lifecycle-owned advisory capacity
+	// projection. It is never persisted and stays absent for older sources.
+	RuntimeStorageHealth *RuntimeStorageHealthDTO `json:"runtime_storage_health,omitempty"`
 	// SupportsSteering mirrors TaskSessionDTO.SupportsSteering for list endpoints.
 	SupportsSteering bool `json:"supports_steering,omitempty"`
 	// PendingAction is the compact per-session projection used when the
@@ -1210,8 +1234,27 @@ func FromTaskWithSessionInfo(
 		Labels:                 task.Labels,
 		Identifier:             task.Identifier,
 		ExternalID:             task.ExternalID,
+		QuickChatCreationID:    service.QuickChatCreationIDFromExternalID(task.ExternalID),
 		IsFromOffice:           task.IsFromOffice,
 	}
+}
+
+// agentWorkspacePathPtr projects an empty native-workspace projection as an
+// explicit null so a full response can clear a stale client value.
+func agentWorkspacePathPtr(path string) *string {
+	if path == "" {
+		return nil
+	}
+	return &path
+}
+
+// observedExecutionRuntimePtr projects an unknown observed runtime as an
+// explicit null. It is never derived from the selected executor.
+func observedExecutionRuntimePtr(runtime string) *string {
+	if runtime == "" {
+		return nil
+	}
+	return &runtime
 }
 
 // FromTaskSessionSummary converts a session model to a summary DTO (no snapshot fields).
@@ -1223,6 +1266,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		Name:               session.Name,
 		AgentExecutionID:   session.AgentExecutionID,
 		ContainerID:        session.ContainerID,
+		ExecutionRuntime:   observedExecutionRuntimePtr(session.ExecutionRuntime),
 		AgentProfileID:     session.AgentProfileID,
 		ExecutionProfileID: session.ExecutionProfileID,
 		RouteGeneration:    session.RouteGeneration,
@@ -1235,6 +1279,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		BaseBranch:         session.BaseBranch,
 		BaseCommitSHA:      session.BaseCommitSHA,
 		WorkspacePath:      session.WorkspacePath,
+		AgentWorkspacePath: agentWorkspacePathPtr(session.AgentWorkspacePath),
 		State:              session.State,
 		ErrorMessage:       session.ErrorMessage,
 		Metadata:           session.Metadata,
@@ -1270,6 +1315,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		Name:                 session.Name,
 		AgentExecutionID:     session.AgentExecutionID,
 		ContainerID:          session.ContainerID,
+		ExecutionRuntime:     observedExecutionRuntimePtr(session.ExecutionRuntime),
 		AgentProfileID:       session.AgentProfileID,
 		ExecutionProfileID:   session.ExecutionProfileID,
 		RouteGeneration:      session.RouteGeneration,
@@ -1282,6 +1328,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		BaseBranch:           session.BaseBranch,
 		BaseCommitSHA:        session.BaseCommitSHA,
 		WorkspacePath:        session.WorkspacePath,
+		AgentWorkspacePath:   agentWorkspacePathPtr(session.AgentWorkspacePath),
 		State:                session.State,
 		ErrorMessage:         session.ErrorMessage,
 		Metadata:             session.Metadata,

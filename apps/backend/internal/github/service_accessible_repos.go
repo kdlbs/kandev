@@ -88,12 +88,17 @@ func (s *Service) ListAccessibleReposForWorkspace(
 	for _, repo := range repos {
 		if repositoryInWorkspaceScope(settings, repo.Owner, repo.Name) &&
 			repositorySetContains(automationVisible, repo.Owner, repo.Name) {
+			repo.GitHubHost = resolved.host().String()
+			repo.HTMLURL = resolved.host().WebURL() + "/" + repo.Owner + "/" + repo.Name
 			filtered = append(filtered, repo)
 		}
 	}
 	limit = clampAccessibleReposLimit(limit)
 	if len(filtered) > limit {
 		filtered = filtered[:limit]
+	}
+	if err := s.requireCurrentHost(ctx, workspaceID, resolved); err != nil {
+		return nil, err
 	}
 	return filtered, nil
 }

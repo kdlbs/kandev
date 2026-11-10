@@ -72,6 +72,7 @@ func (s *Service) retireTransientRetryNoticeLocked(sessionID string, state *tran
 	// Callers hold state.mu. Keep this order, state.mu -> statesMu, everywhere
 	// that touches the lifecycle map so a waiter cannot observe a replacement
 	// state while another caller still owns this state's mutex.
+	state.retirementGeneration++
 	state.retired.Store(true)
 	ttl := s.transientRetryNoticeFenceDuration()
 	state.retiredUntil.Store(time.Now().Add(ttl).UnixNano())

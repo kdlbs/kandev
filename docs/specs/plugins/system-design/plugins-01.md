@@ -90,7 +90,7 @@ surfaces. The core stays small; the ecosystem grows independently.
   revocable generic frontend contracts. A provider plugin can participate in native
   task creation, Link menus, desktop/mobile review surfaces, and composer `#` search
   without a host-specific provider branch.
-- The independently consumable, runtime-free `@kandev/plugin-sdk` package is the
+- The independently consumable, runtime-free `@kdlbs/plugin-sdk` package is the
   frontend author contract. Official plugins use its typed `host.context` reads and
   named UI/provider contracts instead of importing or copying private Kandev store,
   React, Zustand, or `@/` application types.

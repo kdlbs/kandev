@@ -1,5 +1,10 @@
 ---
-spec: docs/specs/integrations/requirements/azure-devops-integration.md
+requirements:
+  - REQ-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001
+system_design:
+  - ../../specs/integrations/system-design/azure-devops-integration-01.md
+  - ../../specs/integrations/system-design/azure-devops-integration-02.md
+legacy_specs: []
 created: 2026-07-17
 updated: 2026-07-31
 status: building

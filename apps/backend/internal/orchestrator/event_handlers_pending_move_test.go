@@ -393,7 +393,7 @@ func buildPendingMoveScenarioWithQueue(t *testing.T, useSQLiteQueue bool) *pendi
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
 	messageQueueService := newAuthoritativeMemoryQueue(repo, log)
 	if useSQLiteQueue {
@@ -891,7 +891,7 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 
 			agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 			log := testLogger()
-			exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+			exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 			svc := &Service{
 				logger:             log,
 				repo:               repo,
@@ -1031,7 +1031,7 @@ func TestHandleAgentBootReady_DrainsOrphanedQueuedMessage(t *testing.T) {
 				// Wire a real executor so the executeQueuedMessage goroutine
 				// spawned by drainQueuedMessageForPromptableSession can safely call
 				// PromptTask -> executor.GetExecutionBySession without nil-derefing.
-				executor: executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
+				executor: withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})),
 			}
 
 			// Seed an orphaned workflow auto-start prompt — what the production
@@ -1202,7 +1202,7 @@ func TestHandleAgentBootReady_DoesNotDrainWhileCancelInFlight(t *testing.T) {
 		taskRepo:     newMockTaskRepo(),
 		agentManager: agentMgr,
 		messageQueue: messagequeue.NewServiceMemory(log),
-		executor:     executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
+		executor:     withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})),
 	}
 
 	if _, err := svc.messageQueue.QueueMessage(

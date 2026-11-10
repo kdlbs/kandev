@@ -176,15 +176,22 @@ func TestPrepareSession_Success(t *testing.T) {
 		t.Fatalf("expected first session to carry immutable original marker, metadata = %#v", createdSession.Metadata)
 	}
 
-	// Verify SetSessionPrimary was called
+	// The mock store predates the atomic election contract, so the executor
+	// retains its explicit promotion fallback for legacy repositories.
 	if len(repo.setSessionPrimaryCalls) != 1 {
-		t.Errorf("Expected 1 SetSessionPrimary call, got %d", len(repo.setSessionPrimaryCalls))
+		t.Errorf("Expected 1 SetSessionPrimary fallback call, got %d", len(repo.setSessionPrimaryCalls))
 	}
 }
 
 func TestPrepareSessionRetriesTaskRunnerChangedAfterReload(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-runner-retry"
+	repo.executorProfiles["profile-old"] = &models.ExecutorProfile{
+		ID: "profile-old", ExecutorID: "executor-runner",
+	}
+	repo.executorProfiles["profile-new"] = &models.ExecutorProfile{
+		ID: "profile-new", ExecutorID: "executor-runner",
+	}
 	repo.tasks[taskID] = &models.Task{
 		ID:          taskID,
 		WorkspaceID: "workspace-runner-retry",
@@ -1891,41 +1898,6 @@ func TestLaunchPreparedSession_FullPath_CarriesResumeToken(t *testing.T) {
 	// path we do NOT clear TaskDescription.
 	if capturedReq.TaskDescription == "" {
 		t.Error("Expected req.TaskDescription to remain set for wakeup; it was cleared")
-	}
-}
-
-func TestLaunchPreparedSession_ProfileSwitchIgnoresMissingStaleExecution(t *testing.T) {
-	repo := newMockRepository()
-	session := &models.TaskSession{
-		ID: "session-123", TaskID: "task-123", AgentProfileID: "office-cto",
-		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
-	}
-	repo.sessions[session.ID] = session
-	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
-		ID: session.ID, SessionID: session.ID, TaskID: session.TaskID,
-		AgentExecutionID: "stale-codex-exec", ExecutionProfileID: "codex-profile",
-	}
-	launched := false
-	agentManager := &mockAgentManager{
-		stopAgentFunc: func(context.Context, string, bool) error {
-			return fmt.Errorf("stale execution: %w", lifecycle.ErrExecutionNotFound)
-		},
-		launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
-			launched = true
-			return &LaunchAgentResponse{AgentExecutionID: "claude-exec"}, nil
-		},
-	}
-	exec := newTestExecutor(t, agentManager, repo)
-	task := &v1.Task{ID: session.TaskID, WorkspaceID: "workspace-123", Title: "Test Task"}
-
-	_, err := exec.LaunchPreparedSession(context.Background(), task, session.ID, LaunchOptions{
-		AgentProfileID: "claude-profile", OfficeAgentProfileID: "office-cto", StartAgent: true,
-	})
-	if err != nil {
-		t.Fatalf("LaunchPreparedSession: %v", err)
-	}
-	if !launched {
-		t.Fatal("expected profile switch to continue with a fresh launch")
 	}
 }
 

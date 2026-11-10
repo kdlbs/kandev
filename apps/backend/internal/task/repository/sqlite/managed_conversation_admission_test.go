@@ -7,7 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"github.com/stretchr/testify/require"
 )
 

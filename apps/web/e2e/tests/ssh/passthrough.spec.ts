@@ -37,7 +37,7 @@ test("remote passthrough accepts input and keeps its PID after reconnect", async
 
 const interruptionTest =
   "remote passthrough survives backend interruption without another initial prompt";
-let interruptionLog: string | undefined;
+let interruptionLog: ((byteLimit: number) => string) | undefined;
 
 test.beforeEach(() => {
   interruptionLog = undefined;
@@ -54,14 +54,25 @@ test(interruptionTest, async ({ testPage, apiClient, seedData, backend }) => {
   const taskDirectory = path.basename(state.workspace);
   const sessionID = state.task.session_id;
   if (/^task-[a-f0-9-]{36}$/.test(taskDirectory) && /^[a-f0-9-]{36}$/.test(sessionID ?? "")) {
-    interruptionLog = path.join(
-      seedData.sshTarget.workDir,
-      "remote-home/tasks",
-      taskDirectory,
+    const remoteLog = path.posix.join(
+      state.workspace,
       ".kandev/sessions",
       sessionID!,
       "agentctl.log",
     );
+    interruptionLog = (byteLimit) =>
+      execInContainer(
+        seedData.sshTarget,
+        [
+          "sh",
+          "-c",
+          'test ! -L "$1" && test -f "$1" && tail -c "$2" -- "$1"',
+          "_",
+          remoteLog,
+          String(Math.min(byteLimit, 512 * 1024)),
+        ],
+        5_000,
+      );
   }
   const backendPID = backend.pid();
   expect(backendPID).toBeTruthy();

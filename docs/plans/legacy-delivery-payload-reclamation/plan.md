@@ -135,6 +135,11 @@ that engine passed. No broad local verify or additional review gate is introduce
 - [x] [Task 01: Separate canonical raw-body proof](task-01-canonical-payload-proof.md)
 - [x] [Task 02: Resume fair historical scanning](task-02-historical-sweep-progress.md)
 - [ ] [Task 03: Verify and repair the local database](task-03-local-database-repair.md)
+- [x] [Task 04: Preserve legacy v1 event serialization](task-04-legacy-v1-serialization.md)
+
+Task 04 is a narrow compatibility follow-up for existing v1 receipt identity.
+It does not reopen completed Tasks 01-02 or claim that Task 03's database repair
+has run. It changes no retention predicate, recipe, validator or stored record.
 
 ## Local evidence and safety checkpoint
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -67,8 +68,12 @@ func TestRestartForConfigChangeStatusWriteFailureStillInvalidates(t *testing.T) 
 	const id = "kandev-plugin-slack"
 	installTestPlugin(t, svc, id)
 	rt.setStartErr(id, errors.New("restart handshake failed"))
-	failing := &failingSaveStore{Store: fsStore}
-	failing.armFailNextSave()
+	failing := &failMatchingSaveStore{
+		Store:   fsStore,
+		match:   func(record *store.Record) bool { return record.Status == store.StatusError },
+		failErr: errors.New("simulated status save failure"),
+	}
+	failing.arm()
 	svc.store = failing
 	deliverer := &fakeDeliverer{}
 	svc.SetDeliverer(deliverer)

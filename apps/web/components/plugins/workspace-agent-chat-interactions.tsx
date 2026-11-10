@@ -10,7 +10,7 @@ import { Textarea } from "@kandev/ui/textarea";
 import type {
   PluginManagedConversationClarificationAnswer,
   PluginManagedConversationInteraction,
-} from "@kandev/plugin-sdk";
+} from "@kdlbs/plugin-sdk";
 
 export type ClarificationAnswer = PluginManagedConversationClarificationAnswer;
 

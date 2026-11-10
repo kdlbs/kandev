@@ -37,3 +37,53 @@ export function compareDependencyCandidates(
   }
   return a.title.localeCompare(b.title);
 }
+
+type RankedCandidate = Pick<Task, "id" | "title" | "updatedAt" | "createdAt"> &
+  Partial<Pick<Task, "workflowStepId">>;
+
+export type CreateDialogCandidateRanking = {
+  contextStepId?: string;
+  recentTaskIds?: ReadonlySet<string>;
+  searchText?: string;
+  titleMatchFirst?: boolean;
+};
+
+function compareCandidateContext(
+  a: RankedCandidate,
+  b: RankedCandidate,
+  ranking: CreateDialogCandidateRanking,
+): number {
+  const aInContext = Boolean(ranking.contextStepId && a.workflowStepId === ranking.contextStepId);
+  const bInContext = Boolean(ranking.contextStepId && b.workflowStepId === ranking.contextStepId);
+  if (aInContext !== bInContext) return aInContext ? -1 : 1;
+  const aRecent = ranking.recentTaskIds?.has(a.id) ?? false;
+  const bRecent = ranking.recentTaskIds?.has(b.id) ?? false;
+  if (aRecent === bRecent) return 0;
+  return aRecent ? -1 : 1;
+}
+
+function compareCandidateTitleMatch(
+  a: RankedCandidate,
+  b: RankedCandidate,
+  ranking: CreateDialogCandidateRanking,
+): number {
+  const search = ranking.searchText?.trim().toLocaleLowerCase();
+  if (!ranking.titleMatchFirst || !search) return 0;
+  const aMatch = a.title.toLocaleLowerCase().includes(search);
+  const bMatch = b.title.toLocaleLowerCase().includes(search);
+  if (aMatch === bMatch) return 0;
+  return aMatch ? -1 : 1;
+}
+
+/** Adds create-dialog context signals before the existing dependency ordering. */
+export function rankCreateDialogCandidates(
+  a: RankedCandidate,
+  b: RankedCandidate,
+  ranking: CreateDialogCandidateRanking = {},
+): number {
+  return (
+    compareCandidateContext(a, b, ranking) ||
+    compareCandidateTitleMatch(a, b, ranking) ||
+    compareDependencyCandidates(a, b)
+  );
+}

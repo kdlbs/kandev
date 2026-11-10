@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconPlug } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -23,8 +23,12 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { TaskGitCredentialsState } from "@/hooks/domains/github/use-task-git-credentials";
 import type { GitHubStatus } from "@/lib/types/github";
 import type { GitHubAutomationMethod } from "./github-auth-method-list";
-import { GitHubConnectionSettingsForm } from "./github-connection-settings-form";
+import {
+  GitHubConnectionSettingsForm,
+  useConnectionSettingsDraft,
+} from "./github-connection-settings-form";
 import { useTranslation } from "react-i18next";
+import { GitHubConnectionDraftContext } from "./github-connection-draft";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 function methodForStatus(status: GitHubStatus): GitHubAutomationMethod {
@@ -51,10 +55,6 @@ export function GitHubConnectionDialog({
   const connected = Boolean(status.automation);
 
   useEffect(() => {
-    setMethod(methodForStatus(status));
-  }, [status]);
-
-  useEffect(() => {
     setOpen(false);
   }, [workspaceId]);
 
@@ -74,18 +74,23 @@ export function GitHubConnectionDialog({
       {connected ? t("github:changeConnection") : t("github:connectGithub")}
     </Button>
   );
+  const formProps = {
+    status,
+    method,
+    workspaceId,
+    open,
+    onMethodChange: setMethod,
+    onSaved,
+    onComplete: () => setOpen(false),
+    taskAccess,
+    isMobile,
+  };
+  const draft = useConnectionSettingsDraft(formProps);
+  const appDraft = useMemo(() => new Map<string, unknown>(), [workspaceId, draft.host, open]);
   const body = (
-    <GitHubConnectionSettingsForm
-      status={status}
-      method={method}
-      workspaceId={workspaceId}
-      open={open}
-      onMethodChange={setMethod}
-      onSaved={onSaved}
-      onComplete={() => setOpen(false)}
-      taskAccess={taskAccess}
-      isMobile={isMobile}
-    />
+    <GitHubConnectionDraftContext.Provider value={appDraft}>
+      <GitHubConnectionSettingsForm {...formProps} draft={draft} />
+    </GitHubConnectionDraftContext.Provider>
   );
 
   if (isMobile) {

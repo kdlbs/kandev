@@ -13,6 +13,8 @@ import { waitForSessionDone } from "../../helpers/session";
 import { readTranscriptScrollState, setTranscriptScrollTop } from "../../helpers/transcript-scroll";
 import { SessionPage } from "../../pages/session-page";
 
+test.use({ trace: "retain-on-failure" });
+
 async function taskLaunchError(apiClient: ApiClient, workspaceId: string, taskId: string) {
   const { tasks } = await apiClient.listTasks(workspaceId);
   const summary = tasks.find((candidate) => candidate.id === taskId)?.status_summary;

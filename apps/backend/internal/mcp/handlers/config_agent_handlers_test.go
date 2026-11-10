@@ -279,3 +279,42 @@ func TestPublishAgentProfileEvent_IncludesInferenceCapability(t *testing.T) {
 		t.Fatalf("no agent_profile.created event was published")
 	}
 }
+
+func TestHandleAgentProfileCopilotPluginSelection(t *testing.T) {
+	h, repo, _ := newAgentSettingsHandlers(t)
+	ctx := context.Background()
+	agent := &settingsmodels.Agent{Name: "copilot-acp"}
+	require.NoError(t, repo.CreateAgent(ctx, agent))
+
+	create := makeWSMessage(t, ws.ActionMCPCreateAgentProfile, map[string]interface{}{
+		"agent_id": agent.ID,
+		"name":     "Copilot plugins",
+		"settings": map[string]interface{}{
+			"copilot_selected_plugins": []string{"live:fixture-market/harness"},
+		},
+	})
+	resp, err := h.handleCreateAgentProfile(ctx, create)
+	require.NoError(t, err)
+	created := decodeAgentProfileResponse(t, resp)
+	require.Equal(t, []string{"live:fixture-market/harness"}, created.CopilotSelectedPlugins)
+
+	omitted := makeWSMessage(t, ws.ActionMCPUpdateAgentProfile, map[string]interface{}{
+		"profile_id": created.ID,
+		"name":       "Renamed",
+	})
+	_, err = h.handleUpdateAgentProfile(ctx, omitted)
+	require.NoError(t, err)
+	stored, err := repo.GetAgentProfile(ctx, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"live:fixture-market/harness"}, stored.CopilotSelectedPlugins)
+
+	clear := makeWSMessage(t, ws.ActionMCPUpdateAgentProfile, map[string]interface{}{
+		"profile_id":               created.ID,
+		"copilot_selected_plugins": []string{},
+	})
+	_, err = h.handleUpdateAgentProfile(ctx, clear)
+	require.NoError(t, err)
+	stored, err = repo.GetAgentProfile(ctx, created.ID)
+	require.NoError(t, err)
+	require.Empty(t, stored.CopilotSelectedPlugins)
+}

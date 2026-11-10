@@ -1,10 +1,13 @@
 import path from "node:path";
 import { expect, test } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import { openTaskSession, waitForAgentMessage } from "../../helpers/session";
 import {
   readIdleSuspensionSnapshot,
   readIdleSuspensionState,
+  readSessionContentMessageCount,
   updateWorkspaceIdlePolicy,
+  watchSessionFocusLaunches,
 } from "../../helpers/idle-parking";
 
 test.describe("workspace ACP idle suspension", () => {
@@ -16,44 +19,6 @@ test.describe("workspace ACP idle suspension", () => {
   }) => {
     test.setTimeout(240_000);
     const databasePath = path.join(backend.tmpDir, "kandev.db");
-    let targetSessionId = "";
-    const focusLaunchRequestIds = new Set<string>();
-    const focusLaunchResponses: Array<{ id: string; payload: unknown }> = [];
-    testPage.on("websocket", (socket) => {
-      socket.on("framesent", (frame) => {
-        try {
-          const message = JSON.parse(String(frame.payload)) as {
-            id?: string;
-            action?: string;
-            payload?: { session_id?: string; activation_source?: string };
-          };
-          if (
-            message.action === "session.launch" &&
-            message.payload?.session_id === targetSessionId &&
-            message.payload.activation_source === "session_focus" &&
-            message.id
-          ) {
-            focusLaunchRequestIds.add(message.id);
-          }
-        } catch {
-          // Ignore unrelated websocket frames.
-        }
-      });
-      socket.on("framereceived", (frame) => {
-        try {
-          const message = JSON.parse(String(frame.payload)) as {
-            id?: string;
-            type?: string;
-            payload?: unknown;
-          };
-          if (message.type === "response" && message.id && focusLaunchRequestIds.has(message.id)) {
-            focusLaunchResponses.push({ id: message.id, payload: message.payload });
-          }
-        } catch {
-          // Ignore unrelated websocket frames.
-        }
-      });
-    });
     try {
       await testPage.goto(`/settings/workspaces/${seedData.workspaceId}`);
       const policySwitch = testPage.getByTestId("workspace-idle-suspension-switch");
@@ -89,7 +54,6 @@ test.describe("workspace ACP idle suspension", () => {
       );
       if (!task.session_id) throw new Error("task creation did not return a session_id");
       const sessionId = task.session_id;
-      targetSessionId = sessionId;
       await waitForAgentMessage(
         apiClient,
         sessionId,
@@ -103,15 +67,16 @@ test.describe("workspace ACP idle suspension", () => {
         })
         .toContain('"idleSuspensionState":"suspended"');
 
+      const focusLaunches = watchSessionFocusLaunches(testPage, sessionId);
       await testPage.goto("/");
       const focusedSession = await openTaskSession(testPage, task.id);
-      await expect.poll(() => focusLaunchResponses.length, { timeout: 10_000 }).toBe(1);
+      await expect.poll(() => focusLaunches.responses.length, { timeout: 10_000 }).toBe(1);
       await expect
         .poll(
           () => ({
             state: readIdleSuspensionState(databasePath, sessionId),
-            focusLaunchRequestCount: focusLaunchRequestIds.size,
-            focusLaunchResponses,
+            focusLaunchRequestCount: focusLaunches.requestIds.size,
+            focusLaunchResponses: focusLaunches.responses,
           }),
           {
             timeout: 30_000,
@@ -130,6 +95,84 @@ test.describe("workspace ACP idle suspension", () => {
         })
         .toBe("suspended");
     } finally {
+      await updateWorkspaceIdlePolicy(backend.baseUrl, seedData.workspaceId, false, 120);
+    }
+  });
+
+  test("prevent auto-start keeps an idle-suspended task stopped on open and a message resumes it", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(240_000);
+    const databasePath = path.join(backend.tmpDir, "kandev.db");
+    try {
+      await updateWorkspaceIdlePolicy(backend.baseUrl, seedData.workspaceId, true, 1);
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
+
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        `Idle parking prevent auto-start ${Date.now()}`,
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      if (!task.session_id) throw new Error("task creation did not return a session_id");
+      const sessionId = task.session_id;
+      const focusLaunches = watchSessionFocusLaunches(testPage, sessionId);
+
+      await waitForAgentMessage(
+        apiClient,
+        sessionId,
+        "This is a simple mock response for e2e testing.",
+      );
+      const priorAgentMessages = readSessionContentMessageCount(databasePath, sessionId, "agent");
+      await expect
+        .poll(() => JSON.stringify(readIdleSuspensionSnapshot(databasePath, sessionId)), {
+          timeout: 180_000,
+          intervals: [500, 1_000],
+          message: "workspace policy suspends a settled mock ACP session",
+        })
+        .toContain('"idleSuspensionState":"suspended"');
+
+      const session = await openTaskSession(testPage, task.id);
+
+      // The hint is the causal anchor for the open-time status hydration; the
+      // dwell proves the skipped resume is not merely late.
+      await expect(testPage.getByTestId("composer-agent-start-hint")).toBeVisible({
+        timeout: 30_000,
+      });
+      await dwell(
+        testPage,
+        1_500,
+        "negative-assertion",
+        "opening an idle-suspended task with prevent-auto-start on must not send a session_focus resume",
+      );
+      expect(focusLaunches.requestIds.size).toBe(0);
+      expect(readIdleSuspensionState(databasePath, sessionId)).toBe("suspended");
+      expect(readSessionContentMessageCount(databasePath, sessionId, "agent")).toBe(
+        priorAgentMessages,
+      );
+
+      await session.sendMessage("/e2e:simple-message");
+      await expect
+        .poll(() => readIdleSuspensionState(databasePath, sessionId), {
+          timeout: 30_000,
+          message: "an accepted message resumes its idle-suspended session",
+        })
+        .toBe("");
+      await expect
+        .poll(() => readSessionContentMessageCount(databasePath, sessionId, "agent"), {
+          timeout: 30_000,
+        })
+        .toBe(priorAgentMessages + 1);
+    } finally {
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
       await updateWorkspaceIdlePolicy(backend.baseUrl, seedData.workspaceId, false, 120);
     }
   });

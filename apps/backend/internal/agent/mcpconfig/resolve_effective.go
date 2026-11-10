@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -107,9 +108,15 @@ func (r *Resolver) Resolve(ctx context.Context, resolutionContext ResolutionCont
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	result := &EffectiveMCPResolution{Setup: setupFromDefinitions(inputs.Definitions), DesiredRevision: inputs.DesiredRevision}
+	result := &EffectiveMCPResolution{Setup: setupFromInputs(inputs), DesiredRevision: inputs.DesiredRevision}
 	names := make(map[string]string, len(ids))
 	for _, id := range ids {
+		if slices.Contains(inputs.ExcludedDefinitionIDs, id) {
+			if definition := inputs.Definitions[id]; definition != nil {
+				result.Decisions = append(result.Decisions, definitionDecision(definition, "session_excluded", "MCP definition is excluded from this session", origins[id]))
+			}
+			continue
+		}
 		resolved, decision, err := r.resolveDefinition(ctx, resolutionContext, policy, id, origins[id], legacyServers, names, inputs.Definitions[id])
 		if err != nil {
 			return nil, err

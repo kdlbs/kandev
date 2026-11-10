@@ -153,6 +153,12 @@ required screenshot embedding in step 7 is complete.
    - For disposable capture specs, prefer the existing `prCapture` fixture from
      `apps/web/e2e/fixtures/test-base.ts`; it writes the expected filenames and
      manifest for PR assets.
+   - Keep captures for one spec file in a single test and use that test's one
+     shared `prCapture` instance. Each test fixture flushes, and
+     `PrAssetCapture.flush()` replaces manifest entries with the same capture
+     key, so multiple tests or default-key instances leave only the last
+     flush's assets. If multiple instances are necessary, give them distinct
+     `captureKey` values or use separate spec files.
    - `apps/web/e2e/scripts/run-e2e.sh` clears `.pr-assets` at the start of each
      managed-runner invocation. Capture desktop and mobile assets in one
      invocation when possible; if separate runs are necessary, preserve/merge
@@ -202,8 +208,12 @@ required screenshot embedding in step 7 is complete.
    target hostname from `git remote get-url origin` before capture. For a
    custom GitHub hostname, establish its deployment type and attachment support
    first; GitHub Enterprise Server is unsupported. If support cannot be
-   established, report the host blocker. Report missing CLI or authentication
-   prerequisites before publication. See [GitHub's attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
+   established, report the host blocker. If installed `gh` is older than
+   2.99.0, download a current official release to a temporary directory, verify
+   its published checksum, and use that binary for the attachment upload
+   without replacing the system install. Report a blocker only if a verified
+   binary cannot perform the upload. Report missing authentication prerequisites
+   before publication. See [GitHub's attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
    and [the release announcement](https://github.blog/changelog/2026-09-01-github-cli-media-in-issues-pull-requests-and-comments/).
 
    Keep assets in ignored `apps/web/.pr-assets`; do not commit them or create

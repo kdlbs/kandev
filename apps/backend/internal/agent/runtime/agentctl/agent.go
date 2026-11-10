@@ -13,7 +13,9 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/startupdiag"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -139,7 +141,25 @@ func managedStartupEvidenceFromDetails(details map[string]any) *types.ManagedSta
 	if err := json.Unmarshal(data, &evidence); err != nil || evidence.ProcessGeneration == 0 {
 		return nil
 	}
+	normalizeManagedStartupEvidence(&evidence)
 	return &evidence
+}
+
+func normalizeManagedStartupEvidence(evidence *types.ManagedStartupEvidence) {
+	if evidence == nil {
+		return
+	}
+	switch evidence.ExitDisposition {
+	case types.ManagedStartupExitOrdinary,
+		types.ManagedStartupExitIntentional,
+		types.ManagedStartupExitSignal,
+		types.ManagedStartupExitUnknown:
+	default:
+		evidence.ExitDisposition = types.ManagedStartupExitUnknown
+	}
+	if evidence.DiagnosticReason != startupdiag.ReasonMiseConfigUntrusted || !evidence.DiagnosticComplete {
+		evidence.DiagnosticReason = ""
+	}
 }
 
 // NewSessionResponse from agentctl
@@ -575,6 +595,9 @@ func (c *Client) prompt(
 		if err := resp.ParsePayload(&errPayload); err != nil {
 			return fmt.Errorf("prompt failed: unable to parse error")
 		}
+		if storageErr := promptStorageError(errPayload); storageErr != nil {
+			return storageErr
+		}
 		return fmt.Errorf("prompt failed: %s", errPayload.Message)
 	}
 
@@ -616,14 +639,28 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 // StreamUpdatesFrom opens the updates stream after a committed delivery
 // sequence. A zero cursor preserves the original first-connect behavior.
 func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error), after uint64) error {
+	return c.StreamUpdatesFromWithOwner(ctx, handler, mcpHandler, onDisconnect, after, nil)
+}
+
+// StreamUpdatesFromWithOwner opens an update stream and reports its accepted
+// connection owner before the stream starts dispatching agent events.
+func (c *Client) StreamUpdatesFromWithOwner(
+	ctx context.Context,
+	handler func(AgentEvent),
+	mcpHandler MCPHandler,
+	onDisconnect func(err error),
+	after uint64,
+	onConnected func(ownerID uint64),
+) error {
 	attempt, streamCtx, err := c.beginUpdatesStreamDial(ctx)
 	if err != nil {
 		return err
 	}
 	const wsRoute = "/api/v1/agent/stream"
-	route := wsRoute
+	// Retained sidecars may predate stage metadata; they ignore this query.
+	route := wsRoute + "?stage=1"
 	if after > 0 {
-		route += "?after=" + strconv.FormatUint(after, 10)
+		route += "&after=" + strconv.FormatUint(after, 10)
 	}
 
 	conn, _, err := c.dialWebSocketWithConn(attempt.ctx, route, c.wsAuthHeaders(), func(conn net.Conn) error {
@@ -640,6 +677,16 @@ func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent)
 	}
 
 	c.logger.Info("connected to updates stream", zap.String("path", wsRoute))
+	stage := newUpdateStreamStage(attempt.ownerID)
+	stage.connected.Store(true)
+	c.mu.Lock()
+	if c.agentStreamConn == conn {
+		c.updateStage.Store(stage)
+	}
+	c.mu.Unlock()
+	if onConnected != nil {
+		onConnected(attempt.ownerID)
+	}
 
 	// writeMessage uses the shared stream write mutex for thread-safe writes
 	writeMessage := func(data []byte) error {
@@ -650,7 +697,7 @@ func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent)
 
 	go func() {
 		defer cancel()
-		c.readUpdatesStream(streamCtx, conn, handler, mcpHandler, onDisconnect, writeMessage)
+		c.readUpdatesStream(streamCtx, conn, handler, mcpHandler, onDisconnect, writeMessage, stage)
 	}()
 
 	return nil
@@ -694,15 +741,17 @@ func (c *Client) readUpdatesStream(
 	mcpHandler MCPHandler,
 	onDisconnect func(err error),
 	writeMessage func([]byte) error,
+	stage *updateStreamStage,
 ) {
 	// Ordered, single-worker dispatch preserves per-stream event ordering while
 	// decoupling handler execution from response-frame delivery.
 	events := newAgentEventQueue()
 	workerDone := make(chan struct{})
-	go c.dispatchAgentEvents(handler, events, workerDone)
+	go c.dispatchAgentEvents(handler, events, workerDone, stage)
 
 	var lastErr error
 	defer func() {
+		stage.connected.Store(false)
 		// Clean up this connection's pending requests BEFORE draining the worker. On a
 		// connection drop mid-cancel, a worker handler
 		// (orchestrator.handleAgentReady) can block acquiring the per-session
@@ -763,6 +812,9 @@ func (c *Client) readUpdatesStream(
 		// Try to parse as ws.Message to check message type
 		var wsMsg ws.Message
 		if err := json.Unmarshal(message, &wsMsg); err == nil {
+			if c.consumeUpdateStreamMetadata(stage, wsMsg) {
+				continue
+			}
 			// Check if this is a response/error to a pending request
 			if (wsMsg.Type == ws.MessageTypeResponse || wsMsg.Type == ws.MessageTypeError) && c.resolvePendingRequest(&wsMsg) {
 				continue
@@ -801,6 +853,7 @@ func (c *Client) readUpdatesStream(
 		}
 
 		tracing.TraceAgentEvent(ctx, event.Type, event.SessionID, c.executionID, message)
+		stage.recordRead()
 		// Hand off to the ordered worker rather than running handler inline.
 		// A full bounded queue closes the stream so retained events can be
 		// replayed instead of growing process memory without limit.
@@ -815,7 +868,7 @@ func (c *Client) readUpdatesStream(
 // pushed onto the queue, preserving arrival order. It is the single consumer of
 // the queue; readUpdatesStream closes the queue on teardown and waits on
 // workerDone so an in-flight handler finishes before disconnect is signaled.
-func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEventQueue, done chan<- struct{}) {
+func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEventQueue, done chan<- struct{}, stage *updateStreamStage) {
 	defer close(done)
 	for {
 		event, ok := events.dequeue()
@@ -823,6 +876,7 @@ func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEven
 			return
 		}
 		handler(event)
+		stage.recordHandled()
 	}
 }
 
@@ -842,7 +896,7 @@ type agentEventQueue struct {
 }
 
 const maxAgentEventQueueItems = 4096
-const maxAgentEventQueueBytes = 4 << 20
+const maxAgentEventQueueBytes = int(deliverylimits.BackendDispatchQueueBytes)
 
 // ErrAgentEventQueueFull indicates that the bounded reader-side event queue
 // could not accept another event. Durable callers reconnect from their

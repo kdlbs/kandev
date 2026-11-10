@@ -38,6 +38,7 @@ func (s *Service) CreateReviewWatchForUser(
 	if strings.TrimSpace(resolved.Principal.Login) == "" {
 		return nil, ErrGitHubPersonalRequired
 	}
+	ctx = withGitHubOperationFence(ctx, s, req.WorkspaceID, resolved)
 	return s.createReviewWatch(ctx, req, resolved.Principal.Login)
 }
 
@@ -50,6 +51,11 @@ func (s *Service) createReviewWatch(
 	if err := s.authorizeWorkspaceAccess(ctx, req.WorkspaceID); err != nil {
 		return nil, err
 	}
+	ctx, host, unlock, err := s.prepareWatchCreation(ctx, req.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	if req.PollIntervalSeconds <= 0 {
 		req.PollIntervalSeconds = defaultWatchPollIntervalSec
 	}
@@ -68,6 +74,7 @@ func (s *Service) createReviewWatch(
 		return nil, fmt.Errorf("invalid cleanup_policy: %q", req.CleanupPolicy)
 	}
 	rw := &ReviewWatch{
+		GitHubHost:          host,
 		WorkspaceID:         req.WorkspaceID,
 		WorkflowID:          req.WorkflowID,
 		WorkflowStepID:      req.WorkflowStepID,
@@ -280,6 +287,9 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 		return nil, admissionErr
 	}
 
+	if err := s.validateReviewWatchHost(ctx, watch); err != nil {
+		return nil, err
+	}
 	connection, err := s.store.GetWorkspaceConnection(ctx, watch.WorkspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("load review watch workspace connection: %w", err)
@@ -294,11 +304,16 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 		watch.LastError = cause
 		return nil, ErrGitHubPersonalRequired
 	}
+	ctx = withExpectedGitHubHost(ctx, defaultAuthFlowHost(watch.GitHubHost))
 	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, "", "")
 	if err != nil {
 		return nil, err
 	}
 
+	if resolved.host().String() != defaultAuthFlowHost(watch.GitHubHost) {
+		return nil, ErrGitHubHostMismatch
+	}
+	ctx = withGitHubOperationFence(ctx, s, watch.WorkspaceID, resolved)
 	s.logger.Debug("checking review watch for pending PRs",
 		zap.String("watch_id", watch.ID),
 		zap.Int("repo_filters", len(watch.Repos)),
@@ -319,6 +334,9 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 	}
 	prs, complete, err := s.fetchReviewPRs(ctx, resolved.Client, &fetchWatch, scopedCacheKey(resolved.CacheScope, workspaceSearchScopeKey(settings)))
 	if err != nil {
+		return nil, err
+	}
+	if err := s.requireCurrentHost(ctx, watch.WorkspaceID, resolved); err != nil {
 		return nil, err
 	}
 	prs = filterPRsByWorkspaceScope(prs, settings)
@@ -346,7 +364,9 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 				zap.String("repo", pr.RepoOwner+"/"+pr.RepoName),
 				zap.Int("pr_number", pr.Number))
 		} else {
-			newPRs = append(newPRs, pr)
+			snapshot := *pr
+			snapshot.operationFence = &githubOperationFence{service: s, workspaceID: watch.WorkspaceID, resolved: resolved}
+			newPRs = append(newPRs, &snapshot)
 		}
 	}
 
@@ -364,6 +384,11 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 	if !complete {
 		return newPRs, nil
 	}
+	ctx, unlock, err := s.lockResourceMutation(ctx, watch.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	now := time.Now().UTC()
 	watch.LastPolledAt = &now
 	_ = s.store.UpdateReviewWatch(ctx, watch)
@@ -516,6 +541,9 @@ func (s *Service) enrichPRDetails(ctx context.Context, client Client, prs []*PR)
 			zap.String("repo", pr.RepoOwner+"/"+pr.RepoName),
 			zap.Int("pr_number", pr.Number))
 
+		if err := requireGitHubOperationCurrent(ctx); err != nil {
+			return
+		}
 		full, err := client.GetPR(ctx, pr.RepoOwner, pr.RepoName, pr.Number)
 		if err != nil {
 			s.logger.Warn("failed to fetch full PR details, review metadata will remain incomplete",
@@ -818,7 +846,7 @@ func (s *Service) SearchUserPRsForWorkspace(
 	if err != nil {
 		return nil, err
 	}
-	return s.filterPersonalPRsByAutomation(ctx, workspaceID, filterPRsByWorkspaceScope(prs, settings))
+	return s.filterPersonalPRsByAutomation(ctx, workspaceID, filterPRsByWorkspaceScope(prsForHost(prs, resolved.host().String()), settings))
 }
 
 // SearchUserIssues searches for issues using a filter or custom query. Unless
@@ -846,7 +874,7 @@ func (s *Service) SearchUserIssuesForWorkspace(
 	if err != nil {
 		return nil, err
 	}
-	return s.filterPersonalIssuesByAutomation(ctx, workspaceID, filterIssuesByWorkspaceScope(issues, settings))
+	return s.filterPersonalIssuesByAutomation(ctx, workspaceID, filterIssuesByWorkspaceScope(issuesForHost(issues, resolved.host().String()), settings))
 }
 
 // ListAutomationPRs is the background-automation search path. It always uses
@@ -935,6 +963,19 @@ func (s *Service) searchUserIssuesPagedWithClient(
 // the dedup row was only written AFTER the slow clone + task-creation work,
 // which could produce duplicate tasks when two pollers or events raced.
 func (s *Service) ReserveReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int, prURL string) (bool, error) {
+	watch, err := s.store.GetReviewWatch(ctx, watchID)
+	if err != nil {
+		return false, err
+	}
+	if watch == nil {
+		return false, ErrGitHubHostMismatch
+	}
+	lock := s.workspaceConnectionMutationLock(watch.WorkspaceID)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := s.validateWatchReservation(ctx, watch.WorkspaceID, watch.GitHubHost); err != nil {
+		return false, err
+	}
 	return s.store.ReserveReviewPRTask(ctx, watchID, repoOwner, repoName, prNumber, prURL)
 }
 
@@ -1002,7 +1043,12 @@ func (s *Service) publishNewReviewPREvent(ctx context.Context, watch *ReviewWatc
 	if s.eventBus == nil {
 		return
 	}
+	host, generation, err := s.watchEventIdentity(ctx, watch.WorkspaceID, watch.GitHubHost, pr.operationFence)
+	if err != nil {
+		return
+	}
 	event := bus.NewEvent(events.GitHubNewReviewPR, "github", &NewReviewPREvent{
+		GitHubHost: host, CredentialGeneration: generation,
 		CreatedByUserID:   watch.CreatedByUserID,
 		ReviewWatchID:     watch.ID,
 		WorkspaceID:       watch.WorkspaceID,

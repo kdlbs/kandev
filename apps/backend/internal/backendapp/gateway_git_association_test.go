@@ -18,6 +18,33 @@ func TestIsAbandonedTurnCompletion(t *testing.T) {
 	}
 }
 
+func TestErrorTerminatedTurnDoesNotNotify(t *testing.T) {
+	startedAt := time.Date(2026, time.October, 29, 20, 32, 0, 0, time.UTC)
+	completedAt := startedAt.Add(5 * time.Second)
+	base := func(metadata map[string]interface{}) map[string]interface{} {
+		return map[string]interface{}{
+			"task_id": "task-1", "session_id": "session-1", "id": "turn-1",
+			"started_at": startedAt, "completed_at": &completedAt, "metadata": metadata,
+		}
+	}
+
+	if shouldNotifyTurnCompleted(base(map[string]interface{}{"error_terminated": true})) {
+		t.Fatal("a retained prompt-error turn must not send a successful turn notification")
+	}
+	if shouldNotifyTurnCompleted(base(map[string]interface{}{"error_terminated": true, "runtime_lost": true})) {
+		t.Fatal("a runtime-failure turn must not send a successful turn notification")
+	}
+	if shouldNotifyTurnCompleted(base(map[string]interface{}{"error_terminated": true, "clarification_requested": true})) {
+		t.Fatal("failure termination skips the turn-finished notification; clarification keeps its own subscription")
+	}
+	if !shouldNotifyTurnCompleted(base(map[string]interface{}{"error_terminated": false})) {
+		t.Fatal("a successful turn must still notify")
+	}
+	if shouldNotifyTurnCompleted(map[string]interface{}{"started_at": startedAt, "completed_at": &startedAt}) {
+		t.Fatal("an abandoned turn must still be skipped")
+	}
+}
+
 func TestClarificationNotificationOccurrence(t *testing.T) {
 	tests := []struct {
 		name          string

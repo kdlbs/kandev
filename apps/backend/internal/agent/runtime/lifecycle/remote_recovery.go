@@ -220,6 +220,22 @@ func (m *Manager) currentRemoteRecoveryOwner(
 ) (*RemoteRecoverySnapshot, bool) {
 	current, err := m.remoteRecoverySnapshot(ctx, entry.record.SessionID)
 	if err != nil {
+		if remoteRecoveryNoMatchProvesStopped(entry.record.Runtime) && m.remoteRecoveryExecutorRowMissing(ctx, entry.record.SessionID) {
+			if provider, ok := m.workspaceInfoProvider.(RemoteRecoveryAbsenceSnapshotProvider); ok && provider != nil {
+				absentOwner, absenceErr := provider.GetRemoteRecoveryAbsenceSnapshot(ctx, entry.record)
+				if absenceErr == nil && remoteRecoverySnapshotMatchesRecord(absentOwner, entry.record) &&
+					!remoteRecoverySnapshotFences(absentOwner) && validateRemoteRecoverySnapshot(absentOwner, entry.record) == nil {
+					if entry.snapshot == nil {
+						if !m.pinRemoteRecoverySnapshot(entry, absentOwner) {
+							return nil, false
+						}
+					} else if !sameRemoteRecoveryOwner(entry.snapshot, absentOwner, entry.record) {
+						return nil, false
+					}
+					return absentOwner, true
+				}
+			}
+		}
 		m.logger.Debug("remote recovery owner snapshot retry failed", zap.String("session_id", entry.record.SessionID), zap.Error(err))
 		return nil, false
 	}
@@ -239,6 +255,15 @@ func (m *Manager) currentRemoteRecoveryOwner(
 	return current, true
 }
 
+func (m *Manager) remoteRecoveryExecutorRowMissing(ctx context.Context, sessionID string) bool {
+	reader, ok := m.runningWriter.(executorRunningReader)
+	if !ok {
+		return false
+	}
+	_, err := reader.GetExecutorRunningBySessionID(ctx, sessionID)
+	return errors.Is(err, models.ErrExecutorRunningNotFound)
+}
+
 func (m *Manager) retryPendingRemoteStop(ctx context.Context, entry *remoteRecoveryRetry) bool {
 	m.remoteRecoveryMu.Lock()
 	stopRequested, reason, force := entry.stopRequested, entry.stopReason, entry.stopForce
@@ -249,7 +274,11 @@ func (m *Manager) retryPendingRemoteStop(ctx context.Context, entry *remoteRecov
 	if execution, exists := m.executionStore.GetBySessionID(entry.record.SessionID); exists && execution.ID == entry.record.AgentExecutionID {
 		return true
 	}
-	stopped, err := m.stopPendingRemoteRecovery(ctx, entry, reason, force)
+	stopWatch := newStopWaitWatch(30*time.Second, func(phase stopWaitPhase) {
+		reportStopWaitDiagnostic(m.logger, entry.record.AgentExecutionID, phase)
+	})
+	defer stopWatch.finish()
+	stopped, err := m.stopPendingRemoteRecovery(ctx, entry, reason, force, stopWatch)
 	if err != nil {
 		m.logger.Debug("pending remote stop remains retryable", zap.String("session_id", entry.record.SessionID), zap.Error(err))
 	} else if stopped {
@@ -273,7 +302,7 @@ func (m *Manager) attachRemoteRecovery(ctx context.Context, entry *remoteRecover
 		m.logger.Debug("remote recovery runtime is unavailable", zap.String("session_id", entry.record.SessionID), zap.Error(err))
 		return
 	}
-	attemptRecord, err := m.remoteRecoveryAttemptRecord(ctx, entry)
+	attemptRecord, rowPresent, err := m.remoteRecoveryAttemptRecord(ctx, entry)
 	if err != nil {
 		m.logger.Debug("remote recovery inventory refresh failed; preserving owner",
 			zap.String("session_id", entry.record.SessionID), zap.Error(err))
@@ -281,8 +310,9 @@ func (m *Manager) attachRemoteRecovery(ctx context.Context, entry *remoteRecover
 	}
 	credentialed := m.revealRemoteRecoveryCredentials(ctx, attemptRecord)
 	var recovered []*ExecutorInstance
+	var outcomes map[string]RecoveryCandidateOutcome
 	if detailed, ok := backend.(DetailedRecoveryBackend); ok {
-		recovered, _, err = detailed.RecoverInstancesDetailed(ctx, []*models.ExecutorRunning{credentialed})
+		recovered, outcomes, err = detailed.RecoverInstancesDetailed(ctx, []*models.ExecutorRunning{credentialed})
 	} else {
 		recovered, err = backend.RecoverInstances(ctx, []*models.ExecutorRunning{credentialed})
 	}
@@ -297,7 +327,15 @@ func (m *Manager) attachRemoteRecovery(ctx context.Context, entry *remoteRecover
 			m.discardRemoteRecoveryInstance(candidate)
 		}
 	}
+	if !rowPresent && ri != nil {
+		m.discardRemoteRecoveryInstance(ri)
+		return
+	}
 	if ri == nil {
+		if _, err := m.settleRemoteRecoveryAbsence(ctx, entry, attemptRecord, rowPresent, outcomes[entry.record.SessionID]); err != nil {
+			m.logger.Debug("confirmed remote absence remains guarded until its runtime row is repaired",
+				zap.String("session_id", entry.record.SessionID), zap.Error(err))
+		}
 		return
 	}
 	if err := m.processRecoveredRemoteInstance(ctx, entry, ri); err != nil {

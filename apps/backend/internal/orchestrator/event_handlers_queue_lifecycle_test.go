@@ -47,7 +47,7 @@ func TestAgentBootReadyDrainsAfterInFlightRuntimeUnavailableRequeue(t *testing.T
 	agentMgr := &mockAgentManager{repoForExecutionLookup: baseRepo}
 	svc := createTestServiceWithAgent(baseRepo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.repo = repo
-	svc.executor = executor.NewExecutor(agentMgr, baseRepo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, baseRepo, testLogger(), executor.ExecutorConfig{}))
 
 	if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "queued prompt", "", messagequeue.QueuedByUser, false, nil); err != nil {
 		t.Fatalf("queue prompt: %v", err)
@@ -133,7 +133,7 @@ func TestExecuteQueuedMessage_LifecycleReselectsReplacementSession(t *testing.T)
 
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	_, _, accepted, err := svc.messageQueue.QueueLifecycleMessageWithCoalesceKey(
 		ctx, "s1", "t1", "merged lifecycle prompt", "", messagequeue.QueuedByWorkflow,
 		false, nil, map[string]interface{}{"origin": githubPRAutomationOrigin},
@@ -199,7 +199,7 @@ func TestExecuteQueuedMessage_LifecycleNonPromptableSessionRequeues(t *testing.T
 
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	queued := &messagequeue.QueuedMessage{
 		ID: "lifecycle-non-promptable", SessionID: "s1", TaskID: "t1", Content: "closed lifecycle prompt",
 		Metadata: map[string]interface{}{
@@ -252,7 +252,7 @@ func TestExecuteQueuedMessage_LifecycleResetAfterTurnCreationRequeues(t *testing
 	session.State = models.TaskSessionStateWaitingForInput
 	manager.isAgentRunning = true
 	svc.messageCreator = &mockMessageCreator{}
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	turnStarted := make(chan struct{}, 1)
 	svc.turnService = &turnStartSignalService{
@@ -340,7 +340,7 @@ func TestExecuteQueuedMessage_LifecycleMessagePersistenceFailureDoesNotDispatch(
 	seedMockTaskState(taskRepo, "t1", v1.TaskStateReview)
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &repoTurnService{repo: repo}
 	svc.messageCreator = &mockMessageCreator{userMessageErr: errors.New("persist lifecycle message")}
 	queued := &messagequeue.QueuedMessage{
@@ -404,7 +404,7 @@ func TestExecuteQueuedMessage_PlanCommentPersistenceFailureRetainsReplayReceipt(
 	seedMockTaskState(taskRepo, "t1", v1.TaskStateReview)
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &repoTurnService{repo: repo}
 	svc.messageCreator = &mockMessageCreator{userMessageErr: errors.New("persist plan-comment message")}
 	_, err = svc.messageQueue.QueueMessageWithMetadata(
@@ -454,7 +454,7 @@ func TestExecuteQueuedMessage_PlanCommentDispatchFailureDoesNotRetryAfterAttempt
 		repoForExecutionLookup: repo,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 	_, err = svc.messageQueue.QueueMessageWithMetadata(
@@ -579,7 +579,7 @@ func TestExecuteQueuedMessage_LifecycleTaskRollbackDoesNotClobberConcurrentTrans
 	seedMockTaskState(taskRepo, "t1", v1.TaskStateReview)
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &hookedMessageCreator{
 		mockMessageCreator: &mockMessageCreator{userMessageErr: errors.New("persist lifecycle message")},
 		beforeCreate: func() {
@@ -639,7 +639,7 @@ func TestDrainQueuedMessage_LifecycleEntryRemainsDurableUntilPromptAcceptance(t 
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, "t1", v1.TaskStateReview)
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.repo = &lifecycleResolveBarrierRepository{
 		repoStore:      repo,
 		resolveEntered: resolveEntered,
@@ -712,7 +712,7 @@ func TestExecuteQueuedMessage_LifecycleReservationPurgedAcrossArchiveUnarchiveDo
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, "t1", v1.TaskStateReview)
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	svc.repo = &lifecycleResolveBarrierRepository{
 		repoStore:      repo,
@@ -793,7 +793,7 @@ func TestExecuteQueuedMessage_LifecycleReservationPurgedBeforeWorkflowSideEffect
 	steps := &countingLifecycleStepGetter{mockStepGetter: newMockStepGetter()}
 	svc := createTestServiceWithAgent(repo, steps.mockStepGetter, taskRepo, agentMgr)
 	svc.workflowStepGetter = steps
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	svc.repo = &lifecycleWorkflowBarrierRepository{
 		repoStore:          repo,

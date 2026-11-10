@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/no-duplicate-string -- Shared workspace fixtures repeat across surface cases. */
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -13,7 +14,10 @@ const appState = vi.hoisted(() => ({
         "session-1": {
           worktree_path: "/root/.kandev/tasks/example/kandev",
         },
-      } as Record<string, { worktree_path: string; workspace_path?: string }>,
+      } as Record<
+        string,
+        { worktree_path: string; workspace_path?: string; agent_workspace_path?: string | null }
+      >,
     },
   },
 }));
@@ -319,32 +323,32 @@ describe("markdownComponents", () => {
     expect(openFile).toHaveBeenCalledWith("docs/nextjs-spa-migration.md");
   });
 
-  it("does not open host-absolute file links outside the worktree", () => {
+  it("opens read-only host-absolute file links outside the worktree", () => {
     render(<Markdown>{"[secret](/root/other-project/secret.md)"}</Markdown>);
 
     fireEvent.click(screen.getByRole("link", { name: "secret" }));
 
-    expect(openFile).not.toHaveBeenCalled();
+    expect(openFile).toHaveBeenCalledWith("/root/other-project/secret.md");
   });
 
-  it("does not treat sibling workspace paths as repo-root file links", () => {
+  it("preserves sibling workspace absolute paths", () => {
     appState.value.taskSessions.items["session-1"].worktree_path = "/workspace/current-project";
 
     render(<Markdown>{"[schema](/workspace/sibling-project/schema.prisma)"}</Markdown>);
 
     fireEvent.click(screen.getByRole("link", { name: "schema" }));
 
-    expect(openFile).not.toHaveBeenCalled();
+    expect(openFile).toHaveBeenCalledWith("/workspace/sibling-project/schema.prisma");
   });
 
-  it("does not open Windows drive-letter absolute file links", () => {
+  it("opens Windows drive-letter absolute file links", () => {
     render(<Markdown>{"[hosts](/C:/Windows/System32/drivers/etc/hosts)"}</Markdown>);
 
     const link = screen.getByRole("link", { name: "hosts" });
     fireEvent.click(link);
 
-    expect(openFile).not.toHaveBeenCalled();
-    expect(link.getAttribute("aria-disabled")).toBe("true");
+    expect(openFile).toHaveBeenCalledWith("C:/Windows/System32/drivers/etc/hosts");
+    expect(link.getAttribute("aria-disabled")).toBeNull();
   });
 
   it("does not treat bare domains as relative file links", () => {
@@ -356,6 +360,23 @@ describe("markdownComponents", () => {
 
     expect(openFile).not.toHaveBeenCalled();
     expect(link.getAttribute("target")).toBe("_blank");
+  });
+});
+
+describe("shared Markdown image rendering", () => {
+  afterEach(resetMarkdownComponentTestState);
+
+  it("keeps browser-rendered relative and same-origin images without a session", () => {
+    render(
+      <Markdown>{"![Relative](images/chart.svg) ![Same origin](/assets/chart.svg)"}</Markdown>,
+    );
+
+    expect(screen.getByRole("img", { name: "Relative" }).getAttribute("src")).toBe(
+      "images/chart.svg",
+    );
+    expect(screen.getByRole("img", { name: "Same origin" }).getAttribute("src")).toBe(
+      "/assets/chart.svg",
+    );
   });
 });
 
@@ -386,13 +407,13 @@ describe("markdownComponents registered source links", () => {
     expect(openFile).toHaveBeenCalledWith("kandev/ui/bundle.js");
   });
 
-  it("keeps an unmatched host path inert", () => {
+  it("opens an unmatched absolute host path through the existing file action", () => {
     render(<Markdown>{"[secret](/home/other-project/secret.md)"}</Markdown>);
 
     const link = screen.getByRole("link", { name: "secret" });
     expect(fireEvent.click(link)).toBe(false);
-    expect(openFile).not.toHaveBeenCalled();
-    expect(link.getAttribute("aria-disabled")).toBe("true");
+    expect(openFile).toHaveBeenCalledWith("/home/other-project/secret.md");
+    expect(link.getAttribute("aria-disabled")).toBeNull();
   });
 });
 
@@ -414,6 +435,51 @@ describe("markdownComponents workspace roots", () => {
 
     expect(openFile).toHaveBeenNthCalledWith(1, "kandev/docs/specs/native/spec.md");
     expect(openFile).toHaveBeenNthCalledWith(2, "plugin/ui/bundle.js");
+  });
+
+  it("opens a promoted session's relative link in its original checkout", () => {
+    appState.value.taskSessions.items["session-1"] = {
+      worktree_path: "/root/.kandev/tasks/example/kandev",
+      workspace_path: "/root/.kandev/tasks/example",
+      agent_workspace_path: "/root/.kandev/tasks/example/kandev",
+    };
+
+    render(<Markdown>{"[base image work order](implementation_plans/task-00.md)"}</Markdown>);
+
+    fireEvent.click(screen.getByRole("link", { name: "base image work order" }));
+
+    expect(openFile).toHaveBeenCalledWith("kandev/implementation_plans/task-00.md");
+  });
+
+  it("keeps an explicit source prefix without adding the native base twice", () => {
+    appState.value.taskSessions.items["session-1"] = {
+      worktree_path: "/root/.kandev/tasks/example/kandev",
+      workspace_path: "/root/.kandev/tasks/example",
+      agent_workspace_path: "/root/.kandev/tasks/example/kandev",
+    };
+
+    render(
+      <MarkdownFileLinkContext.Provider
+        value={{
+          worktreePath: "/root/.kandev/tasks/example",
+          relativeBasePath: "/root/.kandev/tasks/example/kandev",
+          onOpenFile: openFile,
+          fileRootAliases: [
+            {
+              repositoryId: "repo-plugin",
+              sourceRoot: "/home/jcfs/projects/plugin",
+              workspaceRelativeRoot: "plugin",
+            },
+          ],
+        }}
+      >
+        <Markdown>{"[sibling](plugin/ui/bundle.js)"}</Markdown>
+      </MarkdownFileLinkContext.Provider>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "sibling" }));
+
+    expect(openFile).toHaveBeenCalledWith("plugin/ui/bundle.js");
   });
 });
 

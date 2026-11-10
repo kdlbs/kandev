@@ -13,7 +13,7 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 	taskservice "github.com/kandev/kandev/internal/task/service"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // agentConversationTaskAdapter wraps the shared repository to satisfy the

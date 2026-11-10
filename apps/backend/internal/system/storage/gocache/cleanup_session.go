@@ -17,6 +17,20 @@ const (
 	cleanupDelete
 )
 
+const (
+	cleanupReasonScanInvalidated = "cache_scan_invalidated"
+	issueCacheParentChanged      = "cache_parent_changed"
+)
+
+var (
+	// errCacheScanStale reports an ordinary cache-directory replacement that a
+	// retained scan cannot continue through. Fresh discovery is safe.
+	errCacheScanStale = errors.New("go-cache retained scan is stale")
+	// errCacheScanInvalidated reports a directory identity mismatch detected
+	// during removal. Mutation-time safety checks stay authoritative.
+	errCacheScanInvalidated = errors.New("go-cache scan invalidated")
+)
+
 type cleanupSession struct {
 	cachePath         string
 	adopted           bool
@@ -35,6 +49,7 @@ type cleanupSession struct {
 	phase             cleanupPhase
 	traversalDone     bool
 	discoveryComplete bool
+	scanInvalidated   bool
 	issues            []string
 	cause             error
 }
@@ -105,7 +120,7 @@ func (p *Provider) cleanupContentsWithPreparedRoot(
 	defer p.cleanupMu.Unlock()
 
 	session, result, err := p.prepareCleanupSession(
-		result, cachePath, adopted, maxBytes, identityKey, identity, rootHandle,
+		ctx, result, cachePath, adopted, maxBytes, identityKey, identity, rootHandle,
 	)
 	if err != nil {
 		return result, err
@@ -130,6 +145,7 @@ func (b *cleanupEntryBudget) consume(count int) {
 }
 
 func (p *Provider) prepareCleanupSession(
+	ctx context.Context,
 	result CleanupResult,
 	cachePath string,
 	adopted bool,
@@ -146,12 +162,19 @@ func (p *Provider) prepareCleanupSession(
 	}
 	if session != nil {
 		rootHandle.close()
-		if err := session.verifyRoot(); err != nil {
-			session.close()
-			p.cleanupState = nil
+		restartRoot, err := p.reuseCleanupSession(ctx, session, cachePath, adopted, identity)
+		if err != nil {
 			result.Partial = true
-			result.Errors = []string{"cache_root_changed"}
+			if ctx.Err() != nil {
+				result.Errors = []string{cancellationIssue(err)}
+			} else {
+				result.Errors = []string{"cache_root_changed"}
+			}
 			return nil, result, err
+		}
+		if restartRoot != nil {
+			rootHandle = restartRoot
+			session = nil
 		}
 	}
 	if session == nil {
@@ -167,6 +190,31 @@ func (p *Provider) prepareCleanupSession(
 	return session, result, nil
 }
 
+// reuseCleanupSession validates the retained traversal before it resumes. A
+// nil handle keeps the session. A non-nil handle is a freshly opened root for
+// one restart after an ordinary directory replacement.
+func (p *Provider) reuseCleanupSession(
+	ctx context.Context,
+	session *cleanupSession,
+	cachePath string,
+	adopted bool,
+	identity filesystemIdentityFunc,
+) (*cacheRootHandle, error) {
+	err := session.verifyRoot()
+	if err == nil {
+		err = session.validateRetainedFrames(ctx)
+	}
+	if errors.Is(err, errCacheScanStale) {
+		p.finishCleanupSession(session)
+		return p.openValidatedCacheRoot(cachePath, adopted, identity)
+	}
+	if err != nil {
+		p.finishCleanupSession(session)
+		return nil, err
+	}
+	return nil, nil
+}
+
 func (p *Provider) deleteCleanupPass(
 	ctx context.Context,
 	session *cleanupSession,
@@ -180,9 +228,13 @@ func (p *Provider) deleteCleanupPass(
 	if deleteErr != nil {
 		passError = errors.Join(passError, deleteErr)
 	}
-	if ctx.Err() == nil && session.nextDelete == len(session.entries) && !session.traversalDone {
+	if ctx.Err() == nil && !session.scanInvalidated &&
+		session.nextDelete == len(session.entries) && !session.traversalDone {
 		removed, passError = session.deleteRemainder(ctx, budget)
 		result.ReclaimedBytes += removed
+	}
+	if session.scanInvalidated {
+		return p.finishInvalidatedCleanup(session, result)
 	}
 	result.BytesBefore = session.bytes
 	result.BytesBeforeComplete = session.discoveryComplete
@@ -194,6 +246,23 @@ func (p *Provider) deleteCleanupPass(
 		return result, session.failureForPass(passError, "entry_limit_reached")
 	}
 	return p.finishCompletedCleanup(ctx, session, cachePath, budget, result, passError)
+}
+
+// finishInvalidatedCleanup retires a cursor whose directory identity changed
+// during removal. Successfully removed bytes stay counted, and the next call
+// starts fresh threshold discovery.
+func (p *Provider) finishInvalidatedCleanup(
+	session *cleanupSession,
+	result CleanupResult,
+) (CleanupResult, error) {
+	result.BytesBefore = session.bytes
+	result.BytesBeforeComplete = session.discoveryComplete
+	result.Partial = true
+	result.Reason = cleanupReasonScanInvalidated
+	result.Errors = boundedCleanupIssues(append([]string(nil), session.issues...))
+	err := session.failure()
+	p.finishCleanupSession(session)
+	return result, err
 }
 
 func (p *Provider) finishCompletedCleanup(
@@ -308,6 +377,70 @@ func (s *cleanupSession) verifyRoot() error {
 	return verifyAnchoredCacheRoot(s.rootHandle, s.adopted, s.identity)
 }
 
+// validateRetainedFrames proves every active directory frame still describes
+// the directory reachable through the validated root. A replacement or removal
+// is ordinary cache churn; an unsafe replacement or unavailable mount identity
+// is a safety failure.
+func (s *cleanupSession) validateRetainedFrames(ctx context.Context) error {
+	if len(s.stack) > cleanupMaxDepth {
+		return errors.New("go-cache retained traversal exceeds the depth limit")
+	}
+	for index, frame := range s.stack {
+		if index == 0 || frame.relative == "" {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := s.validateRetainedFrame(frame); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *cleanupSession) validateRetainedFrame(frame *cleanupFrame) error {
+	current, err := s.root.Lstat(frame.relative)
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%w: retained directory was removed", errCacheScanStale)
+	}
+	if err != nil {
+		return err
+	}
+	if current.Mode()&os.ModeSymlink != 0 || !current.IsDir() {
+		return errors.New("go-cache retained directory was replaced by an unsafe entry")
+	}
+	if err := s.verifyEntryPathMount(frame.relative); err != nil {
+		return err
+	}
+	if !os.SameFile(frame.info, current) {
+		return fmt.Errorf("%w: retained directory was recreated", errCacheScanStale)
+	}
+	opened, err := s.root.Open(frame.relative)
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%w: retained directory was removed", errCacheScanStale)
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = opened.Close() }()
+	openedInfo, err := opened.Stat()
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(frame.info, openedInfo) {
+		return fmt.Errorf("%w: retained directory was recreated", errCacheScanStale)
+	}
+	descriptorIdentity, err := s.rootHandle.descriptorIdentity(opened)
+	if err != nil {
+		return err
+	}
+	if descriptorIdentity != s.rootHandle.descriptorFilesystem {
+		return errors.New("go-cache retained directory crosses a mount boundary")
+	}
+	return s.verifyEntryPathMount(frame.relative)
+}
+
 func (s *cleanupSession) close() {
 	for _, frame := range s.stack {
 		_ = frame.reader.Close()
@@ -392,7 +525,7 @@ func (s *cleanupSession) inspectFrameEntry(frame *cleanupFrame, entry os.DirEntr
 func (s *cleanupSession) deleteRemainder(ctx context.Context, budget *cleanupEntryBudget) (int64, error) {
 	removed := int64(0)
 	processed := 0
-	for budget.remaining > 0 && len(s.stack) > 0 {
+	for budget.remaining > 0 && len(s.stack) > 0 && !s.scanInvalidated {
 		if err := ctx.Err(); err != nil {
 			return removed, err
 		}
@@ -440,6 +573,10 @@ func (s *cleanupSession) deleteRemainderEntry(frame *cleanupFrame, entry os.DirE
 		return 0
 	}
 	removed, err := s.removeEntry(cleanupEntry{relative: relative, info: info, bytes: info.Size()})
+	if errors.Is(err, errCacheScanInvalidated) {
+		s.retireInvalidatedScan()
+		return removed
+	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		s.addIssue("entry_delete_failed", err)
 	}
@@ -569,9 +706,28 @@ func (s *cleanupSession) removeDirectory(entry cleanupEntry, ctx context.Context
 		s.addIssue("cache_root_changed", err)
 		return
 	}
-	if _, err := s.removeEntry(entry); err != nil && !errors.Is(err, os.ErrNotExist) {
-		s.addIssue("entry_delete_failed", err)
+	if _, err := s.removeEntry(entry); err != nil {
+		if errors.Is(err, errCacheScanInvalidated) {
+			s.retireInvalidatedScan()
+			return
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			s.addIssue("entry_delete_failed", err)
+		}
 	}
+}
+
+func (s *cleanupSession) retireInvalidatedScan() {
+	if s.scanInvalidated {
+		return
+	}
+	s.scanInvalidated = true
+	if len(s.issues) >= cleanupIssueLimit {
+		s.issues[len(s.issues)-1] = issueCacheParentChanged
+	} else {
+		s.issues = append(s.issues, issueCacheParentChanged)
+	}
+	s.cause = errors.Join(s.cause, errCacheScanInvalidated)
 }
 
 func (s *cleanupSession) markTraversalDone() {
@@ -603,6 +759,10 @@ func (s *cleanupSession) deleteCandidates(ctx context.Context, budget *cleanupEn
 		budget.consume(1)
 		bytes, err := s.removeEntry(entry)
 		removed += bytes
+		if errors.Is(err, errCacheScanInvalidated) {
+			s.retireInvalidatedScan()
+			return removed, nil
+		}
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			s.addIssue("path_changed_or_unsafe", err)
 		}
@@ -705,6 +865,9 @@ func (s *cleanupSession) openEntryDirectory(parent *os.Root, component, relative
 		return nil, errors.New("invalid Go-cache parent path")
 	}
 	before, err := parent.Lstat(component)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("%w: go-cache parent disappeared after scan", errCacheScanInvalidated)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -713,9 +876,12 @@ func (s *cleanupSession) openEntryDirectory(parent *os.Root, component, relative
 	}
 	expected := s.directories[relative]
 	if expected == nil || !os.SameFile(expected, before) {
-		return nil, errors.New("go-cache parent changed after scan")
+		return nil, fmt.Errorf("%w: go-cache parent changed after scan", errCacheScanInvalidated)
 	}
 	next, err := parent.OpenRoot(component)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("%w: go-cache parent disappeared after scan", errCacheScanInvalidated)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -732,7 +898,7 @@ func (s *cleanupSession) verifyEntryDirectory(next *os.Root, expected os.FileInf
 		return err
 	}
 	if !os.SameFile(expected, actual) {
-		return errors.New("go-cache parent changed while opening")
+		return fmt.Errorf("%w: go-cache parent changed while opening", errCacheScanInvalidated)
 	}
 	descriptorIdentity, err := cacheFilesystemIdentityFromRootWith(next, s.rootHandle.descriptorIdentity)
 	if err != nil {

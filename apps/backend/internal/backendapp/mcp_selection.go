@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func mcpSelectionOwnerValidator(p routeParams) mcpconfig.SelectionOwnerValidator {
@@ -84,4 +85,53 @@ func mcpSessionResolutionContext(p routeParams) func(context.Context, string, st
 		}
 		return rc, nil
 	}
+}
+
+// Profile eligibility is checked in the settings transaction. Task ownership
+// remains in the task service; recheck it at admission without starting an agent.
+func mcpSelectionAdditionValidator(p routeParams) mcpconfig.SelectionOwnerValidator {
+	return func(ctx context.Context, scope mcpconfig.SelectionScope, workspaceID, ownerID string) error {
+		if scope == mcpconfig.SelectionScopeProfile {
+			return nil
+		}
+		if err := mcpSelectionOwnerValidator(p)(ctx, scope, workspaceID, ownerID); err != nil {
+			return err
+		}
+		taskID := ownerID
+		if scope == mcpconfig.SelectionScopeTaskSession {
+			session, err := p.taskSvc.GetTaskSession(ctx, ownerID)
+			if err != nil || session == nil {
+				return fmt.Errorf("task session unavailable")
+			}
+			if err := validateMCPSessionAddition(ctx, p, workspaceID, session); err != nil {
+				return err
+			}
+			taskID = session.TaskID
+		}
+		if scope == mcpconfig.SelectionScopeTask || scope == mcpconfig.SelectionScopeTaskSession {
+			task, err := p.taskSvc.GetTask(ctx, taskID)
+			if err != nil || task == nil || task.ArchivedAt != nil {
+				return fmt.Errorf("task unavailable")
+			}
+		}
+		return nil
+	}
+}
+
+func validateMCPSessionAddition(ctx context.Context, p routeParams, workspaceID string, session *models.TaskSession) error {
+	if session.IsPassthrough || session.State == models.TaskSessionStateCancelled || session.State == models.TaskSessionStateCompleted || session.State == models.TaskSessionStateFailed {
+		return fmt.Errorf("task session unavailable")
+	}
+	if p.agentSettingsRepo == nil {
+		return fmt.Errorf("session profile unavailable")
+	}
+	profile, err := p.agentSettingsRepo.GetAgentProfile(ctx, session.AgentProfileID)
+	if err != nil || profile == nil || !profile.Enabled || (profile.WorkspaceID != "" && profile.WorkspaceID != workspaceID) {
+		return fmt.Errorf("session profile unavailable")
+	}
+	agent, err := p.agentSettingsRepo.GetAgent(ctx, profile.AgentID)
+	if err != nil || agent == nil || !agent.SupportsMCP {
+		return fmt.Errorf("session agent does not support MCP")
+	}
+	return nil
 }

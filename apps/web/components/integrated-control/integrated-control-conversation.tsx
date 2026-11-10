@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { QuickChatSessionView } from "@/components/quick-chat/quick-chat-session-view";
 import { TaskWorkspaceProvider } from "@/components/task/task-workspace-context";
+import { WorkspaceCollaborationAction } from "@/components/task/workspace-collaboration-action";
 import { ScopedTaskPRProvider } from "@/hooks/domains/github/scoped-task-pr-context";
 import { MessageTaskOriginProvider } from "@/components/task/chat/messages/message-task-origin-context";
 import { CoordinatorProposalProvider } from "@/components/task/chat/messages/kandev/coordinator-proposal-context";
@@ -94,6 +95,15 @@ function ExistingConversation({
             ))}
           </select>
         </label>
+        {!result.task.archived_at && (
+          <TaskWorkspaceProvider taskId={taskId} workspaceId={workspace.id} sessionId={session.id}>
+            <WorkspaceCollaborationAction
+              taskId={taskId}
+              title={result.task.title}
+              workspace={workspace}
+            />
+          </TaskWorkspaceProvider>
+        )}
       </div>
       <MessageTaskOriginProvider value="coordinator">
         <TaskWorkspaceProvider taskId={taskId} workspaceId={workspace.id} sessionId={session.id}>

@@ -76,5 +76,20 @@
   "filtersButton_one": "필터 ({{count}})",
   "filtersButton_other": "필터 ({{count}})",
   "appliedWorkflow": "워크플로: {{name}}",
-  "appliedRepository": "리포지토리: {{name}}"
+  "appliedRepository": "리포지토리: {{name}}",
+  "ungrouped": "그룹 없음",
+  "collaborationTitle": "워크스페이스 협업",
+  "collaborationDescription": "{{workspace}}의 {{task}}. 이 대화가 다른 워크스페이스에 접근할 수 있는 범위를 관리합니다.",
+  "collaborationNativePermissions": "읽기, 보고, 프롬프트, 제어는 독립적입니다. 기존 사용자 권한도 적용됩니다. 네 항목을 모두 해제하면 접근을 회수합니다.",
+  "collaborationRead": "읽기",
+  "collaborationReport": "보고",
+  "collaborationPrompt": "프롬프트",
+  "collaborationControl": "제어",
+  "collaborationTargetUnavailable": "현재 이 대상에 대한 기존 읽기 권한이 없습니다. 저장된 허용값은 표시되지만 편집할 수 없습니다.",
+  "collaborationLoadDenied": "이 대화의 워크스페이스 접근을 관리할 권한이 없습니다.",
+  "collaborationLoadFailed": "워크스페이스 접근을 불러오지 못했습니다. 수정 내용은 유지됩니다. 저장하기 전에 다시 불러오세요.",
+  "collaborationSaveDenied": "권한이 거부되어 이 행을 저장하지 못했습니다. 수정 내용은 유지됩니다.",
+  "collaborationSaveFailed": "이 행을 저장하지 못했습니다. 수정 내용은 유지됩니다.",
+  "collaborationNoTargets": "사용 가능한 다른 워크스페이스가 없습니다.",
+  "collaborationRetry": "다시 불러오기"
 }

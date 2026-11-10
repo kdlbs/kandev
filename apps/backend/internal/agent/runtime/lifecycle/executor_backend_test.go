@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
@@ -96,6 +97,10 @@ func TestCausingRunMetadataIsSessionScoped(t *testing.T) {
 		"the causal run must survive a same-session runtime restart")
 	require.True(t, IsSessionScopedMetadataKey(MetadataKeyCausingRunID),
 		"the causal run must not leak into a sibling session")
+	require.True(t, ShouldPersistMetadataKey(MetadataKeyTerminalCausingRunID),
+		"the terminal event identity must survive a same-session runtime restart")
+	require.True(t, IsSessionScopedMetadataKey(MetadataKeyTerminalCausingRunID),
+		"the terminal event identity must not leak into a sibling session")
 }
 
 func TestSSHRuntimeAPIMetadataIsPersistentAndSessionScoped(t *testing.T) {
@@ -169,6 +174,86 @@ func TestToAgentExecutionFreezesStartupDisposition(t *testing.T) {
 	require.Equal(t, AgentStartupReattachedExisting, execution.startupDispositionSnapshot())
 }
 
+func TestToAgentExecutionAdoptionUsesRetainedResourceCircuitIdentity(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		InstanceID:     "requested-execution",
+		AgentProfileID: "profile-1",
+		Metadata: map[string]interface{}{
+			MetadataKeyResourceCircuitIdentity: resourceCircuitIdentity{
+				ExecutionID: "requested-execution", ProfileID: "profile-1", Key: "current-policy-key",
+			},
+		},
+	}
+	instance := &ExecutorInstance{
+		InstanceID:  "retained-execution",
+		RuntimeName: agentruntime.RuntimeStandalone,
+		Metadata: map[string]interface{}{
+			MetadataKeyReuseExistingProcess: true,
+			MetadataKeyResourceCircuitIdentity: resourceCircuitIdentity{
+				ExecutionID: "retained-execution", ProfileID: "profile-1", Key: "retained-key",
+			},
+		},
+	}
+	execution := instance.ToAgentExecution(req)
+	require.Equal(t, "retained-execution", execution.ID)
+	require.Equal(t, "retained-key", execution.resourceCircuitKey(),
+		"adoption must keep the retained process's persisted resource identity")
+}
+
+func TestToAgentExecutionAdoptionLeavesMissingResourceIdentityUnknown(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		InstanceID:     "requested-execution",
+		AgentProfileID: "profile-1",
+		Metadata: map[string]interface{}{
+			MetadataKeyResourceCircuitIdentity: resourceCircuitIdentity{
+				ExecutionID: "requested-execution", ProfileID: "profile-1", Key: "current-policy-key",
+			},
+		},
+	}
+	instance := &ExecutorInstance{
+		InstanceID:  "retained-execution",
+		RuntimeName: agentruntime.RuntimeStandalone,
+		Metadata:    map[string]interface{}{MetadataKeyReuseExistingProcess: true},
+	}
+	execution := instance.ToAgentExecution(req)
+	require.Empty(t, execution.resourceCircuitKey(),
+		"current launch policy must not be assigned to a retained process without persisted evidence")
+}
+
+func TestToAgentExecutionAdoptionUsesRetainedEmptyEvidence(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		Env:                  map[string]string{"REQUEST_ONLY": "value"},
+		WorkspaceSourceRoots: []string{"/request/root"},
+	}
+	instance := &ExecutorInstance{
+		InstanceID:           "retained-execution",
+		RuntimeName:          agentruntime.RuntimeStandalone,
+		Metadata:             map[string]interface{}{MetadataKeyReuseExistingProcess: true},
+		Env:                  map[string]string{},
+		WorkspaceSourceRoots: []string{},
+	}
+	execution := instance.ToAgentExecution(req)
+	require.Empty(t, execution.WorkspaceSourceRoots, "an empty retained allowlist is authoritative")
+	require.NotContains(t, execution.RuntimeEnvironment(), "REQUEST_ONLY")
+	require.Empty(t, execution.RuntimeEnvironment())
+}
+
+func TestToAgentExecutionAdoptionUsesNilRetainedEvidence(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		Env:                  map[string]string{"REQUEST_ONLY": "value"},
+		WorkspaceSourceRoots: []string{"/request/root"},
+	}
+	instance := &ExecutorInstance{
+		InstanceID:  "retained-execution",
+		RuntimeName: agentruntime.RuntimeStandalone,
+		Metadata:    map[string]interface{}{MetadataKeyReuseExistingProcess: true},
+	}
+	execution := instance.ToAgentExecution(req)
+	require.Empty(t, execution.WorkspaceSourceRoots, "missing retained roots must not fall back to the replacement request")
+	require.NotContains(t, execution.RuntimeEnvironment(), "REQUEST_ONLY")
+	require.Empty(t, execution.RuntimeEnvironment())
+}
+
 func TestToAgentExecutionCapturesDefensiveRuntimeEnvironment(t *testing.T) {
 	reqEnv := map[string]string{
 		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL": "http://127.0.0.1:9876",
@@ -206,6 +291,7 @@ func TestToAgentExecutionCarriesCausingRunID(t *testing.T) {
 		Metadata: map[string]interface{}{MetadataKeyCausingRunID: "office-run-1"},
 	})
 	require.Equal(t, "office-run-1", execution.CausingRunID)
+	require.Equal(t, "office-run-1", execution.TerminalCausingRunID)
 }
 
 func TestToAgentExecutionDoesNotReuseRuntimeCausingRunMetadata(t *testing.T) {
@@ -214,4 +300,5 @@ func TestToAgentExecutionDoesNotReuseRuntimeCausingRunMetadata(t *testing.T) {
 		Metadata:   map[string]interface{}{MetadataKeyCausingRunID: "stale-office-run"},
 	}).ToAgentExecution(&ExecutorCreateRequest{})
 	require.Empty(t, execution.CausingRunID)
+	require.Empty(t, execution.TerminalCausingRunID)
 }

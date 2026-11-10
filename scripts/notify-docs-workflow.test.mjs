@@ -37,6 +37,17 @@ function extractStep(job, name) {
 
 const tokenExpression = String.raw`\$\{\{ secrets\.GITHUB_TOKEN \}\}`;
 
+// @covers AC-CI-ACTIONS-SECURITY-002.3
+test("docs publication installs dependencies without restoring or saving a cache", async () => {
+  const workflow = await fs.readFile(workflowPath, "utf8");
+  const preview = extractJob(workflow, "preview");
+  assert.match(preview, /package-manager-cache: false/);
+  assert.doesNotMatch(preview, /^\s+cache:\s|^\s+cache-dependency-path:|uses: actions\/cache/m);
+  assert.match(preview, /pnpm install --frozen-lockfile/);
+  assert.match(preview, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+  assert.match(preview, /repository: kdlbs\/landing/);
+});
+
 test("docs preview build uses an authenticated read-only token", async () => {
   const workflow = await fs.readFile(workflowPath, "utf8");
   const preview = extractJob(workflow, "preview");

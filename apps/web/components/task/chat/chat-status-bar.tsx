@@ -18,6 +18,7 @@ import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { TaskDependencyChip } from "@/components/task/task-dependency-chip";
+import { TaskGraphButton } from "@/components/task-graph/task-graph-button";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
@@ -25,6 +26,7 @@ import { ConversationUsageDisplay } from "@/components/task/chat/conversation-us
 import { TranscriptNavGroup } from "@/components/task/chat/transcript-nav-group";
 import { OpenInThreadsButton } from "@/components/threads/open-in-threads-button";
 import { useIsDeckThread } from "@/hooks/domains/threads/use-deck-thread";
+import { useSessionSubscriptionUsage } from "@/hooks/domains/session/use-session-subscription-usage";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TodoIndicator } from "./todo-indicator";
 import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
@@ -105,7 +107,9 @@ function getRightControlVisibility({
 }) {
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
   const showConversationUsage = !!taskId && !!sessionId;
+  // A qualifying task keeps the graph action before its first session exists.
   const showRightControls =
+    !!taskId ||
     (showAutoScrollControl && !!sessionId) ||
     showConversationUsage ||
     canShare ||
@@ -141,6 +145,8 @@ export type ChatStatusBarProps = {
   onJumpToLatest?: () => void;
   showScrollToStart?: boolean;
   onScrollToStart?: () => void;
+  /** Stable composer focus target when a dismissed chip no longer exists. */
+  onFocusComposer?: () => void;
 };
 
 export function ComposerCIStatus({
@@ -215,6 +221,7 @@ function ChatStatusBarRightControls({
   showScrollToStart,
   onScrollToStart,
 }: ChatStatusBarRightControlsProps) {
+  const subscriptionUsage = useSessionSubscriptionUsage(sessionId);
   return (
     <div
       data-testid="chat-status-bar-right-controls"
@@ -239,10 +246,12 @@ function ChatStatusBarRightControls({
               taskId={taskId}
               sessionId={sessionId}
               detailActive={detailActive}
+              subscriptionBilling={subscriptionUsage}
             />
           ) : null
         }
       />
+      <TaskGraphButton taskId={taskId} />
     </div>
   );
 }
@@ -305,6 +314,16 @@ function ChatStatusBarActions({
   );
 }
 
+function useActiveAgentGoal(sessionId: string | null) {
+  const metadata = useAppStore((state) =>
+    sessionId ? readACPMetadata(state.taskSessions.items[sessionId]?.metadata) : undefined,
+  );
+  return useMemo(() => {
+    const goal = getAgentGoal(metadata);
+    return goal?.status === "active" ? goal : null;
+  }, [metadata]);
+}
+
 export function ChatStatusBar({
   todoItems,
   taskId,
@@ -325,6 +344,7 @@ export function ChatStatusBar({
   onJumpToLatest,
   showScrollToStart,
   onScrollToStart,
+  onFocusComposer,
 }: ChatStatusBarProps) {
   const separateCI = useComposerDisclosureContext()?.enabled;
   const showTodos = todoItems.length > 0;
@@ -336,13 +356,7 @@ export function ChatStatusBar({
   // Asked here rather than inside the button so the cluster still renders when
   // the Threads jump is the only right-hand control this session qualifies for.
   const showThreadsLink = useIsDeckThread(taskId, sessionId);
-  const activeGoalMetadata = useAppStore((state) =>
-    sessionId ? readACPMetadata(state.taskSessions.items[sessionId]?.metadata) : undefined,
-  );
-  const activeGoal = useMemo(() => {
-    const goal = getAgentGoal(activeGoalMetadata);
-    return goal?.status === "active" ? goal : null;
-  }, [activeGoalMetadata]);
+  const activeGoal = useActiveAgentGoal(sessionId);
   const { canShare, showConversationUsage, showRightControls } = getRightControlVisibility({
     taskId,
     sessionId,
@@ -369,16 +383,15 @@ export function ChatStatusBar({
     showScrollToStart,
     onScrollToStart,
   };
-  if (
-    !shouldRenderChatStatusBar({
-      hasTask: !!taskId,
-      hasTodos: showTodos,
-      hasQueueChip: !!queueChip,
-      showRightControls,
-      showProceed,
-      hasGoal: !!activeGoal,
-    })
-  ) {
+  const renderStatusBar = shouldRenderChatStatusBar({
+    hasTask: !!taskId,
+    hasTodos: showTodos,
+    hasQueueChip: !!queueChip,
+    showRightControls,
+    showProceed,
+    hasGoal: !!activeGoal,
+  });
+  if (!renderStatusBar) {
     return null;
   }
   // PRMergedBanner returns null internally when not applicable
@@ -402,7 +415,11 @@ export function ChatStatusBar({
         <TaskDependencyChip taskId={taskId} />
         {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
         {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
-        <BackgroundWorkChip sessionId={sessionId} detailActive={detailActive} />
+        <BackgroundWorkChip
+          sessionId={sessionId}
+          detailActive={detailActive}
+          onRequestComposerFocus={onFocusComposer}
+        />
         {queueChip}
       </ChatStatusBarActions>
     </div>

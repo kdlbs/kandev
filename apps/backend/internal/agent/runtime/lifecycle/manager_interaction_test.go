@@ -23,7 +23,9 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -44,6 +46,9 @@ type restartMockAgentctlServer struct {
 
 	mu                 sync.Mutex
 	httpActions        []string
+	configuredCommand  string
+	configuredArgs     []string
+	configuredEnv      map[string]string
 	repairPackageSpecs []string
 	updateStreamCount  int
 	updateStreams      []*websocket.Conn
@@ -52,37 +57,41 @@ type restartMockAgentctlServer struct {
 	setModeIDs         []string
 	setOptions         []restartConfigOption
 
-	failStop                     bool
-	onStop                       func(context.Context)
-	failSessionNew               bool
-	initializeError              string
-	sessionNewError              string
-	configureError               string
-	startError                   string
-	failSessionReset             bool
-	failCacheRepair              bool
-	failMode                     bool
-	modeResult                   *agentctl.ModeResult
-	failModel                    bool
-	failConfigOptionID           string
-	stderrLines                  []string
-	stderrConfigured             bool
-	modelState                   *streams.SessionModelState
-	newModelState                *streams.SessionModelState
-	suppressSessionResetResponse bool
-	resetResponseDelay           time.Duration
-	updateStreamClosed           chan struct{}
-	resetLateEvent               *agentctl.AgentEvent
-	resetLateEventSent           chan struct{}
-	newLateEvent                 *agentctl.AgentEvent
-	newLateEventDelay            time.Duration
-	newLateEventSent             chan struct{}
-	newLateEventOnce             sync.Once
-	processGeneration            uint64
-	promptCalls                  int
-	onReset                      func()
-	onSessionNew                 func()
-	onCacheRepair                func()
+	failStop                          bool
+	onStop                            func(context.Context)
+	failSessionNew                    bool
+	initializeError                   string
+	sessionNewError                   string
+	configureError                    string
+	startError                        string
+	failSessionReset                  bool
+	failCacheRepair                   bool
+	failMode                          bool
+	modeResult                        *agentctl.ModeResult
+	failModel                         bool
+	failConfigOptionID                string
+	stderrLines                       []string
+	stderrConfigured                  bool
+	modelState                        *streams.SessionModelState
+	newModelState                     *streams.SessionModelState
+	suppressSessionResetResponse      bool
+	resetResponseDelay                time.Duration
+	updateStreamClosed                chan struct{}
+	resetLateEvent                    *agentctl.AgentEvent
+	resetLateEventSent                chan struct{}
+	newLateEvent                      *agentctl.AgentEvent
+	newLateEventDelay                 time.Duration
+	newLateEventSent                  chan struct{}
+	newLateEventOnce                  sync.Once
+	processGeneration                 uint64
+	supportsManagedRuntimePreparation bool
+	supportsSessionLoad               bool
+	preparationDirectives             []agentctltypes.ManagedRuntimePreparationDirective
+	loadedSessionIDs                  []string
+	promptCalls                       int
+	onReset                           func()
+	onSessionNew                      func()
+	onCacheRepair                     func()
 }
 
 type restartConfigOption struct {
@@ -201,6 +210,16 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
+	mux.HandleFunc("/identity", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		supportsPreparation := m.supportsManagedRuntimePreparation
+		m.mu.Unlock()
+		capabilities := []string{}
+		if supportsPreparation {
+			capabilities = append(capabilities, agentctltypes.ManagedRuntimePrivatePreparationCapability)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"capabilities": capabilities})
+	})
 	mux.HandleFunc("/api/v1/stop", func(w http.ResponseWriter, r *http.Request) {
 		m.recordHTTP("stop")
 		if m.onStop != nil {
@@ -230,10 +249,22 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 		}
 		_, _ = w.Write([]byte(`{"success":true}`))
 	})
-	mux.HandleFunc("/api/v1/agent/configure", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/api/v1/agent/configure", func(w http.ResponseWriter, r *http.Request) {
 		m.recordHTTP("configure")
+		var request struct {
+			Command   string            `json:"command"`
+			AgentArgs []string          `json:"agent_args"`
+			Env       map[string]string `json:"env"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "invalid configure request", http.StatusBadRequest)
+			return
+		}
 		m.mu.Lock()
 		configureError := m.configureError
+		m.configuredCommand = request.Command
+		m.configuredArgs = append([]string(nil), request.AgentArgs...)
+		m.configuredEnv = cloneStringMap(request.Env)
 		m.mu.Unlock()
 		if configureError != "" {
 			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": configureError})
@@ -241,7 +272,15 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 		}
 		_, _ = w.Write([]byte(`{"success":true}`))
 	})
-	mux.HandleFunc("/api/v1/start", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/api/v1/start", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Preparation *agentctltypes.ManagedRuntimePreparationDirective `json:"preparation"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err == nil && request.Preparation != nil {
+			m.mu.Lock()
+			m.preparationDirectives = append(m.preparationDirectives, *request.Preparation)
+			m.mu.Unlock()
+		}
 		m.mu.Lock()
 		m.httpActions = append(m.httpActions, "start")
 		m.processGeneration++
@@ -293,6 +332,7 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 			case "agent.initialize":
 				m.mu.Lock()
 				initializeError := m.initializeError
+				supportsSessionLoad := m.supportsSessionLoad
 				m.mu.Unlock()
 				if initializeError != "" {
 					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
@@ -301,13 +341,17 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					})
 					break
 				}
-				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+				payload := map[string]interface{}{
 					"success": true,
 					"agent_info": map[string]string{
 						"name":    "test-agent",
 						"version": "1.0.0",
 					},
-				})
+				}
+				if supportsSessionLoad {
+					payload["supports_session_load"] = true
+				}
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, payload)
 			case "agent.session.new":
 				if m.onSessionNew != nil {
 					m.onSessionNew()
@@ -335,6 +379,18 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					}
 					resp, _ = ws.NewResponse(msg.ID, msg.Action, payload)
 				}
+			case "agent.session.load":
+				var request struct {
+					SessionID string `json:"session_id"`
+				}
+				_ = json.Unmarshal(msg.Payload, &request)
+				m.mu.Lock()
+				m.loadedSessionIDs = append(m.loadedSessionIDs, request.SessionID)
+				m.mu.Unlock()
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					"success":    true,
+					"session_id": request.SessionID,
+				})
 			case "agent.session.reset":
 				if m.onReset != nil {
 					m.onReset()
@@ -509,6 +565,12 @@ func (m *restartMockAgentctlServer) getHTTPActions() []string {
 	out := make([]string, len(m.httpActions))
 	copy(out, m.httpActions)
 	return out
+}
+
+func (m *restartMockAgentctlServer) getConfiguredProcess() (string, []string, map[string]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.configuredCommand, append([]string(nil), m.configuredArgs...), cloneStringMap(m.configuredEnv)
 }
 
 func (m *restartMockAgentctlServer) getUpdateStreamCount() int {
@@ -773,6 +835,7 @@ func TestManager_PromptOnRunningCursorSessionKeepsLoadedAuthLink(t *testing.T) {
 		SessionID:          "session-cursor-existing",
 		AgentProfileID:     "cursor-profile",
 		ExecutorType:       "local",
+		RuntimeName:        agentruntime.RuntimeStandalone,
 		ACPSessionID:       "existing-session",
 		AgentCommand:       "cursor-acp",
 		AgentID:            "cursor-acp",

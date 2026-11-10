@@ -55,6 +55,16 @@ func parentQuestionRequestFromMessage(msg *ws.Message) (parentQuestionRequest, *
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return req, &parentQuestionError{ws.ErrorCodeBadRequest, "Invalid payload: " + err.Error()}
 	}
+	for _, q := range req.Questions {
+		if q.Images != nil {
+			return req, &parentQuestionError{ws.ErrorCodeValidation, "parent questions do not support images"}
+		}
+		for _, option := range q.Options {
+			if option.Images != nil {
+				return req, &parentQuestionError{ws.ErrorCodeValidation, "parent questions do not support images"}
+			}
+		}
+	}
 	if req.SessionID == "" {
 		return req, &parentQuestionError{ws.ErrorCodeValidation, "session_id is required"}
 	}

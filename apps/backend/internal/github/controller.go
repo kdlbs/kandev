@@ -43,6 +43,7 @@ func NewController(svc *Service, log *logger.Logger) *Controller {
 // RegisterHTTPRoutes registers all GitHub HTTP routes.
 func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api := router.Group("/api/v1/github")
+	api.Use(c.captureExpectedGitHubHost)
 	api.GET("/status", c.httpGetStatus)
 	api.POST("/token", c.httpConfigureToken)
 	api.DELETE("/token", c.httpClearToken)
@@ -99,6 +100,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 
 	api.GET("/watches/pr", c.httpListPRWatches)
 	api.DELETE("/watches/pr/:id", c.httpDeletePRWatch)
+	api.POST("/watches/pr/:id/resume", c.httpResumePRWatch)
 
 	api.GET("/watches/review", c.httpListReviewWatches)
 	api.POST("/watches/review", c.httpCreateReviewWatch)
@@ -667,6 +669,10 @@ func parseRouteNumber(ctx *gin.Context, invalidMessage string) (int, bool) {
 }
 
 func handleGitHubInfoError(ctx *gin.Context, err error) {
+	if errors.Is(err, ErrGitHubHostMismatch) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": "github_host_mismatch"})
+		return
+	}
 	if isGitHubNotConfiguredError(err) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": "GitHub is not configured. Connect GitHub in Settings > Integrations.",
@@ -847,7 +853,8 @@ func (c *Controller) httpListPRWatches(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
 		return
 	}
-	watches, err := c.service.ListActivePRWatchesForWorkspace(ctx.Request.Context(), workspaceID)
+	includeRetired := ctx.Query("include_retired") == "true"
+	watches, err := c.service.ListPRWatchesForWorkspace(ctx.Request.Context(), workspaceID, includeRetired)
 	if err != nil {
 		if writeWatchWorkspaceError(ctx, "PR watch", err) {
 			return
@@ -864,6 +871,10 @@ func (c *Controller) httpDeletePRWatch(ctx *gin.Context) {
 		return
 	}
 	if err := c.service.DeletePRWatch(ctx.Request.Context(), id); err != nil {
+		if errors.Is(err, ErrPRWatchNotFound) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "PR watch not found"})
+			return
+		}
 		if writeWatchWorkspaceError(ctx, "PR watch", err) {
 			return
 		}
@@ -871,6 +882,30 @@ func (c *Controller) httpDeletePRWatch(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
+func (c *Controller) httpResumePRWatch(ctx *gin.Context) {
+	id := ctx.Param("id")
+	if !c.requirePRWatchInWorkspace(ctx, id) {
+		return
+	}
+	watch, err := c.service.ResumePRWatch(ctx.Request.Context(), id, ctx.Query("workspace_id"))
+	if err != nil {
+		if errors.Is(err, ErrPRWatchNotFound) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "PR watch not found"})
+			return
+		}
+		if errors.Is(err, ErrPRWatchTargetIneligible) || errors.Is(err, ErrTaskPRRepositoryMismatch) {
+			ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		if writeWatchWorkspaceError(ctx, "PR watch", err) {
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"watch": watch})
 }
 
 // httpListReviewWatches returns watches scoped to the requested workspace.
@@ -1251,6 +1286,10 @@ func parsePaginationQuery(ctx *gin.Context) (int, int) {
 
 // handleSearchError maps client errors to proper HTTP responses.
 func (c *Controller) handleSearchError(ctx *gin.Context, err error) {
+	if errors.Is(err, ErrGitHubHostMismatch) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": "github_host_mismatch"})
+		return
+	}
 	if isGitHubNotConfiguredError(err) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",

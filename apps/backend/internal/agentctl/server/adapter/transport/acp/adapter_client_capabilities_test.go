@@ -109,12 +109,12 @@ func TestInitialize_LeavesOtherAgentsHandshakeUnchanged(t *testing.T) {
 }
 
 func TestClientCapabilitiesForAgent(t *testing.T) {
-	cursor := clientCapabilitiesForAgent(acpcompat.CursorAgentID, false)
+	cursor := clientCapabilitiesForAgent(acpcompat.CursorAgentID, false, false)
 	if cursor.Meta[acpcompat.ParameterizedModelPickerMetaKey] != true {
 		t.Errorf("cursor meta = %v, want %q true", cursor.Meta, acpcompat.ParameterizedModelPickerMetaKey)
 	}
 
-	other := clientCapabilitiesForAgent("claude-acp", false)
+	other := clientCapabilitiesForAgent("claude-acp", false, false)
 	if _, ok := other.Meta[acpcompat.ParameterizedModelPickerMetaKey]; ok {
 		t.Errorf("non-cursor meta = %v, want no %q", other.Meta, acpcompat.ParameterizedModelPickerMetaKey)
 	}
@@ -124,5 +124,46 @@ func TestClientCapabilitiesForAgent(t *testing.T) {
 	cursor.Meta["test_isolation"] = true
 	if _, ok := other.Meta["test_isolation"]; ok {
 		t.Error("clientCapabilitiesForAgent returned a shared meta map")
+	}
+}
+
+// TestCopilotNativeCapabilitySubscription pins the provider-scoped opt-in:
+// only a Copilot launch that negotiated native events advertises the vendor
+// subscription, and the standard compaction capability stays independent.
+func TestCopilotNativeCapabilitySubscription(t *testing.T) {
+	enabled := clientCapabilitiesForAgent(copilotAgentID, false, true)
+	meta, ok := enabled.Meta[copilotCapabilityMetaKey].(map[string]any)
+	if !ok {
+		t.Fatalf("copilot meta = %#v, want %q", enabled.Meta, copilotCapabilityMetaKey)
+	}
+	events, ok := meta["events"].([]string)
+	if !ok {
+		t.Fatalf("events = %#v, want []string", meta["events"])
+	}
+	want := []string{
+		copilotNativeTypeCompactionStart,
+		copilotNativeTypeCompactionComplete,
+		copilotNativeTypeUsage,
+	}
+	if len(events) != len(want) {
+		t.Fatalf("events = %#v, want %#v", events, want)
+	}
+	for i := range want {
+		if events[i] != want[i] {
+			t.Fatalf("events[%d] = %q, want %q", i, events[i], want[i])
+		}
+	}
+	if enabled.Session == nil || enabled.Session.Compaction == nil {
+		t.Fatal("standard compaction capability must remain advertised")
+	}
+
+	disabled := clientCapabilitiesForAgent(copilotAgentID, false, false)
+	if _, exists := disabled.Meta[copilotCapabilityMetaKey]; exists {
+		t.Fatalf("disabled copilot capabilities unexpectedly advertise %q", copilotCapabilityMetaKey)
+	}
+
+	other := clientCapabilitiesForAgent("claude-acp", false, true)
+	if _, exists := other.Meta[copilotCapabilityMetaKey]; exists {
+		t.Fatalf("non-copilot capabilities unexpectedly advertise %q", copilotCapabilityMetaKey)
 	}
 }

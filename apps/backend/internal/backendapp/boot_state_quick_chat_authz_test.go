@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/webapp"
 )
 
@@ -22,9 +23,14 @@ func seedOwnedQuickChat(t *testing.T, harness bootStateTestHarness, workspaceID,
 		t.Fatalf("CreateWorkspace(%s): %v", workspaceID, err)
 	}
 	taskID := workspaceID + "-chat"
+	creationID := "a7c0fd51-6526-4732-95bc-c6e25f745e7f"
+	externalID, err := taskservice.NewQuickChatCreationExternalID(userID, creationID)
+	if err != nil {
+		t.Fatalf("NewQuickChatCreationExternalID: %v", err)
+	}
 	if err := harness.taskRepo.CreateTask(ctx, &models.Task{
 		ID: taskID, WorkspaceID: workspaceID, Title: title,
-		State: "todo", Priority: "medium", IsEphemeral: true,
+		State: "todo", Priority: "medium", IsEphemeral: true, ExternalID: externalID,
 	}); err != nil {
 		t.Fatalf("CreateTask(%s): %v", taskID, err)
 	}
@@ -38,6 +44,17 @@ func seedOwnedQuickChat(t *testing.T, harness bootStateTestHarness, workspaceID,
 
 func bootQuickChatNames(t *testing.T, params routeParams, userID, workspaceID string) []string {
 	t.Helper()
+	sessions := bootQuickChatSessions(t, params, userID, workspaceID)
+	names := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		name, _ := session["name"].(string)
+		names = append(names, name)
+	}
+	return names
+}
+
+func bootQuickChatSessions(t *testing.T, params routeParams, userID, workspaceID string) []map[string]any {
+	t.Helper()
 	ctx := authn.WithIdentity(t.Context(), authn.Identity{UserID: userID, Role: authn.RoleMember})
 	req := httptest.NewRequest(http.MethodGet, "/?workspaceId="+workspaceID, nil).WithContext(ctx)
 	state := bootInitialState(ctx, req, params, webapp.RouteClassification{Route: webapp.RouteHome})
@@ -47,12 +64,7 @@ func bootQuickChatNames(t *testing.T, params routeParams, userID, workspaceID st
 		return nil
 	}
 	sessions, _ := quickChat["sessions"].([]map[string]any)
-	names := make([]string, 0, len(sessions))
-	for _, session := range sessions {
-		name, _ := session["name"].(string)
-		names = append(names, name)
-	}
-	return names
+	return sessions
 }
 
 // TestBootStateQuickChatIsScopedToTheCaller is the regression guard for the
@@ -74,6 +86,10 @@ func TestBootStateQuickChatIsScopedToTheCaller(t *testing.T) {
 	owned := bootQuickChatNames(t, params, "user-a", "ws-boot-a")
 	if len(owned) != 1 || owned[0] != "A's boot chat" {
 		t.Fatalf("owner boot payload quick chats = %v; want [A's boot chat]", owned)
+	}
+	ownedSessions := bootQuickChatSessions(t, params, "user-a", "ws-boot-a")
+	if len(ownedSessions) != 1 || ownedSessions[0]["creationId"] != "a7c0fd51-6526-4732-95bc-c6e25f745e7f" {
+		t.Fatalf("owner boot creation projection = %v; want exact token", ownedSessions)
 	}
 
 	// Asking for user-b's workspace must not put user-b's tab in user-a's boot

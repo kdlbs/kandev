@@ -699,17 +699,31 @@ func (s *Service) syncTaskMRStrictWithObservation(
 func (s *Service) syncTaskMRWithClient(
 	ctx context.Context, client Client, taskID, repositoryID, projectPath string, iid int,
 ) (*taskMRSyncResult, error) {
+	return s.syncTaskMRWithStatus(ctx, client, taskID, repositoryID, projectPath, iid, nil, nil)
+}
+
+func (s *Service) syncTaskMRWithStatus(
+	ctx context.Context,
+	client Client,
+	taskID, repositoryID, projectPath string,
+	iid int,
+	status *MRStatus,
+	existing *TaskMR,
+) (*taskMRSyncResult, error) {
 	s.mu.RLock()
 	store := s.store
 	s.mu.RUnlock()
 	if store == nil {
 		return nil, errors.New("gitlab store not configured")
 	}
-	host := client.Host()
-	status, err := client.GetMRStatus(ctx, projectPath, iid)
-	if err != nil {
-		return nil, fmt.Errorf("fetch MR status: %w", err)
+	if status == nil {
+		var err error
+		status, err = client.GetMRStatus(ctx, projectPath, iid)
+		if err != nil {
+			return nil, fmt.Errorf("fetch MR status: %w", err)
+		}
 	}
+	host := client.Host()
 	if status == nil || status.MR == nil {
 		return nil, fmt.Errorf("MR !%d not found in %s", iid, projectPath)
 	}
@@ -745,8 +759,21 @@ func (s *Service) syncTaskMRWithClient(
 		ClosedAt:            mr.ClosedAt,
 		LastSyncedAt:        &now,
 	}
-	if err := store.UpsertTaskMR(ctx, row); err != nil {
-		return nil, fmt.Errorf("upsert task MR: %w", err)
+	if existing == nil {
+		if err := store.UpsertTaskMR(ctx, row); err != nil {
+			return nil, fmt.Errorf("upsert task MR: %w", err)
+		}
+	} else {
+		row.ID = existing.ID
+		row.CreatedAt = existing.CreatedAt
+		persisted, err := store.UpdateTaskMRForSync(ctx, row)
+		if err != nil {
+			return nil, fmt.Errorf("refresh task MR: %w", err)
+		}
+		if persisted == nil {
+			return nil, nil
+		}
+		row = persisted
 	}
 	s.reconcileComparisonTargetFromSync(ctx, taskID, host, mr)
 	return &taskMRSyncResult{
