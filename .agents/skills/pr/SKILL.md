@@ -204,7 +204,7 @@ required screenshot embedding in step 7 is complete.
 
    **Embed (GitHub only):** Upload screenshots with native `gh --attach`.
    Require GitHub CLI **2.99.0 or newer**, confirm `gh pr comment --help` lists
-   `--attach`, and verify authenticated repository push access. Determine the
+   `--attach`, and check authenticated repository push access. Determine the
    target hostname from `git remote get-url origin` before capture. For a
    custom GitHub hostname, establish its deployment type and attachment support
    first; GitHub Enterprise Server is unsupported. If support cannot be
@@ -213,11 +213,12 @@ required screenshot embedding in step 7 is complete.
    its published checksum, and use that binary for the attachment upload
    without replacing the system install. Report a blocker only if a verified
    binary cannot perform the upload. Report missing authentication prerequisites
-   before publication. See [GitHub's attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
+   before publication. Contributors without push access to the base repository
+   should use the fork fallback below. See [GitHub's attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
    and [the release announcement](https://github.blog/changelog/2026-09-01-github-cli-media-in-issues-pull-requests-and-comments/).
 
-   Keep assets in ignored `apps/web/.pr-assets`; do not commit them or create
-   media branches. Images must be within GitHub's 10 MB upload limit. Add a
+   Keep assets in ignored `apps/web/.pr-assets` for native uploads. Images must
+   be within GitHub's 10 MB upload limit. Add a
    `## Screenshots` section to a PR-scoped upload comment body using Markdown
    image embeds with descriptive alt text and matching local paths:
    ```markdown
@@ -241,7 +242,7 @@ required screenshot embedding in step 7 is complete.
    embed to contain an uploaded HTTPS URL with its alt text intact. On a
    nonzero exit or lost response, inspect the PR's comments before retrying;
    do not assume the upload or comment creation failed. Recover verified URLs
-   and retry only missing assets. Keep the upload comment as capture evidence.
+   and retry only missing assets. Treat the upload comment as temporary.
 
    Only after all uploads finish, fetch the live PR body and merge the
    verified uploaded embeds into its owned screenshot section using the
@@ -255,7 +256,7 @@ required screenshot embedding in step 7 is complete.
    read-back as authoritative. If the intended section is absent, re-fetch
    and merge the already uploaded URLs before falling back to REST. Never
    REST PATCH local image paths: REST does not upload attachments. If upload
-   fails, report the blocker instead of reviving the media-branch workaround.
+   fails, use the fork fallback below when available, or report the blocker.
    For REST, build the payload with
    `jq --rawfile`, never by hand-escaping shell strings:
    ```bash
@@ -270,6 +271,21 @@ required screenshot embedding in step 7 is complete.
    does not prevent a truncated or empty JSON response from making `gh` report
    an error after the mutation succeeds. Read the resource back with a
    separate GET and verify the intended change.
+
+   After the PR body is verified, delete the temporary upload comment, then
+   check that every image still loads in an unauthenticated session. If removal
+   breaks an image, restore the comment and report the duplication and blocker.
+   Never leave a duplicate screenshot comment as routine capture evidence.
+
+   **Fork fallback:** If the actor cannot upload against the base repository,
+   use a public fork where the actor has push access. Publish the validated
+   images on a dedicated media branch in that fork and embed immutable,
+   commit-pinned raw image URLs in the PR body. Do not add assets to the PR
+   branch. Verify each URL anonymously and verify the final PR body. If no
+   suitable public fork is available, report the concrete blocker. Fork-scoped
+   attachment uploads may be used when available, but verify anonymous image
+   access after publication; do not assume private or unpublished assets are
+   accessible to reviewers.
    **JSON payloads:** Use `jq` (or an equivalent JSON tool) to build and
    validate payloads without interpolating untrusted Markdown into shell
    syntax. When command output is redirected, piped, or consumed by `jq` or
