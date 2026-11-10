@@ -31,6 +31,8 @@
   "fixComments": "修復評論",
   "goToFindings_one": "轉到 {{count}} 條審閱發現",
   "goToFindings_other": "轉到 {{count}} 條審閱發現",
+  "htmlPreviewReadFailed": "無法讀取目前 HTML 檔案。請重試，或顯示 diff。",
+  "htmlPreviewWorkspaceSource": "目前工作區檔案，可能與此 diff 不同。",
   "loadingChangedFiles": "正在載入已更改檔案…",
   "loadingPRChanges": "正在載入 {{repo}} #{{prNumber}} 的更改…",
   "markdownPreviewPartialNotice": "正在顯示已更改的 Markdown 片段。未更改的內容不包含在此 diff 中。",
