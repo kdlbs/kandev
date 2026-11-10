@@ -201,5 +201,6 @@ Completed on 2026-11-10.
 - ACP coverage includes matching generic errors, absent notices, stale generations, user/fenced/quoted chunks, cancellation, successful completion, and specific terminal errors.
 - Dynamic coverage proves shared-binding exclusion, a healthy alternative, exclusive reset probing, and closure only after probe success.
 - Office coverage drives real lifecycle events for task-backed and taskless Claude-to-Codex and Codex-to-Claude routes, asserting health degradation, quota attempt code, requeue, next launch, and unchanged failure counts one below the pause threshold.
+- The repeated-failure regression drives three consecutive recognized quota failures on the same agent with route health and cycle baseline reset between attempts, asserting the original counter and unpaused state after each attempt.
 - Verification passed: affected package tests, changed-Go lint, documentation validation/lint, workflow contract/pinning checks, PR coverage preflight, and `git diff --check`.
 - The Windows native step selects all `TestClassifyClaudeFiveHourLimit*` reset-provenance regressions. It was added but not executed on this Linux host; hosted CI owns that evidence. The original-source probes and disposable candidate results above remain investigation evidence only.

@@ -199,6 +199,7 @@ Implementation completed on 2026-11-10:
 - Added all three rules to `hardQuotaRuleOutranksRateStatus`; only the five-hour rule joined the clock-only reset path.
 - Scoped text-derived reset hints for the new notice rules to their matching unfenced diagnostic line, including the dated parser. Regressions cover fenced, prose, other-channel, and quoted dated text before a genuine notice, plus a notice without a reset beside unrelated text.
 - Added classifier, ACP correlation/isolation, dynamic circuit, and real Office routing regressions, including task-backed and taskless Claude-to-Codex and Codex-to-Claude orders.
+- The repeated-failure regression drives three consecutive recognized quota failures on the same agent with route health and cycle baseline reset between attempts, asserting the original counter and unpaused state after each attempt.
 - `go test -trimpath -tags fts5 ./internal/agent/runtime/routingerr ./internal/agent/runtime/dynamic ./internal/agentctl/server/adapter/transport/acp ./internal/office/scheduler ./internal/office/service -count=1`: passed.
 - `bash scripts/lint-go-changed ...` for the six changed Go files: 0 issues.
 - `python3 scripts/list-docs.py validate`: passed, 446 decisions and 1963 specifications.
