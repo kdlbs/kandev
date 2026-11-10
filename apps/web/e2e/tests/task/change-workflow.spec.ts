@@ -406,6 +406,10 @@ test.describe("Change workflow", () => {
       for (const field of fields) {
         const trigger = form.selectorField(field.id);
         await trigger.scrollIntoViewIfNeeded();
+        await testPage.mouse.move(0, 0);
+        await expect
+          .poll(async () => (await form.readSelectorField(field.id)).backgroundAlpha)
+          .toBe(255);
         const settled = await form.readSelectorField(field.id);
         form.expectVisibleSelectorField(settled, field.label);
         expect(settled.height, `${field.label} desktop height`).toBeCloseTo(28, 0);
@@ -425,7 +429,7 @@ test.describe("Change workflow", () => {
         await trigger.click();
         await expect(trigger).toHaveAttribute("aria-expanded", "true");
         const expanded = await form.readSelectorField(field.id);
-        form.expectVisibleSelectorField(expanded, `${field.label} expanded`);
+        form.expectVisibleSelectorField(expanded, `${field.label} expanded`, false);
         form.expectStableSelectorBounds(settled, expanded, `${field.label} expanded`);
         await testPage.keyboard.press("Escape");
         await expect(trigger).toHaveAttribute("aria-expanded", "false");
