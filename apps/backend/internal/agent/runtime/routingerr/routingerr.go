@@ -209,8 +209,19 @@ func Classify(in Input) *Error {
 		// notice, not in a structured field. Deriving it here lets every
 		// consumer (short retry, circuit breaker) honor it uniformly.
 		text := in.Stderr + "\n" + in.Stdout
+		if ruleUsesScopedTextReset(e.ClassifierRule) {
+			// The new notice rules reject fenced examples, so their reset
+			// hints must come from the unfenced line that classified, not
+			// from unrelated prose elsewhere in the diagnostic bundle.
+			if scoped, ok := providerRuleMatchedLine(in.ProviderID, e.ClassifierRule, text); ok {
+				text = scoped
+			} else {
+				text = ""
+			}
+		}
 		hint := parseResetHintAt(text, observedAt)
-		if hint == nil && e.ClassifierRule == ruleClaudeSessionLimit {
+		if hint == nil && (e.ClassifierRule == ruleClaudeSessionLimit ||
+			e.ClassifierRule == ruleClaudeFiveHourLimit) {
 			hint = parseResetClockHintAt(text, observedAt)
 			e.ResetHintInferred = hint != nil
 		}
@@ -304,7 +315,10 @@ func hardQuotaRuleOutranksRateStatus(rule string) bool {
 	case "claude.stderr.quota.v1",
 		ruleClaudeSessionLimit,
 		ruleClaudeWeeklyLimit,
+		ruleClaudeFiveHourLimit,
+		ruleClaudeUsageLimit,
 		"codex.stderr.quota.v1",
+		ruleCodexOutOfCredits,
 		ruleOpenCodeUsageLimit,
 		ruleOpenCodeGoUsageLimit,
 		ruleOpenCodeCredit:
