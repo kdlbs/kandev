@@ -40,6 +40,7 @@ import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profil
 import type { TaskColor } from "@/lib/task-colors";
 import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
 import type { AgentUpdateJob } from "@/lib/api";
+import type { RuntimeUpdateBatchState } from "@/lib/agents/runtime-update-batch";
 
 export type {
   AgentProfileRecentUseRecord,
@@ -531,6 +532,7 @@ export type SettingsSliceState = {
   agentProfiles: AgentProfilesState;
   installJobs: InstallJobsState;
   updateJobs: AgentUpdateJobsState;
+  runtimeUpdateBatch: RuntimeUpdateBatchState;
   editors: EditorsState;
   prompts: PromptsState;
   secrets: SecretsState;
@@ -578,6 +580,7 @@ export type SettingsSliceActions = {
   upsertAgentUpdateJob: (job: AgentUpdateJob) => void;
   appendAgentUpdateOutput: (agentName: string, jobId: string, chunk: string) => void;
   clearAgentUpdateJob: (agentName: string) => void;
+  setRuntimeUpdateBatch: (state: RuntimeUpdateBatchState) => void;
   setEditors: (editors: EditorsState["items"], folderOpeningAvailable?: boolean) => void;
   setEditorsLoading: (loading: boolean) => void;
   setPrompts: (prompts: PromptsState["items"]) => void;

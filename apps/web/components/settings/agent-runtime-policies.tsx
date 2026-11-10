@@ -1,17 +1,159 @@
 "use client";
 
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
-import { useAgentRuntimeUpdateStatuses } from "@/hooks/domains/settings/use-agent-runtime-update-statuses";
 import type { AgentUpdateStatus } from "@/lib/api";
-import { SettingsGroup, SettingsRow } from "./settings-group";
 import { settingsActionClassName } from "./settings-control";
-import { useSettingsTargetRegistration } from "./settings-target-provider";
 import { useRuntimeAutoUpdatePolicy } from "./use-runtime-auto-update-policy";
 
-function RuntimeOutcome({ status }: { status: AgentUpdateStatus }) {
+export type RuntimePolicyController = {
+  key: string;
+  agentName: string;
+  status: AgentUpdateStatus;
+  draft: boolean;
+  isDirty: boolean;
+  setDraft: (value: boolean) => void;
+  reset: () => void;
+};
+
+type RuntimePolicyStore = {
+  upsert: (controller: RuntimePolicyController) => void;
+  remove: (key: string) => void;
+  subscribe: (listener: () => void) => () => void;
+  get: (agentName: string) => RuntimePolicyController | undefined;
+  list: () => RuntimePolicyController[];
+};
+
+const EMPTY: RuntimePolicyController[] = [];
+const RuntimePolicyContext = createContext<RuntimePolicyStore | null>(null);
+
+function createRuntimePolicyStore(): RuntimePolicyStore {
+  const byKey = new Map<string, RuntimePolicyController>();
+  const listeners = new Set<() => void>();
+  let snapshot: RuntimePolicyController[] = EMPTY;
+  const publish = () => {
+    snapshot = [...byKey.values()];
+    for (const listener of listeners) listener();
+  };
+  const same = (left: RuntimePolicyController, right: RuntimePolicyController) =>
+    left.status === right.status &&
+    left.draft === right.draft &&
+    left.isDirty === right.isDirty &&
+    left.setDraft === right.setDraft &&
+    left.reset === right.reset;
+  return {
+    upsert(controller) {
+      const current = byKey.get(controller.key);
+      if (current && same(current, controller)) return;
+      byKey.set(controller.key, controller);
+      publish();
+    },
+    remove(key) {
+      if (byKey.delete(key)) publish();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    get(agentName) {
+      return snapshot.find((controller) => controller.agentName === agentName);
+    },
+    list() {
+      return snapshot;
+    },
+  };
+}
+
+function RuntimePolicyContributor({
+  store,
+  status,
+}: {
+  store: RuntimePolicyStore;
+  status: AgentUpdateStatus;
+}) {
+  const { draft, setDraft, isDirty, reset } = useRuntimeAutoUpdatePolicy(status);
+  const key = `${status.agent_name}:${status.runtime_id}`;
+  const controller = useRef({
+    key,
+    agentName: status.agent_name,
+    status,
+    draft,
+    isDirty,
+    setDraft,
+    reset,
+  });
+  controller.current = {
+    key,
+    agentName: status.agent_name,
+    status,
+    draft,
+    isDirty,
+    setDraft,
+    reset,
+  };
+  useEffect(() => {
+    store.upsert(controller.current);
+  }, [store, key, status, draft, isDirty, reset, setDraft]);
+  useEffect(() => () => store.remove(key), [store, key]);
+  return null;
+}
+
+/**
+ * Keeps one policy contributor per runtime mounted while the Agents route is
+ * mounted, independent of the conditionally rendered manager surfaces.
+ */
+export function RuntimePolicyControllers({
+  statuses,
+  children,
+}: {
+  statuses: AgentUpdateStatus[];
+  children: ReactNode;
+}) {
+  const storeRef = useRef<RuntimePolicyStore | null>(null);
+  storeRef.current ??= createRuntimePolicyStore();
+  return (
+    <RuntimePolicyContext.Provider value={storeRef.current}>
+      {statuses.map((status) => (
+        <RuntimePolicyContributor
+          key={`${status.agent_name}:${status.runtime_id}`}
+          store={storeRef.current!}
+          status={status}
+        />
+      ))}
+      {children}
+    </RuntimePolicyContext.Provider>
+  );
+}
+
+export function useRuntimePolicyController(agentName: string) {
+  const store = useContext(RuntimePolicyContext);
+  return useSyncExternalStore(
+    store?.subscribe ?? (() => () => {}),
+    () => store?.get(agentName),
+    () => undefined,
+  );
+}
+
+export function useRuntimePolicyControllers() {
+  const store = useContext(RuntimePolicyContext);
+  return useSyncExternalStore(
+    store?.subscribe ?? (() => () => {}),
+    () => store?.list() ?? EMPTY,
+    () => EMPTY,
+  );
+}
+
+export function RuntimePolicyOutcome({ status }: { status: AgentUpdateStatus }) {
   const { t } = useTranslation();
   const outcome = status.last_outcome;
   if (!outcome) return null;
@@ -31,175 +173,139 @@ function RuntimeOutcome({ status }: { status: AgentUpdateStatus }) {
   );
 }
 
-function RuntimeAction({ status, hasControl }: { status: AgentUpdateStatus; hasControl: boolean }) {
+export function RuntimeGuidanceAction({ status }: { status: AgentUpdateStatus }) {
   const { t } = useTranslation();
-  const canManage = useIsAdmin();
-  const managedControl =
-    (status.management === "managed" || status.managed_fallback) &&
-    status.available &&
-    status.enabled &&
-    hasControl &&
-    canManage;
+  if (!status.guidance_url) return null;
   return (
-    <div className="flex flex-col gap-2 md:flex-row md:flex-wrap">
-      {managedControl && (
-        <Button asChild variant="outline" className={settingsActionClassName("shrink-0")}>
-          <a href={`#installed-agent-${status.agent_name}`}>
-            {t(status.managed_fallback ? "agents:runtimeFallbackManage" : "agents:runtimeManage")}
-          </a>
-        </Button>
-      )}
-      {!managedControl || status.managed_fallback
-        ? status.guidance_url && (
-            <Button asChild variant="outline" className={settingsActionClassName("shrink-0")}>
-              <a href={status.guidance_url} target="_blank" rel="noopener noreferrer">
-                {t("agents:runtimeManualGuidance")}
-              </a>
-            </Button>
-          )
-        : null}
-    </div>
+    <Button asChild variant="outline" className={settingsActionClassName("shrink-0")}>
+      <a href={status.guidance_url} target="_blank" rel="noopener noreferrer">
+        {t("agents:runtimeManualGuidance")}
+      </a>
+    </Button>
   );
 }
 
-function RuntimeVersionSummary({ status }: { status: AgentUpdateStatus }) {
+function ownershipKey(status: AgentUpdateStatus): string {
+  if (status.management === "managed") return "agents:runtimeManaged";
+  if (status.management === "manual") return "agents:runtimeManual";
+  return "agents:runtimeUnsupported";
+}
+
+function RuntimePolicyIdentity({ status }: { status: AgentUpdateStatus }) {
   const { t } = useTranslation();
   const managed = status.management === "managed";
-  let ownerKey = "agents:runtimeUnsupported";
-  if (managed) ownerKey = "agents:runtimeManaged";
-  if (status.management === "manual") ownerKey = "agents:runtimeManual";
   return (
-    <div className="min-w-0 flex-1 space-y-1">
-      <div className="flex flex-col gap-1 md:flex-row md:flex-wrap md:items-baseline md:gap-x-3">
-        <h4 className="text-sm font-semibold">{status.display_name || status.agent_name}</h4>
-        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          <span>
-            {t(managed ? "agents:runtimeSelected" : "agents:runtimeObserved", {
-              version: status.effective_version || t("agents:runtimeUnknown"),
-            })}
-          </span>
-          <span>
-            {t("agents:runtimeLatest", {
-              version: status.latest_version || t("agents:runtimeUnknown"),
-            })}
-          </span>
-        </div>
+    <>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-xs text-muted-foreground">
+          {t(managed ? "agents:runtimeSelected" : "agents:runtimeObserved", {
+            version: status.effective_version || t("agents:runtimeUnknown"),
+          })}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          {t("agents:runtimeLatest", {
+            version: status.latest_version || t("agents:runtimeUnknown"),
+          })}
+        </span>
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="min-w-0 break-all font-mono">
           {t("agents:runtimeVersionSource", { runtime: status.source || status.runtime_id })}
         </span>
-        <span>{t(ownerKey)}</span>
+        <span>{t(ownershipKey(status))}</span>
       </div>
-    </div>
+    </>
   );
 }
 
-function RuntimePolicyRow({
+function RuntimeAutomaticPolicy({
   status,
-  hasControl,
+  draft,
+  isDirty,
+  canManage,
+  onChange,
 }: {
   status: AgentUpdateStatus;
-  hasControl: boolean;
+  draft: boolean;
+  isDirty: boolean;
+  canManage: boolean;
+  onChange?: (value: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const canManage = useIsAdmin();
-  const { draft, setDraft, isDirty } = useRuntimeAutoUpdatePolicy(status);
-  const managed = status.management === "managed";
-  const targetId = `runtime-update-${status.agent_name}`;
-  const registerTarget = useSettingsTargetRegistration(targetId);
-  const controlId = `runtime-automatic-${status.agent_name}`;
+  if (status.management !== "managed") return null;
+  const controlId = `runtime-automatic-detail-${status.agent_name}`;
   return (
-    <div
-      id={targetId}
-      ref={registerTarget}
-      className="min-w-0 scroll-mt-4 space-y-2 py-3"
-      data-testid={`runtime-policy-${status.agent_name}`}
-      data-settings-dirty={isDirty}
-    >
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4">
-        <RuntimeVersionSummary status={status} />
-        <div className="flex flex-col gap-2 md:shrink-0 md:flex-row md:items-center md:gap-3">
-          {managed && (
-            <SettingsRow
-              label={t("agents:runtimeAutomatic")}
-              controlId={controlId}
-              touchTarget="switch"
-              isDirty={isDirty}
-              className="flex-row items-center gap-2 py-0 first:pt-0 last:pb-0"
-              controlWrapperClassName="max-md:w-auto"
-              control={
-                <Switch
-                  id={controlId}
-                  aria-describedby="runtime-automatic-help"
-                  checked={draft}
-                  onCheckedChange={setDraft}
-                  disabled={!canManage || (!status.auto_update_supported && !draft)}
-                />
-              }
-            />
-          )}
-          <RuntimeAction status={status} hasControl={hasControl} />
-        </div>
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <label
+          className="flex min-h-8 flex-1 cursor-pointer items-center text-sm max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          htmlFor={controlId}
+          data-testid={`runtime-automatic-target-${status.agent_name}`}
+        >
+          {t("agents:runtimeAutomatic")}
+        </label>
+        <Switch
+          id={controlId}
+          aria-describedby="runtime-automatic-help-detail"
+          checked={draft}
+          onCheckedChange={onChange}
+          disabled={!canManage || !onChange || (!status.auto_update_supported && !draft)}
+        />
       </div>
-      {(!status.available || !status.enabled) && (
-        <p className="text-xs text-muted-foreground">{t("agents:runtimeNotAvailable")}</p>
-      )}
-      {!managed && (
-        <p className="text-xs text-muted-foreground">
-          {t(
-            status.management === "manual"
-              ? "agents:runtimeManualHelp"
-              : "agents:runtimeUnsupportedHelp",
-          )}
+      {status.available && status.enabled && (
+        <p id="runtime-automatic-help-detail" className="text-xs text-muted-foreground">
+          {t("agents:runtimeAutomaticHelp")}
         </p>
       )}
-      <RuntimeOutcome status={status} />
-    </div>
+      {isDirty && <span className="sr-only">{t("agents:runtimePolicyDirtyTitle")}</span>}
+    </>
   );
 }
 
-export function AgentRuntimePolicies({
-  hasRuntimeControl,
-}: {
-  hasRuntimeControl: (agentName: string) => boolean;
-}) {
+function RuntimePolicyNotes({ status }: { status: AgentUpdateStatus }) {
   const { t } = useTranslation();
-  const { statusByAgent } = useAgentRuntimeUpdateStatuses();
-  const registerGroup = useSettingsTargetRegistration("runtime-updates");
-  const statuses = Object.values(statusByAgent);
-  const active = statuses.filter((s) => s.available && s.enabled);
-  const inactive = statuses.filter((s) => !s.available || !s.enabled);
-  const row = (s: AgentUpdateStatus) => (
-    <RuntimePolicyRow
-      key={`${s.agent_name}:${s.runtime_id}`}
-      status={s}
-      hasControl={hasRuntimeControl(s.agent_name)}
-    />
-  );
+  if (!status.available || !status.enabled) {
+    return <p className="text-xs text-muted-foreground">{t("agents:runtimeNotAvailable")}</p>;
+  }
+  if (status.management === "managed") return null;
   return (
-    <SettingsGroup
-      id="runtime-updates"
-      title={<span ref={registerGroup}>{t("agents:runtimeUpdatesTitle")}</span>}
-      collapsible
-      defaultOpen={false}
-      className="border-t pt-4"
-    >
-      <div className="space-y-1 py-2 text-xs text-muted-foreground">
-        <p>{t("agents:runtimeUpdatesDescription")}</p>
-        {statuses.some((status) => status.management === "managed") && (
-          <p id="runtime-automatic-help">{t("agents:runtimeAutomaticHelp")}</p>
-        )}
-      </div>
-      <div className="divide-y">{active.map(row)}</div>
-      {inactive.length > 0 && (
-        <details className="min-w-0">
-          <summary className="flex cursor-pointer items-center py-2 text-xs max-md:min-h-11 [@media(pointer:coarse)]:min-h-11">
-            {t("agents:runtimeOtherRegistrations", { count: inactive.length })}
-          </summary>
-          <div className="divide-y">{inactive.map(row)}</div>
-        </details>
+    <p className="text-xs text-muted-foreground">
+      {t(
+        status.management === "manual"
+          ? "agents:runtimeManualHelp"
+          : "agents:runtimeUnsupportedHelp",
       )}
-    </SettingsGroup>
+    </p>
+  );
+}
+
+/**
+ * The reusable runtime identity and automatic-update controls shown in the
+ * manager's detail view. It reads the route-level policy controller so the
+ * draft survives overview/detail navigation and overlay dismissal.
+ */
+export function RuntimePolicyDetail({ status }: { status: AgentUpdateStatus }) {
+  const canManage = useIsAdmin();
+  const controller = useRuntimePolicyController(status.agent_name);
+  const draft = controller?.draft ?? status.auto_update;
+  const isDirty = controller?.isDirty ?? false;
+  return (
+    <div
+      className="space-y-2 border-b px-4 py-3"
+      data-testid={`runtime-policy-detail-${status.agent_name}`}
+      data-settings-dirty={isDirty}
+    >
+      <RuntimePolicyIdentity status={status} />
+      <RuntimeAutomaticPolicy
+        status={status}
+        draft={draft}
+        isDirty={isDirty}
+        canManage={canManage}
+        onChange={controller?.setDraft}
+      />
+      <RuntimePolicyNotes status={status} />
+      <RuntimePolicyOutcome status={status} />
+      <RuntimeGuidanceAction status={status} />
+    </div>
   );
 }

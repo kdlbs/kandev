@@ -16,6 +16,11 @@ Extend the existing runtime status/activation boundaries, then integrate durable
 
 ## Follow-up contract
 
+The delivered [runtime update manager package](../agent-runtime-update-manager/plan.md)
+replaces the settings presentation and affected notification navigation tests.
+It preserves this package's background checks, ownership, consent, and delivery.
+Existing statuses and verification results remain delivery evidence for this package.
+
 The [floating indicator removal package](../remove-agent-runtime-update-indicator/plan.md) implements AC-AGENTS-RUNTIME-NOTIFY-001.7 in place of retired 001.4. Indicator previews and positive indicator assertions below describe the earlier implementation, not the current result. The follow-up owns the shared desktop/phone helper changes; historical verification results and completed work-order statuses remain delivery evidence for this package.
 
 ## Scope

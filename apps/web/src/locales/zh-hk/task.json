@@ -1427,7 +1427,7 @@
   "waitingReasonAwaitingAnswer": "等待回覆",
   "waitingReasonAwaitingAnswerHelp": "工作階段正在等待回覆後繼續。",
   "waitingReasonQuota": "等待用量上限",
-  "waitingReasonQuotaHelp": "目前的等待時間結束後，任務會再次嘗試。",
+  "waitingReasonQuotaHelp": "目前等待時間結束後，任務會再次嘗試。",
   "waitingReasonQuotaNextRetry": "下次重試時間：{{time}}。",
   "turnFinishedAwaitingInstruction": "本輪結束，等待指示",
   "quorumAwaiting": "正在等待 {{role}} 的 {{received}}/{{required}} 項決定",

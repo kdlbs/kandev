@@ -1,118 +1,136 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentUpdateStatus } from "@/lib/api";
-import { AgentRuntimePolicies } from "./agent-runtime-policies";
-import { SettingsTargetProvider } from "./settings-target-provider";
+import { StateProvider } from "@/components/state-provider";
+import {
+  RuntimePolicyControllers,
+  RuntimePolicyDetail,
+  useRuntimePolicyControllers,
+} from "./agent-runtime-policies";
+import { RuntimePolicyDirtyFooter } from "./agent-runtime-policy-footer";
+import { SettingsSaveProvider } from "./settings-save-provider";
 
-const disclosureSelector = "#runtime-updates details";
+const setAutomatic = vi.fn();
+const refreshStatuses = vi.fn();
 
-const { status, snapshot } = vi.hoisted(() => ({
-  status: {
-    agent_name: "opencode-acp",
-    display_name: "OpenCode",
-    runtime_id: "native:opencode",
-    management: "manual",
-    managed_fallback: true,
-    available: true,
-    enabled: true,
-    guidance_url: "https://opencode.ai/docs/cli/",
-  } as AgentUpdateStatus,
-  snapshot: { statuses: {} as Record<string, AgentUpdateStatus> },
+vi.mock("@/lib/api", () => ({
+  setAgentAutomaticUpdates: (...args: unknown[]) => setAutomatic(...args),
+}));
+vi.mock("@/lib/agents/runtime-update-statuses", () => ({
+  refreshRuntimeUpdateStatuses: (...args: unknown[]) => refreshStatuses(...args),
 }));
 vi.mock("@/hooks/domains/auth/use-is-admin", () => ({ useIsAdmin: () => true }));
-vi.mock("@/hooks/domains/settings/use-agent-runtime-update-statuses", () => ({
-  useAgentRuntimeUpdateStatuses: () => ({ statusByAgent: snapshot.statuses }),
-}));
-vi.mock("./use-runtime-auto-update-policy", () => ({
-  useRuntimeAutoUpdatePolicy: () => ({ draft: false, isDirty: false, setDraft: vi.fn() }),
-}));
+
+const status: AgentUpdateStatus = {
+  agent_name: "opencode-acp",
+  display_name: "OpenCode",
+  runtime_id: "npm:opencode-ai",
+  owner: "kandev",
+  mechanism: "npm_candidate",
+  management: "managed",
+  update_mode: "pinned",
+  package: "opencode-ai",
+  source: "opencode-ai",
+  available: true,
+  enabled: true,
+  auto_update_supported: true,
+  auto_update: false,
+  default_version: "1.0.0",
+  effective_version: "1.0.0",
+  current_version: "1.0.0",
+  latest_version: "1.1.0",
+  check_state: "update_available",
+};
+
+function FooterHarness() {
+  const controllers = useRuntimePolicyControllers();
+  return <RuntimePolicyDirtyFooter controllers={controllers} canManage embedded />;
+}
+
+function Harness({ showDetail = true }: { showDetail?: boolean }) {
+  return (
+    <StateProvider>
+      <SettingsSaveProvider>
+        <RuntimePolicyControllers statuses={[status]}>
+          {showDetail && <RuntimePolicyDetail status={status} />}
+          <FooterHarness />
+        </RuntimePolicyControllers>
+      </SettingsSaveProvider>
+    </StateProvider>
+  );
+}
+
 beforeEach(() => {
-  snapshot.statuses = { "opencode-acp": status };
+  setAutomatic.mockResolvedValue(undefined);
+  refreshStatuses.mockResolvedValue(true);
 });
 afterEach(() => {
   cleanup();
-  window.history.replaceState({}, "", "/");
+  vi.clearAllMocks();
 });
 
-function policies() {
-  return (
-    <SettingsTargetProvider>
-      <AgentRuntimePolicies hasRuntimeControl={() => true} />
-    </SettingsTargetProvider>
-  );
-}
+describe("runtime policy drafts", () => {
+  // @covers AC-AGENTS-RUNTIME-MANAGER-001.5
+  it("keeps a draft and reachable Save/Reset while the detail view unmounts", async () => {
+    const view = render(<Harness />);
+    const toggle = screen.getByRole("switch");
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.getByTestId("runtime-policy-save")).toBeTruthy());
 
-function expand(view: ReturnType<typeof render>) {
-  fireEvent.click(view.container.querySelector("#runtime-updates summary")!);
-}
-
-describe("runtime settings disclosure", () => {
-  // @covers AC-AGENTS-RUNTIME-NOTIFY-001.5
-  it("starts collapsed on ordinary entry with mounted runtime content", () => {
-    const view = render(policies());
-    expect(view.container.querySelector<HTMLDetailsElement>(disclosureSelector)?.open).toBe(false);
-    expect(screen.getByTestId("runtime-policy-opencode-acp")).toBeTruthy();
+    view.rerender(<Harness showDetail={false} />);
+    expect(screen.getByTestId("runtime-policy-dirty-footer")).toBeTruthy();
+    expect(screen.getByTestId("runtime-policy-reset")).toBeTruthy();
   });
 
-  // @covers AC-AGENTS-RUNTIME-NOTIFY-001.6
-  it.each(["runtime-updates", "runtime-update-opencode-acp"])(
-    "reveals an initial %s destination",
-    async (target) => {
-      window.history.replaceState({}, "", `/settings/agents#${target}`);
-      const view = render(policies());
-      await waitFor(() =>
-        expect(view.container.querySelector<HTMLDetailsElement>(disclosureSelector)?.open).toBe(
-          true,
-        ),
-      );
-    },
-  );
-
-  it("reveals a same-page fragment after manual collapse", async () => {
-    window.history.replaceState({}, "", "/settings/agents#runtime-updates");
-    const view = render(policies());
-    const details = view.container.querySelector<HTMLDetailsElement>(disclosureSelector)!;
-    await waitFor(() => expect(details?.open).toBe(true));
-    expand(view);
-    await waitFor(() => expect(details.open).toBe(false));
-    act(() => {
-      window.history.replaceState({}, "", "/settings/agents#runtime-update-opencode-acp");
-      window.dispatchEvent(new Event("hashchange"));
-    });
-    await waitFor(() => expect(details.open).toBe(true));
+  it("resets the draft without writing when Reset is used", async () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("switch"));
+    await waitFor(() => expect(screen.getByTestId("runtime-policy-reset")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("runtime-policy-reset"));
+    await waitFor(() => expect(screen.queryByTestId("runtime-policy-dirty-footer")).toBeNull());
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false");
+    expect(setAutomatic).not.toHaveBeenCalled();
   });
 
-  it("opens both disclosures when an inactive target arrives after navigation", async () => {
-    snapshot.statuses = {};
-    window.history.replaceState({}, "", "/settings/agents#runtime-update-opencode-acp");
-    const view = render(policies());
-    snapshot.statuses = { "opencode-acp": { ...status, available: false } };
-    view.rerender(policies());
-    await waitFor(() => {
-      const disclosures = view.container.querySelectorAll<HTMLDetailsElement>(disclosureSelector);
-      expect(disclosures).toHaveLength(2);
-      expect([...disclosures].every((details) => details.open)).toBe(true);
-    });
+  it("saves the draft explicitly through the shared coordinator", async () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("switch"));
+    await waitFor(() => expect(screen.getByTestId("runtime-policy-save")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("runtime-policy-save"));
+    await waitFor(() => expect(setAutomatic).toHaveBeenCalledWith("opencode-acp", true));
+    await waitFor(() => expect(screen.queryByTestId("runtime-policy-dirty-footer")).toBeNull());
   });
-});
 
-describe("runtime control destinations", () => {
-  it("retains vendor guidance when the separate card snapshot has no runtime control", () => {
-    const view = render(<AgentRuntimePolicies hasRuntimeControl={() => false} />);
-    expand(view);
-    expect(screen.queryByRole("link", { name: "Manage fallback versions" })).toBeNull();
+  it("keeps manual guidance and retained outcomes in the details", () => {
+    const manual: AgentUpdateStatus = {
+      ...status,
+      owner: "external",
+      management: "manual",
+      mechanism: "native",
+      managed_fallback: true,
+      update_mode: undefined,
+      guidance_url: "https://opencode.ai/docs/cli/",
+      last_outcome: {
+        id: "outcome-1",
+        status: "interrupted",
+        previous_version: "1.0.0",
+        target_version: "1.1.0",
+        finished_at: "2026-01-01T00:00:00Z",
+      },
+    };
+    render(
+      <StateProvider>
+        <SettingsSaveProvider>
+          <RuntimePolicyControllers statuses={[manual]}>
+            <RuntimePolicyDetail status={manual} />
+          </RuntimePolicyControllers>
+        </SettingsSaveProvider>
+      </StateProvider>,
+    );
     expect(screen.getByRole("link", { name: "Manual update guidance" }).getAttribute("href")).toBe(
       "https://opencode.ai/docs/cli/",
     );
-  });
-
-  it("links to the installed runtime control after its snapshot becomes available", () => {
-    const view = render(
-      <AgentRuntimePolicies hasRuntimeControl={(name) => name === "opencode-acp"} />,
-    );
-    expand(view);
-    expect(
-      screen.getByRole("link", { name: "Manage fallback versions" }).getAttribute("href"),
-    ).toBe("#installed-agent-opencode-acp");
+    expect(screen.getByRole("status").textContent).toContain("could not be confirmed");
+    expect(screen.queryByRole("switch")).toBeNull();
   });
 });
