@@ -1771,9 +1771,10 @@ export class SessionPage {
   /** Open the New Agent dialog from the phone session controls. */
   async openMobileNewSessionDialog(): Promise<void> {
     await this.page.getByTestId("mobile-sessions-pill").tap();
-    await expect(this.page.getByRole("dialog", { name: "Sessions" })).toBeVisible();
-    await this.page.getByTestId("mobile-launch-session").tap();
-    await expect(this.newSessionDialog()).toBeVisible();
+    const launchButton = this.page.getByTestId("mobile-launch-session");
+    await expect(launchButton).toBeVisible();
+    await launchButton.tap();
+    await expect(this.page.getByTestId("task-description-input")).toBeVisible();
   }
 
   /** Session tab in dockview by session label (e.g., "Session 1", "Session 2"). */
